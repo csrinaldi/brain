@@ -94,7 +94,7 @@ fi
 # --- 1. Base dependencies (blocking) -----------------------------------------
 say "${I18N_BOOTSTRAP_DEPS_SECTION:-Base dependencies}"
 for tool in git npm python3; do
-  command -v "$tool" >/dev/null 2>&1 || { printf "  ✗ ${I18N_BOOTSTRAP_DEPS_MISSING:-Missing \'%s\' (required). Install it and re-run env:init.}\n" "$tool" >&2; exit 1; }
+  command -v "$tool" >/dev/null 2>&1 || { printf "  ✗ ${I18N_BOOTSTRAP_DEPS_MISSING:-Missing '%s' (required). Install it and re-run env:init.}\n" "$tool" >&2; exit 1; }
 done
 ok "${I18N_BOOTSTRAP_DEPS_OK:-git, npm, python3 present}"
 
