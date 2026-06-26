@@ -1,0 +1,41 @@
+schema: spec-driven
+
+# Fill in after running `npm run env:init`.
+# project:   name of this project (human-readable)
+# initialized: YYYY-MM-DD
+
+# context: |
+#   Describe your tech stack here. This text is included in every SDD phase prompt.
+#   Examples:
+#     Tech stack: Node.js 20 + TypeScript, PostgreSQL
+#     Architecture: Hexagonal / Clean — domain at center, adapters on the outside
+#     VCS: GitHub — org/repo (project ID if applicable)
+
+strict_tdd: false
+
+# testing:
+#   test_command: "npm test"
+#   build_command: "npm run build"
+#   framework: "Vitest"
+#   coverage_available: true
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Reference domain glossary for project-specific terms
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    - Follow existing patterns from the codebase
+    tdd: false
+  verify:
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas

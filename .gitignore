@@ -1,0 +1,74 @@
+# Dependencias y cachés de NodeJS / Nx
+node_modules/
+.workspace/
+.nx/
+dist/
+.pnpm-store/
+.DS_Store
+
+# IDEs (IntelliJ, VS Code, NetBeans, Eclipse)
+.idea/
+.idea_modules/
+*.iml
+*.iws
+.vscode/
+nbproject/
+nbbuild/
+nbdist/
+.nb-gradle/
+nbactions.xml
+atlassian-ide-plugin.xml
+.classpath
+.project
+.settings/
+.factorypath
+bin/
+
+# Compilación Java (Maven)
+target/
+build/
+generated/
+*.class
+*.jar
+*.war
+*.ear
+*.rar
+**/shared/client/*.ts
+backend/services/**/.gitmodules
+dependency-reduced-pom.xml
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+pom.xml.tag
+release.properties
+buildNumber.properties
+.mvn/timing.properties
+!/.mvn/wrapper/maven-wrapper.jar
+
+# Temporales / logs / empaquetados
+*.log
+*.ctxt
+hs_err_pid*
+*.bak
+*.swp
+*.tmp
+tmp/
+temp/
+*.tar.gz
+*.zip
+
+# MEMORIA ENGRAM
+# .engram/ (chunks de sync) SÍ se commitea: es la memoria viva de equipo,
+# vinculada a la rama/ticket. Ver brain/decisions/adr-0003-memoria-equipo-git-based.md
+# La DB local de engram vive fuera del repo (~/.engram) y NO se trackea.
+
+# ÍNDICE DE SKILLS (reconstruible): .atl/ lo regenera `gentle-ai skill-registry refresh`.
+# Es cache local, no fuente de verdad — cada SKILL.md manda.
+.atl/
+
+# SCRATCH PER-AGENT: archivos temporales de sub-agentes paralelos dentro de un change SDD.
+# El orquestador consolida en tasks.md al cerrar el batch. Ver consolidation-protocol.md §1.
+openspec/changes/*/scratch/
+
+# VARIABLES DE ENTORNO (secretos): .env real NO se commitea; sí el .env.example
+.env

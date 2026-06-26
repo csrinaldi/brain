@@ -1,0 +1,48 @@
+#!/usr/bin/env sh
+# pre-push — materializa la memoria viva en .memory/ antes del push (ADR-0003).
+#
+# La capa Viva de memoria (sesión, errores, contexto) viaja en .memory/ commiteado
+# y entra a main al mergear el MR. Este hook garantiza que esa materialización
+# ocurra ANTES del push, en lugar de depender de que el dev recuerde memory:share.
+#
+# Comportamiento:
+#   - Sin node instalado (CI, clone fresco) → no bloquea (exit 0).
+#   - Dispatcha `memory:share` vía scripts/memory/cli.mjs (backend-agnóstico, MEMORY_BACKEND).
+#   - Si .memory/ queda con cambios sin commitear (staged, unstaged o untracked)
+#     → aborta el push con instrucciones.
+#   - Bypass de emergencia: git push --no-verify.
+#
+# Instalado vía `core.hooksPath = scripts/hooks` en bootstrap.sh §7 / npm run env:init.
+#
+# Nota de arquitectura: engram escribe a .engram/ (su convención interna); ese path
+# es un symlink → .memory/ (el dir canónico versionado en git). ADR-0003 describe
+# el modelo; este hook inspecciona .memory/ directamente para evitar ambigüedad.
+
+# Sin node no hay dispatcher — no bloquear (entorno mínimo).
+command -v node >/dev/null 2>&1 || exit 0
+
+# Locate repo root so the dispatcher path is absolute regardless of cwd.
+repo_root=$(git rev-parse --show-toplevel)
+
+# Materializar la memoria local en .memory/ vía dispatcher (backend-agnóstico).
+# Si el export falla, no bloquear el push por un problema de tooling.
+node "$repo_root/scripts/memory/cli.mjs" share >/dev/null 2>&1 || exit 0
+
+# ¿Quedó memoria sin commitear en .memory/? `status --porcelain` cubre staged,
+# unstaged Y untracked (?? ) en un solo check — evita el anti-pattern de `git diff`
+# ciego a archivos nuevos (brain/anti-patterns/git-diff-no-ve-untracked.md).
+pending=$(git -C "$repo_root" status --porcelain -- .memory)
+
+if [ -n "$pending" ]; then
+  echo ""
+  echo "✗ pre-push: hay memoria viva sin commitear en .memory/"
+  echo "  'memory:share' generó cambios. Materializá la memoria del ticket:"
+  echo ""
+  echo "    git add .memory && git commit -m 'chore(memory): sync .memory'"
+  echo ""
+  echo "  y pusheá de nuevo.  (bypass de emergencia: git push --no-verify)"
+  echo ""
+  exit 1
+fi
+
+exit 0
