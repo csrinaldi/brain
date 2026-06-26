@@ -2,22 +2,19 @@
 // project-status.mjs — Proyección en vivo del estado del monorepo (Tier 2).
 //
 // Imprime a stdout: reactor Maven (módulos, versiones, parents), poms fuera
-// del reactor, estado del frontend y trabajo abierto en GitLab. NO escribe
-// archivos: el estado se GENERA a demanda, nunca se versiona ni se edita a
-// mano (AGENTS.md §0, Tier 2: proyección reconstruible, no fuente).
+// del reactor, estado del frontend y trabajo abierto en el VCS (vía el adapter,
+// provider-agnóstico). NO escribe archivos: el estado se GENERA a demanda, nunca
+// se versiona ni se edita a mano (AGENTS.md §0, Tier 2: proyección reconstruible, no fuente).
 //
 // Se ejecuta con `npm run project:status`. Sin dependencias externas.
 
 import { execSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadBrainConfig } from './lib/brain-config.mjs';
+import { getVcs } from './vcs/cli.mjs';
+import { originIdentity } from './vcs/lib/repo.mjs';
 
 const ROOT = process.cwd();
-const { project } = loadBrainConfig();
-const GITLAB_HOST = project.gitHost;
-const PROJECT_ID = project.gitProjectId;
-const PROJECT_PATH = project.slug;
 
 const sh = (cmd) => execSync(cmd, { cwd: ROOT, encoding: 'utf8' }).trim();
 const tag = (xml, name) => {
@@ -90,43 +87,39 @@ if (nxProjects.length === 0) {
   console.log(`\n  ${nxProjects.length} proyecto(s) Nx.`);
 }
 
-// --- GitLab: trabajo abierto -------------------------------------------------------
-console.log('\n## Trabajo abierto en GitLab\n');
-const glabReady = (() => {
-  try {
-    sh(`glab auth status --hostname ${GITLAB_HOST} 2>/dev/null`);
-    return true;
-  } catch {
-    return false;
-  }
-})();
+// --- VCS: trabajo abierto ----------------------------------------------------------
+// Provider-agnóstico vía el adapter de VCS (scripts/vcs/cli.mjs).
+console.log('\n## Trabajo abierto\n');
+const { host: vcsHost, project: repo } = originIdentity();
+let vcs = null;
+try { vcs = await getVcs(); } catch { /* provider no configurado */ }
+let vcsAuthed = false;
+if (vcs && repo) {
+  try { vcsAuthed = await vcs.authCheck({ host: vcsHost }); } catch { vcsAuthed = false; }
+}
 
-if (!glabReady) {
-  console.log(`  ⚠ glab sin auth — mirá https://${GITLAB_HOST}/${PROJECT_PATH}/-/issues`);
+if (!repo) {
+  console.log('  ⚠ No se pudo detectar el remote de origin.');
+} else if (!vcs) {
+  console.log('  ⚠ Provider de VCS no configurado (vcs.provider en brain.config.json).');
+} else if (!vcsAuthed) {
+  console.log(`  ⚠ Sin sesión de VCS autenticada — mirá https://${vcsHost}/${repo}`);
 } else {
-  const api = (path) =>
-    JSON.parse(
-      execSync(`glab api "${path}"`, {
-        cwd: ROOT,
-        encoding: 'utf8',
-        env: { ...process.env, GITLAB_HOST },
-      }),
-    );
   try {
-    const issues = api(`projects/${PROJECT_ID}/issues?state=opened&per_page=50`);
+    const issues = await vcs.issueList({ project: repo, state: 'open' });
     console.log(`  Issues abiertos (${issues.length}):`);
     for (const i of issues) {
       const labels = i.labels?.length ? `  [${i.labels.join(', ')}]` : '';
-      console.log(`    #${i.iid}  ${i.title}${labels}`);
+      console.log(`    #${i.number}  ${i.title}${labels}`);
     }
-    const mrs = api(`projects/${PROJECT_ID}/merge_requests?state=opened&per_page=50`);
-    console.log(`\n  MRs abiertos (${mrs.length}):`);
-    for (const m of mrs) {
-      console.log(`    !${m.iid}  ${m.title}  (${m.source_branch})`);
+    const prs = await vcs.mrList({ project: repo, state: 'open' });
+    console.log(`\n  PRs/MRs abiertos (${prs.length}):`);
+    for (const p of prs) {
+      console.log(`    #${p.number}  ${p.title}  (${p.headBranch})`);
     }
-    if (mrs.length === 0) console.log('    (ninguno)');
+    if (prs.length === 0) console.log('    (ninguno)');
   } catch (e) {
-    console.log(`  ⚠ No se pudo consultar GitLab: ${e.message.split('\n')[0]}`);
+    console.log(`  ⚠ No se pudo consultar el VCS: ${e.message.split('\n')[0]}`);
   }
 }
 

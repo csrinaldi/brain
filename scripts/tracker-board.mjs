@@ -1,78 +1,56 @@
 #!/usr/bin/env node
-// tracker-board.mjs — Tablero vivo del tracker GitLab: mis tickets + sin asignar.
+// tracker-board.mjs — Tablero vivo del tracker: mis tickets + sin asignar.
 //
-// Imprime markdown listo para consumo del skill `retomar` (y cualquier otro consumidor).
-// Detecta host y proyecto desde el git remote. Degrada con aviso si glab no está
-// autenticado o el remote no es GitLab.
+// Provider-agnóstico: pasa por el adapter de VCS (scripts/vcs/cli.mjs), así que
+// funciona con GitHub, GitLab u otro host según `vcs.provider` en brain.config.json.
+// Imprime markdown listo para el skill `retomar` (y cualquier otro consumidor).
+// Degrada con aviso si no hay sesión de VCS autenticada o el remote no se detecta.
 //
-// Uso: node scripts/tracker-board.mjs
-//      npm run tracker:board
+// Uso: node scripts/tracker-board.mjs   |   npm run tracker:board
 
-import { execSync } from 'node:child_process';
+import { getVcs } from './vcs/cli.mjs';
+import { originIdentity } from './vcs/lib/repo.mjs';
 
-const sh = (cmd, opts = {}) =>
-  execSync(cmd, { encoding: 'utf8', ...opts }).trim();
+const { host, project } = originIdentity();
+if (!project) {
+  console.log('⚠ No se pudo detectar el remote de origin.');
+  process.exit(0);
+}
 
-const api = (path) =>
-  JSON.parse(sh(`glab api "${path}"`, { env: { ...process.env } }));
-
-// --- Detectar remote GitLab ---------------------------------------------------
-let gitlabHost, projectPath, projectId;
+let vcs;
 try {
-  const remote = sh('git remote get-url origin');
-  const m = remote.match(/https?:\/\/([^/]+)\/(.+?)(?:\.git)?$/);
-  if (!m) throw new Error(`remote sin formato reconocido: ${remote}`);
-  gitlabHost = m[1];
-  projectPath = m[2];
+  vcs = await getVcs();
 } catch (e) {
-  console.log(`⚠ No se pudo detectar el remote GitLab: ${e.message}`);
+  console.log(`⚠ Provider de VCS no configurado: ${e.message}`);
   process.exit(0);
 }
 
-// Verificar auth
+let authed = false;
+try { authed = await vcs.authCheck({ host }); } catch { authed = false; }
+if (!authed) {
+  console.log(`⚠ Sin sesión de VCS autenticada para ${host} — mirá https://${host}/${project}`);
+  process.exit(0);
+}
+
+let currentUser = null;
 try {
-  sh(`glab auth status --hostname ${gitlabHost} 2>&1`);
+  currentUser = (await vcs.whoami()).username;
 } catch {
-  console.log(`⚠ glab sin auth para ${gitlabHost} — mirá https://${gitlabHost}/${projectPath}/-/issues`);
-  process.exit(0);
+  // stderr, para no contaminar el markdown que consume `retomar`.
+  console.error('⚠ No se pudo obtener el usuario — solo se muestran tickets sin asignar.');
 }
 
-// Resolver project ID desde la API (evita hardcodear)
-try {
-  const encoded = projectPath.replace(/\//g, '%2F');
-  const project = api(`projects/${encoded}`);
-  if (!project?.id) throw new Error(`respuesta inesperada de la API: ${JSON.stringify(project)}`);
-  projectId = project.id;
-} catch (e) {
-  console.log(`⚠ No se pudo resolver el proyecto ${projectPath}: ${e.message}`);
-  process.exit(0);
-}
-
-// --- Resolver usuario actual --------------------------------------------------
-let currentUser;
-try {
-  currentUser = api('user').username;
-} catch {
-  currentUser = null;
-}
-
-// --- Fetch de issues ---------------------------------------------------------
-const fetchIssues = (query) => {
-  try {
-    const result = api(`projects/${projectId}/issues?state=opened&per_page=50&${query}`);
-    return Array.isArray(result) ? result : [];
-  } catch {
-    return [];
-  }
+const safeList = async (opts) => {
+  try { return await vcs.issueList({ project, state: 'open', ...opts }); }
+  catch { return []; }
 };
 
-const myIssues = currentUser ? fetchIssues(`assignee_username=${currentUser}`) : [];
-const unassigned = fetchIssues('assignee_id=None');
+const myIssues = currentUser ? await safeList({ assignee: 'me' }) : [];
+const unassigned = await safeList({ assignee: 'none' });
 
-// --- Formato markdown ---------------------------------------------------------
 const formatIssue = (i) => {
   const labels = i.labels?.length ? ` \`${i.labels.join('` `')}\`` : '';
-  return `- #${i.iid}${labels} ${i.title}`;
+  return `- #${i.number}${labels} ${i.title}`;
 };
 
 console.log('## Tus tickets');
