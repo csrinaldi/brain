@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# install-tools.sh — Instala todo el ecosistema de desarrollo en Ubuntu/Debian.
+# install-tools.sh — Installs the full development ecosystem on Ubuntu/Debian.
 #
-# Idempotente: salta herramientas ya instaladas.
-# Corre una vez por máquina, antes de npm run env:init.
-# Uso: bash scripts/install-tools.sh
-#      npm run tools:install
+# Idempotent: skips already-installed tools.
+# Run once per machine, before npm run env:init.
+# Usage: bash scripts/install-tools.sh
+#        npm run tools:install
 set -euo pipefail
 
 say()    { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
@@ -13,14 +13,24 @@ warn()   { printf '  ⚠ %s\n' "$1"; }
 skip()   { printf '  → %s (ya instalado)\n' "$1"; }
 die()    { printf '\n  ✗ %s\n' "$1" >&2; exit 1; }
 
-# ── Verificar distro ──────────────────────────────────────────────────────────
+# ── Verify distro ─────────────────────────────────────────────────────────────
 if ! command -v apt-get >/dev/null 2>&1; then
   die "Este script requiere apt-get (Ubuntu/Debian). Instalá las herramientas manualmente según brain/project/methodology/developer-environment.md."
 fi
 
-# ── 1. Paquetes apt ───────────────────────────────────────────────────────────
+# ── Resolve VCS provider from brain.config.json (defaults to gitlab) ──────────
+# node may not be installed yet — the || echo 'gitlab' fallback handles that case.
+VCS_PROVIDER="$(node -p "(require('./brain.config.json').vcs||{}).provider||'gitlab'" 2>/dev/null || echo 'gitlab')"
+case "$VCS_PROVIDER" in
+  github) VCS_CLI="gh" ;;
+  *)      VCS_CLI="glab" ;;
+esac
+
+# ── 1. apt packages ───────────────────────────────────────────────────────────
+# The VCS CLI is handled separately (§1b): gh is not in the default Debian/Ubuntu
+# apt repos, so a blanket `apt install gh` would abort under `set -e`.
 say "Paquetes del sistema (apt)"
-APT_PKGS=(git curl wget python3 openjdk-17-jdk maven glab)
+APT_PKGS=(git curl wget python3 openjdk-17-jdk maven)
 MISSING_APT=()
 for pkg in "${APT_PKGS[@]}"; do
   if dpkg -s "$pkg" >/dev/null 2>&1; then
@@ -36,6 +46,23 @@ if [ "${#MISSING_APT[@]}" -gt 0 ]; then
   ok "apt: ${MISSING_APT[*]}"
 else
   ok "todos los paquetes apt ya presentes"
+fi
+
+# ── 1b. VCS CLI (gh / glab) ───────────────────────────────────────────────────
+# Installed apart from the apt batch: gh may be absent from the default repos, so
+# we try apt and fall back to printed install instructions (no abort under set -e).
+say "CLI del VCS ($VCS_CLI)"
+if command -v "$VCS_CLI" >/dev/null 2>&1; then
+  skip "$VCS_CLI"
+elif sudo apt-get install -y "$VCS_CLI" 2>/dev/null; then
+  ok "$VCS_CLI instalado"
+else
+  warn "$VCS_CLI no está en apt — instalalo a mano:"
+  if [ "$VCS_CLI" = "gh" ]; then
+    printf '    https://github.com/cli/cli/blob/trunk/docs/install_linux.md\n'
+  else
+    printf '    https://gitlab.com/gitlab-org/cli#installation\n'
+  fi
 fi
 
 # ── 2. Node.js via nvm ────────────────────────────────────────────────────────
@@ -66,7 +93,7 @@ else
   ok "claude instalado"
 fi
 
-# ── 4. gentle-ai (gestiona engram + gga + skills) ─────────────────────────────
+# ── 4. gentle-ai (manages engram + gga + skills) ──────────────────────────────
 say "gentle-ai + ecosistema (engram, gga)"
 if command -v gentle-ai >/dev/null 2>&1; then
   skip "gentle-ai $(gentle-ai --version 2>/dev/null | head -1)"
@@ -76,8 +103,8 @@ else
   ok "gentle-ai instalado"
 fi
 
-# gentle-ai install configura engram, gga y los skills del harness SDD.
-# Es idempotente: si ya está configurado, lo confirma.
+# gentle-ai install configures engram, gga and the SDD harness skills.
+# Idempotent: confirms if already configured.
 if command -v gentle-ai >/dev/null 2>&1; then
   if gentle-ai doctor 2>/dev/null | grep -q 'state file OK'; then
     skip "ecosistema gentle-ai ya configurado"
@@ -87,12 +114,12 @@ if command -v gentle-ai >/dev/null 2>&1; then
   fi
 fi
 
-# ── 5. Resumen ────────────────────────────────────────────────────────────────
+# ── 5. Summary ────────────────────────────────────────────────────────────────
 say "Instalación completa"
 printf '  Siguiente paso:\n'
 printf '    npm install && npm run env:init\n\n'
 printf '  Verifica versiones:\n'
-for tool in git java maven node npm claude gentle-ai engram gga glab; do
+for tool in git java maven node npm claude gentle-ai engram gga "$VCS_CLI"; do
   if command -v "$tool" >/dev/null 2>&1; then
     printf '    ✓ %-14s' "$tool"
     "$tool" --version 2>/dev/null | head -1 | sed 's/^//' || true

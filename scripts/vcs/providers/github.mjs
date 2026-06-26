@@ -7,6 +7,7 @@
 
 import { run, runJson } from '../lib/exec.mjs';
 import { normalizeCommitStatus, providerState, assigneeParams } from '../lib/normalize.mjs';
+import { vcsToken } from '../lib/token.mjs';
 
 export const PROVIDER = 'github';
 
@@ -21,8 +22,9 @@ export async function authCheck({ host } = {}) {
   return run('gh', args).ok;
 }
 
-export async function authLogin({ host, token }) {
-  return run('gh', ['auth', 'login', '--hostname', host || 'github.com', '--with-token'], { input: token }).ok;
+export async function authLogin({ host, token } = {}) {
+  const tok = token ?? vcsToken(PROVIDER);
+  return run('gh', ['auth', 'login', '--hostname', host || 'github.com', '--with-token'], { input: tok }).ok;
 }
 
 export async function whoami() {

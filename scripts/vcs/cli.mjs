@@ -90,6 +90,9 @@ if (isMain) {
     const vcs = await getVcs();
     const result = await vcs[verb](args);
     if (result !== undefined) process.stdout.write(JSON.stringify(result) + '\n');
+    // Boolean verbs (authCheck/authLogin) map false → non-zero exit so shell
+    // callers can branch on the exit code (`if node cli.mjs auth-check …`).
+    if (result === false) process.exit(1);
   } catch (err) {
     console.error(`vcs: ${err.message}`);
     process.exit(1);
