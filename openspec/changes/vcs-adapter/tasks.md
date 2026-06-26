@@ -29,10 +29,10 @@
 - [x] 5.1 Refactor `ticket-start.mjs` → dispatcher (`issueView`, `repoCloneUrl`); `iid`→`number` in branch naming. Comments English; output stays Spanish (i18n later). Verified `issueView(#2)` e2e against GitHub.
 
 ## PR6 — Bootstrap + tools
-- [ ] 6.1 Refactor `bootstrap.sh`: provider-agnostic credential helper, `authCheck`/`authLogin`/`patSetupUrl`/`issueList` via dispatcher.
-- [ ] 6.2 `install-tools.sh`: install `gh` or `glab` based on `vcs.provider`.
+- [x] 6.1 Refactor `bootstrap.sh`: provider-agnostic credential helper (username per provider), `authCheck`/`authLogin`/`patSetupUrl` via dispatcher, issue list via `tracker-board.mjs`. `authLogin` reads the token from `.env` so it's never in argv.
+- [x] 6.2 `install-tools.sh`: install `gh` or `glab` based on `vcs.provider` (gh handled with apt-then-instructions fallback).
 
 ## Closure
-- [ ] README + `brain/core/methodology/harness-contract.md` updated.
-- [ ] Verify criterion: no script invokes `glab` or `/api/v4/` directly (`rg` clean).
-- [ ] `repo:check` + `npm test` green.
+- [x] `brain/core/methodology/harness-contract.md` genericized (VCS auth, `id`/`number`, provider-neutral optional verbs). README already provider-agnostic.
+- [x] Verified: no caller invokes `glab` or `/api/v4/` directly (only the gitlab provider does, by design).
+- [x] `repo:check` + `npm test` green (49 tests).
