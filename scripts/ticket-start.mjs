@@ -1,13 +1,21 @@
 #!/usr/bin/env node
-// ticket-start.mjs — Toma un issue de GitLab y crea la rama de trabajo.
-// Uso: npm run ticket:start -- <iid>                (checkout in-place desde main)
-//      npm run ticket:start -- <iid> --worktree     (worktree aislado desde main)
-//      npm run ticket:start -- <iid> --base <rama>  (base distinta, ej. un tracker de historia)
-//      node scripts/ticket-start.mjs <iid> [--worktree] [--base <rama>]
+// ticket-start.mjs — Take an issue and create the working branch.
+// Provider-agnostic: fetches the issue and the base branch through the VCS
+// adapter (scripts/vcs/cli.mjs), so it works with GitHub, GitLab, or any host
+// configured via vcs.provider in brain.config.json.
+//
+// Usage: npm run ticket:start -- <id>                 (in-place checkout from main)
+//        npm run ticket:start -- <id> --worktree      (isolated worktree from main)
+//        npm run ticket:start -- <id> --base <branch> (different base, e.g. a story tracker)
+//        node scripts/ticket-start.mjs <id> [--worktree] [--base <branch>]
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, copyFileSync, existsSync } from 'node:fs';
-import { join, basename, dirname } from 'node:path';
+import { copyFileSync, existsSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { loadBrainConfig } from './lib/brain-config.mjs';
+import { getVcs, resolveProviderName } from './vcs/cli.mjs';
+import { originIdentity } from './vcs/lib/repo.mjs';
+import { vcsToken, readEnvVar } from './vcs/lib/token.mjs';
 
 const ROOT = process.cwd();
 
@@ -19,77 +27,66 @@ if (baseIdx >= 0 && !baseBranch) {
   console.error('  ✗ --base requiere un nombre de rama. Ej: --base feature/issue-99-mi-historia');
   process.exit(1);
 }
-// iid = primer argumento numérico que NO sea el valor de --base
-const iid = argv.find((a, i) => /^\d+$/.test(a) && (baseIdx < 0 || i !== baseIdx + 1));
-if (!iid) {
-  console.error('Uso: npm run ticket:start -- <issue-iid> [--worktree] [--base <rama>]');
+// id = first numeric argument that is NOT the value of --base
+const id = argv.find((a, i) => /^\d+$/.test(a) && (baseIdx < 0 || i !== baseIdx + 1));
+if (!id) {
+  console.error('Uso: npm run ticket:start -- <issue-id> [--worktree] [--base <rama>]');
   console.error('Ejemplo: npm run ticket:start -- 42');
   console.error('         npm run ticket:start -- 42 --worktree --base feature/issue-99-mi-historia');
   process.exit(1);
 }
-
-const readEnvVar = (key) => {
-  try {
-    const line = readFileSync(join(ROOT, '.env'), 'utf8')
-      .split('\n')
-      .find(l => l.startsWith(`${key}=`));
-    if (line) return line.slice(key.length + 1).trim();
-  } catch { /* no .env — fall through */ }
-  return process.env[key] ?? null;
-};
 
 const sh = (cmd, args, opts = {}) => {
   const r = spawnSync(cmd, args, { encoding: 'utf8', cwd: ROOT, stdio: 'pipe', ...opts });
   return { ok: r.status === 0, out: (r.stdout ?? '').trim(), err: (r.stderr ?? '').trim() };
 };
 
-// ── Detectar remote GitLab ────────────────────────────────────────────────────
-const remoteResult = sh('git', ['remote', 'get-url', 'origin']);
-const remoteMatch = remoteResult.out.match(/https?:\/\/([^/]+)\/(.+?)(?:\.git)?$/);
-if (!remoteMatch) {
-  console.error('  ✗ No se pudo detectar el remote GitLab desde origin');
+// ── Resolve the VCS provider + repo identity ──────────────────────────────────
+const { host, project } = originIdentity();
+if (!project) {
+  console.error('  ✗ No se pudo detectar el remote de origin.');
   process.exit(1);
 }
-const gitlabHost = remoteMatch[1];
-const projectPath = remoteMatch[2];
-const encodedPath = encodeURIComponent(projectPath);
 
-// ── Verificar token ───────────────────────────────────────────────────────────
-const token = readEnvVar('GITLAB_TOKEN');
+let vcsProvider;
+let vcs;
+try {
+  const config = loadBrainConfig();
+  vcsProvider = resolveProviderName({ config });
+  vcs = await getVcs({ config });
+} catch (e) {
+  console.error(`  ✗ No se pudo inicializar el VCS: ${e.message}`);
+  process.exit(1);
+}
+
+const token = vcsToken(vcsProvider, ROOT);
 if (!token) {
-  console.error('  ✗ GITLAB_TOKEN no encontrado en .env — corré npm run env:init');
+  console.error('  ✗ Token del VCS no encontrado en .env — corré npm run env:init');
   process.exit(1);
 }
 
-// ── Propagar NO_PROXY si está en .env ─────────────────────────────────────────
-const noProxy = readEnvVar('NO_PROXY') ?? readEnvVar('no_proxy');
+// Propagate NO_PROXY from .env so Go binaries (gh/glab) bypass the internal proxy.
+const noProxy = readEnvVar('NO_PROXY', ROOT) ?? readEnvVar('no_proxy', ROOT);
 if (noProxy) {
   process.env.NO_PROXY = noProxy;
   process.env.no_proxy = noProxy;
 }
 
-// ── Fetch issue desde la API ──────────────────────────────────────────────────
-console.log(`\n  Buscando issue #${iid}...`);
-const apiResult = sh('curl', [
-  '-s', '-f',
-  '-H', `PRIVATE-TOKEN: ${token}`,
-  `https://${gitlabHost}/api/v4/projects/${encodedPath}/issues/${iid}`,
-]);
-if (!apiResult.ok) {
-  console.error(`  ✗ No se pudo obtener el issue #${iid} — verificá el token y la red`);
-  process.exit(1);
-}
-
+// ── Fetch the issue through the adapter ───────────────────────────────────────
+console.log(`\n  Buscando issue #${id}...`);
 let issue;
-try { issue = JSON.parse(apiResult.out); }
-catch { console.error('  ✗ Respuesta inesperada de la API'); process.exit(1); }
-
-if (!issue?.iid) {
-  console.error(`  ✗ Issue #${iid} no encontrado en ${projectPath}`);
+try {
+  issue = await vcs.issueView({ project, number: id });
+} catch (e) {
+  console.error(`  ✗ No se pudo obtener el issue #${id} — verificá la sesión del VCS y el id. ${e.message}`);
+  process.exit(1);
+}
+if (!issue?.number) {
+  console.error(`  ✗ Issue #${id} no encontrado en ${project}`);
   process.exit(1);
 }
 
-// ── Determinar tipo de rama por labels ────────────────────────────────────────
+// ── Determine the branch type from labels ─────────────────────────────────────
 const LABEL_TYPE = {
   feat: 'feat', feature: 'feat',
   fix: 'fix', bug: 'fix',
@@ -100,9 +97,9 @@ const LABEL_TYPE = {
   build: 'build',
 };
 const labels = issue.labels ?? [];
-const branchType = labels.map(l => LABEL_TYPE[l.toLowerCase()]).find(Boolean) ?? 'feat';
+const branchType = labels.map(l => LABEL_TYPE[String(l).toLowerCase()]).find(Boolean) ?? 'feat';
 
-// ── Generar slug desde el título ──────────────────────────────────────────────
+// ── Build the slug from the title ─────────────────────────────────────────────
 const slug = issue.title
   .toLowerCase()
   .normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -113,21 +110,21 @@ const slug = issue.title
   .slice(0, 40)
   .replace(/-$/, '');
 
-const branchName = `${branchType}/issue-${iid}-${slug}`;
+const branchName = `${branchType}/issue-${issue.number}-${slug}`;
 
-// ── Mostrar contexto del issue ────────────────────────────────────────────────
+// ── Show the issue context ────────────────────────────────────────────────────
 console.log('');
-console.log(`  #${issue.iid}  ${issue.title}`);
+console.log(`  #${issue.number}  ${issue.title}`);
 if (labels.length > 0) console.log(`  Labels: ${labels.join(', ')}`);
-if (issue.description?.trim()) {
-  const preview = issue.description.trim().split('\n').slice(0, 6).join('\n');
+if (issue.body?.trim()) {
+  const preview = issue.body.trim().split('\n').slice(0, 6).join('\n');
   console.log('\n' + preview.split('\n').map(l => `  ${l}`).join('\n'));
 }
 console.log(`\n  Rama: \x1b[1m${branchName}\x1b[0m`);
 
-// ── Actualizar la rama base ───────────────────────────────────────────────────
+// ── Update the base branch ────────────────────────────────────────────────────
 console.log(`\n  Actualizando ${baseBranch}...`);
-const authenticatedRemote = `https://oauth2:${token}@${gitlabHost}/${projectPath}.git`;
+const authenticatedRemote = await vcs.repoCloneUrl({ host, project, token });
 const fetchRes = spawnSync('git',
   ['fetch', authenticatedRemote, `${baseBranch}:refs/remotes/origin/${baseBranch}`],
   { cwd: ROOT, encoding: 'utf8' });
@@ -138,14 +135,14 @@ if (fetchRes.status !== 0) {
 }
 const startPoint = `origin/${baseBranch}`;
 
-// ── Crear la rama ─────────────────────────────────────────────────────────────
-// Dos modos: in-place (checkout sobre el working tree actual) o worktree aislado
-// (carpeta hermana con su propia rama, para trabajo en paralelo sin colisiones).
+// ── Create the branch ─────────────────────────────────────────────────────────
+// Two modes: in-place (checkout on the current working tree) or an isolated
+// worktree (sibling folder with its own branch, for parallel work without clashes).
 const branchExists = sh('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branchName}`]).ok;
 let worktreePath = null;
 
 if (useWorktree) {
-  worktreePath = join(dirname(ROOT), `${basename(ROOT)}-issue-${iid}`);
+  worktreePath = join(dirname(ROOT), `${basename(ROOT)}-issue-${id}`);
 
   if (existsSync(worktreePath)) {
     console.error(`  ✗ Ya existe la carpeta del worktree: ${worktreePath}`);
@@ -153,7 +150,7 @@ if (useWorktree) {
     process.exit(1);
   }
 
-  // Si la rama ya existe, adjuntarla al worktree; si no, crearla desde la base.
+  // If the branch already exists, attach it to the worktree; otherwise create it from the base.
   const wtArgs = branchExists
     ? ['worktree', 'add', worktreePath, branchName]
     : ['worktree', 'add', worktreePath, '-b', branchName, startPoint];
@@ -164,8 +161,8 @@ if (useWorktree) {
   }
   console.log(`  \x1b[32m✓\x1b[0m Worktree creado en ${worktreePath}`);
 
-  // Gotcha: el worktree NO hereda archivos untracked/ignored como .env (tiene
-  // GITLAB_TOKEN, necesario para este script y la API de GitLab). Lo copiamos.
+  // Gotcha: the worktree does NOT inherit untracked/ignored files like .env (which
+  // holds the VCS token, needed by this script and the adapter). Copy it over.
   const srcEnv = join(ROOT, '.env');
   if (existsSync(srcEnv)) {
     copyFileSync(srcEnv, join(worktreePath, '.env'));
@@ -188,11 +185,11 @@ if (useWorktree) {
   }
 }
 
-// ── Próximos pasos ────────────────────────────────────────────────────────────
+// ── Next steps ────────────────────────────────────────────────────────────────
 const cdStep = useWorktree ? `\n    0. cd ${worktreePath}   (abrí tu sesión de trabajo acá)` : '';
 console.log(`
   Próximos pasos:${cdStep}
-    1. Implementar — usá /sdd-new ${iid} si el cambio es complejo
+    1. Implementar — usá /sdd-new ${id} si el cambio es complejo
     2. npm run repo:check antes de cada commit
     3. npm run memory:share && git add .memory/ antes de pushear
     4. git push -u origin ${branchName}

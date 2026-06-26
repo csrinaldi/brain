@@ -26,7 +26,7 @@
 - [x] 4.2 Verified: targeted e2e of `commitStatus`/`repoCloneUrl` against this GitHub repo; main-sync ff-only + recovery logic preserved.
 
 ## PR5 — Ticket
-- [ ] 5.1 Refactor `ticket-start.mjs` → dispatcher (`issueView`, `repoCloneUrl`); `iid`→`number` in branch naming.
+- [x] 5.1 Refactor `ticket-start.mjs` → dispatcher (`issueView`, `repoCloneUrl`); `iid`→`number` in branch naming. Comments English; output stays Spanish (i18n later). Verified `issueView(#2)` e2e against GitHub.
 
 ## PR6 — Bootstrap + tools
 - [ ] 6.1 Refactor `bootstrap.sh`: provider-agnostic credential helper, `authCheck`/`authLogin`/`patSetupUrl`/`issueList` via dispatcher.
