@@ -30,15 +30,16 @@ the GitLab status enum, etc.).
 | `commitStatus` | `({ project, sha }) -> Status\|null` | Normalized enum (see below). |
 | `repoCloneUrl` | `({ host, project, token }) -> string` | Authenticated HTTPS URL. User literal hidden from the caller. |
 | `patSetupUrl` | `({ host, name, scopes }) -> string` | PAT creation URL in the browser. |
-| `projectResolve` | `({ project }) -> string\|number` | Opaque identifier. GH: no-op (slug). GL: numeric id. |
+| `projectResolve` | `({ project }) -> string` | Identity: returns the slug. Both GH and GL address projects by slug/encoded-path, so callers pass the slug everywhere (incl. `repoCloneUrl`). Extension point if a host ever needs a different id. |
 
 ### Normalized `commitStatus` enum
 
-`'success' | 'failed' | 'pending' | 'canceled' | null`
+`'success' | 'failed' | 'running' | 'pending' | 'canceled' | null`
 
 The canonical style is GitLab's. Providers map their native enum to it
-(GitHub `failure` → `failed`, `cancelled` → `canceled`, `in_progress`/`queued` →
-`pending`). `null` = no status available.
+(GitHub `failure` → `failed`, `cancelled` → `canceled`, `in_progress` → `running`,
+`queued` → `pending`). For GitHub check-runs, the live `status` is used until the
+check completes, then its `conclusion`. `null` = no status available.
 
 ## Normalization rules
 
@@ -46,8 +47,9 @@ The canonical style is GitLab's. Providers map their native enum to it
   `source_branch`/`headRefName`), `username` (not `login`).
 - **Filters**: `state:'open'` (not `opened`), `assignee:'none'` (not `None`/`assignee_id`).
 - **Display**: the reference is shown as `#<number>` for issues and MRs/PRs alike.
-- **`projectResolve`**: the caller treats the return as an opaque "project" value and
-  passes it to the other verbs. On hosts that use the slug directly (GitHub), it is the identity.
+- **`projectResolve`**: the caller passes the slug as `project` to every verb. Both
+  GitHub and GitLab address projects by slug / URL-encoded path, so it is the identity.
+  It stays in the contract as an extension point for a host that needs a different id.
 
 ## How to add a provider
 

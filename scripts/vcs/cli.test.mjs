@@ -74,7 +74,7 @@ test('both providers expose every contract verb', async () => {
 test('normalizeCommitStatus maps GitHub enum to canonical', () => {
   assert.equal(normalizeCommitStatus('github', 'failure'), 'failed');
   assert.equal(normalizeCommitStatus('github', 'cancelled'), 'canceled');
-  assert.equal(normalizeCommitStatus('github', 'in_progress'), 'pending');
+  assert.equal(normalizeCommitStatus('github', 'in_progress'), 'running');
   assert.equal(normalizeCommitStatus('github', 'success'), 'success');
   assert.equal(normalizeCommitStatus('github', 'skipped'), null);
   assert.equal(normalizeCommitStatus('github', null), null);
