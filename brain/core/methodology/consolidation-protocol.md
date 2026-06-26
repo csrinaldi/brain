@@ -87,7 +87,7 @@ Esta convención vive en el contenido — es portable a cualquier harness.
 
 ```bash
 # Listar observaciones candidatas a revisión
-mem_review --action list --project plataforma-scit
+mem_review --action list --project <your-project>
 ```
 
 Las observaciones con status `needs_review` son candidatas. Si `mem_review` no está

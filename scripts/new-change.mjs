@@ -81,8 +81,8 @@ issue: ${issue}
 ## Decisiones técnicas
 <Cómo se resuelve. Decisiones de arquitectura, módulos afectados, contrato.>
 
-## Impacto en el contrato (scit-contract)
-<¿Muta el modelo catastral? Si sí, recordar \`npm run contract:generate\`.>
+## Contract / API impact
+<Does this change mutate the public contract or API? If yes, describe the impact and any generation steps needed.>
 
 ## Alternativas descartadas
 <Qué se evaluó y por qué no.>

@@ -23,19 +23,21 @@
 export const prohibitedRefs = [
   {
     id: 'hardcoded-secret',
-    // Catches common patterns: "password = abc123", "secret: xyz", "token=abc"
-    pattern: /(?:password|secret|api_key|token)\s*[=:]\s*['""][^'""]{8,}/i,
+    // Catches common patterns: password="abc123", secret: "xyz", token=literal
+    // Excludes shell command substitutions (token="$(...)") and variable references (token="$VAR").
+    pattern: /(?:password|secret|api_key|token)\s*[=:]\s*["'][^"'$({]{8,}["']/i,
     reason: 'Hardcoded secret detected — use environment variables instead.',
     onlyExt: ['.js', '.mjs', '.ts', '.sh', '.yaml', '.yml', '.json'],
     exempt: ['.env.example'],
   },
   {
     id: 'todo-without-ticket',
-    // TODO comments must reference a ticket: "TODO(#42)" or "TODO: #42"
+    // Enforce that inline TODO comments reference a ticket number.
+    // Valid forms: "TODO(#42)" or "TODO: #42"
     pattern: /\/\/\s*TODO(?!\s*[:(]\s*#\d)/,
     reason: 'TODO without a ticket reference — add a ticket number, e.g. // TODO(#42): description.',
     onlyExt: ['.js', '.mjs', '.ts'],
-    exempt: [],
+    exempt: ['brain/project/check-refs-rules.mjs'],
   },
 ];
 

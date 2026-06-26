@@ -75,13 +75,14 @@ elif [ ! -t 0 ]; then
   warn "sin TTY: agregá GITLAB_TOKEN a .env y volvé a correr env:init"
 else
   cat <<'EOT'
-  Necesitás un Personal Access Token TUYO (scope: api) de git.santafe.gov.ar.
-  Tiene que ser PERSONAL — no el Project Access Token del bot — para que tus
-  push, issues y MRs salgan a tu nombre.
+  You need a Personal Access Token (scope: api) from your Git hosting provider.
+  It must be PERSONAL — not a project bot token — so your pushes, issues and
+  MRs/PRs appear under your name.
 EOT
-  # GitLab >= 18 acepta el formulario de creación pre-llenado por querystring:
-  # el dev solo confirma con su sesión web, copia y pega acá.
-  PAT_URL="https://${GITLAB_HOST}/-/user_settings/personal_access_tokens?name=plataforma-scit-dev&scopes=api"
+  # GitLab >= 18 accepts a pre-filled token creation form via querystring.
+  # Adjust the URL pattern if using GitHub (Settings → Developer settings → Tokens)
+  # or another provider.
+  PAT_URL="https://${GITLAB_HOST}/-/user_settings/personal_access_tokens?name=brain-dev&scopes=api"
   read -r -p "  ¿Abro el navegador con el formulario pre-llenado? [S/n]: " OPEN_BROWSER
   case "${OPEN_BROWSER:-S}" in
     n|N)
@@ -223,14 +224,13 @@ fi
 # --- 9. Próximos pasos -------------------------------------------------------------
 say "Entorno listo"
 cat <<'EOT'
-  Próximos pasos:
-    1. Leé brain/project/CONSTITUTION.md y brain/project/domain/GLOSSARY.md.
-    2. Cada mañana al arrancar: npm run day:start
-       (importa memoria, muestra estado del reactor y tablero de tickets)
-    3. Elegí un ticket y creá tu rama: {tipo}/issue-{iid}-{slug}.
-    4. Diseño técnico de una feature: npm run project:feature -- --issue [ID]
-    5. Antes de pushear: npm run repo:check && npm run memory:share
-    Guía completa: brain/project/methodology/developer-environment.md
+  Next steps:
+    1. Read brain/HOME.md — the entry point to all project knowledge.
+    2. Every morning: npm run day:start
+       (pulls memory, shows open tickets, checks for brain updates)
+    3. Pick a ticket and create your branch: {type}/issue-{iid}-{slug}.
+    4. Plan a feature with SDD: npm run project:feature -- --issue [ID]
+    5. Before pushing: npm run repo:check && npm run memory:share
 EOT
 if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
   printf '  Pendiente: %s\n' "${MISSING_OPTIONAL[*]}"
