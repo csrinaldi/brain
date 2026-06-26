@@ -1,23 +1,32 @@
 #!/usr/bin/env node
-// day-start.mjs — Secuencia de arranque diario: glab auth → actualizaciones → memoria → tablero.
-// Uso: npm run day:start
+// day-start.mjs — Daily startup sequence: VCS auth → updates → memory → board.
+// Usage: npm run day:start
 //
-// Para humanos: corre esto al iniciar la jornada, en cualquier rama.
-// Para agentes IA: corre esto al retomar sesión — establece el contexto antes de trabajar.
+// For humans: run this at the start of the workday, on any branch.
+// For AI agents: run this when resuming a session — sets context before working.
 
 import { spawnSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadBrainConfig } from './lib/brain-config.mjs';
 import { highestTag, readInstalledVersion, compareSemver } from './lib/installer.mjs';
+import { getVcs, resolveProviderName } from './vcs/cli.mjs';
+import { originIdentity } from './vcs/lib/repo.mjs';
+import { vcsToken } from './vcs/lib/token.mjs';
 
 const ROOT = process.cwd();
 const NODE = process.execPath;
 const TOTAL = 6;
 let step = 0;
 
-const { project } = loadBrainConfig();
-const GITLAB_HOST = project.gitHost;
+const config = loadBrainConfig();
+const { host: VCS_HOST, project: VCS_PROJECT } = originIdentity();
+let vcsProvider = null;
+let vcs = null;
+try {
+  vcsProvider = resolveProviderName({ config });
+  vcs = await getVcs({ config });
+} catch { /* provider not configured — the VCS steps degrade with a warning */ }
 
 const C = {
   reset:  '\x1b[0m',
@@ -63,65 +72,61 @@ const readEnvVar = (key) => {
   return process.env[key] ?? null;
 };
 
-// Propagar NO_PROXY desde .env para que binarios Go (glab) bypaseen el proxy interno.
+// Propagate NO_PROXY from .env so Go binaries (gh/glab) bypass the internal proxy.
 const noProxy = readEnvVar('NO_PROXY') ?? readEnvVar('no_proxy');
 if (noProxy) {
   process.env.NO_PROXY = noProxy;
   process.env.no_proxy = noProxy;
 }
 
-// ── 1. Autenticación GitLab (glab) ───────────────────────────────────────────
-sep('Autenticación GitLab (glab)');
-const glabPresent = capture('glab', ['--version']).status === 0;
-if (!glabPresent) {
-  info('glab no disponible — tablero de tickets desactivado.');
-  console.log(`       Instalar: ${C.bold}sudo apt install glab${C.reset}`);
+// ── 1. VCS authentication ────────────────────────────────────────────────────
+sep('Autenticación del VCS');
+if (!vcs) {
+  info(`Provider de VCS no configurado — seteá ${C.bold}vcs.provider${C.reset} en brain.config.json.`);
 } else {
-  const authCheck = capture('glab', ['api', '/user']);
-  const authenticated = authCheck.status === 0 && authCheck.stdout.includes('"username"');
-  if (authenticated) {
-    const username = JSON.parse(authCheck.stdout).username ?? '?';
-    ok(`glab autenticado como ${C.cyan}@${username}${C.reset}.`);
+  let authed = false;
+  try { authed = await vcs.authCheck({ host: VCS_HOST }); } catch { authed = false; }
+  if (authed) {
+    try {
+      const { username } = await vcs.whoami();
+      ok(`Autenticado como ${C.cyan}@${username}${C.reset} (${vcsProvider}).`);
+    } catch {
+      ok(`Autenticado (${vcsProvider}).`);
+    }
   } else {
-    console.log('  Sesión de glab expirada o no iniciada — reautenticando desde .env...');
-    const token = readEnvVar('GITLAB_TOKEN');
+    console.log('  Sesión no iniciada o vencida — reautenticando desde .env...');
+    const token = vcsToken(vcsProvider, ROOT);
     if (!token) {
-      warn(`GITLAB_TOKEN no encontrado en .env — corré ${C.bold}npm run env:init${C.reset}`);
+      warn(`Token no encontrado en .env — corré ${C.bold}npm run env:init${C.reset}`);
     } else {
-      const login = spawnSync(
-        'glab',
-        ['auth', 'login', '--hostname', GITLAB_HOST, '--git-protocol', 'https', '--stdin'],
-        { input: token, stdio: ['pipe', 'inherit', 'inherit'], encoding: 'utf8', cwd: ROOT },
-      );
-      if (login.status === 0) {
-        ok('glab autenticado.');
+      let loggedIn = false;
+      try { loggedIn = await vcs.authLogin({ host: VCS_HOST, token }); } catch { loggedIn = false; }
+      if (loggedIn) {
+        ok(`Autenticado (${vcsProvider}).`);
       } else {
-        warn(`Auth falló — el token puede haber vencido. Corré ${C.bold}npm run env:init${C.reset}`);
+        warn(`Auth falló — verificá el token o que el CLI del provider esté instalado. ${C.bold}npm run env:init${C.reset}`);
       }
     }
   }
 }
 
-// ── 2. Sincronización de main ─────────────────────────────────────────────────
+// ── 2. Main sync ─────────────────────────────────────────────────────────────
 sep('Sincronización de main');
 {
-  // Capturamos el branch local ANTES del fetch/merge — es la referencia correcta
-  // para detectar qué llegó nuevo, independientemente de si origin/main ya estaba
-  // actualizado en el tracking ref local.
+  // Capture the local branch BEFORE fetch/merge — this is the correct reference
+  // to detect what arrived new, regardless of whether origin/main was already
+  // updated in the local tracking ref.
   const prevLocal = capture('git', ['rev-parse', 'main']).stdout.trim();
-  const token = readEnvVar('GITLAB_TOKEN');
-  const remoteUrl = capture('git', ['remote', 'get-url', 'origin']).stdout.trim();
-  const remoteMatch = remoteUrl.match(/https?:\/\/([^/]+)\/(.+?)(?:\.git)?$/);
+  const token = vcs ? vcsToken(vcsProvider, ROOT) : null;
 
-  if (!token || !remoteMatch) {
-    warn('No se puede sincronizar main — GITLAB_TOKEN no disponible.');
+  if (!vcs || !token || !VCS_PROJECT || !VCS_HOST) {
+    warn('No se puede sincronizar main — provider de VCS o token no disponible.');
   } else {
-    const [, gitlabHost, projectPath] = remoteMatch;
-    const authRemote = `https://oauth2:${token}@${gitlabHost}/${projectPath}.git`;
+    const authRemote = await vcs.repoCloneUrl({ host: VCS_HOST, project: VCS_PROJECT, token });
     const fetchResult = capture('git', ['fetch', authRemote, 'main:refs/remotes/origin/main']);
 
     if (fetchResult.status !== 0) {
-      warn(`Fetch de main falló — verificá conectividad a ${C.cyan}${gitlabHost}${C.reset}`);
+      warn(`Fetch de main falló — verificá conectividad a ${C.cyan}${VCS_HOST}${C.reset}`);
     } else {
       const newMain = capture('git', ['rev-parse', 'refs/remotes/origin/main']).stdout.trim();
       const currentBranch = capture('git', ['branch', '--show-current']).stdout.trim();
@@ -129,7 +134,7 @@ sep('Sincronización de main');
       if (currentBranch === 'main') {
         let merge = capture('git', ['merge', '--ff-only', 'refs/remotes/origin/main']);
         if (merge.status !== 0) {
-          // Si el merge falla por archivos generados que serían sobreescritos, restaurarlos y reintentar.
+          // If the merge fails due to generated files that would be overwritten, restore them and retry.
           const wouldOverwrite = /serán sobrescritos al fusionar|would be overwritten by merge/;
           if (wouldOverwrite.test(merge.stderr)) {
             const blocked = merge.stderr.split('\n')
@@ -158,18 +163,7 @@ sep('Sincronización de main');
           .map(l => { const [sha, short, author, subject] = l.split('\x1f'); return { sha, short, author, subject }; });
 
         if (commits.length > 0) {
-          const encodedProject = encodeURIComponent(projectPath);
-
-          const pipelineStatus = (sha) => {
-            const r = capture('curl', [
-              '-sf', '-H', `PRIVATE-TOKEN: ${token}`,
-              `https://${gitlabHost}/api/v4/projects/${encodedProject}/commits/${sha}/statuses?per_page=1`,
-            ]);
-            if (r.status !== 0) return null;
-            try { return JSON.parse(r.stdout)[0]?.status ?? null; }
-            catch { return null; }
-          };
-
+          // CI status per commit via the VCS adapter (normalized enum).
           const badge = (status) => {
             switch (status) {
               case 'success':  return `${C.green}✓${C.reset}`;
@@ -183,7 +177,8 @@ sep('Sincronización de main');
 
           console.log(`\n  ${C.bold}${commits.length} commit(s) nuevos en main:${C.reset}\n`);
           for (const { sha, short, author, subject } of commits) {
-            const status = pipelineStatus(sha);
+            let status = null;
+            try { status = await vcs.commitStatus({ project: VCS_PROJECT, sha }); } catch { status = null; }
             console.log(`    [${badge(status)}] ${C.dim}${short}${C.reset}  ${C.cyan}${author}${C.reset} — ${subject}`);
           }
           console.log('');
@@ -195,7 +190,7 @@ sep('Sincronización de main');
   }
 }
 
-// ── 3. Actualizaciones del ecosistema ────────────────────────────────────────
+// ── 3. Ecosystem updates ─────────────────────────────────────────────────────
 sep('Actualizaciones del ecosistema');
 const gaCheck = capture('gentle-ai', ['--version']);
 if (gaCheck.status !== 0) {
@@ -230,10 +225,10 @@ if (gaCheck.status !== 0) {
   ok('Skill registry actualizado.');
 }
 
-// ── 4. Versión de brain (core) ───────────────────────────────────────────────
-// Check-and-notify (ADR-0006): detecta si hay una versión nueva del core y AVISA.
-// NO auto-actualiza — respeta brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md.
-// El upgrade es siempre una decisión consciente: npm run brain:upgrade -- <tag>.
+// ── 4. brain (core) version ──────────────────────────────────────────────────
+// Check-and-notify (ADR-0006): detects if there is a new core version and WARNS.
+// Does NOT auto-update — respects brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md.
+// Upgrade is always a conscious decision: npm run brain:upgrade -- <tag>.
 sep('Versión de brain (core)');
 {
   const BRAIN_REMOTE = 'https://github.com/csrinaldi/brain.git';
@@ -259,14 +254,14 @@ sep('Versión de brain (core)');
   }
 }
 
-// ── 5. Memoria de equipo ─────────────────────────────────────────────────────
+// ── 5. Team memory ───────────────────────────────────────────────────────────
 sep('Memoria de equipo');
 
-// 4a. Auto-instalar/reparar el pre-push hook que materializa la memoria (ADR-0003).
-//     No depende de re-correr bootstrap: se asegura en cada arranque, así los devs
-//     que ya tienen el sistema andando lo reciben sin acción manual, y se re-instala
-//     solo si alguien lo desactiva. El enforcement real es client-side por diseño:
-//     el export de ~/.engram solo puede ocurrir en la máquina del dev.
+// 4a. Auto-install/repair the pre-push hook that materializes memory (ADR-0003).
+//     Does not depend on re-running bootstrap: ensured on every startup, so devs
+//     who already have the system running receive it without manual action, and it
+//     re-installs itself if someone disables it. Real enforcement is client-side by design:
+//     the ~/.engram export can only happen on the dev's machine.
 const HOOKS_PATH = 'scripts/hooks';
 const hookFile = join(ROOT, HOOKS_PATH, 'pre-push');
 if (!existsSync(hookFile)) {
@@ -284,15 +279,15 @@ if (!existsSync(hookFile)) {
 
 const engram = capture('engram', ['--version']);
 if (engram.status === 0) {
-  // 4a. Importar memoria del equipo desde .memory/ del repo → ~/.engram local
+  // 4a. Import team memory from .memory/ in the repo → ~/.engram local
   console.log(`  ${C.dim}Importando chunks de .memory/ al DB local...${C.reset}`);
   run('engram', ['sync', '--import'], { stdio: ['inherit', 'inherit', 'pipe'] });
 
-  // 4b. Reproyectar brain/ → ~/.engram (ADRs, anti-patterns, dominio)
+  // 4b. Re-project brain/ → ~/.engram (ADRs, anti-patterns, domain)
   console.log(`  ${C.dim}Reproyectando brain/ a engram...${C.reset}`);
   run(NODE, ['scripts/brain-to-engram.mjs']);
 
-  // 4c. Exportar ~/.engram → .memory/ del repo (cierra el ciclo: sin este paso, nada fluye)
+  // 4c. Export ~/.engram → .memory/ in the repo (closes the loop: without this step, nothing flows)
   console.log(`  ${C.dim}Exportando memoria al repo (.memory/)...${C.reset}`);
   const exportResult = capture('engram', ['sync', '--export']);
   if (exportResult.status === 0) {
@@ -305,11 +300,11 @@ if (engram.status === 0) {
   console.log(`       Instalar: ${C.bold}gentle-ai install${C.reset}   o   ${C.bold}npm run tools:install${C.reset}`);
 }
 
-// ── 6. Tablero de tickets ────────────────────────────────────────────────────
+// ── 6. Ticket board ──────────────────────────────────────────────────────────
 sep('Tablero de tickets');
 run(NODE, ['scripts/tracker-board.mjs']);
 
-// ── Listo ────────────────────────────────────────────────────────────────────
+// ── Done ─────────────────────────────────────────────────────────────────────
 const div = `${C.dim}${'─'.repeat(62)}${C.reset}`;
 console.log('\n' + div);
 console.log(`  ${C.bGreen}Con ticket:${C.reset}`);

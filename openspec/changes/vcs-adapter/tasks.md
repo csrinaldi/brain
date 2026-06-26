@@ -22,8 +22,8 @@
 - [x] 3.3 Verified `tracker:board` and `project:status` end-to-end against GitHub (issue #2 listed via gh).
 
 ## PR4 — Auth + sync
-- [ ] 4.1 Refactor `day-start.mjs` → dispatcher (`authCheck`, `authLogin`, `whoami`, `commitStatus`, `repoCloneUrl`).
-- [ ] 4.2 Verify the check-and-notify and main sync still work.
+- [x] 4.1 Refactor `day-start.mjs` → dispatcher (`authCheck`, `authLogin`, `whoami`, `commitStatus`, `repoCloneUrl`). New `scripts/vcs/lib/token.mjs` (provider→token env). Comments translated to English.
+- [x] 4.2 Verified: targeted e2e of `commitStatus`/`repoCloneUrl` against this GitHub repo; main-sync ff-only + recovery logic preserved.
 
 ## PR5 — Ticket
 - [ ] 5.1 Refactor `ticket-start.mjs` → dispatcher (`issueView`, `repoCloneUrl`); `iid`→`number` in branch naming.
