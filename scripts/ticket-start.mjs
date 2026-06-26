@@ -16,6 +16,7 @@ import { loadBrainConfig } from './lib/brain-config.mjs';
 import { getVcs, resolveProviderName } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';
 import { vcsToken, readEnvVar } from './vcs/lib/token.mjs';
+import { t } from './i18n/t.mjs';
 
 const ROOT = process.cwd();
 
@@ -24,15 +25,15 @@ const useWorktree = argv.includes('--worktree');
 const baseIdx = argv.indexOf('--base');
 const baseBranch = baseIdx >= 0 ? argv[baseIdx + 1] : 'main';
 if (baseIdx >= 0 && !baseBranch) {
-  console.error('  ✗ --base requiere un nombre de rama. Ej: --base feature/issue-99-mi-historia');
+  console.error(`  ${await t('ticket.error.baseRequiresArg')}`);
   process.exit(1);
 }
 // id = first numeric argument that is NOT the value of --base
 const id = argv.find((a, i) => /^\d+$/.test(a) && (baseIdx < 0 || i !== baseIdx + 1));
 if (!id) {
-  console.error('Uso: npm run ticket:start -- <issue-id> [--worktree] [--base <rama>]');
-  console.error('Ejemplo: npm run ticket:start -- 42');
-  console.error('         npm run ticket:start -- 42 --worktree --base feature/issue-99-mi-historia');
+  console.error(await t('ticket.error.usage'));
+  console.error(await t('ticket.error.usageExample1'));
+  console.error(await t('ticket.error.usageExample2'));
   process.exit(1);
 }
 
@@ -44,7 +45,7 @@ const sh = (cmd, args, opts = {}) => {
 // ── Resolve the VCS provider + repo identity ──────────────────────────────────
 const { host, project } = originIdentity();
 if (!project) {
-  console.error('  ✗ No se pudo detectar el remote de origin.');
+  console.error(`  ${await t('ticket.error.noRemote')}`);
   process.exit(1);
 }
 
@@ -55,13 +56,13 @@ try {
   vcsProvider = resolveProviderName({ config });
   vcs = await getVcs({ config });
 } catch (e) {
-  console.error(`  ✗ No se pudo inicializar el VCS: ${e.message}`);
+  console.error(`  ${await t('ticket.error.vcsInit', { message: e.message })}`);
   process.exit(1);
 }
 
 const token = vcsToken(vcsProvider, ROOT);
 if (!token) {
-  console.error('  ✗ Token del VCS no encontrado en .env — corré npm run env:init');
+  console.error(`  ${await t('ticket.error.tokenNotFound')}`);
   process.exit(1);
 }
 
@@ -73,16 +74,16 @@ if (noProxy) {
 }
 
 // ── Fetch the issue through the adapter ───────────────────────────────────────
-console.log(`\n  Buscando issue #${id}...`);
+console.log(`\n  ${await t('ticket.fetching', { id })}`);
 let issue;
 try {
   issue = await vcs.issueView({ project, number: id });
 } catch (e) {
-  console.error(`  ✗ No se pudo obtener el issue #${id} — verificá la sesión del VCS y el id. ${e.message}`);
+  console.error(`  ${await t('ticket.error.fetchFailed', { id, message: e.message })}`);
   process.exit(1);
 }
 if (!issue?.number) {
-  console.error(`  ✗ Issue #${id} no encontrado en ${project}`);
+  console.error(`  ${await t('ticket.error.notFound', { id, project })}`);
   process.exit(1);
 }
 
@@ -115,22 +116,22 @@ const branchName = `${branchType}/issue-${issue.number}-${slug}`;
 // ── Show the issue context ────────────────────────────────────────────────────
 console.log('');
 console.log(`  #${issue.number}  ${issue.title}`);
-if (labels.length > 0) console.log(`  Labels: ${labels.join(', ')}`);
+if (labels.length > 0) console.log(`  ${await t('ticket.labels', { labels: labels.join(', ') })}`);
 if (issue.body?.trim()) {
   const preview = issue.body.trim().split('\n').slice(0, 6).join('\n');
   console.log('\n' + preview.split('\n').map(l => `  ${l}`).join('\n'));
 }
-console.log(`\n  Rama: \x1b[1m${branchName}\x1b[0m`);
+console.log(`\n  \x1b[1m${await t('ticket.branch', { branch: branchName })}\x1b[0m`);
 
 // ── Update the base branch ────────────────────────────────────────────────────
-console.log(`\n  Actualizando ${baseBranch}...`);
+console.log(`\n  ${await t('ticket.updatingBase', { base: baseBranch })}`);
 const authenticatedRemote = await vcs.repoCloneUrl({ host, project, token });
 const fetchRes = spawnSync('git',
   ['fetch', authenticatedRemote, `${baseBranch}:refs/remotes/origin/${baseBranch}`],
   { cwd: ROOT, encoding: 'utf8' });
 if (fetchRes.status !== 0) {
-  console.error(`  ✗ No se pudo fetchear la rama base '${baseBranch}' del remoto.`);
-  console.error('    ¿Existe y está pusheada? Verificá el nombre.');
+  console.error(`  ${await t('ticket.error.fetchBase', { branch: baseBranch })}`);
+  console.error(await t('ticket.error.fetchBaseHint'));
   process.exit(1);
 }
 const startPoint = `origin/${baseBranch}`;
@@ -145,8 +146,8 @@ if (useWorktree) {
   worktreePath = join(dirname(ROOT), `${basename(ROOT)}-issue-${id}`);
 
   if (existsSync(worktreePath)) {
-    console.error(`  ✗ Ya existe la carpeta del worktree: ${worktreePath}`);
-    console.error('    Eliminala (git worktree remove) o usá otro issue.');
+    console.error(`  ${await t('ticket.error.worktreeExists', { path: worktreePath })}`);
+    console.error(await t('ticket.error.worktreeExistsHint'));
     process.exit(1);
   }
 
@@ -156,41 +157,43 @@ if (useWorktree) {
     : ['worktree', 'add', worktreePath, '-b', branchName, startPoint];
   const wt = sh('git', wtArgs);
   if (!wt.ok) {
-    console.error(`  ✗ Error al crear el worktree: ${wt.err}`);
+    console.error(`  ${await t('ticket.error.worktreeCreate', { error: wt.err })}`);
     process.exit(1);
   }
-  console.log(`  \x1b[32m✓\x1b[0m Worktree creado en ${worktreePath}`);
+  console.log(`  ${await t('ticket.worktreeCreated', { path: worktreePath })}`);
 
   // Gotcha: the worktree does NOT inherit untracked/ignored files like .env (which
   // holds the VCS token, needed by this script and the adapter). Copy it over.
   const srcEnv = join(ROOT, '.env');
   if (existsSync(srcEnv)) {
     copyFileSync(srcEnv, join(worktreePath, '.env'));
-    console.log(`  \x1b[32m✓\x1b[0m .env copiado al worktree.`);
+    console.log(`  ${await t('ticket.envCopied')}`);
   } else {
-    console.log(`  → No hay .env en ${ROOT} — saltando copia.`);
+    console.log(`  ${await t('ticket.noEnv', { root: ROOT })}`);
   }
 } else {
   const create = sh('git', ['checkout', '-b', branchName, startPoint]);
   if (!create.ok) {
     if (branchExists || create.err.includes('already exists')) {
-      console.log('  → Rama ya existe — cambiando a ella...');
+      console.log(`  ${await t('ticket.branchExists')}`);
       spawnSync('git', ['checkout', branchName], { stdio: 'inherit', cwd: ROOT });
     } else {
-      console.error(`  ✗ Error al crear la rama: ${create.err}`);
+      console.error(`  ${await t('ticket.error.branchCreate', { error: create.err })}`);
       process.exit(1);
     }
   } else {
-    console.log(`  \x1b[32m✓\x1b[0m Rama creada y activa.`);
+    console.log(`  ${await t('ticket.branchCreated')}`);
   }
 }
 
 // ── Next steps ────────────────────────────────────────────────────────────────
-const cdStep = useWorktree ? `\n    0. cd ${worktreePath}   (abrí tu sesión de trabajo acá)` : '';
+const cdStep = useWorktree
+  ? `\n${await t('ticket.nextSteps.cd', { path: worktreePath })}`
+  : '';
 console.log(`
-  Próximos pasos:${cdStep}
-    1. Implementar — usá /sdd-new ${id} si el cambio es complejo
-    2. npm run repo:check antes de cada commit
-    3. npm run memory:share && git add .memory/ antes de pushear
-    4. git push -u origin ${branchName}
+  ${await t('ticket.nextSteps.header')}${cdStep}
+${await t('ticket.nextSteps.step1', { id })}
+${await t('ticket.nextSteps.step2')}
+${await t('ticket.nextSteps.step3')}
+${await t('ticket.nextSteps.step4', { branch: branchName })}
 `);

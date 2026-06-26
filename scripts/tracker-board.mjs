@@ -10,10 +10,11 @@
 
 import { getVcs } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';
+import { t } from './i18n/t.mjs';
 
 const { host, project } = originIdentity();
 if (!project) {
-  console.log('⚠ No se pudo detectar el remote de origin.');
+  console.log(await t('tracker.noRemote'));
   process.exit(0);
 }
 
@@ -21,14 +22,14 @@ let vcs;
 try {
   vcs = await getVcs();
 } catch (e) {
-  console.log(`⚠ Provider de VCS no configurado: ${e.message}`);
+  console.log(await t('tracker.vcsNotConfigured', { error: e.message }));
   process.exit(0);
 }
 
 let authed = false;
 try { authed = await vcs.authCheck({ host }); } catch { authed = false; }
 if (!authed) {
-  console.log(`⚠ Sin sesión de VCS autenticada para ${host} — mirá https://${host}/${project}`);
+  console.log(await t('tracker.noSession', { host, project }));
   process.exit(0);
 }
 
@@ -37,7 +38,7 @@ try {
   currentUser = (await vcs.whoami()).username;
 } catch {
   // stderr, para no contaminar el markdown que consume `retomar`.
-  console.error('⚠ No se pudo obtener el usuario — solo se muestran tickets sin asignar.');
+  console.error(await t('tracker.noUser'));
 }
 
 const safeList = async (opts) => {
@@ -53,16 +54,16 @@ const formatIssue = (i) => {
   return `- #${i.number}${labels} ${i.title}`;
 };
 
-console.log('## Tus tickets');
+console.log(`## ${await t('tracker.yourTickets')}`);
 if (myIssues.length === 0) {
-  console.log('- (ninguno)');
+  console.log(`- ${await t('common.none')}`);
 } else {
   for (const i of myIssues) console.log(formatIssue(i));
 }
 
-console.log('\n## Sin asignar');
+console.log(`\n## ${await t('tracker.unassigned')}`);
 if (unassigned.length === 0) {
-  console.log('- (ninguno)');
+  console.log(`- ${await t('common.none')}`);
 } else {
   for (const i of unassigned) console.log(formatIssue(i));
 }

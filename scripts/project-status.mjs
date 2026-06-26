@@ -13,6 +13,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getVcs } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';
+import { t } from './i18n/t.mjs';
 
 const ROOT = process.cwd();
 
@@ -22,10 +23,10 @@ const tag = (xml, name) => {
   return m ? m[1].trim() : null;
 };
 
-console.log('# Estado del monorepo — proyección generada, NO editar ni guardar\n');
+console.log(`${await t('ps.title')}\n`);
 
 // --- Reactor Maven -------------------------------------------------------------
-console.log('## Reactor Maven\n');
+console.log(`${await t('ps.maven.section')}\n`);
 
 // Recorre el reactor RECURSIVAMENTE: un <module> puede ser otro agregador
 // (backend/core, backend/services) cuyos módulos también participan del build.
@@ -35,7 +36,9 @@ function walkModules(dirRel, depth) {
   const pomAbs = join(ROOT, dirRel, 'pom.xml');
   const pomRel = dirRel ? `${dirRel}/pom.xml` : 'pom.xml';
   if (!existsSync(pomAbs)) {
-    rows.push({ artifact: `(pom AUSENTE: ${dirRel})`, version: '-', packaging: '-', parent: '-', depth });
+    // Note: missingPom uses the Spanish word AUSENTE in es locale; MISSING in en.
+    // Translation happens at runtime via t() — this key is resolved in the async call below.
+    rows.push({ artifact: `_missing_${dirRel}`, version: '-', packaging: '-', parent: '-', depth });
     return;
   }
   visitedPoms.add(pomRel);
@@ -60,20 +63,24 @@ const pad = (s, n) => String(s).padEnd(n);
 console.log(`  ${pad('artifactId', 30)}${pad('versión', 26)}${pad('packaging', 11)}parent`);
 for (const r of rows) {
   const indent = '  '.repeat(r.depth);
-  console.log(`  ${pad(indent + r.artifact, 30)}${pad(r.version, 26)}${pad(r.packaging, 11)}${r.parent}`);
+  // Resolve missing-pom rows (stored with _missing_ sentinel) to a translated label.
+  const artifactLabel = r.artifact.startsWith('_missing_')
+    ? await t('ps.maven.missingPom', { dir: r.artifact.slice('_missing_'.length) })
+    : indent + r.artifact;
+  console.log(`  ${pad(artifactLabel, 30)}${pad(r.version, 26)}${pad(r.packaging, 11)}${r.parent}`);
 }
-console.log(`\n  ${rows.length} módulo(s) en el reactor (incluye agregadores).`);
+console.log(`\n  ${await t('ps.maven.count', { count: rows.length })}`);
 
 // Poms trackeados que NO participan del reactor: candidatos a olvido.
 const trackedPoms = sh('git ls-files "**/pom.xml"').split('\n').filter(Boolean);
 const orphans = trackedPoms.filter((p) => !visitedPoms.has(p));
 if (orphans.length > 0) {
-  console.log('\n  ⚠ Poms trackeados FUERA del reactor (no se construyen con backend:build):');
+  console.log(`\n  ${await t('ps.maven.orphansTitle')}`);
   for (const o of orphans) console.log(`      ${o}`);
 }
 
 // --- Frontend --------------------------------------------------------------------
-console.log('\n## Frontend (Nx)\n');
+console.log(`\n${await t('ps.frontend.section')}\n`);
 let nxProjects = [];
 try {
   nxProjects = sh('git ls-files "frontend/**/project.json"').split('\n').filter(Boolean);
@@ -81,15 +88,15 @@ try {
   /* sin matches */
 }
 if (nxProjects.length === 0) {
-  console.log('  Sin proyectos Nx aún (frontend vacío).');
+  console.log(`  ${await t('ps.frontend.empty')}`);
 } else {
   for (const p of nxProjects) console.log(`  ${p.replace('/project.json', '')}`);
-  console.log(`\n  ${nxProjects.length} proyecto(s) Nx.`);
+  console.log(`\n  ${await t('ps.frontend.count', { count: nxProjects.length })}`);
 }
 
 // --- VCS: trabajo abierto ----------------------------------------------------------
 // Provider-agnóstico vía el adapter de VCS (scripts/vcs/cli.mjs).
-console.log('\n## Trabajo abierto\n');
+console.log(`\n${await t('ps.vcs.section')}\n`);
 const { host: vcsHost, project: repo } = originIdentity();
 let vcs = null;
 try { vcs = await getVcs(); } catch { /* provider no configurado */ }
@@ -99,28 +106,28 @@ if (vcs && repo) {
 }
 
 if (!repo) {
-  console.log('  ⚠ No se pudo detectar el remote de origin.');
+  console.log(`  ${await t('ps.vcs.noRemote')}`);
 } else if (!vcs) {
-  console.log('  ⚠ Provider de VCS no configurado (vcs.provider en brain.config.json).');
+  console.log(`  ${await t('ps.vcs.notConfigured')}`);
 } else if (!vcsAuthed) {
-  console.log(`  ⚠ Sin sesión de VCS autenticada — mirá https://${vcsHost}/${repo}`);
+  console.log(`  ${await t('ps.vcs.noSession', { host: vcsHost, repo })}`);
 } else {
   try {
     const issues = await vcs.issueList({ project: repo, state: 'open' });
-    console.log(`  Issues abiertos (${issues.length}):`);
+    console.log(`  ${await t('ps.vcs.issues', { count: issues.length })}`);
     for (const i of issues) {
       const labels = i.labels?.length ? `  [${i.labels.join(', ')}]` : '';
       console.log(`    #${i.number}  ${i.title}${labels}`);
     }
     const prs = await vcs.mrList({ project: repo, state: 'open' });
-    console.log(`\n  PRs/MRs abiertos (${prs.length}):`);
+    console.log(`\n  ${await t('ps.vcs.prs', { count: prs.length })}`);
     for (const p of prs) {
       console.log(`    #${p.number}  ${p.title}  (${p.headBranch})`);
     }
-    if (prs.length === 0) console.log('    (ninguno)');
+    if (prs.length === 0) console.log(`    ${await t('common.none')}`);
   } catch (e) {
-    console.log(`  ⚠ No se pudo consultar el VCS: ${e.message.split('\n')[0]}`);
+    console.log(`  ${await t('ps.vcs.error', { message: e.message.split('\n')[0] })}`);
   }
 }
 
-console.log('\n— Fin de la proyección. Para regenerar: npm run project:status');
+console.log(`\n${await t('ps.footer')}`);

@@ -46,6 +46,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0007](project/decisions/adr-0007-config-vcs-agnostica-y-checkrefs.md) — VCS-agnostic config and check-refs engine
 - [ADR-0008](project/decisions/adr-0008-adapter-vcs-provider.md) — VCS adapter: explicit provider + verb contract
 - [ADR-0009](project/decisions/adr-0009-documentation-language-policy.md) — Documentation language policy: core English, project docs configurable
+- [ADR-0010](project/decisions/adr-0010-cli-output-i18n.md) — CLI output i18n: message catalogs with English fallback
 
 ### Project-specific rules
 
