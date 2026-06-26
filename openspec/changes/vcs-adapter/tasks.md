@@ -17,9 +17,9 @@
 - [x] 2.3 Tests for each provider against the contract (normalization verified) — `scripts/vcs/providers.test.mjs`.
 
 ## PR3 — Read-only callers
-- [ ] 3.1 Refactor `tracker-board.mjs` → dispatcher (`authCheck`, `whoami`, `projectResolve`, `issueList`).
-- [ ] 3.2 Refactor `project-status.mjs` → dispatcher (`authCheck`, `issueList`, `mrList`).
-- [ ] 3.3 Verify `tracker:board` and `project:status` end-to-end against GitHub (this repo).
+- [x] 3.1 Refactor `tracker-board.mjs` → dispatcher (`authCheck`, `whoami`, `issueList`). New `scripts/vcs/lib/repo.mjs` (origin identity). Output stays Spanish (separate concern).
+- [x] 3.2 Refactor `project-status.mjs` → dispatcher (`authCheck`, `issueList`, `mrList`); only the VCS section, Maven/Nx untouched.
+- [x] 3.3 Verified `tracker:board` and `project:status` end-to-end against GitHub (issue #2 listed via gh).
 
 ## PR4 — Auth + sync
 - [ ] 4.1 Refactor `day-start.mjs` → dispatcher (`authCheck`, `authLogin`, `whoami`, `commitStatus`, `repoCloneUrl`).
