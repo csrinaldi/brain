@@ -1,11 +1,13 @@
-// scripts/i18n/coverage.test.mjs — PR2 parity and translation coverage tests.
+// scripts/i18n/coverage.test.mjs — PR2 + PR3 parity and translation coverage tests.
 // Run with: node --test scripts/i18n/coverage.test.mjs
 // No external dependencies — uses Node built-in node:test.
 //
 // Validates that:
 //  1. All PR2 keys exist in en.mjs with the expected English values.
-//  2. es.mjs has an entry for every key in en.mjs (complete Spanish parity).
-//  3. translate() reproduces the prior Spanish output for a representative sample.
+//  2. All PR3 keys (bootstrap.* and tools.*) exist in en.mjs with expected English values.
+//  3. es.mjs has an entry for every key in en.mjs (complete Spanish parity).
+//  4. translate() reproduces the prior Spanish output for a representative sample.
+//  5. sh.mjs emits well-formed I18N_* assignments for representative shell keys.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -174,5 +176,202 @@ test('translate: day.run.exitCode interpolates code into Spanish', () => {
   assert.equal(
     translate('day.run.exitCode', { code: 1 }, es, en),
     '↳ salió con código 1 (no bloqueante).',
+  );
+});
+
+// ── PR3 bootstrap.sh key existence in en.mjs ──────────────────────────────────
+// Templates use {placeholder} syntax (same convention as PR2 keys).
+// sh.mjs converts {placeholder} → %s for shell printf; t() fills named params for JS.
+
+test('PR3 bootstrap: deps section keys exist in en', () => {
+  assert.equal(en['bootstrap.deps.section'], 'Base dependencies');
+  assert.equal(en['bootstrap.deps.missing'], "Missing '{tool}' (required). Install it and re-run env:init.");
+  assert.equal(en['bootstrap.deps.ok'],      'git, npm, python3 present');
+});
+
+test('PR3 bootstrap: ecosystem section keys exist in en', () => {
+  assert.equal(en['bootstrap.ecosystem.section'],  'Ecosystem tools');
+  assert.equal(en['bootstrap.ecosystem.notFound'], '{tool} not found — {hint}');
+});
+
+test('PR3 bootstrap: PAT section keys exist in en', () => {
+  assert.equal(en['bootstrap.pat.section'],        'Personal access token (.env)');
+  assert.equal(en['bootstrap.pat.alreadySet'],     '{var} already set in .env');
+  assert.equal(en['bootstrap.pat.noTty'],          'no TTY: add {var} to .env and re-run env:init');
+  assert.equal(en['bootstrap.pat.openPrompt'],     'Open the browser with the pre-filled form? [Y/n]: ');
+  assert.equal(en['bootstrap.pat.manualUrl'],      'Create it manually at: {url}');
+  assert.equal(en['bootstrap.pat.browserFallback'],'If the browser did not open, go to: {url}');
+  assert.equal(en['bootstrap.pat.enterPrompt'],    'Paste your PAT (not shown): ');
+  assert.equal(en['bootstrap.pat.skipped'],        'No token: skipping VCS authentication. Re-run env:init when you have it.');
+  assert.equal(en['bootstrap.pat.saved'],          '{var} saved in .env (gitignored)');
+});
+
+test('PR3 bootstrap: credential helper section keys exist in en', () => {
+  assert.equal(en['bootstrap.cred.section'], 'Git credential helper (HTTPS)');
+  assert.equal(en['bootstrap.cred.ok'],      'push/pull over HTTPS use your personal PAT from .env');
+});
+
+test('PR3 bootstrap: VCS auth section keys exist in en', () => {
+  assert.equal(en['bootstrap.auth.section'],   'VCS authentication');
+  assert.equal(en['bootstrap.auth.alreadyOk'], 'already authenticated against {host}');
+  assert.equal(en['bootstrap.auth.ok'],        'authenticated against {host}');
+  assert.equal(en['bootstrap.auth.failed'],    'auth failed — check the token in .env');
+  assert.equal(en['bootstrap.auth.noToken'],   'No token: VCS remains unauthenticated');
+});
+
+test('PR3 bootstrap: SDD harness section keys exist in en', () => {
+  assert.equal(en['bootstrap.sdd.section'],            'SDD implementation (harness)');
+  assert.equal(en['bootstrap.sdd.prompt'],             'Which SDD implementation do you use? [gentle-ai]: ');
+  assert.equal(en['bootstrap.sdd.ok'],                 'harness: {harness} (.env)');
+  assert.equal(en['bootstrap.sdd.gentleaiMissing'],    'gentle-ai missing — brew install gentle-ai and re-run env:init');
+  assert.equal(en['bootstrap.sdd.ecosystemOk'],        'ecosystem already initialized (gentle-ai doctor)');
+  assert.equal(en['bootstrap.sdd.ecosystemConfigured'],'ecosystem configured (skills, engram, gga)');
+  assert.equal(en['bootstrap.sdd.ecosystemFailed'],    'gentle-ai install failed — run it manually and re-run env:init');
+  assert.equal(en['bootstrap.sdd.noTty'],              "no TTY: run 'gentle-ai install' manually");
+  assert.equal(en['bootstrap.sdd.registryOk'],         'skill registry updated');
+  assert.equal(en['bootstrap.sdd.registryFailed'],     'skill-registry refresh failed (non-blocking)');
+  assert.equal(en['bootstrap.sdd.unknownHarness'],     "harness '{harness}' has no known init routine — configure its skills manually");
+});
+
+test('PR3 bootstrap: team memory section keys exist in en', () => {
+  assert.equal(en['bootstrap.memory.section'],         'Team memory');
+  assert.equal(en['bootstrap.memory.prompt'],          'Which memory backend do you use? [engram]: ');
+  assert.equal(en['bootstrap.memory.backend'],         'memory backend: {backend} (.env)');
+  assert.equal(en['bootstrap.memory.hookOk'],          'pre-push hook activated (materializes .memory/ before push — ADR-0003)');
+  assert.equal(en['bootstrap.memory.hookFailed'],      'could not activate core.hooksPath (pre-push hook)');
+  assert.equal(en['bootstrap.memory.nodeAbsent'],      'node absent — engram backend setup skipped');
+  assert.equal(en['bootstrap.memory.engram.ok'],       'engram backend configured (symlink + merge driver)');
+  assert.equal(en['bootstrap.memory.engram.failed'],   'memory setup failed (non-blocking)');
+  assert.equal(en['bootstrap.memory.pull.ok'],         'memory imported (.memory/ → engram)');
+  assert.equal(en['bootstrap.memory.pull.failed'],     'memory:pull failed (non-blocking)');
+  assert.equal(en['bootstrap.memory.index.ok'],        'durable index reprojected (brain/ → engram)');
+  assert.equal(en['bootstrap.memory.index.failed'],    'memory:index failed (non-blocking)');
+  assert.equal(en['bootstrap.memory.unknownBackend'],  "backend '{backend}' has no known init routine — configure it manually");
+});
+
+test('PR3 bootstrap: board and done section keys exist in en', () => {
+  assert.equal(en['bootstrap.board.section'], 'Open tickets in {path}');
+  assert.equal(en['bootstrap.board.failed'],  'could not list tickets — see https://{host}/{path}');
+  assert.equal(en['bootstrap.done.section'],  'Environment ready');
+  assert.equal(en['bootstrap.done.pending'],  'Pending: {tools}');
+  assert.equal(en['bootstrap.done.install'],  'Run: npm run tools:install  (installs all at once)');
+});
+
+// ── PR3 install-tools.sh key existence in en.mjs ──────────────────────────────
+
+test('PR3 tools: require and apt section keys exist in en', () => {
+  assert.equal(en['tools.require.noApt'],  'This script requires apt-get (Ubuntu/Debian). Install the tools manually following brain/project/methodology/developer-environment.md.');
+  assert.equal(en['tools.apt.section'],    'System packages (apt)');
+  assert.equal(en['tools.apt.installing'], 'Installing: {pkgs}');
+  assert.equal(en['tools.apt.ok'],         'apt: {pkgs}');
+  assert.equal(en['tools.apt.allPresent'], 'all apt packages already present');
+});
+
+test('PR3 tools: VCS CLI section keys exist in en', () => {
+  assert.equal(en['tools.vcs.section'],   'VCS CLI ({cli})');
+  assert.equal(en['tools.vcs.installed'], '{cli} installed');
+  assert.equal(en['tools.vcs.notInApt'], '{cli} is not in apt — install it manually:');
+});
+
+test('PR3 tools: Node, Claude, gentle-ai section keys exist in en', () => {
+  assert.equal(en['tools.node.installing'],           'Installing nvm...');
+  assert.equal(en['tools.node.nvmOk'],                'nvm installed');
+  assert.equal(en['tools.node.nodeOk'],               'node {version} via nvm');
+  assert.equal(en['tools.node.reloadShell'],          'Open a new terminal or run: source ~/.bashrc');
+  assert.equal(en['tools.claude.section'],            'Claude Code (Anthropic CLI)');
+  assert.equal(en['tools.gentleai.section'],          'gentle-ai + ecosystem (engram, gga)');
+  assert.equal(en['tools.gentleai.installing'],       'Installing gentle-ai...');
+  assert.equal(en['tools.gentleai.ok'],               'gentle-ai installed');
+  assert.equal(en['tools.gentleai.alreadyConfigured'],'gentle-ai ecosystem already configured');
+  assert.equal(en['tools.gentleai.configuring'],      'Configuring ecosystem (engram, gga, skills)...');
+  assert.equal(en['tools.gentleai.configured'],       'ecosystem configured');
+  assert.equal(en['tools.gentleai.configFailed'],     'gentle-ai install failed — retry manually');
+});
+
+test('PR3 tools: summary section keys exist in en', () => {
+  assert.equal(en['tools.summary.section'],       'Installation complete');
+  assert.equal(en['tools.summary.nextStep'],      'Next step:');
+  assert.equal(en['tools.summary.checkVersions'], 'Check versions:');
+  assert.equal(en['tools.summary.notFound'],      '{tool}  (not found — restart the terminal)');
+  assert.equal(en['tools.installed'],             'already installed');
+});
+
+// ── PR3 sh.mjs shell output shape for representative shell keys ───────────────
+
+import { keyToVar, templateToShell, renderCatalog } from './sh.mjs';
+
+test('PR3 sh: keyToVar converts bootstrap key correctly', () => {
+  assert.equal(keyToVar('bootstrap.deps.section'),    'I18N_BOOTSTRAP_DEPS_SECTION');
+  assert.equal(keyToVar('bootstrap.memory.engram.ok'),'I18N_BOOTSTRAP_MEMORY_ENGRAM_OK');
+  assert.equal(keyToVar('tools.apt.section'),          'I18N_TOOLS_APT_SECTION');
+});
+
+test('PR3 sh: templateToShell converts {placeholder} to %s for bootstrap keys', () => {
+  // {tool} in a template becomes %s for shell printf.
+  assert.equal(templateToShell("Missing '{tool}' (required). Install it and re-run env:init."),
+                               "Missing '%s' (required). Install it and re-run env:init.");
+  assert.equal(templateToShell('{tool} not found — {hint}'), '%s not found — %s');
+  assert.equal(templateToShell('{var} already set in .env'), '%s already set in .env');
+});
+
+test('PR3 sh: renderCatalog emits well-formed assignment for bootstrap.deps.section (English)', () => {
+  // Empty active catalog → English fallback for all keys.
+  const output = renderCatalog({}, en);
+  const lines = output.split('\n');
+  const line = lines.find((l) => l.startsWith('I18N_BOOTSTRAP_DEPS_SECTION='));
+  assert.ok(line, 'I18N_BOOTSTRAP_DEPS_SECTION assignment must be present');
+  assert.equal(line, "I18N_BOOTSTRAP_DEPS_SECTION='Base dependencies'");
+});
+
+test('PR3 sh: renderCatalog emits %s placeholder for bootstrap.auth.alreadyOk', () => {
+  // {host} in the English template becomes %s in the shell assignment.
+  const output = renderCatalog({}, en);
+  const lines = output.split('\n');
+  const line = lines.find((l) => l.startsWith('I18N_BOOTSTRAP_AUTH_ALREADYOK='));
+  assert.ok(line, 'I18N_BOOTSTRAP_AUTH_ALREADYOK assignment must be present');
+  assert.equal(line, "I18N_BOOTSTRAP_AUTH_ALREADYOK='already authenticated against %s'");
+});
+
+test('PR3 sh: renderCatalog uses Spanish value when es catalog is active', () => {
+  const output = renderCatalog(es, en);
+  const lines = output.split('\n');
+  const line = lines.find((l) => l.startsWith('I18N_BOOTSTRAP_DEPS_SECTION='));
+  assert.ok(line, 'I18N_BOOTSTRAP_DEPS_SECTION must appear in Spanish output');
+  assert.equal(line, "I18N_BOOTSTRAP_DEPS_SECTION='Dependencias base'");
+});
+
+test('PR3 sh: renderCatalog emits tools.apt.section correctly', () => {
+  const output = renderCatalog({}, en);
+  const lines = output.split('\n');
+  const line = lines.find((l) => l.startsWith('I18N_TOOLS_APT_SECTION='));
+  assert.ok(line, 'I18N_TOOLS_APT_SECTION assignment must be present');
+  assert.equal(line, "I18N_TOOLS_APT_SECTION='System packages (apt)'");
+});
+
+// ── PR3 Spanish translation accuracy for representative bootstrap/tools keys ──
+
+test('translate: bootstrap.deps.section returns Spanish section title', () => {
+  assert.equal(translate('bootstrap.deps.section', {}, es, en), 'Dependencias base');
+});
+
+test('translate: bootstrap.auth.alreadyOk interpolates host into Spanish', () => {
+  assert.equal(
+    translate('bootstrap.auth.alreadyOk', { host: 'github.com' }, es, en),
+    'ya autenticado contra github.com',
+  );
+});
+
+test('translate: bootstrap.memory.pull.ok returns Spanish string', () => {
+  assert.equal(translate('bootstrap.memory.pull.ok', {}, es, en), 'memoria importada (.memory/ → engram)');
+});
+
+test('translate: tools.apt.allPresent returns Spanish string', () => {
+  assert.equal(translate('tools.apt.allPresent', {}, es, en), 'todos los paquetes apt ya presentes');
+});
+
+test('translate: tools.node.reloadShell returns Spanish string', () => {
+  assert.equal(
+    translate('tools.node.reloadShell', {}, es, en),
+    'Abrí una terminal nueva o ejecutá: source ~/.bashrc',
   );
 });

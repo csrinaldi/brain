@@ -102,6 +102,109 @@ export default {
   'ps.vcs.error':         '⚠ No se pudo consultar el VCS: {message}',
   'ps.footer':            '— Fin de la proyección. Para regenerar: npm run project:status',
 
+  // ── bootstrap.sh (PR3) ───────────────────────────────────────────────────────
+  // §1 Base dependencies
+  'bootstrap.deps.section': 'Dependencias base',
+  'bootstrap.deps.missing': "Falta '{tool}' (requerido). Instalalo y volvé a correr env:init.",
+  'bootstrap.deps.ok':      'git, npm, python3 presentes',
+
+  // §2 Ecosystem tools
+  'bootstrap.ecosystem.section':  'Herramientas del ecosistema',
+  'bootstrap.ecosystem.notFound': '{tool} no encontrado — {hint}',
+
+  // §3 Personal access token
+  'bootstrap.pat.section':         'Token personal de acceso (.env)',
+  'bootstrap.pat.alreadySet':      '{var} ya configurado en .env',
+  'bootstrap.pat.noTty':           'sin TTY: agregá {var} a .env y volvé a correr env:init',
+  'bootstrap.pat.openPrompt':      '¿Abro el navegador con el formulario pre-llenado? [S/n]: ',
+  'bootstrap.pat.manualUrl':       'Crealo a mano en: {url}',
+  'bootstrap.pat.browserFallback': 'Si el navegador no se abrió, entrá a: {url}',
+  'bootstrap.pat.enterPrompt':     'Pegá tu PAT (no se muestra): ',
+  'bootstrap.pat.skipped':         'Sin token: se salta la autenticación del VCS. Volvé a correr env:init cuando lo tengas.',
+  'bootstrap.pat.saved':           '{var} guardado en .env (gitignored)',
+
+  // §4 Git credential helper
+  'bootstrap.cred.section': 'Credential helper de git (HTTPS)',
+  'bootstrap.cred.ok':      'push/pull por HTTPS usan tu PAT personal de .env',
+
+  // §5 VCS authentication
+  'bootstrap.auth.section':   'Autenticación del VCS',
+  'bootstrap.auth.alreadyOk': 'ya autenticado contra {host}',
+  'bootstrap.auth.ok':        'autenticado contra {host}',
+  'bootstrap.auth.failed':    'auth falló — verificá el token en .env',
+  'bootstrap.auth.noToken':   'Sin token: VCS queda sin autenticar',
+
+  // §6 SDD harness
+  'bootstrap.sdd.section':            'Implementación SDD (harness)',
+  'bootstrap.sdd.prompt':             '¿Qué implementación SDD usás? [gentle-ai]: ',
+  'bootstrap.sdd.ok':                 'harness: {harness} (.env)',
+  'bootstrap.sdd.gentleaiMissing':    'gentle-ai ausente — brew install gentle-ai y volvé a correr env:init',
+  'bootstrap.sdd.ecosystemOk':        'ecosistema ya inicializado (gentle-ai doctor)',
+  'bootstrap.sdd.ecosystemConfigured':'ecosistema configurado (skills, engram, gga)',
+  'bootstrap.sdd.ecosystemFailed':    'gentle-ai install falló — corrélo a mano y volvé a correr env:init',
+  'bootstrap.sdd.noTty':              "sin TTY: corré 'gentle-ai install' manualmente",
+  'bootstrap.sdd.registryOk':         'skill registry actualizado',
+  'bootstrap.sdd.registryFailed':     'skill-registry refresh falló (no bloqueante)',
+  'bootstrap.sdd.unknownHarness':     "harness '{harness}' sin rutina de init conocida — configurá sus skills a mano",
+
+  // §7 Team memory
+  'bootstrap.memory.section':        'Memoria de equipo',
+  'bootstrap.memory.prompt':         '¿Qué backend de memoria usás? [engram]: ',
+  'bootstrap.memory.backend':        'backend de memoria: {backend} (.env)',
+  'bootstrap.memory.hookOk':         'pre-push hook activado (materializa .memory/ antes del push — ADR-0003)',
+  'bootstrap.memory.hookFailed':     'no se pudo activar core.hooksPath (pre-push hook)',
+  'bootstrap.memory.nodeAbsent':     'node ausente — setup del backend engram salteado',
+  'bootstrap.memory.engram.ok':      'backend engram configurado (symlink + merge driver)',
+  'bootstrap.memory.engram.failed':  'memory setup falló (no bloqueante)',
+  'bootstrap.memory.pull.ok':        'memoria importada (.memory/ → engram)',
+  'bootstrap.memory.pull.failed':    'memory:pull falló (no bloqueante)',
+  'bootstrap.memory.index.ok':       'índice durable reproyectado (brain/ → engram)',
+  'bootstrap.memory.index.failed':   'memory:index falló (no bloqueante)',
+  'bootstrap.memory.unknownBackend': "backend '{backend}' sin rutina de init conocida — configuralo a mano",
+
+  // §8 Ticket board
+  'bootstrap.board.section': 'Tickets abiertos en {path}',
+  'bootstrap.board.failed':  'no se pudo listar tickets — mirá https://{host}/{path}',
+
+  // §9 Done
+  'bootstrap.done.section': 'Entorno listo',
+  'bootstrap.done.pending': 'Pendiente: {tools}',
+  'bootstrap.done.install': 'Corré: npm run tools:install  (instala todo de una)',
+
+  // ── install-tools.sh (PR3) ────────────────────────────────────────────────────
+  'tools.require.noApt': 'Este script requiere apt-get (Ubuntu/Debian). Instalá las herramientas manualmente según brain/project/methodology/developer-environment.md.',
+  'tools.installed': 'ya instalado',
+
+  'tools.apt.section':    'Paquetes del sistema (apt)',
+  'tools.apt.installing': 'Instalando: {pkgs}',
+  'tools.apt.ok':         'apt: {pkgs}',
+  'tools.apt.allPresent': 'todos los paquetes apt ya presentes',
+
+  'tools.vcs.section':   'CLI del VCS ({cli})',
+  'tools.vcs.installed': '{cli} instalado',
+  'tools.vcs.notInApt':  '{cli} no está en apt — instalalo a mano:',
+
+  'tools.node.installing': 'Instalando nvm...',
+  'tools.node.nvmOk':      'nvm instalado',
+  'tools.node.nodeOk':     'node {version} via nvm',
+  'tools.node.reloadShell':'Abrí una terminal nueva o ejecutá: source ~/.bashrc',
+
+  'tools.claude.section':   'Claude Code (CLI de Anthropic)',
+  'tools.claude.installed': 'claude instalado',
+
+  'tools.gentleai.section':          'gentle-ai + ecosistema (engram, gga)',
+  'tools.gentleai.installing':       'Instalando gentle-ai...',
+  'tools.gentleai.ok':               'gentle-ai instalado',
+  'tools.gentleai.alreadyConfigured':'ecosistema gentle-ai ya configurado',
+  'tools.gentleai.configuring':      'Configurando ecosistema (engram, gga, skills)...',
+  'tools.gentleai.configured':       'ecosistema configurado',
+  'tools.gentleai.configFailed':     'gentle-ai install falló — reintentá a mano',
+
+  'tools.summary.section':       'Instalación completa',
+  'tools.summary.nextStep':      'Siguiente paso:',
+  'tools.summary.checkVersions': 'Verifica versiones:',
+  'tools.summary.notFound':      '{tool}  (no encontrado — reiniciá la terminal)',
+
   // ── ticket-start.mjs (PR2) ────────────────────────────────────────────────────
   'ticket.error.baseRequiresArg': '✗ --base requiere un nombre de rama. Ej: --base feature/issue-99-mi-historia',
   'ticket.error.usage':           'Uso: npm run ticket:start -- <issue-id> [--worktree] [--base <rama>]',

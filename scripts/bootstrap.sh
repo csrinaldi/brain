@@ -79,22 +79,34 @@ env_set() {
   fi
 }
 
+# --- i18n: source active locale catalog (graceful degradation) ────────────────
+# Defines I18N_* vars for every key in the catalog using the active locale
+# (brain.config.json docs.language) with English fallback applied per-key.
+# Guard: only eval when node is available AND sh.mjs produces non-empty output.
+# If node is absent or sh.mjs fails, the script falls through to inline English
+# defaults (${I18N_VAR:-"…"}) used only in the pre-node section (§1 below).
+if command -v node >/dev/null 2>&1; then
+  _i18n_vars="$(node scripts/i18n/sh.mjs 2>/dev/null)"
+  [ -n "$_i18n_vars" ] && eval "$_i18n_vars"
+  unset _i18n_vars
+fi
+
 # --- 1. Base dependencies (blocking) -----------------------------------------
-say "Dependencias base"
+say "${I18N_BOOTSTRAP_DEPS_SECTION:-Base dependencies}"
 for tool in git npm python3; do
-  command -v "$tool" >/dev/null 2>&1 || { echo "  ✗ Falta '$tool' (requerido). Instalalo y volvé a correr env:init." >&2; exit 1; }
+  command -v "$tool" >/dev/null 2>&1 || { printf "  ✗ ${I18N_BOOTSTRAP_DEPS_MISSING:-Missing \'%s\' (required). Install it and re-run env:init.}\n" "$tool" >&2; exit 1; }
 done
-ok "git, npm, python3 presentes"
+ok "${I18N_BOOTSTRAP_DEPS_OK:-git, npm, python3 present}"
 
 # --- 2. Ecosystem tools (degrade gracefully) ----------------------------------
-say "Herramientas del ecosistema"
+say "$I18N_BOOTSTRAP_ECOSYSTEM_SECTION"
 
 # Install hints per tool (Ubuntu/Debian)
 declare -A INSTALL_HINT
 INSTALL_HINT[$VCS_CLI]="npm run tools:install"
 INSTALL_HINT[gentle-ai]="curl -fsSL https://raw.githubusercontent.com/Gentleman-Programming/gentle-ai/main/scripts/install.sh | bash"
-INSTALL_HINT[engram]="gentle-ai install  (requiere gentle-ai)"
-INSTALL_HINT[gga]="gentle-ai install  (requiere gentle-ai)"
+INSTALL_HINT[engram]="gentle-ai install  (requires gentle-ai)"
+INSTALL_HINT[gga]="gentle-ai install  (requires gentle-ai)"
 INSTALL_HINT[claude]="npm install -g @anthropic-ai/claude-code"
 
 MISSING_OPTIONAL=()
@@ -102,18 +114,18 @@ for tool in "$VCS_CLI" engram gentle-ai gga claude; do
   if command -v "$tool" >/dev/null 2>&1; then
     ok "$tool"
   else
-    warn "$tool no encontrado — ${INSTALL_HINT[$tool]:-npm run tools:install}"
+    warn "$(printf "$I18N_BOOTSTRAP_ECOSYSTEM_NOTFOUND" "$tool" "${INSTALL_HINT[$tool]:-npm run tools:install}")"
     MISSING_OPTIONAL+=("$tool")
   fi
 done
 
 # --- 3. Personal PAT in .env --------------------------------------------------
-say "Token personal de acceso (.env)"
+say "$I18N_BOOTSTRAP_PAT_SECTION"
 VCS_TOKEN="$(env_get "$VCS_TOKEN_VAR")"
 if [ -n "$VCS_TOKEN" ]; then
-  ok "$VCS_TOKEN_VAR ya configurado en .env"
+  ok "$(printf "$I18N_BOOTSTRAP_PAT_ALREADYSET" "$VCS_TOKEN_VAR")"
 elif [ ! -t 0 ]; then
-  warn "sin TTY: agregá $VCS_TOKEN_VAR a .env y volvé a correr env:init"
+  warn "$(printf "$I18N_BOOTSTRAP_PAT_NOTTY" "$VCS_TOKEN_VAR")"
 else
   cat <<'EOT'
   You need a Personal Access Token from your Git hosting provider.
@@ -121,10 +133,10 @@ else
   MRs/PRs appear under your name.
 EOT
   PAT_URL="$(node scripts/vcs/cli.mjs pat-setup-url "{\"host\":\"$VCS_HOST\",\"name\":\"brain-dev\",\"scopes\":[\"$PAT_SCOPES\"]}" 2>/dev/null || true)"
-  read -r -p "  ¿Abro el navegador con el formulario pre-llenado? [S/n]: " OPEN_BROWSER
+  read -r -p "  $I18N_BOOTSTRAP_PAT_OPENPROMPT" OPEN_BROWSER
   case "${OPEN_BROWSER:-S}" in
     n|N)
-      printf '  Crealo a mano en: %s\n' "$PAT_URL"
+      printf "  $I18N_BOOTSTRAP_PAT_MANUALURL\n" "$PAT_URL"
       ;;
     *)
       if command -v xdg-open >/dev/null 2>&1; then
@@ -132,16 +144,16 @@ EOT
       elif command -v open >/dev/null 2>&1; then
         open "$PAT_URL" >/dev/null 2>&1 || true
       fi
-      printf '  Si el navegador no se abrió, entrá a: %s\n' "$PAT_URL"
+      printf "  $I18N_BOOTSTRAP_PAT_BROWSERFALLBACK\n" "$PAT_URL"
       ;;
   esac
-  read -r -s -p "  Pegá tu PAT (no se muestra): " VCS_TOKEN
+  read -r -s -p "  $I18N_BOOTSTRAP_PAT_ENTERPROMPT" VCS_TOKEN
   echo
   if [ -z "$VCS_TOKEN" ]; then
-    warn "Sin token: se salta la autenticación del VCS. Volvé a correr env:init cuando lo tengas."
+    warn "$I18N_BOOTSTRAP_PAT_SKIPPED"
   else
     env_set "$VCS_TOKEN_VAR" "$VCS_TOKEN"
-    ok "$VCS_TOKEN_VAR guardado en .env (gitignored)"
+    ok "$(printf "$I18N_BOOTSTRAP_PAT_SAVED" "$VCS_TOKEN_VAR")"
   fi
 fi
 if [ -n "$VCS_TOKEN" ]; then export "$VCS_TOKEN_VAR=$VCS_TOKEN"; fi
@@ -157,105 +169,105 @@ fi
 # SSH is blocked at the infra level: only HTTPS works, with username=$VCS_CRED_USER
 # and the PAT as password. The helper reads the token from .env on every use —
 # nothing is hardcoded in the git config.
-say "Credential helper de git (HTTPS)"
+say "$I18N_BOOTSTRAP_CRED_SECTION"
 HELPER='!f() { . "$(git rev-parse --show-toplevel)/.env" 2>/dev/null; [ -n "${'"$VCS_TOKEN_VAR"':-}" ] || { echo "env:init: '"$VCS_TOKEN_VAR"' vacío en .env" >&2; exit 1; }; echo username='"$VCS_CRED_USER"'; printf "password=%s\n" "${'"$VCS_TOKEN_VAR"'}"; }; f'
 git config --local "credential.https://${VCS_HOST}.helper" "$HELPER"
-ok "push/pull por HTTPS usan tu PAT personal de .env"
+ok "$I18N_BOOTSTRAP_CRED_OK"
 
 # --- 5. VCS CLI authentication -----------------------------------------------
 # Token is read from .env by the provider (Part A of the VCS adapter) —
 # NOT passed in argv to avoid leaking it via /proc/*/cmdline.
-say "Autenticación del VCS"
+say "$I18N_BOOTSTRAP_AUTH_SECTION"
 if node scripts/vcs/cli.mjs auth-check "{\"host\":\"$VCS_HOST\"}" >/dev/null 2>&1; then
-  ok "ya autenticado contra $VCS_HOST"
+  ok "$(printf "$I18N_BOOTSTRAP_AUTH_ALREADYOK" "$VCS_HOST")"
 elif [ -n "$VCS_TOKEN" ]; then
   node scripts/vcs/cli.mjs auth-login "{\"host\":\"$VCS_HOST\"}" \
-    && ok "autenticado contra $VCS_HOST" \
-    || warn "auth falló — verificá el token en .env"
+    && ok "$(printf "$I18N_BOOTSTRAP_AUTH_OK" "$VCS_HOST")" \
+    || warn "$I18N_BOOTSTRAP_AUTH_FAILED"
 else
-  warn "Sin token: VCS queda sin autenticar"
+  warn "$I18N_BOOTSTRAP_AUTH_NOTOKEN"
 fi
 
 # --- 6. SDD implementation (replaceable harness, ADR-0002) --------------------
 # The harness is a per-developer choice, not hardcoded in the repo. Its init
 # configures the full ecosystem (for gentle-ai: skills, engram and gga), so it
 # runs BEFORE the memory sync.
-say "Implementación SDD (harness)"
+say "$I18N_BOOTSTRAP_SDD_SECTION"
 SDD_HARNESS="$(env_get SDD_HARNESS)"
 if [ -z "$SDD_HARNESS" ]; then
   if [ -t 0 ]; then
-    read -r -p "  ¿Qué implementación SDD usás? [gentle-ai]: " SDD_HARNESS
+    read -r -p "  $I18N_BOOTSTRAP_SDD_PROMPT" SDD_HARNESS
   fi
   SDD_HARNESS="${SDD_HARNESS:-gentle-ai}"
   env_set SDD_HARNESS "$SDD_HARNESS"
 fi
-ok "harness: $SDD_HARNESS (.env)"
+ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_HARNESS")"
 case "$SDD_HARNESS" in
   gentle-ai)
     if ! command -v gentle-ai >/dev/null 2>&1; then
-      warn "gentle-ai ausente — brew install gentle-ai y volvé a correr env:init"
+      warn "$I18N_BOOTSTRAP_SDD_GENTLEAIMISSING"
     elif gentle-ai doctor 2>/dev/null | grep -q 'state file OK'; then
-      ok "ecosistema ya inicializado (gentle-ai doctor)"
+      ok "$I18N_BOOTSTRAP_SDD_ECOSYSTEMOK"
     elif [ -t 0 ]; then
       # interactive and self-updating: configures skills, engram and gga
       gentle-ai install \
-        && ok "ecosistema configurado (skills, engram, gga)" \
-        || warn "gentle-ai install falló — corrélo a mano y volvé a correr env:init"
+        && ok "$I18N_BOOTSTRAP_SDD_ECOSYSTEMCONFIGURED" \
+        || warn "$I18N_BOOTSTRAP_SDD_ECOSYSTEMFAILED"
     else
-      warn "sin TTY: corré 'gentle-ai install' manualmente"
+      warn "$I18N_BOOTSTRAP_SDD_NOTTY"
     fi
     if command -v gentle-ai >/dev/null 2>&1; then
-      gentle-ai skill-registry refresh >/dev/null 2>&1 && ok "skill registry actualizado" || warn "skill-registry refresh falló (no bloqueante)"
+      gentle-ai skill-registry refresh >/dev/null 2>&1 && ok "$I18N_BOOTSTRAP_SDD_REGISTRYOK" || warn "$I18N_BOOTSTRAP_SDD_REGISTRYFAILED"
     fi
     ;;
   *)
-    warn "harness '$SDD_HARNESS' sin rutina de init conocida — configurá sus skills a mano"
+    warn "$(printf "$I18N_BOOTSTRAP_SDD_UNKNOWNHARNESS" "$SDD_HARNESS")"
     ;;
 esac
 
 # --- 7. Team memory (replaceable backend, ADR-0003) --------------------------
 # MEMORY_BACKEND mirrors the SDD_HARNESS pattern from §6: read from .env,
 # prompt on TTY if unset, default to "engram".
-say "Memoria de equipo"
+say "$I18N_BOOTSTRAP_MEMORY_SECTION"
 MEMORY_BACKEND="$(env_get MEMORY_BACKEND)"
 if [ -z "$MEMORY_BACKEND" ]; then
   if [ -t 0 ]; then
-    read -r -p "  ¿Qué backend de memoria usás? [engram]: " MEMORY_BACKEND
+    read -r -p "  $I18N_BOOTSTRAP_MEMORY_PROMPT" MEMORY_BACKEND
   fi
   MEMORY_BACKEND="${MEMORY_BACKEND:-engram}"
   env_set MEMORY_BACKEND "$MEMORY_BACKEND"
 fi
-ok "backend de memoria: $MEMORY_BACKEND (.env)"
+ok "$(printf "$I18N_BOOTSTRAP_MEMORY_BACKEND" "$MEMORY_BACKEND")"
 
 git config core.hooksPath scripts/hooks \
-  && ok "pre-push hook activado (materializa .memory/ antes del push — ADR-0003)" \
-  || warn "no se pudo activar core.hooksPath (pre-push hook)"
+  && ok "$I18N_BOOTSTRAP_MEMORY_HOOKOK" \
+  || warn "$I18N_BOOTSTRAP_MEMORY_HOOKFAILED"
 
 case "$MEMORY_BACKEND" in
   engram)
     # Delegate setup (symlink + merge driver) to the backend module — no duplication.
     if command -v node >/dev/null 2>&1; then
       node scripts/memory/cli.mjs setup \
-        && ok "backend engram configurado (symlink + merge driver)" \
-        || warn "memory setup falló (no bloqueante)"
+        && ok "$I18N_BOOTSTRAP_MEMORY_ENGRAM_OK" \
+        || warn "$I18N_BOOTSTRAP_MEMORY_ENGRAM_FAILED"
     else
-      warn "node ausente — setup del backend engram salteado"
+      warn "$I18N_BOOTSTRAP_MEMORY_NODEABSENT"
     fi
-    npm run --silent memory:pull  && ok "memoria importada (.memory/ → engram)"  || warn "memory:pull falló (no bloqueante)"
-    npm run --silent memory:index && ok "índice durable reproyectado (brain/ → engram)" || warn "memory:index falló (no bloqueante)"
+    npm run --silent memory:pull  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
+    npm run --silent memory:index && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
     ;;
   *)
-    warn "backend '$MEMORY_BACKEND' sin rutina de init conocida — configuralo a mano"
+    warn "$(printf "$I18N_BOOTSTRAP_MEMORY_UNKNOWNBACKEND" "$MEMORY_BACKEND")"
     ;;
 esac
 
 # --- 8. Open tickets: starting point -----------------------------------------
-say "Tickets abiertos en $PROJECT_PATH"
+say "$(printf "$I18N_BOOTSTRAP_BOARD_SECTION" "$PROJECT_PATH")"
 node scripts/tracker-board.mjs \
-  || warn "no se pudo listar tickets — mirá https://${VCS_HOST}/${PROJECT_PATH}"
+  || warn "$(printf "$I18N_BOOTSTRAP_BOARD_FAILED" "$VCS_HOST" "$PROJECT_PATH")"
 
 # --- 9. Next steps ------------------------------------------------------------
-say "Entorno listo"
+say "$I18N_BOOTSTRAP_DONE_SECTION"
 cat <<'EOT'
   Next steps:
     1. Read brain/HOME.md — the entry point to all project knowledge.
@@ -266,6 +278,6 @@ cat <<'EOT'
     5. Before pushing: npm run repo:check && npm run memory:share
 EOT
 if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
-  printf '  Pendiente: %s\n' "${MISSING_OPTIONAL[*]}"
-  printf '  Corré: npm run tools:install  (instala todo de una)\n'
+  printf "  $I18N_BOOTSTRAP_DONE_PENDING\n" "${MISSING_OPTIONAL[*]}"
+  printf '  %s\n' "$I18N_BOOTSTRAP_DONE_INSTALL"
 fi
