@@ -15,9 +15,9 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | Verb (npm) | Verb (Claude) | Responsibility |
 |-------------|----------------|-----------------|
 | `npm run env:init` | — | Environment bootstrap: installs tools, configures auth, imports memory, refreshes skill registry. Idempotent. |
-| `npm run day:start` | — | Daily startup: glab auth, ecosystem updates, team memory, ticket board. |
-| `npm run ticket:start -- <iid>` | `/ticket-start <iid>` | Takes an issue, creates the branch with the convention `{tipo}/issue-{iid}-{slug}` from main. |
-| `npm run project:feature -- --issue <iid>` | `/sdd-new <iid>` | Starts an SDD change: creates `openspec/changes/issue-<iid>-<slug>/` with `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
+| `npm run day:start` | — | Daily startup: VCS auth, ecosystem updates, team memory, ticket board. |
+| `npm run ticket:start -- <id>` | `/ticket-start <id>` | Takes an issue, creates the branch with the convention `{type}/issue-{number}-{slug}` from main. |
+| `npm run project:feature -- --issue <id>` | `/sdd-new <id>` | Starts an SDD change: creates `openspec/changes/issue-<id>-<slug>/` with `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
 | `npm run repo:check` | — | Validates prohibited references across the entire tree. Minimum gate before any commit. |
 | `npm run change:verify` | `/sdd-verify` | Validates the scope of the active change: classifies the diff, runs only the necessary verifications. |
 | `npm run memory:share` | — | Exports local engram → `.memory/` (versioned in git). Run before pushing. |
@@ -32,9 +32,9 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | `/sdd-continue` | Advances the next ready phase of the SDD cycle. |
 | `/sdd-apply` | Implements the tasks of the active change. |
 | `/sdd-archive` | Closes the change and consolidates artifacts. |
-| `/retomar` | Recovers the context from the previous session from engram + GitLab board. |
-| `/gitlab-issue` | Creates an issue in GitLab from a description or changeset. |
-| `/gitlab-merge-request` | Opens an MR linked to an issue. |
+| `/retomar` | Recovers the context from the previous session from engram + the VCS board. |
+| `/issue-create` | Creates an issue from a description or changeset. Provider-specific skill (e.g. `gitlab-issue`). |
+| `/mr-create` | Opens a PR/MR linked to an issue. Provider-specific skill. |
 
 ## Artifact contract
 
