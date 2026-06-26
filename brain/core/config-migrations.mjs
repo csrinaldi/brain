@@ -38,4 +38,13 @@ export const migrations = [
       },
     },
   },
+  {
+    version: '0.3.0',
+    description: 'Add vcs.provider selector (ADR-0008): github | gitlab | ...',
+    defaults: {
+      vcs: {
+        provider: '',
+      },
+    },
+  },
 ];

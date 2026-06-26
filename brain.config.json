@@ -9,5 +9,8 @@
   "docs": {
     "language": "en"
   },
-  "schemaVersion": "0.2.0"
+  "vcs": {
+    "provider": "github"
+  },
+  "schemaVersion": "0.3.0"
 }
