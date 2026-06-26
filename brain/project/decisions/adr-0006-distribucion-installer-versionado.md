@@ -1,38 +1,38 @@
-# ADR-0006 — Distribución: Installer Versionado por Git Tags
+# ADR-0006 — Distribution: Versioned Installer via Git Tags
 
-**Estado**: Accepted  
-**Fecha**: 2026-06-26
+**Status**: Accepted  
+**Date**: 2026-06-26
 
-## Contexto
+## Context
 
-`brain/core/` es un producto genérico que múltiples proyectos deberían poder adoptar. Las opciones de distribución son:
+`brain/core/` is a generic product that multiple projects should be able to adopt. The distribution options are:
 
-- **git subtree**: complejo de mantener, mezcla historial upstream con el repo consumidor.
-- **npm registry**: requiere publicar en npmjs.com o un registry privado; overhead burocrático.
-- **git tags + npm install**: instala directamente desde GitHub por tag de versión; compatible con repos privados; cero registry.
-- **copia manual**: no hay forma de recibir actualizaciones de forma controlada.
+- **git subtree**: complex to maintain, mixes upstream history with the consumer repo.
+- **npm registry**: requires publishing to npmjs.com or a private registry; bureaucratic overhead.
+- **git tags + npm install**: installs directly from GitHub by version tag; compatible with private repos; zero registry.
+- **manual copy**: no way to receive updates in a controlled manner.
 
-## Decisión
+## Decision
 
-La distribución usa **git tags + npm install**:
+Distribution uses **git tags + npm install**:
 
 ```bash
 npm install --save-dev github:csrinaldi/brain#v1.0.0
 ```
 
-Esto instala `brain/core/` y los scripts genéricos como una devDependency del proyecto consumidor. La versión queda fijada en `package.json` del consumidor.
+This installs `brain/core/` and the generic scripts as a devDependency of the consumer project. The version is pinned in the consumer's `package.json`.
 
-**Regla clave**: `brain/core/` es **read-only en el consumidor**. Está en `node_modules/brain/` — no se edita ahí. Las mejoras van upstream (PR al repo brain), luego se actualiza la versión en el consumidor.
+**Key rule**: `brain/core/` is **read-only in the consumer**. It lives in `node_modules/brain/` — do not edit it there. Improvements go upstream (PR to the brain repo), then the version is updated in the consumer.
 
-**Check-and-notify en day:start**: `scripts/day-start.mjs` verifica si hay una nueva versión de brain disponible y lo notifica. No auto-actualiza — respeta el anti-pattern `instaladores-autoactualizantes-no-inocuos` (ver `brain/core/anti-patterns/`).
+**Check-and-notify in day:start**: `scripts/day-start.mjs` checks whether a new version of brain is available and notifies. It does not auto-update — this respects the `instaladores-autoactualizantes-no-inocuos` anti-pattern (see `brain/core/anti-patterns/`).
 
-**Migración de brain.config.json**: las migraciones son **additivas y se aplican automáticamente** en el upgrade (`brain:upgrade`). Cuando una versión nueva agrega claves al schema, las registra en `brain/core/config-migrations.mjs`; el installer las suma con sus defaults **sin pisar jamás un valor ya seteado por el consumidor** (incluidos valores falsy como `""`, `0`, `false`). El campo `schemaVersion` en `brain.config.json` registra hasta dónde migró. Renombrados/reestructuras (no additivos) usan una función `migrate()` explícita y deben documentarse en el changelog del tag.
+**brain.config.json migrations**: migrations are **additive and applied automatically** on upgrade (`brain:upgrade`). When a new version adds keys to the schema, it registers them in `brain/core/config-migrations.mjs`; the installer adds them with their defaults **without ever overwriting a value already set by the consumer** (including falsy values such as `""`, `0`, `false`). The `schemaVersion` field in `brain.config.json` tracks how far the migration has run. Renames/restructures (non-additive) use an explicit `migrate()` function and must be documented in the tag's changelog.
 
-## Consecuencias
+## Consequences
 
-- **Positivo**: instalación one-liner, sin registry, compatible con repos privados (GitHub).
-- **Positivo**: la versión queda explícita en `package.json` del consumidor — upgrades son decisiones conscientes.
-- **Positivo**: `git tag` es el mecanismo de release — cero CI complejo para publicar.
-- **Positivo (Slice 6)**: las migraciones additivas de `brain.config.json` se aplican solas y son idempotentes; el consumidor solo lee el changelog para renombrados.
-- **Negativo**: la distribución vía npm install de GitHub requiere que el consumidor tenga acceso al repo brain (autenticado, si es privado).
-- **Implementado (Slice 6)**: `brain:upgrade` (`scripts/brain-upgrade.mjs`), el manifiesto de paths (`brain/core/managed-paths.mjs`), las migraciones (`brain/core/config-migrations.mjs`) y el check-and-notify en `day:start`. Ver `openspec/changes/installer-versionado/`.
+- **Positive**: one-liner installation, no registry, compatible with private repos (GitHub).
+- **Positive**: the version is explicit in the consumer's `package.json` — upgrades are conscious decisions.
+- **Positive**: `git tag` is the release mechanism — zero complex CI to publish.
+- **Positive (Slice 6)**: additive `brain.config.json` migrations run automatically and are idempotent; the consumer only reads the changelog for renames.
+- **Negative**: distributing via npm install from GitHub requires the consumer to have access to the brain repo (authenticated, if private).
+- **Implemented (Slice 6)**: `brain:upgrade` (`scripts/brain-upgrade.mjs`), the path manifest (`brain/core/managed-paths.mjs`), the migrations (`brain/core/config-migrations.mjs`), and the check-and-notify in `day:start`. See `openspec/changes/installer-versionado/`.

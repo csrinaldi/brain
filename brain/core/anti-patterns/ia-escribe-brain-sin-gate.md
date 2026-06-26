@@ -1,46 +1,46 @@
-# Anti-Pattern: IA escribe en `brain/` sin gate humano
+# Anti-Pattern: AI writes to `brain/` without a human gate
 
-**Categoría:** Governance agéntica  
-**Riesgo:** Alto — contaminación de la fuente de verdad durable  
-**Relacionado con:** `CONSTITUTION.md §4`, `methodology/consolidation-protocol.md §2`
+**Category:** Agentic governance  
+**Risk:** High — contamination of the durable source of truth  
+**Related to:** `CONSTITUTION.md §4`, `methodology/consolidation-protocol.md §2`
 
-## El problema
+## The problem
 
-Un agente de IA que commitea directamente en `brain/decisions/`, `brain/anti-patterns/`,
-`brain/domain/` o `brain/methodology/` puede introducir:
+An AI agent that commits directly to `brain/decisions/`, `brain/anti-patterns/`,
+`brain/domain/` or `brain/methodology/` can introduce:
 
-- Decisiones incorrectas o malinterpretadas sin revisión crítica.
-- Anti-patrones que describen soluciones locales como si fueran reglas globales.
-- Términos de dominio definidos desde el código, no desde el negocio.
-- Reglas de metodología que reflejan el estado de una sesión, no el consenso del equipo.
+- Incorrect or misinterpreted decisions without critical review.
+- Anti-patterns that describe local solutions as if they were global rules.
+- Domain terms defined from the code, not from the business.
+- Methodology rules that reflect the state of one session, not team consensus.
 
-`brain/` es la fuente de verdad **durable**. El costo de un error aquí es alto porque
-otros agentes y sesiones futuras lo van a leer como hecho establecido.
+`brain/` is the **durable** source of truth. The cost of an error here is high because
+other agents and future sessions will read it as established fact.
 
-## Por qué ocurre
+## Why it happens
 
-El `consolidation-protocol.md §2` (versión anterior al issue #54) decía explícitamente
-"el agente debe redactar y adjuntar un archivo append-only en `brain/anti-patterns/`
-dentro del mismo commit". Sin gate humano, la intención de capturar conocimiento en caliente
-se convierte en un vector de contaminación directa.
+`consolidation-protocol.md §2` (version prior to issue #54) explicitly stated
+"the agent must draft and attach an append-only file in `brain/anti-patterns/`
+within the same commit". Without a human gate, the intent to capture knowledge in the
+moment becomes a direct contamination vector.
 
-## La regla
+## The rule
 
-**Ningún agente promueve sus propios artefactos a `brain/`. Esa firma es humana.**
+**No agent promotes its own artifacts to `brain/`. That signature is human.**
 
-El flujo correcto:
+The correct flow:
 
 ```
-agente redacta borrador
-    → openspec/changes/{iid}/brain-drafts/{nombre}.md
-        → humano revisa en el MR
-            → humano mueve a brain/ en commit de su autoría
+agent drafts artifact
+    → openspec/changes/{iid}/brain-drafts/{name}.md
+        → human reviews in the MR
+            → human moves to brain/ in a commit of their own authorship
 ```
 
-## Detección
+## Detection
 
-Un agente que propone escribir en `brain/` directamente debe ser detenido.
-El síntoma visible: un commit donde el autor es un agente y los archivos modificados
-están bajo `brain/`.
+An agent that proposes writing to `brain/` directly must be stopped.
+The visible symptom: a commit where the author is an agent and the modified files
+are under `brain/`.
 
-`check-refs.mjs` puede agregarse como validación futura si se expone el autor del commit.
+`check-refs.mjs` can be added as a future validation if the commit author is exposed.

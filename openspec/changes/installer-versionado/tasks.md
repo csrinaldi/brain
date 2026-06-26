@@ -1,4 +1,4 @@
-# Tasks — Installer versionado (Slice 6)
+# Tasks — Versioned installer (Slice 6)
 
 > Maps to the acceptance criteria in [proposal.md](proposal.md). All items
 > implemented and unit-tested (`npm test`, 8 passing).

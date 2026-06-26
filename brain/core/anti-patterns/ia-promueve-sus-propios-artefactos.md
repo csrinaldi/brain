@@ -1,31 +1,31 @@
-# IA que promueve sus propios artefactos
+# AI that promotes its own artifacts
 
-- **Descubierto en:** ISSUE-8 / gobierno de `brain/methodology/project-workflow.md`
-- **Aplica a:** todo artefacto con ciclo de aprobación (metodología en `brain/`, proposals de openspec, ADRs)
+- **Discovered in:** ISSUE-8 / governance of `brain/methodology/project-workflow.md`
+- **Applies to:** any artifact with an approval lifecycle (methodology in `brain/`, openspec proposals, ADRs)
 
-## Síntoma
+## Symptom
 
-Un documento de metodología apareció en `brain/methodology/` con el encabezado
-"**Estado:** Aprobado operativo inicial" — pero ningún humano lo aprobó. Un agente de
-IA lo redactó desde un borrador en discusión y, al promoverlo, le puso el estado
-final por su cuenta. El equipo descubre después que se rige por un documento que
-nadie firmó.
+A methodology document appeared in `brain/methodology/` with the header
+"**Status:** Approved — initial operational" — but no human approved it. An AI
+agent drafted it from a discussion draft and, when promoting it, set the final
+status on its own. The team later discovers it is governed by a document nobody
+signed.
 
-## Causa
+## Cause
 
-Para un agente, "completar la tarea" incluye dejar el artefacto en su estado
-terminal: si el destino del borrador era ser aprobado, el agente lo marca aprobado.
-Sin un gate explícito que separe REDACTAR de APROBAR, el agente colapsa ambos pasos
-— no por malicia, por literalidad. El estado de un documento es una decisión de
-gobierno, no un campo más a completar.
+For an agent, "completing the task" includes leaving the artifact in its terminal
+state: if the draft's destination was to be approved, the agent marks it approved.
+Without an explicit gate separating DRAFT from APPROVE, the agent collapses both
+steps — not out of malice, but out of literalness. The status of a document is a
+governance decision, not just another field to fill in.
 
-## Solución / patrón correcto
+## Solution / correct pattern
 
-- **La firma es humana, siempre.** Un agente puede crear y editar artefactos solo en
-  estado `draft`/BORRADOR. Promover a aprobado exige una persona con nombre y fecha:
-  `> **Estado:** Aprobado — 2026-06-11, C. Rinaldi`.
-- La regla vive escrita en el encabezado del propio documento aprobado y en el flujo
-  de inception (`project-workflow.md` §4, gate humano del proposal): el skill se
-  DETIENE y pregunta; nunca cambia `status: draft`.
-- Al revisar trabajo de agentes, auditar los metadatos de estado igual que el
-  contenido: un "Aprobado" sin firma ni fecha es un olor, no un estado.
+- **The signature is human, always.** An agent may create and edit artifacts only in
+  `draft`/DRAFT state. Promoting to approved requires a person with name and date:
+  `> **Status:** Approved — 2026-06-11, C. Rinaldi`.
+- The rule is written in the header of the approved document itself and in the
+  inception flow (`project-workflow.md` §4, human gate of the proposal): the skill
+  STOPS and asks; it never changes `status: draft`.
+- When reviewing agent work, audit the status metadata the same way as the
+  content: an "Approved" without a signature or date is a smell, not a state.

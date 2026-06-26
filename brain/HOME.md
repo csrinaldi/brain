@@ -43,6 +43,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0005](project/decisions/adr-0005-adapter-harness-sdd-harness.md) — Harness adapter: SDD_HARNESS selector
 - [ADR-0006](project/decisions/adr-0006-distribucion-installer-versionado.md) — Distribution: versioned installer via git tags
 - [ADR-0007](project/decisions/adr-0007-config-vcs-agnostica-y-checkrefs.md) — VCS-agnostic config and check-refs engine
+- [ADR-0009](project/decisions/adr-0009-documentation-language-policy.md) — Documentation language policy: core English, project docs configurable
 
 ### Project-specific rules
 

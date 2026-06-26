@@ -1,28 +1,28 @@
-# ADR-0004 — Adapter de Memoria: MEMORY_BACKEND Selector + Dispatch
+# ADR-0004 — Memory Adapter: MEMORY_BACKEND Selector + Dispatch
 
-**Estado**: Accepted  
-**Fecha**: 2026-06-26
+**Status**: Accepted  
+**Date**: 2026-06-26
 
-## Contexto
+## Context
 
-La memoria de equipo necesita una implementación concreta para búsqueda semántica (engram, por defecto), pero acoplar todos los scripts a engram directamente impide cambiar de backend sin tocar múltiples archivos.
+Team memory needs a concrete implementation for semantic search (engram, by default), but directly coupling all scripts to engram prevents switching backends without touching multiple files.
 
-El patrón de harness reemplazable (ADR-0001) debe aplicarse simétricamente a la memoria.
+The replaceable harness pattern (ADR-0001) must be applied symmetrically to memory.
 
-## Decisión
+## Decision
 
-La memoria sigue el mismo patrón adapter que el harness:
+Memory follows the same adapter pattern as the harness:
 
-- **Selector**: `MEMORY_BACKEND` en `.env`. Default: `engram`.
-- **Dispatcher**: `scripts/memory/cli.mjs`. Punto único de entrada. Lee `MEMORY_BACKEND` y delega a la implementación correspondiente. Verbos: `index`, `share`, `pull`, `setup`.
-- **Backend**: `scripts/memory/backends/engram.mjs`. Encapsula todo lo específico de engram: la invocación del CLI binario, la creación del symlink `.engram → .memory` (necesario porque engram no tiene flag `--dir`), y el registro del merge driver.
-- **Canónico**: `.memory/` es el directorio git real. El symlink `.engram → .memory` es un detalle de implementación del backend engram, no del sistema.
+- **Selector**: `MEMORY_BACKEND` in `.env`. Default: `engram`.
+- **Dispatcher**: `scripts/memory/cli.mjs`. Single entry point. Reads `MEMORY_BACKEND` and delegates to the corresponding implementation. Verbs: `index`, `share`, `pull`, `setup`.
+- **Backend**: `scripts/memory/backends/engram.mjs`. Encapsulates everything specific to engram: the binary CLI invocation, the creation of the symlink `.engram → .memory` (required because engram has no `--dir` flag), and the merge driver registration.
+- **Canonical**: `.memory/` is the real git directory. The symlink `.engram → .memory` is an implementation detail of the engram backend, not of the system.
 
-Para agregar un nuevo backend: crear `scripts/memory/backends/<nombre>.mjs` y agregar un `case` en `scripts/memory/cli.mjs`.
+To add a new backend: create `scripts/memory/backends/<name>.mjs` and add a `case` in `scripts/memory/cli.mjs`.
 
-## Consecuencias
+## Consequences
 
-- **Positivo**: cambiar de backend de memoria = cambiar `MEMORY_BACKEND` en `.env` + `npm run env:init`.
-- **Positivo**: el symlink `.engram → .memory` queda encapsulado en el backend — si engram agrega soporte de `--dir`, se elimina solo ahí.
-- **Negativo**: añadir un backend nuevo requiere implementar todos los verbos (`index`, `share`, `pull`, `setup`) — no hay interfaz formal hoy, solo convención.
-- **Negativo**: el manifiesto `.memory/manifest.json` sigue siendo necesario para todos los backends que usen la capa durable git.
+- **Positive**: switching memory backend = changing `MEMORY_BACKEND` in `.env` + `npm run env:init`.
+- **Positive**: the symlink `.engram → .memory` is encapsulated in the backend — if engram adds `--dir` support, it is removed only there.
+- **Negative**: adding a new backend requires implementing all verbs (`index`, `share`, `pull`, `setup`) — there is no formal interface today, only convention.
+- **Negative**: the `.memory/manifest.json` manifest remains required for all backends that use the durable git layer.

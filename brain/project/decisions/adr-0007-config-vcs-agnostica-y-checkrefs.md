@@ -1,21 +1,21 @@
-# ADR-0007 — Configuración VCS-Agnóstica y Motor de Check-Refs
+# ADR-0007 — VCS-Agnostic Configuration and Check-Refs Engine
 
-**Estado**: Accepted  
-**Fecha**: 2026-06-26
+**Status**: Accepted  
+**Date**: 2026-06-26
 
-## Contexto
+## Context
 
-Los scripts del harness necesitan conocer el host VCS, el identificador de proyecto y el owner para operar (listar tickets, crear MRs/PRs, push, etc.).
+The harness scripts need to know the VCS host, project identifier, and owner to operate (list tickets, create MRs/PRs, push, etc.).
 
-El problema con hardcodear valores VCS en los scripts es doble: el sistema deja de ser reusable (queda atado a GitLab, a un host específico, a un project ID concreto), y los consumidores no pueden adoptar brain sin parchear los scripts.
+The problem with hardcoding VCS values in the scripts is twofold: the system stops being reusable (it becomes tied to GitLab, to a specific host, to a specific project ID), and consumers cannot adopt brain without patching the scripts.
 
-Paralelamente, el validador de referencias prohibidas (`repo:check`) necesita un mecanismo para que cada proyecto defina sus propias reglas sin modificar el motor genérico.
+In parallel, the prohibited-references validator (`repo:check`) needs a mechanism for each project to define its own rules without modifying the generic engine.
 
-## Decisión
+## Decision
 
-### Configuración VCS-agnóstica
+### VCS-agnostic configuration
 
-`brain.config.json` (raíz del repo) es la única fuente de verdad de identidad del proyecto:
+`brain.config.json` (repo root) is the single source of truth for project identity:
 
 ```json
 {
@@ -29,19 +29,19 @@ Paralelamente, el validador de referencias prohibidas (`repo:check`) necesita un
 }
 ```
 
-Las keys son agnósticas al VCS: `gitHost` funciona para GitLab, GitHub, Bitbucket o cualquier otro. `slug` es el path del proyecto en ese host (ej. `org/repo`). `gitProjectId` es el ID numérico cuando el VCS lo requiere (GitLab API).
+The keys are VCS-agnostic: `gitHost` works for GitLab, GitHub, Bitbucket, or any other. `slug` is the project path on that host (e.g. `org/repo`). `gitProjectId` is the numeric ID when the VCS requires it (GitLab API).
 
-Todos los scripts importan `scripts/lib/brain-config.mjs` en lugar de hardcodear valores. `brain.config.json` está gitignoreado — se configura por repo en `env:init`.
+All scripts import `scripts/lib/brain-config.mjs` instead of hardcoding values. `brain.config.json` is gitignored — it is configured per repo during `env:init`.
 
-### Motor de check-refs con reglas externas
+### Check-refs engine with external rules
 
-`scripts/check-refs.mjs` es el motor genérico (incluido en `brain/core/`). Las reglas prohibidas son PROJECT-specific: viven en `brain/project/check-refs-rules.mjs` (exporta `prohibitedRefs` y `globalExempt`).
+`scripts/check-refs.mjs` is the generic engine (included in `brain/core/`). Prohibited rules are PROJECT-specific: they live in `brain/project/check-refs-rules.mjs` (exports `prohibitedRefs` and `globalExempt`).
 
-El motor carga las reglas del proyecto en runtime. Si el archivo no existe, el motor opera con reglas vacías (solo las estructurales genéricas aplican).
+The engine loads the project rules at runtime. If the file does not exist, the engine operates with empty rules (only the generic structural rules apply).
 
-## Consecuencias
+## Consequences
 
-- **Positivo**: brain funciona con GitLab, GitHub, Bitbucket — cualquier host con API REST.
-- **Positivo**: el consumidor define sus propias reglas de check-refs sin tocar el motor.
-- **Negativo**: `brain.config.json` debe completarse manualmente en cada clone — `env:init` guía al dev pero no lo puede pre-llenar.
-- **Negativo**: si un VCS requiere autenticación para la API (GitLab private, GitHub private), el dev debe configurar el token en `.env` además de `brain.config.json`.
+- **Positive**: brain works with GitLab, GitHub, Bitbucket — any host with a REST API.
+- **Positive**: the consumer defines its own check-refs rules without touching the engine.
+- **Negative**: `brain.config.json` must be filled in manually on each clone — `env:init` guides the developer but cannot pre-fill it.
+- **Negative**: if a VCS requires authentication for the API (GitLab private, GitHub private), the developer must configure the token in `.env` in addition to `brain.config.json`.
