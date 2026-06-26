@@ -10,11 +10,11 @@
 - [x] 1.5 Tests: resolver fallback (missing key, unknown locale), interpolation; `sh.mjs` output shape.
 
 ## PR2 — JS script output
-- [ ] 2.1 `day-start.mjs` output → `t()` (keys + en/es entries).
-- [ ] 2.2 `tracker-board.mjs` output → `t()` (preserve `retomar`'s markdown structure).
-- [ ] 2.3 `project-status.mjs` VCS section + headers → `t()`.
-- [ ] 2.4 `ticket-start.mjs` output → `t()`.
-- [ ] 2.5 Verify: brain (`docs.language: en`) prints English; `docs.language: es` prints the prior Spanish.
+- [x] 2.1 `day-start.mjs` output → `t()` (keys + en/es entries).
+- [x] 2.2 `tracker-board.mjs` output → `t()` (preserve `retomar`'s markdown structure).
+- [x] 2.3 `project-status.mjs` VCS section + headers → `t()`.
+- [x] 2.4 `ticket-start.mjs` output → `t()`.
+- [x] 2.5 Verify: brain (`docs.language: en`) prints English; `docs.language: es` prints the prior Spanish.
 
 ## PR3 — Shell script output
 - [ ] 3.1 `bootstrap.sh` → source the generated catalog; `printf` for dynamic messages.
