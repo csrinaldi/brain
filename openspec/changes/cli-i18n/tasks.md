@@ -17,9 +17,9 @@
 - [x] 2.5 Verify: brain (`docs.language: en`) prints English; `docs.language: es` prints the prior Spanish.
 
 ## PR3 — Shell script output
-- [ ] 3.1 `bootstrap.sh` → source the generated catalog; `printf` for dynamic messages.
-- [ ] 3.2 `install-tools.sh` → same.
-- [ ] 3.3 Verify both under `docs.language` en/es with English fallback.
+- [x] 3.1 `bootstrap.sh` → source the generated catalog; `printf` for dynamic messages.
+- [x] 3.2 `install-tools.sh` → same.
+- [x] 3.3 Verify both under `docs.language` en/es with English fallback.
 
 ## Closure
 - [ ] No user-facing literal output strings remain in the migrated scripts (`rg` spot-check).
