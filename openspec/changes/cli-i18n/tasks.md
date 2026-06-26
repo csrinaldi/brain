@@ -3,11 +3,11 @@
 > Implements [proposal.md](proposal.md) following [design.md](design.md). Grouped by chained PR.
 
 ## PR1 — i18n infrastructure
-- [ ] 1.1 `scripts/i18n/en.mjs` — canonical catalog (grows as scripts migrate).
-- [ ] 1.2 `scripts/i18n/t.mjs` — `t(key, params)` resolver: locale from `docs.language`, per-key English fallback, `{placeholder}` interpolation, unknown key → key string.
-- [ ] 1.3 `scripts/i18n/sh.mjs` — emit sourceable shell catalog (`I18N_*` vars, `%s` placeholders) for the active locale with English fallback applied.
-- [ ] 1.4 `scripts/i18n/es.mjs` — start (partial; filled as scripts migrate).
-- [ ] 1.5 Tests: resolver fallback (missing key, unknown locale), interpolation; `sh.mjs` output shape.
+- [x] 1.1 `scripts/i18n/en.mjs` — canonical catalog (grows as scripts migrate).
+- [x] 1.2 `scripts/i18n/t.mjs` — `t(key, params)` resolver: locale from `docs.language`, per-key English fallback, `{placeholder}` interpolation, unknown key → key string.
+- [x] 1.3 `scripts/i18n/sh.mjs` — emit sourceable shell catalog (`I18N_*` vars, `%s` placeholders) for the active locale with English fallback applied.
+- [x] 1.4 `scripts/i18n/es.mjs` — start (partial; filled as scripts migrate).
+- [x] 1.5 Tests: resolver fallback (missing key, unknown locale), interpolation; `sh.mjs` output shape.
 
 ## PR2 — JS script output
 - [ ] 2.1 `day-start.mjs` output → `t()` (keys + en/es entries).
