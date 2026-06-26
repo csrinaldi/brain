@@ -13,6 +13,7 @@ import { highestTag, readInstalledVersion, compareSemver } from './lib/installer
 import { getVcs, resolveProviderName } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';
 import { vcsToken } from './vcs/lib/token.mjs';
+import { t } from './i18n/t.mjs';
 
 const ROOT = process.cwd();
 const NODE = process.execPath;
@@ -52,10 +53,11 @@ const sep = (label) => {
   console.log(`\n${C.bCyan}── ${tag} ${pad}${C.reset}`);
 };
 
-const run = (cmd, args = [], opts = {}) => {
+const run = async (cmd, args = [], opts = {}) => {
   const r = spawnSync(cmd, args, { stdio: 'inherit', cwd: ROOT, ...opts });
   if (r.status !== 0) {
-    console.warn(`  ↳ salió con código ${r.status ?? 'señal'} (no bloqueante).`);
+    const signal = await t('common.signal');
+    console.warn(`  ${await t('day.run.exitCode', { code: r.status ?? signal })}`);
   }
 };
 
@@ -80,38 +82,38 @@ if (noProxy) {
 }
 
 // ── 1. VCS authentication ────────────────────────────────────────────────────
-sep('Autenticación del VCS');
+sep(await t('day.vcs.section'));
 if (!vcs) {
-  info(`Provider de VCS no configurado — seteá ${C.bold}vcs.provider${C.reset} en brain.config.json.`);
+  info(await t('day.vcs.notConfigured'));
 } else {
   let authed = false;
   try { authed = await vcs.authCheck({ host: VCS_HOST }); } catch { authed = false; }
   if (authed) {
     try {
       const { username } = await vcs.whoami();
-      ok(`Autenticado como ${C.cyan}@${username}${C.reset} (${vcsProvider}).`);
+      ok(await t('day.auth.ok', { user: username, provider: vcsProvider }));
     } catch {
-      ok(`Autenticado (${vcsProvider}).`);
+      ok(await t('day.vcs.authOk', { provider: vcsProvider }));
     }
   } else {
-    console.log('  Sesión no iniciada o vencida — reautenticando desde .env...');
+    console.log(`  ${await t('day.vcs.sessionExpired')}`);
     const token = vcsToken(vcsProvider, ROOT);
     if (!token) {
-      warn(`Token no encontrado en .env — corré ${C.bold}npm run env:init${C.reset}`);
+      warn(await t('day.vcs.tokenNotFound'));
     } else {
       let loggedIn = false;
       try { loggedIn = await vcs.authLogin({ host: VCS_HOST, token }); } catch { loggedIn = false; }
       if (loggedIn) {
-        ok(`Autenticado (${vcsProvider}).`);
+        ok(await t('day.vcs.authOk', { provider: vcsProvider }));
       } else {
-        warn(`Auth falló — verificá el token o que el CLI del provider esté instalado. ${C.bold}npm run env:init${C.reset}`);
+        warn(await t('day.vcs.authFailed'));
       }
     }
   }
 }
 
 // ── 2. Main sync ─────────────────────────────────────────────────────────────
-sep('Sincronización de main');
+sep(await t('day.main.section'));
 {
   // Capture the local branch BEFORE fetch/merge — this is the correct reference
   // to detect what arrived new, regardless of whether origin/main was already
@@ -120,13 +122,13 @@ sep('Sincronización de main');
   const token = vcs ? vcsToken(vcsProvider, ROOT) : null;
 
   if (!vcs || !token || !VCS_PROJECT || !VCS_HOST) {
-    warn('No se puede sincronizar main — provider de VCS o token no disponible.');
+    warn(await t('day.main.noVcs'));
   } else {
     const authRemote = await vcs.repoCloneUrl({ host: VCS_HOST, project: VCS_PROJECT, token });
     const fetchResult = capture('git', ['fetch', authRemote, 'main:refs/remotes/origin/main']);
 
     if (fetchResult.status !== 0) {
-      warn(`Fetch de main falló — verificá conectividad a ${C.cyan}${VCS_HOST}${C.reset}`);
+      warn(await t('day.main.fetchFailed', { host: VCS_HOST }));
     } else {
       const newMain = capture('git', ['rev-parse', 'refs/remotes/origin/main']).stdout.trim();
       const currentBranch = capture('git', ['branch', '--show-current']).stdout.trim();
@@ -145,12 +147,12 @@ sep('Sincronización de main');
           }
         }
         if (merge.status === 0) {
-          ok(`${C.cyan}main${C.reset} actualizado (fast-forward aplicado).`);
+          ok(await t('day.main.updated'));
         } else {
-          warn('No se pudo aplicar pull a main — puede haber cambios locales sin commitear.');
+          warn(await t('day.main.pullFailed'));
         }
       } else {
-        ok(`${C.cyan}main${C.reset} remoto actualizado (rama activa: ${C.yellow}${currentBranch}${C.reset}).`);
+        ok(await t('day.main.remoteUpdated', { branch: currentBranch }));
       }
 
       if (prevLocal && prevLocal !== newMain) {
@@ -175,7 +177,7 @@ sep('Sincronización de main');
             }
           };
 
-          console.log(`\n  ${C.bold}${commits.length} commit(s) nuevos en main:${C.reset}\n`);
+          console.log(`\n  ${C.bold}${await t('day.main.newCommits', { count: commits.length })}${C.reset}\n`);
           for (const { sha, short, author, subject } of commits) {
             let status = null;
             try { status = await vcs.commitStatus({ project: VCS_PROJECT, sha }); } catch { status = null; }
@@ -184,20 +186,20 @@ sep('Sincronización de main');
           console.log('');
         }
       } else {
-        ok(`${C.cyan}main${C.reset} ya estaba al día.`);
+        ok(await t('day.main.upToDate'));
       }
     }
   }
 }
 
 // ── 3. Ecosystem updates ─────────────────────────────────────────────────────
-sep('Actualizaciones del ecosistema');
+sep(await t('day.ecosystem.section'));
 const gaCheck = capture('gentle-ai', ['--version']);
 if (gaCheck.status !== 0) {
-  info('gentle-ai no disponible — skipping actualizaciones.');
-  console.log(`       Instalar: ${C.bold}npm run tools:install${C.reset}`);
+  info(await t('day.ecosystem.notAvailable'));
+  console.log(`       ${await t('day.ecosystem.install')}`);
 } else {
-  console.log(`  ${C.dim}Verificando versiones...${C.reset}`);
+  console.log(`  ${C.dim}${await t('day.ecosystem.checking')}${C.reset}`);
   const check = capture('gentle-ai', ['update']);
   if (check.status === 0) {
     const updates = (check.stdout ?? '')
@@ -205,9 +207,9 @@ if (gaCheck.status !== 0) {
       .filter(l => l.includes('[UP]'));
 
     if (updates.length === 0) {
-      ok('Todas las herramientas al día.');
+      ok(await t('day.ecosystem.allUpToDate'));
     } else {
-      console.log(`  ${C.yellow}${updates.length} actualización(es) disponible(s):${C.reset}\n`);
+      console.log(`  ${C.yellow}${await t('day.ecosystem.updatesAvailable', { count: updates.length })}${C.reset}\n`);
       for (const line of updates) {
         const m = line.match(/\[UP\]\s+(\S+)\s+installed:\s+(\S+)\s+latest:\s+(\S+)/);
         if (m) {
@@ -216,46 +218,46 @@ if (gaCheck.status !== 0) {
           console.log(`   ${line.trim()}`);
         }
       }
-      console.log('\n  Aplicando actualizaciones...');
-      run('gentle-ai', ['upgrade']);
-      ok('Listo.');
+      console.log(`\n  ${await t('day.ecosystem.applying')}`);
+      await run('gentle-ai', ['upgrade']);
+      ok(await t('day.ecosystem.done'));
     }
   }
   capture('gentle-ai', ['skill-registry', 'refresh']);
-  ok('Skill registry actualizado.');
+  ok(await t('day.ecosystem.skillRegistry'));
 }
 
 // ── 4. brain (core) version ──────────────────────────────────────────────────
 // Check-and-notify (ADR-0006): detects if there is a new core version and WARNS.
 // Does NOT auto-update — respects brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md.
 // Upgrade is always a conscious decision: npm run brain:upgrade -- <tag>.
-sep('Versión de brain (core)');
+sep(await t('day.brain.section'));
 {
   const BRAIN_REMOTE = 'https://github.com/csrinaldi/brain.git';
   const installed = readInstalledVersion(ROOT);
   if (!installed) {
-    info('No se pudo determinar la versión instalada de brain — skipping check.');
+    info(await t('day.brain.unknownInstalled'));
   } else {
     const ls = capture('git', ['ls-remote', '--tags', BRAIN_REMOTE]);
     if (ls.status !== 0) {
-      info('No se pudo consultar tags remotos (sin red o sin acceso) — skipping check.');
+      info(await t('day.brain.noNetwork'));
     } else {
       const latest = highestTag(ls.stdout);
       if (!latest) {
-        info('El remoto de brain no tiene tags de versión todavía.');
+        info(await t('day.brain.noTags'));
       } else if (compareSemver(latest, installed) > 0) {
-        warn(`Hay una versión nueva de brain: ${C.dim}${installed}${C.reset} → ${C.green}${latest}${C.reset}`);
-        console.log(`       Actualizá a conciencia: ${C.bold}npm run brain:upgrade -- ${latest}${C.reset}`);
-        console.log(`       ${C.dim}(no se auto-aplica — revisá el changelog del tag antes)${C.reset}`);
+        warn(await t('day.brain.newVersion', { installed, latest }));
+        console.log(`       ${await t('day.brain.upgrade', { latest })}`);
+        console.log(`       ${C.dim}${await t('day.brain.noAutoApply')}${C.reset}`);
       } else {
-        ok(`brain al día (${C.cyan}${installed}${C.reset}).`);
+        ok(await t('day.brain.upToDate', { installed }));
       }
     }
   }
 }
 
 // ── 5. Team memory ───────────────────────────────────────────────────────────
-sep('Memoria de equipo');
+sep(await t('day.memory.section'));
 
 // 4a. Auto-install/repair the pre-push hook that materializes memory (ADR-0003).
 //     Does not depend on re-running bootstrap: ensured on every startup, so devs
@@ -265,56 +267,56 @@ sep('Memoria de equipo');
 const HOOKS_PATH = 'scripts/hooks';
 const hookFile = join(ROOT, HOOKS_PATH, 'pre-push');
 if (!existsSync(hookFile)) {
-  warn(`Hook pre-push ausente en ${C.cyan}${HOOKS_PATH}/pre-push${C.reset} — la memoria no se materializa en el push.`);
+  warn(await t('day.memory.hookMissing', { path: HOOKS_PATH }));
 } else {
   const currentHooks = capture('git', ['config', '--get', 'core.hooksPath']).stdout?.trim();
   if (currentHooks !== HOOKS_PATH) {
     const r = capture('git', ['config', 'core.hooksPath', HOOKS_PATH]);
-    if (r.status === 0) ok(`Pre-push hook activado (${C.cyan}core.hooksPath=${HOOKS_PATH}${C.reset}).`);
-    else warn('No se pudo activar el pre-push hook (core.hooksPath).');
+    if (r.status === 0) ok(await t('day.memory.hookActivated', { hooksPath: HOOKS_PATH }));
+    else warn(await t('day.memory.hookFailed'));
   } else {
-    ok('Pre-push hook activo — materializa la memoria antes del push.');
+    ok(await t('day.memory.hookActive'));
   }
 }
 
 const engram = capture('engram', ['--version']);
 if (engram.status === 0) {
   // 4a. Import team memory from .memory/ in the repo → ~/.engram local
-  console.log(`  ${C.dim}Importando chunks de .memory/ al DB local...${C.reset}`);
-  run('engram', ['sync', '--import'], { stdio: ['inherit', 'inherit', 'pipe'] });
+  console.log(`  ${C.dim}${await t('day.memory.importing')}${C.reset}`);
+  await run('engram', ['sync', '--import'], { stdio: ['inherit', 'inherit', 'pipe'] });
 
   // 4b. Re-project brain/ → ~/.engram (ADRs, anti-patterns, domain)
-  console.log(`  ${C.dim}Reproyectando brain/ a engram...${C.reset}`);
-  run(NODE, ['scripts/brain-to-engram.mjs']);
+  console.log(`  ${C.dim}${await t('day.memory.reprojecting')}${C.reset}`);
+  await run(NODE, ['scripts/brain-to-engram.mjs']);
 
   // 4c. Export ~/.engram → .memory/ in the repo (closes the loop: without this step, nothing flows)
-  console.log(`  ${C.dim}Exportando memoria al repo (.memory/)...${C.reset}`);
+  console.log(`  ${C.dim}${await t('day.memory.exporting')}${C.reset}`);
   const exportResult = capture('engram', ['sync', '--export']);
   if (exportResult.status === 0) {
-    ok(`Memoria exportada a ${C.cyan}.memory/${C.reset} — lista para commitear con el próximo push.`);
+    ok(await t('day.memory.exported'));
   } else {
-    warn('Export de engram falló — corré ' + C.bold + 'npm run memory:share' + C.reset + ' manualmente.');
+    warn(await t('day.memory.exportFailed'));
   }
 } else {
-  info('engram no disponible — skipping memoria compartida.');
-  console.log(`       Instalar: ${C.bold}gentle-ai install${C.reset}   o   ${C.bold}npm run tools:install${C.reset}`);
+  info(await t('day.memory.notAvailable'));
+  console.log(`       ${await t('day.memory.install')}`);
 }
 
 // ── 6. Ticket board ──────────────────────────────────────────────────────────
-sep('Tablero de tickets');
-run(NODE, ['scripts/tracker-board.mjs']);
+sep(await t('day.board.section'));
+await run(NODE, ['scripts/tracker-board.mjs']);
 
 // ── Done ─────────────────────────────────────────────────────────────────────
 const div = `${C.dim}${'─'.repeat(62)}${C.reset}`;
 console.log('\n' + div);
-console.log(`  ${C.bGreen}Con ticket:${C.reset}`);
-console.log(`    ${C.bold}npm run ticket:start -- <iid>${C.reset}   ${C.dim}(terminal)${C.reset}`);
-console.log(`    ${C.bold}/ticket-start <iid>${C.reset}             ${C.dim}(Claude / agente IA)${C.reset}`);
+console.log(`  ${C.bGreen}${await t('day.done.withTicket')}${C.reset}`);
+console.log(`    ${C.bold}${await t('day.done.ticketStart')}${C.reset}`);
+console.log(`    ${C.bold}${await t('day.done.ticketStartAgent')}${C.reset}`);
 console.log('');
-console.log(`  ${C.bCyan}Sin ticket — explorá o proponé:${C.reset}`);
-console.log(`    ${C.bold}/sdd-explore <idea>${C.reset}             ${C.dim}investigar antes de comprometerse${C.reset}`);
-console.log(`    ${C.bold}/gitlab-issue${C.reset}                   ${C.dim}crear un issue desde una idea${C.reset}`);
+console.log(`  ${C.bCyan}${await t('day.done.noTicket')}${C.reset}`);
+console.log(`    ${C.bold}${await t('day.done.sddExplore')}${C.reset}`);
+console.log(`    ${C.bold}${await t('day.done.gitlabIssue')}${C.reset}`);
 console.log('');
-console.log(`  ${C.dim}Antes de pushear:${C.reset}`);
-console.log(`    ${C.bold}npm run repo:check && npm run memory:share${C.reset}`);
+console.log(`  ${C.dim}${await t('day.done.beforePush')}${C.reset}`);
+console.log(`    ${C.bold}${await t('day.done.checkCmd')}${C.reset}`);
 console.log(div + '\n');
