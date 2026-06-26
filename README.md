@@ -27,15 +27,47 @@ openspec/            ← SDD artifacts for active and archived changes.
 
 ## How to adopt brain
 
-> Note: the versioned installer (Slice 6) is not yet implemented. For now, use this repo as a template.
+brain installs into a consumer repo from a git tag — no registry, works with
+private repos (see [ADR-0006](brain/project/decisions/adr-0006-distribucion-installer-versionado.md)).
 
-1. Clone or fork this repo.
-2. Fill in `brain.config.json` with your project identity (name, slug, gitHost, gitProjectId, owner).
-3. Copy `.env.example` to `.env` and add your tokens.
-4. Run `npm run env:init` — sets up the credential helper, SDD harness, and memory backend.
-5. Start every workday with `npm run day:start`.
-6. Add your domain knowledge in `brain/project/`, your ADRs in `brain/project/decisions/`.
-7. Use `npm run project:feature` to plan a change with SDD, `npm run repo:check` to validate the repo.
+```bash
+# In your project, install + copy the brain core at a pinned version:
+npm run brain:upgrade -- v0.1.0
+# (the first run requires the brain scripts; bootstrap them by installing once:
+#  npm i -D github:csrinaldi/brain#v0.1.0  and add the npm script alias)
+```
+
+Then:
+
+1. Fill in `brain.config.json` with your project identity (name, slug, gitHost, gitProjectId, owner).
+2. Copy `.env.example` to `.env` and add your tokens.
+3. Run `npm run env:init` — sets up the credential helper, SDD harness, and memory backend.
+4. Start every workday with `npm run day:start` — it also **checks for a newer brain version and notifies you** (it never auto-updates).
+5. Add your domain knowledge in `brain/project/`, your ADRs in `brain/project/decisions/`.
+6. Use `npm run project:feature` to plan a change with SDD, `npm run repo:check` to validate the repo.
+
+### Updating brain
+
+```bash
+npm run brain:upgrade -- v0.2.0     # install a newer tag and copy managed paths
+npm run brain:upgrade -- v0.2.0 --dry-run   # preview what would change
+```
+
+**The golden rule** (ADR-0003 / ADR-0006): `brain/core/**` is **read-only in the
+consumer**. The upgrade overwrites only the *managed* paths and never touches your
+*local* ones:
+
+| Managed (overwritten on upgrade) | Local (never touched) |
+|---|---|
+| `brain/core/**` | `brain/project/**` |
+| `scripts/**` | `brain.config.json` (migrated additively) |
+| `.gitattributes` | `.env`, `openspec/changes/**`, `.memory/**` |
+
+The path manifest lives in [`brain/core/managed-paths.mjs`](brain/core/managed-paths.mjs).
+Config schema changes ship as additive migrations in
+[`brain/core/config-migrations.mjs`](brain/core/config-migrations.mjs) — new keys are
+added with defaults, your existing values are preserved. Improvements to core go
+**upstream first** (PR to the brain repo), then you bump the version.
 
 ---
 
@@ -45,6 +77,8 @@ openspec/            ← SDD artifacts for active and archived changes.
 |---|---|
 | `npm run env:init` | Interactive first-time setup (tokens, harness, memory). |
 | `npm run day:start` | Pull memory, show open tickets, check for brain updates. |
+| `npm run brain:upgrade -- <tag>` | Install/update the brain core at a version; copies managed paths only. |
+| `npm test` | Run the harness unit tests (`node --test`). |
 | `npm run ticket:start` | Start work on a ticket (creates branch, worktree). |
 | `npm run project:feature` | Start a new SDD change (proposal → spec → design → tasks). |
 | `npm run brain:nav` | Verify navigation integrity of `brain/` (no orphans, no broken links). |

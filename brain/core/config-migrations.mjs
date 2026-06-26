@@ -1,0 +1,32 @@
+// config-migrations.mjs — Versioned, additive migrations for brain.config.json.
+//
+// When a new brain version adds keys to the config schema, it registers a
+// migration here. Migrations are ADDITIVE: they fill in keys that are missing
+// and NEVER overwrite a value the consumer already set (ADR-0006 acceptance
+// criterion). This makes every migration idempotent — re-running it is a no-op.
+//
+// The installer applies, in order, every migration whose `version` is greater
+// than the consumer's recorded `schemaVersion` (stored in brain.config.json),
+// up to the target version being installed. Each migration receives the current
+// config and a `mergeDefaults(existing, defaults)` helper that preserves
+// existing leaf values while adding missing ones.
+//
+// To add a migration: append an entry { version, description, defaults } (the
+// common additive case) OR { version, description, migrate(config, helpers) }
+// for renames / restructures. `defaults` is sugar for a pure additive merge.
+
+export const migrations = [
+  {
+    version: '0.1.0',
+    description: 'Initial schema: project identity fields.',
+    defaults: {
+      project: {
+        name: '',
+        slug: '',
+        gitHost: '',
+        gitProjectId: '',
+        owner: '',
+      },
+    },
+  },
+];

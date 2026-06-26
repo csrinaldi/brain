@@ -9,10 +9,11 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadBrainConfig } from './lib/brain-config.mjs';
+import { highestTag, readInstalledVersion, compareSemver } from './lib/installer.mjs';
 
 const ROOT = process.cwd();
 const NODE = process.execPath;
-const TOTAL = 5;
+const TOTAL = 6;
 let step = 0;
 
 const { project } = loadBrainConfig();
@@ -229,7 +230,36 @@ if (gaCheck.status !== 0) {
   ok('Skill registry actualizado.');
 }
 
-// ── 4. Memoria de equipo ─────────────────────────────────────────────────────
+// ── 4. Versión de brain (core) ───────────────────────────────────────────────
+// Check-and-notify (ADR-0006): detecta si hay una versión nueva del core y AVISA.
+// NO auto-actualiza — respeta brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md.
+// El upgrade es siempre una decisión consciente: npm run brain:upgrade -- <tag>.
+sep('Versión de brain (core)');
+{
+  const BRAIN_REMOTE = 'https://github.com/csrinaldi/brain.git';
+  const installed = readInstalledVersion(ROOT);
+  if (!installed) {
+    info('No se pudo determinar la versión instalada de brain — skipping check.');
+  } else {
+    const ls = capture('git', ['ls-remote', '--tags', BRAIN_REMOTE]);
+    if (ls.status !== 0) {
+      info('No se pudo consultar tags remotos (sin red o sin acceso) — skipping check.');
+    } else {
+      const latest = highestTag(ls.stdout);
+      if (!latest) {
+        info('El remoto de brain no tiene tags de versión todavía.');
+      } else if (compareSemver(latest, installed) > 0) {
+        warn(`Hay una versión nueva de brain: ${C.dim}${installed}${C.reset} → ${C.green}${latest}${C.reset}`);
+        console.log(`       Actualizá a conciencia: ${C.bold}npm run brain:upgrade -- ${latest}${C.reset}`);
+        console.log(`       ${C.dim}(no se auto-aplica — revisá el changelog del tag antes)${C.reset}`);
+      } else {
+        ok(`brain al día (${C.cyan}${installed}${C.reset}).`);
+      }
+    }
+  }
+}
+
+// ── 5. Memoria de equipo ─────────────────────────────────────────────────────
 sep('Memoria de equipo');
 
 // 4a. Auto-instalar/reparar el pre-push hook que materializa la memoria (ADR-0003).
@@ -275,7 +305,7 @@ if (engram.status === 0) {
   console.log(`       Instalar: ${C.bold}gentle-ai install${C.reset}   o   ${C.bold}npm run tools:install${C.reset}`);
 }
 
-// ── 5. Tablero de tickets ────────────────────────────────────────────────────
+// ── 6. Tablero de tickets ────────────────────────────────────────────────────
 sep('Tablero de tickets');
 run(NODE, ['scripts/tracker-board.mjs']);
 

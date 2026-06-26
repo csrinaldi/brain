@@ -1,6 +1,6 @@
 {
   "name": "brain",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Generic AI-assisted development harness — knowledge base, SDD scaffolding, and team memory.",
   "scripts": {
@@ -14,6 +14,8 @@
     "brain:nav": "node ./scripts/check-brain-nav.mjs",
     "repo:check": "node ./scripts/check-refs.mjs",
     "change:verify": "node ./scripts/verify-change.mjs",
+    "brain:upgrade": "node ./scripts/brain-upgrade.mjs",
+    "test": "node --test \"scripts/**/*.test.mjs\"",
     "memory:index": "node ./scripts/memory/cli.mjs index",
     "memory:share": "node ./scripts/memory/cli.mjs share",
     "memory:pull": "node ./scripts/memory/cli.mjs pull",

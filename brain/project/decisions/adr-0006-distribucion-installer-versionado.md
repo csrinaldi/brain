@@ -26,13 +26,13 @@ Esto instala `brain/core/` y los scripts genéricos como una devDependency del p
 
 **Check-and-notify en day:start**: `scripts/day-start.mjs` verifica si hay una nueva versión de brain disponible y lo notifica. No auto-actualiza — respeta el anti-pattern `instaladores-autoactualizantes-no-inocuos` (ver `brain/core/anti-patterns/`).
 
-**Migración de brain.config.json**: cuando el schema de `brain.config.json` cambia entre versiones, el changelog del tag documenta las claves añadidas/renombradas. El consumidor migra manualmente antes de actualizar.
+**Migración de brain.config.json**: las migraciones son **additivas y se aplican automáticamente** en el upgrade (`brain:upgrade`). Cuando una versión nueva agrega claves al schema, las registra en `brain/core/config-migrations.mjs`; el installer las suma con sus defaults **sin pisar jamás un valor ya seteado por el consumidor** (incluidos valores falsy como `""`, `0`, `false`). El campo `schemaVersion` en `brain.config.json` registra hasta dónde migró. Renombrados/reestructuras (no additivos) usan una función `migrate()` explícita y deben documentarse en el changelog del tag.
 
 ## Consecuencias
 
 - **Positivo**: instalación one-liner, sin registry, compatible con repos privados (GitHub).
 - **Positivo**: la versión queda explícita en `package.json` del consumidor — upgrades son decisiones conscientes.
 - **Positivo**: `git tag` es el mecanismo de release — cero CI complejo para publicar.
-- **Negativo**: no hay migraciones automáticas de `brain.config.json`; el consumidor debe leer el changelog.
+- **Positivo (Slice 6)**: las migraciones additivas de `brain.config.json` se aplican solas y son idempotentes; el consumidor solo lee el changelog para renombrados.
 - **Negativo**: la distribución vía npm install de GitHub requiere que el consumidor tenga acceso al repo brain (autenticado, si es privado).
-- **Pendiente (Slice 6)**: el installer y el check-and-notify en day:start están planificados pero no implementados aún.
+- **Implementado (Slice 6)**: `brain:upgrade` (`scripts/brain-upgrade.mjs`), el manifiesto de paths (`brain/core/managed-paths.mjs`), las migraciones (`brain/core/config-migrations.mjs`) y el check-and-notify en `day:start`. Ver `openspec/changes/installer-versionado/`.
