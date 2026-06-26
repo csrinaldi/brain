@@ -1,26 +1,26 @@
-# openspec/ — Artefactos SDD (formato OpenSpec)
+# openspec/ — SDD Artifacts (OpenSpec format)
 
-> **Fuente de verdad** del diseño spec-driven, en Markdown tool-agnostic.
-> El harness (gentle-ai hoy) es reemplazable; engram es índice descartable.
-> Ver [`../brain/decisions/adr-0002-harness-reemplazable-openspec.md`](../brain/decisions/adr-0002-harness-reemplazable-openspec.md).
+> **Source of truth** for spec-driven design, in tool-agnostic Markdown.
+> The harness (gentle-ai today) is replaceable; engram is a disposable index.
+> See [`../brain/decisions/adr-0002-harness-reemplazable-openspec.md`](../brain/decisions/adr-0002-harness-reemplazable-openspec.md).
 
-## Estructura
+## Structure
 
 ```
 openspec/
-├── specs/                      # requisitos vivos consolidados
+├── specs/                      # consolidated live requirements
 │   └── [feature]/spec.md
-└── changes/                    # cambios en curso (uno por ticket)
+└── changes/                    # in-progress changes (one per ticket)
     └── [change-id]/
-        ├── proposal.md         # qué y por qué
-        ├── design.md           # cómo (decisiones técnicas)
-        ├── tasks.md            # checklist de implementación
-        └── specs/[feature]/spec.md   # deltas de requisitos del cambio
+        ├── proposal.md         # what and why
+        ├── design.md           # how (technical decisions)
+        ├── tasks.md            # implementation checklist
+        └── specs/[feature]/spec.md   # requirement deltas for the change
 ```
 
-## Reglas
+## Rules
 
-1. **MD manda.** Si engram y estos archivos divergen, estos archivos ganan.
-2. **Un change por ticket.** `change-id` se vincula al ID del issue de GitLab.
-3. **Committeado siempre.** Los artefactos viajan con el código en el mismo MR.
-4. **Reemplaza** a la convención previa `docs/sdd/tasks/` (deprecada).
+1. **MD wins.** If engram and these files diverge, these files win.
+2. **One change per ticket.** `change-id` is linked to the GitLab issue ID.
+3. **Always committed.** Artifacts travel with the code in the same MR.
+4. **Replaces** the previous `docs/sdd/tasks/` convention (deprecated).

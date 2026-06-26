@@ -1,26 +1,26 @@
-# config.yaml mezcla secuencia y mapping (YAML inválido tolerado por el harness)
+# config.yaml mixes sequence and mapping (invalid YAML tolerated by the harness)
 
-- **Descubierto en:** issue #94 / `openspec/config.yaml`
-- **Aplica a:** `openspec/config.yaml` y cualquier consumidor que lo parsee con un YAML estricto
+- **Discovered in:** issue #94 / `openspec/config.yaml`
+- **Applies to:** `openspec/config.yaml` and any consumer that parses it with a strict YAML parser
 
-## Síntoma
+## Symptom
 
-`python3 -c "import yaml; yaml.safe_load(open('openspec/config.yaml'))"` falla con
-`expected <block end>, but found '?'`. Un linter de YAML, un pre-commit, o una migración a
-otra herramienta de parseo romperían la config del harness SDD — aunque `gentle-ai` la lee
-sin problema hoy.
+`python3 -c "import yaml; yaml.safe_load(open('openspec/config.yaml'))"` fails with
+`expected <block end>, but found '?'`. A YAML linter, a pre-commit hook, or a migration to
+another parsing tool would break the SDD harness config — even though `gentle-ai` reads it
+without issue today.
 
-## Causa
+## Cause
 
-Bajo `rules.apply:` y `rules.verify:` el archivo mezcla items de secuencia (`- Follow ...`)
-con claves de mapping (`tdd:`, `test_command:`) en el mismo nivel de indentación. Por spec,
-un nodo YAML no puede ser secuencia y mapping a la vez. El parser de `gentle-ai` es tolerante
-y lo acepta; PyYAML y la mayoría de los linters no.
+Under `rules.apply:` and `rules.verify:` the file mixes sequence items (`- Follow ...`)
+with mapping keys (`tdd:`, `test_command:`) at the same indentation level. By spec,
+a YAML node cannot be both a sequence and a mapping. The `gentle-ai` parser is lenient
+and accepts it; PyYAML and most linters do not.
 
-## Solución / patrón correcto
+## Solution / correct pattern
 
-No "arreglar" la estructura a ciegas: una corrección mecánica puede romper la lectura del
-harness. Si hay que endurecerla, separar las listas de las claves — mover los bullets a una
-clave propia (p. ej. `guidelines: [...]`) y dejar `tdd`/`test_command` como mapping hermano.
-Validar SIEMPRE con `gentle-ai sdd-status --json` (que el harness siga parseando) antes de
-mergear cualquier cambio a `openspec/config.yaml`.
+Do not "fix" the structure blindly: a mechanical correction can break harness parsing.
+If it needs to be hardened, separate the lists from the keys — move the bullets to a
+dedicated key (e.g. `guidelines: [...]`) and leave `tdd`/`test_command` as sibling
+mappings. ALWAYS validate with `gentle-ai sdd-status --json` (to confirm the harness
+still parses) before merging any change to `openspec/config.yaml`.

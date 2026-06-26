@@ -1,44 +1,44 @@
-# Contrato del Harness SDD
+# SDD Harness Contract
 
 > **status:** current | **last-reviewed:** 2026-06-24 | **owner:** @crinaldi
 
-> **Propósito:** define los verbos abstractos que cualquier harness SDD debe implementar
-> para ser compatible con este proyecto. Referenciado por ADR-0002.
+> **Purpose:** defines the abstract verbs that any SDD harness must implement
+> to be compatible with this project. Referenced by ADR-0002.
 
-El harness actual es `gentle-ai`. Otro harness puede reemplazarlo siempre que implemente
-este contrato — sin cambios en `project-workflow.md` ni en `developer-environment.md`.
+The current harness is `gentle-ai`. Another harness may replace it as long as it implements
+this contract — without changes to `project-workflow.md` or `developer-environment.md`.
 
 ---
 
-## Verbos requeridos
+## Required verbs
 
-| Verbo (npm) | Verbo (Claude) | Responsabilidad |
+| Verb (npm) | Verb (Claude) | Responsibility |
 |-------------|----------------|-----------------|
-| `npm run env:init` | — | Bootstrap del entorno: instala herramientas, configura auth, importa memoria, refresca skill registry. Idempotente. |
-| `npm run day:start` | — | Arranque diario: auth glab, actualizaciones del ecosistema, memoria de equipo, tablero de tickets. |
-| `npm run ticket:start -- <iid>` | `/ticket-start <iid>` | Toma un issue, crea la rama con la convención `{tipo}/issue-{iid}-{slug}` desde main. |
-| `npm run project:feature -- --issue <iid>` | `/sdd-new <iid>` | Inicia un change SDD: crea `openspec/changes/issue-<iid>-<slug>/` con `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
-| `npm run repo:check` | — | Valida referencias prohibidas en todo el árbol. Gate mínimo antes de cualquier commit. |
-| `npm run change:verify` | `/sdd-verify` | Valida el scope del cambio activo: clasifica el diff, corre solo las verificaciones necesarias. |
-| `npm run memory:share` | — | Exporta engram local → `.memory/` (versionado en git). Corre antes de pushear. |
-| `npm run memory:pull` | — | Importa `.memory/` → engram local. Trae la memoria del equipo. |
-| `npm run memory:index` | — | Reproyecta `brain/` → engram local. Necesario cuando cambian ADRs o glosario. |
+| `npm run env:init` | — | Environment bootstrap: installs tools, configures auth, imports memory, refreshes skill registry. Idempotent. |
+| `npm run day:start` | — | Daily startup: glab auth, ecosystem updates, team memory, ticket board. |
+| `npm run ticket:start -- <iid>` | `/ticket-start <iid>` | Takes an issue, creates the branch with the convention `{tipo}/issue-{iid}-{slug}` from main. |
+| `npm run project:feature -- --issue <iid>` | `/sdd-new <iid>` | Starts an SDD change: creates `openspec/changes/issue-<iid>-<slug>/` with `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
+| `npm run repo:check` | — | Validates prohibited references across the entire tree. Minimum gate before any commit. |
+| `npm run change:verify` | `/sdd-verify` | Validates the scope of the active change: classifies the diff, runs only the necessary verifications. |
+| `npm run memory:share` | — | Exports local engram → `.memory/` (versioned in git). Run before pushing. |
+| `npm run memory:pull` | — | Imports `.memory/` → local engram. Brings the team's memory. |
+| `npm run memory:index` | — | Reprojects `brain/` → local engram. Needed when ADRs or glossary change. |
 
-## Verbos opcionales (recomendados)
+## Optional verbs (recommended)
 
-| Verbo (Claude) | Responsabilidad |
+| Verb (Claude) | Responsibility |
 |----------------|-----------------|
-| `/sdd-explore <idea>` | Investigación previa al proposal. No crea artefactos. |
-| `/sdd-continue` | Avanza la siguiente fase lista del ciclo SDD. |
-| `/sdd-apply` | Implementa las tareas del change activo. |
-| `/sdd-archive` | Cierra el change y consolida artefactos. |
-| `/retomar` | Recupera el contexto de la sesión anterior desde engram + tablero GitLab. |
-| `/gitlab-issue` | Crea un issue en GitLab desde descripción o changeset. |
-| `/gitlab-merge-request` | Abre un MR vinculado a un issue. |
+| `/sdd-explore <idea>` | Investigation prior to the proposal. Does not create artifacts. |
+| `/sdd-continue` | Advances the next ready phase of the SDD cycle. |
+| `/sdd-apply` | Implements the tasks of the active change. |
+| `/sdd-archive` | Closes the change and consolidates artifacts. |
+| `/retomar` | Recovers the context from the previous session from engram + GitLab board. |
+| `/gitlab-issue` | Creates an issue in GitLab from a description or changeset. |
+| `/gitlab-merge-request` | Opens an MR linked to an issue. |
 
-## Contrato de artefactos
+## Artifact contract
 
-Un change SDD produce exactamente estos artefactos bajo `openspec/changes/issue-<iid>-<slug>/`:
+An SDD change produces exactly these artifacts under `openspec/changes/issue-<iid>-<slug>/`:
 
 ```
 proposal.md   — PRD aprobado por humano (obligatorio)
@@ -47,21 +47,21 @@ design.md     — decisiones técnicas y approach
 tasks.md      — checklist de implementación
 ```
 
-Los artefactos viven en `openspec/` durante el vuelo del change.
-Solo el residuo durable (ADRs, anti-patterns, glosario) se promueve a `brain/` — ver
+Artifacts live in `openspec/` during the change flight.
+Only the durable residue (ADRs, anti-patterns, glossary) is promoted to `brain/` — see
 `brain/methodology/consolidation-protocol.md`.
 
-## Implementación actual (gentle-ai)
+## Current implementation (gentle-ai)
 
-`gentle-ai` implementa este contrato. Los skills de Claude se instalan con
-`gentle-ai install` y se mantienen con `gentle-ai upgrade`. El registry local se
-refresca automáticamente en `day:start` y en `env:init`.
+`gentle-ai` implements this contract. Claude skills are installed with
+`gentle-ai install` and maintained with `gentle-ai upgrade`. The local registry is
+refreshed automatically on `day:start` and `env:init`.
 
-Ver `brain/methodology/agent-skills.md` para el inventario completo de skills.
+See `brain/methodology/agent-skills.md` for the full skill inventory.
 
-## Nota de implementación — capa de memoria materializada
+## Implementation note — materialized memory layer
 
-`.memory/` es el directorio canónico versionado en git para la memoria materializada del equipo.
-El binding a engram (implementación actual) usa un symlink `/.engram → .memory/`, de modo que
-engram escribe a `.engram/` (su convención interna) y los archivos aterrizan en `.memory/`.
-ADR-0003 documenta el modelo de memoria; este symlink es un detalle de implementación agnóstico.
+`.memory/` is the canonical directory versioned in git for the team's materialized memory.
+The binding to engram (current implementation) uses a symlink `/.engram → .memory/`, so that
+engram writes to `.engram/` (its internal convention) and files land in `.memory/`.
+ADR-0003 documents the memory model; this symlink is an implementation-agnostic detail.

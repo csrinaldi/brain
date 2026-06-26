@@ -1,31 +1,31 @@
-# ADR-0001 — Arquitectura de 3 Capas con Harness Reemplazable
+# ADR-0001 — 3-Layer Architecture with Replaceable Harness
 
-**Estado**: Accepted  
-**Fecha**: 2026-06-26
+**Status**: Accepted  
+**Date**: 2026-06-26
 
-## Contexto
+## Context
 
-Un sistema de desarrollo asistido por IA necesita tres concerns bien separados:
+An AI-assisted development system needs three well-separated concerns:
 
-1. **Artefactos SDD** (propuestas, specs, diseños, tasks): el conocimiento planificado de cada cambio.
-2. **Harness SDD**: la herramienta que ejecuta el flujo (propone, verifica, archiva).
-3. **Memoria de equipo**: el conocimiento acumulado que trasciende sesiones.
+1. **SDD Artifacts** (proposals, specs, designs, tasks): the planned knowledge for each change.
+2. **SDD Harness**: the tool that executes the workflow (proposes, verifies, archives).
+3. **Team Memory**: accumulated knowledge that persists across sessions.
 
-El problema de acoplar estos tres elementos es doble: el equipo queda rehén de una herramienta particular, y el sistema no puede evolucionar cada capa de forma independiente.
+Coupling these three elements creates a dual problem: the team becomes locked into a particular tool, and the system cannot evolve each layer independently.
 
-## Decisión
+## Decision
 
-El sistema se divide en tres capas independientes:
+The system is divided into three independent layers:
 
-- **Artefactos SDD (OpenSpec)**: archivos bajo `openspec/` — formato abierto, versionable con git, leíble por cualquier herramienta. Son el contrato duradero.
-- **Harness**: elegido por el desarrollador vía `SDD_HARNESS` en `.env`. El harness ejecuta los verbos del contrato (`sdd-new`, `sdd-apply`, `sdd-verify`, etc.) definidos en `brain/core/methodology/harness-contract.md`. Default: `gentle-ai`.
-- **Memoria**: elegida vía `MEMORY_BACKEND` en `.env`. Default: `engram`.
+- **SDD Artifacts (OpenSpec)**: files under `openspec/` — open format, versionable with git, readable by any tool. These are the durable contract.
+- **Harness**: chosen by the developer via `SDD_HARNESS` in `.env`. The harness executes the contract verbs (`sdd-new`, `sdd-apply`, `sdd-verify`, etc.) defined in `brain/core/methodology/harness-contract.md`. Default: `gentle-ai`.
+- **Memory**: chosen via `MEMORY_BACKEND` in `.env`. Default: `engram`.
 
-El binding entre capas ocurre en UN único punto (`scripts/bootstrap.sh` §6 para el harness, `scripts/memory/cli.mjs` para la memoria). Cambiar de herramienta implica cambiar la variable de entorno y re-correr `env:init`.
+The binding between layers happens at ONE single point (`scripts/bootstrap.sh` §6 for the harness, `scripts/memory/cli.mjs` for memory). Switching tools means changing the environment variable and re-running `env:init`.
 
-## Consecuencias
+## Consequences
 
-- **Positivo**: el equipo puede adoptar un harness mejor sin perder artefactos SDD ni historial de memoria.
-- **Positivo**: los artefactos en `openspec/` son siempre legibles, incluso sin las herramientas instaladas.
-- **Negativo**: el contrato de verbos (`harness-contract.md`) debe mantenerse actualizado cuando se añaden capacidades al flujo SDD.
-- **Negativo**: cada harness nuevo requiere un `case` en `bootstrap.sh` §6 y validación manual.
+- **Positive**: the team can adopt a better harness without losing SDD artifacts or memory history.
+- **Positive**: artifacts in `openspec/` are always readable, even without the tools installed.
+- **Negative**: the verbs contract (`harness-contract.md`) must be kept up to date when new capabilities are added to the SDD workflow.
+- **Negative**: each new harness requires a `case` in `bootstrap.sh` §6 and manual validation.

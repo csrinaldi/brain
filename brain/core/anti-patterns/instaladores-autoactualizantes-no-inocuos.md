@@ -1,40 +1,40 @@
-# Instaladores auto-actualizantes no son inocuos
+# Self-updating installers are not innocuous
 
-- **Descubierto en:** ISSUE-6 / bootstrap del entorno (`env:init`)
-- **Aplica a:** todo tooling del ecosistema con subcomando `install`/`upgrade` (gentle-ai, y cualquier CLI que se gestione a sí misma)
+- **Discovered in:** ISSUE-6 / environment bootstrap (`env:init`)
+- **Applies to:** any ecosystem tooling with an `install`/`upgrade` subcommand (gentle-ai, and any CLI that manages itself)
 
-## Síntoma
+## Symptom
 
-Se ejecuta `gentle-ai install --help` esperando ver la ayuda del subcomando. En su
-lugar, el comando dispara el flujo REAL de instalación: crea un backup, se
-auto-actualiza vía brew (1.33.2 → 1.37.2), se reinicia, y recién entonces falla con
-`Error: flag: help requested`. El sistema quedó modificado por un comando que se
-asumía de solo lectura.
+`gentle-ai install --help` is run expecting to see the subcommand help. Instead,
+the command triggers the REAL installation flow: creates a backup, self-updates
+via brew (1.33.2 → 1.37.2), restarts itself, and only then fails with
+`Error: flag: help requested`. The system was modified by a command that was
+assumed to be read-only.
 
-## Causa
+## Cause
 
-Las CLIs auto-gestionadas suelen interceptar el subcomando ANTES de parsear los
-flags: el auto-update corre como prólogo de `install` sin importar qué flags vengan
-después. La convención "`--help` nunca tiene efectos" es eso — una convención, no
-una garantía.
+Self-managed CLIs typically intercept the subcommand BEFORE parsing flags:
+the auto-update runs as a prologue to `install` regardless of what flags follow.
+The convention "`--help` never has side effects" is just that — a convention, not
+a guarantee.
 
-## Solución / patrón correcto
+## Solution / correct pattern
 
-- Para inspeccionar capacidades: usar el comando de diagnóstico de solo lectura
-  (`gentle-ai doctor`, `gentle-ai config`, `<tool> version`) o la ayuda GLOBAL
-  (`gentle-ai --help`), nunca `<subcomando-mutante> --help`.
-- En scripts de bootstrap: invocar `install` solo a conciencia, detrás de un guard de
-  idempotencia basado en diagnóstico de solo lectura. Ejemplo real en
+- To inspect capabilities: use the read-only diagnostic command
+  (`gentle-ai doctor`, `gentle-ai config`, `<tool> version`) or GLOBAL help
+  (`gentle-ai --help`), never `<mutating-subcommand> --help`.
+- In bootstrap scripts: invoke `install` only deliberately, behind an idempotency
+  guard based on a read-only diagnostic. Real example in
   `scripts/bootstrap.sh`:
 
   ```bash
   if gentle-ai doctor 2>/dev/null | grep -q 'state file OK'; then
-    ok "ecosistema ya inicializado"
+    ok "ecosystem already initialized"
   else
-    gentle-ai install   # interactivo y auto-actualizante: TTY heredado, a conciencia
+    gentle-ai install   # interactive and self-updating: inherited TTY, intentional
   fi
   ```
 
-- Ojo con el exit code de los doctores: `gentle-ai doctor` reporta "unhealthy" por
-  ruido ambiental (duplicados en PATH, endpoint de engram caído). Grepear la línea
-  específica que importa, no confiar en el exit code global.
+- Watch out for the exit code of doctor commands: `gentle-ai doctor` reports "unhealthy"
+  due to ambient noise (duplicates in PATH, engram endpoint down). Grep for the specific
+  line that matters; do not rely on the global exit code.

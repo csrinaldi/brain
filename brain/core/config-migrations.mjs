@@ -29,4 +29,13 @@ export const migrations = [
       },
     },
   },
+  {
+    version: '0.2.0',
+    description: 'Add docs.language: language for project-authored docs (ADR-0009). core is always English.',
+    defaults: {
+      docs: {
+        language: 'en',
+      },
+    },
+  },
 ];

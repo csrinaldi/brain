@@ -1,29 +1,29 @@
-# ADR-0005 — Adapter de Harness: SDD_HARNESS Selector + Contrato de Verbos
+# ADR-0005 — Harness Adapter: SDD_HARNESS Selector + Verb Contract
 
-**Estado**: Accepted  
-**Fecha**: 2026-06-26
+**Status**: Accepted  
+**Date**: 2026-06-26
 
-## Contexto
+## Context
 
-El harness SDD (la herramienta que ejecuta el flujo spec-driven) es una elección por desarrollador, no por repositorio. Diferentes devs de un mismo equipo pueden preferir diferentes herramientas.
+The SDD harness (the tool that runs the spec-driven flow) is a per-developer choice, not a per-repository one. Different developers on the same team may prefer different tools.
 
-Sin un punto de indirección, el repo quedaría acoplado a una herramienta concreta (gentle-ai, Cursor, un script custom) y cambiar de harness requeriría editar múltiples archivos.
+Without an indirection point, the repo would become coupled to a specific tool (gentle-ai, Cursor, a custom script), and switching harnesses would require editing multiple files.
 
-## Decisión
+## Decision
 
-El harness sigue el patrón adapter:
+The harness follows the adapter pattern:
 
-- **Contrato de verbos**: `brain/core/methodology/harness-contract.md`. Define los verbos abstractos del flujo SDD que cualquier harness debe implementar (`sdd-new`, `sdd-apply`, `sdd-verify`, `sdd-archive`, etc.). El repo no sabe ni le importa cómo los implementa el harness elegido.
+- **Verb contract**: `brain/core/methodology/harness-contract.md`. Defines the abstract verbs of the SDD flow that any harness must implement (`sdd-new`, `sdd-apply`, `sdd-verify`, `sdd-archive`, etc.). The repo does not know or care how the chosen harness implements them.
 
-- **Selector**: `SDD_HARNESS` en `.env`. Default: `gentle-ai`.
+- **Selector**: `SDD_HARNESS` in `.env`. Default: `gentle-ai`.
 
-- **Punto de binding**: `scripts/bootstrap.sh` §6. Contiene el `case "$SDD_HARNESS"` que inicializa la implementación elegida. Para gentle-ai: `gentle-ai install` configura skills, engram y gga. Para un harness custom: el `case` debe implementar su init o hacer `warn "sin rutina de init conocida"`.
+- **Binding point**: `scripts/bootstrap.sh` §6. Contains the `case "$SDD_HARNESS"` that initializes the chosen implementation. For gentle-ai: `gentle-ai install` configures skills, engram, and gga. For a custom harness: the `case` must implement its init or run `warn "no known init routine"`.
 
-- **Skills por dev**: cada desarrollador configura sus skills del harness en su entorno local (no en el repo). El repo solo define el contrato de verbos.
+- **Per-dev skills**: each developer configures their harness skills in their local environment (not in the repo). The repo only defines the verb contract.
 
-## Consecuencias
+## Consequences
 
-- **Positivo**: el repo es agnóstico al harness. Los artefactos SDD en `openspec/` son leíbles por cualquier herramienta.
-- **Positivo**: un dev puede usar un harness diferente al resto del equipo sin romper el flujo del repo.
-- **Negativo**: `bootstrap.sh` §6 requiere un `case` por harness conocido — no es extensible sin editar el archivo.
-- **Negativo**: la calidad de los artefactos SDD producidos depende del harness elegido; el contrato de verbos no garantiza la calidad del output.
+- **Positive**: the repo is harness-agnostic. SDD artifacts in `openspec/` are readable by any tool.
+- **Positive**: a developer can use a different harness from the rest of the team without breaking the repo flow.
+- **Negative**: `bootstrap.sh` §6 requires a `case` entry per known harness — not extensible without editing the file.
+- **Negative**: the quality of the SDD artifacts produced depends on the chosen harness; the verb contract does not guarantee output quality.

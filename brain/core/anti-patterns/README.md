@@ -1,55 +1,56 @@
-# Anti-patrones — Conocimiento append-only del equipo
+# Anti-patterns — Append-only team knowledge
 
-> Destino de promoción del **Momento 3** descrito en
+> Promotion destination for **Moment 3** described in
 > [`../methodology/consolidation-protocol.md`](../methodology/consolidation-protocol.md).
 
-## Qué vive acá
+## What lives here
 
-Antipatrones técnicos descubiertos durante el desarrollo que aplican a **múltiples
-microservicios** o que resuelven un bug crítico de compatibilidad (ej: serializaciones
-JSON de Jakarta). No micro-decisiones de una sola feature — esas viven en la sub-tarea
-correspondiente en `openspec/changes/[change-id]/tasks.md` hasta que se consoliden.
+Technical anti-patterns discovered during development that apply to **multiple
+microservices** or that resolve a critical compatibility bug (e.g.: Jakarta JSON
+serialization). Not micro-decisions for a single feature — those live in the
+corresponding sub-task in `openspec/changes/[change-id]/tasks.md` until they are
+consolidated.
 
-## Reglas
+## Rules
 
-1. **Append-only.** No se reescribe un archivo existente; se agrega uno nuevo o se suma
-   una entrada. El historial es el valor.
-2. **Un antipatrón por archivo.** Naming descriptivo: `serializacion-jakarta-json.md`,
+1. **Append-only.** An existing file is never rewritten; a new one is added or an
+   entry is appended. The history is the value.
+2. **One anti-pattern per file.** Descriptive naming: `serializacion-jakarta-json.md`,
    `guice-singleton-eager.md`.
-3. **Se promueve en el MR**, dentro del mismo commit que el código que lo descubrió —
-   antes de quitar el estado *Draft*.
-4. **Se indexa** con `npm run memory:index` cuando haga falta reproyectar el conocimiento
-   durable de `brain/` a engram.
+3. **Promoted in the MR**, within the same commit as the code that discovered it —
+   before removing *Draft* status.
+4. **Indexed** with `npm run memory:index` whenever the durable knowledge in `brain/`
+   needs to be re-projected into engram.
 
-## Formato sugerido por entrada
+## Suggested format per entry
 
 ```markdown
-# <Nombre del antipatrón>
+# <Anti-pattern name>
 
-- **Descubierto en:** ISSUE-<id> / <microservicio>
-- **Aplica a:** <qué módulos/servicios>
+- **Discovered in:** ISSUE-<id> / <microservice>
+- **Applies to:** <which modules/services>
 
-## Síntoma
-<Cómo se manifiesta — el error o comportamiento observable.>
+## Symptom
+<How it manifests — the observable error or behavior.>
 
-## Causa
-<Por qué pasa, técnicamente.>
+## Cause
+<Why it happens, technically.>
 
-## Solución / patrón correcto
-<Qué hacer en su lugar, con ejemplo mínimo.>
+## Solution / correct pattern
+<What to do instead, with a minimal example.>
 ```
 
-## Registrados
+## Registered
 
-Índice navegable — agregá una entrada acá al promover un nuevo anti-pattern
-(lo exige el check `brain:nav` en CI: ningún doc puede quedar huérfano).
+Navigable index — add an entry here when promoting a new anti-pattern
+(required by the `brain:nav` check in CI: no doc may be left orphaned).
 
-- [config.yaml mezcla secuencia y mapping (YAML inválido tolerado por el harness)](config-yaml-seq-map-mezclados.md)
-- [git diff no ve archivos untracked](git-diff-no-ve-untracked.md)
-- [IA escribe en `brain/` sin gate humano](ia-escribe-brain-sin-gate.md)
-- [IA que promueve sus propios artefactos](ia-promueve-sus-propios-artefactos.md)
-- [Instaladores auto-actualizantes no son inocuos](instaladores-autoactualizantes-no-inocuos.md)
+- [config.yaml mixes sequence and mapping (invalid YAML tolerated by the harness)](config-yaml-seq-map-mezclados.md)
+- [git diff does not see untracked files](git-diff-no-ve-untracked.md)
+- [AI writes to `brain/` without a human gate](ia-escribe-brain-sin-gate.md)
+- [AI that promotes its own artifacts](ia-promueve-sus-propios-artefactos.md)
+- [Self-updating installers are not innocuous](instaladores-autoactualizantes-no-inocuos.md)
 
-> Solo anti-patrones genéricos del harness. Los específicos del proyecto (stack, infra,
-> dominio) los indexa el proyecto consumidor por separado — `core/` no referencia `project/`,
-> para poder extraerse de forma autónoma.
+> Only generic harness anti-patterns. Project-specific ones (stack, infra,
+> domain) are indexed by the consuming project separately — `core/` does not reference `project/`,
+> so it can be extracted autonomously.

@@ -1,32 +1,32 @@
-# ADR-0003 — Split core/project y Self-Hosting
+# ADR-0003 — core/project Split and Self-Hosting
 
-**Estado**: Accepted  
-**Fecha**: 2026-06-26
+**Status**: Accepted  
+**Date**: 2026-06-26
 
-## Contexto
+## Context
 
-brain empezó como documentación interna de un proyecto concreto. El sistema maduro tiene dos clases de contenido con ciclos de vida completamente distintos:
+brain started as internal documentation for a specific project. The mature system has two classes of content with completely different lifecycles:
 
-- **Genérico**: aplica a cualquier proyecto que adopte brain (metodología, adapters, motor de check-refs, harness-contract).
-- **Específico del proyecto**: ADRs, dominio, reglas de negocio propias.
+- **Generic**: applies to any project that adopts brain (methodology, adapters, check-refs engine, harness-contract).
+- **Project-specific**: ADRs, domain knowledge, custom business rules.
 
-Mezclarlos impide extraer el sistema genérico como producto reusable.
+Mixing them prevents extracting the generic system as a reusable product.
 
-Además, brain es el tipo de sistema que documenta su propia construcción — tiene sentido que sea self-hosting: que use su propio sistema para evolucionar.
+Additionally, brain is the type of system that documents its own construction — it makes sense for it to be self-hosting: using its own system to evolve itself.
 
-## Decisión
+## Decision
 
-El directorio `brain/` se divide en dos:
+The `brain/` directory is split into two:
 
-- `brain/core/`: el producto genérico. **Read-only para el consumidor.** Contiene metodología genérica, anti-patterns genéricos y el harness-contract. Las mejoras a core van upstream primero (ver `brain/core/methodology/consolidation-protocol.md`). core **jamás** referencia `brain/project/`.
+- `brain/core/`: the generic product. **Read-only for the consumer.** Contains generic methodology, generic anti-patterns, and the harness-contract. Improvements to core go upstream first (see `brain/core/methodology/consolidation-protocol.md`). core **never** references `brain/project/`.
 
-- `brain/project/`: evolución propia del proyecto consumidor. ADRs, dominio, anti-patterns específicos. En el caso del repo `brain` mismo, contiene los ADRs del propio brain.
+- `brain/project/`: the consuming project's own evolution. ADRs, domain knowledge, specific anti-patterns. In the case of the `brain` repo itself, it contains brain's own ADRs.
 
-brain es self-hosting: el repo `github.com/csrinaldi/brain` usa brain para documentar y evolucionar brain. Sus propios ADRs viven en `brain/project/decisions/`. Su propio SDD usa `openspec/`. Esto es dogfooding total.
+brain is self-hosting: the `github.com/csrinaldi/brain` repo uses brain to document and evolve brain. Its own ADRs live in `brain/project/decisions/`. Its own SDD uses `openspec/`. This is total dogfooding.
 
-## Consecuencias
+## Consequences
 
-- **Positivo**: cualquier proyecto puede adoptar brain copiando `brain/core/` (o instalándolo vía npm — ver ADR-0006).
-- **Positivo**: la numeración de ADRs es local a cada proyecto (brain empieza en adr-0001, el consumidor empieza en adr-0001 — sin colisión).
-- **Negativo**: core y project deben mantenerse separados activamente. El invariante "core no referencia project" se valida en CI.
-- **Negativo**: las mejoras genéricas requieren un paso extra (upstream-first) antes de llegar al proyecto consumidor.
+- **Positive**: any project can adopt brain by copying `brain/core/` (or installing it via npm — see ADR-0006).
+- **Positive**: ADR numbering is local to each project (brain starts at adr-0001, the consumer starts at adr-0001 — no collision).
+- **Negative**: core and project must be actively kept separate. The "core does not reference project" invariant is validated in CI.
+- **Negative**: generic improvements require an extra step (upstream-first) before reaching the consuming project.

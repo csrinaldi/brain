@@ -1,75 +1,75 @@
-# Autoridades de los agentes IA
+# AI Agent Authorities
 
 > **status:** current | **last-reviewed:** 2026-06-24 | **owner:** @crinaldi
 
-> **Propósito:** define qué puede hacer un agente autónomamente, qué requiere
-> confirmación humana y qué está prohibido. Companion de `consolidation-protocol.md`
-> y `anti-patterns/ia-escribe-brain-sin-gate.md`.
+> **Purpose:** defines what an agent can do autonomously, what requires
+> human confirmation, and what is prohibited. Companion to `consolidation-protocol.md`
+> and `anti-patterns/ia-escribe-brain-sin-gate.md`.
 >
-> **Este documento es de autoría humana.** Los cambios a las tiers requieren MR
-> con revisión humana — están cubiertos por CODEOWNERS.
+> **This document is human-authored.** Changes to tiers require an MR
+> with human review — they are covered by CODEOWNERS.
 
 ---
 
-## Tiers de autoridad
+## Authority tiers
 
-### Tier 1 — Autónomo
+### Tier 1 — Autonomous
 
-El agente puede ejecutar sin pedir permiso:
+The agent may execute without asking for permission:
 
-- Leer cualquier archivo del repo (`brain/`, `openspec/`, código, scripts)
-- Crear/modificar archivos en `openspec/changes/**` (artefactos SDD en vuelo)
-- Crear/modificar archivos en `.engram/**` (memoria viva)
-- Escribir en `scratch/{agent-id}.md` dentro de un change activo
-- Correr `npm run repo:check`, `npm run backend:build`, `npm run change:verify`
-- Crear issues en GitLab (`/gitlab-issue`)
-- Proponer commits para revisión humana (pero no pushear ni mergear sin confirmación)
-- Guardar observaciones en Engram (`mem_save`, `mem_session_summary`)
-- Refrescar el skill registry (`gentle-ai skill-registry refresh`)
+- Read any file in the repo (`brain/`, `openspec/`, code, scripts)
+- Create/modify files in `openspec/changes/**` (in-flight SDD artifacts)
+- Create/modify files in `.engram/**` (live memory)
+- Write to `scratch/{agent-id}.md` within an active change
+- Run `npm run repo:check`, `npm run backend:build`, `npm run change:verify`
+- Create issues in GitLab (`/gitlab-issue`)
+- Propose commits for human review (but not push or merge without confirmation)
+- Save observations in Engram (`mem_save`, `mem_session_summary`)
+- Refresh the skill registry (`gentle-ai skill-registry refresh`)
 
-### Tier 2 — Confirmar antes de ejecutar
+### Tier 2 — Confirm before executing
 
-El agente propone y espera aprobación explícita del humano:
+The agent proposes and waits for explicit human approval:
 
-- **Push a cualquier rama** — el humano aprueba cada push
-- **Crear o mergear un MR** — el humano revisa el MR antes de mergear
-- **Modificar archivos en `brain/`** — el agente redacta el borrador en
-  `openspec/changes/{iid}/brain-drafts/`; el humano lo mueve a `brain/`
-- **Modificar `.gitlab-ci.yml`, `settings.xml`, `CODEOWNERS`** — cambios de
-  infraestructura que afectan a todo el equipo
-- **Borrar ramas o archivos commiteados** — acciones destructivas irreversibles
-- **Resolver conflictos semánticos de tipo `architecture`/`decision`** en Engram
-  (ver `consolidation-protocol.md §4`)
-- **Deploy al Package Registry** (`npm run backend:deploy`) — afecta artefactos
-  compartidos por todos los consumidores
+- **Push to any branch** — the human approves each push
+- **Create or merge an MR** — the human reviews the MR before merging
+- **Modify files in `brain/`** — the agent drafts the artifact in
+  `openspec/changes/{iid}/brain-drafts/`; the human moves it to `brain/`
+- **Modify `.gitlab-ci.yml`, `settings.xml`, `CODEOWNERS`** — infrastructure changes
+  that affect the whole team
+- **Delete branches or committed files** — irreversible destructive actions
+- **Resolve semantic conflicts of type `architecture`/`decision`** in Engram
+  (see `consolidation-protocol.md §4`)
+- **Deploy to the Package Registry** (`npm run backend:deploy`) — affects artifacts
+  shared by all consumers
 
-### Tier 3 — Prohibido
+### Tier 3 — Prohibited
 
-El agente nunca debe hacer esto, incluso si se lo piden explícitamente:
+The agent must never do this, even if explicitly asked:
 
-- Commitear directamente en `brain/decisions/`, `brain/anti-patterns/`,
-  `brain/domain/` o `brain/methodology/`
-- Aprobar o mergear su propio MR
-- Modificar el historial de git (`--force`, `--amend` de commits publicados,
-  `rebase` de ramas que otros usan)
-- Añadir atribución de IA en commits (`Co-Authored-By: Claude...`)
-- Publicar JARs al Package Registry sin instrucción explícita del humano
-- Escalar decisiones a otros agentes sin conocimiento del humano
-
----
-
-## Regla de escalada
-
-Si el agente no tiene claro a qué tier pertenece una acción: **pausar y preguntar**.
-La duda sobre el tier ya es motivo suficiente para escalar al humano.
+- Commit directly to `brain/decisions/`, `brain/anti-patterns/`,
+  `brain/domain/`, or `brain/methodology/`
+- Approve or merge its own MR
+- Modify git history (`--force`, `--amend` of published commits,
+  `rebase` of branches others use)
+- Add AI attribution in commits (`Co-Authored-By: Claude...`)
+- Publish JARs to the Package Registry without explicit human instruction
+- Escalate decisions to other agents without the human's knowledge
 
 ---
 
-## Revisión
+## Escalation rule
 
-Este documento debe revisarse cuando:
-- Se agrega un nuevo tipo de herramienta o capacidad al harness
-- Una acción del Tier 2 demuestra ser rutinaria y de bajo riesgo (candidata a Tier 1)
-- Una acción del Tier 1 produce un incidente (candidata a Tier 2 o 3)
+If the agent is unclear which tier an action belongs to: **pause and ask**.
+Doubt about the tier is already sufficient reason to escalate to the human.
 
-Los cambios a este documento requieren MR con revisión de `@crinaldi`.
+---
+
+## Review
+
+This document must be reviewed when:
+- A new tool type or capability is added to the harness
+- A Tier 2 action proves to be routine and low-risk (candidate for Tier 1)
+- A Tier 1 action produces an incident (candidate for Tier 2 or 3)
+
+Changes to this document require an MR reviewed by `@crinaldi`.

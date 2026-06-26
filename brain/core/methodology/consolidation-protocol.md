@@ -1,145 +1,145 @@
-# Protocolo de Consolidación de Conocimiento (Momento 3)
+# Knowledge Consolidation Protocol (Moment 3)
 
 > **status:** current | **last-reviewed:** 2026-06-24 | **owner:** @crinaldi
 
-> **Propósito:** Forzar la escalabilidad de las micro-decisiones de diseño, trucos técnicos o antipatrones descubiertos en el chat de un branch hacia el cerebro global con costo de captura cero para el equipo chico.
+> **Purpose:** Force design micro-decisions, technical tricks, or anti-patterns discovered in a branch chat to scale up into the global brain at zero capture cost for the small team.
 
-## 1. Captura en Caliente (Durante el Chat con el Agente)
-- El programador humano o el agente orquestador principal debe volcar los acuerdos técnicos de la sesión directamente en la sección `## Micro-decisiones en caliente` del `tasks.md` del change correspondiente en `./openspec/changes/[change-id]/`. No se permiten micro-decisiones flotantes en el historial del chat.
-- Si el cambio directo no requiere SDD/OpenSpec, las micro-decisiones que deban persistir se documentan en el commit/MR y se promueven a `brain/` solo si aplican a más de un módulo, resuelven un riesgo recurrente o cambian una regla de trabajo.
+## 1. Hot Capture (During the Agent Chat)
+- The human programmer or the main orchestrator agent must dump session technical agreements directly into the `## Micro-decisiones en caliente` section of the `tasks.md` for the corresponding change in `./openspec/changes/[change-id]/`. No floating micro-decisions are allowed in the chat history.
+- If the direct change does not require SDD/OpenSpec, micro-decisions that must persist are documented in the commit/MR and promoted to `brain/` only if they apply to more than one module, resolve a recurring risk, or change a working rule.
 
-### Escritura concurrente — patrón scratch-per-agent
+### Concurrent writes — scratch-per-agent pattern
 
-Cuando múltiples agentes trabajan subtareas en paralelo dentro del mismo change, **no deben escribir directamente en `tasks.md`**. La escritura concurrente sobre un archivo mutable compartido produce conflictos y pérdida silenciosa de contexto.
+When multiple agents work on subtasks in parallel within the same change, **they must not write directly to `tasks.md`**. Concurrent writes to a shared mutable file produce conflicts and silent context loss.
 
-Patrón obligatorio para cambios con sub-agentes paralelos:
+Mandatory pattern for changes with parallel sub-agents:
 
-- Cada agente escribe su contexto local en `openspec/changes/{iid}/scratch/{agent-id}.md` (ignorado por git durante el vuelo del change).
-- El orquestador consolida los scratch files en `tasks.md` al cerrar cada batch.
-- `openspec/changes/{iid}/scratch/` está en `.gitignore` — no se commitea ni persiste.
-- **El orquestador es el único writer de `tasks.md`.** Los sub-agentes solo escriben su propio scratch file.
+- Each agent writes its local context to `openspec/changes/{iid}/scratch/{agent-id}.md` (ignored by git during the change flight).
+- The orchestrator consolidates the scratch files into `tasks.md` when closing each batch.
+- `openspec/changes/{iid}/scratch/` is in `.gitignore` — it is not committed or persisted.
+- **The orchestrator is the only writer of `tasks.md`.** Sub-agents only write their own scratch file.
 
-## 1b. Regla de mantenimiento de HOME.md
+## 1b. HOME.md maintenance rule
 
-Cada vez que se crea un nuevo ADR o se agrega un archivo a `brain/methodology/` o
-`brain/anti-patterns/`, el MR correspondiente **debe** actualizar `brain/HOME.md` para
-incluir el nuevo enlace en la sección correspondiente. Sin esta actualización el MR
-no está completo.
+Every time a new ADR is created or a file is added to `brain/methodology/` or
+`brain/anti-patterns/`, the corresponding MR **must** update `brain/HOME.md` to
+include the new link in the corresponding section. Without this update the MR
+is not complete.
 
-## 2. Promoción en el Merge Request (GitLab)
+## 2. Promotion in the Merge Request (GitLab)
 
-> **Hard Rule — Gate humano obligatorio:**
-> Ningún agente de IA puede commitear directamente a `brain/decisions/`,
-> `brain/anti-patterns/`, `brain/domain/` ni `brain/methodology/`.
-> La promoción funciona así:
-> 1. El agente redacta el borrador del artefacto (ADR, anti-pattern, entrada de glosario)
->    como archivo bajo `openspec/changes/{iid}/brain-drafts/`.
-> 2. El humano revisa el borrador en el MR, lo edita si corresponde, y lo mueve a `brain/`
->    en un commit de su autoría.
-> 3. La descripción del MR documenta qué se promovió y por qué.
+> **Hard Rule — Mandatory human gate:**
+> No AI agent may commit directly to `brain/decisions/`,
+> `brain/anti-patterns/`, `brain/domain/`, or `brain/methodology/`.
+> Promotion works as follows:
+> 1. The agent drafts the artifact (ADR, anti-pattern, glossary entry)
+>    as a file under `openspec/changes/{iid}/brain-drafts/`.
+> 2. The human reviews the draft in the MR, edits it if needed, and moves it to `brain/`
+>    in a commit authored by them.
+> 3. The MR description documents what was promoted and why.
 >
-> Ningún agente promueve sus propios artefactos a `brain/`. Esa firma es humana.
-> Ver anti-pattern: `brain/anti-patterns/ia-escribe-brain-sin-gate.md`.
+> No agent promotes its own artifacts to `brain/`. That signature is human.
+> See anti-pattern: `brain/anti-patterns/ia-escribe-brain-sin-gate.md`.
 
-- Antes de quitar el estado *Draft* del MR en tu GitLab self-hosted, la skill de cierre de la organización procesará de forma analítica las micro-decisiones acumuladas en el branch.
-- Si el aprendizaje aplica a múltiples microservicios o soluciona un bug crítico de compatibilidad (ej: serializaciones JSON de Jakarta), el agente debe redactar el borrador en `openspec/changes/{iid}/brain-drafts/` para que el humano lo revise y promueva.
+- Before removing the *Draft* status from the MR in your self-hosted GitLab, the organization's closing skill will analytically process the micro-decisions accumulated in the branch.
+- If the learning applies to multiple microservices or resolves a critical compatibility bug (e.g., Jakarta JSON serializations), the agent must draft the artifact in `openspec/changes/{iid}/brain-drafts/` for the human to review and promote.
 
-## 3. Mapa de zonas — quién puede escribir qué
+## 3. Zone map — who can write what
 
-| Zona | Quién escribe | Operaciones permitidas | Enforcement |
+| Zone | Who writes | Allowed operations | Enforcement |
 |------|---------------|----------------------|-------------|
-| `brain/**` | Humano únicamente | create, update, delete | CODEOWNERS + gate humano en MR |
-| `openspec/changes/**` | Agente o humano | create, update | Ninguno — zona de vuelo |
-| `openspec/changes/*/brain-drafts/**` | Agente (borrador) | create, update | Ninguno — zona de propuesta |
-| `openspec/changes/archive/**` | Agente o humano | create (al archivar) | Ninguno |
-| `openspec/specs/**` | Agente o humano | create, update | `npm run repo:check` valida referencias |
-| `.engram/**` | Agente o humano | create, update | Merge driver content-addressed |
-| `scripts/**`, `package.json` | Agente o humano | create, update, delete | `npm run repo:check` |
-| `.gitlab-ci.yml`, `settings.xml` | Humano recomendado | update | Requiere issue + MR (no mecánico) |
+| `brain/**` | Human only | create, update, delete | CODEOWNERS + human gate in MR |
+| `openspec/changes/**` | Agent or human | create, update | None — flight zone |
+| `openspec/changes/*/brain-drafts/**` | Agent (draft) | create, update | None — proposal zone |
+| `openspec/changes/archive/**` | Agent or human | create (on archive) | None |
+| `openspec/specs/**` | Agent or human | create, update | `npm run repo:check` validates references |
+| `.engram/**` | Agent or human | create, update | Merge driver content-addressed |
+| `scripts/**`, `package.json` | Agent or human | create, update, delete | `npm run repo:check` |
+| `.gitlab-ci.yml`, `settings.xml` | Human recommended | update | Requires issue + MR (not mechanical) |
 
-**Regla de oro:** si el destino es `brain/`, la firma es humana. Todo lo demás puede
-tener origen en agente, siempre con issue + MR como unidad de entrega.
+**Golden rule:** if the destination is `brain/`, the signature is human. Everything else may
+originate from an agent, always with issue + MR as the delivery unit.
 
-## 4. Protocolo de conflictos semánticos en Engram
+## 4. Semantic conflict protocol in Engram
 
-Engram puede acumular observaciones contradictorias entre sesiones — por ejemplo,
-una decisión "Spring prohibido" coexistiendo con "Spring Boot como destino" antes de
-que ADR-0007 se formalizara.
+Engram may accumulate contradictory observations across sessions — for example,
+a "Spring prohibited" decision coexisting with "Spring Boot as target" before
+ADR-0007 was formalized.
 
-Este protocolo no depende de APIs propietarias del harness (scores de confianza,
-`judgment_id`, `mem_judge`). La autoridad se determina por **tipo de observación**,
-**autoría declarada**, y **supersesión explícita en el contenido** — todo ello
-legible sin el harness activo.
+This protocol does not depend on proprietary harness APIs (confidence scores,
+`judgment_id`, `mem_judge`). Authority is determined by **observation type**,
+**declared authorship**, and **explicit supersession in the content** — all of it
+readable without the harness active.
 
-### Convención de provenance en observaciones
+### Provenance convention in observations
 
-Toda observación guardada en Engram debe declarar en su contenido:
+Every observation saved in Engram must declare in its content:
 
-| Campo | Formato | Ejemplo |
+| Field | Format | Example |
 |-------|---------|---------|
-| **Actor** | Primera línea del body | `**Actor:** @crinaldi (humano)` / `**Actor:** claude-sonnet-4-6 (agente)` |
-| **Fuente** | Referencia a issue/MR si aplica | `**Fuente:** issue #78 / MR !72` |
-| **Supersede** | Solo si reemplaza algo anterior | `**Supersede:** observación anterior "Spring prohibido"` |
+| **Actor** | First line of body | `**Actor:** @crinaldi (humano)` / `**Actor:** claude-sonnet-4-6 (agente)` |
+| **Source** | Reference to issue/MR if applicable | `**Fuente:** issue #78 / MR !72` |
+| **Supersede** | Only if it replaces something previous | `**Supersede:** observación anterior "Spring prohibido"` |
 
-Esta convención vive en el contenido — es portable a cualquier harness.
+This convention lives in the content — it is portable to any harness.
 
-### Cómo detectar conflictos
+### How to detect conflicts
 
 ```bash
 # Listar observaciones candidatas a revisión
 mem_review --action list --project <your-project>
 ```
 
-Las observaciones con status `needs_review` son candidatas. Si `mem_review` no está
-disponible, buscar observaciones con tipo `architecture` o `decision` cuyo contenido
-contradiga ADRs activos en `brain/decisions/`.
+Observations with `needs_review` status are candidates. If `mem_review` is not
+available, look for observations with type `architecture` or `decision` whose content
+contradicts active ADRs in `brain/decisions/`.
 
-### Criterios de resolución
+### Resolution criteria
 
-| Condición | Acción |
+| Condition | Action |
 |-----------|--------|
-| Tipo `architecture`, `decision` o `policy` en conflicto | **El humano decide** — el agente presenta ambas versiones y espera confirmación explícita |
-| Una observación declara `**Supersede:**` apuntando a la otra | La anterior se marca `needs_review`; el agente continúa sin escalar |
-| Tipo `pattern`, `bugfix`, `config` o `discovery` en conflicto | El agente resuelve por recencia (la más nueva gana) salvo contradicción obvia |
-| Una observación es de autoría humana y la conflictiva de agente, mismo tipo | La del humano tiene precedencia |
+| Type `architecture`, `decision`, or `policy` in conflict | **The human decides** — the agent presents both versions and waits for explicit confirmation |
+| One observation declares `**Supersede:**` pointing to the other | The previous one is marked `needs_review`; the agent continues without escalating |
+| Type `pattern`, `bugfix`, `config`, or `discovery` in conflict | The agent resolves by recency (newest wins) unless there is an obvious contradiction |
+| One observation is human-authored and the conflicting one is agent-authored, same type | The human one takes precedence |
 
-### Autoridad de resolución
+### Resolution authority
 
-El humano es la autoridad final sobre conflictos de tipo `architecture`, `decision` y
-`policy`. La resolución se documenta con:
+The human is the final authority over conflicts of type `architecture`, `decision`, and
+`policy`. The resolution is documented with:
 
-1. Una declaración explícita `**Supersede:**` en la observación ganadora
-2. Si el conflicto cambia una regla durable: ADR nuevo o commit de corrección en `brain/`
-3. Si es contexto desactualizado: `mem_review --action mark_reviewed` después de
-   confirmación humana explícita — nunca automáticamente
+1. An explicit `**Supersede:**` declaration in the winning observation
+2. If the conflict changes a durable rule: new ADR or correction commit in `brain/`
+3. If it is stale context: `mem_review --action mark_reviewed` after
+   explicit human confirmation — never automatically
 
-## 5. Sincronización de la Memoria (Engram git-based)
+## 5. Memory Synchronization (Engram git-based)
 
-`npm run day:start` cierra el ciclo completo al arrancar la jornada:
-1. **import** (`engram sync --import`) — trae `.engram/` del repo → `~/.engram` local
-2. **index** (`brain-to-engram.mjs`) — reproyecta `brain/` → `~/.engram`
-3. **export** (`engram sync --export`) — publica `~/.engram` → `.engram/` del repo
+`npm run day:start` closes the full cycle at the start of the workday:
+1. **import** (`engram sync --import`) — pulls `.engram/` from the repo → local `~/.engram`
+2. **index** (`brain-to-engram.mjs`) — reprojects `brain/` → `~/.engram`
+3. **export** (`engram sync --export`) — publishes `~/.engram` → `.engram/` in the repo
 
-El export del paso 3 captura la memoria acumulada de la sesión anterior y la reproyección de `brain/`. La memoria generada durante la jornada activa (llamadas a `mem_save` en sesión) se exporta con el próximo `day:start` o manualmente:
+The export in step 3 captures the memory accumulated from the previous session and the reprojection of `brain/`. Memory generated during the active workday (in-session `mem_save` calls) is exported with the next `day:start` or manually:
 
 ```bash
 npm run memory:share   # export explícito en cualquier momento
 ```
 
-Antes de pushear el branch, confirmar que `.engram/` refleja el estado actual:
+Before pushing the branch, confirm that `.engram/` reflects the current state:
 
 ```bash
 npm run memory:share && git add .engram/ && git status
 ```
 
-A partir de #81, un **pre-push hook** (`scripts/hooks/pre-push`) automatiza esa
-confirmación: corre `engram sync --export` antes de cada push y aborta si `.engram/`
-quedó sin commitear, indicando cómo materializarla. Se auto-instala vía `core.hooksPath`
-(script `prepare` en `npm install` + self-heal en `day:start`), así que no depende de
-re-correr `env:init`. El export es client-side por diseño — solo ocurre en la máquina del
-dev; el hook maximiza su alcance, no lo vuelve inbypasseable (`git push --no-verify` sigue
-siendo escape de emergencia).
+From #81 onwards, a **pre-push hook** (`scripts/hooks/pre-push`) automates that
+check: it runs `engram sync --export` before every push and aborts if `.engram/`
+was left uncommitted, indicating how to materialize it. It auto-installs via `core.hooksPath`
+(the `prepare` script in `npm install` + self-heal in `day:start`), so it does not depend on
+re-running `env:init`. The export is client-side by design — it only happens on the
+dev's machine; the hook maximizes its reach but does not make it unbypassable (`git push --no-verify` remains
+the emergency escape).
 
-Una vez mergeado el MR, el equipo asimila la memoria con `npm run memory:pull` o en el próximo `day:start`.
+Once the MR is merged, the team absorbs the memory with `npm run memory:pull` or on the next `day:start`.
 
-La capa **durable** (decisiones, anti-patrones) se promueve a `brain/` en Markdown, que es la fuente de verdad; engram es la capa **viva** compartida. Ver `../decisions/adr-0003-memoria-equipo-git-based.md`.
+The **durable** layer (decisions, anti-patterns) is promoted to `brain/` in Markdown, which is the source of truth; engram is the shared **live** layer. See `../decisions/adr-0003-memoria-equipo-git-based.md`.

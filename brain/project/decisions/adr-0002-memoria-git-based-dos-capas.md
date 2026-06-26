@@ -1,34 +1,34 @@
-# ADR-0002 — Memoria de Equipo Git-Based en Dos Capas
+# ADR-0002 — Two-Layer Git-Based Team Memory
 
-**Estado**: Accepted  
-**Fecha**: 2026-06-26
+**Status**: Accepted  
+**Date**: 2026-06-26
 
-## Contexto
+## Context
 
-La memoria de equipo necesita dos propiedades aparentemente contradictorias:
+Team memory needs two seemingly contradictory properties:
 
-- **Viva**: accesible en tiempo real por los agentes IA durante una sesión.
-- **Durable**: recuperable sin la implementación (sin engram, sin engram CLI, sin internet), solo con `git clone`.
+- **Live**: accessible in real time by AI agents during a session.
+- **Durable**: recoverable without the implementation (without engram, without engram CLI, without internet), using only `git clone`.
 
-Un único mecanismo no puede satisfacer ambas. Engram (la implementación default) es rápido para búsqueda semántica pero escribe a un directorio local que no es un artefacto git estándar.
+A single mechanism cannot satisfy both. Engram (the default implementation) is fast for semantic search but writes to a local directory that is not a standard git artifact.
 
-## Decisión
+## Decision
 
-La memoria opera en dos capas:
+Memory operates in two layers:
 
-1. **`.memory/` (durable)**: directorio versionado en git. Contiene chunks content-addressed (`.memory/chunks/`) y un manifiesto (`.memory/manifest.json`). Es la fuente de verdad recuperable. El merge driver (`scripts/merge-engram-manifest.mjs`) resuelve conflictos en el manifiesto.
+1. **`.memory/` (durable)**: directory versioned in git. Contains content-addressed chunks (`.memory/chunks/`) and a manifest (`.memory/manifest.json`). This is the recoverable source of truth. The merge driver (`scripts/merge-engram-manifest.mjs`) resolves conflicts in the manifest.
 
-2. **Backend de memoria (viva)**: implementación elegida por `MEMORY_BACKEND`. Engram indexa `.memory/` en su store local para búsqueda semántica. El symlink `.engram → .memory` (creado por `scripts/memory/backends/engram.mjs setup`) es necesario porque el CLI de engram no tiene flag de directorio configurable.
+2. **Memory backend (live)**: implementation chosen by `MEMORY_BACKEND`. Engram indexes `.memory/` into its local store for semantic search. The symlink `.engram → .memory` (created by `scripts/memory/backends/engram.mjs setup`) is required because the engram CLI has no configurable directory flag.
 
-El flujo canónico:
-- `memory:pull` → importa `.memory/` al backend activo.
-- `memory:index` → reproyecta `brain/` durable al backend activo.
-- `memory:share` → materializa el backend activo a `.memory/` antes del push.
-- El hook `pre-push` ejecuta `memory:share` automáticamente.
+The canonical flow:
+- `memory:pull` → imports `.memory/` into the active backend.
+- `memory:index` → reprojects the durable `brain/` into the active backend.
+- `memory:share` → materializes the active backend to `.memory/` before push.
+- The `pre-push` hook runs `memory:share` automatically.
 
-## Consecuencias
+## Consequences
 
-- **Positivo**: el conocimiento del equipo sobrevive a cualquier rotación de herramientas.
-- **Positivo**: `git log .memory/` muestra la historia de la memoria.
-- **Negativo**: el manifiesto es un punto de conflicto en merges concurrentes — el merge driver es obligatorio.
-- **Negativo**: el symlink `.engram → .memory` es una solución de workaround al límite de engram CLI; si engram implementa `--dir`, el symlink se elimina.
+- **Positive**: team knowledge survives any tool rotation.
+- **Positive**: `git log .memory/` shows the memory history.
+- **Negative**: the manifest is a conflict point in concurrent merges — the merge driver is mandatory.
+- **Negative**: the symlink `.engram → .memory` is a workaround for the engram CLI's limitation; if engram implements `--dir`, the symlink can be removed.

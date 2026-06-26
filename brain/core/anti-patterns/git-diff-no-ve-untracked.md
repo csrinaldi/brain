@@ -1,33 +1,33 @@
-# git diff no ve archivos untracked
+# git diff does not see untracked files
 
-- **Descubierto en:** ISSUE-13 / macro `change:verify`
-- **Aplica a:** toda automatización que decida algo a partir del changeset (validación selectiva, generación de MRs, clasificación de scope, CI)
+- **Discovered in:** ISSUE-13 / macro `change:verify`
+- **Applies to:** any automation that makes decisions based on the changeset (selective validation, MR generation, scope classification, CI)
 
-## Síntoma
+## Symptom
 
-Una validación construida sobre `git diff --name-only` (rama vs main + staged +
-working tree) clasifica el cambio como "solo docs" cuando el cambio incluye un script
-NUEVO. El archivo más importante del changeset — el que se está creando — es
-invisible para la validación. En el caso real: `verify-change.mjs` no se detectaba a
-sí mismo en su propio plan de validación.
+A validation built on `git diff --name-only` (branch vs main + staged +
+working tree) classifies the change as "docs only" when the change includes a
+NEW script. The most important file in the changeset — the one being created — is
+invisible to the validation. In the real case: `verify-change.mjs` did not detect
+itself in its own validation plan.
 
-## Causa
+## Cause
 
-`git diff` (en todas sus variantes: contra base, `--cached`, working tree) solo
-compara contenido CONOCIDO por git. Un archivo nunca agregado al índice no participa
-de ningún diff: no es una "modificación" de nada. La intuición "diff = todo lo que
-cambió" es falsa para lo nuevo sin trackear.
+`git diff` (in all its variants: against base, `--cached`, working tree) only
+compares content KNOWN to git. A file that has never been added to the index does not
+participate in any diff: it is not a "modification" of anything. The intuition
+"diff = everything that changed" is false for new untracked content.
 
-## Solución / patrón correcto
+## Solution / correct pattern
 
-Toda recolección de changeset debe sumar explícitamente los untracked:
+Every changeset collection must explicitly include untracked files:
 
 ```js
-collect(`git diff --name-only ${base}...HEAD`);   // commits de la rama
+collect(`git diff --name-only ${base}...HEAD`);   // branch commits
 collect('git diff --name-only --cached');          // staged
 collect('git diff --name-only');                   // working tree
-collect('git ls-files --others --exclude-standard'); // untracked: git diff NO los lista
+collect('git ls-files --others --exclude-standard'); // untracked: git diff does NOT list them
 ```
 
-Y el test de humo correcto es dogfooding: correr la automatización sobre el cambio
-que la introduce — si no se ve a sí misma, está ciega.
+The correct smoke test is dogfooding: run the automation against the change that
+introduces it — if it cannot see itself, it is blind.

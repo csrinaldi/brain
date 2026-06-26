@@ -1,33 +1,33 @@
-# Proposal — Installer versionado de brain (Slice 6)
+# Proposal — Versioned brain installer (Slice 6)
 
-> **Estado:** Borrador para implementar · **Implementa:** [ADR-0006](../../../brain/project/decisions/adr-0006-distribucion-installer-versionado.md)
+> **Status:** Draft for implementation · **Implements:** [ADR-0006](../../../brain/project/decisions/adr-0006-distribucion-installer-versionado.md)
 
-## Contexto
+## Context
 
-`brain` ya está extraí­do como repo standalone (este repo). Falta el mecanismo por el cual un proyecto consumidor **instala** y **actualiza** el core genérico sin tocar lo suyo. La arquitectura completa está en los ADRs de este repo (`brain/project/decisions/adr-0001..0007`) — **leelos primero**, especialmente ADR-0003 (split core/project + self-hosting) y ADR-0006 (distribución).
+`brain` is already extracted as a standalone repo (this repo). What is missing is the mechanism by which a consumer project **installs** and **updates** the generic core without touching its own files. The full architecture is in the ADRs of this repo (`brain/project/decisions/adr-0001..0007`) — **read them first**, especially ADR-0003 (core/project split + self-hosting) and ADR-0006 (distribution).
 
-## Qué construir
+## What to build
 
-1. **`brain:upgrade`** — comando que instala/actualiza una versión del core en un proyecto consumidor:
-   - Mecanismo: `npm i -D github:csrinaldi/brain#<tag>` (o un script que fetchea el tag y copia los archivos gestionados al consumidor).
-   - **Regla de oro (ADR-0003/0006): core read-only en el consumidor.** El upgrade SOBREESCRIBE los paths gestionados y NUNCA toca los locales.
-2. **Manifiesto de paths gestionados** — define qué es upstream vs local:
-   - Gestionado (se sobreescribe): `brain/core/**`, `scripts/**` (harness), `.gitattributes`.
-   - Local (intocable): `brain/project/**`, `brain.config.json`, `.env`, `openspec/changes/**`, `.memory/**`.
-3. **Versionado por git tags** — `v0.1.0`, `v1.0.0`… Taggear el estado actual como primer release.
-4. **Migración de `brain.config.json`** — cuando una versión nueva agrega keys al schema, el upgrade las suma SIN pisar los valores del usuario (migraciones versionadas).
-5. **Check-and-notify en `day:start`** — detecta si hay versión nueva y AVISA (no auto-aplica — respeta `brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md`).
+1. **`brain:upgrade`** — command that installs/upgrades a version of the core in a consumer project:
+   - Mechanism: `npm i -D github:csrinaldi/brain#<tag>` (or a script that fetches the tag and copies the managed files to the consumer).
+   - **Golden rule (ADR-0003/0006): core is read-only in the consumer.** The upgrade OVERWRITES managed paths and NEVER touches local ones.
+2. **Managed-paths manifest** — defines what is upstream vs local:
+   - Managed (overwritten): `brain/core/**`, `scripts/**` (harness), `.gitattributes`.
+   - Local (untouchable): `brain/project/**`, `brain.config.json`, `.env`, `openspec/changes/**`, `.memory/**`.
+3. **Versioning via git tags** — `v0.1.0`, `v1.0.0`… Tag the current state as the first release.
+4. **`brain.config.json` migration** — when a new version adds keys to the schema, the upgrade adds them WITHOUT overwriting user values (versioned migrations).
+5. **Check-and-notify in `day:start`** — detects if a new version is available and NOTIFIES (does not auto-apply — respects `brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md`).
 
-## Fuera de scope (slices futuros)
+## Out of scope (future slices)
 
-- **Adapter de VCS (gh vs glab):** los scripts del harness hoy usan `glab` + API de GitLab. Este repo vive en GitHub, así que `ticket:start`/`tracker:board`/MR no funcionan acá todaví­a. El installer en sí­ es VCS-agnóstico (npm/git/file-copy), así que se puede construir igual. El adapter de VCS es otra historia.
-- **Adopción en el consumidor (catastro):** se hace del lado de plataforma-scit (otra sesión), una vez que este installer tenga un release.
+- **VCS adapter (gh vs glab):** the harness scripts currently use `glab` + GitLab API. This repo lives on GitHub, so `ticket:start`/`tracker:board`/MR do not work here yet. The installer itself is VCS-agnostic (npm/git/file-copy), so it can be built regardless. The VCS adapter is a separate story.
+- **Consumer adoption (catastro):** this is done on the platform-scit side (another session), once this installer has a release.
 
-## Criterios de aceptación
+## Acceptance criteria
 
-- [ ] `brain:upgrade` instala una versión (git tag) y copia solo los paths gestionados.
-- [ ] Los paths locales (`brain/project`, `brain.config.json`, `.env`) quedan intactos tras un upgrade (probado).
-- [ ] Migración de config: agregar una key nueva en una versión no pisa valores existentes (probado).
-- [ ] `day:start` detecta versión nueva y notifica sin auto-aplicar.
-- [ ] Primer release taggeado (ej. `v0.1.0`).
-- [ ] El propio repo brain se documenta: actualizar el README con cómo adoptar/actualizar.
+- [ ] `brain:upgrade` installs a version (git tag) and copies only the managed paths.
+- [ ] Local paths (`brain/project`, `brain.config.json`, `.env`) remain intact after an upgrade (tested).
+- [ ] Config migration: adding a new key in a version does not overwrite existing values (tested).
+- [ ] `day:start` detects a new version and notifies without auto-applying.
+- [ ] First release tagged (e.g. `v0.1.0`).
+- [ ] The brain repo itself is documented: update the README with how to adopt/update.
