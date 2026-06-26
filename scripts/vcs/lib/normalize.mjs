@@ -7,7 +7,7 @@
 
 // Canonical commit-status enum (GitLab style). Providers map their native enum
 // to one of these. `null` means "no status available".
-export const COMMIT_STATUS = ['success', 'failed', 'pending', 'canceled'];
+export const COMMIT_STATUS = ['success', 'failed', 'running', 'pending', 'canceled'];
 
 // GitHub check-run/commit-status values → canonical enum.
 const GITHUB_STATUS_MAP = {
@@ -19,7 +19,7 @@ const GITHUB_STATUS_MAP = {
   timed_out: 'failed',
   action_required: 'pending', // approval gate blocking the run — closest fit is pending (not 'failed')
   pending: 'pending',
-  in_progress: 'pending',
+  in_progress: 'running', // a check actively running — distinct from queued/pending
   queued: 'pending',
   neutral: null,
   skipped: null,
@@ -29,7 +29,7 @@ const GITHUB_STATUS_MAP = {
  * Normalizes a provider-native commit/check status to the canonical enum.
  * @param {'github'|'gitlab'} provider
  * @param {string|null|undefined} raw
- * @returns {'success'|'failed'|'pending'|'canceled'|null}
+ * @returns {'success'|'failed'|'running'|'pending'|'canceled'|null}
  */
 export function normalizeCommitStatus(provider, raw) {
   if (raw == null) return null;

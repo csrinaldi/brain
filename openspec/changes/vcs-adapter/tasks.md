@@ -12,9 +12,9 @@
 - [x] 1.7 Apply the migration to this repo's `brain.config.json` (`vcs.provider: github`).
 
 ## PR2 — Providers
-- [ ] 2.1 `gitlab.mjs`: implement the 10 verbs reproducing the current behavior (glab + API).
-- [ ] 2.2 `github.mjs`: implement the 10 verbs via `gh` (+ `project-resolve` no-op, `commit-status` mapping).
-- [ ] 2.3 Tests for each provider against the contract (normalization verified).
+- [x] 2.1 `gitlab.mjs`: implement the 10 verbs reproducing the current behavior (glab + API).
+- [x] 2.2 `github.mjs`: implement the 10 verbs via `gh` (+ `project-resolve` identity, `commit-status` mapping).
+- [x] 2.3 Tests for each provider against the contract (normalization verified) — `scripts/vcs/providers.test.mjs`.
 
 ## PR3 — Read-only callers
 - [ ] 3.1 Refactor `tracker-board.mjs` → dispatcher (`authCheck`, `whoami`, `projectResolve`, `issueList`).
