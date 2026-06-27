@@ -188,10 +188,13 @@ else
   warn "$I18N_BOOTSTRAP_AUTH_NOTOKEN"
 fi
 
-# --- 6. SDD implementation (replaceable harness, ADR-0002) --------------------
-# The harness is a per-developer choice, not hardcoded in the repo. Its init
-# configures the full ecosystem (for gentle-ai: skills, engram and gga), so it
-# runs BEFORE the memory sync.
+# --- 6. SDD implementation (replaceable harness, ADR-0012) --------------------
+# Harness-specific init is now delegated to scripts/harness/cli.mjs, which
+# dispatches to scripts/harness/backends/<SDD_HARNESS>.mjs. Adding a new
+# harness requires only a new backend module — no edits to this file.
+# Mirrors the memory (ADR-0004) and VCS (ADR-0008) adapter patterns.
+# Runs BEFORE the memory sync so the ecosystem (skills, engram, gga) is
+# ready when memory is imported.
 say "$I18N_BOOTSTRAP_SDD_SECTION"
 SDD_HARNESS="$(env_get SDD_HARNESS)"
 if [ -z "$SDD_HARNESS" ]; then
@@ -202,28 +205,8 @@ if [ -z "$SDD_HARNESS" ]; then
   env_set SDD_HARNESS "$SDD_HARNESS"
 fi
 ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_HARNESS")"
-case "$SDD_HARNESS" in
-  gentle-ai)
-    if ! command -v gentle-ai >/dev/null 2>&1; then
-      warn "$I18N_BOOTSTRAP_SDD_GENTLEAIMISSING"
-    elif gentle-ai doctor 2>/dev/null | grep -q 'state file OK'; then
-      ok "$I18N_BOOTSTRAP_SDD_ECOSYSTEMOK"
-    elif [ -t 0 ]; then
-      # interactive and self-updating: configures skills, engram and gga
-      gentle-ai install \
-        && ok "$I18N_BOOTSTRAP_SDD_ECOSYSTEMCONFIGURED" \
-        || warn "$I18N_BOOTSTRAP_SDD_ECOSYSTEMFAILED"
-    else
-      warn "$I18N_BOOTSTRAP_SDD_NOTTY"
-    fi
-    if command -v gentle-ai >/dev/null 2>&1; then
-      gentle-ai skill-registry refresh >/dev/null 2>&1 && ok "$I18N_BOOTSTRAP_SDD_REGISTRYOK" || warn "$I18N_BOOTSTRAP_SDD_REGISTRYFAILED"
-    fi
-    ;;
-  *)
-    warn "$(printf "$I18N_BOOTSTRAP_SDD_UNKNOWNHARNESS" "$SDD_HARNESS")"
-    ;;
-esac
+node scripts/harness/cli.mjs init \
+  || warn "$I18N_BOOTSTRAP_SDD_INITFAILED"
 
 # --- 7. Team memory (replaceable backend, ADR-0003) --------------------------
 # MEMORY_BACKEND mirrors the SDD_HARNESS pattern from §6: read from .env,

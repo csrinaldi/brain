@@ -1,0 +1,216 @@
+// scripts/harness/backends/gentle-ai.test.mjs — unit tests for the gentle-ai harness backend.
+//
+// Acceptance criteria:
+//   Ecosystem step (init):
+//     (a) gentle-ai absent → warn, return early, no crash.
+//     (b) gentle-ai present + doctor healthy → logs ok, does NOT call install.
+//     (c) gentle-ai present + doctor unhealthy + TTY → calls install.
+//     (d) gentle-ai present + doctor unhealthy + no TTY → warns no-TTY, no install.
+//     (e) registry refresh always attempted when gentle-ai present.
+//   SDD context step (init):
+//     (f) context found in engram → no "not found" notice.
+//     (g) context missing in engram → prints notice mentioning sdd-init or Init Guard.
+//     (h) project unresolvable → skips context check, no crash.
+//   Safety:
+//     (i) never throws when gentle-ai absent + doctor throws.
+//     (j) never throws when engram search throws.
+//     (k) never throws when registry refresh throws.
+//
+// All tests use injectable seams — no real subprocess or engram call is made.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+// RED: import fails until gentle-ai.mjs exports init.
+import { init } from './gentle-ai.mjs';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a set of injectable deps where all tools are present and healthy,
+ * project is resolvable, context is found, no TTY.
+ * Individual overrides let tests probe one behaviour at a time.
+ */
+function makeDeps(overrides = {}) {
+  return {
+    _checkGentleAi:  () => true,
+    _runDoctor:      () => true,          // healthy
+    _runInstall:     () => true,          // success
+    _refreshRegistry: () => true,         // success
+    _checkTty:       () => false,         // no TTY by default
+    _resolveProject: () => 'my-project',
+    _checkEngram:    () => true,
+    _runEngramSearch: (_project) => true, // context found
+    ...overrides,
+  };
+}
+
+/** Capture console.warn lines while calling fn(). */
+async function captureWarn(fn) {
+  const warnings = [];
+  const orig = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try { await fn(); } finally { console.warn = orig; }
+  return warnings;
+}
+
+/** Capture console.log lines while calling fn(). */
+async function captureLog(fn) {
+  const logs = [];
+  const orig = console.log;
+  console.log = (...args) => logs.push(args.join(' '));
+  try { await fn(); } finally { console.log = orig; }
+  return logs;
+}
+
+// ── (a) gentle-ai absent → warn, return early ────────────────────────────────
+
+test('init: gentle-ai absent → warns with mention of gentle-ai, does not crash', async () => {
+  const warnings = await captureWarn(() =>
+    init(makeDeps({ _checkGentleAi: () => false }))
+  );
+  assert.ok(
+    warnings.some((w) => w.includes('gentle-ai')),
+    `expected warning mentioning gentle-ai; got: ${JSON.stringify(warnings)}`,
+  );
+});
+
+test('init: gentle-ai absent → does NOT call doctor', async () => {
+  let doctorCalled = false;
+  await init(makeDeps({
+    _checkGentleAi: () => false,
+    _runDoctor: () => { doctorCalled = true; return true; },
+  }));
+  assert.ok(!doctorCalled, 'doctor should not be called when gentle-ai is absent');
+});
+
+// ── (b) doctor healthy → no install ──────────────────────────────────────────
+
+test('init: doctor healthy → does NOT call install', async () => {
+  let installCalled = false;
+  await init(makeDeps({
+    _runDoctor: () => true,
+    _runInstall: () => { installCalled = true; return true; },
+  }));
+  assert.ok(!installCalled, 'install should not be called when doctor is healthy');
+});
+
+test('init: doctor healthy → logs a message mentioning "already" or "initialized"', async () => {
+  const logs = await captureLog(() => init(makeDeps({ _runDoctor: () => true })));
+  assert.ok(
+    logs.some((l) => /already|initialized|ok/i.test(l)),
+    `expected an "already initialized" log line; got: ${JSON.stringify(logs)}`,
+  );
+});
+
+// ── (c) doctor unhealthy + TTY → runs install ────────────────────────────────
+
+test('init: doctor unhealthy + TTY → calls install', async () => {
+  let installCalled = false;
+  await init(makeDeps({
+    _runDoctor: () => false,
+    _checkTty: () => true,
+    _runInstall: () => { installCalled = true; return true; },
+  }));
+  assert.ok(installCalled, 'install should be called when doctor is unhealthy and TTY is available');
+});
+
+// ── (d) doctor unhealthy + no TTY → warns no-TTY, no install ────────────────
+
+test('init: doctor unhealthy + no TTY → warns about TTY, does NOT call install', async () => {
+  let installCalled = false;
+  const warnings = await captureWarn(() =>
+    init(makeDeps({
+      _runDoctor: () => false,
+      _checkTty: () => false,
+      _runInstall: () => { installCalled = true; return true; },
+    }))
+  );
+  assert.ok(!installCalled, 'install must not be called without a TTY');
+  assert.ok(
+    warnings.some((w) => /tty|terminal/i.test(w)),
+    `expected a no-TTY warning; got: ${JSON.stringify(warnings)}`,
+  );
+});
+
+// ── (e) registry refresh always attempted ────────────────────────────────────
+
+test('init: registry refresh is called when gentle-ai is present', async () => {
+  let refreshCalled = false;
+  await init(makeDeps({ _refreshRegistry: () => { refreshCalled = true; return true; } }));
+  assert.ok(refreshCalled, 'registry refresh should be called when gentle-ai is present');
+});
+
+test('init: registry refresh NOT called when gentle-ai is absent', async () => {
+  let refreshCalled = false;
+  await init(makeDeps({
+    _checkGentleAi: () => false,
+    _refreshRegistry: () => { refreshCalled = true; return true; },
+  }));
+  assert.ok(!refreshCalled, 'registry refresh must not be called when gentle-ai is absent');
+});
+
+// ── (f) context found → no "not found" notice ────────────────────────────────
+
+test('init: context found in engram → no "not found" notice', async () => {
+  const logs = await captureLog(() =>
+    init(makeDeps({ _runEngramSearch: () => true }))
+  );
+  assert.ok(
+    !logs.some((l) => /not found|missing/i.test(l)),
+    `should not emit a "not found" notice when context is present; got: ${JSON.stringify(logs)}`,
+  );
+});
+
+// ── (g) context missing → notice mentions sdd-init or Init Guard ─────────────
+
+test('init: context missing → notice mentions sdd-init or Init Guard', async () => {
+  const logs = await captureLog(() =>
+    init(makeDeps({ _runEngramSearch: () => false }))
+  );
+  assert.ok(
+    logs.some((l) => /sdd.?init|init.?guard|\/sdd-init/i.test(l)),
+    `expected a notice about sdd-init or Init Guard; got: ${JSON.stringify(logs)}`,
+  );
+});
+
+// ── (h) project unresolvable → skip context check ────────────────────────────
+
+test('init: project unresolvable → skips context check, no crash', async () => {
+  let searchCalled = false;
+  await init(makeDeps({
+    _resolveProject: () => null,
+    _runEngramSearch: () => { searchCalled = true; return false; },
+  }));
+  assert.ok(!searchCalled, 'engram search must not be called when project is unresolvable');
+});
+
+// ── (i) never throws when gentle-ai absent + doctor throws ───────────────────
+
+test('init: never throws when gentle-ai absent', async () => {
+  await assert.doesNotReject(() =>
+    init(makeDeps({ _checkGentleAi: () => false }))
+  );
+});
+
+// ── (j) never throws when engram search throws ───────────────────────────────
+
+test('init: never throws when engram search throws', async () => {
+  await assert.doesNotReject(() =>
+    init(makeDeps({
+      _runEngramSearch: () => { throw new Error('engram unavailable'); },
+    }))
+  );
+});
+
+// ── (k) never throws when registry refresh throws ────────────────────────────
+
+test('init: never throws when registry refresh throws', async () => {
+  await assert.doesNotReject(() =>
+    init(makeDeps({
+      _refreshRegistry: () => { throw new Error('refresh failed'); },
+    }))
+  );
+});
