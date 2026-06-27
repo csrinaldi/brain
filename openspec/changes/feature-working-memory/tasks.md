@@ -80,17 +80,17 @@ Branch: `feat/s1-working-memory-contract` → `feat/s0-working-memory-foundation
 
 ### Phase 1: Tests (RED)
 
-- [ ] 1.1 Create `scripts/memory/lib/resume-schema.test.mjs` — unit tests for `validateResume(frontmatter)`: passes with all three required fields present; rejects when `next_action` missing; rejects when `current_slice` missing; rejects when `blockers` missing; rejects when `blockers` is not an array. (REQ-S1-1 schema scenarios)
+- [x] 1.1 Create `scripts/memory/lib/resume-schema.test.mjs` — unit tests for `validateResume(frontmatter)`: passes with all three required fields present; rejects when `next_action` missing; rejects when `current_slice` missing; rejects when `blockers` missing; rejects when `blockers` is not an array. (REQ-S1-1 schema scenarios)
 
 ### Phase 2: Implementation (GREEN)
 
-- [ ] 1.2 Create `scripts/memory/lib/resume-schema.mjs` — export `REQUIRED_FIELDS = ['next_action', 'current_slice', 'blockers']` and `validateResume(frontmatter)` (pure, no FS, throws with field name on violation). (REQ-S1-1)
-- [ ] 1.3 Create `brain/project/decisions/adr-0011-feature-scoped-working-memory.md` — author ADR-0011: two-layer model (durable ADR-0002 vs feature), `resume.md` as generic contract, `feature-checkpoint`/`feature-resume` verb contract, lifecycle (committed-to-branch, hydrated locally, distilled on close, never merged), never-do guardrails, references ADR-0001/0002/0004. (REQ-S1-2 docs)
-- [ ] 1.4 Create `brain/project/methodology/feature-working-memory-contract.md` — document `resume.md` YAML frontmatter fields (all 7 fields with types/semantics), zero-tooling read guarantee, and what MUST NOT appear in `resume.md` (no tasks.md duplicates). Reference ADR-0011. (REQ-S1-1, REQ-S1-2)
+- [x] 1.2 Create `scripts/memory/lib/resume-schema.mjs` — export `REQUIRED_FIELDS = ['next_action', 'current_slice', 'blockers']` and `validateResume(frontmatter)` (pure, no FS, throws with field name on violation). (REQ-S1-1)
+- [x] 1.3 Create `brain/project/decisions/adr-0011-feature-scoped-working-memory.md` — author ADR-0011: two-layer model (durable ADR-0002 vs feature), `resume.md` as generic contract, `feature-checkpoint`/`feature-resume` verb contract, lifecycle (committed-to-branch, hydrated locally, distilled on close, never merged), never-do guardrails, references ADR-0001/0002/0004. (REQ-S1-2 docs)
+- [x] 1.4 Create `brain/project/methodology/feature-working-memory-contract.md` — document `resume.md` YAML frontmatter fields (all 7 fields with types/semantics), zero-tooling read guarantee, and what MUST NOT appear in `resume.md` (no tasks.md duplicates). Reference ADR-0011. (REQ-S1-1, REQ-S1-2)
 
 ### Phase 3: Verify
 
-- [ ] 1.5 Run `npm test` — all tests green (Slice 0 tests still passing + new schema tests).
+- [x] 1.5 Run `npm test` — all tests green (Slice 0 tests still passing + new schema tests).
 
 ---
 
