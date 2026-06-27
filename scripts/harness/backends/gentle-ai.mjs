@@ -55,18 +55,39 @@ function _defaultCheckTty() {
   return Boolean(process.stdin.isTTY);
 }
 
+/**
+ * Extract the bare repo name (last path segment) from a slug or origin-project
+ * path. Engram scopes projects by the bare repo name, not the full owner/repo
+ * path that config files or git origins typically provide.
+ *
+ * Examples:
+ *   "csrinaldi/brain"      → "brain"
+ *   "group/sub/repo"       → "repo"
+ *   "brain"                → "brain"
+ *   null / ""              → null
+ *
+ * @param {string|null} slug Full project path or slug.
+ * @returns {string|null} Bare repo name, or null when input is falsy/empty.
+ */
+export function _toEngramProject(slug) {
+  if (!slug) return null;
+  return slug.split('/').filter(Boolean).pop() ?? null;
+}
+
 function _defaultResolveProject() {
-  // Try brain.config.json project.slug first; fall back to git origin identity.
+  // Resolve the engram project name (bare repo name = last path segment of the
+  // slug or git-origin project path). Engram scopes this repo as "brain", not
+  // the full slug "csrinaldi/brain" that brain.config.json or git origin provides.
   const configPath = join(repoRoot, 'brain.config.json');
   if (existsSync(configPath)) {
     try {
       const cfg = JSON.parse(readFileSync(configPath, 'utf8'));
-      if (cfg?.project?.slug) return cfg.project.slug;
+      if (cfg?.project?.slug) return _toEngramProject(cfg.project.slug);
     } catch {
       // brain.config.json malformed — fall through
     }
   }
-  // Fallback: derive slug from git origin remote URL
+  // Fallback: derive project from git origin remote URL
   try {
     const r = spawnSync('git', ['remote', 'get-url', 'origin'], {
       encoding: 'utf8',
@@ -76,7 +97,7 @@ function _defaultResolveProject() {
     const m = r.stdout.trim().match(
       /(?:https?:\/\/(?:[^@/]+@)?|git@)[^/:]+(?::\d+)?[/:](.+?)(?:\.git)?$/,
     );
-    return m ? m[1] : null;
+    return m ? _toEngramProject(m[1]) : null;
   } catch {
     return null;
   }
@@ -114,7 +135,7 @@ function _defaultRunEngramSearch(project) {
  *   5. Refresh skill registry (best-effort, non-fatal).
  *
  * SDD context step:
- *   6. Resolve project slug from brain.config.json or git origin.
+ *   6. Resolve engram project name (bare repo name) from brain.config.json or git origin.
  *   7. Search engram for `sdd-init/<project>` in the project namespace.
  *   8. If NOT found → print a clear notice that the agent Init Guard will
  *      create it on the first /sdd-* command (or run /sdd-init explicitly).
@@ -128,7 +149,7 @@ function _defaultRunEngramSearch(project) {
  * @param {() => boolean} [opts._runInstall]      Runs install; returns true on success.
  * @param {() => boolean} [opts._refreshRegistry] Refreshes skill registry; returns true on success.
  * @param {() => boolean} [opts._checkTty]        Returns true if stdin is a TTY.
- * @param {() => string|null} [opts._resolveProject] Returns project slug or null.
+ * @param {() => string|null} [opts._resolveProject] Returns bare engram project name or null.
  * @param {() => boolean} [opts._checkEngram]     Returns true if engram binary present.
  * @param {(project: string) => boolean} [opts._runEngramSearch]
  *   Returns true if sdd-init/<project> found in engram.
