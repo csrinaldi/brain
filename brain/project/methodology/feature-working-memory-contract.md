@@ -115,8 +115,15 @@ npm aliases (mirrors the `memory:*` pattern):
 
 1. **Explicit `[feature]` argument** — validate `openspec/changes/<feature>/` exists; error if not.
 2. **No argument, exactly one** `openspec/changes/*/` directory (excluding `archive/`) — use it.
-3. **No argument, more than one** directory — error: `"ambiguous active feature, pass [feature]"` + list.
+3. **No argument, more than one** directory — inspect each for `resume.md`:
+   - **Exactly one** dir has `resume.md` → use it (the actively-worked feature).
+   - **More than one** dir has `resume.md` → error: `"ambiguous active feature, pass [feature]"` + list of dirs with `resume.md`.
+   - **Zero** dirs have `resume.md` → error: `"ambiguous active feature, pass [feature]"` + list of all dirs.
 4. **No argument, zero** directories — informational message, exit 0. Never crash.
+
+The `resume.md` file serves double duty: it is the checkpoint payload AND the signal that a
+feature directory is the currently active one when multiple changes coexist. Only the
+directory the agent is actively working on should have a `resume.md` at any given time.
 
 Branch names are NOT used for resolution. `feat/issue-12-working-memory` is a branch name;
 `feature-working-memory` is a change-folder name. They are structurally different and must

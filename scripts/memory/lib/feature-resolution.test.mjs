@@ -13,7 +13,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -85,13 +85,15 @@ test('resolveFeature: no arg and exactly one change dir returns that dir', (t) =
 });
 
 // ---------------------------------------------------------------------------
-// (d) No arg, multiple dirs → throws "ambiguous" with list
+// (d) No arg, multiple dirs, ZERO with resume.md → throws "ambiguous" with list
+//     (sub-case of the new >1-dir logic: no resume.md to disambiguate)
 // ---------------------------------------------------------------------------
 
-test('resolveFeature: no arg with multiple dirs throws ambiguous error listing them', (t) => {
+test('resolveFeature: no arg with multiple dirs and no resume.md throws ambiguous listing all dirs', (t) => {
   const root = makeTempRoot();
   t.after(() => rmSync(root, { recursive: true, force: true }));
   makeChangesDir(root, ['feature-a', 'feature-b', 'feature-c']);
+  // no resume.md in any dir → all are listed as ambiguous candidates
 
   assert.throws(
     () => resolveFeature(root, undefined),
@@ -142,4 +144,53 @@ test('resolveFeature: archive excluded, single real feature returned', (t) => {
 
   const result = resolveFeature(root, undefined);
   assert.equal(result, 'real-feature');
+});
+
+// ---------------------------------------------------------------------------
+// (h) No arg, multiple dirs, EXACTLY ONE has resume.md → resolves to that dir
+//     This is the new "active-feature" disambiguation path (A2 fix).
+// ---------------------------------------------------------------------------
+
+test('resolveFeature: no arg, multiple dirs, exactly one has resume.md — returns that dir', (t) => {
+  const root = makeTempRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const changesDir = makeChangesDir(root, ['cli-i18n', 'feature-working-memory', 'vcs-adapter']);
+  // only feature-working-memory has a resume.md
+  writeFileSync(
+    join(changesDir, 'feature-working-memory', 'resume.md'),
+    '---\nfeature: feature-working-memory\ncurrent_slice: "test"\nnext_action: "test"\nblockers: []\n---\n',
+  );
+
+  const result = resolveFeature(root, undefined);
+  assert.equal(result, 'feature-working-memory');
+});
+
+// ---------------------------------------------------------------------------
+// (i) No arg, multiple dirs, MORE THAN ONE has resume.md → throws ambiguous,
+//     listing only the dirs that have resume.md (not the ones without it).
+// ---------------------------------------------------------------------------
+
+test('resolveFeature: no arg, multiple dirs, more than one has resume.md — throws ambiguous listing those dirs', (t) => {
+  const root = makeTempRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const changesDir = makeChangesDir(root, ['feature-a', 'feature-b', 'feature-c']);
+  // feature-a and feature-b have resume.md; feature-c does not
+  writeFileSync(join(changesDir, 'feature-a', 'resume.md'), '---\nfeature: feature-a\ncurrent_slice: "s"\nnext_action: "n"\nblockers: []\n---\n');
+  writeFileSync(join(changesDir, 'feature-b', 'resume.md'), '---\nfeature: feature-b\ncurrent_slice: "s"\nnext_action: "n"\nblockers: []\n---\n');
+
+  assert.throws(
+    () => resolveFeature(root, undefined),
+    (err) => {
+      assert.ok(err.message.includes('ambiguous'), `expected 'ambiguous' in: ${err.message}`);
+      // The dirs with resume.md must appear in the error
+      assert.ok(err.message.includes('feature-a'), `expected 'feature-a' in: ${err.message}`);
+      assert.ok(err.message.includes('feature-b'), `expected 'feature-b' in: ${err.message}`);
+      // The dir WITHOUT resume.md must NOT appear (message scoped to resume.md dirs only)
+      assert.ok(
+        !err.message.includes('feature-c'),
+        `feature-c (no resume.md) should not appear in: ${err.message}`,
+      );
+      return true;
+    },
+  );
 });

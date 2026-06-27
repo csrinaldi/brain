@@ -8,7 +8,10 @@
 //     1. Explicit arg provided  → validate openspec/changes/<arg>/ exists; return arg.
 //                                 If dir is missing → throw Error (caller must handle).
 //     2. No arg, exactly one dir in openspec/changes/ (excluding 'archive') → return it.
-//     3. No arg, >1 dirs        → throw Error "ambiguous active feature, pass [feature]: ..."
+//     3. No arg, >1 dirs        → inspect each dir for resume.md:
+//          a. Exactly 1 dir has resume.md → return it (the actively-worked feature).
+//          b. >1 dirs have resume.md → throw Error listing those dirs only.
+//          c. 0 dirs have resume.md → throw Error listing all dirs.
 //                                 Caller: featureCheckpoint catches this; featureResume lets
 //                                 it propagate (→ cli.mjs exits 1).
 //     4. No arg, 0 dirs         → return null (caller exits 0 gracefully; never crash).
@@ -73,7 +76,25 @@ export function resolveFeature(root, explicitArg) {
     return candidates[0];
   }
 
-  // Precedence 3: ambiguous — caller must provide an explicit arg.
+  // Precedence 3: >1 dirs — inspect each for resume.md to disambiguate.
+  const withResume = candidates.filter((candidate) =>
+    existsSync(join(changesDir, candidate, 'resume.md')),
+  );
+
+  if (withResume.length === 1) {
+    // Exactly one dir has resume.md — that is the actively-worked feature.
+    return withResume[0];
+  }
+
+  if (withResume.length > 1) {
+    // Multiple dirs have resume.md — still ambiguous; list only those.
+    throw new Error(
+      `feature-resolution: ambiguous active feature, pass [feature] explicitly.\n` +
+      `  Multiple features have resume.md: ${withResume.join(', ')}`,
+    );
+  }
+
+  // Zero dirs have resume.md — ambiguous; list all candidates.
   throw new Error(
     `feature-resolution: ambiguous active feature, pass [feature] explicitly.\n` +
     `  Found: ${candidates.join(', ')}`,
