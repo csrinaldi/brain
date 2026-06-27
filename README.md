@@ -5,7 +5,7 @@ A generic, project-agnostic system for AI-assisted software development.
 brain combines three things:
 - **Knowledge base** (`brain/`): living documentation, ADRs, domain model, anti-patterns.
 - **SDD scaffolding** (`openspec/`): Spec-Driven Development artifacts — proposals, specs, designs, tasks, verify reports.
-- **Team memory** (`.memory/`): git-based persistent memory, queryable by AI agents across sessions.
+- **Memory** (`.memory/`): git-based **durable** team memory + per-feature **working** memory (`resume.md`), queryable by AI agents across sessions and machines.
 
 It is **self-hosting**: this repo uses brain itself to document and evolve brain.
 
@@ -15,7 +15,7 @@ It is **self-hosting**: this repo uses brain itself to document and evolve brain
 
 ```
 brain/core/          ← Generic product. Read-only for consumers. Upstream-first.
-brain/project/       ← Consumer-specific: your ADRs, domain, rules.
+brain/project/       ← Consumer-specific: your ADRs, domain, rules. Yours to own.
 scripts/             ← Harness verbs (env:init, day:start, ticket:start, …)
 openspec/            ← SDD artifacts for active and archived changes.
 .memory/             ← Git-based durable team memory (content-addressed chunks).
@@ -27,35 +27,68 @@ openspec/            ← SDD artifacts for active and archived changes.
 
 ## How to adopt brain
 
-brain installs into a consumer repo from a git tag — no registry, works with
-private repos (see [ADR-0006](brain/project/decisions/adr-0006-distribucion-installer-versionado.md)).
+brain installs into a consumer repo from a git **tag** — no registry, works with
+private repos ([ADR-0006](brain/project/decisions/adr-0006-distribucion-installer-versionado.md)).
+Every step below is validated end-to-end by `npm run test:fresh-install` (a
+clean-container integration test).
+
+> **Before you start** — authenticate to GitHub so git can fetch the (private)
+> brain repo over HTTPS: `gh auth login && gh auth setup-git`, or configure a PAT
+> credential helper. The `github:` npm shorthand resolves to **SSH**; the
+> commands below use **HTTPS** (`git+https`) so they work without an SSH key.
 
 ```bash
-# In your project, install + copy the brain core at a pinned version:
-npm run brain:upgrade -- v0.1.0
-# (the first run requires the brain scripts; bootstrap them by installing once:
-#  npm i -D github:csrinaldi/brain#v0.1.0  and add the npm script alias)
+# 0. If your repo has no package.json yet:
+npm init -y
+
+# 1. Install brain at a pinned tag (HTTPS):
+npm i -D "git+https://github.com/csrinaldi/brain.git#v0.4.1"
+
+# 2. Add the brain script aliases to your package.json "scripts":
+#      "brain:upgrade": "node node_modules/brain/scripts/brain-upgrade.mjs",
+#      "env:init":      "bash ./scripts/bootstrap.sh",
+#      "day:start":     "node ./scripts/day-start.mjs"
+
+# 3. Copy the managed paths (brain/core, scripts) into your repo:
+npm run brain:upgrade -- v0.4.1
+
+# 4. Initialize the environment (interactive):
+npm run env:init
 ```
+
+`env:init` does the heavy lifting:
+
+- **Creates `brain.config.json`** if missing and derives `vcs.provider`,
+  `gitHost`, and `slug` from your git origin (confirm/override the provider on a TTY).
+- Prompts for your **`VCS_TOKEN`** (offers to open the provider's PAT page),
+  writes it to `.env`, and configures the HTTPS git credential helper.
+- Selects and initializes the SDD harness and the memory backend.
+- Reports any ecosystem tools to install — run `gentle-ai install` for `engram`
+  and `gga`.
 
 Then:
 
-1. Fill in `brain.config.json` with your project identity (name, slug, gitHost, gitProjectId, owner).
-2. Copy `.env.example` to `.env` and add your tokens.
-3. Run `npm run env:init` — sets up the credential helper, SDD harness, and memory backend.
-4. Start every workday with `npm run day:start` — it also **checks for a newer brain version and notifies you** (it never auto-updates).
-5. Add your domain knowledge in `brain/project/`, your ADRs in `brain/project/decisions/`.
-6. Use `npm run project:feature` to plan a change with SDD, `npm run repo:check` to validate the repo.
+1. Add your domain knowledge in `brain/project/`, your ADRs in `brain/project/decisions/`.
+2. `npm run day:start` every workday — pulls memory, shows open tickets, and
+   **notifies you of a newer brain tag** (it never auto-updates).
+3. `npm run project:feature` to plan a change with SDD; `npm run repo:check` to
+   validate the repo before pushing.
 
 ### Updating brain
 
 ```bash
-npm run brain:upgrade -- v0.2.0     # install a newer tag and copy managed paths
-npm run brain:upgrade -- v0.2.0 --dry-run   # preview what would change
+npm run brain:upgrade -- v0.4.1             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v0.4.1 --dry-run   # preview what would change
 ```
 
-**The golden rule** (ADR-0003 / ADR-0006): `brain/core/**` is **read-only in the
-consumer**. The upgrade overwrites only the *managed* paths and never touches your
-*local* ones:
+Read the [CHANGELOG](CHANGELOG.md) before upgrading — **renames / breaking
+changes** need manual action (e.g. v0.4.0 renamed the credential var to
+`VCS_TOKEN`). Additive `brain.config.json` migrations apply automatically.
+
+**The golden rule** ([ADR-0003](brain/project/decisions/adr-0003-split-core-project-self-hosting.md) /
+[ADR-0006](brain/project/decisions/adr-0006-distribucion-installer-versionado.md)):
+`brain/core/**` is **read-only in the consumer**. The upgrade overwrites only the
+*managed* paths and never touches your *local* ones:
 
 | Managed (overwritten on upgrade) | Local (never touched) |
 |---|---|
@@ -63,11 +96,10 @@ consumer**. The upgrade overwrites only the *managed* paths and never touches yo
 | `scripts/**` | `brain.config.json` (migrated additively) |
 | `.gitattributes` | `.env`, `openspec/changes/**`, `.memory/**` |
 
-The path manifest lives in [`brain/core/managed-paths.mjs`](brain/core/managed-paths.mjs).
-Config schema changes ship as additive migrations in
-[`brain/core/config-migrations.mjs`](brain/core/config-migrations.mjs) — new keys are
-added with defaults, your existing values are preserved. Improvements to core go
-**upstream first** (PR to the brain repo), then you bump the version.
+The path manifest lives in [`brain/core/managed-paths.mjs`](brain/core/managed-paths.mjs);
+config schema changes ship as additive migrations in
+[`brain/core/config-migrations.mjs`](brain/core/config-migrations.mjs). Improvements
+to core go **upstream first** (PR to the brain repo), then you bump the version.
 
 ---
 
@@ -75,20 +107,27 @@ added with defaults, your existing values are preserved. Improvements to core go
 
 | Command | What it does |
 |---|---|
-| `npm run env:init` | Interactive first-time setup (tokens, harness, memory). |
-| `npm run day:start` | Pull memory, show open tickets, check for brain updates. |
-| `npm run brain:upgrade -- <tag>` | Install/update the brain core at a version; copies managed paths only. |
-| `npm test` | Run the harness unit tests (`node --test`). |
-| `npm run ticket:start` | Start work on a ticket (creates branch, worktree). |
+| `npm run env:init` | Interactive first-time setup: bootstraps `brain.config.json`, `VCS_TOKEN`, harness, memory. |
+| `npm run day:start` | Pull memory, show open tickets, check for a newer brain tag. |
+| `npm run ticket:start -- <id>` | Start work on a ticket (creates branch / worktree). |
 | `npm run project:feature` | Start a new SDD change (proposal → spec → design → tasks). |
-| `npm run brain:nav` | Verify navigation integrity of `brain/` (no orphans, no broken links). |
+| `npm run brain:upgrade -- <tag>` | Install/update brain core at a tag; copies managed paths only. |
+| `npm run feature:checkpoint` / `feature:resume` | Save / restore per-feature working memory (`resume.md`). |
 | `npm run repo:check` | Check for prohibited references and structural violations. |
 | `npm run memory:share` | Materialize memory to `.memory/` before pushing. |
+| `npm test` | Harness unit tests (`node --test`). |
+| `npm run test:fresh-install -- <tag>` | **Maintainer**: e2e Docker test of the full consumer install from a tag. |
 
 ---
 
-## Harness and memory adapters
+## Adapters (everything swappable)
 
-The harness (`SDD_HARNESS` in `.env`) and the memory backend (`MEMORY_BACKEND` in `.env`) are swappable. Defaults: `gentle-ai` and `engram`.
+brain follows the adapter pattern throughout — the repo is agnostic to the tools underneath:
 
-See [ADR-0001](brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md) and [ADR-0005](brain/project/decisions/adr-0005-adapter-harness-sdd-harness.md) for the design.
+| Concern | Selector | Default | ADR |
+|---|---|---|---|
+| SDD harness | `SDD_HARNESS` (`.env`) | `gentle-ai` | [ADR-0005](brain/project/decisions/adr-0005-adapter-harness-sdd-harness.md) / [ADR-0012](brain/project/decisions/adr-0012-harness-init-adapter.md) |
+| Memory backend | `MEMORY_BACKEND` (`.env`) | `engram` | [ADR-0004](brain/project/decisions/adr-0004-adapter-memoria-memory-backend.md) |
+| VCS provider | `vcs.provider` (`brain.config.json`) | from git origin | [ADR-0008](brain/project/decisions/adr-0008-adapter-vcs-provider.md) |
+
+See [ADR-0001](brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md) for the replaceable-harness architecture.
