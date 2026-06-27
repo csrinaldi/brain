@@ -17,6 +17,7 @@ import { getVcs, resolveProviderName } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';
 import { vcsToken, readEnvVar } from './vcs/lib/token.mjs';
 import { t } from './i18n/t.mjs';
+import { tryFeatureResume } from './memory/lib/auto-resume.mjs';
 
 const ROOT = process.cwd();
 
@@ -162,6 +163,17 @@ if (useWorktree) {
   }
   console.log(`  ${await t('ticket.worktreeCreated', { path: worktreePath })}`);
 
+  // Auto-resume: when attaching to an existing branch, surface the feature context.
+  // tryFeatureResume is fully isolated — any failure returns null, never throws.
+  if (branchExists) {
+    const resumeOutput = tryFeatureResume(worktreePath);
+    if (resumeOutput != null) {
+      console.log(resumeOutput);
+    } else {
+      console.log(`  ${await t('ticket.resume.noContext')}`);
+    }
+  }
+
   // Gotcha: the worktree does NOT inherit untracked/ignored files like .env (which
   // holds the VCS token, needed by this script and the adapter). Copy it over.
   const srcEnv = join(ROOT, '.env');
@@ -177,6 +189,14 @@ if (useWorktree) {
     if (branchExists || create.err.includes('already exists')) {
       console.log(`  ${await t('ticket.branchExists')}`);
       spawnSync('git', ['checkout', branchName], { stdio: 'inherit', cwd: ROOT });
+      // Auto-resume: surface feature context when re-checking out an existing branch.
+      // tryFeatureResume is fully isolated — any failure returns null, never throws.
+      const resumeOutput = tryFeatureResume(ROOT);
+      if (resumeOutput != null) {
+        console.log(resumeOutput);
+      } else {
+        console.log(`  ${await t('ticket.resume.noContext')}`);
+      }
     } else {
       console.error(`  ${await t('ticket.error.branchCreate', { error: create.err })}`);
       process.exit(1);
