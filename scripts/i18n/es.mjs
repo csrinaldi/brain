@@ -146,6 +146,7 @@ export default {
   'bootstrap.sdd.registryOk':         'skill registry actualizado',
   'bootstrap.sdd.registryFailed':     'skill-registry refresh falló (no bloqueante)',
   'bootstrap.sdd.unknownHarness':     "harness '{harness}' sin rutina de init conocida — configurá sus skills a mano",
+  'bootstrap.sdd.initFailed':         'init del harness falló (no bloqueante)',
 
   // §7 Team memory
   'bootstrap.memory.section':        'Memoria de equipo',

@@ -160,6 +160,8 @@ export default {
   'bootstrap.sdd.registryFailed':     'skill-registry refresh failed (non-blocking)',
   // {harness} = unknown harness name
   'bootstrap.sdd.unknownHarness':     "harness '{harness}' has no known init routine — configure its skills manually",
+  // no {placeholder} — generic failure from scripts/harness/cli.mjs init
+  'bootstrap.sdd.initFailed':         'harness init failed (non-blocking)',
 
   // §7 Team memory
   'bootstrap.memory.section':        'Team memory',
