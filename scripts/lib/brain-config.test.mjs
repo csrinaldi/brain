@@ -159,11 +159,13 @@ test('ensureBrainConfig: creates config when missing with github identity', () =
     assert.equal(cfg.vcs.provider, 'github');
     assert.equal(cfg.project.gitHost, 'github.com');
     assert.equal(cfg.project.slug, 'owner/repo');
-    assert.equal(cfg.schemaVersion, '0.3.0');
+    assert.equal(cfg.schemaVersion, '0.4.0');
     // Full schema must exist
     assert.ok('project' in cfg, 'project key must exist');
     assert.ok('docs' in cfg, 'docs key must exist');
     assert.ok('vcs' in cfg, 'vcs key must exist');
+    assert.ok('governance' in cfg, 'governance key must exist');
+    assert.ok(Array.isArray(cfg.governance.ignoreList), 'governance.ignoreList must be an array');
     assert.ok('gitHost' in cfg.project, 'project.gitHost must exist');
     assert.ok('name' in cfg.project, 'project.name must exist');
   } finally {

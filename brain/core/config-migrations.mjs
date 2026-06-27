@@ -47,4 +47,19 @@ export const migrations = [
       },
     },
   },
+  {
+    version: '0.4.0',
+    description: 'Add governance.ignoreList: globs excluded from the diff-size gate (ADR-0014).',
+    defaults: {
+      governance: {
+        ignoreList: [
+          '.memory/**',
+          'openspec/changes/**',
+          'package-lock.json',
+          'pnpm-lock.yaml',
+          'yarn.lock',
+        ],
+      },
+    },
+  },
 ];
