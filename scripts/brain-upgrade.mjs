@@ -22,6 +22,7 @@ import { copyManaged, migrateConfig, installSpec } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
 
 const ROOT = process.cwd();
+const PM = detectPM(ROOT).name;
 
 const C = {
   reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
@@ -41,7 +42,7 @@ const noInstall = flags.has('--no-install');
 const force = flags.has('--force');
 
 if (!tag && !noInstall) {
-  die(`missing <tag>. Usage: npm run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force]`);
+  die(`missing <tag>. Usage: ${PM} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force]`);
 }
 
 // ── Self-host guard ──────────────────────────────────────────────────────────
