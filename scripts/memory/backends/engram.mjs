@@ -18,6 +18,61 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 /**
+ * ensureMemorySymlink(root) — idempotent: guarantees .engram → .memory symlink.
+ *
+ * Scenarios (ADR-0002 / REQ-S0-1):
+ *   1. .memory/ exists, .engram absent          → create symlink.
+ *   2. .memory/ exists, .engram is a symlink    → already correct, no-op.
+ *   3. .memory/ exists, .engram is a real dir   → warn and skip (do not clobber).
+ *      This protects machines that have not yet pulled the git mv migration.
+ *   4. .memory/ absent                          → warn and skip (fresh clone pre-import).
+ *
+ * @param {string} [root=repoRoot]  Repo root; defaults to this package's root.
+ *                                  Override in tests to use temp directories.
+ */
+export function ensureMemorySymlink(root = repoRoot) {
+  const symlinkPath = join(root, ".engram");
+  const targetPath = join(root, ".memory");
+
+  // Does the target (.memory/) exist at all?
+  let targetExists = false;
+  try {
+    lstatSync(targetPath);
+    targetExists = true;
+  } catch {
+    /* not found */
+  }
+
+  if (!targetExists) {
+    console.warn("  ⚠ .memory/ does not exist yet — skipping symlink creation");
+    return;
+  }
+
+  // What is .engram right now?
+  let engramStat = null;
+  try {
+    engramStat = lstatSync(symlinkPath);
+  } catch {
+    /* .engram does not exist — normal post-migration state on a fresh clone */
+  }
+
+  if (engramStat === null) {
+    // Normal case: create the symlink.
+    symlinkSync(".memory", symlinkPath);
+    console.log("  ✓ .engram → .memory symlink created");
+  } else if (engramStat.isSymbolicLink()) {
+    // Already a symlink — idempotent, nothing to do.
+    console.log("  ✓ .engram → .memory symlink already in place");
+  } else {
+    // .engram is a real file or directory — do not clobber; warn instead.
+    // Most likely cause: this machine has not yet pulled the git mv migration.
+    console.warn(
+      "  ⚠ .engram is a real directory — pull the migration before re-running setup",
+    );
+  }
+}
+
+/**
  * Resolve the `engram` binary. Throws if not found.
  */
 function requireEngram() {
@@ -63,37 +118,16 @@ export async function index() {
 
 /**
  * setup() — idempotent setup for the engram backend:
- *   1. Ensure .engram → .memory symlink exists (ADR-0003).
- *   2. Register the merge driver for .memory/manifest.json.
+ *   1. Ensure .engram → .memory symlink (delegates to ensureMemorySymlink).
+ *   2. Register the merge driver for .memory/manifest.json (ADR-0002).
  *
  * Called by bootstrap.sh §7 via: node scripts/memory/cli.mjs setup
  */
 export async function setup() {
-  // 1. Ensure symlink .engram → .memory
-  const symlinkPath = join(repoRoot, ".engram");
-  let targetExists = false;
-  try { lstatSync(join(repoRoot, ".memory")); targetExists = true; } catch { /* not found */ }
+  // 1. Ensure symlink .engram → .memory using the hardened helper.
+  ensureMemorySymlink();
 
-  // lstatSync does not throw for symlinks (even broken ones); use try/catch for the
-  // case where the path simply does not exist at all.
-  let symlinkAlreadyExists = false;
-  try {
-    lstatSync(symlinkPath); // succeeds for regular files, dirs, AND symlinks
-    symlinkAlreadyExists = true;
-  } catch {
-    symlinkAlreadyExists = false;
-  }
-
-  if (!targetExists) {
-    console.warn("  ⚠ .memory/ does not exist yet — skipping symlink creation");
-  } else if (symlinkAlreadyExists) {
-    console.log("  ✓ .engram → .memory symlink already in place");
-  } else {
-    symlinkSync(".memory", symlinkPath);
-    console.log("  ✓ .engram → .memory symlink created");
-  }
-
-  // 2. Register merge driver for manifest.json
+  // 2. Register merge driver for .memory/manifest.json.
   const result = spawnSync(
     "git",
     [
