@@ -147,6 +147,9 @@ export default {
   'bootstrap.sdd.registryFailed':     'skill-registry refresh falló (no bloqueante)',
   'bootstrap.sdd.unknownHarness':     "harness '{harness}' sin rutina de init conocida — configurá sus skills a mano",
   'bootstrap.sdd.initFailed':         'init del harness falló (no bloqueante)',
+  // ADR gap detection (Step 4 of gentle-ai init)
+  'bootstrap.sdd.noProjectAdrs':      'No se encontraron ADRs del proyecto (brain/project/decisions/ está vacío o ausente).',
+  'bootstrap.sdd.noProjectAdrsHint':  'Ejecutá /project:bootstrap-adrs en tu agente de IA para generar el conjunto inicial de ADRs (Stack, Testing, Build).',
 
   // §7 Team memory
   'bootstrap.memory.section':        'Memoria de equipo',
