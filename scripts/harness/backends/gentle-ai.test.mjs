@@ -214,3 +214,54 @@ test('init: never throws when registry refresh throws', async () => {
     }))
   );
 });
+
+// ── _toEngramProject — last path segment extraction ───────────────────────────
+//
+// RED: these fail until _toEngramProject is exported from gentle-ai.mjs.
+
+import { _toEngramProject } from './gentle-ai.mjs';
+
+test('_toEngramProject: "owner/repo" resolves to bare name "repo"', () => {
+  assert.equal(_toEngramProject('owner/repo'), 'repo');
+});
+
+test('_toEngramProject: nested "group/sub/repo" resolves to "repo"', () => {
+  assert.equal(_toEngramProject('group/sub/repo'), 'repo');
+});
+
+test('_toEngramProject: single-segment "brain" resolves to itself', () => {
+  assert.equal(_toEngramProject('brain'), 'brain');
+});
+
+test('_toEngramProject: null returns null (graceful — no origin case)', () => {
+  assert.equal(_toEngramProject(null), null);
+});
+
+test('_toEngramProject: empty string returns null (graceful — empty origin)', () => {
+  assert.equal(_toEngramProject(''), null);
+});
+
+// ── init Step 3: _runEngramSearch invoked with value from _resolveProject ─────
+
+test('init: _runEngramSearch is called with the project name returned by _resolveProject', async () => {
+  let capturedProject = null;
+  await init(makeDeps({
+    _resolveProject: () => 'brain',
+    _runEngramSearch: (p) => { capturedProject = p; return true; },
+  }));
+  assert.equal(capturedProject, 'brain',
+    'init must pass the _resolveProject return value directly to _runEngramSearch');
+});
+
+test('init: context found (bare project name) → no "not found" notice printed', async () => {
+  const logs = await captureLog(() =>
+    init(makeDeps({
+      _resolveProject: () => 'brain',
+      _runEngramSearch: () => true,
+    }))
+  );
+  assert.ok(
+    !logs.some((l) => /not found/i.test(l)),
+    `no "not found" notice should be printed when context exists; got: ${JSON.stringify(logs)}`,
+  );
+});
