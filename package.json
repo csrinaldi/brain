@@ -3,6 +3,10 @@
   "version": "0.4.0",
   "private": true,
   "description": "Generic AI-assisted development harness — knowledge base, SDD scaffolding, and team memory.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csrinaldi/brain.git"
+  },
   "scripts": {
     "env:init": "bash ./scripts/bootstrap.sh",
     "prepare": "git config core.hooksPath scripts/hooks 2>/dev/null || true",

@@ -21,6 +21,9 @@ import {
   parseSemver,
   highestTag,
   readInstalledVersion,
+  resolveInstallUrl,
+  installSpec,
+  BRAIN_REPO_HTTPS,
 } from './installer.mjs';
 
 // ── Glob matching ────────────────────────────────────────────────────────────
@@ -181,4 +184,100 @@ test('highestTag picks the newest semver tag and ignores peeled refs', () => {
   ].join('\n');
   assert.equal(highestTag(stdout), 'v0.2.0');
   assert.equal(highestTag('no tags here'), null);
+});
+
+// ── resolveInstallUrl ─────────────────────────────────────────────────────────
+
+test('resolveInstallUrl: git+https URL is returned as-is', () => {
+  assert.equal(
+    resolveInstallUrl('git+https://github.com/csrinaldi/brain.git'),
+    'git+https://github.com/csrinaldi/brain.git',
+  );
+});
+
+test('resolveInstallUrl: plain https URL gets git+ prefix', () => {
+  assert.equal(
+    resolveInstallUrl('https://github.com/csrinaldi/brain.git'),
+    'git+https://github.com/csrinaldi/brain.git',
+  );
+});
+
+test('resolveInstallUrl: git+ssh URL is converted to git+https', () => {
+  assert.equal(
+    resolveInstallUrl('git+ssh://git@github.com/csrinaldi/brain.git'),
+    'git+https://github.com/csrinaldi/brain.git',
+  );
+});
+
+test('resolveInstallUrl: SCP-style git@ URL is converted to git+https', () => {
+  assert.equal(
+    resolveInstallUrl('git@github.com:csrinaldi/brain.git'),
+    'git+https://github.com/csrinaldi/brain.git',
+  );
+});
+
+test('resolveInstallUrl: github: shorthand is converted to git+https', () => {
+  assert.equal(
+    resolveInstallUrl('github:csrinaldi/brain'),
+    'git+https://github.com/csrinaldi/brain.git',
+  );
+});
+
+test('resolveInstallUrl: null/undefined falls back to BRAIN_REPO_HTTPS constant', () => {
+  assert.equal(resolveInstallUrl(null), BRAIN_REPO_HTTPS);
+  assert.equal(resolveInstallUrl(undefined), BRAIN_REPO_HTTPS);
+  assert.equal(resolveInstallUrl(''), BRAIN_REPO_HTTPS);
+});
+
+// ── installSpec ───────────────────────────────────────────────────────────────
+
+test('installSpec: derives git+https spec from installed brain package.json (git+https url)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-spec-'));
+  try {
+    mkdirSync(join(tmp, 'node_modules', 'brain'), { recursive: true });
+    writeFileSync(
+      join(tmp, 'node_modules', 'brain', 'package.json'),
+      JSON.stringify({ name: 'brain', version: '0.4.0', repository: { type: 'git', url: 'git+https://github.com/csrinaldi/brain.git' } }),
+    );
+    assert.equal(installSpec(tmp, 'v0.4.0'), 'git+https://github.com/csrinaldi/brain.git#v0.4.0');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('installSpec: normalizes https repository.url and appends tag', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-spec-'));
+  try {
+    mkdirSync(join(tmp, 'node_modules', 'brain'), { recursive: true });
+    writeFileSync(
+      join(tmp, 'node_modules', 'brain', 'package.json'),
+      JSON.stringify({ name: 'brain', version: '0.4.0', repository: { type: 'git', url: 'https://github.com/csrinaldi/brain.git' } }),
+    );
+    assert.equal(installSpec(tmp, 'v0.4.0'), 'git+https://github.com/csrinaldi/brain.git#v0.4.0');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('installSpec: falls back to constant when node_modules/brain/package.json is absent', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-spec-'));
+  try {
+    assert.equal(installSpec(tmp, 'v0.4.0'), `${BRAIN_REPO_HTTPS}#v0.4.0`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('installSpec: falls back to constant when repository.url field is absent', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-spec-'));
+  try {
+    mkdirSync(join(tmp, 'node_modules', 'brain'), { recursive: true });
+    writeFileSync(
+      join(tmp, 'node_modules', 'brain', 'package.json'),
+      JSON.stringify({ name: 'brain', version: '0.4.0' }),
+    );
+    assert.equal(installSpec(tmp, 'v0.4.0'), `${BRAIN_REPO_HTTPS}#v0.4.0`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

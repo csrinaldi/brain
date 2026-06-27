@@ -217,6 +217,100 @@ export function migrateConfig(config, migrations, targetVersion) {
   return { config: result, applied };
 }
 
+// ── Install URL resolution ─────────────────────────────────────────────────────
+
+/**
+ * Canonical HTTPS install URL for the brain package.
+ * Used as a fallback when the installed package.json has no repository.url or
+ * when that URL cannot be parsed.
+ */
+export const BRAIN_REPO_HTTPS = 'git+https://github.com/csrinaldi/brain.git';
+
+/**
+ * Normalizes any git repository URL to an npm-installable `git+https://` form.
+ *
+ * Accepted input forms and their canonical output:
+ *   git+https://host/owner/repo.git  → as-is
+ *   https://host/owner/repo.git      → prefix `git+`
+ *   git+ssh://git@host/owner/repo.git → convert host and path to git+https
+ *   git@host:owner/repo.git          → SCP form → convert to git+https
+ *   github:owner/repo                → expand to git+https://github.com/…
+ *
+ * Null / empty input returns BRAIN_REPO_HTTPS (safe fallback).
+ *
+ * @param {string|null|undefined} url
+ * @returns {string}
+ */
+export function resolveInstallUrl(url) {
+  if (!url || typeof url !== 'string' || !url.trim()) return BRAIN_REPO_HTTPS;
+
+  const u = url.trim();
+
+  // Already the correct form.
+  if (u.startsWith('git+https://')) {
+    return u.endsWith('.git') ? u : `${u}.git`;
+  }
+
+  // Plain https — just prefix git+.
+  if (u.startsWith('https://')) {
+    return 'git+' + (u.endsWith('.git') ? u : `${u}.git`);
+  }
+
+  // github: shorthand — npm resolves this to SSH, which is the problem we're fixing.
+  const githubShorthand = u.match(/^github:([^#]+)/);
+  if (githubShorthand) {
+    const path = githubShorthand[1].replace(/\.git$/, '');
+    return `git+https://github.com/${path}.git`;
+  }
+
+  // git+ssh://git@host/owner/repo.git
+  const gitSsh = u.match(/^git\+ssh:\/\/(?:[^@]+@)?([^/]+)\/(.+?)(?:\.git)?$/);
+  if (gitSsh) {
+    return `git+https://${gitSsh[1]}/${gitSsh[2]}.git`;
+  }
+
+  // git@host:owner/repo.git  (SCP shorthand)
+  const scp = u.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
+  if (scp) {
+    return `git+https://${scp[1]}/${scp[2]}.git`;
+  }
+
+  // Unknown form — ensure at least the git+ prefix.
+  return u.startsWith('git+') ? u : `git+${u}`;
+}
+
+/**
+ * Returns the full npm install specifier for brain at the given tag.
+ *
+ * Reads `repository.url` from the installed brain's `package.json` at
+ * `<root>/node_modules/brain/package.json`, normalizes it with
+ * `resolveInstallUrl`, and appends `#<tag>`.
+ *
+ * Falls back to `BRAIN_REPO_HTTPS#<tag>` when the file is absent,
+ * unparseable, or the `repository.url` field is missing.
+ *
+ * The result is ALWAYS in the form `git+https://…#<tag>` — never SSH or
+ * `github:` shorthand — so HTTPS-only consumers (CI, containers without
+ * SSH keys) can install the private repo without extra setup.
+ *
+ * @param {string} root Consumer repo root (e.g. `process.cwd()`).
+ * @param {string} tag  Git tag to install (e.g. `"v0.4.0"`).
+ * @returns {string}
+ */
+export function installSpec(root, tag) {
+  const pkgPath = join(root, 'node_modules', 'brain', 'package.json');
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+    const repoUrl = pkg?.repository?.url ?? (typeof pkg?.repository === 'string' ? pkg.repository : undefined);
+    if (repoUrl && typeof repoUrl === 'string') {
+      return `${resolveInstallUrl(repoUrl)}#${tag}`;
+    }
+  } catch {
+    // File absent or unparseable — fall through to constant fallback.
+  }
+  return `${BRAIN_REPO_HTTPS}#${tag}`;
+}
+
 // ── Update check (for day:start) ───────────────────────────────────────────────
 
 /**
