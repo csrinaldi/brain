@@ -3,7 +3,7 @@
 // Usage: npm run brain:upgrade -- <tag> [--dry-run] [--no-install] [--force]
 //
 // What it does (ADR-0006):
-//   1. Installs the requested tag:  npm i -D github:csrinaldi/brain#<tag>
+//   1. Installs the requested tag:  npm i -D git+https://github.com/csrinaldi/brain.git#<tag>
 //      (skip with --no-install if node_modules/brain is already the right tag).
 //   2. Copies ONLY the managed paths (brain/core/**, scripts/**, .gitattributes)
 //      from node_modules/brain/ into this repo, overwriting them.
@@ -18,10 +18,9 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { copyManaged, migrateConfig } from './lib/installer.mjs';
+import { copyManaged, migrateConfig, installSpec } from './lib/installer.mjs';
 
 const ROOT = process.cwd();
-const REPO = 'github:csrinaldi/brain';
 
 const C = {
   reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
@@ -63,12 +62,17 @@ if (existsSync(ownPkgPath)) {
 console.log(`\n${C.bold}brain:upgrade${C.reset} ${tag ? `→ ${C.cyan}${tag}${C.reset}` : ''}${dryRun ? `  ${C.dim}(dry run)${C.reset}` : ''}\n`);
 
 // ── 1. Install the tag ─────────────────────────────────────────────────────────
+// Derive the install specifier from the currently installed brain's package.json
+// repository.url (always normalized to git+https://…) so HTTPS-only consumers
+// (CI, containers without an SSH key) can install the private repo reliably.
+// Falls back to the canonical constant when the file/field is absent.
+const spec = installSpec(ROOT, tag);
 if (!noInstall) {
   if (dryRun) {
-    info(`would run: npm i -D ${REPO}#${tag}`);
+    info(`would run: npm i -D ${spec}`);
   } else {
-    info(`Installing ${REPO}#${tag} ...`);
-    const r = spawnSync('npm', ['i', '-D', `${REPO}#${tag}`], { stdio: 'inherit', cwd: ROOT });
+    info(`Installing ${spec} ...`);
+    const r = spawnSync('npm', ['i', '-D', spec], { stdio: 'inherit', cwd: ROOT });
     if (r.status !== 0) die('npm install failed — check repo access and that the tag exists.');
     ok('Package installed.');
   }
