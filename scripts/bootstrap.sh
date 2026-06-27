@@ -42,17 +42,20 @@ VCS_HOST="${_IDENT[1]:-}"
 PROJECT_PATH="${_IDENT[2]:-}"
 export VCS_HOST
 
-# Per-provider constants: token env var, credential helper username, PAT scope, CLI binary.
+# Generic credential env var (ADR-0007 / issue #33): a single VCS_TOKEN is used
+# regardless of provider so that .env stays portable across GitHub, GitLab, and any
+# future host.
+VCS_TOKEN_VAR="VCS_TOKEN"
+
+# Per-provider constants: credential helper username, PAT scope, CLI binary.
 case "$VCS_PROVIDER" in
   github)
-    VCS_TOKEN_VAR="GITHUB_TOKEN"
     VCS_CRED_USER="x-access-token"
     PAT_SCOPES="repo"
     VCS_CLI="gh"
     ;;
   *)
     # Default: gitlab (covers empty provider or explicit "gitlab").
-    VCS_TOKEN_VAR="GITLAB_TOKEN"
     VCS_CRED_USER="oauth2"
     PAT_SCOPES="api"
     VCS_CLI="glab"

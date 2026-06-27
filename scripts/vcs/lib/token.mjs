@@ -1,20 +1,26 @@
-// token.mjs — Map the active VCS provider to its credential env var and read it.
+// token.mjs — Read the VCS credential env var (VCS_TOKEN) from .env or process.env.
 //
-// Credentials live in .env (never in brain.config.json). Each provider uses a
-// different env var; this is the single place that mapping lives, so adding a
-// provider means adding one entry here.
+// Credentials live in .env (never in brain.config.json). A single generic env
+// var, VCS_TOKEN, is used regardless of the active provider (ADR-0007 / issue #33).
+// The provider parameter is kept in all exported signatures for source compatibility
+// with callers that pass it, but it is no longer used to select a var name.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const ENV_BY_PROVIDER = {
-  github: 'GITHUB_TOKEN',
-  gitlab: 'GITLAB_TOKEN',
-};
+/** The single env var name used for VCS credentials across all providers. */
+const VCS_TOKEN_KEY = 'VCS_TOKEN';
 
-/** @param {string} provider @returns {string|null} the env var name, or null. */
-export function tokenEnvVar(provider) {
-  return ENV_BY_PROVIDER[provider] ?? null;
+/**
+ * Returns the env var name that holds the VCS token.
+ * The provider argument is accepted for source compatibility but is ignored —
+ * all providers use the same generic VCS_TOKEN variable.
+ *
+ * @param {string} _provider  (unused)
+ * @returns {string}
+ */
+export function tokenEnvVar(_provider) {
+  return VCS_TOKEN_KEY;
 }
 
 /** Reads a var from .env (falling back to process.env). */
@@ -28,8 +34,7 @@ export function readEnvVar(key, root = process.cwd()) {
   return process.env[key] ?? null;
 }
 
-/** Reads the credential token for the active provider. */
+/** Reads the credential token for the active provider from VCS_TOKEN. */
 export function vcsToken(provider, root) {
-  const key = tokenEnvVar(provider);
-  return key ? readEnvVar(key, root) : null;
+  return readEnvVar(tokenEnvVar(provider), root);
 }
