@@ -151,15 +151,15 @@ Branch: `feat/s4-working-memory-checkpoint-auto` → `feat/s3-working-memory-ux`
 
 ### Phase 1: Tests (RED)
 
-- [ ] 4.1 Create `scripts/hooks/pre-push.test.mjs` — integration tests that spawn `scripts/hooks/pre-push` with a synthetic PATH providing mock `node` and `git` binaries: (a) when `openspec/changes/<feature>/` exists → `feature-checkpoint` invocation is observed in mock node output; (b) when no change dir exists → hook exits 0, no `feature-checkpoint` call; (c) when mock `feature-checkpoint` exits non-zero → hook continues to the `.memory/` guard and does NOT exit 1 due to checkpoint failure. (REQ-S4-1 scenario)
+- [x] 4.1 Create `scripts/hooks/pre-push.test.mjs` — integration tests that spawn `scripts/hooks/pre-push` with a synthetic PATH providing mock `node` and `git` binaries: (a) when `openspec/changes/<feature>/` exists → `feature-checkpoint` invocation is observed in mock node output; (b) when no change dir exists → hook exits 0, no `feature-checkpoint` call; (c) when mock `feature-checkpoint` exits non-zero → hook continues to the `.memory/` guard and does NOT exit 1 due to checkpoint failure. (REQ-S4-1 scenario)
 
 ### Phase 2: Implementation (GREEN)
 
-- [ ] 4.2 Update `scripts/hooks/pre-push` — inside the `command -v node` guard, after the `memory:share` call and before the `.memory/` uncommitted guard: add `node "$repo_root/scripts/memory/cli.mjs" feature-checkpoint >/dev/null 2>&1 || true`. (REQ-S4-1; failure is non-blocking per design)
+- [x] 4.2 Update `scripts/hooks/pre-push` — inside the `command -v node` guard, after the `memory:share` call and before the `.memory/` uncommitted guard: add `node "$repo_root/scripts/memory/cli.mjs" feature-checkpoint >/dev/null 2>&1 || true`. (REQ-S4-1; failure is non-blocking per design)
 
 ### Phase 3: Verify
 
-- [ ] 4.3 Run `npm test` — all tests green including pre-push integration tests.
+- [x] 4.3 Run `npm test` — all tests green including pre-push integration tests.
 
 ---
 
