@@ -50,27 +50,27 @@ Branch: `feat/s0-working-memory-foundation` → `epic/working-memory`
 
 ### Phase 1: Tests (RED — run `npm test`, expect failures)
 
-- [ ] 0.1 Create `scripts/merge-engram-manifest.test.mjs` — unit tests: union of two manifests, dedup by `chunk.id`, `version = max(a,b)`. Call module directly with temp JSON files; no git needed. (merge-driver round-trip gate)
-- [ ] 0.2 Create `scripts/memory/backends/engram.setup.test.mjs` — unit tests for `setup()` using temp dirs: (a) creates `.engram → .memory` symlink when `.memory/` exists and `.engram` absent; (b) is idempotent when symlink already exists; (c) logs warning and does NOT clobber when `.engram` is a real directory. (REQ-S0-1 scenarios)
+- [x] 0.1 Create `scripts/merge-engram-manifest.test.mjs` — unit tests: union of two manifests, dedup by `chunk.id`, `version = max(a,b)`. Call module directly with temp JSON files; no git needed. (merge-driver round-trip gate)
+- [x] 0.2 Create `scripts/memory/backends/engram.setup.test.mjs` — unit tests for `setup()` using temp dirs: (a) creates `.engram → .memory` symlink when `.memory/` exists and `.engram` absent; (b) is idempotent when symlink already exists; (c) logs warning and does NOT clobber when `.engram` is a real directory. (REQ-S0-1 scenarios)
 
 ### Phase 2: Migration
 
-- [ ] 0.3 Run `git mv .engram .memory` — moves three committed files (`chunks/aa194500.jsonl.gz`, `chunks/4ba339fa.jsonl.gz`, `manifest.json`) under `.memory/`; stage and commit.
-- [ ] 0.4 Edit `.gitignore`: add `.engram` entry; rewrite the "MEMORIA ENGRAM" comment to state `.memory/` is committed and `.engram` is a local symlink; fix stale ADR reference from `brain/decisions/adr-0003-memoria-equipo-git-based.md` to `brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md`.
+- [x] 0.3 Run `git mv .engram .memory` — moves three committed files (`chunks/aa194500.jsonl.gz`, `chunks/4ba339fa.jsonl.gz`, `manifest.json`) under `.memory/`; stage and commit.
+- [x] 0.4 Edit `.gitignore`: add `.engram` entry; rewrite the "MEMORIA ENGRAM" comment to state `.memory/` is committed and `.engram` is a local symlink; fix stale ADR reference from `brain/decisions/adr-0003-memoria-equipo-git-based.md` to `brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md`.
 
 ### Phase 3: Harden `setup()` (GREEN)
 
-- [ ] 0.5 In `scripts/memory/backends/engram.mjs` `setup()`: add real-directory guard — if `lstatSync(.engram)` succeeds and is NOT a symlink, log `"⚠ .engram is a real directory — pull the migration before re-running setup"` and skip creation without throwing. (REQ-S0-1 idempotent + guard)
+- [x] 0.5 In `scripts/memory/backends/engram.mjs` `setup()`: add real-directory guard — if `lstatSync(.engram)` succeeds and is NOT a symlink, log `"⚠ .engram is a real directory — pull the migration before re-running setup"` and skip creation without throwing. (REQ-S0-1 idempotent + guard). Also extracted as exported `ensureMemorySymlink(root)` for testability.
 
 ### Phase 4: Verify (confirm; no code edits needed)
 
-- [ ] 0.6 Confirm `.gitattributes` — `/.memory/manifest.json merge=engram-manifest` already targets the live path post-migration. No edit. Document as confirmed in PR.
-- [ ] 0.7 Confirm `scripts/hooks/pre-push` — `git status --porcelain -- .memory` now inspects the real path; hook was already written for it. No edit. Document as confirmed. (REQ-S0-2)
-- [ ] 0.8 Run `npm test` — all tests green. Fix any failures before tagging the PR ready.
+- [x] 0.6 Confirm `.gitattributes` — `/.memory/manifest.json merge=engram-manifest` already targets the live path post-migration. No edit. Confirmed: file was already correct.
+- [x] 0.7 Confirm `scripts/hooks/pre-push` — `git status --porcelain -- .memory` now inspects the real path; hook was already written for it. No edit. Confirmed: guard is now live (verified with synthetic uncommitted .memory/ change). (REQ-S0-2)
+- [x] 0.8 Run `npm test` — all tests green. 121/121 pass (10 new tests added).
 
 ### Phase 5: Manual gate (before merging PR-S0)
 
-- [ ] 0.9 Merge-driver round-trip: on a scratch branch from `feat/s0-…`, create two forks each appending a distinct chunk to `.memory/manifest.json`; merge; assert merged manifest contains both chunks (union, no side dropped). Document result in PR description.
+- [x] 0.9 Merge-driver round-trip: on a scratch branch from `feat/s0-…`, create two forks each appending a distinct chunk to `.memory/manifest.json`; merge; assert merged manifest contains both chunks (union, no side dropped). RESULT: fork-A-chunk + fork-B-chunk both present after merge — driver is live on `.memory/manifest.json` path.
 
 ---
 
