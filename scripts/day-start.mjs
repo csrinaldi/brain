@@ -112,6 +112,20 @@ if (!vcs) {
   }
 }
 
+// ── Pre-sync: restore manifest churn so git merge can proceed ────────────────
+// .memory/manifest.json is rewritten by `engram sync --export` (a derived index,
+// not user content). Discarding uncommitted local churn before the git merge is
+// safe and prevents the "your local changes would be overwritten" abort.
+// This is the "pull EARLY" step described in issue #59 / ADR-0002.
+{
+  const manifestFile = '.memory/manifest.json';
+  const manifestStatus = capture('git', ['status', '--porcelain', '--', manifestFile]);
+  if (manifestStatus.stdout?.trim()) {
+    capture('git', ['restore', '--', manifestFile]);
+    info(await t('day.memory.manifestRestored') || `manifest.json churn discarded (safe)`);
+  }
+}
+
 // ── 2. Main sync ─────────────────────────────────────────────────────────────
 sep(await t('day.main.section'));
 {
@@ -281,9 +295,12 @@ if (!existsSync(hookFile)) {
 
 const engram = capture('engram', ['--version']);
 if (engram.status === 0) {
-  // 4a. Import team memory from .memory/ in the repo → ~/.engram local
+  // 4a. Safe memory pull: manifest restore (if still dirty) → git pull → import.
+  //     Uses memory:pull (pullMemory()) so the manifest churn guard is always active,
+  //     even if the pre-sync block above could not run (e.g. on a fresh clone).
+  //     `git pull` here is a no-op when step 2 already fast-forwarded; harmless.
   console.log(`  ${C.dim}${await t('day.memory.importing')}${C.reset}`);
-  await run('engram', ['sync', '--import'], { stdio: ['inherit', 'inherit', 'pipe'] });
+  await run(NODE, ['scripts/memory/cli.mjs', 'pull']);
 
   // 4b. Re-project brain/ → ~/.engram (ADRs, anti-patterns, domain)
   console.log(`  ${C.dim}${await t('day.memory.reprojecting')}${C.reset}`);

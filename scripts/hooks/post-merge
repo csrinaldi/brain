@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+# post-merge — best-effort engram re-sync after a pull/merge (issue #59 / ADR-0002).
+#
+# Triggered automatically by git after:
+#   - git pull (when it results in a merge or fast-forward)
+#   - git merge
+#
+# Purpose: ensure engram re-syncs from .memory/ after the working tree is updated,
+# so that new memory chunks committed upstream are immediately available locally.
+#
+# Behaviour:
+#   - Non-blocking (|| true): a failed import NEVER aborts the merge/pull.
+#   - No node required for the guard — we call node only when it is available.
+#   - Mirrors the defensive style of the pre-push hook.
+#
+# Installed via `core.hooksPath = scripts/hooks` (bootstrap.sh §7 / npm run env:init).
+
+# Without node there is nothing to do — do not block.
+command -v node >/dev/null 2>&1 || exit 0
+
+repo_root=$(git rev-parse --show-toplevel)
+
+# Re-import .memory/ into local engram now that the working tree is up-to-date.
+# || true: a failed import is informational, not a merge blocker.
+node "$repo_root/scripts/memory/cli.mjs" pull >/dev/null 2>&1 || true
+
+exit 0

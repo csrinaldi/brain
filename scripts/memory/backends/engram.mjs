@@ -110,13 +110,121 @@ export async function share() {
   execFileSync(engram, ["sync", "--export"], { stdio: "inherit" });
 }
 
+// ---------------------------------------------------------------------------
+// pullMemory — churn-resilient memory pull (issue #59)
+// ---------------------------------------------------------------------------
+
 /**
- * pull() — import .memory/ into engram.
- * Equivalent to what `memory:pull` used to do directly.
+ * Default seam: check whether .memory/manifest.json has uncommitted local changes.
+ *
+ * @param {string} root  Repo root.
+ * @returns {boolean}
  */
-export async function pull() {
+function _defaultIsManifestDirty(root) {
+  const r = spawnSync(
+    "git",
+    ["status", "--porcelain", "--", ".memory/manifest.json"],
+    { encoding: "utf8", cwd: root },
+  );
+  return !!r.stdout?.trim();
+}
+
+/**
+ * Default seam: discard uncommitted local changes to .memory/manifest.json.
+ * Non-fatal: logs a warning on failure instead of throwing.
+ *
+ * @param {string} root  Repo root.
+ */
+function _defaultRestoreManifest(root) {
+  const r = spawnSync("git", ["checkout", "--", ".memory/manifest.json"], {
+    stdio: "pipe",
+    cwd: root,
+  });
+  if (r.status !== 0) {
+    console.warn(
+      "  ⚠ could not restore .memory/manifest.json —",
+      r.stderr?.toString().trim() || "unknown error",
+    );
+  } else {
+    console.log("  ✓ .memory/manifest.json restored (discarded local churn)");
+  }
+}
+
+/**
+ * Default seam: run `git pull` in the repo root.
+ * Throws (via execFileSync) on non-zero exit so callers can detect failure.
+ *
+ * @param {string} root  Repo root.
+ */
+function _defaultGitPull(root) {
+  execFileSync("git", ["pull"], { stdio: "inherit", cwd: root });
+}
+
+/**
+ * Default seam: run `engram sync --import`.
+ */
+function _defaultImport() {
   const engram = requireEngram();
   execFileSync(engram, ["sync", "--import"], { stdio: "inherit" });
+}
+
+/**
+ * pullMemory() — churn-resilient memory pull (issue #59).
+ *
+ * Problem: `engram sync --export` (run by memory:share / pre-push) rewrites
+ * .memory/manifest.json, leaving it dirty in the working tree. A subsequent
+ * `git pull` aborts with "your local changes would be overwritten by merge"
+ * because manifest.json is a tracked file with uncommitted local changes.
+ * The union-merge driver only helps with COMMITTED conflicts, not dirty-tree blocks.
+ *
+ * Solution: the manifest is a DERIVED index that engram regenerates on every
+ * export. Discarding local churn is therefore always safe. This function:
+ *   1. Detects and discards uncommitted manifest churn before pulling.
+ *   2. Runs `git pull` (the union-merge driver handles any committed-manifest merges).
+ *   3. Runs `engram sync --import` to hydrate the local engram from .memory/.
+ *
+ * Injectable seams make the function fully unit-testable without real git/engram:
+ *
+ * @param {object} [opts]
+ * @param {string}  [opts.root]              Repo root (defaults to this package's root).
+ * @param {(root: string) => boolean}  [opts._isManifestDirty]
+ *   Returns true when manifest.json has uncommitted local changes.
+ * @param {(root: string) => void}     [opts._restoreManifest]
+ *   Discards uncommitted manifest changes (non-fatal, best-effort).
+ * @param {(root: string) => void}     [opts._gitPull]
+ *   Runs `git pull`; MUST throw on non-zero exit so import is not called on failure.
+ * @param {() => void}                 [opts._import]
+ *   Runs `engram sync --import`.
+ */
+export async function pullMemory({
+  root = repoRoot,
+  _isManifestDirty = _defaultIsManifestDirty,
+  _restoreManifest = _defaultRestoreManifest,
+  _gitPull = _defaultGitPull,
+  _import = _defaultImport,
+} = {}) {
+  // Step 1: discard regenerable manifest churn so git pull can proceed.
+  if (_isManifestDirty(root)) {
+    console.log(
+      "  ℹ .memory/manifest.json has uncommitted local changes — restoring before pull",
+    );
+    _restoreManifest(root);
+  }
+
+  // Step 2: pull latest commits (throws on failure — import must not run).
+  _gitPull(root);
+
+  // Step 3: hydrate local engram from the newly merged .memory/.
+  await _import();
+}
+
+/**
+ * pull() — import .memory/ into engram using the churn-resilient safe pull.
+ * Replaces the former thin `engram sync --import` wrapper.
+ * Called by scripts/memory/cli.mjs when op = "pull".
+ */
+export async function pull() {
+  await pullMemory();
 }
 
 /**
