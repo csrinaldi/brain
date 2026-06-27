@@ -42,6 +42,10 @@ VCS_HOST="${_IDENT[1]:-}"
 PROJECT_PATH="${_IDENT[2]:-}"
 export VCS_HOST
 
+# Auto-fill project.gitHost / project.slug in brain.config.json from the origin.
+# Non-fatal: the node script is idempotent and degrades gracefully if git is absent.
+node scripts/lib/brain-config.mjs ensure || true
+
 # Generic credential env var (ADR-0007 / issue #33): a single VCS_TOKEN is used
 # regardless of provider so that .env stays portable across GitHub, GitLab, and any
 # future host.
