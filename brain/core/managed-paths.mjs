@@ -19,6 +19,8 @@ export const managed = [
   'brain/core/**',
   'scripts/**',
   '.gitattributes',
+  '.github/workflows/governance.yml',   // the L1 gate travels with brain (ADR-0014)
+  '.github/PULL_REQUEST_TEMPLATE.md',   // the Closes/Fixes scaffold the gate parses (ADR-0014)
 ];
 
 // Paths the consumer owns. The upgrade NEVER touches these.

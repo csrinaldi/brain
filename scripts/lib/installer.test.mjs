@@ -26,6 +26,8 @@ import {
   BRAIN_REPO_HTTPS,
 } from './installer.mjs';
 
+import { migrations } from '../../brain/core/config-migrations.mjs';
+
 // ── Glob matching ────────────────────────────────────────────────────────────
 test('globToRegExp: ** matches across separators, * does not', () => {
   assert.ok(globToRegExp('brain/core/**').test('brain/core/a/b.md'));
@@ -280,4 +282,51 @@ test('installSpec: falls back to constant when repository.url field is absent', 
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── governance.ignoreList migration (0.4.0) ────────────────────────────────────
+
+test('0.4.0 migration adds governance.ignoreList when missing', () => {
+  const config = {
+    schemaVersion: '0.3.0',
+    project: { name: 'mine', slug: 'org/repo', gitHost: 'github.com', gitProjectId: '1', owner: 'me' },
+    docs: { language: 'en' },
+    vcs: { provider: 'github' },
+  };
+  const { config: migrated, applied } = migrateConfig(config, migrations, '0.4.0');
+
+  assert.deepEqual(applied, ['0.4.0']);
+  assert.equal(migrated.schemaVersion, '0.4.0');
+  assert.ok(Array.isArray(migrated.governance?.ignoreList), 'governance.ignoreList must be an array');
+  assert.ok(migrated.governance.ignoreList.includes('.memory/**'), 'must include .memory/**');
+  assert.ok(migrated.governance.ignoreList.includes('openspec/changes/**'), 'must include openspec/changes/**');
+  assert.ok(migrated.governance.ignoreList.includes('package-lock.json'), 'must include package-lock.json');
+  assert.ok(migrated.governance.ignoreList.includes('pnpm-lock.yaml'), 'must include pnpm-lock.yaml');
+  assert.ok(migrated.governance.ignoreList.includes('yarn.lock'), 'must include yarn.lock');
+});
+
+test('0.4.0 migration is idempotent — re-running on an already-migrated config is a no-op', () => {
+  const config = {
+    schemaVersion: '0.4.0',
+    project: { name: 'mine', slug: 'org/repo', gitHost: 'github.com', gitProjectId: '1', owner: 'me' },
+    docs: { language: 'en' },
+    vcs: { provider: 'github' },
+    governance: { ignoreList: ['.memory/**', 'openspec/changes/**', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'] },
+  };
+  const { applied } = migrateConfig(config, migrations, '0.4.0');
+  assert.deepEqual(applied, []);
+});
+
+test('0.4.0 migration preserves a consumer-set governance.ignoreList', () => {
+  const config = {
+    schemaVersion: '0.3.0',
+    project: { name: 'mine', slug: 'org/repo', gitHost: 'github.com', gitProjectId: '1', owner: 'me' },
+    docs: { language: 'en' },
+    vcs: { provider: 'github' },
+    governance: { ignoreList: ['dist/**', 'coverage/**'] },
+  };
+  const { config: migrated } = migrateConfig(config, migrations, '0.4.0');
+
+  // Consumer-set list must be preserved (mergeDefaults never overwrites existing values).
+  assert.deepEqual(migrated.governance.ignoreList, ['dist/**', 'coverage/**']);
 });

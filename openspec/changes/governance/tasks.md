@@ -36,13 +36,13 @@ Chain strategy: feature-branch-chain
 
 ## S1 — Foundation (PR #S1 → base `feature/governance`) ~110 lines
 
-- [ ] **S1.1** [FILE] Verify `brain/project/decisions/adr-0014-workflow-governance.md` and `brain/HOME.md` link `[ADR-0014](project/decisions/adr-0014-workflow-governance.md)` are committed on S1 branch; run `npm run brain:nav` → exit 0. (REQ-S1-1)
-- [ ] **S1.2** [FILE] Create `.github/PULL_REQUEST_TEMPLATE.md` containing: `Closes|Fixes|Resolves #N` section, 400-line budget + `size:exception` reference, ADR/decision checkbox. (REQ-S1-2)
-- [ ] **S1.3** [CODE-TDD RED] Add two test cases to `scripts/lib/installer.test.mjs`: (a) fixture config missing `governance.ignoreList` → migration adds it with `.memory/**`, `openspec/changes/**`, lock-file globs; (b) second run is a no-op (idempotent). (REQ-S1-3)
-- [ ] **S1.4** [CODE-TDD GREEN] Append `0.4.0` migration to `brain/core/config-migrations.mjs`: additive defaults `{ governance: { ignoreList: ['.memory/**','openspec/changes/**','package-lock.json','pnpm-lock.yaml','yarn.lock'] } }`. (REQ-S1-3)
-- [ ] **S1.5** [CODE-TDD RED] Create `scripts/lib/managed-paths.test.mjs`: assert `managed` contains `.github/workflows/governance.yml` and `.github/PULL_REQUEST_TEMPLATE.md`; assert no entry matches `.github/**` glob. (REQ-S1-4)
-- [ ] **S1.6** [CODE-TDD GREEN] Add the two literal `.github/` entries to `managed` array in `brain/core/managed-paths.mjs`. Do not add `.github/**`. (REQ-S1-4)
-- [ ] **S1.7** [OPERATOR] `npm test` → green; `npm run brain:nav` → exit 0; confirm no `governance.yml` in repo (no CI yet). (REQ-S1-5)
+- [x] **S1.1** [FILE] Verify `brain/project/decisions/adr-0014-workflow-governance.md` and `brain/HOME.md` link `[ADR-0014](project/decisions/adr-0014-workflow-governance.md)` are committed on S1 branch; run `npm run brain:nav` → exit 0. (REQ-S1-1)
+- [x] **S1.2** [FILE] Create `.github/PULL_REQUEST_TEMPLATE.md` containing: `Closes|Fixes|Resolves #N` section, 400-line budget + `size:exception` reference, ADR/decision checkbox. (REQ-S1-2)
+- [x] **S1.3** [CODE-TDD RED] Add two test cases to `scripts/lib/installer.test.mjs`: (a) fixture config missing `governance.ignoreList` → migration adds it with `.memory/**`, `openspec/changes/**`, lock-file globs; (b) second run is a no-op (idempotent). (REQ-S1-3)
+- [x] **S1.4** [CODE-TDD GREEN] Append `0.4.0` migration to `brain/core/config-migrations.mjs`: additive defaults `{ governance: { ignoreList: ['.memory/**','openspec/changes/**','package-lock.json','pnpm-lock.yaml','yarn.lock'] } }`. (REQ-S1-3)
+- [x] **S1.5** [CODE-TDD RED] Create `scripts/lib/managed-paths.test.mjs`: assert `managed` contains `.github/workflows/governance.yml` and `.github/PULL_REQUEST_TEMPLATE.md`; assert no entry matches `.github/**` glob. (REQ-S1-4)
+- [x] **S1.6** [CODE-TDD GREEN] Add the two literal `.github/` entries to `managed` array in `brain/core/managed-paths.mjs`. Do not add `.github/**`. (REQ-S1-4)
+- [x] **S1.7** [OPERATOR] `npm test` → green; `npm run brain:nav` → exit 0; confirm no `governance.yml` in repo (no CI yet). (REQ-S1-5)
 
 Sequential: S1.3 → S1.4; S1.5 → S1.6. S1.1, S1.2, and the two TDD pairs are parallel tracks.
 
