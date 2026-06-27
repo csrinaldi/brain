@@ -41,33 +41,33 @@ Chain strategy: feature-branch-chain
 
 ### Phase 1: RED — Failing tests first (all must fail before Phase 2)
 
-- [ ] 1.1 `gentle-ai.test.mjs`: add test "absent decisions dir → gap notice logged" — inject `_checkDecisionsDir: () => false`, assert `console.log` output contains "No project ADRs"
-- [ ] 1.2 Add test "empty decisions dir (no .md files) → gap notice logged" — same assert, seam returns `false`
-- [ ] 1.3 Add test "populated decisions dir (≥1 .md) → no notice" — inject seam returning `true`, assert notice absent
-- [ ] 1.4 Add test "Step 4 runs independently of engram: notice fires even when `_resolveProject` returns null (checkSddContext early-return does not skip Step 4)"
-- [ ] 1.5 Add test "existing engram-context notice (Step 3) still fires unchanged after checkSddContext() refactor" — regression guard
+- [x] 1.1 `gentle-ai.test.mjs`: add test "absent decisions dir → gap notice logged" — inject `_checkDecisionsDir: () => false`, assert `console.log` output contains "No project ADRs"
+- [x] 1.2 Add test "empty decisions dir (no .md files) → gap notice logged" — same assert, seam returns `false`
+- [x] 1.3 Add test "populated decisions dir (≥1 .md) → no notice" — inject seam returning `true`, assert notice absent
+- [x] 1.4 Add test "Step 4 runs independently of engram: notice fires even when `_resolveProject` returns null (checkSddContext early-return does not skip Step 4)"
+- [x] 1.5 Add test "existing engram-context notice (Step 3) still fires unchanged after checkSddContext() refactor" — regression guard
 
 ### Phase 2: GREEN — Implement seam in `scripts/harness/backends/gentle-ai.mjs`
 
-- [ ] 2.1 Add `readdirSync` to `import { readFileSync, existsSync } from 'node:fs'`
-- [ ] 2.2 Add `_defaultResolveDecisionsDir()`: `return join(repoRoot, 'brain', 'project', 'decisions')`
-- [ ] 2.3 Add `_defaultCheckDecisionsDir(dir)`: `try { if (!existsSync(dir)) return false; return readdirSync(dir).some(f => f.endsWith('.md')); } catch { return false; }`
-- [ ] 2.4 Extract current Step 3 body into internal `function checkSddContext({ _resolveProject, _checkEngram, _runEngramSearch })` — bare `return`s now scope to the helper, not `init()`
-- [ ] 2.5 Add `_resolveDecisionsDir = _defaultResolveDecisionsDir` and `_checkDecisionsDir = _defaultCheckDecisionsDir` to `init()` param list with defaults; call `await checkSddContext(...)` where Step 3 was
-- [ ] 2.6 Add Step 4 after `checkSddContext()` call: `const adrsPresent = (() => { try { return _checkDecisionsDir(_resolveDecisionsDir()); } catch { return false; } })(); if (!adrsPresent) { console.log(\`  \${t('bootstrap.sdd.noProjectAdrs')}\`); console.log(\`    \${t('bootstrap.sdd.noProjectAdrsHint')}\`); }`
-- [ ] 2.7 Run `npm test` — all prior tests still pass + Phase 1 tests now green
+- [x] 2.1 Add `readdirSync` to `import { readFileSync, existsSync } from 'node:fs'`
+- [x] 2.2 Add `_defaultResolveDecisionsDir()`: `return join(repoRoot, 'brain', 'project', 'decisions')`
+- [x] 2.3 Add `_defaultCheckDecisionsDir(dir)`: `try { if (!existsSync(dir)) return false; return readdirSync(dir).some(f => f.endsWith('.md')); } catch { return false; }`
+- [x] 2.4 Extract current Step 3 body into internal `function checkSddContext({ _resolveProject, _checkEngram, _runEngramSearch })` — bare `return`s now scope to the helper, not `init()`
+- [x] 2.5 Add `_resolveDecisionsDir = _defaultResolveDecisionsDir` and `_checkDecisionsDir = _defaultCheckDecisionsDir` to `init()` param list with defaults; call `await checkSddContext(...)` where Step 3 was
+- [x] 2.6 Add Step 4 after `checkSddContext()` call: fires `t('bootstrap.sdd.noProjectAdrs')` + `t('bootstrap.sdd.noProjectAdrsHint')` via `console.log` when `!adrsPresent`
+- [x] 2.7 Run `npm test` — all prior tests still pass + Phase 1 tests now green (251 total, +5)
 
 ### Phase 3: i18n parity (en.mjs + es.mjs)
 
-- [ ] 3.1 `scripts/i18n/en.mjs` §6: add `'bootstrap.sdd.noProjectAdrs': 'No project ADRs found (brain/project/decisions/ is empty or absent).'`
-- [ ] 3.2 `scripts/i18n/en.mjs` §6: add `'bootstrap.sdd.noProjectAdrsHint': 'Run /project:bootstrap-adrs in your AI agent to draft the starter ADR set (Stack, Testing, Build).'`
-- [ ] 3.3 `scripts/i18n/es.mjs` §6: add Spanish equivalent for `bootstrap.sdd.noProjectAdrs`
-- [ ] 3.4 `scripts/i18n/es.mjs` §6: add Spanish equivalent for `bootstrap.sdd.noProjectAdrsHint`
-- [ ] 3.5 Run `npm test` — `scripts/i18n/coverage.test.mjs` passes (no missing-key gaps)
+- [x] 3.1 `scripts/i18n/en.mjs` §6: add `'bootstrap.sdd.noProjectAdrs': 'No project ADRs found (brain/project/decisions/ is empty or absent).'`
+- [x] 3.2 `scripts/i18n/en.mjs` §6: add `'bootstrap.sdd.noProjectAdrsHint': 'Run /project:bootstrap-adrs in your AI agent to draft the starter ADR set (Stack, Testing, Build).'`
+- [x] 3.3 `scripts/i18n/es.mjs` §6: add Spanish equivalent for `bootstrap.sdd.noProjectAdrs`
+- [x] 3.4 `scripts/i18n/es.mjs` §6: add Spanish equivalent for `bootstrap.sdd.noProjectAdrsHint`
+- [x] 3.5 Run `npm test` — `scripts/i18n/coverage.test.mjs` passes (no missing-key gaps)
 
 ### Phase 4: Fresh-install integration assertion
 
-- [ ] 4.1 `test/fresh-install/in-container.sh`: add `[4]` block after `[3]` — re-run `npm run env:init` capturing stdout, assert `grep -q "No project ADRs"` passes; `ok "gap notice appears"` else `fail "gap notice missing"` (samples-of-html5 has no `brain/project/decisions/` so notice fires)
+- [x] 4.1 `test/fresh-install/in-container.sh`: add `[4]` block after `[3]` — re-run `npm run env:init` capturing stdout, assert `grep -q "No project ADRs"` passes; `ok "gap notice appears"` else `fail "gap notice missing"` (samples-of-html5 has no `brain/project/decisions/` so notice fires)
 
 ---
 
@@ -77,15 +77,15 @@ Chain strategy: feature-branch-chain
 
 ### Phase 5: Scaffold
 
-- [ ] 5.1 Create `openspec/changes/auto-adrs/brain-drafts/.gitkeep` — makes Tier 1 draft output directory trackable in git
+- [x] 5.1 Create `openspec/changes/auto-adrs/brain-drafts/.gitkeep` — makes Tier 1 draft output directory trackable in git
 
 ### Phase 6: Author `.claude/commands/project-bootstrap-adrs.md` (phases 0-2 only)
 
-- [ ] 6.1 Write frontmatter: `name: project-bootstrap-adrs`, `description: "..."` — do NOT include `delegate_only: true`
-- [ ] 6.2 Write Phase 0 (preflight): resolve repoRoot via `import.meta.url`; read `brain.config.json` → `docs.language` (default `en`) and `project.slug`; scan `brain/project/decisions/` for `adr-(\d{4})-*.md`; compute `maxNNNN`; set `nextNNNN = maxNNNN + 1` (empty dir → `0001`)
-- [ ] 6.3 Write Phase 1 (detect, Tier 1): `mem_search("sdd-init/<project>") → mem_get_observation` to read engram-cached signals for Stack/Testing/Build; fallback to direct file scan (`package.json`, `tsconfig.json`, lock files, `go.mod`, `pyproject.toml`, `Cargo.toml`, `Gemfile`, `composer.json`) using the detection→ADR mapping from design
-- [ ] 6.4 Write Phase 2 (draft, Tier 1): for each detected topic write `openspec/changes/auto-adrs/brain-drafts/adr-NNNN-<slug>.md` using template: title, `**Status**: Proposed`, `**Date**: <today>`, `## Decision\n<detected facts>`, `## Context\n<TODO: ...>`, `## Consequences\n<TODO: ...>`; language follows `docs.language`; numbers assigned sequentially at draft time
-- [ ] 6.5 Add graceful degradation: if a topic yields zero signal from all sources, skip that ADR and report "no signal detected for <topic>" to user — never write an empty stub
+- [x] 6.1 Write frontmatter: `name: project-bootstrap-adrs`, `description: "..."` — do NOT include `delegate_only: true`
+- [x] 6.2 Write Phase 0 (preflight): resolve repoRoot via `import.meta.url`; read `brain.config.json` → `docs.language` (default `en`) and `project.slug`; scan `brain/project/decisions/` for `adr-(\d{4})-*.md`; compute `maxNNNN`; set `nextNNNN = maxNNNN + 1` (empty dir → `0001`)
+- [x] 6.3 Write Phase 1 (detect, Tier 1): `mem_search("sdd-init/<project>") → mem_get_observation` to read engram-cached signals for Stack/Testing/Build; fallback to direct file scan (`package.json`, `tsconfig.json`, lock files, `go.mod`, `pyproject.toml`, `Cargo.toml`, `Gemfile`, `composer.json`) using the detection→ADR mapping from design
+- [x] 6.4 Write Phase 2 (draft, Tier 1): for each detected topic write `openspec/changes/auto-adrs/brain-drafts/adr-NNNN-<slug>.md` using template: title, `**Status**: Proposed`, `**Date**: <today>`, `## Decision\n<detected facts>`, `## Context\n<TODO: ...>`, `## Consequences\n<TODO: ...>`; language follows `docs.language`; numbers assigned sequentially at draft time
+- [x] 6.5 Add graceful degradation: if a topic yields zero signal from all sources, skip that ADR and report "no signal detected for <topic>" to user — never write an empty stub
 
 ### Phase 7: Manual E2E checklist (Slice 2)
 
