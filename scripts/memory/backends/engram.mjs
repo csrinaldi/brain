@@ -275,11 +275,11 @@ export async function featureCheckpoint(
   try {
     resolvedFeature = resolveFeature(root, feature);
   } catch (err) {
-    console.log(`  ℹ memory: ${err.message} — skipping checkpoint`);
+    console.warn(`  ℹ memory: ${err.message} — skipping checkpoint`);
     return; // exit 0: must never break the pre-push hook
   }
   if (!resolvedFeature) {
-    console.log("  ℹ memory: no active feature found — skipping checkpoint");
+    console.warn("  ℹ memory: no active feature found — skipping checkpoint");
     return;
   }
 
