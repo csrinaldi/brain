@@ -28,6 +28,16 @@ repo_root=$(git rev-parse --show-toplevel)
 # Si el export falla, no bloquear el push por un problema de tooling.
 node "$repo_root/scripts/memory/cli.mjs" share >/dev/null 2>&1 || exit 0
 
+# Checkpoint the active feature's resume.md so the latest context travels
+# with the branch on every push (REQ-S4-1).
+# Non-blocking: || true ensures a failed or ambiguous-resolution checkpoint
+# never aborts the push.
+# Known limitation (A2): when multiple openspec/changes/ dirs exist the cli
+# exits non-zero ("ambiguous"); || true swallows it and the push continues
+# unaffected.  The committed resume.md remains the primary context-travel
+# mechanism in that case.
+node "$repo_root/scripts/memory/cli.mjs" feature-checkpoint >/dev/null 2>&1 || true
+
 # ¿Quedó memoria sin commitear en .memory/? `status --porcelain` cubre staged,
 # unstaged Y untracked (?? ) en un solo check — evita el anti-pattern de `git diff`
 # ciego a archivos nuevos (brain/anti-patterns/git-diff-no-ve-untracked.md).
