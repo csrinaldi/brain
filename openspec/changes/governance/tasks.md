@@ -50,10 +50,10 @@ Sequential: S1.3 → S1.4; S1.5 → S1.6. S1.1, S1.2, and the two TDD pairs are 
 
 ## S2 — Hard Gates I+II (PR #S2 → base `gov/s1-foundation`) ~150 lines
 
-- [ ] **S2.1** [CODE-TDD RED] Create `scripts/vcs/diff-size-count.test.mjs`: test `parseDiffNumstat(rawNumstat, ignoreList)` — fixture with `.memory/` (3 lines) + `scripts/foo.mjs` (5 lines) + ignoreList `['.memory/**']` → 5; fixture with +5 added/-3 deleted in included files → 8. (REQ-S2-3)
-- [ ] **S2.2** [CODE-TDD GREEN] Create `scripts/vcs/diff-size-count.mjs` exporting `parseDiffNumstat(raw, ignoreList)`: parse `git diff --numstat` output string, apply minimatch glob exclusions, return additions+deletions. (REQ-S2-3)
-- [ ] **S2.3** [YAML] Create `.github/workflows/governance.yml` with `issue-link` job (parse PR body for `Closes|Fixes|Resolves #N`, verify `status:approved` label via `gh api`) and `diff-size` job (read ignoreList from `brain.config.json` via `jq`, call `node scripts/vcs/diff-size-count.mjs`, fail >400 without `size:exception`). Apply all YAML/bash gotchas from design: `run: |`, `set -euo pipefail`, `|| true` on grep no-match, single-quoted git pathspec, `join()` label flatten, `pull_request` trigger. (REQ-S2-1, REQ-S2-2)
-- [ ] **S2.4** [OPERATOR] `npm test` → green; validate `governance.yml` YAML syntax. (REQ-S2-3)
+- [x] **S2.1** [CODE-TDD RED] Create `scripts/vcs/diff-size-count.test.mjs`: test `parseDiffNumstat(rawNumstat, ignoreList)` — fixture with `.memory/` (3 lines) + `scripts/foo.mjs` (5 lines) + ignoreList `['.memory/**']` → 5; fixture with +5 added/-3 deleted in included files → 8. (REQ-S2-3)
+- [x] **S2.2** [CODE-TDD GREEN] Create `scripts/vcs/diff-size-count.mjs` exporting `parseDiffNumstat(raw, ignoreList)`: parse `git diff --numstat` output string, apply minimatch glob exclusions, return additions+deletions. (REQ-S2-3)
+- [x] **S2.3** [YAML] Create `.github/workflows/governance.yml` with `issue-link` job (parse PR body for `Closes|Fixes|Resolves #N`, verify `status:approved` label via `gh api`) and `diff-size` job (read ignoreList from `brain.config.json` via `jq`, call `node scripts/vcs/diff-size-count.mjs`, fail >400 without `size:exception`). Apply all YAML/bash gotchas from design: `run: |`, `set -euo pipefail`, `|| true` on grep no-match, single-quoted git pathspec, `join()` label flatten, `pull_request` trigger. (REQ-S2-1, REQ-S2-2)
+- [x] **S2.4** [OPERATOR] `npm test` → green; validate `governance.yml` YAML syntax. (REQ-S2-3)
 - [ ] **S2.5** [OPERATOR / manual E2E] S2 PR description must include numbered checklist: (a) PR body has `Closes #N` for a `status:approved` issue; (b) diff after ignore-list <400 lines; (c) both CI jobs pass; (d) branch protection remains off after merge. (REQ-S2-4, REQ-E-1)
 
 Sequential: S2.1 → S2.2. S2.3 can be authored in parallel. S2.4 after S2.1-S2.3.
