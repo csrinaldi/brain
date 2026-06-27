@@ -1,0 +1,10 @@
+{
+  "name": "brain-test-consumer-npm",
+  "version": "1.0.0",
+  "description": "Mock consumer repo for brain integration tests (npm)",
+  "private": true,
+  "scripts": {
+    "brain:upgrade": "node node_modules/brain/scripts/brain-upgrade.mjs",
+    "env:init": "bash ./scripts/bootstrap.sh"
+  }
+}
