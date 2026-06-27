@@ -51,6 +51,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0011](project/decisions/adr-0011-feature-scoped-working-memory.md) — Feature-scoped working memory: branch-local resume.md
 - [ADR-0012](project/decisions/adr-0012-harness-init-adapter.md) — Harness-init adapter: each harness defines its init
 - [ADR-0013](project/decisions/adr-0013-auto-adr-onboarding.md) — Auto-ADR onboarding: bootstrap notices, agent drafts, human signs
+- [ADR-0014](project/decisions/adr-0014-workflow-governance.md) — Workflow governance: enforce load-bearing invariants server-side
 
 ### Project-specific rules
 
