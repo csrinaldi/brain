@@ -243,32 +243,235 @@ Detected names (package names, filenames, version strings) are never translated 
 
 ---
 
-## End of Slice 2
+## Phase 3 — Interactive Review
 
-After Phase 2 completes, report a final summary:
+**Goal:** review each draft with the user and collect a decision — `accept`, `edit [feedback]`, `reject`, or `accept-all`. This phase writes **nothing to `brain/`** — that happens in Phase 4 after explicit Tier 2 confirmation.
+
+### Setup
+
+Before presenting any draft, track two pieces of state:
+
+- `reviewedConfirmed` — starts `false`; set to `true` only when the user **explicitly asserts** they have reviewed the drafts (e.g., "I reviewed all drafts", "I've reviewed them", "already reviewed", or equivalent phrasing).
+- `decisions` — a map from each draft filename to `accept` or `reject`. Starts empty.
+
+### Accept-all gate
+
+`accept-all` is always listed as a choice so the user knows it exists. However, if the user types `accept-all` and `reviewedConfirmed` is `false`, **decline** and respond:
+
+> "Please confirm you have reviewed the drafts before using `accept-all`. Once you have, say something like \"I reviewed all drafts\" — then type `accept-all` to accept all remaining drafts in one step."
+
+Do **not** proceed with accept-all until the user makes that explicit assertion and `reviewedConfirmed` becomes `true`.
+
+If the user's input is not one of the four commands but contains a review assertion (e.g., "I reviewed all drafts", "I reviewed them", "already reviewed", "I've read them all"), set `reviewedConfirmed = true` and confirm:
+
+> "`accept-all` is now unlocked. Type `accept-all` to accept all remaining drafts at once, or continue reviewing draft by draft."
+
+Then prompt for their choice on the current draft.
+
+### For each draft (Stack → Testing → Build, skip NO-SIGNAL topics)
+
+For each topic where a draft was written in Phase 2:
+
+**Step 1 — Read the draft**
+
+Read `<repoRoot>/openspec/changes/auto-adrs/brain-drafts/<filename>`.
+
+**Step 2 — Present the summary**
+
+Show a 2–3 sentence summary of the draft, then the four choices:
 
 ```
-/project:bootstrap-adrs — Slice 2 complete (draft phase).
+--- Review: <filename> ---
+<2–3 sentence summary drawn from the ## Decision section and the ADR title.
+ State what technology was detected and recorded, and that Context/Consequences
+ are TODO stubs awaiting human authorship.>
 
-Drafts written to openspec/changes/auto-adrs/brain-drafts/:
-  <list each filename written, one per line>
-  (or "No drafts written — all topics had no signal." if all were skipped)
-
-Topics with no signal (skipped): <list or "none">
-
-These are Tier 1 drafts only.
-No files were written to brain/project/decisions/ or brain/HOME.md.
-
-Next step — Slice 3 (not yet implemented):
-  The interactive review phase (accept | edit [feedback] | reject | accept-all)
-  followed by Tier 2 writes to brain/project/decisions/ with explicit confirmation
-  will be added to this command in the next slice.
-  Run /project:bootstrap-adrs again after the Slice 3 update to complete the flow.
+Choices:
+  accept            — mark this ADR for Tier 2 write to brain/
+  edit [feedback]   — revise this draft in brain-drafts/ and re-present before you decide
+  reject            — discard this ADR (no write to brain/, no HOME.md entry)
+  accept-all        — accept all remaining drafts at once (requires "I reviewed" confirmation first)
 ```
 
-<!-- SLICE 3 EXTENSION POINT
-Phase 3 (interactive review: accept | edit | reject | accept-all) and
-Phase 4 (Tier 2 writes to brain/project/decisions/ + brain/HOME.md patch)
-will be appended here by the Slice 3 implementation.
-Do NOT modify the Phase 0–2 structure above when extending.
--->
+**Step 3 — Handle the response**
+
+#### `accept`
+
+- Record `decisions[filename] = 'accept'`.
+- Respond: `Accepted: <filename>.`
+- Proceed to the next draft.
+
+#### `edit [feedback]`
+
+- Extract the feedback text (everything after the keyword `edit `).
+- Revise the draft **in-place** at `<repoRoot>/openspec/changes/auto-adrs/brain-drafts/<filename>`:
+  - Incorporate the feedback into the `## Decision` section only.
+  - Do **not** add invented rationale, alternatives, or tradeoffs to `## Context` or `## Consequences`.
+- Confirm: `Draft revised: <filename> — <one-sentence description of the change made>.`
+- **Re-present** the draft (return to Step 1 for the same draft). Repeat until the user chooses `accept` or `reject`.
+
+#### `reject`
+
+- Record `decisions[filename] = 'reject'`.
+- Respond: `Rejected: <filename> — no write to brain/ for this ADR.`
+- Proceed to the next draft.
+
+#### `accept-all`
+
+- Check the gate: if `reviewedConfirmed` is `false`, decline (see **Accept-all gate** above).
+- If `reviewedConfirmed` is `true`:
+  - Record `decisions[current_filename] = 'accept'`.
+  - Record `decisions[each remaining unreviewed filename] = 'accept'`.
+  - Skip individual review for all remaining drafts.
+  - Proceed directly to Phase 4 **Path B (batched)**.
+
+### Phase 3 summary
+
+After all drafts are reviewed (or `accept-all` reached):
+
+```
+--- Phase 3 Review complete ---
+Accepted: <list of accepted filenames, or "none">
+Rejected: <list of rejected filenames, or "none">
+```
+
+If **no** drafts were accepted, skip Phase 4 entirely and report:
+
+```
+No drafts accepted — nothing will be written to brain/.
+/project:bootstrap-adrs complete.
+```
+
+---
+
+## Phase 4 — Tier 2 Writes + HOME.md Patch
+
+**Goal:** write accepted ADR files to `brain/project/decisions/` and patch `brain/HOME.md`. Per `brain/core/methodology/agent-authorities.md` (Tier 2), every write to `brain/` requires **explicit human confirmation** before it occurs. Nothing in this phase is autonomous.
+
+There are two paths — **Path A** (per-ADR, from individual `accept` choices) and **Path B** (batched, from `accept-all` after the "I reviewed" gate).
+
+---
+
+### Path A — Per-ADR (individual `accept` choices)
+
+Process each accepted ADR **in order** (Stack → Testing → Build).
+
+**For each accepted ADR**, request Tier 2 confirmation — present this prompt and wait:
+
+```
+--- Tier 2 confirmation required — brain/ write ---
+  File:    brain/project/decisions/<adr-NNNN-slug.md>
+  Content: <one-sentence summary of the ## Decision section>
+
+Type "confirm" to write this file, or "skip" to leave it out.
+```
+
+- If `confirm`: write the draft content to `<repoRoot>/brain/project/decisions/<filename>`. Report: `Written: brain/project/decisions/<filename>`.
+- If `skip`: do **not** write the file. Report: `Skipped: <filename> — not written to brain/.`
+
+After all accepted ADRs are processed, run the **HOME.md patch** step with a separate Tier 2 prompt (see below).
+
+---
+
+### Path B — Batched (`accept-all` after "I reviewed" gate)
+
+Issue **one single** batched Tier 2 confirmation covering all accepted ADR files and the HOME.md patch together:
+
+```
+--- Tier 2 batch confirmation required — brain/ writes ---
+The following changes will be made:
+
+ADR files to write:
+<list each: brain/project/decisions/<adr-NNNN-slug.md> — <one-sentence Decision summary>>
+
+HOME.md patch:
+  brain/HOME.md — append one link per accepted ADR to '### Architecture decisions'
+
+Type "confirm" to apply all changes, or "cancel" to abort everything.
+```
+
+- If `confirm`: write each accepted ADR file to `<repoRoot>/brain/project/decisions/<filename>`, then run the **HOME.md patch** (see below). Report each file as written.
+- If `cancel`: write nothing. Report: `Batch write cancelled — no changes made to brain/.` End the command.
+
+---
+
+### HOME.md patch
+
+This step runs after all accepted ADR files are written (whether via Path A or Path B).
+
+**Path A only** — request a separate Tier 2 confirmation for the HOME.md modification before patching:
+
+```
+--- Tier 2 confirmation required — brain/HOME.md patch ---
+  File:   brain/HOME.md
+  Change: append <N> ADR link(s) to the '### Architecture decisions' list.
+
+  Lines to be appended:
+  <list each: - [ADR-NNNN](project/decisions/<adr-NNNN-slug.md>) — <short description>>
+
+Type "confirm" to patch HOME.md, or "skip" to leave HOME.md unchanged
+(you will need to add the links manually).
+```
+
+If the user types `skip`, leave HOME.md unchanged and proceed to **Post-write verification**.
+
+In **Path B**, no separate prompt is needed — the batch confirmation already covers the HOME.md patch.
+
+#### Locate the insertion point (fail-safe)
+
+1. Read `<repoRoot>/brain/HOME.md`.
+2. Search for the heading `### Architecture decisions` (exact, case-sensitive match).
+   - **If not found**: ABORT the patch. Leave `brain/HOME.md` unchanged. Report:
+     ```
+     HOME.md patch ABORTED — could not locate the heading '### Architecture decisions'.
+     HOME.md was NOT modified. Add these lines manually after that heading:
+     <list each: - [ADR-NNNN](project/decisions/<adr-NNNN-slug.md>) — <short description>>
+     ```
+     Continue to **Post-write verification** without modifying HOME.md.
+3. Within the `### Architecture decisions` section (between that heading and the next `---` separator or `##` heading), find the **last** line that matches the pattern `- [ADR-NNNN](project/decisions/...)` where NNNN is exactly four digits.
+   - **If no such line is found within that section**: ABORT the patch. Leave `brain/HOME.md` unchanged. Report:
+     ```
+     HOME.md patch ABORTED — found '### Architecture decisions' but could not locate
+     any existing ADR link line (expected pattern: - [ADR-NNNN](project/decisions/...)).
+     HOME.md was NOT modified. Add these lines manually after the last existing ADR link:
+     <list each: - [ADR-NNNN](project/decisions/<adr-NNNN-slug.md>) — <short description>>
+     ```
+     Continue to **Post-write verification** without modifying HOME.md.
+
+#### Append the links
+
+If the insertion point was found successfully:
+
+For each accepted and written ADR (in order), insert a new line immediately after the last existing ADR link line, using this exact format:
+
+```
+- [ADR-<NNNN>](project/decisions/<adr-NNNN-slug>.md) — <short description>
+```
+
+Where:
+- `<NNNN>` is the zero-padded four-digit number from the filename.
+- `project/decisions/<adr-NNNN-slug>.md` is the path **relative to `brain/`** — no `brain/` prefix.
+- `<short description>` is derived from the ADR title line `# ADR-NNNN — <Topic>: <detail>`: take the text after the first ` — ` separator (e.g., for title `# ADR-0014 — Stack: TypeScript + React`, the description is `Stack: TypeScript + React`).
+
+After writing `brain/HOME.md`, confirm:
+
+```
+HOME.md patched: appended <N> ADR link(s) after the last entry in '### Architecture decisions'.
+```
+
+---
+
+### Post-write verification
+
+After all writes (ADR files + HOME.md) are complete, report:
+
+```
+/project:bootstrap-adrs complete.
+
+Written to brain/:
+<list each brain/project/decisions/<filename>, or "none">
+
+brain/HOME.md: <patched | unchanged — see above>
+
+Recommended: run 'npm run brain:nav' to verify no orphaned ADRs and no broken links.
+```
