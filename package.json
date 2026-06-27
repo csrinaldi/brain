@@ -20,6 +20,7 @@
     "change:verify": "node ./scripts/verify-change.mjs",
     "brain:upgrade": "node ./scripts/brain-upgrade.mjs",
     "test": "node --test \"scripts/**/*.test.mjs\"",
+    "test:fresh-install": "bash test/fresh-install/run.sh",
     "memory:index": "node ./scripts/memory/cli.mjs index",
     "memory:share": "node ./scripts/memory/cli.mjs share",
     "memory:pull": "node ./scripts/memory/cli.mjs pull",
