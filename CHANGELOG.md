@@ -5,6 +5,34 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.5.0 — 2026-06-27
+
+### Added
+
+- **Auto-ADR onboarding** (ADR-0013, #53): the bootstrap notices when
+  `brain/project/decisions/` has no ADRs and points to the new
+  `/project:bootstrap-adrs` agent command, which explores the consumer repo and
+  drafts **descriptive** starter ADRs (Stack, Testing, Build) into
+  `openspec/changes/auto-adrs/brain-drafts/` (Tier 1). The human accepts each into
+  `brain/` via per-action **Tier 2** confirmation; the agent never auto-commits and
+  never invents rationale (`Context`/`Consequences` stay `<TODO>` stubs).
+- **`memory:import`** verb — `engram sync --import` only (no `git pull`).
+- **`post-merge` git hook** — re-imports engram after any pull/merge.
+
+### Fixed
+
+- **Cross-machine `memory:pull` churn** (#59): `engram sync --export` rewrites
+  `.memory/manifest.json` and leaves it dirty, blocking a `git pull`
+  (*"local changes would be overwritten"*). `memory:pull` is now churn-resilient
+  (restore the regenerable manifest → `git pull` → import). The manifest stays
+  **committed** — it is engram's authoritative chunk index (see ADR-0002 note);
+  gitignoring it would silently lose memory on every fresh machine.
+
+### Changed
+
+- `memory:pull` now performs a safe `git pull` (restore + pull + import), not just
+  an import. Use the new **`memory:import`** for the old import-only behavior.
+
 ## v0.4.1 — 2026-06-27
 
 ### Fixed
