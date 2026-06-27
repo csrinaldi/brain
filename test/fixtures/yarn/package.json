@@ -1,0 +1,11 @@
+{
+  "name": "brain-test-consumer-yarn",
+  "version": "1.0.0",
+  "description": "Mock consumer repo for brain integration tests (yarn)",
+  "private": true,
+  "packageManager": "yarn@4.0.0",
+  "scripts": {
+    "brain:upgrade": "node node_modules/brain/scripts/brain-upgrade.mjs",
+    "env:init": "bash ./scripts/bootstrap.sh"
+  }
+}
