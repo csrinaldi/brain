@@ -31,7 +31,84 @@ Scan `<repoRoot>/brain/project/decisions/` for files whose names match the patte
 - If the directory does not exist or contains no matching files, set `nextNNNN = 1`.
 - Format `nextNNNN` as a zero-padded four-digit string: e.g. `1` → `"0001"`, `13` → `"0013"`.
 
-### 0.4 Report
+### 0.4 — Coverage assessment (augment mode)
+
+If no ADR files were found in Step 0.3 (decisions directory absent or empty), set `topicsToDraft = ['Stack', 'Testing', 'Build']` and skip ahead to Step 0.6 — there is nothing to match against, so no coverage assessment is needed.
+
+If at least one ADR file was found, compute topic coverage by keyword-matching each ADR's filename slug and H1 title against the topic keyword sets below.
+
+**For each existing ADR file found in Step 0.3:**
+
+1. Extract the **slug**: the portion of the filename between the four-digit NNNN block and `.md`. Example: `adr-0009-documentation-language-policy.md` → slug = `documentation-language-policy`. Replace hyphens with spaces.
+2. Read the **H1 title**: the first line of the file that begins with `# `. Strip the leading `# `.
+3. Build the **combined text**: join slug words + H1 title text, all lowercased. Example: `documentation language policy  adr-0009 — documentation language policy`.
+4. For each of the three topics, check whether any keyword from that topic's set appears as a **substring** of the combined text.
+
+**Topic keyword sets (substring match, case-insensitive):**
+
+| Topic | Keywords |
+|-------|---------|
+| **Stack** | `stack`, `framework`, `frontend`, `backend`, `language`, `react`, `vue`, `angular`, `nest`, `express`, `next`, `svelte` |
+| **Testing** | `test`, `testing`, `coverage`, `tdd`, `jest`, `vitest`, `mocha`, `playwright`, `cypress` |
+| **Build** | `build`, `bundl`, `package`, `manager`, `vite`, `webpack`, `rollup`, `esbuild`, `tsup`, `pnpm`, `yarn`, `npm`, `bun` |
+
+> Note: `bundl` is a stem — it matches "bundle", "bundler", "bundling" and any word that contains it.
+
+**Coverage result per topic:**
+- **COVERED**: at least one existing ADR's combined text contains at least one keyword from that topic's set. Record which filename(s) produced the match.
+- **NOT COVERED**: no existing ADR matched any keyword for that topic.
+
+Store internally:
+- `stackCovered: true | false` (+ matching filename list if true)
+- `testingCovered: true | false` (+ matching filename list if true)
+- `buildCovered: true | false` (+ matching filename list if true)
+
+### 0.5 — Confirm coverage and set draft scope
+
+Initialise `topicsToDraft` with every topic that is NOT COVERED.
+
+**If all three topics are NOT COVERED** (none of the existing ADRs matched any keyword): set `topicsToDraft = ['Stack', 'Testing', 'Build']` and skip to Step 0.6 — every topic will be drafted, nothing to skip, no assessment to present.
+
+**If at least one topic is COVERED**, present the coverage assessment and wait for the user's choice before proceeding:
+
+```
+Coverage assessment — starter ADR topics:
+
+  Stack:   <COVERED — matched: <filename(s)> | NOT COVERED>
+  Testing: <COVERED — matched: <filename(s)> | NOT COVERED>
+  Build:   <COVERED — matched: <filename(s)> | NOT COVERED>
+
+Topics that will be drafted:   <comma-separated list of NOT COVERED topics, or "none">
+Topics already covered (skip): <comma-separated list of COVERED topics, or "none">
+
+How to proceed:
+  confirm            — draft uncovered topics only (skip covered ones)
+  include <topic>    — re-add a covered topic to the draft run (e.g., "include stack")
+  include all        — re-add all covered topics and draft all 3
+  cancel             — exit without drafting anything
+```
+
+**Handle each response:**
+
+- `confirm`: accept the assessment as shown. `topicsToDraft` stays as the NOT COVERED topics.
+- `include <topic>` (e.g., `include stack`): add the named topic to `topicsToDraft`. Re-display the updated "Topics that will be drafted / Topics already covered" lines and prompt again (only `confirm` or `cancel` accepted at this point).
+- `include all`: set `topicsToDraft = ['Stack', 'Testing', 'Build']`. Re-display the updated lines and prompt for `confirm` or `cancel`.
+- `cancel`: respond with:
+  ```
+  Cancelled. /project:bootstrap-adrs exited without writing any files.
+  ```
+  Exit — do not run Phases 1–4.
+
+**Full-coverage clean exit**: if, after the user types `confirm`, `topicsToDraft` is empty (every topic was COVERED and the user did not override any), respond with:
+
+```
+All starter ADR topics are already covered. No drafts needed.
+/project:bootstrap-adrs complete.
+```
+
+Exit — do not run Phases 1–4.
+
+### 0.6 — Report
 
 Tell the user:
 
@@ -39,8 +116,10 @@ Tell the user:
 Phase 0 — Preflight complete.
   Project slug:       <projectSlug>
   Draft language:     <lang>
+  Existing ADRs:      <count of ADR files found in decisions/, or "none">
   Next ADR number:    <NNNN>
   Draft destination:  openspec/changes/auto-adrs/brain-drafts/
+  Topics to draft:    <topicsToDraft comma-separated, e.g. "Stack, Testing, Build" or "Testing, Build">
 ```
 
 ---
@@ -49,7 +128,9 @@ Phase 0 — Preflight complete.
 
 **Goal:** collect signals for three ADR topics — **Stack**, **Testing**, and **Build** — from the consumer repo.
 
-You will produce a signal record for each topic: either DETECTED (with concrete facts) or NO-SIGNAL.
+**Scope**: process only the topics in `topicsToDraft` (resolved in Phase 0). For any topic not in `topicsToDraft`, skip all detection work — do not call mem_search for it, do not scan any files, do not produce a signal record, and do not report on it.
+
+You will produce a signal record for each topic in `topicsToDraft`: either DETECTED (with concrete facts) or NO-SIGNAL.
 
 ### 1a — Try Engram cache first
 
@@ -94,25 +175,30 @@ If the Engram cache is absent or does not provide sufficient signals for a topic
 
 ### 1c — Signal summary
 
-After completing Steps 1a and 1b, produce an internal signal record:
+After completing Steps 1a and 1b, produce an internal signal record for each topic in `topicsToDraft` only (topics not in `topicsToDraft` are omitted from this summary):
 
 ```
-Stack:   DETECTED — <summary of facts> | NO-SIGNAL
-Testing: DETECTED — <summary of facts> | NO-SIGNAL
-Build:   DETECTED — <summary of facts> | NO-SIGNAL
+Stack:   DETECTED — <summary of facts> | NO-SIGNAL | (skipped — already covered)
+Testing: DETECTED — <summary of facts> | NO-SIGNAL | (skipped — already covered)
+Build:   DETECTED — <summary of facts> | NO-SIGNAL | (skipped — already covered)
 ```
 
-Report this to the user before proceeding to Phase 2.
+Report only the in-scope topic rows to the user before proceeding to Phase 2.
 
 ---
 
 ## Phase 2 — Draft (Tier 1, autonomous)
 
-**Goal:** write one ADR draft file per DETECTED topic into `openspec/changes/auto-adrs/brain-drafts/`. Numbers are assigned sequentially at draft time: Stack = `nextNNNN`, Testing = `nextNNNN+1`, Build = `nextNNNN+2`. A topic with NO-SIGNAL is skipped (its number slot is still consumed to preserve ordering).
+**Goal:** write one ADR draft file per DETECTED topic (that is also in `topicsToDraft`) into `openspec/changes/auto-adrs/brain-drafts/`. Numbers are assigned sequentially among the topics in `topicsToDraft` only. Topics not in `topicsToDraft` (confirmed as already covered in Phase 0) are skipped entirely — no file written, no NNNN slot consumed. Within `topicsToDraft`, a topic with NO-SIGNAL is skipped but its NNNN slot IS still consumed to preserve relative ordering among the in-scope topics.
 
-Process topics in this order: **Stack → Testing → Build**.
+Process topics in this fixed order: **Stack → Testing → Build**.
 
 ### For each topic
+
+**If NOT IN `topicsToDraft`** (topic was confirmed as already covered in Phase 0):
+- Skip this topic entirely — no scan was run, no draft to write.
+- Do NOT consume a NNNN slot.
+- (No need to report — the coverage assessment in Phase 0 already informed the user.)
 
 **If NO-SIGNAL:**
 - Do NOT write a file.

@@ -129,10 +129,10 @@ Chain strategy: feature-branch-chain
 
 ### Phase 10: Extend Phase 0 with coverage detection
 
-- [ ] 10.1 Compute topic coverage: keyword-match each existing ADR title/slug against design keyword sets — Stack: `stack/framework/frontend/backend/language` + known framework names (react/vue/angular/nest/express/next/svelte); Testing: `test/testing/coverage/tdd` + known runner names (jest/vitest/mocha/playwright/cypress); Build: `build/bundl/package.manager` + known bundler/PM names (vite/webpack/rollup/esbuild/tsup/pnpm/yarn/npm/bun)
-- [ ] 10.2 Present coverage assessment to user before drafting: list topics as covered/uncovered; ask user to confirm or override; never silently skip
-- [ ] 10.3 Draft only uncovered topics: skip Phase 1-2 for any topic the user confirms as already covered
-- [ ] 10.4 Full-coverage clean exit: when all 3 topics confirmed covered, print "All starter ADR topics are already covered. No drafts needed." and exit without writing any files to `brain-drafts/`
+- [x] 10.1 Compute topic coverage: keyword-match each existing ADR title/slug against design keyword sets — Stack: `stack/framework/frontend/backend/language` + known framework names (react/vue/angular/nest/express/next/svelte); Testing: `test/testing/coverage/tdd` + known runner names (jest/vitest/mocha/playwright/cypress); Build: `build/bundl/package.manager` + known bundler/PM names (vite/webpack/rollup/esbuild/tsup/pnpm/yarn/npm/bun)
+- [x] 10.2 Present coverage assessment to user before drafting: list topics as covered/uncovered; ask user to confirm or override; never silently skip
+- [x] 10.3 Draft only uncovered topics: skip Phase 1-2 for any topic the user confirms as already covered
+- [x] 10.4 Full-coverage clean exit: when all 3 topics confirmed covered, print "All starter ADR topics are already covered. No drafts needed." and exit without writing any files to `brain-drafts/`
 
 ### Phase 11: Manual E2E checklist (Slice 4)
 
