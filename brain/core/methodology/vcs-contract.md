@@ -9,7 +9,7 @@
 The active provider is chosen via `vcs.provider` in `brain.config.json` (explicit,
 repo-level — see ADR-0008). The dispatcher `scripts/vcs/cli.mjs` reads that key and
 delegates to `scripts/vcs/providers/<provider>.mjs`. Credentials live in `.env`
-(`GITHUB_TOKEN` / `GITLAB_TOKEN`), never in the config.
+(`VCS_TOKEN`, a single generic var across providers), never in the config.
 
 ---
 
