@@ -10,6 +10,15 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
+# Bootstrap brain.config.json before resolving identity.
+# On a fresh clone the file doesn't exist: ensureBrainConfig creates it with the
+# full schema and derives vcs.provider / gitHost / slug from the git origin so
+# the mapfile below reads the correct provider (not the *)‐default gitlab).
+# Non-fatal: degrades gracefully if git is absent or node is not yet available.
+_config_existed=true
+[ -f brain.config.json ] || _config_existed=false
+node scripts/lib/brain-config.mjs ensure || true
+
 # Resolve project identity from brain.config.json, falling back to git origin.
 # VCS_PROVIDER: env var wins, then brain.config.json vcs.provider.
 # VCS_HOST:     brain.config.json project.gitHost, then origin host.
@@ -42,9 +51,29 @@ VCS_HOST="${_IDENT[1]:-}"
 PROJECT_PATH="${_IDENT[2]:-}"
 export VCS_HOST
 
-# Auto-fill project.gitHost / project.slug in brain.config.json from the origin.
-# Non-fatal: the node script is idempotent and degrades gracefully if git is absent.
-node scripts/lib/brain-config.mjs ensure || true
+# Interactive: on a TTY, after a fresh creation, show derived values and let the
+# developer confirm or override the VCS provider. Non-TTY → use derived silently.
+if [ -t 0 ] && [ "$_config_existed" = false ] && [ -n "$VCS_PROVIDER$VCS_HOST$PROJECT_PATH" ]; then
+  printf '\n  Derived from git origin:\n'
+  printf '    provider : %s\n' "${VCS_PROVIDER:-?}"
+  printf '    gitHost  : %s\n' "${VCS_HOST:-?}"
+  printf '    slug     : %s\n' "${PROJECT_PATH:-?}"
+  read -r -p "  VCS provider [${VCS_PROVIDER:-}]: " _override
+  _override="${_override:-$VCS_PROVIDER}"
+  if [ -n "$_override" ] && [ "$_override" != "$VCS_PROVIDER" ]; then
+    VCS_PROVIDER="$_override"
+    # Persist the override to brain.config.json — use env var to avoid injection.
+    VCS_PROVIDER_OVERRIDE="$_override" node --input-type=module <<'NODE' || true
+import { readFileSync, writeFileSync } from 'node:fs';
+try {
+  const cfg = JSON.parse(readFileSync('brain.config.json', 'utf8'));
+  if (!cfg.vcs) cfg.vcs = {};
+  cfg.vcs.provider = process.env.VCS_PROVIDER_OVERRIDE;
+  writeFileSync('brain.config.json', JSON.stringify(cfg, null, 2) + '\n');
+} catch {}
+NODE
+  fi
+fi
 
 # Generic credential env var (ADR-0007 / issue #33): a single VCS_TOKEN is used
 # regardless of provider so that .env stays portable across GitHub, GitLab, and any
