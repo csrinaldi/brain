@@ -1,5 +1,8 @@
 # Dependencias y cachés de NodeJS / Nx
 node_modules/
+# package-lock.json: el repo no tiene dependencias (deps/devDeps vacíos),
+# así que el lockfile no fija nada. npm lo regenera; no se versiona.
+package-lock.json
 .workspace/
 .nx/
 dist/
