@@ -16,10 +16,12 @@ import { loadBrainConfig } from './lib/brain-config.mjs';
 import { getVcs, resolveProviderName } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';
 import { vcsToken, readEnvVar } from './vcs/lib/token.mjs';
+import { detectPM } from './lib/pm.mjs';
 import { t } from './i18n/t.mjs';
 import { tryFeatureResume } from './memory/lib/auto-resume.mjs';
 
 const ROOT = process.cwd();
+const PM = detectPM(ROOT).name;
 
 const argv = process.argv.slice(2);
 const useWorktree = argv.includes('--worktree');
@@ -213,7 +215,7 @@ const cdStep = useWorktree
 console.log(`
   ${await t('ticket.nextSteps.header')}${cdStep}
 ${await t('ticket.nextSteps.step1', { id })}
-${await t('ticket.nextSteps.step2')}
-${await t('ticket.nextSteps.step3')}
+${await t('ticket.nextSteps.step2', { pm: PM })}
+${await t('ticket.nextSteps.step3', { pm: PM })}
 ${await t('ticket.nextSteps.step4', { branch: branchName })}
 `);

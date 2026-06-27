@@ -13,6 +13,7 @@ import { highestTag, readInstalledVersion, compareSemver } from './lib/installer
 import { getVcs, resolveProviderName } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';
 import { vcsToken } from './vcs/lib/token.mjs';
+import { detectPM } from './lib/pm.mjs';
 import { t } from './i18n/t.mjs';
 
 const ROOT = process.cwd();
@@ -22,6 +23,7 @@ let step = 0;
 
 const config = loadBrainConfig();
 const { host: VCS_HOST, project: VCS_PROJECT } = originIdentity();
+const PM = detectPM(ROOT).name;
 let vcsProvider = null;
 let vcs = null;
 try {
@@ -247,7 +249,7 @@ sep(await t('day.brain.section'));
         info(await t('day.brain.noTags'));
       } else if (compareSemver(latest, installed) > 0) {
         warn(await t('day.brain.newVersion', { installed, latest }));
-        console.log(`       ${await t('day.brain.upgrade', { latest })}`);
+        console.log(`       ${await t('day.brain.upgrade', { latest, pm: PM })}`);
         console.log(`       ${C.dim}${await t('day.brain.noAutoApply')}${C.reset}`);
       } else {
         ok(await t('day.brain.upToDate', { installed }));
@@ -295,7 +297,7 @@ if (engram.status === 0) {
   if (exportResult.status === 0) {
     ok(await t('day.memory.exported'));
   } else {
-    warn(await t('day.memory.exportFailed'));
+    warn(await t('day.memory.exportFailed', { pm: PM }));
   }
 } else {
   info(await t('day.memory.notAvailable'));
@@ -318,5 +320,5 @@ console.log(`    ${C.bold}${await t('day.done.sddExplore')}${C.reset}`);
 console.log(`    ${C.bold}${await t('day.done.gitlabIssue')}${C.reset}`);
 console.log('');
 console.log(`  ${C.dim}${await t('day.done.beforePush')}${C.reset}`);
-console.log(`    ${C.bold}${await t('day.done.checkCmd')}${C.reset}`);
+console.log(`    ${C.bold}${await t('day.done.checkCmd', { pm: PM })}${C.reset}`);
 console.log(div + '\n');
