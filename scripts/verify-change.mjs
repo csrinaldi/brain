@@ -153,7 +153,7 @@ for (const p of plan) {
       console.error(
         `\n✗ Falló [${p.scope}] \`${cmd.join(' ')}\` (exit ${res.status ?? 'señal'}).`,
       );
-      console.error('  Corregí y volvé a correr `npm run change:verify`.');
+      console.error(`  Corregí y volvé a correr \`${pm.name} run change:verify\`.`);
       process.exit(1);
     }
   }

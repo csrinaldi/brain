@@ -112,6 +112,12 @@ export default {
   'ps.vcs.error':         '⚠ Could not query VCS: {message}',
   'ps.footer':            '— End of projection. To regenerate: npm run project:status',
 
+  // ── verify-change.mjs ────────────────────────────────────────────────────────
+  'verify.error.rerun':   'Fix and re-run: {pm} run change:verify',
+
+  // ── brain-upgrade.mjs ────────────────────────────────────────────────────────
+  'upgrade.error.usage':  'Usage: {pm} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force]',
+
   // ── bootstrap.sh (PR3) ───────────────────────────────────────────────────────
   // §1 Base dependencies
   'bootstrap.deps.section': 'Base dependencies',
