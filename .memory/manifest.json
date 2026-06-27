@@ -80,6 +80,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "ee7f292a",
+      "created_by": "gandalf",
+      "created_at": "2026-06-27T23:26:08Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }
