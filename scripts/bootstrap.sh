@@ -144,7 +144,7 @@ fi
 unset _PM_FOUND _pm_bin
 # Detect the consumer's package manager for use in §7 memory steps.
 PM="$(node scripts/lib/pm.mjs name 2>/dev/null || echo npm)"
-ok "${I18N_BOOTSTRAP_DEPS_OK:-git, python3 present}"
+ok "$(printf "${I18N_BOOTSTRAP_DEPS_OK:-git, python3 present; package manager: %s}" "$PM")"
 
 # --- 2. Ecosystem tools (degrade gracefully) ----------------------------------
 say "$I18N_BOOTSTRAP_ECOSYSTEM_SECTION"
