@@ -4,10 +4,10 @@
 
 > **Purpose:** documents the backend-agnostic `resume.md` schema and the
 > `feature-checkpoint` / `feature-resume` verb contract. Establishes what
-> MUST and MUST NOT appear in `resume.md`. Referenced by ADR-0011.
+> MUST and MUST NOT appear in `resume.md`. Referenced by the feature-scoped working memory ADR.
 
 Feature working memory is the second memory layer in brain's two-layer model
-(ADR-0002 + ADR-0011). It carries the in-flight state of a multi-slice feature
+(the two-layer durable memory ADR + the feature-scoped working memory ADR). It carries the in-flight state of a multi-slice feature
 across machines and sessions. The contract is intentionally backend-agnostic:
 the source of truth is a plain committed file (`openspec/changes/<feature>/resume.md`)
 that is readable with `git clone` and a text editor — no engram, no Node.js, no
@@ -88,8 +88,7 @@ the local engram store is absent (fresh clone, new machine, CI environment).
 - **Secrets, keys, credentials, or PII.** `resume.md` is committed to the feature
   branch and pushed to remote. Treat it as public-readable content.
 
-- **Content that belongs in an ADR.** Distill decisions into
-  `brain/project/decisions/` at close time via `sdd-archive`. `resume.md` is ephemeral;
+- **Content that belongs in an ADR.** Distill decisions into your project's decisions folder at close time via `sdd-archive`. `resume.md` is ephemeral;
   it never merges to `main`.
 
 ---
@@ -166,8 +165,8 @@ A YAML parse error upstream should also degrade to prose-only treatment, never a
 
 ## References
 
-- ADR-0011 — Feature-Scoped Working Memory (the architectural decision this contract documents).
-- ADR-0002 — Two-Layer Git-Based Team Memory (the durable layer this is separated from).
-- ADR-0004 — Memory Adapter (the backend-agnostic dispatch discipline this mirrors).
+- The feature-scoped working memory ADR — the architectural decision this contract documents.
+- The two-layer durable memory ADR — the durable layer this is separated from.
+- The memory adapter ADR — the backend-agnostic dispatch discipline this mirrors.
 - `scripts/memory/lib/resume-schema.mjs` — validator implementation (Slice 1).
 - `scripts/memory/backends/engram.mjs` — engram implementation of the verbs (Slice 2).
