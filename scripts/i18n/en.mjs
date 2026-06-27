@@ -162,6 +162,9 @@ export default {
   'bootstrap.sdd.unknownHarness':     "harness '{harness}' has no known init routine — configure its skills manually",
   // no {placeholder} — generic failure from scripts/harness/cli.mjs init
   'bootstrap.sdd.initFailed':         'harness init failed (non-blocking)',
+  // ADR gap detection (Step 4 of gentle-ai init)
+  'bootstrap.sdd.noProjectAdrs':      'No project ADRs found (brain/project/decisions/ is empty or absent).',
+  'bootstrap.sdd.noProjectAdrsHint':  'Run /project:bootstrap-adrs in your AI agent to draft the starter ADR set (Stack, Testing, Build).',
 
   // §7 Team memory
   'bootstrap.memory.section':        'Team memory',
