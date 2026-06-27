@@ -100,29 +100,29 @@ Branch: `feat/s2-working-memory-engram-impl` → `feat/s1-working-memory-contrac
 
 ### Phase 1: Discovery gate (MUST complete before writing featureResume)
 
-- [ ] 2.1 Validate `engram sync --export` project-scoping: run `engram save "probe" "body" --project brain.feat.probe --topic sdd/probe/test`; run `npm run memory:share`; diff `.memory/`; assert no new chunk with `brain.feat.probe` origin. Record: **CONFIRMED** (use `--project <featureProject>`) or **NOT CONFIRMED** (degrade featureResume to print-only). This gates the implementation of 2.6.
+- [x] 2.1 Validate `engram sync --export` project-scoping: run `engram save "probe" "body" --project brain.feat.probe --topic sdd/probe/test`; run `npm run memory:share`; diff `.memory/`; assert no new chunk with `brain.feat.probe` origin. Record: **CONFIRMED** (use `--project <featureProject>`) or **NOT CONFIRMED** (degrade featureResume to print-only). This gates the implementation of 2.6.
 
 ### Phase 2: Tests (RED)
 
-- [ ] 2.2 Create `scripts/memory/lib/feature-resolution.test.mjs` — unit tests for `resolveFeature(root, explicitArg)`: explicit arg with valid dir → returns arg; explicit arg with missing dir → throws; exactly one change dir, no arg → returns it; multiple dirs, no arg → throws "ambiguous" with list; zero dirs → returns null. Use temp dirs.
-- [ ] 2.3 Create `scripts/memory/backends/engram.feature.test.mjs` — unit tests:
+- [x] 2.2 Create `scripts/memory/lib/feature-resolution.test.mjs` — unit tests for `resolveFeature(root, explicitArg)`: explicit arg with valid dir → returns arg; explicit arg with missing dir → throws; exactly one change dir, no arg → returns it; multiple dirs, no arg → throws "ambiguous" with list; zero dirs → returns null. Use temp dirs.
+- [x] 2.3 Create `scripts/memory/backends/engram.feature.test.mjs` — unit tests:
   - `featureCheckpoint(feature)`: creates `resume.md` with all three required fields; updates in place on second call (no duplicate); does NOT spawn any `engram` binary (assert child-process mock never called with "engram save" or "sync"). (REQ-S2-1, REQ-E-1)
   - `featureResume(feature)`: calls `engram save` once per `.md` file in the change folder; does NOT call `engram sync --export`; exits 0 with "no resume point" when `resume.md` absent. (REQ-S2-2)
   - No-arg resolution edge cases: zero dirs → exits 0; ambiguous → error output, non-zero.
 
 ### Phase 3: Implementation (GREEN)
 
-- [ ] 2.4 Create `scripts/memory/lib/feature-resolution.mjs` — export `resolveFeature(root, explicitArg)`: scans `openspec/changes/*/` (excluding `archive/`); applies precedence (explicit arg > single dir > error-if-ambiguous > null-if-zero). (active-feature resolution design)
-- [ ] 2.5 Add `featureCheckpoint(feature)` to `scripts/memory/backends/engram.mjs`: read or create skeleton `openspec/changes/<feature>/resume.md`; re-stamp `checkpointed_at` (UTC ISO-8601) and `checkpointed_from` (`${hostname}/${currentBranch}`); call `validateResume()` from `resume-schema.mjs`; best-effort: try reading `sdd/<feature>/apply-progress` engram obs to enrich empty `next_action`/`blockers` fields (wrapped in try/catch — never fatal); write file via `fs.writeFileSync`. MUST NOT call `engram save`, `engram sync`, or any child process. (REQ-S2-1, REQ-E-1)
-- [ ] 2.6 Add `featureResume(feature)` to `scripts/memory/backends/engram.mjs`: if 2.1 CONFIRMED → iterate `openspec/changes/<feature>/*.md`, call `execFileSync('engram', ['save', title, content, '--type', 'reference', '--project', featureProject, '--topic', `sdd/${feature}/${stem}`])` per file; if NOT CONFIRMED → print `resume.md` content directly, skip engram save; always print `next_action` + `current_slice` from frontmatter; exit 0 with "no resume point" when `resume.md` absent. (REQ-S2-2)
-- [ ] 2.7 Update `scripts/memory/cli.mjs`: add `"feature-checkpoint"` and `"feature-resume"` to `VALID_OPS`; add camelCase normalization before dispatch (`op.replace(/-([a-z])/g, (_, c) => c.toUpperCase())`); forward `...process.argv.slice(3)` to backend function. (REQ-S1-2)
-- [ ] 2.8 Add to `package.json` `scripts`: `"feature:checkpoint": "node ./scripts/memory/cli.mjs feature-checkpoint"` and `"feature:resume": "node ./scripts/memory/cli.mjs feature-resume"`. (design verb aliases)
+- [x] 2.4 Create `scripts/memory/lib/feature-resolution.mjs` — export `resolveFeature(root, explicitArg)`: scans `openspec/changes/*/` (excluding `archive/`); applies precedence (explicit arg > single dir > error-if-ambiguous > null-if-zero). (active-feature resolution design)
+- [x] 2.5 Add `featureCheckpoint(feature)` to `scripts/memory/backends/engram.mjs`: read or create skeleton `openspec/changes/<feature>/resume.md`; re-stamp `checkpointed_at` (UTC ISO-8601) and `checkpointed_from` (`${hostname}/${currentBranch}`); call `validateResume()` from `resume-schema.mjs`; best-effort: try reading `sdd/<feature>/apply-progress` engram obs to enrich empty `next_action`/`blockers` fields (wrapped in try/catch — never fatal); write file via `fs.writeFileSync`. MUST NOT call `engram save`, `engram sync`, or any child process. (REQ-S2-1, REQ-E-1)
+- [x] 2.6 Add `featureResume(feature)` to `scripts/memory/backends/engram.mjs`: if 2.1 CONFIRMED → iterate `openspec/changes/<feature>/*.md`, call `execFileSync('engram', ['save', title, content, '--type', 'reference', '--project', featureProject, '--topic', `sdd/${feature}/${stem}`])` per file; if NOT CONFIRMED → print `resume.md` content directly, skip engram save; always print `next_action` + `current_slice` from frontmatter; exit 0 with "no resume point" when `resume.md` absent. (REQ-S2-2)
+- [x] 2.7 Update `scripts/memory/cli.mjs`: add `"feature-checkpoint"` and `"feature-resume"` to `VALID_OPS`; add camelCase normalization before dispatch (`op.replace(/-([a-z])/g, (_, c) => c.toUpperCase())`); forward `...process.argv.slice(3)` to backend function. (REQ-S1-2)
+- [x] 2.8 Add to `package.json` `scripts`: `"feature:checkpoint": "node ./scripts/memory/cli.mjs feature-checkpoint"` and `"feature:resume": "node ./scripts/memory/cli.mjs feature-resume"`. (design verb aliases)
 
 ### Phase 4: Verify
 
-- [ ] 2.9 Run `npm test` — all tests green including Slice 0 and Slice 1.
-- [ ] 2.10 Smoke: `node scripts/memory/cli.mjs feature-checkpoint` (with single change dir) creates `resume.md` with required fields; `feature-resume` prints `next_action` + `current_slice`.
-- [ ] 2.11 Epic invariant smoke: run `npm run memory:share`; git diff `.memory/`; assert no new chunks whose sole origin is `featureCheckpoint()`.
+- [x] 2.9 Run `npm test` — all tests green including Slice 0 and Slice 1.
+- [x] 2.10 Smoke: `node scripts/memory/cli.mjs feature-checkpoint` (with single change dir) creates `resume.md` with required fields; `feature-resume` prints `next_action` + `current_slice`.
+- [x] 2.11 Epic invariant smoke: run `npm run memory:share`; git diff `.memory/`; assert no new chunks whose sole origin is `featureCheckpoint()`.
 
 ---
 

@@ -39,7 +39,14 @@ const MEMORY_BACKEND = process.env.MEMORY_BACKEND ?? envVars.MEMORY_BACKEND ?? "
 // ---------------------------------------------------------------------------
 // Validate op
 // ---------------------------------------------------------------------------
-const VALID_OPS = ["share", "pull", "index", "setup"];
+const VALID_OPS = [
+  "share",
+  "pull",
+  "index",
+  "setup",
+  "feature-checkpoint",
+  "feature-resume",
+];
 const op = process.argv[2];
 
 if (!op) {
@@ -51,6 +58,10 @@ if (!VALID_OPS.includes(op)) {
   console.error(`memory/cli: unknown op '${op}'. Valid ops: ${VALID_OPS.join(", ")}`);
   process.exit(1);
 }
+
+// Normalize hyphenated op to camelCase for export name lookup.
+// e.g. "feature-checkpoint" → "featureCheckpoint"
+const fn = op.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
 // ---------------------------------------------------------------------------
 // Load backend and dispatch
@@ -66,14 +77,15 @@ try {
   process.exit(1);
 }
 
-if (typeof backend[op] !== "function") {
+if (typeof backend[fn] !== "function") {
   console.error(`memory/cli: backend '${MEMORY_BACKEND}' does not implement op '${op}'`);
   process.exit(1);
 }
 
 try {
-  await backend[op]();
+  // Forward positional args (e.g., [feature]) to the backend function.
+  await backend[fn](...process.argv.slice(3));
 } catch (err) {
-  console.error(`memory/cli: ${MEMORY_BACKEND}.${op}() failed — ${err.message}`);
+  console.error(`memory/cli: ${MEMORY_BACKEND}.${fn}() failed — ${err.message}`);
   process.exit(1);
 }
