@@ -5,6 +5,16 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.4.1 — 2026-06-27
+
+### Fixed
+
+- `brain-upgrade` (and the install flow) now use `git+https://…#<tag>` instead of
+  npm's `github:` shorthand, which resolved to SSH and failed for the **private**
+  brain repo on HTTPS-only consumers (CI / containers without an SSH key).
+  `package.json` gains a `repository` field; the install URL is derived from it
+  and normalized to `git+https`. (#44)
+
 ## v0.4.0 — 2026-06-27
 
 ### ⚠ BREAKING
