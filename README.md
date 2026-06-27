@@ -115,6 +115,7 @@ to core go **upstream first** (PR to the brain repo), then you bump the version.
 | `npm run feature:checkpoint` / `feature:resume` | Save / restore per-feature working memory (`resume.md`). |
 | `npm run repo:check` | Check for prohibited references and structural violations. |
 | `npm run memory:share` | Materialize memory to `.memory/` before pushing. |
+| `npm run memory:pull` | **Cross-machine sync**: safe pull — discards regenerable manifest churn, runs `git pull`, then imports `.memory/` into local engram. Use this instead of raw `git pull` when `.memory/manifest.json` is dirty (i.e. after `memory:share` ran locally). Raw `git pull` may abort with "your local changes would be overwritten" when the manifest is uncommitted. |
 | `npm test` | Harness unit tests (`node --test`). |
 | `npm run test:fresh-install -- <tag>` | **Maintainer**: e2e Docker test of the full consumer install from a tag. |
 

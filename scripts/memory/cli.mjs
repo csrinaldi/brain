@@ -2,7 +2,12 @@
 // scripts/memory/cli.mjs — MEMORY_BACKEND dispatcher.
 //
 // Usage: node scripts/memory/cli.mjs <op>
-//   op: share | pull | index | setup
+//   op: share | pull | import | index | setup | feature-checkpoint | feature-resume
+//
+//   pull   — churn-resilient full pull: manifest restore + git pull + engram import.
+//            Use for cross-machine sync (npm run memory:pull).
+//   import — import-only: engram sync --import, no git pull.
+//            Use after git already pulled (post-merge hook, day-start step 5).
 //
 // Reads MEMORY_BACKEND from the environment or .env (default: engram).
 // Imports the corresponding backend from ./backends/<backend>.mjs and
@@ -42,6 +47,7 @@ const MEMORY_BACKEND = process.env.MEMORY_BACKEND ?? envVars.MEMORY_BACKEND ?? "
 const VALID_OPS = [
   "share",
   "pull",
+  "import",
   "index",
   "setup",
   "feature-checkpoint",
@@ -59,9 +65,14 @@ if (!VALID_OPS.includes(op)) {
   process.exit(1);
 }
 
-// Normalize hyphenated op to camelCase for export name lookup.
-// e.g. "feature-checkpoint" → "featureCheckpoint"
-const fn = op.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+// Map verb strings that cannot be valid JS export names to their actual export name.
+// "import" is a reserved keyword in JS — the backend export is named "importMemory".
+const VERB_TO_EXPORT = { import: "importMemory" };
+
+// Normalize hyphenated op to camelCase for export name lookup,
+// then apply reserved-keyword overrides.
+// e.g. "feature-checkpoint" → "featureCheckpoint", "import" → "importMemory"
+const fn = VERB_TO_EXPORT[op] ?? op.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
 // ---------------------------------------------------------------------------
 // Load backend and dispatch
