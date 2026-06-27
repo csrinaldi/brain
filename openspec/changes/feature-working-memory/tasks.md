@@ -132,16 +132,16 @@ Branch: `feat/s3-working-memory-ux` → `feat/s2-working-memory-engram-impl`
 
 ### Phase 1: Tests (RED)
 
-- [ ] 3.1 Create `scripts/memory/lib/auto-resume.test.mjs` — unit tests for `tryFeatureResume(root)` using mocked child-process: (a) when spawned cli exits 0 → returns stdout string; (b) when it exits non-zero → returns null without throwing; (c) when spawn itself throws (e.g., node not found) → returns null without throwing. (REQ-S3-1 failure-isolated scenario)
+- [x] 3.1 Create `scripts/memory/lib/auto-resume.test.mjs` — unit tests for `tryFeatureResume(root)` using mocked child-process: (a) when spawned cli exits 0 → returns stdout string; (b) when it exits non-zero → returns null without throwing; (c) when spawn itself throws (e.g., node not found) → returns null without throwing. (REQ-S3-1 failure-isolated scenario)
 
 ### Phase 2: Implementation (GREEN)
 
-- [ ] 3.2 Create `scripts/memory/lib/auto-resume.mjs` — export `tryFeatureResume(root)`: spawns `node scripts/memory/cli.mjs feature-resume` with `{cwd: root, encoding: 'utf8'}`; returns stdout on exit 0; returns null on any non-zero exit or thrown error. Never throws. (REQ-S3-1 isolation)
-- [ ] 3.3 Modify `scripts/ticket-start.mjs`: import `tryFeatureResume`; on both re-checkout paths (in-place: `branchExists` after failed checkout; worktree: `branchExists` on `worktree add`), call `await tryFeatureResume(ROOT)`; if non-null, `console.log` the output (resume context); if null, log a single-line warning. No `process.exit(1)` in either branch. (REQ-S3-1 auto-resume scenario)
+- [x] 3.2 Create `scripts/memory/lib/auto-resume.mjs` — export `tryFeatureResume(root)`: spawns `node scripts/memory/cli.mjs feature-resume` with `{cwd: root, encoding: 'utf8'}`; returns stdout on exit 0; returns null on any non-zero exit or thrown error. Never throws. (REQ-S3-1 isolation)
+- [x] 3.3 Modify `scripts/ticket-start.mjs`: import `tryFeatureResume`; on both re-checkout paths (in-place: `branchExists` after failed checkout; worktree: `branchExists` on `worktree add`), call `await tryFeatureResume(ROOT)`; if non-null, `console.log` the output (resume context); if null, log a single-line warning. No `process.exit(1)` in either branch. (REQ-S3-1 auto-resume scenario)
 
 ### Phase 3: Verify
 
-- [ ] 3.4 Run `npm test` — all tests green including auto-resume unit tests.
+- [x] 3.4 Run `npm test` — all tests green including auto-resume unit tests.
 
 ---
 
