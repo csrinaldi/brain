@@ -161,9 +161,19 @@ function _defaultGitPull(root) {
 }
 
 /**
- * Default seam: run `engram sync --import`.
+ * importMemory() — import .memory/ chunks into local engram (engram sync --import).
+ *
+ * This is the import-only step, with no git pull. Use it when the working tree
+ * is already up-to-date (e.g. after day-start's step-2 git merge, or in the
+ * post-merge hook where git itself has already integrated the new commits).
+ *
+ * Called by:
+ *   - pullMemory() as its default _import seam
+ *   - cli.mjs "import" verb (import-only, no manifest restore, no git pull)
+ *   - post-merge hook (via cli.mjs import)
+ *   - day-start step 5 (via cli.mjs import, after step 2 already pulled)
  */
-function _defaultImport() {
+export async function importMemory() {
   const engram = requireEngram();
   execFileSync(engram, ["sync", "--import"], { stdio: "inherit" });
 }
@@ -181,7 +191,10 @@ function _defaultImport() {
  * export. Discarding local churn is therefore always safe. This function:
  *   1. Detects and discards uncommitted manifest churn before pulling.
  *   2. Runs `git pull` (the union-merge driver handles any committed-manifest merges).
- *   3. Runs `engram sync --import` to hydrate the local engram from .memory/.
+ *   3. Calls importMemory() to hydrate local engram from the merged .memory/.
+ *
+ * Use pullMemory() for cross-machine syncs (npm run memory:pull).
+ * Use importMemory() when git pull already ran (post-merge hook, day-start step 5).
  *
  * Injectable seams make the function fully unit-testable without real git/engram:
  *
@@ -193,15 +206,15 @@ function _defaultImport() {
  *   Discards uncommitted manifest changes (non-fatal, best-effort).
  * @param {(root: string) => void}     [opts._gitPull]
  *   Runs `git pull`; MUST throw on non-zero exit so import is not called on failure.
- * @param {() => void}                 [opts._import]
- *   Runs `engram sync --import`.
+ * @param {() => void | Promise<void>} [opts._import]
+ *   Runs the import step — defaults to importMemory().
  */
 export async function pullMemory({
   root = repoRoot,
   _isManifestDirty = _defaultIsManifestDirty,
   _restoreManifest = _defaultRestoreManifest,
   _gitPull = _defaultGitPull,
-  _import = _defaultImport,
+  _import = importMemory,
 } = {}) {
   // Step 1: discard regenerable manifest churn so git pull can proceed.
   if (_isManifestDirty(root)) {

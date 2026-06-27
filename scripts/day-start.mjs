@@ -295,12 +295,12 @@ if (!existsSync(hookFile)) {
 
 const engram = capture('engram', ['--version']);
 if (engram.status === 0) {
-  // 4a. Safe memory pull: manifest restore (if still dirty) → git pull → import.
-  //     Uses memory:pull (pullMemory()) so the manifest churn guard is always active,
-  //     even if the pre-sync block above could not run (e.g. on a fresh clone).
-  //     `git pull` here is a no-op when step 2 already fast-forwarded; harmless.
+  // 4a. Import team memory from .memory/ → local engram (import-only, no git pull).
+  //     Step 2 already ran git fetch + merge (guarded by the early manifest restore),
+  //     so the working tree is up-to-date. Using "import" avoids a redundant network
+  //     call and eliminates any risk of post-merge hook recursion.
   console.log(`  ${C.dim}${await t('day.memory.importing')}${C.reset}`);
-  await run(NODE, ['scripts/memory/cli.mjs', 'pull']);
+  await run(NODE, ['scripts/memory/cli.mjs', 'import']);
 
   // 4b. Re-project brain/ → ~/.engram (ADRs, anti-patterns, domain)
   console.log(`  ${C.dim}${await t('day.memory.reprojecting')}${C.reset}`);
