@@ -142,4 +142,4 @@ the emergency escape).
 
 Once the MR is merged, the team absorbs the memory with `npm run memory:pull` or on the next `day:start`.
 
-The **durable** layer (decisions, anti-patterns) is promoted to `brain/` in Markdown, which is the source of truth; engram is the shared **live** layer. See `../decisions/adr-0003-memoria-equipo-git-based.md`.
+The **durable** layer (decisions, anti-patterns) is promoted to `brain/` in Markdown, which is the source of truth; engram is the shared **live** layer. See the consuming project's two-layer memory ADR.

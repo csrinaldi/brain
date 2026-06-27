@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# pre-push — materializa la memoria viva en .memory/ antes del push (ADR-0003).
+# pre-push — materializa la memoria viva en .memory/ antes del push (ADR-0002).
 #
 # La capa Viva de memoria (sesión, errores, contexto) viaja en .memory/ commiteado
 # y entra a main al mergear el MR. Este hook garantiza que esa materialización
@@ -15,7 +15,7 @@
 # Instalado vía `core.hooksPath = scripts/hooks` en bootstrap.sh §7 / npm run env:init.
 #
 # Nota de arquitectura: engram escribe a .engram/ (su convención interna); ese path
-# es un symlink → .memory/ (el dir canónico versionado en git). ADR-0003 describe
+# es un symlink → .memory/ (el dir canónico versionado en git). ADR-0002 describe
 # el modelo; este hook inspecciona .memory/ directamente para evitar ambigüedad.
 
 # Sin node no hay dispatcher — no bloquear (entorno mínimo).
@@ -36,7 +36,7 @@ node "$repo_root/scripts/memory/cli.mjs" share >/dev/null 2>&1 || exit 0
 # exits non-zero ("ambiguous"); || true swallows it and the push continues
 # unaffected.  The committed resume.md remains the primary context-travel
 # mechanism in that case.
-node "$repo_root/scripts/memory/cli.mjs" feature-checkpoint >/dev/null 2>&1 || true
+node "$repo_root/scripts/memory/cli.mjs" feature-checkpoint 2>/dev/null || true
 
 # ¿Quedó memoria sin commitear en .memory/? `status --porcelain` cubre staged,
 # unstaged Y untracked (?? ) en un solo check — evita el anti-pattern de `git diff`
