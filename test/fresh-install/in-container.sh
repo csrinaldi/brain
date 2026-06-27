@@ -55,6 +55,12 @@ if [ -f brain.config.json ]; then
   else fail "wrong provider derivation (got '${prov}', expected 'github')"; fi
 else fail "brain.config.json NOT created"; fi
 
+line "[4] env:init emits no-project-ADRs notice (brain/project/decisions/ absent)"
+INIT_OUT=$(npm run env:init 2>&1)
+if echo "$INIT_OUT" | grep -q "No project ADRs"; then
+  ok "no-project-ADRs notice present in env:init output"
+else fail "no-project-ADRs notice NOT found in env:init output"; fi
+
 line "RESULT"
 if [ "$FAILED" = 0 ]; then echo "  ✓✓ TOTAL fresh-install PASSED @ ${TAG}"; exit 0
 else echo "  ✗✗ TOTAL fresh-install FAILED @ ${TAG}"; exit 1; fi

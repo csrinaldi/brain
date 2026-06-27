@@ -13,9 +13,11 @@
 //             + SDD project context check (engram search sdd-init/<project>).
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { t } from '../../i18n/t.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -120,6 +122,64 @@ function _defaultRunEngramSearch(project) {
   return out.length > 0 && !out.includes('No memories found');
 }
 
+function _defaultResolveDecisionsDir() {
+  return join(repoRoot, 'brain', 'project', 'decisions');
+}
+
+/**
+ * Returns true when the decisions directory contains at least one `.md` file;
+ * false when the directory is absent, empty, or unreadable.
+ *
+ * @param {string} dir Absolute path to the decisions directory.
+ * @returns {boolean}
+ */
+function _defaultCheckDecisionsDir(dir) {
+  try {
+    if (!existsSync(dir)) return false;
+    return readdirSync(dir).some((f) => f.endsWith('.md'));
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helper: SDD project context check (Step 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Checks whether the engram SDD context for this project exists.
+ * Bare returns here exit only this helper, not init() — allowing Step 4 to
+ * always run regardless of the engram/project resolution outcome.
+ */
+async function checkSddContext({ _resolveProject, _checkEngram, _runEngramSearch }) {
+  const project = (() => { try { return _resolveProject(); } catch { return null; } })();
+  if (!project) {
+    console.warn('  harness: could not resolve project slug — skipping SDD context check');
+    return;
+  }
+
+  const engramPresent = (() => { try { return _checkEngram(); } catch { return false; } })();
+  if (!engramPresent) {
+    // engram absent is non-fatal — user may not have set it up yet
+    return;
+  }
+
+  try {
+    const found = _runEngramSearch(project);
+    if (!found) {
+      console.log(`  harness: SDD context 'sdd-init/${project}' not found in engram.`);
+      console.log(
+        '    The agent Init Guard will create it on the first /sdd-* command.',
+      );
+      console.log('    To create it now, run: /sdd-init');
+    }
+    // Context found — no noise needed; ecosystem is ready.
+  } catch {
+    // engram call failed — non-fatal
+    console.warn('  harness: SDD context check failed (non-blocking)');
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Verb: init
 // ---------------------------------------------------------------------------
@@ -153,6 +213,10 @@ function _defaultRunEngramSearch(project) {
  * @param {() => boolean} [opts._checkEngram]     Returns true if engram binary present.
  * @param {(project: string) => boolean} [opts._runEngramSearch]
  *   Returns true if sdd-init/<project> found in engram.
+ * @param {() => string} [opts._resolveDecisionsDir]
+ *   Returns the absolute path to brain/project/decisions/.
+ * @param {(dir: string) => boolean} [opts._checkDecisionsDir]
+ *   Returns true when the dir contains at least one .md file; false when absent or empty.
  */
 export async function init({
   _checkGentleAi  = _defaultCheckGentleAi,
@@ -163,6 +227,8 @@ export async function init({
   _resolveProject = _defaultResolveProject,
   _checkEngram    = _defaultCheckEngram,
   _runEngramSearch = _defaultRunEngramSearch,
+  _resolveDecisionsDir = _defaultResolveDecisionsDir,
+  _checkDecisionsDir   = _defaultCheckDecisionsDir,
 } = {}) {
 
   // ── Step 1: Ecosystem ─────────────────────────────────────────────────────
@@ -207,31 +273,18 @@ export async function init({
   }
 
   // ── Step 3: SDD project context check ────────────────────────────────────
+  //
+  // Delegated to checkSddContext() so its bare `return`s do not exit init().
+  // Step 4 (pure-fs ADR gap detection) must always run regardless of whether
+  // the engram / project-slug resolution succeeds.
 
-  const project = (() => { try { return _resolveProject(); } catch { return null; } })();
-  if (!project) {
-    console.warn('  harness: could not resolve project slug — skipping SDD context check');
-    return;
-  }
+  await checkSddContext({ _resolveProject, _checkEngram, _runEngramSearch });
 
-  const engramPresent = (() => { try { return _checkEngram(); } catch { return false; } })();
-  if (!engramPresent) {
-    // engram absent is non-fatal — user may not have set it up yet
-    return;
-  }
+  // ── Step 4: Project ADR gap detection (pure fs — no network) ─────────────
 
-  try {
-    const found = _runEngramSearch(project);
-    if (!found) {
-      console.log(`  harness: SDD context 'sdd-init/${project}' not found in engram.`);
-      console.log(
-        '    The agent Init Guard will create it on the first /sdd-* command.',
-      );
-      console.log('    To create it now, run: /sdd-init');
-    }
-    // Context found — no noise needed; ecosystem is ready.
-  } catch {
-    // engram call failed — non-fatal
-    console.warn('  harness: SDD context check failed (non-blocking)');
+  const adrsPresent = _checkDecisionsDir(_resolveDecisionsDir());
+  if (!adrsPresent) {
+    console.log(`  harness: ${await t('bootstrap.sdd.noProjectAdrs')}`);
+    console.log(`    ${await t('bootstrap.sdd.noProjectAdrsHint')}`);
   }
 }

@@ -30,7 +30,7 @@ import { init } from './gentle-ai.mjs';
 
 /**
  * Returns a set of injectable deps where all tools are present and healthy,
- * project is resolvable, context is found, no TTY.
+ * project is resolvable, context is found, no TTY, and decisions dir is populated.
  * Individual overrides let tests probe one behaviour at a time.
  */
 function makeDeps(overrides = {}) {
@@ -43,6 +43,8 @@ function makeDeps(overrides = {}) {
     _resolveProject: () => 'my-project',
     _checkEngram:    () => true,
     _runEngramSearch: (_project) => true, // context found
+    _resolveDecisionsDir: () => '/fake/decisions',
+    _checkDecisionsDir: () => true,       // populated → no ADR notice by default
     ...overrides,
   };
 }
@@ -263,5 +265,66 @@ test('init: context found (bare project name) → no "not found" notice printed'
   assert.ok(
     !logs.some((l) => /not found/i.test(l)),
     `no "not found" notice should be printed when context exists; got: ${JSON.stringify(logs)}`,
+  );
+});
+
+// ── Step 4: _checkDecisionsDir seam (tasks 1.1 – 1.5) ───────────────────────
+
+// (1.1) absent decisions dir → gap notice
+test('init: absent decisions dir → gap notice logged', async () => {
+  const logs = await captureLog(() =>
+    init(makeDeps({ _checkDecisionsDir: () => false }))
+  );
+  assert.ok(
+    logs.some((l) => /No project ADRs/i.test(l)),
+    `expected gap notice for absent dir; got: ${JSON.stringify(logs)}`,
+  );
+});
+
+// (1.2) present dir with no .md files → gap notice (same seam shape, different semantic)
+test('init: empty decisions dir (no .md files) → gap notice logged', async () => {
+  const logs = await captureLog(() =>
+    init(makeDeps({ _checkDecisionsDir: () => false }))
+  );
+  assert.ok(
+    logs.some((l) => /No project ADRs/i.test(l)),
+    `expected gap notice for empty (no .md) dir; got: ${JSON.stringify(logs)}`,
+  );
+});
+
+// (1.3) populated dir → silent
+test('init: populated decisions dir (≥1 .md) → no gap notice', async () => {
+  const logs = await captureLog(() =>
+    init(makeDeps({ _checkDecisionsDir: () => true }))
+  );
+  assert.ok(
+    !logs.some((l) => /No project ADRs/i.test(l)),
+    `should not log gap notice when decisions dir is populated; got: ${JSON.stringify(logs)}`,
+  );
+});
+
+// (1.4) Step 4 runs even when _resolveProject returns null
+// (the early return inside checkSddContext must NOT skip Step 4)
+test('init: Step 4 runs even when _resolveProject returns null (engram early-return does not skip Step 4)', async () => {
+  const logs = await captureLog(() =>
+    init(makeDeps({
+      _resolveProject: () => null,
+      _checkDecisionsDir: () => false,
+    }))
+  );
+  assert.ok(
+    logs.some((l) => /No project ADRs/i.test(l)),
+    `expected gap notice even when project is unresolvable; got: ${JSON.stringify(logs)}`,
+  );
+});
+
+// (1.5) regression: engram-context notice (Step 3) still fires after checkSddContext() refactor
+test('init: engram context notice (checkSddContext) still fires after refactor', async () => {
+  const logs = await captureLog(() =>
+    init(makeDeps({ _runEngramSearch: () => false }))
+  );
+  assert.ok(
+    logs.some((l) => /sdd.?init|init.?guard|\/sdd-init/i.test(l)),
+    `expected SDD context notice to still fire after checkSddContext() refactor; got: ${JSON.stringify(logs)}`,
   );
 });
