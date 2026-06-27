@@ -103,14 +103,14 @@ Chain strategy: feature-branch-chain
 
 ### Phase 8: Extend `.claude/commands/project-bootstrap-adrs.md` with Phase 3 + Phase 4
 
-- [ ] 8.1 Add Phase 3 (interactive review): present each draft with a 2-3 sentence summary and exactly four choices: `accept | edit [feedback] | reject | accept-all`
-- [ ] 8.2 Document `edit [feedback]` flow: revise draft in `brain-drafts/` incorporating feedback, re-present; loop until `accept` or `reject`
-- [ ] 8.3 Document `reject` flow: discard draft; zero writes to `brain/`; no HOME.md entry for that ADR
-- [ ] 8.4 Document `accept-all` gate: option is NEVER surfaced until user explicitly states they reviewed the drafts; if user types `accept-all` before that assertion, decline and ask for the confirmation first (REQ-S3-4)
-- [ ] 8.5 Add Phase 4 (Tier 2 writes): for each accepted ADR, request explicit per-action user confirmation before writing `brain/project/decisions/adr-NNNN-<slug>.md`; `accept-all` path collapses to one batched Tier 2 confirmation after the "I reviewed" gate
-- [ ] 8.6 Add HOME.md patch: read `brain/HOME.md`, locate `### Architecture decisions` list, append after last `- [ADR-NNNN](...)` entry in exact format: `- [ADR-NNNN](project/decisions/adr-NNNN-<slug>.md) — <short description>`; patch is gated by Tier 2 confirmation
-- [ ] 8.7 Add HOME.md fail-safe: if `### Architecture decisions` anchor or trailing ADR link line cannot be located unambiguously → abort patch, leave HOME.md untouched, report exact lines to add manually; never produce an orphaned ADR (REQ-S3-3)
-- [ ] 8.8 Add post-write recommendation: suggest `npm run brain:nav` to verify no orphans
+- [x] 8.1 Add Phase 3 (interactive review): present each draft with a 2-3 sentence summary and exactly four choices: `accept | edit [feedback] | reject | accept-all`
+- [x] 8.2 Document `edit [feedback]` flow: revise draft in `brain-drafts/` incorporating feedback, re-present; loop until `accept` or `reject`
+- [x] 8.3 Document `reject` flow: discard draft; zero writes to `brain/`; no HOME.md entry for that ADR
+- [x] 8.4 Document `accept-all` gate: option is NEVER surfaced until user explicitly states they reviewed the drafts; if user types `accept-all` before that assertion, decline and ask for the confirmation first (REQ-S3-4)
+- [x] 8.5 Add Phase 4 (Tier 2 writes): for each accepted ADR, request explicit per-action user confirmation before writing `brain/project/decisions/adr-NNNN-<slug>.md`; `accept-all` path collapses to one batched Tier 2 confirmation after the "I reviewed" gate
+- [x] 8.6 Add HOME.md patch: read `brain/HOME.md`, locate `### Architecture decisions` list, append after last `- [ADR-NNNN](...)` entry in exact format: `- [ADR-NNNN](project/decisions/adr-NNNN-<slug>.md) — <short description>`; patch is gated by Tier 2 confirmation
+- [x] 8.7 Add HOME.md fail-safe: if `### Architecture decisions` anchor or trailing ADR link line cannot be located unambiguously → abort patch, leave HOME.md untouched, report exact lines to add manually; never produce an orphaned ADR (REQ-S3-3)
+- [x] 8.8 Add post-write recommendation: suggest `npm run brain:nav` to verify no orphans
 
 ### Phase 9: Manual E2E checklist (Slice 3)
 
