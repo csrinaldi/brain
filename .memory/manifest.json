@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "chunks": [
+    {
+      "id": "aa194500",
+      "created_by": "scit",
+      "created_at": "2026-06-26T18:57:41Z",
+      "sessions": 2,
+      "memories": 11,
+      "prompts": 1
+    },
+    {
+      "id": "4ba339fa",
+      "created_by": "gandalf",
+      "created_at": "2026-06-26T22:28:57Z",
+      "sessions": 2,
+      "memories": 2,
+      "prompts": 0
+    },
+    {
+      "id": "456ff313",
+      "created_by": "gandalf",
+      "created_at": "2026-06-27T00:19:41Z",
+      "sessions": 0,
+      "memories": 11,
+      "prompts": 0
+    },
+    {
+      "id": "b7f8b12f",
+      "created_by": "gandalf",
+      "created_at": "2026-06-27T01:52:00Z",
+      "sessions": 0,
+      "memories": 2,
+      "prompts": 0
+    }
+  ]
+}

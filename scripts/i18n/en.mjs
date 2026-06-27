@@ -262,4 +262,7 @@ export default {
   'ticket.nextSteps.step2':       '    2. npm run repo:check before each commit',
   'ticket.nextSteps.step3':       '    3. npm run memory:share && git add .memory/ before pushing',
   'ticket.nextSteps.step4':       '    4. git push -u origin {branch}',
+
+  // ── ticket-start.mjs — feature working memory (Slice 3) ─────────────────────
+  'ticket.resume.noContext': '→ No feature resume context found — continuing.',
 };

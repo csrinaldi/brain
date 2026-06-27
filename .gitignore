@@ -58,9 +58,11 @@ temp/
 *.zip
 
 # MEMORIA ENGRAM
-# .engram/ (chunks de sync) SÍ se commitea: es la memoria viva de equipo,
-# vinculada a la rama/ticket. Ver brain/decisions/adr-0003-memoria-equipo-git-based.md
+# .memory/ (chunks + manifest) SÍ se commitea: es la memoria durable de equipo,
+# vinculada a la rama/ticket. Ver brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md
+# .engram es un symlink LOCAL → .memory (convención interna de engram); NO se trackea.
 # La DB local de engram vive fuera del repo (~/.engram) y NO se trackea.
+.engram
 
 # ÍNDICE DE SKILLS (reconstruible): .atl/ lo regenera `gentle-ai skill-registry refresh`.
 # Es cache local, no fuente de verdad — cada SKILL.md manda.
