@@ -11,9 +11,11 @@
 // Sin dependencias externas.
 
 import { execSync, spawnSync } from 'node:child_process';
+import { detectPM } from './lib/pm.mjs';
 
 const ROOT = process.cwd();
 const sh = (cmd) => execSync(cmd, { cwd: ROOT, encoding: 'utf8' }).trim();
+const pm = detectPM(ROOT);
 
 // --- Matriz de validación: única fuente, espeja la tabla del workflow ---------
 // `match` clasifica un path tocado; `commands` puede ser estático o función de
@@ -23,7 +25,7 @@ const MATRIX = [
     scope: 'repo',
     label: 'cualquier cambio',
     match: () => true,
-    commands: () => [['npm', 'run', '--silent', 'repo:check']],
+    commands: () => [pm.runArgs('repo:check', true)],
     always: true,
   },
   {
@@ -31,13 +33,13 @@ const MATRIX = [
     label: 'backend/**, pom.xml, settings.xml',
     match: (f) =>
       f.startsWith('backend/') || f.endsWith('pom.xml') || f === 'settings.xml',
-    commands: () => [['npm', 'run', '--silent', 'backend:build']],
+    commands: () => [pm.runArgs('backend:build', true)],
   },
   {
     scope: 'contract',
     label: 'backend/contract/** (modelo catastral / contrato Java-TS)',
     match: (f) => f.startsWith('backend/contract/'),
-    commands: () => [['npm', 'run', '--silent', 'contract:generate']],
+    commands: () => [pm.runArgs('contract:generate', true)],
   },
   {
     scope: 'frontend',

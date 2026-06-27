@@ -129,10 +129,22 @@ fi
 
 # --- 1. Base dependencies (blocking) -----------------------------------------
 say "${I18N_BOOTSTRAP_DEPS_SECTION:-Base dependencies}"
-for tool in git npm python3; do
+for tool in git python3; do
   command -v "$tool" >/dev/null 2>&1 || { printf "  ✗ ${I18N_BOOTSTRAP_DEPS_MISSING:-Missing '%s' (required). Install it and re-run env:init.}\n" "$tool" >&2; exit 1; }
 done
-ok "${I18N_BOOTSTRAP_DEPS_OK:-git, npm, python3 present}"
+# Require at least one supported package manager (npm/pnpm/yarn/bun).
+_PM_FOUND=false
+for _pm_bin in npm pnpm yarn bun; do
+  if command -v "$_pm_bin" >/dev/null 2>&1; then _PM_FOUND=true; break; fi
+done
+if [ "$_PM_FOUND" = false ]; then
+  printf "  ✗ ${I18N_BOOTSTRAP_DEPS_MISSING:-Missing '%s' (required). Install it and re-run env:init.}\n" "npm/pnpm/yarn/bun" >&2
+  exit 1
+fi
+unset _PM_FOUND _pm_bin
+# Detect the consumer's package manager for use in §7 memory steps.
+PM="$(node scripts/lib/pm.mjs name 2>/dev/null || echo npm)"
+ok "${I18N_BOOTSTRAP_DEPS_OK:-git, python3 present}"
 
 # --- 2. Ecosystem tools (degrade gracefully) ----------------------------------
 say "$I18N_BOOTSTRAP_ECOSYSTEM_SECTION"
@@ -272,8 +284,8 @@ case "$MEMORY_BACKEND" in
     else
       warn "$I18N_BOOTSTRAP_MEMORY_NODEABSENT"
     fi
-    npm run --silent memory:pull  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
-    npm run --silent memory:index && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
+    $PM run --silent memory:pull  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
+    $PM run --silent memory:index && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
     ;;
   *)
     warn "$(printf "$I18N_BOOTSTRAP_MEMORY_UNKNOWNBACKEND" "$MEMORY_BACKEND")"
