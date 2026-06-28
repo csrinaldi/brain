@@ -61,8 +61,54 @@ export async function branchProtect({ project, branch = 'main', checks, required
     ['api', '-X', 'PUT', `repos/${project}/branches/${branch}/protection`, '--input', '-'],
     { input: JSON.stringify(payload) }
   );
-  if (!r.ok) throw new Error(`branchProtect failed (${r.status}): ${r.stderr}`);
-  return { protected: true };
+  if (r.ok) return { enforced: true };
+  // Tier / plan limitation — GitHub free plan blocks protection on private repos
+  if (r.stderr.includes('403') || /upgrade.*pro/i.test(r.stderr)) {
+    return {
+      enforced: false,
+      reason: 'tier',
+      remedy: 'GitHub Pro for private repos, or make the repo public',
+    };
+  }
+  return {
+    enforced: false,
+    reason: 'unsupported',
+    remedy: r.stderr.trim() || 'unknown error from gh api',
+  };
+}
+
+// Capability cache — keyed by "project:branch" to avoid cross-test interference.
+const _capabilityCache = new Map();
+
+/**
+ * Probe the GitHub API to determine whether branch protection APIs are accessible
+ * for the given project+branch. Caches the result per project:branch for the
+ * lifetime of the Node.js process.
+ *
+ * Returns: { hardEnforcement: 'available' | 'unavailable' | 'unknown', remedy?, detail? }
+ */
+export async function capabilities({ project = '', branch = 'main' } = {}) {
+  const key = `${project}:${branch}`;
+  if (_capabilityCache.has(key)) return _capabilityCache.get(key);
+
+  const r = run('gh', ['api', `repos/${project}/branches/${branch}/protection`]);
+  let result;
+  if (r.ok) {
+    result = { hardEnforcement: 'available' };
+  } else if (r.stderr.includes('404')) {
+    // No protection set yet — API is accessible, feature is available
+    result = { hardEnforcement: 'available' };
+  } else if (r.stderr.includes('403') || /upgrade.*pro/i.test(r.stderr)) {
+    result = {
+      hardEnforcement: 'unavailable',
+      remedy: 'GitHub Pro for private repos, or make the repo public',
+    };
+  } else {
+    result = { hardEnforcement: 'unknown' };
+  }
+
+  _capabilityCache.set(key, result);
+  return result;
 }
 
 export async function issueList({ project, state = 'open', assignee } = {}) {

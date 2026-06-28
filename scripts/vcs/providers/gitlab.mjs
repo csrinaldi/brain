@@ -82,3 +82,11 @@ export async function patSetupUrl({ host, name, scopes }) {
 export async function branchProtect({ project, branch = 'main', checks, requiredReviews = 1 } = {}) {
   throw new Error('gitlab.branchProtect: not yet implemented (Phase 3)');
 }
+
+/**
+ * GitLab capability probe — stub for Phase 3.
+ * Returns 'unknown' rather than throwing so brain:governance-status can still render.
+ */
+export async function capabilities() {
+  return { hardEnforcement: 'unknown', detail: 'gitlab not yet implemented (Phase 3)' };
+}

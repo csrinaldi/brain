@@ -152,7 +152,7 @@ test('gitlab.projectResolve returns the slug unchanged (identity)', async () => 
 
 // ── branchProtect ─────────────────────────────────────────────────────────────
 
-test('github.branchProtect calls gh api -X PUT with correct payload and returns { protected: true }', async () => {
+test('github.branchProtect sends PUT with strict payload and returns {enforced:true} on exit 0', async () => {
   let captured = null;
   setSpawn((cmd, args, opts) => {
     captured = { cmd, args, opts };
@@ -182,7 +182,7 @@ test('github.branchProtect calls gh api -X PUT with correct payload and returns 
   assert.equal(payload.allow_force_pushes, false);
   assert.equal(payload.allow_deletions, false);
 
-  assert.deepEqual(result, { protected: true });
+  assert.deepEqual(result, { enforced: true });
 });
 
 test('github.branchProtect respects custom branch and requiredReviews', async () => {
@@ -192,11 +192,52 @@ test('github.branchProtect respects custom branch and requiredReviews', async ()
     return { status: 0, stdout: '{}', stderr: '' };
   });
 
-  await github.branchProtect({ project: 'o/r', branch: 'develop', checks: [], requiredReviews: 2 });
+  const result = await github.branchProtect({ project: 'o/r', branch: 'develop', checks: [], requiredReviews: 2 });
 
   assert.ok(captured.args.includes('repos/o/r/branches/develop/protection'));
   const payload = JSON.parse(captured.opts.input);
   assert.equal(payload.required_pull_request_reviews.required_approving_review_count, 2);
+  assert.deepEqual(result, { enforced: true });
+});
+
+test('github.branchProtect returns {enforced:false,reason:"tier"} on 403 / upgrade message', async () => {
+  setSpawn(() => ({
+    status: 1,
+    stdout: '',
+    stderr: 'HTTP 403: Upgrade to GitHub Pro or make this repository public to enable this feature.',
+  }));
+
+  const result = await github.branchProtect({ project: 'o/r', checks: [] });
+
+  assert.equal(result.enforced, false);
+  assert.equal(result.reason, 'tier');
+  assert.ok(typeof result.remedy === 'string' && result.remedy.length > 0, 'remedy must be non-empty');
+});
+
+test('github.branchProtect returns {enforced:false,reason:"unsupported"} on other non-zero exit', async () => {
+  setSpawn(() => ({
+    status: 1,
+    stdout: '',
+    stderr: 'HTTP 500: Internal Server Error',
+  }));
+
+  const result = await github.branchProtect({ project: 'o/r', checks: [] });
+
+  assert.equal(result.enforced, false);
+  assert.equal(result.reason, 'unsupported');
+  assert.ok(result.remedy.includes('HTTP 500'), 'remedy should include the stderr text');
+});
+
+test('github.branchProtect never throws even on non-zero exit', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'some error' }));
+
+  let threw = false;
+  try {
+    await github.branchProtect({ project: 'o/r', checks: [] });
+  } catch (_) {
+    threw = true;
+  }
+  assert.equal(threw, false, 'branchProtect must not throw');
 });
 
 test('gitlab.branchProtect throws "not yet implemented"', async () => {
@@ -204,4 +245,41 @@ test('gitlab.branchProtect throws "not yet implemented"', async () => {
     () => gitlab.branchProtect({ project: 'g/r', checks: [] }),
     /not yet implemented/i
   );
+});
+
+// ── capabilities ──────────────────────────────────────────────────────────────
+
+test('github.capabilities returns {hardEnforcement:"available"} when probe succeeds (200)', async () => {
+  setSpawn(() => ({ status: 0, stdout: '{"url":"..."}', stderr: '' }));
+  const result = await github.capabilities({ project: 'cap/ok', branch: 'main' });
+  assert.equal(result.hardEnforcement, 'available');
+});
+
+test('github.capabilities returns {hardEnforcement:"available"} on 404 (protection not yet set)', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 404: Not Found' }));
+  const result = await github.capabilities({ project: 'cap/noprot', branch: 'main' });
+  assert.equal(result.hardEnforcement, 'available');
+});
+
+test('github.capabilities returns {hardEnforcement:"unavailable"} on 403', async () => {
+  setSpawn(() => ({
+    status: 1,
+    stdout: '',
+    stderr: 'HTTP 403: Upgrade to GitHub Pro to enable this feature.',
+  }));
+  const result = await github.capabilities({ project: 'cap/tier', branch: 'main' });
+  assert.equal(result.hardEnforcement, 'unavailable');
+  assert.ok(typeof result.remedy === 'string' && result.remedy.length > 0, 'remedy must be present');
+});
+
+test('github.capabilities returns {hardEnforcement:"unknown"} on unexpected error', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 500: Internal Server Error' }));
+  const result = await github.capabilities({ project: 'cap/err', branch: 'main' });
+  assert.equal(result.hardEnforcement, 'unknown');
+});
+
+test('gitlab.capabilities returns {hardEnforcement:"unknown"} (stub — Phase 3)', async () => {
+  const result = await gitlab.capabilities();
+  assert.equal(result.hardEnforcement, 'unknown');
+  assert.ok(typeof result.detail === 'string' && result.detail.includes('gitlab'), 'detail must mention gitlab');
 });

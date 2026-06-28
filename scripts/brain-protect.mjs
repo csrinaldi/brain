@@ -66,12 +66,24 @@ export async function activateProtection() {
   console.log(`Activating branch protection on ${project} (provider: ${provider})`);
   console.log(`  Required checks: ${checks.join(', ')}`);
 
+  let result;
   try {
-    const result = await providerModule.branchProtect({ project, checks });
-    console.log('Branch protection activated:', JSON.stringify(result));
+    result = await providerModule.branchProtect({ project, checks });
   } catch (e) {
-    console.error(`brain:protect failed: ${e.message}`);
+    // branchProtect should not throw in the v2 adapter, but guard against
+    // unexpected runtime errors (e.g. network timeout, unhandled edge case).
+    console.error(`brain:protect failed unexpectedly: ${e.message}`);
     process.exit(1);
+  }
+
+  if (result.enforced) {
+    console.log('Branch protection activated successfully.');
+  } else {
+    console.log('Branch protection could not be enforced.');
+    console.log(`  Reason : ${result.reason ?? 'unknown'}`);
+    if (result.remedy) console.log(`  Remedy : ${result.remedy}`);
+    // Exit 0 — {enforced:false} is a known, non-error outcome (e.g. tier limitation).
+    // Reserve exit 1 for configuration errors and unexpected failures above.
   }
 }
 
