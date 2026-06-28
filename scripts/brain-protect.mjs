@@ -12,6 +12,8 @@
 // See ADR-0014 and brain/core/methodology/workflow-governance.md.
 //
 // The command is idempotent — re-running refreshes protection without side effects.
+// It performs NO action on import — the activation runs only when invoked as a CLI
+// (the guard at the bottom). Importing this module is side-effect-free.
 
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -21,50 +23,60 @@ import { checkContexts } from './vcs/governance-checks.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Read brain.config.json from the repo root (one level up from scripts/).
-const configPath = resolve(__dirname, '..', 'brain.config.json');
-let config;
-try {
-  config = JSON.parse(readFileSync(configPath, 'utf8'));
-} catch (e) {
-  console.error(`brain:protect: cannot read brain.config.json — ${e.message}`);
-  process.exit(1);
+/**
+ * Activate branch protection on main via the configured VCS provider.
+ * Side-effecting (network) — only ever called from the CLI guard below.
+ */
+export async function activateProtection() {
+  const configPath = resolve(__dirname, '..', 'brain.config.json');
+  let config;
+  try {
+    config = JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch (e) {
+    console.error(`brain:protect: cannot read brain.config.json — ${e.message}`);
+    process.exit(1);
+  }
+
+  const provider = config?.vcs?.provider;
+  const project = config?.project?.slug;
+
+  if (!provider) {
+    console.error('brain:protect: vcs.provider not set in brain.config.json');
+    process.exit(1);
+  }
+  if (!project) {
+    console.error('brain:protect: project.slug not set in brain.config.json');
+    process.exit(1);
+  }
+
+  let providerModule;
+  try {
+    providerModule = await import(`./vcs/providers/${provider}.mjs`);
+  } catch (e) {
+    console.error(`brain:protect: cannot load provider "${provider}" — ${e.message}`);
+    process.exit(1);
+  }
+
+  if (typeof providerModule.branchProtect !== 'function') {
+    console.error(`brain:protect: provider "${provider}" does not implement branchProtect`);
+    process.exit(1);
+  }
+
+  const checks = checkContexts();
+  console.log(`Activating branch protection on ${project} (provider: ${provider})`);
+  console.log(`  Required checks: ${checks.join(', ')}`);
+
+  try {
+    const result = await providerModule.branchProtect({ project, checks });
+    console.log('Branch protection activated:', JSON.stringify(result));
+  } catch (e) {
+    console.error(`brain:protect failed: ${e.message}`);
+    process.exit(1);
+  }
 }
 
-const provider = config?.vcs?.provider;
-const project = config?.project?.slug;
-
-if (!provider) {
-  console.error('brain:protect: vcs.provider not set in brain.config.json');
-  process.exit(1);
-}
-if (!project) {
-  console.error('brain:protect: project.slug not set in brain.config.json');
-  process.exit(1);
-}
-
-// Dynamically import the VCS provider module.
-let providerModule;
-try {
-  providerModule = await import(`./vcs/providers/${provider}.mjs`);
-} catch (e) {
-  console.error(`brain:protect: cannot load provider "${provider}" — ${e.message}`);
-  process.exit(1);
-}
-
-if (typeof providerModule.branchProtect !== 'function') {
-  console.error(`brain:protect: provider "${provider}" does not implement branchProtect`);
-  process.exit(1);
-}
-
-const checks = checkContexts();
-console.log(`Activating branch protection on ${project} (provider: ${provider})`);
-console.log(`  Required checks: ${checks.join(', ')}`);
-
-try {
-  const result = await providerModule.branchProtect({ project, checks });
-  console.log('Branch protection activated:', JSON.stringify(result));
-} catch (e) {
-  console.error(`brain:protect failed: ${e.message}`);
-  process.exit(1);
+// CLI guard — the activation runs ONLY when this file is invoked directly
+// (`node scripts/brain-protect.mjs` / `npm run brain:protect`), NEVER on import.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  await activateProtection();
 }
