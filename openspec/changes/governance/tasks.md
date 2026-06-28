@@ -4,99 +4,129 @@
 
 | Field | Value |
 |-------|-------|
-| Estimated changed lines | ~540 total across 4 PRs (~110 / ~150 / ~220 / ~60 per slice) |
-| 400-line budget risk | Low |
+| Estimated changed lines | ~840 total across 5 PRs (~110 / ~150 / ~260 / ~200 / ~120 per slice) |
+| 400-line budget risk | **Medium** — S3 and S4 each approach the budget; split S4 if checks lib + audit exceed ~350 lines |
 | Chained PRs recommended | Yes |
-| Suggested split | S1 → S2 → S3 → S4 (feature-branch-chain, tracker `feature/governance`) |
+| Suggested split | S1 → S2 → S3 → S4 → S5 (feature-branch-chain, tracker `feature/governance`) |
 | Delivery strategy | feature-branch-chain |
 | Chain strategy | feature-branch-chain |
 
-Decision needed before apply: No
+Decision needed before apply: No (S3-S5 each within budget at current estimates)
 Chained PRs recommended: Yes
 Chain strategy: feature-branch-chain
-400-line budget risk: Low
+400-line budget risk: Medium (S4 watch — 200 lines est. but may expand; split to S4a/S4b if needed)
 
 ### Chained PR Plan
 
 | Slice | Branch | Base | ~Lines |
 |-------|--------|------|--------|
-| S1 | `gov/s1-foundation` | `feature/governance` | ~110 |
-| S2 | `gov/s2-hard-gates` | `gov/s1-foundation` | ~150 |
-| S3 | `gov/s3-protect` | `gov/s2-hard-gates` | ~220 |
-| S4 | `gov/s4-gates-iv` | `gov/s3-protect` | ~60 |
+| S1 | `gov/s1-foundation` | `feature/governance` | ~110 ✅ Done |
+| S2 | `gov/s2-hard-gates` | `gov/s1-foundation` | ~150 ✅ Done |
+| S3 | `gov/s3-protect` | `gov/s2-hard-gates` | ~260 |
+| S4 | `gov/s4-floor` | `gov/s3-protect` | ~200 |
+| S5 | `gov/s5-golden-path` | `gov/s4-floor` | ~120 |
 
 **Activation gate**: `brain:protect` runs ONLY after S3 merges to tracker. Coordinate `feature/issue-11-cli-i18n` before running (REQ-E-2, operator decision, not automated). This ends the direct-merge window for all subsequent PRs.
+
+**S4 split signal**: if the generic checks library + hook suite + `brain:audit` together exceed ~350 lines, split into `gov/s4a-checks-lib` (library + tests) and `gov/s4b-hooks-audit` (hook suite + `brain:audit`).
 
 ---
 
 ## Task type legend
-**CODE-TDD** = node:test unit-testable | **YAML** = workflow authoring | **FILE** = file-authoring/file assertion | **OPERATOR** = manual/live action
+**CODE-TDD** = node:test unit-testable | **FILE** = file-authoring/file assertion | **OPERATOR** = manual/live action
 
 ---
 
-## S1 — Foundation (PR #S1 → base `feature/governance`) ~110 lines
+## S1 — Foundation ✅ (all tasks complete)
 
-- [x] **S1.1** [FILE] Verify `brain/project/decisions/adr-0014-workflow-governance.md` and `brain/HOME.md` link `[ADR-0014](project/decisions/adr-0014-workflow-governance.md)` are committed on S1 branch; run `npm run brain:nav` → exit 0. (REQ-S1-1)
-- [x] **S1.2** [FILE] Create `.github/PULL_REQUEST_TEMPLATE.md` containing: `Closes|Fixes|Resolves #N` section, 400-line budget + `size:exception` reference, ADR/decision checkbox. (REQ-S1-2)
-- [x] **S1.3** [CODE-TDD RED] Add two test cases to `scripts/lib/installer.test.mjs`: (a) fixture config missing `governance.ignoreList` → migration adds it with `.memory/**`, `openspec/changes/**`, lock-file globs; (b) second run is a no-op (idempotent). (REQ-S1-3)
-- [x] **S1.4** [CODE-TDD GREEN] Append `0.4.0` migration to `brain/core/config-migrations.mjs`: additive defaults `{ governance: { ignoreList: ['.memory/**','openspec/changes/**','package-lock.json','pnpm-lock.yaml','yarn.lock'] } }`. (REQ-S1-3)
-- [x] **S1.5** [CODE-TDD RED] Create `scripts/lib/managed-paths.test.mjs`: assert `managed` contains `.github/workflows/governance.yml` and `.github/PULL_REQUEST_TEMPLATE.md`; assert no entry matches `.github/**` glob. (REQ-S1-4)
-- [x] **S1.6** [CODE-TDD GREEN] Add the two literal `.github/` entries to `managed` array in `brain/core/managed-paths.mjs`. Do not add `.github/**`. (REQ-S1-4)
-- [x] **S1.7** [OPERATOR] `npm test` → green; `npm run brain:nav` → exit 0; confirm no `governance.yml` in repo (no CI yet). (REQ-S1-5)
-
-Sequential: S1.3 → S1.4; S1.5 → S1.6. S1.1, S1.2, and the two TDD pairs are parallel tracks.
+- [x] **S1.1** [FILE] `brain/project/decisions/adr-0014-workflow-governance.md` and `brain/HOME.md` link committed; `npm run brain:nav` → exit 0. (REQ-S1-1)
+- [x] **S1.2** [FILE] `.github/PULL_REQUEST_TEMPLATE.md` with `Closes|Fixes|Resolves #N` section, 400-line + `size:exception` reference, ADR/decision checkbox. (REQ-S1-2)
+- [x] **S1.3** [CODE-TDD] Tests: (a) migration adds `governance.ignoreList`; (b) second run is idempotent. (REQ-S1-3)
+- [x] **S1.4** [CODE-TDD] Append `0.4.0` migration to `brain/core/config-migrations.mjs`. (REQ-S1-3)
+- [x] **S1.5** [CODE-TDD] `managed-paths.test.mjs`: two specific `.github/` paths present; no `.github/**` glob. (REQ-S1-4)
+- [x] **S1.6** [CODE-TDD] Add two literal `.github/` entries to `brain/core/managed-paths.mjs`. (REQ-S1-4)
+- [x] **S1.7** [OPERATOR] `npm test` → green; `npm run brain:nav` → exit 0; no `governance.yml` in repo. (REQ-S1-5)
 
 ---
 
-## S2 — Hard Gates I+II (PR #S2 → base `gov/s1-foundation`) ~150 lines
+## S2 — Platform CI Adapter ✅ (all tasks complete)
 
-- [x] **S2.1** [CODE-TDD RED] Create `scripts/vcs/diff-size-count.test.mjs`: test `parseDiffNumstat(rawNumstat, ignoreList)` — fixture with `.memory/` (3 lines) + `scripts/foo.mjs` (5 lines) + ignoreList `['.memory/**']` → 5; fixture with +5 added/-3 deleted in included files → 8. (REQ-S2-3)
-- [x] **S2.2** [CODE-TDD GREEN] Create `scripts/vcs/diff-size-count.mjs` exporting `parseDiffNumstat(raw, ignoreList)`: parse `git diff --numstat` output string, apply minimatch glob exclusions, return additions+deletions. (REQ-S2-3)
-- [x] **S2.3** [YAML] Create `.github/workflows/governance.yml` with `issue-link` job (parse PR body for `Closes|Fixes|Resolves #N`, verify `status:approved` label via `gh api`) and `diff-size` job (read ignoreList from `brain.config.json` via `jq`, call `node scripts/vcs/diff-size-count.mjs`, fail >400 without `size:exception`). Apply all YAML/bash gotchas from design: `run: |`, `set -euo pipefail`, `|| true` on grep no-match, single-quoted git pathspec, `join()` label flatten, `pull_request` trigger. (REQ-S2-1, REQ-S2-2)
-- [x] **S2.4** [OPERATOR] `npm test` → green; validate `governance.yml` YAML syntax. (REQ-S2-3)
-- [ ] **S2.5** [OPERATOR / manual E2E] S2 PR description must include numbered checklist: (a) PR body has `Closes #N` for a `status:approved` issue; (b) diff after ignore-list <400 lines; (c) both CI jobs pass; (d) branch protection remains off after merge. (REQ-S2-4, REQ-E-1)
-
-Sequential: S2.1 → S2.2. S2.3 can be authored in parallel. S2.4 after S2.1-S2.3.
+- [x] **S2.1** [CODE-TDD] `diff-size-count.test.mjs`: `parseDiffNumstat` with `.memory/` exclusion and addition+deletion sum. (REQ-S2-3)
+- [x] **S2.2** [CODE-TDD] `scripts/vcs/diff-size-count.mjs` exporting `parseDiffNumstat`. (REQ-S2-3)
+- [x] **S2.3** [FILE] `.github/workflows/governance.yml` with `issue-link` and `diff-size` jobs. (REQ-S2-1, REQ-S2-2)
+- [x] **S2.4** [OPERATOR] `npm test` → green; `governance.yml` YAML syntax valid. (REQ-S2-3)
+- [ ] **S2.5** [OPERATOR / manual E2E] S2 PR description checklist: (a) `Closes #N` for `status:approved` issue; (b) diff after ignore-list <400; (c) both CI jobs pass; (d) protection remains off after merge. (REQ-S2-4, REQ-E-1)
 
 ---
 
-## S3 — brain:protect + Activation (PR #S3 → base `gov/s2-hard-gates`) ~220 lines
+## S3 — Capability-aware Adapter (PR #S3 → base `gov/s2-hard-gates`) ~260 lines
 
-- [x] **S3.1** [CODE-TDD RED] Create `scripts/vcs/governance-checks.test.mjs`: (a) drift-guard — parse `governance.yml` job `name:` fields, assert set equals `GOVERNANCE_JOBS` from module (hard correctness dep — fail closed on drift); (b) `checkContexts()` returns `['governance / issue-link', 'governance / diff-size']`. (REQ-S3-3)
-- [x] **S3.2** [CODE-TDD GREEN] Create `scripts/vcs/governance-checks.mjs` exporting `WORKFLOW_NAME = 'governance'`, `GOVERNANCE_JOBS = ['issue-link', 'diff-size']` (S2-state; S4 extends), `checkContexts()`. (REQ-S3-3)
-- [x] **S3.3** [CODE-TDD RED] Add `branchProtect` tests to `scripts/vcs/providers.test.mjs` via `setSpawn` seam: assert `gh api -X PUT repos/{project}/branches/main/protection` called; assert payload `required_status_checks.strict=true`, `allow_force_pushes=false`, `required_pull_request_reviews.required_approving_review_count=1`, `restrictions=null`; assert returns `{ protected: true }`. (REQ-S3-1)
-- [x] **S3.4** [CODE-TDD GREEN] Implement `branchProtect({ project, branch='main', checks, requiredReviews=1 })` in `scripts/vcs/providers/github.mjs` using `run('gh', ['api','-X','PUT', ...], { input: JSON.stringify(payload) })`; place alongside `issueView`. (REQ-S3-1)
-- [x] **S3.5** [CODE-TDD RED+GREEN] Add test to `scripts/vcs/providers.test.mjs`: `gitlab.branchProtect()` throws error containing "not yet implemented". Add stub to `scripts/vcs/providers/gitlab.mjs`. (REQ-S3-2)
-- [x] **S3.6** [FILE] Create `scripts/brain-protect.mjs`: reads `vcs.provider` + `project` from `brain.config.json`, imports `checkContexts` from `governance-checks.mjs`, dispatches to provider `branchProtect({ project, checks: checkContexts() })`, prints result. (REQ-S3-1)
-- [x] **S3.7** [FILE] Add `"brain:protect": "node scripts/brain-protect.mjs"` to `package.json` scripts. (REQ-S3-5)
-- [x] **S3.8** [FILE] Update `brain/core/methodology/vcs-contract.md`: add `branchProtect` row `({ project, branch, checks, requiredReviews }) -> { protected }` to verb table; note GitLab deferred to Phase 3. (REQ-S3-1)
-- [x] **S3.9** [FILE] Create `brain/core/methodology/workflow-governance.md`: four invariants each mapped to gate (CI job name + skip label); enforce-outputs/guide-judgment boundary explicitly named; lockout recovery (`gh api -X DELETE .../protection`) and S3 rollback dual-surface (revert files AND disable protection). (REQ-S3-4)
-- [x] **S3.10** [FILE] Update `scripts/bootstrap.sh` (`env:init` target): add output directing operator to run `npm run brain:protect` as a one-time admin action, NOT a per-developer step. (REQ-S3-5)
-- [x] **S3.11** [OPERATOR] `npm test` → green (drift-guard, branchProtect, GitLab stub tests all pass). (REQ-S3-1, REQ-S3-2, REQ-S3-3)
-- [ ] **S3.12** [OPERATOR — pre-activation] Inspect `feature/issue-11-cli-i18n`; decide: merge, rebase into compliance, or document exception. Record decision in S3 PR description. (REQ-E-2)
-- [ ] **S3.13** [OPERATOR — activation] After S3 merges to tracker: run `npm run brain:protect`; verify via `gh api GET /repos/{project}/branches/main/protection` that status-checks, PR reviews, and `allow_force_pushes:false` are configured; confirm a non-admin direct push is rejected. (REQ-S3-6)
+- [ ] **S3.1** [CODE-TDD RED] `scripts/vcs/governance-checks.test.mjs`: (a) drift-guard — parse `governance.yml` job names, assert set equals `GOVERNANCE_JOBS`; (b) `checkContexts()` returns `['governance / issue-link', 'governance / diff-size']`. (REQ-S3-3)
+- [ ] **S3.2** [CODE-TDD GREEN] `scripts/vcs/governance-checks.mjs` exporting `WORKFLOW_NAME`, `GOVERNANCE_JOBS = ['issue-link', 'diff-size']`, `checkContexts()`. (REQ-S3-3)
+- [ ] **S3.3** [CODE-TDD RED] `scripts/vcs/providers.test.mjs` — `protectBranch` tests via `setSpawn` seam: (a) returns `{enforced:true}` on exit 0; (b) returns `{enforced:false, reason:'tier', remedy:'...'}` on exit 403; (c) returns `{enforced:false, reason:'unsupported', ...}` on other non-zero; (d) never throws. Assert payload `required_status_checks.strict=true`, `allow_force_pushes=false`, `required_pull_request_reviews.required_approving_review_count=1`. (REQ-S3-1)
+- [ ] **S3.4** [CODE-TDD GREEN] Implement `protectBranch({ project, branch, checks, requiredReviews })` in `scripts/vcs/providers/github.mjs` returning `{enforced, reason?, remedy?}`. (REQ-S3-1)
+- [ ] **S3.5** [CODE-TDD RED] `capabilities()` tests: (a) 200/404 → `{hardEnforcement:'available'}`; (b) 403 → `{hardEnforcement:'unavailable'}`; (c) other → `{hardEnforcement:'unknown'}`. (REQ-S3-7)
+- [ ] **S3.6** [CODE-TDD GREEN] Implement `capabilities()` in `scripts/vcs/providers/github.mjs` via API probe + cache. (REQ-S3-7)
+- [ ] **S3.7** [CODE-TDD RED+GREEN] Test + stub: `gitlab.protectBranch()` throws "not yet implemented". (REQ-S3-2)
+- [ ] **S3.8** [FILE] `scripts/brain-protect.mjs`: reads `vcs.provider` + `project`, imports `checkContexts`, dispatches to `protectBranch({ checks: checkContexts() })`, prints `{enforced, reason?, remedy?}`. (REQ-S3-1)
+- [ ] **S3.9** [FILE] `scripts/brain-governance-status.mjs`: reads config, calls `capabilities()`, reports hooks (ON, universal), adapter (available/unavailable + remedy), audit (ON, universal). Exposed as `npm run brain:governance-status`. (REQ-S3-8)
+- [ ] **S3.10** [FILE] `package.json` scripts: add `"brain:protect"` and `"brain:governance-status"`. (REQ-S3-1, REQ-S3-8)
+- [ ] **S3.11** [FILE] `brain/core/methodology/vcs-contract.md`: add `protectBranch` → `{enforced, reason?, remedy?}` and `capabilities()` → `{hardEnforcement, detail}` to verb table; note GitLab deferred. (REQ-S3-1, REQ-S3-7)
+- [ ] **S3.12** [FILE] `brain/core/methodology/workflow-governance.md`: four invariants, each mapped to its layer (floor hook, CI adapter, audit); enforce-outputs/guide-judgment boundary; lockout recovery; activation sequence. (REQ-S3-4)
+- [ ] **S3.13** [FILE] `scripts/bootstrap.sh` (`env:init`): add output directing operator to run `npm run brain:protect` as a one-time admin action (NOT per-developer). (REQ-S3-5)
+- [ ] **S3.14** [OPERATOR] `npm test` → green (drift-guard, protectBranch, capabilities, GitLab stub tests all pass). (REQ-S3-1, REQ-S3-2, REQ-S3-3, REQ-S3-7)
+- [ ] **S3.15** [OPERATOR — pre-activation] Inspect `feature/issue-11-cli-i18n`; decide: merge, rebase into compliance, or document exception. Record decision in S3 PR description. (REQ-E-2)
+- [ ] **S3.16** [OPERATOR — activation] After S3 merges to tracker: run `npm run brain:protect`; verify via `gh api GET .../branches/main/protection`; confirm a non-admin direct push is rejected. (REQ-S3-6)
 
-Sequential: S3.1 → S3.2; S3.3 → S3.4; S3.5 self-contained; S3.6 after S3.2+S3.4; S3.7-S3.10 parallel after S3.6; S3.12 and S3.13 are post-merge operator steps.
+Sequential: S3.1 → S3.2; S3.3 → S3.4; S3.5 → S3.6; S3.7 self-contained; S3.8 after S3.2+S3.4; S3.9 after S3.6; S3.10-S3.13 parallel after S3.8-S3.9; S3.15 and S3.16 are post-merge operator steps.
 
 ---
 
-## S4 — Gates III+IV (PR #S4 → base `gov/s3-protect`) ~60 lines
+## S4 — The Floor (PR #S4 → base `gov/s3-protect`) ~200 lines
 
-- [ ] **S4.1** [CODE-TDD + YAML — atomic commit] Update `GOVERNANCE_JOBS` in `scripts/vcs/governance-checks.mjs` to `['issue-link','diff-size','memory-gate','decision-gate']`; update drift-guard expectations in `governance-checks.test.mjs`; add `memory-gate` and `decision-gate` jobs to `.github/workflows/governance.yml` in the same commit (drift-guard test is red until YAML and constant match). (REQ-S4-1, REQ-S4-2, REQ-S3-3)
-- [ ] **S4.2** [YAML] `memory-gate` job body: `git diff --name-only $BASE_SHA...$HEAD_SHA -- '.memory/'`; empty output → non-zero exit; `skip:memory-gate` label → exit 0 early. (REQ-S4-1)
-- [ ] **S4.3** [YAML] `decision-gate` job — step 1 (hard): if `decision` label present, require `brain/project/decisions/adr-[0-9]{4}-*.md` AND `brain/HOME.md` in diff, else exit non-zero. Step 2 (heuristic): check arch surfaces (`scripts/.*/providers/`, `brain/core/`, `config-migrations.mjs`, `package.json`) with no ADR → emit `::warning::`, always `exit 0`. (REQ-S4-2, REQ-S4-3)
-- [ ] **S4.4** [OPERATOR] `npm test` → green; drift-guard confirms 4 YAML job names === `GOVERNANCE_JOBS`. (REQ-S3-3)
-- [ ] **S4.5** [OPERATOR / manual E2E] S4 PR description checklist: (a) all 4 CI jobs pass under active governance; (b) verify `skip:memory-gate` label exempts memory-gate; (c) verify `decision` label + no ADR fails decision-gate; (d) verify arch-surface heuristic emits warning but does not block. (REQ-S4-1, REQ-S4-2, REQ-S4-3, REQ-E-1)
+> **If this slice exceeds ~350 lines:** split into `gov/s4a-checks-lib` (S4.1–S4.4 + tests) and `gov/s4b-hooks-audit` (S4.5–S4.9). The two halves compose; S4a has no activation step.
 
-S4.1 must be one atomic commit (GOVERNANCE_JOBS + test expectations + YAML jobs together). S4.2 and S4.3 are part of that same commit.
+- [ ] **S4.1** [CODE-TDD RED] `scripts/governance/checks/diff-size.test.mjs`: test `diffSize(rawNumstat, ignoreList)` — fixture with `.memory/` excluded (→ pass within budget), 401-line fixture (→ fail), binary files → 0. Reuse `parseDiffNumstat` from `diff-size-count.mjs` as the implementation. (REQ-S4-1)
+- [ ] **S4.2** [CODE-TDD RED] `scripts/governance/checks/issue-link.test.mjs`: (a) body with `Closes #42` → pass; (b) body with no reference → fail; (c) case-insensitive `FIXES #7` → pass. (REQ-S4-1)
+- [ ] **S4.3** [CODE-TDD RED] `scripts/governance/checks/adr-presence.test.mjs`: (a) changedFiles includes `brain/project/decisions/adr-0042-foo.md` and `brain/HOME.md` → pass; (b) missing ADR file → fail; (c) missing HOME.md → fail. (REQ-S4-1)
+- [ ] **S4.4** [CODE-TDD RED] `scripts/governance/checks/memory-presence.test.mjs`: (a) changedFiles includes `.memory/chunks/foo.jsonl.gz` → pass; (b) no `.memory/` file → fail. (REQ-S4-1)
+- [ ] **S4.5** [CODE-TDD GREEN] Create the four check modules in `scripts/governance/checks/`: `diff-size.mjs` (re-exports `parseDiffNumstat`), `issue-link.mjs`, `adr-presence.mjs`, `memory-presence.mjs`. Each returns `{ pass: boolean, reason?: string }`. (REQ-S4-1)
+- [ ] **S4.6** [FILE] Create `scripts/hooks/commit-msg`: validate conventional commit format + ticket ref (`#N` required for non-merge commits); no-node guard (exit 0 if node unavailable). (REQ-S4-2)
+- [ ] **S4.7** [FILE] Create `scripts/hooks/pre-commit`: run `npm run repo:check`; block direct commit to `main`/`master` by reading current branch via `git rev-parse --abbrev-ref HEAD`; no-node guard. (REQ-S4-3)
+- [ ] **S4.8** [FILE] Extend `scripts/hooks/pre-push`: wire calls to `diffSize`, `issueLink`, `adrPresence`, `memoryPresence` from `scripts/governance/checks/` against the pushed range (`git log $remote_sha..$local_sha`); exit non-zero on any failure with clear remedy message. Memory materialization (existing) stays; runs before check calls. (REQ-S4-4)
+- [ ] **S4.9** [CODE-TDD + FILE] `scripts/brain-audit.mjs` + test: (a) iterate merge commits in audit range via `git log --merges`; (b) run four checks per merge; (c) emit `[PASS|FAIL] <sha> <short-msg> — <failed invariants>`; (d) exit non-zero on any FAIL. Test with a git fixture repository (bare init + synthetic merges). Add `"brain:audit": "node scripts/brain-audit.mjs"` to `package.json` scripts. (REQ-S4-5, REQ-S4-6)
+- [ ] **S4.10** [OPERATOR] `npm test` → green (all check unit tests + audit test pass). (REQ-S4-1 through REQ-S4-6)
+- [ ] **S4.11** [OPERATOR / manual] Verify hook suite fires correctly: create a test commit with a bad message → `commit-msg` blocks; attempt direct commit to `main` → `pre-commit` blocks; attempt push without `.memory/` changes → `pre-push` blocks. (REQ-S4-2, REQ-S4-3, REQ-S4-4)
+
+Sequential: S4.1-S4.4 (RED tests) are parallel; S4.5 (GREEN) after all four REDs; S4.6-S4.8 parallel after S4.5; S4.9 after S4.5; S4.10 after all code tasks; S4.11 after S4.10.
+
+---
+
+## S5 — The Golden Path (PR #S5 → base `gov/s4-floor`) ~120 lines
+
+- [ ] **S5.1** [CODE-TDD RED+GREEN] `scripts/brain-start.mjs` + test: (a) call `issueView()` via VCS adapter; (b) assert `status:approved` label → create branch via `branchCreate`; (c) exit non-zero with clear message if not approved or not found. Add `"brain:start": "node scripts/brain-start.mjs"` to `package.json`. (REQ-S5-1)
+- [ ] **S5.2** [CODE-TDD RED+GREEN] `scripts/brain-check.mjs` + test: spawn `diffSize`, `issueLink`, `adrPresence`, `memoryPresence` against current branch diff vs. base; spawn `npm test`; spawn `npm run repo:check`; aggregate; exit non-zero if any fails. Add `"brain:check": "node scripts/brain-check.mjs"` to `package.json`. (REQ-S5-2)
+- [ ] **S5.3** [CODE-TDD RED+GREEN] `scripts/brain-save.mjs` + test: (a) call `memory:share`; (b) detect new `.memory/` uncommitted changes via `git status --porcelain`; (c) if none → exit non-zero with prompt to capture session summary; (d) commit `.memory/` with message `chore(memory): sync .memory [brain:save]`. Add `"brain:save": "node scripts/brain-save.mjs"` to `package.json`. (REQ-S5-3)
+- [ ] **S5.4** [CODE-TDD RED+GREEN] `scripts/brain-ship.mjs` + test: (a) call `brain:check` subprocess; (b) exit non-zero if any check fails; (c) call `mrCreate` via VCS adapter with template + `Closes #<issue>` body + labels; (d) print PR URL on success. Add `"brain:ship": "node scripts/brain-ship.mjs"` to `package.json`. (REQ-S5-4)
+- [ ] **S5.5** [CODE-TDD RED+GREEN] `scripts/brain-next.mjs` + test: derive state from (git branch, open PRs via VCS adapter stub, `.memory/` status, brain.config.json); emit correct next command for each state: no-branch → `brain:start`; checks-failing → `brain:check`; no-memory → `brain:save`; checks+memory done → `brain:ship`; open-PR → status message. Add `"brain:next": "node scripts/brain-next.mjs"` to `package.json`. (REQ-S5-5)
+- [ ] **S5.6** [FILE + CODE-TDD] Add `--no-verify` and `git commit -n` to the prohibited-refs list in `brain/core/check-config.json` (or the config file used by `repo:check`). Add unit test asserting `repo:check` exits non-zero on a fixture file containing `--no-verify`. (REQ-S5-6)
+- [ ] **S5.7** [FILE] Create/extend `.claude/settings.json` (or the applicable Claude Code harness config) with a PreToolUse hook rule blocking Bash commands matching `--no-verify|git commit -n`. Add this path to managed paths if it should travel with brain. (REQ-S5-6)
+- [ ] **S5.8** [OPERATOR] `npm test` → green (all S5 tests pass). (REQ-S5-1 through REQ-S5-6)
+- [ ] **S5.9** [OPERATOR / manual E2E] S5 PR checklist: (a) `brain:start` refuses an unapproved issue; (b) `brain:check` exits non-zero on a bad diff; (c) `brain:save` refuses with no new memory; (d) `brain:ship` refuses if checks fail; (e) `brain:next` emits the correct next step from each state; (f) `repo:check` flags a file containing `--no-verify`. (REQ-S5-1 through REQ-S5-6)
+
+Sequential: S5.1-S5.5 are independent and can be authored in parallel; S5.6 → S5.7 sequential (policy before harness); S5.8 after all code tasks.
 
 ---
 
 ## Closure Checklist
 
-- [ ] `npm test` green on all 4 slice branches (no regressions introduced)
+- [ ] `npm test` green on all 5 slice branches (no regressions)
 - [ ] `npm run brain:nav` exit 0 (ADR-0014 indexed, no orphans)
-- [ ] Drift-guard test passing (`GOVERNANCE_JOBS` === YAML job names on S4 branch)
+- [ ] Drift-guard test passing (`GOVERNANCE_JOBS === YAML job names`)
 - [ ] `brain:protect` run confirmed; protection verified via `gh api GET` (REQ-S3-6)
+- [ ] `brain:governance status` reports all three layers correctly for the current consumer
+- [ ] `brain:audit` run over recent merged history — no undetected violations
+- [ ] `brain:next` returns correct guidance from each workflow state
 - [ ] `feature/issue-11-cli-i18n` coordination documented before activation (REQ-E-2)
-- [ ] Epic invariant confirmed: no arch-surface heuristic step uses `exit 1` — all `exit 0` (REQ-E-1 + non-goal)
+- [ ] Epic invariant confirmed: no floor check exits non-zero when it should be a warning
+- [ ] `--no-verify` does NOT appear in any brain script file (`repo:check` confirms)
