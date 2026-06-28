@@ -186,7 +186,7 @@ test('translate: day.run.exitCode interpolates code into Spanish', () => {
 test('PR3 bootstrap: deps section keys exist in en', () => {
   assert.equal(en['bootstrap.deps.section'], 'Base dependencies');
   assert.equal(en['bootstrap.deps.missing'], "Missing '{tool}' (required). Install it and re-run env:init.");
-  assert.equal(en['bootstrap.deps.ok'],      'git, npm, python3 present');
+  assert.equal(en['bootstrap.deps.ok'],      'git, python3 present; package manager: {pm}');
 });
 
 test('PR3 bootstrap: ecosystem section keys exist in en', () => {

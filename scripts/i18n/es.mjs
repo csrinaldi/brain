@@ -52,7 +52,7 @@ export default {
   'day.brain.noNetwork':        'No se pudo consultar tags remotos (sin red o sin acceso) — skipping check.',
   'day.brain.noTags':           'El remoto de brain no tiene tags de versión todavía.',
   'day.brain.newVersion':       'Hay una versión nueva de brain: {installed} → {latest}',
-  'day.brain.upgrade':          'Actualizá a conciencia: npm run brain:upgrade -- {latest}',
+  'day.brain.upgrade':          'Actualizá a conciencia: {pm} run brain:upgrade -- {latest}',
   'day.brain.noAutoApply':      '(no se auto-aplica — revisá el changelog del tag antes)',
   'day.brain.upToDate':         'brain al día ({installed}).',
 
@@ -64,7 +64,7 @@ export default {
   'day.memory.reprojecting':   'Reproyectando brain/ a engram...',
   'day.memory.exporting':      'Exportando memoria al repo (.memory/)...',
   'day.memory.exported':       'Memoria exportada a .memory/ — lista para commitear con el próximo push.',
-  'day.memory.exportFailed':   'Export de engram falló — corré npm run memory:share manualmente.',
+  'day.memory.exportFailed':   'Export de engram falló — corré {pm} run memory:share manualmente.',
   'day.memory.notAvailable':   'engram no disponible — skipping memoria compartida.',
   'day.memory.install':        'Instalar: gentle-ai install   o   npm run tools:install',
 
@@ -75,7 +75,7 @@ export default {
   'day.done.sddExplore':      '/sdd-explore <idea>             investigar antes de comprometerse',
   'day.done.gitlabIssue':     '/gitlab-issue                   crear un issue desde una idea',
   'day.done.beforePush':      'Antes de pushear:',
-  'day.done.checkCmd':        'npm run repo:check && npm run memory:share',
+  'day.done.checkCmd':        '{pm} run repo:check && {pm} run memory:share',
 
   // ── tracker-board.mjs (PR2) ───────────────────────────────────────────────────
   'tracker.noRemote':        '⚠ No se pudo detectar el remote de origin.',
@@ -102,11 +102,17 @@ export default {
   'ps.vcs.error':         '⚠ No se pudo consultar el VCS: {message}',
   'ps.footer':            '— Fin de la proyección. Para regenerar: npm run project:status',
 
+  // ── verify-change.mjs ────────────────────────────────────────────────────────
+  'verify.error.rerun':   'Corregí y volvé a correr: {pm} run change:verify',
+
+  // ── brain-upgrade.mjs ────────────────────────────────────────────────────────
+  'upgrade.error.usage':  'Uso: {pm} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force]',
+
   // ── bootstrap.sh (PR3) ───────────────────────────────────────────────────────
   // §1 Base dependencies
   'bootstrap.deps.section': 'Dependencias base',
   'bootstrap.deps.missing': "Falta '{tool}' (requerido). Instalalo y volvé a correr env:init.",
-  'bootstrap.deps.ok':      'git, npm, python3 presentes',
+  'bootstrap.deps.ok':      'git, python3 presentes; gestor de paquetes: {pm}',
 
   // §2 Ecosystem tools
   'bootstrap.ecosystem.section':  'Herramientas del ecosistema',
@@ -237,8 +243,8 @@ export default {
   'ticket.nextSteps.header':      'Próximos pasos:',
   'ticket.nextSteps.cd':          '    0. cd {path}   (abrí tu sesión de trabajo acá)',
   'ticket.nextSteps.step1':       '    1. Implementar — usá /sdd-new {id} si el cambio es complejo',
-  'ticket.nextSteps.step2':       '    2. npm run repo:check antes de cada commit',
-  'ticket.nextSteps.step3':       '    3. npm run memory:share && git add .memory/ antes de pushear',
+  'ticket.nextSteps.step2':       '    2. {pm} run repo:check antes de cada commit',
+  'ticket.nextSteps.step3':       '    3. {pm} run memory:share && git add .memory/ antes de pushear',
   'ticket.nextSteps.step4':       '    4. git push -u origin {branch}',
 
   // ── ticket-start.mjs — feature working memory (Slice 3) ─────────────────────

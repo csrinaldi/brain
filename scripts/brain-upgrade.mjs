@@ -19,8 +19,10 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { copyManaged, migrateConfig, installSpec } from './lib/installer.mjs';
+import { detectPM } from './lib/pm.mjs';
 
 const ROOT = process.cwd();
+const PM = detectPM(ROOT).name;
 
 const C = {
   reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
@@ -40,7 +42,7 @@ const noInstall = flags.has('--no-install');
 const force = flags.has('--force');
 
 if (!tag && !noInstall) {
-  die(`missing <tag>. Usage: npm run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force]`);
+  die(`missing <tag>. Usage: ${PM} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force]`);
 }
 
 // ── Self-host guard ──────────────────────────────────────────────────────────
@@ -67,13 +69,14 @@ console.log(`\n${C.bold}brain:upgrade${C.reset} ${tag ? `→ ${C.cyan}${tag}${C.
 // (CI, containers without an SSH key) can install the private repo reliably.
 // Falls back to the canonical constant when the file/field is absent.
 const spec = installSpec(ROOT, tag);
+const pm = detectPM(ROOT);
 if (!noInstall) {
   if (dryRun) {
-    info(`would run: npm i -D ${spec}`);
+    info(`would run: ${[...pm.installArgs, spec].join(' ')}`);
   } else {
     info(`Installing ${spec} ...`);
-    const r = spawnSync('npm', ['i', '-D', spec], { stdio: 'inherit', cwd: ROOT });
-    if (r.status !== 0) die('npm install failed — check repo access and that the tag exists.');
+    const r = spawnSync(pm.installArgs[0], [...pm.installArgs.slice(1), spec], { stdio: 'inherit', cwd: ROOT });
+    if (r.status !== 0) die(`${pm.name} install failed — check repo access and that the tag exists.`);
     ok('Package installed.');
   }
 }
