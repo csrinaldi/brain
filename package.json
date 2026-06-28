@@ -29,6 +29,7 @@
     "memory:pull": "node ./scripts/memory/cli.mjs pull",
     "feature:checkpoint": "node ./scripts/memory/cli.mjs feature-checkpoint",
     "feature:resume": "node ./scripts/memory/cli.mjs feature-resume",
-    "tools:install": "bash ./scripts/install-tools.sh"
+    "tools:install": "bash ./scripts/install-tools.sh",
+    "brain:audit": "node ./scripts/brain-audit.mjs"
   }
 }
