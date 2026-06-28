@@ -18,6 +18,7 @@ Reusable documentation — applies to any project that adopts this system.
 - [Harness contract](core/methodology/harness-contract.md) — abstract SDD verbs any harness must implement
 - [VCS contract](core/methodology/vcs-contract.md) — abstract VCS verbs any provider (gh/glab) must implement
 - [Feature-working-memory contract](core/methodology/feature-working-memory-contract.md) — the resume.md schema + feature-checkpoint/resume verbs
+- [Workflow governance](core/methodology/workflow-governance.md) — four invariants, CI gates, enforce-outputs boundary, lockout recovery
 
 ### Anti-patterns (generic)
 

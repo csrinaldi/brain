@@ -125,7 +125,7 @@ a documented operator step, never automated.
 
 - [VCS contract](../../core/methodology/vcs-contract.md) — the verb table the `branchProtect`
   verb extends.
-- `workflow-governance.md` (`brain/core/methodology/workflow-governance.md`) — the L3 in-context
+- [Workflow governance](../../core/methodology/workflow-governance.md) — the L3 in-context
   source of truth mapping each invariant to its gate (added in S3).
 - [ADR-0006](adr-0006-distribucion-installer-versionado.md) — versioned installer; the managed-path
   + additive-migration mechanics this change rides (the two `.github/...` literals + `0.4.0`

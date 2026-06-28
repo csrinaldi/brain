@@ -19,6 +19,8 @@
     "repo:check": "node ./scripts/check-refs.mjs",
     "change:verify": "node ./scripts/verify-change.mjs",
     "brain:upgrade": "node ./scripts/brain-upgrade.mjs",
+    "brain:protect": "node ./scripts/brain-protect.mjs",
+    "brain:governance-status": "node ./scripts/brain-governance-status.mjs",
     "test": "node --test \"scripts/**/*.test.mjs\"",
     "test:fresh-install": "bash test/fresh-install/run.sh",
     "test:upgrade": "bash test/upgrade/run.sh",

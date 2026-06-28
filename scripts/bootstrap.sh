@@ -312,3 +312,15 @@ if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
   printf "  $I18N_BOOTSTRAP_DONE_PENDING\n" "${MISSING_OPTIONAL[*]}"
   printf '  %s\n' "$I18N_BOOTSTRAP_DONE_INSTALL"
 fi
+
+# --- ADMIN ONLY (one-time) -------------------------------------------------------
+# Branch protection is a repo setting, not a per-developer concern.
+# After S3 of the governance change merges to the tracker branch, a repo admin
+# must run:
+#
+#   npm run brain:protect
+#
+# This activates protection on main (required status checks + ≥1 review + no
+# force-push). It is idempotent and requires repo-admin permissions.
+# See brain/core/methodology/workflow-governance.md for recovery steps.
+# ---------------------------------------------------------------------------------
