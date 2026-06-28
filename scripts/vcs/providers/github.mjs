@@ -42,6 +42,29 @@ export async function issueView({ project, number }) {
   return { number: r.number, title: r.title, labels: (r.labels ?? []).map(l => l.name), body: r.body };
 }
 
+export async function branchProtect({ project, branch = 'main', checks, requiredReviews = 1 }) {
+  const payload = {
+    required_status_checks: {
+      strict: true,
+      checks: checks.map(context => ({ context })),
+    },
+    enforce_admins: false,
+    required_pull_request_reviews: {
+      required_approving_review_count: requiredReviews,
+    },
+    restrictions: null,
+    allow_force_pushes: false,
+    allow_deletions: false,
+  };
+  const r = run(
+    'gh',
+    ['api', '-X', 'PUT', `repos/${project}/branches/${branch}/protection`, '--input', '-'],
+    { input: JSON.stringify(payload) }
+  );
+  if (!r.ok) throw new Error(`branchProtect failed (${r.status}): ${r.stderr}`);
+  return { protected: true };
+}
+
 export async function issueList({ project, state = 'open', assignee } = {}) {
   let currentUser;
   if (assignee === 'me') currentUser = (await whoami()).username;

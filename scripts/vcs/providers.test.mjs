@@ -149,3 +149,59 @@ test('gitlab.projectResolve returns the slug unchanged (identity)', async () => 
   const result = await gitlab.projectResolve({ project: 'g/r' });
   assert.equal(result, 'g/r');
 });
+
+// ── branchProtect ─────────────────────────────────────────────────────────────
+
+test('github.branchProtect calls gh api -X PUT with correct payload and returns { protected: true }', async () => {
+  let captured = null;
+  setSpawn((cmd, args, opts) => {
+    captured = { cmd, args, opts };
+    return { status: 0, stdout: '{}', stderr: '' };
+  });
+
+  const checks = ['governance / issue-link', 'governance / diff-size'];
+  const result = await github.branchProtect({ project: 'o/r', checks });
+
+  assert.ok(captured, 'spawn was called');
+  assert.equal(captured.cmd, 'gh');
+  assert.deepEqual(captured.args, [
+    'api', '-X', 'PUT',
+    'repos/o/r/branches/main/protection',
+    '--input', '-',
+  ]);
+
+  const payload = JSON.parse(captured.opts.input);
+  assert.equal(payload.required_status_checks.strict, true);
+  assert.deepEqual(
+    payload.required_status_checks.checks,
+    [{ context: 'governance / issue-link' }, { context: 'governance / diff-size' }]
+  );
+  assert.equal(payload.enforce_admins, false);
+  assert.equal(payload.required_pull_request_reviews.required_approving_review_count, 1);
+  assert.equal(payload.restrictions, null);
+  assert.equal(payload.allow_force_pushes, false);
+  assert.equal(payload.allow_deletions, false);
+
+  assert.deepEqual(result, { protected: true });
+});
+
+test('github.branchProtect respects custom branch and requiredReviews', async () => {
+  let captured = null;
+  setSpawn((cmd, args, opts) => {
+    captured = { cmd, args, opts };
+    return { status: 0, stdout: '{}', stderr: '' };
+  });
+
+  await github.branchProtect({ project: 'o/r', branch: 'develop', checks: [], requiredReviews: 2 });
+
+  assert.ok(captured.args.includes('repos/o/r/branches/develop/protection'));
+  const payload = JSON.parse(captured.opts.input);
+  assert.equal(payload.required_pull_request_reviews.required_approving_review_count, 2);
+});
+
+test('gitlab.branchProtect throws "not yet implemented"', async () => {
+  await assert.rejects(
+    () => gitlab.branchProtect({ project: 'g/r', checks: [] }),
+    /not yet implemented/i
+  );
+});

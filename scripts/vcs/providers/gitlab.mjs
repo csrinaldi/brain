@@ -74,3 +74,11 @@ export async function repoCloneUrl({ host, project, token }) {
 export async function patSetupUrl({ host, name, scopes }) {
   return `https://${host}/-/user_settings/personal_access_tokens?name=${name}&scopes=${scopes.join(',')}`;
 }
+
+// branchProtect is not yet implemented for GitLab (Phase 3).
+// The verb is in the contract so the door is open; classic-protection vs rulesets
+// will be resolved in the Phase 3 spike.
+// eslint-disable-next-line no-unused-vars
+export async function branchProtect({ project, branch = 'main', checks, requiredReviews = 1 } = {}) {
+  throw new Error('gitlab.branchProtect: not yet implemented (Phase 3)');
+}
