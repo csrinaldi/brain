@@ -1,123 +1,224 @@
 # Design — Workflow Governance Layer for brain
 
-**Status:** Draft for review · **Date:** 2026-06-27 · **Author:** session design
+**Status:** Draft for review (v2 — tool-agnostic model) · **Date:** 2026-06-28
 **Context:** brain's mission is org-wide workflow governance for humans + agents with
 shared knowledge (repo + engram). For that to work, the load-bearing steps must be
-*enforced*, not merely *guided* (a guide's floor is the least-disciplined participant).
+*enforced as far as the environment allows, and made the path of least resistance
+everywhere* — because a guide's floor is the least-disciplined participant, and an
+org cannot assume any particular VCS, tier, or harness.
 
-## The four non-negotiable invariants
+---
+
+## 1. The four non-negotiable invariants
 
 1. **No merge without an approved ticket.**
 2. **No PR over 400 changed lines without `size:exception`.**
 3. **Memory dumped (session summary) before closing.**
 4. **An ADR exists for every decision.**
 
-## Core principle
+## 2. Core principle
 
-> A step is *guaranteed* only when something downstream **fails closed** without it —
-> server-side, where neither a human nor an agent can bypass it. Everything else is
-> *guidance*, which raises probability but never reaches 1.0.
+> Enforce the observable **OUTPUTS** wherever a gate can fail-closed; **guide** the
+> irreducible **JUDGMENT** (capture quality, recognizing a decision) with in-context
+> docs + the path of least resistance. Never claim to enforce what cannot be
+> mechanically verified, and never assume a platform/tier/harness is present.
 
-So the design **enforces the observable OUTPUTS** of each invariant at a server-side
-gate, and **guides the JUDGMENT** (which is irreducibly soft) with in-context docs +
-low-friction commands + after-the-fact audit. Naming that boundary honestly is part of
-the design — we do not pretend to enforce what cannot be mechanically detected.
+## 3. The honest boundary (read this first)
 
-## Three reinforcing layers
+A **hard** guarantee needs a bypass-proof chokepoint at the point of no return (the
+update of the shared branch). On hosted SaaS that chokepoint is owned by the
+platform (branch protection / push rules) → **tool- and tier-specific**. The only
+tool-native server-side gate is a `pre-receive` hook, which requires controlling the
+git server (self-hosted). **Therefore a fully tool-independent HARD guarantee does
+not exist on SaaS.** What IS universal: a default-on local layer + post-hoc
+verification. brain is honest about this everywhere.
 
-| Layer | Mechanism | Guarantee | Bypass |
-|---|---|---|---|
-| **L1 — Server-side** | `.github/workflows/governance.yml` (PR checks) + branch protection on `main` | **Real** — agent & human alike cannot merge without it | only a repo admin override (logged) |
-| **L2 — Local hooks** | `pre-commit` / `pre-push` run the same checks for fast feedback | Partial | `--no-verify` (so L1 is the true gate) |
-| **L3 — In-context** | governance doc + skills + path-of-least-resistance commands | Soft (probability) | agent can skip/forget |
+---
 
-The **uniform-gate insight:** a PR check enforces the *output of a PR* regardless of
-who authored it. That is exactly why it works for "agents can't skip" — the gate is
-author-agnostic. Humans and agents flow through the same wall.
+## 4. Architecture — one set of generic checks, composed at three points
 
-## Per-invariant enforcement
+The checks are **generic** (Node scripts over `git` data): diff-size, issue-link,
+ADR-presence, memory-presence. Tool-independent. The same check code runs at three
+**complementary** points (NOT substitutes for one another):
 
-### 1. No merge without an approved ticket — FULLY enforceable
-- **L1 gate:** CI parses the PR body for `Closes|Fixes|Resolves #N`; calls the GitHub
-  API to confirm issue `#N` carries `status:approved`. Missing either → check fails →
-  branch protection blocks merge.
-- **Residual (by design):** *who* approves the ticket is a human decision — that's the
-  point (the human sets intent; the gate enforces that intent exists before code merges).
+```
+GENERIC CHECKS (node/git, tool-independent)
+   │
+   ├─►  FLOOR  (brain-core, ALWAYS ON, every repo/tier/platform):
+   │       • client git hooks (commit-msg, pre-commit, pre-push)  → prevent-by-default, local, fast
+   │       • brain:audit  → re-verify the merged history          → detection + attribution  ← the teeth
+   │
+   └─►  HARD GATE  (VCS adapter, ADDITIVE, capability-aware):
+           • protectBranch()  → platform server-side enforcement WHERE the tier allows
+           • if unavailable → reports {enforced:false, reason, remedy}; NEVER simulates it with client hooks
+```
 
-### 2. No PR over 400 lines without exception — FULLY enforceable
-- **L1 gate:** CI computes `additions + deletions` of the PR diff, excluding a
-  configurable **ignore-list** (lock files, `.memory/**`, `openspec/changes/**`,
-  generated artifacts). If >400 and no `size:exception` label → fail. This is what
-  actually *produces slicing* — the agent must split to pass.
-- **Residual:** the ignore-list definition (tune per org).
+Plus a **golden-path command sequence** (§8) that makes the compliant path the path
+of least resistance for human and agent alike, and self-gates step order.
 
-### 3. Memory dumped before closing — PARTIALLY enforceable (the subtle one)
-- The dump has two parts: **(a) materialization** (engram → `.memory/`, mechanical) and
-  **(b) capture quality** (did the agent `mem_save` the *right* things — irreducibly soft).
-- **L1 gate (enforces the step happened):** CI verifies the committed `.memory/` contains
-  a `session_summary` observation referencing this change/issue. `mem_session_summary`
-  (the close protocol) writes exactly such an observation → materialized into `.memory/`
-  → CI greps for it. No summary → no merge. This makes "run the close protocol"
-  **mechanical**.
-- **L2:** the existing `pre-push` hook materializes `.memory/` (so the summary is
-  committed); plus a check that engram has no un-materialized state.
-- **Residual (soft):** the *quality/completeness* of the captured knowledge. Mitigation:
-  an audit prompt at review ("does the summary cover Goal/Discoveries/Next?") + reviewer
-  judgment. We enforce that capture *happened*; we cannot enforce that it was *good*.
+### 4.1 Floor vs. hard gate — they COMPOSE, they do not fall back
 
-### 4. ADR for decisions — PARTIALLY enforceable (the fuzziest)
-- You cannot mechanically detect "this PR *made a decision*." So the gate is two-pronged:
-- **L1 hard gate (label-conditional):** a PR labeled `decision` MUST include an
-  `brain/project/decisions/adr-*.md` file in its diff **and** a `brain/HOME.md` index
-  update (else `brain:nav` orphan). Missing → fail.
-- **L1 heuristic warning (soft-detect the unlabeled):** CI flags PRs touching
-  architectural surfaces (adapters, config schema, new `package.json` deps, new top-level
-  modules, the harness/memory/vcs backends) that carry **no** ADR — as a **warning**, not
-  a block (heuristics must not hard-fail). Reviewer/agent then labels `decision` or
-  dismisses.
-- **Residual (soft):** recognizing an unlabeled decision. Mitigation: the heuristic +
-  agent-authorities in-context + review.
+This distinction is load-bearing for the document:
 
-## Distribution (the governance must travel with brain)
+- **Floor (unconditional):** client hooks + `brain:audit`, running the generic
+  checks. They **exist and run independently of the adapter**, on every repo, tier,
+  and platform. The floor is *softer* (hooks are `--no-verify`-bypassable; the audit
+  is post-hoc) but *universal*.
+- **Hard gate (additive):** the VCS adapter binds the platform's *server-side*
+  enforcement **where supported**; otherwise it reports the gap. It is *harder* but
+  *conditional* on tier/platform.
 
-- **The workflow file** ships as a **managed path** (`.github/workflows/governance.yml`)
-  — copied to consumers on `brain:upgrade`, so adopting brain *is* adopting the gates.
-- **Branch protection** is a GitHub *setting*, not a file → a new **`brain:protect`**
-  verb (`gh api`) configures `main` protection (require the governance checks + ≥1 review
-  + no direct push), run during `env:init` or documented as a one-time setup. Provider-
-  agnostic via the VCS adapter (GitHub rulesets / GitLab push rules).
-- A **governance doc** (`brain/core/methodology/workflow-governance.md`) states the four
-  invariants and maps each to its gate — the in-context L3 source of truth.
+The adapter does **NOT** "fall back to hooks." That framing is wrong and dishonest:
+client hooks are bypassable, so they are not equivalent to a server gate. They are
+the *floor*, not a *substitute*. Even when the hard gate IS available you keep the
+floor (you always want fast local feedback + the post-hoc audit). The three points
+are different moments in the lifecycle:
 
-## The honest residual (the irreducible boundary)
+| Point | When | Strength |
+|---|---|---|
+| client hook (pre-push) | before the push leaves the machine | soft (bypassable), universal |
+| platform gate | at the merge to the protected branch (server) | hard, conditional |
+| `brain:audit` | after, over the merged history | detection + attribution, universal |
 
-L1 guarantees **outputs**: ticket linked, size bounded, summary present, ADR-for-labeled-
-decision. L1 does **not** guarantee **judgment**: good capture, recognizing an unlabeled
-decision, slicing *well* (vs merely under 400). Those stay L3 + audit. This boundary is
-not a gap to be closed — it is the line between what a machine can verify and what
-requires a mind. The design's job is to push everything *mechanically verifiable* to L1
-and make the *judgment* path the easy one.
+### 4.2 Client hooks vs. server hooks (don't conflate)
 
-## New ADR
+- **client hooks** (`commit-msg`/`pre-commit`/`pre-push`, via `core.hooksPath`):
+  the FLOOR. Versioned, installed by `env:init`, run the generic checks. Bypassable.
+- **server hook** (`pre-receive`): ONE possible implementation of the adapter's hard
+  gate, only on self-hosted platforms. Not bypassable. A *platform* mechanism.
 
-- **ADR-0014 — Workflow governance: enforce load-bearing invariants server-side.**
-  Records the four invariants, the 3-layer model, the enforce-outputs/guide-judgment
-  boundary, and the distribution model (managed workflow + `brain:protect`).
+Same word "hook", different layers — name them separately in any doc.
 
-## Phasing (delivery)
+## 5. The generic checks (tool-independent library)
 
-- **Phase 1 (biggest guarantee-gain):** `governance.yml` with the four checks +
-  `brain:protect` verb + branch protection. Invariants 1 & 2 become hard; 3 & 4 get their
-  hard sub-gates.
-- **Phase 2:** L2 local-hook fast feedback + the `workflow-governance.md` doc + low-
-  friction commands (one command that does ticket→worktree→slices).
-- **Phase 3:** the audit/detection heuristics (decision-surface warning, summary-
-  completeness prompt) + the provider-agnostic GitLab path.
+Extract the four checks into a shared library (`scripts/governance/checks/` or
+similar), each a pure function over git/PR data. `diff-size-count.mjs` already
+exists and is the template. The same functions are imported by: the client hooks,
+`brain:audit`, and (where useful) the platform CI workflow. Single source of truth
+for *what* a check means; the three points only differ in *where/when* they run.
 
-## Open questions
+## 6. The floor — client hooks + brain:audit
 
-- The session-summary↔issue linkage: how does a `session_summary` observation reference
-  the issue (a `topic_key` convention like `sdd/<issue>/...`, or an explicit issue field)?
-- The 400-line ignore-list: exact globs.
-- `brain:protect` for GitLab (rulesets differ) — Phase 3.
-- Admin-override policy: who can bypass a required check, and is the override audited?
+- **Hook suite** (always on, `core.hooksPath = scripts/hooks`):
+  `commit-msg` (conventional commit + ticket ref), `pre-commit` (repo:check; block
+  direct commit to main), `pre-push` (the four invariant checks). Tool-independent.
+- **`brain:audit`** (the universal teeth): re-verifies the invariants over the
+  **merged history** — diff-size per PR, ADR-for-decision, memory-present,
+  issue-link. **Forge-proof** (verifies the *outcome*, not a marker). ~90% pure git
+  + a thin READ via the VCS adapter for PR/issue metadata. Flags + **attributes**
+  every violation regardless of whether a hook was bypassed. In an org, visible +
+  attributed violations deter almost as well as prevention — this is the
+  tool-independent backbone of the guarantee.
+
+## 7. The hard gate — the VCS adapter, capability-aware
+
+All tier/platform reality is **isolated inside the VCS adapter**. The rest of brain
+is tier-blind.
+
+```js
+provider.protectBranch({ project, branch, checks, requiredReviews })
+   → { enforced: true }                                  // tier allows it
+   → { enforced: false, reason: 'tier'|'unsupported',    // 403 / not available
+       remedy: '...' }                                   // NEVER a raw crash
+
+provider.capabilities()   // PROBED, not hardcoded
+   → { hardEnforcement: 'available'|'unavailable'|'unknown', detail }
+```
+
+- **Probe, don't hardcode the matrix** — capabilities differ per platform AND change
+  over time; a hardcoded matrix rots. The adapter attempts + caches the 403/result.
+- Illustrative (probed in reality): GitHub public → free; GitHub private free → none
+  (403); GitHub Pro/Team/Enterprise → yes (+ GHE pre-receive); **GitLab free →
+  protected branches yes** (more generous), Premium/self-managed → more; Bitbucket →
+  mostly paid; self-hosted → `pre-receive`.
+- **`brain:governance status`** reports per-consumer, explicitly:
+  ```
+  Tu repo: github · private · free
+    ✓ hooks (commit-msg/pre-commit/pre-push)  → ON  [universal]
+    ✓ brain:audit                              → ON  [universal]
+    ✗ platform hard gate                       → unavailable  (remedy: GitHub Pro for private, or make public)
+  ```
+  Nobody learns via a surprise 403. brain probes, adapts, and reports.
+
+## 8. The golden path — the hard guide (human AND agent)
+
+The workflow is codified as a sequence of **self-gating brain verbs** — the same for
+a dev with no agent and for an agent:
+
+```
+brain:start <issue>  → verify issue exists + status:approved → branch/worktree   [gate: no approved ticket → refuse]
+   … work …
+brain:check          → run the generic checks + tests + repo:check               [fast feedback]
+brain:save           → capture session summary + materialize memory              [gate before close]
+brain:ship           → re-verify invariants → open PR (template + Closes #N + labels)   [gate: refuse if unmet]
+   … merge (platform gate where available) …
+brain:audit          → re-verify merged history                                  [continuous]
+brain:next           → state machine: "your next step is X"                      [agent-like guidance for humans]
+```
+
+- **Self-gating**: each verb verifies the prior step's output → step order can't be
+  skipped *within* the flow.
+- **Path of least resistance**: one verb per step; compliance is easier than not.
+- **`brain:next`**: gives a dev-without-an-agent an agent-like experience — brain
+  tells them the next command.
+- **Unification**: one golden path, traversed by human and agent. The agent is
+  additionally bound by the harness (§9) + instruction; the human is guided by
+  `brain:next` + the verbs' self-gating. **Same outcomes, verified the same way.**
+- **Honest hardness**: you cannot force a human onto the verbs (raw git is always
+  possible) — but deviation is gated locally (verbs) + caught universally (hooks at
+  push, audit at the outcome).
+
+## 9. The `--no-verify` policy
+
+- **brain's own scripts** never use `--no-verify` / `git commit -n` → make it a
+  **prohibited reference** in `repo:check` (the check-refs engine already does
+  prohibited-reference detection, ADR-0007). Enforceable + tool-independent.
+- **The agent** → a **harness PreToolUse hook** (Claude Code) blocks any Bash command
+  containing `--no-verify` / `-n` on git → the agent literally cannot run it in the
+  sanctioned harness. Harness-specific but it's the sanctioned harness.
+- **What slips through** → caught by `brain:audit` (it verifies the outcome, not the
+  flag).
+- **Precondition (the session's lesson)**: hooks MUST be reliable (zero false
+  positives) or bypass is *rational* — agents and humans will (and did) `--no-verify`
+  a hook that cries wolf. Trustworthy hooks are a prerequisite of the policy. (The
+  memory:pull churn fix, #59, was part of earning that trust.)
+
+## 10. New ADR
+
+**ADR-0014 — Workflow governance.** Records: the four invariants; enforce-outputs /
+guide-judgment; the **floor (always-on hooks + audit) vs. additive capability-aware
+hard gate** split; the generic-checks library; the golden-path self-gating verbs +
+human/agent unification; the `--no-verify` policy; the honest tool-independence
+boundary. Never-do: claim to enforce judgment; treat client hooks as a substitute
+for the hard gate; hardcode the tier matrix; auto-activate protection without
+coordinating open non-compliant branches; let check-names drift from job-names.
+
+## 11. Reshaped epic (slices/phases)
+
+- **S1 Foundation** ✅ (done): ADR-0014, PR template, `governance.ignoreList`
+  migration, managed-paths.
+- **S2 Platform CI (GitHub adapter)** ✅ (done): `governance.yml` issue-link +
+  diff-size — now understood as ONE enforcement adapter (additive, conditional).
+- **S3 `brain:protect` + capability-aware adapter** (code done; activation blocked by
+  tier): make `protectBranch()` return `{enforced, reason, remedy}` (no crash); add
+  `capabilities()`; add `brain:governance status`. Activation is per-consumer +
+  deliberate.
+- **S4 → reshaped: the FLOOR (the real independence)** — extract the four checks to a
+  generic library; wire the full client-hook suite to run them; build **`brain:audit`**
+  (re-verify merged history). THIS is the tool-independent guarantee.
+- **S5 The golden path** — the self-gating verb sequence (`brain:start/check/save/
+  ship/next`) unifying human + agent; the `--no-verify` policy (repo:check prohibition
+  + the harness hook).
+- **Phase 3** — GitLab/Bitbucket/self-hosted `protectBranch` + `pre-receive`; ruleset
+  support; the full session_summary check (engram schema spike + `session/{issue}`
+  convention).
+
+## 12. Open questions
+
+- The `brain:audit` cadence: on-demand, pre-push, scheduled, or a CI job? (Probably
+  all — same code.)
+- `brain:next` state source: derive from git + brain.config + open PRs/issues?
+- The harness-hook shipping: brain ships a `.claude/` PreToolUse config as a managed
+  path? (Mirrors the `.github/workflows/governance.yml` managed-path decision.)
+- The session_summary↔issue linkage convention (`session/{issue}` topic_key) — the
+  Phase-3 prerequisite for the full memory check.
