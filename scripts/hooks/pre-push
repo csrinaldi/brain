@@ -18,6 +18,16 @@
 # es un symlink → .memory/ (el dir canónico versionado en git). ADR-0002 describe
 # el modelo; este hook inspecciona .memory/ directamente para evitar ambigüedad.
 
+# ── S4.8 note — reliability-first deviation from literal spec ──────────────
+# Hard-blocking the PR-level invariants (issue-link, adr-presence,
+# memory-presence) here would cause false-positives → developers use
+# --no-verify, defeating governance.  Pre-push hard-blocks ONLY:
+#   (a) uncommitted memory (existing)
+#   (b) repo:check — reference/prohibition violations (new)
+# Diff-size is a WARNING only (dev may be about to split PRs).
+# brain:audit is where ALL 4 invariants are enforced hard (on merged history).
+# ────────────────────────────────────────────────────────────────────────────
+
 # Sin node no hay dispatcher — no bloquear (entorno mínimo).
 command -v node >/dev/null 2>&1 || exit 0
 
@@ -38,9 +48,23 @@ node "$repo_root/scripts/memory/cli.mjs" share >/dev/null 2>&1 || exit 0
 # mechanism in that case.
 node "$repo_root/scripts/memory/cli.mjs" feature-checkpoint 2>/dev/null || true
 
-# ¿Quedó memoria sin commitear en .memory/? `status --porcelain` cubre staged,
-# unstaged Y untracked (?? ) en un solo check — evita el anti-pattern de `git diff`
-# ciego a archivos nuevos (brain/anti-patterns/git-diff-no-ve-untracked.md).
+# ── repo:check (hard — no false positives) ──────────────────────────────────
+node "$repo_root/scripts/check-refs.mjs" || exit 1
+
+# ── diff-size WARNING (informational only — never blocks) ────────────────────
+base=$(git merge-base HEAD origin/main 2>/dev/null) || base=""
+if [ -n "$base" ]; then
+  diff_lines=$(git diff --numstat "$base" HEAD \
+    | node "$repo_root/scripts/vcs/diff-size-count.mjs" 2>/dev/null) || diff_lines=""
+  if [ -n "$diff_lines" ] && [ "$diff_lines" -gt 400 ] 2>/dev/null; then
+    echo ""
+    echo "⚠ pre-push: ~${diff_lines} changed lines (budget: 400)."
+    echo "  Consider splitting before opening a review (this push continues)."
+    echo ""
+  fi
+fi
+
+# ── uncommitted .memory/ check (hard) ───────────────────────────────────────
 pending=$(git -C "$repo_root" status --porcelain -- .memory)
 
 if [ -n "$pending" ]; then
