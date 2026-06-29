@@ -90,3 +90,12 @@ export async function branchProtect({ project, branch = 'main', checks, required
 export async function capabilities() {
   return { hardEnforcement: 'unknown', detail: 'gitlab not yet implemented (Phase 3)' };
 }
+
+/**
+ * Create a merge request — stub for Phase 3.
+ * Returns { url: null, error: string } so callers degrade gracefully.
+ */
+// eslint-disable-next-line no-unused-vars
+export async function mrCreate({ project, title, body, head, base, labels } = {}) {
+  return { url: null, error: 'gitlab.mrCreate: not yet implemented (Phase 3)' };
+}

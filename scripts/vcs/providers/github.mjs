@@ -139,6 +139,37 @@ export async function commitStatus({ project, sha }) {
   return normalizeCommitStatus('github', raw);
 }
 
+/**
+ * Create a pull request via `gh pr create`.
+ * Returns { url: string } on success or { url: null, error: string } on failure.
+ * Never throws.
+ */
+export async function mrCreate({
+  project,
+  title,
+  body,
+  head,
+  base = 'main',
+  labels = [],
+} = {}) {
+  // gh pr create resolves the repo from the git remote; project is validated
+  // implicitly.  Pass title + body + branch refs explicitly.
+  const args = [
+    'pr', 'create',
+    '--title', title,
+    '--body', body,
+    '--head', head,
+    '--base', base,
+  ];
+  for (const label of labels) {
+    args.push('--label', label);
+  }
+
+  const r = run('gh', args);
+  if (r.ok) return { url: r.stdout.trim() };
+  return { url: null, error: r.stderr.trim() || `gh pr create failed (status ${r.status})` };
+}
+
 export async function repoCloneUrl({ host, project, token }) {
   return `https://x-access-token:${token}@${host || 'github.com'}/${project}.git`;
 }

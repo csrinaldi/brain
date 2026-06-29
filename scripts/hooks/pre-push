@@ -64,19 +64,20 @@ if [ -n "$base" ]; then
   fi
 fi
 
-# ── uncommitted .memory/ check (hard) ───────────────────────────────────────
+# ── uncommitted .memory/ check (WARNING — reliability-first, never blocks) ────
+# Rationale (ADR-0014 §9): `memory:share` above re-materializes the manifest,
+# which is non-deterministic (it churns), so a hard block here would self-block
+# the very push it runs on → developers reach for --no-verify, silencing the
+# whole hook. `brain:save` is the proper materialize-and-commit point, and
+# `brain:audit` enforces memory-presence on the merge to main. So: WARN here.
 pending=$(git -C "$repo_root" status --porcelain -- .memory)
 
 if [ -n "$pending" ]; then
   echo ""
-  echo "✗ pre-push: hay memoria viva sin commitear en .memory/"
-  echo "  'memory:share' generó cambios. Materializá la memoria del ticket:"
+  echo "⚠ pre-push: memoria viva sin commitear en .memory/ (este push continúa)."
+  echo "  Materializá con 'brain:save' (o: git add .memory && git commit -m 'chore(memory): sync .memory')."
+  echo "  El audit verifica memory-presence en el merge a main."
   echo ""
-  echo "    git add .memory && git commit -m 'chore(memory): sync .memory'"
-  echo ""
-  echo "  y pusheá de nuevo.  (bypass de emergencia: git push --no-verify)"
-  echo ""
-  exit 1
 fi
 
 exit 0

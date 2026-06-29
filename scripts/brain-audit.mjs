@@ -56,7 +56,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const range = resolveRange(cwd);
   const ignoreList = loadIgnoreList(cwd);
 
-  const log = git(`log --merges --format=%H%x09%s ${range}`, cwd);
+  // --first-parent: audit only the INTEGRATION merges that landed on the audited
+  // branch (e.g. main), NOT the nested slice merges inside a feature branch.
+  // Nested slice merges legitimately carry "Part of #N" bodies and no per-slice
+  // memory — auditing them produces false failures.  The integration merge (the
+  // one that actually landed on main) is the canonical governance checkpoint.
+  const log = git(`log --first-parent --merges --format=%H%x09%s ${range}`, cwd);
   if (!log) {
     console.log(`[INFO] No merge commits found in range: ${range}`);
     process.exit(0);

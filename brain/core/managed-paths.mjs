@@ -21,6 +21,7 @@ export const managed = [
   '.gitattributes',
   '.github/workflows/governance.yml',   // the L1 gate travels with brain (ADR-0014)
   '.github/PULL_REQUEST_TEMPLATE.md',   // the Closes/Fixes scaffold the gate parses (ADR-0014)
+  '.claude/settings.json',              // Claude Code harness hook — no-verify policy (ADR-0014 §9)
 ];
 
 // Paths the consumer owns. The upgrade NEVER touches these.
