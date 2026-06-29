@@ -40,6 +40,7 @@ const tag = args.find((a) => !a.startsWith('--'));
 const dryRun = flags.has('--dry-run');
 const noInstall = flags.has('--no-install');
 const force = flags.has('--force');
+const abortOnCollision = flags.has('--abort-on-collision');
 
 if (!tag && !noInstall) {
   die(`missing <tag>. Usage: ${PM} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force]`);
@@ -88,14 +89,30 @@ if (!existsSync(pkgRoot)) {
 }
 
 const { managed, local } = await import(join(pkgRoot, 'brain', 'core', 'managed-paths.mjs'));
-const { copied, skipped, merged } = copyManaged({
+const { copied, skipped, merged, collisions } = copyManaged({
   srcRoot: pkgRoot,
   destRoot: ROOT,
   managed,
   local,
   dryRun,
   specialMerge: { '.claude/settings.json': mergeClaudeSettings },
+  abortOnCollision,
 });
+
+// ── Collision report ────────────────────────────────────────────────────────────
+// Emitted before the summary so the operator sees it immediately. The non-zero
+// exit (under --abort-on-collision) is deferred until AFTER the plan/summary is
+// printed (see below), so a `--dry-run --abort-on-collision` preview still shows
+// the full "would copy/merge" plan instead of blanking it.
+if (collisions.length > 0) {
+  if (abortOnCollision) {
+    const effect = dryRun ? 'a live upgrade would write zero files' : 'zero files were written';
+    warn(`Aborting: ${collisions.length} collision(s) detected — destination differs from brain source (${effect}).`);
+  } else {
+    warn(`${collisions.length} collision(s) detected (destination differs from brain source). Proceeding — review the diff:`);
+  }
+  for (const f of collisions) console.log(`      ${C.dim}${f}${C.reset}`);
+}
 
 if (dryRun) {
   info(`would copy ${copied.length} managed file(s):`);
@@ -115,6 +132,10 @@ if (skipped.length) {
   warn(`Skipped ${skipped.length} path(s) that overlap local ownership (local wins):`);
   for (const f of skipped) console.log(`      ${C.dim}${f}${C.reset}`);
 }
+
+// Deferred non-zero exit: the plan/summary has now been printed, so stop here —
+// before config migration — when the caller asked to abort on collisions.
+if (abortOnCollision && collisions.length > 0) process.exit(1);
 
 // ── 3. Migrate brain.config.json (additive) ─────────────────────────────────────
 const configPath = join(ROOT, 'brain.config.json');

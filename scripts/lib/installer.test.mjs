@@ -510,6 +510,294 @@ test('settings.local.json is absent from the managed-paths.mjs managed export (R
   );
 });
 
+// ── S2: Collision Guard ───────────────────────────────────────────────────────
+//
+// All S2 tests exercise copyManaged() directly. The pre-flight guarantee
+// (detection before first write) is proved via abortOnCollision: when the
+// abort gate fires the write loop is never entered — so a clean file that
+// would have been written is still absent from disk after the call.
+
+// REQ-S2-1: Differing dest produces a collision record.
+test('copyManaged: collision recorded when dest exists and bytes differ from src (REQ-S2-1)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s2-1-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'a.md'), 'SRC CONTENT');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'a.md'), 'DIFFERENT CONTENT');
+
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['brain/core/**'],
+      local: [],
+    });
+
+    assert.ok(Array.isArray(result.collisions),
+      'result must have a collisions array');
+    assert.ok(result.collisions.includes('brain/core/a.md'),
+      'collision must include the differing path');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-S2-1: Pre-flight runs before any write. Proved by aborting: a clean
+// sibling file is absent from disk after the call because the write loop
+// was never entered — i.e., collision detection completed before writes.
+test('copyManaged: collision detection is a pre-flight pass before any write begins (REQ-S2-1)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s2-pf-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    // File a.md: will collide (dest differs).
+    writeFileSync(join(src, 'brain', 'core', 'a.md'), 'SRC A');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'a.md'), 'OLD A');
+    // File b.md: clean (no dest), would be copied in a normal run.
+    writeFileSync(join(src, 'brain', 'core', 'b.md'), 'SRC B');
+
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['brain/core/**'],
+      local: [],
+      abortOnCollision: true,
+    });
+
+    // Collision detected in pre-flight.
+    assert.ok(result.collisions.includes('brain/core/a.md'),
+      'collision must be detected');
+    // Zero writes — the write loop was never entered.
+    assert.equal(result.copied.length, 0,
+      'zero copies when aborting on collision');
+    assert.ok(!existsSync(join(dest, 'brain', 'core', 'b.md')),
+      'clean sibling file must not be written when pre-flight caused abort');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-S2-2: abort path — zero writes when collisions exist.
+test('copyManaged: abortOnCollision=true causes zero writes when collisions exist (REQ-S2-2)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s2-2-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'managed.md'), 'NEW CONTENT');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'managed.md'), 'OLD CONTENT');
+
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['brain/core/**'],
+      local: [],
+      abortOnCollision: true,
+    });
+
+    assert.equal(result.copied.length, 0,
+      'no files must be copied when aborting on collision');
+    assert.equal(
+      readFileSync(join(dest, 'brain', 'core', 'managed.md'), 'utf8'),
+      'OLD CONTENT',
+      'destination file must remain unchanged',
+    );
+    assert.ok(result.collisions.includes('brain/core/managed.md'),
+      'collision must be present in result');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-S2-2: default (no abort) — a collision is recorded but the colliding file
+// IS still overwritten (the documented "warn and proceed" behavior, verified on disk).
+test('copyManaged: without abortOnCollision a collision is recorded but the file is still overwritten (REQ-S2-2)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s2-proceed-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'managed.md'), 'NEW CONTENT');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'managed.md'), 'OLD CONTENT');
+
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['brain/core/**'],
+      local: [],
+      // abortOnCollision omitted → defaults to false
+    });
+
+    assert.ok(result.collisions.includes('brain/core/managed.md'),
+      'collision must still be recorded in the proceed path');
+    assert.ok(result.copied.includes('brain/core/managed.md'),
+      'colliding file must be reported as copied');
+    assert.equal(
+      readFileSync(join(dest, 'brain', 'core', 'managed.md'), 'utf8'),
+      'NEW CONTENT',
+      'colliding file must be overwritten when not aborting',
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-S2-2: dry-run + abort — the abort gate must NOT blank the plan. The colliding
+// file is reported in the plan, collisions are recorded, and nothing is written.
+test('copyManaged: dryRun + abortOnCollision returns the full plan and writes nothing (REQ-S2-2)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s2-dryabort-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'managed.md'), 'NEW CONTENT');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'managed.md'), 'OLD CONTENT');
+
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['brain/core/**'],
+      local: [],
+      dryRun: true,
+      abortOnCollision: true,
+    });
+
+    // Plan is preserved (not blanked by the abort gate) under dry-run.
+    assert.ok(result.copied.includes('brain/core/managed.md'),
+      'dry-run plan must list the colliding file under copied');
+    assert.ok(result.collisions.includes('brain/core/managed.md'),
+      'collision must be recorded under dry-run');
+    // Nothing was written.
+    assert.equal(
+      readFileSync(join(dest, 'brain', 'core', 'managed.md'), 'utf8'),
+      'OLD CONTENT',
+      'dry-run must not write the colliding file',
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-S2-2: no-op when clean — abortOnCollision=true allows writes to proceed.
+test('copyManaged: abortOnCollision=true is a no-op when there are no collisions (REQ-S2-2)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s2-clean-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'a.md'), 'SAME CONTENT');
+    // Dest is identical — not a collision.
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'a.md'), 'SAME CONTENT');
+
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['brain/core/**'],
+      local: [],
+      abortOnCollision: true,
+    });
+
+    assert.equal(result.collisions.length, 0,
+      'no collisions when content is identical');
+    assert.ok(result.copied.includes('brain/core/a.md'),
+      'file must be copied normally when no collision exists');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-S2-3: Absent dest is NOT a collision.
+test('copyManaged: absent dest is not a collision (REQ-S2-3)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s2-3a-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'new.md'), 'CONTENT');
+    mkdirSync(dest, { recursive: true });
+    // dest/brain/core/new.md does NOT exist.
+
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['brain/core/**'],
+      local: [],
+    });
+
+    assert.equal(result.collisions.length, 0,
+      'absent dest must not be a collision');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-S2-3: Identical dest (same bytes) is NOT a collision.
+test('copyManaged: identical dest is not a collision (REQ-S2-3)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s2-3b-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'same.md'), 'IDENTICAL CONTENT');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'same.md'), 'IDENTICAL CONTENT');
+
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['brain/core/**'],
+      local: [],
+    });
+
+    assert.equal(result.collisions.length, 0,
+      'identical dest must not be a collision');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// specialMerge paths are EXCLUDED from the collision guard.
+test('copyManaged: specialMerge paths are excluded from the collision guard', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s2-sm-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, '.claude'), { recursive: true });
+    writeFileSync(join(src, '.claude', 'settings.json'), '{"hooks":{}}');
+    mkdirSync(join(dest, '.claude'), { recursive: true });
+    // Dest differs from src — would be a collision if not in specialMerge.
+    writeFileSync(join(dest, '.claude', 'settings.json'), '{"different":true}');
+
+    let mergeFnCalled = false;
+    const fakeMergeFn = (_destPath, _srcPath) => { mergeFnCalled = true; };
+
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['.claude/settings.json'],
+      local: [],
+      specialMerge: { '.claude/settings.json': fakeMergeFn },
+    });
+
+    assert.equal(result.collisions.length, 0,
+      'specialMerge paths must not appear in collisions');
+    assert.ok(mergeFnCalled,
+      'specialMerge function must still be called');
+    assert.ok(result.merged.includes('.claude/settings.json'),
+      'path must appear in merged, not in collisions');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // REQ-S1-5: copyManaged routes .claude/settings.json through specialMerge, not copyFileSync.
 test('copyManaged routes .claude/settings.json through specialMerge, not copied (REQ-S1-5)', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'brain-s1-5-'));
