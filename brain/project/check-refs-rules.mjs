@@ -1,7 +1,7 @@
 // check-refs-rules.mjs — Project-specific rules for the repo:check validator.
 //
 // EDIT THIS FILE to define your own prohibited references and structural rules.
-// The motor (scripts/check-refs.mjs) loads these rules at runtime.
+// The motor (brain/scripts/check-refs.mjs) loads these rules at runtime.
 //
 // Format:
 //   prohibitedRefs — array of rule objects; each rule is checked against every
@@ -47,7 +47,7 @@ export const prohibitedRefs = [
     // use them — violations are detected here (pre-push / CI) and caught again by
     // brain:audit on the merged history.  See ADR-0014 §9 (--no-verify policy).
     //
-    // Hook files (scripts/hooks/pre-commit, pre-push) are intentionally extensionless
+    // Hook files (brain/scripts/hooks/pre-commit, pre-push) are intentionally extensionless
     // and therefore excluded by onlyExt — they document the bypass option to users,
     // which is legitimate self-documentation, not an invocation.
     pattern: /--no-verify|\bgit commit\b[^"'\n]*\s+-n\b/,
@@ -61,8 +61,8 @@ export const prohibitedRefs = [
     //                            DETECTS --no-verify (the guard, not a bypass)
     exempt: [
       'brain/project/check-refs-rules.mjs',
-      'scripts/check-refs.test.mjs',
-      'scripts/lib/installer.test.mjs',
+      'brain/scripts/check-refs.test.mjs',
+      'brain/scripts/lib/installer.test.mjs',
     ],
   },
 ];
@@ -72,5 +72,5 @@ export const prohibitedRefs = [
 export const globalExempt = [
   // 'brain/project/decisions/',   // uncomment to exempt all ADRs
   // 'openspec/',                  // uncomment to exempt all SDD artifacts
-  'scripts/check-refs.mjs',        // the checker itself is always exempt
+  'brain/scripts/check-refs.mjs',        // the checker itself is always exempt
 ];

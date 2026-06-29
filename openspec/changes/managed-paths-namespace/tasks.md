@@ -51,8 +51,8 @@ all diverge simultaneously). Revert = one clean commit. Reviewer load is mechani
 
 Stage steps 3.1–3.6, verify gates 3.7–3.8, then ONE commit (3.9). No intermediate commits.
 
-- [ ] 3.1 `git mv scripts/ brain/scripts/` — stage all 87 file moves.
-- [ ] 3.2 Apply design §S3 Reference-Update MAP (~74 refs / ~20 files):
+- [x] 3.1 `git mv scripts/ brain/scripts/` — stage all 87 file moves.
+- [x] 3.2 Apply design §S3 Reference-Update MAP (~74 refs / ~20 files):
   - `package.json`: 28 aliases `./scripts/X` → `./brain/scripts/X`; test glob `scripts/**/*.test.mjs` → `brain/scripts/**/*.test.mjs`.
   - `brain/scripts/bootstrap.sh` §7 (`git config core.hooksPath`) + `brain/scripts/day-start.mjs` `const HOOKS_PATH`: `scripts/hooks` → `brain/scripts/hooks`.
   - `brain/core/managed-paths.mjs`: `'scripts/**'` → `'brain/scripts/**'`. [REQ-S3-1, REQ-S3-3]
@@ -60,13 +60,13 @@ Stage steps 3.1–3.6, verify gates 3.7–3.8, then ONE commit (3.9). No interme
   - Hook calls in `brain/scripts/hooks/pre-push` (4), `pre-commit` (1), `post-merge` (1): `$repo_root/scripts/` → `$repo_root/brain/scripts/`.
   - Scope matchers in `brain/scripts/verify-change.mjs` (2), `brain/project/check-refs-rules.mjs` (2), `brain/scripts/check-refs.mjs` (1).
   - `.github/workflows/governance.yml` (~line 76 + header comment ~line 5). (`governance-checks.mjs` syncs JOB NAMES only — no path change needed; audit confirmed.)
-- [ ] 3.3 Bootstrap install alias in README, fixtures, container scripts: `node_modules/brain/scripts/` → `node_modules/brain/brain/scripts/` (double `brain/`, intentional).
-- [ ] 3.4 Test container scripts `test/fresh-install/in-container.sh` + `test/upgrade/in-container.sh`: 8 path refs → `brain/scripts/`.
-- [ ] 3.5 Test fixtures `test/fixtures/{npm,pnpm,bun,yarn}/package.json`: 8 alias entries → `./brain/scripts/`.
-- [ ] 3.6 Test assertions (~15): `scripts/lib/installer.test.mjs` (5), `scripts/check-refs.test.mjs` (3), `scripts/governance/checks/diff-size.test.mjs` + `scripts/vcs/diff-size-count.test.mjs` (4), `scripts/i18n/coverage.test.mjs` (2), `scripts/lib/managed-paths.test.mjs` (1). Also update README + `openspec/` docs + `docs/inbox` headers (~85 non-breaking doc refs).
-- [ ] 3.7 `CHANGELOG.md`: add breaking-change entry — (a) delete orphaned root `scripts/` after upgrading; (b) new bootstrap path `node_modules/brain/brain/scripts/brain-upgrade.mjs`; (c) required order `brain:upgrade` → `day:start`/`env:init`; (d) `core.hooksPath` stale-window + self-heal explanation. [REQ-S3-4, REQ-S3-5]
-- [ ] 3.8 Write/update ADR-0006 under `docs/decisions/`: 3-pillar model (`brain/core` / `brain/project` / `brain/scripts`), `brain/scripts/` namespace rationale, merge-don't-overwrite policy for managed config.
-- [ ] 3.9 **Gate**: `npm test` + `npm run repo:check` + `npm run brain:nav` → all exit zero.
+- [x] 3.3 Bootstrap install alias in README, fixtures, container scripts: `node_modules/brain/scripts/` → `node_modules/brain/brain/scripts/` (double `brain/`, intentional).
+- [x] 3.4 Test container scripts `test/fresh-install/in-container.sh` + `test/upgrade/in-container.sh`: 8 path refs → `brain/scripts/`.
+- [x] 3.5 Test fixtures `test/fixtures/{npm,pnpm,bun,yarn}/package.json`: 8 alias entries → `./brain/scripts/`.
+- [x] 3.6 Test assertions (~15): `scripts/lib/installer.test.mjs` (5), `scripts/check-refs.test.mjs` (3), `scripts/governance/checks/diff-size.test.mjs` + `scripts/vcs/diff-size-count.test.mjs` (4), `scripts/i18n/coverage.test.mjs` (2), `scripts/lib/managed-paths.test.mjs` (1). Also update README + `openspec/` docs + `docs/inbox` headers (~85 non-breaking doc refs).
+- [x] 3.7 `CHANGELOG.md`: add breaking-change entry — (a) delete orphaned root `scripts/` after upgrading; (b) new bootstrap path `node_modules/brain/brain/scripts/brain-upgrade.mjs`; (c) required order `brain:upgrade` → `day:start`/`env:init`; (d) `core.hooksPath` stale-window + self-heal explanation. [REQ-S3-4, REQ-S3-5]
+- [x] 3.8 Write/update ADR-0006 under `docs/decisions/`: 3-pillar model (`brain/core` / `brain/project` / `brain/scripts`), `brain/scripts/` namespace rationale, merge-don't-overwrite policy for managed config.
+- [x] 3.9 **Gate**: `npm test` + `npm run repo:check` + `npm run brain:nav` → all exit zero.
 - [ ] 3.10 **Gate**: Docker `test/fresh-install/in-container.sh` + `test/upgrade/in-container.sh` → both pass. [REQ-S3-2 integration scenarios]
 - [ ] 3.11 ONE `git commit` all staged (3.1–3.8). Verify `git show HEAD --stat` lists both moved files and updated references in same commit. Open PR3 → base PR2 branch; label `size:exception`. [REQ-S3-6]
 

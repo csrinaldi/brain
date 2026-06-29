@@ -2,7 +2,7 @@
 #
 # Enforces four process invariants as PR checks. Each job name becomes the
 # GitHub check context reported as "governance / <job-name>". These names are
-# load-bearing: scripts/vcs/governance-checks.mjs (S3) derives the required
+# load-bearing: brain/scripts/vcs/governance-checks.mjs (S3) derives the required
 # status-check list from them, and branch protection references them by context.
 #
 # Trigger: pull_request (NOT pull_request_target) — the gate needs no write
@@ -73,7 +73,7 @@ jobs:
           # Pipe numstat to the helper script, which reads governance.ignoreList
           # from brain.config.json in the repo root and applies glob exclusions.
           changed=$(git diff --numstat "$BASE_SHA"..."$HEAD_SHA" \
-            | node scripts/vcs/diff-size-count.mjs)
+            | node brain/scripts/vcs/diff-size-count.mjs)
           echo "Changed lines (ex-ignore-list): $changed"
           if [ "$changed" -gt 400 ]; then
             echo "::error::PR changes $changed lines (>400) without size:exception."

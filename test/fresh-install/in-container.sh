@@ -115,10 +115,10 @@ ok "Consumer code modified (src/index.js)"
 ORIGINAL_SRC=$(md5sum src/index.js 2>/dev/null | awk '{print $1}')
 
 line "[2] brain:upgrade -- ${TAG} (FULL, no --no-install)"
-node -e "const p=require('./package.json');p.scripts={...p.scripts,'brain:upgrade':'node node_modules/brain/scripts/brain-upgrade.mjs','env:init':'bash ./scripts/bootstrap.sh'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
+node -e "const p=require('./package.json');p.scripts={...p.scripts,'brain:upgrade':'node node_modules/brain/brain/scripts/brain-upgrade.mjs','env:init':'bash ./brain/scripts/bootstrap.sh'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
 # brain:upgrade is invoked via the consumer's own PM (brain already wired to detect it)
 $CPM run brain:upgrade -- "${TAG}" >/dev/null 2>&1
-if [ -f scripts/bootstrap.sh ] && [ -d brain/core ]; then ok "managed paths copied (scripts + brain/core)"; else fail "managed paths NOT copied"; fi
+if [ -d brain/scripts ] && [ -d brain/core ]; then ok "managed paths copied (brain/scripts + brain/core)"; else fail "managed paths NOT copied"; fi
 
 line "[3] env:init creates brain.config.json with the derived provider"
 $CPM run env:init >/dev/null 2>&1

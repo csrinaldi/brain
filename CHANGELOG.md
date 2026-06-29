@@ -5,6 +5,58 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.7.0 — BREAKING: scripts/ → brain/scripts/ namespace migration (#97)
+
+### BREAKING CHANGE — Manual action required on upgrade
+
+Brain's managed harness directory has moved from the consumer repo root
+(`scripts/`) into the `brain/` namespace (`brain/scripts/`). This eliminates the
+namespace collision where `brain:upgrade` could overwrite consumer-owned scripts
+living at the root `scripts/` path.
+
+**Required migration steps (in order):**
+
+1. **Upgrade brain**: `npm run brain:upgrade -- <new-tag>`
+   After this step, `brain/scripts/` is populated with the new harness.
+
+2. **Delete the orphaned root `scripts/`**: the installer never deletes files —
+   your old `scripts/` directory remains at the repo root and is now ORPHANED
+   (brain no longer manages it). Delete it manually:
+   ```bash
+   rm -rf scripts/
+   ```
+   Do NOT delete it before upgrading if you have consumer-owned files there.
+
+3. **Update your `package.json` aliases** (if you seeded them from the README):
+   ```json
+   {
+     "brain:upgrade": "node node_modules/brain/brain/scripts/brain-upgrade.mjs",
+     "env:init":      "bash ./brain/scripts/bootstrap.sh",
+     "day:start":     "node ./brain/scripts/day-start.mjs"
+   }
+   ```
+   Note the double `brain/` in `node_modules/brain/brain/scripts/...` — this is
+   intentional: the installed package is `node_modules/brain/`, and the harness
+   now lives at `brain/scripts/` within it.
+
+4. **Run `day:start` after `brain:upgrade`** to self-heal `core.hooksPath`:
+   `brain:upgrade` does not write git config. Between the upgrade and the next
+   `day:start`, your `core.hooksPath` still points at the old `scripts/hooks`
+   (which no longer exists). `day:start` detects this and reconfigures
+   `core.hooksPath = brain/scripts/hooks` automatically. During this one-run
+   window, git hooks are inactive — run `day:start` promptly.
+
+### Summary of changes
+
+- `scripts/**` → `brain/scripts/**` in the managed-paths manifest.
+- `core.hooksPath` reconfigured from `scripts/hooks` → `brain/scripts/hooks`
+  by `day:start` on first run after upgrade (self-healing, one-time).
+- All npm script aliases in `package.json` updated to `./brain/scripts/...`.
+- Bootstrap install path changes from `node_modules/brain/scripts/brain-upgrade.mjs`
+  to `node_modules/brain/brain/scripts/brain-upgrade.mjs`.
+
+
+
 ## v0.6.1 — 2026-06-28
 
 ### Fixed

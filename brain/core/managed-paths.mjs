@@ -9,7 +9,7 @@
 // if a glob ever overlaps, the installer skips the path and warns rather than
 // risking a clobber of the consumer's own work.
 //
-// Glob syntax (matched by scripts/lib/installer.mjs):
+// Glob syntax (matched by brain/scripts/lib/installer.mjs):
 //   *   matches anything except a path separator
 //   **  matches anything, including path separators (recursive)
 //   A trailing `/**` matches every file under that directory.
@@ -17,7 +17,7 @@
 // Paths brain owns. The upgrade OVERWRITES these in the consumer.
 export const managed = [
   'brain/core/**',
-  'scripts/**',
+  'brain/scripts/**',
   '.gitattributes',
   '.github/workflows/governance.yml',   // the L1 gate travels with brain (ADR-0014)
   '.github/PULL_REQUEST_TEMPLATE.md',   // the Closes/Fixes scaffold the gate parses (ADR-0014)
