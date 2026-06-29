@@ -29,6 +29,8 @@ npm init -y >/dev/null 2>&1
 npm i -D "${BRAIN}#${FROM}" >/dev/null 2>&1
 # Seed FROM managed state manually: a pre-v0.4.1 brain-upgrade uses the SSH
 # github: shorthand and can't run over HTTPS; this mimics its managed-paths copy.
+# FROM is an OLD-layout release (root scripts/), so seed it with the OLD paths —
+# this simulates a pre-S3 consumer that the breaking upgrade must carry across.
 cp -r node_modules/brain/scripts ./scripts
 mkdir -p brain && cp -r node_modules/brain/brain/core ./brain/core
 node -e "const p=require('./package.json');p.scripts={...p.scripts,'brain:upgrade':'node node_modules/brain/scripts/brain-upgrade.mjs','env:init':'bash ./scripts/bootstrap.sh'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
@@ -45,11 +47,15 @@ info "added consumer ADR, .env MY_SECRET, config owner=ACME, openspec/changes/my
 
 line "3. UPGRADE ${FROM} → ${TO} (HTTPS: re-install git+https + brain:upgrade)"
 npm i -D "${BRAIN}#${TO}" >/dev/null 2>&1
+# Breaking migration (S3): the entrypoint moves to node_modules/brain/brain/scripts/.
+# A real consumer repoints its aliases (the documented manual step) before running
+# the new upgrade — the old root-scripts/ alias no longer resolves post-install.
+node -e "const p=require('./package.json');p.scripts={...p.scripts,'brain:upgrade':'node node_modules/brain/brain/scripts/brain-upgrade.mjs','env:init':'bash ./brain/scripts/bootstrap.sh'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
 npm run brain:upgrade -- "${TO}" 2>&1 | tail -3
 
 line "4. ASSERT — core updated + project untouched"
 NOW=$(node -e "console.log(require('./node_modules/brain/package.json').version)" 2>/dev/null)
-TO_FP=$(grep -c installSpec scripts/brain-upgrade.mjs 2>/dev/null)
+TO_FP=$(grep -c installSpec brain/scripts/brain-upgrade.mjs 2>/dev/null)
 [ "$NOW" = "${TO#v}" ] && ok "brain installed @ ${TO}" || fail "version (got '${NOW}')"
 if [ "$NOW" != "$(echo "$FROM" | sed 's/^v//')" ]; then
   { [ "${FROM_FP:-0}" != "${TO_FP:-0}" ] || [ "${FROM_FP:-0}" -ne 0 ]; } && ok "managed core updated (scripts changed ${FROM} → ${TO})" || info "managed scripts identical between ${FROM}/${TO} (no code delta)"
