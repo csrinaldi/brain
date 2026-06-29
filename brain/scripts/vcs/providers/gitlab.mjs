@@ -85,20 +85,106 @@ export async function patSetupUrl({ host, name, scopes }) {
   return `https://${host}/-/user_settings/personal_access_tokens?name=${name}&scopes=${scopes.join(',')}`;
 }
 
-// branchProtect is not yet implemented for GitLab (Phase 3).
-// The verb is in the contract so the door is open; classic-protection vs rulesets
-// will be resolved in the Phase 3 spike.
-// eslint-disable-next-line no-unused-vars
+/**
+ * Apply (or refresh) branch protection on GitLab via the protected branches API.
+ * GitLab protected branches are available on all tiers for private repos — no
+ * tier block exists unlike GitHub Free.
+ *
+ * Note: approval-count enforcement (requiredReviews) requires GitLab Premium's
+ * approval rules API and is NOT enforced here. The protected branch itself is
+ * the hard gate floor.
+ *
+ * @param {{ project: string, branch?: string, checks?: string[], requiredReviews?: number }}
+ * @returns {{ enforced: boolean, reason?: string, remedy?: string }}
+ */
 export async function branchProtect({ project, branch = 'main', checks, requiredReviews = 1 } = {}) {
-  throw new Error('gitlab.branchProtect: not yet implemented (Phase 3)');
+  const enc = encodeURIComponent(project);
+
+  // Step 1: Protect the branch (the core hard gate).
+  // push_access_level=0 → no direct pushes; everything must go through MRs.
+  // merge_access_level=40 → Maintainers can merge.
+  // allow_force_push=false → force pushes are blocked.
+  const r = run('glab', [
+    'api', '-X', 'POST',
+    `projects/${enc}/protected_branches`,
+    '-f', `name=${branch}`,
+    '-f', 'push_access_level=0',
+    '-f', 'merge_access_level=40',
+    '-f', 'allow_force_push=false',
+  ]);
+
+  // Determine whether the branch is now protected (success OR already protected).
+  // Match the HTTP status anchored with its `: ` prefix (glab prints "...: 409")
+  // so a project slug that happens to contain "409" can't false-positive into
+  // claiming the branch is protected when it is not.
+  const alreadyProtected = r.stderr.includes(': 409') || /already protected/i.test(r.stderr);
+  const isProtected = r.ok || alreadyProtected;
+
+  if (!isProtected) {
+    if (r.stderr.includes(': 401') || /unauthorized/i.test(r.stderr)) {
+      return {
+        enforced: false,
+        reason: 'auth',
+        remedy: 'authenticate: glab auth login (or set VCS_TOKEN)',
+      };
+    }
+    if (r.stderr.includes(': 403') || /forbidden/i.test(r.stderr)) {
+      return {
+        enforced: false,
+        reason: 'permission',
+        remedy: 'requires Maintainer or Owner on the project',
+      };
+    }
+    return {
+      enforced: false,
+      reason: 'unsupported',
+      remedy: r.stderr.trim() || 'unknown error from glab api',
+    };
+  }
+
+  // Step 2: Best-effort — require green pipelines when checks are provided.
+  // Failure here does NOT flip the result; the protected branch is the floor.
+  if (Array.isArray(checks) && checks.length > 0) {
+    run('glab', ['api', '-X', 'PUT', `projects/${enc}`, '-f', 'only_allow_merge_if_pipeline_succeeds=true']);
+  }
+
+  return { enforced: true };
 }
 
+// Capability cache — keyed by "project:branch" to avoid cross-test interference.
+const _capabilityCache = new Map();
+
 /**
- * GitLab capability probe — stub for Phase 3.
- * Returns 'unknown' rather than throwing so brain:governance-status can still render.
+ * Probe the GitLab API to determine whether branch protection APIs are accessible
+ * for the given project+branch. Caches the result per project:branch for the
+ * lifetime of the Node.js process.
+ *
+ * GitLab protected branches are free for private repos (no tier restriction),
+ * so the result is generally 'available' when auth and permissions are satisfied.
+ *
+ * @param {{ project?: string, branch?: string }}
+ * @returns {{ hardEnforcement: 'available' | 'unavailable' | 'unknown', remedy? }}
  */
-export async function capabilities() {
-  return { hardEnforcement: 'unknown', detail: 'gitlab not yet implemented (Phase 3)' };
+export async function capabilities({ project = '', branch = 'main' } = {}) {
+  const key = `${project}:${branch}`;
+  if (_capabilityCache.has(key)) return _capabilityCache.get(key);
+
+  const enc = encodeURIComponent(project);
+  const r = run('glab', ['api', `projects/${enc}/protected_branches`]);
+
+  let result;
+  if (r.ok) {
+    result = { hardEnforcement: 'available' };
+  } else if (r.stderr.includes(': 401') || /unauthorized/i.test(r.stderr)) {
+    result = { hardEnforcement: 'unavailable', remedy: 'authenticate (glab auth login / VCS_TOKEN)' };
+  } else if (r.stderr.includes(': 403') || /forbidden/i.test(r.stderr)) {
+    result = { hardEnforcement: 'unavailable', remedy: 'requires Maintainer on the project' };
+  } else {
+    result = { hardEnforcement: 'unknown' };
+  }
+
+  _capabilityCache.set(key, result);
+  return result;
 }
 
 /**
