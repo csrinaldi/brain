@@ -64,6 +64,11 @@ fi
 
 cd consumer || exit 2
 
+# Ensure a git origin so env:init can derive the provider/slug (fixtures, unlike
+# the cloned fallback repo, have no origin — issue #80).
+git rev-parse --git-dir >/dev/null 2>&1 || git init -q
+git remote get-url origin >/dev/null 2>&1 || git remote add origin https://github.com/test-org/test-consumer.git
+
 # Install the consumer's chosen PM if it is not npm.
 case "$CPM" in
   pnpm) npm install -g pnpm >/dev/null 2>&1; info "pnpm installed globally" ;;
@@ -98,13 +103,16 @@ It should NOT be modified during brain upgrades.
 ADR
 ok "Consumer ADR created (brain/project/decisions/adr-0001-consumer.md)"
 
-# Store original content for verification
+# Store original content for verification. SRC is captured AFTER the consumer's
+# own modification below, so the [4] check verifies the UPGRADE preserves it
+# (capturing before the modification compared the upgrade against the pre-edit
+# file and always false-failed — issue #80).
 ORIGINAL_ADR=$(md5sum brain/project/decisions/adr-0001-consumer.md 2>/dev/null | awk '{print $1}')
-ORIGINAL_SRC=$(md5sum src/index.js 2>/dev/null | awk '{print $1}')
 
 # Modify consumer code
 echo "// Consumer modification - should survive brain upgrade" >> src/index.js
 ok "Consumer code modified (src/index.js)"
+ORIGINAL_SRC=$(md5sum src/index.js 2>/dev/null | awk '{print $1}')
 
 line "[2] brain:upgrade -- ${TAG} (FULL, no --no-install)"
 node -e "const p=require('./package.json');p.scripts={...p.scripts,'brain:upgrade':'node node_modules/brain/scripts/brain-upgrade.mjs','env:init':'bash ./scripts/bootstrap.sh'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
@@ -147,8 +155,8 @@ else
 fi
 
 line "[5] Verify MANAGED: brain/core/* updated by upgrade"
-if [ -d brain/core ] && [ -f brain/core/.gitattributes ]; then
-  ok "brain/core updated (managed paths synced)"
+if [ -d brain/core ] && [ -f .gitattributes ]; then
+  ok "brain/core updated (managed paths synced; .gitattributes at root)"
 else
   fail "brain/core NOT updated or missing .gitattributes"
 fi
