@@ -42,7 +42,7 @@ clean-container integration test).
 npm init -y
 
 # 1. Install brain at a pinned tag (HTTPS):
-npm i -D "git+https://github.com/csrinaldi/brain.git#v0.4.1"
+npm i -D "git+https://github.com/csrinaldi/brain.git#v0.6.0"
 
 # 2. Add the brain script aliases to your package.json "scripts":
 #      "brain:upgrade": "node node_modules/brain/scripts/brain-upgrade.mjs",
@@ -50,11 +50,24 @@ npm i -D "git+https://github.com/csrinaldi/brain.git#v0.4.1"
 #      "day:start":     "node ./scripts/day-start.mjs"
 
 # 3. Copy the managed paths (brain/core, scripts) into your repo:
-npm run brain:upgrade -- v0.4.1
+npm run brain:upgrade -- v0.6.0
 
 # 4. Initialize the environment (interactive):
 npm run env:init
 ```
+
+> **Using pnpm / yarn / bun?** brain is **package-manager-agnostic** — it detects your
+> PM and runs through it. Use your PM's verbs throughout:
+>
+> ```bash
+> pnpm add -D "git+https://github.com/csrinaldi/brain.git#v0.6.0"
+> pnpm run brain:upgrade -- v0.6.0     # brain:upgrade installs via your detected PM
+> pnpm run env:init
+> pnpm run day:start
+> ```
+>
+> (yarn: `yarn add … && yarn brain:upgrade -- v0.6.0`; bun: `bun add -d … && bun run brain:upgrade`.)
+> The fresh-install test covers npm / pnpm / yarn / bun fixtures.
 
 `env:init` does the heavy lifting:
 
@@ -65,6 +78,18 @@ npm run env:init
 - Selects and initializes the SDD harness and the memory backend.
 - Reports any ecosystem tools to install — run `gentle-ai install` for `engram`
   and `gga`.
+- Configures the git **hooks** (`core.hooksPath = scripts/hooks`).
+
+**Safe by design** — `env:init` never overwrites your code or history. It creates
+`brain.config.json` only if missing (and only fills empty fields otherwise,
+preserving your values), sets *local* git config (per-clone, not committed), and
+writes the gitignored `.env`. The only command that overwrites files is
+`brain:upgrade`, and it touches only brain's *managed* paths (`brain/core`,
+`scripts`, …) — never your `brain/project/`, your config, or your code.
+
+> **Git hooks are per-clone.** `core.hooksPath` is a local git setting (git won't
+> auto-install hooks from a clone, by design). Each teammate runs `env:init` once
+> per clone — or just `day:start`, which **self-heals** the hook config every workday.
 
 Then:
 
@@ -77,8 +102,8 @@ Then:
 ### Updating brain
 
 ```bash
-npm run brain:upgrade -- v0.4.1             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v0.4.1 --dry-run   # preview what would change
+npm run brain:upgrade -- v0.6.0             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v0.6.0 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](CHANGELOG.md) before upgrading — **renames / breaking
@@ -117,6 +142,10 @@ to core go **upstream first** (PR to the brain repo), then you bump the version.
 | `npm run memory:share` | Materialize memory to `.memory/` before pushing. |
 | `npm run memory:pull` | **Cross-machine sync**: safe pull — discards regenerable manifest churn, runs `git pull`, then imports `.memory/` into local engram. Use this instead of raw `git pull` when `.memory/manifest.json` is dirty (i.e. after `memory:share` ran locally). Raw `git pull` may abort with "your local changes would be overwritten" when the manifest is uncommitted. |
 | `npm test` | Harness unit tests (`node --test`). |
+| `npm run brain:start` / `check` / `save` / `ship` / `next` | **Golden path** — self-gating workflow verbs (start a ticket → check → save memory → ship a PR; `next` tells you the next step). |
+| `npm run brain:audit` | Re-verify the 4 governance invariants on merged history (the tool-independent teeth). |
+| `npm run brain:governance-status` | Report what governance enforcement your repo's platform + tier supports. |
+| `npm run brain:protect` | One-time admin: activate platform branch protection where the tier allows it. |
 | `npm run test:fresh-install -- <tag>` | **Maintainer**: e2e Docker test of the full consumer install from a tag. |
 
 ---
