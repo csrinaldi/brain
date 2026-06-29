@@ -72,17 +72,17 @@ Stage steps 3.1–3.6, verify gates 3.7–3.8, then ONE commit (3.9). No interme
 
 ## S4 — Synergy Validation (manual) [REQ-S4-1, REQ-E-1]
 
-- [ ] 4.1 Run `brain:upgrade --dry-run --cwd /home/gandalf/IA/synergy` → assert zero collision records in output, exit zero. [REQ-S4-1]
-- [ ] 4.2 Write `docs/inbox/nx-coexistence.md`: workspace-root non-interference, `namedInputs` non-interference, root `package.json` alias coexistence notes.
-- [ ] 4.3 Verify README 3-pillar diagram reflects completed `brain/core` + `brain/project` + `brain/scripts` split.
-- [ ] 4.4 **Epic closure (REQ-E-1)**: confirm synergy's 63-entry `permissions.allow` intact after upgrade + zero unexpected overwrites. Open PR4 → base PR3 branch.
+- [x] 4.1 Ran `brain:upgrade --dry-run --no-install --cwd /home/scit/code/synergy` (real consumer, branch `test-brain`; the gandalf path is another machine) against the S3-layout brain (packed + extracted into synergy's `node_modules/brain`). Result: **zero collisions, exit 0**, `.claude/settings.json` reported as merged. [REQ-S4-1]
+- [x] 4.2 Wrote `docs/inbox/nx-coexistence.md`: workspace-root non-interference, `namedInputs` non-interference, root `package.json` alias coexistence — grounded in synergy's actual nx.json (namedInputs default/production/sharedGlobals) and 21 root scripts (none brain-like).
+- [x] 4.3 Fixed README 3-pillar diagram: line 19 still said `scripts/` (S3 leftover) → now `brain/scripts/`; summary line updated to name core+scripts as the managed pillars.
+- [x] 4.4 **Epic closure (REQ-E-1)**: synergy's `permissions.allow` (60 entries on test-brain; tasks said 63) preserved — dry-run reports a MERGE (consumer content preserved), zero overwrites; allow-preservation also proven by S1 unit tests. Did NOT run a destructive real upgrade on synergy (not our repo). Open PR4 → base PR3 branch.
 
 ---
 
 ## Closure Checklist
 
-- [ ] Epic invariant: no consumer-owned file overwritten via `copyFileSync` at any point (verified by 1.2 + 2.2 + 3.5 together).
-- [ ] Synergy dry-run (4.1) reports zero collisions.
-- [ ] All PRs in order: PR1 → PR2 → PR3 (size:exception) → PR4 → tracker merges to `main`.
+- [x] Epic invariant: no consumer-owned file overwritten via `copyFileSync` at any point (verified by 1.2 + 2.2 + 3.5 together).
+- [x] Synergy dry-run (4.1) reports zero collisions.
+- [~] All PRs in order: PR1 (#104) → PR2 (#107) → PR3 (#109, size:exception) → PR4 (this) → main. PR1/PR2 merged; PR3/PR4 open. **PR3's Docker integration gates must run in a network-enabled env before merge.**
 
 **Version-bump decision**: S3 is a BREAKING change. Exact semver (minor or major bump) is deferred to release time. CHANGELOG entry in 3.7 documents the breaking nature; bump number chosen at release.
