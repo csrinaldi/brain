@@ -44,6 +44,16 @@ export async function issueView({ project, number }) {
   return { number: r.iid, title: r.title, labels: r.labels ?? [], body: r.description };
 }
 
+/**
+ * prView — stub for Phase 3. Returns a graceful empty result so audit callers
+ * degrade without error on GitLab repos.
+ * @returns {Promise<{ number: number|null, labels: [], body: string }>}
+ */
+// eslint-disable-next-line no-unused-vars
+export async function prView({ project, number } = {}) {
+  return { number: number ?? null, labels: [], body: '' };
+}
+
 export async function issueList({ project, state = 'open', assignee } = {}) {
   let currentUser;
   if (assignee === 'me') currentUser = (await whoami()).username;

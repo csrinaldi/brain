@@ -162,3 +162,98 @@ test('brain-audit: --first-parent excludes nested slice merges', (t) => {
   assert.equal(auditLines.length, 1,
     `expected 1 audited merge (integration merge only), got ${auditLines.length}:\n${r.stdout}`);
 });
+
+// ── baseline — pre-baseline merges are skipped, not failed ───────────────────
+//
+// Pattern:
+//   A (initial) → MERGE_BAD (no issue link) → E (add config) → [tag v0.1.0 on E] → MERGE_GOOD (Closes #1)
+//
+// With auditBaseline = "v0.1.0":
+//   MERGE_BAD: v0.1.0 (E) is NOT ancestor of MERGE_BAD → [SKIP] — not a failure
+//   MERGE_GOOD: v0.1.0 (E) IS ancestor of MERGE_GOOD → [PASS]
+//   Exit: 0  (without baseline MERGE_BAD would cause exit 1)
+test('brain-audit: baseline skips pre-baseline merges (no false failure)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-baseline-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+
+  // (A) initial commit on main
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+
+  // (B) feature/bad — will be merged before the baseline tag; has no issue link
+  git('checkout', '-b', 'feature/bad');
+  commit(git, dir, { 'src/bad.mjs': 'export const x = 1;' }, 'feat: pre-baseline work');
+  git('checkout', 'main');
+  git('merge', '--no-ff', 'feature/bad', '-m', 'Merge feature/bad (no issue ref)');  // MERGE_BAD
+
+  // (C) commit that carries the brain.config.json with the baseline setting
+  commit(git, dir, {
+    'brain.config.json': JSON.stringify({
+      governance: { auditBaseline: 'v0.1.0' },
+    }),
+  }, 'chore: add audit config');
+
+  // Tag v0.1.0 on the current HEAD (commit C — after MERGE_BAD)
+  git('tag', 'v0.1.0');
+
+  // (D) feature/good — after the baseline tag; has all invariants satisfied
+  git('checkout', '-b', 'feature/good');
+  commit(git, dir, { '.memory/chunks/s.jsonl.gz': 'data' }, 'feat: after baseline Closes #1');
+  git('checkout', 'main');
+  git('merge', '--no-ff', 'feature/good', '-m', 'Merge feature/good Closes #1');  // MERGE_GOOD
+
+  // Run without explicit range — defaults to HEAD (whole history)
+  const r = spawnSync('node', [AUDIT_SCRIPT], {
+    cwd: dir, encoding: 'utf8',
+  });
+
+  assert.equal(r.status, 0,
+    `expected exit 0 (MERGE_BAD skipped by baseline), got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+
+  // MERGE_BAD must be skipped, not failed
+  assert.ok(r.stdout.includes('[SKIP]'),
+    `expected [SKIP] for pre-baseline merge:\n${r.stdout}`);
+  assert.ok(!r.stdout.includes('[FAIL]'),
+    `unexpected [FAIL] — pre-baseline merge must be skipped:\n${r.stdout}`);
+
+  // MERGE_GOOD must be audited and pass
+  assert.ok(r.stdout.includes('[PASS]'),
+    `expected [PASS] for post-baseline merge:\n${r.stdout}`);
+});
+
+// ── baseline invalid ref — warns and audits all (no crash) ───────────────────
+test('brain-audit: invalid baseline ref warns and falls back to auditing all', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-baseline-invalid-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+
+  // Config with a baseline ref that does not exist
+  commit(git, dir, {
+    'brain.config.json': JSON.stringify({
+      governance: { auditBaseline: 'v99.0.0-nonexistent' },
+    }),
+  }, 'chore: add config');
+
+  // One good merge after the config
+  git('checkout', '-b', 'feature/ok');
+  commit(git, dir, { '.memory/chunks/s.jsonl.gz': 'data' }, 'feat: good Closes #1');
+  git('checkout', 'main');
+  git('merge', '--no-ff', 'feature/ok', '-m', 'Merge feature/ok Closes #1');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT], {
+    cwd: dir, encoding: 'utf8',
+  });
+
+  // Invalid baseline → falls back → audits all → [PASS] → exit 0
+  assert.equal(r.status, 0,
+    `expected exit 0 after invalid baseline fallback, got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+  // Warning must be emitted to stderr
+  assert.ok(r.stderr.includes('[WARN]'),
+    `expected [WARN] on stderr for invalid baseline:\n${r.stderr}`);
+  // Still audits and passes the good merge
+  assert.ok(r.stdout.includes('[PASS]'),
+    `expected [PASS] in stdout after fallback:\n${r.stdout}`);
+});

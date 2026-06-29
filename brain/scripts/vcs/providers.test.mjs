@@ -327,3 +327,42 @@ test('gitlab.mrCreate returns {url:null, error} stub — Phase 3', async () => {
   assert.equal(result.url, null);
   assert.ok(typeof result.error === 'string' && result.error.includes('Phase 3'));
 });
+
+// ── prView ────────────────────────────────────────────────────────────────────
+
+test('github.prView returns { number, labels, body } on success', async () => {
+  setSpawn(fakeSpawn({
+    number: 42,
+    labels: [{ name: 'size:exception' }, { name: 'kind:feature' }],
+    body: 'Closes #10\n\nDetails here.',
+  }));
+  const result = await github.prView({ project: 'o/r', number: 42 });
+  assert.deepEqual(result, {
+    number: 42,
+    labels: ['size:exception', 'kind:feature'],
+    body: 'Closes #10\n\nDetails here.',
+  });
+});
+
+test('github.prView returns { number, labels: [], body: "" } on gh failure (never throws)', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'not found' }));
+  const result = await github.prView({ project: 'o/r', number: 99 });
+  assert.deepEqual(result, { number: 99, labels: [], body: '' });
+});
+
+test('github.prView returns { number, labels: [], body: "" } on malformed JSON (never throws)', async () => {
+  setSpawn(() => ({ status: 0, stdout: 'not-json', stderr: '' }));
+  const result = await github.prView({ project: 'o/r', number: 5 });
+  assert.deepEqual(result, { number: 5, labels: [], body: '' });
+});
+
+test('github.prView body defaults to "" when field absent in response', async () => {
+  setSpawn(fakeSpawn({ number: 3, labels: [], body: null }));
+  const result = await github.prView({ project: 'o/r', number: 3 });
+  assert.equal(result.body, '');
+});
+
+test('gitlab.prView returns { number, labels: [], body: "" } stub — Phase 3', async () => {
+  const result = await gitlab.prView({ project: 'g/r', number: 7 });
+  assert.deepEqual(result, { number: 7, labels: [], body: '' });
+});
