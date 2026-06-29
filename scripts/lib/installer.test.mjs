@@ -16,6 +16,7 @@ import {
   matchesAny,
   copyManaged,
   mergeDefaults,
+  mergeClaudeSettings,
   migrateConfig,
   compareSemver,
   parseSemver,
@@ -329,4 +330,215 @@ test('0.4.0 migration preserves a consumer-set governance.ignoreList', () => {
 
   // Consumer-set list must be preserved (mergeDefaults never overwrites existing values).
   assert.deepEqual(migrated.governance.ignoreList, ['dist/**', 'coverage/**']);
+});
+
+// ── S1: mergeClaudeSettings ───────────────────────────────────────────────────
+//
+// Fixtures shared across S1 tests.
+
+/** Brain's canonical .claude/settings.json block (PreToolUse hook). */
+const BRAIN_HOOK_ENTRY = {
+  matcher: 'Bash',
+  hooks: [
+    {
+      type: 'command',
+      command: 'node -e "const cmd = JSON.parse(require(\'fs\').readFileSync(\'/dev/stdin\',\'utf8\')).tool_input?.command ?? \'\'; if (/--no-verify/.test(cmd)) { process.exit(2); }"',
+    },
+  ],
+};
+
+const BRAIN_SETTINGS = {
+  hooks: {
+    PreToolUse: [BRAIN_HOOK_ENTRY],
+  },
+};
+
+/**
+ * Writes a temporary brain settings file and returns its path.
+ * Caller must clean up the parent tmp directory.
+ */
+function writeBrainSettings(dir) {
+  const p = join(dir, 'brain-settings.json');
+  writeFileSync(p, JSON.stringify(BRAIN_SETTINGS, null, 2) + '\n');
+  return p;
+}
+
+// REQ-S1-1: Fresh consumer — brain block written as-is.
+test('mergeClaudeSettings: fresh consumer writes brain settings as-is (REQ-S1-1)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s1-1-'));
+  try {
+    const brainPath = writeBrainSettings(tmp);
+    const destPath = join(tmp, 'settings.json');
+    // destPath does not exist — mergeClaudeSettings must create it.
+    mergeClaudeSettings(destPath, brainPath);
+    const result = JSON.parse(readFileSync(destPath, 'utf8'));
+    assert.deepEqual(result, BRAIN_SETTINGS, 'fresh consumer: output must equal brain settings block');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-S1-2a: 63-entry permissions.allow preserved after merge.
+test('mergeClaudeSettings: 63-entry permissions.allow preserved, brain hooks present (REQ-S1-2)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s1-2a-'));
+  try {
+    const brainPath = writeBrainSettings(tmp);
+    const allowList = Array.from({ length: 63 }, (_, i) => `Bash(allowed_tool_${i}:*)`);
+    const consumerSettings = {
+      permissions: { allow: allowList },
+      hooks: { PreToolUse: [] },
+    };
+    const destPath = join(tmp, 'settings.json');
+    writeFileSync(destPath, JSON.stringify(consumerSettings, null, 2) + '\n');
+
+    mergeClaudeSettings(destPath, brainPath);
+
+    const result = JSON.parse(readFileSync(destPath, 'utf8'));
+
+    // All 63 original permissions.allow entries must survive.
+    assert.equal(result.permissions?.allow?.length, 63,
+      'all 63 permissions.allow entries must be preserved');
+    for (const entry of allowList) {
+      assert.ok(result.permissions.allow.includes(entry),
+        `permissions.allow must retain: ${entry}`);
+    }
+
+    // Brain hook must be present.
+    const preToolUse = result.hooks?.PreToolUse ?? [];
+    const brainHookPresent = preToolUse.some(
+      (e) => JSON.stringify(e) === JSON.stringify(BRAIN_HOOK_ENTRY),
+    );
+    assert.ok(brainHookPresent, 'brain PreToolUse hook must be present after merge');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-S1-2b: Custom consumer hook not owned by brain is preserved.
+test('mergeClaudeSettings: custom consumer hook is preserved alongside brain hooks (REQ-S1-2)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s1-2b-'));
+  try {
+    const brainPath = writeBrainSettings(tmp);
+    const customEntry = { matcher: 'Read', hooks: [{ type: 'command', command: 'my-custom-hook' }] };
+    const consumerSettings = { hooks: { PreToolUse: [customEntry] } };
+    const destPath = join(tmp, 'settings.json');
+    writeFileSync(destPath, JSON.stringify(consumerSettings, null, 2) + '\n');
+
+    mergeClaudeSettings(destPath, brainPath);
+
+    const result = JSON.parse(readFileSync(destPath, 'utf8'));
+    const preToolUse = result.hooks?.PreToolUse ?? [];
+
+    const customPresent = preToolUse.some(
+      (e) => JSON.stringify(e) === JSON.stringify(customEntry),
+    );
+    assert.ok(customPresent, 'consumer custom hook must be preserved after merge');
+
+    const brainPresent = preToolUse.some(
+      (e) => JSON.stringify(e) === JSON.stringify(BRAIN_HOOK_ENTRY),
+    );
+    assert.ok(brainPresent, 'brain hook must also be present after merge');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-S1-3: Idempotent — second run produces no duplication.
+test('mergeClaudeSettings: idempotent — second upgrade does not duplicate brain hooks (REQ-S1-3)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s1-3-'));
+  try {
+    const brainPath = writeBrainSettings(tmp);
+    const consumerSettings = { hooks: { PreToolUse: [] } };
+    const destPath = join(tmp, 'settings.json');
+    writeFileSync(destPath, JSON.stringify(consumerSettings, null, 2) + '\n');
+
+    // First run.
+    mergeClaudeSettings(destPath, brainPath);
+    const afterFirst = JSON.parse(readFileSync(destPath, 'utf8'));
+    const countAfterFirst = afterFirst.hooks?.PreToolUse?.length ?? 0;
+
+    // Second run.
+    mergeClaudeSettings(destPath, brainPath);
+    const afterSecond = JSON.parse(readFileSync(destPath, 'utf8'));
+    const countAfterSecond = afterSecond.hooks?.PreToolUse?.length ?? 0;
+
+    assert.equal(countAfterSecond, countAfterFirst,
+      'second upgrade must not add duplicate brain hook entries');
+    assert.deepEqual(afterSecond, afterFirst,
+      'settings.json must be identical after first and second upgrade');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-S1-2c: brain hook events OTHER than PreToolUse are also merged (regression
+// guard — the merge must loop over every event brain defines, not just PreToolUse).
+test('mergeClaudeSettings: brain hooks under non-PreToolUse events are merged (REQ-S1-2)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s1-2c-'));
+  try {
+    const postEntry = { matcher: 'Write', hooks: [{ type: 'command', command: 'brain-post' }] };
+    const brainPath = join(tmp, 'brain-settings.json');
+    writeFileSync(brainPath, JSON.stringify({ hooks: { PostToolUse: [postEntry] } }, null, 2));
+
+    const consumerEntry = { matcher: 'Read', hooks: [{ type: 'command', command: 'consumer-pre' }] };
+    const destPath = join(tmp, 'settings.json');
+    writeFileSync(destPath, JSON.stringify({ hooks: { PreToolUse: [consumerEntry] } }, null, 2) + '\n');
+
+    mergeClaudeSettings(destPath, brainPath);
+
+    const result = JSON.parse(readFileSync(destPath, 'utf8'));
+    const postPresent = (result.hooks?.PostToolUse ?? []).some(
+      (e) => JSON.stringify(e) === JSON.stringify(postEntry),
+    );
+    assert.ok(postPresent, 'brain PostToolUse hook must be merged, not dropped');
+    // The consumer's unrelated PreToolUse event must survive untouched.
+    assert.deepEqual(result.hooks?.PreToolUse, [consumerEntry],
+      'consumer-only hook events must be preserved');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-S1-4: settings.local.json is absent from the managed-paths export.
+test('settings.local.json is absent from the managed-paths.mjs managed export (REQ-S1-4)', async () => {
+  const { managed: managedGlobs } = await import('../../brain/core/managed-paths.mjs');
+  // Use real glob expansion (not a substring scan) so the assertion still holds
+  // if managed ever switches to a wildcard like `.claude/**`.
+  assert.ok(
+    !matchesAny('.claude/settings.local.json', managedGlobs),
+    'settings.local.json must not match any managed glob',
+  );
+});
+
+// REQ-S1-5: copyManaged routes .claude/settings.json through specialMerge, not copyFileSync.
+test('copyManaged routes .claude/settings.json through specialMerge, not copied (REQ-S1-5)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s1-5-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, '.claude'), { recursive: true });
+    writeFileSync(join(src, '.claude', 'settings.json'), JSON.stringify(BRAIN_SETTINGS));
+    mkdirSync(join(dest, '.claude'), { recursive: true });
+    writeFileSync(join(dest, '.claude', 'settings.json'), '{"existing":true}');
+
+    let mergeFnCalled = false;
+    const fakeMergeFn = (_destPath, _srcPath) => { mergeFnCalled = true; };
+
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['.claude/settings.json'],
+      local: [],
+      specialMerge: { '.claude/settings.json': fakeMergeFn },
+    });
+
+    assert.ok(mergeFnCalled,
+      'specialMerge function must be called for .claude/settings.json');
+    assert.ok(!(result.copied ?? []).includes('.claude/settings.json'),
+      '.claude/settings.json must not appear in copied');
+    assert.ok((result.merged ?? []).includes('.claude/settings.json'),
+      '.claude/settings.json must appear in merged');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

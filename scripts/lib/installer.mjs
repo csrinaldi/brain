@@ -10,11 +10,13 @@
 // Config migrations are additive: existing consumer values always win.
 
 import {
-  readdirSync,
-  statSync,
+  existsSync,
   mkdirSync,
   copyFileSync,
   readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
 } from 'node:fs';
 import { join, dirname, relative, sep } from 'node:path';
 
@@ -99,16 +101,26 @@ export function listFiles(root) {
  * glob into `destRoot`, overwriting. A path that also matches a `local` glob is
  * skipped (local always wins) and reported under `skipped`.
  *
- * @param {object} opts
- * @param {string} opts.srcRoot  Installed brain package root.
- * @param {string} opts.destRoot Consumer repo root.
+ * When `specialMerge` is provided, any managed path whose relative form is a
+ * key in that map is routed through the corresponding merge function instead of
+ * `copyFileSync`. The merge function receives `(destPath, srcPath)` and is
+ * responsible for writing the merged result to disk. Those paths are reported
+ * under `merged` (not `copied`). Under `--dry-run` the merge function is NOT
+ * called but the path still appears in `merged` so callers can plan output.
+ *
+ * @param {object}  opts
+ * @param {string}  opts.srcRoot      Installed brain package root.
+ * @param {string}  opts.destRoot     Consumer repo root.
  * @param {string[]} opts.managed
  * @param {string[]} opts.local
- * @param {boolean} [opts.dryRun] When true, computes the plan without writing.
- * @returns {{ copied: string[], skipped: string[] }}
+ * @param {boolean} [opts.dryRun]     When true, computes the plan without writing.
+ * @param {Record<string, (destPath: string, srcPath: string) => void>} [opts.specialMerge]
+ *   Map of relative path → merge function. Paths in this map bypass copyFileSync.
+ * @returns {{ copied: string[], skipped: string[], merged: string[] }}
  */
-export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false }) {
+export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false, specialMerge = {} }) {
   const copied = [];
+  const merged = [];
   const skipped = [];
   for (const rel of listFiles(srcRoot)) {
     if (!matchesAny(rel, managed)) continue;
@@ -117,14 +129,87 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false 
       skipped.push(rel);
       continue;
     }
-    if (!dryRun) {
-      const dest = join(destRoot, rel);
-      mkdirSync(dirname(dest), { recursive: true });
-      copyFileSync(join(srcRoot, rel), dest);
+    if (Object.prototype.hasOwnProperty.call(specialMerge, rel)) {
+      // Special merge path: call the provided merge function instead of copyFileSync.
+      if (!dryRun) {
+        const dest = join(destRoot, rel);
+        mkdirSync(dirname(dest), { recursive: true });
+        specialMerge[rel](dest, join(srcRoot, rel));
+      }
+      merged.push(rel);
+    } else {
+      if (!dryRun) {
+        const dest = join(destRoot, rel);
+        mkdirSync(dirname(dest), { recursive: true });
+        copyFileSync(join(srcRoot, rel), dest);
+      }
+      copied.push(rel);
     }
-    copied.push(rel);
   }
-  return { copied: copied.sort(), skipped: skipped.sort() };
+  return { copied: copied.sort(), skipped: skipped.sort(), merged: merged.sort() };
+}
+
+// ── Claude settings merge ─────────────────────────────────────────────────────
+
+/**
+ * Merges brain's `.claude/settings.json` into the consumer's copy without
+ * overwriting consumer-owned content.
+ *
+ * Behaviour:
+ * - No existing file at `existingPath` → write brain's block as-is.
+ * - Existing file → spread consumer object (all consumer keys preserved),
+ *   then for EVERY hook event brain defines (PreToolUse, PostToolUse, …),
+ *   additively append brain's entries that are not already present.
+ *   `permissions.allow` and every other consumer key are left untouched.
+ *
+ * Entry dedup is by `JSON.stringify`, so it is sensitive to key ordering: a
+ * brain hook entry a consumer hand-added with a different key order would not
+ * dedup and could duplicate. In practice brain owns these entries and writes
+ * them with a stable key order, so this is a non-issue.
+ *
+ * @param {string} existingPath       Absolute path to consumer's settings.json (may not exist).
+ * @param {string} brainSettingsPath  Absolute path to brain's settings.json.
+ */
+export function mergeClaudeSettings(existingPath, brainSettingsPath) {
+  const brainSettings = JSON.parse(readFileSync(brainSettingsPath, 'utf8'));
+
+  if (!existsSync(existingPath)) {
+    mkdirSync(dirname(existingPath), { recursive: true });
+    writeFileSync(existingPath, JSON.stringify(brainSettings, null, 2) + '\n');
+    return;
+  }
+
+  // The consumer's file is not under brain's control — a corrupt or partial
+  // settings.json must fail with a file-identifying message, not an opaque
+  // SyntaxError that aborts brain:upgrade with no clue which file is at fault.
+  let consumerSettings;
+  try {
+    consumerSettings = JSON.parse(readFileSync(existingPath, 'utf8'));
+  } catch (e) {
+    throw new Error(
+      `mergeClaudeSettings: could not parse consumer settings at ${existingPath}: ${e.message}`,
+    );
+  }
+
+  // Shallow-spread preserves all top-level consumer keys (permissions.allow, etc.).
+  const merged = { ...consumerSettings };
+
+  // Merge every hook event brain defines: keep consumer entries first, then
+  // append any brain entries not already present (compared by serialised value).
+  // Consumer-only hook events are preserved untouched by the spread below.
+  const brainHooks = brainSettings.hooks ?? {};
+  if (Object.keys(brainHooks).length > 0) {
+    const mergedHooks = { ...consumerSettings.hooks };
+    for (const [event, brainEntries] of Object.entries(brainHooks)) {
+      const consumerEntries = mergedHooks[event] ?? [];
+      const seen = new Set(consumerEntries.map((e) => JSON.stringify(e)));
+      const additions = brainEntries.filter((e) => !seen.has(JSON.stringify(e)));
+      mergedHooks[event] = [...consumerEntries, ...additions];
+    }
+    merged.hooks = mergedHooks;
+  }
+
+  writeFileSync(existingPath, JSON.stringify(merged, null, 2) + '\n');
 }
 
 // ── Config migration ─────────────────────────────────────────────────────────

@@ -34,10 +34,10 @@ all diverge simultaneously). Revert = one clean commit. Reviewer load is mechani
 
 ## S1 — settings.json Merge (TDD) [REQ-S1-1..5]
 
-- [ ] 1.1 **[RED]** `scripts/lib/installer.test.mjs`: failing tests for `mergeClaudeSettings()` — fresh consumer writes as-is (REQ-S1-1); 63-entry `permissions.allow` preserved + brain hooks present (REQ-S1-2); custom consumer hook preserved (REQ-S1-2); idempotent re-run = no duplication (REQ-S1-3); `settings.local.json` absent from managed export (REQ-S1-4); `settings.json` not passed to `copyFileSync` (REQ-S1-5). `npm test` → RED.
-- [ ] 1.2 **[GREEN]** `scripts/lib/installer.mjs`: implement `mergeClaudeSettings(existingPath, brainSettingsPath)` — no dest → write brain's block as-is; dest exists → `{...consumerObj}`, additively append brain's `hooks.PreToolUse` entries deduped by `JSON.stringify`, preserve `permissions.allow` and all other keys. `npm test` → GREEN.
-- [ ] 1.3 `scripts/lib/installer.mjs` `copyManaged()`: add `specialMerge?: Record<relPath, mergeFn>` to opts; if managed path matches key → call `mergeFn(destPath, srcPath)` instead of `copyFileSync`; add `merged: string[]` to result object; `--dry-run` labels as `merged` not `copied`.
-- [ ] 1.4 `scripts/brain-upgrade.mjs`: pass `specialMerge: { '.claude/settings.json': mergeClaudeSettings }` into `copyManaged()`; surface `merged[]` and `collisions[]` in upgrade summary output.
+- [x] 1.1 **[RED]** `scripts/lib/installer.test.mjs`: failing tests for `mergeClaudeSettings()` — fresh consumer writes as-is (REQ-S1-1); 63-entry `permissions.allow` preserved + brain hooks present (REQ-S1-2); custom consumer hook preserved (REQ-S1-2); idempotent re-run = no duplication (REQ-S1-3); `settings.local.json` absent from managed export (REQ-S1-4); `settings.json` not passed to `copyFileSync` (REQ-S1-5). `npm test` → RED.
+- [x] 1.2 **[GREEN]** `scripts/lib/installer.mjs`: implement `mergeClaudeSettings(existingPath, brainSettingsPath)` — no dest → write brain's block as-is; dest exists → `{...consumerObj}`, additively append brain's `hooks.PreToolUse` entries deduped by `JSON.stringify`, preserve `permissions.allow` and all other keys. `npm test` → GREEN.
+- [x] 1.3 `scripts/lib/installer.mjs` `copyManaged()`: add `specialMerge?: Record<relPath, mergeFn>` to opts; if managed path matches key → call `mergeFn(destPath, srcPath)` instead of `copyFileSync`; add `merged: string[]` to result object; `--dry-run` labels as `merged` not `copied`.
+- [x] 1.4 `scripts/brain-upgrade.mjs`: pass `specialMerge: { '.claude/settings.json': mergeClaudeSettings }` into `copyManaged()`; surface `merged[]` and `collisions[]` in upgrade summary output.
 - [ ] 1.5 `npm test` → zero. Open PR1 → base `feature/issue-97-managed-paths`.
 
 ## S2 — Collision Guard (TDD) [REQ-S2-1..3]

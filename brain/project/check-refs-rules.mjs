@@ -57,7 +57,13 @@ export const prohibitedRefs = [
     // Exempt files that legitimately reference --no-verify without invoking it:
     //   • check-refs-rules.mjs — defines the pattern as a regex literal
     //   • check-refs.test.mjs  — holds fixture strings testing the rule itself
-    exempt: ['brain/project/check-refs-rules.mjs', 'scripts/check-refs.test.mjs'],
+    //   • installer.test.mjs   — fixture mirrors brain's settings.json hook that
+    //                            DETECTS --no-verify (the guard, not a bypass)
+    exempt: [
+      'brain/project/check-refs-rules.mjs',
+      'scripts/check-refs.test.mjs',
+      'scripts/lib/installer.test.mjs',
+    ],
   },
 ];
 

@@ -18,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { copyManaged, migrateConfig, installSpec } from './lib/installer.mjs';
+import { copyManaged, mergeClaudeSettings, migrateConfig, installSpec } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
 
 const ROOT = process.cwd();
@@ -88,13 +88,28 @@ if (!existsSync(pkgRoot)) {
 }
 
 const { managed, local } = await import(join(pkgRoot, 'brain', 'core', 'managed-paths.mjs'));
-const { copied, skipped } = copyManaged({ srcRoot: pkgRoot, destRoot: ROOT, managed, local, dryRun });
+const { copied, skipped, merged } = copyManaged({
+  srcRoot: pkgRoot,
+  destRoot: ROOT,
+  managed,
+  local,
+  dryRun,
+  specialMerge: { '.claude/settings.json': mergeClaudeSettings },
+});
 
 if (dryRun) {
   info(`would copy ${copied.length} managed file(s):`);
   for (const f of copied) console.log(`      ${C.dim}${f}${C.reset}`);
+  if (merged.length) {
+    info(`would merge ${merged.length} settings file(s) (consumer content preserved):`);
+    for (const f of merged) console.log(`      ${C.dim}${f}${C.reset}`);
+  }
 } else {
   ok(`Copied ${copied.length} managed file(s) (brain/core, scripts, .gitattributes).`);
+  if (merged.length) {
+    ok(`Merged ${merged.length} settings file(s) additively (consumer content preserved):`);
+    for (const f of merged) console.log(`      ${C.dim}${f}${C.reset}`);
+  }
 }
 if (skipped.length) {
   warn(`Skipped ${skipped.length} path(s) that overlap local ownership (local wins):`);
