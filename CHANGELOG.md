@@ -5,6 +5,12 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.7.1 — maintenance
+
+- `gitlab.capabilities()` now returns a `detail` field on the `unknown` outcome,
+  so `brain:governance-status` can surface the underlying glab error (parity with
+  the other outcomes). No config or behavior changes for consumers.
+
 ## v0.7.0 — BREAKING: scripts/ → brain/scripts/ namespace migration (#97)
 
 ### BREAKING CHANGE — Manual action required on upgrade
