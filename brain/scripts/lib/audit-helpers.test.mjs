@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parsePrNumber, shouldSkipSize, isAfterBaseline, selectIssueLinkBody } from './audit-helpers.mjs';
+import { parsePrNumber, shouldSkipSize, isAfterBaseline, selectIssueLinkBody, chunkObservations } from './audit-helpers.mjs';
 import { issueLink } from '../governance/checks/issue-link.mjs';
 
 // ── parsePrNumber ─────────────────────────────────────────────────────────────
@@ -125,4 +125,31 @@ test('issueLink falls back to commit body when PR body is empty and commit body 
 test('issueLink fails when both PR body and commit body have no reference', () => {
   const body = selectIssueLinkBody('', 'Merge pull request #42 from feat/something');
   assert.equal(issueLink(body).pass, false);
+});
+
+// ── chunkObservations ─────────────────────────────────────────────────────────
+
+test('chunkObservations: valid chunk with observations array → returns array', () => {
+  const obs = [{ id: 1, type: 'session_summary' }, { id: 2, type: 'decision' }];
+  assert.deepEqual(chunkObservations({ sessions: [], observations: obs }), obs);
+});
+
+test('chunkObservations: missing observations key → returns []', () => {
+  assert.deepEqual(chunkObservations({ sessions: [] }), []);
+});
+
+test('chunkObservations: observations is not an array → returns []', () => {
+  assert.deepEqual(chunkObservations({ observations: 'not-an-array' }), []);
+});
+
+test('chunkObservations: null input → returns []', () => {
+  assert.deepEqual(chunkObservations(null), []);
+});
+
+test('chunkObservations: undefined input → returns []', () => {
+  assert.deepEqual(chunkObservations(undefined), []);
+});
+
+test('chunkObservations: empty object → returns []', () => {
+  assert.deepEqual(chunkObservations({}), []);
 });

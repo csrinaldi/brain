@@ -12,13 +12,14 @@
 
 import { execSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { diffSize } from './governance/checks/diff-size.mjs';
 import { issueLink } from './governance/checks/issue-link.mjs';
 import { adrPresence } from './governance/checks/adr-presence.mjs';
 import { memoryPresence } from './governance/checks/memory-presence.mjs';
+import { readChunkObservations } from './lib/chunk-reader.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -60,11 +61,13 @@ function spawnCommand(cmd, args, cwd) {
 /**
  * Run all governance checks.
  *
- * @param {object} ctx
+ * @param {object}   ctx
  * @param {string}   ctx.numstat       Raw `git diff --numstat` output.
  * @param {string[]} ctx.changedFiles  Files from `git diff --name-only`.
  * @param {string}   ctx.prBody        Latest commit body (for issueLink check).
  * @param {string[]} ctx.ignoreList    brain.config.json governance.ignoreList.
+ * @param {Array}    ctx.observations  Parsed engram observations for memoryPresence.
+ *   Injected by tests or read from .memory/chunks/ in the CLI entry-point.
  * @param {Function} ctx.npmTestFn     Async fn() → {ok,output}. Injected for tests.
  * @param {Function} ctx.repoCheckFn   Async fn() → {ok,output}. Injected for tests.
  * @returns {Promise<{exitCode:number, failures:Array, summary:string}>}
@@ -74,6 +77,7 @@ export async function runCheck({
   changedFiles,
   prBody,
   ignoreList,
+  observations = [],
   npmTestFn,
   repoCheckFn,
 }) {
@@ -81,7 +85,7 @@ export async function runCheck({
     { check: 'diffSize',        result: diffSize(numstat, ignoreList) },
     { check: 'issueLink',       result: issueLink(prBody) },
     { check: 'adrPresence',     result: adrPresence(changedFiles) },
-    { check: 'memoryPresence',  result: memoryPresence(changedFiles) },
+    { check: 'memoryPresence',  result: memoryPresence(observations) },
   ];
 
   // Run async checks
@@ -115,11 +119,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const prBody = git('log -1 --format=%B HEAD', cwd);
   const ignoreList = loadIgnoreList(cwd);
 
+  const observations = readChunkObservations(cwd);
+
   const result = await runCheck({
     numstat,
     changedFiles,
     prBody,
     ignoreList,
+    observations,
     npmTestFn: () => spawnCommand('npm', ['test'], cwd),
     repoCheckFn: () => spawnCommand('npm', ['run', 'repo:check'], cwd),
   });
