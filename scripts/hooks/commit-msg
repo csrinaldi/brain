@@ -3,7 +3,8 @@
 #
 # Hard checks (blocks the commit — both locally unambiguous):
 #   1. Conventional commit format: <type>[(<scope>)][!]: <description>
-#   2. Ticket ref (#N) — skipped for Merge and Revert commits.
+#   2. Ticket ref (#N) — skipped for Merge, Revert, chore(release) and
+#      chore(memory) commits (machine-generated, legitimately ticket-less).
 #
 # No-node guard: exits 0 if node is not available (minimal env).
 # Installed via core.hooksPath = scripts/hooks.
@@ -33,6 +34,13 @@ if ! echo "$msg" | grep -qE \
 fi
 
 # ── 2. Ticket reference ──────────────────────────────────────────────────────
+# Release commits (chore(release), cut by the release flow) and memory syncs
+# (chore(memory), written by brain:save) are machine-generated and carry no
+# ticket — exempt them from the ref requirement. Format is still enforced above.
+case "$msg" in
+  chore\(release\)*|chore\(memory\)*) exit 0 ;;
+esac
+
 if ! echo "$msg" | grep -qE '#[0-9]+'; then
   echo ""
   echo "✗ commit-msg: message must reference a ticket (#N)."
