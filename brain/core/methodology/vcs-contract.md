@@ -31,7 +31,7 @@ the GitLab status enum, etc.).
 | `repoCloneUrl` | `({ host, project, token }) -> string` | Authenticated HTTPS URL. User literal hidden from the caller. |
 | `patSetupUrl` | `({ host, name, scopes }) -> string` | PAT creation URL in the browser. |
 | `projectResolve` | `({ project }) -> string` | Identity: returns the slug. Both GH and GL address projects by slug/encoded-path, so callers pass the slug everywhere (incl. `repoCloneUrl`). Extension point if a host ever needs a different id. |
-| `branchProtect` | `({ project, branch?, checks, requiredReviews? }) -> { protected }` | Apply (or refresh) branch protection. `branch` defaults to `'main'`; `checks` is an array of required GitHub check context strings (derive via `checkContexts()` from `governance-checks.mjs`); `requiredReviews` defaults to `1`. GitHub: idempotent `PUT repos/{project}/branches/{branch}/protection` via `gh api --input -`. GitLab: throws `"not yet implemented (Phase 3)"` — full provider parity deferred. |
+| `branchProtect` | `({ project, branch?, checks, requiredReviews? }) -> { enforced, reason?, remedy? }` | Apply (or refresh) branch protection. `branch` defaults to `'main'`; `checks` is an array of required check context strings; `requiredReviews` defaults to `1`. Returns `{enforced:true}` on success or `{enforced:false,reason,remedy}` on failure (never throws). GitHub: idempotent `PUT repos/{project}/branches/{branch}/protection` via `gh api --input -`; may return `reason:'tier'` on GitHub Free private repos. GitLab: `POST projects/{enc}/protected_branches` (push_access_level=0, allow_force_push=false); idempotent on 409; never returns `reason:'tier'` (protected branches are free on all GitLab tiers). Approval-count enforcement (requiredReviews) requires GitLab Premium and is not enforced in this slice. |
 
 ### Normalized `commitStatus` enum
 
@@ -61,3 +61,12 @@ valid value of `vcs.provider`. The callers are not touched.
 
 `github` (`gh`) and `gitlab` (`glab`). The `gitlab` provider reproduces the historical
 behavior of the scripts (parity — a revert leaves the GitLab flow intact).
+
+### Phase 3 adapter status
+
+| Verb | GitHub | GitLab |
+|------|--------|--------|
+| `branchProtect` | implemented | implemented (Phase 3 — issue #95) |
+| `capabilities` | implemented | implemented (Phase 3 — issue #95) |
+| `mrCreate` | implemented | stub — not yet implemented |
+| `prView` | implemented | stub — not yet implemented |

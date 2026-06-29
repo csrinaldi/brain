@@ -240,11 +240,150 @@ test('github.branchProtect never throws even on non-zero exit', async () => {
   assert.equal(threw, false, 'branchProtect must not throw');
 });
 
-test('gitlab.branchProtect throws "not yet implemented"', async () => {
-  await assert.rejects(
-    () => gitlab.branchProtect({ project: 'g/r', checks: [] }),
-    /not yet implemented/i
+test('gitlab.branchProtect sends POST to protected_branches with allow_force_push=false and returns {enforced:true} on exit 0', async () => {
+  const calls = [];
+  setSpawn((cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return { status: 0, stdout: '{}', stderr: '' };
+  });
+
+  const checks = ['ci/test', 'ci/lint'];
+  const result = await gitlab.branchProtect({ project: 'g/r', branch: 'main', checks });
+
+  // First call must be the POST to protected_branches
+  assert.ok(calls.length >= 1, 'spawn was called at least once');
+  const postCall = calls[0];
+  assert.equal(postCall.cmd, 'glab');
+  assert.ok(postCall.args.some(a => a.includes('protected_branches')), 'must POST to protected_branches endpoint');
+  assert.ok(
+    postCall.args.indexOf('POST') !== -1 &&
+    postCall.args[postCall.args.indexOf('-X') + 1] === 'POST',
+    'must use -X POST'
   );
+  assert.ok(postCall.args.includes('allow_force_push=false'), 'must disable force pushes');
+
+  assert.deepEqual(result, { enforced: true });
+});
+
+test('gitlab.branchProtect makes best-effort pipeline call when checks is non-empty', async () => {
+  const calls = [];
+  setSpawn((cmd, args) => {
+    calls.push(args);
+    return { status: 0, stdout: '{}', stderr: '' };
+  });
+
+  await gitlab.branchProtect({ project: 'g/r', checks: ['ci/test'] });
+
+  // Second call should be the PUT to enable pipeline enforcement
+  assert.ok(calls.length === 2, 'should make two spawn calls when checks is non-empty');
+  assert.ok(calls[1].includes('only_allow_merge_if_pipeline_succeeds=true'), 'second call must enable pipeline requirement');
+});
+
+test('gitlab.branchProtect skips pipeline call when checks is empty', async () => {
+  let callCount = 0;
+  setSpawn(() => {
+    callCount++;
+    return { status: 0, stdout: '{}', stderr: '' };
+  });
+
+  await gitlab.branchProtect({ project: 'g/r', checks: [] });
+
+  assert.equal(callCount, 1, 'should make only one spawn call when checks is empty');
+});
+
+test('gitlab.branchProtect returns {enforced:true} when branch is already protected (409 — idempotent)', async () => {
+  setSpawn(() => ({
+    status: 1,
+    stdout: '',
+    stderr: 'POST https://gitlab.example.com/api/v4/projects/g%2Fr/protected_branches: 409\n{"message":"Protected Branch \'main\' already exists"}',
+  }));
+
+  const result = await gitlab.branchProtect({ project: 'g/r', checks: [] });
+  assert.deepEqual(result, { enforced: true });
+});
+
+test('gitlab.branchProtect returns {enforced:false,reason:"auth"} on 401', async () => {
+  setSpawn(() => ({
+    status: 1,
+    stdout: '',
+    stderr: 'POST https://gitlab.example.com/api/v4/projects/g%2Fr/protected_branches: 401\n{"message":"401 Unauthorized"}',
+  }));
+
+  const result = await gitlab.branchProtect({ project: 'g/r', checks: [] });
+  assert.equal(result.enforced, false);
+  assert.equal(result.reason, 'auth');
+  assert.notEqual(result.reason, 'tier', 'GitLab branchProtect must never return reason:tier');
+  assert.ok(typeof result.remedy === 'string' && result.remedy.length > 0, 'remedy must be non-empty');
+});
+
+test('gitlab.branchProtect returns {enforced:false,reason:"permission"} on 403 — never reason:"tier"', async () => {
+  setSpawn(() => ({
+    status: 1,
+    stdout: '',
+    stderr: 'POST https://gitlab.example.com/api/v4/projects/g%2Fr/protected_branches: 403\n{"message":"403 Forbidden"}',
+  }));
+
+  const result = await gitlab.branchProtect({ project: 'g/r', checks: [] });
+  assert.equal(result.enforced, false);
+  assert.equal(result.reason, 'permission');
+  assert.notEqual(result.reason, 'tier', 'GitLab branchProtect must never return reason:tier');
+  assert.ok(typeof result.remedy === 'string' && result.remedy.length > 0, 'remedy must be non-empty');
+});
+
+test('gitlab.branchProtect: a 403 on a slug containing "409" is NOT a false-positive success', async () => {
+  // Regression: the status must be matched anchored (": 409"), not anywhere in
+  // stderr — a project slug like fix-409-auth must not flip a real 403 into enforced.
+  setSpawn(() => ({
+    status: 1,
+    stdout: '',
+    stderr: 'POST https://gitlab.example.com/api/v4/projects/org%2Ffix-409-auth/protected_branches: 403\n{"message":"403 Forbidden"}',
+  }));
+
+  const result = await gitlab.branchProtect({ project: 'org/fix-409-auth', checks: [] });
+  assert.equal(result.enforced, false, 'a real 403 must not be misread as already-protected');
+  assert.equal(result.reason, 'permission');
+});
+
+test('gitlab.branchProtect returns {enforced:true} even when the best-effort pipeline PUT fails', async () => {
+  // POST (protect) succeeds; the optional only_allow_merge_if_pipeline_succeeds
+  // PUT fails — that failure must NOT flip the result.
+  let call = 0;
+  setSpawn(() => {
+    call += 1;
+    return call === 1
+      ? { status: 0, stdout: '{}', stderr: '' }                                  // POST succeeds
+      : { status: 1, stdout: '', stderr: 'PUT .../projects/g%2Fr: 403\n{"message":"403 Forbidden"}' }; // PUT fails
+  });
+
+  const result = await gitlab.branchProtect({ project: 'g/r', checks: ['ci/test'] });
+  assert.deepEqual(result, { enforced: true });
+  assert.equal(call, 2, 'both the POST and the best-effort PUT must have been attempted');
+});
+
+test('gitlab.branchProtect returns {enforced:false,reason:"unsupported"} on unexpected error', async () => {
+  setSpawn(() => ({
+    status: 1,
+    stdout: '',
+    stderr: 'POST https://gitlab.example.com/api/v4/projects/g%2Fr/protected_branches: 500\n{"message":"Internal Server Error"}',
+  }));
+
+  const result = await gitlab.branchProtect({ project: 'g/r', checks: [] });
+  assert.equal(result.enforced, false);
+  assert.equal(result.reason, 'unsupported');
+  assert.notEqual(result.reason, 'tier', 'GitLab branchProtect must never return reason:tier');
+  assert.ok(result.remedy.includes('500') || result.remedy.length > 0, 'remedy should include error detail');
+});
+
+test('gitlab.branchProtect never throws even on non-zero exit', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'some error' }));
+
+  let threw = false;
+  try {
+    await gitlab.branchProtect({ project: 'g/r', checks: [] });
+  } catch (_) {
+    threw = true;
+  }
+  assert.equal(threw, false, 'branchProtect must not throw');
 });
 
 // ── capabilities ──────────────────────────────────────────────────────────────
@@ -278,10 +417,54 @@ test('github.capabilities returns {hardEnforcement:"unknown"} on unexpected erro
   assert.equal(result.hardEnforcement, 'unknown');
 });
 
-test('gitlab.capabilities returns {hardEnforcement:"unknown"} (stub — Phase 3)', async () => {
-  const result = await gitlab.capabilities();
+test('gitlab.capabilities returns {hardEnforcement:"available"} when GET protected_branches succeeds', async () => {
+  setSpawn(() => ({ status: 0, stdout: '[]', stderr: '' }));
+  const result = await gitlab.capabilities({ project: 'gl-cap/ok', branch: 'main' });
+  assert.equal(result.hardEnforcement, 'available');
+  assert.equal(result.remedy, undefined, 'no remedy when available');
+});
+
+test('gitlab.capabilities returns {hardEnforcement:"unavailable"} on 401', async () => {
+  setSpawn(() => ({
+    status: 1,
+    stdout: '',
+    stderr: 'GET https://gitlab.example.com/api/v4/projects/gl-cap%2Fauth/protected_branches: 401\n{"message":"401 Unauthorized"}',
+  }));
+  const result = await gitlab.capabilities({ project: 'gl-cap/auth', branch: 'main' });
+  assert.equal(result.hardEnforcement, 'unavailable');
+  assert.ok(typeof result.remedy === 'string' && result.remedy.length > 0, 'remedy must be present');
+});
+
+test('gitlab.capabilities returns {hardEnforcement:"unavailable"} on 403', async () => {
+  setSpawn(() => ({
+    status: 1,
+    stdout: '',
+    stderr: 'GET https://gitlab.example.com/api/v4/projects/gl-cap%2Fperm/protected_branches: 403\n{"message":"403 Forbidden"}',
+  }));
+  const result = await gitlab.capabilities({ project: 'gl-cap/perm', branch: 'main' });
+  assert.equal(result.hardEnforcement, 'unavailable');
+  assert.ok(typeof result.remedy === 'string' && result.remedy.length > 0, 'remedy must be present');
+});
+
+test('gitlab.capabilities returns {hardEnforcement:"unknown"} on unexpected error', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 500: Internal Server Error' }));
+  const result = await gitlab.capabilities({ project: 'gl-cap/err', branch: 'main' });
   assert.equal(result.hardEnforcement, 'unknown');
-  assert.ok(typeof result.detail === 'string' && result.detail.includes('gitlab'), 'detail must mention gitlab');
+});
+
+test('gitlab.capabilities caches result and does not spawn twice for the same project:branch', async () => {
+  let spawnCount = 0;
+  setSpawn(() => {
+    spawnCount++;
+    return { status: 0, stdout: '[]', stderr: '' };
+  });
+
+  const r1 = await gitlab.capabilities({ project: 'gl-cap/cache', branch: 'main' });
+  const r2 = await gitlab.capabilities({ project: 'gl-cap/cache', branch: 'main' });
+
+  assert.equal(spawnCount, 1, 'spawn should be called only once (cache hit on second call)');
+  assert.strictEqual(r1, r2, 'second call returns the same cached object reference');
+  assert.equal(r1.hardEnforcement, 'available');
 });
 
 // ── mrCreate ──────────────────────────────────────────────────────────────────
