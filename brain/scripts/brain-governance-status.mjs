@@ -44,6 +44,7 @@ export async function reportGovernanceStatus() {
   // Hooks and brain:audit are always ON regardless of provider tier.
   console.log('  hooks       ON  [universal]');
   console.log('  brain:audit ON  [universal]');
+  console.log('  pre-receive available  [bypass-proof self-hosted hard gate — npm run brain:protect-server]');
 
   if (!config?.vcs?.provider) {
     console.log('  platform    UNKNOWN (vcs.provider not configured)');
