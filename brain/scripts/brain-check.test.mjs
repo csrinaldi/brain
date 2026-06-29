@@ -19,7 +19,10 @@ test('brain-check: importing is side-effect-free (CLI guard holds)', async () =>
 function makeCtx(overrides = {}) {
   return {
     numstat: '1\t0\tsrc/feature.mjs\n',
-    changedFiles: ['src/feature.mjs', '.memory/chunks/session.jsonl.gz'],
+    changedFiles: ['src/feature.mjs'],
+    // Inject a session_summary observation so memoryPresence passes without
+    // reading from the filesystem (decoupled from changedFiles).
+    observations: [{ type: 'session_summary', title: 'Session summary: brain' }],
     prBody: 'Closes #42',
     ignoreList: [],
     npmTestFn: async () => ({ ok: true }),
@@ -55,7 +58,8 @@ test('brain-check: issueLink fails → exitCode 1', async () => {
 
 test('brain-check: memoryPresence fails → exitCode 1', async () => {
   const { runCheck } = await import('./brain-check.mjs');
-  const result = await runCheck(makeCtx({ changedFiles: ['src/only-code.mjs'] }));
+  // Pass an empty observations array — no session_summary → memoryPresence fails
+  const result = await runCheck(makeCtx({ observations: [] }));
   assert.equal(result.exitCode, 1);
   assert.ok(result.failures.some(f => f.check === 'memoryPresence'),
     `expected memoryPresence in failures: ${JSON.stringify(result.failures)}`);

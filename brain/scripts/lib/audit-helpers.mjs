@@ -54,6 +54,22 @@ export function selectIssueLinkBody(prBody, commitBody) {
 }
 
 /**
+ * Extract the observations array from a parsed engram chunk object.
+ *
+ * BRITTLE EXTERNAL DEPENDENCY: the chunk schema is determined by engram's export
+ * format (.memory/chunks/*.jsonl.gz).  Currently the format is a single JSON object
+ * { "sessions": ..., "observations": [...] } (NOT line-delimited JSONL despite the
+ * file extension).  If engram changes its schema, this function may return [].
+ *
+ * @param {unknown} parsed  A parsed chunk object (JSON.parse output from a gunzip'd chunk).
+ * @returns {Array<{type: string, [key: string]: unknown}>}  Observation objects, or [] on schema drift.
+ */
+export function chunkObservations(parsed) {
+  if (parsed && Array.isArray(parsed.observations)) return parsed.observations;
+  return [];
+}
+
+/**
  * Whether a commit sha is "after" (i.e. has the baseline as an ancestor).
  *
  * The `isAncestorFn` seam mirrors `git merge-base --is-ancestor <baseline> <sha>`:

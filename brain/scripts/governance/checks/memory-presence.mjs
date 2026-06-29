@@ -1,17 +1,30 @@
-// memory-presence.mjs — check that at least one .memory/chunks/ file is in the diff.
+// memory-presence.mjs — check that committed .memory/chunks/ contains a session_summary observation.
 // Returns { pass: boolean, reason?: string }.
-
-const CHUNK_PREFIX = '.memory/chunks/';
+//
+// This is an existence check decoupled from the merge diff: brain-audit reads the
+// working-tree .memory/chunks/*.jsonl.gz once (before the merge loop) and passes the
+// collected observations to this function.  The check is therefore the same for every
+// merge in a run — it verifies that the repo has AT LEAST ONE session summary captured.
 
 /**
- * @param {string[]} changedFiles  Paths from `git diff --name-only`.
+ * Verify that at least one session_summary observation exists in the committed
+ * .memory/chunks/ directory.
+ *
+ * BRITTLE EXTERNAL DEPENDENCY: the shape of `observations` items is determined by
+ * engram's export format (.memory/chunks/*.jsonl.gz).  Each item is expected to have
+ * at least `{ id, type, title, content, ... }`.  If engram changes its schema,
+ * this check may silently pass or fail unexpectedly.
+ *
+ * @param {Array<{type: string, [key: string]: unknown}>} observations
+ *   Parsed observation objects extracted from committed .memory/chunks/*.jsonl.gz files
+ *   by brain-audit before the merge loop.  A non-array is treated as empty (→ fail).
  * @returns {{ pass: boolean, reason?: string }}
  */
-export function memoryPresence(changedFiles) {
-  const files = Array.isArray(changedFiles) ? changedFiles : [];
-  if (files.some(f => f.startsWith(CHUNK_PREFIX))) return { pass: true };
+export function memoryPresence(observations) {
+  const obs = Array.isArray(observations) ? observations : [];
+  if (obs.some(o => o?.type === 'session_summary')) return { pass: true };
   return {
     pass: false,
-    reason: 'no .memory/chunks/ file found — run brain:save or memory:share before closing',
+    reason: 'no session_summary observation found in committed .memory/ — capture a session summary (mem_session_summary / brain:save) before closing',
   };
 }
