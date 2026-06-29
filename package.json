@@ -19,6 +19,7 @@
     "change:verify": "node ./brain/scripts/verify-change.mjs",
     "brain:upgrade": "node ./brain/scripts/brain-upgrade.mjs",
     "brain:protect": "node ./brain/scripts/brain-protect.mjs",
+    "brain:protect-server": "node ./brain/scripts/brain-protect-server.mjs",
     "brain:governance-status": "node ./brain/scripts/brain-governance-status.mjs",
     "test": "node --test \"brain/scripts/**/*.test.mjs\"",
     "test:fresh-install": "bash test/fresh-install/run.sh",
