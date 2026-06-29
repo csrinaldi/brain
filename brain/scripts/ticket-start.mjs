@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { loadBrainConfig } from './lib/brain-config.mjs';
+import { deriveBranchType } from './lib/branch-type.mjs';
 import { getVcs, resolveProviderName } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';
 import { vcsToken, readEnvVar } from './vcs/lib/token.mjs';
@@ -91,17 +92,9 @@ if (!issue?.number) {
 }
 
 // ── Determine the branch type from labels ─────────────────────────────────────
-const LABEL_TYPE = {
-  feat: 'feat', feature: 'feat',
-  fix: 'fix', bug: 'fix',
-  chore: 'chore',
-  docs: 'docs',
-  refactor: 'refactor',
-  ci: 'ci',
-  build: 'build',
-};
+// deriveBranchType strips the `type:` namespace before mapping (#101).
 const labels = issue.labels ?? [];
-const branchType = labels.map(l => LABEL_TYPE[String(l).toLowerCase()]).find(Boolean) ?? 'feat';
+const branchType = deriveBranchType(labels);
 
 // ── Build the slug from the title ─────────────────────────────────────────────
 const slug = issue.title
