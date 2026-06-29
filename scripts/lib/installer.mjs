@@ -101,27 +101,47 @@ export function listFiles(root) {
  * glob into `destRoot`, overwriting. A path that also matches a `local` glob is
  * skipped (local always wins) and reported under `skipped`.
  *
+ * Before any write begins, a read-only pre-flight pass inspects every managed
+ * path that is NOT in `specialMerge`: if the destination exists and its bytes
+ * differ from the source, the relative path is pushed to `collisions[]`. This
+ * pre-flight always completes before the write loop starts, so a caller with
+ * `abortOnCollision: true` is guaranteed to observe zero writes.
+ *
+ * When `abortOnCollision` is true and `collisions` is non-empty, the function
+ * returns immediately — before the write loop — with empty `copied` and `merged`
+ * arrays. When false (the default), all files are written and `collisions` is
+ * surfaced as a warning list for the caller.
+ *
  * When `specialMerge` is provided, any managed path whose relative form is a
  * key in that map is routed through the corresponding merge function instead of
- * `copyFileSync`. The merge function receives `(destPath, srcPath)` and is
+ * `copyFileSync`. Those paths are excluded from the collision guard (they merge,
+ * never collide). The merge function receives `(destPath, srcPath)` and is
  * responsible for writing the merged result to disk. Those paths are reported
  * under `merged` (not `copied`). Under `--dry-run` the merge function is NOT
  * called but the path still appears in `merged` so callers can plan output.
  *
  * @param {object}  opts
- * @param {string}  opts.srcRoot      Installed brain package root.
- * @param {string}  opts.destRoot     Consumer repo root.
+ * @param {string}  opts.srcRoot          Installed brain package root.
+ * @param {string}  opts.destRoot         Consumer repo root.
  * @param {string[]} opts.managed
  * @param {string[]} opts.local
- * @param {boolean} [opts.dryRun]     When true, computes the plan without writing.
+ * @param {boolean} [opts.dryRun]         When true, computes the plan without writing.
+ * @param {boolean} [opts.abortOnCollision] When true and collisions exist, returns
+ *   before the write loop with empty copied/merged arrays.
  * @param {Record<string, (destPath: string, srcPath: string) => void>} [opts.specialMerge]
- *   Map of relative path → merge function. Paths in this map bypass copyFileSync.
- * @returns {{ copied: string[], skipped: string[], merged: string[] }}
+ *   Map of relative path → merge function. Paths in this map bypass the collision
+ *   guard and copyFileSync.
+ * @returns {{ copied: string[], skipped: string[], merged: string[], collisions: string[] }}
  */
-export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false, specialMerge = {} }) {
-  const copied = [];
-  const merged = [];
+export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false, specialMerge = {}, abortOnCollision = false }) {
   const skipped = [];
+  const collisions = [];
+  const toCopy = [];  // rel paths for plain copyFileSync
+  const toMerge = []; // rel paths for specialMerge
+
+  // ── Pre-flight pass (read-only) ─────────────────────────────────────────────
+  // Categorise every source file into skipped, toMerge, or toCopy.
+  // For toCopy candidates, detect collisions: dest exists AND bytes differ.
   for (const rel of listFiles(srcRoot)) {
     if (!matchesAny(rel, managed)) continue;
     if (matchesAny(rel, local)) {
@@ -130,23 +150,56 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
       continue;
     }
     if (Object.prototype.hasOwnProperty.call(specialMerge, rel)) {
-      // Special merge path: call the provided merge function instead of copyFileSync.
-      if (!dryRun) {
-        const dest = join(destRoot, rel);
-        mkdirSync(dirname(dest), { recursive: true });
-        specialMerge[rel](dest, join(srcRoot, rel));
-      }
-      merged.push(rel);
+      // Special merge path: excluded from the collision guard.
+      toMerge.push(rel);
     } else {
-      if (!dryRun) {
-        const dest = join(destRoot, rel);
-        mkdirSync(dirname(dest), { recursive: true });
-        copyFileSync(join(srcRoot, rel), dest);
+      // Plain copy candidate: check for a collision before the write loop.
+      const destFile = join(destRoot, rel);
+      if (existsSync(destFile)) {
+        const srcBytes = readFileSync(join(srcRoot, rel));
+        const destBytes = readFileSync(destFile);
+        if (!srcBytes.equals(destBytes)) {
+          collisions.push(rel);
+        }
       }
-      copied.push(rel);
+      toCopy.push(rel);
     }
   }
-  return { copied: copied.sort(), skipped: skipped.sort(), merged: merged.sort() };
+
+  // ── Abort gate ──────────────────────────────────────────────────────────────
+  // When the caller requests abort-on-collision and collisions were found, return
+  // before the write loop so the caller observes zero writes. Skipped under
+  // dryRun: a dry run never writes anyway, so we fall through and return the full
+  // plan (toCopy/toMerge) — the caller can report it AND the collisions.
+  if (abortOnCollision && !dryRun && collisions.length > 0) {
+    return {
+      copied: [],
+      skipped: skipped.sort(),
+      merged: [],
+      collisions: collisions.sort(),
+    };
+  }
+
+  // ── Write loop ──────────────────────────────────────────────────────────────
+  if (!dryRun) {
+    for (const rel of toMerge) {
+      const dest = join(destRoot, rel);
+      mkdirSync(dirname(dest), { recursive: true });
+      specialMerge[rel](dest, join(srcRoot, rel));
+    }
+    for (const rel of toCopy) {
+      const dest = join(destRoot, rel);
+      mkdirSync(dirname(dest), { recursive: true });
+      copyFileSync(join(srcRoot, rel), dest);
+    }
+  }
+
+  return {
+    copied: toCopy.sort(),
+    skipped: skipped.sort(),
+    merged: toMerge.sort(),
+    collisions: collisions.sort(),
+  };
 }
 
 // ── Claude settings merge ─────────────────────────────────────────────────────

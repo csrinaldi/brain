@@ -42,9 +42,9 @@ all diverge simultaneously). Revert = one clean commit. Reviewer load is mechani
 
 ## S2 — Collision Guard (TDD) [REQ-S2-1..3]
 
-- [ ] 2.1 **[RED]** `scripts/lib/installer.test.mjs`: failing tests — collision recorded when dest≠src (REQ-S2-1); collision report printed before first write (REQ-S2-1); `--abort-on-collision` exits non-zero + zero write calls (REQ-S2-2); no-op when all clean (REQ-S2-2); absent dest = no collision (REQ-S2-3); identical dest = no collision (REQ-S2-3); `specialMerge` paths excluded from guard. `npm test` → RED.
-- [ ] 2.2 **[GREEN]** `scripts/lib/installer.mjs` `copyManaged()`: before any write, for each managed path NOT in `specialMerge` — if dest exists AND bytes differ → push to `collisions[]`; return `collisions: string[]` in result. Pre-flight runs before writes begin.
-- [ ] 2.3 `scripts/brain-upgrade.mjs`: parse `--abort-on-collision` from argv; if `collisions.length > 0 && abortOnCollision` → print report, `process.exit(1)`, zero writes; default → print warning, proceed (current behavior preserved).
+- [x] 2.1 **[RED]** `scripts/lib/installer.test.mjs`: failing tests — collision recorded when dest≠src (REQ-S2-1); collision report printed before first write (REQ-S2-1); `--abort-on-collision` exits non-zero + zero write calls (REQ-S2-2); no-op when all clean (REQ-S2-2); absent dest = no collision (REQ-S2-3); identical dest = no collision (REQ-S2-3); `specialMerge` paths excluded from guard. `npm test` → RED.
+- [x] 2.2 **[GREEN]** `scripts/lib/installer.mjs` `copyManaged()`: before any write, for each managed path NOT in `specialMerge` — if dest exists AND bytes differ → push to `collisions[]`; return `collisions: string[]` in result. Pre-flight runs before writes begin.
+- [x] 2.3 `scripts/brain-upgrade.mjs`: parse `--abort-on-collision` from argv; if `collisions.length > 0 && abortOnCollision` → print report, `process.exit(1)`, zero writes; default → print warning, proceed (current behavior preserved).
 - [ ] 2.4 `npm test` → zero. Open PR2 → base PR1 branch.
 
 ## S3 — Atomic Rename (ONE commit) [REQ-S3-1..6]
