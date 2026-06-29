@@ -111,6 +111,33 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
   return result;
 }
 
+/**
+ * Fetch a PR's metadata (number, label names, and body) via `gh pr view`.
+ * Uses the current repo's git remote — `project` is accepted for contract
+ * compatibility but not required by the gh CLI when run from the repo root.
+ *
+ * Never throws: returns { number, labels: [], body: '' } on any failure so
+ * callers can treat this as best-effort supplementary data (e.g. audit
+ * size:exception check and issueLink-via-PR-description).
+ *
+ * @param {{ project?: string, number: number }} opts
+ * @returns {Promise<{ number: number, labels: string[], body: string }>}
+ */
+export async function prView({ project, number } = {}) {
+  const r = run('gh', ['pr', 'view', String(number), '--json', 'number,labels,body']);
+  if (!r.ok) return { number, labels: [], body: '' };
+  try {
+    const data = JSON.parse(r.stdout);
+    return {
+      number: data.number,
+      labels: (data.labels ?? []).map(l => l.name),
+      body: data.body ?? '',
+    };
+  } catch {
+    return { number, labels: [], body: '' };
+  }
+}
+
 export async function issueList({ project, state = 'open', assignee } = {}) {
   let currentUser;
   if (assignee === 'me') currentUser = (await whoami()).username;

@@ -18,7 +18,7 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 // The verbs every provider must implement (see vcs-contract.md).
 export const VERBS = [
   'authCheck', 'authLogin', 'whoami',
-  'issueView', 'issueList', 'mrList',
+  'issueView', 'issueList', 'mrList', 'prView',
   'commitStatus', 'repoCloneUrl', 'patSetupUrl', 'projectResolve',
 ];
 

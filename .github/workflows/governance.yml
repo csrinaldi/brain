@@ -20,6 +20,11 @@ permissions:
 
 jobs:
   # ── Invariant 1 — Every PR links an approved issue ──────────────────────────
+  #
+  # Chained-PR awareness: slice PRs target a feature/tracker branch (base != main)
+  # and legitimately carry "Part of #N" instead of "Closes #N".  The integration
+  # PR (base == main) must still use Closes|Fixes|Resolves #N.  Both patterns
+  # must reference an issue labelled status:approved.
   issue-link:
     name: issue-link
     runs-on: ubuntu-latest
@@ -30,19 +35,46 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
-          # Extract the first issue number from Closes/Fixes/Resolves #N.
+
           # grep exits 1 on no-match; || true prevents -e from aborting here —
           # we handle the empty case explicitly below.
-          num=$(printf '%s' "$PR_BODY" \
-            | grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?) +#[0-9]+' \
-            | grep -oE '[0-9]+' | head -n1 || true)
-          if [ -z "$num" ]; then
-            echo "::error::PR body has no Closes/Fixes/Resolves #<issue> reference."
-            exit 1
+
+          if [ "$BASE_BRANCH" = "main" ]; then
+            # Integration PR to main: must use a closing keyword (Closes / Fixes / Resolves).
+            # This closes the tracked issue and provides a definitive governance link.
+            num=$(printf '%s' "$PR_BODY" \
+              | grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?) +#[0-9]+' \
+              | grep -oE '[0-9]+' | head -n1 || true)
+            if [ -z "$num" ]; then
+              echo "::error::PR to main must have a Closes/Fixes/Resolves #<issue> reference."
+              exit 1
+            fi
+          else
+            # Slice PR (base != main): accept "Part of #N" for chained-PR flows.
+            # Also accept a closing keyword so slice PRs that target the tracker
+            # branch directly still work.
+            num=$(printf '%s' "$PR_BODY" \
+              | grep -oiE 'part +of +#[0-9]+' \
+              | grep -oE '[0-9]+' | head -n1 || true)
+            if [ -z "$num" ]; then
+              num=$(printf '%s' "$PR_BODY" \
+                | grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?) +#[0-9]+' \
+                | grep -oE '[0-9]+' | head -n1 || true)
+            fi
+            if [ -z "$num" ]; then
+              echo "::error::Slice PR must have a Part of #<issue> (or Closes/Fixes/Resolves) reference."
+              exit 1
+            fi
           fi
-          labels=$(gh api "repos/${{ github.repository }}/issues/${num}" --jq '.labels[].name')
+
+          # In both cases the referenced issue must be labelled status:approved.
+          # Handle gh failure explicitly: under `set -e` an unguarded non-zero
+          # would abort the step with no actionable message.
+          labels=$(gh api "repos/${{ github.repository }}/issues/${num}" --jq '.labels[].name') \
+            || { echo "::error::Could not fetch issue #${num} (gh api failed — does it exist?)."; exit 1; }
           if ! printf '%s\n' "$labels" | grep -qx 'status:approved'; then
             echo "::error::Issue #${num} is not labeled status:approved."
             exit 1
