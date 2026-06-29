@@ -206,6 +206,74 @@ test('featureCheckpoint: exits 0 with no feature dirs present', async (t) => {
 });
 
 // ---------------------------------------------------------------------------
+// (#102) Branch-scope guard — the auto (pre-push) path must not churn an
+// unrelated feature's resume.md when the current branch belongs to other work.
+// ---------------------------------------------------------------------------
+
+function writeResume(root, feature, frontmatterLines, body = 'body text\n') {
+  const dir = makeFeatureDir(root, feature);
+  writeFileSync(
+    join(dir, 'resume.md'),
+    ['---', ...frontmatterLines, '---', '', body].join('\n'),
+  );
+}
+
+const SEEDED = [
+  'feature: my-feature',
+  'current_slice: Slice-1',
+  'next_action: do-x',
+  'blockers:',
+  'checkpointed_at: 2026-01-01T00:00:00.000Z',
+  'checkpointed_from: test-host/branchA',
+];
+
+test('featureCheckpoint (#102): auto path leaves resume.md untouched when branch ≠ feature branch', async (t) => {
+  const root = makeTempRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeResume(root, 'my-feature', SEEDED);
+  const rp = resumePath(root, 'my-feature');
+  const before = readFileSync(rp, 'utf8');
+
+  // Auto path (no explicit feature), pushing an UNRELATED branch.
+  await featureCheckpoint(undefined, {
+    root,
+    ...defaultDeps({ getBranch: () => 'branchB', getTimestamp: () => '2099-01-01T00:00:00.000Z' }),
+  });
+
+  assert.equal(readFileSync(rp, 'utf8'), before, 'resume.md must be byte-for-byte unchanged (no churn)');
+});
+
+test('featureCheckpoint (#102): auto path DOES checkpoint when branch matches the feature branch', async (t) => {
+  const root = makeTempRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeResume(root, 'my-feature', SEEDED);
+
+  await featureCheckpoint(undefined, {
+    root,
+    ...defaultDeps({ getBranch: () => 'branchA', getTimestamp: () => '2099-01-01T00:00:00.000Z' }),
+  });
+
+  const { frontmatter } = parseFrontmatter(readFileSync(resumePath(root, 'my-feature'), 'utf8'));
+  assert.equal(frontmatter.checkpointed_at, '2099-01-01T00:00:00.000Z', 'matching branch must re-stamp');
+});
+
+test('featureCheckpoint (#102): explicit feature arg bypasses the branch guard', async (t) => {
+  const root = makeTempRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeResume(root, 'my-feature', SEEDED);
+
+  // Explicit feature, branch differs — the user asked for THIS feature → re-stamp.
+  await featureCheckpoint('my-feature', {
+    root,
+    ...defaultDeps({ getBranch: () => 'branchB', getTimestamp: () => '2099-01-01T00:00:00.000Z' }),
+  });
+
+  const { frontmatter } = parseFrontmatter(readFileSync(resumePath(root, 'my-feature'), 'utf8'));
+  assert.equal(frontmatter.checkpointed_at, '2099-01-01T00:00:00.000Z', 'explicit checkpoint must re-stamp');
+  assert.equal(frontmatter.checkpointed_from, 'test-host/branchB', 'explicit checkpoint stamps the current branch');
+});
+
+// ---------------------------------------------------------------------------
 // (f) featureResume: saves each .md file under brain-feature-<feature>
 // ---------------------------------------------------------------------------
 

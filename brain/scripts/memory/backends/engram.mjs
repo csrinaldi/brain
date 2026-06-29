@@ -437,6 +437,30 @@ export async function featureCheckpoint(
     frontmatter.next_action = "Update this file with the current state";
   if (!Array.isArray(frontmatter.blockers)) frontmatter.blockers = [];
 
+  // 3.5. Branch-scope guard (#102). On the AUTOMATIC path (no explicit feature —
+  //      i.e. the pre-push hook fires on every push), do NOT churn the active
+  //      feature's resume.md when the current branch is unrelated to it. The
+  //      feature's branch is the one recorded in `checkpointed_from`
+  //      (host/branch); a mismatch means this push belongs to other work, so we
+  //      skip without writing. An explicit feature arg always proceeds — the
+  //      caller asked to checkpoint THIS feature regardless of branch. A feature
+  //      with no prior checkpointed_from (first checkpoint) also proceeds and
+  //      establishes its branch.
+  const explicit = feature !== undefined && feature !== null && feature !== "";
+  if (!explicit && frontmatter.checkpointed_from) {
+    const recordedBranch = String(frontmatter.checkpointed_from)
+      .split("/")
+      .slice(1)
+      .join("/");
+    const currentBranch = getBranch(root);
+    if (recordedBranch && currentBranch && recordedBranch !== currentBranch) {
+      console.warn(
+        `  ℹ memory: branch '${currentBranch}' ≠ feature '${resolvedFeature}' branch '${recordedBranch}' — skipping checkpoint (unrelated push)`,
+      );
+      return;
+    }
+  }
+
   // 4. Re-stamp provenance fields.
   frontmatter.checkpointed_at = getTimestamp();
   frontmatter.checkpointed_from = `${getHostname()}/${getBranch(root)}`;
