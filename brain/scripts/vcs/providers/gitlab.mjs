@@ -180,7 +180,7 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
   } else if (r.stderr.includes(': 403') || /forbidden/i.test(r.stderr)) {
     result = { hardEnforcement: 'unavailable', remedy: 'requires Maintainer on the project' };
   } else {
-    result = { hardEnforcement: 'unknown' };
+    result = { hardEnforcement: 'unknown', detail: r.stderr.trim() || 'unexpected error from glab api' };
   }
 
   _capabilityCache.set(key, result);
