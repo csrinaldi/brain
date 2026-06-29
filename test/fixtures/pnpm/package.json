@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "Mock consumer repo for brain integration tests (pnpm)",
   "private": true,
-  "packageManager": "pnpm@9.0.0",
   "scripts": {
     "brain:upgrade": "node node_modules/brain/scripts/brain-upgrade.mjs",
     "env:init": "bash ./scripts/bootstrap.sh"
