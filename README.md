@@ -42,7 +42,7 @@ clean-container integration test).
 npm init -y
 
 # 1. Install brain at a pinned tag (HTTPS):
-npm i -D "git+https://github.com/csrinaldi/brain.git#v0.6.0"
+npm i -D "git+https://github.com/csrinaldi/brain.git#v0.6.1"
 
 # 2. Add the brain script aliases to your package.json "scripts":
 #      "brain:upgrade": "node node_modules/brain/scripts/brain-upgrade.mjs",
@@ -50,7 +50,7 @@ npm i -D "git+https://github.com/csrinaldi/brain.git#v0.6.0"
 #      "day:start":     "node ./scripts/day-start.mjs"
 
 # 3. Copy the managed paths (brain/core, scripts) into your repo:
-npm run brain:upgrade -- v0.6.0
+npm run brain:upgrade -- v0.6.1
 
 # 4. Initialize the environment (interactive):
 npm run env:init
@@ -60,13 +60,13 @@ npm run env:init
 > PM and runs through it. Use your PM's verbs throughout:
 >
 > ```bash
-> pnpm add -D "git+https://github.com/csrinaldi/brain.git#v0.6.0"
-> pnpm run brain:upgrade -- v0.6.0     # brain:upgrade installs via your detected PM
+> pnpm add -D "git+https://github.com/csrinaldi/brain.git#v0.6.1"
+> pnpm run brain:upgrade -- v0.6.1     # brain:upgrade installs via your detected PM
 > pnpm run env:init
 > pnpm run day:start
 > ```
 >
-> (yarn: `yarn add … && yarn brain:upgrade -- v0.6.0`; bun: `bun add -d … && bun run brain:upgrade`.)
+> (yarn: `yarn add … && yarn brain:upgrade -- v0.6.1`; bun: `bun add -d … && bun run brain:upgrade`.)
 > The fresh-install test covers npm / pnpm / yarn / bun fixtures.
 
 `env:init` does the heavy lifting:
@@ -102,8 +102,8 @@ Then:
 ### Updating brain
 
 ```bash
-npm run brain:upgrade -- v0.6.0             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v0.6.0 --dry-run   # preview what would change
+npm run brain:upgrade -- v0.6.1             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v0.6.1 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](CHANGELOG.md) before upgrading — **renames / breaking

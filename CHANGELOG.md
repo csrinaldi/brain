@@ -5,6 +5,17 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.6.1 — 2026-06-28
+
+### Fixed
+
+- **pnpm install** (#86): removed the `prepare` script that triggered
+  `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` — pnpm 11 blocks git-hosted deps with
+  build scripts. brain now installs cleanly via **npm / pnpm / yarn / bun**. The
+  `prepare` was useless for consumers (it ran in brain's temporary clone on a
+  git-dep install); `core.hooksPath` is configured by `env:init` and self-healed
+  by `day:start`.
+
 ## v0.6.0 — 2026-06-28
 
 ### Added — Workflow governance (ADR-0014, #67)
