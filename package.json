@@ -30,6 +30,11 @@
     "feature:checkpoint": "node ./scripts/memory/cli.mjs feature-checkpoint",
     "feature:resume": "node ./scripts/memory/cli.mjs feature-resume",
     "tools:install": "bash ./scripts/install-tools.sh",
-    "brain:audit": "node ./scripts/brain-audit.mjs"
+    "brain:audit": "node ./scripts/brain-audit.mjs",
+    "brain:start": "node ./scripts/brain-start.mjs",
+    "brain:check": "node ./scripts/brain-check.mjs",
+    "brain:save": "node ./scripts/brain-save.mjs",
+    "brain:ship": "node ./scripts/brain-ship.mjs",
+    "brain:next": "node ./scripts/brain-next.mjs"
   }
 }

@@ -283,3 +283,47 @@ test('gitlab.capabilities returns {hardEnforcement:"unknown"} (stub — Phase 3)
   assert.equal(result.hardEnforcement, 'unknown');
   assert.ok(typeof result.detail === 'string' && result.detail.includes('gitlab'), 'detail must mention gitlab');
 });
+
+// ── mrCreate ──────────────────────────────────────────────────────────────────
+
+test('github.mrCreate returns {url} on success', async () => {
+  setSpawn(() => ({
+    status: 0,
+    stdout: 'https://github.com/o/r/pull/42\n',
+    stderr: '',
+  }));
+  const result = await github.mrCreate({
+    project: 'o/r',
+    title: 'feat: my PR',
+    body: 'Closes #10',
+    head: 'feature/my-branch',
+    base: 'main',
+    labels: ['kind:feature'],
+  });
+  assert.equal(result.url, 'https://github.com/o/r/pull/42');
+  assert.equal(result.error, undefined);
+});
+
+test('github.mrCreate returns {url:null, error} on failure (never throws)', async () => {
+  setSpawn(() => ({
+    status: 1,
+    stdout: '',
+    stderr: 'HTTP 422: Validation failed',
+  }));
+  const result = await github.mrCreate({
+    project: 'o/r',
+    title: 'feat: bad PR',
+    body: 'no issue ref',
+    head: 'feature/bad',
+    base: 'main',
+  });
+  assert.equal(result.url, null);
+  assert.ok(typeof result.error === 'string' && result.error.length > 0,
+    'error should be a non-empty string');
+});
+
+test('gitlab.mrCreate returns {url:null, error} stub — Phase 3', async () => {
+  const result = await gitlab.mrCreate({ project: 'g/r', title: 'T', body: 'B', head: 'h' });
+  assert.equal(result.url, null);
+  assert.ok(typeof result.error === 'string' && result.error.includes('Phase 3'));
+});
