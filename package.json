@@ -9,7 +9,6 @@
   },
   "scripts": {
     "env:init": "bash ./scripts/bootstrap.sh",
-    "prepare": "git config core.hooksPath scripts/hooks 2>/dev/null || true",
     "day:start": "node ./scripts/day-start.mjs",
     "ticket:start": "node ./scripts/ticket-start.mjs",
     "project:feature": "node ./scripts/new-change.mjs",
