@@ -6,6 +6,12 @@ This repo is **self-hosting**: brain uses itself to document and evolve brain.
 
 ---
 
+## Getting started
+
+- [Adoption guide](../docs/adoption.md) — bring brain into a repo (new repo vs existing repo, step by step)
+
+---
+
 ## Generic core (`brain/core/`)
 
 Reusable documentation — applies to any project that adopts this system.
