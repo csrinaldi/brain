@@ -96,6 +96,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "099dead3",
+      "created_by": "gandalf",
+      "created_at": "2026-06-29T01:51:40Z",
+      "sessions": 0,
+      "memories": 13,
+      "prompts": 0
     }
   ]
 }
