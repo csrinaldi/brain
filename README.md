@@ -16,12 +16,13 @@ It is **self-hosting**: this repo uses brain itself to document and evolve brain
 ```
 brain/core/          ← Generic product. Read-only for consumers. Upstream-first.
 brain/project/       ← Consumer-specific: your ADRs, domain, rules. Yours to own.
-scripts/             ← Harness verbs (env:init, day:start, ticket:start, …)
+brain/scripts/       ← Managed harness verbs (env:init, day:start, ticket:start, …)
 openspec/            ← SDD artifacts for active and archived changes.
 .memory/             ← Git-based durable team memory (content-addressed chunks).
 ```
 
-`brain/core/` is the reusable part. `brain/project/` is yours to own.
+`brain/core/` (product) and `brain/scripts/` (harness) are the managed,
+upstream-first parts. `brain/project/` is yours to own.
 
 ---
 
