@@ -31,6 +31,7 @@ the GitLab status enum, etc.).
 | `repoCloneUrl` | `({ host, project, token }) -> string` | Authenticated HTTPS URL. User literal hidden from the caller. |
 | `patSetupUrl` | `({ host, name, scopes }) -> string` | PAT creation URL in the browser. |
 | `projectResolve` | `({ project }) -> string` | Identity: returns the slug. Both GH and GL address projects by slug/encoded-path, so callers pass the slug everywhere (incl. `repoCloneUrl`). Extension point if a host ever needs a different id. |
+| `branchProtect` | `({ project, branch?, checks, requiredReviews? }) -> { protected }` | Apply (or refresh) branch protection. `branch` defaults to `'main'`; `checks` is an array of required GitHub check context strings (derive via `checkContexts()` from `governance-checks.mjs`); `requiredReviews` defaults to `1`. GitHub: idempotent `PUT repos/{project}/branches/{branch}/protection` via `gh api --input -`. GitLab: throws `"not yet implemented (Phase 3)"` — full provider parity deferred. |
 
 ### Normalized `commitStatus` enum
 
@@ -53,7 +54,7 @@ check completes, then its `conclusion`. `null` = no status available.
 
 ## How to add a provider
 
-Create `scripts/vcs/providers/<name>.mjs` exporting the 10 verbs and add `<name>` as a
+Create `scripts/vcs/providers/<name>.mjs` exporting the 11 verbs and add `<name>` as a
 valid value of `vcs.provider`. The callers are not touched.
 
 ## Current implementation

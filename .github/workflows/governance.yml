@@ -1,0 +1,81 @@
+# governance.yml — Workflow Governance Layer (ADR-0014)
+#
+# Enforces four process invariants as PR checks. Each job name becomes the
+# GitHub check context reported as "governance / <job-name>". These names are
+# load-bearing: scripts/vcs/governance-checks.mjs (S3) derives the required
+# status-check list from them, and branch protection references them by context.
+#
+# Trigger: pull_request (NOT pull_request_target) — the gate needs no write
+# token and must not run untrusted PR code with secrets; read scopes suffice.
+
+name: governance
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  # ── Invariant 1 — Every PR links an approved issue ──────────────────────────
+  issue-link:
+    name: issue-link
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify approved issue link
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          # Extract the first issue number from Closes/Fixes/Resolves #N.
+          # grep exits 1 on no-match; || true prevents -e from aborting here —
+          # we handle the empty case explicitly below.
+          num=$(printf '%s' "$PR_BODY" \
+            | grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?) +#[0-9]+' \
+            | grep -oE '[0-9]+' | head -n1 || true)
+          if [ -z "$num" ]; then
+            echo "::error::PR body has no Closes/Fixes/Resolves #<issue> reference."
+            exit 1
+          fi
+          labels=$(gh api "repos/${{ github.repository }}/issues/${num}" --jq '.labels[].name')
+          if ! printf '%s\n' "$labels" | grep -qx 'status:approved'; then
+            echo "::error::Issue #${num} is not labeled status:approved."
+            exit 1
+          fi
+
+  # ── Invariant 2 — PR diff fits within the 400-line review budget ────────────
+  diff-size:
+    name: diff-size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce diff size budget
+        env:
+          # join() flattens the label array to a space-separated string because
+          # GitHub Actions has no array env — grep -qw then tests word membership.
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if printf '%s' "$LABELS" | grep -qw 'size:exception'; then
+            echo "size:exception present — skipping diff-size gate."
+            exit 0
+          fi
+          # Pipe numstat to the helper script, which reads governance.ignoreList
+          # from brain.config.json in the repo root and applies glob exclusions.
+          changed=$(git diff --numstat "$BASE_SHA"..."$HEAD_SHA" \
+            | node scripts/vcs/diff-size-count.mjs)
+          echo "Changed lines (ex-ignore-list): $changed"
+          if [ "$changed" -gt 400 ]; then
+            echo "::error::PR changes $changed lines (>400) without size:exception."
+            exit 1
+          fi

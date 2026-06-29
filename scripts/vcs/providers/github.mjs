@@ -42,6 +42,75 @@ export async function issueView({ project, number }) {
   return { number: r.number, title: r.title, labels: (r.labels ?? []).map(l => l.name), body: r.body };
 }
 
+export async function branchProtect({ project, branch = 'main', checks, requiredReviews = 1 }) {
+  const payload = {
+    required_status_checks: {
+      strict: true,
+      checks: checks.map(context => ({ context })),
+    },
+    enforce_admins: false,
+    required_pull_request_reviews: {
+      required_approving_review_count: requiredReviews,
+    },
+    restrictions: null,
+    allow_force_pushes: false,
+    allow_deletions: false,
+  };
+  const r = run(
+    'gh',
+    ['api', '-X', 'PUT', `repos/${project}/branches/${branch}/protection`, '--input', '-'],
+    { input: JSON.stringify(payload) }
+  );
+  if (r.ok) return { enforced: true };
+  // Tier / plan limitation — GitHub free plan blocks protection on private repos
+  if (r.stderr.includes('403') || /upgrade.*pro/i.test(r.stderr)) {
+    return {
+      enforced: false,
+      reason: 'tier',
+      remedy: 'GitHub Pro for private repos, or make the repo public',
+    };
+  }
+  return {
+    enforced: false,
+    reason: 'unsupported',
+    remedy: r.stderr.trim() || 'unknown error from gh api',
+  };
+}
+
+// Capability cache — keyed by "project:branch" to avoid cross-test interference.
+const _capabilityCache = new Map();
+
+/**
+ * Probe the GitHub API to determine whether branch protection APIs are accessible
+ * for the given project+branch. Caches the result per project:branch for the
+ * lifetime of the Node.js process.
+ *
+ * Returns: { hardEnforcement: 'available' | 'unavailable' | 'unknown', remedy?, detail? }
+ */
+export async function capabilities({ project = '', branch = 'main' } = {}) {
+  const key = `${project}:${branch}`;
+  if (_capabilityCache.has(key)) return _capabilityCache.get(key);
+
+  const r = run('gh', ['api', `repos/${project}/branches/${branch}/protection`]);
+  let result;
+  if (r.ok) {
+    result = { hardEnforcement: 'available' };
+  } else if (r.stderr.includes('404')) {
+    // No protection set yet — API is accessible, feature is available
+    result = { hardEnforcement: 'available' };
+  } else if (r.stderr.includes('403') || /upgrade.*pro/i.test(r.stderr)) {
+    result = {
+      hardEnforcement: 'unavailable',
+      remedy: 'GitHub Pro for private repos, or make the repo public',
+    };
+  } else {
+    result = { hardEnforcement: 'unknown' };
+  }
+
+  _capabilityCache.set(key, result);
+  return result;
+}
+
 export async function issueList({ project, state = 'open', assignee } = {}) {
   let currentUser;
   if (assignee === 'me') currentUser = (await whoami()).username;
@@ -68,6 +137,37 @@ export async function commitStatus({ project, sha }) {
   // (queued/in_progress). Use status until completed, then the conclusion.
   const raw = cr.status === 'completed' ? cr.conclusion : cr.status;
   return normalizeCommitStatus('github', raw);
+}
+
+/**
+ * Create a pull request via `gh pr create`.
+ * Returns { url: string } on success or { url: null, error: string } on failure.
+ * Never throws.
+ */
+export async function mrCreate({
+  project,
+  title,
+  body,
+  head,
+  base = 'main',
+  labels = [],
+} = {}) {
+  // gh pr create resolves the repo from the git remote; project is validated
+  // implicitly.  Pass title + body + branch refs explicitly.
+  const args = [
+    'pr', 'create',
+    '--title', title,
+    '--body', body,
+    '--head', head,
+    '--base', base,
+  ];
+  for (const label of labels) {
+    args.push('--label', label);
+  }
+
+  const r = run('gh', args);
+  if (r.ok) return { url: r.stdout.trim() };
+  return { url: null, error: r.stderr.trim() || `gh pr create failed (status ${r.status})` };
 }
 
 export async function repoCloneUrl({ host, project, token }) {

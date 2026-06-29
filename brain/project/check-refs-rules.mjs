@@ -39,6 +39,26 @@ export const prohibitedRefs = [
     onlyExt: ['.js', '.mjs', '.ts'],
     exempt: ['brain/project/check-refs-rules.mjs'],
   },
+  {
+    id: 'no-verify-bypass',
+    // Prohibit --no-verify and `git commit -n` in tracked scripts.
+    // These flags bypass the client-hook floor (commit-msg, pre-commit, pre-push),
+    // silencing governance enforcement locally.  brain's own scripts must NEVER
+    // use them — violations are detected here (pre-push / CI) and caught again by
+    // brain:audit on the merged history.  See ADR-0014 §9 (--no-verify policy).
+    //
+    // Hook files (scripts/hooks/pre-commit, pre-push) are intentionally extensionless
+    // and therefore excluded by onlyExt — they document the bypass option to users,
+    // which is legitimate self-documentation, not an invocation.
+    pattern: /--no-verify|\bgit commit\b[^"'\n]*\s+-n\b/,
+    reason:
+      'Use of --no-verify or git commit -n bypasses governance hooks — strictly prohibited. See ADR-0014 §9.',
+    onlyExt: ['.mjs', '.js', '.ts', '.sh'],
+    // Exempt files that legitimately reference --no-verify without invoking it:
+    //   • check-refs-rules.mjs — defines the pattern as a regex literal
+    //   • check-refs.test.mjs  — holds fixture strings testing the rule itself
+    exempt: ['brain/project/check-refs-rules.mjs', 'scripts/check-refs.test.mjs'],
+  },
 ];
 
 // Paths (relative to repo root) that are globally exempt from ALL rules.

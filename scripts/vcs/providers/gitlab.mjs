@@ -74,3 +74,28 @@ export async function repoCloneUrl({ host, project, token }) {
 export async function patSetupUrl({ host, name, scopes }) {
   return `https://${host}/-/user_settings/personal_access_tokens?name=${name}&scopes=${scopes.join(',')}`;
 }
+
+// branchProtect is not yet implemented for GitLab (Phase 3).
+// The verb is in the contract so the door is open; classic-protection vs rulesets
+// will be resolved in the Phase 3 spike.
+// eslint-disable-next-line no-unused-vars
+export async function branchProtect({ project, branch = 'main', checks, requiredReviews = 1 } = {}) {
+  throw new Error('gitlab.branchProtect: not yet implemented (Phase 3)');
+}
+
+/**
+ * GitLab capability probe — stub for Phase 3.
+ * Returns 'unknown' rather than throwing so brain:governance-status can still render.
+ */
+export async function capabilities() {
+  return { hardEnforcement: 'unknown', detail: 'gitlab not yet implemented (Phase 3)' };
+}
+
+/**
+ * Create a merge request — stub for Phase 3.
+ * Returns { url: null, error: string } so callers degrade gracefully.
+ */
+// eslint-disable-next-line no-unused-vars
+export async function mrCreate({ project, title, body, head, base, labels } = {}) {
+  return { url: null, error: 'gitlab.mrCreate: not yet implemented (Phase 3)' };
+}
