@@ -5,6 +5,40 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.6.0 — 2026-06-28
+
+### Added — Workflow governance (ADR-0014, #67)
+
+A **tool-agnostic** governance layer enforcing the 4 load-bearing invariants
+(approved ticket · PR ≤400 · memory dumped · ADR for decisions):
+
+- **The floor** (always-on, tool-independent): the generic checks library
+  (`scripts/governance/checks/`), the client-hook suite (`commit-msg`,
+  `pre-commit`, a reliable `pre-push`), and **`brain:audit`** — re-verifies the
+  invariants on merged history (the universal teeth).
+- **The hard gate** (additive, capability-aware): `brain:protect` +
+  `branchProtect` adapter verb (GitHub; GitLab Phase 3); **`brain:governance-status`**
+  reports per-consumer what enforcement the platform/tier actually supports.
+- **The golden path**: `brain:start` / `brain:check` / `brain:save` / `brain:ship`
+  / `brain:next` — self-gating verbs unifying human + agent.
+- **`--no-verify` policy**: a `repo:check` prohibited-reference + a Claude Code
+  PreToolUse hook (`.claude/settings.json`).
+
+### Changed
+
+- `pre-push` `.memory/` check is now a **WARNING**, not a hard block — the
+  reliability precondition for the `--no-verify` policy (the hook re-materializes
+  memory, which churns, so a hard block self-blocked the push).
+- New npm scripts: `brain:audit`, `brain:protect`, `brain:governance-status`,
+  `brain:start`, `brain:check`, `brain:save`, `brain:ship`, `brain:next`.
+
+### Notes
+
+- **L1 hard enforcement** (branch protection / rulesets) requires **GitHub Pro
+  for private repos, a public repo, or self-hosted** — run `brain:governance-status`
+  to see your repo's capability. The **floor (hooks + audit) works on every repo,
+  tier, and platform**. Activation (`brain:protect`) is a one-time per-repo admin step.
+
 ## v0.5.0 — 2026-06-27
 
 ### Added
