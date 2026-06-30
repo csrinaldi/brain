@@ -66,11 +66,11 @@ A thin CLI (`brain/scripts/adopt.mjs`, verb `brain:adopt`) walks the consumer tr
 // classification = matchesAny(logicalName, managed) && !matchesAny(logicalName, local)
 //   ? 'generic' : 'project-owned'
 ```
-Upstream reference bytes resolve from `resolveUpstreamRoot(repoRoot)`: prefer `node_modules/brain/`, fall back to `repoRoot` itself when its `package.json.name === 'brain'` (self-host). Bytes = `join(upstreamRoot, logicalName)`. Absent file → `divergence: 'upstream-missing'`, flagged.
+Upstream reference bytes resolve from `resolveUpstreamRoot(repoRoot)`: prefer `node_modules/brain/`, fall back to `repoRoot` itself when its `package.json.name === 'brain'` (self-host). Bytes = `join(upstreamRoot, logicalName)`. Absent file → `divergenceKind: 'upstream-missing'`, flagged.
 
 ### Divergence classifier
 ```js
-// classifyDivergence(consumerText, upstreamText) -> { divergence, languageSignal, reason }
+// classifyDivergence(consumerText, upstreamText) -> { divergenceKind, languageSignal, reason }
 // 1. identical bytes                              -> 'identical'
 // 2. languageSignal(consumerText): count es markers (ñ ¿ ¡ áéíóúü + es stopwords)
 //    vs en stopwords -> { es, en, verdict }
@@ -89,7 +89,7 @@ Upstream reference bytes resolve from `resolveUpstreamRoot(repoRoot)`: prefer `n
   "files": [ { "path":"brain/methodology/x.md",
                "logicalName":"brain/core/methodology/x.md",
                "classification":"generic","matchedGlob":"brain/core/**",
-               "divergence":"translation","languageSignal":{"es":12,"en":1,"verdict":"es"},
+               "divergenceKind":"translation","languageSignal":{"es":12,"en":1,"verdict":"es"},
                "proposedAction":"adopt-upstream","reason":"..." } ] }
 ```
 `proposedAction`: generic→`adopt-upstream` (divergent generics also listed under report "Replacements"); project-owned flat-brain→`keep-as-project`; project-owned no-brain→`place-under-brain-project`. Target shape = `flat-brain` if any generic match, else `no-brain`.
