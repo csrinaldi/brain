@@ -144,7 +144,8 @@ export function deriveChangeFromBranch(branchName, changesDir,
     out.matches = entries
       .filter(e => e.isDirectory() && e.name !== 'archive')
       .map(e => e.name)
-      .filter(name => name.includes(out.token))        // dir name contains issue-<N>
+      // Delimiter-anchored, NOT substring `.includes` — see rationale below.
+      .filter(name => name === out.token || name.startsWith(`${out.token}-`))
       .sort();                                          // deterministic ordering
     return out;
   } catch {
@@ -155,7 +156,15 @@ export function deriveChangeFromBranch(branchName, changesDir,
 
 **Algorithm:** extract `issue-<N>` via `/issue-(\d+)/i`; enumerate
 `openspec/changes/*` directories (excluding `archive`); keep those whose folder name
-**contains** the token; return `{ token, matches: [] }` sorted.
+is **delimiter-anchored equal to the token** — `name === token` (bare
+`issue-<N>`) **or** `name.startsWith(token + '-')` (the usual
+`issue-<N>-<slug>` shape) — NOT a plain substring `.includes(token)` match.
+A plain `.includes` check lets a short issue number falsely match a longer
+one sharing the same prefix digits, e.g.
+`'issue-138-session-start'.includes('issue-13')` === `true` — branch
+`issue-13` would wrongly resolve to change `issue-138-session-start`, a
+confident WRONG answer with no error signal. Return `{ token, matches: [] }`
+sorted.
 
 **0 / 1 / N handling** (resolved by the caller `step3ResolveChange`, never thrown):
 - `0` matches → context block prints "no change folder for branch <branch>"; loader
@@ -176,15 +185,37 @@ Three independent, testable layers — defense in depth:
 `memory/cli.mjs`'s `pull` path. A static test asserts the import graph stays within
 the allowlist.
 
-**(b) Runtime argv allowlist.** Every subprocess in the loader goes through ONE
-gated runner, `assertLocalArgv(cmd, args)`, which throws if the call is not on the
-local allowlist:
+**(b) Runtime argv allowlist.** Every subprocess the loader controls goes through
+ONE gated runner, `gatedSpawn(cmd, args, opts, spawnFn)`, which calls
+`assertLocalArgv(cmd, args)` before delegating to `spawnFn` (the real `spawnSync`
+in production, an injectable spy in tests). `assertLocalArgv` throws if the call is
+not on the local allowlist:
 - `git status|restore|rev-parse` (read/local index only — never `fetch`, `merge`,
-  `pull`, `clone`, `ls-remote`, `push`).
-- `node brain/scripts/memory/cli.mjs import` (engram sync --import; verified local
-  per memory/cli.mjs:9 — "no git pull").
-- `node brain/scripts/memory/cli.mjs feature-resume` (via `tryFeatureResume`; local
-  engram read only).
+  `pull`, `clone`, `ls-remote`, `push`; trailing path args permitted, these ops
+  legitimately take them).
+- `node brain/scripts/memory/cli.mjs import` or `... feature-resume`, called with
+  EXACTLY those 2 args — no trailing flags (engram sync --import / a local
+  `feature-resume` read; verified local per memory/cli.mjs:9 — "no git pull").
+- Defense in depth: a forbidden token (`pull|fetch|merge|clone|ls-remote|push` as a
+  whole argv token, or `--export|--cloud` anywhere) is rejected even on an
+  otherwise-allowed `cmd`.
+
+Coverage — concretely, which calls are gated and how (fresh review MAJOR 2 closed
+the gap where 3 of 4 spawn sites bypassed the gate):
+- `step2HydrateEngram` calls `gatedSpawn` directly for `memory/cli.mjs import`.
+- `step1RestoreManifest` and `step3ResolveChange` inject a `gatedSpawn`-wrapping
+  function as the `{_spawn}` seam into `restoreManifestChurn` and `currentBranch`
+  (both PR1 libs already accept `{_spawn}` — no change needed there) — their git
+  calls are gated without modifying the libs.
+- `step4LoadTicketMemory` supplies `tryFeatureResume`'s own `{_runner}` injection
+  point with a runner that calls the same `gatedSpawn` for
+  `memory/cli.mjs feature-resume`. `auto-resume.mjs` itself is NOT modified — it
+  belongs to the already-merged feature-working-memory change and is out of scope;
+  its existing `_runner` seam is reused as-is, from the caller side.
+
+All four steps build their `gatedSpawn` wrapper from the SAME `deps._spawn` (or the
+real `spawnSync` in production), so a single injected `_spawn` spy in tests
+observes every subprocess call the loader makes — already passed through the gate.
 
 Any other argv (notably the `pull` verb, `git fetch`, `gentle-ai update`, `engram
 sync --export`) throws synchronously, failing the test and never reaching the
