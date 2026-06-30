@@ -55,14 +55,18 @@ export const prohibitedRefs = [
       'Use of --no-verify or git commit -n bypasses governance hooks — strictly prohibited. See ADR-0014 §9.',
     onlyExt: ['.mjs', '.js', '.ts', '.sh'],
     // Exempt files that legitimately reference --no-verify without invoking it:
-    //   • check-refs-rules.mjs — defines the pattern as a regex literal
-    //   • check-refs.test.mjs  — holds fixture strings testing the rule itself
-    //   • installer.test.mjs   — fixture mirrors brain's settings.json hook that
-    //                            DETECTS --no-verify (the guard, not a bypass)
+    //   • check-refs-rules.mjs        — defines the pattern as a regex literal
+    //   • check-refs.test.mjs         — holds fixture strings testing the rule itself
+    //   • installer.test.mjs          — fixture mirrors brain's settings.json hook that
+    //                                   DETECTS --no-verify (the guard, not a bypass)
+    //   • session-start-config.test.mjs — asserts the existing PreToolUse hook
+    //                                   (the same --no-verify guard) survives the
+    //                                   SessionStart hook merge unchanged (#138)
     exempt: [
       'brain/project/check-refs-rules.mjs',
       'brain/scripts/check-refs.test.mjs',
       'brain/scripts/lib/installer.test.mjs',
+      'brain/scripts/session-start-config.test.mjs',
     ],
   },
 ];

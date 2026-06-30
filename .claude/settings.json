@@ -10,6 +10,16 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npm run session:start"
+          }
+        ]
+      }
     ]
   }
 }
