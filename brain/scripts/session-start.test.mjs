@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+import en from './i18n/en.mjs';
+
 import {
   deriveChangeFromBranch,
   assertLocalArgv,
@@ -19,6 +21,7 @@ import {
   step3ResolveChange,
   step4LoadTicketMemory,
   runSessionStart,
+  resolveSessionStrings,
 } from './session-start.mjs';
 
 // ---------------------------------------------------------------------------
@@ -134,17 +137,33 @@ test('deriveChangeFromBranch: delimiter-anchored match — bare dir name equal t
 });
 
 // ---------------------------------------------------------------------------
-// renderContextBlock(model) — pure, sync, deterministic (design §1.7)
+// renderContextBlock(model, strings) — pure, sync, deterministic (design §1.7/§1.8)
 // ---------------------------------------------------------------------------
 //
-// NOTE: section labels below are plain string literals for PR2 — moving
-// them to session.* i18n keys is PR3 scope (see TODO(#138) comment in
-// session-start.mjs). Exact-string snapshots here pin the format contract.
+// `strings` is the resolved `session.*` map (design §1.8): the CLI entry
+// resolves it ONCE via t() (still containing {placeholder} tokens) and
+// renderContextBlock fills the placeholders synchronously — no i18n call
+// inside the renderer itself. Tests build the fixture from the REAL en.mjs
+// catalog (not a parallel hardcoded copy) so a future drift in en.mjs's
+// session.* templates fails this suite instead of silently diverging.
 //
 // ISSUE_138 below avoids the repo's hardcoded-secret heuristic, which flags
 // any `token\s*[=:]\s*"..."` literal — a false positive on the resolver's
 // `token` field name.
 const ISSUE_138 = 'issue-138';
+
+const SESSION_STRINGS = {
+  header:           en['session.header'],
+  branch:           en['session.branch'],
+  changeOne:        en['session.change.one'],
+  changeNone:       en['session.change.none'],
+  changeAmbiguous:  en['session.change.ambiguous'],
+  memoryOk:         en['session.memory.ok'],
+  memorySkip:       en['session.memory.skip'],
+  manifestRestored: en['session.manifest.restored'],
+  ticketLabel:      en['session.ticket.label'],
+  ticketNone:       en['session.ticket.none'],
+};
 
 test('renderContextBlock: full success — resolved change, engram ok, manifest restored, ticket present', () => {
   const model = {
@@ -165,7 +184,7 @@ test('renderContextBlock: full success — resolved change, engram ok, manifest 
     '  Feature:      issue-138-session-start\n  Next action:  implement PR2\n',
     '========================',
   ].join('\n');
-  assert.equal(renderContextBlock(model), expected);
+  assert.equal(renderContextBlock(model, SESSION_STRINGS), expected);
 });
 
 test('renderContextBlock: no change resolved for branch', () => {
@@ -186,7 +205,7 @@ test('renderContextBlock: no change resolved for branch', () => {
     '(no active ticket memory)',
     '========================',
   ].join('\n');
-  assert.equal(renderContextBlock(model), expected);
+  assert.equal(renderContextBlock(model, SESSION_STRINGS), expected);
 });
 
 test('renderContextBlock: ambiguous (N) matches lists all candidates', () => {
@@ -207,7 +226,7 @@ test('renderContextBlock: ambiguous (N) matches lists all candidates', () => {
     '(no active ticket memory)',
     '========================',
   ].join('\n');
-  assert.equal(renderContextBlock(model), expected);
+  assert.equal(renderContextBlock(model, SESSION_STRINGS), expected);
 });
 
 test('renderContextBlock: engram skipped (unavailable)', () => {
@@ -228,7 +247,7 @@ test('renderContextBlock: engram skipped (unavailable)', () => {
     '(no active ticket memory)',
     '========================',
   ].join('\n');
-  assert.equal(renderContextBlock(model), expected);
+  assert.equal(renderContextBlock(model, SESSION_STRINGS), expected);
 });
 
 test('renderContextBlock: no ticket memory (null branch / detached HEAD)', () => {
@@ -249,7 +268,7 @@ test('renderContextBlock: no ticket memory (null branch / detached HEAD)', () =>
     '(no active ticket memory)',
     '========================',
   ].join('\n');
-  assert.equal(renderContextBlock(model), expected);
+  assert.equal(renderContextBlock(model, SESSION_STRINGS), expected);
 });
 
 test('renderContextBlock: manifest line omitted when nothing to restore', () => {
@@ -259,8 +278,60 @@ test('renderContextBlock: manifest line omitted when nothing to restore', () => 
     change: { branch: 'main', token: null, matches: [] },
     ticket: null,
   };
-  const lines = renderContextBlock(model).split('\n');
+  const lines = renderContextBlock(model, SESSION_STRINGS).split('\n');
   assert.ok(!lines.some((l) => l.startsWith('manifest:')), 'manifest line must be omitted when restored:false');
+});
+
+// Proves `strings` is actually consumed by the renderer (not a hardcoded
+// English literal that merely happens to match en.mjs's current values) —
+// without this test, a production implementation that ignores its 2nd
+// argument would still pass every snapshot above.
+test('renderContextBlock: consumes the provided strings map, not a hardcoded literal (i18n wiring proof)', () => {
+  const model = {
+    manifest: { restored: true },
+    engram: { ok: true },
+    change: { branch: 'feat/issue-138-x', token: ISSUE_138, matches: ['issue-138-session-start'] },
+    ticket: 'next_action: ship it\n',
+  };
+  const markerStrings = {
+    header:           'MARKER_HEADER',
+    branch:           'MARKER_BRANCH {branch}',
+    changeOne:        'MARKER_CHANGE {change}',
+    changeNone:       'MARKER_CHANGE_NONE',
+    changeAmbiguous:  'MARKER_CHANGE_AMBIGUOUS ({count}): {list}',
+    memoryOk:         'MARKER_MEMORY_OK',
+    memorySkip:       'MARKER_MEMORY_SKIP',
+    manifestRestored: 'MARKER_MANIFEST_RESTORED',
+    ticketLabel:      'MARKER_TICKET_LABEL',
+    ticketNone:       'MARKER_TICKET_NONE',
+  };
+  const output = renderContextBlock(model, markerStrings);
+  assert.ok(output.includes('MARKER_HEADER'), 'header must come from strings.header');
+  assert.ok(output.includes('MARKER_BRANCH feat/issue-138-x'), 'branch line must interpolate {branch} into strings.branch');
+  assert.ok(output.includes('MARKER_CHANGE issue-138-session-start'), 'change line must interpolate {change} into strings.changeOne');
+  assert.ok(output.includes('MARKER_MEMORY_OK'), 'memory line must come from strings.memoryOk');
+  assert.ok(output.includes('MARKER_MANIFEST_RESTORED'), 'manifest line must come from strings.manifestRestored');
+  assert.ok(output.includes('MARKER_TICKET_LABEL'), 'ticket label must come from strings.ticketLabel');
+  assert.ok(!output.includes('brain · session context'), 'must NOT fall back to the old hardcoded English literal');
+});
+
+test('renderContextBlock: ambiguous-match line interpolates {count}/{list} from the provided strings map', () => {
+  const model = {
+    manifest: { restored: false },
+    engram: { ok: false },
+    change: { branch: 'feat/issue-138-x', token: ISSUE_138, matches: ['issue-138-a', 'issue-138-b'] },
+    ticket: null,
+  };
+  const markerStrings = {
+    header: 'H', branch: 'B {branch}', changeOne: 'C {change}',
+    changeNone: 'CN', changeAmbiguous: 'AMBIG ({count}): {list}',
+    memoryOk: 'MOK', memorySkip: 'MSKIP', manifestRestored: 'MREST',
+    ticketLabel: 'TL', ticketNone: 'TNONE',
+  };
+  const output = renderContextBlock(model, markerStrings);
+  assert.ok(output.includes('AMBIG (2): issue-138-a, issue-138-b'));
+  assert.ok(output.includes('MSKIP'));
+  assert.ok(output.includes('TNONE'));
 });
 
 test('renderContextBlock: deterministic — same input → same output (no clock/random)', () => {
@@ -270,7 +341,7 @@ test('renderContextBlock: deterministic — same input → same output (no clock
     change: { branch: 'feat/issue-138-x', token: ISSUE_138, matches: ['issue-138-session-start'] },
     ticket: 'next_action: ship it\n',
   };
-  assert.equal(renderContextBlock(model), renderContextBlock(model));
+  assert.equal(renderContextBlock(model, SESSION_STRINGS), renderContextBlock(model, SESSION_STRINGS));
 });
 
 // ---------------------------------------------------------------------------
@@ -414,7 +485,7 @@ test('runSessionStart: returns {exitCode:0, output} even when every step fails',
     _changes: () => { throw new Error('ENOENT'); },
     _resume: () => { throw new Error('cli not found'); },
   };
-  const result = await runSessionStart('/repo', deps);
+  const result = await runSessionStart('/repo', deps, SESSION_STRINGS);
   assert.equal(result.exitCode, 0);
   assert.equal(typeof result.output, 'string');
   assert.ok(result.output.includes('brain · session context'));
@@ -433,7 +504,7 @@ test('runSessionStart: executes steps in order manifest → engram → branch/ch
   const _changes = () => [direntDir('issue-138-session-start')];
   const _resume = () => { order.push('ticket'); return null; };
 
-  await runSessionStart('/repo', { _spawn, _branch, _changes, _resume });
+  await runSessionStart('/repo', { _spawn, _branch, _changes, _resume }, SESSION_STRINGS);
 
   assert.deepEqual(order, ['manifest', 'engram', 'branch', 'ticket']);
 });
@@ -444,14 +515,14 @@ test('runSessionStart: output composition matches renderContextBlock for the res
   const _changes = () => [direntDir('issue-138-session-start')];
   const _resume = () => 'next_action: ship it\n';
 
-  const result = await runSessionStart('/repo', { _spawn, _branch, _changes, _resume });
+  const result = await runSessionStart('/repo', { _spawn, _branch, _changes, _resume }, SESSION_STRINGS);
 
   const expected = renderContextBlock({
     manifest: { restored: false },
     engram: { ok: true },
     change: { branch: 'feat/issue-138-x', token: ISSUE_138, matches: ['issue-138-session-start'] },
     ticket: 'next_action: ship it\n',
-  });
+  }, SESSION_STRINGS);
   assert.equal(result.output, expected);
 });
 
@@ -581,7 +652,7 @@ test('no-network: spy _spawn over the full loop — every argv allowlisted, none
   };
   const _changes = () => [direntDir('issue-138-session-start')];
 
-  await runSessionStart('/repo', { _spawn, _changes });
+  await runSessionStart('/repo', { _spawn, _changes }, SESSION_STRINGS);
 
   assert.ok(calls.length > 0, 'expected at least one spawn call to verify');
   for (const { cmd, args } of calls) {
@@ -617,12 +688,34 @@ test('no-network: the pull codepath is never reached even when manifest churn is
   };
   const _changes = () => [];
 
-  await runSessionStart('/repo', { _spawn, _changes });
+  await runSessionStart('/repo', { _spawn, _changes }, SESSION_STRINGS);
 
   assert.ok(calls.some((c) => c.args[0] === 'restore'), 'manifest restore should have run');
   for (const { args } of calls) {
     assert.ok(!FORBIDDEN_VERBS.test(args.join(' ')), `forbidden verb found: ${args.join(' ')}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// resolveSessionStrings() — real i18n wiring end-to-end (design §1.8, REQ-8)
+// ---------------------------------------------------------------------------
+
+test('resolveSessionStrings: resolves every field from the real en.mjs catalog (default locale)', async () => {
+  const strings = await resolveSessionStrings();
+  assert.deepEqual(strings, SESSION_STRINGS);
+});
+
+test('resolveSessionStrings: output feeds renderContextBlock end-to-end (no hardcoded fallback)', async () => {
+  const strings = await resolveSessionStrings();
+  const model = {
+    manifest: { restored: false },
+    engram: { ok: true },
+    change: { branch: 'main', token: null, matches: [] },
+    ticket: null,
+  };
+  const output = renderContextBlock(model, strings);
+  assert.ok(output.startsWith(en['session.header']));
+  assert.ok(output.includes(en['session.change.none']));
 });
 
 // ---------------------------------------------------------------------------

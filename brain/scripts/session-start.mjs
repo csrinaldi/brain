@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { currentBranch } from './lib/git-branch.mjs';
 import { restoreManifestChurn } from './lib/memory-manifest.mjs';
 import { tryFeatureResume } from './memory/lib/auto-resume.mjs';
+import { t } from './i18n/t.mjs';
 
 // ── deriveChangeFromBranch — branch → openspec/changes/* resolver (design §1.4) ──
 
@@ -145,52 +146,71 @@ export function gatedSpawn(cmd, args, opts, spawnFn = spawnSync) {
   return spawnFn(cmd, args, opts);
 }
 
-// ── renderContextBlock — pure, sync, deterministic output (design §1.7) ─────
+// ── renderContextBlock — pure, sync, deterministic output (design §1.7/§1.8) ─
 
-// TODO(#138): move these section labels to session.* i18n keys (en.mjs/es.mjs)
-// per design §1.8. Kept as plain literals here so the renderer stays pure/sync
-// and trivially snapshot-testable in PR2; PR3 resolves the i18n strings ONCE
-// in the CLI entry and passes the resolved map in, without changing this
-// function's shape.
-const HEADER = 'brain · session context';
+// Structural separators only — NOT translatable user-facing text, so they
+// stay plain constants outside the i18n layer (design §1.7's fixed format).
 const RULE_DOUBLE = '========================';
 const RULE_SINGLE = '------------------------------------------';
 
-function formatChangeLine(change) {
+/**
+ * Synchronous `{placeholder}` substitution — mirrors i18n/t.mjs's own
+ * `translate()` interpolation rule, duplicated here (not imported) because
+ * `translate()` also performs catalog/locale selection, which renderContextBlock
+ * must NOT do (it stays pure: the caller already resolved the locale-correct
+ * template via `t()` before calling in).
+ *
+ * @param {string} template
+ * @param {Record<string, string|number>} params
+ * @returns {string}
+ */
+function fill(template, params) {
+  return template.replace(/\{(\w+)\}/g, (_, k) => (k in params ? String(params[k]) : `{${k}}`));
+}
+
+function formatChangeLine(change, strings) {
   const { matches } = change;
-  if (matches.length === 0) return 'change:   (no change folder for branch)';
-  if (matches.length === 1) return `change:   ${matches[0]}`;
-  return `change:   ambiguous (${matches.length}): ${matches.join(', ')}`;
+  if (matches.length === 0) return strings.changeNone;
+  if (matches.length === 1) return fill(strings.changeOne, { change: matches[0] });
+  return fill(strings.changeAmbiguous, { count: matches.length, list: matches.join(', ') });
 }
 
 /**
- * Pure, synchronous string builder — no clocks, no randomness, no ANSI.
- * Fixed section order; lines are present/absent based only on the inputs.
+ * Pure, synchronous string builder — no clocks, no randomness, no ANSI, no
+ * i18n resolution (the caller resolves `session.*` templates ONCE via `t()`
+ * and passes the resolved map in as `strings` — design §1.8). Fixed section
+ * order; lines are present/absent based only on the inputs.
  *
  * @param {{ manifest: {restored: boolean}, engram: {ok: boolean},
  *           change: {branch: string|null, token: string|null, matches: string[]},
  *           ticket: string|null }} model
+ * @param {{ header: string, branch: string, changeOne: string, changeNone: string,
+ *           changeAmbiguous: string, memoryOk: string, memorySkip: string,
+ *           manifestRestored: string, ticketLabel: string, ticketNone: string }} strings
+ *           Resolved `session.*` templates (placeholders intact), e.g. from
+ *           `resolveSessionStrings()`.
  * @returns {string}
  */
-export function renderContextBlock(model) {
+export function renderContextBlock(model, strings) {
   const { manifest, engram, change, ticket } = model;
+  const s = strings;
 
   const lines = [
-    HEADER,
+    s.header,
     RULE_DOUBLE,
-    `branch:   ${change.branch ?? '(unknown)'}`,
-    formatChangeLine(change),
-    engram.ok ? 'memory:   engram hydrated' : 'memory:   engram unavailable (skipped)',
+    fill(s.branch, { branch: change.branch ?? '(unknown)' }),
+    formatChangeLine(change, s),
+    engram.ok ? s.memoryOk : s.memorySkip,
   ];
 
   if (manifest.restored) {
-    lines.push('manifest: churn restored (safe)');
+    lines.push(s.manifestRestored);
   }
 
   lines.push(
     RULE_SINGLE,
-    'ticket:',
-    ticket ?? '(no active ticket memory)',
+    s.ticketLabel,
+    ticket ?? s.ticketNone,
     RULE_DOUBLE,
   );
 
@@ -313,15 +333,55 @@ export function step4LoadTicketMemory(cwd, deps = {}) {
  *
  * @param {string} cwd
  * @param {{ _spawn?: Function, _branch?: Function, _changes?: Function, _resume?: Function }} [deps]
+ * @param {object} strings  Resolved `session.*` templates (placeholders intact),
+ *        forwarded as-is into `renderContextBlock` — see `resolveSessionStrings()`.
  * @returns {Promise<{ exitCode: 0, output: string }>}
  */
-export async function runSessionStart(cwd, deps = {}) {
+export async function runSessionStart(cwd, deps = {}, strings) {
   const manifest = step1RestoreManifest(cwd, deps);
   const engram = step2HydrateEngram(cwd, deps);
   const change = step3ResolveChange(cwd, deps);
   const ticket = step4LoadTicketMemory(cwd, deps);
-  const output = renderContextBlock({ manifest, engram, change, ticket });
+  const output = renderContextBlock({ manifest, engram, change, ticket }, strings);
   return { exitCode: 0, output };
+}
+
+// ── i18n wiring — resolve session.* strings ONCE (design §1.8) ──────────────
+//
+// `t()` is async; `renderContextBlock` must stay sync (so it is trivially
+// snapshot-testable). The split: resolve every `session.*` template ONCE
+// here (still containing {placeholder} tokens — no params passed to `t()`,
+// so unresolved placeholders pass through verbatim per t.mjs's own
+// substitution rule), then `renderContextBlock` fills the placeholders
+// synchronously with the actual runtime values (branch name, change list,
+// etc.) that are only known after the steps run.
+
+const SESSION_I18N_KEYS = {
+  header:           'session.header',
+  branch:           'session.branch',
+  changeOne:        'session.change.one',
+  changeNone:       'session.change.none',
+  changeAmbiguous:  'session.change.ambiguous',
+  memoryOk:         'session.memory.ok',
+  memorySkip:       'session.memory.skip',
+  manifestRestored: 'session.manifest.restored',
+  ticketLabel:      'session.ticket.label',
+  ticketNone:       'session.ticket.none',
+};
+
+/**
+ * Resolves the full `session.*` template map from the active locale (design
+ * §1.8). Exported for the CLI entry and for tests that want to exercise the
+ * real i18n wiring end-to-end.
+ *
+ * @returns {Promise<object>} field-keyed map matching `renderContextBlock`'s
+ *          `strings` contract.
+ */
+export async function resolveSessionStrings() {
+  const entries = await Promise.all(
+    Object.entries(SESSION_I18N_KEYS).map(async ([field, key]) => [field, await t(key)]),
+  );
+  return Object.fromEntries(entries);
 }
 
 // ── CLI entry-point ──────────────────────────────────────────────────────────
@@ -331,6 +391,7 @@ export async function runSessionStart(cwd, deps = {}) {
 // must never block an agent's session on a context-load failure (REQ-1, REQ-7).
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { output } = await runSessionStart(process.cwd());
+  const strings = await resolveSessionStrings();
+  const { output } = await runSessionStart(process.cwd(), {}, strings);
   console.log(output);
 }
