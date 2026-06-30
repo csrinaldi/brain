@@ -76,16 +76,28 @@ export function deriveChangeFromBranch(branchName, changesDir, { _readdir = read
 const GIT_ALLOWED_SUBCOMMANDS = new Set(['status', 'restore', 'rev-parse']);
 const MEMORY_CLI_ALLOWED_OPS = new Set(['import', 'feature-resume']);
 
+// Defense in depth: reject these anywhere in argv, even on an otherwise-
+// allowed cmd — guards against a future bug appending a network verb or flag
+// (e.g. `import --export`) to an allowlisted call. The first alternative is
+// anchored (`^...$`) so it only matches a *whole* argv token, not a
+// substring; `--export`/`--cloud` match anywhere since they are themselves
+// unambiguous flag names.
+const FORBIDDEN_ARGV_TOKEN = /^(pull|fetch|merge|clone|ls-remote|push)$|--export|--cloud/i;
+
 /**
  * Throws synchronously if `(cmd, args)` is not on the local-only allowlist:
- *   - `git status|restore|rev-parse` (read/local index only).
- *   - `<node> brain/scripts/memory/cli.mjs import|feature-resume` (local-only
- *     ops per memory/cli.mjs:7-10 — never `pull`).
+ *   - `git status|restore|rev-parse` (read/local index only; trailing path
+ *     args are permitted — these ops legitimately take them).
+ *   - `<node> brain/scripts/memory/cli.mjs import|feature-resume`, called
+ *     with EXACTLY those 2 args — no trailing flags (local-only ops per
+ *     memory/cli.mjs:7-10 — never `pull`).
  *
  * Any other argv (notably `git fetch|pull|merge|clone|ls-remote|push`,
- * `memory/cli.mjs pull`, `engram sync --export`) is rejected. This is the
- * defense-in-depth runtime layer of REQ-2 — every subprocess this module
- * issues directly is checked here before it runs.
+ * `memory/cli.mjs pull`, `memory/cli.mjs import --export`, `engram sync
+ * --export`) is rejected. This is the runtime gate ALL subprocess calls
+ * session-start.mjs controls are routed through — directly (step 2) and via
+ * the injected `_spawn` seam threaded into the PR1 libs and the
+ * feature-resume runner (steps 1, 3, 4) — before they reach the real spawn.
  *
  * @param {string} cmd
  * @param {string[]} args
@@ -93,13 +105,35 @@ const MEMORY_CLI_ALLOWED_OPS = new Set(['import', 'feature-resume']);
  */
 export function assertLocalArgv(cmd, args = []) {
   const a = Array.isArray(args) ? args : [];
+  const describe = () => `${cmd} ${a.join(' ')}`;
+
+  if (a.some((arg) => typeof arg === 'string' && FORBIDDEN_ARGV_TOKEN.test(arg))) {
+    throw new Error(`assertLocalArgv: blocked non-allowlisted local op: ${describe()}`);
+  }
 
   if (cmd === 'git' && GIT_ALLOWED_SUBCOMMANDS.has(a[0])) return;
 
   const isMemoryCli = typeof a[0] === 'string' && a[0].includes('memory/cli.mjs');
-  if (isMemoryCli && MEMORY_CLI_ALLOWED_OPS.has(a[1])) return;
+  if (isMemoryCli && a.length === 2 && MEMORY_CLI_ALLOWED_OPS.has(a[1])) return;
 
-  throw new Error(`assertLocalArgv: blocked non-allowlisted local op: ${cmd} ${a.join(' ')}`);
+  throw new Error(`assertLocalArgv: blocked non-allowlisted local op: ${describe()}`);
+}
+
+/**
+ * The ONE gated runner every subprocess session-start.mjs controls funnels
+ * through: validates `(cmd, args)` via `assertLocalArgv` BEFORE invoking the
+ * underlying spawn function (real `spawnSync` in production, an injectable
+ * spy in tests) — design §1.5(b)'s "every subprocess goes through ONE gated
+ * runner" made literally true for both production and test code paths.
+ *
+ * @param {string} cmd
+ * @param {string[]} args
+ * @param {object} opts
+ * @param {Function} [spawnFn]  Defaults to the real `spawnSync`.
+ */
+export function gatedSpawn(cmd, args, opts, spawnFn = spawnSync) {
+  assertLocalArgv(cmd, args);
+  return spawnFn(cmd, args, opts);
 }
 
 // ── renderContextBlock — pure, sync, deterministic output (design §1.7) ─────

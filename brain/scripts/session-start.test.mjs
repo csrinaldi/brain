@@ -458,6 +458,22 @@ test('assertLocalArgv: engram sync --export throws', () => {
   assert.throws(() => assertLocalArgv('engram', ['sync', '--export']));
 });
 
+// MINOR 2 hardening (fresh review): allowlisted memory/cli.mjs ops took no
+// extra args before, so trailing flags slipped through unrejected, e.g.
+// ['memory/cli.mjs', 'import', '--export'] used to pass. Now rejected both
+// because import/feature-resume must be called with exactly 2 args, AND
+// because a forbidden token anywhere in argv is rejected as defense in depth.
+test('assertLocalArgv: rejects unexpected trailing args on memory/cli.mjs import|feature-resume', () => {
+  assert.throws(() => assertLocalArgv('/usr/bin/node', ['brain/scripts/memory/cli.mjs', 'import', '--export']));
+  assert.throws(() => assertLocalArgv('/usr/bin/node', ['brain/scripts/memory/cli.mjs', 'import', '--extra-flag']));
+  assert.throws(() => assertLocalArgv('/usr/bin/node', ['brain/scripts/memory/cli.mjs', 'feature-resume', 'extra']));
+});
+
+test('assertLocalArgv: rejects a forbidden token anywhere in argv, even on an otherwise-allowed cmd', () => {
+  assert.throws(() => assertLocalArgv('git', ['status', '--', 'pull']));
+  assert.throws(() => assertLocalArgv('/usr/bin/node', ['brain/scripts/memory/cli.mjs', 'import', '--cloud']));
+});
+
 test('assertLocalArgv: throws synchronously (no promise rejection)', () => {
   let threw = false;
   try {
