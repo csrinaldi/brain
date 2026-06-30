@@ -141,6 +141,39 @@ alone approaches 400 lines once written.
       guard, calls `runSessionStart(process.cwd())`, `console.log(output)`, never
       `process.exit(1)` (exits 0 implicitly).
 
+### Fresh review fixes (PR2, same branch `feat/issue-138-s2-core`)
+
+A fresh adversarial review found 2 MAJOR + 2 MINOR findings, all fixed with
+RED-first regression tests before the GREEN fix, 0 regressions (`npm test`
+604/604 after):
+
+- [x] **MAJOR 1** — `deriveChangeFromBranch` used `.includes(token)`, letting a
+      short issue number substring-match a longer one (`issue-13` wrongly
+      resolved to `issue-138-session-start`). Fixed: delimiter-anchored match
+      (`name === token || name.startsWith(token + '-')`). `design.md` §1.4
+      updated to specify the anchored contract.
+- [x] **MAJOR 2** — `assertLocalArgv` was only invoked by `step2HydrateEngram`;
+      `step1RestoreManifest`, `step3ResolveChange`, and `step4LoadTicketMemory`
+      spawned directly, bypassing the gate (`step4` ignored `deps._spawn`
+      entirely and could reach a real subprocess). Fixed: `gatedSpawn(cmd,
+      args, opts, spawnFn)` + a per-step `boundGatedSpawn(deps)` helper now
+      route ALL 4 steps' subprocess calls through `assertLocalArgv` before the
+      real spawn — including `tryFeatureResume`, via its own existing
+      `{_runner}` injection point (`auto-resume.mjs` itself was NOT modified;
+      out of scope, owned by the already-merged feature-working-memory
+      change). `design.md` §1.5(b) and the file's top docstring updated to
+      describe this coverage accurately.
+- [x] **MINOR 1** — the no-network behavioral test stubbed `_branch`/`_resume`
+      directly, so `git rev-parse` and `feature-resume` never flowed through
+      the `_spawn` spy. Fixed: only `_spawn`/`_changes` are stubbed now; the
+      real `currentBranch`/`tryFeatureResume` paths run and are observed by
+      the spy, with explicit assertions all 4 spawn kinds are present.
+- [x] **MINOR 2** — `assertLocalArgv` ignored trailing args, so
+      `['memory/cli.mjs', 'import', '--export']` would have passed. Fixed:
+      `import`/`feature-resume` now require exactly 2 args, plus a global
+      forbidden-token check (`pull|fetch|merge|clone|ls-remote|push` as a
+      whole token, or `--export|--cloud` anywhere) as defense in depth.
+
 ## Slice 3 — i18n + universal entry + adapter wiring (REQ-1, REQ-8)
 
 - [ ] 3.1 [GREEN] Add canonical `session.*` keys to `brain/scripts/i18n/en.mjs` per
