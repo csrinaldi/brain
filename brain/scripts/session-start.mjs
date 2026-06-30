@@ -57,7 +57,13 @@ export function deriveChangeFromBranch(branchName, changesDir, { _readdir = read
     out.matches = entries
       .filter((e) => e && typeof e.isDirectory === 'function' && e.isDirectory() && e.name !== 'archive')
       .map((e) => e.name)
-      .filter((name) => name.includes(out.token))
+      // Delimiter-anchored match (NOT substring `.includes`): a dir name only
+      // matches when it IS the token (bare `issue-<N>`) or starts with
+      // `<token>-` (the usual `issue-<N>-<slug>` shape). Plain `.includes`
+      // let a short token substring-match a longer one, e.g.
+      // 'issue-138-session-start'.includes('issue-13') === true — a
+      // confident WRONG resolution for branch `issue-13`.
+      .filter((name) => name === out.token || name.startsWith(`${out.token}-`))
       .sort();
     return out;
   } catch {

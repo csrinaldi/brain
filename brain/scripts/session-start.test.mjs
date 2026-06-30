@@ -107,6 +107,32 @@ test('deriveChangeFromBranch: case-insensitive ISSUE token, canonical lowercase 
   assert.deepEqual(result.matches, ['issue-138-session-start']);
 });
 
+// MAJOR 1 regression (fresh review): `.includes(token)` let a short issue
+// number substring-match a longer one — `'issue-138-session-start'.includes(
+// 'issue-13')` === true, so branch `issue-13` wrongly resolved to change
+// `issue-138-session-start`. Fixed via delimiter-anchored matching:
+// `name === token || name.startsWith(token + '-')`.
+test('deriveChangeFromBranch: delimiter-anchored match — issue-13 must NOT match issue-138-*', () => {
+  const _readdir = () => [direntDir('issue-138-session-start')];
+  const result = deriveChangeFromBranch('feat/issue-13-x', '/repo/openspec/changes', { _readdir });
+  assert.equal(result.token, 'issue-13');
+  assert.deepEqual(result.matches, [], 'issue-13 must never match an issue-138-* directory');
+});
+
+test('deriveChangeFromBranch: delimiter-anchored match — issue-13 resolves ONLY to its own dir, not issue-138-*', () => {
+  const _readdir = () => [direntDir('issue-13-foo'), direntDir('issue-138-bar')];
+  const result = deriveChangeFromBranch('feat/issue-13-x', '/repo/openspec/changes', { _readdir });
+  assert.equal(result.token, 'issue-13');
+  assert.deepEqual(result.matches, ['issue-13-foo']);
+});
+
+test('deriveChangeFromBranch: delimiter-anchored match — bare dir name equal to the token still matches', () => {
+  const _readdir = () => [direntDir('issue-13'), direntDir('issue-138-bar')];
+  const result = deriveChangeFromBranch('feat/issue-13-x', '/repo/openspec/changes', { _readdir });
+  assert.equal(result.token, 'issue-13');
+  assert.deepEqual(result.matches, ['issue-13']);
+});
+
 // ---------------------------------------------------------------------------
 // renderContextBlock(model) — pure, sync, deterministic (design §1.7)
 // ---------------------------------------------------------------------------

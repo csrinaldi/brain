@@ -144,7 +144,8 @@ export function deriveChangeFromBranch(branchName, changesDir,
     out.matches = entries
       .filter(e => e.isDirectory() && e.name !== 'archive')
       .map(e => e.name)
-      .filter(name => name.includes(out.token))        // dir name contains issue-<N>
+      // Delimiter-anchored, NOT substring `.includes` — see rationale below.
+      .filter(name => name === out.token || name.startsWith(`${out.token}-`))
       .sort();                                          // deterministic ordering
     return out;
   } catch {
@@ -155,7 +156,15 @@ export function deriveChangeFromBranch(branchName, changesDir,
 
 **Algorithm:** extract `issue-<N>` via `/issue-(\d+)/i`; enumerate
 `openspec/changes/*` directories (excluding `archive`); keep those whose folder name
-**contains** the token; return `{ token, matches: [] }` sorted.
+is **delimiter-anchored equal to the token** — `name === token` (bare
+`issue-<N>`) **or** `name.startsWith(token + '-')` (the usual
+`issue-<N>-<slug>` shape) — NOT a plain substring `.includes(token)` match.
+A plain `.includes` check lets a short issue number falsely match a longer
+one sharing the same prefix digits, e.g.
+`'issue-138-session-start'.includes('issue-13')` === `true` — branch
+`issue-13` would wrongly resolve to change `issue-138-session-start`, a
+confident WRONG answer with no error signal. Return `{ token, matches: [] }`
+sorted.
 
 **0 / 1 / N handling** (resolved by the caller `step3ResolveChange`, never thrown):
 - `0` matches → context block prints "no change folder for branch <branch>"; loader
