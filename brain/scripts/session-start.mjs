@@ -249,7 +249,12 @@ export async function runSessionStart(cwd, deps = {}) {
 }
 
 // ── CLI entry-point ──────────────────────────────────────────────────────────
+//
+// Import-pure: NO action runs unless this file is the process entry point.
+// Prints the context block to stdout and exits 0 implicitly — session:start
+// must never block an agent's session on a context-load failure (REQ-1, REQ-7).
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  // Placeholder until 2.16 wires the full orchestrator.
+  const { output } = await runSessionStart(process.cwd());
+  console.log(output);
 }

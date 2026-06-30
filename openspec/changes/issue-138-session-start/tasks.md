@@ -116,27 +116,27 @@ alone approaches 400 lines once written.
       asserts output composition matches `renderContextBlock` for given step results.
 - [x] 2.10 [GREEN] Implement `runSessionStart` orchestrator in `session-start.mjs` per
       design §1.1 to pass 2.9. ALWAYS resolves `exitCode: 0`.
-- [ ] 2.11 [RED] Write the import-graph allowlist test: statically inspect
+- [x] 2.11 [RED] Write the import-graph allowlist test: statically inspect
       `session-start.mjs`'s import specifiers and assert they are a subset of
       `{node:* builtins, lib/git-branch.mjs, lib/memory-manifest.mjs,
       memory/lib/auto-resume.mjs, i18n/t.mjs}` — explicitly assert `day-start.mjs`,
       `vcs/*`, `lib/installer.mjs` are NOT imported.
-- [ ] 2.12 [RED] Write the spy-spawn behavioral no-network test: inject a `_spawn` spy
+- [x] 2.12 [RED] Write the spy-spawn behavioral no-network test: inject a `_spawn` spy
       into `runSessionStart` over a fixture repo, run the full loop, and assert
       (a) every captured argv matches the allowlist, (b) NO argv contains
       `pull|fetch|merge|clone|ls-remote|push|--export`.
-- [ ] 2.13 [GREEN] Fix any gaps surfaced by 2.11/2.12 (these tests should pass against
+- [x] 2.13 [GREEN] Fix any gaps surfaced by 2.11/2.12 (these tests should pass against
       the 2.2–2.10 implementation with no production changes if the design was
       followed correctly; treat any failure here as a structural bug to fix, not
       a test to weaken).
-- [ ] 2.14 [RED] Write branch→change fixture integration tests: temp
+- [x] 2.14 [RED] Write branch→change fixture integration tests: temp
       `openspec/changes/{issue-138-session-start, issue-99-other}` dirs;
       assert resolution from a `feature/138-...`-style branch and ambiguity
       detection from two `issue-138-*` dirs.
-- [ ] 2.15 [GREEN] Confirm 2.14 passes against the existing implementation (no new
+- [x] 2.15 [GREEN] Confirm 2.14 passes against the existing implementation (no new
       production code expected; this is an integration-level regression net
       over 2.2 + 2.8).
-- [ ] 2.16 [GREEN] Add the import-pure CLI entry point at the bottom of
+- [x] 2.16 [GREEN] Add the import-pure CLI entry point at the bottom of
       `session-start.mjs`: `if (process.argv[1] === fileURLToPath(import.meta.url))`
       guard, calls `runSessionStart(process.cwd())`, `console.log(output)`, never
       `process.exit(1)` (exits 0 implicitly).

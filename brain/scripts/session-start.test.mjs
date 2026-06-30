@@ -5,6 +5,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import {
   deriveChangeFromBranch,
@@ -436,4 +440,128 @@ test('assertLocalArgv: throws synchronously (no promise rejection)', () => {
     threw = true;
   }
   assert.ok(threw, 'must throw synchronously, not return a rejected promise');
+});
+
+// ---------------------------------------------------------------------------
+// No-network — import-graph allowlist (structural, design §1.5a)
+// ---------------------------------------------------------------------------
+
+const SESSION_START_PATH = join(dirname(fileURLToPath(import.meta.url)), 'session-start.mjs');
+
+const ALLOWED_IMPORT_SPECIFIERS = [
+  /^node:/,
+  './lib/git-branch.mjs',
+  './lib/memory-manifest.mjs',
+  './memory/lib/auto-resume.mjs',
+  './i18n/t.mjs',
+];
+
+function extractImportSpecifiers(source) {
+  const specifiers = [];
+  const re = /from\s+['"]([^'"]+)['"]/g;
+  let m;
+  while ((m = re.exec(source)) !== null) specifiers.push(m[1]);
+  return specifiers;
+}
+
+test('import-graph: session-start.mjs imports only the allowlisted modules', () => {
+  const source = readFileSync(SESSION_START_PATH, 'utf8');
+  const specifiers = extractImportSpecifiers(source);
+  assert.ok(specifiers.length > 0, 'expected at least one import specifier');
+  for (const spec of specifiers) {
+    const allowed = ALLOWED_IMPORT_SPECIFIERS.some((rule) =>
+      rule instanceof RegExp ? rule.test(spec) : rule === spec,
+    );
+    assert.ok(allowed, `import specifier not allowlisted: ${spec}`);
+  }
+});
+
+test('import-graph: day-start.mjs, vcs/*, lib/installer.mjs are NOT imported', () => {
+  const source = readFileSync(SESSION_START_PATH, 'utf8');
+  const specifiers = extractImportSpecifiers(source);
+  assert.ok(!specifiers.some((s) => s.includes('day-start.mjs')), 'must not import day-start.mjs');
+  assert.ok(!specifiers.some((s) => s.includes('/vcs/')), 'must not import vcs/*');
+  assert.ok(!specifiers.some((s) => s.includes('installer.mjs')), 'must not import lib/installer.mjs');
+});
+
+// ---------------------------------------------------------------------------
+// No-network — spy-spawn behavioral test over the full loop (design §1.5c)
+// ---------------------------------------------------------------------------
+
+const FORBIDDEN_VERBS = /\b(pull|fetch|merge|clone|ls-remote|push|--export)\b/;
+
+test('no-network: spy _spawn over the full loop — every argv allowlisted, none forbidden', async () => {
+  const calls = [];
+  const _spawn = (cmd, args) => { calls.push({ cmd, args }); return { status: 0, stdout: '' }; };
+  const _branch = () => 'feat/issue-138-x';
+  const _changes = () => [direntDir('issue-138-session-start')];
+  const _resume = () => null;
+
+  await runSessionStart('/repo', { _spawn, _branch, _changes, _resume });
+
+  assert.ok(calls.length > 0, 'expected at least one spawn call to verify');
+  for (const { cmd, args } of calls) {
+    assert.doesNotThrow(
+      () => assertLocalArgv(cmd, args),
+      `argv not on the local allowlist: ${cmd} ${args.join(' ')}`,
+    );
+    assert.ok(
+      !FORBIDDEN_VERBS.test(args.join(' ')),
+      `forbidden verb found in argv: ${cmd} ${args.join(' ')}`,
+    );
+  }
+});
+
+test('no-network: the pull codepath is never reached even when manifest churn is present', async () => {
+  const calls = [];
+  const _spawn = (cmd, args) => {
+    calls.push({ cmd, args });
+    if (args[0] === 'status') return { status: 0, stdout: ' M .memory/manifest.json\n' };
+    return { status: 0, stdout: '' };
+  };
+  const _branch = () => null;
+  const _changes = () => [];
+  const _resume = () => null;
+
+  await runSessionStart('/repo', { _spawn, _branch, _changes, _resume });
+
+  assert.ok(calls.some((c) => c.args[0] === 'restore'), 'manifest restore should have run');
+  for (const { args } of calls) {
+    assert.ok(!FORBIDDEN_VERBS.test(args.join(' ')), `forbidden verb found: ${args.join(' ')}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// branch→change fixture integration tests (design §1.4, real filesystem)
+// ---------------------------------------------------------------------------
+
+test('fixtures: resolves a single change from a real openspec/changes/ tree', () => {
+  const root = mkdtempSync(join(tmpdir(), 'session-start-fixture-'));
+  try {
+    const changesDir = join(root, 'openspec', 'changes');
+    mkdirSync(join(changesDir, 'issue-138-session-start'), { recursive: true });
+    mkdirSync(join(changesDir, 'issue-99-other'), { recursive: true });
+
+    const result = deriveChangeFromBranch('feat/issue-138-s2-core', changesDir);
+    assert.equal(result.token, 'issue-138');
+    assert.deepEqual(result.matches, ['issue-138-session-start']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('fixtures: detects ambiguity from two issue-138-* dirs', () => {
+  const root = mkdtempSync(join(tmpdir(), 'session-start-fixture-'));
+  try {
+    const changesDir = join(root, 'openspec', 'changes');
+    mkdirSync(join(changesDir, 'issue-138-session-start'), { recursive: true });
+    mkdirSync(join(changesDir, 'issue-138-other-slice'), { recursive: true });
+    mkdirSync(join(changesDir, 'archive'), { recursive: true });
+
+    const result = deriveChangeFromBranch('feat/issue-138-x', changesDir);
+    assert.equal(result.token, 'issue-138');
+    assert.deepEqual(result.matches, ['issue-138-other-slice', 'issue-138-session-start']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
