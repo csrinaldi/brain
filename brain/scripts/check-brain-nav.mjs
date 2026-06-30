@@ -21,6 +21,9 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const BRAIN = join(ROOT, "brain");
 const HOME = join(BRAIN, "HOME.md");
+const CORE = join(BRAIN, "core");
+const PROJECT = join(BRAIN, "project");
+const isUnder = (file, dir) => file === dir || file.startsWith(dir + "/");
 
 const walk = (dir) =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -57,13 +60,20 @@ function linksOf(file) {
   return out;
 }
 
-// 1. Links rotos en cualquier doc de brain/.
+// 1. Links rotos + leaks core→project en cualquier doc de brain/.
 const dead = [];
+const coreLeaks = [];
 for (const f of brainFiles) {
   for (const { raw, kind } of linksOf(f)) {
-    if (resolveLink(f, raw, kind) === null) {
+    const r = resolveLink(f, raw, kind);
+    if (r === null) {
       const shown = kind === "wikilink" ? `[[${raw}]]` : raw;
       dead.push(`${relative(ROOT, f)} → ${shown}`);
+    } else if (isUnder(f, CORE) && isUnder(r, PROJECT)) {
+      // core/** es genérico y se distribuye a consumidores; project/** es del
+      // consumidor y varía. Un link core→project resuelve acá (self-hosting)
+      // pero rompe en todo consumidor, donde ese target no existe.
+      coreLeaks.push(`${relative(ROOT, f)} → ${relative(ROOT, r)}`);
     }
   }
 }
@@ -97,8 +107,17 @@ if (dead.length) {
   console.error(`\n✗ ${dead.length} link(s) roto(s) en brain/:`);
   for (const d of dead) console.error(`  • ${d}`);
 }
+if (coreLeaks.length) {
+  console.error(
+    `\n✗ ${coreLeaks.length} link(s) core→project en brain/ (core debe ser genérico):`,
+  );
+  for (const c of coreLeaks) console.error(`  • ${c}`);
+  console.error(
+    "  brain/core/** no puede linkear a brain/project/** — el target no existe en los consumidores.",
+  );
+}
 
-const problems = orphans.length + dead.length;
+const problems = orphans.length + dead.length + coreLeaks.length;
 if (problems === 0) {
   console.log("✓ Navegación de brain/ íntegra: sin huérfanos, sin links rotos.");
   process.exit(0);
