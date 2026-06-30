@@ -83,24 +83,24 @@ alone approaches 400 lines once written.
 
 ## Slice 2 — session-start core + no-network guarantee (REQ-2, REQ-5, REQ-6, REQ-7)
 
-- [ ] 2.1 [RED] Write failing tests for `deriveChangeFromBranch(branchName, changesDir, {_readdir})`:
+- [x] 2.1 [RED] Write failing tests for `deriveChangeFromBranch(branchName, changesDir, {_readdir})`:
       token + 1 matching dir → 1 match; token + 2 matching dirs → 2 matches,
       sorted; no `issue-<N>` token → `{token:null, matches:[]}`; `null` branch →
       `{token:null, matches:[]}`; missing `changesDir` → `[]`; `archive` dir
       excluded even if it matches; never throws (fuzz a couple of odd inputs).
-- [ ] 2.2 [GREEN] Implement `deriveChangeFromBranch` in `brain/scripts/session-start.mjs`
+- [x] 2.2 [GREEN] Implement `deriveChangeFromBranch` in `brain/scripts/session-start.mjs`
       per design §1.4 to pass 2.1.
-- [ ] 2.3 [RED] Write failing tests for `assertLocalArgv(cmd, args)`: allowlisted
+- [x] 2.3 [RED] Write failing tests for `assertLocalArgv(cmd, args)`: allowlisted
       argvs (`git status|restore|rev-parse`, `node .../memory/cli.mjs import`,
       `node .../memory/cli.mjs feature-resume`) pass through; non-allowlisted
       argvs (`git fetch`, `git pull`, `git merge`, `git clone`, `git ls-remote`,
       `git push`, `memory/cli.mjs pull`, `engram sync --export`) throw synchronously.
-- [ ] 2.4 [GREEN] Implement `assertLocalArgv` gate in `session-start.mjs` per design §1.5(b).
-- [ ] 2.5 [RED] Write failing tests for `renderContextBlock(model)` (pure/sync):
+- [x] 2.4 [GREEN] Implement `assertLocalArgv` gate in `session-start.mjs` per design §1.5(b).
+- [x] 2.5 [RED] Write failing tests for `renderContextBlock(model)` (pure/sync):
       exact-string snapshots for resolved change, no change, ambiguous N (2+),
       engram-skipped, no-ticket, and full-success cases; determinism (same
       input → same output, no clock/random).
-- [ ] 2.6 [GREEN] Implement `renderContextBlock` in `session-start.mjs` per design §1.7
+- [x] 2.6 [GREEN] Implement `renderContextBlock` in `session-start.mjs` per design §1.7
       to pass 2.5 (consumes pre-resolved i18n strings, stays sync).
 - [ ] 2.7 [RED] Write failing tests for the 5 step functions (`step1RestoreManifest`,
       `step2HydrateEngram`, `step3ResolveChange`, `step4LoadTicketMemory`) with
