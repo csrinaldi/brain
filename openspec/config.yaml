@@ -1,23 +1,28 @@
 schema: spec-driven
 
-# Fill in after running `npm run env:init`.
-# project:   name of this project (human-readable)
-# initialized: YYYY-MM-DD
+project: brain
+initialized: 2026-06-30
 
-# context: |
-#   Describe your tech stack here. This text is included in every SDD phase prompt.
-#   Examples:
-#     Tech stack: Node.js 20 + TypeScript, PostgreSQL
-#     Architecture: Hexagonal / Clean — domain at center, adapters on the outside
-#     VCS: GitHub — org/repo (project ID if applicable)
+context: |
+  Tech stack: Node.js 22 + ESM (.mjs), no framework — pure CLI scripts
+  Architecture: CLI tooling harness — scripts under brain/scripts/, lib modules, hooks
+  VCS: GitHub — csrinaldi/brain (private repo, gh CLI for all GitHub ops)
+  Package manager: npm (no lock file; scripts-only project, installed via git tags)
+  Commits: conventional commits only, no AI attribution, no Co-Authored-By
+  Branch policy: no direct commits to main (pre-commit hook enforced); branch + PR for all changes
 
 strict_tdd: false
 
-# testing:
-#   test_command: "npm test"
-#   build_command: "npm run build"
-#   framework: "Vitest"
-#   coverage_available: true
+testing:
+  test_command: "npm test"
+  build_command: ""
+  framework: "Node.js built-in (node --test)"
+  coverage_available: false
+  integration:
+    - command: "npm run test:fresh-install"
+      description: "Docker-based full fresh-install integration test (requires docker + VCS_TOKEN)"
+    - command: "npm run test:upgrade"
+      description: "Docker-based upgrade-safety integration test (requires docker + VCS_TOKEN)"
 
 rules:
   proposal:
@@ -35,7 +40,10 @@ rules:
   apply:
     - Follow existing patterns from the codebase
     tdd: false
+    test_command: "npm test"
   verify:
+    test_command: "npm test"
+    build_command: ""
     coverage_threshold: 0
   archive:
     - Warn before merging destructive deltas

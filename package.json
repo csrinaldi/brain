@@ -35,6 +35,7 @@
     "brain:check": "node ./brain/scripts/brain-check.mjs",
     "brain:save": "node ./brain/scripts/brain-save.mjs",
     "brain:ship": "node ./brain/scripts/brain-ship.mjs",
-    "brain:next": "node ./brain/scripts/brain-next.mjs"
+    "brain:next": "node ./brain/scripts/brain-next.mjs",
+    "brain:adopt": "node ./brain/scripts/adopt.mjs"
   }
 }
