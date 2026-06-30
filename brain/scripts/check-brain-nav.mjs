@@ -30,7 +30,7 @@ const walk = (dir) =>
     e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],
   );
 
-const brainFiles = walk(BRAIN).filter((f) => f.endsWith(".md"));
+const brainFiles = walk(BRAIN).filter((f) => f.endsWith(".md") && !f.includes("/__fixtures__/"));
 const brainSet = new Set(brainFiles);
 
 // Resuelve el target de un link a una ruta absoluta existente, o null.
