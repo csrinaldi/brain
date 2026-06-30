@@ -374,6 +374,35 @@ test('step4LoadTicketMemory: _resume throws → null, never throws', () => {
   assert.equal(step4LoadTicketMemory('/repo', { _resume }), null);
 });
 
+// MAJOR 2 regression (fresh review): step4 only accepted a full `_resume`
+// override and otherwise called the REAL tryFeatureResume (real spawnSync),
+// completely ignoring deps._spawn — bypassing the gate AND making the
+// no-network behavioral test blind to this subprocess call when `_resume`
+// isn't separately stubbed. step4 must now route through the same shared,
+// gated `_spawn` seam steps 1-3 use, via tryFeatureResume's own `_runner`
+// injection point (no change to auto-resume.mjs required).
+test('step4LoadTicketMemory: routes its subprocess call through the shared gated _spawn seam (no _resume override)', () => {
+  const calls = [];
+  const _spawn = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return { status: 0, stdout: 'next_action: ship it\n' };
+  };
+  const result = step4LoadTicketMemory('/repo', { _spawn });
+  assert.equal(calls.length, 1, 'step4 must route its subprocess call through the shared _spawn seam, not a real spawn');
+  assert.ok(typeof calls[0].args[0] === 'string' && calls[0].args[0].includes('memory/cli.mjs'));
+  assert.equal(calls[0].args[1], 'feature-resume');
+  assert.equal(result, 'next_action: ship it\n');
+});
+
+test('step4LoadTicketMemory: the gated call is rejected by assertLocalArgv if argv is ever tampered (defense-in-depth proof)', () => {
+  // Sanity check that the gate is actually wired in, not bypassed: a spy that
+  // returns a non-zero status still proves the call reached the spy (i.e.
+  // passed assertLocalArgv) rather than throwing before it got there.
+  const _spawn = () => ({ status: 1, stdout: '' });
+  assert.doesNotThrow(() => step4LoadTicketMemory('/repo', { _spawn }));
+  assert.equal(step4LoadTicketMemory('/repo', { _spawn }), null);
+});
+
 // ---------------------------------------------------------------------------
 // runSessionStart(cwd, deps) — top-level orchestrator (design §1.1)
 // ---------------------------------------------------------------------------

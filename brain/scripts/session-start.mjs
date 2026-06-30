@@ -15,6 +15,15 @@
 // node:* builtins, lib/git-branch.mjs, lib/memory-manifest.mjs, and
 // memory/lib/auto-resume.mjs. It MUST NOT import day-start.mjs, vcs/*,
 // lib/installer.mjs, or memory/cli.mjs's `pull` path.
+//
+// No-network gate (design §1.5b): every subprocess this module's steps issue
+// is routed through `gatedSpawn` (assertLocalArgv before the real spawn) —
+// directly in step2, and via the `{_spawn}` seam injected into the two PR1
+// libs (steps 1, 3). Step 4's call to `tryFeatureResume` is gated too, via
+// the `{_runner}` injection point `auto-resume.mjs` already exposes — that
+// file is NOT modified (it belongs to the already-merged
+// feature-working-memory change, out of scope here); its existing seam is
+// reused as-is from the caller side.
 
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -195,16 +204,38 @@ export function renderContextBlock(model) {
 // Every step is independently try/caught and folds failure into its return
 // shape — a missing engram, a non-git dir, or an ambiguous branch must
 // degrade to a printed note, never an exception.
+//
+// Gate coverage (fresh review MAJOR 2): every subprocess call a step issues —
+// directly (step 2) or via an injected `{_spawn}` seam into a PR1 lib (steps
+// 1, 3) or via tryFeatureResume's own `_runner` injection point (step 4) —
+// is routed through `boundGatedSpawn(deps)`, so `assertLocalArgv` runs
+// before the call reaches the real `spawnSync` (production) or a test spy.
+// `currentBranch` and `restoreManifestChurn` already accept `{_spawn}`;
+// `tryFeatureResume` is not modified (out of scope — owned by the
+// already-merged feature-working-memory change) — instead we supply a
+// `_runner` that itself calls through the same gated spawn.
+
+/**
+ * Builds a `(cmd, args, opts) => result` function that runs `assertLocalArgv`
+ * before delegating to `deps._spawn` (the shared test seam) or the real
+ * `spawnSync`. Every step below builds its own bound instance from the same
+ * `deps`, so a single injected `_spawn` spy observes every subprocess call
+ * the loader makes, already passed through the gate.
+ */
+function boundGatedSpawn(deps) {
+  const spawnFn = deps._spawn ?? spawnSync;
+  return (cmd, args, opts) => gatedSpawn(cmd, args, opts, spawnFn);
+}
 
 /**
  * Step 1 — restore `.memory/manifest.json` churn before any git or engram
- * operation (REQ-3). Thin wrapper over `restoreManifestChurn`.
+ * operation (REQ-3). Thin wrapper over `restoreManifestChurn`, gated.
  *
  * @returns {{ restored: boolean }}
  */
 export function step1RestoreManifest(cwd, deps = {}) {
   try {
-    return restoreManifestChurn(cwd, { _spawn: deps._spawn });
+    return restoreManifestChurn(cwd, { _spawn: boundGatedSpawn(deps) });
   } catch {
     return { restored: false };
   }
@@ -218,10 +249,9 @@ export function step1RestoreManifest(cwd, deps = {}) {
  */
 export function step2HydrateEngram(cwd, deps = {}) {
   try {
-    const spawn = deps._spawn ?? spawnSync;
+    const spawn = boundGatedSpawn(deps);
     const cmd = process.execPath;
     const args = ['brain/scripts/memory/cli.mjs', 'import'];
-    assertLocalArgv(cmd, args);
     const r = spawn(cmd, args, { cwd, encoding: 'utf8' });
     return { ok: Boolean(r) && r.status === 0 };
   } catch {
@@ -231,13 +261,13 @@ export function step2HydrateEngram(cwd, deps = {}) {
 
 /**
  * Step 3 — resolve the current branch and its matching change folder(s)
- * (REQ-5). Combines `currentBranch` + `deriveChangeFromBranch`.
+ * (REQ-5). Combines `currentBranch` (gated) + `deriveChangeFromBranch`.
  *
  * @returns {{ branch: string|null, token: string|null, matches: string[] }}
  */
 export function step3ResolveChange(cwd, deps = {}) {
   try {
-    const branchFn = deps._branch ?? ((c) => currentBranch(c, { _spawn: deps._spawn }));
+    const branchFn = deps._branch ?? ((c) => currentBranch(c, { _spawn: boundGatedSpawn(deps) }));
     const branch = branchFn(cwd);
     const changesDir = join(cwd, 'openspec', 'changes');
     const readdir = deps._changes ?? readdirSync;
@@ -250,15 +280,21 @@ export function step3ResolveChange(cwd, deps = {}) {
 
 /**
  * Step 4 — surface active-ticket operational memory via the existing
- * `tryFeatureResume` (REQ-6). Already fully isolated; wrapped again here for
- * the same step-level invariant the other steps share.
+ * `tryFeatureResume` (REQ-6). `deps._resume` (if provided) fully overrides
+ * the call for tests; otherwise `tryFeatureResume` is invoked with a
+ * `_runner` that routes through the same gated, shared `_spawn` seam the
+ * other steps use — closing the gap where this step used to call the real
+ * subprocess directly, bypassing both the gate and the shared test spy.
  *
  * @returns {string|null}
  */
 export function step4LoadTicketMemory(cwd, deps = {}) {
   try {
-    const resumeFn = deps._resume ?? tryFeatureResume;
-    return resumeFn(cwd) ?? null;
+    if (deps._resume) return deps._resume(cwd) ?? null;
+    const spawn = boundGatedSpawn(deps);
+    const runner = (root) =>
+      spawn(process.execPath, ['brain/scripts/memory/cli.mjs', 'feature-resume'], { cwd: root, encoding: 'utf8' });
+    return tryFeatureResume(cwd, { _runner: runner }) ?? null;
   } catch {
     return null;
   }
