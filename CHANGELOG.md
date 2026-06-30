@@ -5,6 +5,15 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.7.2 — core→project link fix + nav guard
+
+- `check-brain-nav` now flags any `brain/core/**` link that resolves into
+  `brain/project/**`. Core is generic and shipped to consumers; `brain/project/**`
+  is consumer-owned and varies — so a core→project link resolves in brain's own
+  self-hosting but **breaks every consumer's `brain:nav`**. Fixed the one offender
+  (`core/methodology/workflow-governance.md` referenced `ADR-0014` by path → now by
+  name). Discovered dogfooding the catastro/plataforma-scit adoption. (#126)
+
 ## v0.7.1 — maintenance
 
 - `gitlab.capabilities()` now returns a `detail` field on the `unknown` outcome,
