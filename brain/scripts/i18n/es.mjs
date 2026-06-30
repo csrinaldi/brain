@@ -249,4 +249,16 @@ export default {
 
   // ── ticket-start.mjs — feature working memory (Slice 3) ─────────────────────
   'ticket.resume.noContext': '→ No se encontró contexto de reanudación — continuando.',
+
+  // ── session-start.mjs (issue #138, PR3) ───────────────────────────────────────
+  'session.header':             'brain · contexto de sesión',
+  'session.branch':             'rama:      {branch}',
+  'session.change.one':         'cambio:    {change}',
+  'session.change.none':        'cambio:    (sin carpeta de cambio para la rama)',
+  'session.change.ambiguous':   'cambio:    ambiguo ({count}): {list}',
+  'session.memory.ok':          'memoria:   engram hidratado',
+  'session.memory.skip':        'memoria:   engram no disponible (omitido)',
+  'session.manifest.restored':  'manifest:  cambios descartados (seguro)',
+  'session.ticket.label':       'ticket:',
+  'session.ticket.none':        '(sin memoria de ticket activa)',
 };

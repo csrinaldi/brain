@@ -348,6 +348,29 @@ test('PR3 sh: renderCatalog emits tools.apt.section correctly', () => {
   assert.equal(line, "I18N_TOOLS_APT_SECTION='System packages (apt)'");
 });
 
+// ── PR3 session-start.mjs: session.* key existence in en.mjs (REQ-8, design §1.8) ──
+
+test('PR3 session: all session.* keys exist in en with the planned English templates', () => {
+  assert.equal(en['session.header'],            'brain · session context');
+  assert.equal(en['session.branch'],             'branch:   {branch}');
+  assert.equal(en['session.change.one'],         'change:   {change}');
+  assert.equal(en['session.change.none'],        'change:   (no change folder for branch)');
+  assert.equal(en['session.change.ambiguous'],   'change:   ambiguous ({count}): {list}');
+  assert.equal(en['session.memory.ok'],          'memory:   engram hydrated');
+  assert.equal(en['session.memory.skip'],        'memory:   engram unavailable (skipped)');
+  assert.equal(en['session.manifest.restored'],  'manifest: churn restored (safe)');
+  assert.equal(en['session.ticket.label'],       'ticket:');
+  assert.equal(en['session.ticket.none'],        '(no active ticket memory)');
+});
+
+test('PR3 session: every session.* key in en has a translated (non-identical-fallback) es entry', () => {
+  const sessionKeys = Object.keys(en).filter((k) => k.startsWith('session.'));
+  assert.ok(sessionKeys.length >= 10, 'expected at least 10 session.* keys in en.mjs');
+  for (const key of sessionKeys) {
+    assert.ok(key in es, `es.mjs is missing session.* key: ${key}`);
+  }
+});
+
 // ── PR3 Spanish translation accuracy for representative bootstrap/tools keys ──
 
 test('translate: bootstrap.deps.section returns Spanish section title', () => {
