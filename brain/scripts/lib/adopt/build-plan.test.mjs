@@ -96,7 +96,10 @@ test('catastro-flat: summary.generic===1, summary.project===2, summary.translati
       join(FIXTURE_ROOT, 'docs', 'onboarding', 'guide.md'),
       'utf8',
     ),
-    'brain/project/custom/notes.md': 'Custom project notes for Catastro team.',
+    'brain/project/custom/notes.md': readFileSync(
+      join(FIXTURE_ROOT, 'brain', 'project', 'custom', 'notes.md'),
+      'utf8',
+    ),
   };
 
   const upstreamContent = {
@@ -329,6 +332,67 @@ test('per-file record has all required spec fields', async () => {
   assert.ok(['generic', 'project'].includes(record.classification), 'classification must be generic|project');
   assert.equal(typeof record.languageFlag, 'boolean', 'languageFlag must be boolean');
   assert.equal(typeof record.reason, 'string', 'reason must be string');
+});
+
+// ── EN-drift structural guard integration ─────────────────────────────────────
+//
+// A generic EN file where the consumer added sections (more headings than upstream)
+// must NOT be scheduled for adopt-upstream. The classifier returns 'flag-for-review',
+// which build-plan maps to divergenceKind:'drift' + proposedAction:'flag-review'.
+// The consumer's content is therefore NOT overwritten (no adopt-upstream in the plan).
+
+test('EN generic file with consumer-added sections → proposedAction:flag-review, NOT adopt-upstream', async () => {
+  const enConsumerWithExtraSections = `\
+# Brain Methodology — Introduction
+
+## What is Brain Methodology?
+
+The Brain methodology provides structured knowledge management.
+
+## How It Works
+
+Brain uses managed paths to decide which files it owns.
+
+## Catastro-Specific Conventions
+
+This section was added by the Catastro team. Upstream does not have this.
+
+## Additional Team Notes
+
+More consumer-added content absent from the upstream brain package.
+`;
+  const enUpstream = `\
+# Brain Methodology — Introduction
+
+## What is Brain Methodology?
+
+The Brain methodology provides structured knowledge management.
+
+## How It Works
+
+Brain uses managed paths to decide which files it owns.
+`;
+
+  const plan = await buildPlan({
+    files: ['brain/methodology/intro.md'],
+    readConsumer: () => enConsumerWithExtraSections,
+    readUpstream: () => enUpstream,
+    manifest: MANIFEST,
+    generatedAt: GENERATED_AT,
+    manifestSource: 'self-host',
+  });
+
+  const record = plan.files[0];
+  assert.equal(record.classification, 'generic', 'must be classified generic');
+  // classifier 'flag-for-review' maps to plan divergenceKind:'drift' + proposedAction:'flag-review'
+  assert.equal(record.divergenceKind, 'drift',
+    `plan divergenceKind must be 'drift' (internal flag-for-review maps here), got ${record.divergenceKind}`);
+  assert.equal(record.proposedAction, 'flag-review',
+    `proposedAction must be 'flag-review', NOT 'adopt-upstream'; consumer content must not be overwritten`);
+  assert.equal(record.languageFlag, false, 'languageFlag must be false (not a translation)');
+  // Guard: consumer content is NOT scheduled for overwrite
+  assert.notEqual(record.proposedAction, 'adopt-upstream',
+    'adopt-upstream must NOT appear — consumer-added sections would be silently overwritten');
 });
 
 // ── generatedAt is injected (purity check) ───────────────────────────────────

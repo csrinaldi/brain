@@ -185,6 +185,85 @@ test('upstream text used as consumer (EN only, differs) → divergenceKind: drif
   assert.equal(languageSignal.verdict, 'en');
 });
 
+// ── EN structural guard (condition 4 mirrored for EN path) ──────────────────
+
+test('EN-dominant file with more headings than upstream → divergenceKind: flag-for-review', () => {
+  // Spec condition 4 applies to both languages: an EN generic file with consumer-added
+  // sections (more headings than upstream) must not be silently scheduled for adopt-upstream.
+  const enConsumerWithExtraSections = `\
+# Brain Methodology — Introduction
+
+## What is Brain Methodology?
+
+The Brain methodology provides structured knowledge management.
+
+## How It Works
+
+Brain uses managed paths to decide which files it owns.
+
+## Catastro-Specific Conventions
+
+This section was added by the Catastro team and does not exist in upstream.
+All local overrides for our municipality deployment are documented here.
+
+## Additional Team Notes
+
+More consumer-added content absent from the upstream brain package.
+`;
+  const enUpstream = `\
+# Brain Methodology — Introduction
+
+## What is Brain Methodology?
+
+The Brain methodology provides structured knowledge management.
+
+## How It Works
+
+Brain uses managed paths to decide which files it owns.
+`;
+  // consumer: 4 headings, upstream: 3 headings → structural divergence → flag-for-review
+  const { divergenceKind, languageSignal, reason } = classifyDivergence(enConsumerWithExtraSections, enUpstream);
+  assert.strictEqual(divergenceKind, 'flag-for-review',
+    `expected flag-for-review (EN structural guard), got ${divergenceKind}; reason: ${reason}`);
+  assert.ok(languageSignal !== null);
+  assert.strictEqual(languageSignal.verdict, 'en', 'language signal must still be EN-dominant');
+  assert.ok(reason.includes('consumer-added headings'),
+    `reason should mention consumer-added headings, got: ${reason}`);
+});
+
+test('EN-dominant file with same/fewer headings but differing bytes → divergenceKind: drift', () => {
+  // When the EN consumer has NOT added headings (≤ upstream count), it is plain drift —
+  // the structural guard does not fire and adopt-upstream is safe.
+  const enConsumerDrift = `\
+# Brain Methodology — Introduction
+
+## What is Brain Methodology?
+
+The Brain methodology provides structured knowledge management, modified by consumer.
+
+## How It Works
+
+Brain uses managed paths to decide which files it owns.
+`;
+  const enUpstream = `\
+# Brain Methodology — Introduction
+
+## What is Brain Methodology?
+
+The Brain methodology provides structured knowledge management.
+
+## How It Works
+
+Brain uses managed paths to decide which files it owns.
+`;
+  // consumer: 3 headings, upstream: 3 headings → no structural divergence → drift
+  const { divergenceKind, languageSignal } = classifyDivergence(enConsumerDrift, enUpstream);
+  assert.strictEqual(divergenceKind, 'drift',
+    `expected drift (same heading count, bytes differ), got ${divergenceKind}`);
+  assert.ok(languageSignal !== null);
+  assert.strictEqual(languageSignal.verdict, 'en');
+});
+
 // ── Flag-for-review (ambiguous / short / no markers) ────────────────────────
 
 test('short text with no language markers → divergenceKind: flag-for-review', () => {
