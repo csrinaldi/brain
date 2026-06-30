@@ -6,7 +6,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { deriveChangeFromBranch, assertLocalArgv, renderContextBlock } from './session-start.mjs';
+import {
+  deriveChangeFromBranch,
+  assertLocalArgv,
+  renderContextBlock,
+  step1RestoreManifest,
+  step2HydrateEngram,
+  step3ResolveChange,
+  step4LoadTicketMemory,
+} from './session-start.mjs';
 
 // ---------------------------------------------------------------------------
 // deriveChangeFromBranch(branchName, changesDir, {_readdir})
@@ -232,6 +240,107 @@ test('renderContextBlock: deterministic — same input → same output (no clock
     ticket: 'next_action: ship it\n',
   };
   assert.equal(renderContextBlock(model), renderContextBlock(model));
+});
+
+// ---------------------------------------------------------------------------
+// step1RestoreManifest / step2HydrateEngram / step3ResolveChange /
+// step4LoadTicketMemory — ordered step functions, injectable deps (design §1.1)
+// ---------------------------------------------------------------------------
+
+test('step1RestoreManifest: churn present → {restored:true}', () => {
+  const _spawn = (cmd, args) => {
+    if (args[0] === 'status') return { status: 0, stdout: ' M .memory/manifest.json\n' };
+    return { status: 0, stdout: '' };
+  };
+  assert.deepEqual(step1RestoreManifest('/repo', { _spawn }), { restored: true });
+});
+
+test('step1RestoreManifest: clean → {restored:false}', () => {
+  const _spawn = () => ({ status: 0, stdout: '' });
+  assert.deepEqual(step1RestoreManifest('/repo', { _spawn }), { restored: false });
+});
+
+test('step1RestoreManifest: _spawn throws → {restored:false}, never throws', () => {
+  const _spawn = () => { throw new Error('spawn git ENOENT'); };
+  assert.doesNotThrow(() => step1RestoreManifest('/repo', { _spawn }));
+  assert.deepEqual(step1RestoreManifest('/repo', { _spawn }), { restored: false });
+});
+
+test('step2HydrateEngram: spawn exits 0 → {ok:true}', () => {
+  const _spawn = () => ({ status: 0, stdout: '' });
+  assert.deepEqual(step2HydrateEngram('/repo', { _spawn }), { ok: true });
+});
+
+test('step2HydrateEngram: spawn exits non-zero → {ok:false}', () => {
+  const _spawn = () => ({ status: 1, stdout: '' });
+  assert.deepEqual(step2HydrateEngram('/repo', { _spawn }), { ok: false });
+});
+
+test('step2HydrateEngram: _spawn throws → {ok:false}, never throws', () => {
+  const _spawn = () => { throw new Error('engram not found'); };
+  assert.doesNotThrow(() => step2HydrateEngram('/repo', { _spawn }));
+  assert.deepEqual(step2HydrateEngram('/repo', { _spawn }), { ok: false });
+});
+
+test('step2HydrateEngram: only ever calls the allowlisted memory/cli.mjs import argv', () => {
+  const calls = [];
+  const _spawn = (cmd, args, opts) => { calls.push({ cmd, args, opts }); return { status: 0, stdout: '' }; };
+  step2HydrateEngram('/repo', { _spawn });
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].args[0].includes('memory/cli.mjs'));
+  assert.equal(calls[0].args[1], 'import');
+  assert.equal(calls[0].opts.cwd, '/repo');
+});
+
+test('step3ResolveChange: resolves branch + matches via injected _branch/_changes', () => {
+  const _branch = () => 'feat/issue-138-x';
+  const _changes = () => [direntDir('issue-138-session-start')];
+  const result = step3ResolveChange('/repo', { _branch, _changes });
+  assert.equal(result.branch, 'feat/issue-138-x');
+  assert.equal(result.token, 'issue-138');
+  assert.deepEqual(result.matches, ['issue-138-session-start']);
+});
+
+test('step3ResolveChange: null branch → {branch:null, token:null, matches:[]}', () => {
+  const _branch = () => null;
+  const _changes = () => [direntDir('issue-138-session-start')];
+  const result = step3ResolveChange('/repo', { _branch, _changes });
+  assert.equal(result.branch, null);
+  assert.equal(result.token, null);
+  assert.deepEqual(result.matches, []);
+});
+
+test('step3ResolveChange: _branch throws → isolated failure shape, never throws', () => {
+  const _branch = () => { throw new Error('git absent'); };
+  assert.doesNotThrow(() => step3ResolveChange('/repo', { _branch }));
+  const result = step3ResolveChange('/repo', { _branch });
+  assert.equal(result.branch, null);
+  assert.deepEqual(result.matches, []);
+});
+
+test('step3ResolveChange: _changes throws → isolated failure shape, never throws', () => {
+  const _branch = () => 'feat/issue-138-x';
+  const _changes = () => { throw new Error('ENOENT'); };
+  assert.doesNotThrow(() => step3ResolveChange('/repo', { _branch, _changes }));
+  const result = step3ResolveChange('/repo', { _branch, _changes });
+  assert.equal(result.token, 'issue-138');
+  assert.deepEqual(result.matches, []);
+});
+
+test('step4LoadTicketMemory: returns _resume() output verbatim', () => {
+  const _resume = () => 'next_action: ship it\n';
+  assert.equal(step4LoadTicketMemory('/repo', { _resume }), 'next_action: ship it\n');
+});
+
+test('step4LoadTicketMemory: _resume returns null → null', () => {
+  const _resume = () => null;
+  assert.equal(step4LoadTicketMemory('/repo', { _resume }), null);
+});
+
+test('step4LoadTicketMemory: _resume throws → null, never throws', () => {
+  const _resume = () => { throw new Error('cli not found'); };
+  assert.doesNotThrow(() => step4LoadTicketMemory('/repo', { _resume }));
+  assert.equal(step4LoadTicketMemory('/repo', { _resume }), null);
 });
 
 // ---------------------------------------------------------------------------

@@ -102,11 +102,11 @@ alone approaches 400 lines once written.
       input → same output, no clock/random).
 - [x] 2.6 [GREEN] Implement `renderContextBlock` in `session-start.mjs` per design §1.7
       to pass 2.5 (consumes pre-resolved i18n strings, stays sync).
-- [ ] 2.7 [RED] Write failing tests for the 5 step functions (`step1RestoreManifest`,
+- [x] 2.7 [RED] Write failing tests for the 5 step functions (`step1RestoreManifest`,
       `step2HydrateEngram`, `step3ResolveChange`, `step4LoadTicketMemory`) with
       injected `deps` spies: each isolates failure into its return shape and
       never throws.
-- [ ] 2.8 [GREEN] Implement the 4 step functions in `session-start.mjs` per design §1.1,
+- [x] 2.8 [GREEN] Implement the 4 step functions in `session-start.mjs` per design §1.1,
       wiring `step1` to `restoreManifestChurn`, `step2` to `assertLocalArgv`-gated
       `memory/cli.mjs import`, `step3` to `currentBranch` + `deriveChangeFromBranch`,
       `step4` to `tryFeatureResume`.

@@ -148,6 +148,82 @@ export function renderContextBlock(model) {
   return lines.join('\n');
 }
 
+// ── ordered step functions — injectable deps seam (design §1.1) ─────────────
+//
+// `deps` is the single seam for tests: { _spawn, _branch, _changes, _resume }.
+// Each defaults to the real local implementation; production passes nothing.
+// Every step is independently try/caught and folds failure into its return
+// shape — a missing engram, a non-git dir, or an ambiguous branch must
+// degrade to a printed note, never an exception.
+
+/**
+ * Step 1 — restore `.memory/manifest.json` churn before any git or engram
+ * operation (REQ-3). Thin wrapper over `restoreManifestChurn`.
+ *
+ * @returns {{ restored: boolean }}
+ */
+export function step1RestoreManifest(cwd, deps = {}) {
+  try {
+    return restoreManifestChurn(cwd, { _spawn: deps._spawn });
+  } catch {
+    return { restored: false };
+  }
+}
+
+/**
+ * Step 2 — hydrate local engram from `.memory/` via the allowlisted
+ * `memory/cli.mjs import` (REQ-4). Local-only: gated by `assertLocalArgv`.
+ *
+ * @returns {{ ok: boolean }}
+ */
+export function step2HydrateEngram(cwd, deps = {}) {
+  try {
+    const spawn = deps._spawn ?? spawnSync;
+    const cmd = process.execPath;
+    const args = ['brain/scripts/memory/cli.mjs', 'import'];
+    assertLocalArgv(cmd, args);
+    const r = spawn(cmd, args, { cwd, encoding: 'utf8' });
+    return { ok: Boolean(r) && r.status === 0 };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * Step 3 — resolve the current branch and its matching change folder(s)
+ * (REQ-5). Combines `currentBranch` + `deriveChangeFromBranch`.
+ *
+ * @returns {{ branch: string|null, token: string|null, matches: string[] }}
+ */
+export function step3ResolveChange(cwd, deps = {}) {
+  try {
+    const branchFn = deps._branch ?? ((c) => currentBranch(c, { _spawn: deps._spawn }));
+    const branch = branchFn(cwd);
+    const changesDir = join(cwd, 'openspec', 'changes');
+    const readdir = deps._changes ?? readdirSync;
+    const { token, matches } = deriveChangeFromBranch(branch, changesDir, { _readdir: readdir });
+    return { branch: branch ?? null, token, matches };
+  } catch {
+    return { branch: null, token: null, matches: [] };
+  }
+}
+
+/**
+ * Step 4 — surface active-ticket operational memory via the existing
+ * `tryFeatureResume` (REQ-6). Already fully isolated; wrapped again here for
+ * the same step-level invariant the other steps share.
+ *
+ * @returns {string|null}
+ */
+export function step4LoadTicketMemory(cwd, deps = {}) {
+  try {
+    const resumeFn = deps._resume ?? tryFeatureResume;
+    return resumeFn(cwd) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ── CLI entry-point ──────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
