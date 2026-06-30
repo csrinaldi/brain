@@ -65,6 +65,37 @@ export function deriveChangeFromBranch(branchName, changesDir, { _readdir = read
   }
 }
 
+// ── assertLocalArgv — runtime local-op allowlist gate (design §1.5b) ─────────
+
+const GIT_ALLOWED_SUBCOMMANDS = new Set(['status', 'restore', 'rev-parse']);
+const MEMORY_CLI_ALLOWED_OPS = new Set(['import', 'feature-resume']);
+
+/**
+ * Throws synchronously if `(cmd, args)` is not on the local-only allowlist:
+ *   - `git status|restore|rev-parse` (read/local index only).
+ *   - `<node> brain/scripts/memory/cli.mjs import|feature-resume` (local-only
+ *     ops per memory/cli.mjs:7-10 — never `pull`).
+ *
+ * Any other argv (notably `git fetch|pull|merge|clone|ls-remote|push`,
+ * `memory/cli.mjs pull`, `engram sync --export`) is rejected. This is the
+ * defense-in-depth runtime layer of REQ-2 — every subprocess this module
+ * issues directly is checked here before it runs.
+ *
+ * @param {string} cmd
+ * @param {string[]} args
+ * @throws {Error} when the argv is not allowlisted.
+ */
+export function assertLocalArgv(cmd, args = []) {
+  const a = Array.isArray(args) ? args : [];
+
+  if (cmd === 'git' && GIT_ALLOWED_SUBCOMMANDS.has(a[0])) return;
+
+  const isMemoryCli = typeof a[0] === 'string' && a[0].includes('memory/cli.mjs');
+  if (isMemoryCli && MEMORY_CLI_ALLOWED_OPS.has(a[1])) return;
+
+  throw new Error(`assertLocalArgv: blocked non-allowlisted local op: ${cmd} ${a.join(' ')}`);
+}
+
 // ── CLI entry-point ──────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
