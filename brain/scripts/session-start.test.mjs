@@ -14,6 +14,7 @@ import {
   step2HydrateEngram,
   step3ResolveChange,
   step4LoadTicketMemory,
+  runSessionStart,
 } from './session-start.mjs';
 
 // ---------------------------------------------------------------------------
@@ -341,6 +342,58 @@ test('step4LoadTicketMemory: _resume throws → null, never throws', () => {
   const _resume = () => { throw new Error('cli not found'); };
   assert.doesNotThrow(() => step4LoadTicketMemory('/repo', { _resume }));
   assert.equal(step4LoadTicketMemory('/repo', { _resume }), null);
+});
+
+// ---------------------------------------------------------------------------
+// runSessionStart(cwd, deps) — top-level orchestrator (design §1.1)
+// ---------------------------------------------------------------------------
+
+test('runSessionStart: returns {exitCode:0, output} even when every step fails', async () => {
+  const deps = {
+    _spawn: () => { throw new Error('spawn unavailable'); },
+    _branch: () => { throw new Error('git absent'); },
+    _changes: () => { throw new Error('ENOENT'); },
+    _resume: () => { throw new Error('cli not found'); },
+  };
+  const result = await runSessionStart('/repo', deps);
+  assert.equal(result.exitCode, 0);
+  assert.equal(typeof result.output, 'string');
+  assert.ok(result.output.includes('brain · session context'));
+});
+
+test('runSessionStart: executes steps in order manifest → engram → branch/change → ticket', async () => {
+  const order = [];
+  const _spawn = (cmd, args) => {
+    if (args[0] === 'status') order.push('manifest');
+    else if (typeof args[0] === 'string' && args[0].includes('memory/cli.mjs') && args[1] === 'import') {
+      order.push('engram');
+    }
+    return { status: 0, stdout: '' };
+  };
+  const _branch = () => { order.push('branch'); return 'feat/issue-138-x'; };
+  const _changes = () => [direntDir('issue-138-session-start')];
+  const _resume = () => { order.push('ticket'); return null; };
+
+  await runSessionStart('/repo', { _spawn, _branch, _changes, _resume });
+
+  assert.deepEqual(order, ['manifest', 'engram', 'branch', 'ticket']);
+});
+
+test('runSessionStart: output composition matches renderContextBlock for the resolved step results', async () => {
+  const _spawn = () => ({ status: 0, stdout: '' });
+  const _branch = () => 'feat/issue-138-x';
+  const _changes = () => [direntDir('issue-138-session-start')];
+  const _resume = () => 'next_action: ship it\n';
+
+  const result = await runSessionStart('/repo', { _spawn, _branch, _changes, _resume });
+
+  const expected = renderContextBlock({
+    manifest: { restored: false },
+    engram: { ok: true },
+    change: { branch: 'feat/issue-138-x', token: ISSUE_138, matches: ['issue-138-session-start'] },
+    ticket: 'next_action: ship it\n',
+  });
+  assert.equal(result.output, expected);
 });
 
 // ---------------------------------------------------------------------------

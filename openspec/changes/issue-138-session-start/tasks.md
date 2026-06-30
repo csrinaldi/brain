@@ -110,11 +110,11 @@ alone approaches 400 lines once written.
       wiring `step1` to `restoreManifestChurn`, `step2` to `assertLocalArgv`-gated
       `memory/cli.mjs import`, `step3` to `currentBranch` + `deriveChangeFromBranch`,
       `step4` to `tryFeatureResume`.
-- [ ] 2.9 [RED] Write failing tests for `runSessionStart(cwd, deps)`: returns
+- [x] 2.9 [RED] Write failing tests for `runSessionStart(cwd, deps)`: returns
       `{exitCode:0, output}` even when every step's spy fails; asserts step
       execution order (manifest → engram → branch/change → ticket → render);
       asserts output composition matches `renderContextBlock` for given step results.
-- [ ] 2.10 [GREEN] Implement `runSessionStart` orchestrator in `session-start.mjs` per
+- [x] 2.10 [GREEN] Implement `runSessionStart` orchestrator in `session-start.mjs` per
       design §1.1 to pass 2.9. ALWAYS resolves `exitCode: 0`.
 - [ ] 2.11 [RED] Write the import-graph allowlist test: statically inspect
       `session-start.mjs`'s import specifiers and assert they are a subset of

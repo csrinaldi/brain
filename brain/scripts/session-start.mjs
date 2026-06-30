@@ -224,6 +224,30 @@ export function step4LoadTicketMemory(cwd, deps = {}) {
   }
 }
 
+// ── runSessionStart — top-level orchestrator (design §1.1) ──────────────────
+
+/**
+ * Runs the full session:start loop in order: restore manifest churn →
+ * hydrate engram → resolve branch/change → load ticket memory → render.
+ *
+ * ALWAYS resolves with `exitCode: 0`. session:start is a best-effort context
+ * loader — a missing engram, a non-git dir, or an ambiguous branch must
+ * degrade to a printed note, never a non-zero exit (an agent's session must
+ * not be blocked by a context-load failure).
+ *
+ * @param {string} cwd
+ * @param {{ _spawn?: Function, _branch?: Function, _changes?: Function, _resume?: Function }} [deps]
+ * @returns {Promise<{ exitCode: 0, output: string }>}
+ */
+export async function runSessionStart(cwd, deps = {}) {
+  const manifest = step1RestoreManifest(cwd, deps);
+  const engram = step2HydrateEngram(cwd, deps);
+  const change = step3ResolveChange(cwd, deps);
+  const ticket = step4LoadTicketMemory(cwd, deps);
+  const output = renderContextBlock({ manifest, engram, change, ticket });
+  return { exitCode: 0, output };
+}
+
 // ── CLI entry-point ──────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
