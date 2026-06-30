@@ -353,6 +353,7 @@ test('PR3 sh: renderCatalog emits tools.apt.section correctly', () => {
 test('PR3 session: all session.* keys exist in en with the planned English templates', () => {
   assert.equal(en['session.header'],            'brain · session context');
   assert.equal(en['session.branch'],             'branch:   {branch}');
+  assert.equal(en['session.branch.unknown'],     '(unknown)');
   assert.equal(en['session.change.one'],         'change:   {change}');
   assert.equal(en['session.change.none'],        'change:   (no change folder for branch)');
   assert.equal(en['session.change.ambiguous'],   'change:   ambiguous ({count}): {list}');

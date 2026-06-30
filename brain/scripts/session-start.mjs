@@ -184,9 +184,10 @@ function formatChangeLine(change, strings) {
  * @param {{ manifest: {restored: boolean}, engram: {ok: boolean},
  *           change: {branch: string|null, token: string|null, matches: string[]},
  *           ticket: string|null }} model
- * @param {{ header: string, branch: string, changeOne: string, changeNone: string,
- *           changeAmbiguous: string, memoryOk: string, memorySkip: string,
- *           manifestRestored: string, ticketLabel: string, ticketNone: string }} strings
+ * @param {{ header: string, branch: string, branchUnknown: string, changeOne: string,
+ *           changeNone: string, changeAmbiguous: string, memoryOk: string,
+ *           memorySkip: string, manifestRestored: string, ticketLabel: string,
+ *           ticketNone: string }} strings
  *           Resolved `session.*` templates (placeholders intact), e.g. from
  *           `resolveSessionStrings()`.
  * @returns {string}
@@ -198,7 +199,7 @@ export function renderContextBlock(model, strings) {
   const lines = [
     s.header,
     RULE_DOUBLE,
-    fill(s.branch, { branch: change.branch ?? '(unknown)' }),
+    fill(s.branch, { branch: change.branch ?? s.branchUnknown }),
     formatChangeLine(change, s),
     engram.ok ? s.memoryOk : s.memorySkip,
   ];
@@ -359,6 +360,7 @@ export async function runSessionStart(cwd, deps = {}, strings) {
 const SESSION_I18N_KEYS = {
   header:           'session.header',
   branch:           'session.branch',
+  branchUnknown:    'session.branch.unknown',
   changeOne:        'session.change.one',
   changeNone:       'session.change.none',
   changeAmbiguous:  'session.change.ambiguous',

@@ -283,6 +283,7 @@ export default {
   // (design §1.8). {branch}/{change}/{count}/{list} are filled at render time.
   'session.header':             'brain · session context',
   'session.branch':             'branch:   {branch}',
+  'session.branch.unknown':     '(unknown)',
   'session.change.one':         'change:   {change}',
   'session.change.none':        'change:   (no change folder for branch)',
   'session.change.ambiguous':   'change:   ambiguous ({count}): {list}',

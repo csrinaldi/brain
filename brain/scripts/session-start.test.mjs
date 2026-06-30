@@ -155,6 +155,7 @@ const ISSUE_138 = 'issue-138';
 const SESSION_STRINGS = {
   header:           en['session.header'],
   branch:           en['session.branch'],
+  branchUnknown:    en['session.branch.unknown'],
   changeOne:        en['session.change.one'],
   changeNone:       en['session.change.none'],
   changeAmbiguous:  en['session.change.ambiguous'],
@@ -296,6 +297,7 @@ test('renderContextBlock: consumes the provided strings map, not a hardcoded lit
   const markerStrings = {
     header:           'MARKER_HEADER',
     branch:           'MARKER_BRANCH {branch}',
+    branchUnknown:    'MARKER_BRANCH_UNKNOWN',
     changeOne:        'MARKER_CHANGE {change}',
     changeNone:       'MARKER_CHANGE_NONE',
     changeAmbiguous:  'MARKER_CHANGE_AMBIGUOUS ({count}): {list}',
@@ -313,6 +315,27 @@ test('renderContextBlock: consumes the provided strings map, not a hardcoded lit
   assert.ok(output.includes('MARKER_MANIFEST_RESTORED'), 'manifest line must come from strings.manifestRestored');
   assert.ok(output.includes('MARKER_TICKET_LABEL'), 'ticket label must come from strings.ticketLabel');
   assert.ok(!output.includes('brain · session context'), 'must NOT fall back to the old hardcoded English literal');
+});
+
+// REQ-8 completeness fix (fresh review): the null-branch fallback was a
+// hardcoded '(unknown)' literal inside renderContextBlock, bypassing the
+// strings map entirely for this one case.
+test('renderContextBlock: null branch fallback comes from strings.branchUnknown, not a hardcoded literal', () => {
+  const model = {
+    manifest: { restored: false },
+    engram: { ok: true },
+    change: { branch: null, token: null, matches: [] },
+    ticket: null,
+  };
+  const markerStrings = {
+    header: 'H', branch: 'B {branch}', branchUnknown: 'MARKER_BRANCH_UNKNOWN',
+    changeOne: 'C {change}', changeNone: 'CN', changeAmbiguous: 'AMBIG ({count}): {list}',
+    memoryOk: 'MOK', memorySkip: 'MSKIP', manifestRestored: 'MREST',
+    ticketLabel: 'TL', ticketNone: 'TNONE',
+  };
+  const output = renderContextBlock(model, markerStrings);
+  assert.ok(output.includes('B MARKER_BRANCH_UNKNOWN'), 'null branch must fill {branch} with strings.branchUnknown');
+  assert.ok(!output.includes('(unknown)'), 'must NOT fall back to the old hardcoded (unknown) literal');
 });
 
 test('renderContextBlock: ambiguous-match line interpolates {count}/{list} from the provided strings map', () => {

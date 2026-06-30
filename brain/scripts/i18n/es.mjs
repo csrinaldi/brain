@@ -253,6 +253,7 @@ export default {
   // ── session-start.mjs (issue #138, PR3) ───────────────────────────────────────
   'session.header':             'brain · contexto de sesión',
   'session.branch':             'rama:      {branch}',
+  'session.branch.unknown':     '(desconocida)',
   'session.change.one':         'cambio:    {change}',
   'session.change.none':        'cambio:    (sin carpeta de cambio para la rama)',
   'session.change.ambiguous':   'cambio:    ambiguo ({count}): {list}',
