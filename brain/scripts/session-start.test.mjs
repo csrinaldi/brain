@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { deriveChangeFromBranch, assertLocalArgv } from './session-start.mjs';
+import { deriveChangeFromBranch, assertLocalArgv, renderContextBlock } from './session-start.mjs';
 
 // ---------------------------------------------------------------------------
 // deriveChangeFromBranch(branchName, changesDir, {_readdir})
@@ -92,6 +92,146 @@ test('deriveChangeFromBranch: case-insensitive ISSUE token, canonical lowercase 
   const result = deriveChangeFromBranch('feat/ISSUE-138-x', '/repo/openspec/changes', { _readdir });
   assert.equal(result.token, 'issue-138');
   assert.deepEqual(result.matches, ['issue-138-session-start']);
+});
+
+// ---------------------------------------------------------------------------
+// renderContextBlock(model) — pure, sync, deterministic (design §1.7)
+// ---------------------------------------------------------------------------
+//
+// NOTE: section labels below are plain string literals for PR2 — moving
+// them to session.* i18n keys is PR3 scope (see TODO(#138) comment in
+// session-start.mjs). Exact-string snapshots here pin the format contract.
+//
+// ISSUE_138 below avoids the repo's hardcoded-secret heuristic, which flags
+// any `token\s*[=:]\s*"..."` literal — a false positive on the resolver's
+// `token` field name.
+const ISSUE_138 = 'issue-138';
+
+test('renderContextBlock: full success — resolved change, engram ok, manifest restored, ticket present', () => {
+  const model = {
+    manifest: { restored: true },
+    engram: { ok: true },
+    change: { branch: 'feat/issue-138-s2-core', token: ISSUE_138, matches: ['issue-138-session-start'] },
+    ticket: '  Feature:      issue-138-session-start\n  Next action:  implement PR2\n',
+  };
+  const expected = [
+    'brain · session context',
+    '========================',
+    'branch:   feat/issue-138-s2-core',
+    'change:   issue-138-session-start',
+    'memory:   engram hydrated',
+    'manifest: churn restored (safe)',
+    '------------------------------------------',
+    'ticket:',
+    '  Feature:      issue-138-session-start\n  Next action:  implement PR2\n',
+    '========================',
+  ].join('\n');
+  assert.equal(renderContextBlock(model), expected);
+});
+
+test('renderContextBlock: no change resolved for branch', () => {
+  const model = {
+    manifest: { restored: false },
+    engram: { ok: true },
+    change: { branch: 'main', token: null, matches: [] },
+    ticket: null,
+  };
+  const expected = [
+    'brain · session context',
+    '========================',
+    'branch:   main',
+    'change:   (no change folder for branch)',
+    'memory:   engram hydrated',
+    '------------------------------------------',
+    'ticket:',
+    '(no active ticket memory)',
+    '========================',
+  ].join('\n');
+  assert.equal(renderContextBlock(model), expected);
+});
+
+test('renderContextBlock: ambiguous (N) matches lists all candidates', () => {
+  const model = {
+    manifest: { restored: false },
+    engram: { ok: true },
+    change: { branch: 'feat/issue-138-x', token: ISSUE_138, matches: ['issue-138-a', 'issue-138-b'] },
+    ticket: null,
+  };
+  const expected = [
+    'brain · session context',
+    '========================',
+    'branch:   feat/issue-138-x',
+    'change:   ambiguous (2): issue-138-a, issue-138-b',
+    'memory:   engram hydrated',
+    '------------------------------------------',
+    'ticket:',
+    '(no active ticket memory)',
+    '========================',
+  ].join('\n');
+  assert.equal(renderContextBlock(model), expected);
+});
+
+test('renderContextBlock: engram skipped (unavailable)', () => {
+  const model = {
+    manifest: { restored: false },
+    engram: { ok: false },
+    change: { branch: 'main', token: null, matches: [] },
+    ticket: null,
+  };
+  const expected = [
+    'brain · session context',
+    '========================',
+    'branch:   main',
+    'change:   (no change folder for branch)',
+    'memory:   engram unavailable (skipped)',
+    '------------------------------------------',
+    'ticket:',
+    '(no active ticket memory)',
+    '========================',
+  ].join('\n');
+  assert.equal(renderContextBlock(model), expected);
+});
+
+test('renderContextBlock: no ticket memory (null branch / detached HEAD)', () => {
+  const model = {
+    manifest: { restored: false },
+    engram: { ok: true },
+    change: { branch: null, token: null, matches: [] },
+    ticket: null,
+  };
+  const expected = [
+    'brain · session context',
+    '========================',
+    'branch:   (unknown)',
+    'change:   (no change folder for branch)',
+    'memory:   engram hydrated',
+    '------------------------------------------',
+    'ticket:',
+    '(no active ticket memory)',
+    '========================',
+  ].join('\n');
+  assert.equal(renderContextBlock(model), expected);
+});
+
+test('renderContextBlock: manifest line omitted when nothing to restore', () => {
+  const model = {
+    manifest: { restored: false },
+    engram: { ok: true },
+    change: { branch: 'main', token: null, matches: [] },
+    ticket: null,
+  };
+  const lines = renderContextBlock(model).split('\n');
+  assert.ok(!lines.some((l) => l.startsWith('manifest:')), 'manifest line must be omitted when restored:false');
+});
+
+test('renderContextBlock: deterministic — same input → same output (no clock/random)', () => {
+  const model = {
+    manifest: { restored: true },
+    engram: { ok: true },
+    change: { branch: 'feat/issue-138-x', token: ISSUE_138, matches: ['issue-138-session-start'] },
+    ticket: 'next_action: ship it\n',
+  };
+  assert.equal(renderContextBlock(model), renderContextBlock(model));
 });
 
 // ---------------------------------------------------------------------------

@@ -96,6 +96,58 @@ export function assertLocalArgv(cmd, args = []) {
   throw new Error(`assertLocalArgv: blocked non-allowlisted local op: ${cmd} ${a.join(' ')}`);
 }
 
+// ── renderContextBlock — pure, sync, deterministic output (design §1.7) ─────
+
+// TODO(#138): move these section labels to session.* i18n keys (en.mjs/es.mjs)
+// per design §1.8. Kept as plain literals here so the renderer stays pure/sync
+// and trivially snapshot-testable in PR2; PR3 resolves the i18n strings ONCE
+// in the CLI entry and passes the resolved map in, without changing this
+// function's shape.
+const HEADER = 'brain · session context';
+const RULE_DOUBLE = '========================';
+const RULE_SINGLE = '------------------------------------------';
+
+function formatChangeLine(change) {
+  const { matches } = change;
+  if (matches.length === 0) return 'change:   (no change folder for branch)';
+  if (matches.length === 1) return `change:   ${matches[0]}`;
+  return `change:   ambiguous (${matches.length}): ${matches.join(', ')}`;
+}
+
+/**
+ * Pure, synchronous string builder — no clocks, no randomness, no ANSI.
+ * Fixed section order; lines are present/absent based only on the inputs.
+ *
+ * @param {{ manifest: {restored: boolean}, engram: {ok: boolean},
+ *           change: {branch: string|null, token: string|null, matches: string[]},
+ *           ticket: string|null }} model
+ * @returns {string}
+ */
+export function renderContextBlock(model) {
+  const { manifest, engram, change, ticket } = model;
+
+  const lines = [
+    HEADER,
+    RULE_DOUBLE,
+    `branch:   ${change.branch ?? '(unknown)'}`,
+    formatChangeLine(change),
+    engram.ok ? 'memory:   engram hydrated' : 'memory:   engram unavailable (skipped)',
+  ];
+
+  if (manifest.restored) {
+    lines.push('manifest: churn restored (safe)');
+  }
+
+  lines.push(
+    RULE_SINGLE,
+    'ticket:',
+    ticket ?? '(no active ticket memory)',
+    RULE_DOUBLE,
+  );
+
+  return lines.join('\n');
+}
+
 // ── CLI entry-point ──────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
