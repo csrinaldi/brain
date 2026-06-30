@@ -129,14 +129,21 @@ function countHeadings(text) {
  *   2b. ES dominant but consumerHeadings > upstreamHeadings → 'flag-for-review'
  *       (consumer added sections not present in upstream; mislabeling 'translation' would
  *       cause adopt-upstream to silently overwrite custom content — conservative guard)
- *   3. EN dominant (en > 0 && es < MIN_HITS) → 'drift'
+ *   3. EN dominant (en > 0 && es < MIN_HITS) AND consumerHeadings ≤ upstreamHeadings
+ *      → 'drift'  (spec condition 4: structural mirroring guard applies to EN too)
+ *   3b. EN dominant but consumerHeadings > upstreamHeadings → 'flag-for-review'
+ *       (consumer added sections to an EN generic file; adopt-upstream would silently
+ *       overwrite custom content — same conservative guard as the ES path)
  *   4. Ambiguous / no markers / mixed → 'flag-for-review' (conservative default)
  *
  * NOTE: 'flag-for-review' is an internal signal. build-plan.mjs maps it to
  *       divergenceKind: 'drift' + proposedAction: 'flag-review' in the final plan.
  *
- * Spec condition 4 is enforced via heading-structure comparison: the consumer heading
- * count must not exceed the upstream count for 'translation' to be assigned.
+ * Spec condition 4 (structural mirroring) is enforced for BOTH language paths:
+ * the consumer heading count must not exceed the upstream count for either
+ * 'translation' (ES path) or 'drift' (EN path) to be assigned. This prevents
+ * adopt-upstream from silently overwriting consumer-added sections regardless
+ * of the file language.
  *
  * @param {string} consumerText  Full text content of the consumer file.
  * @param {string} upstreamText  Full text content of the upstream brain file.
@@ -181,6 +188,19 @@ export function classifyDivergence(consumerText, upstreamText) {
   }
 
   if (signal.verdict === 'en') {
+    // Spec condition 4: structural mirroring guard — applies to EN just as to ES.
+    // An EN generic file where the consumer has added headings beyond the upstream
+    // count has consumer-specific content; silently scheduling it for adopt-upstream
+    // would overwrite those additions. Flag for human review instead.
+    const consumerHeadings = countHeadings(consumerText);
+    const upstreamHeadings = countHeadings(upstreamText);
+    if (consumerHeadings > upstreamHeadings) {
+      return {
+        divergenceKind: 'flag-for-review',
+        languageSignal: signal,
+        reason: `EN generic file with consumer-added headings (consumer: ${consumerHeadings}, upstream: ${upstreamHeadings}) — structure diverges from upstream; flagged for human review before adopt-upstream`,
+      };
+    }
     return {
       divergenceKind: 'drift',
       languageSignal: signal,
