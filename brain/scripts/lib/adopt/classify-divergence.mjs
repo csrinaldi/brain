@@ -108,16 +108,35 @@ function computeLanguageSignal(text) {
 }
 
 /**
+ * Counts Markdown heading lines (lines starting with 1–6 # characters followed by a space).
+ * Used by the structural mirroring check: a clean translation mirrors the upstream
+ * heading hierarchy; consumer-added headings signal drift or restructuring that a
+ * human must confirm before an adopt-upstream action overwrites the content.
+ * @param {string} text
+ * @returns {number}
+ */
+function countHeadings(text) {
+  return (text.match(/^#{1,6}\s/gm) || []).length;
+}
+
+/**
  * Classifies the divergence between a consumer file and its upstream equivalent.
  *
  * Classification rules (applied in order):
  *   1. Identical bytes → 'identical'  (languageSignal: null)
- *   2. ES dominant (es ≥ MIN_HITS && es > en) → 'translation'
- *   3. EN dominant (en > 0 && es < MIN_HITS)  → 'drift'
- *   4. Ambiguous / no markers / mixed          → 'flag-for-review' (conservative default)
+ *   2. ES dominant (es ≥ MIN_HITS && es > en) AND consumerHeadings ≤ upstreamHeadings
+ *      → 'translation'  (spec condition 4: structural mirroring enforced via heading count)
+ *   2b. ES dominant but consumerHeadings > upstreamHeadings → 'flag-for-review'
+ *       (consumer added sections not present in upstream; mislabeling 'translation' would
+ *       cause adopt-upstream to silently overwrite custom content — conservative guard)
+ *   3. EN dominant (en > 0 && es < MIN_HITS) → 'drift'
+ *   4. Ambiguous / no markers / mixed → 'flag-for-review' (conservative default)
  *
  * NOTE: 'flag-for-review' is an internal signal. build-plan.mjs maps it to
  *       divergenceKind: 'drift' + proposedAction: 'flag-review' in the final plan.
+ *
+ * Spec condition 4 is enforced via heading-structure comparison: the consumer heading
+ * count must not exceed the upstream count for 'translation' to be assigned.
  *
  * @param {string} consumerText  Full text content of the consumer file.
  * @param {string} upstreamText  Full text content of the upstream brain file.
@@ -139,10 +158,25 @@ export function classifyDivergence(consumerText, upstreamText) {
   const signal = computeLanguageSignal(consumerText);
 
   if (signal.verdict === 'es') {
+    // Spec condition 4: structural mirroring guard.
+    // A clean ES translation mirrors or is a subset of upstream's heading structure.
+    // If consumer has MORE headings than upstream, the file likely has consumer-added
+    // sections; mislabeling it 'translation' would cause adopt-upstream to overwrite
+    // custom content. Tolerance: strict — consumer must not exceed upstream count;
+    // even one extra heading signals restructuring or consumer drift.
+    const consumerHeadings = countHeadings(consumerText);
+    const upstreamHeadings = countHeadings(upstreamText);
+    if (consumerHeadings > upstreamHeadings) {
+      return {
+        divergenceKind: 'flag-for-review',
+        languageSignal: signal,
+        reason: `ES-dominant but structure diverges from upstream — consumer has ${consumerHeadings} headings vs upstream ${upstreamHeadings}; possible restructured translation or drift; human must confirm before adopt-upstream`,
+      };
+    }
     return {
       divergenceKind: 'translation',
       languageSignal: signal,
-      reason: `consumer text is ES-dominant (es=${signal.es}, en=${signal.en}, MIN_HITS=${MIN_HITS}); upstream is EN by policy (ADR-0009)`,
+      reason: `consumer text is ES-dominant (es=${signal.es}, en=${signal.en}, MIN_HITS=${MIN_HITS}); upstream is EN by policy (ADR-0009); heading structure mirrors upstream (consumer: ${consumerHeadings}, upstream: ${upstreamHeadings})`,
     };
   }
 

@@ -108,6 +108,55 @@ test('inline Spanish text with ≥MIN_HITS markers → divergenceKind: translati
   assert.ok(languageSignal.es >= MIN_HITS);
 });
 
+test('ES-dominant consumer with more headings than upstream → divergenceKind: flag-for-review', () => {
+  // Spec condition 4: ES-dominant text that has consumer-ADDED sections (more headings
+  // than upstream) must NOT be classified as 'translation' — doing so would allow
+  // adopt-upstream to silently overwrite custom content.
+  const esConsumerWithExtraSections = `\
+# Metodología Brain — Introducción
+
+## ¿Qué es la Metodología Brain?
+
+La metodología Brain proporciona una organización estructurada para la gestión del
+conocimiento en equipos de desarrollo. Está diseñada para facilitar la adopción
+de convenciones compartidas sin imponer restricciones innecesarias.
+
+## ¿Cómo Funciona?
+
+Brain utiliza una lista de rutas gestionadas para determinar qué archivos son
+responsabilidad del paquete. Durante la actualización, solo se actualizan los
+archivos declarados como gestionados.
+
+## Sección del Equipo Catastro
+
+Este contenido fue agregado por el equipo de Catastro y no existe en el upstream.
+Documentación específica del proyecto municipal.
+
+## Otra Sección Personalizada
+
+Contenido adicional propietario del equipo, también ausente en el upstream original.
+`;
+  const upstreamEN = `\
+# Brain Methodology — Introduction
+
+## What is Brain Methodology?
+
+Brain provides a structured system for managing knowledge.
+
+## How It Works
+
+Brain uses a list to determine which files are managed.
+`;
+  // consumer: 5 headings, upstream: 3 headings → structural divergence → flag-for-review.
+  const { divergenceKind, languageSignal, reason } = classifyDivergence(esConsumerWithExtraSections, upstreamEN);
+  assert.strictEqual(divergenceKind, 'flag-for-review',
+    `expected flag-for-review (structural divergence), got ${divergenceKind}; reason: ${reason}`);
+  assert.ok(languageSignal !== null);
+  assert.strictEqual(languageSignal.verdict, 'es', 'language signal must still be ES-dominant');
+  assert.ok(reason.includes('structure diverges'),
+    `reason should mention structural divergence, got: ${reason}`);
+});
+
 // ── Drift (English-modified text) ───────────────────────────────────────────
 
 test('English text differing from upstream → divergenceKind: drift', () => {
@@ -150,17 +199,13 @@ test('code-only text (no ES or EN stopwords) → divergenceKind: flag-for-review
   assert.equal(divergenceKind, 'flag-for-review');
 });
 
-test('mixed-language text (balanced ES/EN, es < MIN_HITS) → flag-for-review or drift', () => {
+test('mixed-language text (balanced ES/EN, es < MIN_HITS) → drift', () => {
   // A text with just 1 ES marker (below MIN_HITS) and some EN markers.
-  // es=1 < MIN_HITS=3, en>0 → drift (EN dominant).
+  // é in café → es=1 < MIN_HITS=3; EN stopwords (the, will, there, and, have) → en=5.
+  // es < MIN_HITS + en > 0 → verdict 'en' → divergenceKind: 'drift'. Outcome is deterministic.
   const mixedText = 'The café is open. We will meet there and have coffee.';
   const { divergenceKind, languageSignal } = classifyDivergence(mixedText, 'different');
-  // é in café adds 1 ES diacritic; EN stopwords add en>0; so es<MIN_HITS + en>0 → drift.
-  // Either drift or flag-for-review is acceptable depending on exact counts.
-  assert.ok(
-    divergenceKind === 'drift' || divergenceKind === 'flag-for-review',
-    `expected drift or flag-for-review, got ${divergenceKind}`,
-  );
+  assert.strictEqual(divergenceKind, 'drift');
   assert.ok(languageSignal !== null);
   assert.ok(languageSignal.es < MIN_HITS, `ES (${languageSignal.es}) must be < MIN_HITS (${MIN_HITS})`);
 });
@@ -179,6 +224,15 @@ test('languageSignal has required shape { es, en, verdict } for non-identical', 
 test('reason field is a non-empty string', () => {
   const { reason } = classifyDivergence('hello world', 'different');
   assert.ok(typeof reason === 'string' && reason.length > 0);
+});
+
+// ── Edge cases ──────────────────────────────────────────────────────────────
+
+test('empty consumer vs non-empty upstream → divergenceKind: flag-for-review', () => {
+  // Empty content yields no language markers (es=0, en=0) → mixed verdict → flag-for-review.
+  // Conservative: an empty consumer file against a non-empty upstream is always flagged.
+  const { divergenceKind } = classifyDivergence('', 'non-empty upstream');
+  assert.strictEqual(divergenceKind, 'flag-for-review');
 });
 
 // ── MIN_HITS is exported and equals the tuned constant ───────────────────────

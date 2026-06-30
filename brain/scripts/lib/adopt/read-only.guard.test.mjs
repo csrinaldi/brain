@@ -19,8 +19,8 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const FS_IMPORT_RE         = /import[^'"]*['"]node:fs['"]/;
-const CHILD_IMPORT_RE      = /import[^'"]*['"]node:child_process['"]/;
+const FS_IMPORT_RE    = /import[^'"]*['"](?:node:)?fs(?:\/[^'"]+)?['"]/;
+const CHILD_IMPORT_RE = /import[^'"]*['"](?:node:)?child_process['"]/;
 
 test('adopt lib modules import no node:fs or node:child_process', () => {
   const entries = readdirSync(__dirname).filter((name) => {
