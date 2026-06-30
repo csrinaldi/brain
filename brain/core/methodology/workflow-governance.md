@@ -1,6 +1,6 @@
 # Workflow Governance — L3 Reference
 
-> **Layer**: L3 (in-context guidance). See [ADR-0014](../../project/decisions/adr-0014-workflow-governance.md) for the architecture.
+> **Layer**: L3 (in-context guidance). See ADR-0014 (workflow-governance) in the brain project for the architecture. (Core docs reference project ADRs by name, not by path — `brain/project/**` is consumer-owned and varies per repo.)
 > **Status**: current | **Introduced**: S3 (governance change)
 
 This document is the in-context reference for the governance workflow that enforces
