@@ -12,5 +12,11 @@
   "vcs": {
     "provider": "github"
   },
+  "governance": {
+    "ignoreList": [
+      "**/*.test.mjs",
+      "openspec/changes/**"
+    ]
+  },
   "schemaVersion": "0.3.0"
 }
