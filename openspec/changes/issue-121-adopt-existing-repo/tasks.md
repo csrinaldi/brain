@@ -40,20 +40,20 @@ Design-to-spec corrections that ALL code must implement:
 
 ## Phase 1: Test Fixture
 
-- [ ] 1.1 Create `__fixtures__/catastro-flat/brain/methodology/intro.md` — Spanish translation of an upstream methodology intro; include ≥6 ES markers (diacritics + ES stopwords) and mirror upstream heading structure to trigger the `translation` scenario (spec: Logical-Name Classification § catastro fixture).
-- [ ] 1.2 Create `__fixtures__/catastro-flat/docs/onboarding/guide.md` — project doc absent from `managed[]`; triggers `absent-upstream` / `keep-as-project` scenario (spec: File absent from manifest).
-- [ ] 1.3 Create `__fixtures__/catastro-flat/scripts/setup.sh` — root-level script; triggers flat `scripts/` → `brain/scripts/` path-mapping scenario.
+- [x] 1.1 Create `__fixtures__/catastro-flat/brain/methodology/intro.md` — Spanish translation of an upstream methodology intro; include ≥6 ES markers (diacritics + ES stopwords) and mirror upstream heading structure to trigger the `translation` scenario (spec: Logical-Name Classification § catastro fixture).
+- [x] 1.2 Create `__fixtures__/catastro-flat/docs/onboarding/guide.md` — project doc absent from `managed[]`; triggers `absent-upstream` / `keep-as-project` scenario (spec: File absent from manifest).
+- [x] 1.3 Create `__fixtures__/catastro-flat/scripts/setup.sh` — root-level script; triggers flat `scripts/` → `brain/scripts/` path-mapping scenario.
 
 ## Phase 2: resolve-logical-name (Pure + Unit Test) [parallel-capable with Phases 3–4]
 
-- [ ] 2.1 Create `brain/scripts/lib/adopt/resolve-logical-name.mjs` — POSIX normalization + five mapping rules: flat `brain/<seg>/` (seg ∉ core|project|scripts) → `brain/core/<seg>/`; root `scripts/` → `brain/scripts/`; `brain/project/**` → stays project; `brain/core/**` → as-is; anything else → as-is; returns `{ logicalName, classification, matchedGlob }`; `classification` values `"generic" | "project"`; imports only `node:path` + installer pure helpers (`globToRegExp`, `matchesAny`); no `node:fs`.
-- [ ] 2.2 Create `brain/scripts/lib/adopt/resolve-logical-name.test.mjs` — `node --test` units covering all five mapping rules and both spec scenarios: flat brain/methodology → `brain/core/methodology` (generic), root scripts → brain/scripts (generic), brain/project → project, brain/core → as-is, no-manifest file → project.
+- [x] 2.1 Create `brain/scripts/lib/adopt/resolve-logical-name.mjs` — POSIX normalization + five mapping rules: flat `brain/<seg>/` (seg ∉ core|project|scripts) → `brain/core/<seg>/`; root `scripts/` → `brain/scripts/`; `brain/project/**` → stays project; `brain/core/**` → as-is; anything else → as-is; returns `{ logicalName, classification, matchedGlob }`; `classification` values `"generic" | "project"`; imports only `node:path` + installer pure helpers (`globToRegExp`, `matchesAny`); no `node:fs`.
+- [x] 2.2 Create `brain/scripts/lib/adopt/resolve-logical-name.test.mjs` — `node --test` units covering all five mapping rules and both spec scenarios: flat brain/methodology → `brain/core/methodology` (generic), root scripts → brain/scripts (generic), brain/project → project, brain/core → as-is, no-manifest file → project.
 
 ## Phase 3: classify-divergence (Pure + Unit Test) [parallel-capable with Phases 2, 4]
 
-- [ ] 3.1 Create `brain/scripts/lib/adopt/classify-divergence.mjs` — marker-ratio heuristic; returns internal `{ divergence: "identical"|"translation"|"drift"|"flag-for-review", languageSignal, reason }`; `languageSignal: { es, en, verdict: "es"|"en"|"mixed" } | null`; conservative default `"flag-for-review"`; no `node:fs` import.
-- [ ] 3.2 Create `brain/scripts/lib/adopt/classify-divergence.test.mjs` — `node --test` units: identical bytes→`"identical"`, ES-dominant→`"translation"`, EN-diff→`"drift"`, ambiguous/short→`"flag-for-review"`; assert `languageSignal.verdict` shape.
-- [ ] 3.3 **Tuning (open question #1)**: run tests against catastro intro.md fixture; pin `MIN_HITS` constant and ES/EN stopword arrays to values that make intro.md resolve to `"translation"` and an EN-only diff resolve to `"drift"`; add block comment in the module documenting chosen values and rationale; update test assertions to use pinned constants.
+- [x] 3.1 Create `brain/scripts/lib/adopt/classify-divergence.mjs` — marker-ratio heuristic; returns internal `{ divergenceKind: "identical"|"translation"|"drift"|"flag-for-review", languageSignal, reason }`; `languageSignal: { es, en, verdict: "es"|"en"|"mixed" } | null`; conservative default `"flag-for-review"`; no `node:fs` import.
+- [x] 3.2 Create `brain/scripts/lib/adopt/classify-divergence.test.mjs` — `node --test` units: identical bytes→`"identical"`, ES-dominant→`"translation"`, EN-diff→`"drift"`, ambiguous/short→`"flag-for-review"`; assert `languageSignal.verdict` shape.
+- [x] 3.3 **Tuning (open question #1)**: MIN_HITS=3 pinned; ES_STOPWORDS (30 tokens) and EN_STOPWORDS (26 tokens) arrays finalized; catastro intro.md yields es≥39, en≈0 → translation ✓; EN-only diff yields en>0, es=0 → drift ✓; block comment in classify-divergence.mjs documents chosen values and rationale.
 
 ## Phase 4: render-report (Pure + Unit Test) [parallel-capable with Phases 2–3]
 
@@ -73,7 +73,7 @@ Design-to-spec corrections that ALL code must implement:
 ## Phase 7: Wiring + Guard [Phase 7.1 anytime; 7.2 after all lib files exist]
 
 - [ ] 7.1 Modify `package.json` — add `"brain:adopt": "node ./brain/scripts/adopt.mjs"` to `scripts` (consistent with existing `brain:*` verb pattern).
-- [ ] 7.2 Create `brain/scripts/lib/adopt/read-only.guard.test.mjs` — `node --test` guard: for each `*.mjs` in `brain/scripts/lib/adopt/`, read source text and assert it matches neither `/import[^'"]*['"]node:fs['"]/` nor `/import[^'"]*['"]node:child_process['"]/`; test fails on any new lib file that adds a prohibited import.
+- [x] 7.2 Create `brain/scripts/lib/adopt/read-only.guard.test.mjs` — `node --test` guard: for each `*.mjs` in `brain/scripts/lib/adopt/`, read source text and assert it matches neither `/import[^'"]*['"]node:fs['"]/` nor `/import[^'"]*['"]node:child_process['"]/`; test fails on any new lib file that adds a prohibited import.
 
 ---
 
