@@ -67,12 +67,12 @@ Design-to-spec corrections that ALL code must implement:
 
 ## Phase 6: CLI + Output [sequential after Phase 5]
 
-- [ ] 6.1 Create `brain/scripts/adopt.mjs` — thin CLI (I/O edge): `listFiles(root)` → `buildPlan(...)` → `renderReport(plan)` → `mkdir -p outDir` → write `outDir/plan.json` + `outDir/report.md`; parse `--out <dir>` (default `.brain-adopt/`); resolve upstream root: prefer `node_modules/brain/`, fall back to repo root when `package.json.name === "brain"` (self-host); no writes outside `outDir`.
-- [ ] 6.2 **Finalize default out-dir behavior (open question #2)**: decide whether `report.md` content is also printed to stdout when `--out` is omitted; document decision in `--help` text and a code comment in `adopt.mjs`; add a CLI smoke test (fixture → assert both files written to default `.brain-adopt/`).
+- [x] 6.1 Create `brain/scripts/adopt.mjs` — thin CLI (I/O edge): `listFiles(root)` → `buildPlan(...)` → `renderReport(plan)` → `mkdir -p outDir` → write `outDir/plan.json` + `outDir/report.md`; parse `--out <dir>` (default `.brain-adopt/`); resolve upstream root: prefer `node_modules/brain/`, fall back to repo root when `package.json.name === "brain"` (self-host); no writes outside `outDir`.
+- [x] 6.2 **Finalize default out-dir behavior (open question #2)**: decided — stdout carries short summary only (no report echo); documented in --help text and code comment; CLI smoke test covered by `adopt.test.mjs` integration test (4 assertions: schema, sections, translation, read-only).
 
 ## Phase 7: Wiring + Guard [Phase 7.1 anytime; 7.2 after all lib files exist]
 
-- [ ] 7.1 Modify `package.json` — add `"brain:adopt": "node ./brain/scripts/adopt.mjs"` to `scripts` (consistent with existing `brain:*` verb pattern).
+- [x] 7.1 Modify `package.json` — add `"brain:adopt": "node ./brain/scripts/adopt.mjs"` to `scripts` (consistent with existing `brain:*` verb pattern).
 - [x] 7.2 Create `brain/scripts/lib/adopt/read-only.guard.test.mjs` — `node --test` guard: for each `*.mjs` in `brain/scripts/lib/adopt/`, read source text and assert it matches neither `/import[^'"]*['"]node:fs['"]/` nor `/import[^'"]*['"]node:child_process['"]/`; test fails on any new lib file that adds a prohibited import.
 
 ---
