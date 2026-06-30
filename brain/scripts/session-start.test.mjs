@@ -561,14 +561,27 @@ test('import-graph: day-start.mjs, vcs/*, lib/installer.mjs are NOT imported', (
 
 const FORBIDDEN_VERBS = /\b(pull|fetch|merge|clone|ls-remote|push|--export)\b/;
 
-test('no-network: spy _spawn over the full loop — every argv allowlisted, none forbidden', async () => {
+// MINOR 1 fix (fresh review): previously this test injected `_branch` and
+// `_resume`, so `currentBranch`'s git rev-parse and `tryFeatureResume`'s
+// feature-resume call never flowed through the `_spawn` spy at all — the
+// allowlist assertion below was blind to 2 of the 4 controlled spawn sites.
+// Now only `_spawn` (the gated seam) and `_changes` (pure FS, no subprocess)
+// are stubbed, so the real `currentBranch` + `tryFeatureResume` call paths
+// run for real and their subprocess calls are observed by the spy.
+test('no-network: spy _spawn over the full loop — every argv allowlisted, none forbidden (rev-parse + feature-resume included)', async () => {
   const calls = [];
-  const _spawn = (cmd, args) => { calls.push({ cmd, args }); return { status: 0, stdout: '' }; };
-  const _branch = () => 'feat/issue-138-x';
+  const _spawn = (cmd, args) => {
+    calls.push({ cmd, args });
+    if (cmd === 'git' && args[0] === 'rev-parse') return { status: 0, stdout: 'feat/issue-138-x\n' };
+    if (cmd === 'git' && args[0] === 'status') return { status: 0, stdout: '' }; // clean — no restore call
+    if (typeof args[0] === 'string' && args[0].includes('memory/cli.mjs') && args[1] === 'feature-resume') {
+      return { status: 0, stdout: 'next_action: ship it\n' };
+    }
+    return { status: 0, stdout: '' };
+  };
   const _changes = () => [direntDir('issue-138-session-start')];
-  const _resume = () => null;
 
-  await runSessionStart('/repo', { _spawn, _branch, _changes, _resume });
+  await runSessionStart('/repo', { _spawn, _changes });
 
   assert.ok(calls.length > 0, 'expected at least one spawn call to verify');
   for (const { cmd, args } of calls) {
@@ -581,6 +594,18 @@ test('no-network: spy _spawn over the full loop — every argv allowlisted, none
       `forbidden verb found in argv: ${cmd} ${args.join(' ')}`,
     );
   }
+
+  // Proof that all 4 controlled spawn sites were actually exercised (not
+  // stubbed away): manifest restore, branch resolution, engram hydrate, and
+  // ticket memory must all be present, all flowing through the same spy.
+  const kinds = calls.map((c) => (c.cmd === 'git' ? `git:${c.args[0]}` : `node:${c.args[1]}`));
+  assert.ok(kinds.includes('git:status'), 'manifest restore (git status) must flow through the spy');
+  assert.ok(kinds.includes('git:rev-parse'), 'branch resolution (git rev-parse) must flow through the spy');
+  assert.ok(kinds.includes('node:import'), 'engram hydrate (memory/cli.mjs import) must flow through the spy');
+  assert.ok(
+    kinds.includes('node:feature-resume'),
+    'ticket memory (memory/cli.mjs feature-resume) must flow through the spy',
+  );
 });
 
 test('no-network: the pull codepath is never reached even when manifest churn is present', async () => {
@@ -590,11 +615,9 @@ test('no-network: the pull codepath is never reached even when manifest churn is
     if (args[0] === 'status') return { status: 0, stdout: ' M .memory/manifest.json\n' };
     return { status: 0, stdout: '' };
   };
-  const _branch = () => null;
   const _changes = () => [];
-  const _resume = () => null;
 
-  await runSessionStart('/repo', { _spawn, _branch, _changes, _resume });
+  await runSessionStart('/repo', { _spawn, _changes });
 
   assert.ok(calls.some((c) => c.args[0] === 'restore'), 'manifest restore should have run');
   for (const { args } of calls) {
