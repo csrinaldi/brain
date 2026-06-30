@@ -16,12 +16,14 @@ import assert from 'node:assert/strict';
 import { renderReport } from './render-report.mjs';
 
 // ── Test plan — represents a catastro-flat-style repo with:
-//   • intro.md   : generic, translation → languageFlag:true, adopt-upstream
-//   • setup.sh   : generic, drift+flag-for-review → proposedAction:flag-review
-//   • guide.md   : project, absent-upstream → keep-as-project (flat-brain shape)
+//   • intro.md        : generic, translation → languageFlag:true, adopt-upstream
+//   • setup.sh        : generic, drift+flag-for-review → proposedAction:flag-review
+//   • conventions.md  : generic, drift → proposedAction:adopt-upstream (auto-overwrite callout)
+//   • guide.md        : project, absent-upstream → keep-as-project (flat-brain shape)
 
 const TRANSLATION_PATH = 'brain/methodology/intro.md';
 const FLAGGED_PATH = 'scripts/setup.sh';
+const DRIFT_ADOPT_PATH = 'brain/core/conventions.md';
 const PROJECT_PATH = 'docs/onboarding/guide.md';
 
 const TEST_PLAN = {
@@ -31,12 +33,12 @@ const TEST_PLAN = {
   target: { shape: 'flat-brain', root: '.' },
   manifestSource: 'self-host',
   summary: {
-    total: 3,
-    generic: 2,
+    total: 4,
+    generic: 3,
     project: 1,
     identical: 0,
     translation: 1,
-    drift: 0,
+    drift: 1,
     flagForReview: 1,
     upstreamMissing: 0,
   },
@@ -62,6 +64,17 @@ const TEST_PLAN = {
       languageFlag: false,
       proposedAction: 'flag-review',
       reason: 'ambiguous language signal (es=0, en=0); flagged for human review',
+    },
+    {
+      sourcePath: DRIFT_ADOPT_PATH,
+      logicalName: 'brain/core/conventions.md',
+      classification: 'generic',
+      matchedGlob: 'brain/core/**',
+      divergenceKind: 'drift',
+      languageSignal: { es: 0, en: 5, verdict: 'en' },
+      languageFlag: false,
+      proposedAction: 'adopt-upstream',
+      reason: 'consumer text is EN with differing bytes (en=5, es=0); classified as drift',
     },
     {
       sourcePath: PROJECT_PATH,
@@ -178,7 +191,7 @@ test('Summary section contains correct total count', () => {
   const summaryStart = md.indexOf('## Summary');
   const genericStart = md.indexOf('## Generic Files');
   const summaryBlock = md.slice(summaryStart, genericStart);
-  assert.ok(summaryBlock.includes('| Total files | 3 |'), 'Summary must show Total files: 3');
+  assert.ok(summaryBlock.includes('| Total files | 4 |'), 'Summary must show Total files: 4');
   assert.ok(summaryBlock.includes('| Translations | 1 |'), 'Summary must show Translations: 1');
 });
 
@@ -243,6 +256,81 @@ test('no-brain plan: Project Files shows place-under-project action', () => {
   assert.ok(projectBlock.includes('place-under-project'));
 });
 
+// ── Auto-adopted from upstream callout ───────────────────────────────────────
+//
+// drift files with proposedAction:'adopt-upstream' must appear in the
+// "Auto-adopted from upstream" callout section so humans cannot miss that
+// their local copy will be overwritten.
+
+test('drift+adopt-upstream file appears in "Auto-adopted from upstream" section', () => {
+  const md = renderReport(TEST_PLAN);
+  assert.ok(
+    md.includes('## Auto-adopted from upstream (local copy will be overwritten)'),
+    'must contain the auto-adopted callout section header',
+  );
+  // The drift+adopt-upstream file must appear under the callout section,
+  // not only in the generic table.
+  const calloutStart = md.indexOf('## Auto-adopted from upstream');
+  const replacementsStart = md.indexOf('## Replacements');
+  assert.ok(calloutStart !== -1, 'callout section must be present');
+  assert.ok(replacementsStart > calloutStart, 'Replacements section must come after callout');
+  const calloutBlock = md.slice(calloutStart, replacementsStart);
+  assert.ok(
+    calloutBlock.includes(DRIFT_ADOPT_PATH),
+    `callout block must contain '${DRIFT_ADOPT_PATH}'`,
+  );
+});
+
+test('translation file does NOT appear in auto-adopted callout (listed in Replacements)', () => {
+  const md = renderReport(TEST_PLAN);
+  const calloutStart = md.indexOf('## Auto-adopted from upstream');
+  const replacementsStart = md.indexOf('## Replacements');
+  const calloutBlock = md.slice(calloutStart, replacementsStart);
+  assert.ok(
+    !calloutBlock.includes(TRANSLATION_PATH),
+    `translation file '${TRANSLATION_PATH}' must NOT appear in the auto-adopted callout (it belongs in Replacements)`,
+  );
+});
+
+test('flag-review file does NOT appear in auto-adopted callout', () => {
+  const md = renderReport(TEST_PLAN);
+  const calloutStart = md.indexOf('## Auto-adopted from upstream');
+  const replacementsStart = md.indexOf('## Replacements');
+  const calloutBlock = md.slice(calloutStart, replacementsStart);
+  assert.ok(
+    !calloutBlock.includes(FLAGGED_PATH),
+    `flag-review file '${FLAGGED_PATH}' must NOT appear in auto-adopted callout`,
+  );
+});
+
+test('plan with no drift+adopt-upstream files shows empty callout message', () => {
+  const noDriftPlan = {
+    ...NO_BRAIN_PLAN,
+    files: [
+      {
+        sourcePath: 'docs/README.md',
+        logicalName: 'docs/README.md',
+        classification: 'project',
+        matchedGlob: null,
+        divergenceKind: 'absent-upstream',
+        languageSignal: null,
+        languageFlag: false,
+        proposedAction: 'place-under-project',
+        reason: 'no manifest match; consumer-owned file',
+      },
+    ],
+  };
+  const md = renderReport(noDriftPlan);
+  const calloutStart = md.indexOf('## Auto-adopted from upstream');
+  assert.ok(calloutStart !== -1, 'callout section must always be present');
+  const replacementsStart = md.indexOf('## Replacements');
+  const calloutBlock = md.slice(calloutStart, replacementsStart);
+  assert.ok(
+    calloutBlock.includes('No drift files scheduled'),
+    'empty callout must show placeholder message',
+  );
+});
+
 // ── Empty-files plan (edge case: no files at all) ────────────────────────────
 
 test('empty plan renders without crashing and contains all section headers', () => {
@@ -259,6 +347,7 @@ test('empty plan renders without crashing and contains all section headers', () 
   assert.ok(typeof md === 'string' && md.length > 0);
   assert.ok(md.includes('## Summary'));
   assert.ok(md.includes('## Generic Files'));
+  assert.ok(md.includes('## Auto-adopted from upstream'));
   assert.ok(md.includes('## Replacements'));
   assert.ok(md.includes('## Flagged for Review'));
   assert.ok(md.includes('## Project Files'));

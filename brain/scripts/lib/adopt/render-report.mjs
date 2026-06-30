@@ -15,9 +15,11 @@
  * Sections (in order):
  *   1. Summary — counts table + envelope metadata
  *   2. Generic Files — all generic files with divergence + proposed action
- *   3. Replacements (translations to be adopted from upstream) — languageFlag:true files
- *   4. Flagged for Review — files with proposedAction 'flag-review'
- *   5. Project Files — consumer-owned files
+ *   3. Auto-adopted from upstream — drift files with proposedAction 'adopt-upstream'
+ *      (warns that the local copy will be overwritten)
+ *   4. Replacements (translations to be adopted from upstream) — languageFlag:true files
+ *   5. Flagged for Review — files with proposedAction 'flag-review'
+ *   6. Project Files — consumer-owned files
  *
  * @param {object} plan - canonical plan object from buildPlan()
  * @returns {string} Markdown report
@@ -65,7 +67,37 @@ export function renderReport(plan) {
   }
   lines.push('');
 
-  // ── 3. Replacements (translations to be adopted from upstream) ─────────────
+  // ── 3. Auto-adopted from upstream (drift files that will be overwritten) ──────
+  //
+  // Drift files with proposedAction 'adopt-upstream' will have their local copy
+  // overwritten by the upstream version. Unlike 'identical' (no change) or
+  // 'translation' (listed in Replacements), these are EN files the consumer has
+  // modified; a human could easily miss the overwrite risk in the generic table alone.
+
+  const autoAdopted = plan.files.filter(
+    f => f.divergenceKind === 'drift' && f.proposedAction === 'adopt-upstream',
+  );
+  lines.push('## Auto-adopted from upstream (local copy will be overwritten)');
+  lines.push('');
+  if (autoAdopted.length === 0) {
+    lines.push('No drift files scheduled for automatic upstream adoption.');
+  } else {
+    lines.push(
+      'The following files have drifted from upstream in English. ' +
+      'The local copy **will be overwritten** with the upstream version when adopt is applied. ' +
+      'Review them before proceeding.',
+    );
+    lines.push('');
+    lines.push('| Source path | Logical name | Reason |');
+    lines.push('|---|---|---|');
+    for (const f of autoAdopted) {
+      const safeReason = f.reason.replace(/\|/g, '\\|');
+      lines.push(`| \`${f.sourcePath}\` | \`${f.logicalName}\` | ${safeReason} |`);
+    }
+  }
+  lines.push('');
+
+  // ── 4. Replacements (translations to be adopted from upstream) ──────────────
   //
   // ADR-0009: every languageFlag:true file MUST appear in this section.
   // Omitting a translated file from the report is prohibited.
@@ -92,7 +124,7 @@ export function renderReport(plan) {
   }
   lines.push('');
 
-  // ── 4. Flagged for Review ──────────────────────────────────────────────────
+  // ── 5. Flagged for Review ──────────────────────────────────────────────────
 
   const flagged = plan.files.filter(f => f.proposedAction === 'flag-review');
   lines.push('## Flagged for Review');
@@ -112,7 +144,7 @@ export function renderReport(plan) {
   }
   lines.push('');
 
-  // ── 5. Project Files ───────────────────────────────────────────────────────
+  // ── 6. Project Files ───────────────────────────────────────────────────────
 
   const projectFiles = plan.files.filter(f => f.classification === 'project');
   lines.push('## Project Files');
