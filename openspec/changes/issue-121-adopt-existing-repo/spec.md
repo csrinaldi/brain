@@ -84,7 +84,7 @@ canonical and aligned with the design document; the design's `resolveLogicalName
 | `tool` | string | `"brain:adopt"` |
 | `generatedAt` | string | ISO 8601 timestamp |
 | `target` | object | `{ shape: "flat-brain" \| "no-brain", root: string }` |
-| `manifestSource` | string | `node_modules/brain` \| `self-host` |
+| `manifestSource` | string | `node_modules/brain` \| `self-host` \| `none` (no upstream reference found; all generic files classify as `upstream-missing`) |
 | `summary` | object | `{ total, generic, project, identical, translation, drift, flagForReview, upstreamMissing }` |
 | `files` | array | per-file records (see below) |
 

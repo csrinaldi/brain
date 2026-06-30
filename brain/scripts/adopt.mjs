@@ -111,7 +111,7 @@ function resolveUpstreamRoot(targetRoot) {
   }
 
   // No upstream found — proceed with null; upstream reads return null.
-  return { upstreamRoot: null, manifestSource: 'unknown' };
+  return { upstreamRoot: null, manifestSource: 'none' };
 }
 
 /**
@@ -133,7 +133,11 @@ export async function run(argv) {
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if ((arg === '--out' || arg === '-o') && argv[i + 1]) {
+    if (arg === '--out' || arg === '-o') {
+      if (!argv[i + 1] || argv[i + 1].startsWith('-')) {
+        console.error('brain:adopt: --out requires a directory path');
+        process.exit(1);
+      }
       outArg = argv[++i];
     } else if (arg === '--help' || arg === '-h') {
       console.log(HELP);
