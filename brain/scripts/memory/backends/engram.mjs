@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 import { resolveFeature } from "../lib/feature-resolution.mjs";
 import { parseFrontmatter, serializeFrontmatter } from "../lib/resume-frontmatter.mjs";
 import { validateResume } from "../lib/resume-schema.mjs";
+import { currentBranch } from "../../lib/git-branch.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -290,19 +291,15 @@ export async function setup() {
  * Read the current git branch name.
  * Returns 'unknown' on any failure (git absent, detached HEAD, etc.).
  *
+ * Thin wrapper over the shared `lib/git-branch.mjs#currentBranch` primitive
+ * (issue #138, design §1.2) — preserves this module's existing 'unknown'
+ * contract on top of the de-duplicated detection logic.
+ *
  * @param {string} root  Repo root to run git in.
  * @returns {string}
  */
-function _getGitBranch(root) {
-  try {
-    const r = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      encoding: "utf8",
-      cwd: root,
-    });
-    return r.stdout?.trim() || "unknown";
-  } catch {
-    return "unknown";
-  }
+export function _getGitBranch(root) {
+  return currentBranch(root) ?? "unknown";
 }
 
 /**
