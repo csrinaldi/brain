@@ -36,3 +36,23 @@ test('_getGitBranch: real git repo on a named branch → branch name', () => {
 test('_getGitBranch: never throws', () => {
   assert.doesNotThrow(() => _getGitBranch('/path/does/not/exist/at/all'));
 });
+
+test('_getGitBranch: detached HEAD → "unknown" (NOT the literal "HEAD")', () => {
+  // Behavior-change guard: the old inline implementation returned the
+  // literal 'HEAD' string on detached HEAD. The de-duplicated wrapper must
+  // normalize it to 'unknown' like every other failure case.
+  //
+  // Uses process.cwd() (a real repo on a real named branch) as root, so an
+  // un-threaded `_spawn` injection would fall through to the REAL git call
+  // and return the actual branch name (not 'unknown') — proving this test
+  // actually exercises the injection seam rather than coincidentally
+  // passing because the cwd isn't a git repo.
+  let calls = 0;
+  const _spawn = () => {
+    calls++;
+    return { status: 0, stdout: 'HEAD\n' };
+  };
+  const branch = _getGitBranch(process.cwd(), { _spawn });
+  assert.equal(calls, 1, 'the injected _spawn spy must be invoked');
+  assert.equal(branch, 'unknown');
+});
