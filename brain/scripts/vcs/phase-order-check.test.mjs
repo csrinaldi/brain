@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { evaluatePhaseOrder, runPhaseOrderCheck, main } from './phase-order-check.mjs';
+import { evaluatePhaseOrder, runPhaseOrderCheck, main, BASELINE_EXEMPT_DIRS } from './phase-order-check.mjs';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -396,4 +396,24 @@ test('Gap G1: change dir with specs/foo/spec.md (nested convention) is detected 
     0,
     `expected no Rule A finding, got: ${JSON.stringify(result.findings)}`
   );
+});
+
+test('baseline (REQ-L4-5): pre-v3 legacy dir with no spec artifact → exempt, not fail, in detection mode', () => {
+  for (const legacyDir of BASELINE_EXEMPT_DIRS) {
+    const deps = makeFakeDeps({
+      changedFiles: ['brain/scripts/vcs/foo.mjs', `openspec/changes/${legacyDir}/tasks.md`],
+      filesAfter: {
+        [`openspec/changes/${legacyDir}/proposal.md`]: '',
+        [`openspec/changes/${legacyDir}/design.md`]: '',
+        // no spec.md, no specs/*/spec.md — models the real pre-v3 dirs.
+        [`openspec/changes/${legacyDir}/tasks.md`]: '- [x] done\n',
+      },
+    });
+    const result = runPhaseOrderCheck(deps);
+    assert.equal(result.level, 'pass', `${legacyDir}: expected pass (exempt), got ${result.level}`);
+    const finding = result.findings.find(f => f.change === legacyDir);
+    assert.ok(finding, `${legacyDir}: expected an exempted finding`);
+    assert.equal(finding.level, 'exempt');
+    assert.match(finding.message, /baseline exemption/);
+  }
 });
