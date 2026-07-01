@@ -67,6 +67,9 @@ test('GOVERNANCE_JOBS equals the union of REQUIRED_JOBS and DETECTION_JOBS', () 
 test('checkContexts() derives contexts from REQUIRED_JOBS only, excluding DETECTION_JOBS', () => {
   const contexts = checkContexts();
   assert.deepEqual(contexts, REQUIRED_JOBS.map(job => `${WORKFLOW_NAME} / ${job}`));
+  // PR2a: this loop is a no-op while DETECTION_JOBS = []. It becomes load-bearing
+  // once DETECTION_JOBS is non-empty (e.g. 'phase-order') — wire a real fixture
+  // then so this exclusion is actually exercised, not just vacuously true.
   for (const detectionJob of DETECTION_JOBS) {
     assert.ok(
       !contexts.includes(`${WORKFLOW_NAME} / ${detectionJob}`),
@@ -75,23 +78,26 @@ test('checkContexts() derives contexts from REQUIRED_JOBS only, excluding DETECT
   }
 });
 
-// ── Drift-guard regression: split preserves the full-union YAML match ──────────
+// ── Drift-guard regression: split preserves union ORDER, not just membership ───
 //
-// Regression guard for the REQUIRED_JOBS/DETECTION_JOBS split itself: the YAML must
-// still equal the full GOVERNANCE_JOBS union (not just REQUIRED_JOBS) after the
-// registry refactor.
+// The drift-guard above sorts both sides before comparing, so it cannot catch a
+// shuffled union. This is a genuinely different, order-sensitive assertion: the
+// YAML must define REQUIRED_JOBS' jobs before DETECTION_JOBS' jobs, in exact
+// GOVERNANCE_JOBS = [...REQUIRED_JOBS, ...DETECTION_JOBS] order. Becomes real signal
+// once DETECTION_JOBS is non-empty (PR2a+) — today it degenerates to REQUIRED_JOBS
+// order only, but the assertion shape is already correct.
 
-test('drift-guard regression: governance.yml job names still equal the full GOVERNANCE_JOBS union after the split', () => {
+test('drift-guard regression: governance.yml job order matches REQUIRED_JOBS then DETECTION_JOBS', () => {
   const yamlPath = resolve(REPO_ROOT, '.github/workflows/governance.yml');
   const yamlText = readFileSync(yamlPath, 'utf8');
   const matches = [...yamlText.matchAll(/^    name: (\S+)\s*$/mg)];
   const yamlJobNames = matches.map(m => m[1]);
 
   assert.deepEqual(
-    [...new Set(yamlJobNames)].sort(),
-    [...new Set(GOVERNANCE_JOBS)].sort(),
-    `Drift detected post-split: GOVERNANCE_JOBS=${JSON.stringify(GOVERNANCE_JOBS)} ` +
-    `but governance.yml job names=${JSON.stringify(yamlJobNames)}`
+    yamlJobNames,
+    GOVERNANCE_JOBS,
+    `Order drift: GOVERNANCE_JOBS=${JSON.stringify(GOVERNANCE_JOBS)} ` +
+    `but governance.yml job order=${JSON.stringify(yamlJobNames)}`
   );
 });
 
