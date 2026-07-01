@@ -116,6 +116,9 @@ ORIGINAL_SRC=$(md5sum src/index.js 2>/dev/null | awk '{print $1}')
 
 line "[2] brain:upgrade -- ${TAG} (FULL, no --no-install)"
 node -e "const p=require('./package.json');p.scripts={...p.scripts,'brain:upgrade':'node node_modules/brain/brain/scripts/brain-upgrade.mjs','brain:env:init':'bash ./brain/scripts/bootstrap.sh'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
+# Plant a custom brain:day:start BEFORE upgrade to prove consumer-wins on specialMerge.
+node -e "const p=require('./package.json');p.scripts['brain:day:start']='consumer-custom-day-start';require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
+info "planted brain:day:start='consumer-custom-day-start' (must survive specialMerge)"
 # brain:upgrade is invoked via the consumer's own PM (brain already wired to detect it)
 $CPM run brain:upgrade -- "${TAG}" >/dev/null 2>&1
 if [ -d brain/scripts ] && [ -d brain/core ]; then ok "managed paths copied (brain/scripts + brain/core)"; else fail "managed paths NOT copied"; fi
@@ -159,6 +162,34 @@ if [ -d brain/core ] && [ -f .gitattributes ]; then
   ok "brain/core updated (managed paths synced; .gitattributes at root)"
 else
   fail "brain/core NOT updated or missing .gitattributes"
+fi
+
+line "[6] Verify package.json brain:* verb injection (specialMerge)"
+# Assert that brain:* verbs were injected into the consumer package.json.
+BRAIN_REPO_CHECK=$(node -e "const p=require('./package.json');console.log(p.scripts['brain:repo:check']||'')" 2>/dev/null)
+if [ -n "$BRAIN_REPO_CHECK" ]; then ok "brain:repo:check injected into consumer package.json"
+else fail "brain:repo:check NOT injected into consumer package.json"; fi
+
+BRAIN_CHANGE_VERIFY=$(node -e "const p=require('./package.json');console.log(p.scripts['brain:change:verify']||'')" 2>/dev/null)
+if [ -n "$BRAIN_CHANGE_VERIFY" ]; then ok "brain:change:verify injected into consumer package.json"
+else fail "brain:change:verify NOT injected into consumer package.json"; fi
+
+# Assert that the pre-existing custom value was NOT clobbered (consumer-wins).
+CUSTOM_DAY=$(node -e "const p=require('./package.json');console.log(p.scripts['brain:day:start']||'')" 2>/dev/null)
+if [ "$CUSTOM_DAY" = "consumer-custom-day-start" ]; then
+  ok "brain:day:start custom value preserved after upgrade (consumer-wins, not clobbered)"
+else
+  fail "brain:day:start was CLOBBERED by upgrade (got '${CUSTOM_DAY}', expected 'consumer-custom-day-start')"
+fi
+
+# Assert idempotency: re-upgrade must not change package.json.
+PKG_HASH_BEFORE=$(md5sum package.json 2>/dev/null | awk '{print $1}')
+$CPM run brain:upgrade -- "${TAG}" --no-install >/dev/null 2>&1
+PKG_HASH_AFTER=$(md5sum package.json 2>/dev/null | awk '{print $1}')
+if [ "$PKG_HASH_BEFORE" = "$PKG_HASH_AFTER" ]; then
+  ok "package.json unchanged after re-upgrade (specialMerge is idempotent)"
+else
+  fail "package.json CHANGED on re-upgrade (specialMerge is NOT idempotent)"
 fi
 
 line "RESULT"

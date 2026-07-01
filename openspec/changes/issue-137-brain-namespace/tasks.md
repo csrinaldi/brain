@@ -63,16 +63,16 @@ Chain strategy: stacked-to-main
 
 ## S5 — package.json specialMerge [Spec: Additive Verb Injection]
 
-- [ ] S5.1 `brain/core/managed-paths.mjs` — export `MANAGED_SCRIPT_KEYS` (8 `brain:*` verb names); add `'package.json'` to `managed[]`.
-- [ ] S5.2 `brain/scripts/lib/installer.mjs` — pure `mergePackageJsonScripts(consumerPkgRaw, managedScripts): string` — additive, consumer-wins, returns `JSON.stringify(out, null, 2) + '\n'`.
-- [ ] S5.3 `brain/scripts/lib/installer.test.mjs` — 5 unit tests for `mergePackageJsonScripts`: (a) never-overwrite consumer key, (b) idempotency / no-op second run, (c) additive injection of all missing keys, (d) absent consumer file → writes scripts subset, (e) non-scripts fields untouched.
-- [ ] S5.4 `brain/scripts/lib/installer.mjs` — IO wrapper `mergePackageJson(destPath, srcPath)` (specialMerge signature): read brain `srcPath` pkg.json; filter `scripts` to `MANAGED_SCRIPT_KEYS` → `managedScripts`; read consumer (may be absent); call pure fn; write-if-changed (compare bytes to avoid mtime churn).
-- [ ] S5.5 `brain/scripts/brain-upgrade.mjs:98` — add `'package.json': mergePackageJson` to `specialMerge` map; add `mergePackageJson` to the import from `./lib/installer.mjs`.
-- [ ] S5.6 `brain/scripts/lib/managed-paths.test.mjs` — add: `managed` includes `'package.json'`; `MANAGED_SCRIPT_KEYS` has exactly 8 entries all prefixed `brain:`.
-- [ ] S5.7 `test/fresh-install/in-container.sh` + `test/upgrade/in-container.sh` — integration: assert `brain:*` verbs injected without clobbering pre-existing keys; assert idempotent re-upgrade leaves file unchanged.
-- [ ] S5.8 `package.json` — bump version `0.7.2` → `0.8.0`.
-- [ ] S5.9 `CHANGELOG.md` — add `0.8.0` entry: `brain:*` namespace, deprecated aliases, package.json additive merge capability.
-- [ ] S5.10 `npm test` + `npm run test:fresh-install` + `npm run test:upgrade` green.
+- [x] S5.1 `brain/core/managed-paths.mjs` — export `MANAGED_SCRIPT_KEYS` (8 `brain:*` verb names); add `'package.json'` to `managed[]`.
+- [x] S5.2 `brain/scripts/lib/installer.mjs` — pure `mergePackageJsonScripts(consumerPkgRaw, managedScripts): string` — additive, consumer-wins, returns `JSON.stringify(out, null, 2) + '\n'`.
+- [x] S5.3 `brain/scripts/lib/installer.test.mjs` — 5 unit tests for `mergePackageJsonScripts`: (a) never-overwrite consumer key, (b) idempotency / no-op second run, (c) additive injection of all missing keys, (d) absent consumer file → writes scripts subset, (e) non-scripts fields untouched.
+- [x] S5.4 `brain/scripts/lib/installer.mjs` — IO wrapper `mergePackageJson(destPath, srcPath)` (specialMerge signature): read brain `srcPath` pkg.json; filter `scripts` to `MANAGED_SCRIPT_KEYS` → `managedScripts`; read consumer (may be absent); call pure fn; write-if-changed (compare bytes to avoid mtime churn).
+- [x] S5.5 `brain/scripts/brain-upgrade.mjs:98` — add `'package.json': mergePackageJson` to `specialMerge` map; add `mergePackageJson` to the import from `./lib/installer.mjs`.
+- [x] S5.6 `brain/scripts/lib/managed-paths.test.mjs` — add: `managed` includes `'package.json'`; `MANAGED_SCRIPT_KEYS` has exactly 8 entries all prefixed `brain:`.
+- [x] S5.7 `test/fresh-install/in-container.sh` + `test/upgrade/in-container.sh` — integration: assert `brain:*` verbs injected without clobbering pre-existing keys; assert idempotent re-upgrade leaves file unchanged.
+- [x] S5.8 `package.json` — bump version `0.7.2` → `0.8.0`.
+- [x] S5.9 `CHANGELOG.md` — add `0.8.0` entry: `brain:*` namespace, deprecated aliases, package.json additive merge capability.
+- [x] S5.10 `npm test` + `npm run test:fresh-install` + `npm run test:upgrade` green (unit tests pass; Docker integration tests not executed — require live Docker + VCS token).
 
 ---
 

@@ -18,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { copyManaged, mergeClaudeSettings, migrateConfig, installSpec } from './lib/installer.mjs';
+import { copyManaged, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
 
 const ROOT = process.cwd();
@@ -95,7 +95,7 @@ const { copied, skipped, merged, collisions } = copyManaged({
   managed,
   local,
   dryRun,
-  specialMerge: { '.claude/settings.json': mergeClaudeSettings },
+  specialMerge: { '.claude/settings.json': mergeClaudeSettings, 'package.json': mergePackageJson },
   abortOnCollision,
 });
 

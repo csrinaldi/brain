@@ -44,6 +44,9 @@ echo "MY_SECRET=keep-me" >> .env
 node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('brain.config.json'));c.project.owner='ACME';fs.writeFileSync('brain.config.json',JSON.stringify(c,null,2))"
 mkdir -p openspec/changes/my-feature; echo "my proposal" > openspec/changes/my-feature/proposal.md
 info "added consumer ADR, .env MY_SECRET, config owner=ACME, openspec/changes/my-feature"
+# Plant a custom brain:day:start BEFORE upgrade to prove consumer-wins on specialMerge.
+node -e "const p=require('./package.json');p.scripts['brain:day:start']='consumer-day-start';require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
+info "planted brain:day:start='consumer-day-start' (must survive specialMerge)"
 
 line "3. UPGRADE ${FROM} → ${TO} (HTTPS: re-install git+https + brain:upgrade)"
 npm i -D "${BRAIN}#${TO}" >/dev/null 2>&1
@@ -64,6 +67,24 @@ fi
 grep -q "MY_SECRET=keep-me" .env && ok ".env preserved (MY_SECRET)" || fail ".env LOST"
 [ "$(node -e "console.log(require('./brain.config.json').project.owner)" 2>/dev/null)" = "ACME" ] && ok "brain.config.json custom value preserved (owner=ACME)" || fail "brain.config.json custom value LOST"
 [ -f openspec/changes/my-feature/proposal.md ] && ok "openspec/changes preserved" || fail "openspec/changes LOST"
+
+line "5. ASSERT — package.json brain:* verb injection (specialMerge)"
+# Assert brain:* verbs were injected into the consumer package.json.
+BRAIN_REPO_CHECK=$(node -e "const p=require('./package.json');console.log(p.scripts['brain:repo:check']||'')" 2>/dev/null)
+[ -n "$BRAIN_REPO_CHECK" ] && ok "brain:repo:check injected into consumer package.json" \
+  || fail "brain:repo:check NOT injected"
+
+BRAIN_CHANGE_VERIFY=$(node -e "const p=require('./package.json');console.log(p.scripts['brain:change:verify']||'')" 2>/dev/null)
+[ -n "$BRAIN_CHANGE_VERIFY" ] && ok "brain:change:verify injected into consumer package.json" \
+  || fail "brain:change:verify NOT injected"
+
+# Assert that the pre-planted custom value was NOT clobbered (consumer-wins).
+CUSTOM_DAY=$(node -e "const p=require('./package.json');console.log(p.scripts['brain:day:start']||'')" 2>/dev/null)
+if [ "$CUSTOM_DAY" = "consumer-day-start" ]; then
+  ok "brain:day:start custom value preserved after upgrade (consumer-wins, not clobbered)"
+else
+  fail "brain:day:start was CLOBBERED by upgrade (got '${CUSTOM_DAY}', expected 'consumer-day-start')"
+fi
 
 line "RESULT"
 if [ "$FAILED" = 0 ]; then echo "  ✓✓ UPGRADE ${FROM}→${TO}: core updated, consumer project preserved"; exit 0
