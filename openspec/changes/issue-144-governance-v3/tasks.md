@@ -79,20 +79,20 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 
 ## PR2a — Substrate detector core (REQ-LADDER-1, REQ-LADDER-2, design §1)
 
-- [ ] [RED] `substrate.test.mjs`: `detectSubstrate()` with no probes/config returns `{ rung: 4, enforced: false, reason, remedy, rungs }` (floor fallback) — REQ-LADDER-1
-- [ ] [GREEN] scaffold `brain/scripts/vcs/substrate.mjs`: `detectSubstrate({ config, vcs, env, probes })` with rung-4 default
-- [ ] [RED] `substrate.test.mjs`: rung 3 armed when the post-merge-workflow probe (`.github/workflows/governance-postmerge.yml` presence, or `env.GITHUB_ACTIONS === 'true'`) returns true
-- [ ] [GREEN] implement rung-3 probe + selection
-- [ ] [RED] `substrate.test.mjs`: rung 2 armed when the release-gate probe (`.github/workflows/release.yml` presence, or `config.governance.releaseGate === true`) returns true
-- [ ] [GREEN] implement rung-2 probe + selection
-- [ ] [RED] `substrate.test.mjs`: rung 1 — `200` + required contexts present → armed; `404` → available-but-unset (not armed); `403`/tier-locked message → not armed; `config.vcs.selfHostedPreReceive === true` → armed via self-hosted floor
-- [ ] [GREEN] implement the finer branch-protection read (beyond `capabilities()`'s available/unavailable) — design §1 "why finer than capabilities()"
-- [ ] [RED] `substrate.test.mjs`: `rungs[1].gates.brainWritesReviewed` shape — GitHub needs branch protection `require_code_owner_reviews` **and** `.github/CODEOWNERS`; GitLab needs Premium+; Bitbucket → unavailable — per-provider L6 rung-1 sub-probe
-- [ ] [GREEN] implement `gates.brainWritesReviewed` per-provider sub-probe
-- [ ] [RED] `substrate.test.mjs`: any probe throwing degrades to the next-lower rung (never propagates) — probe-throws-never-crashes case
-- [ ] [GREEN] wrap every probe call in try/catch degrade-on-throw
-- [ ] [RED] `substrate.test.mjs`: highest-armed-rung selection across combinations (all armed → 1; only rung 3 → 3; none → 4)
-- [ ] [GREEN] finalize rung-selection algorithm + `rungs` per-rung `{available, active, reason, remedy}` output shape — REQ-LADDER-1, REQ-LADDER-2
+- [x] [RED] `substrate.test.mjs`: `detectSubstrate()` with no probes/config returns `{ rung: 4, enforced: false, reason, remedy, rungs }` (floor fallback) — REQ-LADDER-1
+- [x] [GREEN] scaffold `brain/scripts/vcs/substrate.mjs`: `detectSubstrate({ config, vcs, env, probes })` with rung-4 default
+- [x] [RED] `substrate.test.mjs`: rung 3 armed when the post-merge-workflow probe (`.github/workflows/governance-postmerge.yml` presence, or `env.GITHUB_ACTIONS === 'true'`) returns true
+- [x] [GREEN] implement rung-3 probe + selection
+- [x] [RED] `substrate.test.mjs`: rung 2 armed when the release-gate probe (`.github/workflows/release.yml` presence, or `config.governance.releaseGate === true`) returns true
+- [x] [GREEN] implement rung-2 probe + selection
+- [x] [RED] `substrate.test.mjs`: rung 1 — `200` + required contexts present → armed; `404` → available-but-unset (not armed); `403`/tier-locked message → not armed; `config.vcs.selfHostedPreReceive === true` → armed via self-hosted floor
+- [x] [GREEN] implement the finer branch-protection read (beyond `capabilities()`'s available/unavailable) — design §1 "why finer than capabilities()"
+- [x] [RED] `substrate.test.mjs`: `rungs[1].gates.brainWritesReviewed` shape — GitHub needs branch protection `require_code_owner_reviews` **and** `.github/CODEOWNERS`; GitLab needs Premium+; Bitbucket → unavailable — per-provider L6 rung-1 sub-probe
+- [x] [GREEN] implement `gates.brainWritesReviewed` per-provider sub-probe
+- [x] [RED] `substrate.test.mjs`: any probe throwing degrades to the next-lower rung (never propagates) — probe-throws-never-crashes case
+- [x] [GREEN] wrap every probe call in try/catch degrade-on-throw
+- [x] [RED] `substrate.test.mjs`: highest-armed-rung selection across combinations (all armed → 1; only rung 3 → 3; none → 4)
+- [x] [GREEN] finalize rung-selection algorithm + `rungs` per-rung `{available, active, reason, remedy}` output shape — REQ-LADDER-1, REQ-LADDER-2
 
 ## PR2b — `brain-governance-status.mjs` extension (REQ-HONESTY-1, REQ-HONESTY-2)
 
