@@ -30,25 +30,25 @@ Chain strategy: stacked-to-main
 
 ## S1 — De-risk Call Sites [Spec: No-Subprocess Contract]
 
-- [ ] S1.1 [CREATE] `brain/scripts/verify-change.test.mjs` — source inspection: `pm.runArgs('repo:check'` absent; `['node','brain/scripts/check-refs.mjs']` present (RED until S1.3).
-- [ ] S1.2 `brain/scripts/verify-change.mjs:28` — MATRIX repo-scope `commands`: `() => [pm.runArgs('repo:check', true)]` → `() => [['node', 'brain/scripts/check-refs.mjs']]`. `pm`/`detectPM` import unchanged (other rows still use it). Verify S1.1 turns GREEN.
-- [ ] S1.3 `brain/scripts/brain-check.mjs:131` — CLI `repoCheckFn` lambda: `spawnCommand('npm', ['run', 'repo:check'], cwd)` → `spawnCommand('node', ['brain/scripts/check-refs.mjs'], cwd)`.
-- [ ] S1.4 `npm test` green — `brain-check.test.mjs` injected-fn tests confirm no regression.
+- [x] S1.1 [CREATE] `brain/scripts/verify-change.test.mjs` — source inspection: `pm.runArgs('repo:check'` absent; `['node','brain/scripts/check-refs.mjs']` present (RED until S1.3).
+- [x] S1.2 `brain/scripts/verify-change.mjs:28` — MATRIX repo-scope `commands`: `() => [pm.runArgs('repo:check', true)]` → `() => [['node', 'brain/scripts/check-refs.mjs']]`. `pm`/`detectPM` import unchanged (other rows still use it). Verify S1.1 turns GREEN.
+- [x] S1.3 `brain/scripts/brain-check.mjs:131` — CLI `repoCheckFn` lambda: `spawnCommand('npm', ['run', 'repo:check'], cwd)` → `spawnCommand('node', ['brain/scripts/check-refs.mjs'], cwd)`.
+- [x] S1.4 `npm test` green — `brain-check.test.mjs` injected-fn tests confirm no regression.
 
 ## S2 — Add brain:* Aliases [Spec: Verb Namespace Uniformity]
 
-- [ ] S2.1 `package.json` scripts — add 8 `brain:*` entries (`brain:env:init`, `brain:day:start`, `brain:ticket:start`, `brain:project:feature`, `brain:project:status`, `brain:tracker:board`, `brain:repo:check`, `brain:change:verify`) pointing at identical direct targets; retain old 8 verbs unchanged.
-- [ ] S2.2 Internal header comments in `brain-check.mjs:~8` + `bootstrap.sh:2` — update verb refs to `brain:*` equivalents.
-- [ ] S2.3 `npm test` green.
+- [x] S2.1 `package.json` scripts — add 8 `brain:*` entries (`brain:env:init`, `brain:day:start`, `brain:ticket:start`, `brain:project:feature`, `brain:project:status`, `brain:tracker:board`, `brain:repo:check`, `brain:change:verify`) pointing at identical direct targets; retain old 8 verbs unchanged.
+- [x] S2.2 Internal header comments in `brain-check.mjs:~8` + `bootstrap.sh:2` — update verb refs to `brain:*` equivalents.
+- [x] S2.3 `npm test` green.
 
 ## S3 — i18n + User-Facing Strings [Spec: i18n Lockstep]
 
-- [ ] S3.1 `brain/scripts/i18n/en.mjs` — update all verb strings referencing old names (`env:init`, `repo:check`, `change:verify`, `ticket:start`, `project:status`, `day:start`, `project:feature`) to `brain:*` equivalents.
-- [ ] S3.2 `brain/scripts/i18n/es.mjs` — same updates lockstep with S3.1.
-- [ ] S3.3 `brain/scripts/i18n/coverage.test.mjs` — update `assert.equal` expected strings to match new verb names; `npm test` stays green.
-- [ ] S3.4 `brain/scripts/harness/backends/gentle-ai.mjs:~238,~255` — `re-run env:init` → `re-run brain:env:init`.
-- [ ] S3.5 `brain/scripts/bootstrap.sh` heredoc output (line ~305–310) — `npm run day:start`, `npm run repo:check`, `npm run project:feature` → `brain:*`.
-- [ ] S3.6 `npm test` green — `coverage.test.mjs` suite passes.
+- [x] S3.1 `brain/scripts/i18n/en.mjs` — update all verb strings referencing old names (`env:init`, `repo:check`, `change:verify`, `ticket:start`, `project:status`, `day:start`, `project:feature`) to `brain:*` equivalents.
+- [x] S3.2 `brain/scripts/i18n/es.mjs` — same updates lockstep with S3.1.
+- [x] S3.3 `brain/scripts/i18n/coverage.test.mjs` — update `assert.equal` expected strings to match new verb names; `npm test` stays green.
+- [x] S3.4 `brain/scripts/harness/backends/gentle-ai.mjs:~238,~255` — `re-run env:init` → `re-run brain:env:init`.
+- [x] S3.5 `brain/scripts/bootstrap.sh` heredoc output (line ~305–310) — `npm run day:start`, `npm run repo:check`, `npm run project:feature` → `brain:*`.
+- [x] S3.6 `npm test` green — `coverage.test.mjs` suite passes.
 
 ## S4 — Docs, Methodology, Fixtures [Spec: Deprecation Contract]
 
