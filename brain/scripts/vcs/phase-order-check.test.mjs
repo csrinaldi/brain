@@ -60,3 +60,48 @@ test('Rule C: impl non-empty and touched dir has >= 1 checked task → no violat
   assert.equal(result.level, 'pass');
   assert.deepEqual(result.findings, []);
 });
+
+// ── Rule A — artifact completeness, gated on Rule C seeing impl ────────────────
+
+test('Rule A: touched change missing hasDesign → fail "implementation without spec.md/design.md"', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    changeDirs: [makeDir({ checkedTasks: 1, hasDesign: false })],
+  });
+  assert.equal(result.level, 'fail');
+  const ruleAFinding = result.findings.find(f => f.rule === 'A');
+  assert.ok(ruleAFinding, 'expected a Rule A finding');
+  assert.equal(ruleAFinding.level, 'fail');
+  assert.match(ruleAFinding.message, /implementation without spec\.md\/design\.md/);
+});
+
+test('Rule A: touched change lacking a spec artifact (either convention, via hasSpec) → fail', () => {
+  // hasSpec is expected to already fold in BOTH spec.md and specs/*/spec.md
+  // detection (Gap G1) — this pure function only consumes the resulting boolean.
+  const result = evaluatePhaseOrder({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    changeDirs: [makeDir({ checkedTasks: 1, hasSpec: false })],
+  });
+  assert.equal(result.level, 'fail');
+  const ruleAFinding = result.findings.find(f => f.rule === 'A');
+  assert.ok(ruleAFinding, 'expected a Rule A finding');
+  assert.equal(ruleAFinding.level, 'fail');
+  assert.match(ruleAFinding.message, /implementation without spec\.md\/design\.md/);
+});
+
+test('Rule A: planning-only PR (impl empty) is never subjected to Rule A, even with incomplete artifacts', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: ['openspec/changes/issue-999-foo/tasks.md'],
+    changeDirs: [
+      makeDir({
+        checkedTasks: 0,
+        hasSpec: false,
+        hasDesign: false,
+        statusBefore: 'draft',
+        statusAfter: 'draft',
+      }),
+    ],
+  });
+  assert.equal(result.level, 'pass');
+  assert.equal(result.findings.filter(f => f.rule === 'A').length, 0);
+});

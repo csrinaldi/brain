@@ -54,6 +54,29 @@ function evaluateRuleC(impl, touchedDirs) {
   return findings;
 }
 
+// ── Rule A — artifact completeness, gated on Rule C seeing impl ────────────────
+
+function evaluateRuleA(impl, touchedDirs) {
+  const findings = [];
+  // Planning-only PRs (no impl code) are never subjected to Rule A — they may
+  // legitimately be mid-phase (design §10-A).
+  if (impl.length === 0) return findings;
+
+  for (const dir of touchedDirs) {
+    const complete = dir.hasProposal && dir.hasSpec && dir.hasDesign && dir.hasTasks;
+    if (!complete) {
+      findings.push({
+        rule: 'A',
+        level: 'fail',
+        change: dir.name,
+        message: `openspec/changes/${dir.name}: implementation without spec.md/design.md`,
+      });
+    }
+  }
+
+  return findings;
+}
+
 // ── Aggregation ─────────────────────────────────────────────────────────────
 
 /**
@@ -84,7 +107,7 @@ export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [] } = {}) 
     changedFiles.some(f => f.startsWith(`${CHANGE_DIR_PREFIX}${dir.name}/`))
   );
 
-  const findings = [...evaluateRuleC(impl, touchedDirs)];
+  const findings = [...evaluateRuleC(impl, touchedDirs), ...evaluateRuleA(impl, touchedDirs)];
 
   const level = findings.some(f => f.level === 'fail')
     ? 'fail'
