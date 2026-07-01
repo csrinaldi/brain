@@ -128,7 +128,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     ignoreList,
     observations,
     npmTestFn: () => spawnCommand('npm', ['test'], cwd),
-    repoCheckFn: () => spawnCommand('npm', ['run', 'repo:check'], cwd),
+    repoCheckFn: () => spawnCommand('node', ['brain/scripts/check-refs.mjs'], cwd),
   });
 
   console.log('\nbrain:check results:\n');
