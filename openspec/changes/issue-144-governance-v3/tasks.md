@@ -117,22 +117,22 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 
 ## PR4a — L4 pure evaluator `evaluatePhaseOrder` (REQ-L4-1, REQ-L4-2, REQ-L4-3, REQ-L4-4, design §2)
 
-- [ ] [RED] `phase-order-check.test.mjs`: Rule C — `impl` non-empty and exactly one `touched` dir with `checkedTasks === 0` → `fail` finding "implementation code present but tasks.md has no checked item" — REQ-L4-4
-- [ ] [GREEN] implement Rule C fail branch in `evaluatePhaseOrder`
-- [ ] [RED] `phase-order-check.test.mjs`: Rule C — `impl` non-empty but no `touched` dir (unattributable) → `warn`, never `fail`
-- [ ] [GREEN] implement Rule C warn branch
-- [ ] [RED] `phase-order-check.test.mjs`: Rule C — `impl` non-empty and `touched` dir has ≥1 checked task → no violation
-- [ ] [GREEN] confirm Rule C pass branch
-- [ ] [RED] `phase-order-check.test.mjs`: Rule A — gated on Rule C; `touched` change missing `hasDesign` or lacking a spec artifact under **either** `spec.md` or `specs/*/spec.md` → `fail` "implementation without spec.md/design.md" — REQ-L4-2
-- [ ] [GREEN] implement Rule A, gated on Rule C seeing `impl` code, with dual spec-convention detection (Gap G1)
-- [ ] [RED] `phase-order-check.test.mjs`: Rule A — planning-only PR (`impl` empty) is never subjected to Rule A even with incomplete artifacts (protects this very change's own missing `spec.md` — design §10-A)
-- [ ] [GREEN] confirm the Rule-A/Rule-C gating explicitly (assert no false-positive on planning-only diffs)
-- [ ] [RED] `phase-order-check.test.mjs`: Rule B — `statusAfter` earlier than `statusBefore` on the ladder `draft < proposed < spec < designed < tasked < applying < verified < archived` → `fail` (backward phase jump) — REQ-L4-3
-- [ ] [GREEN] implement Rule B ladder comparison
-- [ ] [RED] `phase-order-check.test.mjs`: Rule B — unknown/custom status, unchanged status, or absent frontmatter → pass (no-op); forward-only progression → pass
-- [ ] [GREEN] implement Rule B no-op branches (dormant guard on today's `status: draft`-only convention)
-- [ ] [RED] `phase-order-check.test.mjs`: aggregation — `level` is `fail` if any rule fails, else `warn` if any rule warns, else `pass`; `findings` collects every rule's output
-- [ ] [GREEN] implement `{ level, findings }` aggregation — REQ-L4-1
+- [x] [RED] `phase-order-check.test.mjs`: Rule C — `impl` non-empty and exactly one `touched` dir with `checkedTasks === 0` → `fail` finding "implementation code present but tasks.md has no checked item" — REQ-L4-4
+- [x] [GREEN] implement Rule C fail branch in `evaluatePhaseOrder`
+- [x] [RED] `phase-order-check.test.mjs`: Rule C — `impl` non-empty but no `touched` dir (unattributable) → `warn`, never `fail`
+- [x] [GREEN] implement Rule C warn branch
+- [x] [RED] `phase-order-check.test.mjs`: Rule C — `impl` non-empty and `touched` dir has ≥1 checked task → no violation
+- [x] [GREEN] confirm Rule C pass branch
+- [x] [RED] `phase-order-check.test.mjs`: Rule A — gated on Rule C; `touched` change missing `hasDesign` or lacking a spec artifact under **either** `spec.md` or `specs/*/spec.md` → `fail` "implementation without spec.md/design.md" — REQ-L4-2
+- [x] [GREEN] implement Rule A, gated on Rule C seeing `impl` code, with dual spec-convention detection (Gap G1)
+- [x] [RED] `phase-order-check.test.mjs`: Rule A — planning-only PR (`impl` empty) is never subjected to Rule A even with incomplete artifacts (protects this very change's own missing `spec.md` — design §10-A)
+- [x] [GREEN] confirm the Rule-A/Rule-C gating explicitly (assert no false-positive on planning-only diffs)
+- [x] [RED] `phase-order-check.test.mjs`: Rule B — `statusAfter` earlier than `statusBefore` on the ladder `draft < proposed < spec < designed < tasked < applying < verified < archived` → `fail` (backward phase jump) — REQ-L4-3
+- [x] [GREEN] implement Rule B ladder comparison
+- [x] [RED] `phase-order-check.test.mjs`: Rule B — unknown/custom status, unchanged status, or absent frontmatter → pass (no-op); forward-only progression → pass
+- [x] [GREEN] implement Rule B no-op branches (dormant guard on today's `status: draft`-only convention)
+- [x] [RED] `phase-order-check.test.mjs`: aggregation — `level` is `fail` if any rule fails, else `warn` if any rule warns, else `pass`; `findings` collects every rule's output
+- [x] [GREEN] implement `{ level, findings }` aggregation — REQ-L4-1
 
 ## PR4b — L4 wrapper + CLI + `DETECTION_JOBS` wiring + hardening (REQ-L4-1, REQ-L4-5)
 
