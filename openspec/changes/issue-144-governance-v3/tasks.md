@@ -69,13 +69,13 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 
 ## PR1 — L1 CI job + registry refactor (REQ-L1-1, REQ-L3-3, design §7)
 
-- [ ] [RED] `governance-checks.test.mjs`: assert `REQUIRED_JOBS` and `DETECTION_JOBS` are exported arrays, `GOVERNANCE_JOBS` equals their union, and `checkContexts()` derives contexts from `REQUIRED_JOBS` only — REQ-L3-3
-- [ ] [GREEN] `governance-checks.mjs`: split `GOVERNANCE_JOBS` into `REQUIRED_JOBS = ['issue-link', 'diff-size']` + `DETECTION_JOBS = []`; `GOVERNANCE_JOBS = [...REQUIRED_JOBS, ...DETECTION_JOBS]`; `checkContexts()` maps `REQUIRED_JOBS` only — design §7
-- [ ] [RED] `governance-checks.test.mjs`: add drift-guard sub-test — YAML job names (full set) still equal `GOVERNANCE_JOBS` after the refactor (regression guard for the split itself) — REQ-L3-3
-- [ ] [GREEN] confirm drift-guard passes unchanged post-refactor (no YAML change needed yet)
+- [x] [RED] `governance-checks.test.mjs`: assert `REQUIRED_JOBS` and `DETECTION_JOBS` are exported arrays, `GOVERNANCE_JOBS` equals their union, and `checkContexts()` derives contexts from `REQUIRED_JOBS` only — REQ-L3-3
+- [x] [GREEN] `governance-checks.mjs`: split `GOVERNANCE_JOBS` into `REQUIRED_JOBS = ['issue-link', 'diff-size']` + `DETECTION_JOBS = []`; `GOVERNANCE_JOBS = [...REQUIRED_JOBS, ...DETECTION_JOBS]`; `checkContexts()` maps `REQUIRED_JOBS` only — design §7
+- [x] [RED] `governance-checks.test.mjs`: add drift-guard sub-test — YAML job names (full set) still equal `GOVERNANCE_JOBS` after the refactor (regression guard for the split itself) — REQ-L3-3
+- [x] [GREEN] confirm drift-guard passes unchanged post-refactor (no YAML change needed yet)
 - [ ] [RED] `governance-checks.test.mjs`: assert `local-checks` is present in both `REQUIRED_JOBS` and the parsed `governance.yml` job names — REQ-L1-1
 - [ ] [GREEN] `.github/workflows/governance.yml`: add `local-checks` job running `npm run repo:check`, `npm run brain:nav`, `npm test` on the existing `pull_request` trigger; add `'local-checks'` to `REQUIRED_JOBS` in the same commit — REQ-L1-1
-- [ ] [Manual] REQ-L1-1 CI-behavior acceptance: this very PR is the self-governing verification — confirm `local-checks` trips on a deliberately broken commit and clears once fixed
+- [ ] [Manual] REQ-L1-1 CI-behavior acceptance: this very PR is the self-governing verification — confirm `local-checks` trips on a deliberately broken commit and clears once fixed (deferred: requires this PR to actually be opened and observed in CI — see deviation note)
 
 ## PR2a — Substrate detector core (REQ-LADDER-1, REQ-LADDER-2, design §1)
 
