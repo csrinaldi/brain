@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 import { _getGitBranch } from './engram.mjs';
 
@@ -25,12 +26,22 @@ test('_getGitBranch: non-git directory → "unknown"', () => {
 });
 
 test('_getGitBranch: real git repo on a named branch → branch name', () => {
-  // This repo itself is a real git repo on a real branch — exercise the
-  // real spawnSync path (no spy) to prove the wrapper is wired correctly.
-  const branch = _getGitBranch(process.cwd());
-  assert.notEqual(branch, 'unknown');
-  assert.equal(typeof branch, 'string');
-  assert.ok(branch.length > 0);
+  // Build an isolated fixture repo on a KNOWN named branch and exercise the
+  // real spawnSync path (no spy). Using a fixture instead of process.cwd()
+  // keeps this deterministic under CI, where the checkout is a detached HEAD
+  // (a merge commit) and cwd has no named branch.
+  const dir = mkdtempSync(join(tmpdir(), 'engram-branch-named-'));
+  try {
+    const git = (args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+    git(['init', '-q']);
+    git(['config', 'user.email', 'test@example.com']);
+    git(['config', 'user.name', 'test']);
+    git(['checkout', '-q', '-b', 'named-branch']);
+    git(['commit', '-q', '--allow-empty', '-m', 'init']);
+    assert.equal(_getGitBranch(dir), 'named-branch');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('_getGitBranch: never throws', () => {
