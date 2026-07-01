@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -17,6 +17,8 @@ import {
   copyManaged,
   mergeDefaults,
   mergeClaudeSettings,
+  mergePackageJsonScripts,
+  mergePackageJson,
   migrateConfig,
   compareSemver,
   parseSemver,
@@ -826,6 +828,139 @@ test('copyManaged routes .claude/settings.json through specialMerge, not copied 
       '.claude/settings.json must not appear in copied');
     assert.ok((result.merged ?? []).includes('.claude/settings.json'),
       '.claude/settings.json must appear in merged');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── S5: mergePackageJsonScripts ───────────────────────────────────────────────
+//
+// Tests the PURE function directly. Fixtures use a small managed map so tests
+// don't need to know about the full MANAGED_SCRIPT_KEYS list.
+
+/** Small managed-scripts map used across S5 unit tests. */
+const S5_MANAGED = {
+  'brain:env:init': 'bash ./brain/scripts/bootstrap.sh',
+  'brain:repo:check': 'node ./brain/scripts/check-refs.mjs',
+  'brain:day:start': 'node ./brain/scripts/day-start.mjs',
+};
+
+// S5-a: fresh consumer with none of the managed keys → all injected.
+test('mergePackageJsonScripts: injects all managed keys into a consumer that has none (S5-a)', () => {
+  const consumer = { name: 'my-app', version: '1.0.0', scripts: { build: 'tsc', test: 'jest' } };
+  const result = JSON.parse(mergePackageJsonScripts(consumer, S5_MANAGED));
+
+  assert.equal(result.scripts['brain:env:init'], 'bash ./brain/scripts/bootstrap.sh',
+    'brain:env:init must be injected');
+  assert.equal(result.scripts['brain:repo:check'], 'node ./brain/scripts/check-refs.mjs',
+    'brain:repo:check must be injected');
+  assert.equal(result.scripts['brain:day:start'], 'node ./brain/scripts/day-start.mjs',
+    'brain:day:start must be injected');
+  // Pre-existing consumer scripts must be untouched.
+  assert.equal(result.scripts.build, 'tsc', 'pre-existing build key must survive');
+  assert.equal(result.scripts.test, 'jest', 'pre-existing test key must survive');
+});
+
+// S5-b: consumer owns brain:repo:check with a custom value → never overwritten.
+test('mergePackageJsonScripts: consumer value wins unconditionally — never-overwrite (S5-b)', () => {
+  const consumer = { scripts: { 'brain:repo:check': 'my-custom-check' } };
+  const result = JSON.parse(mergePackageJsonScripts(consumer, S5_MANAGED));
+
+  assert.equal(result.scripts['brain:repo:check'], 'my-custom-check',
+    'consumer brain:repo:check must NOT be overwritten');
+  // Other missing managed keys are still injected.
+  assert.equal(result.scripts['brain:env:init'], 'bash ./brain/scripts/bootstrap.sh',
+    'absent managed keys must still be injected');
+  assert.equal(result.scripts['brain:day:start'], 'node ./brain/scripts/day-start.mjs',
+    'absent managed keys must still be injected');
+});
+
+// S5-c: idempotent — second merge produces byte-equal output.
+test('mergePackageJsonScripts: idempotent — second run is byte-equal to first (S5-c)', () => {
+  const consumer = { scripts: { build: 'tsc' } };
+  const first = mergePackageJsonScripts(consumer, S5_MANAGED);
+  // Feed the first output back in as the consumer (simulates a re-upgrade).
+  const second = mergePackageJsonScripts(JSON.parse(first), S5_MANAGED);
+  assert.equal(second, first, 'second merge must produce identical bytes to first');
+});
+
+// S5-d: absent consumer file — treated as empty {} → managed scripts become the sole content.
+test('mergePackageJsonScripts: empty consumer ({}) writes managed scripts as the sole content (S5-d)', () => {
+  const result = JSON.parse(mergePackageJsonScripts({}, S5_MANAGED));
+
+  // Only a scripts field should be present (empty consumer had nothing else).
+  assert.deepEqual(Object.keys(result), ['scripts'],
+    'output must contain only a scripts field when consumer is empty');
+  for (const [k, v] of Object.entries(S5_MANAGED)) {
+    assert.equal(result.scripts[k], v, `managed key "${k}" must be present`);
+  }
+});
+
+// S5-e: non-scripts fields (name, version, dependencies) are preserved verbatim.
+test('mergePackageJsonScripts: non-scripts fields are preserved verbatim (S5-e)', () => {
+  const consumer = {
+    name: 'my-app',
+    version: '3.1.4',
+    description: 'a consumer repo',
+    dependencies: { lodash: '^4.0.0' },
+    devDependencies: { typescript: '^5.0.0' },
+    scripts: { build: 'tsc' },
+  };
+  const result = JSON.parse(mergePackageJsonScripts(consumer, S5_MANAGED));
+
+  assert.equal(result.name, 'my-app', 'name must be preserved');
+  assert.equal(result.version, '3.1.4', 'version must be preserved');
+  assert.equal(result.description, 'a consumer repo', 'description must be preserved');
+  assert.deepEqual(result.dependencies, { lodash: '^4.0.0' }, 'dependencies must be preserved');
+  assert.deepEqual(result.devDependencies, { typescript: '^5.0.0' }, 'devDependencies must be preserved');
+});
+
+// S5-io: mergePackageJson IO wrapper — write-if-changed idempotency.
+test('mergePackageJson: write-if-changed — second call is a mtime no-op (S5-io)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s5-io-'));
+  try {
+    // Build a minimal brain package.json with the managed scripts.
+    const brainPkg = {
+      name: 'brain',
+      version: '0.8.0',
+      scripts: {
+        'brain:env:init': 'bash ./brain/scripts/bootstrap.sh',
+        'brain:day:start': 'node ./brain/scripts/day-start.mjs',
+        'brain:ticket:start': 'node ./brain/scripts/ticket-start.mjs',
+        'brain:project:feature': 'node ./brain/scripts/new-change.mjs',
+        'brain:project:status': 'node ./brain/scripts/project-status.mjs',
+        'brain:tracker:board': 'node ./brain/scripts/tracker-board.mjs',
+        'brain:repo:check': 'node ./brain/scripts/check-refs.mjs',
+        'brain:change:verify': 'node ./brain/scripts/verify-change.mjs',
+        // Non-managed script (must NOT be injected).
+        'build': 'tsc',
+      },
+    };
+    const srcPath = join(tmp, 'brain-package.json');
+    writeFileSync(srcPath, JSON.stringify(brainPkg, null, 2) + '\n');
+
+    const destPath = join(tmp, 'consumer-package.json');
+    writeFileSync(destPath, JSON.stringify({ name: 'consumer', scripts: { build: 'tsc' } }, null, 2) + '\n');
+
+    // First call: merges and writes.
+    mergePackageJson(destPath, srcPath);
+    const afterFirst = readFileSync(destPath, 'utf8');
+    const parsed = JSON.parse(afterFirst);
+    assert.ok('brain:repo:check' in parsed.scripts, 'brain:repo:check must be injected');
+    assert.ok(!('build' in parsed.scripts) || parsed.scripts.build === 'tsc',
+      'non-managed build key must not be overwritten');
+
+    // Second call: content is identical — no write should happen. Verify by
+    // capturing mtime before and after the no-op call.
+    const { mtimeMs: mBefore } = statSync(destPath);
+    mergePackageJson(destPath, srcPath);
+    const { mtimeMs: mAfter } = statSync(destPath);
+    assert.equal(mAfter, mBefore, 'mtime must not change on a no-op re-merge');
+
+    // Non-managed brain script must NOT appear in consumer.
+    const final = JSON.parse(readFileSync(destPath, 'utf8'));
+    assert.ok(!('build' in final.scripts) || final.scripts.build === 'tsc',
+      'non-managed "build" script from brain must not be injected into consumer');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
