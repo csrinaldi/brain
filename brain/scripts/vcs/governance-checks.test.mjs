@@ -123,9 +123,28 @@ test('checkContexts returns "governance / <job>" for each REQUIRED_JOB', () => {
     'governance / issue-link',
     'governance / diff-size',
     'governance / local-checks',
+    'governance / memory-gate',
+    'governance / decision-gate',
   ]);
 });
 
 test('WORKFLOW_NAME is "governance"', () => {
   assert.equal(WORKFLOW_NAME, 'governance');
+});
+
+// ── L3 memory-gate + decision-gate jobs (REQ-L3-1, REQ-L3-2, REQ-L3-3) ──────────
+
+test('memory-gate and decision-gate are present in REQUIRED_JOBS', () => {
+  assert.ok(REQUIRED_JOBS.includes('memory-gate'), 'REQUIRED_JOBS must include "memory-gate"');
+  assert.ok(REQUIRED_JOBS.includes('decision-gate'), 'REQUIRED_JOBS must include "decision-gate"');
+});
+
+test('memory-gate and decision-gate are present in the parsed governance.yml job names', () => {
+  const yamlPath = resolve(REPO_ROOT, '.github/workflows/governance.yml');
+  const yamlText = readFileSync(yamlPath, 'utf8');
+  const matches = [...yamlText.matchAll(/^    name: (\S+)\s*$/mg)];
+  const yamlJobNames = matches.map(m => m[1]);
+
+  assert.ok(yamlJobNames.includes('memory-gate'), 'governance.yml must define a "memory-gate" job');
+  assert.ok(yamlJobNames.includes('decision-gate'), 'governance.yml must define a "decision-gate" job');
 });

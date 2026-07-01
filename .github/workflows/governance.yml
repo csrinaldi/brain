@@ -133,3 +133,35 @@ jobs:
 
       - name: test (unit test suite)
         run: npm test
+
+  # ── Invariant 4 (L3, governance v3) — session memory was captured ──────────
+  #
+  # Wraps the existing pure memoryPresence check: fails when no committed
+  # .memory/chunks/ observation is a session_summary. Thin runner keeps the
+  # logic in the tested pure function (design §4).
+  memory-gate:
+    name: memory-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: memory-gate (session summary captured)
+        run: node brain/scripts/governance/run-check.mjs memory-gate
+
+  # ── Invariant 5 (L3, governance v3) — architectural changes carry an ADR ────
+  #
+  # Wraps the existing pure adrPresence check over the PR's diff. Needs full
+  # history (fetch-depth: 0) to diff BASE_SHA...HEAD_SHA.
+  decision-gate:
+    name: decision-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: decision-gate (architectural changes carry an ADR)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node brain/scripts/governance/run-check.mjs decision-gate
