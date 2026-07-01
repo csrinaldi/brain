@@ -171,6 +171,50 @@ export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [] } = {}) 
   return { level, findings };
 }
 
+// ── Baseline / grandfather allowlist (REQ-L4-5, Gap G3) ────────────────────────
+//
+// Pre-v3 legacy openspec/changes/** dirs that carry proposal.md + design.md +
+// tasks.md but no spec artifact under either convention (spec.md or
+// specs/*/spec.md) — they predate even the spec.md convention. Hardcoded per
+// Micro-decisions (tasks.md line 210), analogous to brain-audit.mjs's
+// `governance.auditBaseline`. Not `brain.config.json`-driven yet — promote to
+// config-driven only if a second consumer needs it.
+
+export const BASELINE_EXEMPT_DIRS = ['installer-versionado', 'vcs-adapter', 'cli-i18n'];
+
+/**
+ * Post-processes an evaluatePhaseOrder() result: any `fail` finding attributed
+ * to a baseline/grandfather dir is downgraded to a non-blocking `exempt`
+ * finding rather than silently dropped, so the baseline dir's status stays
+ * visible in detection-mode output (REQ-L4-5).
+ *
+ * @param {{level: string, findings: Array}} evaluation
+ * @param {string[]} [baselineDirs]
+ * @returns {{level: string, findings: Array}}
+ */
+export function applyBaselineExemption(evaluation, baselineDirs = BASELINE_EXEMPT_DIRS) {
+  const findings = evaluation.findings.map(f => {
+    if (f.change && baselineDirs.includes(f.change) && f.level === 'fail') {
+      return {
+        ...f,
+        level: 'exempt',
+        message:
+          `${f.message} — pre-v3 baseline exemption (REQ-L4-5): known, not ` +
+          'failing in detection mode.',
+      };
+    }
+    return f;
+  });
+
+  const level = findings.some(f => f.level === 'fail')
+    ? 'fail'
+    : findings.some(f => f.level === 'warn')
+      ? 'warn'
+      : 'pass';
+
+  return { level, findings };
+}
+
 // ── Git I/O wrapper (PR4b) ──────────────────────────────────────────────────
 //
 // Gathers evaluatePhaseOrder()'s inputs from git + the filesystem. Every I/O
@@ -314,11 +358,11 @@ export function gatherPhaseOrderInputs({ baseSha, headSha, cwd = process.cwd(), 
 }
 
 /**
- * Runs the full L4 phase-order check: gathers inputs (git I/O) and evaluates
- * the pure rules. Never throws — an uncomputable diff (missing BASE_SHA/
- * HEAD_SHA, or a failing git command) degrades to `warn` rather than `fail`,
- * keeping REQ-L4-5's zero-false-positive goal intact while this job is
- * detection-only (DETECTION_JOBS).
+ * Runs the full L4 phase-order check: gathers inputs (git I/O), evaluates the
+ * pure rules, and applies the baseline/grandfather exemption. Never throws —
+ * an uncomputable diff (missing BASE_SHA/HEAD_SHA, or a failing git command)
+ * degrades to `warn` rather than `fail`, keeping REQ-L4-5's zero-false-positive
+ * goal intact while this job is detection-only (DETECTION_JOBS).
  *
  * @param {{ cwd?: string, baseSha?: string, headSha?: string, deps?: object }} [deps]
  * @returns {{ level: 'pass'|'warn'|'fail', findings: Array }}
@@ -357,7 +401,7 @@ export function runPhaseOrderCheck(deps = {}) {
     };
   }
 
-  return evaluatePhaseOrder(inputs);
+  return applyBaselineExemption(evaluatePhaseOrder(inputs));
 }
 
 function formatFinding(f) {
