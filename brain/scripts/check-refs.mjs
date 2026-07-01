@@ -12,7 +12,7 @@
 // If that file does not exist, the engine runs with structural checks only.
 // See ADR-0007 for the design rationale.
 //
-// Run with: npm run repo:check
+// Run with: npm run brain:repo:check  (deprecated alias: npm run repo:check)
 
 import { execSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';

@@ -7,7 +7,7 @@
 // el plan y corre SOLO las verificaciones que el cambio exige.
 //
 // Mismo script para local y CI: cero divergencia entre lo que valida un dev y
-// lo que valida el pipeline. Se ejecuta con `npm run change:verify`.
+// lo que valida el pipeline. Se ejecuta con `npm run brain:change:verify` (alias deprecado: change:verify).
 // Sin dependencias externas.
 
 import { execSync, spawnSync } from 'node:child_process';
