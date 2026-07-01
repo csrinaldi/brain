@@ -273,6 +273,38 @@ test('detectSubstrate: brainWritesReviewed probe throwing degrades to unavailabl
   assert.equal(gate.available, false);
 });
 
+// PR2b nit (a) — the brainWritesReviewed probe is only meaningful for providers
+// that actually have a rung-1 code-owner-review mechanism (GitHub, GitLab). For
+// Bitbucket and an unset provider there is nothing to probe — calling it anyway
+// is a wasted network/gh call. The probe call must live inside the
+// github/gitlab branches only (or the function must early-return before it).
+
+test('detectSubstrate: brainWritesReviewed probe is never invoked for Bitbucket (no such capability)', async () => {
+  let called = false;
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'bitbucket' } },
+    env: {},
+    probes: {
+      brainWritesReviewed: async () => { called = true; return {}; },
+    },
+  });
+
+  assert.equal(called, false, 'Bitbucket has no rung-1 code-owner-review capability — the probe must not be called');
+  assert.equal(result.rungs[1].gates.brainWritesReviewed.available, false);
+});
+
+test('detectSubstrate: brainWritesReviewed probe is never invoked when provider is unset', async () => {
+  let called = false;
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      brainWritesReviewed: async () => { called = true; return {}; },
+    },
+  });
+
+  assert.equal(called, false, 'no provider configured — nothing to probe, the probe must not be called');
+});
+
 // ── Probe-throws-never-crashes: every rung's probe, not just gates ─────────────
 
 test('detectSubstrate: a throwing branchProtection probe degrades rung 1 to inactive, never crashes', async () => {
@@ -341,6 +373,24 @@ test('detectSubstrate: all rungs armed selects rung 1 (highest wins)', async () 
   });
   assert.equal(result.rung, 1);
   assert.equal(result.enforced, true);
+});
+
+// PR2b nit (b) — rungs arm INDEPENDENTLY of which one is ultimately "selected".
+// Locks in that rungs[2] and rungs[3] both report active:true in an "all rungs
+// armed" fixture even though the top-level `rung` is 1 (highest wins for
+// selection, but every rung's own evidence is still reported honestly).
+test('detectSubstrate: all rungs armed — rungs[2] and rungs[3] are both independently active alongside selected rung 1', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 200, contexts: OUR_CONTEXTS }),
+      releaseGate: async () => true,
+      postMergeCi: async () => true,
+    },
+  });
+  assert.equal(result.rung, 1);
+  assert.equal(result.rungs[2].active, true, 'rung 2 evidence arms independently of the selected rung');
+  assert.equal(result.rungs[3].active, true, 'rung 3 evidence arms independently of the selected rung');
 });
 
 test('detectSubstrate: only rung 3 armed selects rung 3', async () => {

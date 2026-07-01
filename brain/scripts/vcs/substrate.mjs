@@ -148,9 +148,14 @@ async function evalRung1({ config, vcs, env, probes }) {
 // honestly when unavailable, per provider, never inferred.
 async function evalBrainWritesReviewedGate({ config, vcs, env, probes }) {
   const provider = config?.vcs?.provider;
-  const result = await safeProbe(probes.brainWritesReviewed, { config, vcs, env });
+
+  // The probe is only meaningful for providers that actually expose a rung-1
+  // code-owner-review mechanism. Calling it for Bitbucket (no such capability)
+  // or an unset provider would be a wasted probe/network call — so the call is
+  // scoped to the github/gitlab branches only, never invoked otherwise.
 
   if (provider === 'github') {
+    const result = await safeProbe(probes.brainWritesReviewed, { config, vcs, env });
     const { requireCodeOwnerReviews, codeownersPresent } = result ?? {};
     if (requireCodeOwnerReviews && codeownersPresent) {
       return { available: true, active: true, reason: null, remedy: null };
@@ -167,6 +172,7 @@ async function evalBrainWritesReviewedGate({ config, vcs, env, probes }) {
   }
 
   if (provider === 'gitlab') {
+    const result = await safeProbe(probes.brainWritesReviewed, { config, vcs, env });
     const { premiumOrHigher } = result ?? {};
     if (premiumOrHigher) {
       return { available: true, active: true, reason: null, remedy: null };
