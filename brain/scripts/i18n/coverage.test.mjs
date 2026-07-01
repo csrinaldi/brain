@@ -31,8 +31,8 @@ test('PR2 day-start: VCS auth message keys exist in en', () => {
   assert.equal(en['day.vcs.notConfigured'],  'VCS provider not configured — set vcs.provider in brain.config.json.');
   assert.equal(en['day.vcs.authOk'],         'Authenticated ({provider}).');
   assert.equal(en['day.vcs.sessionExpired'], 'Session not started or expired — re-authenticating from .env...');
-  assert.equal(en['day.vcs.tokenNotFound'],  'Token not found in .env — run npm run env:init');
-  assert.equal(en['day.vcs.authFailed'],     'Auth failed — check the token or that the provider CLI is installed. npm run env:init');
+  assert.equal(en['day.vcs.tokenNotFound'],  'Token not found in .env — run brain:env:init');
+  assert.equal(en['day.vcs.authFailed'],     'Auth failed — check the token or that the provider CLI is installed. brain:env:init');
 });
 
 test('PR2 day-start: main sync keys exist in en', () => {
@@ -78,7 +78,7 @@ test('PR2 project-status: VCS section and header keys exist in en', () => {
   assert.equal(en['ps.vcs.noRemote'],   '⚠ Could not detect origin remote.');
   assert.equal(en['ps.vcs.issues'],     'Open issues ({count}):');
   assert.equal(en['ps.vcs.prs'],        'Open PRs/MRs ({count}):');
-  assert.equal(en['ps.footer'],         '— End of projection. To regenerate: npm run project:status');
+  assert.equal(en['ps.footer'],         '— End of projection. To regenerate: brain:project:status');
 });
 
 test('PR2 ticket-start: key sample exists in en', () => {
@@ -87,7 +87,7 @@ test('PR2 ticket-start: key sample exists in en', () => {
   assert.equal(en['ticket.worktreeCreated'],    '✓ Worktree created at {path}');
   assert.equal(en['ticket.nextSteps.header'],   'Next steps:');
   assert.equal(en['ticket.nextSteps.step1'],    '    1. Implement — use /sdd-new {id} if the change is complex');
-  assert.equal(en['ticket.error.tokenNotFound'],'✗ VCS token not found in .env — run npm run env:init');
+  assert.equal(en['ticket.error.tokenNotFound'],'✗ VCS token not found in .env — run brain:env:init');
 });
 
 // ── Parity: es has every key that en has ───────────────────────────────────────
@@ -147,7 +147,7 @@ test('translate: ps.vcs.section returns prior Spanish section header', () => {
 test('translate: ps.footer returns prior Spanish footer', () => {
   assert.equal(
     translate('ps.footer', {}, es, en),
-    '— Fin de la proyección. Para regenerar: npm run project:status',
+    '— Fin de la proyección. Para regenerar: brain:project:status',
   );
 });
 
@@ -185,7 +185,7 @@ test('translate: day.run.exitCode interpolates code into Spanish', () => {
 
 test('PR3 bootstrap: deps section keys exist in en', () => {
   assert.equal(en['bootstrap.deps.section'], 'Base dependencies');
-  assert.equal(en['bootstrap.deps.missing'], "Missing '{tool}' (required). Install it and re-run env:init.");
+  assert.equal(en['bootstrap.deps.missing'], "Missing '{tool}' (required). Install it and re-run brain:env:init.");
   assert.equal(en['bootstrap.deps.ok'],      'git, python3 present; package manager: {pm}');
 });
 
@@ -197,12 +197,12 @@ test('PR3 bootstrap: ecosystem section keys exist in en', () => {
 test('PR3 bootstrap: PAT section keys exist in en', () => {
   assert.equal(en['bootstrap.pat.section'],        'Personal access token (.env)');
   assert.equal(en['bootstrap.pat.alreadySet'],     '{var} already set in .env');
-  assert.equal(en['bootstrap.pat.noTty'],          'no TTY: add {var} to .env and re-run env:init');
+  assert.equal(en['bootstrap.pat.noTty'],          'no TTY: add {var} to .env and re-run brain:env:init');
   assert.equal(en['bootstrap.pat.openPrompt'],     'Open the browser with the pre-filled form? [Y/n]: ');
   assert.equal(en['bootstrap.pat.manualUrl'],      'Create it manually at: {url}');
   assert.equal(en['bootstrap.pat.browserFallback'],'If the browser did not open, go to: {url}');
   assert.equal(en['bootstrap.pat.enterPrompt'],    'Paste your PAT (not shown): ');
-  assert.equal(en['bootstrap.pat.skipped'],        'No token: skipping VCS authentication. Re-run env:init when you have it.');
+  assert.equal(en['bootstrap.pat.skipped'],        'No token: skipping VCS authentication. Re-run brain:env:init when you have it.');
   assert.equal(en['bootstrap.pat.saved'],          '{var} saved in .env (gitignored)');
 });
 
@@ -223,10 +223,10 @@ test('PR3 bootstrap: SDD harness section keys exist in en', () => {
   assert.equal(en['bootstrap.sdd.section'],            'SDD implementation (harness)');
   assert.equal(en['bootstrap.sdd.prompt'],             'Which SDD implementation do you use? [gentle-ai]: ');
   assert.equal(en['bootstrap.sdd.ok'],                 'harness: {harness} (.env)');
-  assert.equal(en['bootstrap.sdd.gentleaiMissing'],    'gentle-ai missing — brew install gentle-ai and re-run env:init');
+  assert.equal(en['bootstrap.sdd.gentleaiMissing'],    'gentle-ai missing — brew install gentle-ai and re-run brain:env:init');
   assert.equal(en['bootstrap.sdd.ecosystemOk'],        'ecosystem already initialized (gentle-ai doctor)');
   assert.equal(en['bootstrap.sdd.ecosystemConfigured'],'ecosystem configured (skills, engram, gga)');
-  assert.equal(en['bootstrap.sdd.ecosystemFailed'],    'gentle-ai install failed — run it manually and re-run env:init');
+  assert.equal(en['bootstrap.sdd.ecosystemFailed'],    'gentle-ai install failed — run it manually and re-run brain:env:init');
   assert.equal(en['bootstrap.sdd.noTty'],              "no TTY: run 'gentle-ai install' manually");
   assert.equal(en['bootstrap.sdd.registryOk'],         'skill registry updated');
   assert.equal(en['bootstrap.sdd.registryFailed'],     'skill-registry refresh failed (non-blocking)');
@@ -308,8 +308,8 @@ test('PR3 sh: keyToVar converts bootstrap key correctly', () => {
 
 test('PR3 sh: templateToShell converts {placeholder} to %s for bootstrap keys', () => {
   // {tool} in a template becomes %s for shell printf.
-  assert.equal(templateToShell("Missing '{tool}' (required). Install it and re-run env:init."),
-                               "Missing '%s' (required). Install it and re-run env:init.");
+  assert.equal(templateToShell("Missing '{tool}' (required). Install it and re-run brain:env:init."),
+                               "Missing '%s' (required). Install it and re-run brain:env:init.");
   assert.equal(templateToShell('{tool} not found — {hint}'), '%s not found — %s');
   assert.equal(templateToShell('{var} already set in .env'), '%s already set in .env');
 });
