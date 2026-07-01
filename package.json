@@ -10,6 +10,7 @@
   "scripts": {
     "env:init": "bash ./brain/scripts/bootstrap.sh",
     "day:start": "node ./brain/scripts/day-start.mjs",
+    "session:start": "node ./brain/scripts/session-start.mjs",
     "ticket:start": "node ./brain/scripts/ticket-start.mjs",
     "project:feature": "node ./brain/scripts/new-change.mjs",
     "project:status": "node ./brain/scripts/project-status.mjs",

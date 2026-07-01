@@ -15,6 +15,8 @@ import { originIdentity } from './vcs/lib/repo.mjs';
 import { vcsToken } from './vcs/lib/token.mjs';
 import { detectPM } from './lib/pm.mjs';
 import { t } from './i18n/t.mjs';
+import { currentBranch } from './lib/git-branch.mjs';
+import { restoreManifestChurn } from './lib/memory-manifest.mjs';
 
 const ROOT = process.cwd();
 const NODE = process.execPath;
@@ -120,10 +122,8 @@ if (!vcs) {
 // safe and prevents the "your local changes would be overwritten" abort.
 // This is the "pull EARLY" step described in issue #59 / ADR-0002.
 {
-  const manifestFile = '.memory/manifest.json';
-  const manifestStatus = capture('git', ['status', '--porcelain', '--', manifestFile]);
-  if (manifestStatus.stdout?.trim()) {
-    capture('git', ['restore', '--', manifestFile]);
+  const { restored } = restoreManifestChurn(ROOT);
+  if (restored) {
     info(await t('day.memory.manifestRestored') || `manifest.json churn discarded (safe)`);
   }
 }
@@ -147,9 +147,9 @@ sep(await t('day.main.section'));
       warn(await t('day.main.fetchFailed', { host: VCS_HOST }));
     } else {
       const newMain = capture('git', ['rev-parse', 'refs/remotes/origin/main']).stdout.trim();
-      const currentBranch = capture('git', ['branch', '--show-current']).stdout.trim();
+      const activeBranch = currentBranch(ROOT);
 
-      if (currentBranch === 'main') {
+      if (activeBranch === 'main') {
         let merge = capture('git', ['merge', '--ff-only', 'refs/remotes/origin/main']);
         if (merge.status !== 0) {
           // If the merge fails due to generated files that would be overwritten, restore them and retry.
@@ -168,7 +168,7 @@ sep(await t('day.main.section'));
           warn(await t('day.main.pullFailed'));
         }
       } else {
-        ok(await t('day.main.remoteUpdated', { branch: currentBranch }));
+        ok(await t('day.main.remoteUpdated', { branch: activeBranch ?? 'unknown' }));
       }
 
       if (prevLocal && prevLocal !== newMain) {

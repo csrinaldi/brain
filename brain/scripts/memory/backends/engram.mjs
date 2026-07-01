@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 import { resolveFeature } from "../lib/feature-resolution.mjs";
 import { parseFrontmatter, serializeFrontmatter } from "../lib/resume-frontmatter.mjs";
 import { validateResume } from "../lib/resume-schema.mjs";
+import { currentBranch } from "../../lib/git-branch.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -290,19 +291,21 @@ export async function setup() {
  * Read the current git branch name.
  * Returns 'unknown' on any failure (git absent, detached HEAD, etc.).
  *
+ * Thin wrapper over the shared `lib/git-branch.mjs#currentBranch` primitive
+ * (issue #138, design §1.2) — preserves this module's existing 'unknown'
+ * contract on top of the de-duplicated detection logic. Note the observable
+ * behavior change on detached HEAD: the old inline implementation returned
+ * the literal `'HEAD'` string; this wrapper normalizes it to `'unknown'`
+ * like every other failure case, via `currentBranch`'s `null` sentinel.
+ *
  * @param {string} root  Repo root to run git in.
+ * @param {{ _spawn?: Function }} [opts]  Injectable spawn seam for tests
+ *   (forwarded to `currentBranch`); existing single-arg call sites are
+ *   unaffected since this parameter defaults to `{}`.
  * @returns {string}
  */
-function _getGitBranch(root) {
-  try {
-    const r = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      encoding: "utf8",
-      cwd: root,
-    });
-    return r.stdout?.trim() || "unknown";
-  } catch {
-    return "unknown";
-  }
+export function _getGitBranch(root, opts = {}) {
+  return currentBranch(root, opts) ?? "unknown";
 }
 
 /**
