@@ -25,7 +25,7 @@ const MATRIX = [
     scope: 'repo',
     label: 'cualquier cambio',
     match: () => true,
-    commands: () => [pm.runArgs('repo:check', true)],
+    commands: () => [['node', 'brain/scripts/check-refs.mjs']],
     always: true,
   },
   {
