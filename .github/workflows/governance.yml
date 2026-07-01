@@ -165,3 +165,24 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: node brain/scripts/governance/run-check.mjs decision-gate
+
+  # ── Invariant 6 (L4, governance v3, detection-only) — SDD phase order ──────
+  #
+  # Wraps evaluatePhaseOrder() over the PR's diff + touched openspec/changes/**
+  # artifact state. Detection-only (DETECTION_JOBS, governance-checks.mjs):
+  # runs and reports on every PR but is NOT yet required at merge — promotion
+  # to REQUIRED_JOBS is a one-line move, gated on REQ-L4-5's zero-false-positive
+  # acceptance run (design §7).
+  phase-order:
+    name: phase-order
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: phase-order (SDD phase-order + artifact completeness, detection-only)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node brain/scripts/vcs/phase-order-check.mjs
