@@ -39,8 +39,8 @@ function evaluateRuleC(impl, touchedDirs) {
     return findings;
   }
 
-  if (touchedDirs.length === 1 && touchedDirs[0].checkedTasks === 0) {
-    const dir = touchedDirs[0];
+  for (const dir of touchedDirs) {
+    if (dir.checkedTasks !== 0) continue;
     findings.push({
       rule: 'C',
       level: 'fail',

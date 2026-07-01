@@ -61,6 +61,62 @@ test('Rule C: impl non-empty and touched dir has >= 1 checked task → no violat
   assert.deepEqual(result.findings, []);
 });
 
+test('Rule C: multi-dir — impl + two touched dirs, one checkedTasks===0 and one checkedTasks>=1 → fail attributed to the 0-checked dir', () => {
+  // Regression: a bystander second change-dir edit (e.g. an unrelated checkbox
+  // bump or shared doc touch in a second openspec/changes/** dir) must NOT
+  // disable the enforcing core for the dir with the real violation.
+  const result = evaluatePhaseOrder({
+    changedFiles: [
+      'brain/scripts/vcs/foo.mjs',
+      'openspec/changes/issue-999-foo/tasks.md',
+      'openspec/changes/issue-888-bar/tasks.md',
+    ],
+    changeDirs: [
+      makeDir({ name: 'issue-999-foo', checkedTasks: 0 }),
+      makeDir({ name: 'issue-888-bar', checkedTasks: 5 }),
+    ],
+  });
+  assert.equal(result.level, 'fail');
+  const ruleCFindings = result.findings.filter(f => f.rule === 'C');
+  assert.equal(ruleCFindings.length, 1);
+  assert.equal(ruleCFindings[0].change, 'issue-999-foo');
+  assert.match(ruleCFindings[0].message, /tasks\.md has no checked item/);
+});
+
+test('Rule C: multi-dir — impl + two touched dirs, BOTH checkedTasks===0 → fail with one finding per dir', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: [
+      'brain/scripts/vcs/foo.mjs',
+      'openspec/changes/issue-999-foo/tasks.md',
+      'openspec/changes/issue-888-bar/tasks.md',
+    ],
+    changeDirs: [
+      makeDir({ name: 'issue-999-foo', checkedTasks: 0 }),
+      makeDir({ name: 'issue-888-bar', checkedTasks: 0 }),
+    ],
+  });
+  assert.equal(result.level, 'fail');
+  const ruleCFindings = result.findings.filter(f => f.rule === 'C');
+  assert.equal(ruleCFindings.length, 2);
+  assert.ok(ruleCFindings.some(f => f.change === 'issue-999-foo'));
+  assert.ok(ruleCFindings.some(f => f.change === 'issue-888-bar'));
+});
+
+test('Rule C: multi-dir — impl + two touched dirs, both checkedTasks>=1 → no Rule C violation', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: [
+      'brain/scripts/vcs/foo.mjs',
+      'openspec/changes/issue-999-foo/tasks.md',
+      'openspec/changes/issue-888-bar/tasks.md',
+    ],
+    changeDirs: [
+      makeDir({ name: 'issue-999-foo', checkedTasks: 1 }),
+      makeDir({ name: 'issue-888-bar', checkedTasks: 5 }),
+    ],
+  });
+  assert.equal(result.findings.filter(f => f.rule === 'C').length, 0);
+});
+
 // ── Rule A — artifact completeness, gated on Rule C seeing impl ────────────────
 
 test('Rule A: touched change missing hasDesign → fail "implementation without spec.md/design.md"', () => {

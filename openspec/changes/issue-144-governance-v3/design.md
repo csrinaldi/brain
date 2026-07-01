@@ -96,11 +96,18 @@ export function evaluatePhaseOrder({
 Let `impl = changedFiles.filter(f => !f.startsWith('openspec/changes/'))` minus an
 allowlist (`*.md` at repo root, `docs/**`, `.memory/**`). Let `touched` = the change
 dir(s) that appear in `changedFiles`.
-- `impl` non-empty **and** exactly one `touched` change dir whose `checkedTasks === 0`
-  → **fail**: "implementation code present but `openspec/changes/{name}/tasks.md` has no
-  checked item — phases not reached apply."
+- `impl` non-empty: for **each** `touched` change dir whose `checkedTasks === 0` → **fail**
+  (one finding per offending dir): "implementation code present but
+  `openspec/changes/{name}/tasks.md` has no checked item — phases not reached apply."
+  Touched dirs with `checkedTasks >= 1` produce no finding.
 - `impl` non-empty but **no** `touched` change dir (hotfix/docs-only-attribution
   ambiguous) → **warn** (cannot attribute → never fail). Keeps FP ≈ 0.
+
+*Fix-first note:* the evaluator originally gated this rule on `touched.length === 1`,
+which meant any diff touching 2+ change dirs (e.g. a bystander checkbox bump in an
+unrelated `openspec/changes/**` dir) silently bypassed Rule C entirely — worse than the
+zero-touched-dir case, which correctly warns. The per-dir evaluation above closes that
+fail-open.
 
 **Rule A — artifact completeness, gated on Rule C.** Only when Rule C sees `impl` code
 for a `touched` change: that change must have `hasProposal && hasSpec && hasDesign &&
