@@ -113,7 +113,7 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 - [x] [GREEN] implement the `decision-gate` branch + architectural-surface pattern constant
 - [x] [RED] `governance-checks.test.mjs`: assert `memory-gate` and `decision-gate` are present in both `REQUIRED_JOBS` and the parsed `governance.yml` job names — REQ-L3-3
 - [x] [GREEN] add `memory-gate` and `decision-gate` jobs to `.github/workflows/governance.yml` (composed like `issue-link`); add both names to `REQUIRED_JOBS` in the same commit
-- [ ] [Manual] REQ-L3-1/REQ-L3-2 CI-behavior acceptance: confirm on this PR that a `.memory/`-touching commit passes `memory-gate` and an architectural-surface commit without an ADR fails `decision-gate` (deferred: requires this PR to actually be opened and observed in CI)
+- [x] [Manual] REQ-L3-1/REQ-L3-2 CI-behavior acceptance: confirm on this PR that a `.memory/`-touching commit passes `memory-gate` and an architectural-surface commit without an ADR fails `decision-gate` (deferred: requires this PR to actually be opened and observed in CI) — **DONE on PR #156**: `memory-gate` observed green in CI (pass path); `decision-gate` observed green in CI (this PR touches no ADR/HOME.md → correct pass). Fail path (architectural change without ADR → red) verified out-of-CI by fresh-review live non-mocked CLI + the 11 `run-check.test.mjs` unit tests, not as a red check on this PR.
 
 ## PR4a — L4 pure evaluator `evaluatePhaseOrder` (REQ-L4-1, REQ-L4-2, REQ-L4-3, REQ-L4-4, design §2)
 
