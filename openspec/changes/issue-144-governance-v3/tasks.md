@@ -96,14 +96,14 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 
 ## PR2b — `brain-governance-status.mjs` extension (REQ-HONESTY-1, REQ-HONESTY-2)
 
-- [ ] [RED] `brain-governance-status.test.mjs`: rung-4-only fixture prints a prominent `RUNG 4 — DETECTION ONLY, no enforcing guarantee` block, not buried in normal output — REQ-HONESTY-2
-- [ ] [GREEN] wire `detectSubstrate()` into `reportGovernanceStatus()`; add the prominent rung-4 warning block
-- [ ] [RED] `brain-governance-status.test.mjs`: rung-2 fixture reports active rung 2 and includes remedy text to reach rung 1 — REQ-HONESTY-1
-- [ ] [GREEN] print rung + remedy for rungs 2/3
-- [ ] [RED] `brain-governance-status.test.mjs`: rung-1 fixture reports active rung 1 with no remedy line
-- [ ] [GREEN] suppress remedy output when already at rung 1
-- [ ] [RED] `brain-governance-status.test.mjs`: L6 sub-status line — when `rungs[1].gates.brainWritesReviewed.active === false`, print "brain-writes-reviewed enforced at evidence rung; CODEOWNERS rung-1 enhancement unavailable: `<reason>`"
-- [ ] [GREEN] implement the L6 sub-status line — REQ-HONESTY-1
+- [x] [RED] `brain-governance-status.test.mjs`: rung-4-only fixture prints a prominent `RUNG 4 — DETECTION ONLY, no enforcing guarantee` block, not buried in normal output — REQ-HONESTY-2
+- [x] [GREEN] wire `detectSubstrate()` into `reportGovernanceStatus()`; add the prominent rung-4 warning block
+- [x] [RED] `brain-governance-status.test.mjs`: rung-2 fixture reports active rung 2 and includes remedy text to reach rung 1 — REQ-HONESTY-1
+- [x] [GREEN] print rung + remedy for rungs 2/3
+- [x] [RED] `brain-governance-status.test.mjs`: rung-1 fixture reports active rung 1 with no remedy line
+- [x] [GREEN] suppress remedy output when already at rung 1
+- [x] [RED] `brain-governance-status.test.mjs`: L6 sub-status line — when `rungs[1].gates.brainWritesReviewed.active === false`, print "brain-writes-reviewed enforced at evidence rung; CODEOWNERS rung-1 enhancement unavailable: `<reason>`"
+- [x] [GREEN] implement the L6 sub-status line — REQ-HONESTY-1
 
 ## PR3 — L3 `memory-gate` + `decision-gate` jobs (REQ-L3-1, REQ-L3-2, REQ-L3-3)
 
