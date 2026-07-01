@@ -5,7 +5,7 @@
 //   Runs the 4 generic checks (diffSize, issueLink, adrPresence, memoryPresence)
 //   against the current branch's diff vs base (origin/main), then runs:
 //     • npm test          — full test suite
-//     • npm run repo:check — prohibited-reference check
+//     • npm run brain:repo:check — prohibited-reference check
 //   Aggregates results and exits non-zero if any check fails.
 //
 // The script performs NO action on import — side effects are guarded at the bottom.

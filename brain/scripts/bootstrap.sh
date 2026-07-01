@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bootstrap.sh — interactive development environment setup (verb: npm run env:init)
+# bootstrap.sh — interactive development environment setup (verb: npm run brain:env:init | deprecated alias: env:init)
 #
 # Leaves a fresh clone operational: personal PAT in .env, HTTPS credential helper
 # at repo level, VCS CLI authenticated, SDD harness chosen and initialized,
