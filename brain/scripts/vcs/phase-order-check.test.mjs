@@ -1,13 +1,15 @@
 // phase-order-check.test.mjs — Unit tests for evaluatePhaseOrder (REQ-L4-1..4, design §2)
+// and the PR4b git I/O wrapper + CLI (REQ-L4-1, REQ-L4-5, REQ-NEUTRALITY-1/2).
 // Run with: npm test  (node --test, no dependencies)
 //
-// Covers PR4a scope only: the pure evaluator. The git I/O wrapper + CLI entrypoint
-// (git diff, readdirSync, `git show BASE:path`, `- [x]` counting) is PR4b.
+// Wrapper tests use plain-data fakes injected via `deps` — no test spawns a real
+// git process or touches the real cwd (CI-fragility discipline, same as
+// run-check.test.mjs).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { evaluatePhaseOrder } from './phase-order-check.mjs';
+import { evaluatePhaseOrder, runPhaseOrderCheck, main } from './phase-order-check.mjs';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -246,4 +248,104 @@ test('aggregation: level is warn (not fail) when only warn-level findings are pr
   });
   assert.equal(result.level, 'warn');
   assert.equal(result.findings.every(f => f.level !== 'fail'), true);
+});
+
+// ── PR4b — git I/O wrapper + CLI (REQ-L4-1) ─────────────────────────────────────
+
+/**
+ * Builds injectable `deps` for gatherPhaseOrderInputs/runPhaseOrderCheck/main
+ * from plain in-memory maps — no real git process, no real filesystem.
+ *
+ * `filesAfter`/`filesBefore` are flat maps of relative-path → file content
+ * (working tree / BASE ref, respectively). A "directory" is any prefix shared
+ * by at least one key, so `exists()`/`listDir()` behave like a real fs without
+ * needing explicit directory entries.
+ */
+function makeFakeDeps({ baseSha = 'BASE', headSha = 'HEAD', changedFiles = [], filesAfter = {}, filesBefore = {} }) {
+  const exists = relPath => {
+    if (Object.prototype.hasOwnProperty.call(filesAfter, relPath)) return true;
+    const prefix = `${relPath}/`;
+    return Object.keys(filesAfter).some(k => k.startsWith(prefix));
+  };
+  const listDir = relPath => {
+    const prefix = `${relPath}/`;
+    const names = new Set();
+    for (const key of Object.keys(filesAfter)) {
+      if (key.startsWith(prefix)) names.add(key.slice(prefix.length).split('/')[0]);
+    }
+    return [...names];
+  };
+  return {
+    baseSha,
+    headSha,
+    diffNameOnly: () => changedFiles,
+    exists,
+    listDir,
+    readFile: relPath => filesAfter[relPath] ?? null,
+    showAtRef: (_ref, relPath) => filesBefore[relPath] ?? null,
+  };
+}
+
+/** Runs `fn` with console.log captured; returns the logged lines. */
+function captureLogs(fn) {
+  const lines = [];
+  const orig = console.log;
+  console.log = msg => lines.push(msg);
+  try {
+    fn();
+  } finally {
+    console.log = orig;
+  }
+  return lines;
+}
+
+const COMPLETE_DIR_FILES = {
+  'openspec/changes/issue-999-foo/proposal.md': '',
+  'openspec/changes/issue-999-foo/design.md': '',
+  'openspec/changes/issue-999-foo/spec.md': '',
+  'openspec/changes/issue-999-foo/tasks.md': '---\nstatus: tasked\n---\n- [x] done\n',
+};
+
+test('wrapper: happy path — complete artifacts + a checked task → main exits 0, pass verdict', () => {
+  const deps = makeFakeDeps({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    filesAfter: COMPLETE_DIR_FILES,
+    filesBefore: { 'openspec/changes/issue-999-foo/tasks.md': '---\nstatus: tasked\n---\n- [ ] pending\n' },
+  });
+
+  let exitCode;
+  const lines = captureLogs(() => {
+    exitCode = main(deps);
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(lines[0], 'phase-order-check: pass');
+});
+
+test('wrapper: fail path — impl change + zero checked tasks → main exits 1, expected verdict format', () => {
+  const deps = makeFakeDeps({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    filesAfter: {
+      ...COMPLETE_DIR_FILES,
+      'openspec/changes/issue-999-foo/tasks.md': '---\nstatus: tasked\n---\n- [ ] not done\n',
+    },
+  });
+
+  let exitCode;
+  const lines = captureLogs(() => {
+    exitCode = main(deps);
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(lines[0], 'phase-order-check: fail');
+  assert.ok(
+    lines.some(l => l.includes('Rule C') && l.includes('tasks.md has no checked item')),
+    `expected a Rule C line, got: ${JSON.stringify(lines)}`
+  );
+});
+
+test('wrapper: missing BASE_SHA/HEAD_SHA degrades to warn, never throws or fails', () => {
+  const deps = makeFakeDeps({ changedFiles: [] });
+  const result = runPhaseOrderCheck({ ...deps, baseSha: undefined, headSha: undefined });
+  assert.equal(result.level, 'warn');
 });
