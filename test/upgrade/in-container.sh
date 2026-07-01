@@ -50,7 +50,7 @@ npm i -D "${BRAIN}#${TO}" >/dev/null 2>&1
 # Breaking migration (S3): the entrypoint moves to node_modules/brain/brain/scripts/.
 # A real consumer repoints its aliases (the documented manual step) before running
 # the new upgrade — the old root-scripts/ alias no longer resolves post-install.
-node -e "const p=require('./package.json');p.scripts={...p.scripts,'brain:upgrade':'node node_modules/brain/brain/scripts/brain-upgrade.mjs','env:init':'bash ./brain/scripts/bootstrap.sh'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
+node -e "const p=require('./package.json');p.scripts={...p.scripts,'brain:upgrade':'node node_modules/brain/brain/scripts/brain-upgrade.mjs','brain:env:init':'bash ./brain/scripts/bootstrap.sh'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
 npm run brain:upgrade -- "${TO}" 2>&1 | tail -3
 
 line "4. ASSERT — core updated + project untouched"
