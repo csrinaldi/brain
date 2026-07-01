@@ -149,3 +149,45 @@ test('Rule B: unknown/custom status, unchanged status, absent frontmatter, forwa
   assert.equal(absentFrontmatter.level, 'pass');
   assert.equal(absentFrontmatter.findings.filter(f => f.rule === 'B').length, 0);
 });
+
+// ── Aggregation — level + findings across rules (REQ-L4-1) ────────────────────
+
+test('aggregation: level is pass and findings is empty when no rule reports a violation', () => {
+  const result = evaluatePhaseOrder({ changedFiles: [], changeDirs: [] });
+  assert.equal(result.level, 'pass');
+  assert.deepEqual(result.findings, []);
+});
+
+test('aggregation: level is fail when multiple rules report violations across different dirs; findings collects all of them', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: [
+      'brain/scripts/vcs/foo.mjs',
+      'openspec/changes/issue-999-foo/tasks.md',
+      'openspec/changes/issue-888-bar/design.md',
+    ],
+    changeDirs: [
+      // Rule A fail: touched, impl present, missing design.
+      makeDir({ name: 'issue-999-foo', checkedTasks: 1, hasDesign: false }),
+      // Rule B fail: touched (via design.md), status regressed.
+      makeDir({
+        name: 'issue-888-bar',
+        checkedTasks: 1,
+        statusBefore: 'designed',
+        statusAfter: 'proposed',
+      }),
+    ],
+  });
+  assert.equal(result.level, 'fail');
+  assert.equal(result.findings.length, 2);
+  assert.ok(result.findings.some(f => f.rule === 'A' && f.change === 'issue-999-foo'));
+  assert.ok(result.findings.some(f => f.rule === 'B' && f.change === 'issue-888-bar'));
+});
+
+test('aggregation: level is warn (not fail) when only warn-level findings are present', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: ['brain/scripts/vcs/foo.mjs'],
+    changeDirs: [],
+  });
+  assert.equal(result.level, 'warn');
+  assert.equal(result.findings.every(f => f.level !== 'fail'), true);
+});
