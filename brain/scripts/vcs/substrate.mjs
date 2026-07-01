@@ -88,6 +88,58 @@ async function evalRung2({ config, env, probes }) {
   };
 }
 
+// ── Rung 1 — merge ───────────────────────────────────────────────────────────────
+// Armed when branch protection (or a self-hosted pre-receive hook) is active with
+// OUR required check contexts. This is the finer read `capabilities()` cannot do
+// (github.mjs:96-100 maps both 200 and 404 to 'available' — correct for "can I call
+// brain:protect?", but blind to armed-vs-unset). The 200/404/403 interpretation
+// lives HERE (unit-testable); the raw HTTP read is the injected `probes.branchProtection`.
+async function evalRung1({ config, vcs, env, probes }) {
+  if (config?.vcs?.selfHostedPreReceive === true) {
+    return { available: true, active: true, reason: null, remedy: null };
+  }
+
+  const result = await safeProbe(probes.branchProtection, { config, vcs, env });
+  const status = result?.status;
+  const contexts = Array.isArray(result?.contexts) ? result.contexts : [];
+  const ourContexts = checkContexts();
+  const hasOurContexts = ourContexts.length > 0 && ourContexts.every(c => contexts.includes(c));
+
+  if (status === 200 && hasOurContexts) {
+    return { available: true, active: true, reason: null, remedy: null };
+  }
+  if (status === 200) {
+    return {
+      available: true,
+      active: false,
+      reason: 'branch protection active but missing our required governance check contexts',
+      remedy: 'run npm run brain:protect to (re)apply the required check contexts',
+    };
+  }
+  if (status === 404) {
+    return {
+      available: true,
+      active: false,
+      reason: 'branch protection available but not configured (unset) — not armed',
+      remedy: 'run npm run brain:protect to activate branch protection',
+    };
+  }
+  if (status === 403) {
+    return {
+      available: false,
+      active: false,
+      reason: 'branch protection unavailable — tier-locked',
+      remedy: 'upgrade plan (e.g. GitHub Pro for private repos) or make the repo public',
+    };
+  }
+  return {
+    available: false,
+    active: false,
+    reason: 'branch protection status unknown (no probe wired, or probe failed)',
+    remedy: 'wire a branchProtection probe and verify VCS provider connectivity',
+  };
+}
+
 // ── Rung selection ───────────────────────────────────────────────────────────────
 // Highest-armed-rung wins: check 1, then 2, then 3; 4 is the guaranteed floor.
 function selectRung(rungs) {
@@ -112,6 +164,7 @@ function selectRung(rungs) {
 export async function detectSubstrate({ config = {}, vcs, env = process.env, probes = {} } = {}) {
   const rungs = {};
 
+  rungs[1] = await evalRung1({ config, vcs, env, probes });
   rungs[3] = await evalRung3({ config, env, probes });
   rungs[2] = await evalRung2({ config, env, probes });
   rungs[4] = evalRung4();

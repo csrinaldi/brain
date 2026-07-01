@@ -77,7 +77,10 @@ test('detectSubstrate: rung 2 armed when the releaseGate probe returns true (run
   assert.equal(result.rung, 2);
   assert.equal(result.enforced, true);
   assert.equal(result.rungs[2].active, true);
-  assert.equal(result.reason, null, 'at the ceiling relative to available evidence, reason is null');
+  // Below rung 1 (no branchProtection probe wired here), so the top-level
+  // reason/remedy surface rung 1's blocker — the actionable next step to climb.
+  assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
+  assert.ok(typeof result.remedy === 'string' && result.remedy.length > 0);
 });
 
 test('detectSubstrate: rung 2 wins over rung 3 when both are armed (higher rung takes priority)', async () => {
@@ -90,4 +93,84 @@ test('detectSubstrate: rung 2 wins over rung 3 when both are armed (higher rung 
   });
 
   assert.equal(result.rung, 2);
+});
+
+// ── Rung 1 — merge (finer branch-protection read, beyond capabilities()) ────────
+//
+// capabilities() (github.mjs:96-100) maps BOTH 200 and 404 to 'available' — correct
+// for "can I call brain:protect?" but it cannot distinguish armed (rung 1 active)
+// from available-but-unset. detectSubstrate adds that distinction itself, via the
+// injected branchProtection probe's raw { status, contexts } read (design §1 "why
+// finer than capabilities()"). checkContexts() (not hardcoded) defines "our
+// required contexts" so this test tracks REQUIRED_JOBS without duplicating it.
+
+const OUR_CONTEXTS = checkContexts();
+
+test('detectSubstrate: rung 1 armed on 200 + our required contexts present', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 200, contexts: OUR_CONTEXTS }),
+    },
+  });
+
+  assert.equal(result.rung, 1);
+  assert.equal(result.enforced, true);
+  assert.equal(result.reason, null);
+  assert.equal(result.remedy, null);
+});
+
+test('detectSubstrate: rung 1 NOT armed on 200 without our required contexts (falls through)', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 200, contexts: ['some-other-check'] }),
+    },
+  });
+
+  assert.notEqual(result.rung, 1);
+  assert.equal(result.rungs[1].active, false);
+});
+
+test('detectSubstrate: rung 1 NOT armed on 404 (available but unset) — falls to rung 4', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 404, contexts: [] }),
+    },
+  });
+
+  assert.equal(result.rung, 4);
+  assert.equal(result.rungs[1].available, true, 'branch protection API is reachable — capability is available');
+  assert.equal(result.rungs[1].active, false, 'but not yet configured — not armed');
+  assert.ok(/unset|not configured|not armed/i.test(result.rungs[1].reason));
+});
+
+test('detectSubstrate: rung 1 NOT armed on 403/tier-locked — unavailable, not just unset', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 403, contexts: [] }),
+    },
+  });
+
+  assert.equal(result.rung, 4);
+  assert.equal(result.rungs[1].available, false, 'tier-locked means the capability itself is unavailable');
+  assert.equal(result.rungs[1].active, false);
+  assert.ok(typeof result.rungs[1].remedy === 'string' && result.rungs[1].remedy.length > 0);
+});
+
+test('detectSubstrate: rung 1 armed via self-hosted pre-receive floor, bypassing the probe entirely', async () => {
+  const result = await detectSubstrate({
+    config: { vcs: { selfHostedPreReceive: true } },
+    env: {},
+    probes: {
+      // If this were called, the self-hosted override would still have to win —
+      // but self-hosted arms WITHOUT needing the probe at all.
+      branchProtection: async () => ({ status: 403, contexts: [] }),
+    },
+  });
+
+  assert.equal(result.rung, 1);
+  assert.equal(result.enforced, true);
 });
