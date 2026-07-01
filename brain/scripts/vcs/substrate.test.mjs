@@ -34,3 +34,60 @@ test('detectSubstrate: called with no arguments at all never throws (default env
   // acceptable for "does it crash", never for a deterministic rung assertion.
   await assert.doesNotReject(async () => detectSubstrate());
 });
+
+// ── Rung 3 — auto-correct (post-merge CI presence) ──────────────────────────────
+
+test('detectSubstrate: rung 3 armed when the postMergeCi probe returns true', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => true,
+    },
+  });
+
+  assert.equal(result.rung, 3);
+  assert.equal(result.enforced, true);
+  assert.equal(result.rungs[3].active, true);
+});
+
+test('detectSubstrate: rung 3 inactive when the postMergeCi probe returns false', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => false,
+    },
+  });
+
+  assert.equal(result.rung, 4);
+  assert.equal(result.rungs[3].active, false);
+  assert.ok(typeof result.rungs[3].reason === 'string' && result.rungs[3].reason.length > 0);
+  assert.ok(typeof result.rungs[3].remedy === 'string' && result.rungs[3].remedy.length > 0);
+});
+
+// ── Rung 2 — release (release-gate presence) ────────────────────────────────────
+
+test('detectSubstrate: rung 2 armed when the releaseGate probe returns true (rung 3 absent)', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      releaseGate: async () => true,
+    },
+  });
+
+  assert.equal(result.rung, 2);
+  assert.equal(result.enforced, true);
+  assert.equal(result.rungs[2].active, true);
+  assert.equal(result.reason, null, 'at the ceiling relative to available evidence, reason is null');
+});
+
+test('detectSubstrate: rung 2 wins over rung 3 when both are armed (higher rung takes priority)', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      releaseGate: async () => true,
+      postMergeCi: async () => true,
+    },
+  });
+
+  assert.equal(result.rung, 2);
+});

@@ -52,6 +52,42 @@ function evalRung4() {
   return { available: true, active: true, reason: null, remedy: null };
 }
 
+// ── Rung 3 — auto-correct ────────────────────────────────────────────────────────
+// Armed when post-merge CI runs brain:audit and can open an auto-revert PR.
+// Evidence: `probes.postMergeCi({ config, env })` — real wiring checks presence of
+// .github/workflows/governance-postmerge.yml or env.GITHUB_ACTIONS === 'true'
+// (design §1). The interpretation lives here so it stays unit-testable; the actual
+// fs/env read is the caller's concern (see module doc).
+async function evalRung3({ config, env, probes }) {
+  const active = Boolean(await safeProbe(probes.postMergeCi, { config, env }));
+  if (active) {
+    return { available: true, active: true, reason: null, remedy: null };
+  }
+  return {
+    available: true, // CI is always something the project can wire — never a tier block
+    active: false,
+    reason: 'no post-merge CI detected (no governance-postmerge.yml, not running in CI)',
+    remedy: 'add .github/workflows/governance-postmerge.yml running brain:audit with auto-revert on failure',
+  };
+}
+
+// ── Rung 2 — release ─────────────────────────────────────────────────────────────
+// Armed when the publish/tag path runs brain:audit fail-closed. Evidence:
+// `probes.releaseGate({ config, env })` — real wiring checks presence of
+// .github/workflows/release.yml or config.governance.releaseGate === true.
+async function evalRung2({ config, env, probes }) {
+  const active = Boolean(await safeProbe(probes.releaseGate, { config, env }));
+  if (active) {
+    return { available: true, active: true, reason: null, remedy: null };
+  }
+  return {
+    available: true, // the project always controls its own release path
+    active: false,
+    reason: 'no release-gate wired (no release.yml, governance.releaseGate not set)',
+    remedy: 'add .github/workflows/release.yml running brain:audit fail-closed before tag, or set governance.releaseGate=true',
+  };
+}
+
 // ── Rung selection ───────────────────────────────────────────────────────────────
 // Highest-armed-rung wins: check 1, then 2, then 3; 4 is the guaranteed floor.
 function selectRung(rungs) {
@@ -76,13 +112,22 @@ function selectRung(rungs) {
 export async function detectSubstrate({ config = {}, vcs, env = process.env, probes = {} } = {}) {
   const rungs = {};
 
+  rungs[3] = await evalRung3({ config, env, probes });
+  rungs[2] = await evalRung2({ config, env, probes });
   rungs[4] = evalRung4();
 
+  const rung = selectRung(rungs);
+  const enforced = rung <= 3;
+  // At the ceiling (rung 1) there is nowhere higher to climb — no reason/remedy
+  // needed. Below the ceiling, surface the nearest unattained rung's reason/remedy:
+  // it is always the single, most actionable next step to climb the ladder.
+  const blocker = rung === 1 ? null : rungs[rung - 1];
+
   return {
-    rung: 4,
-    enforced: false,
-    reason: 'no capability probes wired — governance runs in detection-only mode',
-    remedy: 'wire release-gate, post-merge CI, and branch-protection probes (see brain-governance-status.mjs)',
+    rung,
+    enforced,
+    reason: blocker?.reason ?? null,
+    remedy: blocker?.remedy ?? null,
     rungs,
   };
 }

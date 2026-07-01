@@ -120,6 +120,14 @@
       "sessions": 3,
       "memories": 13,
       "prompts": 0
+    },
+    {
+      "id": "e697c0bb",
+      "created_by": "gandalf",
+      "created_at": "2026-07-01T01:26:59Z",
+      "sessions": 0,
+      "memories": 6,
+      "prompts": 0
     }
   ]
 }
