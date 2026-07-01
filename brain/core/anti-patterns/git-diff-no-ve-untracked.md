@@ -1,6 +1,6 @@
 # git diff does not see untracked files
 
-- **Discovered in:** ISSUE-13 / macro `change:verify`
+- **Discovered in:** ISSUE-13 / macro `brain:change:verify` (formerly `change:verify`)
 - **Applies to:** any automation that makes decisions based on the changeset (selective validation, MR generation, scope classification, CI)
 
 ## Symptom

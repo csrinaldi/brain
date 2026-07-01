@@ -1,6 +1,6 @@
 # Self-updating installers are not innocuous
 
-- **Discovered in:** ISSUE-6 / environment bootstrap (`env:init`)
+- **Discovered in:** ISSUE-6 / environment bootstrap (`brain:env:init`, formerly `env:init`)
 - **Applies to:** any ecosystem tooling with an `install`/`upgrade` subcommand (gentle-ai, and any CLI that manages itself)
 
 ## Symptom
