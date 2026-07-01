@@ -107,13 +107,13 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 
 ## PR3 — L3 `memory-gate` + `decision-gate` jobs (REQ-L3-1, REQ-L3-2, REQ-L3-3)
 
-- [ ] [RED] `run-check.test.mjs`: `memory-gate` subcommand computes chunk-observation input (reusing `readChunkObservations` from `lib/chunk-reader.mjs`), calls `memoryPresence`, exits 1 on `{pass:false}`, 0 on `{pass:true}` — REQ-L3-1
-- [ ] [GREEN] scaffold `brain/scripts/governance/run-check.mjs` with the `memory-gate` branch
-- [ ] [RED] `run-check.test.mjs`: `decision-gate` subcommand computes `git diff --name-only $BASE_SHA...$HEAD_SHA`, matches the architectural-surface pattern set (see Micro-decisions), calls `adrPresence`, exits 1 only when the diff matches the pattern set and no ADR file is present — REQ-L3-2
-- [ ] [GREEN] implement the `decision-gate` branch + architectural-surface pattern constant
-- [ ] [RED] `governance-checks.test.mjs`: assert `memory-gate` and `decision-gate` are present in both `REQUIRED_JOBS` and the parsed `governance.yml` job names — REQ-L3-3
-- [ ] [GREEN] add `memory-gate` and `decision-gate` jobs to `.github/workflows/governance.yml` (composed like `issue-link`); add both names to `REQUIRED_JOBS` in the same commit
-- [ ] [Manual] REQ-L3-1/REQ-L3-2 CI-behavior acceptance: confirm on this PR that a `.memory/`-touching commit passes `memory-gate` and an architectural-surface commit without an ADR fails `decision-gate`
+- [x] [RED] `run-check.test.mjs`: `memory-gate` subcommand computes chunk-observation input (reusing `readChunkObservations` from `lib/chunk-reader.mjs`), calls `memoryPresence`, exits 1 on `{pass:false}`, 0 on `{pass:true}` — REQ-L3-1
+- [x] [GREEN] scaffold `brain/scripts/governance/run-check.mjs` with the `memory-gate` branch
+- [x] [RED] `run-check.test.mjs`: `decision-gate` subcommand computes `git diff --name-only $BASE_SHA...$HEAD_SHA`, matches the architectural-surface pattern set (see Micro-decisions), calls `adrPresence`, exits 1 only when the diff matches the pattern set and no ADR file is present — REQ-L3-2
+- [x] [GREEN] implement the `decision-gate` branch + architectural-surface pattern constant
+- [x] [RED] `governance-checks.test.mjs`: assert `memory-gate` and `decision-gate` are present in both `REQUIRED_JOBS` and the parsed `governance.yml` job names — REQ-L3-3
+- [x] [GREEN] add `memory-gate` and `decision-gate` jobs to `.github/workflows/governance.yml` (composed like `issue-link`); add both names to `REQUIRED_JOBS` in the same commit
+- [ ] [Manual] REQ-L3-1/REQ-L3-2 CI-behavior acceptance: confirm on this PR that a `.memory/`-touching commit passes `memory-gate` and an architectural-surface commit without an ADR fails `decision-gate` (deferred: requires this PR to actually be opened and observed in CI)
 
 ## PR4a — L4 pure evaluator `evaluatePhaseOrder` (REQ-L4-1, REQ-L4-2, REQ-L4-3, REQ-L4-4, design §2)
 
