@@ -176,31 +176,57 @@ RED-first regression tests before the GREEN fix, 0 regressions (`npm test`
 
 ## Slice 3 — i18n + universal entry + adapter wiring (REQ-1, REQ-8)
 
-- [ ] 3.1 [GREEN] Add canonical `session.*` keys to `brain/scripts/i18n/en.mjs` per
+- [x] 3.1 [GREEN] Add canonical `session.*` keys to `brain/scripts/i18n/en.mjs` per
       design §1.8: `session.header`, `session.branch`, `session.change.one`,
       `session.change.none`, `session.change.ambiguous`, `session.memory.ok`,
       `session.memory.skip`, `session.manifest.restored`, `session.ticket.label`,
       `session.ticket.none`.
-- [ ] 3.2 [GREEN] Mirror the same `session.*` keys (translated) in `brain/scripts/i18n/es.mjs`.
-- [ ] 3.3 Run the existing i18n key-coverage test suite; confirm it passes with
+- [x] 3.2 [GREEN] Mirror the same `session.*` keys (translated) in `brain/scripts/i18n/es.mjs`.
+- [x] 3.3 Run the existing i18n key-coverage test suite; confirm it passes with
       every `en.mjs` `session.*` key present (and translated) in `es.mjs`, and
       that no `session:start` user-facing string is hardcoded outside the i18n
       layer (REQ-8). Add a targeted coverage assertion if the existing suite
       doesn't already enumerate by prefix.
-- [ ] 3.4 [GREEN] Update the CLI entry in `session-start.mjs` to resolve all
+- [x] 3.4 [GREEN] Update the CLI entry in `session-start.mjs` to resolve all
       `session.*` strings ONCE via `t()` before calling `renderContextBlock`,
       per design §1.8 (renderer stays sync).
-- [ ] 3.5 [GREEN] Add `"session:start": "node ./brain/scripts/session-start.mjs"` to
+- [x] 3.5 [GREEN] Add `"session:start": "node ./brain/scripts/session-start.mjs"` to
       `package.json` `scripts` (REQ-1 — universal invocation, agent-agnostic).
-- [ ] 3.6 [GREEN] Smoke-run `npm run session:start` from a clean checkout; confirm
+- [x] 3.6 [GREEN] Smoke-run `npm run session:start` from a clean checkout; confirm
       exit code 0 and a printed context block (manual verification step, not a
       unit test — covers the REQ-1 "any shell context" scenario at a basic level).
-- [ ] 3.7 [GREEN] Merge a `SessionStart` hook into `/home/gandalf/IA/brain/.claude/settings.json`
+- [x] 3.7 [GREEN] Merge a `SessionStart` hook into `/home/gandalf/IA/brain/.claude/settings.json`
       beside the existing `PreToolUse` array per design §1.6 — command is exactly
       `"npm run session:start"`, zero logic in the JSON. Do NOT remove or alter
       the existing `PreToolUse` `--no-verify` blocker.
-- [ ] 3.8 Verify `.claude/settings.json` is still valid JSON and both hook keys
+- [x] 3.8 Verify `.claude/settings.json` is still valid JSON and both hook keys
       (`PreToolUse`, `SessionStart`) are present and independently structured.
+
+### Implementation notes (PR3)
+
+- `renderContextBlock(model, strings)` and `runSessionStart(cwd, deps, strings)`
+  both gained a `strings` parameter (no default — REQ-8 requires zero
+  hardcoded user-facing strings in production code). The CLI entry resolves
+  the map ONCE via the new exported `resolveSessionStrings()` (calls `t()`
+  per `session.*` key with no params, so unresolved `{placeholder}` tokens
+  pass through verbatim) and threads it through `runSessionStart` into the
+  still-pure/sync `renderContextBlock`, which performs the actual
+  `{placeholder}` substitution at render time with the runtime values
+  (branch, change list, etc.).
+- Test fixtures in `session-start.test.mjs` build their `strings` fixture
+  from the REAL `en.mjs` catalog (not a parallel hardcoded literal set), so
+  future i18n drift fails the suite instead of silently diverging. A
+  dedicated "marker strings" test proves the renderer actually consumes the
+  `strings` argument (a naive implementation ignoring the 2nd arg would
+  otherwise still pass every snapshot, since en.mjs's templates were chosen
+  to byte-match the prior PR2 literals).
+- New `brain/scripts/session-start-config.test.mjs` validates the two static
+  config artifacts (package.json's `session:start` script, the merged
+  `.claude/settings.json` `SessionStart` hook) without executing the script.
+  Added to the `no-verify-bypass` governance rule's `exempt` list in
+  `brain/project/check-refs-rules.mjs` (asserts the existing PreToolUse
+  guard text survives the merge — doesn't invoke the bypass), following the
+  same precedent as `installer.test.mjs`.
 
 ---
 

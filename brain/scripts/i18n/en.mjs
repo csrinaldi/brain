@@ -276,4 +276,20 @@ export default {
 
   // ── ticket-start.mjs — feature working memory (Slice 3) ─────────────────────
   'ticket.resume.noContext': '→ No feature resume context found — continuing.',
+
+  // ── session-start.mjs (issue #138, PR3) ───────────────────────────────────────
+  // Resolved ONCE (as templates, placeholders intact) in session-start.mjs's CLI
+  // entry via t(), then interpolated synchronously by the pure renderContextBlock
+  // (design §1.8). {branch}/{change}/{count}/{list} are filled at render time.
+  'session.header':             'brain · session context',
+  'session.branch':             'branch:   {branch}',
+  'session.branch.unknown':     '(unknown)',
+  'session.change.one':         'change:   {change}',
+  'session.change.none':        'change:   (no change folder for branch)',
+  'session.change.ambiguous':   'change:   ambiguous ({count}): {list}',
+  'session.memory.ok':          'memory:   engram hydrated',
+  'session.memory.skip':        'memory:   engram unavailable (skipped)',
+  'session.manifest.restored':  'manifest: churn restored (safe)',
+  'session.ticket.label':       'ticket:',
+  'session.ticket.none':        '(no active ticket memory)',
 };
