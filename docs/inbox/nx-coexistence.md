@@ -47,7 +47,7 @@ own, generate, or overwrite any of Nx's load-bearing files.
 ### 3. Root `package.json` alias coexistence
 
 - brain contributes only a small set of script *aliases* (`brain:upgrade`,
-  `env:init`, `day:start`, `ticket:start`, …) that point at
+  `brain:env:init`, `brain:day:start`, `brain:ticket:start`, …) that point at
   `node_modules/brain/brain/scripts/…` or `./brain/scripts/…`.
 - Verified on `synergy`: of its 21 root scripts, **none** are brain-like, so
   there is no name clash. Nx's own targets (`nx build`, `nx test`, …) live in

@@ -1,6 +1,6 @@
 {
   "name": "brain",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "private": true,
   "description": "Generic AI-assisted development harness — knowledge base, SDD scaffolding, and team memory.",
   "repository": {
@@ -16,6 +16,14 @@
     "project:status": "node ./brain/scripts/project-status.mjs",
     "tracker:board": "node ./brain/scripts/tracker-board.mjs",
     "brain:nav": "node ./brain/scripts/check-brain-nav.mjs",
+    "brain:env:init": "bash ./brain/scripts/bootstrap.sh",
+    "brain:day:start": "node ./brain/scripts/day-start.mjs",
+    "brain:ticket:start": "node ./brain/scripts/ticket-start.mjs",
+    "brain:project:feature": "node ./brain/scripts/new-change.mjs",
+    "brain:project:status": "node ./brain/scripts/project-status.mjs",
+    "brain:tracker:board": "node ./brain/scripts/tracker-board.mjs",
+    "brain:repo:check": "node ./brain/scripts/check-refs.mjs",
+    "brain:change:verify": "node ./brain/scripts/verify-change.mjs",
     "repo:check": "node ./brain/scripts/check-refs.mjs",
     "change:verify": "node ./brain/scripts/verify-change.mjs",
     "brain:upgrade": "node ./brain/scripts/brain-upgrade.mjs",

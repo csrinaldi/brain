@@ -33,8 +33,8 @@ export default {
   'day.vcs.notConfigured':  'VCS provider not configured — set vcs.provider in brain.config.json.',
   'day.vcs.authOk':         'Authenticated ({provider}).',
   'day.vcs.sessionExpired': 'Session not started or expired — re-authenticating from .env...',
-  'day.vcs.tokenNotFound':  'Token not found in .env — run npm run env:init',
-  'day.vcs.authFailed':     'Auth failed — check the token or that the provider CLI is installed. npm run env:init',
+  'day.vcs.tokenNotFound':  'Token not found in .env — run brain:env:init',
+  'day.vcs.authFailed':     'Auth failed — check the token or that the provider CLI is installed. brain:env:init',
 
   // Main sync
   'day.main.noVcs':         'Cannot sync main — VCS provider or token not available.',
@@ -79,13 +79,13 @@ export default {
 
   // Done footer
   'day.done.withTicket':      'With a ticket:',
-  'day.done.ticketStart':     'npm run ticket:start -- <iid>   (terminal)',
+  'day.done.ticketStart':     'brain:ticket:start -- <iid>   (terminal)',
   'day.done.ticketStartAgent':'/ticket-start <iid>             (Claude / AI agent)',
   'day.done.noTicket':        'No ticket — explore or propose:',
   'day.done.sddExplore':      '/sdd-explore <idea>             explore before committing',
   'day.done.gitlabIssue':     '/gitlab-issue                   create an issue from an idea',
   'day.done.beforePush':      'Before pushing:',
-  'day.done.checkCmd':        '{pm} run repo:check && {pm} run memory:share',
+  'day.done.checkCmd':        '{pm} run brain:repo:check && {pm} run memory:share',
 
   // ── tracker-board.mjs (PR2) ───────────────────────────────────────────────────
   'tracker.noRemote':        '⚠ Could not detect origin remote.',
@@ -110,10 +110,10 @@ export default {
   'ps.vcs.issues':        'Open issues ({count}):',
   'ps.vcs.prs':           'Open PRs/MRs ({count}):',
   'ps.vcs.error':         '⚠ Could not query VCS: {message}',
-  'ps.footer':            '— End of projection. To regenerate: npm run project:status',
+  'ps.footer':            '— End of projection. To regenerate: brain:project:status',
 
   // ── verify-change.mjs ────────────────────────────────────────────────────────
-  'verify.error.rerun':   'Fix and re-run: {pm} run change:verify',
+  'verify.error.rerun':   'Fix and re-run: {pm} run brain:change:verify',
 
   // ── brain-upgrade.mjs ────────────────────────────────────────────────────────
   'upgrade.error.usage':  'Usage: {pm} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force]',
@@ -121,7 +121,7 @@ export default {
   // ── bootstrap.sh (PR3) ───────────────────────────────────────────────────────
   // §1 Base dependencies
   'bootstrap.deps.section': 'Base dependencies',
-  'bootstrap.deps.missing': "Missing '{tool}' (required). Install it and re-run env:init.",
+  'bootstrap.deps.missing': "Missing '{tool}' (required). Install it and re-run brain:env:init.",
   'bootstrap.deps.ok':      'git, python3 present; package manager: {pm}',
 
   // §2 Ecosystem tools
@@ -132,12 +132,12 @@ export default {
   // §3 Personal access token
   'bootstrap.pat.section':         'Personal access token (.env)',
   'bootstrap.pat.alreadySet':      '{var} already set in .env',
-  'bootstrap.pat.noTty':           'no TTY: add {var} to .env and re-run env:init',
+  'bootstrap.pat.noTty':           'no TTY: add {var} to .env and re-run brain:env:init',
   'bootstrap.pat.openPrompt':      'Open the browser with the pre-filled form? [Y/n]: ',
   'bootstrap.pat.manualUrl':       'Create it manually at: {url}',
   'bootstrap.pat.browserFallback': 'If the browser did not open, go to: {url}',
   'bootstrap.pat.enterPrompt':     'Paste your PAT (not shown): ',
-  'bootstrap.pat.skipped':         'No token: skipping VCS authentication. Re-run env:init when you have it.',
+  'bootstrap.pat.skipped':         'No token: skipping VCS authentication. Re-run brain:env:init when you have it.',
   'bootstrap.pat.saved':           '{var} saved in .env (gitignored)',
 
   // §4 Git credential helper
@@ -157,10 +157,10 @@ export default {
   'bootstrap.sdd.prompt':             'Which SDD implementation do you use? [gentle-ai]: ',
   // {harness} = harness name (e.g. gentle-ai)
   'bootstrap.sdd.ok':                 'harness: {harness} (.env)',
-  'bootstrap.sdd.gentleaiMissing':    'gentle-ai missing — brew install gentle-ai and re-run env:init',
+  'bootstrap.sdd.gentleaiMissing':    'gentle-ai missing — brew install gentle-ai and re-run brain:env:init',
   'bootstrap.sdd.ecosystemOk':        'ecosystem already initialized (gentle-ai doctor)',
   'bootstrap.sdd.ecosystemConfigured':'ecosystem configured (skills, engram, gga)',
-  'bootstrap.sdd.ecosystemFailed':    'gentle-ai install failed — run it manually and re-run env:init',
+  'bootstrap.sdd.ecosystemFailed':    'gentle-ai install failed — run it manually and re-run brain:env:init',
   'bootstrap.sdd.noTty':              "no TTY: run 'gentle-ai install' manually",
   'bootstrap.sdd.registryOk':         'skill registry updated',
   'bootstrap.sdd.registryFailed':     'skill-registry refresh failed (non-blocking)',
@@ -244,12 +244,12 @@ export default {
 
   // ── ticket-start.mjs (PR2) ────────────────────────────────────────────────────
   'ticket.error.baseRequiresArg': '✗ --base requires a branch name. Example: --base feature/issue-99-my-story',
-  'ticket.error.usage':           'Usage: npm run ticket:start -- <issue-id> [--worktree] [--base <branch>]',
-  'ticket.error.usageExample1':   'Example: npm run ticket:start -- 42',
-  'ticket.error.usageExample2':   '         npm run ticket:start -- 42 --worktree --base feature/issue-99-my-story',
+  'ticket.error.usage':           'Usage: brain:ticket:start -- <issue-id> [--worktree] [--base <branch>]',
+  'ticket.error.usageExample1':   'Example: brain:ticket:start -- 42',
+  'ticket.error.usageExample2':   '         brain:ticket:start -- 42 --worktree --base feature/issue-99-my-story',
   'ticket.error.noRemote':        '✗ Could not detect origin remote.',
   'ticket.error.vcsInit':         '✗ Could not initialize VCS: {message}',
-  'ticket.error.tokenNotFound':   '✗ VCS token not found in .env — run npm run env:init',
+  'ticket.error.tokenNotFound':   '✗ VCS token not found in .env — run brain:env:init',
   'ticket.fetching':              'Searching for issue #{id}...',
   'ticket.error.fetchFailed':     '✗ Could not get issue #{id} — check VCS session and ID. {message}',
   'ticket.error.notFound':        '✗ Issue #{id} not found in {project}',
@@ -270,7 +270,7 @@ export default {
   'ticket.nextSteps.header':      'Next steps:',
   'ticket.nextSteps.cd':          '    0. cd {path}   (open your work session here)',
   'ticket.nextSteps.step1':       '    1. Implement — use /sdd-new {id} if the change is complex',
-  'ticket.nextSteps.step2':       '    2. {pm} run repo:check before each commit',
+  'ticket.nextSteps.step2':       '    2. {pm} run brain:repo:check before each commit',
   'ticket.nextSteps.step3':       '    3. {pm} run memory:share && git add .memory/ before pushing',
   'ticket.nextSteps.step4':       '    4. git push -u origin {branch}',
 

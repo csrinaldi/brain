@@ -19,6 +19,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, dirname, relative, sep } from 'node:path';
+import { MANAGED_SCRIPT_KEYS } from '../../core/managed-paths.mjs';
 
 // ── Glob matching ────────────────────────────────────────────────────────────
 // Minimal glob → RegExp for the manifest syntax: `*` (no separator) and `**`
@@ -263,6 +264,91 @@ export function mergeClaudeSettings(existingPath, brainSettingsPath) {
   }
 
   writeFileSync(existingPath, JSON.stringify(merged, null, 2) + '\n');
+}
+
+// ── Package.json scripts merge ─────────────────────────────────────────────────
+
+/**
+ * Merges managed brain:* script entries into a consumer's package.json without
+ * overwriting consumer-owned values.
+ *
+ * Rules:
+ * - `out = { ...consumer }` — all top-level consumer fields preserved.
+ * - `out.scripts = { ...consumer.scripts }` — created empty if absent.
+ * - For each [k, v] in managedScripts: add ONLY if k is NOT already in out.scripts.
+ *   Consumer value wins unconditionally — never deleted, never reordered.
+ * - Additions are appended in managedScripts iteration order (MANAGED_SCRIPT_KEYS
+ *   order when the caller is mergePackageJson).
+ * - Serialized as `JSON.stringify(out, null, 2) + '\n'` — matches every other
+ *   JSON writer in the repo (mergeClaudeSettings, migrateConfig).
+ *
+ * @param {string|object} consumerPkgRaw  Consumer's package.json — text or parsed object.
+ * @param {Record<string, string>} managedScripts  Brain-managed key→target map.
+ * @param {string} [label]  Optional file path for error messages (mirrors mergeClaudeSettings).
+ * @returns {string} Serialized package.json (2-space indent + trailing newline).
+ */
+export function mergePackageJsonScripts(consumerPkgRaw, managedScripts, label) {
+  let consumer;
+  if (typeof consumerPkgRaw === 'string') {
+    try {
+      consumer = JSON.parse(consumerPkgRaw);
+    } catch (e) {
+      const at = label ? ` at ${label}` : '';
+      throw new Error(
+        `mergePackageJsonScripts: could not parse consumer package.json${at}: ${e.message}`,
+      );
+    }
+  } else {
+    consumer = consumerPkgRaw;
+  }
+
+  const out = { ...consumer };
+  out.scripts = { ...(consumer.scripts ?? {}) };
+
+  for (const [k, v] of Object.entries(managedScripts)) {
+    if (!(k in out.scripts)) {
+      out.scripts[k] = v;
+    }
+  }
+
+  return JSON.stringify(out, null, 2) + '\n';
+}
+
+/**
+ * IO wrapper for mergePackageJsonScripts — implements the specialMerge signature.
+ *
+ * Reads brain's package.json at `srcPath`, filters its `scripts` to
+ * `MANAGED_SCRIPT_KEYS` → managedScripts. Reads the consumer's package.json at
+ * `destPath` (may be absent — treated as an empty `{}` so all managed scripts are
+ * written). Calls the pure fn and writes the result ONLY if it differs from the
+ * current file bytes (idempotent no-op write — no needless mtime churn on re-upgrade).
+ *
+ * @param {string} destPath  Absolute path to consumer's package.json (may not exist).
+ * @param {string} srcPath   Absolute path to brain's package.json.
+ */
+export function mergePackageJson(destPath, srcPath) {
+  const brainPkg = JSON.parse(readFileSync(srcPath, 'utf8'));
+
+  // Filter brain's scripts to only the managed brain:* keys.
+  const managedScripts = {};
+  for (const key of MANAGED_SCRIPT_KEYS) {
+    if (brainPkg.scripts?.[key] !== undefined) {
+      managedScripts[key] = brainPkg.scripts[key];
+    }
+  }
+
+  // Absent consumer → start from an empty object (managed scripts become the only content).
+  const consumerRaw = existsSync(destPath)
+    ? readFileSync(destPath, 'utf8')
+    : '{}';
+
+  const result = mergePackageJsonScripts(consumerRaw, managedScripts, destPath);
+
+  // Write only if content changed — avoid mtime churn on idempotent re-upgrade.
+  if (existsSync(destPath) && readFileSync(destPath, 'utf8') === result) return;
+
+  mkdirSync(dirname(destPath), { recursive: true });
+  writeFileSync(destPath, result);
 }
 
 // ── Config migration ─────────────────────────────────────────────────────────

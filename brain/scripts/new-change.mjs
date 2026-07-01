@@ -4,8 +4,9 @@
 // propia estructura SDD. Ver brain/project/decisions/adr-0002-harness-reemplazable-openspec.md
 //
 // Uso:
-//   npm run project:feature -- --issue 104
-//   npm run project:feature -- --issue 104 --title "valuacion masiva"
+//   npm run brain:project:feature -- --issue 104
+//   npm run brain:project:feature -- --issue 104 --title "valuacion masiva"
+// (alias deprecado: npm run project:feature)
 
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";

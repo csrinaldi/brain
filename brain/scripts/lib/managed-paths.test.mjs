@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { managed } from '../../core/managed-paths.mjs';
+import { managed, MANAGED_SCRIPT_KEYS } from '../../core/managed-paths.mjs';
 
 test('managed includes .github/workflows/governance.yml (exact literal)', () => {
   assert.ok(
@@ -46,4 +46,22 @@ test('managed does NOT contain scripts/** (REQ-S3-3)', () => {
     !managed.includes('scripts/**'),
     'managed must NOT contain "scripts/**" — consumer root scripts/ is consumer-owned after S3',
   );
+});
+
+// S5: package.json must be a managed path for specialMerge injection.
+test('managed includes package.json (S5)', () => {
+  assert.ok(
+    managed.includes('package.json'),
+    'managed must contain "package.json" so brain:upgrade routes it through specialMerge',
+  );
+});
+
+// S5: MANAGED_SCRIPT_KEYS must have exactly 8 entries, all prefixed brain:.
+test('MANAGED_SCRIPT_KEYS has exactly 8 entries, all prefixed brain: (S5)', () => {
+  assert.equal(MANAGED_SCRIPT_KEYS.length, 8,
+    'MANAGED_SCRIPT_KEYS must contain exactly 8 brain:* verb keys');
+  for (const key of MANAGED_SCRIPT_KEYS) {
+    assert.ok(key.startsWith('brain:'),
+      `every key must start with "brain:" — got "${key}"`);
+  }
 });

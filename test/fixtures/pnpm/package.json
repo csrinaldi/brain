@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "brain:upgrade": "node node_modules/brain/brain/scripts/brain-upgrade.mjs",
+    "brain:env:init": "bash ./brain/scripts/bootstrap.sh",
     "env:init": "bash ./brain/scripts/bootstrap.sh"
   }
 }

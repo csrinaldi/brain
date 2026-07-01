@@ -21,7 +21,7 @@ The agent may execute without asking for permission:
 - Create/modify files in `openspec/changes/**` (in-flight SDD artifacts)
 - Create/modify files in `.engram/**` (live memory)
 - Write to `scratch/{agent-id}.md` within an active change
-- Run `npm run repo:check`, `npm run backend:build`, `npm run change:verify`
+- Run `npm run brain:repo:check`, `npm run backend:build`, `npm run brain:change:verify`
 - Create issues in GitLab (`/gitlab-issue`)
 - Propose commits for human review (but not push or merge without confirmation)
 - Save observations in Engram (`mem_save`, `mem_session_summary`)

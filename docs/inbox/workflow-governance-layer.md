@@ -83,7 +83,7 @@ are different moments in the lifecycle:
 ### 4.2 Client hooks vs. server hooks (don't conflate)
 
 - **client hooks** (`commit-msg`/`pre-commit`/`pre-push`, via `core.hooksPath`):
-  the FLOOR. Versioned, installed by `env:init`, run the generic checks. Bypassable.
+  the FLOOR. Versioned, installed by `brain:env:init`, run the generic checks. Bypassable.
 - **server hook** (`pre-receive`): ONE possible implementation of the adapter's hard
   gate, only on self-hosted platforms. Not bypassable. A *platform* mechanism.
 
@@ -100,7 +100,7 @@ for *what* a check means; the three points only differ in *where/when* they run.
 ## 6. The floor — client hooks + brain:audit
 
 - **Hook suite** (always on, `core.hooksPath = scripts/hooks`):
-  `commit-msg` (conventional commit + ticket ref), `pre-commit` (repo:check; block
+  `commit-msg` (conventional commit + ticket ref), `pre-commit` (brain:repo:check; block
   direct commit to main), `pre-push` (the four invariant checks). Tool-independent.
 - **`brain:audit`** (the universal teeth): re-verifies the invariants over the
   **merged history** — diff-size per PR, ADR-for-decision, memory-present,
@@ -171,7 +171,7 @@ brain:next           → state machine: "your next step is X"                   
 ## 9. The `--no-verify` policy
 
 - **brain's own scripts** never use `--no-verify` / `git commit -n` → make it a
-  **prohibited reference** in `repo:check` (the check-refs engine already does
+  **prohibited reference** in `brain:repo:check` (the check-refs engine already does
   prohibited-reference detection, ADR-0007). Enforceable + tool-independent.
 - **The agent** → a **harness PreToolUse hook** (Claude Code) blocks any Bash command
   containing `--no-verify` / `-n` on git → the agent literally cannot run it in the
@@ -207,7 +207,7 @@ coordinating open non-compliant branches; let check-names drift from job-names.
   generic library; wire the full client-hook suite to run them; build **`brain:audit`**
   (re-verify merged history). THIS is the tool-independent guarantee.
 - **S5 The golden path** — the self-gating verb sequence (`brain:start/check/save/
-  ship/next`) unifying human + agent; the `--no-verify` policy (repo:check prohibition
+  ship/next`) unifying human + agent; the `--no-verify` policy (brain:repo:check prohibition
   + the harness hook).
 - **Phase 3** — GitLab/Bitbucket/self-hosted `protectBranch` + `pre-receive`; ruleset
   support; the full session_summary check (engram schema spike + `session/{issue}`
