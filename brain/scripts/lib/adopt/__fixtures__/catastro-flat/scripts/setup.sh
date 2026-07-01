@@ -11,6 +11,6 @@ echo "Setting up Catastro development environment..."
 npm install
 
 # Bootstrap brain configuration
-npm run env:init
+npm run brain:env:init
 
 echo "Setup complete."

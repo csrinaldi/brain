@@ -1,5 +1,5 @@
 # Register the union-merge driver for .memory/manifest.json.
-# The driver is installed locally via: npm run env:init  (scripts/bootstrap.sh)
+# The driver is installed locally via: npm run brain:env:init  (scripts/bootstrap.sh)
 # or manually: git config merge.engram-manifest.driver \
 #   "node scripts/merge-engram-manifest.mjs %O %A %B"
 /.memory/manifest.json merge=engram-manifest

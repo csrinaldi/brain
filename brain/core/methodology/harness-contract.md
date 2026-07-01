@@ -12,17 +12,22 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 
 ## Required verbs
 
-| Verb (npm) | Verb (Claude) | Responsibility |
-|-------------|----------------|-----------------|
-| `npm run env:init` | — | Environment bootstrap: installs tools, configures auth, imports memory, refreshes skill registry. Idempotent. |
-| `npm run day:start` | — | Daily startup: VCS auth, ecosystem updates, team memory, ticket board. |
-| `npm run ticket:start -- <id>` | `/ticket-start <id>` | Takes an issue, creates the branch with the convention `{type}/issue-{number}-{slug}` from main. |
-| `npm run project:feature -- --issue <id>` | `/sdd-new <id>` | Starts an SDD change: creates `openspec/changes/issue-<id>-<slug>/` with `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
-| `npm run repo:check` | — | Validates prohibited references across the entire tree. Minimum gate before any commit. |
-| `npm run change:verify` | `/sdd-verify` | Validates the scope of the active change: classifies the diff, runs only the necessary verifications. |
-| `npm run memory:share` | — | Exports local engram → `.memory/` (versioned in git). Run before pushing. |
-| `npm run memory:pull` | — | Imports `.memory/` → local engram. Brings the team's memory. |
-| `npm run memory:index` | — | Reprojects `brain/` → local engram. Needed when ADRs or glossary change. |
+> **Naming note (v0.8.0+):** the `brain:*` prefix is now the canonical name for all
+> brain-managed verbs. The short aliases (e.g. `env:init`, `repo:check`) remain as
+> deprecated aliases pointing at the same targets — they will be removed in a future
+> major release.
+
+| Canonical verb (npm) | Deprecated alias | Verb (Claude) | Responsibility |
+|---|---|---|---|
+| `npm run brain:env:init` | `env:init` | — | Environment bootstrap: installs tools, configures auth, imports memory, refreshes skill registry. Idempotent. |
+| `npm run brain:day:start` | `day:start` | — | Daily startup: VCS auth, ecosystem updates, team memory, ticket board. |
+| `npm run brain:ticket:start -- <id>` | `ticket:start -- <id>` | `/ticket-start <id>` | Takes an issue, creates the branch with the convention `{type}/issue-{number}-{slug}` from main. |
+| `npm run brain:project:feature -- --issue <id>` | `project:feature -- --issue <id>` | `/sdd-new <id>` | Starts an SDD change: creates `openspec/changes/issue-<id>-<slug>/` with `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
+| `npm run brain:repo:check` | `repo:check` | — | Validates prohibited references across the entire tree. Minimum gate before any commit. |
+| `npm run brain:change:verify` | `change:verify` | `/sdd-verify` | Validates the scope of the active change: classifies the diff, runs only the necessary verifications. |
+| `npm run memory:share` | — | — | Exports local engram → `.memory/` (versioned in git). Run before pushing. |
+| `npm run memory:pull` | — | — | Imports `.memory/` → local engram. Brings the team's memory. |
+| `npm run memory:index` | — | — | Reprojects `brain/` → local engram. Needed when ADRs or glossary change. |
 
 ## Optional verbs (recommended)
 
@@ -55,7 +60,7 @@ Only the durable residue (ADRs, anti-patterns, glossary) is promoted to `brain/`
 
 `gentle-ai` implements this contract. Claude skills are installed with
 `gentle-ai install` and maintained with `gentle-ai upgrade`. The local registry is
-refreshed automatically on `day:start` and `env:init`.
+refreshed automatically on `brain:day:start` and `brain:env:init`.
 
 See `brain/methodology/agent-skills.md` for the full skill inventory.
 

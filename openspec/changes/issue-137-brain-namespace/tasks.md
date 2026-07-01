@@ -52,14 +52,14 @@ Chain strategy: stacked-to-main
 
 ## S4 — Docs, Methodology, Fixtures [Spec: Deprecation Contract]
 
-- [ ] S4.1 `brain/core/methodology/harness-contract.md` verb table — add `brain:*` as authoritative name column; mark old verbs deprecated aliases; update inline refs (~line 58).
-- [ ] S4.2 `brain/core/methodology/consolidation-protocol.md` + `brain/core/methodology/agent-authorities.md` — old verb refs → `brain:*`.
-- [ ] S4.3 `README.md` — all old verb occurrences → `brain:*` equivalents (16 occurrences identified).
-- [ ] S4.4 `docs/adoption.md` + `docs/inbox/workflow-governance-layer.md` + `docs/inbox/nx-coexistence.md` — verb refs → `brain:*`.
-- [ ] S4.5 `test/fixtures/{npm,pnpm,bun,yarn}/package.json` — add BOTH old verb + `brain:*` equivalent entries; keep existing `brain:upgrade` key.
-- [ ] S4.6 `test/fresh-install/in-container.sh` + `test/upgrade/in-container.sh` — add `brain:*` verb assertions alongside existing old-verb invocations.
-- [ ] S4.7 `brain/scripts/lib/adopt/__fixtures__/catastro-flat/scripts/setup.sh` — add `brain:env:init` invocation alongside existing `env:init`.
-- [ ] S4.8 `npm test` green.
+- [x] S4.1 `brain/core/methodology/harness-contract.md` verb table — add `brain:*` as authoritative name column; mark old verbs deprecated aliases; update inline refs (~line 58).
+- [x] S4.2 `brain/core/methodology/consolidation-protocol.md` + `brain/core/methodology/agent-authorities.md` — old verb refs → `brain:*`.
+- [x] S4.3 `README.md` — all old verb occurrences → `brain:*` equivalents (16 occurrences identified).
+- [x] S4.4 `docs/adoption.md` + `docs/inbox/workflow-governance-layer.md` + `docs/inbox/nx-coexistence.md` — verb refs → `brain:*`.
+- [x] S4.5 `test/fixtures/{npm,pnpm,bun,yarn}/package.json` — add BOTH old verb + `brain:*` equivalent entries; keep existing `brain:upgrade` key.
+- [x] S4.6 `test/fresh-install/in-container.sh` + `test/upgrade/in-container.sh` — update invocation verb names to brain:*.
+- [x] S4.7 `brain/scripts/lib/adopt/__fixtures__/catastro-flat/scripts/setup.sh` — update `npm run env:init` → `brain:env:init`.
+- [x] S4.8 `npm test` green.
 
 ## S5 — package.json specialMerge [Spec: Additive Verb Injection]
 
