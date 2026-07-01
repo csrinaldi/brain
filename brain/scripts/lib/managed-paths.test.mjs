@@ -56,10 +56,10 @@ test('managed includes package.json (S5)', () => {
   );
 });
 
-// S5: MANAGED_SCRIPT_KEYS must have exactly 8 entries, all prefixed brain:.
-test('MANAGED_SCRIPT_KEYS has exactly 8 entries, all prefixed brain: (S5)', () => {
-  assert.equal(MANAGED_SCRIPT_KEYS.length, 8,
-    'MANAGED_SCRIPT_KEYS must contain exactly 8 brain:* verb keys');
+// S5 + #154: MANAGED_SCRIPT_KEYS must have exactly 9 entries, all prefixed brain:.
+test('MANAGED_SCRIPT_KEYS has exactly 9 entries, all prefixed brain: (S5)', () => {
+  assert.equal(MANAGED_SCRIPT_KEYS.length, 9,
+    'MANAGED_SCRIPT_KEYS must contain exactly 9 brain:* verb keys');
   for (const key of MANAGED_SCRIPT_KEYS) {
     assert.ok(key.startsWith('brain:'),
       `every key must start with "brain:" — got "${key}"`);
