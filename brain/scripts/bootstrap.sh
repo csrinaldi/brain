@@ -302,11 +302,11 @@ say "$I18N_BOOTSTRAP_DONE_SECTION"
 cat <<'EOT'
   Next steps:
     1. Read brain/HOME.md — the entry point to all project knowledge.
-    2. Every morning: npm run day:start
+    2. Every morning: brain:day:start
        (pulls memory, shows open tickets, checks for brain updates)
     3. Pick a ticket and create your branch: {type}/issue-{iid}-{slug}.
-    4. Plan a feature with SDD: npm run project:feature -- --issue [ID]
-    5. Before pushing: npm run repo:check && npm run memory:share
+    4. Plan a feature with SDD: brain:project:feature -- --issue [ID]
+    5. Before pushing: brain:repo:check && npm run memory:share
 EOT
 if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
   printf "  $I18N_BOOTSTRAP_DONE_PENDING\n" "${MISSING_OPTIONAL[*]}"
