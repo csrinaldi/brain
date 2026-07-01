@@ -235,7 +235,7 @@ export async function init({
 
   if (!_checkGentleAi()) {
     console.warn(
-      '  harness: gentle-ai not found — brew install gentle-ai and re-run env:init',
+      '  harness: gentle-ai not found — brew install gentle-ai and re-run brain:env:init',
     );
     return;
   }
@@ -252,7 +252,7 @@ export async function init({
       console.log('  harness: ecosystem configured (skills, engram, gga)');
     } else {
       console.warn(
-        '  harness: gentle-ai install failed — run it manually and re-run env:init',
+        '  harness: gentle-ai install failed — run it manually and re-run brain:env:init',
       );
     }
   } else {
