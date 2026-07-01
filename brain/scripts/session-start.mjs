@@ -324,11 +324,11 @@ export function step4LoadTicketMemory(cwd, deps = {}) {
 // ── runSessionStart — top-level orchestrator (design §1.1) ──────────────────
 
 /**
- * Runs the full session:start loop in order: restore manifest churn →
+ * Runs the full brain:session:start loop in order: restore manifest churn →
  * hydrate engram → resolve branch/change → load ticket memory → render.
  *
- * ALWAYS resolves with `exitCode: 0`. session:start is a best-effort context
- * loader — a missing engram, a non-git dir, or an ambiguous branch must
+ * ALWAYS resolves with `exitCode: 0`. brain:session:start is a best-effort
+ * context loader — a missing engram, a non-git dir, or an ambiguous branch must
  * degrade to a printed note, never a non-zero exit (an agent's session must
  * not be blocked by a context-load failure).
  *
@@ -389,7 +389,7 @@ export async function resolveSessionStrings() {
 // ── CLI entry-point ──────────────────────────────────────────────────────────
 //
 // Import-pure: NO action runs unless this file is the process entry point.
-// Prints the context block to stdout and exits 0 implicitly — session:start
+// Prints the context block to stdout and exits 0 implicitly — brain:session:start
 // must never block an agent's session on a context-load failure (REQ-1, REQ-7).
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
