@@ -14,11 +14,12 @@
 //   **  matches anything, including path separators (recursive)
 //   A trailing `/**` matches every file under that directory.
 
-// The 8 brain:* verb keys that brain:upgrade injects into consumer package.json.
+// The 9 brain:* verb keys that brain:upgrade injects into consumer package.json.
 // Single source of truth — imported by installer.mjs mergePackageJson.
 export const MANAGED_SCRIPT_KEYS = [
   'brain:env:init',
   'brain:day:start',
+  'brain:session:start',
   'brain:ticket:start',
   'brain:project:feature',
   'brain:project:status',

@@ -16,11 +16,15 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 > brain-managed verbs. The short aliases (e.g. `env:init`, `repo:check`) remain as
 > deprecated aliases pointing at the same targets — they will be removed in a future
 > major release.
+>
+> **v0.8.1:** `brain:session:start` is the canonical form of `session:start` (added in v0.8.0
+> but missed the prefix). The `session:start` alias continues to work.
 
 | Canonical verb (npm) | Deprecated alias | Verb (Claude) | Responsibility |
 |---|---|---|---|
 | `npm run brain:env:init` | `env:init` | — | Environment bootstrap: installs tools, configures auth, imports memory, refreshes skill registry. Idempotent. |
 | `npm run brain:day:start` | `day:start` | — | Daily startup: VCS auth, ecosystem updates, team memory, ticket board. |
+| `npm run brain:session:start` | `session:start` | — | Session context loader: restores manifest churn, hydrates local engram, resolves active change and ticket memory. Read-only, local-only, no network. |
 | `npm run brain:ticket:start -- <id>` | `ticket:start -- <id>` | `/ticket-start <id>` | Takes an issue, creates the branch with the convention `{type}/issue-{number}-{slug}` from main. |
 | `npm run brain:project:feature -- --issue <id>` | `project:feature -- --issue <id>` | `/sdd-new <id>` | Starts an SDD change: creates `openspec/changes/issue-<id>-<slug>/` with `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
 | `npm run brain:repo:check` | `repo:check` | — | Validates prohibited references across the entire tree. Minimum gate before any commit. |

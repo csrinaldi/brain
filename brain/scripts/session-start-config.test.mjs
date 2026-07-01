@@ -1,9 +1,10 @@
-// session-start-config.test.mjs — config wiring tests for session:start
-// (issue #138, PR3). Validates the two static config artifacts task 3.5/3.7
-// require: package.json's `session:start` script, and `.claude/settings.json`'s
+// session-start-config.test.mjs — config wiring tests for brain:session:start
+// (issue #138, PR3; prefixed in #154). Validates the two static config artifacts
+// task 3.5/3.7 require: package.json's canonical `brain:session:start` script
+// (plus the `session:start` deprecated alias), and `.claude/settings.json`'s
 // merged `SessionStart` hook beside the pre-existing `PreToolUse` hook
 // (design §1.6). Strict TDD, node:test, zero deps — no dynamic execution of
-// `npm run session:start` here (that's the manual smoke test, task 3.6);
+// `npm run brain:session:start` here (that's the manual smoke test, task 3.6);
 // this file only asserts the static JSON shape is correct.
 
 import { test } from 'node:test';
@@ -15,10 +16,16 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 // ---------------------------------------------------------------------------
-// package.json — "session:start" script (REQ-1, task 3.5)
+// package.json — "brain:session:start" canonical script + "session:start" alias
+// (REQ-1, task 3.5; canonical verb prefixed in #154)
 // ---------------------------------------------------------------------------
 
-test('package.json: has a session:start script invoking session-start.mjs', () => {
+test('package.json: has a brain:session:start script invoking session-start.mjs', () => {
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  assert.equal(pkg.scripts?.['brain:session:start'], 'node ./brain/scripts/session-start.mjs');
+});
+
+test('package.json: session:start deprecated alias still points to session-start.mjs (dual-alias, shipped in v0.8.0)', () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts?.['session:start'], 'node ./brain/scripts/session-start.mjs');
 });
@@ -60,14 +67,14 @@ test('.claude/settings.json: SessionStart hook is present, merged beside PreTool
   assert.deepEqual(sessionStart, [
     {
       hooks: [
-        { type: 'command', command: 'npm run session:start' },
+        { type: 'command', command: 'npm run brain:session:start' },
       ],
     },
   ]);
 });
 
-test('.claude/settings.json: SessionStart hook command is exactly "npm run session:start" — zero logic in the JSON (ADR-0002)', () => {
+test('.claude/settings.json: SessionStart hook command is exactly "npm run brain:session:start" — zero logic in the JSON (ADR-0002)', () => {
   const settings = JSON.parse(readFileSync(join(ROOT, '.claude', 'settings.json'), 'utf8'));
   const command = settings.hooks?.SessionStart?.[0]?.hooks?.[0]?.command;
-  assert.equal(command, 'npm run session:start');
+  assert.equal(command, 'npm run brain:session:start');
 });

@@ -5,6 +5,33 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.8.1 — brain:session:start canonical verb (#154)
+
+### New canonical verb
+
+`session:start` (added in v0.8.0 as a bare verb) is now prefixed under the
+`brain:` namespace per the convention established by #137:
+
+| New canonical verb       | Deprecated alias |
+|--------------------------|------------------|
+| `brain:session:start`    | `session:start`  |
+
+The `session:start` alias continues to work — it shipped in v0.8.0 and will not
+be removed before the next MAJOR version.
+
+### Automated consumer migration on `brain:upgrade`
+
+`brain:upgrade` now injects `brain:session:start` into the consumer's
+`package.json` alongside the existing 8 `brain:*` verbs (via `MANAGED_SCRIPT_KEYS`
+in `brain/core/managed-paths.mjs`). Consumer-wins rule applies: if
+`brain:session:start` already exists in the consumer's scripts, it is not
+overwritten.
+
+The `.claude/settings.json` `SessionStart` hook now uses `npm run brain:session:start`.
+Consumers whose hook still says `session:start` remain functional via the alias.
+
+**No action required**: `brain:upgrade` handles injection automatically.
+
 ## v0.8.0 — brain:* verb namespace + automated consumer migration (#137)
 
 ### New: 8 `brain:*` canonical verbs
