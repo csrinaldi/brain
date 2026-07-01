@@ -8,6 +8,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { evaluatePhaseOrder, runPhaseOrderCheck, main } from './phase-order-check.mjs';
 
@@ -348,4 +350,50 @@ test('wrapper: missing BASE_SHA/HEAD_SHA degrades to warn, never throws or fails
   const deps = makeFakeDeps({ changedFiles: [] });
   const result = runPhaseOrderCheck({ ...deps, baseSha: undefined, headSha: undefined });
   assert.equal(result.level, 'warn');
+});
+
+test('neutrality (REQ-NEUTRALITY-1): identical verdict with vs. without SKILL.md/.claude/** files present', () => {
+  const shared = {
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    filesAfter: COMPLETE_DIR_FILES,
+    filesBefore: { 'openspec/changes/issue-999-foo/tasks.md': '---\nstatus: tasked\n---\n- [x] already\n' },
+  };
+  const without = runPhaseOrderCheck(makeFakeDeps(shared));
+  const withHarness = runPhaseOrderCheck(
+    makeFakeDeps({
+      ...shared,
+      changedFiles: [...shared.changedFiles, 'SKILL.md', '.claude/settings.json'],
+      filesAfter: {
+        ...shared.filesAfter,
+        'SKILL.md': '# a harness skill file',
+        '.claude/settings.json': '{}',
+      },
+    })
+  );
+  assert.deepEqual(without, withHarness);
+});
+
+test('neutrality source-scan (REQ-NEUTRALITY-2): phase-order-check.mjs source contains no .claude or SKILL.md literal', () => {
+  const srcPath = fileURLToPath(new URL('./phase-order-check.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  assert.equal(src.includes('.claude'), false, 'source must not reference .claude');
+  assert.equal(src.includes('SKILL.md'), false, 'source must not reference SKILL.md');
+});
+
+test('Gap G1: change dir with specs/foo/spec.md (nested convention) is detected as hasSpec=true — no false Rule A fail', () => {
+  const deps = makeFakeDeps({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    filesAfter: {
+      'openspec/changes/issue-999-foo/proposal.md': '',
+      'openspec/changes/issue-999-foo/design.md': '',
+      'openspec/changes/issue-999-foo/specs/governance/spec.md': '',
+      'openspec/changes/issue-999-foo/tasks.md': '- [x] done\n',
+    },
+  });
+  const result = runPhaseOrderCheck(deps);
+  assert.equal(
+    result.findings.filter(f => f.rule === 'A').length,
+    0,
+    `expected no Rule A finding, got: ${JSON.stringify(result.findings)}`
+  );
 });
