@@ -11,6 +11,12 @@
 // from process.cwd() git state directly — keeps this safe under CI's detached
 // HEAD checkout. All I/O is injectable via `deps` so tests never touch the
 // real filesystem or spawn a real git process.
+//
+// FAIL-CLOSED: decision-gate is a REQUIRED gate. If the diff cannot be
+// computed (missing BASE_SHA/HEAD_SHA env, or the git command throwing),
+// defaultDiffNameOnly() THROWS rather than degrading to `[]` — an empty diff
+// would otherwise read as "no architectural change" and let adrPresence pass
+// silently. runCheck() catches the throw and fails the gate closed instead.
 
 import { execFileSync } from 'node:child_process';
 
@@ -20,22 +26,25 @@ import { readChunkObservations } from '../lib/chunk-reader.mjs';
 
 /**
  * Computes `git diff --name-only $BASE_SHA...$HEAD_SHA` from the workflow env.
- * Returns an empty list (never throws) when BASE_SHA/HEAD_SHA are absent —
- * callers running outside the decision-gate job simply get no diff.
+ * Throws when BASE_SHA/HEAD_SHA are absent or the git command fails — the
+ * diff-gate must fail closed rather than silently treat an uncomputable diff
+ * as an empty (harmless) one.
  *
  * @returns {string[]}
  */
 function defaultDiffNameOnly() {
   const base = process.env.BASE_SHA;
   const head = process.env.HEAD_SHA;
-  if (!base || !head) return [];
+  if (!base || !head) {
+    throw new Error('BASE_SHA/HEAD_SHA not set — cannot compute diff');
+  }
   try {
     const out = execFileSync('git', ['diff', '--name-only', `${base}...${head}`], {
       encoding: 'utf8',
     });
     return out.split('\n').filter(Boolean);
-  } catch {
-    return [];
+  } catch (err) {
+    throw new Error(`git diff failed: ${err.message}`);
   }
 }
 
@@ -56,7 +65,16 @@ export function runCheck(checkName, deps = {}) {
     return memoryPresence(readChunks(cwd));
   }
   if (checkName === 'decision-gate') {
-    return adrPresence(diffNameOnly());
+    let changedFiles;
+    try {
+      changedFiles = diffNameOnly();
+    } catch (err) {
+      return {
+        pass: false,
+        reason: `cannot compute diff — failing closed: ${err.message}`,
+      };
+    }
+    return adrPresence(changedFiles);
   }
   throw new Error(`run-check.mjs: unknown check "${checkName}"`);
 }

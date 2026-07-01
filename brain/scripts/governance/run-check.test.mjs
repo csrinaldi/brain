@@ -66,6 +66,29 @@ test('runCheck: decision-gate — injected diff touches neither ADR nor HOME.md 
   assert.deepEqual(result, { pass: true });
 });
 
+// ── decision-gate fail-closed when the diff cannot be computed ──────────────
+//
+// A REQUIRED gate must never silently pass just because its input could not
+// be computed (missing BASE_SHA/HEAD_SHA env, or the git command throwing).
+// diffNameOnly() throwing MUST fail the gate closed, not degrade to `[]`
+// (which adrPresence would otherwise treat as a harmless empty diff → pass).
+
+test('runCheck: decision-gate — diffNameOnly throws (diff uncomputable) → fail closed with reason', () => {
+  const result = runCheck('decision-gate', {
+    diffNameOnly: () => { throw new Error('BASE_SHA/HEAD_SHA not set'); },
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /cannot compute diff — failing closed/i);
+});
+
+test('runCheck: decision-gate — diffNameOnly throws → reason includes the underlying error message', () => {
+  const result = runCheck('decision-gate', {
+    diffNameOnly: () => { throw new Error('git exited with status 128'); },
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /git exited with status 128/);
+});
+
 // ── unknown check ────────────────────────────────────────────────────────────
 
 test('runCheck: unknown check name throws', () => {
@@ -108,4 +131,16 @@ test('main: decision-gate passing (non-architectural PR) → returns 0, prints n
   });
   assert.equal(code, 0);
   assert.deepEqual(logs, []);
+});
+
+test('main: decision-gate — diff uncomputable → returns 1, prints fail-closed reason', async () => {
+  let code;
+  const logs = await captureLog(() => {
+    code = main('decision-gate', {
+      diffNameOnly: () => { throw new Error('no BASE_SHA/HEAD_SHA'); },
+    });
+  });
+  assert.equal(code, 1);
+  assert.ok(logs.length === 1);
+  assert.match(logs[0], /cannot compute diff — failing closed/i);
 });
