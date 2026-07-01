@@ -284,16 +284,18 @@ export function mergeClaudeSettings(existingPath, brainSettingsPath) {
  *
  * @param {string|object} consumerPkgRaw  Consumer's package.json — text or parsed object.
  * @param {Record<string, string>} managedScripts  Brain-managed key→target map.
+ * @param {string} [label]  Optional file path for error messages (mirrors mergeClaudeSettings).
  * @returns {string} Serialized package.json (2-space indent + trailing newline).
  */
-export function mergePackageJsonScripts(consumerPkgRaw, managedScripts) {
+export function mergePackageJsonScripts(consumerPkgRaw, managedScripts, label) {
   let consumer;
   if (typeof consumerPkgRaw === 'string') {
     try {
       consumer = JSON.parse(consumerPkgRaw);
     } catch (e) {
+      const at = label ? ` at ${label}` : '';
       throw new Error(
-        `mergePackageJsonScripts: could not parse consumer package.json: ${e.message}`,
+        `mergePackageJsonScripts: could not parse consumer package.json${at}: ${e.message}`,
       );
     }
   } else {
@@ -340,7 +342,7 @@ export function mergePackageJson(destPath, srcPath) {
     ? readFileSync(destPath, 'utf8')
     : '{}';
 
-  const result = mergePackageJsonScripts(consumerRaw, managedScripts);
+  const result = mergePackageJsonScripts(consumerRaw, managedScripts, destPath);
 
   // Write only if content changed — avoid mtime churn on idempotent re-upgrade.
   if (existsSync(destPath) && readFileSync(destPath, 'utf8') === result) return;

@@ -932,8 +932,10 @@ test('mergePackageJson: write-if-changed — second call is a mtime no-op (S5-io
         'brain:tracker:board': 'node ./brain/scripts/tracker-board.mjs',
         'brain:repo:check': 'node ./brain/scripts/check-refs.mjs',
         'brain:change:verify': 'node ./brain/scripts/verify-change.mjs',
-        // Non-managed script (must NOT be injected).
-        'build': 'tsc',
+        // Non-managed script (must NOT be injected). Intentionally differs from
+        // the consumer's own 'build' value ('tsc') so that any filter regression
+        // that leaks this into the consumer would be caught by the assertion below.
+        'build': 'webpack',
       },
     };
     const srcPath = join(tmp, 'brain-package.json');
@@ -947,8 +949,9 @@ test('mergePackageJson: write-if-changed — second call is a mtime no-op (S5-io
     const afterFirst = readFileSync(destPath, 'utf8');
     const parsed = JSON.parse(afterFirst);
     assert.ok('brain:repo:check' in parsed.scripts, 'brain:repo:check must be injected');
-    assert.ok(!('build' in parsed.scripts) || parsed.scripts.build === 'tsc',
-      'non-managed build key must not be overwritten');
+    // Consumer's own build ('tsc') must be preserved; brain's build ('webpack') must NOT leak.
+    assert.strictEqual(parsed.scripts.build, 'tsc',
+      'consumer build must stay "tsc"; brain build ("webpack") must not leak');
 
     // Second call: content is identical — no write should happen. Verify by
     // capturing mtime before and after the no-op call.
@@ -959,8 +962,9 @@ test('mergePackageJson: write-if-changed — second call is a mtime no-op (S5-io
 
     // Non-managed brain script must NOT appear in consumer.
     const final = JSON.parse(readFileSync(destPath, 'utf8'));
-    assert.ok(!('build' in final.scripts) || final.scripts.build === 'tsc',
-      'non-managed "build" script from brain must not be injected into consumer');
+    // Consumer's build ('tsc') must be intact; brain's differing build ('webpack') must not appear.
+    assert.strictEqual(final.scripts.build, 'tsc',
+      'non-managed "build" script from brain ("webpack") must not be injected into consumer');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
