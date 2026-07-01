@@ -136,15 +136,15 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 
 ## PR4b — L4 wrapper + CLI + `DETECTION_JOBS` wiring + hardening (REQ-L4-1, REQ-L4-5)
 
-- [ ] [RED] `phase-order-check.test.mjs`: wrapper happy path — `mkdtemp` + `git init` fixture repo with complete artifacts and a checked task; CLI exits 0 and prints the pass verdict
-- [ ] [GREEN] implement the git I/O wrapper (`git diff --name-only`, `readdirSync`/`existsSync` artifact flags, `- [x]` count, `git show BASE:path` for `statusBefore`) + CLI entrypoint in `brain/scripts/vcs/phase-order-check.mjs`
-- [ ] [RED] `phase-order-check.test.mjs`: wrapper fail path — fixture repo with `impl` change and zero checked tasks; CLI exits 1 with the expected verdict format
-- [ ] [GREEN] confirm wrapper fail-path output format matches the CI job's expectations — REQ-L4-1
-- [ ] [RED] `phase-order-check.test.mjs`: identical verdict with vs. without `SKILL.md`/`.claude/**` files present in the fixture tree — REQ-L4-1, REQ-NEUTRALITY-1
-- [ ] [GREEN] confirm no harness-path reads exist; add a source-scan regression test asserting `phase-order-check.mjs` contains no `.claude` or `SKILL.md` string literal — REQ-NEUTRALITY-2
-- [ ] [GREEN] wire the `phase-order` job into `governance.yml`; add `'phase-order'` to `DETECTION_JOBS` (not `REQUIRED_JOBS`) in `governance-checks.mjs`, same commit — drift-guard (full-set) stays green
-- [ ] [RED] `phase-order-check.test.mjs`: pre-v3 legacy dirs with no spec artifact at all (fixture modeled on `installer-versionado/`, `vcs-adapter/`, `cli-i18n/`) are reported as known/exempted, not `fail`, in detection mode
-- [ ] [GREEN] implement the baseline/grandfather allowlist consumed by the wrapper (see Micro-decisions) — REQ-L4-5
+- [x] [RED] `phase-order-check.test.mjs`: wrapper happy path — `mkdtemp` + `git init` fixture repo with complete artifacts and a checked task; CLI exits 0 and prints the pass verdict
+- [x] [GREEN] implement the git I/O wrapper (`git diff --name-only`, `readdirSync`/`existsSync` artifact flags, `- [x]` count, `git show BASE:path` for `statusBefore`) + CLI entrypoint in `brain/scripts/vcs/phase-order-check.mjs`
+- [x] [RED] `phase-order-check.test.mjs`: wrapper fail path — fixture repo with `impl` change and zero checked tasks; CLI exits 1 with the expected verdict format
+- [x] [GREEN] confirm wrapper fail-path output format matches the CI job's expectations — REQ-L4-1
+- [x] [RED] `phase-order-check.test.mjs`: identical verdict with vs. without `SKILL.md`/`.claude/**` files present in the fixture tree — REQ-L4-1, REQ-NEUTRALITY-1
+- [x] [GREEN] confirm no harness-path reads exist; add a source-scan regression test asserting `phase-order-check.mjs` contains no `.claude` or `SKILL.md` string literal — REQ-NEUTRALITY-2
+- [x] [GREEN] wire the `phase-order` job into `governance.yml`; add `'phase-order'` to `DETECTION_JOBS` (not `REQUIRED_JOBS`) in `governance-checks.mjs`, same commit — drift-guard (full-set) stays green
+- [x] [RED] `phase-order-check.test.mjs`: pre-v3 legacy dirs with no spec artifact at all (fixture modeled on `installer-versionado/`, `vcs-adapter/`, `cli-i18n/`) are reported as known/exempted, not `fail`, in detection mode
+- [x] [GREEN] implement the baseline/grandfather allowlist consumed by the wrapper (see Micro-decisions) — REQ-L4-5
 - [ ] [Manual] REQ-L4-5 operational acceptance: run `phase-order-check.mjs` over the full `openspec/changes/**` history (including `issue-138-session-start/`'s stale `status: draft` frontmatter — Gap G2); record the run log as the zero-false-positive acceptance artifact. Promotion (`DETECTION_JOBS` → `REQUIRED_JOBS`) is an explicit follow-up, not part of this PR
 
 ## PR5 — L5 human-approval actor check (REQ-L5-1, REQ-L5-2)
