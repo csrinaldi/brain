@@ -272,3 +272,99 @@ test('detectSubstrate: brainWritesReviewed probe throwing degrades to unavailabl
   const gate = result.rungs[1].gates.brainWritesReviewed;
   assert.equal(gate.available, false);
 });
+
+// ── Probe-throws-never-crashes: every rung's probe, not just gates ─────────────
+
+test('detectSubstrate: a throwing branchProtection probe degrades rung 1 to inactive, never crashes', async () => {
+  await assert.doesNotReject(async () => {
+    const result = await detectSubstrate({
+      env: {},
+      probes: {
+        branchProtection: async () => { throw new Error('gh api timeout'); },
+      },
+    });
+    assert.equal(result.rungs[1].active, false);
+    assert.notEqual(result.rung, 1);
+  });
+});
+
+test('detectSubstrate: a throwing releaseGate probe degrades rung 2 to inactive, never crashes', async () => {
+  await assert.doesNotReject(async () => {
+    const result = await detectSubstrate({
+      env: {},
+      probes: {
+        releaseGate: () => { throw new Error('fs read error'); },
+      },
+    });
+    assert.equal(result.rungs[2].active, false);
+  });
+});
+
+test('detectSubstrate: a throwing postMergeCi probe degrades rung 3 to inactive, never crashes', async () => {
+  await assert.doesNotReject(async () => {
+    const result = await detectSubstrate({
+      env: {},
+      probes: {
+        postMergeCi: () => { throw new Error('boom'); },
+      },
+    });
+    assert.equal(result.rungs[3].active, false);
+  });
+});
+
+test('detectSubstrate: ALL probes throwing degrades all the way to rung 4, never crashes', async () => {
+  await assert.doesNotReject(async () => {
+    const result = await detectSubstrate({
+      env: {},
+      probes: {
+        branchProtection: async () => { throw new Error('boom'); },
+        releaseGate: async () => { throw new Error('boom'); },
+        postMergeCi: async () => { throw new Error('boom'); },
+        brainWritesReviewed: async () => { throw new Error('boom'); },
+      },
+    });
+    assert.equal(result.rung, 4);
+    assert.equal(result.enforced, false);
+  });
+});
+
+// ── Highest-armed-rung selection across full combinations ──────────────────────
+
+test('detectSubstrate: all rungs armed selects rung 1 (highest wins)', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 200, contexts: OUR_CONTEXTS }),
+      releaseGate: async () => true,
+      postMergeCi: async () => true,
+    },
+  });
+  assert.equal(result.rung, 1);
+  assert.equal(result.enforced, true);
+});
+
+test('detectSubstrate: only rung 3 armed selects rung 3', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 404, contexts: [] }),
+      releaseGate: async () => false,
+      postMergeCi: async () => true,
+    },
+  });
+  assert.equal(result.rung, 3);
+  assert.equal(result.enforced, true);
+});
+
+test('detectSubstrate: none armed selects rung 4 (detection-only)', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 403, contexts: [] }),
+      releaseGate: async () => false,
+      postMergeCi: async () => false,
+    },
+  });
+  assert.equal(result.rung, 4);
+  assert.equal(result.enforced, false);
+});
