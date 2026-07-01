@@ -77,6 +77,44 @@ function evaluateRuleA(impl, touchedDirs) {
   return findings;
 }
 
+// ── Rule B — monotonic status ───────────────────────────────────────────────
+
+const STATUS_LADDER = [
+  'draft',
+  'proposed',
+  'spec',
+  'designed',
+  'tasked',
+  'applying',
+  'verified',
+  'archived',
+];
+
+function evaluateRuleB(touchedDirs) {
+  const findings = [];
+
+  for (const dir of touchedDirs) {
+    const { statusBefore, statusAfter, name } = dir;
+    if (!statusBefore || !statusAfter) continue; // absent frontmatter → no-op
+
+    const idxBefore = STATUS_LADDER.indexOf(statusBefore);
+    const idxAfter = STATUS_LADDER.indexOf(statusAfter);
+    if (idxBefore === -1 || idxAfter === -1) continue; // unknown/custom → no-op
+    if (idxAfter >= idxBefore) continue; // unchanged or forward-only → no-op
+
+    findings.push({
+      rule: 'B',
+      level: 'fail',
+      change: name,
+      message:
+        `openspec/changes/${name}: status regressed from '${statusBefore}' to ` +
+        `'${statusAfter}' — backward phase jump`,
+    });
+  }
+
+  return findings;
+}
+
 // ── Aggregation ─────────────────────────────────────────────────────────────
 
 /**
@@ -107,7 +145,11 @@ export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [] } = {}) 
     changedFiles.some(f => f.startsWith(`${CHANGE_DIR_PREFIX}${dir.name}/`))
   );
 
-  const findings = [...evaluateRuleC(impl, touchedDirs), ...evaluateRuleA(impl, touchedDirs)];
+  const findings = [
+    ...evaluateRuleC(impl, touchedDirs),
+    ...evaluateRuleA(impl, touchedDirs),
+    ...evaluateRuleB(touchedDirs),
+  ];
 
   const level = findings.some(f => f.level === 'fail')
     ? 'fail'

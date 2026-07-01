@@ -105,3 +105,47 @@ test('Rule A: planning-only PR (impl empty) is never subjected to Rule A, even w
   assert.equal(result.level, 'pass');
   assert.equal(result.findings.filter(f => f.rule === 'A').length, 0);
 });
+
+// ── Rule B — monotonic status ───────────────────────────────────────────────
+
+test('Rule B: statusAfter earlier than statusBefore on the ladder → fail (backward phase jump)', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: ['openspec/changes/issue-999-foo/design.md'],
+    changeDirs: [makeDir({ statusBefore: 'designed', statusAfter: 'proposed' })],
+  });
+  assert.equal(result.level, 'fail');
+  const ruleBFinding = result.findings.find(f => f.rule === 'B');
+  assert.ok(ruleBFinding, 'expected a Rule B finding');
+  assert.equal(ruleBFinding.level, 'fail');
+  assert.match(ruleBFinding.message, /designed.*proposed/s);
+});
+
+test('Rule B: unknown/custom status, unchanged status, absent frontmatter, forward-only → pass (no-op)', () => {
+  const unchanged = evaluatePhaseOrder({
+    changedFiles: ['openspec/changes/issue-999-foo/tasks.md'],
+    changeDirs: [makeDir({ statusBefore: 'tasked', statusAfter: 'tasked' })],
+  });
+  assert.equal(unchanged.level, 'pass');
+  assert.equal(unchanged.findings.filter(f => f.rule === 'B').length, 0);
+
+  const forwardOnly = evaluatePhaseOrder({
+    changedFiles: ['openspec/changes/issue-999-foo/tasks.md'],
+    changeDirs: [makeDir({ statusBefore: 'spec', statusAfter: 'designed' })],
+  });
+  assert.equal(forwardOnly.level, 'pass');
+  assert.equal(forwardOnly.findings.filter(f => f.rule === 'B').length, 0);
+
+  const unknownStatus = evaluatePhaseOrder({
+    changedFiles: ['openspec/changes/issue-999-foo/tasks.md'],
+    changeDirs: [makeDir({ statusBefore: 'custom-legacy', statusAfter: 'draft' })],
+  });
+  assert.equal(unknownStatus.level, 'pass');
+  assert.equal(unknownStatus.findings.filter(f => f.rule === 'B').length, 0);
+
+  const absentFrontmatter = evaluatePhaseOrder({
+    changedFiles: ['openspec/changes/issue-999-foo/tasks.md'],
+    changeDirs: [makeDir({ statusBefore: undefined, statusAfter: undefined })],
+  });
+  assert.equal(absentFrontmatter.level, 'pass');
+  assert.equal(absentFrontmatter.findings.filter(f => f.rule === 'B').length, 0);
+});
