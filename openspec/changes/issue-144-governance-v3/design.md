@@ -351,9 +351,18 @@ export function checkContexts() {                                    // ← only
 - `brain:protect` (`brain-protect.mjs:65`) requires only `checkContexts()` = `REQUIRED_JOBS`.
 - **The flip**: move a name from `DETECTION_JOBS` → `REQUIRED_JOBS`. The job already runs;
   the next `brain:protect` (rung 1 armed) makes its context required at merge. **No job
-  code changes.** The same running check context transparently becomes enforcing the
-  moment the operator arms the substrate — exactly the "climbs to prevention with no code
-  change, only the substrate" capability.
+  code changes** *for gates that already fail closed on an uncomputable diff* (e.g.
+  `decision-gate`, see `run-check.mjs`). The same running check context transparently
+  becomes enforcing the moment the operator arms the substrate — exactly the "climbs to
+  prevention with no code change, only the substrate" capability.
+- **Promotion precondition for `phase-order` (fail-open guard).** Unlike `decision-gate`,
+  `phase-order-check.mjs`'s wrapper deliberately degrades an *uncomputable* diff (missing
+  `BASE_SHA`/`HEAD_SHA`, git failure) to `warn` → exit `0` while detection-only, to keep
+  REQ-L4-5's zero-false-positive goal intact. Promoting it to `REQUIRED_JOBS` verbatim
+  would turn that into a silent **fail-open** (a required gate passing without evaluating).
+  So promotion of `phase-order` specifically is **not** a code-free flip: it MUST first
+  switch the uncomputable-diff branch to fail-closed, mirroring `run-check.mjs`'s
+  `decision-gate`. Track this as an explicit precondition on the promotion follow-up.
 - L1 checks (`repo:check` + `brain:nav` + `npm test`) land as required jobs too
   (zero-risk), moving them out of the bypassable `pre-push` hook
   (`hooks/pre-push:52`).

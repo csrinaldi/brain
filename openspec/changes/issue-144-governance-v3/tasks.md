@@ -145,7 +145,7 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 - [x] [GREEN] wire the `phase-order` job into `governance.yml`; add `'phase-order'` to `DETECTION_JOBS` (not `REQUIRED_JOBS`) in `governance-checks.mjs`, same commit — drift-guard (full-set) stays green
 - [x] [RED] `phase-order-check.test.mjs`: pre-v3 legacy dirs with no spec artifact at all (fixture modeled on `installer-versionado/`, `vcs-adapter/`, `cli-i18n/`) are reported as known/exempted, not `fail`, in detection mode
 - [x] [GREEN] implement the baseline/grandfather allowlist consumed by the wrapper (see Micro-decisions) — REQ-L4-5
-- [ ] [Manual] REQ-L4-5 operational acceptance: run `phase-order-check.mjs` over the full `openspec/changes/**` history (including `issue-138-session-start/`'s stale `status: draft` frontmatter — Gap G2); record the run log as the zero-false-positive acceptance artifact. Promotion (`DETECTION_JOBS` → `REQUIRED_JOBS`) is an explicit follow-up, not part of this PR
+- [ ] [Manual] REQ-L4-5 operational acceptance: run `phase-order-check.mjs` over the full `openspec/changes/**` history (including `issue-138-session-start/`'s stale `status: draft` frontmatter — Gap G2); record the run log as the zero-false-positive acceptance artifact. Promotion (`DETECTION_JOBS` → `REQUIRED_JOBS`) is an explicit follow-up, not part of this PR — **precondition**: promoting `phase-order` first requires switching its wrapper's uncomputable-diff branch from `warn` to fail-closed (mirroring `run-check.mjs`'s `decision-gate`), else the required gate is fail-open on an uncomputable diff (see design §7)
 
 ## PR5 — L5 human-approval actor check (REQ-L5-1, REQ-L5-2)
 
