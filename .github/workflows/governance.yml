@@ -111,3 +111,25 @@ jobs:
             echo "::error::PR changes $changed lines (>400) without size:exception."
             exit 1
           fi
+
+  # ── Invariant 3 (L1, governance v3) — local-only checks run in CI too ───────
+  #
+  # repo:check, brain:nav, and npm test previously ran only in the local
+  # pre-push hook (brain/scripts/hooks/pre-push), which is bypassable via
+  # `git push --no-verify` or simply not installed. This job closes that gap
+  # author-agnostically: it runs on every PR event covered by the workflow
+  # trigger above, regardless of whether the contributor's local hook ran.
+  local-checks:
+    name: local-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: repo:check (structural reference checks)
+        run: npm run repo:check
+
+      - name: brain:nav (navigation/link integrity)
+        run: npm run brain:nav
+
+      - name: test (unit test suite)
+        run: npm test

@@ -95,10 +95,29 @@ test('drift-guard regression: governance.yml job names still equal the full GOVE
   );
 });
 
+// ── L1 local-checks job (REQ-L1-1) ──────────────────────────────────────────────
+
+test('local-checks is present in REQUIRED_JOBS', () => {
+  assert.ok(REQUIRED_JOBS.includes('local-checks'), 'REQUIRED_JOBS must include "local-checks"');
+});
+
+test('local-checks is present in the parsed governance.yml job names', () => {
+  const yamlPath = resolve(REPO_ROOT, '.github/workflows/governance.yml');
+  const yamlText = readFileSync(yamlPath, 'utf8');
+  const matches = [...yamlText.matchAll(/^    name: (\S+)\s*$/mg)];
+  const yamlJobNames = matches.map(m => m[1]);
+
+  assert.ok(yamlJobNames.includes('local-checks'), 'governance.yml must define a "local-checks" job');
+});
+
 // ── checkContexts ─────────────────────────────────────────────────────────────
 
 test('checkContexts returns "governance / <job>" for each REQUIRED_JOB', () => {
-  assert.deepEqual(checkContexts(), ['governance / issue-link', 'governance / diff-size']);
+  assert.deepEqual(checkContexts(), [
+    'governance / issue-link',
+    'governance / diff-size',
+    'governance / local-checks',
+  ]);
 });
 
 test('WORKFLOW_NAME is "governance"', () => {

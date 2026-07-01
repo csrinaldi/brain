@@ -24,7 +24,7 @@ export const WORKFLOW_NAME = 'governance';
  *
  * @type {string[]}
  */
-export const REQUIRED_JOBS = ['issue-link', 'diff-size'];
+export const REQUIRED_JOBS = ['issue-link', 'diff-size', 'local-checks'];
 
 /**
  * Detection-only job names. These run and report in governance.yml but are NOT
