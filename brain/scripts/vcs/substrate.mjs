@@ -140,6 +140,62 @@ async function evalRung1({ config, vcs, env, probes }) {
   };
 }
 
+// ── rungs[1].gates.brainWritesReviewed — per-provider L6 rung-1 sub-probe ────────
+// Rung 1 is not monolithic: "required code-owner review" is a platform-specific
+// mechanism. This is only an OPTIONAL rung-1 ENHANCEMENT for L6 — the real
+// enforcement is the evidence-based brain-writes-reviewed checker (design §6.1,
+// active at detection / rung 2 / rung 3 regardless of this gate). Reported
+// honestly when unavailable, per provider, never inferred.
+async function evalBrainWritesReviewedGate({ config, vcs, env, probes }) {
+  const provider = config?.vcs?.provider;
+  const result = await safeProbe(probes.brainWritesReviewed, { config, vcs, env });
+
+  if (provider === 'github') {
+    const { requireCodeOwnerReviews, codeownersPresent } = result ?? {};
+    if (requireCodeOwnerReviews && codeownersPresent) {
+      return { available: true, active: true, reason: null, remedy: null };
+    }
+    const reason = !codeownersPresent
+      ? 'GitHub rung-1 code-owner review requires a .github/CODEOWNERS file'
+      : 'GitHub rung-1 code-owner review requires branch protection require_code_owner_reviews';
+    return {
+      available: false,
+      active: false,
+      reason,
+      remedy: 'add .github/CODEOWNERS and enable require_code_owner_reviews in branch protection',
+    };
+  }
+
+  if (provider === 'gitlab') {
+    const { premiumOrHigher } = result ?? {};
+    if (premiumOrHigher) {
+      return { available: true, active: true, reason: null, remedy: null };
+    }
+    return {
+      available: false,
+      active: false,
+      reason: 'GitLab rung-1 code-owner review requires Premium tier or higher',
+      remedy: 'upgrade to GitLab Premium+ to enable required code-owner approvals, or rely on the evidence checker',
+    };
+  }
+
+  if (provider === 'bitbucket') {
+    return {
+      available: false,
+      active: false,
+      reason: 'Bitbucket has no rung-1 required-code-owner-review capability',
+      remedy: 'rely on the evidence-based brain-writes-reviewed checker (rung 2/3)',
+    };
+  }
+
+  return {
+    available: false,
+    active: false,
+    reason: `rung-1 code-owner review capability unknown for provider "${provider ?? 'unset'}"`,
+    remedy: 'configure vcs.provider in brain.config.json, or rely on the evidence-based brain-writes-reviewed checker',
+  };
+}
+
 // ── Rung selection ───────────────────────────────────────────────────────────────
 // Highest-armed-rung wins: check 1, then 2, then 3; 4 is the guaranteed floor.
 function selectRung(rungs) {
@@ -165,6 +221,7 @@ export async function detectSubstrate({ config = {}, vcs, env = process.env, pro
   const rungs = {};
 
   rungs[1] = await evalRung1({ config, vcs, env, probes });
+  rungs[1].gates = { brainWritesReviewed: await evalBrainWritesReviewedGate({ config, vcs, env, probes }) };
   rungs[3] = await evalRung3({ config, env, probes });
   rungs[2] = await evalRung2({ config, env, probes });
   rungs[4] = evalRung4();

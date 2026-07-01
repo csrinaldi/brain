@@ -174,3 +174,101 @@ test('detectSubstrate: rung 1 armed via self-hosted pre-receive floor, bypassing
   assert.equal(result.rung, 1);
   assert.equal(result.enforced, true);
 });
+
+// ── rungs[1].gates.brainWritesReviewed — per-provider L6 rung-1 sub-probe ───────
+//
+// Rung 1 is not monolithic: L6 "required code-owner review" is platform-specific.
+// GitHub needs branch protection require_code_owner_reviews AND .github/CODEOWNERS;
+// GitLab needs Premium+; Bitbucket has no such capability at all. The evidence
+// checker (brain-writes-reviewed.mjs, PR6a) is the actual enforcement — this is
+// only an OPTIONAL rung-1 enhancement, reported honestly when unavailable.
+
+test('detectSubstrate: brainWritesReviewed armed on GitHub with require_code_owner_reviews + CODEOWNERS', async () => {
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'github' } },
+    env: {},
+    probes: {
+      brainWritesReviewed: async () => ({ requireCodeOwnerReviews: true, codeownersPresent: true }),
+    },
+  });
+
+  const gate = result.rungs[1].gates.brainWritesReviewed;
+  assert.equal(gate.available, true);
+  assert.equal(gate.active, true);
+});
+
+test('detectSubstrate: brainWritesReviewed unavailable on GitHub without CODEOWNERS (honest reason)', async () => {
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'github' } },
+    env: {},
+    probes: {
+      brainWritesReviewed: async () => ({ requireCodeOwnerReviews: true, codeownersPresent: false }),
+    },
+  });
+
+  const gate = result.rungs[1].gates.brainWritesReviewed;
+  assert.equal(gate.available, false);
+  assert.ok(/CODEOWNERS/.test(gate.reason));
+  assert.ok(typeof gate.remedy === 'string' && gate.remedy.length > 0);
+});
+
+test('detectSubstrate: brainWritesReviewed armed on GitLab Premium+', async () => {
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'gitlab' } },
+    env: {},
+    probes: {
+      brainWritesReviewed: async () => ({ premiumOrHigher: true }),
+    },
+  });
+
+  const gate = result.rungs[1].gates.brainWritesReviewed;
+  assert.equal(gate.available, true);
+  assert.equal(gate.active, true);
+});
+
+test('detectSubstrate: brainWritesReviewed unavailable on GitLab below Premium', async () => {
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'gitlab' } },
+    env: {},
+    probes: {
+      brainWritesReviewed: async () => ({ premiumOrHigher: false }),
+    },
+  });
+
+  const gate = result.rungs[1].gates.brainWritesReviewed;
+  assert.equal(gate.available, false);
+  assert.ok(/Premium/.test(gate.reason));
+});
+
+test('detectSubstrate: brainWritesReviewed reports n/a on Bitbucket (honest, no probe needed)', async () => {
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'bitbucket' } },
+    env: {},
+    probes: {},
+  });
+
+  const gate = result.rungs[1].gates.brainWritesReviewed;
+  assert.equal(gate.available, false);
+  assert.ok(/Bitbucket/.test(gate.reason));
+});
+
+test('detectSubstrate: brainWritesReviewed degrades honestly when provider is unset', async () => {
+  const result = await detectSubstrate({ env: {}, probes: {} });
+
+  const gate = result.rungs[1].gates.brainWritesReviewed;
+  assert.equal(gate.available, false);
+  assert.ok(typeof gate.reason === 'string' && gate.reason.length > 0);
+});
+
+test('detectSubstrate: brainWritesReviewed probe throwing degrades to unavailable, never crashes', async () => {
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'github' } },
+    env: {},
+    probes: {
+      brainWritesReviewed: async () => { throw new Error('network blip'); },
+    },
+  });
+
+  const gate = result.rungs[1].gates.brainWritesReviewed;
+  assert.equal(gate.available, false);
+});
