@@ -96,12 +96,12 @@ Chain strategy: feature-branch-chain
 
 ### Phase 10: Post-index nav integrity (REQ-6)
 
-- [ ] 10.1 RED — extend nav-integrity fixture (or add a new one): scaffold HOME.md via `ensureHome`, patch it via `insertAdrLink` with a real `brain/project/decisions/adr-NNNN-*.md` fixture, run `check-brain-nav.mjs`, assert exit 0
-- [ ] 10.2 GREEN — fix any gap surfaced (expected pass; diagnostic only)
+- [x] 10.1 RED — extend nav-integrity fixture (or add a new one): scaffold HOME.md via `ensureHome`, patch it via `insertAdrLink` with a real `brain/project/decisions/adr-NNNN-*.md` fixture, run `check-brain-nav.mjs`, assert exit 0 — new file `brain/scripts/lib/home-index-nav-integrity.test.mjs`
+- [x] 10.2 GREEN — fix any gap surfaced (expected pass; diagnostic only) — passed immediately, no gap found
 
 ### Phase 11: Distribution check (REQ-7)
 
-- [ ] 11.1 Verify `brain/core/managed-paths.mjs`'s `managed` array glob already covers `brain/scripts/lib/home-index.mjs` (e.g. `brain/scripts/**`) — no source change expected, confirm only
+- [x] 11.1 Verify `brain/core/managed-paths.mjs`'s `managed` array glob already covers `brain/scripts/lib/home-index.mjs` (e.g. `brain/scripts/**`) — no source change expected, confirm only — verified via a new `matchesAny`-based assertion in `brain/scripts/lib/managed-paths.test.mjs` (REQ-7), passes with zero source change
 
 ---
 
