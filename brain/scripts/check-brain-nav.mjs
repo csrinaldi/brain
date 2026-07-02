@@ -25,6 +25,17 @@ const CORE = join(BRAIN, "core");
 const PROJECT = join(BRAIN, "project");
 const isUnder = (file, dir) => file === dir || file.startsWith(dir + "/");
 
+// Guard: brain/HOME.md es el punto de entrada requerido. Sin este chequeo,
+// la BFS de alcanzabilidad (más abajo) lo lee sin validar existencia y
+// explota con un stack trace crudo de ENOENT. Fallar acá con un mensaje
+// claro y accionable en su lugar (issue #176).
+if (!existsSync(HOME)) {
+  console.error(
+    "\n✗ brain/HOME.md no existe — corré la adopción / brain:env:init para crear el punto de entrada de la base de conocimiento.",
+  );
+  process.exit(1);
+}
+
 const walk = (dir) =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
     e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],

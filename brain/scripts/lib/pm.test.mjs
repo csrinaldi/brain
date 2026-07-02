@@ -275,6 +275,65 @@ test('detectPM: bun.lockb wins over package-lock.json when both present', () => 
   );
 });
 
+// ── detectPM: pnpm workspace root (issue #176 bug 2) ──────────────────────────
+// `pnpm add` on a workspace root aborts with ERR_PNPM_ADDING_TO_ROOT unless
+// `-w`/`--workspace-root` is passed. Only append `-w` when pnpm-workspace.yaml
+// exists at root — never for non-workspace pnpm (where -w itself would error)
+// and never for npm/yarn/bun.
+
+test('detectPM: pnpm-lock.yaml + pnpm-workspace.yaml → installArgs includes -w', () => {
+  withTmpDir(
+    {
+      'pnpm-lock.yaml': 'lockfileVersion: 6',
+      'pnpm-workspace.yaml': 'packages:\n  - "packages/*"\n',
+    },
+    (dir) => {
+      const pm = detectPM(dir);
+      assert.equal(pm.name, 'pnpm');
+      assert.deepEqual(pm.installArgs, ['pnpm', 'add', '-D', '-w']);
+    },
+  );
+});
+
+test('detectPM: pnpm-lock.yaml without pnpm-workspace.yaml → installArgs does NOT include -w', () => {
+  withTmpDir(
+    { 'pnpm-lock.yaml': 'lockfileVersion: 6' },
+    (dir) => {
+      const pm = detectPM(dir);
+      assert.equal(pm.name, 'pnpm');
+      assert.deepEqual(pm.installArgs, ['pnpm', 'add', '-D']);
+    },
+  );
+});
+
+test('detectPM: packageManager "pnpm@9" + pnpm-workspace.yaml → installArgs includes -w (issue #176)', () => {
+  withTmpDir(
+    {
+      'package.json': JSON.stringify({ packageManager: 'pnpm@9.1.0' }),
+      'pnpm-workspace.yaml': 'packages:\n  - "packages/*"\n',
+    },
+    (dir) => {
+      const pm = detectPM(dir);
+      assert.equal(pm.name, 'pnpm');
+      assert.deepEqual(pm.installArgs, ['pnpm', 'add', '-D', '-w']);
+    },
+  );
+});
+
+test('detectPM: non-pnpm PM + a stray pnpm-workspace.yaml → -w never leaks (issue #176)', () => {
+  withTmpDir(
+    {
+      'package.json': JSON.stringify({ packageManager: 'npm@10.0.0' }),
+      'pnpm-workspace.yaml': 'packages:\n  - "packages/*"\n',
+    },
+    (dir) => {
+      const pm = detectPM(dir);
+      assert.equal(pm.name, 'npm');
+      assert.deepEqual(pm.installArgs, ['npm', 'install', '-D']);
+    },
+  );
+});
+
 // ── detectPM: runArgs shape ────────────────────────────────────────────────────
 
 test('detectPM returns runArgs function that builds correct argv', () => {
