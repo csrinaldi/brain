@@ -79,35 +79,35 @@ Chain strategy: feature-branch-chain
 
 ### Phase 8: `insertAdrLink` pure helper (REQ-1 through REQ-4 of `home-index`)
 
-- [ ] 8.1 RED — `brain/scripts/lib/home-index.test.mjs` (model after `lib/branch-type.test.mjs`): test "section has no ADR line (empty heading) → insert immediately after heading, `inserted:true`"
-- [ ] 8.2 RED — same file: test "section has ≥1 ADR link → insert new line immediately after the last one, prior lines unchanged"
-- [ ] 8.3 RED — same file: test "`### Architecture decisions` heading absent → return input unchanged, `inserted:false`, `reason:'anchor-not-found'`, `linesToAdd` populated"
-- [ ] 8.4 RED — same file: test "re-inserting an already-present ADR slug → no-op, `inserted:false`, `reason:'already-present'`, no duplicate line"
-- [ ] 8.5 GREEN — Create `brain/scripts/lib/home-index.mjs`: `insertAdrLink(homeText, { number, slug, description })` per design Decision 4 (idempotent check, anchor bounded by next `^---$`/`^## `, append-after-last, insert-after-empty-heading, fail-safe branches) — pure string-in/string-out, no agent-specific logic (REQ-7)
-- [ ] 8.6 GREEN — Add CLI guard to the same file (I/O only): `node home-index.mjs insert --home <path> --number <n> --slug <s> --desc <d>` — writes on `inserted`, exit 0 no-op on `already-present`, exit 3 + prints `linesToAdd` on fail-safe
-- [ ] 8.7 Run `npm test` — all Phase 8 tests green
+- [x] 8.1 RED — `brain/scripts/lib/home-index.test.mjs` (model after `lib/branch-type.test.mjs`): test "section has no ADR line (empty heading) → insert immediately after heading, `inserted:true`"
+- [x] 8.2 RED — same file: test "section has ≥1 ADR link → insert new line immediately after the last one, prior lines unchanged"
+- [x] 8.3 RED — same file: test "`### Architecture decisions` heading absent → return input unchanged, `inserted:false`, `reason:'anchor-not-found'`, `linesToAdd` populated"
+- [x] 8.4 RED — same file: test "re-inserting an already-present ADR slug → no-op, `inserted:false`, `reason:'already-present'`, no duplicate line"
+- [x] 8.5 GREEN — Create `brain/scripts/lib/home-index.mjs`: `insertAdrLink(homeText, { number, slug, description })` per design Decision 4 (idempotent check, anchor bounded by next `^---$`/`^## `, append-after-last, insert-after-empty-heading, fail-safe branches) — pure string-in/string-out, no agent-specific logic (REQ-7)
+- [x] 8.6 GREEN — Add CLI guard to the same file (I/O only): `node home-index.mjs insert --home <path> --number <n> --slug <s> --desc <d>` — writes on `inserted`, exit 0 no-op on `already-present`, exit 3 + prints `linesToAdd` on fail-safe
+- [x] 8.7 Run `npm test` — all Phase 8 tests green
 
 ### Phase 9: Adapter rewire (REQ-5)
 
-- [ ] 9.1 `.claude/commands/project-bootstrap-adrs.md` Phase 4 (~L506-546): remove the "Locate the insertion point (fail-safe)" and "Append the links" prose subsections
-- [ ] 9.2 Replace with a single per-ADR call to `node brain/scripts/lib/home-index.mjs insert …`, branching on exit code per design's Decision 5 table (exit 0 "patched" / exit 0 "no-op" / exit 3 fail-safe → surface `linesToAdd`)
-- [ ] 9.3 Preserve the existing Tier-2 confirmation prompt (before) and post-write `brain:nav` recommendation (after) unchanged
-- [ ] 9.4 File assertion: grep the rewired Phase 4 text and confirm no step-by-step patch-location/append prose remains (REQ-5 acceptance)
+- [x] 9.1 `.claude/commands/project-bootstrap-adrs.md` Phase 4 (~L506-546): remove the "Locate the insertion point (fail-safe)" and "Append the links" prose subsections
+- [x] 9.2 Replace with a single per-ADR call to `node brain/scripts/lib/home-index.mjs insert …`, branching on exit code per design's Decision 5 table (exit 0 "patched" / exit 0 "no-op" / exit 3 fail-safe → surface `linesToAdd`)
+- [x] 9.3 Preserve the existing Tier-2 confirmation prompt (before) and post-write `brain:nav` recommendation (after) unchanged
+- [x] 9.4 File assertion: grep the rewired Phase 4 text and confirm no step-by-step patch-location/append prose remains (REQ-5 acceptance) — automated as `brain/scripts/lib/home-index-adapter.test.mjs`, RED before the rewire (asserted no helper call + old prose present), GREEN after
 
 ### Phase 10: Post-index nav integrity (REQ-6)
 
-- [ ] 10.1 RED — extend nav-integrity fixture (or add a new one): scaffold HOME.md via `ensureHome`, patch it via `insertAdrLink` with a real `brain/project/decisions/adr-NNNN-*.md` fixture, run `check-brain-nav.mjs`, assert exit 0
-- [ ] 10.2 GREEN — fix any gap surfaced (expected pass; diagnostic only)
+- [x] 10.1 RED — extend nav-integrity fixture (or add a new one): scaffold HOME.md via `ensureHome`, patch it via `insertAdrLink` with a real `brain/project/decisions/adr-NNNN-*.md` fixture, run `check-brain-nav.mjs`, assert exit 0 — new file `brain/scripts/lib/home-index-nav-integrity.test.mjs`
+- [x] 10.2 GREEN — fix any gap surfaced (expected pass; diagnostic only) — passed immediately, no gap found
 
 ### Phase 11: Distribution check (REQ-7)
 
-- [ ] 11.1 Verify `brain/core/managed-paths.mjs`'s `managed` array glob already covers `brain/scripts/lib/home-index.mjs` (e.g. `brain/scripts/**`) — no source change expected, confirm only
+- [x] 11.1 Verify `brain/core/managed-paths.mjs`'s `managed` array glob already covers `brain/scripts/lib/home-index.mjs` (e.g. `brain/scripts/**`) — no source change expected, confirm only — verified via a new `matchesAny`-based assertion in `brain/scripts/lib/managed-paths.test.mjs` (REQ-7), passes with zero source change
 
 ---
 
 ## Closure Checklist
 
-- [ ] C.1 `npm test` green — all `scripts/**/*.test.mjs` pass, including new Slice 1 and Slice 2 tests
-- [ ] C.2 `npm run brain:nav` green on both the brain repo and a scaffolded fixture consumer
-- [ ] C.3 Confirm `brain/HOME.md` absent from both `managed` and `local` arrays in `brain/core/managed-paths.mjs` (REQ-6)
-- [ ] C.4 Confirm no prose patch-mechanics remain in `.claude/commands/project-bootstrap-adrs.md` Phase 4 (REQ-5)
+- [x] C.1 `npm test` green — all `scripts/**/*.test.mjs` pass, including new Slice 1 and Slice 2 tests — 815/815 pass
+- [x] C.2 `npm run brain:nav` green on both the brain repo and a scaffolded fixture consumer — `node brain/scripts/check-brain-nav.mjs` exit 0 on the real repo; both fixture tests (`home-scaffold-nav-integrity.test.mjs`, `home-index-nav-integrity.test.mjs`) assert exit 0 on a scaffolded fresh-consumer fixture and are part of `npm test`
+- [x] C.3 Confirm `brain/HOME.md` absent from both `managed` and `local` arrays in `brain/core/managed-paths.mjs` (REQ-6) — literal checks + hardened `matchesAny` glob-match assertion, all green
+- [x] C.4 Confirm no prose patch-mechanics remain in `.claude/commands/project-bootstrap-adrs.md` Phase 4 (REQ-5) — `rg "Locate the insertion point|Append the links"` finds nothing; automated via `home-index-adapter.test.mjs`
