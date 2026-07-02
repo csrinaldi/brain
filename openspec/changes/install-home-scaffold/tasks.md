@@ -1,5 +1,7 @@
 # Tasks: Install-time HOME.md Scaffold
 
+> **Status:** Archived
+
 ## Review Workload Forecast
 
 | Field | Value |
