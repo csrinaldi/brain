@@ -32,6 +32,23 @@ test('managed does NOT contain .github/** (never clobber consumer GitHub files)'
   );
 });
 
+// Issue #176 bug 1: the L2 rung-2/rung-3 workflow files must travel with
+// brain on upgrade, as exact literals — never the broad .github/** glob.
+// Without these, rung-2/rung-3 enforcement never reaches any consumer.
+test('managed includes .github/workflows/release.yml (exact literal, issue #176)', () => {
+  assert.ok(
+    managed.includes('.github/workflows/release.yml'),
+    'managed must contain the exact literal ".github/workflows/release.yml"',
+  );
+});
+
+test('managed includes .github/workflows/governance-postmerge.yml (exact literal, issue #176)', () => {
+  assert.ok(
+    managed.includes('.github/workflows/governance-postmerge.yml'),
+    'managed must contain the exact literal ".github/workflows/governance-postmerge.yml"',
+  );
+});
+
 // REQ-S3-1: managed declares brain/scripts/**, not scripts/**
 test('managed includes brain/scripts/** (REQ-S3-1)', () => {
   assert.ok(

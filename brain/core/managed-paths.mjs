@@ -34,6 +34,8 @@ export const managed = [
   'brain/scripts/**',
   '.gitattributes',
   '.github/workflows/governance.yml',   // the L1 gate travels with brain (ADR-0014)
+  '.github/workflows/release.yml',      // L2 rung-2/rung-3 enforcement travels with brain (issue #176)
+  '.github/workflows/governance-postmerge.yml', // L2 rung-2/rung-3 enforcement travels with brain (issue #176)
   '.github/PULL_REQUEST_TEMPLATE.md',   // the Closes/Fixes scaffold the gate parses (ADR-0014)
   '.github/CODEOWNERS',                 // L6 rung-1 enhancement, optional (REQ-L6-1, design §6.2)
   '.claude/settings.json',              // Claude Code harness hook — no-verify policy (ADR-0014 §9)
