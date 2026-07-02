@@ -194,18 +194,19 @@ test('extractIssueNumber: no match anywhere → null', () => {
 
 // ── gh I/O wrapper — gatherActorCheckInputs (DI fakes, no real gh) ──────────────
 
-function makeFakeDeps({ labeledEvents = [], issueLabels = [], botAllowlist = [] } = {}) {
+function makeFakeDeps({ labeledEvents = [], issueLabels = [], issueAuthor = null, botAllowlist = [] } = {}) {
   return {
     fetchLabeledEvents: () => labeledEvents,
-    fetchIssueLabels: () => issueLabels,
+    fetchIssue: () => ({ labels: issueLabels, author: issueAuthor }),
     readBotAllowlist: () => botAllowlist,
   };
 }
 
-test('gatherActorCheckInputs: resolves issue number, fetches labeled events + labels, reads allowlist', () => {
+test('gatherActorCheckInputs: resolves issue number, fetches labeled events + issue (labels + author), reads allowlist', () => {
   const deps = makeFakeDeps({
     labeledEvents: [{ actor: { login: 'bob' } }],
     issueLabels: ['status:approved'],
+    issueAuthor: 'carol',
     botAllowlist: ['release-bot'],
   });
   const inputs = gatherActorCheckInputs({
@@ -216,6 +217,7 @@ test('gatherActorCheckInputs: resolves issue number, fetches labeled events + la
     deps,
   });
   assert.equal(inputs.author, 'alice');
+  assert.equal(inputs.issueAuthor, 'carol');
   assert.deepEqual(inputs.labeledEvents, [{ actor: { login: 'bob' } }]);
   assert.deepEqual(inputs.botAllowlist, ['release-bot']);
   assert.equal(inputs.adminOverride, false);
@@ -253,7 +255,7 @@ test('gatherActorCheckInputs: an override:* label present but NOT allow-listed d
   assert.equal(inputs.adminOverride, false);
 });
 
-test('gatherActorCheckInputs: no resolvable issue number → empty labeledEvents (feeds the warn+pass branch)', () => {
+test('gatherActorCheckInputs: no resolvable issue number → empty labeledEvents + null issueAuthor (feeds the warn+pass branch)', () => {
   const deps = makeFakeDeps({ labeledEvents: [{ actor: { login: 'bob' } }] });
   const inputs = gatherActorCheckInputs({
     author: 'alice',
@@ -263,6 +265,49 @@ test('gatherActorCheckInputs: no resolvable issue number → empty labeledEvents
     deps,
   });
   assert.deepEqual(inputs.labeledEvents, []);
+  assert.equal(inputs.issueAuthor, null);
+});
+
+// ── FIX2 wiring: gatherActorCheckInputs must surface issueAuthor ───────────────
+//
+// The wrapper already fetches the issue object to read its labels; the issue
+// author (`issue.user.login`) must be surfaced from that SAME call, not a
+// second gh round-trip.
+
+test('FIX2: gatherActorCheckInputs surfaces issueAuthor from the same fetchIssue call used for labels (no second API round-trip)', () => {
+  let fetchIssueCallCount = 0;
+  const deps = {
+    fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
+    fetchIssue: () => {
+      fetchIssueCallCount += 1;
+      return { labels: ['status:approved'], author: 'bob' };
+    },
+    readBotAllowlist: () => [],
+  };
+  const inputs = gatherActorCheckInputs({
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    deps,
+  });
+  assert.equal(inputs.issueAuthor, 'bob');
+  assert.equal(fetchIssueCallCount, 1, 'issue must be fetched exactly once — labels and author come from the same call');
+});
+
+test('FIX2 end-to-end: Bob files the issue, Alice opens the PR, Bob self-labels his own issue status:approved → fail', () => {
+  const deps = {
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
+    fetchIssue: () => ({ labels: ['status:approved'], author: 'bob' }),
+    readBotAllowlist: () => [],
+  };
+  const result = runActorCheck(deps);
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /self/i);
 });
 
 // ── runActorCheck / main — never throws, gh failure degrades to warn + pass ────
@@ -276,7 +321,7 @@ test('runActorCheck: gh api failure inside the wrapper → warn + pass, never th
     fetchLabeledEvents: () => {
       throw new Error('gh api failed: rate limited');
     },
-    fetchIssueLabels: () => ['status:approved'],
+    fetchIssue: () => ({ labels: ['status:approved'], author: 'bob' }),
     readBotAllowlist: () => [],
   };
   assert.doesNotThrow(() => {
@@ -297,7 +342,7 @@ test('runActorCheck: happy path end-to-end through the wrapper — human approva
     baseBranch: 'main',
     repo: 'org/repo',
     fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
-    fetchIssueLabels: () => ['status:approved'],
+    fetchIssue: () => ({ labels: ['status:approved'], author: 'alice' }),
     readBotAllowlist: () => [],
   };
   const result = runActorCheck(deps);
@@ -325,7 +370,7 @@ test('main: fail verdict → exit code 1', () => {
     baseBranch: 'main',
     repo: 'org/repo',
     fetchLabeledEvents: () => [{ actor: { login: 'alice' } }],
-    fetchIssueLabels: () => ['status:approved'],
+    fetchIssue: () => ({ labels: ['status:approved'], author: 'alice' }),
     readBotAllowlist: () => [],
   };
   let exitCode;
@@ -343,7 +388,7 @@ test('main: warn verdict → exit code 0', () => {
     baseBranch: 'main',
     repo: 'org/repo',
     fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
-    fetchIssueLabels: () => [],
+    fetchIssue: () => ({ labels: [], author: null }),
     readBotAllowlist: () => [],
   };
   let exitCode;
@@ -361,7 +406,7 @@ test('main: pass verdict → exit code 0', () => {
     baseBranch: 'main',
     repo: 'org/repo',
     fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
-    fetchIssueLabels: () => ['status:approved'],
+    fetchIssue: () => ({ labels: ['status:approved'], author: 'alice' }),
     readBotAllowlist: () => [],
   };
   let exitCode;

@@ -149,13 +149,17 @@ function defaultFetchLabeledEvents(repo) {
   };
 }
 
-function defaultFetchIssueLabels(repo) {
+function defaultFetchIssue(repo) {
   return issueNumber => {
+    // Single-object fetch (not a list endpoint) — no --paginate needed here.
     const out = execFileSync('gh', ['api', `repos/${repo}/issues/${issueNumber}`], {
       encoding: 'utf8',
     });
     const issue = JSON.parse(out);
-    return (issue.labels ?? []).map(l => l.name);
+    return {
+      labels: (issue.labels ?? []).map(l => l.name),
+      author: issue.user?.login ?? null,
+    };
   };
 }
 
@@ -175,28 +179,31 @@ function defaultReadBotAllowlist(cwd) {
  * `deps` in tests). `adminOverride` is resolved here — an override:* label is
  * only honored when it is BOTH present on the issue AND listed in
  * `botAllowlist` (`config.governance.approvalActors`); an unlisted override:*
- * label grants nothing (REQ-L5-2 — no blanket bypass).
+ * label grants nothing (REQ-L5-2 — no blanket bypass). `issueAuthor` is
+ * surfaced from the same issue-object fetch used for labels (`fetchIssue`) —
+ * no second gh round-trip — so evaluateActor can compare the approving actor
+ * against BOTH the PR author and the issue author (REQ-L5-1).
  *
  * @param {{ author: string, prBody: string, baseBranch: string, repo: string, cwd?: string, deps?: object }} args
- * @returns {{ author: string, labeledEvents: Array, botAllowlist: string[], adminOverride: boolean }}
+ * @returns {{ author: string, issueAuthor: string|null, labeledEvents: Array, botAllowlist: string[], adminOverride: boolean }}
  */
 export function gatherActorCheckInputs({ author, prBody, baseBranch, repo, cwd = process.cwd(), deps = {} } = {}) {
   const fetchLabeledEvents = deps.fetchLabeledEvents ?? defaultFetchLabeledEvents(repo);
-  const fetchIssueLabels = deps.fetchIssueLabels ?? defaultFetchIssueLabels(repo);
+  const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(repo);
   const readBotAllowlist = deps.readBotAllowlist ?? defaultReadBotAllowlist(cwd);
 
   const botAllowlist = readBotAllowlist();
   const issueNumber = extractIssueNumber(prBody, baseBranch);
 
   if (issueNumber == null) {
-    return { author, labeledEvents: [], botAllowlist, adminOverride: false };
+    return { author, issueAuthor: null, labeledEvents: [], botAllowlist, adminOverride: false };
   }
 
   const labeledEvents = fetchLabeledEvents(issueNumber);
-  const issueLabels = fetchIssueLabels(issueNumber);
+  const { labels: issueLabels, author: issueAuthor } = fetchIssue(issueNumber);
   const adminOverride = issueLabels.some(l => l.startsWith('override:') && botAllowlist.includes(l));
 
-  return { author, labeledEvents, botAllowlist, adminOverride };
+  return { author, issueAuthor, labeledEvents, botAllowlist, adminOverride };
 }
 
 /**
