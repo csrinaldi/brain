@@ -503,47 +503,33 @@ If the user types `skip`, leave HOME.md unchanged and proceed to **Post-write ve
 
 In **Path B**, no separate prompt is needed — the batch confirmation already covers the HOME.md patch.
 
-#### Locate the insertion point (fail-safe)
+#### Patch via the home-index helper
 
-1. Read `<repoRoot>/brain/HOME.md`.
-2. Search for the heading `### Architecture decisions` (exact, case-sensitive match).
-   - **If not found**: ABORT the patch. Leave `brain/HOME.md` unchanged. Report:
-     ```
-     HOME.md patch ABORTED — could not locate the heading '### Architecture decisions'.
-     HOME.md was NOT modified. Add these lines manually after that heading:
-     <list each: - [ADR-NNNN](project/decisions/<adr-NNNN-slug.md>) — <short description>>
-     ```
-     Continue to **Post-write verification** without modifying HOME.md.
-3. Within the `### Architecture decisions` section (between that heading and the next `---` separator or `##` heading), find the **last** line that matches the pattern `- [ADR-NNNN](project/decisions/...)` where NNNN is exactly four digits.
-   - **If no such line is found within that section**: ABORT the patch. Leave `brain/HOME.md` unchanged. Report:
-     ```
-     HOME.md patch ABORTED — found '### Architecture decisions' but could not locate
-     any existing ADR link line (expected pattern: - [ADR-NNNN](project/decisions/...)).
-     HOME.md was NOT modified. Add these lines manually after the last existing ADR link:
-     <list each: - [ADR-NNNN](project/decisions/<adr-NNNN-slug.md>) — <short description>>
-     ```
-     Continue to **Post-write verification** without modifying HOME.md.
-
-#### Append the links
-
-If the insertion point was found successfully:
-
-For each accepted and written ADR (in order), insert a new line immediately after the last existing ADR link line, using this exact format:
+HOME.md patch mechanics (locating the anchor, bounding the section, appending
+after the last link vs. an empty section) are implemented once, agnostically,
+in `brain/scripts/lib/home-index.mjs` — not re-described here. For each
+accepted and written ADR (in order), invoke it:
 
 ```
-- [ADR-<NNNN>](project/decisions/<adr-NNNN-slug>.md) — <short description>
+node brain/scripts/lib/home-index.mjs insert --home <repoRoot>/brain/HOME.md --number <NNNN> --slug <adr-NNNN-slug> --desc "<short description>"
 ```
 
 Where:
 - `<NNNN>` is the zero-padded four-digit number from the filename.
-- `project/decisions/<adr-NNNN-slug>.md` is the path **relative to `brain/`** — no `brain/` prefix.
+- `<adr-NNNN-slug>` is the ADR filename without the `.md` extension.
 - `<short description>` is derived from the ADR title line `# ADR-NNNN — <Topic>: <detail>`: take the text after the first ` — ` separator (e.g., for title `# ADR-0014 — Stack: TypeScript + React`, the description is `Stack: TypeScript + React`).
 
-After writing `brain/HOME.md`, confirm:
+Branch on the command's exit code:
 
-```
-HOME.md patched: appended <N> ADR link(s) after the last entry in '### Architecture decisions'.
-```
+| Exit code / outcome | Report |
+|---|---|
+| `0` — stdout `HOME.md patched: inserted ADR-NNNN` | `HOME.md patched: appended ADR-NNNN` |
+| `0` — stdout `HOME.md: ADR-NNNN already indexed` | `HOME.md: ADR-NNNN already indexed` |
+| `1` — I/O or unexpected error, stderr names the path | Report the stderr message to the user; skip this ADR's HOME.md patch and continue with the remaining accepted ADRs — do NOT halt the whole run |
+| `2` — bad usage, stderr prints the `Usage:` line | Report the stderr message to the user; this indicates an internal bug in how the CLI was invoked, not a user-facing failure |
+| `3` — fail-safe, stderr lists the lines to add manually | `HOME.md patch ABORTED — HOME.md was NOT modified. Add these lines manually:` followed by the printed lines |
+
+After processing all accepted ADRs, continue to **Post-write verification**.
 
 ---
 

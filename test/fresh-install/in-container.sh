@@ -132,6 +132,20 @@ if [ -f brain.config.json ]; then
   else fail "wrong provider derivation (got '${prov}', expected 'github')"; fi
 else fail "brain.config.json NOT created"; fi
 
+line "[3.5] env:init scaffolds brain/HOME.md (install-home-scaffold)"
+if [ -f brain/HOME.md ]; then
+  ok "brain/HOME.md scaffolded by env:init"
+else
+  fail "brain/HOME.md NOT created by env:init"
+fi
+# brain:nav is not one of the injected MANAGED_SCRIPT_KEYS, so invoke the
+# managed script directly rather than via a package.json verb that may not exist.
+if node brain/scripts/check-brain-nav.mjs >/dev/null 2>&1; then
+  ok "check-brain-nav.mjs exits 0 on the scaffolded HOME.md"
+else
+  fail "check-brain-nav.mjs did NOT exit 0 on the scaffolded HOME.md"
+fi
+
 line "[4] Verify READ-ONLY: brain/project/* NOT touched by upgrade"
 # Check that consumer ADR is untouched
 if [ -f brain/project/decisions/adr-0001-consumer.md ]; then

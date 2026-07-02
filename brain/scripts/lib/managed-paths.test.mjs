@@ -9,7 +9,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { managed, MANAGED_SCRIPT_KEYS } from '../../core/managed-paths.mjs';
+import { managed, local, MANAGED_SCRIPT_KEYS } from '../../core/managed-paths.mjs';
+import { matchesAny } from './installer.mjs';
 
 test('managed includes .github/workflows/governance.yml (exact literal)', () => {
   assert.ok(
@@ -81,6 +82,40 @@ test('managed includes package.json (S5)', () => {
     managed.includes('package.json'),
     'managed must contain "package.json" so brain:upgrade routes it through specialMerge',
   );
+});
+
+// install-home-scaffold REQ-6: brain/HOME.md must stay outside both managed
+// and local — managed would clobber curated ADR links on every brain:upgrade,
+// local only protects files that already exist at scaffold time. Consumer-owned
+// by design.
+test('managed does NOT contain an entry matching brain/HOME.md or HOME.md (REQ-6)', () => {
+  const hit = managed.find((p) => p === 'brain/HOME.md' || p === 'HOME.md');
+  assert.equal(hit, undefined,
+    `managed must not contain an entry matching brain/HOME.md or HOME.md — found "${hit}"`);
+});
+
+test('local does NOT contain an entry matching brain/HOME.md or HOME.md (REQ-6)', () => {
+  const hit = local.find((p) => p === 'brain/HOME.md' || p === 'HOME.md');
+  assert.equal(hit, undefined,
+    `local must not contain an entry matching brain/HOME.md or HOME.md — found "${hit}"`);
+});
+
+// install-home-scaffold REQ-6, hardened: the two literal-only assertions above
+// would not catch a future BROAD glob (e.g. `brain/**`) that silently pulls
+// brain/HOME.md into `managed` without ever containing the literal string
+// "brain/HOME.md". Assert via the actual glob matcher the installer uses
+// (matchesAny, from installer.mjs) that no managed pattern MATCHES the path —
+// not just that no entry equals it literally.
+test('no managed glob MATCHES brain/HOME.md, via the real glob matcher (REQ-6, hardened)', () => {
+  assert.equal(matchesAny('brain/HOME.md', managed), false,
+    'brain/HOME.md must not match any managed glob — it would be clobbered on brain:upgrade');
+});
+
+// install-home-scaffold REQ-7: brain/scripts/lib/home-index.mjs must be
+// covered by a managed glob so it ships to every consumer via brain:upgrade.
+test('a managed glob covers brain/scripts/lib/home-index.mjs (REQ-7)', () => {
+  assert.equal(matchesAny('brain/scripts/lib/home-index.mjs', managed), true,
+    'brain/scripts/lib/home-index.mjs must be reachable by a managed glob (e.g. brain/scripts/**)');
 });
 
 // S5 + #154: MANAGED_SCRIPT_KEYS must have exactly 9 entries, all prefixed brain:.
