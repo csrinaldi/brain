@@ -137,6 +137,7 @@ failure. It shows exactly what to adopt next.
 
 ## Reference
 
+- [Workflow guide](workflow-guide.md) — how to run a feature end to end, both AI-assisted (Claude) and manually (npm verbs in sequence).
 - [HOME.md](../brain/HOME.md) — the knowledge-base entry point.
 - [ADR-0006](../brain/project/decisions/adr-0006-distribucion-installer-versionado.md) — distribution via git tags.
 - [ADR-0013](../brain/project/decisions/adr-0013-auto-adr-onboarding.md) — ADR onboarding authority tiers (agent drafts, human signs).
