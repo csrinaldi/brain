@@ -26,6 +26,23 @@ test('adapter Phase 4 invokes the home-index.mjs helper', () => {
   );
 });
 
+test('adapter Phase 4 positively delegates patch mechanics to the helper, not just omits old prose (REQ-5)', () => {
+  // Positive guard: absence-only assertions (see test below) can pass
+  // vacuously if patch mechanics reappear under new wording. Assert the
+  // rewired Phase 4 actually names the helper as the implementation and
+  // states the mechanics are not re-described in the adapter prose.
+  assert.match(
+    adapterText,
+    /node brain\/scripts\/lib\/home-index\.mjs insert/,
+    'Phase 4 must contain the helper-invocation command line',
+  );
+  assert.match(
+    adapterText,
+    /not re-described here/,
+    'Phase 4 must state that patch mechanics live in the helper and are not re-described in the adapter',
+  );
+});
+
 test('adapter Phase 4 contains no step-by-step patch-location/append prose (REQ-5)', () => {
   assert.doesNotMatch(
     adapterText,
