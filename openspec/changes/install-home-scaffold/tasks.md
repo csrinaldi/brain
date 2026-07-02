@@ -69,7 +69,7 @@ Chain strategy: feature-branch-chain
 
 ### Phase 7 (optional, Docker-gated): Fresh-install assertion
 
-- [ ] 7.1 `test/fresh-install/in-container.sh`: add a block after `env:init` asserting `brain/HOME.md` exists and `npm run brain:nav` exits 0
+- [x] 7.1 `test/fresh-install/in-container.sh`: add a block after `env:init` asserting `brain/HOME.md` exists and `brain:nav` exits 0 — invokes `node brain/scripts/check-brain-nav.mjs` directly rather than `npm run brain:nav`, since `brain:nav` is not one of the 9 `MANAGED_SCRIPT_KEYS` injected into a consumer's `package.json` (verified against `test/fixtures/*/package.json`, none define it) and calling an undefined npm script would false-fail the container assertion
 
 ---
 
