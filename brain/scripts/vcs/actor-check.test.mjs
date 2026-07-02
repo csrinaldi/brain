@@ -98,6 +98,52 @@ test('human-applied approval, actor differs from author → pass', () => {
   assert.equal(result.level, 'pass');
 });
 
+// ── FIX2: actor must be compared against the PR author OR the issue author ────
+//
+// REQ-L5-1 (spec.md:398-400) requires failing when the approval actor equals
+// "the PR author or the issue author" — two distinct entities. The Bob/Alice
+// gap: Bob files issue #N, Alice opens the PR, Bob self-labels his own issue
+// status:approved → actor "bob" !== prAuthor "alice", so a check that only
+// compares against the PR author wrongly PASSes.
+
+test('FIX2: actor === issueAuthor (distinct from PR author), not bot/override → fail (Bob/Alice self-approval via issue author)', () => {
+  const result = evaluateActor({
+    author: 'alice', // PR author
+    issueAuthor: 'bob', // issue author
+    labeledEvents: [{ actor: { login: 'bob' } }],
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /self/i);
+});
+
+test('FIX2: actor === issueAuthor but issueAuthor is allow-listed → pass', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    issueAuthor: 'release-bot',
+    labeledEvents: [{ actor: { login: 'release-bot' } }],
+    botAllowlist: ['release-bot'],
+  });
+  assert.equal(result.level, 'pass');
+});
+
+test('FIX2 regression: actor === PR author still fails, even with a distinct third-party issueAuthor present', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    issueAuthor: 'carol',
+    labeledEvents: [{ actor: { login: 'alice' } }],
+  });
+  assert.equal(result.level, 'fail');
+});
+
+test('FIX2: actor differs from both PR author and issue author → pass', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    issueAuthor: 'bob',
+    labeledEvents: [{ actor: { login: 'carol' } }],
+  });
+  assert.equal(result.level, 'pass');
+});
+
 // ── FIX1 fail-open guard: unpaginated gh api list fetch truncates to page 1 ────
 //
 // `gh api` does NOT auto-paginate. GitHub's Events API is oldest-first, so on an

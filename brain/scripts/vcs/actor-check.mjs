@@ -28,8 +28,12 @@ import { fileURLToPath } from 'node:url';
  *      logged.
  *   3. Actor in `botAllowlist` (e.g. automation acting on a human's explicit
  *      instruction) → pass.
- *   4. Actor === author → fail (self-approval) — REQ-L5-1.
- *   5. Otherwise → pass (human-applied approval, actor differs from author).
+ *   4. Actor === author OR actor === issueAuthor → fail (self-approval) —
+ *      REQ-L5-1 requires comparing against BOTH the PR author and the issue
+ *      author (spec.md:398-400): the PR author and the issue author can be
+ *      two different people (e.g. Bob files the issue, Alice opens the PR),
+ *      and either one self-labeling their own issue counts as self-approval.
+ *   5. Otherwise → pass (human-applied approval, actor differs from both).
  *
  * The "most recent" labeled event wins (handles re-labeling: remove → re-add
  * uses the latest add) — `labeledEvents` is assumed to be in the same
@@ -38,6 +42,8 @@ import { fileURLToPath } from 'node:url';
  *
  * @param {object} input
  * @param {string} input.author  PR author login (design §5 step 1).
+ * @param {string} [input.issueAuthor]  Issue author login (the issue the PR
+ *   closes/references) — REQ-L5-1 requires failing on either author matching.
  * @param {Array<{ actor: { login: string } }>} input.labeledEvents  `labeled`
  *   events for the `status:approved` label, chronologically ordered.
  * @param {string[]} [input.botAllowlist]  Allow-listed actor logins / override
@@ -47,7 +53,13 @@ import { fileURLToPath } from 'node:url';
  *   `botAllowlist` — never a blanket bypass, REQ-L5-2).
  * @returns {{ level: 'pass'|'warn'|'fail', reason: string }}
  */
-export function evaluateActor({ author, labeledEvents = [], botAllowlist = [], adminOverride = false } = {}) {
+export function evaluateActor({
+  author,
+  issueAuthor,
+  labeledEvents = [],
+  botAllowlist = [],
+  adminOverride = false,
+} = {}) {
   if (labeledEvents.length === 0) {
     return {
       level: 'warn',
@@ -73,16 +85,17 @@ export function evaluateActor({ author, labeledEvents = [], botAllowlist = [], a
     };
   }
 
-  if (actor === author) {
+  if (actor === author || (issueAuthor && actor === issueAuthor)) {
+    const matched = actor === author ? 'PR author' : 'issue author';
     return {
       level: 'fail',
-      reason: `status:approved was self-applied by the PR/issue author "${author}" — self-approval is not allowed.`,
+      reason: `status:approved was self-applied by "${actor}" (matches the ${matched}) — self-approval is not allowed.`,
     };
   }
 
   return {
     level: 'pass',
-    reason: `status:approved applied by "${actor}", distinct from author "${author}".`,
+    reason: `status:approved applied by "${actor}", distinct from the PR author "${author}" and the issue author "${issueAuthor ?? 'n/a'}".`,
   };
 }
 
