@@ -55,6 +55,17 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           sha="${{ github.sha }}"
+          br="auto-revert/${sha:0:7}"
+
+          # Operational-robustness item 3 (idempotency, #165): a re-run on the
+          # same SHA — a retry, or the daily cron re-hitting an already-flagged
+          # commit before its revert PR merges — must not fail loudly on an
+          # existing branch/PR. If the auto-revert branch already exists on
+          # origin, the revert PR was already opened; no-op and exit cleanly.
+          if git ls-remote --exit-code --heads origin "$br" >/dev/null 2>&1; then
+            echo "auto-revert branch $br already exists — revert PR already opened for $sha; skipping."
+            exit 0
+          fi
 
           # Operational-robustness item 2: `git revert -m 1` errors out if $sha
           # is NOT a merge commit (e.g. squash or fast-forward merges have a
@@ -67,7 +78,6 @@ jobs:
             git revert --no-edit "$sha"
           fi
 
-          br="auto-revert/${sha:0:7}"
           git switch -c "$br"
           git push origin "$br"
 
