@@ -233,8 +233,8 @@ Both names go into `REQUIRED_JOBS` in the **same commit** as the YAML, so the dr
 Pure evaluator + gh I/O wrapper, same split.
 
 ```js
-export function evaluateActor({ author, labeledEvents, botAllowlist = [], adminOverride = false })
-  → { level: 'pass'|'warn'|'fail', reason }
+export function evaluateActor({ author, issueAuthor, labeledEvents, botAllowlist = [], adminOverride = false })
+  → { level: 'pass'|'warn'|'fail', reason }  // fails when actor === author OR issueAuthor
 ```
 
 **Algorithm.**
