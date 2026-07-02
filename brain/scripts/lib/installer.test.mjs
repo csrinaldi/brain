@@ -915,6 +915,24 @@ test('mergePackageJsonScripts: non-scripts fields are preserved verbatim (S5-e)'
   assert.deepEqual(result.devDependencies, { typescript: '^5.0.0' }, 'devDependencies must be preserved');
 });
 
+// Issue #180 lock-in guard: a pre-v0.8.0 vendored upgrader plain-copied
+// package.json and clobbered the consumer's identity (name/version), which
+// then tripped brain-upgrade.mjs's own self-guard and locked the consumer
+// out of all future upgrades. Since v0.9.x package.json goes through this
+// specialMerge function instead of a plain copy — this test locks in that
+// consumer identity always survives a merge, regardless of what brain's own
+// package.json fields are.
+test('mergePackageJsonScripts: consumer identity survives a merge — clobber regression guard (issue #180)', () => {
+  const consumer = { name: '@x/y', version: '1.2.3', scripts: {} };
+  const result = JSON.parse(mergePackageJsonScripts(consumer, S5_MANAGED));
+
+  assert.equal(result.name, '@x/y', 'consumer name must never be clobbered by a merge (issue #180)');
+  assert.equal(result.version, '1.2.3', 'consumer version must never be clobbered by a merge (issue #180)');
+  for (const [k, v] of Object.entries(S5_MANAGED)) {
+    assert.equal(result.scripts[k], v, `managed key "${k}" must still be injected`);
+  }
+});
+
 // S5-io: mergePackageJson IO wrapper — write-if-changed idempotency.
 test('mergePackageJson: write-if-changed — second call is a mtime no-op (S5-io)', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'brain-s5-io-'));

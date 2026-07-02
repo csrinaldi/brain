@@ -14,12 +14,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const BRAIN_UPGRADE_SCRIPT = new URL('./brain-upgrade.mjs', import.meta.url).pathname;
+const BRAIN_UPGRADE_SOURCE = fileURLToPath(new URL('./brain-upgrade.mjs', import.meta.url));
 
 function runBrainUpgrade(dir, args = []) {
   return spawnSync('node', [BRAIN_UPGRADE_SCRIPT, ...args], { cwd: dir, encoding: 'utf8' });
@@ -102,4 +104,19 @@ test('brain:upgrade: no warning printed when package.json name is not "brain"', 
 
   assert.doesNotMatch(r.stderr, /may have clobbered your project name/,
     `no warning expected for a normal consumer package.json name:\n${r.stderr}`);
+});
+
+// ── specialMerge lock-in guard (issue #180, Part 2) ─────────────────────────
+//
+// The root cause of the clobber was package.json being plain-copied instead
+// of merged. Since v0.9.x it IS routed through specialMerge (mergePackageJson),
+// but nothing asserted it STAYS that way. This is a regression guard: if a
+// future edit ever drops 'package.json' from the specialMerge map passed to
+// copyManaged, this test must fail.
+test('brain:upgrade: registers package.json under specialMerge → mergePackageJson (lock-in guard, issue #180)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  assert.match(source, /specialMerge:\s*\{[^}]*'package\.json':\s*mergePackageJson/,
+    'brain-upgrade.mjs must register \'package.json\': mergePackageJson under specialMerge — ' +
+    'a plain copy would clobber the consumer\'s package.json identity again (issue #180)');
 });
