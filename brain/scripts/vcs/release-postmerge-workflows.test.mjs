@@ -53,8 +53,8 @@ test('release.yml does NOT use the empty origin/main..HEAD range on a tag push',
   const text = readFileSync(RELEASE_YML, 'utf8');
   assert.doesNotMatch(
     text,
-    /origin\/main\.\.HEAD/,
-    'release.yml must not audit origin/main..HEAD — that range is empty on brain\'s tag-after-merge flow'
+    /brain-audit\.mjs\s+origin\/main\.\.HEAD/,
+    'release.yml must not invoke brain-audit.mjs with origin/main..HEAD — that literal range is empty on brain\'s tag-after-merge flow'
   );
 });
 
@@ -62,7 +62,7 @@ test('release.yml derives the audit range from the previous release tag', () => 
   const text = readFileSync(RELEASE_YML, 'utf8');
   assert.match(text, /git describe --tags/, 'release.yml must locate the previous release tag via git describe --tags');
   assert.match(text, /GITHUB_REF_NAME/, 'release.yml must use GITHUB_REF_NAME to identify the tag being released');
-  assert.match(text, /PREV_TAG\.\.HEAD/, 'release.yml must audit PREV_TAG..HEAD (previous tag to the tagged commit)');
+  assert.match(text, /PREV_TAG\}?\.\.HEAD/, 'release.yml must audit PREV_TAG..HEAD (previous tag to the tagged commit)');
 });
 
 // ── governance-postmerge.yml (rung 3, auto-revert) — REQ-L2-2 ──────────────

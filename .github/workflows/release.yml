@@ -11,11 +11,12 @@
 # read-only; this one only ever runs on a tag push, never on untrusted PR code
 # (design.md §10-B, gap B).
 #
-# [Manual] dry-run note: origin/main..HEAD assumes `origin/main` resolves on the
-# tag ref. `fetch-depth: 0` below fetches full history + all refs, which should
-# make `origin/main` available even when checking out a tag — confirm this on
-# the REQ-L2-1 fixture dry-run (tasks.md PR7 [Manual] line) before relying on it
-# in production.
+# Range note: brain merges the release PR to main, THEN tags that commit. On the
+# tag push, origin/main is at/ahead of the tagged commit, so origin/main..HEAD is
+# EMPTY — brain-audit.mjs would log "No merge commits found" and exit 0
+# unconditionally, making this gate a silent no-op. Audit from the PREVIOUS
+# release tag to the tagged commit instead (always non-empty, falls back to the
+# repo root commit for the first-ever release).
 
 name: release
 
@@ -33,6 +34,11 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      - name: Run brain-audit over origin/main..HEAD
-        run: node brain/scripts/brain-audit.mjs origin/main..HEAD
+      - name: Run brain-audit over the previous release tag..HEAD
+        run: |
+          # Audit every merge since the previous release tag (origin/main is at/ahead
+          # of the tag on brain's tag-after-merge flow, so origin/main..HEAD would be
+          # empty).
+          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          node brain/scripts/brain-audit.mjs "${PREV_TAG}..HEAD"
         # exit 1 blocks the tag/publish — fail closed.

@@ -29,7 +29,17 @@ jobs:
 
       - id: audit
         name: Run brain-audit over the last push range
-        run: node brain/scripts/brain-audit.mjs "${{ github.event.before }}..${{ github.sha }}"
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # No push payload on cron: github.event.before does not exist, so the
+            # naive "${{ github.event.before }}..${{ github.sha }}" range collapses
+            # to sha..sha (empty) and the daily backstop would never catch anything.
+            # Audit unreleased merges since the last tag instead.
+            BASE=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          node brain/scripts/brain-audit.mjs "${BASE}..${{ github.sha }}"
         continue-on-error: true
 
       - name: Open auto-revert PR on audit failure
