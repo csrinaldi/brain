@@ -5,6 +5,25 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.9.2 — upgrade self-host guard hardening (#180)
+
+Fixes a lockout hazard for consumers stranded by a **pre-v0.8.0** upgrade.
+
+- **No more false-positive lockout.** A pre-v0.8.0 upgrader plain-copied brain's
+  `package.json`, clobbering the consumer's `name` → `brain`; that tripped
+  `brain:upgrade`'s own `name === 'brain'` self-guard and locked the consumer out of
+  every future upgrade. The self-host guard now keys on a `.brain-source` marker (present
+  only in the brain source repo, never distributed) instead of the package name — a
+  clobbered consumer can upgrade to recover; the old name check remains only as a
+  non-fatal warning.
+- **`package.json` locked into specialMerge** — a regression test pins it so it can never
+  revert to a plain copy that would clobber consumer identity again.
+- New anti-pattern doc: `brain/core/anti-patterns/pre-v0-8-0-upgrade-clobber-lockout.md`
+  (mechanism + recovery).
+
+Recovery for an already-locked-out consumer: restore your `package.json` name, then run
+`node node_modules/brain/brain/scripts/brain-upgrade.mjs -- v0.9.2` (or `--force` once).
+
 ## v0.9.1 — upgrade/distribution robustness (#176)
 
 Three bugs found by a real v0.9.0 upgrade test of a vendored + pnpm-workspace
