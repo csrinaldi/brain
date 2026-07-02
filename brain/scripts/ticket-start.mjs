@@ -4,10 +4,11 @@
 // adapter (scripts/vcs/cli.mjs), so it works with GitHub, GitLab, or any host
 // configured via vcs.provider in brain.config.json.
 //
-// Usage: npm run ticket:start -- <id>                 (in-place checkout from main)
-//        npm run ticket:start -- <id> --worktree      (isolated worktree from main)
-//        npm run ticket:start -- <id> --base <branch> (different base, e.g. a story tracker)
+// Usage: npm run brain:ticket:start -- <id>                 (in-place checkout from main)
+//        npm run brain:ticket:start -- <id> --worktree      (isolated worktree from main)
+//        npm run brain:ticket:start -- <id> --base <branch> (different base, e.g. a story tracker)
 //        node brain/scripts/ticket-start.mjs <id> [--worktree] [--base <branch>]
+// Deprecated alias: npm run ticket:start (same target)
 
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync } from 'node:fs';

@@ -52,9 +52,9 @@ is not complete.
 | `openspec/changes/**` | Agent or human | create, update | None — flight zone |
 | `openspec/changes/*/brain-drafts/**` | Agent (draft) | create, update | None — proposal zone |
 | `openspec/changes/archive/**` | Agent or human | create (on archive) | None |
-| `openspec/specs/**` | Agent or human | create, update | `npm run repo:check` validates references |
+| `openspec/specs/**` | Agent or human | create, update | `npm run brain:repo:check` validates references |
 | `.engram/**` | Agent or human | create, update | Merge driver content-addressed |
-| `scripts/**`, `package.json` | Agent or human | create, update, delete | `npm run repo:check` |
+| `scripts/**`, `package.json` | Agent or human | create, update, delete | `npm run brain:repo:check` |
 | `.gitlab-ci.yml`, `settings.xml` | Human recommended | update | Requires issue + MR (not mechanical) |
 
 **Golden rule:** if the destination is `brain/`, the signature is human. Everything else may
@@ -115,12 +115,12 @@ The human is the final authority over conflicts of type `architecture`, `decisio
 
 ## 5. Memory Synchronization (Engram git-based)
 
-`npm run day:start` closes the full cycle at the start of the workday:
+`npm run brain:day:start` closes the full cycle at the start of the workday:
 1. **import** (`engram sync --import`) — pulls `.engram/` from the repo → local `~/.engram`
 2. **index** (`brain-to-engram.mjs`) — reprojects `brain/` → `~/.engram`
 3. **export** (`engram sync --export`) — publishes `~/.engram` → `.engram/` in the repo
 
-The export in step 3 captures the memory accumulated from the previous session and the reprojection of `brain/`. Memory generated during the active workday (in-session `mem_save` calls) is exported with the next `day:start` or manually:
+The export in step 3 captures the memory accumulated from the previous session and the reprojection of `brain/`. Memory generated during the active workday (in-session `mem_save` calls) is exported with the next `brain:day:start` or manually:
 
 ```bash
 npm run memory:share   # export explícito en cualquier momento
@@ -135,11 +135,11 @@ npm run memory:share && git add .engram/ && git status
 From #81 onwards, a **pre-push hook** (`scripts/hooks/pre-push`) automates that
 check: it runs `engram sync --export` before every push and aborts if `.engram/`
 was left uncommitted, indicating how to materialize it. It auto-installs via `core.hooksPath`
-(the `prepare` script in `npm install` + self-heal in `day:start`), so it does not depend on
-re-running `env:init`. The export is client-side by design — it only happens on the
+(the `prepare` script in `npm install` + self-heal in `brain:day:start`), so it does not depend on
+re-running `brain:env:init`. The export is client-side by design — it only happens on the
 dev's machine; the hook maximizes its reach but does not make it unbypassable (`git push --no-verify` remains
 the emergency escape).
 
-Once the MR is merged, the team absorbs the memory with `npm run memory:pull` or on the next `day:start`.
+Once the MR is merged, the team absorbs the memory with `npm run memory:pull` or on the next `brain:day:start`.
 
 The **durable** layer (decisions, anti-patterns) is promoted to `brain/` in Markdown, which is the source of truth; engram is the shared **live** layer. See the consuming project's two-layer memory ADR.

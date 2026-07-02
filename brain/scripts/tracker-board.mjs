@@ -6,7 +6,7 @@
 // Imprime markdown listo para el skill `retomar` (y cualquier otro consumidor).
 // Degrada con aviso si no hay sesión de VCS autenticada o el remote no se detecta.
 //
-// Uso: node brain/scripts/tracker-board.mjs   |   npm run tracker:board
+// Uso: node brain/scripts/tracker-board.mjs   |   npm run brain:tracker:board  (alias deprecado: tracker:board)
 
 import { getVcs } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';

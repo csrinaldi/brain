@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // day-start.mjs — Daily startup sequence: VCS auth → updates → memory → board.
-// Usage: npm run day:start
+// Usage: npm run brain:day:start  (deprecated alias: npm run day:start)
 //
 // For humans: run this at the start of the workday, on any branch.
 // For AI agents: run this when resuming a session — sets context before working.

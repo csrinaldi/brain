@@ -6,7 +6,7 @@
 // provider-agnóstico). NO escribe archivos: el estado se GENERA a demanda, nunca
 // se versiona ni se edita a mano (AGENTS.md §0, Tier 2: proyección reconstruible, no fuente).
 //
-// Se ejecuta con `npm run project:status`. Sin dependencias externas.
+// Se ejecuta con `npm run brain:project:status` (alias deprecado: project:status). Sin dependencias externas.
 
 import { execSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';

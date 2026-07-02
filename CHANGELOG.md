@@ -5,6 +5,74 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.8.1 — brain:session:start canonical verb (#154)
+
+### New canonical verb
+
+`session:start` (added in v0.8.0 as a bare verb) is now prefixed under the
+`brain:` namespace per the convention established by #137:
+
+| New canonical verb       | Deprecated alias |
+|--------------------------|------------------|
+| `brain:session:start`    | `session:start`  |
+
+The `session:start` alias continues to work — it shipped in v0.8.0 and will not
+be removed before the next MAJOR version.
+
+### Automated consumer migration on `brain:upgrade`
+
+`brain:upgrade` now injects `brain:session:start` into the consumer's
+`package.json` alongside the existing 8 `brain:*` verbs (via `MANAGED_SCRIPT_KEYS`
+in `brain/core/managed-paths.mjs`). Consumer-wins rule applies: if
+`brain:session:start` already exists in the consumer's scripts, it is not
+overwritten.
+
+The `.claude/settings.json` `SessionStart` hook now uses `npm run brain:session:start`.
+Consumers whose hook still says `session:start` remain functional via the alias.
+
+**No action required**: `brain:upgrade` handles injection automatically.
+
+## v0.8.0 — brain:* verb namespace + automated consumer migration (#137)
+
+### New: 8 `brain:*` canonical verbs
+
+All harness commands now have a `brain:`-prefixed canonical name alongside the
+original verb, which continues to work as a deprecated alias:
+
+| New canonical verb      | Deprecated alias   |
+|-------------------------|--------------------|
+| `brain:env:init`        | `env:init`         |
+| `brain:day:start`       | `day:start`        |
+| `brain:ticket:start`    | `ticket:start`     |
+| `brain:project:feature` | `project:feature`  |
+| `brain:project:status`  | `project:status`   |
+| `brain:tracker:board`   | `tracker:board`    |
+| `brain:repo:check`      | `repo:check`       |
+| `brain:change:verify`   | `change:verify`    |
+
+Both forms invoke the **same direct `node` target** — no indirection, no
+subprocess, no name-coupling. Old verbs are functional in 0.8.0 and will not
+be removed before the next MAJOR version.
+
+### New capability: automated `package.json` migration on `brain:upgrade`
+
+`brain:upgrade` now **additively injects** all 8 `brain:*` script keys into
+the consumer's `package.json`. Rules:
+
+- **Consumer-wins**: if a key already exists in the consumer's `scripts`, its
+  value is never overwritten.
+- **Additive only**: no existing key is deleted, renamed, or reordered.
+- **Idempotent**: running `brain:upgrade` a second time leaves `package.json`
+  byte-identical — no mtime churn.
+- **Non-scripts fields** (`version`, `dependencies`, etc.) are never touched.
+- Implemented via the `specialMerge` path in `copyManaged`, the same
+  mechanism already used for `.claude/settings.json`. Controlled by
+  `MANAGED_SCRIPT_KEYS` in `brain/core/managed-paths.mjs` (single source of
+  truth — keys and targets are never hardcoded in two places).
+
+**No action required**: `brain:upgrade` handles migration automatically on
+the first upgrade to 0.8.0.
+
 ## v0.7.2 — core→project link fix + nav guard
 
 - `check-brain-nav` now flags any `brain/core/**` link that resolves into
