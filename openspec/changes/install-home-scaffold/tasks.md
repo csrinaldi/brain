@@ -79,13 +79,13 @@ Chain strategy: feature-branch-chain
 
 ### Phase 8: `insertAdrLink` pure helper (REQ-1 through REQ-4 of `home-index`)
 
-- [ ] 8.1 RED — `brain/scripts/lib/home-index.test.mjs` (model after `lib/branch-type.test.mjs`): test "section has no ADR line (empty heading) → insert immediately after heading, `inserted:true`"
-- [ ] 8.2 RED — same file: test "section has ≥1 ADR link → insert new line immediately after the last one, prior lines unchanged"
-- [ ] 8.3 RED — same file: test "`### Architecture decisions` heading absent → return input unchanged, `inserted:false`, `reason:'anchor-not-found'`, `linesToAdd` populated"
-- [ ] 8.4 RED — same file: test "re-inserting an already-present ADR slug → no-op, `inserted:false`, `reason:'already-present'`, no duplicate line"
-- [ ] 8.5 GREEN — Create `brain/scripts/lib/home-index.mjs`: `insertAdrLink(homeText, { number, slug, description })` per design Decision 4 (idempotent check, anchor bounded by next `^---$`/`^## `, append-after-last, insert-after-empty-heading, fail-safe branches) — pure string-in/string-out, no agent-specific logic (REQ-7)
-- [ ] 8.6 GREEN — Add CLI guard to the same file (I/O only): `node home-index.mjs insert --home <path> --number <n> --slug <s> --desc <d>` — writes on `inserted`, exit 0 no-op on `already-present`, exit 3 + prints `linesToAdd` on fail-safe
-- [ ] 8.7 Run `npm test` — all Phase 8 tests green
+- [x] 8.1 RED — `brain/scripts/lib/home-index.test.mjs` (model after `lib/branch-type.test.mjs`): test "section has no ADR line (empty heading) → insert immediately after heading, `inserted:true`"
+- [x] 8.2 RED — same file: test "section has ≥1 ADR link → insert new line immediately after the last one, prior lines unchanged"
+- [x] 8.3 RED — same file: test "`### Architecture decisions` heading absent → return input unchanged, `inserted:false`, `reason:'anchor-not-found'`, `linesToAdd` populated"
+- [x] 8.4 RED — same file: test "re-inserting an already-present ADR slug → no-op, `inserted:false`, `reason:'already-present'`, no duplicate line"
+- [x] 8.5 GREEN — Create `brain/scripts/lib/home-index.mjs`: `insertAdrLink(homeText, { number, slug, description })` per design Decision 4 (idempotent check, anchor bounded by next `^---$`/`^## `, append-after-last, insert-after-empty-heading, fail-safe branches) — pure string-in/string-out, no agent-specific logic (REQ-7)
+- [x] 8.6 GREEN — Add CLI guard to the same file (I/O only): `node home-index.mjs insert --home <path> --number <n> --slug <s> --desc <d>` — writes on `inserted`, exit 0 no-op on `already-present`, exit 3 + prints `linesToAdd` on fail-safe
+- [x] 8.7 Run `npm test` — all Phase 8 tests green
 
 ### Phase 9: Adapter rewire (REQ-5)
 
