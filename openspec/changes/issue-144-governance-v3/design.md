@@ -238,14 +238,25 @@ export function evaluateActor({ author, labeledEvents, botAllowlist = [], adminO
 ```
 
 **Algorithm.**
-1. PR author = `github.event.pull_request.user.login`.
+1. PR author = `github.event.pull_request.user.login`. Issue author =
+   `issue.user.login`, fetched from the same issue-object call as step 2 (no
+   second gh round-trip) — REQ-L5-1 requires comparing the approving actor
+   against **both** the PR author and the issue author, since they can be two
+   different people (e.g. Bob files the issue, Alice opens the PR).
 2. Issue number = reuse `issue-link` extraction from PR body.
-3. `gh api repos/{repo}/issues/{n}/events --jq '[.[] | select(.event=="labeled" and .label.name=="status:approved")]'`.
+3. `gh api --paginate repos/{repo}/issues/{n}/events --jq '[.[] | select(.event=="labeled" and .label.name=="status:approved")]'`.
+   **`--paginate` is required**: `gh api` does not auto-paginate, and the
+   Events API is oldest-first, so an unpaginated fetch on an issue with
+   >~30 events silently drops the newest labeled events (page 2+) — including
+   a late self-applied `status:approved` — which would wrongly pass
+   (fail-open). This is the same fail-closed discipline as the rest of the
+   detection layer.
 4. Take the **most recent** `labeled` event's `actor.login` (handles re-labeling:
    remove→re-add uses the latest add).
 5. Decision:
-   - actor `=== author` and actor **not** in `botAllowlist` and not `adminOverride` →
-     **fail** (self-approval).
+   - actor `=== author` **or** actor `=== issueAuthor`, and actor **not** in
+     `botAllowlist` and not `adminOverride` → **fail** (self-approval), each
+     still exempted by the same `botAllowlist`/`adminOverride` checks below.
    - actor in `botAllowlist` (e.g. a CI/automation bot applying a human's decision) →
      **pass**.
    - `adminOverride` label present (allowlisted `override:*`) → **pass**, logged.
