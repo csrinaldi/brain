@@ -5,6 +5,28 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.9.3 — install-time HOME.md scaffold + agnostic ADR-index helper (#184)
+
+Closes the fresh-consumer onboarding gap: adopting brain now creates a
+`brain/HOME.md` at `brain:env:init`, and the auto-ADR flow can index accepted
+ADRs into it. **Additive — no renames, no breaking changes.**
+
+- **`brain:env:init` scaffolds `brain/HOME.md`** (create-if-absent; never
+  overwrites an existing one) from a new managed template
+  `brain/core/templates/HOME.template.md`. Fresh installs get a nav-clean entry
+  point instead of the missing-HOME stopgap warning.
+- **New agent-agnostic `brain/scripts/lib/home-index.mjs`** — inserts an ADR
+  link into HOME.md's `### Architecture decisions` section (idempotent,
+  CRLF-safe, fail-safe when the anchor is absent). The `project-bootstrap-adrs`
+  flow now calls this helper instead of re-implementing the patch in prose, so
+  any agent adapter reuses the same agnostic logic (enforced by a neutrality
+  source-scan test).
+- **`check-brain-nav`** excludes `brain/core/templates/` from the nav walk.
+
+Upgrade note: `brain:upgrade` never touches your `brain/HOME.md` (it is
+consumer-owned). To scaffold a HOME.md on an existing repo that lacks one, run
+`brain:env:init`.
+
 ## v0.9.2 — upgrade self-host guard hardening (#180)
 
 Fixes a lockout hazard for consumers stranded by a **pre-v0.8.0** upgrade.
