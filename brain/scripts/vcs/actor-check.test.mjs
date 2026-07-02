@@ -416,3 +416,10 @@ test('main: pass verdict → exit code 0', () => {
   assert.equal(exitCode, 0);
   assert.equal(lines[0], 'actor-check: pass');
 });
+
+test('neutrality source-scan (REQ-NEUTRALITY-2): actor-check.mjs source contains no .claude or SKILL.md literal', () => {
+  const srcPath = fileURLToPath(new URL('./actor-check.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  assert.equal(src.includes('.claude'), false, 'source must not reference .claude');
+  assert.equal(src.includes('SKILL.md'), false, 'source must not reference SKILL.md');
+});
