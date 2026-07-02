@@ -42,15 +42,15 @@ Chain strategy: feature-branch-chain
 
 ### Phase 2: Template content (REQ-4)
 
-- [ ] 2.1 Create `brain/core/templates/HOME.template.md` with the exact body from design Decision 2: `## Generic core` with 6 direct methodology links, `core/anti-patterns/README.md` link, empty `### Architecture decisions` heading, no `project/**` links, all prose in English (ADR-0009)
+- [x] 2.1 Create `brain/core/templates/HOME.template.md` with the exact body from design Decision 2: `## Generic core` with 6 direct methodology links, `core/anti-patterns/README.md` link, empty `### Architecture decisions` heading, no `project/**` links, all prose in English (ADR-0009)
 
 ### Phase 3: `ensureHome` scaffold helper (REQ-1, REQ-2)
 
-- [ ] 3.1 RED — `brain/scripts/lib/home-scaffold.test.mjs` (model after `lib/brain-config.test.mjs`): test "absent HOME.md → `{created:true}`, file written with template content"
-- [ ] 3.2 RED — same file: test "existing HOME.md with arbitrary content → `{created:false}`, content byte-identical to before the call"
-- [ ] 3.3 RED — same file: test "second call on a just-created HOME.md → `{created:false}`, no rewrite"
-- [ ] 3.4 GREEN — Create `brain/scripts/lib/home-scaffold.mjs`: `ensureHome(root, { templatePath, write })` per design Decision 1 (existsSync guard, byte-verbatim copy, no token substitution, injectable `root`/`templatePath`/`write` seams) + main-module CLI guard (`node home-scaffold.mjs ensure`)
-- [ ] 3.5 Run `npm test` — Phase 3 tests green, no regressions
+- [x] 3.1 RED — `brain/scripts/lib/home-scaffold.test.mjs` (model after `lib/brain-config.test.mjs`): test "absent HOME.md → `{created:true}`, file written with template content"
+- [x] 3.2 RED — same file: test "existing HOME.md with arbitrary content → `{created:false}`, content byte-identical to before the call"
+- [x] 3.3 RED — same file: test "second call on a just-created HOME.md → `{created:false}`, no rewrite"
+- [x] 3.4 GREEN — Create `brain/scripts/lib/home-scaffold.mjs`: `ensureHome(root, { templatePath, write })` per design Decision 1 (existsSync guard, byte-verbatim copy, no token substitution, injectable `root`/`templatePath`/`write` seams) + main-module CLI guard (`node home-scaffold.mjs ensure`)
+- [x] 3.5 Run `npm test` — Phase 3 tests green, no regressions
 
 ### Phase 4: Nav-integrity fixture (REQ-3, REQ-6)
 
