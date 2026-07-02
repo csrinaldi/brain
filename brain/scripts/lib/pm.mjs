@@ -86,6 +86,27 @@ export function getPMConfig(name) {
   return cfg;
 }
 
+/**
+ * Returns the pnpm PMConfig, appending `-w` to installArgs when `root` is a
+ * pnpm workspace root (pnpm-workspace.yaml present). `pnpm add` on a
+ * workspace root aborts with ERR_PNPM_ADDING_TO_ROOT unless `-w` /
+ * `--workspace-root` is passed; non-workspace pnpm must NOT get `-w` (it
+ * would itself error there).
+ *
+ * @param {string} root
+ * @returns {PMConfig}
+ */
+function getPnpmConfig(root) {
+  const base = getPMConfig('pnpm');
+  if (!existsSync(join(root, 'pnpm-workspace.yaml'))) {
+    return base;
+  }
+  return {
+    ...base,
+    installArgs: [...base.installArgs, '-w'],
+  };
+}
+
 // ── Detection helpers ─────────────────────────────────────────────────────────
 
 /**
@@ -148,6 +169,8 @@ export function detectPM(root = process.cwd()) {
   if (fieldName) {
     if (!PM_CONFIGS[fieldName]) {
       // Unknown PM declared in packageManager — fall through to lockfile detection.
+    } else if (fieldName === 'pnpm') {
+      return getPnpmConfig(root);
     } else {
       return getPMConfig(fieldName);
     }
@@ -155,7 +178,7 @@ export function detectPM(root = process.cwd()) {
 
   // 2. Lockfile detection — priority order per spec: pnpm → yarn → bun → npm.
   if (existsSync(join(root, 'pnpm-lock.yaml'))) {
-    return getPMConfig('pnpm');
+    return getPnpmConfig(root);
   }
 
   if (existsSync(join(root, 'yarn.lock'))) {
