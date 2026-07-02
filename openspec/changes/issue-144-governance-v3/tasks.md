@@ -188,12 +188,12 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 
 ## PR7 — L2 release-gate (rung 2) + post-merge auto-revert (rung 3) (REQ-L2-1, REQ-L2-2)
 
-- [ ] [GREEN] create `.github/workflows/release.yml`: `on: push: tags: ['v*']`, `permissions: { contents: read }`, single job invoking `node brain/scripts/brain-audit.mjs origin/main..HEAD` — fails closed on non-zero exit, `brain-audit.mjs` unchanged — design §3
-- [ ] [RED] structural test asserting `release.yml` references `brain-audit.mjs` and triggers on `tags: ['v*']` (drift-guard-style YAML-content assertion)
-- [ ] [GREEN] confirm the test passes against the file created above — REQ-L2-1
-- [ ] [GREEN] create `.github/workflows/governance-postmerge.yml`: `on: push: branches:[main]` + daily cron, `permissions: { contents: write, pull-requests: write }`, runs `brain-audit.mjs` over `github.event.before..github.sha`; on failure, `git revert -m 1 --no-edit`, push `auto-revert/<sha7>`, `gh pr create` with `size:exception` label and a `Part of #144` body — design §3
-- [ ] [RED] structural test asserting `governance-postmerge.yml` references `brain-audit.mjs`, declares `contents: write` and `pull-requests: write`, and is a **separate file** from `governance.yml` (read-only PR gate isolation — design §10-B)
-- [ ] [GREEN] confirm the test passes against the file created above — REQ-L2-2
+- [x] [GREEN] create `.github/workflows/release.yml`: `on: push: tags: ['v*']`, `permissions: { contents: read }`, single job invoking `node brain/scripts/brain-audit.mjs origin/main..HEAD` — fails closed on non-zero exit, `brain-audit.mjs` unchanged — design §3
+- [x] [RED] structural test asserting `release.yml` references `brain-audit.mjs` and triggers on `tags: ['v*']` (drift-guard-style YAML-content assertion)
+- [x] [GREEN] confirm the test passes against the file created above — REQ-L2-1
+- [x] [GREEN] create `.github/workflows/governance-postmerge.yml`: `on: push: branches:[main]` + daily cron, `permissions: { contents: write, pull-requests: write }`, runs `brain-audit.mjs` over `github.event.before..github.sha`; on failure, `git revert -m 1 --no-edit`, push `auto-revert/<sha7>`, `gh pr create` with `size:exception` label and a `Part of #144` body — design §3
+- [x] [RED] structural test asserting `governance-postmerge.yml` references `brain-audit.mjs`, declares `contents: write` and `pull-requests: write`, and is a **separate file** from `governance.yml` (read-only PR gate isolation — design §10-B)
+- [x] [GREEN] confirm the test passes against the file created above — REQ-L2-2
 - [ ] [Manual] REQ-L2-1/REQ-L2-2 integration/E2E acceptance: dry-run `release.yml` against a fixture branch with a known audit violation (aborts) and a clean range (proceeds); dry-run `governance-postmerge.yml` against a fixture branch with a deliberate post-merge violation (opens the auto-revert PR); record as acceptance evidence
 
 ## PR8 — ADR draft (Tier-2 constraint) (documentation only)
