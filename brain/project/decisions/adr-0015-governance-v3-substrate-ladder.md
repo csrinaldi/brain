@@ -1,4 +1,4 @@
-> ⚠️ DRAFT — AWAITING HUMAN SIGNATURE. An agent copied this ADR from the
+> **Status**: Accepted **Date**: 06/02/2026 Cristian Rinaldi . An agent copied this ADR from the
 > `openspec/changes/issue-144-governance-v3/brain-drafts/` staging area into
 > `brain/project/decisions/`. Per `agent-authorities.md` and the
 > `ia-promueve-sus-propios-artefactos` anti-pattern, the agent may only place it here
