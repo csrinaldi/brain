@@ -176,7 +176,7 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 - [x] [RED] `brain-writes-reviewed.test.mjs`: no reviews API / zero reviews yet → `warn` + `pass`, never crashes on a missing/unsupported reviews API
 - [x] [GREEN] implement the warn branch
 - [x] [GREEN] wire the `brain-writes-reviewed` job into `governance.yml` (fetches reviews via `gh api repos/{repo}/pulls/{n}/reviews`, normalized by the VCS adapter); add `'brain-writes-reviewed'` to `DETECTION_JOBS` in `governance-checks.mjs`, same commit — REQ-L6-1
-- [ ] [Follow-up — before sdd-verify/archive] **Spec traceability gap (fresh-review PR6a #5)**: REQ-L6-1 (spec.md:446-475) + scenarios describe ONLY the CODEOWNERS file-assertion (PR6b); the evidence-based `evaluateBrainWritesReviewed` check (design §6.1, the PRIMARY L6 mechanism) has NO spec requirement/scenario. Add **REQ-L6-2** (or amend REQ-L6-1) with scenarios for the evidence-based check before verify/archive — same pattern as PR5's design §5 amendment. Non-blocking for PR6a merge (code correct, tested, detection-only).
+- [x] [Follow-up — before sdd-verify/archive] **Spec traceability gap (fresh-review PR6a #5)**: REQ-L6-1 (spec.md:446-475) + scenarios describe ONLY the CODEOWNERS file-assertion (PR6b); the evidence-based `evaluateBrainWritesReviewed` check (design §6.1, the PRIMARY L6 mechanism) has NO spec requirement/scenario. Add **REQ-L6-2** (or amend REQ-L6-1) with scenarios for the evidence-based check before verify/archive — same pattern as PR5's design §5 amendment. Non-blocking for PR6a merge (code correct, tested, detection-only). → closed by REQ-L6-2
 
 ## PR6b — CODEOWNERS optional rung-1 enhancement (REQ-L6-1 file assertion, design §6.2)
 

@@ -42,6 +42,7 @@ harness-agnostic backstop.
 | REQ-L5-1 | L5 | Actor who applied `status:approved` MUST differ from the PR/issue author | Unit (`node --test`) + CI-behavior |
 | REQ-L5-2 | L5 | Bot/admin/re-label edge cases do not misfire as self-approval | Unit (`node --test`) |
 | REQ-L6-1 | L6 | CODEOWNERS requires human review on `brain/core/**` and `brain/project/**` edits | File assertion + CI-behavior |
+| REQ-L6-2 | L6 | Evidence check: a PR touching brain/core/** or brain/project/** must have an APPROVED review from a non-author human (not the PR author, not a bot) | Unit + CI-behavior (detection) |
 | REQ-LADDER-1 | Ladder | Every new gate returns `{enforced, reason, remedy}` and never crashes | Unit (`node --test`) |
 | REQ-LADDER-2 | Ladder | Every new gate detects the substrate and runs at the highest available rung, no dual code path | Integration / manual acceptance |
 | REQ-HONESTY-1 | Honesty | `brain:governance-status` reports the active rung and the remedy to climb higher | Integration / manual |
@@ -452,6 +453,11 @@ per ADR-0014's managed-path model, as a specific entry — never a broad `.githu
 glob (the same discipline already applied to `governance.yml` and
 `PULL_REQUEST_TEMPLATE.md` in `brain/core/managed-paths.mjs`).
 
+This requirement is the **optional rung-1 enhancement**: it depends on a platform that
+supports required code-owner review and on branch protection being armed (rung 1). It
+is not the primary L6 enforcement mechanism — see REQ-L6-2, which enforces L6 by
+evidence regardless of platform or branch-protection state (design §6.1, §6.2).
+
 [**File assertion**: `CODEOWNERS` exists and its rule lines match `brain/core/**` and
 `brain/project/**`; **CI-behavior**: a PR touching `brain/core/**` shows a required
 human-review requirement in the PR's review panel — verified once branch protection or
@@ -472,6 +478,64 @@ required-reviewers is active]
 
 - GIVEN `brain/core/managed-paths.mjs` is inspected after CODEOWNERS ships
 - THEN it lists `CODEOWNERS` (or `.github/CODEOWNERS`) as a specific managed entry, and no entry matches the broad glob `.github/**`
+
+---
+
+### Requirement REQ-L6-2: Evidence-Based Human Review on Brain-Writes (Primary L6 Mechanism)
+
+A PR whose changed files include at least one path under `brain/core/**` or
+`brain/project/**` MUST have at least one `APPROVED` review from a human reviewer who
+is neither the PR author nor a bot-allow-listed identity, before that PR's brain-writes
+are considered reviewed. This check MUST derive its verdict exclusively from PR review
+evidence (state, reviewer login) — never from CODEOWNERS assignment or branch-
+protection configuration — so it enforces identically on any VCS platform, including
+one with no CODEOWNERS support and no branch protection armed. This is the **PRIMARY,
+platform-agnostic L6 enforcement mechanism** (design §6.1); REQ-L6-1's `CODEOWNERS`
+file is an OPTIONAL rung-1 enhancement layered on top where the platform and branch
+protection support required code-owner review (design §6.2). Missing or unavailable
+review evidence MUST degrade to a warning, never a false failure, per
+REQ-LADDER-1/REQ-NEUTRALITY-1.
+
+[**Unit-testable**: `evaluateBrainWritesReviewed` fixtures covering touch/no-touch,
+self-approval, bot-only approval, human approval, missing evidence, and admin override;
+**CI-behavior (detection)**: the `brain-writes-reviewed` job runs on every PR and
+reports (does not yet block) the verdict while in `DETECTION_JOBS`]
+
+#### Scenario: Non-brain PR is exempt
+
+- GIVEN a PR's changed files contain no path under `brain/core/**` or `brain/project/**`
+- WHEN the `brain-writes-reviewed` check runs
+- THEN it reports `pass` — no Tier-2 review requirement applies
+
+#### Scenario: Self-approval only fails the check
+
+- GIVEN a PR touches `brain/core/**` or `brain/project/**` and the only `APPROVED` reviewer is the PR author
+- WHEN the `brain-writes-reviewed` check runs
+- THEN it reports `fail`, enforcing "no agent writes to `brain/`" (Tier-2)
+
+#### Scenario: Bot-only approval fails the check
+
+- GIVEN a PR touches `brain/core/**` or `brain/project/**` and the only `APPROVED` reviewer is a bot-allow-listed identity (no non-author human approver)
+- WHEN the `brain-writes-reviewed` check runs
+- THEN it reports `fail`
+
+#### Scenario: Human review present passes the check
+
+- GIVEN a PR touches `brain/core/**` or `brain/project/**` and at least one `APPROVED` reviewer is neither the PR author nor bot-allow-listed
+- WHEN the `brain-writes-reviewed` check runs
+- THEN it reports `pass`
+
+#### Scenario: Missing review evidence warns, never fails
+
+- GIVEN a PR touches `brain/core/**` or `brain/project/**` and there are no reviews, zero `APPROVED` reviews, or the reviews API is unavailable
+- WHEN the `brain-writes-reviewed` check runs
+- THEN it reports `warn` and never `fail` — missing evidence MUST NOT be treated as a violation
+
+#### Scenario: Admin override passes, logged
+
+- GIVEN a PR touches `brain/core/**` or `brain/project/**` and carries an allow-listed `override:*` label
+- WHEN the `brain-writes-reviewed` check runs
+- THEN it reports `pass` and the override is logged in the reason string
 
 ---
 
