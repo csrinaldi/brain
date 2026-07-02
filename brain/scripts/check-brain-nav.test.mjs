@@ -58,3 +58,31 @@ test('check-brain-nav: happy path (HOME.md present, no orphans/dead links) still
   assert.equal(r.status, 0,
     `expected exit 0 (clean nav), got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
 });
+
+// install-home-scaffold Slice 1, Phase 1: templates are scaffolding sources, not
+// navigable docs. brain/core/templates/HOME.template.md ships as part of
+// brain/core/** and, if walked like any other .md, would (a) be reported as an
+// orphan (HOME.md must not link its own template) and (b) have its links
+// (core/methodology/...) resolve relative to brain/core/templates/ and dead-link.
+// Both trigger merely from the file existing — so /templates/ must be excluded
+// from the walk, mirroring the existing /__fixtures__/ skip.
+test('check-brain-nav: a .md file under /templates/ is excluded (no orphan, no dead link)', (t) => {
+  const dir = makeFixtureRoot();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  writeFileSync(join(dir, 'brain/HOME.md'), '# HOME\n');
+
+  // A template file that, if scanned, would dead-link (target does not exist
+  // relative to brain/core/templates/) and would itself be an orphan (nothing
+  // links to it, by design — HOME.md must not reference its own template).
+  mkdirSync(join(dir, 'brain/core/templates'), { recursive: true });
+  writeFileSync(
+    join(dir, 'brain/core/templates/HOME.template.md'),
+    '# Template\n\n[dead](core/methodology/does-not-exist.md)\n',
+  );
+
+  const r = runCheckBrainNav(dir);
+
+  assert.equal(r.status, 0,
+    `expected exit 0 (template excluded from nav walk), got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+});

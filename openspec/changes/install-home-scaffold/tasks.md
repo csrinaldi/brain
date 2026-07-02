@@ -37,8 +37,8 @@ Chain strategy: feature-branch-chain
 
 ### Phase 1: Nav exclusion (must land first — unblocks the template file)
 
-- [ ] 1.1 RED — `brain/scripts/check-brain-nav.test.mjs`: add case asserting a `.md` file under `brain/core/templates/` is neither reported as orphan nor dead-linked
-- [ ] 1.2 GREEN — `brain/scripts/check-brain-nav.mjs` L44: extend the `brainFiles` filter to also exclude `/templates/`, mirroring the existing `/__fixtures__/` skip
+- [x] 1.1 RED — `brain/scripts/check-brain-nav.test.mjs`: add case asserting a `.md` file under `brain/core/templates/` is neither reported as orphan nor dead-linked
+- [x] 1.2 GREEN — `brain/scripts/check-brain-nav.mjs` L44: extend the `brainFiles` filter to also exclude `/templates/`, mirroring the existing `/__fixtures__/` skip
 
 ### Phase 2: Template content (REQ-4)
 
