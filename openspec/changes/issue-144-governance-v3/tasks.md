@@ -198,7 +198,7 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 
 ## PR8 — ADR draft (Tier-2 constraint) (documentation only)
 
-- [ ] [GREEN] draft the ADR at `openspec/changes/issue-144-governance-v3/brain-drafts/adr-00xx-governance-v3-substrate-ladder.md` recording: the six levels (L1–L6), the four-rung substrate ladder, the `REQUIRED_JOBS`/`DETECTION_JOBS` detection→prevention flip, and the Epic Invariant non-goal (never claims judgment-level correctness)
+- [x] [GREEN] draft the ADR at `openspec/changes/issue-144-governance-v3/brain-drafts/adr-0015-governance-v3-substrate-ladder.md` recording: the six levels (L1–L6), the four-rung substrate ladder, the `REQUIRED_JOBS`/`DETECTION_JOBS` detection→prevention flip, and the Epic Invariant non-goal (never claims judgment-level correctness)
 - [ ] [Manual] note in the PR body: this draft is **not** written to `brain/project/decisions/` directly — Tier-2 managed path; a human copies/renames it into `brain/project/decisions/adr-00xx-*.md` after review, per the Tier-2 "no agent writes to `brain/`" constraint this very change enforces
 
 ---
