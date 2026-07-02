@@ -306,6 +306,34 @@ test('detectPM: pnpm-lock.yaml without pnpm-workspace.yaml → installArgs does 
   );
 });
 
+test('detectPM: packageManager "pnpm@9" + pnpm-workspace.yaml → installArgs includes -w (issue #176)', () => {
+  withTmpDir(
+    {
+      'package.json': JSON.stringify({ packageManager: 'pnpm@9.1.0' }),
+      'pnpm-workspace.yaml': 'packages:\n  - "packages/*"\n',
+    },
+    (dir) => {
+      const pm = detectPM(dir);
+      assert.equal(pm.name, 'pnpm');
+      assert.deepEqual(pm.installArgs, ['pnpm', 'add', '-D', '-w']);
+    },
+  );
+});
+
+test('detectPM: non-pnpm PM + a stray pnpm-workspace.yaml → -w never leaks (issue #176)', () => {
+  withTmpDir(
+    {
+      'package.json': JSON.stringify({ packageManager: 'npm@10.0.0' }),
+      'pnpm-workspace.yaml': 'packages:\n  - "packages/*"\n',
+    },
+    (dir) => {
+      const pm = detectPM(dir);
+      assert.equal(pm.name, 'npm');
+      assert.deepEqual(pm.installArgs, ['npm', 'install', '-D']);
+    },
+  );
+});
+
 // ── detectPM: runArgs shape ────────────────────────────────────────────────────
 
 test('detectPM returns runArgs function that builds correct argv', () => {
