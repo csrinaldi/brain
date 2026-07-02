@@ -1,10 +1,10 @@
 // home-index.mjs — Pure helper to insert an ADR link into brain/HOME.md's
 // '### Architecture decisions' section, plus a thin CLI for file I/O.
 //
-// Agent-agnostic (REQ-7): no Claude-only, Codex-only, or agent-coupled logic.
-// Any current or future adapter (Claude, Codex, ...) calls this same CLI
-// instead of re-implementing the HOME.md-patch algorithm in prose
-// (install-home-scaffold, REQ-5).
+// Agent-agnostic (REQ-7): no agent-coupled logic — this helper knows nothing
+// about which AI agent invokes it. Any current or future agent adapter calls
+// this same CLI instead of re-implementing the HOME.md-patch algorithm in prose
+// (install-home-scaffold, REQ-5). Enforced by home-helpers-neutrality.test.mjs.
 //
 // insertAdrLink is a pure string→string function (input text in, patched
 // text out, never touches disk) — the CLI below is the only I/O layer.
