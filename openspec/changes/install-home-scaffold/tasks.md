@@ -54,13 +54,13 @@ Chain strategy: feature-branch-chain
 
 ### Phase 4: Nav-integrity fixture (REQ-3, REQ-6)
 
-- [ ] 4.1 RED — new fixture test (model after `check-brain-nav.test.mjs` spawn pattern): `cpSync` real `check-brain-nav.mjs` + real `brain/core/` into a temp root, call `ensureHome(root)`, spawn the script, assert exit 0 with zero orphans/dead links
-- [ ] 4.2 GREEN — fix any reachability gap surfaced by 4.1 (expected to pass once Phase 1 + Phase 2 land; only diagnostic changes if it fails)
+- [x] 4.1 RED — new fixture test (model after `check-brain-nav.test.mjs` spawn pattern): `cpSync` real `check-brain-nav.mjs` + real `brain/core/` into a temp root, call `ensureHome(root)`, spawn the script, assert exit 0 with zero orphans/dead links
+- [x] 4.2 GREEN — fix any reachability gap surfaced by 4.1 (expected to pass once Phase 1 + Phase 2 land; only diagnostic changes if it fails) — passed immediately, no gap found
 
 ### Phase 5: `managed-paths.mjs` scope check (REQ-6)
 
-- [ ] 5.1 RED — `brain/core/managed-paths.test.mjs` (or nearest existing suite): assert neither `managed` nor `local` arrays contain an entry matching `brain/HOME.md` or `HOME.md`
-- [ ] 5.2 Verify GREEN with no source change (spec requires absence, not addition) — confirm existing globs in `brain/core/managed-paths.mjs` do not accidentally match `HOME.md`
+- [x] 5.1 RED — `brain/core/managed-paths.test.mjs` (or nearest existing suite): assert neither `managed` nor `local` arrays contain an entry matching `brain/HOME.md` or `HOME.md`
+- [x] 5.2 Verify GREEN with no source change (spec requires absence, not addition) — confirm existing globs in `brain/core/managed-paths.mjs` do not accidentally match `HOME.md`
 
 ### Phase 6: `bootstrap.sh` wiring (REQ-5)
 

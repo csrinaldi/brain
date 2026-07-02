@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { managed, MANAGED_SCRIPT_KEYS } from '../../core/managed-paths.mjs';
+import { managed, local, MANAGED_SCRIPT_KEYS } from '../../core/managed-paths.mjs';
 
 test('managed includes .github/workflows/governance.yml (exact literal)', () => {
   assert.ok(
@@ -81,6 +81,22 @@ test('managed includes package.json (S5)', () => {
     managed.includes('package.json'),
     'managed must contain "package.json" so brain:upgrade routes it through specialMerge',
   );
+});
+
+// install-home-scaffold REQ-6: brain/HOME.md must stay outside both managed
+// and local — managed would clobber curated ADR links on every brain:upgrade,
+// local only protects files that already exist at scaffold time. Consumer-owned
+// by design.
+test('managed does NOT contain an entry matching brain/HOME.md or HOME.md (REQ-6)', () => {
+  const hit = managed.find((p) => p === 'brain/HOME.md' || p === 'HOME.md');
+  assert.equal(hit, undefined,
+    `managed must not contain an entry matching brain/HOME.md or HOME.md — found "${hit}"`);
+});
+
+test('local does NOT contain an entry matching brain/HOME.md or HOME.md (REQ-6)', () => {
+  const hit = local.find((p) => p === 'brain/HOME.md' || p === 'HOME.md');
+  assert.equal(hit, undefined,
+    `local must not contain an entry matching brain/HOME.md or HOME.md — found "${hit}"`);
 });
 
 // S5 + #154: MANAGED_SCRIPT_KEYS must have exactly 9 entries, all prefixed brain:.
