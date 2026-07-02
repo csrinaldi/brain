@@ -5,6 +5,45 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.9.0 — governance v3: fail-closed substrate ladder (#144)
+
+Governance v3 makes brain's load-bearing workflow discipline **fail-closed over
+observable CI/git/PR evidence**, harness-agnostic, and capability-aware. See
+[ADR-0015](brain/project/decisions/adr-0015-governance-v3-substrate-ladder.md).
+
+### New CI gates (six enforcement levels)
+
+`.github/workflows/governance.yml` gains, alongside `issue-link` / `diff-size`:
+
+| Job | Level | Tier |
+|-----|-------|------|
+| `local-checks` | L1 — `repo:check` + `brain:nav` + `npm test` in CI | required |
+| `memory-gate` | L3 — engram dumped before close | required |
+| `decision-gate` | L3 — ADR ships with a `brain/HOME.md` change | required |
+| `phase-order` | L4 — SDD phase order (spec/design present, monotonic status, no code before a checked task) | detection |
+| `actor-check` | L5 — no self-approval of `status:approved` (PR author *or* issue author) | detection |
+| `brain-writes-reviewed` | L6 — `brain/core|project` writes reviewed by a non-author human | detection |
+
+Detection jobs **run and report but do not block merge**; promote one by moving its
+name from `DETECTION_JOBS` to `REQUIRED_JOBS` in `governance-checks.mjs`.
+
+### New managed files (arrive automatically on `brain:upgrade`)
+
+- `.github/workflows/release.yml` — rung-2 fail-closed release gate (audits `PREV_TAG..HEAD` on a tag push).
+- `.github/workflows/governance-postmerge.yml` — rung-3 post-merge auto-revert (idempotent).
+- `.github/CODEOWNERS` — optional rung-1 enhancement (ships with a placeholder reviewer; set your real team).
+
+### Substrate ladder
+
+Every gate enforces at the **highest rung its substrate allows** (branch protection →
+release script → post-merge auto-correct → detection floor) and **never lies about the
+active rung**: `brain:governance-status` reports the rung and the remedy to climb higher.
+
+**No breaking renames.** Additive gates + managed paths only. Note: the new detection
+gates run in your CI on the next PR; on a solo-dev repo `actor-check` /
+`brain-writes-reviewed` may show red (self-approval) — that is honest detection, not a
+merge blocker. This tag also carries the previously untagged v0.8.0 / v0.8.1 content.
+
 ## v0.8.1 — brain:session:start canonical verb (#154)
 
 ### New canonical verb
