@@ -1,0 +1,3 @@
+# Marker: this is the brain SOURCE repo. brain:upgrade refuses to run here.
+# NOT a managed path — never distributed to consumers (see brain/core/managed-paths.mjs).
+# See: brain/core/anti-patterns/pre-v0-8-0-upgrade-clobber-lockout.md (issue #180).
