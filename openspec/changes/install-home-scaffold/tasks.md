@@ -107,7 +107,7 @@ Chain strategy: feature-branch-chain
 
 ## Closure Checklist
 
-- [ ] C.1 `npm test` green — all `scripts/**/*.test.mjs` pass, including new Slice 1 and Slice 2 tests
-- [ ] C.2 `npm run brain:nav` green on both the brain repo and a scaffolded fixture consumer
-- [ ] C.3 Confirm `brain/HOME.md` absent from both `managed` and `local` arrays in `brain/core/managed-paths.mjs` (REQ-6)
-- [ ] C.4 Confirm no prose patch-mechanics remain in `.claude/commands/project-bootstrap-adrs.md` Phase 4 (REQ-5)
+- [x] C.1 `npm test` green — all `scripts/**/*.test.mjs` pass, including new Slice 1 and Slice 2 tests — 815/815 pass
+- [x] C.2 `npm run brain:nav` green on both the brain repo and a scaffolded fixture consumer — `node brain/scripts/check-brain-nav.mjs` exit 0 on the real repo; both fixture tests (`home-scaffold-nav-integrity.test.mjs`, `home-index-nav-integrity.test.mjs`) assert exit 0 on a scaffolded fresh-consumer fixture and are part of `npm test`
+- [x] C.3 Confirm `brain/HOME.md` absent from both `managed` and `local` arrays in `brain/core/managed-paths.mjs` (REQ-6) — literal checks + hardened `matchesAny` glob-match assertion, all green
+- [x] C.4 Confirm no prose patch-mechanics remain in `.claude/commands/project-bootstrap-adrs.md` Phase 4 (REQ-5) — `rg "Locate the insertion point|Append the links"` finds nothing; automated via `home-index-adapter.test.mjs`
