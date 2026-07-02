@@ -59,6 +59,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0012](project/decisions/adr-0012-harness-init-adapter.md) — Harness-init adapter: each harness defines its init
 - [ADR-0013](project/decisions/adr-0013-auto-adr-onboarding.md) — Auto-ADR onboarding: bootstrap notices, agent drafts, human signs
 - [ADR-0014](project/decisions/adr-0014-workflow-governance.md) — Workflow governance: enforce load-bearing invariants server-side
+- [ADR-0015](project/decisions/adr-0015-governance-v3-substrate-ladder.md) — Governance v3: six-level fail-closed gate ladder over observable evidence (L1–L6 + substrate rung ladder)
 
 ### Project-specific rules
 
