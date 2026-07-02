@@ -7,6 +7,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import {
   evaluateActor,
@@ -94,6 +96,29 @@ test('human-applied approval, actor differs from author → pass', () => {
     labeledEvents: [{ actor: { login: 'bob' } }],
   });
   assert.equal(result.level, 'pass');
+});
+
+// ── FIX1 fail-open guard: unpaginated gh api list fetch truncates to page 1 ────
+//
+// `gh api` does NOT auto-paginate. GitHub's Events API is oldest-first, so on an
+// issue with more than ~30 events the most recent `status:approved` labeled
+// event (including a late self-applied one) lands on page 2+ and is silently
+// dropped — self-approval would then wrongly PASS. Guard via source-scan
+// (mirrors the neutrality source-scan style in phase-order-check.test.mjs).
+
+test('FIX1 fail-open guard: defaultFetchLabeledEvents source includes --paginate on the gh api events call', () => {
+  const srcPath = fileURLToPath(new URL('./actor-check.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  const fnStart = src.indexOf('function defaultFetchLabeledEvents');
+  assert.notEqual(fnStart, -1, 'defaultFetchLabeledEvents not found in source');
+  const fnEnd = src.indexOf('\nfunction ', fnStart + 1);
+  const fnBody = src.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
+  assert.match(fnBody, /issues\/\$\{issueNumber\}\/events/, 'sanity: events endpoint present');
+  assert.match(
+    fnBody,
+    /--paginate/,
+    'events fetch must use --paginate — otherwise a truncated page 1 can hide the newest labeled event (fail-open)'
+  );
 });
 
 // ── extractIssueNumber (reuses the issue-link extraction rules, governance.yml) ─

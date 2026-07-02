@@ -122,9 +122,15 @@ export function extractIssueNumber(prBody, baseBranch) {
 
 function defaultFetchLabeledEvents(repo) {
   return issueNumber => {
-    const out = execFileSync('gh', ['api', `repos/${repo}/issues/${issueNumber}/events`], {
-      encoding: 'utf8',
-    });
+    // --paginate is REQUIRED: `gh api` does not auto-paginate, and the Events
+    // API is oldest-first — on an issue with >~30 events, an unpaginated fetch
+    // silently drops the newest labeled events (page 2+), including a late
+    // self-applied `status:approved`, which would wrongly PASS (fail-open).
+    const out = execFileSync(
+      'gh',
+      ['api', '--paginate', `repos/${repo}/issues/${issueNumber}/events`],
+      { encoding: 'utf8' }
+    );
     const events = JSON.parse(out);
     return events.filter(e => e.event === 'labeled' && e.label?.name === 'status:approved');
   };
