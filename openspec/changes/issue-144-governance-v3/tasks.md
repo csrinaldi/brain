@@ -165,17 +165,17 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 
 ## PR6a — L6 `brain-writes-reviewed` evaluator (REQ-L6-1 evidence path, design §6.1)
 
-- [ ] [RED] `brain-writes-reviewed.test.mjs`: no `brain/core/**` or `brain/project/**` touched → `pass` (no Tier-2 requirement)
-- [ ] [GREEN] scaffold `brain/scripts/vcs/brain-writes-reviewed.mjs` with the `touchesBrain` guard
-- [ ] [RED] `brain-writes-reviewed.test.mjs`: at least one approver `≠ author`, not bot-allow-listed → `pass`
-- [ ] [GREEN] implement approvers dedup + comparison
-- [ ] [RED] `brain-writes-reviewed.test.mjs`: only self-approval (author is sole approver) → `fail` — enforces Tier-2 "no agent writes to `brain/`"
-- [ ] [GREEN] implement the fail branch
-- [ ] [RED] `brain-writes-reviewed.test.mjs`: `adminOverride` label → `pass`, logged (reuse actor-check's pattern)
-- [ ] [GREEN] implement `adminOverride` branch
-- [ ] [RED] `brain-writes-reviewed.test.mjs`: no reviews API / zero reviews yet → `warn` + `pass`, never crashes on a missing/unsupported reviews API
-- [ ] [GREEN] implement the warn branch
-- [ ] [GREEN] wire the `brain-writes-reviewed` job into `governance.yml` (fetches reviews via `gh api repos/{repo}/pulls/{n}/reviews`, normalized by the VCS adapter); add `'brain-writes-reviewed'` to `DETECTION_JOBS` in `governance-checks.mjs`, same commit — REQ-L6-1
+- [x] [RED] `brain-writes-reviewed.test.mjs`: no `brain/core/**` or `brain/project/**` touched → `pass` (no Tier-2 requirement)
+- [x] [GREEN] scaffold `brain/scripts/vcs/brain-writes-reviewed.mjs` with the `touchesBrain` guard
+- [x] [RED] `brain-writes-reviewed.test.mjs`: at least one approver `≠ author`, not bot-allow-listed → `pass`
+- [x] [GREEN] implement approvers dedup + comparison
+- [x] [RED] `brain-writes-reviewed.test.mjs`: only self-approval (author is sole approver) → `fail` — enforces Tier-2 "no agent writes to `brain/`"
+- [x] [GREEN] implement the fail branch
+- [x] [RED] `brain-writes-reviewed.test.mjs`: `adminOverride` label → `pass`, logged (reuse actor-check's pattern)
+- [x] [GREEN] implement `adminOverride` branch
+- [x] [RED] `brain-writes-reviewed.test.mjs`: no reviews API / zero reviews yet → `warn` + `pass`, never crashes on a missing/unsupported reviews API
+- [x] [GREEN] implement the warn branch
+- [x] [GREEN] wire the `brain-writes-reviewed` job into `governance.yml` (fetches reviews via `gh api repos/{repo}/pulls/{n}/reviews`, normalized by the VCS adapter); add `'brain-writes-reviewed'` to `DETECTION_JOBS` in `governance-checks.mjs`, same commit — REQ-L6-1
 
 ## PR6b — CODEOWNERS optional rung-1 enhancement (REQ-L6-1 file assertion, design §6.2)
 
