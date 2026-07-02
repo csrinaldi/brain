@@ -48,15 +48,35 @@ if (!tag && !noInstall) {
 
 // ── Self-host guard ──────────────────────────────────────────────────────────
 // Running this inside the brain repo itself would copy node_modules/brain over
-// the working tree — almost never what you want. Refuse unless --force.
+// the working tree — almost never what you want. The brain SOURCE repo carries
+// a `.brain-source` marker file at its root (never a managed path — see
+// brain/core/managed-paths.mjs, it matches no managed glob) that reliably
+// identifies it. Refuse unless --force.
+//
+// This marker replaces the old `package.json name === "brain"` check, which
+// used to die HARD here. That check false-positives on any consumer whose
+// package.json was clobbered by a pre-v0.8.0 vendored upgrader (which
+// plain-copied package.json instead of merging it) — permanently locking the
+// clobbered consumer out of the very upgrade that would fix it (issue #180).
+const sourceMarkerPath = join(ROOT, '.brain-source');
+if (existsSync(sourceMarkerPath) && !force) {
+  die(
+    'this is the brain SOURCE repo (.brain-source marker found at repo root).\n' +
+    '    brain:upgrade is for CONSUMER repos, not the brain source repo. Use --force only if you really mean it.',
+  );
+}
+
+// Soft warning (non-fatal): a pre-v0.8.0 brain:upgrade plain-copied
+// package.json and may have clobbered a consumer's "name" field to "brain"
+// (also version/description/license). Recovery-awareness only — never
+// blocks the upgrade. See brain/core/anti-patterns/ for the full writeup.
 const ownPkgPath = join(ROOT, 'package.json');
-if (existsSync(ownPkgPath)) {
+if (existsSync(ownPkgPath) && !existsSync(sourceMarkerPath)) {
   try {
     const ownPkg = JSON.parse(readFileSync(ownPkgPath, 'utf8'));
-    if (ownPkg.name === 'brain' && !force) {
-      die(
-        'this looks like the brain repo itself (package.json name === "brain").\n' +
-        '    brain:upgrade is for CONSUMER repos. Use --force only if you really mean it.',
+    if (ownPkg.name === 'brain') {
+      warn(
+        'package.json name is "brain" — a pre-v0.8.0 brain:upgrade may have clobbered your project name; consider restoring it.',
       );
     }
   } catch { /* unreadable package.json — let the install step report it */ }
