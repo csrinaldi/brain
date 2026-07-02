@@ -12,6 +12,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { detectSubstrate } from './substrate.mjs';
 import { checkContexts } from './governance-checks.mjs';
@@ -417,4 +419,11 @@ test('detectSubstrate: none armed selects rung 4 (detection-only)', async () => 
   });
   assert.equal(result.rung, 4);
   assert.equal(result.enforced, false);
+});
+
+test('neutrality source-scan (REQ-NEUTRALITY-2): substrate.mjs source contains no .claude or SKILL.md literal', () => {
+  const srcPath = fileURLToPath(new URL('./substrate.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  assert.equal(src.includes('.claude'), false, 'source must not reference .claude');
+  assert.equal(src.includes('SKILL.md'), false, 'source must not reference SKILL.md');
 });
