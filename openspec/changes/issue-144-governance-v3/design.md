@@ -155,7 +155,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - run: node brain/scripts/brain-audit.mjs origin/main..HEAD   # exit 1 blocks the tag/publish
+      - run: |
+          # brain tags AFTER merging to main, so origin/main..HEAD would be empty
+          # on the tag push (origin/main is at/ahead of the tagged commit) —
+          # audit from the previous release tag instead.
+          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          node brain/scripts/brain-audit.mjs "${PREV_TAG}..HEAD"   # exit 1 blocks the tag/publish
 ```
 `brain-audit` already exits `1` on any failing invariant (`brain-audit.mjs:235`), so a
 red audit **blocks the release job** → bad state may sit on `main` but is **never
@@ -175,7 +180,16 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - id: audit
-        run: node brain/scripts/brain-audit.mjs "${{ github.event.before }}..${{ github.sha }}"
+        run: |
+          # On schedule events github.event.before does not exist, so the naive
+          # range collapses to sha..sha (empty) and the cron backstop would never
+          # catch anything — branch on event_name and fall back to the latest tag.
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            BASE=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          node brain/scripts/brain-audit.mjs "${BASE}..${{ github.sha }}"
         continue-on-error: true
       - if: steps.audit.outcome == 'failure'
         env: { GH_TOKEN: ${{ github.token }} }
