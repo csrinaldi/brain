@@ -19,6 +19,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const HEADING = '### Architecture decisions';
+const HEADING_RE = /^###\s+Architecture decisions\s*$/;
 // Bounds the section: the next `---` separator or any `## ` heading closes it.
 const SECTION_BOUNDARY_RE = /^(---|## )/;
 const ADR_LINE_RE = /^- \[ADR-(\d{4})\]\(project\/decisions\/[^)]+\)/;
@@ -45,11 +46,14 @@ function formatLine({ number, slug, description }) {
 export function insertAdrLink(homeText, adr) {
   const line = formatLine(adr);
   const linkPath = `project/decisions/${adr.slug}.md`;
-  const lines = homeText.split('\n');
+  // Newline-style-agnostic: detect the file's EOL and split/join with it so a
+  // CRLF HOME.md round-trips as CRLF (never silently converted to LF).
+  const eol = homeText.includes('\r\n') ? '\r\n' : '\n';
+  const lines = homeText.split(/\r?\n/);
 
   const headingIndices = [];
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i] === HEADING) headingIndices.push(i);
+    if (HEADING_RE.test(lines[i].trimEnd())) headingIndices.push(i);
   }
 
   if (headingIndices.length === 0) {
@@ -78,7 +82,7 @@ export function insertAdrLink(homeText, adr) {
 
   const insertAt = lastAdrIdx === -1 ? headingIdx + 1 : lastAdrIdx + 1;
   const newLines = [...lines.slice(0, insertAt), line, ...lines.slice(insertAt)];
-  return { text: newLines.join('\n'), inserted: true };
+  return { text: newLines.join(eol), inserted: true };
 }
 
 // ── CLI (I/O only — keeps insertAdrLink pure) ────────────────────────────────

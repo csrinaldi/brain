@@ -97,6 +97,49 @@ test('insertAdrLink: re-inserting an already-present ADR link → no-op, no dupl
   assert.equal(result.reason, 'already-present');
 });
 
+test('insertAdrLink: CRLF HOME.md with empty section → inserts correctly, CRLF preserved', () => {
+  const home = [
+    '# Knowledge Base',
+    '',
+    '### Architecture decisions',
+    '',
+    '---',
+    '',
+  ].join('\r\n');
+
+  const result = insertAdrLink(home, { number: 1, slug: 'adr-0001-example', description: 'Example: decision' });
+
+  assert.equal(result.inserted, true, 'must insert, not anchor-not-found');
+  assert.equal(result.reason, undefined);
+  assert.ok(!result.text.includes('\n\n'.replace('\r', '')), 'sanity: text is non-empty');
+  // No lone LF: every \n in the output must be immediately preceded by \r.
+  assert.doesNotMatch(result.text.replace(/\r\n/g, ''), /\n/, 'output must not contain converted/mixed LF-only newlines');
+  assert.match(result.text, /\r\n/, 'output must preserve CRLF line endings');
+  const lines = result.text.split('\r\n');
+  const headingIdx = lines.indexOf('### Architecture decisions');
+  assert.equal(
+    lines[headingIdx + 1],
+    '- [ADR-0001](project/decisions/adr-0001-example.md) — Example: decision',
+    'new link must be immediately after the heading line',
+  );
+});
+
+test('insertAdrLink: heading with trailing space is still matched', () => {
+  const home = [
+    '# Knowledge Base',
+    '',
+    '### Architecture decisions ',
+    '',
+    '---',
+    '',
+  ].join('\n');
+
+  const result = insertAdrLink(home, { number: 1, slug: 'adr-0001-example', description: 'Example: decision' });
+
+  assert.equal(result.inserted, true, 'heading with trailing space must still be recognized as the anchor');
+  assert.equal(result.reason, undefined);
+});
+
 test('insertAdrLink: ambiguous anchor (heading appears twice) → fail-safe, input untouched', () => {
   const home = [
     '### Architecture decisions',
@@ -190,3 +233,4 @@ test('CLI: fail-safe when anchor is absent → exit 3, file untouched, linesToAd
   const after = readFileSync(homePath, 'utf8');
   assert.equal(after, original, 'HOME.md must be left completely untouched on fail-safe');
 });
+
