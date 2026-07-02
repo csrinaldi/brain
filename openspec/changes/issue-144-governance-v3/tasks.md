@@ -149,19 +149,19 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 
 ## PR5 — L5 human-approval actor check (REQ-L5-1, REQ-L5-2)
 
-- [ ] [RED] `actor-check.test.mjs`: `evaluateActor` — actor `=== author`, not allow-listed, no admin override → `fail` (self-approval) — REQ-L5-1
-- [ ] [GREEN] scaffold `brain/scripts/vcs/actor-check.mjs` with the core comparison
-- [ ] [RED] `actor-check.test.mjs`: actor in `botAllowlist` → `pass`
-- [ ] [GREEN] implement `botAllowlist` branch — REQ-L5-2
-- [ ] [RED] `actor-check.test.mjs`: `adminOverride` (allow-listed `override:*` label) → `pass`, logged
-- [ ] [GREEN] implement `adminOverride` branch — REQ-L5-2
-- [ ] [RED] `actor-check.test.mjs`: no `labeled` event found for `status:approved` → `warn` + `pass` (never fail on missing evidence)
-- [ ] [GREEN] implement missing-event branch
-- [ ] [RED] `actor-check.test.mjs`: re-labeling — most recent `labeled` event's actor wins
-- [ ] [GREEN] implement "most recent event" selection
-- [ ] [RED] `actor-check.test.mjs`: `gh api` failure in the wrapper → `warn` + `pass`, never throws
-- [ ] [GREEN] implement the gh wrapper (issue-number resolution reused from `issue-link`) with try/catch degrade
-- [ ] [GREEN] wire the `actor-check` job into `governance.yml` (reuses `permissions: issues: read`); add `'actor-check'` to `DETECTION_JOBS` in `governance-checks.mjs`, same commit — REQ-L5-1
+- [x] [RED] `actor-check.test.mjs`: `evaluateActor` — actor `=== author`, not allow-listed, no admin override → `fail` (self-approval) — REQ-L5-1
+- [x] [GREEN] scaffold `brain/scripts/vcs/actor-check.mjs` with the core comparison
+- [x] [RED] `actor-check.test.mjs`: actor in `botAllowlist` → `pass`
+- [x] [GREEN] implement `botAllowlist` branch — REQ-L5-2
+- [x] [RED] `actor-check.test.mjs`: `adminOverride` (allow-listed `override:*` label) → `pass`, logged
+- [x] [GREEN] implement `adminOverride` branch — REQ-L5-2
+- [x] [RED] `actor-check.test.mjs`: no `labeled` event found for `status:approved` → `warn` + `pass` (never fail on missing evidence)
+- [x] [GREEN] implement missing-event branch
+- [x] [RED] `actor-check.test.mjs`: re-labeling — most recent `labeled` event's actor wins
+- [x] [GREEN] implement "most recent event" selection
+- [x] [RED] `actor-check.test.mjs`: `gh api` failure in the wrapper → `warn` + `pass`, never throws
+- [x] [GREEN] implement the gh wrapper (issue-number resolution reused from `issue-link`) with try/catch degrade
+- [x] [GREEN] wire the `actor-check` job into `governance.yml` (reuses `permissions: issues: read`); add `'actor-check'` to `DETECTION_JOBS` in `governance-checks.mjs`, same commit — REQ-L5-1
 
 ## PR6a — L6 `brain-writes-reviewed` evaluator (REQ-L6-1 evidence path, design §6.1)
 
