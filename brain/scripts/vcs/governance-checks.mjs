@@ -33,7 +33,7 @@ export const REQUIRED_JOBS = ['issue-link', 'diff-size', 'local-checks', 'memory
  *
  * @type {string[]}
  */
-export const DETECTION_JOBS = ['phase-order', 'actor-check'];
+export const DETECTION_JOBS = ['phase-order', 'actor-check', 'brain-writes-reviewed'];
 
 /**
  * The full set of job names governance.yml must define — the union of REQUIRED_JOBS

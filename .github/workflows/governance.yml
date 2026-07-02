@@ -207,3 +207,29 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
         run: node brain/scripts/vcs/actor-check.mjs
+
+  # ── Invariant 8 (L6, governance v3, detection-only) — brain-writes reviewed ─
+  #
+  # Wraps evaluateBrainWritesReviewed() over the PR's changed files + its
+  # review history. Reuses the existing `permissions: pull-requests: read`
+  # (governance.yml:18). Detection-only (DETECTION_JOBS, governance-checks.mjs):
+  # runs and reports on every PR but is NOT yet required at merge — REQ-L6-1
+  # evidence path (design §6.1); CODEOWNERS is a separate, optional rung-1
+  # enhancement (PR6b, design §6.2).
+  brain-writes-reviewed:
+    name: brain-writes-reviewed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: brain-writes-reviewed (brain/core or brain/project changes carry a human review, detection-only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node brain/scripts/vcs/brain-writes-reviewed.mjs
