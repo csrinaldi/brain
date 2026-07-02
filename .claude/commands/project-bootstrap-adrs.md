@@ -525,6 +525,8 @@ Branch on the command's exit code:
 |---|---|
 | `0` — stdout `HOME.md patched: inserted ADR-NNNN` | `HOME.md patched: appended ADR-NNNN` |
 | `0` — stdout `HOME.md: ADR-NNNN already indexed` | `HOME.md: ADR-NNNN already indexed` |
+| `1` — I/O or unexpected error, stderr names the path | Report the stderr message to the user; skip this ADR's HOME.md patch and continue with the remaining accepted ADRs — do NOT halt the whole run |
+| `2` — bad usage, stderr prints the `Usage:` line | Report the stderr message to the user; this indicates an internal bug in how the CLI was invoked, not a user-facing failure |
 | `3` — fail-safe, stderr lists the lines to add manually | `HOME.md patch ABORTED — HOME.md was NOT modified. Add these lines manually:` followed by the printed lines |
 
 After processing all accepted ADRs, continue to **Post-write verification**.
