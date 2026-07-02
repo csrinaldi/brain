@@ -47,3 +47,13 @@ test('managed does NOT contain scripts/** (REQ-S3-3)', () => {
     'managed must NOT contain "scripts/**" — consumer root scripts/ is consumer-owned after S3',
   );
 });
+
+// REQ-L6-1: .github/CODEOWNERS (rung-1 enhancement, design §6.2) must travel with
+// brain on upgrade, as an exact literal — never the broad .github/** glob, which
+// would clobber a consumer's own CODEOWNERS, issue templates, or other workflows.
+test('managed includes .github/CODEOWNERS (exact literal, REQ-L6-1)', () => {
+  assert.ok(
+    managed.includes('.github/CODEOWNERS'),
+    'managed must contain the exact literal ".github/CODEOWNERS"',
+  );
+});
