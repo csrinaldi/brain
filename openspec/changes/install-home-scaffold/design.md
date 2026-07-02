@@ -1,6 +1,6 @@
 # Design — Install-time HOME.md Scaffold
 
-> How the [proposal](proposal.md) is implemented. Technical decisions.
+> **Status:** Archived · How the [proposal](proposal.md) is implemented. Technical decisions.
 > Governed by [ADR-0013](../../../brain/project/decisions/adr-0013-auto-adr-onboarding.md)
 > ("never orphan an accepted ADR"), [ADR-0012](../../../brain/project/decisions/adr-0012-harness-init-adapter.md)
 > (logic in agnostic helpers, not the agent surface), [ADR-0009](../../../brain/project/decisions/adr-0009-documentation-language-policy.md)
