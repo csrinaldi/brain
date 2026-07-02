@@ -180,10 +180,10 @@ branch alone). Every slice keeps the drift-guard test green — `GOVERNANCE_JOBS
 
 ## PR6b — CODEOWNERS optional rung-1 enhancement (REQ-L6-1 file assertion, design §6.2)
 
-- [ ] [RED] file-assertion test: `.github/CODEOWNERS` exists and contains a rule matching `brain/core/**` and a rule matching `brain/project/**`, each assigned a human reviewer identity — REQ-L6-1
-- [ ] [GREEN] create `.github/CODEOWNERS` with the two rules (see Micro-decisions for the placeholder reviewer identity)
-- [ ] [RED] `managed-paths.test.mjs`-style assertion: `managed` in `brain/core/managed-paths.mjs` contains the exact literal `'.github/CODEOWNERS'` and no entry matches the broad glob `.github/**`
-- [ ] [GREEN] add `'.github/CODEOWNERS'` to `managed` in `brain/core/managed-paths.mjs` — REQ-L6-1
+- [x] [RED] file-assertion test: `.github/CODEOWNERS` exists and contains a rule matching `brain/core/**` and a rule matching `brain/project/**`, each assigned a human reviewer identity — REQ-L6-1
+- [x] [GREEN] create `.github/CODEOWNERS` with the two rules (see Micro-decisions for the placeholder reviewer identity)
+- [x] [RED] `managed-paths.test.mjs`-style assertion: `managed` in `brain/core/managed-paths.mjs` contains the exact literal `'.github/CODEOWNERS'` and no entry matches the broad glob `.github/**`
+- [x] [GREEN] add `'.github/CODEOWNERS'` to `managed` in `brain/core/managed-paths.mjs` — REQ-L6-1
 - [ ] [Manual] REQ-L6-1 CI-behavior acceptance: once branch protection + `require_code_owner_reviews` is armed, confirm a PR touching `brain/core/**` shows a required human-review requirement in the GitHub review panel
 
 ## PR7 — L2 release-gate (rung 2) + post-merge auto-revert (rung 3) (REQ-L2-1, REQ-L2-2)
