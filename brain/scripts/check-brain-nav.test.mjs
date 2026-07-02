@@ -86,3 +86,29 @@ test('check-brain-nav: a .md file under /templates/ is excluded (no orphan, no d
   assert.equal(r.status, 0,
     `expected exit 0 (template excluded from nav walk), got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
 });
+
+// install-home-scaffold Slice 1 review fix: the /templates/ exclusion must be
+// anchored to brain/core/templates/ (the shipped scaffold source), NOT a loose
+// substring on "/templates/". check-brain-nav is a governance gate; a consumer
+// dir like brain/project/templates/ must NOT silently lose nav coverage, or the
+// gate would hide real orphans and dead links inside it.
+test('check-brain-nav: a .md under a NON-core templates/ dir is still scanned (orphan/dead-link caught)', (t) => {
+  const dir = makeFixtureRoot();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  writeFileSync(join(dir, 'brain/HOME.md'), '# HOME\n');
+
+  // A consumer doc under a project-level templates/ dir: both an orphan (nothing
+  // links to it) and dead-linked. Only brain/core/templates/ is scaffolding to
+  // exclude — every other "templates" path is real content the gate must cover.
+  mkdirSync(join(dir, 'brain/project/templates'), { recursive: true });
+  writeFileSync(
+    join(dir, 'brain/project/templates/consumer-doc.md'),
+    '# Consumer doc\n\n[broken](./nope.md)\n',
+  );
+
+  const r = runCheckBrainNav(dir);
+
+  assert.notEqual(r.status, 0,
+    `expected non-zero exit (a non-core templates/ file must be scanned), got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+});
