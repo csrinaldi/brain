@@ -64,8 +64,8 @@ Chain strategy: feature-branch-chain
 
 ### Phase 6: `bootstrap.sh` wiring (REQ-5)
 
-- [ ] 6.1 `brain/scripts/bootstrap.sh` ~L20: add `node brain/scripts/lib/home-scaffold.mjs ensure || true` beside the existing `brain-config.mjs ensure` call, with a short comment mirroring the existing convention
-- [ ] 6.2 Manual verification: run `brain:env:init` twice on a fixture repo — first run creates `brain/HOME.md`, second run leaves it unchanged (REQ-5 scenarios)
+- [x] 6.1 `brain/scripts/bootstrap.sh` ~L20: add `node brain/scripts/lib/home-scaffold.mjs ensure || true` beside the existing `brain-config.mjs ensure` call, with a short comment mirroring the existing convention
+- [x] 6.2 Manual verification: run `brain:env:init` twice on a fixture repo — first run creates `brain/HOME.md`, second run leaves it unchanged (REQ-5 scenarios) — verified by invoking the exact wired command (`node brain/scripts/lib/home-scaffold.mjs ensure`) against an isolated fixture root rather than the full interactive `bootstrap.sh` (which does VCS auth / PAT setup unsafe to run against a real checkout); run 1 created `brain/HOME.md`, run 2 left its sha256 unchanged
 
 ### Phase 7 (optional, Docker-gated): Fresh-install assertion
 

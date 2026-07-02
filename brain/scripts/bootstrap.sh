@@ -19,6 +19,11 @@ _config_existed=true
 [ -f brain.config.json ] || _config_existed=false
 node brain/scripts/lib/brain-config.mjs ensure || true
 
+# Scaffold brain/HOME.md if absent (never overwrites an existing one — the file
+# is consumer-owned once it exists). Non-fatal, idempotent: re-running env:init
+# on a repo that already has HOME.md is a no-op.
+node brain/scripts/lib/home-scaffold.mjs ensure || true
+
 # Resolve project identity from brain.config.json, falling back to git origin.
 # VCS_PROVIDER: env var wins, then brain.config.json vcs.provider.
 # VCS_HOST:     brain.config.json project.gitHost, then origin host.
