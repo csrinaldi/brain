@@ -44,6 +44,27 @@ test('release.yml declares read-only contents permission (fail-closed, no write 
   assert.match(text, /permissions:\s*\{\s*contents:\s*read\s*\}/, 'release.yml must declare permissions: { contents: read }');
 });
 
+// brain merges the release PR to main, THEN tags that commit. On the tag push,
+// origin/main is at/ahead of the tagged commit, so origin/main..HEAD is EMPTY —
+// brain-audit.mjs logs "No merge commits found" and exits 0 unconditionally,
+// making the rung-2 gate a silent no-op. The audit must instead run from the
+// PREVIOUS release tag to the tagged commit, which is always non-empty.
+test('release.yml does NOT use the empty origin/main..HEAD range on a tag push', () => {
+  const text = readFileSync(RELEASE_YML, 'utf8');
+  assert.doesNotMatch(
+    text,
+    /origin\/main\.\.HEAD/,
+    'release.yml must not audit origin/main..HEAD — that range is empty on brain\'s tag-after-merge flow'
+  );
+});
+
+test('release.yml derives the audit range from the previous release tag', () => {
+  const text = readFileSync(RELEASE_YML, 'utf8');
+  assert.match(text, /git describe --tags/, 'release.yml must locate the previous release tag via git describe --tags');
+  assert.match(text, /GITHUB_REF_NAME/, 'release.yml must use GITHUB_REF_NAME to identify the tag being released');
+  assert.match(text, /PREV_TAG\.\.HEAD/, 'release.yml must audit PREV_TAG..HEAD (previous tag to the tagged commit)');
+});
+
 // ── governance-postmerge.yml (rung 3, auto-revert) — REQ-L2-2 ──────────────
 
 test('governance-postmerge.yml exists', () => {
@@ -65,6 +86,29 @@ test('governance-postmerge.yml triggers on push to main and a daily schedule', (
   const text = readFileSync(POSTMERGE_YML, 'utf8');
   assert.match(text, /branches:\s*\[main\]/, 'governance-postmerge.yml must trigger on push to main');
   assert.match(text, /schedule:/, 'governance-postmerge.yml must also trigger on a schedule (daily cron)');
+});
+
+// On `schedule` events, github.event.before does not exist, so the unconditional
+// range "${{ github.event.before }}..${{ github.sha }}" becomes "..<sha>" which
+// git treats as sha..sha — an empty range. The daily cron backstop (REQ-L2-2's
+// whole purpose) would never catch anything. The workflow must branch on
+// github.event_name and, on schedule, audit from the latest tag to HEAD instead.
+test('governance-postmerge.yml branches on github.event_name for the cron leg', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  assert.match(
+    text,
+    /github\.event_name.*=.*['"]schedule['"]/,
+    'governance-postmerge.yml must branch on github.event_name == schedule to avoid auditing an empty range on cron runs'
+  );
+});
+
+test('governance-postmerge.yml still uses github.event.before for the push-triggered path', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  assert.match(
+    text,
+    /github\.event\.before/,
+    'governance-postmerge.yml must still use github.event.before on the push (non-cron) path'
+  );
 });
 
 // ── design §10-B: separate-file isolation ───────────────────────────────────
