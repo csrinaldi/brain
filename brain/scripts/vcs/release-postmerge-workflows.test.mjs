@@ -111,6 +111,20 @@ test('governance-postmerge.yml still uses github.event.before for the push-trigg
   );
 });
 
+// Idempotency (#165): a re-run on the same SHA — a retry, or the daily cron
+// re-hitting an already-flagged commit before its revert PR merges — must not
+// fail loudly on the existing auto-revert branch/PR. The workflow must check
+// whether auto-revert/<sha7> already exists on origin and no-op if so, before
+// reverting / pushing / opening the PR.
+test('governance-postmerge.yml guards auto-revert branch idempotency before creating it', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  assert.match(
+    text,
+    /git ls-remote --exit-code --heads origin/,
+    'governance-postmerge.yml must check whether the auto-revert branch already exists on origin (idempotency guard, #165)'
+  );
+});
+
 // ── design §10-B: separate-file isolation ───────────────────────────────────
 //
 // The read-only PR gate (governance.yml) must never gain write scope. Rung 3's
