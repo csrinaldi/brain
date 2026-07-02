@@ -89,10 +89,10 @@ Chain strategy: feature-branch-chain
 
 ### Phase 9: Adapter rewire (REQ-5)
 
-- [ ] 9.1 `.claude/commands/project-bootstrap-adrs.md` Phase 4 (~L506-546): remove the "Locate the insertion point (fail-safe)" and "Append the links" prose subsections
-- [ ] 9.2 Replace with a single per-ADR call to `node brain/scripts/lib/home-index.mjs insert …`, branching on exit code per design's Decision 5 table (exit 0 "patched" / exit 0 "no-op" / exit 3 fail-safe → surface `linesToAdd`)
-- [ ] 9.3 Preserve the existing Tier-2 confirmation prompt (before) and post-write `brain:nav` recommendation (after) unchanged
-- [ ] 9.4 File assertion: grep the rewired Phase 4 text and confirm no step-by-step patch-location/append prose remains (REQ-5 acceptance)
+- [x] 9.1 `.claude/commands/project-bootstrap-adrs.md` Phase 4 (~L506-546): remove the "Locate the insertion point (fail-safe)" and "Append the links" prose subsections
+- [x] 9.2 Replace with a single per-ADR call to `node brain/scripts/lib/home-index.mjs insert …`, branching on exit code per design's Decision 5 table (exit 0 "patched" / exit 0 "no-op" / exit 3 fail-safe → surface `linesToAdd`)
+- [x] 9.3 Preserve the existing Tier-2 confirmation prompt (before) and post-write `brain:nav` recommendation (after) unchanged
+- [x] 9.4 File assertion: grep the rewired Phase 4 text and confirm no step-by-step patch-location/append prose remains (REQ-5 acceptance) — automated as `brain/scripts/lib/home-index-adapter.test.mjs`, RED before the rewire (asserted no helper call + old prose present), GREEN after
 
 ### Phase 10: Post-index nav integrity (REQ-6)
 
