@@ -5,6 +5,24 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.9.1 — upgrade/distribution robustness (#176)
+
+Three bugs found by a real v0.9.0 upgrade test of a vendored + pnpm-workspace
+consumer. **Upgrade to v0.9.1 if you are on v0.9.0** — the v0.9.0 L2 workflows did
+not actually distribute.
+
+- **L2 workflows now distribute.** `.github/workflows/release.yml` and
+  `.github/workflows/governance-postmerge.yml` were missing from `managed[]`, so
+  rung-2/rung-3 enforcement never reached consumers on `brain:upgrade` (the v0.9.0
+  CHANGELOG claim was aspirational). They are now managed and arrive on upgrade.
+- **pnpm workspace support.** `brain:upgrade` on a pnpm **workspace root** aborted
+  with `ERR_PNPM_ADDING_TO_ROOT`; the installer now passes `-w` when
+  `pnpm-workspace.yaml` is present (never for non-workspace pnpm or other PMs).
+- **`brain:nav` fails gracefully** on a missing `brain/HOME.md` (incomplete
+  adoption) — clear message + exit 1 instead of a raw ENOENT stack trace.
+
+**No action beyond `brain:upgrade -- v0.9.1`.** Additive; no renames.
+
 ## v0.9.0 — governance v3: fail-closed substrate ladder (#144)
 
 Governance v3 makes brain's load-bearing workflow discipline **fail-closed over
