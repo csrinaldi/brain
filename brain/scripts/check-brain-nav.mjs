@@ -41,7 +41,16 @@ const walk = (dir) =>
     e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],
   );
 
-const brainFiles = walk(BRAIN).filter((f) => f.endsWith(".md") && !f.includes("/__fixtures__/"));
+// El template scaffold vive SOLO en brain/core/templates/ (fuente de andamiaje,
+// no doc navegable). Excluir con ancla precisa a esa ruta — NO un substring
+// "/templates/", que sacaría del scan cualquier templates/ del consumer (p.ej.
+// brain/project/templates/) y ocultaría huérfanos/links rotos reales.
+const brainFiles = walk(BRAIN).filter(
+  (f) =>
+    f.endsWith(".md") &&
+    !f.includes("/__fixtures__/") &&
+    !isUnder(f, join(CORE, "templates")),
+);
 const brainSet = new Set(brainFiles);
 
 // Resuelve el target de un link a una ruta absoluta existente, o null.
