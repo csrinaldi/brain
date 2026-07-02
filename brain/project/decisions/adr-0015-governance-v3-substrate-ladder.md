@@ -1,17 +1,7 @@
-> **Status**: Accepted **Date**: 06/02/2026 Cristian Rinaldi . An agent copied this ADR from the
-> `openspec/changes/issue-144-governance-v3/brain-drafts/` staging area into
-> `brain/project/decisions/`. Per `agent-authorities.md` and the
-> `ia-promueve-sus-propios-artefactos` anti-pattern, the agent may only place it here
-> in DRAFT state — **a human must review and sign it** (change `Status` to `Accepted`
-> and add name + date below) for this ADR to be in force. Until signed, it is not a
-> governing decision. This is precisely the constraint the change itself enforces
-> (L6, §6 below): the ADR about "no agent writes to `brain/`" is, itself, not promoted
-> to `brain/` by the agent that drafted it.
-
 # ADR-0015 — Governance v3: Six-Level Fail-Closed Gate Ladder Over Observable Evidence
 
-**Status**: Draft — awaiting human signature (do NOT treat as Accepted until signed)
-**Date**: 2026-07-01 (drafted; signing date to be set by the human reviewer)
+**Status**: Accepted  
+**Date**: 06/02/2026 — Cristian Rinaldi
 
 ## Context
 
