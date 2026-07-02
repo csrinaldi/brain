@@ -111,3 +111,125 @@ jobs:
             echo "::error::PR changes $changed lines (>400) without size:exception."
             exit 1
           fi
+
+  # ── Invariant 3 (L1, governance v3) — local-only checks run in CI too ───────
+  #
+  # repo:check, brain:nav, and npm test previously ran only in the local
+  # pre-push hook (brain/scripts/hooks/pre-push), which is bypassable via
+  # `git push --no-verify` or simply not installed. This job closes that gap
+  # author-agnostically: it runs on every PR event covered by the workflow
+  # trigger above, regardless of whether the contributor's local hook ran.
+  local-checks:
+    name: local-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: repo:check (structural reference checks)
+        run: npm run repo:check
+
+      - name: brain:nav (navigation/link integrity)
+        run: npm run brain:nav
+
+      - name: test (unit test suite)
+        run: npm test
+
+  # ── Invariant 4 (L3, governance v3) — session memory was captured ──────────
+  #
+  # Wraps the existing pure memoryPresence check: fails when no committed
+  # .memory/chunks/ observation is a session_summary. Thin runner keeps the
+  # logic in the tested pure function (design §4).
+  memory-gate:
+    name: memory-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: memory-gate (session summary captured)
+        run: node brain/scripts/governance/run-check.mjs memory-gate
+
+  # ── Invariant 5 (L3, governance v3) — architectural changes carry an ADR ────
+  #
+  # Wraps the existing pure adrPresence check over the PR's diff. Needs full
+  # history (fetch-depth: 0) to diff BASE_SHA...HEAD_SHA.
+  decision-gate:
+    name: decision-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: decision-gate (architectural changes carry an ADR)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node brain/scripts/governance/run-check.mjs decision-gate
+
+  # ── Invariant 6 (L4, governance v3, detection-only) — SDD phase order ──────
+  #
+  # Wraps evaluatePhaseOrder() over the PR's diff + touched openspec/changes/**
+  # artifact state. Detection-only (DETECTION_JOBS, governance-checks.mjs):
+  # runs and reports on every PR but is NOT yet required at merge — promotion
+  # to REQUIRED_JOBS is a one-line move, gated on REQ-L4-5's zero-false-positive
+  # acceptance run (design §7).
+  phase-order:
+    name: phase-order
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: phase-order (SDD phase-order + artifact completeness, detection-only)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node brain/scripts/vcs/phase-order-check.mjs
+
+  # ── Invariant 7 (L5, governance v3, detection-only) — human-approval actor ──
+  #
+  # Wraps evaluateActor() over the status:approved labeling history of the
+  # issue referenced by the PR body. Reuses the existing `permissions: issues:
+  # read` (governance.yml:19) and the same issue-number extraction rules as the
+  # issue-link job. Detection-only (DETECTION_JOBS, governance-checks.mjs):
+  # runs and reports on every PR but is NOT yet required at merge.
+  actor-check:
+    name: actor-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: actor-check (status:approved actor differs from the author, detection-only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+        run: node brain/scripts/vcs/actor-check.mjs
+
+  # ── Invariant 8 (L6, governance v3, detection-only) — brain-writes reviewed ─
+  #
+  # Wraps evaluateBrainWritesReviewed() over the PR's changed files + its
+  # review history. Reuses the existing `permissions: pull-requests: read`
+  # (governance.yml:18). Detection-only (DETECTION_JOBS, governance-checks.mjs):
+  # runs and reports on every PR but is NOT yet required at merge — REQ-L6-1
+  # evidence path (design §6.1); CODEOWNERS is a separate, optional rung-1
+  # enhancement (PR6b, design §6.2).
+  brain-writes-reviewed:
+    name: brain-writes-reviewed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: brain-writes-reviewed (brain/core or brain/project changes carry a human review, detection-only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node brain/scripts/vcs/brain-writes-reviewed.mjs

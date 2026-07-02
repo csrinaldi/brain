@@ -48,6 +48,16 @@ test('managed does NOT contain scripts/** (REQ-S3-3)', () => {
   );
 });
 
+// REQ-L6-1: .github/CODEOWNERS (rung-1 enhancement, design §6.2) must travel with
+// brain on upgrade, as an exact literal — never the broad .github/** glob, which
+// would clobber a consumer's own CODEOWNERS, issue templates, or other workflows.
+test('managed includes .github/CODEOWNERS (exact literal, REQ-L6-1)', () => {
+  assert.ok(
+    managed.includes('.github/CODEOWNERS'),
+    'managed must contain the exact literal ".github/CODEOWNERS"',
+  );
+});
+
 // S5: package.json must be a managed path for specialMerge injection.
 test('managed includes package.json (S5)', () => {
   assert.ok(

@@ -1,0 +1,44 @@
+# release.yml — L2 release-gate (rung 2, fail-closed)
+#
+# Reuses brain/scripts/brain-audit.mjs UNCHANGED. brain-audit already exits 1 on
+# any failing invariant (brain-audit.mjs:235), so a red audit blocks the release
+# job -> bad state may sit on main but is never released. This is the primary
+# enforcing guarantee for free-tier-private repos where branch protection
+# (rung 1) is unreachable. The presence of this workflow is what detectSubstrate
+# probes for rung 2 (see design.md §3, REQ-L2-1).
+#
+# Deliberately a SEPARATE workflow from governance.yml: the PR-time gate stays
+# read-only; this one only ever runs on a tag push, never on untrusted PR code
+# (design.md §10-B, gap B).
+#
+# Range note: brain merges the release PR to main, THEN tags that commit. On the
+# tag push, origin/main is at/ahead of the tagged commit, so origin/main..HEAD is
+# EMPTY — brain-audit.mjs would log "No merge commits found" and exit 0
+# unconditionally, making this gate a silent no-op. Audit from the PREVIOUS
+# release tag to the tagged commit instead (always non-empty, falls back to the
+# repo root commit for the first-ever release).
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions: { contents: read }
+
+jobs:
+  audit-gate:
+    name: audit-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Run brain-audit over the previous release tag..HEAD
+        run: |
+          # Audit every merge since the previous release tag (origin/main is at/ahead
+          # of the tag on brain's tag-after-merge flow, so origin/main..HEAD would be
+          # empty).
+          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          node brain/scripts/brain-audit.mjs "${PREV_TAG}..HEAD"
+        # exit 1 blocks the tag/publish — fail closed.

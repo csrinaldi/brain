@@ -1,0 +1,77 @@
+# governance-postmerge.yml — L2 post-merge auto-revert (rung 3)
+#
+# Reuses brain/scripts/brain-audit.mjs UNCHANGED, run in the trusted post-merge
+# context (code already on main) — which is why contents: write is safe here
+# while the PR-time gate (governance.yml) stays read-only. Deliberately a
+# SEPARATE workflow from governance.yml (design.md §10-B, gap B): the read-only
+# PR gate must never gain write scope.
+#
+# On audit failure, opens an auto-revert PR so bad state does not persist on
+# main (design.md §3, REQ-L2-2).
+
+name: governance-postmerge
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * *'
+
+permissions: { contents: write, pull-requests: write } # trusted: runs post-merge on main
+
+jobs:
+  audit-and-revert:
+    name: audit-and-revert
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - id: audit
+        name: Run brain-audit over the last push range
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # No push payload on cron: github.event.before does not exist, so the
+            # naive "${{ github.event.before }}..${{ github.sha }}" range collapses
+            # to sha..sha (empty) and the daily backstop would never catch anything.
+            # Audit unreleased merges since the last tag instead.
+            BASE=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          node brain/scripts/brain-audit.mjs "${BASE}..${{ github.sha }}"
+        continue-on-error: true
+
+      - name: Open auto-revert PR on audit failure
+        if: steps.audit.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Operational-robustness item 1: a bare runner has no git identity —
+          # `git revert` fails without author/committer info configured.
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          sha="${{ github.sha }}"
+
+          # Operational-robustness item 2: `git revert -m 1` errors out if $sha
+          # is NOT a merge commit (e.g. squash or fast-forward merges have a
+          # single parent). Only pass -m 1 when the commit actually has 2+
+          # parents; otherwise revert it as a normal single-parent commit.
+          parent_count="$(git cat-file -p "$sha" | grep -c '^parent ')"
+          if [ "$parent_count" -ge 2 ]; then
+            git revert -m 1 --no-edit "$sha"
+          else
+            git revert --no-edit "$sha"
+          fi
+
+          br="auto-revert/${sha:0:7}"
+          git switch -c "$br"
+          git push origin "$br"
+
+          gh pr create --base main --head "$br" \
+            --title "revert: governance audit failed on ${sha:0:7}" \
+            --body "Automated revert — post-merge brain:audit failed. Part of #144" \
+            --label size:exception
