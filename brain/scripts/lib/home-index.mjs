@@ -101,7 +101,7 @@ function parseArgs(argv) {
 /**
  * Runs the `insert` CLI: reads --home, calls insertAdrLink, writes on success.
  * @param {string[]} argv - process.argv.slice(3) (after the `insert` verb).
- * @returns {number} exit code — 0 patched/no-op, 2 bad usage, 3 fail-safe.
+ * @returns {number} exit code — 0 patched/no-op, 1 I/O or unexpected error, 2 bad usage, 3 fail-safe.
  */
 export function runInsertCli(argv) {
   const { home, number, slug, desc } = parseArgs(argv);
@@ -110,12 +110,24 @@ export function runInsertCli(argv) {
     return 2;
   }
 
-  const homeText = readFileSync(home, 'utf8');
+  let homeText;
+  try {
+    homeText = readFileSync(home, 'utf8');
+  } catch (err) {
+    console.error(`HOME.md patch FAILED — could not read '${home}': ${err.code ?? err.message}`);
+    return 1;
+  }
+
   const result = insertAdrLink(homeText, { number, slug, description: desc });
   const nnnn = String(number).padStart(4, '0');
 
   if (result.inserted) {
-    writeFileSync(home, result.text, 'utf8');
+    try {
+      writeFileSync(home, result.text, 'utf8');
+    } catch (err) {
+      console.error(`HOME.md patch FAILED — could not write '${home}': ${err.code ?? err.message}`);
+      return 1;
+    }
     console.log(`HOME.md patched: inserted ADR-${nnnn}`);
     return 0;
   }

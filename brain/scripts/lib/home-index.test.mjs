@@ -234,3 +234,33 @@ test('CLI: fail-safe when anchor is absent → exit 3, file untouched, linesToAd
   assert.equal(after, original, 'HOME.md must be left completely untouched on fail-safe');
 });
 
+test('CLI: --home points at a nonexistent file → exit 1, clean stderr message naming the path, no stack trace', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'home-index-cli-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const missingPath = join(dir, 'does-not-exist.md');
+
+  const r = spawnSync('node', [
+    CLI_PATH, 'insert',
+    '--home', missingPath,
+    '--number', '9',
+    '--slug', 'adr-0009-y',
+    '--desc', 'Y: detail',
+  ], { encoding: 'utf8' });
+
+  assert.equal(r.status, 1, `stdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+  assert.ok(r.stderr.includes(missingPath), 'stderr must name the offending path');
+  assert.doesNotMatch(r.stderr, /Error:/, 'stderr must not contain a raw Error: stack-trace prefix');
+  assert.doesNotMatch(r.stderr, /at Object\.<anonymous>/, 'stderr must not contain a Node.js stack trace');
+});
+
+test('CLI: missing required arg → exit 2, usage message', (t) => {
+  const r = spawnSync('node', [
+    CLI_PATH, 'insert',
+    '--number', '9',
+    '--slug', 'adr-0009-y',
+    '--desc', 'Y: detail',
+  ], { encoding: 'utf8' });
+
+  assert.equal(r.status, 2, `stdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+  assert.match(r.stderr, /Usage:/);
+});
