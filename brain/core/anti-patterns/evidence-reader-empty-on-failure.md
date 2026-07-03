@@ -44,8 +44,9 @@ catch { return { labels: [], body: '' }; }
 catch { return { labels: null, body: null }; }
 ```
 
-Fixed at source in A1 (issue #194 chain): `prView()` returns `null` on failure;
-the seam (`ci-context.mjs`, ADR-0016) specifies the distinction contractually
-(REQ-CIC-2/3/5); wrappers of REQUIRED gates fail closed on `null`. The audit
-path (`brain-audit.mjs`, `audit-helpers.mjs`) was migrated off the empty-default
-in the same slice so the fail-open does not survive on a parallel path.
+Being fixed at source in slice A1 (Track A, adapter plan): `prView()` will
+return `null` on failure; the seam (`ci-context.mjs`, ADR-0016) specifies the
+distinction contractually (REQ-CIC-2/3/5); wrappers of REQUIRED gates fail
+closed on `null`. The audit path (`brain-audit.mjs`, `audit-helpers.mjs`) is
+migrated off the empty-default in the same slice so the fail-open does not
+survive on a parallel path.

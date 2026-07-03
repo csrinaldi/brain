@@ -1,11 +1,6 @@
 # ADR-0016 — CI Context Normalization: One Seam Over Provider-Specific Pipeline Evidence
 
-> **STATUS: DRAFT — human-promote to `brain/project/decisions/` per consolidation-protocol; not yet an accepted ADR.**
-> This draft lives in `openspec/changes/issue-193-ci-context-design/brain-drafts/`.
-> No agent may write it into `brain/` (Tier-2 / ADR-0015 L6). A human reviews and
-> promotes it following the ADR-0013 draft → review → promotion flow.
-
-**Status**: Status: Accepted
+**Status**: Accepted
 **Date**: 07/02/2026 — Cristian Rinaldi
 
 ## Context
