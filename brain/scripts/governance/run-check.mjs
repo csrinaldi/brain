@@ -7,34 +7,38 @@
 //   memory-gate    → memoryPresence(readChunkObservations(cwd))
 //   decision-gate  → adrPresence(git diff --name-only BASE_SHA...HEAD_SHA)
 //
-// CI FRAGILITY: BASE_SHA/HEAD_SHA come from the workflow env (design §4), never
-// from process.cwd() git state directly — keeps this safe under CI's detached
-// HEAD checkout. All I/O is injectable via `deps` so tests never touch the
-// real filesystem or spawn a real git process.
+// CI FRAGILITY: BASE_SHA/HEAD_SHA come from the normalized ci-context seam
+// (ADR-0016), never read from process.env directly here — ci-context.mjs is
+// the sole module allowed to read pipeline env (a drift-guard test enforces
+// this). All I/O is injectable via `deps` so tests never touch the real
+// filesystem or spawn a real git process.
 //
 // FAIL-CLOSED: decision-gate is a REQUIRED gate. If the diff cannot be
-// computed (missing BASE_SHA/HEAD_SHA env, or the git command throwing),
-// defaultDiffNameOnly() THROWS rather than degrading to `[]` — an empty diff
-// would otherwise read as "no architectural change" and let adrPresence pass
-// silently. runCheck() catches the throw and fails the gate closed instead.
+// computed (ctx.baseSha/headSha null/uncomputable, or the git command
+// throwing), defaultDiffNameOnly() THROWS rather than degrading to `[]` — an
+// empty diff would otherwise read as "no architectural change" and let
+// adrPresence pass silently. runCheck() catches the throw and fails the gate
+// closed instead.
 
 import { execFileSync } from 'node:child_process';
 
 import { memoryPresence } from './checks/memory-presence.mjs';
 import { adrPresence } from './checks/adr-presence.mjs';
 import { readChunkObservations } from '../lib/chunk-reader.mjs';
+import { loadContext } from '../vcs/ci-context.mjs';
 
 /**
- * Computes `git diff --name-only $BASE_SHA...$HEAD_SHA` from the workflow env.
- * Throws when BASE_SHA/HEAD_SHA are absent or the git command fails — the
- * diff-gate must fail closed rather than silently treat an uncomputable diff
- * as an empty (harmless) one.
+ * Computes `git diff --name-only $baseSha...$headSha` from the normalized
+ * ci-context (`ctx.baseSha`/`ctx.headSha`). Throws when either is null/absent
+ * or the git command fails — the diff-gate must fail closed rather than
+ * silently treat an uncomputable diff as an empty (harmless) one.
  *
+ * @param {{ baseSha?: string|null, headSha?: string|null }} ctx
  * @returns {string[]}
  */
-function defaultDiffNameOnly() {
-  const base = process.env.BASE_SHA;
-  const head = process.env.HEAD_SHA;
+function defaultDiffNameOnly(ctx = {}) {
+  const base = ctx.baseSha;
+  const head = ctx.headSha;
   if (!base || !head) {
     throw new Error('BASE_SHA/HEAD_SHA not set — cannot compute diff');
   }
@@ -53,13 +57,14 @@ function defaultDiffNameOnly() {
  * git/IO (or from injected `deps` in tests).
  *
  * @param {'memory-gate'|'decision-gate'} checkName
- * @param {{ cwd?: string, readChunks?: (cwd: string) => unknown[], diffNameOnly?: () => string[] }} [deps]
+ * @param {{ cwd?: string, ctx?: object, readChunks?: (cwd: string) => unknown[], diffNameOnly?: () => string[] }} [deps]
  * @returns {{ pass: boolean, reason?: string }}
  */
 export function runCheck(checkName, deps = {}) {
   const cwd = deps.cwd ?? process.cwd();
   const readChunks = deps.readChunks ?? readChunkObservations;
-  const diffNameOnly = deps.diffNameOnly ?? defaultDiffNameOnly;
+  const ctx = deps.ctx ?? {};
+  const diffNameOnly = deps.diffNameOnly ?? (() => defaultDiffNameOnly(ctx));
 
   if (checkName === 'memory-gate') {
     return memoryPresence(readChunks(cwd));
@@ -97,5 +102,6 @@ export function main(checkName, deps = {}) {
 import { fileURLToPath } from 'node:url';
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  process.exit(main(process.argv[2]));
+  const ctx = await loadContext();
+  process.exit(main(process.argv[2], { ctx }));
 }

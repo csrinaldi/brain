@@ -513,36 +513,44 @@ test('gitlab.mrCreate returns {url:null, error} stub — Phase 3', async () => {
 
 // ── prView ────────────────────────────────────────────────────────────────────
 
-test('github.prView returns { number, labels, body } on success', async () => {
+test('github.prView returns { number, labels, body, author } on success', async () => {
   setSpawn(fakeSpawn({
     number: 42,
     labels: [{ name: 'size:exception' }, { name: 'kind:feature' }],
     body: 'Closes #10\n\nDetails here.',
+    author: { login: 'alice' },
   }));
   const result = await github.prView({ project: 'o/r', number: 42 });
   assert.deepEqual(result, {
     number: 42,
     labels: ['size:exception', 'kind:feature'],
     body: 'Closes #10\n\nDetails here.',
+    author: 'alice',
   });
 });
 
-test('github.prView returns { number, labels: [], body: "" } on gh failure (never throws)', async () => {
+test('github.prView returns { number, labels: null, body: null, author: null } on gh failure (never throws) — REQ-CIC-2 uncomputable, not genuinely-empty', async () => {
   setSpawn(() => ({ status: 1, stdout: '', stderr: 'not found' }));
   const result = await github.prView({ project: 'o/r', number: 99 });
-  assert.deepEqual(result, { number: 99, labels: [], body: '' });
+  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null });
 });
 
-test('github.prView returns { number, labels: [], body: "" } on malformed JSON (never throws)', async () => {
+test('github.prView returns { number, labels: null, body: null, author: null } on malformed JSON (never throws)', async () => {
   setSpawn(() => ({ status: 0, stdout: 'not-json', stderr: '' }));
   const result = await github.prView({ project: 'o/r', number: 5 });
-  assert.deepEqual(result, { number: 5, labels: [], body: '' });
+  assert.deepEqual(result, { number: 5, labels: null, body: null, author: null });
 });
 
-test('github.prView body defaults to "" when field absent in response', async () => {
-  setSpawn(fakeSpawn({ number: 3, labels: [], body: null }));
+test('github.prView body defaults to "" (genuinely empty) when field absent in an otherwise-successful response', async () => {
+  setSpawn(fakeSpawn({ number: 3, labels: [], body: null, author: null }));
   const result = await github.prView({ project: 'o/r', number: 3 });
   assert.equal(result.body, '');
+});
+
+test('github.prView author defaults to null when absent from an otherwise-successful response', async () => {
+  setSpawn(fakeSpawn({ number: 3, labels: [], body: 'x' }));
+  const result = await github.prView({ project: 'o/r', number: 3 });
+  assert.equal(result.author, null);
 });
 
 test('gitlab.prView returns { number, labels: [], body: "" } stub — Phase 3', async () => {

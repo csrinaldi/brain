@@ -16,7 +16,10 @@
     "ignoreList": [
       "**/*.test.mjs",
       ".memory/**",
-      "openspec/changes/**"
+      "openspec/changes/**",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "yarn.lock"
     ]
   },
   "schemaVersion": "0.3.0"

@@ -97,6 +97,43 @@ test('runCheck: unknown check name throws', () => {
   assert.throws(() => runCheck('not-a-real-check', {}), /unknown check/i);
 });
 
+// ── ci-context seam wiring (ADR-0016) — decision-gate reads ctx.baseSha/headSha ─
+//
+// The default diff-computation path now sources baseSha/headSha from an
+// injected `deps.ctx` (built by ci-context.mjs's loadContext() at the CLI
+// entrypoint) instead of reading process.env.BASE_SHA/HEAD_SHA directly.
+// `deps.diffNameOnly` still overrides everything (existing tests above never
+// pass `ctx` and are unaffected).
+
+function withEnv(overrides, fn) {
+  const saved = {};
+  for (const k of Object.keys(overrides)) saved[k] = process.env[k];
+  Object.assign(process.env, overrides);
+  try {
+    return fn();
+  } finally {
+    for (const k of Object.keys(overrides)) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+}
+
+test('runCheck: decision-gate — deps.ctx.baseSha/headSha take precedence over process.env.BASE_SHA/HEAD_SHA (ci-context seam)', () => {
+  withEnv({ BASE_SHA: 'this-is-not-a-real-sha-xyz', HEAD_SHA: 'this-is-not-a-real-sha-abc' }, () => {
+    const result = runCheck('decision-gate', { ctx: { baseSha: 'HEAD', headSha: 'HEAD' } });
+    assert.deepEqual(result, { pass: true }, 'ctx.baseSha/headSha ("HEAD") must win over the bogus env values');
+  });
+});
+
+test('runCheck: decision-gate — deps.ctx signaling null baseSha/headSha fails closed even when process.env.BASE_SHA/HEAD_SHA are set', () => {
+  withEnv({ BASE_SHA: 'HEAD', HEAD_SHA: 'HEAD' }, () => {
+    const result = runCheck('decision-gate', { ctx: { baseSha: null, headSha: null } });
+    assert.equal(result.pass, false);
+    assert.match(result.reason, /cannot compute diff — failing closed/i);
+  });
+});
+
 // ── main() — exit-code + printed-reason smoke test ───────────────────────────
 
 test('main: memory-gate passing → returns 0, prints nothing', async () => {

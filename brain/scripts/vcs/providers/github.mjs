@@ -112,29 +112,33 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
 }
 
 /**
- * Fetch a PR's metadata (number, label names, and body) via `gh pr view`.
+ * Fetch a PR's metadata (number, label names, body, and author) via `gh pr view`.
  * Uses the current repo's git remote — `project` is accepted for contract
  * compatibility but not required by the gh CLI when run from the repo root.
  *
- * Never throws: returns { number, labels: [], body: '' } on any failure so
- * callers can treat this as best-effort supplementary data (e.g. audit
- * size:exception check and issueLink-via-PR-description).
+ * Never throws: returns { number, labels: null, body: null, author: null } on
+ * ANY failure (ci-context.mjs's REQ-CIC-2 uncomputable signal) — distinct from
+ * a genuinely empty `[]`/`''` on an otherwise-successful response. Callers that
+ * need "no labels" vs "couldn't fetch labels" distinguished (e.g. a REQUIRED
+ * gate) MUST treat `null` as uncomputable, never collapse it to a fabricated
+ * empty default.
  *
  * @param {{ project?: string, number: number }} opts
- * @returns {Promise<{ number: number, labels: string[], body: string }>}
+ * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null }>}
  */
 export async function prView({ project, number } = {}) {
-  const r = run('gh', ['pr', 'view', String(number), '--json', 'number,labels,body']);
-  if (!r.ok) return { number, labels: [], body: '' };
+  const r = run('gh', ['pr', 'view', String(number), '--json', 'number,labels,body,author']);
+  if (!r.ok) return { number, labels: null, body: null, author: null };
   try {
     const data = JSON.parse(r.stdout);
     return {
       number: data.number,
       labels: (data.labels ?? []).map(l => l.name),
       body: data.body ?? '',
+      author: data.author?.login ?? null,
     };
   } catch {
-    return { number, labels: [], body: '' };
+    return { number, labels: null, body: null, author: null };
   }
 }
 

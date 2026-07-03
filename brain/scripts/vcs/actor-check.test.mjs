@@ -417,6 +417,51 @@ test('main: pass verdict → exit code 0', () => {
   assert.equal(lines[0], 'actor-check: pass');
 });
 
+// ── ci-context seam wiring (ADR-0016) ─────────────────────────────────────────
+//
+// `author`, `prBody`, `baseBranch`, `repo` now source from an injected
+// `deps.ctx` (built by ci-context.mjs's loadContext()) instead of
+// process.env.PR_AUTHOR/PR_BODY/BASE_BRANCH/GITHUB_REPOSITORY. `deps.author`
+// etc. still take precedence (existing tests above never pass `ctx` and are
+// unaffected). Per CP-A0 ruling 1, `author` now means the PR AUTHOR sourced
+// from the API payload (ctx.author) — never PR_AUTHOR env.
+
+test('ci-context seam: ctx.author/ctx.repo/ctx.targetBranch feed the wrapper when deps.author/repo/baseBranch are absent', () => {
+  const deps = {
+    ctx: { author: 'alice', repo: 'org/repo', targetBranch: 'main', body: 'Closes #144' },
+    fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
+    fetchIssue: () => ({ labels: ['status:approved'], author: 'alice' }),
+    readBotAllowlist: () => [],
+  };
+  const result = runActorCheck(deps);
+  assert.equal(result.level, 'pass');
+});
+
+test('ci-context seam: no ctx.author and no deps.author → warn (never falls back to process.env.PR_AUTHOR)', () => {
+  const result = runActorCheck({ ctx: { author: null, repo: null } });
+  assert.equal(result.level, 'warn');
+});
+
+test('ci-context seam: DETECTION consumer — ctx.body null (API failure) falls back to env.PR_BODY via resolveDetectionBody', () => {
+  const deps = {
+    ctx: { author: 'alice', repo: 'org/repo', targetBranch: 'main', body: null },
+    env: { PR_BODY: 'Closes #144' },
+    fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
+    fetchIssue: () => ({ labels: ['status:approved'], author: 'carol' }),
+    readBotAllowlist: () => [],
+  };
+  const result = runActorCheck(deps);
+  // extractIssueNumber only resolves an issue (and thus a non-empty labeledEvents
+  // path) when prBody carries "Closes #N" — proving the PR_BODY fallback was used.
+  assert.equal(result.level, 'pass');
+});
+
+test('CP-A0 ruling 1: actor-check.mjs source never reads process.env.PR_AUTHOR (author sourced from ctx.author / API payload only)', () => {
+  const srcPath = fileURLToPath(new URL('./actor-check.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  assert.equal(src.includes('process.env.PR_AUTHOR'), false, 'source must not reference process.env.PR_AUTHOR');
+});
+
 test('neutrality source-scan (REQ-NEUTRALITY-2): actor-check.mjs source contains no .claude or SKILL.md literal', () => {
   const srcPath = fileURLToPath(new URL('./actor-check.mjs', import.meta.url));
   const src = readFileSync(srcPath, 'utf8');
