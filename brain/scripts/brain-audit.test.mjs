@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 
 const AUDIT_SCRIPT = new URL('./brain-audit.mjs', import.meta.url).pathname;
@@ -354,4 +355,22 @@ test('brain-audit: corrupt gzip chunk is skipped — audit does not crash', (t) 
   // No unhandled exception
   assert.ok(!r.stderr.includes('brain-audit: unexpected error'),
     `unexpected top-level error logged:\n${r.stderr}`);
+});
+
+// ── prView fix-at-source disposition ──────────────────────────────────────────
+//
+// prView() now returns `labels: null, body: null` on a genuinely uncomputable
+// fetch (REQ-CIC-2) — distinct from `[]`/`''` (genuinely empty). The audit
+// consumer must NOT collapse that `null` back into a fabricated `[]`/`''`
+// default (`pr.labels ?? []`) — that re-introduces the exact fail-open the
+// seam was built to remove, just on a parallel path. `shouldSkipSize(null)`
+// and `selectIssueLinkBody(null, commitBody)` (audit-helpers.test.mjs) already
+// prove the downstream pure functions handle `null` safely; this proves the
+// null actually reaches them, unmangled.
+test('brain-audit: prView() null labels/body are NOT coerced to []/\'\' before reaching the pure helpers (fix dies at source)', () => {
+  const src = readFileSync(fileURLToPath(new URL('./brain-audit.mjs', import.meta.url)), 'utf8');
+  assert.equal(src.includes('pr.labels ?? []'), false,
+    'must not fabricate an empty labels default over a possibly-null pr.labels — let null reach shouldSkipSize()');
+  assert.equal(src.includes('pr.body ?? \'\''), false,
+    'must not fabricate an empty body default over a possibly-null pr.body — let null reach selectIssueLinkBody()');
 });

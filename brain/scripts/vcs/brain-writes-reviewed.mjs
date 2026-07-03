@@ -16,6 +16,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { loadContext } from './ci-context.mjs';
+
 // ── Pure evaluator (design §6.1) ────────────────────────────────────────────
 
 const BRAIN_MANAGED_PREFIXES = ['brain/core/', 'brain/project/'];
@@ -195,10 +197,6 @@ export function gatherBrainWritesReviewedInputs({
   return { changedFiles, reviews, author, botAllowlist, adminOverride };
 }
 
-function parsePrLabels(raw) {
-  return (raw ?? '').split(/\s+/).filter(Boolean);
-}
-
 /**
  * Runs the full L6 brain-writes-reviewed check: gathers inputs (git + gh API),
  * evaluates the pure rule. Never throws — a gh/git failure, or missing
@@ -206,16 +204,25 @@ function parsePrLabels(raw) {
  * zero-false-positive detection goal intact while this job is
  * detection-only (DETECTION_JOBS).
  *
- * @param {{ baseSha?: string, headSha?: string, prNumber?: number|string, repo?: string, author?: string, prLabels?: string[], cwd?: string } & object} [deps]
+ * baseSha/headSha/prNumber/repo/author/prLabels source from the normalized
+ * ci-context (`ctx.*`, ADR-0016) — never from process.env directly (a
+ * drift-guard test enforces this). `ctx.labels` is already an array, so it
+ * replaces the former `PR_LABELS` space-separated env parsing outright.
+ *
+ * @param {{ baseSha?: string, headSha?: string, prNumber?: number|string, repo?: string, author?: string, prLabels?: string[], cwd?: string, ctx?: object } & object} [deps]
  * @returns {{ level: 'pass'|'warn'|'fail', reason: string }}
  */
 export function runBrainWritesReviewedCheck(deps = {}) {
-  const baseSha = deps.baseSha ?? process.env.BASE_SHA;
-  const headSha = deps.headSha ?? process.env.HEAD_SHA;
-  const prNumber = deps.prNumber ?? process.env.PR_NUMBER;
-  const repo = deps.repo ?? process.env.GITHUB_REPOSITORY;
-  const author = deps.author ?? process.env.PR_AUTHOR;
-  const prLabels = deps.prLabels ?? parsePrLabels(process.env.PR_LABELS);
+  const ctx = deps.ctx ?? {};
+  const baseSha = deps.baseSha ?? ctx.baseSha ?? undefined;
+  const headSha = deps.headSha ?? ctx.headSha ?? undefined;
+  const prNumber = deps.prNumber ?? ctx.prNumber ?? undefined;
+  const repo = deps.repo ?? ctx.repo ?? undefined;
+  const author = deps.author ?? ctx.author ?? undefined;
+  // ctx.labels may be null (uncomputable fetch); collapsing to [] here is the SAFE
+  // direction for this DETECTION gate — no labels ⇒ no admin-override applies ⇒
+  // stricter enforcement, never a fail-open (unlike the empty-on-failure anti-pattern).
+  const prLabels = deps.prLabels ?? ctx.labels ?? [];
   const cwd = deps.cwd ?? process.cwd();
 
   if (!baseSha || !headSha || !prNumber || !repo || !author) {
@@ -258,5 +265,6 @@ export function main(deps = {}) {
 // ── CLI entrypoint ───────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  process.exit(main());
+  const ctx = await loadContext();
+  process.exit(main({ ctx }));
 }

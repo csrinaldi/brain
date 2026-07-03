@@ -15,6 +15,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { loadContext, resolveDetectionBody } from './ci-context.mjs';
+
 // ── Pure evaluator (design §5 step 5) ───────────────────────────────────────
 
 /**
@@ -212,14 +214,23 @@ export function gatherActorCheckInputs({ author, prBody, baseBranch, repo, cwd =
  * degrades to `warn` rather than `fail`, keeping REQ-L5-2's zero-false-positive
  * goal intact while this job is detection-only (DETECTION_JOBS).
  *
- * @param {{ author?: string, prBody?: string, baseBranch?: string, repo?: string, cwd?: string } & object} [deps]
+ * `author`/`baseBranch`/`repo` source from the normalized ci-context (`ctx.*`,
+ * ADR-0016) — never from process.env directly (a drift-guard test enforces
+ * this). Per CP-A0 ruling 1, `author` is the PR author from the API payload
+ * (`ctx.author`), NOT the pipeline-trigger env identity.
+ * `prBody` is DETECTION-only: it falls back to PR_BODY via
+ * `resolveDetectionBody()` when `ctx.body` is uncomputable (amendment 2 — this
+ * fallback is sanctioned ONLY for DETECTION consumers like this check).
+ *
+ * @param {{ author?: string, prBody?: string, baseBranch?: string, repo?: string, cwd?: string, ctx?: object } & object} [deps]
  * @returns {{ level: 'pass'|'warn'|'fail', reason: string }}
  */
 export function runActorCheck(deps = {}) {
-  const author = deps.author ?? process.env.PR_AUTHOR;
-  const prBody = deps.prBody ?? process.env.PR_BODY ?? '';
-  const baseBranch = deps.baseBranch ?? process.env.BASE_BRANCH;
-  const repo = deps.repo ?? process.env.GITHUB_REPOSITORY;
+  const ctx = deps.ctx ?? {};
+  const author = deps.author ?? ctx.author ?? undefined;
+  const prBody = deps.prBody ?? resolveDetectionBody(ctx, deps) ?? '';
+  const baseBranch = deps.baseBranch ?? ctx.targetBranch ?? undefined;
+  const repo = deps.repo ?? ctx.repo ?? undefined;
   const cwd = deps.cwd ?? process.cwd();
 
   if (!author || !repo) {
@@ -261,5 +272,6 @@ export function main(deps = {}) {
 // ── CLI entrypoint ───────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  process.exit(main());
+  const ctx = await loadContext();
+  process.exit(main({ ctx }));
 }

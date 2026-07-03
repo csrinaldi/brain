@@ -13,6 +13,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { loadContext } from './ci-context.mjs';
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const CHANGE_DIR_PREFIX = 'openspec/changes/';
@@ -364,13 +366,14 @@ export function gatherPhaseOrderInputs({ baseSha, headSha, cwd = process.cwd(), 
  * degrades to `warn` rather than `fail`, keeping REQ-L4-5's zero-false-positive
  * goal intact while this job is detection-only (DETECTION_JOBS).
  *
- * @param {{ cwd?: string, baseSha?: string, headSha?: string, deps?: object }} [deps]
+ * @param {{ cwd?: string, baseSha?: string, headSha?: string, ctx?: object, deps?: object }} [deps]
  * @returns {{ level: 'pass'|'warn'|'fail', findings: Array }}
  */
 export function runPhaseOrderCheck(deps = {}) {
   const cwd = deps.cwd ?? process.cwd();
-  const baseSha = deps.baseSha ?? process.env.BASE_SHA;
-  const headSha = deps.headSha ?? process.env.HEAD_SHA;
+  const ctx = deps.ctx ?? {};
+  const baseSha = deps.baseSha ?? ctx.baseSha;
+  const headSha = deps.headSha ?? ctx.headSha;
 
   if (!baseSha || !headSha) {
     return {
@@ -430,5 +433,6 @@ export function main(deps = {}) {
 // ── CLI entrypoint ───────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  process.exit(main());
+  const ctx = await loadContext();
+  process.exit(main({ ctx }));
 }

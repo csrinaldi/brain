@@ -184,10 +184,15 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       //   • body    → issueLink check (PR description has Closes/Part of #N;
       //               merge commit body is typically "Merge pull request #N")
       //
-      // Any failure (VCS unconfigured, adapter error, no PR number found) sets
-      // both to empty/null and falls back to commit-body behavior.  NEVER crash.
-      let prLabels = [];
-      let prBody = '';
+      // Any failure (VCS unconfigured, adapter error, no PR number found) leaves
+      // both null (uncomputable — REQ-CIC-2) and falls back to commit-body
+      // behavior.  NEVER crash, and NEVER collapse a fetched-but-null value back
+      // into a fabricated [] / '' default — shouldSkipSize()/selectIssueLinkBody()
+      // already treat null as "no evidence" correctly; re-fabricating an empty
+      // default here would re-introduce the exact fail-open the seam removes,
+      // just on a parallel path (prView fix-at-source disposition).
+      let prLabels = null;
+      let prBody = null;
       const prNum = parsePrNumber(subject);
       if (prNum !== null && vcs) {
         try {
@@ -195,8 +200,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
             project: config.project?.slug,
             number: prNum,
           });
-          prLabels = pr.labels ?? [];
-          prBody = pr.body ?? '';
+          prLabels = pr.labels;
+          prBody = pr.body;
         } catch {
           // VCS call failed — proceed without PR metadata (audit normally)
         }

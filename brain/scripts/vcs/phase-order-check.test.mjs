@@ -373,6 +373,27 @@ test('neutrality (REQ-NEUTRALITY-1): identical verdict with vs. without SKILL.md
   assert.deepEqual(without, withHarness);
 });
 
+// ── ci-context seam wiring (ADR-0016) — reads ctx.baseSha/headSha ────────────
+
+test('ci-context seam: deps.ctx.baseSha/headSha are used when deps.baseSha/headSha are absent', () => {
+  const deps = makeFakeDeps({ changedFiles: [] });
+  delete deps.baseSha;
+  delete deps.headSha;
+  const result = runPhaseOrderCheck({ ...deps, ctx: { baseSha: 'BASE', headSha: 'HEAD' } });
+  // makeFakeDeps' diffNameOnly ignores its args and returns `changedFiles` — a
+  // pass/warn/fail verdict (not the "BASE_SHA/HEAD_SHA not set" degrade) proves
+  // gatherPhaseOrderInputs was actually invoked with ctx-derived shas.
+  assert.notEqual(result.findings[0]?.message, 'BASE_SHA/HEAD_SHA not set — cannot compute diff; skipping phase-order check.');
+});
+
+test('ci-context seam: missing both deps.baseSha/headSha AND ctx → degrades to warn (never reads process.env directly)', () => {
+  const deps = makeFakeDeps({ changedFiles: [] });
+  delete deps.baseSha;
+  delete deps.headSha;
+  const result = runPhaseOrderCheck({ ...deps, ctx: { baseSha: null, headSha: null } });
+  assert.equal(result.level, 'warn');
+});
+
 test('neutrality source-scan (REQ-NEUTRALITY-2): phase-order-check.mjs source contains no .claude or SKILL.md literal', () => {
   const srcPath = fileURLToPath(new URL('./phase-order-check.mjs', import.meta.url));
   const src = readFileSync(srcPath, 'utf8');

@@ -339,6 +339,54 @@ test('main: pass verdict → exit code 0', () => {
   assert.equal(lines[0], 'brain-writes-reviewed: pass');
 });
 
+// ── ci-context seam wiring (ADR-0016) ─────────────────────────────────────────
+//
+// baseSha/headSha/prNumber/repo/author/prLabels now source from an injected
+// `deps.ctx` (ci-context.mjs's loadContext()) instead of process.env.
+// `ctx.labels` (already an array) replaces the PR_LABELS env parsing.
+
+test('ci-context seam: deps.ctx feeds baseSha/headSha/prNumber/repo/author/prLabels when deps.* are absent', () => {
+  const deps = {
+    ctx: {
+      baseSha: 'base', headSha: 'head', prNumber: 144, repo: 'org/repo',
+      author: 'alice', labels: ['override:incident-response'],
+    },
+    diffNameOnly: () => ['brain/core/foo.mjs'],
+    fetchReviews: () => [{ state: 'APPROVED', author: 'bob' }],
+    readBotAllowlist: () => ['override:incident-response'],
+  };
+  const result = runBrainWritesReviewedCheck(deps);
+  assert.equal(result.level, 'pass');
+});
+
+test('ci-context seam: no ctx and no deps.* context → warn (never reads process.env directly)', () => {
+  const result = runBrainWritesReviewedCheck({ ctx: {} });
+  assert.equal(result.level, 'warn');
+});
+
+test('ci-context seam: ctx.labels (array) feeds adminOverride resolution directly — no PR_LABELS string parsing needed', () => {
+  const deps = {
+    ctx: {
+      baseSha: 'base', headSha: 'head', prNumber: 144, repo: 'org/repo',
+      author: 'alice', labels: ['override:incident-response'],
+    },
+    diffNameOnly: () => ['brain/core/foo.mjs'],
+    fetchReviews: () => [{ state: 'APPROVED', author: 'alice' }], // self-approval — would fail without override
+    readBotAllowlist: () => ['override:incident-response'],
+  };
+  const result = runBrainWritesReviewedCheck(deps);
+  assert.equal(result.level, 'pass');
+  assert.match(result.reason, /override/i);
+});
+
+test('drift-guard: brain-writes-reviewed.mjs source never reads process.env.PR_LABELS/PR_AUTHOR/BASE_SHA/HEAD_SHA/PR_NUMBER/GITHUB_REPOSITORY directly', () => {
+  const srcPath = fileURLToPath(new URL('./brain-writes-reviewed.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  for (const v of ['PR_LABELS', 'PR_AUTHOR', 'BASE_SHA', 'HEAD_SHA', 'PR_NUMBER', 'GITHUB_REPOSITORY']) {
+    assert.equal(src.includes(`process.env.${v}`), false, `source must not reference process.env.${v}`);
+  }
+});
+
 test('neutrality source-scan (REQ-NEUTRALITY-2): brain-writes-reviewed.mjs source contains no .claude or SKILL.md literal', () => {
   const srcPath = fileURLToPath(new URL('./brain-writes-reviewed.mjs', import.meta.url));
   const src = readFileSync(srcPath, 'utf8');

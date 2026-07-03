@@ -203,7 +203,10 @@ jobs:
       - name: actor-check (status:approved actor differs from the author, detection-only)
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # PR_NUMBER lets ci-context.mjs source the author from the prView API
+          # (ADR-0016 Never-do #3: never the author from env). PR_BODY stays as the
+          # DETECTION-only body fallback; PR_AUTHOR removed (author now via API).
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
         run: node brain/scripts/vcs/actor-check.mjs
