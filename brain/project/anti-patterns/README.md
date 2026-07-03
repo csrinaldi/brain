@@ -6,4 +6,3 @@ Los anti-patterns genéricos (aplican a cualquier proyecto que use brain) viven 
 
 Este directorio contiene únicamente los anti-patterns específicos de este proyecto.
 
-- [Evidence reader returns empty on failure (fail-open in REQUIRED gates)](evidence-reader-empty-on-failure.md)
