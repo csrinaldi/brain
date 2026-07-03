@@ -60,6 +60,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0013](project/decisions/adr-0013-auto-adr-onboarding.md) — Auto-ADR onboarding: bootstrap notices, agent drafts, human signs
 - [ADR-0014](project/decisions/adr-0014-workflow-governance.md) — Workflow governance: enforce load-bearing invariants server-side
 - [ADR-0015](project/decisions/adr-0015-governance-v3-substrate-ladder.md) — Governance v3: six-level fail-closed gate ladder over observable evidence (L1–L6 + substrate rung ladder)
+- [ADR-0016](project/decisions/adr-0016-ci-context-normalization.md) — CI Context Normalization: One Seam Over Provider-Specific Pipeline Evidence
 
 ### Project-specific rules
 
