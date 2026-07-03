@@ -128,6 +128,22 @@
       "sessions": 0,
       "memories": 6,
       "prompts": 0
+    },
+    {
+      "id": "79ab9e81",
+      "created_by": "gandalf",
+      "created_at": "2026-07-02T22:48:23Z",
+      "sessions": 4,
+      "memories": 26,
+      "prompts": 0
+    },
+    {
+      "id": "c4b2408b",
+      "created_by": "gandalf",
+      "created_at": "2026-07-03T10:41:57Z",
+      "sessions": 0,
+      "memories": 2,
+      "prompts": 0
     }
   ]
 }

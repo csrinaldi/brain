@@ -15,6 +15,7 @@
   "governance": {
     "ignoreList": [
       "**/*.test.mjs",
+      ".memory/**",
       "openspec/changes/**"
     ]
   },
