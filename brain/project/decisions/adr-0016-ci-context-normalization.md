@@ -140,12 +140,12 @@ wiring and provider verbs follow in A2/A3.
 - `openspec/changes/issue-193-ci-context-design/design.md` — the full field mapping,
   extraction citations, and the by-gate-type degrade matrix.
 - `openspec/changes/issue-193-ci-context-design/specs/ci-context/spec.md` — REQ-CIC-1..5.
-- [ADR-0015](../../../../brain/project/decisions/adr-0015-governance-v3-substrate-ladder.md) —
+- [ADR-0015](adr-0015-governance-v3-substrate-ladder.md) —
   the six-level ladder, the `REQUIRED_JOBS` / `DETECTION_JOBS` split, and the Epic Invariant
   this seam preserves and strengthens.
-- [ADR-0014](../../../../brain/project/decisions/adr-0014-workflow-governance.md) — the
+- [ADR-0014](adr-0014-workflow-governance.md) — the
   enforce-outputs / guide-judgment boundary and the 400-line budget + `governance.ignoreList`.
-- [ADR-0013](../../../../brain/project/decisions/adr-0013-auto-adr-onboarding.md) — the
+- [ADR-0013](adr-0013-auto-adr-onboarding.md) — the
   draft → human-review → promotion flow this draft itself follows.
-- [ADR-0009](../../../../brain/project/decisions/adr-0009-documentation-language-policy.md) —
+- [ADR-0009](adr-0009-documentation-language-policy.md) —
   documentation-language policy (this ADR is English).
