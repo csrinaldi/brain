@@ -35,7 +35,7 @@ secret-scrubbing gate and its config plumbing (C1b), which depend on C1a but not
    `validateRecord`, `serializeRecord`, `parseRecordLine`, `buildIndexEntry`, `serializeIndex`.
 2. **`brain/scripts/memory/lib/store.mjs`** — thin I/O: `appendRecord` (validate + append one
    physical JSONL line to `records/<yyyy-mm>.jsonl`), `rebuildIndex` (regenerate
-   `.memory/index.json` from `records/` alone; fails closed on a corrupt line with file+line
+   `.memory/index.jsonl` from `records/` alone; fails closed on a corrupt line with file+line
    number; degenerate-empty is a no-op success).
 3. **`memory:reindex`** — new CLI op in `brain/scripts/memory/cli.mjs`, dispatched directly
    (backend-agnostic — the record format is brain-owned, not a `MEMORY_BACKEND` concern) — plus

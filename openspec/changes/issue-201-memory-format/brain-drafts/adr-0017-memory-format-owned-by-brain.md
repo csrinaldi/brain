@@ -6,7 +6,8 @@
 > are written for the **final** location `brain/project/decisions/`.
 
 **Status**: Proposed (draft)
-**Date**: 2026-07-04
+**Date**: 2026-07-04 (amended 2026-07-07, C1b/issue #214: `index.json` → `index.jsonl` rename +
+union-exclusion rationale correction)
 
 ## Context
 
@@ -53,7 +54,7 @@ independent of engram's gzip chunks:
 
 - **`.memory/records/<yyyy-mm>.jsonl`** — append-only, plaintext, one JSON **record** per line,
   monthly files. This is the source of truth.
-- **`.memory/index.json`** — a committed, **derived, regenerable** lookup surface over the
+- **`.memory/index.jsonl`** — a committed, **derived, regenerable** lookup surface over the
   records (query accelerator + dedup materialization). Never authoritative.
 
 The normative record schema and the full rationale live in the methodology doc
@@ -100,7 +101,7 @@ ADR-0002's manifest merge driver exists to manage. Brain resolves it structurall
    are rejected — they would make union's failure mode (the same record re-imported on two
    branches) an **invisible duplicate**.
 3. **Dedup at reindex.** Union can physically duplicate a line when both branches wrote the
-   same record; because those lines are byte-identical and share an `id`, `index.json` is keyed
+   same record; because those lines are byte-identical and share an `id`, `index.jsonl` is keyed
    by `id` and collapses them losslessly. The JSONL stays strictly append-only (never
    rewritten — preserving union safety and clean `git log .memory/`); the index is the dedup
    authority.
@@ -118,21 +119,26 @@ and are correctly NOT deduped — they are distinct memories, not one.)
 ### Why this is strictly better than ADR-0002's manifest
 
 ADR-0002's manifest was **authoritative and non-regenerable** — lose it and you lose the
-memory; hence a mandatory, careful merge driver. Brain's `index.json` is the inversion:
+memory; hence a mandatory, careful merge driver. Brain's `index.jsonl` is the inversion:
 **derived and regenerable** from the plaintext records via a future `memory:reindex`. The
 records JSONL is the durable truth; the index is throwaway. Even if the index ever conflicts or
 is deleted, it is rebuilt from the records — the failure mode ADR-0002 could not tolerate
 becomes a no-op here. Note the union driver is scoped to `records/*.jsonl` **only** and
-deliberately **excludes** `index.json` (union would splice two JSON objects into invalid JSON);
-a merge conflict on `index.json` is resolved by **discarding both sides and running
-`memory:reindex`**, never by hand- or union-merging it.
+deliberately **excludes** `index.jsonl`. **Corrected rationale (C1b, issue #214 — the original
+"union would splice two JSON objects into invalid JSON" framing (now removed) was stale the
+moment the index was fixed as one-entry-per-line JSONL, not a single JSON document):** a reindex REPLACES
+and REORDERS the index's lines on every run (stable-sorted by `id`), so a line-based union of
+two independently regenerated indexes would concatenate both sides' now-superseded snapshots —
+producing duplicate and stale entries, not a clean merge. The index is fully regenerable from
+`records/`, so a merge conflict on `index.jsonl` is resolved by **discarding both sides and
+running `memory:reindex`**, never by hand- or union-merging it.
 
 ### Index churn discipline (the manifest-churn lesson)
 
-`memory:share` / `memory:reindex` **MUST NOT rewrite the whole `index.json` on every run** — the
+`memory:share` / `memory:reindex` **MUST NOT rewrite the whole `index.jsonl` on every run** — the
 ADR-0002 export-churn that rewrote the entire manifest each `memory:share` and blocked a raw
 `git pull`. The index is stable-ordered by `id`; a reindex adds/updates only the entries for
-newly appended records and leaves every other entry byte-identical, so `git diff index.json` is
+newly appended records and leaves every other entry byte-identical, so `git diff index.jsonl` is
 proportional to the *new* records, not to the store size.
 
 The index is serialized **one entry per physical line, sorted by `id`, deterministically** — a
@@ -140,7 +146,7 @@ normative rule: because `id`s are content hashes, parallel insertions distribute
 across the sorted file, so git's ordinary 3-way merge auto-resolves most parallel appends cleanly
 and a real conflict is reduced to the occasional adjacent-line insertion (a compact single-line
 `JSON.stringify` would instead conflict on every parallel merge). The conflict ergonomics MAY be
-a helper or a post-merge hook, but MUST NOT require a **custom merge driver for `index.json`** — a
+a helper or a post-merge hook, but MUST NOT require a **custom merge driver for `index.jsonl`** — a
 per-clone `.git/config` registration is exactly the engram-driver friction this format
 eliminates; `records/*.jsonl` keeps the built-in `merge=union`, which needs no per-clone
 registration.

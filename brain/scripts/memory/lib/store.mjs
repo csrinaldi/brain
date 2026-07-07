@@ -1,4 +1,4 @@
-// store.mjs — thin I/O layer over `.memory/records/` + `.memory/index.json`.
+// store.mjs — thin I/O layer over `.memory/records/` + `.memory/index.jsonl`.
 //
 // Implements the durable-store side of the C0 contract
 // (openspec/changes/issue-201-memory-format/spec.md, REQ-MF-3/REQ-MF-4): all
@@ -14,7 +14,14 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, appendFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { parseRecordLine, buildIndexEntry, serializeIndex, serializeRecord, validateRecord } from './format.mjs';
+import {
+  parseRecordLine,
+  buildIndexEntry,
+  serializeIndex,
+  serializeRecord,
+  validateRecord,
+  computeRecordId,
+} from './format.mjs';
 
 /**
  * appendRecord() — validate, then append one record as exactly one physical
@@ -36,7 +43,7 @@ export function appendRecord(record, { recordsDir }) {
 }
 
 /**
- * rebuildIndex() — regenerate `.memory/index.json` purely from `.memory/records/`
+ * rebuildIndex() — regenerate `.memory/index.jsonl` purely from `.memory/records/`
  * (REQ-MF-4). Deterministic and idempotent: deleting the index and re-running
  * reproduces it byte-for-byte (the property test in store.test.mjs).
  *
@@ -62,6 +69,19 @@ export function rebuildIndex({ recordsDir, indexPath }) {
         record = parseRecordLine(line);
       } catch (err) {
         throw new Error(`rebuildIndex: corrupt record at ${filename}:${i + 1} — ${err.message}`);
+      }
+      // id-integrity hardening (issue #214, C1b): recompute the id via the ONE
+      // shared computeRecordId (never a second hasher) from the record's own
+      // read fields. A legitimate record already has `title` folded into
+      // `content` and absent optionals omitted (R3), so computeRecordId(record)
+      // reproduces the stored id exactly. A mismatch means the line was
+      // tampered with or is stale — fail closed with the same file:line
+      // convention as the corrupt-line path above.
+      const recomputedId = computeRecordId(record);
+      if (recomputedId !== record.id) {
+        throw new Error(
+          `rebuildIndex: id mismatch at ${filename}:${i + 1} — stored id '${record.id}' does not match the recomputed id '${recomputedId}' (tampered or stale record)`,
+        );
       }
       entries.set(record.id, buildIndexEntry(record, filename));
     }

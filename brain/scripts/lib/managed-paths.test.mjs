@@ -9,8 +9,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { managed, local, MANAGED_SCRIPT_KEYS } from '../../core/managed-paths.mjs';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import {
+  managed,
+  local,
+  MANAGED_SCRIPT_KEYS,
+  RECORDS_UNION_MERGE_GITATTRIBUTES_LINE,
+} from '../../core/managed-paths.mjs';
 import { matchesAny } from './installer.mjs';
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 test('managed includes .github/workflows/governance.yml (exact literal)', () => {
   assert.ok(
@@ -126,4 +137,23 @@ test('MANAGED_SCRIPT_KEYS has exactly 9 entries, all prefixed brain: (S5)', () =
     assert.ok(key.startsWith('brain:'),
       `every key must start with "brain:" — got "${key}"`);
   }
+});
+
+// issue #214, C1b: the records/*.jsonl union-merge .gitattributes line is a
+// single-source-of-truth constant (mirrors the MANAGED_SCRIPT_KEYS pattern
+// above), so this repo's own .gitattributes can be drift-guarded against it.
+test('RECORDS_UNION_MERGE_GITATTRIBUTES_LINE is the exact expected literal', () => {
+  assert.equal(
+    RECORDS_UNION_MERGE_GITATTRIBUTES_LINE,
+    '/.memory/records/*.jsonl merge=union',
+  );
+});
+
+test('.gitattributes contains the exact RECORDS_UNION_MERGE_GITATTRIBUTES_LINE literal (drift guard)', () => {
+  const content = readFileSync(join(REPO_ROOT, '.gitattributes'), 'utf8');
+  const lines = content.split('\n').map((l) => l.trim());
+  assert.ok(
+    lines.includes(RECORDS_UNION_MERGE_GITATTRIBUTES_LINE),
+    `.gitattributes must contain the exact line: ${RECORDS_UNION_MERGE_GITATTRIBUTES_LINE}`,
+  );
 });

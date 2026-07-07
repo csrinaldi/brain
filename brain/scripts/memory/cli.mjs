@@ -8,7 +8,7 @@
 //             Use for cross-machine sync (npm run memory:pull).
 //   import  — import-only: engram sync --import, no git pull.
 //             Use after git already pulled (post-merge hook, day-start step 5).
-//   reindex — regenerate .memory/index.json from .memory/records/ alone
+//   reindex — regenerate .memory/index.jsonl from .memory/records/ alone
 //             (REQ-MF-4, issue #205). Backend-agnostic: dispatched directly
 //             here, not through backends/<backend>.mjs — the record format is
 //             brain-owned and independent of the live memory backend.
@@ -74,7 +74,7 @@ if (!VALID_OPS.includes(op)) {
 
 // ---------------------------------------------------------------------------
 // "reindex" is backend-agnostic: the durable record format (.memory/records/,
-// .memory/index.json) is brain-owned (ADR-0017), not a MEMORY_BACKEND concern.
+// .memory/index.jsonl) is brain-owned (ADR-0017), not a MEMORY_BACKEND concern.
 // Dispatched directly here instead of through backends/<backend>.mjs.
 // ---------------------------------------------------------------------------
 if (op === "reindex") {
@@ -82,7 +82,7 @@ if (op === "reindex") {
   try {
     const { count } = rebuildIndex({
       recordsDir: join(repoRoot, ".memory", "records"),
-      indexPath: join(repoRoot, ".memory", "index.json"),
+      indexPath: join(repoRoot, ".memory", "index.jsonl"),
     });
     console.log(`memory/cli: ${await t("memory.reindex.done", { count })}`);
     process.exit(0);

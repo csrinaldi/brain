@@ -9,7 +9,7 @@
 | REQ-MF-1 | Record schema and required fields | ✅ `format.mjs#validateRecord` + `#serializeRecord`/`#parseRecordLine` (one-physical-line invariant) |
 | REQ-MF-2 | Content-hash `id` identity + determinism | ✅ `format.mjs#computeRecordId` (RFC 8785 JCS subset, R2/R3 pins) |
 | REQ-MF-3 | Concurrent-append merge policy | ✅ mechanism proven by `records-merge.integration.test.mjs` (real git merge); ⏳ repo-wide `.gitattributes` ships in C1b |
-| REQ-MF-4 | `index.json` derived, regenerable, low-churn | ✅ `store.mjs#rebuildIndex` (R1: one entry/line, sorted, deterministic; property-tested byte-identical rebuild) |
+| REQ-MF-4 | `index.jsonl` derived, regenerable, low-churn | ✅ `store.mjs#rebuildIndex` (R1: one entry/line, sorted, deterministic; property-tested byte-identical rebuild) |
 | REQ-MF-5 | Public-repo exposure constraints | ✅ partial (email-actor heuristic in `validateRecord`); ⏳ the enforcing secret-scrub gate ships in C1b |
 | REQ-MF-6 | Engram export → record migration | ⏳ out of scope — slice C4 |
 
@@ -32,8 +32,13 @@
   reindex mechanism).
 - Degenerate states (absent or empty `records/`) produce an empty index and exit 0 with no
   warning, and never touch a sibling `.memory/chunks/*.jsonl.gz` (the legacy engram transport).
-- The property test (`store.test.mjs`) proves: delete `index.json`, reindex, byte-identical to
+- The property test (`store.test.mjs`) proves: delete `index.jsonl`, reindex, byte-identical to
   the pre-deletion file — the C0 "index is fully regenerable from records" scenario.
+
+> **C1b rename note**: this file was named `index.json` through C1a; C1b renames it to
+> `index.jsonl` (issue #214) — the content was always JSONL (one entry per physical line, R1),
+> never a whole-file JSON document, so the `.json` extension invited a `JSON.parse(entireFile)`
+> trap. Zero migration cost: no `.memory/index.json` had been committed yet.
 
 ## Scenarios covered by tests (this slice)
 
@@ -56,7 +61,7 @@ WHEN merged under `merge=union` — THEN both lines survive, no conflict markers
 (`records-merge.integration.test.mjs` — real `git merge`)
 
 #### The index is fully regenerable from records (REQ-MF-4)
-GIVEN `index.json` is deleted
+GIVEN `index.jsonl` is deleted
 WHEN `memory:reindex` runs — THEN it is rebuilt byte-identical. (`store.test.mjs`)
 
 #### A corrupt physical line fails closed (store degenerate-state contract)

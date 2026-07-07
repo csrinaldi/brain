@@ -5,7 +5,8 @@
 > `brain/core/methodology/` (Tier-2 human gate). Relative links below are written for the
 > **final** location `brain/core/methodology/`.
 
-> **status:** draft | **last-reviewed:** 2026-07-04 | **owner:** @crinaldi
+> **status:** draft | **last-reviewed:** 2026-07-07 (C1b, issue #214: `index.json` renamed to
+> `index.jsonl`; union-exclusion rationale corrected) | **owner:** @crinaldi
 > **governed by:** [ADR-0017](../../project/decisions/adr-0017-memory-format-owned-by-brain.md)
 > (brain owns the durable format) · [ADR-0002](../../project/decisions/adr-0002-memoria-git-based-dos-capas.md)
 > (two-layer durable/live memory) · [ADR-0004](../../project/decisions/adr-0004-adapter-memoria-memory-backend.md)
@@ -27,7 +28,7 @@ C1–C4); this document is the contract they implement.
   records/
     2026-07.jsonl        # append-only, plaintext, one record per line
     2026-06.jsonl
-  index.json             # derived, regenerable, committed — a query accelerator, never authoritative
+  index.jsonl            # derived, regenerable, committed — a query accelerator, never authoritative
 ```
 
 - **`records/<yyyy-mm>.jsonl`** — the **source of truth**. Append-only: a record is never
@@ -37,7 +38,7 @@ C1–C4); this document is the contract they implement.
   newlines, those newlines MUST be escaped (`\n`). This is a hard requirement — `merge=union` is
   line-based, so a record spanning multiple physical lines could be split by a union merge; the
   validator rejects any multi-line record.
-- **`index.json`** — **derived** from the records and regenerable via a future `memory:reindex`.
+- **`index.jsonl`** — **derived** from the records and regenerable via a future `memory:reindex`.
   It is committed for zero-tool querying and as the materialized dedup surface, but it is never
   the truth. If it is lost, deleted, or conflicts, it is rebuilt from `records/`.
 
@@ -90,7 +91,7 @@ hashInput = { type, actor, actorKind, ts, project, issue?, supersedes?, content 
   *invisible* duplicate after a union merge. The content hash makes it a *detectable,
   collapsible* one.
 - **Uniqueness = semantic identity.** Two records with an identical `hashInput` are, by
-  definition, the same record and share an `id`. `index.json` is keyed by `id`.
+  definition, the same record and share an `id`. `index.jsonl` is keyed by `id`.
 - `source` is **excluded** from the hash: it is incidental provenance and must not split one
   logical record into two ids when two writers cite it slightly differently.
 - **Absent optionals are omitted, never `null`.** Optional fields (`issue`, `supersedes`,
@@ -111,7 +112,7 @@ ADR-0002 manifest problem. It is resolved structurally:
 2. **Content-hash `id`** (above) makes the same record identical across branches.
 3. **Dedup at reindex.** Union's one failure mode is a duplicated physical line when both
    branches wrote the same record. Those lines are byte-identical and share an `id`, so
-   `index.json` (keyed by `id`) collapses them losslessly. The JSONL stays **strictly
+   `index.jsonl` (keyed by `id`) collapses them losslessly. The JSONL stays **strictly
    append-only** — never rewritten — which preserves union safety and a clean
    `git log .memory/records/`. The index, not the log, is the dedup authority.
 
@@ -128,9 +129,9 @@ machine-generated log and does not scale to parallel agents. See
 [ADR-0017](../../project/decisions/adr-0017-memory-format-owned-by-brain.md) for the full
 comparison.
 
-## `index.json` — derived, regenerable, low-churn
+## `index.jsonl` — derived, regenerable, low-churn
 
-`index.json` maps each `id` to its lookup metadata (`ts`, `actor`, `type`, `project`, `issue`,
+`index.jsonl` maps each `id` to its lookup metadata (`ts`, `actor`, `type`, `project`, `issue`,
 `supersedes`, and the `records/<yyyy-mm>.jsonl` file it lives in). It is:
 
 - **Derived** — the inverse of ADR-0002's *authoritative* manifest. The records are the truth;
@@ -143,17 +144,21 @@ comparison.
   common case. A compact single-line `JSON.stringify` would instead conflict on every parallel
   merge, making the discard+reindex fallback routine rather than rare. The conflict ergonomics
   MAY be a helper or a post-merge hook, but MUST NOT require a **custom merge driver for
-  `index.json`** (a per-clone `.git/config` registration — the engram-driver friction this format
+  `index.jsonl`** (a per-clone `.git/config` registration — the engram-driver friction this format
   eliminates); `records/*.jsonl` keeps the built-in `merge=union`, which needs no per-clone
   registration.
 - **Excluded from the union driver.** The `merge=union` policy is scoped to `records/*.jsonl`
-  ONLY; the `.gitattributes` glob deliberately EXCLUDES `index.json`. Union is a line
-  concatenator — applied to a single JSON object it would splice two objects into invalid JSON.
-  A git merge conflict on `index.json` is therefore resolved by **discarding both sides and
+  ONLY; the `.gitattributes` glob deliberately EXCLUDES `index.jsonl`. **Corrected rationale
+  (C1b, issue #214 — the original "single JSON object" framing (now removed) was stale the
+  moment R1 fixed the index as one-entry-per-line JSONL):** a reindex REPLACES and REORDERS the index's
+  lines on every run (stable-sorted by `id`), so a line-based union of two independently
+  regenerated indexes would concatenate both sides' now-superseded snapshots — producing
+  duplicate and stale entries, not a clean merge. The index is fully regenerable from
+  `records/`, so a git merge conflict on `index.jsonl` is resolved by **discarding both sides and
   running `memory:reindex`** — it is NEVER hand-merged and NEVER union-merged.
 - **Low-churn** — `memory:reindex` / `memory:share` **MUST NOT rewrite the whole index every
   run**. Entries are stable-ordered by `id`; a reindex adds/updates only entries for newly
-  appended records and leaves every other entry byte-identical, so `git diff index.json` is
+  appended records and leaves every other entry byte-identical, so `git diff index.jsonl` is
   proportional to the new records, not to the store size. This is the direct lesson of the
   ADR-0002 manifest churn that rewrote the full file each `memory:share` and blocked a raw
   `git pull`.

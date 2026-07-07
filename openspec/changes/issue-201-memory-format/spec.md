@@ -3,7 +3,7 @@
 ## Purpose
 
 Specifies the **normative durable memory record format** owned by brain — the record schema,
-the `.memory/records/` + `.memory/index.json` layout, the content-hash identity, and the
+the `.memory/records/` + `.memory/index.jsonl` layout, the content-hash identity, and the
 concurrent-append **merge policy** (union + content-hash + dedup-at-reindex) chosen in
 [design.md](design.md) Decision 2. This is a **design-only** delta (slice C0): it fixes the
 contract; the format library, validator, `.gitattributes` merge driver, and the engram↔record
@@ -19,7 +19,7 @@ library that reads/writes it, which C1 chooses.
 | REQ-MF-1 | Record schema and required fields | Unit (`node --test`) — schema validator |
 | REQ-MF-2 | Content-hash `id` identity + determinism | Unit (`node --test`) |
 | REQ-MF-3 | Concurrent-append merge policy (union + dedup) | Integration (git merge fixture) |
-| REQ-MF-4 | `index.json` is derived, regenerable, and low-churn | Unit + git-diff assertion |
+| REQ-MF-4 | `index.jsonl` is derived, regenerable, and low-churn | Unit + git-diff assertion |
 | REQ-MF-5 | Public-repo exposure constraints (handle-not-PII, project-scope only) | Unit (validator) |
 | REQ-MF-6 | Engram export → record migration losses are enumerated and handled | Unit (`node --test`) — C4 |
 
@@ -150,20 +150,20 @@ one entry]
   `id`) to `records/2026-07.jsonl`
 - WHEN the branches merge under `merge=union` (yielding two identical physical lines)
 - AND `memory:reindex` runs
-- THEN `index.json` contains exactly one entry for that `id`
+- THEN `index.jsonl` contains exactly one entry for that `id`
 - AND the JSONL is not rewritten (the duplicate physical line remains until an explicit compact)
 
 ---
 
-## Requirement REQ-MF-4: `index.json` Is Derived, Regenerable, And Low-Churn
+## Requirement REQ-MF-4: `index.jsonl` Is Derived, Regenerable, And Low-Churn
 
-`.memory/index.json` MUST be a **derived** projection of `records/`, regenerable via
+`.memory/index.jsonl` MUST be a **derived** projection of `records/`, regenerable via
 `memory:reindex`, keyed by `id`, and MUST NOT be treated as authoritative — the records are the
 source of truth. A reindex or `memory:share` MUST NOT rewrite the whole index on every run: it
 MUST update/add only entries for newly appended records and leave every other entry
 byte-identical (stable-ordered by `id`), so the `git diff` is proportional to the new records.
 
-`index.json` MUST be serialized **one entry per physical line, sorted by `id`, with
+`index.jsonl` MUST be serialized **one entry per physical line, sorted by `id`, with
 deterministic (stable) formatting**. This is normative, not cosmetic: because `id`s are content
 hashes, parallel insertions distribute **uniformly** across the sorted file, so git's ordinary
 3-way merge auto-resolves **most** parallel appends cleanly — a real conflict is reduced to the
@@ -172,14 +172,14 @@ hashes, parallel insertions distribute **uniformly** across the sorted file, so 
 fallback a routine manual step rather than a rare one.
 
 The conflict ergonomics MAY be implemented as a **helper or a post-merge hook**, but MUST NOT
-require a **custom merge driver for `index.json`** — a per-clone `.git/config` registration is
+require a **custom merge driver for `index.jsonl`** — a per-clone `.git/config` registration is
 exactly the engram-driver friction this design eliminates. (`records/*.jsonl` still uses the
 built-in `merge=union`, which needs no per-clone registration.)
 
-The `merge=union` driver (REQ-MF-3) MUST NOT apply to `index.json`: the `.gitattributes` glob
+The `merge=union` driver (REQ-MF-3) MUST NOT apply to `index.jsonl`: the `.gitattributes` glob
 scopes union to `records/*.jsonl` ONLY and deliberately EXCLUDES the index (union is a line
 concatenator; splicing two JSON objects yields invalid JSON). A git merge conflict on
-`index.json` MUST be resolved by **discarding both sides and running `memory:reindex`** to
+`index.jsonl` MUST be resolved by **discarding both sides and running `memory:reindex`** to
 regenerate it; the index MUST NEVER be hand-merged or union-merged.
 
 [**unit-testable**: reindex after appending one record touches exactly one index entry; deleting
@@ -187,27 +187,27 @@ the index and reindexing reproduces it byte-for-byte from the records]
 
 #### Scenario: A single new record produces a single-entry index diff
 
-- GIVEN an existing `index.json` for a populated store
+- GIVEN an existing `index.jsonl` for a populated store
 - WHEN one new record is appended and `memory:reindex` runs
-- THEN `git diff index.json` shows exactly one added/updated entry and no reordering of others
+- THEN `git diff index.jsonl` shows exactly one added/updated entry and no reordering of others
 
 #### Scenario: The index is fully regenerable from records
 
-- GIVEN `index.json` is deleted
+- GIVEN `index.jsonl` is deleted
 - WHEN `memory:reindex` runs over `records/`
-- THEN `index.json` is rebuilt and is equivalent to the pre-deletion index
+- THEN `index.jsonl` is rebuilt and is equivalent to the pre-deletion index
 
 #### Scenario: Hash-distributed appends 3-way merge the index cleanly
 
 - GIVEN branch X and branch Y each append a record whose content-hash `id` sorts to a
-  non-adjacent position in `index.json`
+  non-adjacent position in `index.jsonl`
 - WHEN the branches merge
-- THEN git's ordinary 3-way merge auto-resolves `index.json` with no conflict and no reindex
+- THEN git's ordinary 3-way merge auto-resolves `index.jsonl` with no conflict and no reindex
 - AND only an adjacent-line insertion collision falls back to discarding both sides + `memory:reindex`
 
-#### Scenario: An `index.json` merge conflict is discarded and regenerated, never merged
+#### Scenario: An `index.jsonl` merge conflict is discarded and regenerated, never merged
 
-- GIVEN `index.json` has a git merge conflict
+- GIVEN `index.jsonl` has a git merge conflict
 - WHEN the conflict is resolved
 - THEN both sides are discarded and `memory:reindex` regenerates the index from `records/`
 - AND the index is never hand-merged and never union-merged

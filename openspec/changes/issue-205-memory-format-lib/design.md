@@ -7,7 +7,7 @@
 ## Decision 1 — pure-evaluator + thin-I/O split
 
 `format.mjs` (pure: hashing, canonicalization, schema validation, serialization) is fully
-separated from `store.mjs` (I/O: append to `records/<yyyy-mm>.jsonl`, rebuild `index.json`).
+separated from `store.mjs` (I/O: append to `records/<yyyy-mm>.jsonl`, rebuild `index.jsonl`).
 Matches the convention already used across `brain/scripts/memory/lib/` (e.g.
 `resume-schema.mjs` vs. its caller in `backends/engram.mjs`). This makes the hashing/validation
 logic — the highest-risk, spec-critical code — testable with zero filesystem mocking, and keeps
@@ -36,7 +36,7 @@ generality than exists.
 ## Decision 3 — `memory:reindex` dispatches directly in `cli.mjs`, not through a backend
 
 `cli.mjs` normally dispatches every op to `backends/<MEMORY_BACKEND>.mjs`. `reindex` breaks that
-pattern deliberately: the durable record format (`.memory/records/`, `.memory/index.json`) is
+pattern deliberately: the durable record format (`.memory/records/`, `.memory/index.jsonl`) is
 **brain-owned** (ADR-0017 draft) and independent of the live memory backend engram vs. any future
 alternative. Routing it through `backends/engram.mjs` would wrongly couple a backend-agnostic
 format operation to one specific backend's module, and every future backend would have to
