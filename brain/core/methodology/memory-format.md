@@ -2,16 +2,16 @@
 
 > **status:** current | **last-reviewed:** 2026-07-07 (C1b, issue #214: `index.json` renamed to
 > `index.jsonl`; union-exclusion rationale corrected) | **owner:** @crinaldi
-> **governed by:** [ADR-0017](../../project/decisions/adr-0017-memory-format-owned-by-brain.md)
-> (brain owns the durable format) · [ADR-0002](../../project/decisions/adr-0002-memoria-git-based-dos-capas.md)
-> (two-layer durable/live memory) · [ADR-0004](../../project/decisions/adr-0004-adapter-memoria-memory-backend.md)
+> **governed by:** ADR-0017
+> (brain owns the durable format) · ADR-0002
+> (two-layer durable/live memory) · ADR-0004
 > (memory-backend adapter)
 
 ## Purpose
 
 Define the **normative, tool-independent** on-disk format of brain's *durable* memory layer,
 so that team knowledge is recoverable with nothing but `git clone` and a text editor — the
-literal promise of [ADR-0002](../../project/decisions/adr-0002-memoria-git-based-dos-capas.md).
+literal promise of ADR-0002.
 This format is owned by brain and is **independent of engram's gzip chunk transport**. The
 format library, its validator, and the engram↔record migration are out of scope here (slices
 C1–C4); this document is the contract they implement.
@@ -121,7 +121,7 @@ distinct-actor conflicts but fragments the layout, complicates reindex/query wit
 still conflicts on same-actor-two-branches, and leaks actor identities into filenames (a
 public-repo concern). *Manual conflict resolution* reintroduces the ADR-0002 pain on a
 machine-generated log and does not scale to parallel agents. See
-[ADR-0017](../../project/decisions/adr-0017-memory-format-owned-by-brain.md) for the full
+ADR-0017 for the full
 comparison.
 
 ## `index.jsonl` — derived, regenerable, low-churn
@@ -179,7 +179,7 @@ durability guarantee. Therefore:
 ## What engram export cannot supply (and what the record drops)
 
 Migrating an engram chunk (see the real shape in
-[ADR-0017](../../project/decisions/adr-0017-memory-format-owned-by-brain.md)) into a brain
+ADR-0017) into a brain
 record is lossy in both directions. This enumeration is the migration contract for slice C4.
 
 **Brain fields engram export cannot supply structurally** — they exist only as
@@ -215,8 +215,8 @@ record is lossy in both directions. This enumeration is the migration contract f
 
 ## Relationship to the live layer
 
-Per [ADR-0002](../../project/decisions/adr-0002-memoria-git-based-dos-capas.md) /
-[ADR-0004](../../project/decisions/adr-0004-adapter-memoria-memory-backend.md), the live backend
+Per ADR-0002 /
+ADR-0004, the live backend
 (engram) remains a *derived index* for semantic search. This format governs the **durable**
 layer only. `memory:share` materializes durable knowledge into `records/`; `memory:import`
 projects `records/` into the active backend. The gzip chunks are engram's private transport and
