@@ -293,6 +293,10 @@ export default {
   'session.ticket.label':       'ticket:',
   'session.ticket.none':        '(no active ticket memory)',
 
+  // ── memory/cli.mjs — reindex (issue #205, C1) ─────────────────────────────────
+  'memory.reindex.done':   '✓ reindex complete — {count} record(s) indexed.',
+  'memory.reindex.failed': '✗ reindex failed — {message}',
+
   // ── brain-protect.mjs — arm-and-verify (issue #203) ───────────────────────────
   'protect.verify.unverifiable': '  Verify   : no check-runs found yet on {branch} — unverifiable until the first PR runs.',
   'protect.verify.missing':      '  WARNING  : required check "{context}" has no matching check-run yet — confirm the job name is exact.',

@@ -2,12 +2,16 @@
 // brain/scripts/memory/cli.mjs — MEMORY_BACKEND dispatcher.
 //
 // Usage: node brain/scripts/memory/cli.mjs <op>
-//   op: share | pull | import | index | setup | feature-checkpoint | feature-resume
+//   op: share | pull | import | index | reindex | setup | feature-checkpoint | feature-resume
 //
-//   pull   — churn-resilient full pull: manifest restore + git pull + engram import.
-//            Use for cross-machine sync (npm run memory:pull).
-//   import — import-only: engram sync --import, no git pull.
-//            Use after git already pulled (post-merge hook, day-start step 5).
+//   pull    — churn-resilient full pull: manifest restore + git pull + engram import.
+//             Use for cross-machine sync (npm run memory:pull).
+//   import  — import-only: engram sync --import, no git pull.
+//             Use after git already pulled (post-merge hook, day-start step 5).
+//   reindex — regenerate .memory/index.json from .memory/records/ alone
+//             (REQ-MF-4, issue #205). Backend-agnostic: dispatched directly
+//             here, not through backends/<backend>.mjs — the record format is
+//             brain-owned and independent of the live memory backend.
 //
 // Reads MEMORY_BACKEND from the environment or .env (default: engram).
 // Imports the corresponding backend from ./backends/<backend>.mjs and
@@ -18,6 +22,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { t } from "../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -49,6 +55,7 @@ const VALID_OPS = [
   "pull",
   "import",
   "index",
+  "reindex",
   "setup",
   "feature-checkpoint",
   "feature-resume",
@@ -63,6 +70,26 @@ if (!op) {
 if (!VALID_OPS.includes(op)) {
   console.error(`memory/cli: unknown op '${op}'. Valid ops: ${VALID_OPS.join(", ")}`);
   process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// "reindex" is backend-agnostic: the durable record format (.memory/records/,
+// .memory/index.json) is brain-owned (ADR-0017), not a MEMORY_BACKEND concern.
+// Dispatched directly here instead of through backends/<backend>.mjs.
+// ---------------------------------------------------------------------------
+if (op === "reindex") {
+  const { rebuildIndex } = await import("./lib/store.mjs");
+  try {
+    const { count } = rebuildIndex({
+      recordsDir: join(repoRoot, ".memory", "records"),
+      indexPath: join(repoRoot, ".memory", "index.json"),
+    });
+    console.log(`memory/cli: ${await t("memory.reindex.done", { count })}`);
+    process.exit(0);
+  } catch (err) {
+    console.error(`memory/cli: ${await t("memory.reindex.failed", { message: err.message })}`);
+    process.exit(1);
+  }
 }
 
 // Map verb strings that cannot be valid JS export names to their actual export name.
