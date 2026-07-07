@@ -372,16 +372,21 @@ const SESSION_I18N_KEYS = {
 };
 
 /**
- * Resolves the full `session.*` template map from the active locale (design
- * §1.8). Exported for the CLI entry and for tests that want to exercise the
- * real i18n wiring end-to-end.
+ * Resolves the full `session.*` template map from a locale (design §1.8).
+ * Exported for the CLI entry and for tests that want to exercise the real i18n
+ * wiring end-to-end.
  *
+ * `locale` is optional: omit it (CLI path) to use the ambient locale from
+ * `brain.config.json`; pass an explicit locale (e.g. tests) to resolve
+ * deterministically, independent of the consumer's ambient config.
+ *
+ * @param {string} [locale] explicit locale override; ambient when omitted.
  * @returns {Promise<object>} field-keyed map matching `renderContextBlock`'s
  *          `strings` contract.
  */
-export async function resolveSessionStrings() {
+export async function resolveSessionStrings(locale) {
   const entries = await Promise.all(
-    Object.entries(SESSION_I18N_KEYS).map(async ([field, key]) => [field, await t(key)]),
+    Object.entries(SESSION_I18N_KEYS).map(async ([field, key]) => [field, await t(key, {}, { locale })]),
   );
   return Object.fromEntries(entries);
 }
