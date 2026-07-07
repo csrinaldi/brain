@@ -77,6 +77,25 @@ export async function branchProtect({ project, branch = 'main', checks, required
   };
 }
 
+/**
+ * Optional, non-contract verb (github only — `brain:protect`'s arm-and-verify
+ * step, issue #203). Returns the check-run names reported for the branch's
+ * latest commit. Never throws: a fetch failure degrades to `[]`, which
+ * `verifyArmedProtection` (brain-protect.mjs) treats as "unverifiable" rather
+ * than a crash.
+ *
+ * @param {{ project: string, branch?: string }} opts
+ * @returns {Promise<string[]>}
+ */
+export async function checkRuns({ project, branch = 'main' } = {}) {
+  try {
+    const resp = runJson('gh', ['api', `repos/${project}/commits/${branch}/check-runs`]);
+    return (resp.check_runs ?? []).map(cr => cr.name);
+  } catch {
+    return [];
+  }
+}
+
 // Capability cache — keyed by "project:branch" to avoid cross-test interference.
 const _capabilityCache = new Map();
 

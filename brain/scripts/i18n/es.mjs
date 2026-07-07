@@ -262,4 +262,9 @@ export default {
   'session.manifest.restored':  'manifest:  cambios descartados (seguro)',
   'session.ticket.label':       'ticket:',
   'session.ticket.none':        '(sin memoria de ticket activa)',
+
+  // ── brain-protect.mjs — arm-and-verify (issue #203) ───────────────────────────
+  'protect.verify.unverifiable': '  Verificar: aún no hay check-runs en {branch} — no verificable hasta el primer PR.',
+  'protect.verify.missing':      '  AVISO    : el check requerido "{context}" no tiene check-run coincidente aún — confirmar que el nombre del job sea exacto.',
+  'protect.verify.unsupported':  '  Verificar: verificación por check-runs no soportada en el provider {provider} — los contexts armados no se cruzan.',
 };
