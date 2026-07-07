@@ -5,6 +5,28 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.9.4 — consumer-portable unit test suite (#206)
+
+Fixes a merge-blocking regression for consumers on v0.9.3: the governance CI job
+runs `npm test` (brain's whole vendored suite) inside consumer repos, but five
+tests assumed they ran inside the brain source repo and failed there — red CI
+blocked every consumer PR (surfaced on a `docs.language: es` monorepo).
+**Test-only + additive i18n seam — no renames, no breaking changes, no CLI
+behavior change.**
+
+- **i18n gains an explicit-locale seam.** `t()` accepts an optional `{ locale }`,
+  and a new exported `loadCatalog(lang)` resolves a catalog without touching the
+  ambient `brain.config.json` or the module-level cache; `resolveSessionStrings`
+  forwards it. The CLI path is unchanged (still reads the ambient locale). The
+  affected tests pin `'en'` instead of the consumer's ambient language.
+- **Brain-source-only tests skip in consumers.** Tests asserting on files that
+  are never vendored (`.claude/commands/**`, `README.md`, the deprecated bare
+  `session:start` alias) skip when the `.brain-source` marker is absent. One
+  module-scope read that threw at import in a consumer moved inside its test.
+
+Upgrade note: nothing to do beyond `brain:upgrade -- v0.9.4`. A consumer whose
+CI was red on v0.9.3 solely from these tests goes green after upgrading.
+
 ## v0.9.3 — install-time HOME.md scaffold + agnostic ADR-index helper (#184)
 
 Closes the fresh-consumer onboarding gap: adopting brain now creates a
