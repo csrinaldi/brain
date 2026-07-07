@@ -5,6 +5,29 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v0.9.5 — consumers no longer run brain's internal unit suite (#211)
+
+Closes the portability treadmill v0.9.4 started down. v0.9.4 made two coupled
+test files hermetic, but the governance CI job `local-checks` (vendored,
+merge-blocking) runs `npm test` — brain's **entire** internal unit suite —
+inside consumer repos, and two more tests coupled to brain-repo state surfaced
+immediately in an `es` consumer. Those tests validate brain's own tooling, not
+the consumer's integration; making each one portable is endless. **CI/config
+only — no runtime or CLI change.**
+
+- **`local-checks` runs `npm test` only in the brain source repo.** The step is
+  now gated on the `.brain-source` marker (present only in brain source, never a
+  managed path, so never vendored). Consumers run `repo:check` + `brain:nav` —
+  which validate the consumer's own `brain/` state — and skip brain's internal
+  suite. Since `governance.yml` is a managed path, every consumer picks this up
+  on `brain:upgrade`.
+
+Upgrade note: nothing to do beyond `brain:upgrade -- v0.9.5`. A consumer whose
+CI was red solely from vendored brain unit tests goes green after upgrading.
+The two tests that surfaced this (`brain/scripts/harness/backends/gentle-ai.test.mjs`,
+`brain/scripts/check-refs.test.mjs`) remain brain-CI-only by design and are not
+made portable.
+
 ## v0.9.4 — consumer-portable unit test suite (#206)
 
 Fixes a merge-blocking regression for consumers on v0.9.3: the governance CI job
