@@ -292,4 +292,9 @@ export default {
   'session.manifest.restored':  'manifest: churn restored (safe)',
   'session.ticket.label':       'ticket:',
   'session.ticket.none':        '(no active ticket memory)',
+
+  // ── brain-protect.mjs — arm-and-verify (issue #203) ───────────────────────────
+  'protect.verify.unverifiable': '  Verify   : no check-runs found yet on {branch} — unverifiable until the first PR runs.',
+  'protect.verify.missing':      '  WARNING  : required check "{context}" has no matching check-run yet — confirm the job name is exact.',
+  'protect.verify.unsupported':  '  Verify   : run verification not supported on provider {provider} — armed contexts not cross-checked.',
 };

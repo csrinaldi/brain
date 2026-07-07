@@ -106,6 +106,22 @@ test('github.commitStatus returns null when there are no checks', async () => {
   assert.equal(result, null);
 });
 
+// ── checkRuns (issue #203 review fix F3 — direct provider-level coverage) ────────
+
+test('github.checkRuns maps check_runs[].name entries to an array of bare names', async () => {
+  setSpawn(fakeSpawn({
+    check_runs: [{ name: 'issue-link' }, { name: 'diff-size' }],
+  }));
+  const result = await github.checkRuns({ project: 'o/r', branch: 'main' });
+  assert.deepEqual(result, ['issue-link', 'diff-size']);
+});
+
+test('github.checkRuns resolves to [] when the seam throws (never throws itself)', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 500: Internal Server Error' }));
+  const result = await github.checkRuns({ project: 'o/r', branch: 'main' });
+  assert.deepEqual(result, []);
+});
+
 test('gitlab.commitStatus maps a running pipeline → running', async () => {
   setSpawn(fakeSpawn([{ status: 'running' }]));
   const result = await gitlab.commitStatus({ project: 'g/r', sha: 'abc' });
