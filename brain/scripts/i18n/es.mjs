@@ -263,6 +263,10 @@ export default {
   'session.ticket.label':       'ticket:',
   'session.ticket.none':        '(sin memoria de ticket activa)',
 
+  // ── memory/cli.mjs — reindex (issue #205, C1) ─────────────────────────────────
+  'memory.reindex.done':   '✓ reindex completo — {count} registro(s) indexado(s).',
+  'memory.reindex.failed': '✗ reindex falló — {message}',
+
   // ── brain-protect.mjs — arm-and-verify (issue #203) ───────────────────────────
   'protect.verify.unverifiable': '  Verificar: aún no hay check-runs en {branch} — no verificable hasta el primer PR.',
   'protect.verify.missing':      '  AVISO    : el check requerido "{context}" no tiene check-run coincidente aún — confirmar que el nombre del job sea exacto.',

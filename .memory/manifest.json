@@ -168,6 +168,14 @@
       "sessions": 0,
       "memories": 2,
       "prompts": 0
+    },
+    {
+      "id": "82884c07",
+      "created_by": "gandalf",
+      "created_at": "2026-07-07T17:08:45Z",
+      "sessions": 0,
+      "memories": 2,
+      "prompts": 0
     }
   ]
 }

@@ -37,6 +37,7 @@
     "memory:index": "node ./brain/scripts/memory/cli.mjs index",
     "memory:share": "node ./brain/scripts/memory/cli.mjs share",
     "memory:pull": "node ./brain/scripts/memory/cli.mjs pull",
+    "memory:reindex": "node ./brain/scripts/memory/cli.mjs reindex",
     "feature:checkpoint": "node ./brain/scripts/memory/cli.mjs feature-checkpoint",
     "feature:resume": "node ./brain/scripts/memory/cli.mjs feature-resume",
     "tools:install": "bash ./brain/scripts/install-tools.sh",
