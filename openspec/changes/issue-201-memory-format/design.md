@@ -218,13 +218,15 @@ and blocked a raw `git pull` — the churn that forced the churn-resilient `memo
   index** — a per-clone `.git/config` registration is exactly the engram-driver friction this
   design eliminates. (`records/*.jsonl` still uses the built-in `merge=union`, which needs no
   per-clone registration.)
-- **Union is scoped to `records/*.jsonl` ONLY and deliberately EXCLUDES `index.json`.** The
+- **Union is scoped to `records/*.jsonl` ONLY and deliberately EXCLUDES `index.jsonl`.** The
   `.gitattributes` glob (`.memory/records/*.jsonl merge=union`) does **not** cover the index:
-  `index.json` is a single JSON object, and union is a line concatenator — applying it there
-  would splice two objects into invalid JSON. A git merge conflict on `index.json` is therefore
-  resolved by **discarding both sides and running `memory:reindex`** — it is **never**
-  hand-merged and **never** union-merged. The index is derived and regenerable (Decision 4), so
-  a conflict on it is throwaway, not a data-loss risk.
+  the index's lines are replaced and reordered on every reindex, so a line-based union of two
+  independently regenerated indexes would concatenate both sides' now-superseded snapshots —
+  producing duplicate and stale entries, not a clean merge. The index is fully regenerable from
+  `records/`, so a git merge conflict on `index.jsonl` is therefore resolved by **discarding both
+  sides and running `memory:reindex`** — it is **never** hand-merged and **never** union-merged.
+  The index is derived and regenerable (Decision 4), so a conflict on it is throwaway, not a
+  data-loss risk.
 
 ## Note (c) — Co-promotion gate for the two drafts (REQUIRED)
 

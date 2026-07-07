@@ -33,7 +33,7 @@ test('REQ-MF-3: two branches append distinct records to the same month file — 
   t.after(() => rmSync(repo, { recursive: true, force: true }));
 
   const recordsDir = join(repo, '.memory', 'records');
-  const indexPath = join(repo, '.memory', 'index.json');
+  const indexPath = join(repo, '.memory', 'index.jsonl');
 
   // 1. Init repo + declare the union-merge attribute (the C1b .gitattributes mechanism).
   git(repo, ['init', '-q', '-b', 'main']);

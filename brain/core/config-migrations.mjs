@@ -62,4 +62,24 @@ export const migrations = [
       },
     },
   },
+  {
+    version: '0.5.0',
+    description:
+      'Add governance.memorySecretPatterns + governance.memorySecretAllowPatterns: the ' +
+      'fail-closed memory:share secret scanner (issue #214) and its sole, committed bypass ' +
+      '(no CLI flag — brain/scripts/memory/lib/secret-scrub.mjs#DEFAULT_SECRET_PATTERNS mirrors ' +
+      'the pattern list below; the two are guarded against drift by installer.test.mjs).',
+    defaults: {
+      governance: {
+        memorySecretPatterns: [
+          'ghp_[A-Za-z0-9]{20,}',
+          'github_pat_[A-Za-z0-9_]{20,}',
+          'glpat-[A-Za-z0-9_-]{20,}',
+          'AKIA[0-9A-Z]{16}',
+          '-----BEGIN [A-Z ]*PRIVATE KEY-----',
+        ],
+        memorySecretAllowPatterns: [],
+      },
+    },
+  },
 ];

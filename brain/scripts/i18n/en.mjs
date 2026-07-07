@@ -297,6 +297,9 @@ export default {
   'memory.reindex.done':   '✓ reindex complete — {count} record(s) indexed.',
   'memory.reindex.failed': '✗ reindex failed — {message}',
 
+  // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
+  'memory.share.secretFound': 'Secret detected in {file}:{line} — pattern "{pattern}" matched. Redact the secret, or add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive. Run `gunzip -c {file} | jq .` to inspect (the line number is against that pretty-printed view).',
+
   // ── brain-protect.mjs — arm-and-verify (issue #203) ───────────────────────────
   'protect.verify.unverifiable': '  Verify   : no check-runs found yet on {branch} — unverifiable until the first PR runs.',
   'protect.verify.missing':      '  WARNING  : required check "{context}" has no matching check-run yet — confirm the job name is exact.',

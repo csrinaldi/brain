@@ -5,11 +5,11 @@
 // openspec/changes/issue-201-memory-format/brain-drafts/memory-format.md.
 //
 // Pure functions only: no filesystem access, no engram dependency, no child
-// processes. The thin I/O layer (append to records/, rebuild index.json) lives
+// processes. The thin I/O layer (append to records/, rebuild index.jsonl) lives
 // in ./store.mjs, which calls into this module.
 //
 // Three code-pins from the C0 contract, enforced here:
-//   R1 — index.json: one entry per physical line, sorted by id, deterministic (serializeIndex).
+//   R1 — index.jsonl: one entry per physical line, sorted by id, deterministic (serializeIndex).
 //   R2 — a non-empty `title` is folded into `content` as a bold prefix BEFORE hashing (buildRecord).
 //   R3 — absent optional fields (`issue`, `supersedes`, `source`) are OMITTED — never `null` (buildRecord, validateRecord).
 
@@ -181,7 +181,7 @@ export function parseRecordLine(line) {
 }
 
 /**
- * buildIndexEntry() — the derived `index.json` projection of one record
+ * buildIndexEntry() — the derived `index.jsonl` projection of one record
  * (REQ-MF-4): `{ id, ts, actor, type, project, issue?, supersedes?, file }`.
  *
  * @param {object} record
@@ -197,7 +197,7 @@ export function buildIndexEntry(record, file) {
 }
 
 /**
- * serializeIndex() — R1: one entry per physical line, sorted by `id`,
+ * serializeIndex() — R1 (index.jsonl): one entry per physical line, sorted by `id`,
  * deterministic formatting (`JSON.stringify`, stable key insertion order from
  * buildIndexEntry). An empty map serializes to the empty string.
  *

@@ -334,6 +334,66 @@ test('0.4.0 migration preserves a consumer-set governance.ignoreList', () => {
   assert.deepEqual(migrated.governance.ignoreList, ['dist/**', 'coverage/**']);
 });
 
+// ── memory secret-scrub config migration (0.5.0, issue #214) ───────────────────
+
+test('0.5.0 migration adds governance.memorySecretPatterns + memorySecretAllowPatterns when missing', () => {
+  const config = {
+    schemaVersion: '0.4.0',
+    project: { name: 'mine', slug: 'org/repo', gitHost: 'github.com', gitProjectId: '1', owner: 'me' },
+    docs: { language: 'en' },
+    vcs: { provider: 'github' },
+    governance: { ignoreList: ['.memory/**'] },
+  };
+  const { config: migrated, applied } = migrateConfig(config, migrations, '0.5.0');
+
+  assert.deepEqual(applied, ['0.5.0']);
+  assert.equal(migrated.schemaVersion, '0.5.0');
+  assert.ok(Array.isArray(migrated.governance?.memorySecretPatterns), 'memorySecretPatterns must be an array');
+  assert.ok(migrated.governance.memorySecretPatterns.includes('AKIA[0-9A-Z]{16}'), 'must include the AWS key pattern');
+  assert.ok(Array.isArray(migrated.governance?.memorySecretAllowPatterns), 'memorySecretAllowPatterns must be an array');
+  assert.deepEqual(migrated.governance.memorySecretAllowPatterns, [], 'no allowlist entries ship by default');
+  // Additive: the pre-existing ignoreList from 0.4.0 must survive untouched.
+  assert.deepEqual(migrated.governance.ignoreList, ['.memory/**']);
+});
+
+test('0.5.0 migration is idempotent — re-running on an already-migrated config is a no-op', () => {
+  const config = {
+    schemaVersion: '0.5.0',
+    project: { name: 'mine', slug: 'org/repo', gitHost: 'github.com', gitProjectId: '1', owner: 'me' },
+    docs: { language: 'en' },
+    vcs: { provider: 'github' },
+    governance: {
+      memorySecretPatterns: ['ghp_[A-Za-z0-9]{20,}', 'github_pat_[A-Za-z0-9_]{20,}', 'glpat-[A-Za-z0-9_-]{20,}', 'AKIA[0-9A-Z]{16}', '-----BEGIN [A-Z ]*PRIVATE KEY-----'],
+      memorySecretAllowPatterns: [],
+    },
+  };
+  const { applied } = migrateConfig(config, migrations, '0.5.0');
+  assert.deepEqual(applied, []);
+});
+
+test('0.5.0 migration preserves a consumer-set memorySecretAllowPatterns', () => {
+  const config = {
+    schemaVersion: '0.4.0',
+    project: { name: 'mine', slug: 'org/repo', gitHost: 'github.com', gitProjectId: '1', owner: 'me' },
+    docs: { language: 'en' },
+    vcs: { provider: 'github' },
+    governance: { memorySecretAllowPatterns: ['glpat-TUTORIAL-EXAMPLE'] },
+  };
+  const { config: migrated } = migrateConfig(config, migrations, '0.5.0');
+
+  // Consumer-set allowlist must be preserved (mergeDefaults never overwrites existing values).
+  assert.deepEqual(migrated.governance.memorySecretAllowPatterns, ['glpat-TUTORIAL-EXAMPLE']);
+});
+
+// Drift guard: config-migrations.mjs's 0.5.0 default pattern list and
+// secret-scrub.mjs's runtime DEFAULT_SECRET_PATTERNS describe the same
+// conceptual default — they must never diverge silently.
+test('0.5.0 migration default patterns match secret-scrub.mjs#DEFAULT_SECRET_PATTERNS (drift guard)', async () => {
+  const { DEFAULT_SECRET_PATTERNS } = await import('../memory/lib/secret-scrub.mjs');
+  const migration = migrations.find((m) => m.version === '0.5.0');
+  assert.deepEqual(migration.defaults.governance.memorySecretPatterns, DEFAULT_SECRET_PATTERNS);
+});
+
 // ── S1: mergeClaudeSettings ───────────────────────────────────────────────────
 //
 // Fixtures shared across S1 tests.

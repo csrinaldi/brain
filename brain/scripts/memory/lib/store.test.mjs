@@ -1,5 +1,5 @@
 // store.test.mjs — unit tests for the thin I/O layer over .memory/records/ +
-// .memory/index.json (REQ-MF-3, REQ-MF-4, and the degenerate-state contract).
+// .memory/index.jsonl (REQ-MF-3, REQ-MF-4, and the degenerate-state contract).
 //
 // RED: these imports fail until store.mjs is created (task C1a.2).
 import { test } from 'node:test';
@@ -13,7 +13,7 @@ import { appendRecord, rebuildIndex } from './store.mjs';
 
 function tmpMemoryDir() {
   const root = mkdtempSync(join(tmpdir(), 'brain-memory-store-'));
-  return { root, recordsDir: join(root, 'records'), indexPath: join(root, 'index.json') };
+  return { root, recordsDir: join(root, 'records'), indexPath: join(root, 'index.jsonl') };
 }
 
 const base = {
@@ -93,6 +93,27 @@ test('rebuildIndex: an invalid (schema-violating) record fails closed with file 
   const bad = { ...buildRecord({ ...base, content: 'x' }), type: 'manual' };
   writeFileSync(join(recordsDir, '2026-07.jsonl'), JSON.stringify(bad) + '\n');
   assert.throws(() => rebuildIndex({ recordsDir, indexPath }), /2026-07\.jsonl:1/);
+});
+
+// ── rebuildIndex — id-integrity hardening (issue #214, C1b) ──────────────────
+// Recompute each record's id via the ONE shared computeRecordId (never a second
+// hasher) and fail closed on a mismatch, same file:line policy as the corrupt-line path.
+
+test('rebuildIndex: a tampered id fails closed with file + line number in the error', () => {
+  const { recordsDir, indexPath } = tmpMemoryDir();
+  mkdirSync(recordsDir, { recursive: true });
+  const rec = buildRecord({ ...base, content: 'legitimate content' });
+  const tampered = { ...rec, id: 'rec-0000000000000000' };
+  writeFileSync(join(recordsDir, '2026-07.jsonl'), JSON.stringify(tampered) + '\n');
+  assert.throws(() => rebuildIndex({ recordsDir, indexPath }), /2026-07\.jsonl:1/);
+});
+
+test('rebuildIndex: a legitimate record (title folded, optionals omitted) never produces a false id mismatch', () => {
+  const { recordsDir, indexPath } = tmpMemoryDir();
+  const rec = buildRecord({ ...base, title: 'A Title', content: 'body text', issue: 214 });
+  appendRecord(rec, { recordsDir });
+  const { count } = rebuildIndex({ recordsDir, indexPath }); // must not throw
+  assert.equal(count, 1);
 });
 
 // ── rebuildIndex — normal + property behavior (REQ-MF-4, R1) ─────────────────

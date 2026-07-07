@@ -33,6 +33,8 @@ import { resolveFeature } from "../lib/feature-resolution.mjs";
 import { parseFrontmatter, serializeFrontmatter } from "../lib/resume-frontmatter.mjs";
 import { validateResume } from "../lib/resume-schema.mjs";
 import { currentBranch } from "../../lib/git-branch.mjs";
+import { resolveSecretConfig, compilePatterns, scrubChunkFile } from "../lib/secret-scrub.mjs";
+import { t } from "../../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -103,12 +105,129 @@ function requireEngram() {
 }
 
 /**
- * share() — export live engram memory to .memory/ (idempotent, content-addressed).
- * Equivalent to what `memory:share` used to do directly.
+ * share() — export live engram memory to .memory/ (idempotent, content-addressed),
+ * then fail-closed secret-scrub whatever was materialized this run (issue #214, C1b).
+ *
+ * Scrub scope (design decision, C1a design.md Decision 5 + C1b): today `share()`
+ * materializes engram's gzip chunks, NOT `.memory/records/` (that lands in C2),
+ * so the scanner's target is the CHANGED chunk files this run touched — detected
+ * via `git status` against `.memory/chunks` (content-addressed: an unchanged
+ * chunk's filename/content never appears as dirty). C2 re-points this at
+ * `records/`. There is NO `--no-scrub` flag; the only bypass is the config
+ * allowlist (`governance.memorySecretAllowPatterns`), applied inside
+ * scrubMaterializedChunks().
+ *
+ * @param {object} [opts]  Injectable seams for testing — production defaults
+ *   call the real engram binary, git, and filesystem.
+ * @param {string} [opts.root]  Repo root.
+ * @param {() => string} [opts._requireEngram]  Resolves the engram binary; throws if absent.
+ * @param {(engram: string) => void} [opts._export]  Runs `engram sync --export`.
+ * @param {(root: string) => string[]} [opts._changedChunkFiles]  Chunk files materialized this run.
+ * @param {(root: string) => object} [opts._loadConfig]  Reads brain.config.json.
+ * @param {(path: string, patterns: RegExp[], allowPatterns: RegExp[]) => object|null} [opts._scrubChunk]
  */
-export async function share() {
-  const engram = requireEngram();
+export async function share({
+  root = repoRoot,
+  _requireEngram = requireEngram,
+  _export = _defaultShareExport,
+  _changedChunkFiles = _defaultChangedChunkFiles,
+  _loadConfig = _defaultLoadBrainConfig,
+  _scrubChunk = scrubChunkFile,
+} = {}) {
+  const engram = _requireEngram();
+  _export(engram);
+  await scrubMaterializedChunks(root, { _changedChunkFiles, _loadConfig, _scrubChunk });
+}
+
+function _defaultShareExport(engram) {
   execFileSync(engram, ["sync", "--export"], { stdio: "inherit" });
+}
+
+/**
+ * Default seam: reads `brain.config.json` for the `governance.memorySecret*`
+ * keys. Never throws — an absent/unparseable config falls back to `{}`, which
+ * resolveSecretConfig() turns into the default pattern set.
+ *
+ * @param {string} root
+ * @returns {object}
+ */
+function _defaultLoadBrainConfig(root) {
+  try {
+    return JSON.parse(readFileSync(join(root, "brain.config.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Default seam: the `.memory/chunks/*.jsonl.gz` files `git status` reports as
+ * changed (new or modified) after `engram sync --export` ran. Chunks are
+ * content-addressed, so an untouched chunk never appears here — this is the
+ * "materialized THIS run" boundary the scrubber respects (never the whole store).
+ *
+ * @param {string} root
+ * @returns {string[]}  Absolute paths.
+ */
+export function _defaultChangedChunkFiles(root, { _spawn = spawnSync } = {}) {
+  const r = _spawn("git", ["status", "--porcelain", "--", ".memory/chunks"], {
+    encoding: "utf8",
+    cwd: root,
+  });
+  // Fail CLOSED on any git failure (binary absent, not a repo, or the common
+  // safe.directory "dubious ownership" → status 128 with empty stdout). A silent
+  // [] here would scan ZERO chunks and let a secret through — the one path that
+  // must never fail open in a fail-closed slice (matches the r.status guard in
+  // _defaultIsManifestDirty / _defaultRestoreManifest).
+  if (r.error || r.status !== 0) {
+    throw new Error(
+      `secret-scrub: 'git status' failed — cannot determine which chunks were materialized this run; refusing to share (fail closed): ${r.stderr || r.error || `exit ${r.status}`}`
+    );
+  }
+  return (r.stdout ?? "")
+    .split("\n")
+    .map((line) => line.slice(3).trim())
+    .filter((p) => p.endsWith(".jsonl.gz"))
+    .map((p) => join(root, p));
+}
+
+/**
+ * scrubMaterializedChunks() — the fail-closed core, independent of requireEngram()
+ * so it is unit-testable with zero real engram/git/gzip dependency. Resolves
+ * the effective pattern set (defaults + `governance.memorySecretPatterns`,
+ * additive) and the allowlist (`governance.memorySecretAllowPatterns`, the sole
+ * bypass — no CLI flag), then scans every changed chunk. Throws on the FIRST
+ * hit, naming the matched pattern and the file:line location.
+ *
+ * @param {string} root
+ * @param {object} [opts]
+ * @param {(root: string) => string[]} [opts._changedChunkFiles]
+ * @param {(root: string) => object} [opts._loadConfig]
+ * @param {(path: string, patterns: RegExp[], allowPatterns: RegExp[]) => object|null} [opts._scrubChunk]
+ */
+export async function scrubMaterializedChunks(
+  root,
+  {
+    _changedChunkFiles = _defaultChangedChunkFiles,
+    _loadConfig = _defaultLoadBrainConfig,
+    _scrubChunk = scrubChunkFile,
+  } = {},
+) {
+  const { patternSources, allowPatternSources } = resolveSecretConfig(_loadConfig(root));
+  const patterns = compilePatterns(patternSources);
+  const allowPatterns = compilePatterns(allowPatternSources);
+
+  for (const chunkPath of _changedChunkFiles(root)) {
+    const hit = _scrubChunk(chunkPath, patterns, allowPatterns);
+    if (hit) {
+      throw new Error(
+        await t("memory.share.secretFound", {
+          file: chunkPath,
+          line: hit.lineNumber,
+          pattern: hit.pattern,
+        }),
+      );
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

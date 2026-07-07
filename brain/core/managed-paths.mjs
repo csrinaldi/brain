@@ -28,6 +28,13 @@ export const MANAGED_SCRIPT_KEYS = [
   'brain:change:verify',
 ];
 
+// The .gitattributes line declaring git's BUILT-IN `union` merge driver for the
+// brain-owned durable record log (ADR-0017, REQ-MF-3, issue #214/C1b). Unlike
+// the legacy `merge=engram-manifest` line, this needs NO per-clone `git config`
+// registration. Single source of truth — drift-guarded against the real
+// `.gitattributes` file by managed-paths.test.mjs.
+export const RECORDS_UNION_MERGE_GITATTRIBUTES_LINE = '/.memory/records/*.jsonl merge=union';
+
 // Paths brain owns. The upgrade OVERWRITES these in the consumer.
 export const managed = [
   'brain/core/**',
