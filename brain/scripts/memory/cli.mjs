@@ -95,17 +95,44 @@ if (op === "reindex") {
 
 // ---------------------------------------------------------------------------
 // "migrate-v1" is likewise backend-agnostic (chunks → records is a durable-
-// format concern, ADR-0017 — not a MEMORY_BACKEND one). C2a scope: `--dry-run`
-// only. The persisting real run (records/ writes, chunks → .memory/legacy/,
-// idempotency abort, reindex) is C2b — see design.md's dual-write pipeline.
+// format concern, ADR-0017 — not a MEMORY_BACKEND one).
+//
+// `--dry-run` → the C2a report only, never mutates `.memory/`.
+// no `--dry-run` → `runMigration()` (C2-migrate, #219): real-run CODE, wired
+// against the true `.memory/{chunks,records,legacy}` + `index.jsonl` paths.
+// Fixture-proven only (design.md Decision 1) — the real EXECUTION runbook
+// against the TRUE store is C2b's cutover, not this dispatch.
 // ---------------------------------------------------------------------------
 if (op === "migrate-v1") {
-  const { collectChunkObservations, buildMigrationReport } = await import("./lib/migrate-v1.mjs");
-  if (!process.argv.includes("--dry-run")) {
-    console.error(`memory/cli: ${await t("memory.migrateV1.realRunPending")}`);
-    process.exit(1);
-  }
+  const { collectChunkObservations, buildMigrationReport, runMigration } = await import(
+    "./lib/migrate-v1.mjs"
+  );
   const chunksDir = join(repoRoot, ".memory", "chunks");
+
+  if (!process.argv.includes("--dry-run")) {
+    try {
+      const summary = runMigration({
+        chunksDir,
+        recordsDir: join(repoRoot, ".memory", "records"),
+        legacyDir: join(repoRoot, ".memory", "legacy"),
+        indexPath: join(repoRoot, ".memory", "index.jsonl"),
+      });
+      console.log(
+        await t("memory.migrateV1.realRunSummary", {
+          written: summary.written,
+          rejected: summary.rejected,
+          skipped: summary.skipped,
+          legacyDir: summary.legacyDir,
+          reportPath: summary.reportPath,
+        }),
+      );
+      process.exit(0);
+    } catch (err) {
+      console.error(`memory/cli: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
   const { observations, unparseable, emptyObservations } = collectChunkObservations(chunksDir);
   const report = buildMigrationReport(observations, { unparseable, emptyObservations });
 

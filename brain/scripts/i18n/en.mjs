@@ -300,8 +300,8 @@ export default {
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.secretFound': 'Secret detected in {file}:{line} — pattern "{pattern}" matched. Redact the secret, or add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive. Run `gunzip -c {file} | jq .` to inspect (the line number is against that pretty-printed view).',
 
-  // ── memory/cli.mjs — migrate-v1 (issue #217, C2a) ─────────────────────────────
-  'memory.migrateV1.realRunPending':        'real run not yet implemented — pending C2b (dual-write pipeline); use --dry-run',
+  // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate) ───────────
+  'memory.migrateV1.realRunSummary':        'Real-run migration complete — records written: {written} | rejected: {rejected} | skipped (personal): {skipped}. Original chunks moved to {legacyDir}. Rejection report persisted at {reportPath}.',
   'memory.migrateV1.dryRunHeader':          'Dry-run migration report (issue #217, C2):',
   'memory.migrateV1.summary':               'records: {records} | skipped (personal): {skipped} | rejected: {rejected} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations}',
   'memory.migrateV1.typesHistogramHeader':  'Types histogram:',

@@ -1,19 +1,22 @@
 // migrate-v1.mjs — one-shot engram chunk → brain record migration (issue
 // #217, C2).
 //
-// C2a scope (this slice): the DRY-RUN report only — record count, types
-// histogram, unparseable-chunk list, rejection report, and the provenance
-// recovered/fallback histogram. The REAL (persisting) run — writing
-// `records/<yyyy-mm>.jsonl`, moving chunks to `.memory/legacy/`, the
-// idempotency abort-if-`records/`-already-has-content guard, and the
-// reindex — is C2b (see design.md "dual-write pipeline" decision). This
-// module never mutates `.memory/chunks/`.
+// C2a scope: the DRY-RUN report — record count, types histogram,
+// unparseable-chunk list, rejection report, and the provenance
+// recovered/fallback histogram.
+//
+// C2-migrate scope (this slice, #219): `runMigration()` — the real-run CODE,
+// proven only against a synthetic fixture store (never the live `.memory/`).
+// The real EXECUTION against the TRUE store (dual-write pipeline, import,
+// scrub re-point, and the cutover runbook itself) is C2b — see design.md
+// Decision 1.
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
 
 import { exportObservation } from './engram-export.mjs';
+import { appendRecord, rebuildIndex } from './store.mjs';
 
 /**
  * collectChunkObservations() — decompress every `*.jsonl.gz` chunk under
@@ -146,4 +149,118 @@ export function buildMigrationReport(observations, chunkStats = {}) {
   }
 
   return report;
+}
+
+const REJECTION_REPORT_FILE = 'migration-rejected.json';
+
+/**
+ * runMigration() — the real-run CODE (C2-migrate, #219). Fixture-tested only
+ * (design.md Decision 1): proven against a synthetic temp-dir store, never
+ * executed here against the live `.memory/`. Deps are injected (`_`-prefixed,
+ * mirroring backends/engram.mjs's seam pattern) so tests drive a real
+ * filesystem in a temp dir.
+ *
+ * Order (design.md Decision 2 + 3):
+ *   1. Idempotency abort FIRST, before any work: a `recordsDir` that already
+ *      has `.jsonl` content means a prior run (or a C2b dual-write `share`)
+ *      already populated it — throw, routing the operator to the runbook.
+ *   2. Collect + export every chunk observation; accepted → `appendRecord`
+ *      (bucketed by `ts` month); rejected/`scope:personal` → accumulated,
+ *      never dropped.
+ *   3. Persist the rejection report (id/title/type/reason) under `legacyDir`
+ *      — a NAMED file, never silently lost.
+ *   4. MOVE every original chunk file to `legacyDir` (never delete in place).
+ *   5. `rebuildIndex()`.
+ *
+ * @param {object} opts
+ * @param {string} opts.chunksDir
+ * @param {string} opts.recordsDir
+ * @param {string} opts.legacyDir
+ * @param {string} opts.indexPath
+ * @param {typeof collectChunkObservations} [opts._collectChunkObservations]
+ * @param {typeof exportObservation} [opts._exportObservation]
+ * @param {typeof appendRecord} [opts._appendRecord]
+ * @param {typeof rebuildIndex} [opts._rebuildIndex]
+ * @param {typeof existsSync} [opts._existsSync]
+ * @param {typeof readdirSync} [opts._readdirSync]
+ * @param {typeof mkdirSync} [opts._mkdirSync]
+ * @param {typeof renameSync} [opts._renameSync]
+ * @param {typeof writeFileSync} [opts._writeFileSync]
+ * @returns {{written:number, rejected:number, skipped:number,
+ *            unparseableChunks:number, emptyObservationsChunks:number,
+ *            legacyDir:string, reportPath:string, indexCount:number}}
+ * @throws {Error} if `recordsDir` already has migrated `.jsonl` content —
+ *   message names `recordsDir` and contains "run the cutover runbook".
+ */
+export function runMigration({
+  chunksDir,
+  recordsDir,
+  legacyDir,
+  indexPath,
+  _collectChunkObservations = collectChunkObservations,
+  _exportObservation = exportObservation,
+  _appendRecord = appendRecord,
+  _rebuildIndex = rebuildIndex,
+  _existsSync = existsSync,
+  _readdirSync = readdirSync,
+  _mkdirSync = mkdirSync,
+  _renameSync = renameSync,
+  _writeFileSync = writeFileSync,
+}) {
+  const alreadyMigrated =
+    _existsSync(recordsDir) && _readdirSync(recordsDir).some((f) => f.endsWith('.jsonl'));
+  if (alreadyMigrated) {
+    throw new Error(
+      `runMigration: '${recordsDir}' already has migrated records — refusing to re-run this one-shot migration; run the cutover runbook (C2b) instead of memory:migrate-v1`,
+    );
+  }
+
+  const { observations, unparseable, emptyObservations } = _collectChunkObservations(chunksDir);
+
+  const rejected = [];
+  let written = 0;
+  let skipped = 0;
+
+  for (const obs of observations) {
+    let result;
+    try {
+      result = _exportObservation(obs);
+    } catch (err) {
+      rejected.push({ id: obs.sync_id ?? String(obs.id), title: obs.title ?? '', type: obs.type, reason: err.message });
+      continue;
+    }
+    if (result.skipped) {
+      skipped += 1;
+      continue;
+    }
+    if (result.rejected) {
+      rejected.push(result.rejected);
+      continue;
+    }
+    _appendRecord(result.record, { recordsDir });
+    written += 1;
+  }
+
+  _mkdirSync(legacyDir, { recursive: true });
+  const reportPath = join(legacyDir, REJECTION_REPORT_FILE);
+  _writeFileSync(reportPath, JSON.stringify(rejected, null, 2) + '\n', 'utf8');
+
+  if (_existsSync(chunksDir)) {
+    for (const file of _readdirSync(chunksDir).filter((f) => f.endsWith('.jsonl.gz'))) {
+      _renameSync(join(chunksDir, file), join(legacyDir, file));
+    }
+  }
+
+  const { count: indexCount } = _rebuildIndex({ recordsDir, indexPath });
+
+  return {
+    written,
+    rejected: rejected.length,
+    skipped,
+    unparseableChunks: unparseable.length,
+    emptyObservationsChunks: emptyObservations.length,
+    legacyDir,
+    reportPath,
+    indexCount,
+  };
 }

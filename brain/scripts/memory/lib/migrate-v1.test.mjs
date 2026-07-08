@@ -5,12 +5,12 @@
 // RED: these imports fail until migrate-v1.mjs is created.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { collectChunkObservations, buildMigrationReport } from './migrate-v1.mjs';
+import { collectChunkObservations, buildMigrationReport, runMigration } from './migrate-v1.mjs';
 
 const baseObs = (overrides = {}) => ({
   id: 1,
@@ -218,4 +218,74 @@ test('buildMigrationReport: one observation with a malformed created_at is rejec
   assert.equal(report.rejected[0].id, 'obs-2');
   assert.ok(report.rejected[0].reason, 'the malformed-timestamp rejection must carry a reason string');
   assert.match(report.rejected[0].reason, /not-a-real-timestamp/);
+});
+
+// ── runMigration (real-run CODE, fixtures only — never the live .memory/) ───
+
+function tmpMigrationFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'brain-migrate-v1-run-'));
+  const chunksDir = join(root, 'chunks');
+  const recordsDir = join(root, 'records');
+  const legacyDir = join(root, 'legacy');
+  const indexPath = join(root, 'index.jsonl');
+  mkdirSync(chunksDir, { recursive: true });
+  return { chunksDir, recordsDir, legacyDir, indexPath };
+}
+
+test('runMigration: writes accepted records, moves chunks to legacy, persists the rejection report, rebuilds the index', () => {
+  const { chunksDir, recordsDir, legacyDir, indexPath } = tmpMigrationFixture();
+  const payload = {
+    sessions: [],
+    observations: [baseObs(), baseObs({ id: 2, sync_id: 'obs-2', type: 'manual' })],
+    prompts: [],
+  };
+  writeFileSync(join(chunksDir, 'chunk1.jsonl.gz'), gzipSync(Buffer.from(JSON.stringify(payload))));
+
+  const summary = runMigration({ chunksDir, recordsDir, legacyDir, indexPath });
+
+  assert.equal(summary.written, 1);
+  assert.equal(summary.rejected, 1);
+
+  const recordsFile = join(recordsDir, '2026-07.jsonl');
+  assert.ok(existsSync(recordsFile), 'accepted record must land in records/2026-07.jsonl');
+  assert.equal(readFileSync(recordsFile, 'utf8').trim().split('\n').length, 1);
+
+  assert.ok(existsSync(join(legacyDir, 'chunk1.jsonl.gz')), 'original chunk must be moved to legacy/');
+  assert.ok(!existsSync(join(chunksDir, 'chunk1.jsonl.gz')), 'chunk must not remain in chunks/');
+
+  assert.ok(existsSync(summary.reportPath), 'the rejection report must be persisted, never dropped');
+  const report = JSON.parse(readFileSync(summary.reportPath, 'utf8'));
+  assert.equal(report.length, 1);
+  assert.equal(report[0].type, 'manual');
+  assert.equal(report[0].id, 'obs-2');
+
+  assert.ok(existsSync(indexPath), 'the index must be rebuilt');
+});
+
+test('runMigration: idempotency abort — a populated records/ throws BEFORE any work, message names the runbook and the records dir', () => {
+  const { chunksDir, recordsDir, legacyDir, indexPath } = tmpMigrationFixture();
+  mkdirSync(recordsDir, { recursive: true });
+  writeFileSync(join(recordsDir, '2026-01.jsonl'), '{"id":"already-migrated"}\n');
+
+  assert.throws(
+    () => runMigration({ chunksDir, recordsDir, legacyDir, indexPath }),
+    (err) => {
+      assert.match(err.message, /run the cutover runbook/);
+      assert.ok(err.message.includes(recordsDir));
+      return true;
+    },
+  );
+});
+
+test('runMigration: re-run over a just-migrated fixture aborts (idempotency)', () => {
+  const { chunksDir, recordsDir, legacyDir, indexPath } = tmpMigrationFixture();
+  writeFileSync(
+    join(chunksDir, 'chunk1.jsonl.gz'),
+    gzipSync(Buffer.from(JSON.stringify({ sessions: [], observations: [baseObs()], prompts: [] }))),
+  );
+  runMigration({ chunksDir, recordsDir, legacyDir, indexPath });
+  assert.throws(
+    () => runMigration({ chunksDir, recordsDir, legacyDir, indexPath }),
+    /run the cutover runbook/,
+  );
 });
