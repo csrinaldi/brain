@@ -13,6 +13,23 @@
 > chunks-only (a delta the one-shot can never migrate); the atomic commit closes that
 > (`sdd/memory-format/c2-migrate-c2b-boundary`).
 
+## ⚠️ EMBARGO — chunk-based `pull` is suspended for the transitional window
+
+Between the **merge of the cutover PR** and the **merge of C4**, do NOT run `memory:pull` (chunk-based)
+on ANY clone. The manifest goes stale by design — MEASURED: post-share it references 24 chunks, 23 of
+them absent from `chunks/` and now in `legacy/`, so a chunk-based pull cannot find the migrated chunks.
+This degradation is **transitional and DECLARED, never silent**; it is NOT data loss (the observations
+live in `records/` — the new committed truth — and in `legacy/`; the records-based import reads `records/`).
+
+- **Window minimized by scheduling:** C4 is the NEXT slice, with nothing in between. The window closes at
+  C4's merge; **C4 is scheduled immediately** after the cutover merges.
+- **Concrete second consumer:** `PCStaFe30-174` (`~/code/brain`, `feature/v2.0.0`) was synced pre-cutover
+  on 2026-07-08 (31 chunks in its local engram). That machine MUST NOT run `memory:pull` from the cutover
+  merge until the C4 merge — its risk delta is only what is shared from today onward.
+- **Enforcement caveat:** a written note relies on human discipline. If any clone's session-start hook
+  auto-runs a chunk-based sync/pull, the embargo can be violated silently — confirm the hook does not
+  pull (or pause it on `PCStaFe30-174` for the window).
+
 ## Step 0 — Preflight + backup + branch (no shared-world change)
 
 ```bash
@@ -69,6 +86,14 @@ idealized model:**
   in `legacy/` (the preserved originals). The records-based pull/import (C2b-1) reads `records/`; the
   `pull → records-only` switch that retires this degradation is **C4**.
 - `records/` stays idempotent (the dual-write dedups by id — no duplicate physical lines on re-share).
+- **Why the index dedups 275 → 136 (MEASURED cause, not a surprise to investigate live):** the repo has
+  **47 physical chunk files** but the pre-cutover manifest references only **23** — the other **24 are
+  orphans** from manifest churn (superseded snapshots left committed without a reference), carrying
+  overlapping observations. `migrate-v1` reads FILES, not the manifest, so it captures everything,
+  orphans included (correct behavior), and the reindex collapses the overlap by content-hash → **136
+  unique**. The "24 referenced" in the bullet above is the POST-share manifest (23 pre-existing + 1 new
+  delta chunk); the "23" here is the pre-cutover manifest — different points in time, NOT a contradiction.
+  This same manifest-churn history is why the second consumer reported "31 imported".
 
 **Verify:** the share succeeds (scrub green); `chunks/` contains only the new delta chunk(s);
 `records/` gained no duplicate physical lines; the manifest/`chunks/` mismatch is the KNOWN transitional
@@ -82,12 +107,21 @@ STOP — the fix (records-based pull earlier, or migrate copy-not-move) is desig
 git add .memory brain.config.json
 git commit -m "feat(memory): cutover — migrate chunks→records + activate dual-write (#222)"
 git push -u origin cutover/records-v1
-gh pr create --base feature/v2.0.0 --title "cutover: records-v1 (#222)" --body "Part of #222 — the real cutover, per runbook.md"
+# PR body MUST paste the real Step 1 migrate report + the EMBARGO note (naming PCStaFe30-174).
+gh pr create --base feature/v2.0.0 --title "cutover: records-v1 (#222)" \
+  --body "Part of #222 — the real cutover, per runbook.md.
+
+Real migrate report (Step 1): written 275, rejected 3, skipped 0, unparseable 0, empty 4; index 136 unique.
+
+EMBARGO: between this PR's merge and C4's merge, NO chunk-based memory:pull on any clone (manifest stale
+by design — references 24, 23 in legacy/). PCStaFe30-174 (~/code/brain, feature/v2.0.0, synced 2026-07-08)
+MUST NOT pull until C4 merges. C4 is scheduled immediately."
 ```
 **Verify:** the commit contains `.memory/records/`, `.memory/legacy/`, the `chunks/` delta, the updated
-manifest, AND `brain.config.json` with `dualWrite: true` — all together. The PR's 5 REQUIRED gates are
-green (rung-1 preserved; no bypass). **The cutover COMPLETES when this PR merges** — that is when the
-shared world changes.
+manifest, AND `brain.config.json` with `dualWrite: true` — all together. The PR body carries the real
+migrate report + the embargo. The PR's 5 REQUIRED gates are green (rung-1 preserved; no bypass).
+**Opening this PR is the final step of the runbook; the cutover COMPLETES when it merges** — that merge is
+the closure of the cutover and the final evidence of CP-C2b-2.
 
 ## Step 5 — Post-cutover success criteria (verify on the branch, before/with the merge)
 
@@ -96,9 +130,12 @@ npm run memory:migrate-v1        # re-run → MUST abort (idempotency)
 #   records-based pull/import round-trips (records/ → engram) — the C2b-1 import over real data
 rg -c '"type":"decision"' .memory/records/*.jsonl   # smoke grep — ADR-0002's git-clone+grep, made command
 ```
-**Verify:** the re-run ABORTS with the "run the cutover runbook" message; the records-based import
-rebuilds engram observations from `records/`; the smoke grep returns a real count from the plaintext
-records. Record each answer as the cutover evidence (post-merge, human-executed).
+**Verify (against the MEASURED numbers — any divergence STOPS the cutover and returns to the reviewer):**
+the Step 1 report equals **275 written / 3 rejected / 0 skipped / 0 unparseable / 4 empty** AND the index
+is **136 unique records** (dedup cause pinned in Step 3 — known, not a surprise to investigate live). The
+re-run ABORTS with the "run the cutover runbook" message; the records-based import rebuilds engram
+observations from `records/`; the smoke grep returns a real count from the plaintext records. Record each
+answer as the cutover evidence (post-merge, human-executed).
 
 ## Rollback (its own section — REHEARSED in fixture; run if any step fails)
 
