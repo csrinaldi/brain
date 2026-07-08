@@ -28,12 +28,22 @@ FULL runbook there. **@csrinaldi executes the real mutating cutover** — the fi
 mutation — only after the external APPROVE. Same principle as promotion to `brain/`: executing the
 irreversible is a human act. No code/test/artifact in this PR touches the real `.memory/`.
 
-## Decision 4 — the `memory.dualWrite=true` flip is runbook step 2 (committed state marker)
+## Decision 4 — the cutover materializes through git: one atomic commit + a PR (CP-C2b-2 REVISE gap 1)
 
-Immediately after the real migrate (step 1) populates `records/`, the human commits `memory.dualWrite=true`
-(step 2) so subsequent shares dual-write. This is the committed cutover STATE MARKER from C2b-1 Decision 5
-— auditable in git, not a merge, not a bypass switch. Ordering (migrate → flip → verified scrub) is the
-safety property.
+The cutover is NOT a direct push. Steps run on a branch `cutover/records-v1`; **ONE atomic commit
+carries the migrated store AND `brain.config.json` `memory.dualWrite=true` together** (the flip is not a
+separate commit — it lands with the migrated store so there is never a window with one but not the
+other). The cutover **completes when the PR to `feature/v2.0.0` merges** — that is when the shared world
+changes. This preserves rung-1 (no direct-push/bypass), the gates pass by design, and the merge is the
+single auditable event. The `memory.dualWrite` marker is still the committed C2b-1 Decision 5 state
+marker — now materialized inside the atomic cutover commit.
+
+**Measured gap 2 (CP-C2b-2 REVISE):** the first post-cutover `share` does NOT re-materialize the migrated
+chunks — engram's export is manifest-tracked and writes only the delta. The manifest becomes stale
+relative to `chunks/` (migrated chunks are in `legacy/`), so the old chunk-based cross-machine `pull` is
+degraded for the transitional window (NOT data loss — `records/` is the committed truth, retired at C4).
+Measured against a copy of the real store; evidence + the adjusted step-3 verification are in
+runbook.md + checkpoint-report.md §5b.
 
 ## Decision 5 — the scrub enforcement asymmetry is ACCEPTED design, the full-gate re-architecture is REJECTED (not deferred)
 

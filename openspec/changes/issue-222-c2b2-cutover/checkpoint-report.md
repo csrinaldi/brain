@@ -38,6 +38,35 @@ The fresh-context review sub-agent **failed on an account session limit** mid-ru
 - **Rollback correct** — byte-identical restore verified; edges handled (absent `legacy/`, report cleanup, `legacy/`-dir removal, `records/` force-remove).
 - i18n en/es parity holds (new keys `realRunSummary`, `rollbackSummary`); the runbook's `--rollback` command matches the implemented flag.
 
+## 5b. CP-C2b-2 REVISE response — runbook updated + gap-2 measured (code stayed APPROVED)
+
+The code + rehearsed rollback were approved; the revision was scoped to `runbook.md`. Three fixes applied:
+1. **Git materialization** — steps run on `cutover/records-v1`; ONE atomic commit carries the migrated
+   store + `dualWrite=true` together; the cutover completes at the **PR merge** to `feature/v2.0.0`
+   (rung-1 preserved, no direct-push/bypass, gates pass by design).
+2. **Gap-2 MEASURED** (below) and pinned in step 3 with the adjusted verification.
+3. **Step 0a hard-stop** — the `records/`-empty check now `exit 1`s (a mandatory gate, not a print).
+
+**Gap-2 measurement — first post-cutover share, measured against a COPY of the real store** (isolated
+temp dir + git remote so engram scopes `brain`; the real `.memory/` was verified byte-untouched before
+and after; full backup taken and restored-clean):
+
+- Migrate on the copy → report == forecast EXACTLY: `written 275, rejected 3, skipped 0, unparseable 0,
+  empty 4` (index deduped to 136 unique — content-addressed).
+- `engram sync` post-migrate is **manifest-tracked, not chunks/-content-tracked**: it did NOT
+  re-materialize the 47 migrated chunks — it wrote ONE delta chunk (~17 changed observations).
+- `chunks/` ended with 1 chunk; the **manifest referenced 24 chunks, 23 of them ABSENT from `chunks/`**
+  (now in `legacy/`) → the old chunk-based cross-machine `pull` is **DEGRADED for the transitional
+  window** (it can't find the migrated chunks).
+- **NOT data loss:** the observations live in `records/` (the committed new truth) + `legacy/`
+  (preserved originals); the records-based pull/import (C2b-1) reads `records/`; the `pull → records-only`
+  switch that retires this degradation is **C4**.
+
+**Assessment (your call at the re-checkpoint):** the degradation is transitional (until C4) and is not
+data loss. If no cross-machine chunk-pull happens in the window, it is acceptable as documented; if it
+IS needed, the fix (records-based pull earlier, or migrate copy-not-move) must be designed before the
+keystroke. Step 3's verification is written against this measured reality, not an idealized model.
+
 ## 6. Substrate
 `brain:governance-status` → **RUNG 1**. 5 REQUIRED must be green; `brain-writes-reviewed` PASSES (no `brain/core`); `actor-check` red = solo-maintainer L5 DETECTION (expected).
 
