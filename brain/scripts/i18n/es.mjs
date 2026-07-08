@@ -270,6 +270,16 @@ export default {
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.secretFound': 'Se detectó un secreto en {file}:{line} — coincide con el patrón "{pattern}". Eliminá el secreto o agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo. Ejecutá `gunzip -c {file} | jq .` para inspeccionar (el número de línea corresponde a esa vista formateada).',
 
+  // ── memory/cli.mjs — migrate-v1 (issue #217, C2a) ─────────────────────────────
+  'memory.migrateV1.realRunPending':        'ejecución real aún no implementada — pendiente en C2b (pipeline de doble escritura); usá --dry-run',
+  'memory.migrateV1.dryRunHeader':          'Reporte de migración en dry-run (issue #217, C2):',
+  'memory.migrateV1.summary':               'registros: {records} | omitidos (personal): {skipped} | rechazados: {rejected} | chunks no parseables: {unparseable} | chunks sin observaciones: {emptyObservations}',
+  'memory.migrateV1.typesHistogramHeader':  'Histograma de tipos:',
+  'memory.migrateV1.provenanceHistogramHeader': 'Histograma de procedencia: {recovered} recuperados / {fallback} por convención de respaldo',
+  'memory.migrateV1.rejectedHeader':        'Registros rechazados:',
+  'memory.migrateV1.emptyObservationsHeader': 'Chunks solo de sesiones/prompts (observations: null — no es corrupción, 0 observaciones aportadas):',
+  'memory.migrateV1.unparseableHeader':     'Archivos chunk no parseables (corrupción real — cantidad de observaciones desconocida):',
+
   // ── brain-protect.mjs — arm-and-verify (issue #203) ───────────────────────────
   'protect.verify.unverifiable': '  Verificar: aún no hay check-runs en {branch} — no verificable hasta el primer PR.',
   'protect.verify.missing':      '  AVISO    : el check requerido "{context}" no tiene check-run coincidente aún — confirmar que el nombre del job sea exacto.',
