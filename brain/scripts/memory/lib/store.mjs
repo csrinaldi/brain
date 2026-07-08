@@ -91,3 +91,38 @@ export function rebuildIndex({ recordsDir, indexPath }) {
   writeFileSync(indexPath, serializeIndex(entries), 'utf8');
   return { count: entries.size };
 }
+
+/**
+ * readRecordIds() — read the set of record `id`s currently present in
+ * `records/` (issue #221 fix pass, BLOCKER). `records/` is the AUTHORITATIVE
+ * dedup source — not the derived `index.jsonl` — since it is the append-only
+ * log dualWriteRecords() must never write a duplicate physical line into.
+ *
+ * Same degenerate-state contract as rebuildIndex(): an absent/empty
+ * `records/` returns an empty Set, never throws. A corrupt physical line is
+ * silently skipped here — this function is dedup INPUT, not the fail-closed
+ * integrity gate (that remains rebuildIndex()'s job, which still fails closed
+ * on the exact same line the next time it runs).
+ *
+ * @param {{recordsDir: string}} opts
+ * @returns {Set<string>}
+ */
+export function readRecordIds({ recordsDir }) {
+  const ids = new Set();
+  if (!existsSync(recordsDir)) return ids;
+
+  const filenames = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl'));
+  for (const filename of filenames) {
+    const raw = readFileSync(join(recordsDir, filename), 'utf8');
+    for (const line of raw.split('\n')) {
+      if (line.trim() === '') continue;
+      try {
+        const record = JSON.parse(line);
+        if (record && typeof record.id === 'string') ids.add(record.id);
+      } catch {
+        continue; // corrupt line — not this function's fail-closed gate
+      }
+    }
+  }
+  return ids;
+}

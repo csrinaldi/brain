@@ -270,6 +270,9 @@ export default {
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.secretFound': 'Se detectó un secreto en {file}:{line} — coincide con el patrón "{pattern}". Eliminá el secreto o agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo. Ejecutá `gunzip -c {file} | jq .` para inspeccionar (el número de línea corresponde a esa vista formateada).',
 
+  // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
+  'memory.share.secretFoundRecords': 'Se detectó un secreto en un registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
+
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate) ───────────
   'memory.migrateV1.cutoverDeferred':       'la migración real se ejecuta solo mediante el runbook de cutover de C2b, no con memory:migrate-v1 directamente — corré el runbook de cutover (migrar → activar dual-write de inmediato → scrub re-apuntado a records/). Este comando solo admite --dry-run.',
   'memory.migrateV1.dryRunHeader':          'Reporte de migración en dry-run (issue #217, C2):',

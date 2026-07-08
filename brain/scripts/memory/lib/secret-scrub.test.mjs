@@ -19,6 +19,7 @@ import {
   resolveSecretConfig,
   scanTextForSecrets,
   scrubChunkFile,
+  scrubRecordsFile,
 } from './secret-scrub.mjs';
 
 // ── compilePatterns ────────────────────────────────────────────────────────────
@@ -135,5 +136,52 @@ test('scrubChunkFile: a clean gzipped chunk returns null', (t) => {
 
   const patterns = compilePatterns(DEFAULT_SECRET_PATTERNS);
   const hit = scrubChunkFile(file, patterns);
+  assert.equal(hit, null);
+});
+
+// ── scrubRecordsFile — plaintext JSONL reader, no gunzip (REQ-C2B1-2, #221 C2b-1) ──
+
+function tmpRecordsFile(lines) {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-secret-scrub-records-'));
+  const file = join(dir, '2026-07.jsonl');
+  writeFileSync(file, lines.join('\n') + '\n');
+  return { dir, file };
+}
+
+test('scrubRecordsFile: detects a secret in a plaintext records JSONL line, reporting the line number', (t) => {
+  const { dir, file } = tmpRecordsFile([
+    '{"id":"rec-aaa","content":"clean line one"}',
+    '{"id":"rec-bbb","content":"token: ghp_abcdefghijklmnopqrstuvwxyz01"}',
+  ]);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const patterns = compilePatterns(DEFAULT_SECRET_PATTERNS);
+  const hit = scrubRecordsFile(file, patterns);
+  assert.ok(hit, 'expected a hit inside the plaintext records file');
+  assert.equal(hit.lineNumber, 2);
+  assert.match(hit.pattern, /ghp_/);
+});
+
+test('scrubRecordsFile: a clean records file returns null', (t) => {
+  const { dir, file } = tmpRecordsFile(['{"id":"rec-ccc","content":"just a normal decision"}']);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const patterns = compilePatterns(DEFAULT_SECRET_PATTERNS);
+  const hit = scrubRecordsFile(file, patterns);
+  assert.equal(hit, null);
+});
+
+test('scrubRecordsFile: reads plaintext directly — a raw non-gzip file is readable (no gunzip step)', (t) => {
+  const { dir, file } = tmpRecordsFile(['{"id":"rec-ddd","content":"plaintext, never gzipped"}']);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  assert.doesNotThrow(() => scrubRecordsFile(file, compilePatterns(DEFAULT_SECRET_PATTERNS)));
+});
+
+test('scrubRecordsFile: an allowlisted line is suppressed, same allowlist contract as scanTextForSecrets', (t) => {
+  const { dir, file } = tmpRecordsFile(['{"id":"rec-eee","content":"glpat-EXAMPLE-TUTORIAL-TOKEN"}']);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const patterns = compilePatterns(DEFAULT_SECRET_PATTERNS);
+  const allow = compilePatterns(['glpat-EXAMPLE-TUTORIAL-TOKEN']);
+  const hit = scrubRecordsFile(file, patterns, allow);
   assert.equal(hit, null);
 });

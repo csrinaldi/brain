@@ -82,4 +82,19 @@ export const migrations = [
       },
     },
   },
+  {
+    version: '0.6.0',
+    description:
+      'Add memory.dualWrite (default false): the auditable STATE MARKER that activates the ' +
+      'records/ dual-write in memory:share (issue #221, C2b-1). Dormant by default so merging the ' +
+      'machinery never populates records/ ahead of the C2b-2 cutover; the human flips it to true ' +
+      'as a committed runbook step IMMEDIATELY after the real migrate. NOT a CLI bypass switch — a ' +
+      'committed cutover state marker (C1b doctrine: gates live in auditable config). Transitional ' +
+      '— retired when the chunks are (C3/C4).',
+    defaults: {
+      memory: {
+        dualWrite: false,
+      },
+    },
+  },
 ];

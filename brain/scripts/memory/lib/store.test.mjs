@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { buildRecord } from './format.mjs';
-import { appendRecord, rebuildIndex } from './store.mjs';
+import { appendRecord, rebuildIndex, readRecordIds } from './store.mjs';
 
 function tmpMemoryDir() {
   const root = mkdtempSync(join(tmpdir(), 'brain-memory-store-'));
@@ -151,4 +151,43 @@ test('rebuildIndex: property — delete index, reindex, byte-identical to the or
   rebuildIndex({ recordsDir, indexPath });
   const after = readFileSync(indexPath, 'utf8');
   assert.equal(after, before);
+});
+
+// ── readRecordIds — dedup input for dualWriteRecords (issue #221 fix pass, BLOCKER) ──
+// records/ is the authoritative dedup source (not the derived index.jsonl).
+
+test('readRecordIds: absent records/ → empty Set, no throw', () => {
+  const { recordsDir } = tmpMemoryDir();
+  const ids = readRecordIds({ recordsDir });
+  assert.ok(ids instanceof Set);
+  assert.equal(ids.size, 0);
+});
+
+test('readRecordIds: empty records/ (no .jsonl files) → empty Set', () => {
+  const { recordsDir } = tmpMemoryDir();
+  mkdirSync(recordsDir, { recursive: true });
+  const ids = readRecordIds({ recordsDir });
+  assert.equal(ids.size, 0);
+});
+
+test('readRecordIds: collects ids across every month file under records/', () => {
+  const { recordsDir } = tmpMemoryDir();
+  const recA = buildRecord({ ...base, content: 'A' });
+  const recB = buildRecord({ ...base, ts: '2026-06-01T00:00:00Z', content: 'B' });
+  appendRecord(recA, { recordsDir });
+  appendRecord(recB, { recordsDir });
+  const ids = readRecordIds({ recordsDir });
+  assert.deepEqual([...ids].sort(), [recA.id, recB.id].sort());
+});
+
+test('readRecordIds: a corrupt physical line is skipped (not this function\'s fail-closed gate — rebuildIndex owns that)', () => {
+  const { recordsDir } = tmpMemoryDir();
+  mkdirSync(recordsDir, { recursive: true });
+  const recA = buildRecord({ ...base, content: 'A' });
+  writeFileSync(
+    join(recordsDir, '2026-07.jsonl'),
+    `${JSON.stringify(recA)}\nnot valid json\n`,
+  );
+  const ids = readRecordIds({ recordsDir });
+  assert.deepEqual([...ids], [recA.id]);
 });

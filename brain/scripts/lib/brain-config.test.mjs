@@ -159,7 +159,8 @@ test('ensureBrainConfig: creates config when missing with github identity', () =
     assert.equal(cfg.vcs.provider, 'github');
     assert.equal(cfg.project.gitHost, 'github.com');
     assert.equal(cfg.project.slug, 'owner/repo');
-    assert.equal(cfg.schemaVersion, '0.5.0');
+    assert.equal(cfg.schemaVersion, '0.6.0');
+    assert.equal(cfg.memory.dualWrite, false, 'memory.dualWrite must default to false (0.6.0 additive migration — dormant cutover marker)');
     // Full schema must exist
     assert.ok('project' in cfg, 'project key must exist');
     assert.ok('docs' in cfg, 'docs key must exist');
