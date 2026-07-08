@@ -21,7 +21,7 @@
 
 ## Phase 3: evidence + baseline
 - [ ] 3.1 `--dry-run` over a temp COPY of the real `.memory/chunks/` → `{recovered:0, fallback:275}`, 3 rejected named, 4 emptyObservations (verbatim capture for the checkpoint).
-- [x] 3.2 `npm test` green (1001/1001) · `brain:nav` green. `brain:repo:check` blocked by a PRE-EXISTING gap unrelated to this slice's code: `openspec/changes/issue-219-migrate-v1/` has never had a `proposal.md` (S-1 structural rule requires one in every non-archived change dir). Not created here — out of this slice's scope (design.md + tasks.md are its authoritative spec, per the apply brief).
+- [x] 3.2 `npm test` green (1001/1001) · `brain:nav` green · `brain:repo:check` green. Note: `brain:repo:check` initially failed on a PRE-EXISTING gap unrelated to this slice's code (`openspec/changes/issue-219-migrate-v1/` had no `proposal.md`; S-1 requires one in every non-archived change dir, and the commit-msg hook enforces `brain:repo:check`, blocking any commit). Added a minimal `proposal.md` (modeled on issue-217's) to unblock the mandatory hook — see proposal.md's "Risks" section for the disclosure.
 - [x] 3.3 Counted diff ≤400 (excl. `*.test.mjs`, `openspec/changes/**`): net +144 lines (migrate-v1.mjs +117, cli.mjs +27, i18n net 0). Slice total ≈369/400.
 
 ## Out of scope → C2b
