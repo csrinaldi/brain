@@ -35,7 +35,7 @@ import { validateResume } from "../lib/resume-schema.mjs";
 import { currentBranch } from "../../lib/git-branch.mjs";
 import { resolveSecretConfig, compilePatterns, scrubChunkFile, scanTextForSecrets } from "../lib/secret-scrub.mjs";
 import { exportObservation } from "../lib/engram-export.mjs";
-import { appendRecord, rebuildIndex } from "../lib/store.mjs";
+import { appendRecord, rebuildIndex, readRecordIds } from "../lib/store.mjs";
 import { serializeRecord } from "../lib/format.mjs";
 import { collectChunkObservations } from "../lib/migrate-v1.mjs";
 import { t } from "../../i18n/t.mjs";
@@ -110,19 +110,29 @@ function requireEngram() {
 
 /**
  * share() — export live engram memory to .memory/ (idempotent, content-addressed),
- * dual-write the exported observations into `.memory/records/` under
- * scan-then-write (issue #221, C2b-1, design.md Decision 1), then fail-closed
- * secret-scrub whatever chunks were materialized this run as the transitional
- * backstop (issue #214, C1b).
+ * fail-closed secret-scrub whatever chunks were materialized this run as the
+ * transitional backstop (issue #214, C1b), THEN dual-write the exported
+ * observations into `.memory/records/` under scan-then-write (issue #221,
+ * C2b-1, design.md Decision 1).
  *
- * Scrub scope: TWO independent fail-closed scans now run, never one gating
+ * Order (issue #221 fix pass, MINOR): the chunk backstop runs BEFORE the
+ * records dual-write. Rationale — `dualWriteRecords()` APPENDS to the
+ * append-only `records/` log; if it ran first and a LATER gate (the chunk
+ * backstop) then failed, `records/` would already be mutated on an aborted
+ * share. Scanning chunks first means a chunk-only secret (e.g. a
+ * `scope:personal` observation the records candidate filter already
+ * excluded) aborts the share before `records/` is ever touched.
+ *
+ * Scrub scope: TWO independent fail-closed scans run, never one gating
  * the other's write:
- *   1. dualWriteRecords() — candidate records (transformed from observations
- *      via exportObservation) are scanned BEFORE any `records/` append; a hit
- *      aborts before the append-only log is ever touched (Decision 1).
- *   2. scrubMaterializedChunks() — the chunks engram's export just wrote are
+ *   1. scrubMaterializedChunks() — the chunks engram's export just wrote are
  *      scanned AFTER materialization (C1b's original design, unchanged): a
  *      hit blocks the push but the chunk itself was already written locally.
+ *   2. dualWriteRecords() — candidate records (transformed from observations
+ *      via exportObservation) are scanned BEFORE any `records/` append; a hit
+ *      aborts before the append-only log is ever touched (Decision 1). It
+ *      also dedups by content-addressed `id` against what `records/` already
+ *      has (issue #221 fix pass, BLOCKER) — a retry after ANY abort is safe.
  * There is NO `--no-scrub` flag for either path; the only bypass is the
  * config allowlist (`governance.memorySecretAllowPatterns`).
  *
@@ -131,7 +141,8 @@ function requireEngram() {
  * @param {string} [opts.root]  Repo root.
  * @param {() => string} [opts._requireEngram]  Resolves the engram binary; throws if absent.
  * @param {(engram: string) => void} [opts._export]  Runs `engram sync --export`.
- * @param {(root: string) => object[]} [opts._readObservations]  Observations materialized this run.
+ * @param {(root: string) => {observations: object[], unparseable: string[], emptyObservations: string[]}} [opts._readObservations]
+ *   Observations materialized this run, plus the chunk-level accounting buckets.
  * @param {typeof exportObservation} [opts._exportObservation]
  * @param {typeof appendRecord} [opts._appendRecord]
  * @param {typeof rebuildIndex} [opts._rebuildIndex]
@@ -153,22 +164,24 @@ export async function share({
 } = {}) {
   const engram = _requireEngram();
   _export(engram);
-  await dualWriteRecords(root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig });
   await scrubMaterializedChunks(root, { _changedChunkFiles, _loadConfig, _scrubChunk });
+  await dualWriteRecords(root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig });
 }
 
 /**
  * Default seam: the observations materialized by this run's `engram sync
  * --export` — read back from the gzip chunks it just wrote under
  * `.memory/chunks` (reuses migrate-v1.mjs's collectChunkObservations, never a
- * second reader).
+ * second reader). Returns the FULL bucket shape — `observations` plus the
+ * `unparseable`/`emptyObservations` chunk-level buckets — so dualWriteRecords()
+ * can account for every chunk, not just the ones that parsed into observations
+ * (issue #221 fix pass, MAJOR).
  *
  * @param {string} root
- * @returns {object[]}
+ * @returns {{observations: object[], unparseable: string[], emptyObservations: string[]}}
  */
-function _defaultReadObservations(root) {
-  const { observations } = collectChunkObservations(join(root, ".memory", "chunks"));
-  return observations;
+export function _defaultReadObservations(root) {
+  return collectChunkObservations(join(root, ".memory", "chunks"));
 }
 
 /**
@@ -179,20 +192,34 @@ function _defaultReadObservations(root) {
  *
  * Order: read observations → transform each into a CANDIDATE record via
  * exportObservation() → scan the candidate record LINES for secrets → only
- * if clean, append every candidate to `records/` + rebuild the index. A hit
- * aborts BEFORE any `appendRecord` call — the append-only `records/` log is
- * never written with a secret. One observation that fails to export (throws,
- * is `scope:personal`, or is rejected) is skipped, never aborting the run for
- * the others (mirrors migrate-v1.mjs's per-observation isolation).
+ * if clean, dedup by content-addressed `id` against what `records/` already
+ * has (issue #221 fix pass, BLOCKER) → append every NEW candidate to
+ * `records/` + rebuild the index. A secret hit aborts BEFORE any
+ * `appendRecord` call — the append-only `records/` log is never written with
+ * a secret.
+ *
+ * Accounting (issue #221 fix pass, MAJOR — mirrors migrate-v1.mjs's
+ * buildMigrationReport() honesty contract): every observation is accounted
+ * for exactly once, never silently dropped. `errored` (a throwing
+ * exportObservation), `rejected` (non-enum type), and `skippedPersonal`
+ * (scope:personal) each get their own counter — none of them abort the run
+ * for the others (per-observation isolation) — and the chunk-level
+ * `unparseableChunks`/`emptyObservationsChunks` buckets from
+ * `_readObservations()` are surfaced too. `deduped` counts candidates whose
+ * `id` was already present in `records/` (a prior run) OR earlier in THIS
+ * batch (two observations exporting to the same content-addressed record).
  *
  * @param {string} root
  * @param {object} [opts]
- * @param {(root: string) => object[]} [opts._readObservations]
+ * @param {(root: string) => {observations: object[], unparseable?: string[], emptyObservations?: string[]}} [opts._readObservations]
  * @param {typeof exportObservation} [opts._exportObservation]
  * @param {typeof appendRecord} [opts._appendRecord]
  * @param {typeof rebuildIndex} [opts._rebuildIndex]
+ * @param {typeof readRecordIds} [opts._readRecordIds]
  * @param {(root: string) => object} [opts._loadConfig]
- * @returns {Promise<{written: number, indexCount?: number}>}
+ * @returns {Promise<{written: number, deduped: number, errored: number, rejected: number,
+ *   skippedPersonal: number, unparseableChunks: number, emptyObservationsChunks: number,
+ *   indexCount?: number}>}
  */
 export async function dualWriteRecords(
   root,
@@ -201,23 +228,46 @@ export async function dualWriteRecords(
     _exportObservation = exportObservation,
     _appendRecord = appendRecord,
     _rebuildIndex = rebuildIndex,
+    _readRecordIds = readRecordIds,
     _loadConfig = _defaultLoadBrainConfig,
   } = {},
 ) {
-  const observations = _readObservations(root);
+  const { observations, unparseable = [], emptyObservations = [] } = _readObservations(root);
 
   const candidates = [];
+  let errored = 0;
+  let rejected = 0;
+  let skippedPersonal = 0;
   for (const obs of observations) {
     let result;
     try {
       result = _exportObservation(obs);
     } catch {
-      continue; // one bad observation must never abort the whole share
+      errored += 1; // one bad observation must never abort the whole share
+      continue;
     }
-    if (result.record) candidates.push(result.record);
+    if (result.skipped) {
+      skippedPersonal += 1;
+      continue;
+    }
+    if (result.rejected) {
+      rejected += 1;
+      continue;
+    }
+    candidates.push(result.record);
   }
 
-  if (candidates.length === 0) return { written: 0 };
+  const accounting = {
+    written: 0,
+    deduped: 0,
+    errored,
+    rejected,
+    skippedPersonal,
+    unparseableChunks: unparseable.length,
+    emptyObservationsChunks: emptyObservations.length,
+  };
+
+  if (candidates.length === 0) return accounting;
 
   const { patternSources, allowPatternSources } = resolveSecretConfig(_loadConfig(root));
   const patterns = compilePatterns(patternSources);
@@ -236,11 +286,28 @@ export async function dualWriteRecords(
 
   const recordsDir = join(root, ".memory", "records");
   const indexPath = join(root, ".memory", "index.jsonl");
+
+  const existingIds = _readRecordIds({ recordsDir });
+  const seenInBatch = new Set();
+  const toAppend = [];
   for (const record of candidates) {
+    if (existingIds.has(record.id) || seenInBatch.has(record.id)) {
+      accounting.deduped += 1;
+      continue;
+    }
+    seenInBatch.add(record.id);
+    toAppend.push(record);
+  }
+
+  for (const record of toAppend) {
     _appendRecord(record, { recordsDir });
   }
-  const { count } = _rebuildIndex({ recordsDir, indexPath });
-  return { written: candidates.length, indexCount: count };
+  accounting.written = toAppend.length;
+  if (toAppend.length > 0) {
+    const { count } = _rebuildIndex({ recordsDir, indexPath });
+    accounting.indexCount = count;
+  }
+  return accounting;
 }
 
 function _defaultShareExport(engram) {

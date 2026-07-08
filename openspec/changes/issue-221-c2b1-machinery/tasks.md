@@ -26,5 +26,26 @@
 - [x] 4.2 Counted diff ≤400 (excl. `*.test.mjs`, `openspec/changes/**`).
 - [x] 4.3 `.memory/` (real store) never mutated by code or tests (temp dirs only).
 
+## Phase 5: Fix pass — adversarial review (BLOCKER + MAJOR + 2 MINOR)
+- [x] 5.1 Test (RED) + fix (GREEN), BLOCKER: `dualWriteRecords` dedups by content-addressed `id`.
+  Added `readRecordIds({ recordsDir })` (store.mjs) as the authoritative existing-id source (reads
+  `records/`, not the derived index). A candidate whose `id` is already present — from a prior
+  `share`, or duplicated within the same batch — is never re-appended.
+- [x] 5.2 Test (RED) + fix (GREEN), MAJOR: `dualWriteRecords` accounts for every observation, never
+  silently drops one. `_defaultReadObservations` now returns `{observations, unparseable,
+  emptyObservations}` (mirrors `collectChunkObservations`). `dualWriteRecords` returns `{written,
+  deduped, errored, rejected, skippedPersonal, unparseableChunks, emptyObservationsChunks}` —
+  mirrors `buildMigrationReport`'s honest-accounting contract; zero fields stay present.
+- [x] 5.3 Test (RED) + fix (GREEN), MINOR: `share` reordered to `export → scrubMaterializedChunks
+  (chunk backstop) → dualWriteRecords (records)` — the chunk backstop now runs BEFORE the records
+  append so a chunk-only secret can never abort AFTER `records/` was already mutated.
+- [x] 5.4 MINOR: corrected `spec.md` REQ-C2B1-2 + `design.md` Decision 3 — `scrubRecordsFile` is
+  the TESTED CUTOVER SEAM for C2b-2, not wired into the live `share` path this slice; the live
+  records-protection is `dualWriteRecords`'s pre-write candidate scan. Added a residual-risk design
+  note under Decision 1 (accepted, narrowed by 5.3 + 5.1).
+- [x] 5.5 `npm test` green (1034/1034) · `brain:repo:check` · `brain:nav`.
+- [x] 5.6 Counted diff within budget (excl. `*.test.mjs`, `openspec/changes/**`).
+- [x] 5.7 `.memory/` (real store) never mutated by code or tests (temp dirs only).
+
 ## Out of scope
 - THE CUTOVER (real execution) → C2b-2 (#222). Round-trip contract test + pull→records-only → C4.
