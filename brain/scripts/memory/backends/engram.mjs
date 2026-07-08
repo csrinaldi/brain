@@ -33,7 +33,11 @@ import { resolveFeature } from "../lib/feature-resolution.mjs";
 import { parseFrontmatter, serializeFrontmatter } from "../lib/resume-frontmatter.mjs";
 import { validateResume } from "../lib/resume-schema.mjs";
 import { currentBranch } from "../../lib/git-branch.mjs";
-import { resolveSecretConfig, compilePatterns, scrubChunkFile } from "../lib/secret-scrub.mjs";
+import { resolveSecretConfig, compilePatterns, scrubChunkFile, scanTextForSecrets } from "../lib/secret-scrub.mjs";
+import { exportObservation } from "../lib/engram-export.mjs";
+import { appendRecord, rebuildIndex } from "../lib/store.mjs";
+import { serializeRecord } from "../lib/format.mjs";
+import { collectChunkObservations } from "../lib/migrate-v1.mjs";
 import { t } from "../../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -106,22 +110,31 @@ function requireEngram() {
 
 /**
  * share() — export live engram memory to .memory/ (idempotent, content-addressed),
- * then fail-closed secret-scrub whatever was materialized this run (issue #214, C1b).
+ * dual-write the exported observations into `.memory/records/` under
+ * scan-then-write (issue #221, C2b-1, design.md Decision 1), then fail-closed
+ * secret-scrub whatever chunks were materialized this run as the transitional
+ * backstop (issue #214, C1b).
  *
- * Scrub scope (design decision, C1a design.md Decision 5 + C1b): today `share()`
- * materializes engram's gzip chunks, NOT `.memory/records/` (that lands in C2),
- * so the scanner's target is the CHANGED chunk files this run touched — detected
- * via `git status` against `.memory/chunks` (content-addressed: an unchanged
- * chunk's filename/content never appears as dirty). C2 re-points this at
- * `records/`. There is NO `--no-scrub` flag; the only bypass is the config
- * allowlist (`governance.memorySecretAllowPatterns`), applied inside
- * scrubMaterializedChunks().
+ * Scrub scope: TWO independent fail-closed scans now run, never one gating
+ * the other's write:
+ *   1. dualWriteRecords() — candidate records (transformed from observations
+ *      via exportObservation) are scanned BEFORE any `records/` append; a hit
+ *      aborts before the append-only log is ever touched (Decision 1).
+ *   2. scrubMaterializedChunks() — the chunks engram's export just wrote are
+ *      scanned AFTER materialization (C1b's original design, unchanged): a
+ *      hit blocks the push but the chunk itself was already written locally.
+ * There is NO `--no-scrub` flag for either path; the only bypass is the
+ * config allowlist (`governance.memorySecretAllowPatterns`).
  *
  * @param {object} [opts]  Injectable seams for testing — production defaults
  *   call the real engram binary, git, and filesystem.
  * @param {string} [opts.root]  Repo root.
  * @param {() => string} [opts._requireEngram]  Resolves the engram binary; throws if absent.
  * @param {(engram: string) => void} [opts._export]  Runs `engram sync --export`.
+ * @param {(root: string) => object[]} [opts._readObservations]  Observations materialized this run.
+ * @param {typeof exportObservation} [opts._exportObservation]
+ * @param {typeof appendRecord} [opts._appendRecord]
+ * @param {typeof rebuildIndex} [opts._rebuildIndex]
  * @param {(root: string) => string[]} [opts._changedChunkFiles]  Chunk files materialized this run.
  * @param {(root: string) => object} [opts._loadConfig]  Reads brain.config.json.
  * @param {(path: string, patterns: RegExp[], allowPatterns: RegExp[]) => object|null} [opts._scrubChunk]
@@ -130,13 +143,104 @@ export async function share({
   root = repoRoot,
   _requireEngram = requireEngram,
   _export = _defaultShareExport,
+  _readObservations = _defaultReadObservations,
+  _exportObservation = exportObservation,
+  _appendRecord = appendRecord,
+  _rebuildIndex = rebuildIndex,
   _changedChunkFiles = _defaultChangedChunkFiles,
   _loadConfig = _defaultLoadBrainConfig,
   _scrubChunk = scrubChunkFile,
 } = {}) {
   const engram = _requireEngram();
   _export(engram);
+  await dualWriteRecords(root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig });
   await scrubMaterializedChunks(root, { _changedChunkFiles, _loadConfig, _scrubChunk });
+}
+
+/**
+ * Default seam: the observations materialized by this run's `engram sync
+ * --export` — read back from the gzip chunks it just wrote under
+ * `.memory/chunks` (reuses migrate-v1.mjs's collectChunkObservations, never a
+ * second reader).
+ *
+ * @param {string} root
+ * @returns {object[]}
+ */
+function _defaultReadObservations(root) {
+  const { observations } = collectChunkObservations(join(root, ".memory", "chunks"));
+  return observations;
+}
+
+/**
+ * dualWriteRecords() — scan-then-write over the RECORDS log (issue #221,
+ * C2b-1; design.md Decision 1, REQ-C2B1-3). Independent of requireEngram()/
+ * the real export so it is unit-testable with zero engram/git dependency,
+ * mirroring scrubMaterializedChunks()'s testable-core pattern.
+ *
+ * Order: read observations → transform each into a CANDIDATE record via
+ * exportObservation() → scan the candidate record LINES for secrets → only
+ * if clean, append every candidate to `records/` + rebuild the index. A hit
+ * aborts BEFORE any `appendRecord` call — the append-only `records/` log is
+ * never written with a secret. One observation that fails to export (throws,
+ * is `scope:personal`, or is rejected) is skipped, never aborting the run for
+ * the others (mirrors migrate-v1.mjs's per-observation isolation).
+ *
+ * @param {string} root
+ * @param {object} [opts]
+ * @param {(root: string) => object[]} [opts._readObservations]
+ * @param {typeof exportObservation} [opts._exportObservation]
+ * @param {typeof appendRecord} [opts._appendRecord]
+ * @param {typeof rebuildIndex} [opts._rebuildIndex]
+ * @param {(root: string) => object} [opts._loadConfig]
+ * @returns {Promise<{written: number, indexCount?: number}>}
+ */
+export async function dualWriteRecords(
+  root,
+  {
+    _readObservations = _defaultReadObservations,
+    _exportObservation = exportObservation,
+    _appendRecord = appendRecord,
+    _rebuildIndex = rebuildIndex,
+    _loadConfig = _defaultLoadBrainConfig,
+  } = {},
+) {
+  const observations = _readObservations(root);
+
+  const candidates = [];
+  for (const obs of observations) {
+    let result;
+    try {
+      result = _exportObservation(obs);
+    } catch {
+      continue; // one bad observation must never abort the whole share
+    }
+    if (result.record) candidates.push(result.record);
+  }
+
+  if (candidates.length === 0) return { written: 0 };
+
+  const { patternSources, allowPatternSources } = resolveSecretConfig(_loadConfig(root));
+  const patterns = compilePatterns(patternSources);
+  const allowPatterns = compilePatterns(allowPatternSources);
+
+  const candidateText = candidates.map(serializeRecord).join("\n");
+  const hit = scanTextForSecrets(candidateText, patterns, allowPatterns);
+  if (hit) {
+    throw new Error(
+      await t("memory.share.secretFoundRecords", {
+        line: hit.lineNumber,
+        pattern: hit.pattern,
+      }),
+    );
+  }
+
+  const recordsDir = join(root, ".memory", "records");
+  const indexPath = join(root, ".memory", "index.jsonl");
+  for (const record of candidates) {
+    _appendRecord(record, { recordsDir });
+  }
+  const { count } = _rebuildIndex({ recordsDir, indexPath });
+  return { written: candidates.length, indexCount: count };
 }
 
 function _defaultShareExport(engram) {

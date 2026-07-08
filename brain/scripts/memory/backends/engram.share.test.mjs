@@ -8,9 +8,13 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { share, scrubMaterializedChunks, _defaultChangedChunkFiles } from './engram.mjs';
+import { share, scrubMaterializedChunks, dualWriteRecords, _defaultChangedChunkFiles } from './engram.mjs';
 import { DEFAULT_SECRET_PATTERNS } from '../lib/secret-scrub.mjs';
+import { buildRecord } from '../lib/format.mjs';
 
 // ---------------------------------------------------------------------------
 // scrubMaterializedChunks — the testable core, independent of requireEngram()
@@ -123,17 +127,18 @@ test('share() is exported as a callable function', () => {
   assert.equal(typeof share, 'function', 'share must be exported from engram.mjs');
 });
 
-test('share(): calls requireEngram → export → scrub, in order, and resolves on a clean run', async () => {
+test('share(): calls requireEngram → export → dual-write(records) → scrub(chunks), in order, and resolves on a clean run', async () => {
   const callLog = [];
   await share({
     root: '/fake/root',
     _requireEngram: () => { callLog.push('requireEngram'); return 'engram'; },
     _export: () => { callLog.push('export'); },
+    _readObservations: () => { callLog.push('readObservations'); return []; },
     _changedChunkFiles: () => { callLog.push('changedChunkFiles'); return []; },
     _loadConfig: () => ({}),
     _scrubChunk: () => null,
   });
-  assert.deepEqual(callLog, ['requireEngram', 'export', 'changedChunkFiles']);
+  assert.deepEqual(callLog, ['requireEngram', 'export', 'readObservations', 'changedChunkFiles']);
 });
 
 test('share(): a secret hit in a materialized chunk fails closed (non-zero — the caller sees a thrown error)', async () => {
@@ -172,4 +177,164 @@ test('share(): there is no --no-scrub style bypass parameter — the allowlist i
       }),
     /leaked\.jsonl\.gz/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// dualWriteRecords() — scan-then-write over the RECORDS log (issue #221,
+// C2b-1, design.md Decision 1 + REQ-C2B1-3). Independent of requireEngram()/
+// the real export, mirroring how scrubMaterializedChunks is unit-tested
+// separately from share()'s full orchestration.
+// ---------------------------------------------------------------------------
+
+const baseRecordFields = {
+  ts: '2026-07-04T12:00:00Z', actor: '@crinaldi', actorKind: 'human', type: 'decision', project: 'brain',
+};
+
+test('dualWriteRecords: no observations → resolves without appending or reindexing', async () => {
+  let appendCalled = false;
+  let reindexCalled = false;
+  const result = await dualWriteRecords('/fake/root', {
+    _readObservations: () => [],
+    _exportObservation: () => { throw new Error('must not be called when there are no observations'); },
+    _appendRecord: () => { appendCalled = true; },
+    _rebuildIndex: () => { reindexCalled = true; return { count: 0 }; },
+    _loadConfig: () => ({}),
+  });
+  assert.equal(appendCalled, false);
+  assert.equal(reindexCalled, false);
+  assert.equal(result.written, 0);
+});
+
+test('dualWriteRecords: a clean run appends every candidate record and reindexes', async () => {
+  const recA = buildRecord({ ...baseRecordFields, content: 'A' });
+  const recB = buildRecord({ ...baseRecordFields, content: 'B' });
+  const appended = [];
+  const result = await dualWriteRecords('/fake/root', {
+    _readObservations: () => [{ id: 1 }, { id: 2 }],
+    _exportObservation: (obs) => ({ record: obs.id === 1 ? recA : recB, recovered: false }),
+    _appendRecord: (record) => { appended.push(record); },
+    _rebuildIndex: () => ({ count: 2 }),
+    _loadConfig: () => ({}),
+  });
+  assert.deepEqual(appended, [recA, recB]);
+  assert.equal(result.written, 2);
+  assert.equal(result.indexCount, 2);
+});
+
+test('dualWriteRecords: skipped/rejected observations are excluded from candidates, never appended', async () => {
+  const recA = buildRecord({ ...baseRecordFields, content: 'A' });
+  const appended = [];
+  const result = await dualWriteRecords('/fake/root', {
+    _readObservations: () => [{ id: 1 }, { id: 2 }, { id: 3 }],
+    _exportObservation: (obs) => {
+      if (obs.id === 1) return { record: recA, recovered: false };
+      if (obs.id === 2) return { skipped: 'scope:personal' };
+      return { rejected: { id: '3', title: '', type: 'manual', reason: 'non-enum type' } };
+    },
+    _appendRecord: (record) => { appended.push(record); },
+    _rebuildIndex: () => ({ count: 1 }),
+    _loadConfig: () => ({}),
+  });
+  assert.deepEqual(appended, [recA]);
+  assert.equal(result.written, 1);
+});
+
+test('dualWriteRecords: a throwing exportObservation on one observation does not abort the others', async () => {
+  const recB = buildRecord({ ...baseRecordFields, content: 'B' });
+  const appended = [];
+  const result = await dualWriteRecords('/fake/root', {
+    _readObservations: () => [{ id: 1 }, { id: 2 }],
+    _exportObservation: (obs) => {
+      if (obs.id === 1) throw new Error('malformed observation');
+      return { record: recB, recovered: false };
+    },
+    _appendRecord: (record) => { appended.push(record); },
+    _rebuildIndex: () => ({ count: 1 }),
+    _loadConfig: () => ({}),
+  });
+  assert.deepEqual(appended, [recB]);
+  assert.equal(result.written, 1);
+});
+
+test('dualWriteRecords: a secret in a candidate record line aborts BEFORE any append — records/ stays untouched (victim-file style)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-dual-write-'));
+  try {
+    const recordsDir = join(dir, '.memory', 'records');
+    const leaked = buildRecord({ ...baseRecordFields, content: 'token: ghp_abcdefghijklmnopqrstuvwxyz01' });
+
+    await assert.rejects(
+      () =>
+        dualWriteRecords(dir, {
+          _readObservations: () => [{ id: 1 }],
+          _exportObservation: () => ({ record: leaked, recovered: false }),
+          _appendRecord: () => { throw new Error('appendRecord must NEVER be called on a secret hit'); },
+          _rebuildIndex: () => { throw new Error('rebuildIndex must NEVER be called on a secret hit'); },
+          _loadConfig: () => ({}),
+        }),
+      (err) => {
+        assert.ok(/ghp_/.test(err.message), `expected the secret pattern in the error, got: ${err.message}`);
+        return true;
+      },
+    );
+    // The append-only records log must never have been created at all.
+    assert.equal(existsSync(recordsDir), false, 'records/ must be untouched on a secret hit');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('dualWriteRecords: a clean run against the REAL appendRecord/rebuildIndex writes records/ and index.jsonl', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-dual-write-clean-'));
+  try {
+    const { appendRecord, rebuildIndex } = await import('../lib/store.mjs');
+    const recA = buildRecord({ ...baseRecordFields, content: 'A clean candidate.' });
+    const result = await dualWriteRecords(dir, {
+      _readObservations: () => [{ id: 1 }],
+      _exportObservation: () => ({ record: recA, recovered: false }),
+      _appendRecord: appendRecord,
+      _rebuildIndex: rebuildIndex,
+      _loadConfig: () => ({}),
+    });
+    assert.equal(result.written, 1);
+    assert.equal(existsSync(join(dir, '.memory', 'records', '2026-07.jsonl')), true);
+    assert.equal(existsSync(join(dir, '.memory', 'index.jsonl')), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('share(): the chunk backstop (C1b) still runs after a clean dual-write', async () => {
+  const callLog = [];
+  await share({
+    root: '/fake/root',
+    _requireEngram: () => 'engram',
+    _export: () => {},
+    _readObservations: () => [],
+    _changedChunkFiles: () => { callLog.push('scrubbedChunks'); return []; },
+    _loadConfig: () => ({}),
+    _scrubChunk: () => null,
+  });
+  assert.deepEqual(callLog, ['scrubbedChunks']);
+});
+
+test('share(): a secret in a candidate RECORD aborts the whole share BEFORE the chunk backstop even runs', async () => {
+  const leaked = buildRecord({ ...baseRecordFields, content: 'token: AKIAABCDEFGHIJKLMNOP' });
+  let chunkScrubRan = false;
+  await assert.rejects(
+    () =>
+      share({
+        root: '/fake/root',
+        _requireEngram: () => 'engram',
+        _export: () => {},
+        _readObservations: () => [{ id: 1 }],
+        _exportObservation: () => ({ record: leaked, recovered: false }),
+        _appendRecord: () => { throw new Error('must not append on a secret hit'); },
+        _rebuildIndex: () => { throw new Error('must not reindex on a secret hit'); },
+        _changedChunkFiles: () => { chunkScrubRan = true; return []; },
+        _loadConfig: () => ({}),
+        _scrubChunk: () => null,
+      }),
+    /AKIA/,
+  );
+  assert.equal(chunkScrubRan, false, 'the chunk backstop must not run once the records dual-write already aborted');
 });

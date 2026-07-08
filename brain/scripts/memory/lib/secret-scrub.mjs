@@ -113,3 +113,20 @@ export function scrubChunkFile(chunkPath, patterns, allowPatterns = []) {
   }
   return scanTextForSecrets(pretty, patterns, allowPatterns);
 }
+
+/**
+ * scrubRecordsFile() — read a plaintext `.memory/records/*.jsonl` file (one
+ * physical JSON line per record, R1 — see format.mjs) and scan it for
+ * secrets. Unlike scrubChunkFile(), there is NO gzip step: REQ-C2B1-2's
+ * re-point target (issue #221, C2b-1) is already plaintext. Mirrors
+ * scrubChunkFile()'s signature/return exactly.
+ *
+ * @param {string} recordsPath
+ * @param {RegExp[]} patterns
+ * @param {RegExp[]} [allowPatterns]
+ * @returns {{pattern: string, lineNumber: number, line: string} | null}
+ */
+export function scrubRecordsFile(recordsPath, patterns, allowPatterns = []) {
+  const text = readFileSync(recordsPath, 'utf8');
+  return scanTextForSecrets(text, patterns, allowPatterns);
+}
