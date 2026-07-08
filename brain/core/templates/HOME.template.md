@@ -17,6 +17,7 @@ this system. `brain/core/` is upstream and treated as read-only here.
 - [Harness contract](core/methodology/harness-contract.md) — abstract SDD verbs any harness must implement
 - [VCS contract](core/methodology/vcs-contract.md) — abstract VCS verbs any provider must implement
 - [Feature-working-memory contract](core/methodology/feature-working-memory-contract.md) — resume.md schema + checkpoint/resume verbs
+- [Memory record format](core/methodology/memory-format.md) — the brain-owned durable .memory/ record format
 - [Workflow governance](core/methodology/workflow-governance.md) — invariants, CI gates, lockout recovery
 
 ### Anti-patterns (generic)

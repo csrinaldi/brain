@@ -24,6 +24,7 @@ Reusable documentation — applies to any project that adopts this system.
 - [Harness contract](core/methodology/harness-contract.md) — abstract SDD verbs any harness must implement
 - [VCS contract](core/methodology/vcs-contract.md) — abstract VCS verbs any provider (gh/glab) must implement
 - [Feature-working-memory contract](core/methodology/feature-working-memory-contract.md) — the resume.md schema + feature-checkpoint/resume verbs
+- [Memory record format](core/methodology/memory-format.md) — the brain-owned durable .memory/ record format (schema, union merge, index)
 - [Workflow governance](core/methodology/workflow-governance.md) — four invariants, CI gates, enforce-outputs boundary, lockout recovery
 
 ### Anti-patterns (generic)
@@ -61,6 +62,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0014](project/decisions/adr-0014-workflow-governance.md) — Workflow governance: enforce load-bearing invariants server-side
 - [ADR-0015](project/decisions/adr-0015-governance-v3-substrate-ladder.md) — Governance v3: six-level fail-closed gate ladder over observable evidence (L1–L6 + substrate rung ladder)
 - [ADR-0016](project/decisions/adr-0016-ci-context-normalization.md) — CI Context Normalization: One Seam Over Provider-Specific Pipeline Evidence
+- [ADR-0017](project/decisions/adr-0017-memory-format-owned-by-brain.md) — The Durable Memory Record Format Is Owned By Brain, Not By Engram
 
 ### Project-specific rules
 
