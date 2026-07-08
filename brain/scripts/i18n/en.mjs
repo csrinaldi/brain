@@ -303,8 +303,9 @@ export default {
   // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
   'memory.share.secretFoundRecords': 'Secret detected in a candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
 
-  // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate) ───────────
-  'memory.migrateV1.cutoverDeferred':       'the real migration runs only via the C2b cutover runbook, not memory:migrate-v1 directly — run the cutover runbook (migrate → immediately activate dual-write → scrub re-pointed to records/). This command supports --dry-run only.',
+  // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──
+  'memory.migrateV1.realRunSummary':        '✓ migration complete — written: {written} | rejected: {rejected} | skipped (personal): {skipped} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations} | index: {indexCount} record(s). Next: commit memory.dualWrite=true (runbook step 2).',
+  'memory.migrateV1.rollbackSummary':       '✓ rollback complete — chunk(s) restored: {restored} | index: {indexCount} record(s).',
   'memory.migrateV1.dryRunHeader':          'Dry-run migration report (issue #217, C2):',
   'memory.migrateV1.summary':               'records: {records} | skipped (personal): {skipped} | rejected: {rejected} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations}',
   'memory.migrateV1.typesHistogramHeader':  'Types histogram:',
