@@ -135,7 +135,7 @@ test('share() is exported as a callable function', () => {
   assert.equal(typeof share, 'function', 'share must be exported from engram.mjs');
 });
 
-test('share(): calls requireEngram → export → scrub(chunks) → dual-write(records), in order, and resolves on a clean run (issue #221 fix pass, MINOR — reordered so no gate-failure mutates records/ after the chunk backstop already ran)', async () => {
+test('share(): dual-write is DORMANT by default — memory.dualWrite absent → C1b behavior (export + chunk scrub only, records/ never touched)', async () => {
   const callLog = [];
   await share({
     root: '/fake/root',
@@ -143,10 +143,45 @@ test('share(): calls requireEngram → export → scrub(chunks) → dual-write(r
     _export: () => { callLog.push('export'); },
     _readObservations: () => { callLog.push('readObservations'); return { observations: [] }; },
     _changedChunkFiles: () => { callLog.push('changedChunkFiles'); return []; },
-    _loadConfig: () => ({}),
+    _loadConfig: () => ({}), // no memory.dualWrite → OFF
+    _scrubChunk: () => null,
+  });
+  // dualWriteRecords never ran → readObservations was never called
+  assert.deepEqual(callLog, ['requireEngram', 'export', 'changedChunkFiles']);
+});
+
+test('share(): memory.dualWrite === true ACTIVATES the dual-write — order requireEngram → export → scrub(chunks) → dual-write(records) (issue #221 fix pass: config state marker, reordered so the chunk backstop runs first)', async () => {
+  const callLog = [];
+  await share({
+    root: '/fake/root',
+    _requireEngram: () => { callLog.push('requireEngram'); return 'engram'; },
+    _export: () => { callLog.push('export'); },
+    _readObservations: () => { callLog.push('readObservations'); return { observations: [] }; },
+    _changedChunkFiles: () => { callLog.push('changedChunkFiles'); return []; },
+    _loadConfig: () => ({ memory: { dualWrite: true } }), // cutover state marker ON
     _scrubChunk: () => null,
   });
   assert.deepEqual(callLog, ['requireEngram', 'export', 'changedChunkFiles', 'readObservations']);
+});
+
+test('share(): even with memory.dualWrite true, a secret in a candidate record aborts before any records/ append (dormant-vs-active does not weaken the scan-then-write guard)', async () => {
+  // The config marker gates WHETHER dual-write runs, never HOW safely: when active,
+  // the pre-append candidate scan still fails closed. Guarded here so a future edit
+  // to the gate can't silently drop the records-log protection.
+  await assert.rejects(
+    () =>
+      share({
+        root: '/fake/root',
+        _requireEngram: () => 'engram',
+        _export: () => {},
+        _changedChunkFiles: () => [],
+        _readObservations: () => ({ observations: [{ id: 1, sync_id: 'obs-1', type: 'decision', title: 'T', content: 'ghp_AAAAAAAAAAAAAAAAAAAA', project: 'brain', scope: 'project', created_at: '2026-07-01 01:19:12' }] }),
+        _appendRecord: () => { throw new Error('appendRecord must NOT run when a candidate has a secret'); },
+        _loadConfig: () => ({ memory: { dualWrite: true } }),
+        _scrubChunk: () => null,
+      }),
+    /ghp_|secret/i,
+  );
 });
 
 test('share(): a secret hit in a materialized chunk fails closed (non-zero — the caller sees a thrown error)', async () => {
@@ -525,7 +560,7 @@ test('share(): a secret in a candidate RECORD aborts the share AFTER the chunk b
         _appendRecord: () => { throw new Error('must not append on a secret hit'); },
         _rebuildIndex: () => { throw new Error('must not reindex on a secret hit'); },
         _changedChunkFiles: () => { chunkScrubRan = true; return []; },
-        _loadConfig: () => ({}),
+        _loadConfig: () => ({ memory: { dualWrite: true } }), // dual-write ACTIVE to exercise the candidate scan
         _scrubChunk: () => null,
       }),
     /AKIA/,

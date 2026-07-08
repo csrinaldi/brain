@@ -68,7 +68,36 @@ Chunks continue to be materialized for the old cross-machine `pull` for one tran
 `records/` is the new write-truth. Dropping the chunks (the `pull` → records-only switch) is
 deferred to C4/later — NOT this slice.
 
+## Decision 5 — dual-write is DORMANT by config; activation is a committed cutover STATE MARKER, not a merge or a bypass switch (human ruling)
+
+`share()` calls `dualWriteRecords` ONLY when `memory.dualWrite === true` in `brain.config.json`
+(default **false**, added by the additive `0.6.0` config migration). Absent/false → `share()` keeps
+its C1b behavior (export + chunk scrub only); `records/` is never populated.
+
+**Why config, not "activated by merging C2b-2".** "C2b-2 activates it" hides the same trap one level
+up: if activation meant *merging* the wiring, then merging C2b-2 (which un-refuses the `migrate-v1`
+CLI) would re-open the window where an ordinary `share`/push populates `records/` **before** the
+cutover's `migrate-v1` real run — tripping its abort-if-populated guard and stranding the cutover.
+A config flag decouples *shipping the machinery* from *activating it*: both C2b-1 and C2b-2 can merge
+with the dual-write still OFF; the human flips `memory.dualWrite=true` as a **committed** runbook
+step, IMMEDIATELY after the real migrate.
+
+**Doctrinal distinction (explicit).** This is NOT the CLI bypass flag rejected in C2-migrate. That
+was an ad-hoc switch to *trigger execution* on a single invocation. This is a **state marker of the
+cutover** that lives committed in `brain.config.json` — auditable in git history, reviewable as a
+diff. C1b's own doctrine says exactly this: gates live in auditable config, never in command
+switches. The flag is **transitional**, like the dual-write itself — retired when the chunks are
+(C3/C4 or a later cleanup).
+
+**The incident that proved this (damage #2, empirically).** Wiring the dual-write LIVE into `share()`
+was caught when a routine `memory:share` (the pre-push scrub gate) executed it against the real
+store and wrote `.memory/records/` + `.memory/index.jsonl` — a real mutation, un-gated, ahead of any
+cutover. Cleaned up (both were untracked, removed; store restored). The config gate makes that path
+impossible by default. Category: **wiring-vs-shipping** (a sister of code-vs-execution) — shipping
+reachable code is safe; wiring it into an auto-running path is a form of executing it.
+
 ## What C2b-1 explicitly does NOT do
 
-No real-store mutation (fixtures only), no un-refusing the `migrate-v1` CLI real path (that stays
-refused until C2b-2's runbook), no cutover, no round-trip contract test (C4).
+No real-store mutation (fixtures only; the dual-write is dormant by config), no un-refusing the
+`migrate-v1` CLI real path (that stays refused until C2b-2's runbook), no cutover, no round-trip
+contract test (C4).

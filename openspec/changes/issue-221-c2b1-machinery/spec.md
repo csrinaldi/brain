@@ -37,11 +37,17 @@ post-write file re-scan.
 
 ## REQ-C2B1-3: Dual-write in `share` with scan-then-write over the records log, idempotent by id
 
-`share` MUST, in order: export engram → **scan materialized chunks (C1b backstop)** → read
-observations → transform to candidate records → **scan the candidate record lines for secrets** →
-**only if clean**, dedup candidates by content-addressed `id` against what `records/` already has
+**The dual-write is DORMANT by default (fix pass, issue #221 — human ruling; design.md Decision 5):**
+`share` invokes `dualWriteRecords` ONLY when `memory.dualWrite === true` in `brain.config.json`
+(default false, added by the additive `0.6.0` migration). Absent/false → `share` keeps C1b behavior
+(export + chunk scrub only), so merging this machinery never populates `records/` ahead of the
+C2b-2 cutover's abort-if-populated guard. The flip to true is a committed runbook step, not a merge.
+
+When ACTIVE, `share` MUST, in order: export engram → **scan materialized chunks (C1b backstop)** →
+read observations → transform to candidate records → **scan the candidate record lines for secrets**
+→ **only if clean**, dedup candidates by content-addressed `id` against what `records/` already has
 → append the NEW records → reindex. The candidate-record scan runs BEFORE the records append. The
-chunk backstop now runs BEFORE the records dual-write (fix pass, issue #221, MINOR) so a
+chunk backstop runs BEFORE the records dual-write (fix pass, issue #221, MINOR) so a
 chunk-only secret aborts the share before `records/` is ever touched.
 
 `dualWriteRecords` MUST be idempotent (fix pass, issue #221, BLOCKER): re-running `share` with the

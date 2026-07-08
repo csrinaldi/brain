@@ -47,5 +47,10 @@
 - [x] 5.6 Counted diff within budget (excl. `*.test.mjs`, `openspec/changes/**`).
 - [x] 5.7 `.memory/` (real store) never mutated by code or tests (temp dirs only).
 
+## Phase 6: dual-write DORMANT by config (incident fix — human ruling)
+- [x] 6.1 `share()` gates `dualWriteRecords` behind `memory.dualWrite === true` (default false) — dormant by design; merging C2b-1 (or C2b-2) never populates `records/`. Tests: dormant-by-default (records path never entered), active-when-true (order preserved), candidate scan still fails closed when active.
+- [x] 6.2 Additive `0.6.0` config migration `memory.dualWrite: false` — an auditable cutover STATE MARKER, NOT a CLI bypass switch (design Decision 5). `brain/core/config-migrations.mjs` → `brain-writes-reviewed` WARN expected. `ensureBrainConfig` test updated (schemaVersion 0.6.0 + the new key).
+- [x] 6.3 design.md Decision 5 + spec REQ-C2B1-3 re-worded (dormant by config; activation is a committed runbook step in C2b-2). The live-wiring incident recorded as empirical proof of damage #2 (wiring-vs-shipping).
+
 ## Out of scope
 - THE CUTOVER (real execution) → C2b-2 (#222). Round-trip contract test + pull→records-only → C4.
