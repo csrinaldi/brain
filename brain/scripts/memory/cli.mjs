@@ -56,6 +56,7 @@ const VALID_OPS = [
   "import",
   "index",
   "reindex",
+  "migrate-v1",
   "setup",
   "feature-checkpoint",
   "feature-resume",
@@ -90,6 +91,70 @@ if (op === "reindex") {
     console.error(`memory/cli: ${await t("memory.reindex.failed", { message: err.message })}`);
     process.exit(1);
   }
+}
+
+// ---------------------------------------------------------------------------
+// "migrate-v1" is likewise backend-agnostic (chunks → records is a durable-
+// format concern, ADR-0017 — not a MEMORY_BACKEND one).
+//
+// `--dry-run` → the C2a report only, never mutates `.memory/`.
+// no `--dry-run` → REFUSED here. The real migration runs only via the C2b
+// cutover runbook (design.md Decision 1 + 5): its `runMigration()` ships as
+// fixture-proven CODE, but firing it ad-hoc before C2b's dual-write is active
+// would strand every later share as chunks-only. Execution is ordered by the
+// runbook, NOT gated by a CLI bypass switch (the `--no-scrub` class C1b
+// prohibited). C2b wires the execution as a runbook step.
+// ---------------------------------------------------------------------------
+if (op === "migrate-v1") {
+  const { collectChunkObservations, buildMigrationReport } = await import(
+    "./lib/migrate-v1.mjs"
+  );
+  const chunksDir = join(repoRoot, ".memory", "chunks");
+
+  if (!process.argv.includes("--dry-run")) {
+    console.error(`memory/cli: ${await t("memory.migrateV1.cutoverDeferred")}`);
+    process.exit(1);
+  }
+
+  const { observations, unparseable, emptyObservations } = collectChunkObservations(chunksDir);
+  const report = buildMigrationReport(observations, { unparseable, emptyObservations });
+
+  console.log(await t("memory.migrateV1.dryRunHeader"));
+  console.log(
+    await t("memory.migrateV1.summary", {
+      records: report.recordCount,
+      skipped: report.skippedPersonal,
+      rejected: report.rejected.length,
+      unparseable: report.unparseableChunks.length,
+      emptyObservations: report.emptyObservationsChunks.length,
+    }),
+  );
+  console.log(await t("memory.migrateV1.typesHistogramHeader"));
+  for (const [type, count] of Object.entries(report.typesHistogram).sort()) {
+    console.log(`  ${type}: ${count}`);
+  }
+  console.log(
+    await t("memory.migrateV1.provenanceHistogramHeader", {
+      recovered: report.provenanceHistogram.recovered,
+      fallback: report.provenanceHistogram.fallback,
+    }),
+  );
+  if (report.rejected.length > 0) {
+    console.log(await t("memory.migrateV1.rejectedHeader"));
+    for (const r of report.rejected) {
+      console.log(`  - id=${r.id} type=${r.type} title="${r.title}" reason=${r.reason}`);
+    }
+  }
+  if (report.emptyObservationsChunks.length > 0) {
+    console.log(await t("memory.migrateV1.emptyObservationsHeader"));
+    for (const f of report.emptyObservationsChunks) console.log(`  - ${f}`);
+  }
+  if (report.unparseableChunks.length > 0) {
+    console.log(await t("memory.migrateV1.unparseableHeader"));
+    for (const f of report.unparseableChunks) console.log(`  - ${f}`);
+    console.log(`  ${report.unparseableNote}`);
+  }
+  process.exit(0);
 }
 
 // Map verb strings that cannot be valid JS export names to their actual export name.

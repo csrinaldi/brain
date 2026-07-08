@@ -270,6 +270,19 @@ export default {
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.secretFound': 'Se detectó un secreto en {file}:{line} — coincide con el patrón "{pattern}". Eliminá el secreto o agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo. Ejecutá `gunzip -c {file} | jq .` para inspeccionar (el número de línea corresponde a esa vista formateada).',
 
+  // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
+  'memory.share.secretFoundRecords': 'Se detectó un secreto en un registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
+
+  // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate) ───────────
+  'memory.migrateV1.cutoverDeferred':       'la migración real se ejecuta solo mediante el runbook de cutover de C2b, no con memory:migrate-v1 directamente — corré el runbook de cutover (migrar → activar dual-write de inmediato → scrub re-apuntado a records/). Este comando solo admite --dry-run.',
+  'memory.migrateV1.dryRunHeader':          'Reporte de migración en dry-run (issue #217, C2):',
+  'memory.migrateV1.summary':               'registros: {records} | omitidos (personal): {skipped} | rechazados: {rejected} | chunks no parseables: {unparseable} | chunks sin observaciones: {emptyObservations}',
+  'memory.migrateV1.typesHistogramHeader':  'Histograma de tipos:',
+  'memory.migrateV1.provenanceHistogramHeader': 'Histograma de procedencia: {recovered} recuperados / {fallback} por convención de respaldo',
+  'memory.migrateV1.rejectedHeader':        'Registros rechazados:',
+  'memory.migrateV1.emptyObservationsHeader': 'Chunks solo de sesiones/prompts (observations: null — no es corrupción, 0 observaciones aportadas):',
+  'memory.migrateV1.unparseableHeader':     'Archivos chunk no parseables (corrupción real — cantidad de observaciones desconocida):',
+
   // ── brain-protect.mjs — arm-and-verify (issue #203) ───────────────────────────
   'protect.verify.unverifiable': '  Verificar: aún no hay check-runs en {branch} — no verificable hasta el primer PR.',
   'protect.verify.missing':      '  AVISO    : el check requerido "{context}" no tiene check-run coincidente aún — confirmar que el nombre del job sea exacto.',

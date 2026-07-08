@@ -300,6 +300,19 @@ export default {
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.secretFound': 'Secret detected in {file}:{line} — pattern "{pattern}" matched. Redact the secret, or add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive. Run `gunzip -c {file} | jq .` to inspect (the line number is against that pretty-printed view).',
 
+  // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
+  'memory.share.secretFoundRecords': 'Secret detected in a candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
+
+  // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate) ───────────
+  'memory.migrateV1.cutoverDeferred':       'the real migration runs only via the C2b cutover runbook, not memory:migrate-v1 directly — run the cutover runbook (migrate → immediately activate dual-write → scrub re-pointed to records/). This command supports --dry-run only.',
+  'memory.migrateV1.dryRunHeader':          'Dry-run migration report (issue #217, C2):',
+  'memory.migrateV1.summary':               'records: {records} | skipped (personal): {skipped} | rejected: {rejected} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations}',
+  'memory.migrateV1.typesHistogramHeader':  'Types histogram:',
+  'memory.migrateV1.provenanceHistogramHeader': 'Provenance histogram: {recovered} recovered / {fallback} fallback',
+  'memory.migrateV1.rejectedHeader':        'Rejected records:',
+  'memory.migrateV1.emptyObservationsHeader': 'Sessions/prompts-only chunks (observations: null — not corruption, 0 contributed):',
+  'memory.migrateV1.unparseableHeader':     'Unparseable chunk files (genuinely corrupt — observation count unknown):',
+
   // ── brain-protect.mjs — arm-and-verify (issue #203) ───────────────────────────
   'protect.verify.unverifiable': '  Verify   : no check-runs found yet on {branch} — unverifiable until the first PR runs.',
   'protect.verify.missing':      '  WARNING  : required check "{context}" has no matching check-run yet — confirm the job name is exact.',
