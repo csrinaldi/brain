@@ -37,7 +37,9 @@ After Option 1, the writer's `proposal.md` still claimed the CLI "calls `runMigr
 - **Real-run over a synthetic fixture store:** `writes accepted records, moves chunks to legacy, persists the rejection report (all four categories, skips NAMED), rebuilds the index`; `idempotency abort … throws BEFORE any work … zero fs effects`; `re-run over a just-migrated fixture aborts`.
 
 ## 7. Substrate
-`brain:governance-status` → **RUNG 1**. The 5 REQUIRED must be green; `brain-writes-reviewed` PASSES (no `brain/core`); `actor-check` red = solo-maintainer L5 DETECTION (expected).
+`brain:governance-status` → **RUNG 1**. 5 REQUIRED green; `brain-writes-reviewed` PASSES (no `brain/core`); `phase-order` PASSES; `actor-check` red = solo-maintainer L5 DETECTION (expected).
+
+**phase-order incident (self-introduced, gate-caught, fixed):** the first push failed `phase-order` (DETECTION) — Rule A (artifact completeness) requires proposal+spec+design+tasks when impl code is present, and I had shipped this change dir WITHOUT `spec.md`. Added the missing `spec.md` (REQ-MIG-RUN-1..4); reproduced the check locally (`level: pass`) before re-pushing. The gate did exactly its job: caught an incomplete SDD phase set.
 
 ## 8. What this completes / next
 - C2-migrate = the migration tool, provably correct against fixtures, NOT fired against the real store.
