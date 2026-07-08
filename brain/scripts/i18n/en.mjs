@@ -301,7 +301,7 @@ export default {
   'memory.share.secretFound': 'Secret detected in {file}:{line} — pattern "{pattern}" matched. Redact the secret, or add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive. Run `gunzip -c {file} | jq .` to inspect (the line number is against that pretty-printed view).',
 
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate) ───────────
-  'memory.migrateV1.realRunSummary':        'Real-run migration complete — records written: {written} | rejected: {rejected} | skipped (personal): {skipped}. Original chunks moved to {legacyDir}. Rejection report persisted at {reportPath}.',
+  'memory.migrateV1.cutoverDeferred':       'the real migration runs only via the C2b cutover runbook, not memory:migrate-v1 directly — run the cutover runbook (migrate → immediately activate dual-write → scrub re-pointed to records/). This command supports --dry-run only.',
   'memory.migrateV1.dryRunHeader':          'Dry-run migration report (issue #217, C2):',
   'memory.migrateV1.summary':               'records: {records} | skipped (personal): {skipped} | rejected: {rejected} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations}',
   'memory.migrateV1.typesHistogramHeader':  'Types histogram:',

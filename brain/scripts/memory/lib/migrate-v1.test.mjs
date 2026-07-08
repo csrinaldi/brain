@@ -236,7 +236,11 @@ test('runMigration: writes accepted records, moves chunks to legacy, persists th
   const { chunksDir, recordsDir, legacyDir, indexPath } = tmpMigrationFixture();
   const payload = {
     sessions: [],
-    observations: [baseObs(), baseObs({ id: 2, sync_id: 'obs-2', type: 'manual' })],
+    observations: [
+      baseObs(),
+      baseObs({ id: 2, sync_id: 'obs-2', type: 'manual' }),
+      baseObs({ id: 3, sync_id: 'obs-3', scope: 'personal' }),
+    ],
     prompts: [],
   };
   writeFileSync(join(chunksDir, 'chunk1.jsonl.gz'), gzipSync(Buffer.from(JSON.stringify(payload))));
@@ -245,6 +249,7 @@ test('runMigration: writes accepted records, moves chunks to legacy, persists th
 
   assert.equal(summary.written, 1);
   assert.equal(summary.rejected, 1);
+  assert.equal(summary.skipped, 1);
 
   const recordsFile = join(recordsDir, '2026-07.jsonl');
   assert.ok(existsSync(recordsFile), 'accepted record must land in records/2026-07.jsonl');
@@ -253,11 +258,19 @@ test('runMigration: writes accepted records, moves chunks to legacy, persists th
   assert.ok(existsSync(join(legacyDir, 'chunk1.jsonl.gz')), 'original chunk must be moved to legacy/');
   assert.ok(!existsSync(join(chunksDir, 'chunk1.jsonl.gz')), 'chunk must not remain in chunks/');
 
-  assert.ok(existsSync(summary.reportPath), 'the rejection report must be persisted, never dropped');
+  // The persisted report NAMES every non-migrated category (design.md Decision 3),
+  // with all four keys present even when empty (a zero is counted-evidence).
+  assert.ok(existsSync(summary.reportPath), 'the report must be persisted, never dropped');
   const report = JSON.parse(readFileSync(summary.reportPath, 'utf8'));
-  assert.equal(report.length, 1);
-  assert.equal(report[0].type, 'manual');
-  assert.equal(report[0].id, 'obs-2');
+  assert.deepEqual(Object.keys(report).sort(), ['emptyObservationsChunks', 'rejected', 'skipped', 'unparseableChunks']);
+  assert.equal(report.rejected.length, 1);
+  assert.equal(report.rejected[0].type, 'manual');
+  assert.equal(report.rejected[0].id, 'obs-2');
+  assert.equal(report.skipped.length, 1, 'scope:personal skips must be NAMED, not merely counted');
+  assert.equal(report.skipped[0].id, 'obs-3');
+  assert.equal(report.skipped[0].reason, 'scope:personal');
+  assert.deepEqual(report.unparseableChunks, []);
+  assert.deepEqual(report.emptyObservationsChunks, []);
 
   assert.ok(existsSync(indexPath), 'the index must be rebuilt');
 });
@@ -266,6 +279,11 @@ test('runMigration: idempotency abort — a populated records/ throws BEFORE any
   const { chunksDir, recordsDir, legacyDir, indexPath } = tmpMigrationFixture();
   mkdirSync(recordsDir, { recursive: true });
   writeFileSync(join(recordsDir, '2026-01.jsonl'), '{"id":"already-migrated"}\n');
+  // A chunk is present: if the abort is truly FIRST, it must remain untouched.
+  writeFileSync(
+    join(chunksDir, 'chunk1.jsonl.gz'),
+    gzipSync(Buffer.from(JSON.stringify({ sessions: [], observations: [baseObs()], prompts: [] }))),
+  );
 
   assert.throws(
     () => runMigration({ chunksDir, recordsDir, legacyDir, indexPath }),
@@ -275,6 +293,12 @@ test('runMigration: idempotency abort — a populated records/ throws BEFORE any
       return true;
     },
   );
+
+  // Zero filesystem effects before the throw (NIT-1): chunk not moved, no
+  // legacy/ created, no report, no index written.
+  assert.ok(existsSync(join(chunksDir, 'chunk1.jsonl.gz')), 'the chunk must NOT be moved when the run aborts');
+  assert.ok(!existsSync(legacyDir), 'legacy/ must not be created before the abort');
+  assert.ok(!existsSync(indexPath), 'the index must not be rebuilt before the abort');
 });
 
 test('runMigration: re-run over a just-migrated fixture aborts (idempotency)', () => {

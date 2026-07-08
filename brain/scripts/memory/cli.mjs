@@ -98,39 +98,22 @@ if (op === "reindex") {
 // format concern, ADR-0017 — not a MEMORY_BACKEND one).
 //
 // `--dry-run` → the C2a report only, never mutates `.memory/`.
-// no `--dry-run` → `runMigration()` (C2-migrate, #219): real-run CODE, wired
-// against the true `.memory/{chunks,records,legacy}` + `index.jsonl` paths.
-// Fixture-proven only (design.md Decision 1) — the real EXECUTION runbook
-// against the TRUE store is C2b's cutover, not this dispatch.
+// no `--dry-run` → REFUSED here. The real migration runs only via the C2b
+// cutover runbook (design.md Decision 1 + 5): its `runMigration()` ships as
+// fixture-proven CODE, but firing it ad-hoc before C2b's dual-write is active
+// would strand every later share as chunks-only. Execution is ordered by the
+// runbook, NOT gated by a CLI bypass switch (the `--no-scrub` class C1b
+// prohibited). C2b wires the execution as a runbook step.
 // ---------------------------------------------------------------------------
 if (op === "migrate-v1") {
-  const { collectChunkObservations, buildMigrationReport, runMigration } = await import(
+  const { collectChunkObservations, buildMigrationReport } = await import(
     "./lib/migrate-v1.mjs"
   );
   const chunksDir = join(repoRoot, ".memory", "chunks");
 
   if (!process.argv.includes("--dry-run")) {
-    try {
-      const summary = runMigration({
-        chunksDir,
-        recordsDir: join(repoRoot, ".memory", "records"),
-        legacyDir: join(repoRoot, ".memory", "legacy"),
-        indexPath: join(repoRoot, ".memory", "index.jsonl"),
-      });
-      console.log(
-        await t("memory.migrateV1.realRunSummary", {
-          written: summary.written,
-          rejected: summary.rejected,
-          skipped: summary.skipped,
-          legacyDir: summary.legacyDir,
-          reportPath: summary.reportPath,
-        }),
-      );
-      process.exit(0);
-    } catch (err) {
-      console.error(`memory/cli: ${err.message}`);
-      process.exit(1);
-    }
+    console.error(`memory/cli: ${await t("memory.migrateV1.cutoverDeferred")}`);
+    process.exit(1);
   }
 
   const { observations, unparseable, emptyObservations } = collectChunkObservations(chunksDir);

@@ -33,6 +33,24 @@ CP-C2-migrate evidence: (1) `--dry-run` over a temp COPY of the real `.memory/ch
 synthetic fixture store → records written, `legacy/` populated, report persisted, re-run aborts.
 The real run over the TRUE store is CP-C2b evidence, never here.
 
+## Decision 5 — the CLI REFUSES the real run; execution gating lives in the runbook order, not a bypass switch
+
+The non-`--dry-run` CLI path does NOT execute `runMigration()` — it refuses with a message routing
+the operator to the C2b cutover runbook. `runMigration()` ships as reachable, fixture-tested CODE
+(that IS the re-scoped issue's "wire the real run" — reachable and proven, not ad-hoc fireable);
+C2b wires its execution as an ordered step of the runbook.
+
+**Rejected alternative (with doctrine): a CLI confirmation flag / env gate.** An adversarial review
+floated gating the real run behind an explicit opt-in (`MIGRATE_V1_CONFIRM=…`). REJECTED. A
+CLI bypass switch that turns a refusal into an execution is the same class of valve C1b already
+prohibited when it refused a `--no-scrub` flag (the only sanctioned bypass there is an auditable
+config allowlist, never a command switch). Execution gating for a destructive one-shot belongs in
+the **sequencing of the cutover runbook** (migrate → immediately dual-write → scrub re-pointed),
+where the ORDER is the safety property — not in a per-invocation switch a stray script or a hurried
+operator can flip. A flag would also re-open the exact delta-loss window Decision 1 exists to close.
+The abort-if-populated guard remains, but it protects only the *second* run; the *first* run's
+safety is the runbook's ordering, which is why the CLI must not fire it at all here.
+
 ## Out of scope → C2b
 Import (`renderProvenance`), scrub re-point `chunks/`→`records/`, dual-write pipeline, and THE
 CUTOVER (execution + runbook). C4 round-trip = id-equality (`sdd/memory-format/c4-roundtrip-equality`).

@@ -21,18 +21,18 @@ cross-machine `memory:pull` for the transition window.
    routes to the C2b cutover runbook), export + `appendRecord` per observation, a persisted
    rejection report under `.memory/legacy/`, chunk files moved (never deleted) to `.memory/legacy/`,
    and `rebuildIndex()`.
-2. **`cli.mjs`** — the non-`--dry-run` path now calls `runMigration()` against the real
-   `.memory/{chunks,records,legacy}` + `index.jsonl` paths and prints a summary. `--dry-run`
-   unchanged.
-3. **i18n** — en + es entries for the new real-run summary string.
+2. **`cli.mjs`** — the non-`--dry-run` path **REFUSES**, pointing the operator to the C2b cutover
+   runbook. `runMigration()` is reachable + fixture-tested CODE, deliberately NOT CLI-fireable
+   ad-hoc (design.md Decision 5). `--dry-run` unchanged.
+3. **i18n** — en + es entries for the cutover-deferred refusal string.
 
 ## Out of scope (deferred to C2b)
 
 - Import (`renderProvenance`-based brain record → engram observation).
 - Secret-scrub re-point from `.memory/chunks/` to `.memory/records/`.
 - The dual-write `share`/`pull` pipeline wiring and its transitional chunk policy.
-- **The actual cutover** — running `runMigration()` against the TRUE `.memory/` store, and the
-  runbook that governs it.
+- **The actual cutover** — wiring the CLI to EXECUTE `runMigration()` against the TRUE `.memory/`
+  store, as an ordered step of the runbook that governs it.
 
 ## Acceptance criteria
 
@@ -41,7 +41,8 @@ cross-machine `memory:pull` for the transition window.
   synthetic fixture store only.
 - [x] Idempotency abort fires FIRST, before any work, when `records/` already has `.jsonl` content;
   the error message contains "run the cutover runbook" and names the records dir.
-- [x] `cli.mjs`'s non-`--dry-run` path is wired to `runMigration()`; `--dry-run` is unchanged.
+- [x] `cli.mjs`'s non-`--dry-run` path REFUSES with a runbook-pointing message (execution is the
+  C2b cutover, not an ad-hoc CLI run — design.md Decision 5); `--dry-run` is unchanged.
 - [x] Every new CLI string has an en + es i18n entry.
 - [x] `npm test` and `brain:nav` stay green; `.memory/` (the real store) is never mutated by this
   slice's code or its tests.

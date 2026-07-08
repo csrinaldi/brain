@@ -167,8 +167,9 @@ const REJECTION_REPORT_FILE = 'migration-rejected.json';
  *   2. Collect + export every chunk observation; accepted → `appendRecord`
  *      (bucketed by `ts` month); rejected/`scope:personal` → accumulated,
  *      never dropped.
- *   3. Persist the rejection report (id/title/type/reason) under `legacyDir`
- *      — a NAMED file, never silently lost.
+ *   3. Persist the report under `legacyDir` naming EVERY non-migrated category
+ *      — rejected, `scope:personal` skips, unparseable + empty-obs chunks —
+ *      each present even when empty (a zero is counted-evidence, not silence).
  *   4. MOVE every original chunk file to `legacyDir` (never delete in place).
  *   5. `rebuildIndex()`.
  *
@@ -218,19 +219,20 @@ export function runMigration({
   const { observations, unparseable, emptyObservations } = _collectChunkObservations(chunksDir);
 
   const rejected = [];
+  const skipped = [];
   let written = 0;
-  let skipped = 0;
 
   for (const obs of observations) {
+    const obsRef = obs.sync_id ?? String(obs.id);
     let result;
     try {
       result = _exportObservation(obs);
     } catch (err) {
-      rejected.push({ id: obs.sync_id ?? String(obs.id), title: obs.title ?? '', type: obs.type, reason: err.message });
+      rejected.push({ id: obsRef, title: obs.title ?? '', type: obs.type, reason: err.message });
       continue;
     }
     if (result.skipped) {
-      skipped += 1;
+      skipped.push({ id: obsRef, title: obs.title ?? '', type: obs.type, reason: result.skipped });
       continue;
     }
     if (result.rejected) {
@@ -241,9 +243,20 @@ export function runMigration({
     written += 1;
   }
 
+  // Persist EVERY non-migrated category — NAMED, not merely counted (design.md
+  // Decision 3): rejected + scope:personal skips + unparseable + empty-obs
+  // chunks. The empty arrays are kept ON PURPOSE: a zero IN the report is
+  // evidence the category was counted, not silently ignored (same principle as
+  // the 0-recovered provenance histogram).
   _mkdirSync(legacyDir, { recursive: true });
   const reportPath = join(legacyDir, REJECTION_REPORT_FILE);
-  _writeFileSync(reportPath, JSON.stringify(rejected, null, 2) + '\n', 'utf8');
+  const persistedReport = {
+    rejected,
+    skipped,
+    unparseableChunks: unparseable,
+    emptyObservationsChunks: emptyObservations,
+  };
+  _writeFileSync(reportPath, JSON.stringify(persistedReport, null, 2) + '\n', 'utf8');
 
   if (_existsSync(chunksDir)) {
     for (const file of _readdirSync(chunksDir).filter((f) => f.endsWith('.jsonl.gz'))) {
@@ -256,7 +269,7 @@ export function runMigration({
   return {
     written,
     rejected: rejected.length,
-    skipped,
+    skipped: skipped.length,
     unparseableChunks: unparseable.length,
     emptyObservationsChunks: emptyObservations.length,
     legacyDir,
