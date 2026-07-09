@@ -46,6 +46,52 @@ test('runCheck: memory-gate — never calls readChunkObservations with a raw fs 
   assert.equal(receivedCwd, '/fake/cwd');
 });
 
+// ── memory-gate — records/ OR chunks/ union (issue #222 cutover fix) ────────
+//
+// Post-cutover, .memory/chunks/ is a legacy transport (empty or delta-only)
+// and session_summary observations live in .memory/records/*.jsonl. The gate
+// must accept EITHER source during this transitional window — never require
+// both. Both readChunks and readRecords are injectable so these tests never
+// touch the real filesystem.
+
+test('runCheck: memory-gate — only records has session_summary (chunks empty) → pass', () => {
+  const result = runCheck('memory-gate', {
+    readChunks: () => [],
+    readRecords: () => [{ type: 'session_summary', content: 'recap' }],
+  });
+  assert.deepEqual(result, { pass: true });
+});
+
+test('runCheck: memory-gate — only chunks has session_summary (records empty) → pass (existing behavior preserved)', () => {
+  const result = runCheck('memory-gate', {
+    readChunks: () => [{ type: 'session_summary' }],
+    readRecords: () => [],
+  });
+  assert.deepEqual(result, { pass: true });
+});
+
+test('runCheck: memory-gate — neither records nor chunks has session_summary → fail with reason', () => {
+  const result = runCheck('memory-gate', {
+    readChunks: () => [{ type: 'decision' }],
+    readRecords: () => [{ type: 'bugfix' }],
+  });
+  assert.equal(result.pass, false);
+  assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
+});
+
+test('runCheck: memory-gate — readRecords receives the same cwd as readChunks (injected reader)', () => {
+  let receivedCwd;
+  runCheck('memory-gate', {
+    cwd: '/fake/cwd',
+    readChunks: () => [],
+    readRecords: (cwd) => {
+      receivedCwd = cwd;
+      return [{ type: 'session_summary' }];
+    },
+  });
+  assert.equal(receivedCwd, '/fake/cwd');
+});
+
 // ── decision-gate ────────────────────────────────────────────────────────────
 
 test('runCheck: decision-gate — injected diff has HOME.md but no ADR file → fail with reason', () => {
