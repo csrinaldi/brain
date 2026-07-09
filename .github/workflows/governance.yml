@@ -137,8 +137,10 @@ jobs:
   # ── Invariant 4 (L3, governance v3) — session memory was captured ──────────
   #
   # Wraps the existing pure memoryPresence check: fails when no committed
-  # .memory/chunks/ observation is a session_summary. Thin runner keeps the
-  # logic in the tested pure function (design §4).
+  # .memory/records/ OR .memory/chunks/ observation is a session_summary
+  # (transitional: both sources are unioned during the chunks→records cutover
+  # window — see run-check.mjs). Thin runner keeps the logic in the tested
+  # pure function (design §4).
   memory-gate:
     name: memory-gate
     runs-on: ubuntu-latest

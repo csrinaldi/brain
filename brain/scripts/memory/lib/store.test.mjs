@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { buildRecord } from './format.mjs';
-import { appendRecord, rebuildIndex, readRecordIds } from './store.mjs';
+import { appendRecord, rebuildIndex, readRecordIds, readRecordObservations } from './store.mjs';
 
 function tmpMemoryDir() {
   const root = mkdtempSync(join(tmpdir(), 'brain-memory-store-'));
@@ -190,4 +190,37 @@ test('readRecordIds: a corrupt physical line is skipped (not this function\'s fa
   );
   const ids = readRecordIds({ recordsDir });
   assert.deepEqual([...ids], [recA.id]);
+});
+
+// ── readRecordObservations — transitional reader for the governance memory-gate ──
+// (issue #222 gap fix). Best-effort, mirrors readChunkObservations's contract:
+// an absent/unreadable records/ or a corrupt line yields fewer (or zero)
+// records, never throws. Returns the full parsed record (incl. `.type`) so
+// memoryPresence() can inspect it, same shape readChunkObservations returns.
+
+test('readRecordObservations: returns full parsed records (incl. type) from records/', () => {
+  const { recordsDir } = tmpMemoryDir();
+  const rec = buildRecord({ ...base, type: 'session_summary', content: 'session recap' });
+  appendRecord(rec, { recordsDir });
+  const observations = readRecordObservations({ recordsDir });
+  assert.deepEqual(observations, [rec]);
+  assert.equal(observations[0].type, 'session_summary');
+});
+
+test('readRecordObservations: absent records/ → empty array, no throw', () => {
+  const { recordsDir } = tmpMemoryDir();
+  const observations = readRecordObservations({ recordsDir });
+  assert.deepEqual(observations, []);
+});
+
+test('readRecordObservations: a corrupt physical line is skipped — other records still returned, no throw', () => {
+  const { recordsDir } = tmpMemoryDir();
+  mkdirSync(recordsDir, { recursive: true });
+  const rec = buildRecord({ ...base, type: 'session_summary', content: 'good record' });
+  writeFileSync(
+    join(recordsDir, '2026-07.jsonl'),
+    `${JSON.stringify(rec)}\nnot valid json\n`,
+  );
+  const observations = readRecordObservations({ recordsDir });
+  assert.deepEqual(observations, [rec]);
 });
