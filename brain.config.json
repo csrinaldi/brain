@@ -22,5 +22,8 @@
       "yarn.lock"
     ]
   },
+  "memory":{
+    "dualWrite": true
+  },
   "schemaVersion": "0.3.0"
 }
