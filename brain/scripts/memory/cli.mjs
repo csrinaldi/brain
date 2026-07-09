@@ -97,24 +97,72 @@ if (op === "reindex") {
 // "migrate-v1" is likewise backend-agnostic (chunks → records is a durable-
 // format concern, ADR-0017 — not a MEMORY_BACKEND one).
 //
-// `--dry-run` → the C2a report only, never mutates `.memory/`.
-// no `--dry-run` → REFUSED here. The real migration runs only via the C2b
-// cutover runbook (design.md Decision 1 + 5): its `runMigration()` ships as
-// fixture-proven CODE, but firing it ad-hoc before C2b's dual-write is active
-// would strand every later share as chunks-only. Execution is ordered by the
-// runbook, NOT gated by a CLI bypass switch (the `--no-scrub` class C1b
-// prohibited). C2b wires the execution as a runbook step.
+// `--dry-run`  → the C2a report only, never mutates `.memory/`.
+// no `--dry-run` → executes the real migration (un-refused, C2b — design.md
+//   Decision 1): the CLI being runnable IS the runbook's intended step 1;
+//   the control is the runbook order + the human keystroke, not a CLI switch
+//   (the `--no-scrub` class C1b prohibited stays rejected). Safe by
+//   construction while `memory.dualWrite` is false. The abort-if-populated
+//   guard in `runMigration()` still protects re-runs.
+// `--rollback` → the inverse (REQ-C2B2-2): restores chunks from `legacy/`,
+//   drops `records/`, reindexes. Rehearsed only in fixtures per the runbook;
+//   the real rollback runs only via the cutover runbook.
+//
+// BRAIN_MIGRATE_V1_TEST_ROOT (test-only seam): when set, this op resolves
+// `.memory/` under `<value>/.memory` instead of the real repo root. NEVER
+// set this outside tests — it exists solely so cli.migrate-v1.test.mjs can
+// drive this op end-to-end against a fixture without ever touching the
+// real `.memory/`.
 // ---------------------------------------------------------------------------
 if (op === "migrate-v1") {
+  const testRoot = process.env.BRAIN_MIGRATE_V1_TEST_ROOT;
+  const memoryRoot = testRoot ? join(testRoot, ".memory") : join(repoRoot, ".memory");
+  const chunksDir = join(memoryRoot, "chunks");
+  const recordsDir = join(memoryRoot, "records");
+  const legacyDir = join(memoryRoot, "legacy");
+  const indexPath = join(memoryRoot, "index.jsonl");
+
+  if (process.argv.includes("--rollback")) {
+    const { rollbackMigration } = await import("./lib/migrate-v1.mjs");
+    try {
+      const summary = rollbackMigration({ chunksDir, recordsDir, legacyDir, indexPath });
+      console.log(
+        await t("memory.migrateV1.rollbackSummary", {
+          restored: summary.restored,
+          indexCount: summary.indexCount,
+        }),
+      );
+      process.exit(0);
+    } catch (err) {
+      console.error(`memory/cli: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
+  if (!process.argv.includes("--dry-run")) {
+    const { runMigration } = await import("./lib/migrate-v1.mjs");
+    try {
+      const summary = runMigration({ chunksDir, recordsDir, legacyDir, indexPath });
+      console.log(
+        await t("memory.migrateV1.realRunSummary", {
+          written: summary.written,
+          rejected: summary.rejected,
+          skipped: summary.skipped,
+          unparseable: summary.unparseableChunks,
+          emptyObservations: summary.emptyObservationsChunks,
+          indexCount: summary.indexCount,
+        }),
+      );
+      process.exit(0);
+    } catch (err) {
+      console.error(`memory/cli: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
   const { collectChunkObservations, buildMigrationReport } = await import(
     "./lib/migrate-v1.mjs"
   );
-  const chunksDir = join(repoRoot, ".memory", "chunks");
-
-  if (!process.argv.includes("--dry-run")) {
-    console.error(`memory/cli: ${await t("memory.migrateV1.cutoverDeferred")}`);
-    process.exit(1);
-  }
 
   const { observations, unparseable, emptyObservations } = collectChunkObservations(chunksDir);
   const report = buildMigrationReport(observations, { unparseable, emptyObservations });

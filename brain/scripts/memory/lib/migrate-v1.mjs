@@ -11,7 +11,7 @@
 // scrub re-point, and the cutover runbook itself) is C2b — see design.md
 // Decision 1.
 
-import { existsSync, readdirSync, readFileSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, mkdirSync, renameSync, writeFileSync, rmSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
 
@@ -276,4 +276,75 @@ export function runMigration({
     reportPath,
     indexCount,
   };
+}
+
+/**
+ * rollbackMigration() — the INVERSE of runMigration() (C2b-2, #222,
+ * design.md Decision 2): restores a fixture store to its byte-identical
+ * pre-cutover state. Fixture-tested only, mirroring runMigration()'s own
+ * scope — the real rollback against the true store runs only via the
+ * cutover runbook, at @csrinaldi's post-APPROVE keystroke.
+ *
+ * Order (the exact inverse of runMigration()):
+ *   1. Move every `*.jsonl.gz` from `legacyDir` back to `chunksDir`.
+ *   2. Remove the persisted rejection report (`legacyDir/migration-rejected.json`).
+ *   3. Remove `legacyDir` itself once emptied (byte-identical restore: the
+ *      pre-cutover snapshot never had a `legacy/` directory at all).
+ *   4. Remove `recordsDir` entirely (records are gone after rollback).
+ *   5. `rebuildIndex()` — deterministically empty once `recordsDir` is gone.
+ *
+ * Safe on a store that was never migrated: an absent `legacyDir`/`recordsDir`
+ * is a no-op for that step, never a throw.
+ *
+ * @param {object} opts
+ * @param {string} opts.chunksDir
+ * @param {string} opts.recordsDir
+ * @param {string} opts.legacyDir
+ * @param {string} opts.indexPath
+ * @param {typeof appendRecord} [opts._rebuildIndex]
+ * @param {typeof existsSync} [opts._existsSync]
+ * @param {typeof readdirSync} [opts._readdirSync]
+ * @param {typeof mkdirSync} [opts._mkdirSync]
+ * @param {typeof renameSync} [opts._renameSync]
+ * @param {typeof rmSync} [opts._rmSync]
+ * @returns {{restored: number, indexCount: number}}
+ */
+export function rollbackMigration({
+  chunksDir,
+  recordsDir,
+  legacyDir,
+  indexPath,
+  _rebuildIndex = rebuildIndex,
+  _existsSync = existsSync,
+  _readdirSync = readdirSync,
+  _mkdirSync = mkdirSync,
+  _renameSync = renameSync,
+  _rmSync = rmSync,
+}) {
+  let restored = 0;
+
+  if (_existsSync(legacyDir)) {
+    _mkdirSync(chunksDir, { recursive: true });
+    for (const file of _readdirSync(legacyDir).filter((f) => f.endsWith('.jsonl.gz'))) {
+      _renameSync(join(legacyDir, file), join(chunksDir, file));
+      restored += 1;
+    }
+
+    const reportPath = join(legacyDir, REJECTION_REPORT_FILE);
+    if (_existsSync(reportPath)) _rmSync(reportPath);
+
+    // Byte-identical restore: the pre-cutover snapshot never had `legacy/`
+    // at all, so once it is emptied, remove it too.
+    if (_readdirSync(legacyDir).length === 0) {
+      _rmSync(legacyDir, { recursive: true });
+    }
+  }
+
+  if (_existsSync(recordsDir)) {
+    _rmSync(recordsDir, { recursive: true, force: true });
+  }
+
+  const { count: indexCount } = _rebuildIndex({ recordsDir, indexPath });
+
+  return { restored, indexCount };
 }

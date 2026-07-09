@@ -8,7 +8,7 @@ Ships import + scrub re-point + dual-write, fixture-tested. No real-store mutati
 engram binary (`engram sync --export` in `_defaultShareExport`). The chunk `.jsonl.gz` files are
 written by engram BEFORE our code can pre-scan anything — we do NOT control that write, so a
 literal "gate both outputs before any write" is not achievable without re-architecting chunk
-materialization (deferred; see below). What we DO control is the append to `records/`.
+materialization (REJECTED as correct-not-deferred; see below). What we DO control is the append to `records/`.
 
 **Decision:** apply full **scan-then-write to the RECORDS log** — the ruling's explicit core ("nothing
 secret ever touches the append-only records log"):
@@ -24,10 +24,15 @@ would leave the secret in a local records file (push blocked, but the leak is on
 candidates first, append nothing on a hit. **`scanTextForSecrets` is reused verbatim** — only WHAT
 text (candidate record lines) and WHEN (pre-append) change.
 
-**Deferred (not this slice):** re-architecting `share` to materialize chunks ourselves (from a
-read-only engram observation dump) so a single pre-write scan gates BOTH outputs. That is a larger
-change and depends on engram's read-only-dump capability — flagged for the checkpoint / a later
-slice, not silently assumed away.
+**REJECTED, not deferred (recategorized at CP-C2b-1 by human ruling — supersedes the earlier
+"deferred" framing):** re-architecting `share` to materialize chunks ourselves (from a read-only
+engram observation dump) so a single pre-write scan gates BOTH outputs. This is **correct as-is, not
+a gap to close** — the enforcement asymmetry mirrors an OWNERSHIP asymmetry (brain writes records →
+can pre-scan; engram's binary writes chunks → only a backstop, without reaching across the adapter
+boundary), the failure costs are asymmetric in the same direction (a committed unerasable records
+log vs a local chunk with the push blocked), and it is transitional by construction (dies with the
+chunks, post-C3/C4). **No future agent should build the re-architecture**
+(`sdd/memory-format/scrub-asymmetry-accepted`; C2b-2 design.md Decision 5).
 
 **Reorder (fix pass, issue #221, MINOR):** `share` now runs `scrubMaterializedChunks` (the chunk
 backstop) BEFORE `dualWriteRecords` — the original order ran the records dual-write first, so a
