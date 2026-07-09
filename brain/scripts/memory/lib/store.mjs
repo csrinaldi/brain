@@ -126,3 +126,51 @@ export function readRecordIds({ recordsDir }) {
   }
   return ids;
 }
+
+/**
+ * readRecordObservations() — TRANSITIONAL reader for the governance
+ * memory-gate (issue #222 cutover fix), mirroring the chunk-reader's contract
+ * (`../lib/chunk-reader.mjs`'s `readChunkObservations`): returns the full
+ * parsed record objects (so callers can inspect `.type`, e.g. for
+ * `session_summary`) found under `records/`. Best-effort — an absent/
+ * unreadable `records/` or a corrupt physical line yields fewer (or zero)
+ * records, and this NEVER throws. This is a gate READER, not the fail-closed
+ * integrity gate (that remains `rebuildIndex()`'s job).
+ *
+ * Reuses the exact per-line parsing idiom from `readRecordIds()` above
+ * (split on '\n', skip blank lines, `JSON.parse` inside try/catch with a
+ * silent `continue` on failure) — no second/bespoke parser.
+ *
+ * Retire this once the chunks-path is fully decommissioned (tracked for
+ * C4/D1); until then both `.memory/records/` and `.memory/chunks/` are
+ * legitimate observation sources for the memory-gate.
+ *
+ * @param {{recordsDir: string}} opts
+ * @returns {Array<{type?: string, [key: string]: unknown}>}
+ */
+export function readRecordObservations({ recordsDir }) {
+  const observations = [];
+  let filenames;
+  try {
+    filenames = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl'));
+  } catch {
+    return observations; // records/ absent or unreadable
+  }
+  for (const filename of filenames) {
+    let raw;
+    try {
+      raw = readFileSync(join(recordsDir, filename), 'utf8');
+    } catch {
+      continue; // file vanished/unreadable between readdir and read — best-effort, never throw
+    }
+    for (const line of raw.split('\n')) {
+      if (line.trim() === '') continue;
+      try {
+        observations.push(JSON.parse(line));
+      } catch {
+        continue; // corrupt line — not this function's fail-closed gate
+      }
+    }
+  }
+  return observations;
+}

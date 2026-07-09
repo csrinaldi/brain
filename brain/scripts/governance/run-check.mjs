@@ -4,8 +4,14 @@
 //
 // All decision logic lives in the already-tested pure functions
 // (memoryPresence, adrPresence). This file is git/IO glue only:
-//   memory-gate    → memoryPresence(readChunkObservations(cwd))
+//   memory-gate    → memoryPresence(readChunkObservations(cwd).concat(readRecordObservations(cwd)))
 //   decision-gate  → adrPresence(git diff --name-only BASE_SHA...HEAD_SHA)
+//
+// TRANSITIONAL (issue #222 cutover): session_summary observations may live in
+// EITHER `.memory/records/*.jsonl` (the current durable-record format) OR the
+// legacy `.memory/chunks/*.jsonl.gz` (engram export transport) — both are
+// unioned so the gate passes on either source during this window. Retire the
+// chunks-path once it is fully decommissioned (tracked for C4/D1).
 //
 // CI FRAGILITY: BASE_SHA/HEAD_SHA come from the normalized ci-context seam
 // (ADR-0016), never read from process.env directly here — ci-context.mjs is
@@ -21,11 +27,25 @@
 // closed instead.
 
 import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 
 import { memoryPresence } from './checks/memory-presence.mjs';
 import { adrPresence } from './checks/adr-presence.mjs';
 import { readChunkObservations } from '../lib/chunk-reader.mjs';
+import { readRecordObservations } from '../memory/lib/store.mjs';
 import { loadContext } from '../vcs/ci-context.mjs';
+
+/**
+ * Default `readRecords` dep for the memory-gate (issue #222 cutover fix):
+ * best-effort reads `<cwd>/.memory/records/*.jsonl` via the transitional
+ * `readRecordObservations`. Never throws — see that function's contract.
+ *
+ * @param {string} cwd
+ * @returns {Array<{type?: string, [key: string]: unknown}>}
+ */
+function defaultReadRecords(cwd) {
+  return readRecordObservations({ recordsDir: join(cwd, '.memory', 'records') });
+}
 
 /**
  * Computes `git diff --name-only $baseSha...$headSha` from the normalized
@@ -57,17 +77,18 @@ function defaultDiffNameOnly(ctx = {}) {
  * git/IO (or from injected `deps` in tests).
  *
  * @param {'memory-gate'|'decision-gate'} checkName
- * @param {{ cwd?: string, ctx?: object, readChunks?: (cwd: string) => unknown[], diffNameOnly?: () => string[] }} [deps]
+ * @param {{ cwd?: string, ctx?: object, readChunks?: (cwd: string) => unknown[], readRecords?: (cwd: string) => unknown[], diffNameOnly?: () => string[] }} [deps]
  * @returns {{ pass: boolean, reason?: string }}
  */
 export function runCheck(checkName, deps = {}) {
   const cwd = deps.cwd ?? process.cwd();
   const readChunks = deps.readChunks ?? readChunkObservations;
+  const readRecords = deps.readRecords ?? defaultReadRecords;
   const ctx = deps.ctx ?? {};
   const diffNameOnly = deps.diffNameOnly ?? (() => defaultDiffNameOnly(ctx));
 
   if (checkName === 'memory-gate') {
-    return memoryPresence(readChunks(cwd));
+    return memoryPresence(readChunks(cwd).concat(readRecords(cwd)));
   }
   if (checkName === 'decision-gate') {
     let changedFiles;
