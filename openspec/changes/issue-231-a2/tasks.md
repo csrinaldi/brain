@@ -106,31 +106,38 @@ whole, which was the real value of the cohesion argument.
 - [x] A.8 `npm test` green (0 failures) · `repo:check` · `brain:nav`.
 
 ## Phase 3: the shipped GitLab pipeline fragment + managed-paths (RED → GREEN)
-- [ ] 3.1 Test (RED): `managed-paths.mjs` `managed[]` contains the literal
+> **TASK BOUNDARY — brain/core touch:** task 3.2 edits `brain/core/managed-paths.mjs`, engaging the L6
+> `brain-writes-reviewed` gate (expected PASS+warn — the same established path as the config-migrations
+> touch in Phase 1).
+- [x] 3.1 Test (RED): `managed-paths.mjs` `managed[]` contains the literal
       `brain/scripts/ci/gitlab-governance.yml` and NO root `.gitlab-ci.yml` entry.
-- [ ] 3.2 GREEN: add the literal to `managed[]` in `managed-paths.mjs`.
-- [ ] 3.3 Create `brain/scripts/ci/gitlab-governance.yml`: eight jobs, each running
+- [x] 3.2 GREEN: add the literal to `managed[]` in `managed-paths.mjs`.
+- [x] 3.3 Create `brain/scripts/ci/gitlab-governance.yml`: eight jobs, each running
       `node brain/scripts/governance/run-check.mjs <job>` (or the existing Node entrypoint). REQUIRED
       jobs normal; DETECTION jobs carry `allow_failure: true` (Decision 3 — never flatten).
 
 ## Phase 4: drift-guard extension (RED → GREEN)
-- [ ] 4.1 Test (RED): the drift-guard string-slices `gitlab-governance.yml` (NO `yaml` npm dep) and
+- [x] 4.1 Test (RED): the drift-guard string-slices `gitlab-governance.yml` (NO `yaml` npm dep) and
       asserts its job-name set == `GOVERNANCE_JOBS`.
-- [ ] 4.2 Test (RED): the drift-guard asserts `allow_failure: true` present iff the job ∈
+- [x] 4.2 Test (RED): the drift-guard asserts `allow_failure: true` present iff the job ∈
       `DETECTION_JOBS` (REQUIRED job with `allow_failure` → red; DETECTION job without → red).
-- [ ] 4.3 GREEN: extend `ci-context-drift-guard.test.mjs` with the two assertions using the existing
-      string-slice technique.
+- [x] 4.3 GREEN: extend `ci-context-drift-guard.test.mjs` with the two assertions using the existing
+      string-slice technique. Also added a GitLab-side wiring guard: no job may locally override
+      `CI_DEFAULT_BRANCH` (it is a free standard predefined var — the fragment needs no explicit mapping,
+      unlike GitHub Actions' `DEFAULT_BRANCH` env line).
 
 ## Phase 5: GitHub parity for the approved-label read + baseline
-- [ ] 5.1 GREEN: `.github/workflows/governance.yml` `issue-link` bash sources the approved label from the
+- [x] 5.1 GREEN: `.github/workflows/governance.yml` `issue-link` bash sources the approved label from the
       `approved-label.mjs` CLI (replace the literal `status:approved` grep at :78). GitHub's
       `issue-link`/`diff-size` otherwise stay bash (only the label read moves to config).
-- [ ] 5.2 `npm test` green · `brain:repo:check` · `brain:nav`.
+- [x] 5.2 `npm test` green · `brain:repo:check` · `brain:nav`.
 - [ ] 5.3 `memory:share` run before push. No `decision` label unless a new promoted decision arises
-      (the ADR draft stays a DRAFT — human promotes it; ADR-0013 flow).
+      (the ADR draft stays a DRAFT — human promotes it; ADR-0013 flow). DEFERRED — orchestrator handles
+      the CP-A2a push per this apply run's instructions.
 - [ ] 5.4 STOP at CP-A2a (fixture-tested; live e2e is CP-A2b, deferred). Declare in the PR body that
       CP-A2a is fixture-only (SCIT endpoint obsolete; migrate-v1 code-vs-execution precedent) and CP-A2b
-      is deferred pending restored GitLab access + a new endpoint.
+      is deferred pending restored GitLab access + a new endpoint. DEFERRED — orchestrator assembles the
+      CP-A2a PR.
 
 ## Open questions
 - ~~Migration version number~~ **RESOLVED (human ruling): `0.7.0`.** Version numbers are

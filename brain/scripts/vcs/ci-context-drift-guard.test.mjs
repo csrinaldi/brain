@@ -17,8 +17,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 
+import { GOVERNANCE_JOBS, DETECTION_JOBS } from './governance-checks.mjs';
+
 const VCS_DIR = dirname(fileURLToPath(import.meta.url));
 const GOVERNANCE_CHECKS_DIR = join(VCS_DIR, '..', 'governance', 'checks');
+const GITLAB_GOVERNANCE_YML = join(VCS_DIR, '..', 'ci', 'gitlab-governance.yml');
 
 // Pipeline context env vars that only ci-context.mjs may read directly.
 const PIPELINE_ENV_PATTERN =
@@ -168,3 +171,77 @@ for (const job of CI_CONTEXT_CONSUMING_JOBS) {
       `${job} job must map DEFAULT_BRANCH from github.event.repository.default_branch (repo metadata, never a raw trigger var) so ci-context's loadContext() can compute ctx.defaultBranch`);
   });
 }
+
+// ── Drift-guard extension (issue #231 A2 phase 3/4, design.md Decision 5,
+// REQ-A2-5): string-slice gitlab-governance.yml (NO `yaml` npm dependency —
+// same technique the two loops above already use for governance.yml) and
+// assert (a) its job-name set equals GOVERNANCE_JOBS; (b) `allow_failure:
+// true` appears IFF the job is in DETECTION_JOBS (Amendment 3, Decision 3 —
+// the two classes must never flatten into one). ──────────────────────────
+
+/**
+ * Extracts GitLab job names: top-level (zero-indent) YAML keys, EXCLUDING
+ * hidden/template keys (GitLab convention: a leading `.` marks a key as a
+ * template never instantiated as a real job, e.g. `.governance_mr_rules:`
+ * used here via `extends:`).
+ */
+function extractGitlabJobNames(yml) {
+  const matches = [...yml.matchAll(/^([a-zA-Z][\w-]*):\s*$/mg)];
+  return matches.map((m) => m[1]);
+}
+
+/** Extracts a GitLab job's YAML block (zero-indent job header to the next zero-indent key). */
+function extractGitlabJobBlock(yml, jobName) {
+  const jobStart = yml.indexOf(`\n${jobName}:`);
+  if (jobStart === -1) return null;
+  const rest = yml.slice(jobStart + 1);
+  const nextKeyMatch = rest.slice(1).match(/\n[a-zA-Z.][\w-]*:\s*\n/);
+  return nextKeyMatch ? rest.slice(0, nextKeyMatch.index + 1) : rest;
+}
+
+test('drift-guard (GitLab): gitlab-governance.yml job-name set equals GOVERNANCE_JOBS (REQ-A2-5)', () => {
+  const yml = readFileSync(GITLAB_GOVERNANCE_YML, 'utf8');
+  const yamlJobNames = extractGitlabJobNames(yml);
+  assert.deepEqual(
+    [...new Set(yamlJobNames)].sort(),
+    [...new Set(GOVERNANCE_JOBS)].sort(),
+    `Drift detected: GOVERNANCE_JOBS=${JSON.stringify(GOVERNANCE_JOBS)} but ` +
+    `gitlab-governance.yml job names=${JSON.stringify(yamlJobNames)}`
+  );
+});
+
+for (const job of GOVERNANCE_JOBS) {
+  const isDetection = DETECTION_JOBS.includes(job);
+  test(`drift-guard (GitLab): "${job}" job ${isDetection ? 'carries' : 'does NOT carry'} allow_failure: true (REQ-A2-4, Amendment 3 — never flatten)`, () => {
+    const yml = readFileSync(GITLAB_GOVERNANCE_YML, 'utf8');
+    const block = extractGitlabJobBlock(yml, job);
+    assert.ok(block, `${job} job not found in gitlab-governance.yml`);
+    const hasAllowFailure = /allow_failure:\s*true/.test(block);
+    assert.equal(
+      hasAllowFailure, isDetection,
+      isDetection
+        ? `DETECTION job "${job}" must carry allow_failure: true`
+        : `REQUIRED job "${job}" must NOT carry allow_failure: true (that would silently un-gate it)`
+    );
+  });
+}
+
+// ── CI wiring (GitLab side of the A2 phase 2 addendum, issue #231 A2 phase
+// 3/4): CI_DEFAULT_BRANCH is a standard GitLab-predefined variable, always
+// available to every job automatically — unlike GitHub Actions, no job
+// `variables:`/env mapping is needed (the fragment's header comment
+// documents this). This guard is the inverse of the GitHub-side wiring test
+// above: it asserts NO job in gitlab-governance.yml locally overrides
+// CI_DEFAULT_BRANCH, which would shadow the platform-provided value and
+// silently reintroduce a hardcoded default-branch literal (exactly what the
+// addendum exists to prevent). ─────────────────────────────────────────────
+
+test('CI wiring (GitLab): gitlab-governance.yml never locally overrides CI_DEFAULT_BRANCH (must stay the platform-provided predefined var, never hardcoded)', () => {
+  const yml = readFileSync(GITLAB_GOVERNANCE_YML, 'utf8');
+  assert.doesNotMatch(
+    yml, /CI_DEFAULT_BRANCH:\s*\S/,
+    'gitlab-governance.yml must not assign a value to CI_DEFAULT_BRANCH — it is a standard predefined ' +
+    'GitLab CI/CD variable, automatically available to every job; a local override would shadow the ' +
+    'platform-provided default branch and reintroduce a hardcoded literal (the exact gap the A2 phase 2 addendum closed).'
+  );
+});

@@ -202,3 +202,28 @@ test('memory-gate and decision-gate are present in the parsed governance.yml job
   assert.ok(yamlJobNames.includes('memory-gate'), 'governance.yml must define a "memory-gate" job');
   assert.ok(yamlJobNames.includes('decision-gate'), 'governance.yml must define a "decision-gate" job');
 });
+
+// ── REQ-A2-3 (issue #231 A2 phase 5): the GitHub bash issue-link job sources
+// the approved label from the config-driven resolver, never a hardcoded
+// literal (design.md Decision 4 — no runtime code, bash included, hardcodes
+// 'status:approved' after this slice). approved-label.mjs's CLI printer
+// (brain/scripts/governance/approved-label.mjs) is the sanctioned non-Node
+// consumer path — no bash config-parser was invented.
+
+test('REQ-A2-3: governance.yml issue-link job sources the approved label from approved-label.mjs (github), never a hardcoded literal', () => {
+  const yamlPath = resolve(REPO_ROOT, '.github/workflows/governance.yml');
+  const yamlText = readFileSync(yamlPath, 'utf8');
+  const jobStart = yamlText.indexOf('\n  issue-link:');
+  assert.ok(jobStart !== -1, 'issue-link job not found in governance.yml');
+  const nextJobStart = yamlText.indexOf('\n  diff-size:', jobStart);
+  const block = nextJobStart === -1 ? yamlText.slice(jobStart) : yamlText.slice(jobStart, nextJobStart);
+
+  assert.match(
+    block, /\$\(node brain\/scripts\/governance\/approved-label\.mjs github\)/,
+    'issue-link job must source the approved label via `node brain/scripts/governance/approved-label.mjs github`'
+  );
+  assert.doesNotMatch(
+    block, /'status:approved'/,
+    'issue-link job must not hardcode the literal \'status:approved\' — it must read the resolved value'
+  );
+});

@@ -41,6 +41,11 @@ export const managed = [
   'brain/scripts/**',
   '.gitattributes',
   '.github/workflows/governance.yml',   // the L1 gate travels with brain (ADR-0014)
+  'brain/scripts/ci/gitlab-governance.yml', // opt-in GitLab governance pipeline fragment (issue #231
+                                             // A2, design.md Decision 1). LITERAL only — brain never
+                                             // manages the consumer's root .gitlab-ci.yml (that file
+                                             // stays LOCAL; adoption is a single `include: local:` line
+                                             // the consumer adds themselves).
   '.github/workflows/release.yml',      // L2 rung-2/rung-3 enforcement travels with brain (issue #176)
   '.github/workflows/governance-postmerge.yml', // L2 rung-2/rung-3 enforcement travels with brain (issue #176)
   '.github/PULL_REQUEST_TEMPLATE.md',   // the Closes/Fixes scaffold the gate parses (ADR-0014)

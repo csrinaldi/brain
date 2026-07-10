@@ -139,6 +139,22 @@ test('MANAGED_SCRIPT_KEYS has exactly 9 entries, all prefixed brain: (S5)', () =
   }
 });
 
+// issue #231, A2 phase 3: the GitLab governance pipeline fragment ships as a
+// managed LITERAL (never a root .gitlab-ci.yml — that would clobber the
+// consumer's single pipeline file, design.md Decision 1 / REQ-A2-1).
+test('managed includes brain/scripts/ci/gitlab-governance.yml (exact literal, issue #231 A2)', () => {
+  assert.ok(
+    managed.includes('brain/scripts/ci/gitlab-governance.yml'),
+    'managed must contain the exact literal "brain/scripts/ci/gitlab-governance.yml"',
+  );
+});
+
+test('managed does NOT contain a root .gitlab-ci.yml entry (issue #231 A2, REQ-A2-1)', () => {
+  const hit = managed.find((p) => p === '.gitlab-ci.yml');
+  assert.equal(hit, undefined,
+    'managed must not contain ".gitlab-ci.yml" — the consumer root pipeline file stays LOCAL, brain never manages it');
+});
+
 // issue #214, C1b: the records/*.jsonl union-merge .gitattributes line is a
 // single-source-of-truth constant (mirrors the MANAGED_SCRIPT_KEYS pattern
 // above), so this repo's own .gitattributes can be drift-guarded against it.
