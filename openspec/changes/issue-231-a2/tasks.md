@@ -18,16 +18,16 @@
 > **TASK BOUNDARY — brain/core touch:** task 1.2 edits `brain/core/config-migrations.mjs`, engaging the
 > L6 `brain-writes-reviewed` gate (human review of the merge, distinct from author). Expected PASS+warn
 > — the fourth slice to touch this file. Do NOT be surprised by the gate; it is the established path.
-- [ ] 1.1 Test (RED): `resolveApprovedLabel(config, 'github')` → `status:approved`;
+- [x] 1.1 Test (RED): `resolveApprovedLabel(config, 'github')` → `status:approved`;
       `resolveApprovedLabel(config, 'gitlab')` → scoped `status::approved`; a consumer-set value wins.
-- [ ] 1.2 GREEN: add the additive `governance.approvedLabel` entry to `config-migrations.mjs` (default
+- [x] 1.2 GREEN: add the additive `governance.approvedLabel` entry to `config-migrations.mjs` (default
       `status:approved`) at version **`0.7.0`** (RULED — version numbers are content-identifiers, NEVER
       reused; the `0.6.0` gap C4 left by removing the never-shipped dualWrite entry is honest record of a
       retirement, not a slot to refill). Create `approved-label.mjs` with `resolveApprovedLabel` + a CLI
       printer.
-- [ ] 1.3 Test (RED): `actor-check.mjs` and `brain-start.mjs` pass with NO literal `'status:approved'`
+- [x] 1.3 Test (RED): `actor-check.mjs` and `brain-start.mjs` pass with NO literal `'status:approved'`
       (they read the resolved value).
-- [ ] 1.4 GREEN: replace the hardcoded reads at `actor-check.mjs:150` and `brain-start.mjs:67` with the
+- [x] 1.4 GREEN: replace the hardcoded reads at `actor-check.mjs:150` and `brain-start.mjs:67` with the
       resolver. i18n (en + es) for any changed CLI string.
 
 ## Phase 2: run-check `issue-link` + `diff-size` cases (THE GOTCHA) (RED → GREEN)
