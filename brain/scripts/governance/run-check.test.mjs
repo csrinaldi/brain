@@ -30,32 +30,32 @@ async function captureLog(fn) {
 // longer imported by run-check.mjs at all. `readRecords` is injectable so
 // these tests never touch the real filesystem.
 
-test('runCheck: memory-gate — records has session_summary → pass', () => {
-  const result = runCheck('memory-gate', {
+test('runCheck: memory-gate — records has session_summary → pass', async () => {
+  const result = await runCheck('memory-gate', {
     readRecords: () => [{ type: 'session_summary', title: 'x' }],
   });
   assert.deepEqual(result, { pass: true });
 });
 
-test('runCheck: memory-gate — records have no session_summary → fail with reason', () => {
-  const result = runCheck('memory-gate', {
+test('runCheck: memory-gate — records have no session_summary → fail with reason', async () => {
+  const result = await runCheck('memory-gate', {
     readRecords: () => [{ type: 'decision' }],
   });
   assert.equal(result.pass, false);
   assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
 });
 
-test('runCheck: memory-gate — records empty → fail with reason', () => {
-  const result = runCheck('memory-gate', {
+test('runCheck: memory-gate — records empty → fail with reason', async () => {
+  const result = await runCheck('memory-gate', {
     readRecords: () => [],
   });
   assert.equal(result.pass, false);
   assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
 });
 
-test('runCheck: memory-gate — readRecords receives the injected cwd (uses injected reader, never a raw fs read)', () => {
+test('runCheck: memory-gate — readRecords receives the injected cwd (uses injected reader, never a raw fs read)', async () => {
   let receivedCwd;
-  runCheck('memory-gate', {
+  await runCheck('memory-gate', {
     cwd: '/fake/cwd',
     readRecords: (cwd) => {
       receivedCwd = cwd;
@@ -65,8 +65,8 @@ test('runCheck: memory-gate — readRecords receives the injected cwd (uses inje
   assert.equal(receivedCwd, '/fake/cwd');
 });
 
-test('runCheck: memory-gate — only chunks has session_summary (records empty) → FAIL (chunks are no longer read, #227 union retired)', () => {
-  const result = runCheck('memory-gate', {
+test('runCheck: memory-gate — only chunks has session_summary (records empty) → FAIL (chunks are no longer read, #227 union retired)', async () => {
+  const result = await runCheck('memory-gate', {
     readChunks: () => [{ type: 'session_summary' }],
     readRecords: () => [],
   });
@@ -76,23 +76,23 @@ test('runCheck: memory-gate — only chunks has session_summary (records empty) 
 
 // ── decision-gate ────────────────────────────────────────────────────────────
 
-test('runCheck: decision-gate — injected diff has HOME.md but no ADR file → fail with reason', () => {
-  const result = runCheck('decision-gate', {
+test('runCheck: decision-gate — injected diff has HOME.md but no ADR file → fail with reason', async () => {
+  const result = await runCheck('decision-gate', {
     diffNameOnly: () => ['brain/HOME.md', 'src/other.mjs'],
   });
   assert.equal(result.pass, false);
   assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
 });
 
-test('runCheck: decision-gate — injected diff has ADR file and HOME.md → pass', () => {
-  const result = runCheck('decision-gate', {
+test('runCheck: decision-gate — injected diff has ADR file and HOME.md → pass', async () => {
+  const result = await runCheck('decision-gate', {
     diffNameOnly: () => ['brain/project/decisions/adr-0099-foo.md', 'brain/HOME.md'],
   });
   assert.deepEqual(result, { pass: true });
 });
 
-test('runCheck: decision-gate — injected diff touches neither ADR nor HOME.md → pass (non-architectural PR)', () => {
-  const result = runCheck('decision-gate', { diffNameOnly: () => ['src/whatever.mjs'] });
+test('runCheck: decision-gate — injected diff touches neither ADR nor HOME.md → pass (non-architectural PR)', async () => {
+  const result = await runCheck('decision-gate', { diffNameOnly: () => ['src/whatever.mjs'] });
   assert.deepEqual(result, { pass: true });
 });
 
@@ -103,16 +103,16 @@ test('runCheck: decision-gate — injected diff touches neither ADR nor HOME.md 
 // diffNameOnly() throwing MUST fail the gate closed, not degrade to `[]`
 // (which adrPresence would otherwise treat as a harmless empty diff → pass).
 
-test('runCheck: decision-gate — diffNameOnly throws (diff uncomputable) → fail closed with reason', () => {
-  const result = runCheck('decision-gate', {
+test('runCheck: decision-gate — diffNameOnly throws (diff uncomputable) → fail closed with reason', async () => {
+  const result = await runCheck('decision-gate', {
     diffNameOnly: () => { throw new Error('BASE_SHA/HEAD_SHA not set'); },
   });
   assert.equal(result.pass, false);
   assert.match(result.reason, /cannot compute diff — failing closed/i);
 });
 
-test('runCheck: decision-gate — diffNameOnly throws → reason includes the underlying error message', () => {
-  const result = runCheck('decision-gate', {
+test('runCheck: decision-gate — diffNameOnly throws → reason includes the underlying error message', async () => {
+  const result = await runCheck('decision-gate', {
     diffNameOnly: () => { throw new Error('git exited with status 128'); },
   });
   assert.equal(result.pass, false);
@@ -121,8 +121,8 @@ test('runCheck: decision-gate — diffNameOnly throws → reason includes the un
 
 // ── unknown check ────────────────────────────────────────────────────────────
 
-test('runCheck: unknown check name throws', () => {
-  assert.throws(() => runCheck('not-a-real-check', {}), /unknown check/i);
+test('runCheck: unknown check name throws', async () => {
+  await assert.rejects(() => runCheck('not-a-real-check', {}), /unknown check/i);
 });
 
 // ── ci-context seam wiring (ADR-0016) — decision-gate reads ctx.baseSha/headSha ─
@@ -147,16 +147,16 @@ function withEnv(overrides, fn) {
   }
 }
 
-test('runCheck: decision-gate — deps.ctx.baseSha/headSha take precedence over process.env.BASE_SHA/HEAD_SHA (ci-context seam)', () => {
-  withEnv({ BASE_SHA: 'this-is-not-a-real-sha-xyz', HEAD_SHA: 'this-is-not-a-real-sha-abc' }, () => {
-    const result = runCheck('decision-gate', { ctx: { baseSha: 'HEAD', headSha: 'HEAD' } });
+test('runCheck: decision-gate — deps.ctx.baseSha/headSha take precedence over process.env.BASE_SHA/HEAD_SHA (ci-context seam)', async () => {
+  await withEnv({ BASE_SHA: 'this-is-not-a-real-sha-xyz', HEAD_SHA: 'this-is-not-a-real-sha-abc' }, async () => {
+    const result = await runCheck('decision-gate', { ctx: { baseSha: 'HEAD', headSha: 'HEAD' } });
     assert.deepEqual(result, { pass: true }, 'ctx.baseSha/headSha ("HEAD") must win over the bogus env values');
   });
 });
 
-test('runCheck: decision-gate — deps.ctx signaling null baseSha/headSha fails closed even when process.env.BASE_SHA/HEAD_SHA are set', () => {
-  withEnv({ BASE_SHA: 'HEAD', HEAD_SHA: 'HEAD' }, () => {
-    const result = runCheck('decision-gate', { ctx: { baseSha: null, headSha: null } });
+test('runCheck: decision-gate — deps.ctx signaling null baseSha/headSha fails closed even when process.env.BASE_SHA/HEAD_SHA are set', async () => {
+  await withEnv({ BASE_SHA: 'HEAD', HEAD_SHA: 'HEAD' }, async () => {
+    const result = await runCheck('decision-gate', { ctx: { baseSha: null, headSha: null } });
     assert.equal(result.pass, false);
     assert.match(result.reason, /cannot compute diff — failing closed/i);
   });
@@ -166,8 +166,8 @@ test('runCheck: decision-gate — deps.ctx signaling null baseSha/headSha fails 
 
 test('main: memory-gate passing → returns 0, prints nothing', async () => {
   let code;
-  const logs = await captureLog(() => {
-    code = main('memory-gate', { readRecords: () => [{ type: 'session_summary' }] });
+  const logs = await captureLog(async () => {
+    code = await main('memory-gate', { readRecords: () => [{ type: 'session_summary' }] });
   });
   assert.equal(code, 0);
   assert.deepEqual(logs, []);
@@ -175,8 +175,8 @@ test('main: memory-gate passing → returns 0, prints nothing', async () => {
 
 test('main: memory-gate failing → returns 1, prints the reason', async () => {
   let code;
-  const logs = await captureLog(() => {
-    code = main('memory-gate', { readRecords: () => [] });
+  const logs = await captureLog(async () => {
+    code = await main('memory-gate', { readRecords: () => [] });
   });
   assert.equal(code, 1);
   assert.ok(logs.length === 1 && logs[0].length > 0);
@@ -184,8 +184,8 @@ test('main: memory-gate failing → returns 1, prints the reason', async () => {
 
 test('main: decision-gate failing → returns 1, prints the reason', async () => {
   let code;
-  const logs = await captureLog(() => {
-    code = main('decision-gate', { diffNameOnly: () => ['brain/HOME.md'] });
+  const logs = await captureLog(async () => {
+    code = await main('decision-gate', { diffNameOnly: () => ['brain/HOME.md'] });
   });
   assert.equal(code, 1);
   assert.ok(logs.length === 1 && logs[0].length > 0);
@@ -193,8 +193,8 @@ test('main: decision-gate failing → returns 1, prints the reason', async () =>
 
 test('main: decision-gate passing (non-architectural PR) → returns 0, prints nothing', async () => {
   let code;
-  const logs = await captureLog(() => {
-    code = main('decision-gate', { diffNameOnly: () => ['src/foo.mjs'] });
+  const logs = await captureLog(async () => {
+    code = await main('decision-gate', { diffNameOnly: () => ['src/foo.mjs'] });
   });
   assert.equal(code, 0);
   assert.deepEqual(logs, []);
@@ -202,8 +202,8 @@ test('main: decision-gate passing (non-architectural PR) → returns 0, prints n
 
 test('main: decision-gate — diff uncomputable → returns 1, prints fail-closed reason', async () => {
   let code;
-  const logs = await captureLog(() => {
-    code = main('decision-gate', {
+  const logs = await captureLog(async () => {
+    code = await main('decision-gate', {
       diffNameOnly: () => { throw new Error('no BASE_SHA/HEAD_SHA'); },
     });
   });
@@ -218,3 +218,259 @@ test('neutrality source-scan (REQ-NEUTRALITY-2): run-check.mjs source contains n
   assert.equal(src.includes('.claude'), false, 'source must not reference .claude');
   assert.equal(src.includes('SKILL.md'), false, 'source must not reference SKILL.md');
 });
+
+// ── issue-link — THE GOTCHA (issue #231 A2 phase 2, design.md Decision 2) ──
+//
+// GitLab has no CI_MERGE_REQUEST_DESCRIPTION var and CI_MERGE_REQUEST_LABELS
+// freezes at pipeline creation (ADR-0016:45), so issue-link cannot be bash on
+// GitLab. run-check.mjs's issue-link case calls the EXISTING pure evaluator
+// issueLink(ctx.body) for the reference pattern, THEN verifies the referenced
+// issue carries the resolved approved label via an injectable `fetchIssue`
+// dep — never a real network call in tests. `readConfig` is injectable too so
+// resolveApprovedLabel() never touches the real brain.config.json.
+
+test('runCheck: issue-link — body has "Part of #231", referenced issue carries the approved label → pass (fresh ctx.labels via fetchIssue, never CI_MERGE_REQUEST_LABELS)', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: { body: 'feat: slice\n\nPart of #231', provider: 'gitlab' },
+    fetchIssue: async (issueNumber) => {
+      assert.equal(issueNumber, 231);
+      return { labels: ['status::approved'] };
+    },
+    readConfig: () => ({}),
+  });
+  assert.deepEqual(result, { pass: true });
+});
+
+test('runCheck: issue-link — body has "Closes #42", referenced issue carries the approved label → pass', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: { body: 'fix: bug\n\nCloses #42', provider: 'github' },
+    fetchIssue: async () => ({ labels: ['status:approved'] }),
+    readConfig: () => ({}),
+  });
+  assert.deepEqual(result, { pass: true });
+});
+
+test('runCheck: issue-link — referenced issue does NOT carry the approved label → fail with reason', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: { body: 'Part of #5', provider: 'gitlab' },
+    fetchIssue: async () => ({ labels: ['status::in-review'] }),
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
+});
+
+test('runCheck: issue-link — fetchIssue throws (network/API failure) → fail closed with reason', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: { body: 'Closes #9', provider: 'gitlab' },
+    fetchIssue: async () => { throw new Error('GitLab MR API failed: 500'); },
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /failing closed/i);
+});
+
+// ── issue-link — REQUIRED fail-closed on null body (task 2.2) ──────────────
+
+test('runCheck: issue-link — ctx.body is null (uncomputable) → fails closed, never passes (REQUIRED gate)', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: { body: null, provider: 'gitlab' },
+    fetchIssue: async () => { throw new Error('must not be called — body is null'); },
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+});
+
+test('main: issue-link — ctx.body is null → returns 1 (never 0) on the REQUIRED gate', async () => {
+  const code = await main('issue-link', {
+    ctx: { body: null, provider: 'gitlab' },
+    fetchIssue: async () => { throw new Error('must not be called'); },
+    readConfig: () => ({}),
+  });
+  assert.equal(code, 1);
+});
+
+test('runCheck: issue-link — body with no reference at all → fail, referenced-issue fetch never attempted', async () => {
+  let fetchCalled = false;
+  const result = await runCheck('issue-link', {
+    ctx: { body: 'Some PR description without any link', provider: 'gitlab' },
+    fetchIssue: async () => { fetchCalled = true; return { labels: [] }; },
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.equal(fetchCalled, false, 'fetchIssue must not be called when the body carries no reference');
+});
+
+// ── diff-size — size:exception from FRESH ctx.labels, never CI_MERGE_REQUEST_LABELS (task 2.3) ─
+
+test('runCheck: diff-size — ctx.labels includes "size:exception" → skips the budget check, pass', async () => {
+  const result = await runCheck('diff-size', {
+    ctx: { labels: ['size:exception'], baseSha: 'BASE', headSha: 'HEAD' },
+    diffNumstat: () => { throw new Error('must not be called — size:exception skips the gate'); },
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, true);
+});
+
+test('runCheck: diff-size — over budget, no size:exception label → fail with reason', async () => {
+  const result = await runCheck('diff-size', {
+    ctx: { labels: [], baseSha: 'BASE', headSha: 'HEAD' },
+    diffNumstat: () => '300\t101\tsrc/big.mjs',
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /401/);
+});
+
+test('runCheck: diff-size — under budget, no size:exception label → pass', async () => {
+  const result = await runCheck('diff-size', {
+    ctx: { labels: [], baseSha: 'BASE', headSha: 'HEAD' },
+    diffNumstat: () => '5\t0\tbrain/scripts/foo.mjs',
+    readConfig: () => ({}),
+  });
+  assert.deepEqual(result, { pass: true });
+});
+
+test('runCheck: diff-size — reads ignoreList from governance.ignoreList (config), not hardcoded', async () => {
+  const result = await runCheck('diff-size', {
+    ctx: { labels: [], baseSha: 'BASE', headSha: 'HEAD' },
+    diffNumstat: () => '3\t0\t.memory/session.jsonl.gz\n5\t0\tbrain/scripts/foo.mjs',
+    readConfig: () => ({ governance: { ignoreList: ['.memory/**'] } }),
+  });
+  assert.deepEqual(result, { pass: true });
+});
+
+test('runCheck: diff-size — diffNumstat throws (git uncomputable) → fail closed with reason', async () => {
+  const result = await runCheck('diff-size', {
+    ctx: { labels: [], baseSha: null, headSha: null },
+    diffNumstat: () => { throw new Error('BASE_SHA/HEAD_SHA not set'); },
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /cannot compute diff — failing closed/i);
+});
+
+// ── behavior parity (task 2.6, CP-A2a ruling) ───────────────────────────────
+//
+// Name parity alone is NOT enough. This table encodes the truth table
+// implemented by the GitHub bash paths — issue-link (.github/workflows/
+// governance.yml:28-81) and diff-size (:84-113) — for the fixture dimensions
+// task 2.6 calls out (body with/without a ref, referenced issue approved/not,
+// diff over/under budget, size:exception present/absent), and asserts the
+// Node run-check.mjs cases return the SAME pass/fail verdict for the SAME
+// inputs. This proves routing through Node changed the TRANSPORT, not the
+// VERDICT.
+//
+// Scope note: the bash issue-link job branches on BASE_BRANCH — base=='main'
+// requires a closing keyword (Closes|Fixes|Resolves #N) ONLY; base!='main'
+// (the slice-PR branch, :55-71) accepts EITHER "Part of #N" OR a closing
+// keyword. run-check.mjs's issue-link case (Decision 2) calls the existing
+// pure evaluator issueLink(ctx.body), which is NOT base-branch-conditional —
+// this matches the bash's slice-PR branch (:55-71) exactly, which is the
+// actual port target for GitLab MRs (REQ-A2-2 does not model base-branch
+// differentiation in Node). All rows below use inputs that produce the SAME
+// verdict on the slice-PR branch regardless of which pattern is present, so
+// the table is unambiguous with respect to that documented scope boundary.
+
+const issueLinkParityTable = [
+  {
+    label: 'Closes #N present, issue approved',
+    body: 'fix: thing\n\nCloses #42',
+    issueLabels: ['status:approved'],
+    // bash (governance.yml:59-66): num extracted via Part-of-or-closing regex
+    // (finds #42) → (:76-81) gh api fetches issue #42 labels → grep -qx
+    // 'status:approved' matches → PASS.
+    githubBashVerdict: true,
+  },
+  {
+    label: 'Part of #N present, issue approved',
+    body: 'feat: slice\n\nPart of #42',
+    issueLabels: ['status:approved'],
+    // bash (:59-62): Part-of regex matches #42 → (:76-81) approved → PASS.
+    githubBashVerdict: true,
+  },
+  {
+    label: 'Closes #N present, issue NOT approved',
+    body: 'fix: thing\n\nCloses #42',
+    issueLabels: ['status:in-review'],
+    // bash (:76-81): labels fetched but grep -qx 'status:approved' does not
+    // match 'status:in-review' → ::error:: not labeled → FAIL.
+    githubBashVerdict: false,
+  },
+  {
+    label: 'Part of #N present, issue NOT approved',
+    body: 'Part of #7',
+    issueLabels: [],
+    // bash (:76-81): issue has no labels at all → grep -qx fails → FAIL.
+    githubBashVerdict: false,
+  },
+  {
+    label: 'no issue reference at all',
+    body: 'chore: tidy up, no link here',
+    issueLabels: ['status:approved'], // irrelevant — bash never reaches the fetch
+    // bash (:59-70): both num= extractions come up empty → ::error:: must
+    // have a reference → exit 1 → FAIL (before any gh api call).
+    githubBashVerdict: false,
+  },
+];
+
+for (const row of issueLinkParityTable) {
+  test(`behavior parity (issue-link): "${row.label}" → Node verdict matches documented GitHub-bash verdict (${row.githubBashVerdict ? 'PASS' : 'FAIL'})`, async () => {
+    // provider: 'github' — the bash's own label literal is the unscoped
+    // 'status:approved' (governance.yml:78); the fixture issueLabels above
+    // use that same unscoped form, so the Node-side resolver must resolve to
+    // the SAME form for an apples-to-apples verdict comparison.
+    const result = await runCheck('issue-link', {
+      ctx: { body: row.body, provider: 'github' },
+      fetchIssue: async () => ({ labels: row.issueLabels }),
+      readConfig: () => ({}),
+    });
+    assert.equal(result.pass, row.githubBashVerdict,
+      `Node issue-link verdict (${result.pass}) must match GitHub-bash verdict (${row.githubBashVerdict}) for: ${row.label}`);
+  });
+}
+
+const diffSizeParityTable = [
+  {
+    label: 'under budget, no size:exception',
+    numstat: '5\t0\tbrain/scripts/foo.mjs',
+    labels: [],
+    // bash (:100-113): LABELS has no size:exception word → git diff --numstat
+    // piped to diff-size-count.mjs → changed=5 → 5>400 false → PASS (no error).
+    githubBashVerdict: true,
+  },
+  {
+    label: 'over budget, no size:exception',
+    numstat: '300\t101\tsrc/big.mjs',
+    labels: [],
+    // bash (:100-113): no size:exception → changed=401 → 401>400 → ::error:: → FAIL.
+    githubBashVerdict: false,
+  },
+  {
+    label: 'over budget, size:exception present',
+    numstat: '300\t101\tsrc/big.mjs',
+    labels: ['size:exception'],
+    // bash (:101-104): grep -qw 'size:exception' on LABELS matches → prints
+    // "skipping" → exit 0 → PASS (the budget is never even computed).
+    githubBashVerdict: true,
+  },
+  {
+    label: 'under budget, size:exception present',
+    numstat: '5\t0\tbrain/scripts/foo.mjs',
+    labels: ['size:exception'],
+    // bash (:101-104): size:exception present → skip → exit 0 → PASS.
+    githubBashVerdict: true,
+  },
+];
+
+for (const row of diffSizeParityTable) {
+  test(`behavior parity (diff-size): "${row.label}" → Node verdict matches documented GitHub-bash verdict (${row.githubBashVerdict ? 'PASS' : 'FAIL'})`, async () => {
+    const result = await runCheck('diff-size', {
+      ctx: { labels: row.labels, baseSha: 'BASE', headSha: 'HEAD' },
+      diffNumstat: () => row.numstat,
+      readConfig: () => ({}),
+    });
+    assert.equal(result.pass, row.githubBashVerdict,
+      `Node diff-size verdict (${result.pass}) must match GitHub-bash verdict (${row.githubBashVerdict}) for: ${row.label}`);
+  });
+}

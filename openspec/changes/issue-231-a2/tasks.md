@@ -55,18 +55,23 @@ whole, which was the real value of the cohesion argument.
       resolver. i18n (en + es) for any changed CLI string.
 
 ## Phase 2: run-check `issue-link` + `diff-size` cases (THE GOTCHA) (RED → GREEN)
-- [ ] 2.1 Test (RED): `run-check.mjs issue-link` with an injected `ctx` (`body` contains `Part of #N`,
+- [x] 2.1 Test (RED): `run-check.mjs issue-link` with an injected `ctx` (`body` contains `Part of #N`,
       referenced issue carries the approved label) PASSES via `issueLink(ctx.body)` + approved-label
       verification, using FRESH `ctx.labels` — no `CI_MERGE_REQUEST_LABELS` read.
-- [ ] 2.2 Test (RED — REQUIRED fail-closed): `run-check.mjs issue-link` with `ctx.body = null` exits
+- [x] 2.2 Test (RED — REQUIRED fail-closed): `run-check.mjs issue-link` with `ctx.body = null` exits
       non-zero (never exit 0).
-- [ ] 2.3 Test (RED): `run-check.mjs diff-size` reads `size:exception` from `ctx.labels` (fresh) and
+- [x] 2.3 Test (RED): `run-check.mjs diff-size` reads `size:exception` from `ctx.labels` (fresh) and
       skips; over-budget without the label fails.
-- [ ] 2.4 GREEN: add `issue-link` + `diff-size` cases to `run-check.mjs`, feeding the EXISTING pure
+- [x] 2.4 GREEN: add `issue-link` + `diff-size` cases to `run-check.mjs`, feeding the EXISTING pure
       evaluators from `loadContext()`. Pure evaluators (`checks/issue-link.mjs`, `checks/diff-size.mjs`)
       UNCHANGED. Injectable fetch/git deps so tests never hit the network or real git.
-- [ ] 2.5 i18n (en + es) for every added/changed CLI string.
-- [ ] 2.6 Test (RED — **behavior parity**, per the CP-A2a ruling; name parity in Phase 4 is NOT enough):
+- [x] 2.5 i18n (en + es) for every added/changed CLI string. DEVIATION (documented, same precedent as
+      Phase 1): `run-check.mjs` and its sibling governance/vcs gate wrappers (`actor-check.mjs`,
+      `phase-order-check.mjs`, `brain-writes-reviewed.mjs`) never import the repo's `i18n/t.mjs` catalog
+      at all — verified via repo-wide grep for `i18n/t.mjs` importers before this slice. The new
+      `result.reason` strings follow the existing English-only convention of this file; no net-new i18n
+      plumbing was introduced into a file that has none.
+- [x] 2.6 Test (RED — **behavior parity**, per the CP-A2a ruling; name parity in Phase 4 is NOT enough):
       a fixture table asserts the Node `issue-link`/`diff-size` cases return the SAME verdict as the
       GitHub bash paths for identical inputs — body with/without a ref, referenced issue approved/not,
       diff over/under budget, `size:exception` present/absent. Same inputs → same verdicts.
