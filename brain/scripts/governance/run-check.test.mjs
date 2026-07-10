@@ -283,6 +283,10 @@ test('runCheck: issue-link — ctx.body is null (uncomputable) → fails closed,
     readConfig: () => ({}),
   });
   assert.equal(result.pass, false);
+  // Self-diagnostic message: a null body means the context API fetch failed
+  // (token/endpoint), NOT a missing issue reference — the two must be
+  // distinguishable in a failing pipeline log.
+  assert.match(result.reason, /MR body uncomputable \(context API fetch failed\) — failing closed/);
 });
 
 test('main: issue-link — ctx.body is null → returns 1 (never 0) on the REQUIRED gate', async () => {
@@ -302,6 +306,9 @@ test('runCheck: issue-link — body with no reference at all → fail, reference
     readConfig: () => ({}),
   });
   assert.equal(result.pass, false);
+  // A non-null body with no reference is a GENUINE governance miss — distinct
+  // from the null-body (uncomputable) case above.
+  assert.match(result.reason, /no issue reference found/);
   assert.equal(fetchCalled, false, 'fetchIssue must not be called when the body carries no reference');
 });
 

@@ -240,8 +240,9 @@ function requiresClosingKeyword(ctx) {
  * policy (see requiresClosingKeyword — FAIL-CLOSED, never assumes 'main' when
  * `ctx.defaultBranch` is uncomputable), then verifies the referenced issue
  * carries the resolved approved label via an injectable `fetchIssue`. Fails
- * closed on a null/uncomputable body (issueLink() itself returns
- * `{ pass: false }` for a non-string body), on an uncomputable
+ * closed with a DISTINCT self-diagnostic reason on a non-string body (the
+ * wrapper catches it before issueLink() — "context API fetch failed", vs the
+ * "no issue reference found" of a string with no link), on an uncomputable
  * target/default branch, and on a fetch failure.
  *
  * @param {{ body?: string|null, provider?: string, repo?: string|null, targetBranch?: string|null, defaultBranch?: string|null }} ctx
@@ -249,6 +250,18 @@ function requiresClosingKeyword(ctx) {
  * @returns {Promise<{ pass: boolean, reason?: string }>}
  */
 async function runIssueLinkCheck(ctx, deps) {
+  // Self-diagnostic distinction (finding #12 follow-up): a NON-STRING body means
+  // ci-context could not fetch the MR description (token/endpoint/API failure) —
+  // an INFRA fail-closed, not a governance miss. Distinguish it in the message so
+  // a failing pipeline log discriminates (A) "no issue link" from (B) "couldn't
+  // read the MR body". The pure issueLink() evaluator stays UNCHANGED (REQ-CIC-4);
+  // it only ever sees a string below.
+  if (typeof ctx.body !== 'string') {
+    return {
+      pass: false,
+      reason: 'issue-link: MR body uncomputable (context API fetch failed) — failing closed',
+    };
+  }
   const linkResult = issueLink(ctx.body);
   if (!linkResult.pass) return linkResult;
 
