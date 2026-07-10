@@ -92,6 +92,29 @@ recorded as a follow-up) while the Node path (now used by GitLab, and covered by
 the CORRECT platform-sourced policy. This divergence is called out explicitly in the parity table and in
 `governance.yml`'s `issue-link` job comment — never silently implied as total parity.
 
+### Decision 2 ADDENDUM 2 (issue #231 CP-A2a review, finding M1) — closing-keyword vocabulary unified, narrow→broad, by ruling
+
+**The gap:** `issueLink()` (`checks/issue-link.mjs`) defined its own closing-keyword regex covering only
+3 of GitHub's 9 documented forms (`closes|fixes|resolves`). GitHub bash (`governance.yml`'s `issue-link`
+job) and `actor-check.mjs` both already used the BROAD 9-form vocabulary (`close[sd]?|fix(e[sd])?
+|resolve[sd]?`). `run-check.mjs` had its own THIRD copy of the narrow pattern (`CLOSING_NUM_RE`). Result:
+a body like `Fixed #42` merging to the default branch PASSED GitHub bash and would have passed
+`actor-check.mjs`'s DETECTION verdict, but FAILED the REQUIRED `issue-link` gate on Node (both directly via
+`issueLink()` and via `run-check.mjs`'s own duplicate) — a fail-closed parity divergence between the two
+platforms, and an internal disagreement between two gates in the SAME pipeline.
+
+**RULING (precedent for future reviews):** "pure evaluator unchanged" (REQ-CIC-4) protects
+`checks/issue-link.mjs` from **refactor drift** introduced by the ci-context seam (ADR-0016) — it does NOT
+protect a **pre-existing correctness bug** from being fixed. `issueLink()` accepted FEWER forms than the
+platforms it gates actually honor; that is a bug that happened to survive because this repo's own commit
+history uses `Closes`/`Part of` by habit. The fix widens `issueLink()`'s verdict (RULED, with tests: RED
+first on `Fixed #42`/`Close #10`/`Resolved #5`, confirmed narrow-pattern failure, then widened) and unifies
+all three regex copies into ONE shared pure-constant module,
+`checks/issue-ref-patterns.mjs` (no `ci-context` import — REQ-CIC-4 still holds for the *seam*, just not for
+a sibling pure-constants import), imported by `issue-link.mjs`, `run-check.mjs`, and `actor-check.mjs`.
+Doctrine restated: never a second parser (the hasher / §4-grammar precedent) — one constant, three
+importers, zero drift possible going forward.
+
 ## Decision 3 — Exit-code → GitLab mapping: REQUIRED normal, DETECTION `allow_failure: true`
 
 Amendment 3 (adr-0016:62-80) fixes the policy: REQUIRED → fail-closed (0/1; uncomputable FAILS CLOSED);
@@ -119,6 +142,22 @@ mapping is mechanical). Destructive schemaVersion restructure — REJECTED (addi
 `brain-writes-reviewed` gate engages — human review of the merge, distinct from the author. This is the
 FOURTH slice to touch that file (after #215 C1b, #223 C2b-1, #229 C4); all PASS+warn under the L6 gate.
 No new ceremony; the edit rides the established path. **Version number is an open question** (below).
+
+### Known gap (issue #231 CP-A2a review, finding m3) — `actor-check.mjs` is `gh`-hardcoded, degrades safe on GitLab
+
+`actor-check.mjs`'s `defaultFetchLabeledEvents` (and `defaultFetchIssue`) call `execFileSync('gh', …)`
+directly — the GitHub CLI. On GitLab there is no `gh` binary, so this call always throws; `runActorCheck`
+catches the throw and returns a `warn` verdict (never `fail`), which is exactly this DETECTION job's
+documented degrade-safe contract (REQ-L5-2: never false-pass, never a false block on missing evidence).
+**This is intentional scope, not a bug**: A2/A3 drew the boundary at provider-agnostic VERBS
+(`issueView`, MR/labels reads via `ci-context.mjs`'s provider abstraction) landing in A3, not A2.
+`actor-check.mjs`'s `gh`-hardcoded I/O wrapper is the one piece of A2 that was NOT ported through that
+abstraction, because the actor-check job itself is DETECTION-only (`allow_failure: true` on both
+platforms) — a GitLab MR always gets a visible `warn`, never a silent false-pass and never a wrongly
+blocked MR. Destined for CP-A2b/A3: swap `defaultFetchLabeledEvents`/`defaultFetchIssue` for the
+provider-abstraction verbs (`getVcs()` from `vcs/cli.mjs`, already used by `run-check.mjs`'s
+`defaultFetchIssue`) so GitLab gets real detection instead of a permanent warn. Not fixed in this slice
+(CP-A2a review, DOCUMENT ONLY per ruling) — recorded here so it is not silently rediscovered.
 
 ## Decision 5 — Drift-guard extension: parse both YAMLs by string-slice (zero deps)
 

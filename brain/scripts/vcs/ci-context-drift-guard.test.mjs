@@ -24,8 +24,13 @@ const GOVERNANCE_CHECKS_DIR = join(VCS_DIR, '..', 'governance', 'checks');
 const GITLAB_GOVERNANCE_YML = join(VCS_DIR, '..', 'ci', 'gitlab-governance.yml');
 
 // Pipeline context env vars that only ci-context.mjs may read directly.
+// DEFAULT_BRANCH / CI_DEFAULT_BRANCH (issue #231 CP-A2a review, finding m4):
+// the A2 phase 2 addendum introduced these as the new seam vars behind
+// ctx.defaultBranch but never extended this negative-space enumeration to
+// forbid a future gate from reading them directly — the #204 wiring-test
+// lesson (the guard must cover everything it itself guards) repeating.
 const PIPELINE_ENV_PATTERN =
-  /process\.env\.(PR_[A-Z_]+|BASE_SHA|HEAD_SHA|BASE_BRANCH|GITHUB_REPOSITORY|GITHUB_HEAD_REF|GITHUB_EVENT_NAME|GITHUB_ACTOR|GITHUB_SHA|GITHUB_BASE_REF|GITHUB_REF|CI_MERGE_REQUEST_[A-Z_]+|CI_PROJECT_[A-Z_]+|CI_COMMIT_[A-Z_]+|CI_API_V4_URL)\b/g;
+  /process\.env\.(PR_[A-Z_]+|BASE_SHA|HEAD_SHA|BASE_BRANCH|GITHUB_REPOSITORY|GITHUB_HEAD_REF|GITHUB_EVENT_NAME|GITHUB_ACTOR|GITHUB_SHA|GITHUB_BASE_REF|GITHUB_REF|CI_MERGE_REQUEST_[A-Z_]+|CI_PROJECT_[A-Z_]+|CI_COMMIT_[A-Z_]+|CI_API_V4_URL|DEFAULT_BRANCH|CI_DEFAULT_BRANCH)\b/g;
 
 // Every gate wrapper this seam was introduced for (the 5 files cited in
 // ADR-0016) PLUS run-check.mjs's sibling checks dir, EXCLUDING ci-context.mjs
@@ -51,6 +56,29 @@ test('drift-guard: no gate wrapper reads a pipeline-context env var directly —
       `${file} must not read pipeline env directly — found: ${JSON.stringify(matches)}. All pipeline context must flow through ci-context.mjs.`
     );
   }
+});
+
+// ── PIPELINE_ENV_PATTERN vocabulary gap (issue #231 CP-A2a review, finding
+// m4): the A2 phase 2 addendum introduced ctx.defaultBranch, sourced from
+// the NEW seam vars DEFAULT_BRANCH (GitHub, mapped) / CI_DEFAULT_BRANCH
+// (GitLab, standard predefined) — but PIPELINE_ENV_PATTERN, this guard's own
+// negative-space enumeration of pipeline-context env vars, was never
+// extended to include them. A future gate reading `process.env.
+// DEFAULT_BRANCH` directly (bypassing ci-context.mjs) would go undetected.
+// This is the #204 wiring-test lesson repeating: the guard must cover
+// everything it itself guards.
+
+test('drift-guard: PIPELINE_ENV_PATTERN also covers the ADDENDUM seam vars DEFAULT_BRANCH / CI_DEFAULT_BRANCH (m4 — a future gate reading these directly must be caught, not silently exempted)', () => {
+  // Uses String#match (not assert.match/RegExp#test) deliberately: the
+  // shared PIPELINE_ENV_PATTERN carries the `g` flag, and RegExp#test on a
+  // global regex mutates `lastIndex` across calls — a second `.test()` call
+  // on a shorter match can spuriously report no-match. String#match resets
+  // `lastIndex` internally on every call, so it is safe to reuse the same
+  // module-level regex object here exactly like the file's other assertions do.
+  assert.ok('process.env.DEFAULT_BRANCH'.match(PIPELINE_ENV_PATTERN),
+    'PIPELINE_ENV_PATTERN must forbid a gate wrapper reading process.env.DEFAULT_BRANCH directly');
+  assert.ok('process.env.CI_DEFAULT_BRANCH'.match(PIPELINE_ENV_PATTERN),
+    'PIPELINE_ENV_PATTERN must forbid a gate wrapper reading process.env.CI_DEFAULT_BRANCH directly');
 });
 
 test('drift-guard: ci-context.mjs IS the sanctioned reader — it references process.env AND the pipeline var names (sanity: pattern is not vacuous)', () => {

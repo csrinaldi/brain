@@ -391,6 +391,37 @@ test('runCheck: issue-link — ctx.targetBranch is null (defaultBranch known) �
   assert.equal(result.pass, false);
 });
 
+// ── issue-link — issue-number extraction precedence (issue #231 CP-A2a
+// review, finding m2) ─────────────────────────────────────────────────────
+//
+// GitHub bash's SLICE branch (governance.yml:66-76) tries Part-of FIRST,
+// then falls back to a closing keyword. Before m2, run-check.mjs's
+// extractIssueNumber() tried CLOSING first regardless of target — a
+// fail-OPEN edge for a body carrying BOTH patterns pointing at DIFFERENT
+// issues: bash picks the Part-of issue, Node picked the closing issue. m2
+// aligns Node to bash: on a slice target, extract Part-of first; on a
+// default-branch target, only the closing ref is ever consulted (the
+// default-branch policy already requires it).
+
+test('runCheck: issue-link — slice target, body has BOTH "Closes #42" and "Part of #7" (different issues) → extracts #7 (Part-of-first, matches GitHub bash slice-branch precedence)', async () => {
+  let fetchedIssueNumber = null;
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'fix: thing\n\nCloses #42\n\nPart of #7',
+      provider: 'github',
+      targetBranch: 'feature/tracker',
+      defaultBranch: 'main',
+    },
+    fetchIssue: async (issueNumber) => {
+      fetchedIssueNumber = issueNumber;
+      return { labels: ['status:approved'] };
+    },
+    readConfig: () => ({}),
+  });
+  assert.equal(fetchedIssueNumber, 7, 'slice target must extract the Part-of issue (#7) first, mirroring GitHub bash');
+  assert.deepEqual(result, { pass: true });
+});
+
 // ── diff-size — size:exception from FRESH ctx.labels, never CI_MERGE_REQUEST_LABELS (task 2.3) ─
 
 test('runCheck: diff-size — ctx.labels includes "size:exception" → skips the budget check, pass', async () => {
@@ -475,6 +506,16 @@ test('runCheck: diff-size — diffNumstat throws (git uncomputable) → fail clo
 // pre-existing bash limitation, not introduced by this addendum, and fixing
 // the bash side is out of scope here — recorded as a follow-up, not implied
 // parity.
+//
+// VOCABULARY DIMENSION (issue #231 CP-A2a review, finding M1): the rows
+// above use "Closes"/"Part of" almost exclusively. The table now also covers
+// the full 9-form closing-keyword vocabulary (close, closes, closed, fix,
+// fixes, fixed, resolve, resolves, resolved) that GitHub bash's grep
+// (close[sd]?|fix(e[sd])?|resolve[sd]?) has always accepted — issueLink()
+// and run-check.mjs's own closing-number regex were previously NARROWER (3
+// forms only), a fail-closed parity gap now closed by sharing one pattern
+// (checks/issue-ref-patterns.mjs) across issueLink(), run-check.mjs, and
+// actor-check.mjs.
 
 const issueLinkParityTable = [
   {
@@ -532,6 +573,54 @@ const issueLinkParityTable = [
     // a Part-of-only body → FAIL. Both paths FAIL — this is the exact input
     // that used to PASS on Node before this addendum (the gap being closed).
     githubBashVerdict: false,
+  },
+
+  // ── vocabulary dimension (issue #231 CP-A2a review, finding M1) ───────────
+  //
+  // Before M1, run-check.mjs's issue-link case (via issueLink() AND its own
+  // CLOSING_NUM_RE) only recognized closes|fixes|resolves (3 of the 9
+  // GitHub-documented closing forms) — a NARROWER vocabulary than GitHub
+  // bash's own grep (close[sd]?|fix(e[sd])?|resolve[sd]?, all 9 forms). A
+  // body like "Fixed #42" therefore PASSED GitHub bash but FAILED the Node
+  // path — a parity divergence. M1 widens issueLink() and run-check.mjs to
+  // the SAME shared broad pattern (checks/issue-ref-patterns.mjs). These
+  // rows cover at least one form from each of the three keyword families
+  // (close/fix/resolve) on a slice target, PLUS the exact M1 default-branch
+  // case below.
+  {
+    label: 'Fixed #N (past-tense "fix" form), issue approved',
+    body: 'Fixed #42',
+    issueLabels: ['status:approved'],
+    // bash (:74, broad grep matches "Fixed"): finds #42 → approved → PASS.
+    githubBashVerdict: true,
+  },
+  {
+    label: 'close #N (bare "close" form), issue approved',
+    body: 'close #42',
+    issueLabels: ['status:approved'],
+    // bash (:74, broad grep matches "close"): finds #42 → approved → PASS.
+    githubBashVerdict: true,
+  },
+  {
+    label: 'Resolved #N (past-tense "resolve" form), issue approved',
+    body: 'Resolved #42',
+    issueLabels: ['status:approved'],
+    // bash (:74, broad grep matches "Resolved"): finds #42 → approved → PASS.
+    githubBashVerdict: true,
+  },
+  {
+    label: 'Fixed #42 targeting the DEFAULT branch — THE M1 case (broad closing form satisfies the default-branch closing-keyword policy)',
+    body: 'Fixed #42',
+    issueLabels: ['status:approved'],
+    targetBranch: 'main',
+    defaultBranch: 'main',
+    // bash (governance.yml:55-64, base=='main' branch): the broad grep
+    // (close[sd]?|fix(e[sd])?|resolve[sd]?) matches "Fixed" → num=42 →
+    // approved → PASS. Before M1, Node's own CLOSING_NUM_RE was narrow
+    // (closes|fixes|resolves) and did NOT match "Fixed" → the default-branch
+    // closing-keyword policy (requiresClosingKeyword) would wrongly FAIL this
+    // — the exact fail-closed parity divergence M1 closes.
+    githubBashVerdict: true,
   },
 ];
 
