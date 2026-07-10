@@ -1,0 +1,134 @@
+# Design — GitLab Governance Pipeline (slice A2)
+
+Ship the GitLab governance pipeline over the existing `ci-context` seam. A1 already built the GitLab
+CONTEXT reader; A2 builds the PIPELINE that invokes the eight jobs and the Node wiring that lets two
+previously-bash jobs run on GitLab. Pure evaluators stay untouched (ADR-0016 boundary). All artifacts
+English (ADR-0009).
+
+## Decision 1 — `include: local:` opt-in; brain NEVER manages the consumer root
+
+Brain ships `brain/scripts/ci/gitlab-governance.yml` and registers it as a LITERAL in
+`managed-paths.mjs` `managed[]` (managed-paths.mjs:39-51 holds literal paths only — no globs). The
+consumer's root `.gitlab-ci.yml` stays LOCAL (`local[]`), consistent with how brain owns
+`.github/workflows/governance.yml` but never the consumer's other CI. Adoption is one line the consumer
+adds themselves: `include: { local: 'brain/scripts/ci/gitlab-governance.yml' }`.
+
+**Alternatives considered:** (a) ship a root `.gitlab-ci.yml` — REJECTED: GitLab allows exactly one root
+pipeline file, so brain would clobber the consumer's own CI (ADR-0003 core-is-read-only violation).
+(b) generate the root via installer merge — REJECTED: YAML deep-merge of an arbitrary consumer pipeline
+is fragile and there is no zero-dep YAML writer. **The `include:`-line adoption cost is the honest
+residual F1 inherits** (argued fully in the ADR draft): the consumer must add one line, and brain cannot
+verify they did — the fragment is inert until included. This is the correct trade against clobber risk.
+
+## Decision 2 — THE GOTCHA: `issue-link`/`diff-size` CANNOT be bash on GitLab → uniform Node entrypoints
+
+On GitHub, `issue-link` (governance.yml:28-81) and `diff-size` (:84-113) are pure bash reading the
+`github.event` payload, which carries a FRESH body and labels. **GitLab has no equivalent:** there is no
+`CI_MERGE_REQUEST_DESCRIPTION` predefined variable, and `CI_MERGE_REQUEST_LABELS` FREEZES at pipeline
+creation (forbidden — ADR-0016:45). The MR body and fresh labels exist only behind
+`loadGitlabContext()` (ci-context.mjs:120-153), which fetches them in one proxy-aware API call.
+
+**Decision:** route ALL eight GitLab jobs through Node entrypoints. Extend `run-check.mjs` — today it
+handles `memory-gate` + `decision-gate` (run-check.mjs:87-101) — with `issue-link` and `diff-size` cases
+that call the ALREADY-EXISTING pure evaluators (`checks/issue-link.mjs#issueLink`,
+`checks/diff-size.mjs#diffSize` — unit-tested, never CLI-wired) fed by `loadContext()`. The CLI
+entrypoint (run-check.mjs:122-125) already loads `ctx` once and passes it in. This reuses the pure
+evaluators, duplicates NO logic, and is uniformly fixture-testable. **This is the scope-shaping decision
+for CP-A2a review: A2 is NOT "just a YAML" — it is the Node wiring that makes the seam usable end-to-end
+on GitLab.**
+
+Inputs per case:
+- `issue-link` → `issueLink(ctx.body)` for the reference pattern, THEN verify the referenced issue
+  carries the resolved approved label (Decision 4) via an injectable issue-fetch. On a `null` body the
+  REQUIRED gate fails closed (run-check.mjs:57-71 is the established precedent).
+- `diff-size` → `diffSize(numstat, ignoreList)` where `numstat = git diff --numstat baseSha...headSha`
+  (from `ctx`) and `size:exception` is read from FRESH `ctx.labels`, never `CI_MERGE_REQUEST_LABELS`.
+
+GitHub keeps its working bash for these two jobs; only the approved-label read moves to config
+(Decision 4). Converting GitHub wholesale to Node is out of scope (avoids needless churn/risk).
+
+## Decision 3 — Exit-code → GitLab mapping: REQUIRED normal, DETECTION `allow_failure: true`
+
+Amendment 3 (adr-0016:62-80) fixes the policy: REQUIRED → fail-closed (0/1; uncomputable FAILS CLOSED);
+DETECTION → degrade-to-warn (uncomputable → warn+exit0; real finding → exit1 visible). The three
+detection wrappers already implement this internally (phase-order-check.mjs:372-408,
+actor-check.mjs:228-254, brain-writes-reviewed.mjs:215-248). The GitLab pipeline maps the CLASS, not the
+per-run outcome: REQUIRED jobs are normal (exit1 blocks the MR); DETECTION jobs carry
+`allow_failure: true` (exit1 shows red but does not block). **Never flatten** the two classes into one —
+a DETECTION `allow_failure` on a REQUIRED job would silently un-gate it.
+
+## Decision 4 — `governance.approvedLabel`: additive config, provider-resolved, TOUCHES brain/core
+
+`status:approved` is hardcoded in three places: `governance.yml:78` (bash grep), `actor-check.mjs:150`,
+`brain-start.mjs:67`. Add an ADDITIVE `config-migrations.mjs` entry (all six existing entries are
+additive; `mergeDefaults` structurally cannot remove a key): `governance.approvedLabel` default
+`status:approved`. A resolver `resolveApprovedLabel(config, provider)` returns `status:approved` on
+GitHub and the scoped `status::approved` on GitLab (GitLab scoped labels use `::`). Node sites import it;
+the GitHub `issue-link` bash sources the label from a tiny node CLI (one-line change, replacing the
+literal grep) so no bash config-parser is invented.
+
+**Alternatives considered:** store both provider strings in config — REJECTED (redundant; the `:`↔`::`
+mapping is mechanical). Destructive schemaVersion restructure — REJECTED (additive-only doctrine).
+
+**Task boundary (call out in tasks.md):** this edits `brain/core/config-migrations.mjs`, so the L6
+`brain-writes-reviewed` gate engages — human review of the merge, distinct from the author. This is the
+FOURTH slice to touch that file (after #215 C1b, #223 C2b-1, #229 C4); all PASS+warn under the L6 gate.
+No new ceremony; the edit rides the established path. **Version number is an open question** (below).
+
+## Decision 5 — Drift-guard extension: parse both YAMLs by string-slice (zero deps)
+
+`ci-context-drift-guard.test.mjs` already string-slices `governance.yml` (drift-guard test:119-132) with
+NO `yaml` dependency (zero-deps policy). Extend it to slice `gitlab-governance.yml` and assert: (a) job
+names == `GOVERNANCE_JOBS`; (b) `allow_failure: true` present iff the job ∈ `DETECTION_JOBS`. This binds
+Decisions 1, 3 to the registry — adding or mis-classifying a job turns the guard red.
+
+## Data flow
+
+    GitLab MR ─▶ pipeline (include: local: gitlab-governance.yml)
+                     │  8 jobs, each: node run-check.mjs <job>
+                     ▼
+              loadContext() ──▶ loadGitlabContext (1 proxy-aware MR API call)
+                     │            body, FRESH labels, author, baseSha, headSha
+                     ▼
+        pure evaluators (issueLink | diffSize | memoryPresence | adrPresence | …)  ← UNCHANGED
+                     │
+                     ▼   exit 0/1
+        REQUIRED → blocks · DETECTION (allow_failure:true) → visible, non-blocking
+
+## File changes
+
+| File | Action | Description |
+|------|--------|-------------|
+| `brain/scripts/ci/gitlab-governance.yml` | Create | Eight-job GitLab pipeline fragment; REQUIRED normal, DETECTION `allow_failure:true`; each job runs `node run-check.mjs <job>` |
+| `brain/scripts/governance/run-check.mjs` | Modify | Add `issue-link` + `diff-size` cases fed by `loadContext()`; keep memory/decision cases |
+| `brain/core/config-migrations.mjs` | Modify | Additive `governance.approvedLabel` entry (L6 gate) |
+| `brain/scripts/governance/approved-label.mjs` | Create | `resolveApprovedLabel(config, provider)` + CLI printer for the GitHub bash |
+| `brain/scripts/vcs/actor-check.mjs` | Modify | Replace hardcoded `status:approved` with the resolved lookup |
+| `brain/scripts/brain-start.mjs` | Modify | Same replacement |
+| `.github/workflows/governance.yml` | Modify | `issue-link` bash sources the approved label from the node CLI |
+| `brain/core/managed-paths.mjs` | Modify | Add the fragment as a literal `managed[]` entry |
+| `brain/scripts/vcs/ci-context-drift-guard.test.mjs` | Modify | Parse the GitLab YAML; assert job-set + classification |
+
+## Testing strategy
+
+| Layer | What | Approach |
+|-------|------|----------|
+| Unit | `resolveApprovedLabel` provider mapping; run-check issue-link/diff-size cases | Injected `ctx`/config fixtures; no real fetch, no real git |
+| Unit | REQUIRED fail-closed on `null` body/labels | Inject `ctx` with `null` fields; assert exit 1 |
+| Integration (fixture) | Drift-guard over `gitlab-governance.yml` | String-slice the real YAML; assert vs `GOVERNANCE_JOBS`/`DETECTION_JOBS` |
+| E2E (DEFERRED to CP-A2b) | Real MR blocked/passing | Deferred until GitLab access + endpoint restored |
+
+## Migration / rollout
+
+Consumer adds one `include: local:` line (Decision 1). The config migration is additive/idempotent.
+CP-A2a is the acceptance gate (fixture-tested, hard stop, PR-as-review); CP-A2b (live e2e) is deferred.
+
+## Open questions
+
+- [ ] **Migration version number.** C4 (#229) removed the never-shipped `0.6.0` entry
+      (config-migrations.mjs:87-95); the array now ends at `0.5.0`. Should `governance.approvedLabel`
+      reuse the freed `0.6.0` slot (safe — proven never shipped) or take `0.7.0` (monotonic-forever, no
+      reused-version ambiguity in git history)? Default recommendation: `0.6.0`. Also: A2 and C4 are
+      siblings off `feature/v2.0.0` — whichever lands second must append after the other's version.
+- [ ] **CP-A2b endpoint.** The live e2e is blocked on the human restoring GitLab access + a new
+      endpoint; not decidable in this slice.
