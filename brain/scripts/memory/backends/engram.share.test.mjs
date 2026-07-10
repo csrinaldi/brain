@@ -21,7 +21,7 @@ import {
   _defaultChangedChunkFiles,
   _defaultReadObservations,
 } from './engram.mjs';
-import { DEFAULT_SECRET_PATTERNS } from '../lib/secret-scrub.mjs';
+import { DEFAULT_SECRET_PATTERNS, scrubChunkFile } from '../lib/secret-scrub.mjs';
 import { buildRecord } from '../lib/format.mjs';
 
 // ---------------------------------------------------------------------------
@@ -84,6 +84,53 @@ test('_defaultChangedChunkFiles: git failure fails CLOSED (refuses to share), ne
 test('_defaultChangedChunkFiles: a clean git run (status 0, no changes) returns [] — no scan, no permablock', () => {
   const out = _defaultChangedChunkFiles('/fake/root', { _spawn: () => ({ status: 0, stdout: '', stderr: '' }) });
   assert.deepEqual(out, []);
+});
+
+// ── cutover finding 7 (id:388): porcelain deletions must not reach the scrubber ──
+//
+// After the cutover moved chunks to legacy/, `git status --porcelain` on
+// .memory/chunks reports DELETION lines. A deletion whose path still ends in
+// `.jsonl.gz` used to pass the suffix-only filter, so scrubChunkFile() would
+// readFileSync() a path that no longer exists → ENOENT. Fix: exclude porcelain
+// deletions before the suffix filter runs.
+
+test('_defaultChangedChunkFiles: porcelain deletions of .jsonl.gz chunks are excluded, live changes survive (finding 7, id:388)', () => {
+  const out = _defaultChangedChunkFiles('/fake/root', {
+    _spawn: () => ({
+      status: 0,
+      stdout: [
+        ' D .memory/chunks/unstaged-deleted.jsonl.gz',
+        'D  .memory/chunks/staged-deleted.jsonl.gz',
+        'AD .memory/chunks/added-then-deleted.jsonl.gz',
+        ' M .memory/chunks/modified.jsonl.gz',
+        '?? .memory/chunks/new-untracked.jsonl.gz',
+      ].join('\n'),
+      stderr: '',
+    }),
+  });
+  assert.deepEqual(out, [
+    join('/fake/root', '.memory/chunks/modified.jsonl.gz'),
+    join('/fake/root', '.memory/chunks/new-untracked.jsonl.gz'),
+  ]);
+});
+
+test('scrubMaterializedChunks: a porcelain-deleted .jsonl.gz chunk does not reach _scrubChunk / does not throw ENOENT (finding 7, id:388)', async () => {
+  await assert.doesNotReject(() =>
+    scrubMaterializedChunks('/fake/root', {
+      _changedChunkFiles: (root) =>
+        _defaultChangedChunkFiles(root, {
+          _spawn: () => ({
+            status: 0,
+            stdout: ' D .memory/chunks/nonexistent-deleted.jsonl.gz\n',
+            stderr: '',
+          }),
+        }),
+      _loadConfig: () => ({}),
+      // REAL scrubChunkFile — would throw ENOENT if the deletion leaked through
+      // to a readFileSync() on a path that no longer exists on disk.
+      _scrubChunk: scrubChunkFile,
+    }),
+  );
 });
 
 test('scrubMaterializedChunks: default patterns are used when config has no governance keys', async () => {

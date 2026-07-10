@@ -11,7 +11,7 @@
 // allowlist (never an ephemeral local CLI flag).
 
 import { gunzipSync } from 'node:zlib';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 /**
  * Default secret patterns (regex source strings). Additive only: a consumer's
@@ -96,12 +96,20 @@ export function scanTextForSecrets(text, patterns, allowPatterns = []) {
  * JSON object per ADR-0017's empirical inspection), pretty-print it so a
  * match has a meaningful line number, and scan for secrets.
  *
+ * Defense-in-depth (cutover finding 7, id:388): guards existence before the
+ * read. The primary fix excludes porcelain deletions in
+ * `_defaultChangedChunkFiles` (engram.mjs), but a caller could still hand this
+ * function a path that no longer exists (e.g. a race between `git status` and
+ * the read) — treat "already gone" as "nothing to scan" rather than an ENOENT
+ * throw.
+ *
  * @param {string} chunkPath
  * @param {RegExp[]} patterns
  * @param {RegExp[]} [allowPatterns]
  * @returns {{pattern: string, lineNumber: number, line: string} | null}
  */
 export function scrubChunkFile(chunkPath, patterns, allowPatterns = []) {
+  if (!existsSync(chunkPath)) return null;
   const gz = readFileSync(chunkPath);
   const raw = gunzipSync(gz).toString('utf8');
   let pretty;

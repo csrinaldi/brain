@@ -346,6 +346,14 @@ function _defaultLoadBrainConfig(root) {
  * content-addressed, so an untouched chunk never appears here — this is the
  * "materialized THIS run" boundary the scrubber respects (never the whole store).
  *
+ * Excludes porcelain DELETIONS (cutover finding 7, id:388): once chunks moved
+ * to `legacy/`, `git status --porcelain` on `.memory/chunks` reports deletion
+ * lines (` D`, `D `, `AD`, …) whose path still ends in `.jsonl.gz`. Left
+ * unfiltered, a deletion would pass the suffix-only filter and `scrubChunkFile`
+ * would `readFileSync` a path that no longer exists → ENOENT. A status code
+ * containing `D` in either column is a deletion and is dropped before the
+ * suffix filter runs.
+ *
  * @param {string} root
  * @returns {string[]}  Absolute paths.
  */
@@ -366,6 +374,7 @@ export function _defaultChangedChunkFiles(root, { _spawn = spawnSync } = {}) {
   }
   return (r.stdout ?? "")
     .split("\n")
+    .filter((line) => line.length > 3 && !line.slice(0, 2).includes("D"))
     .map((line) => line.slice(3).trim())
     .filter((p) => p.endsWith(".jsonl.gz"))
     .map((p) => join(root, p));

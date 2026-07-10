@@ -139,6 +139,12 @@ test('scrubChunkFile: a clean gzipped chunk returns null', (t) => {
   assert.equal(hit, null);
 });
 
+test('scrubChunkFile: a missing chunk path returns null instead of throwing ENOENT (defense-in-depth, finding 7 id:388)', () => {
+  const patterns = compilePatterns(DEFAULT_SECRET_PATTERNS);
+  const hit = scrubChunkFile('/nonexistent/does-not-exist/chunk.jsonl.gz', patterns);
+  assert.equal(hit, null);
+});
+
 // ── scrubRecordsFile — plaintext JSONL reader, no gunzip (REQ-C2B1-2, #221 C2b-1) ──
 
 function tmpRecordsFile(lines) {
