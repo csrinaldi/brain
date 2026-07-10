@@ -82,7 +82,28 @@ export const migrations = [
       },
     },
   },
+  {
+    version: '0.7.0',
+    description:
+      'Add governance.approvedLabel: the provider-resolved approved-issue label ' +
+      '(issue #231 A2 phase 1). Default is the plain base form status:approved; ' +
+      'resolveApprovedLabel() (brain/scripts/governance/approved-label.mjs) maps it ' +
+      'to the GitLab scoped form (::) at read time. A consumer-set value wins.',
+    defaults: {
+      governance: {
+        approvedLabel: 'status:approved',
+      },
+    },
+  },
 ];
+
+// NOTE (issue #231 A2, human ruling in tasks.md/design.md): this entry is versioned
+// 0.7.0, NOT the 0.6.0 gap left by C4's removal of the never-shipped `memory.dualWrite`
+// entry (see the note below). Version numbers are content-identifiers and are never
+// reused — a reused 0.6.0 would name two indistinguishable states, and this repo ran
+// under a real 0.6.0-dualWrite during the C2b-1/C2b-2 cutover window, so that window's
+// archaeology needs the number to mean ONE thing. DOCTRINE: retire-by-deletion includes
+// the version slot; the migration sequence is monotonic-forever.
 
 // NOTE (D3/C4, issue #229): the 0.6.0 migration entry that added `memory.dualWrite`
 // (issue #221, C2b-1) was REMOVED here, not left inert. This is safe ONLY because

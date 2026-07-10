@@ -5,10 +5,15 @@
 // is fully unit-testable with fixture events. The gh I/O wrapper resolves the
 // issue referenced by the PR body (reusing the same Closes/Fixes/Resolves/Part-of
 // extraction rules governance.yml's issue-link job already enforces in bash),
-// fetches the `status:approved` labeling history via `gh api .../events`, and
+// fetches the approved-label labeling history via `gh api .../events`, and
 // feeds evaluateActor. All I/O is dependency-injectable via `deps` (same
 // CI-fragility discipline as run-check.mjs / phase-order-check.mjs) — no test
 // spawns a real gh process.
+//
+// The approved label is config-driven and provider-resolved (issue #231 A2
+// phase 1, design.md Decision 4): `resolveApprovedLabel()` reads
+// `governance.approvedLabel` from brain.config.json and maps it per VCS
+// provider. This file never hardcodes the label literal.
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -16,11 +21,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadContext, resolveDetectionBody } from './ci-context.mjs';
+import { resolveApprovedLabel } from '../governance/approved-label.mjs';
 
 // ── Pure evaluator (design §5 step 5) ───────────────────────────────────────
 
 /**
- * Evaluates whether the `status:approved` actor is distinct from the PR/issue
+ * Evaluates whether the approved-label actor is distinct from the PR/issue
  * author. Pure — no gh, no filesystem access (fully testable with fixtures).
  *
  * Decision order (design §5 step 5):
@@ -47,7 +53,7 @@ import { loadContext, resolveDetectionBody } from './ci-context.mjs';
  * @param {string} [input.issueAuthor]  Issue author login (the issue the PR
  *   closes/references) — REQ-L5-1 requires failing on either author matching.
  * @param {Array<{ actor: { login: string } }>} input.labeledEvents  `labeled`
- *   events for the `status:approved` label, chronologically ordered.
+ *   events for the resolved approved label, chronologically ordered.
  * @param {string[]} [input.botAllowlist]  Allow-listed actor logins / override
  *   label strings (`config.governance.approvalActors`).
  * @param {boolean} [input.adminOverride]  Whether an allow-listed `override:*`
@@ -66,7 +72,7 @@ export function evaluateActor({
     return {
       level: 'warn',
       reason:
-        'no labeled event found for status:approved — cannot verify the approval actor; ' +
+        'no labeled event found for the approved label — cannot verify the approval actor; ' +
         'never failing on missing evidence (REQ-L5-2).',
     };
   }
@@ -83,7 +89,7 @@ export function evaluateActor({
   if (actor && botAllowlist.includes(actor)) {
     return {
       level: 'pass',
-      reason: `status:approved applied by allow-listed automation identity "${actor}".`,
+      reason: `the approved label was applied by allow-listed automation identity "${actor}".`,
     };
   }
 
@@ -91,13 +97,13 @@ export function evaluateActor({
     const matched = actor === author ? 'PR author' : 'issue author';
     return {
       level: 'fail',
-      reason: `status:approved was self-applied by "${actor}" (matches the ${matched}) — self-approval is not allowed.`,
+      reason: `the approved label was self-applied by "${actor}" (matches the ${matched}) — self-approval is not allowed.`,
     };
   }
 
   return {
     level: 'pass',
-    reason: `status:approved applied by "${actor}", distinct from the PR author "${author}" and the issue author "${issueAuthor ?? 'n/a'}".`,
+    reason: `the approved label was applied by "${actor}", distinct from the PR author "${author}" and the issue author "${issueAuthor ?? 'n/a'}".`,
   };
 }
 
@@ -135,19 +141,33 @@ export function extractIssueNumber(prBody, baseBranch) {
 
 // ── gh I/O wrapper ───────────────────────────────────────────────────────────
 
-function defaultFetchLabeledEvents(repo) {
+/**
+ * Filters `gh api .../events` output down to `labeled` events for the
+ * resolved approved label. Pure — exported for unit testing the
+ * provider-resolved wiring without spawning a real `gh` process (issue #231
+ * A2 phase 1).
+ *
+ * @param {Array<{ event?: string, label?: { name?: string } }>} events
+ * @param {string} approvedLabel
+ * @returns {Array<{ event: string, label: { name: string } }>}
+ */
+export function filterLabeledEvents(events, approvedLabel) {
+  return events.filter(e => e.event === 'labeled' && e.label?.name === approvedLabel);
+}
+
+function defaultFetchLabeledEvents(repo, approvedLabel) {
   return issueNumber => {
     // --paginate is REQUIRED: `gh api` does not auto-paginate, and the Events
     // API is oldest-first — on an issue with >~30 events, an unpaginated fetch
     // silently drops the newest labeled events (page 2+), including a late
-    // self-applied `status:approved`, which would wrongly PASS (fail-open).
+    // self-applied approved label, which would wrongly PASS (fail-open).
     const out = execFileSync(
       'gh',
       ['api', '--paginate', `repos/${repo}/issues/${issueNumber}/events`],
       { encoding: 'utf8' }
     );
     const events = JSON.parse(out);
-    return events.filter(e => e.event === 'labeled' && e.label?.name === 'status:approved');
+    return filterLabeledEvents(events, approvedLabel);
   };
 }
 
@@ -176,6 +196,16 @@ function defaultReadBotAllowlist(cwd) {
   };
 }
 
+function defaultReadConfig(cwd) {
+  return () => {
+    try {
+      return JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
+    } catch {
+      return {};
+    }
+  };
+}
+
 /**
  * Gathers evaluateActor()'s inputs from the PR body + gh API (or from injected
  * `deps` in tests). `adminOverride` is resolved here — an override:* label is
@@ -186,11 +216,19 @@ function defaultReadBotAllowlist(cwd) {
  * no second gh round-trip — so evaluateActor can compare the approving actor
  * against BOTH the PR author and the issue author (REQ-L5-1).
  *
- * @param {{ author: string, prBody: string, baseBranch: string, repo: string, cwd?: string, deps?: object }} args
+ * `provider` (github|gitlab, from `ctx.provider`) resolves the approved label
+ * (`governance.approvedLabel`, issue #231 A2 phase 1) for the default
+ * `fetchLabeledEvents` wrapper; an injected `deps.fetchLabeledEvents` bypasses
+ * resolution entirely (as tests do).
+ *
+ * @param {{ author: string, prBody: string, baseBranch: string, repo: string, provider?: string, cwd?: string, deps?: object }} args
  * @returns {{ author: string, issueAuthor: string|null, labeledEvents: Array, botAllowlist: string[], adminOverride: boolean }}
  */
-export function gatherActorCheckInputs({ author, prBody, baseBranch, repo, cwd = process.cwd(), deps = {} } = {}) {
-  const fetchLabeledEvents = deps.fetchLabeledEvents ?? defaultFetchLabeledEvents(repo);
+export function gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, cwd = process.cwd(), deps = {} } = {}) {
+  const readConfig = deps.readConfig ?? defaultReadConfig(cwd);
+  const approvedLabel = resolveApprovedLabel(readConfig(), provider);
+
+  const fetchLabeledEvents = deps.fetchLabeledEvents ?? defaultFetchLabeledEvents(repo, approvedLabel);
   const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(repo);
   const readBotAllowlist = deps.readBotAllowlist ?? defaultReadBotAllowlist(cwd);
 
@@ -231,6 +269,7 @@ export function runActorCheck(deps = {}) {
   const prBody = deps.prBody ?? resolveDetectionBody(ctx, deps) ?? '';
   const baseBranch = deps.baseBranch ?? ctx.targetBranch ?? undefined;
   const repo = deps.repo ?? ctx.repo ?? undefined;
+  const provider = deps.provider ?? ctx.provider ?? undefined;
   const cwd = deps.cwd ?? process.cwd();
 
   if (!author || !repo) {
@@ -242,7 +281,7 @@ export function runActorCheck(deps = {}) {
 
   let inputs;
   try {
-    inputs = gatherActorCheckInputs({ author, prBody, baseBranch, repo, cwd, deps });
+    inputs = gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, cwd, deps });
   } catch (err) {
     return {
       level: 'warn',

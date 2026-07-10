@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import {
   evaluateActor,
   extractIssueNumber,
+  filterLabeledEvents,
   gatherActorCheckInputs,
   runActorCheck,
   main,
@@ -467,4 +468,47 @@ test('neutrality source-scan (REQ-NEUTRALITY-2): actor-check.mjs source contains
   const src = readFileSync(srcPath, 'utf8');
   assert.equal(src.includes('.claude'), false, 'source must not reference .claude');
   assert.equal(src.includes('SKILL.md'), false, 'source must not reference SKILL.md');
+});
+
+// ── REQ-A2-3 (issue #231 A2 phase 1): the approved label is config-driven ──────
+//
+// governance.approvedLabel (config-migrations.mjs, 0.7.0) + resolveApprovedLabel()
+// (governance/approved-label.mjs) replace the hardcoded 'status:approved' literal.
+// No comparison anywhere in this file may hardcode the label — it must always
+// read the resolved value.
+
+test('REQ-A2-3: actor-check.mjs source contains no literal status:approved (reads the resolved governance.approvedLabel value)', () => {
+  const srcPath = fileURLToPath(new URL('./actor-check.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  assert.equal(src.includes('status:approved'), false,
+    'source must not hardcode the approved-label literal — use resolveApprovedLabel()');
+});
+
+test('filterLabeledEvents: matches only events labeled with the resolved approvedLabel, not a hardcoded value', () => {
+  const events = [
+    { event: 'labeled', label: { name: 'status:approved' } },
+    { event: 'labeled', label: { name: 'status::approved' } },
+    { event: 'commented' },
+  ];
+  assert.deepEqual(filterLabeledEvents(events, 'status::approved'), [events[1]]);
+  assert.deepEqual(filterLabeledEvents(events, 'status:approved'), [events[0]]);
+  assert.deepEqual(filterLabeledEvents(events, 'ready:approved'), []);
+});
+
+test('gatherActorCheckInputs: an injected fetchLabeledEvents still wins over default resolution (provider/readConfig accepted but unused)', () => {
+  const deps = {
+    fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
+    fetchIssue: () => ({ labels: [], author: null }),
+    readBotAllowlist: () => [],
+    readConfig: () => ({ governance: { approvedLabel: 'ready:approved' } }),
+  };
+  const inputs = gatherActorCheckInputs({
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    provider: 'gitlab',
+    deps,
+  });
+  assert.deepEqual(inputs.labeledEvents, [{ actor: { login: 'bob' } }]);
 });
