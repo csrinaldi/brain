@@ -31,10 +31,10 @@
 - [x] 3.3 `engram.mjs` `pullMemory`/`importMemory` GREEN: read via `readRecordObservations`, transform via `importRecord()`, write per-record via `engram save`; drop `engram sync --import` (chunks).
 - [x] 3.4 i18n (en + es) for every changed/added CLI string.
 
-## Phase 4: D1 round-trip contract on the REAL store (RED → GREEN)
-- [ ] 4.1 Test (RED): for every record in the REAL `.memory/records/2026-06.jsonl` (135 `@legacy`) + `2026-07.jsonl`, `computeRecordId(exportObservation(importRecord(r)).record) === r.id` (read via `readRecordObservations`/`parseRecordLine`).
-- [ ] 4.2 Keep the existing synthetic issue-without-source pin (`engram-import.test.mjs:46-60`) — source hash-excluded, re-materialized `source` must not shift the id.
-- [ ] 4.3 GREEN: any format/provenance adjustment needed for real-data equality (expected: none — the contract should already hold; the test PINS it).
+## Phase 4: D1 round-trip contract on the REAL store (RED → GREEN) — DONE
+- [x] 4.1 Test (RED): for every record in the REAL `.memory/records/2026-06.jsonl` (135 `@legacy`) + `2026-07.jsonl`, `computeRecordId(exportObservation(importRecord(r)).record) === r.id` (read via `readRecordObservations`/`parseRecordLine`).
+- [x] 4.2 Keep the existing synthetic issue-without-source pin (`engram-import.test.mjs:46-60`) — source hash-excluded, re-materialized `source` must not shift the id.
+- [x] 4.3 GREEN: any format/provenance adjustment needed for real-data equality (expected: none — the contract should already hold; the test PINS it). Confirmed: no production code changed, contract held on all 275 real records with zero adjustment.
 
 ## Phase 5: D5 END the embargo + baseline
 - [ ] 5.1 Declare the embargo ENDED in the PR body with the precise wording: the chunk path no longer exists, so there is nothing left to go stale (NOT "chunk-based pull is safe again"). Cite cutover finding by id (id:388) — never "#7" (GitHub auto-links `#N`).
