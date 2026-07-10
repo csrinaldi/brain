@@ -40,14 +40,15 @@ import { computeRecordId } from './format.mjs';
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const recordsDir = join(repoRoot, '.memory', 'records');
 
-test('REQ-C4-1: round-trip id-equality holds for every record in the REAL .memory/records/ store', () => {
+test('REQ-C4-1: round-trip id-equality holds for every record in the REAL .memory/records/ store', (t) => {
   const records = readRecordObservations({ recordsDir });
 
   if (records.length === 0) {
-    // Honest skip, not a false pass — zero coverage must be visible, never masked.
-    console.warn(
+    // Real skip, not a false pass — an early `return` is reported as ok/pass by
+    // node:test, masking zero coverage. t.skip() makes the gap visible in output.
+    t.skip(
       'REQ-C4-1: .memory/records/ is empty or missing — 0 real records exercised. ' +
-        'This is a coverage GAP, not a pass. Skipping the assertion loop.',
+        'This is a coverage GAP, not a pass.',
     );
     return;
   }

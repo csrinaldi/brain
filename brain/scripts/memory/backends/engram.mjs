@@ -542,6 +542,7 @@ export async function importMemory({
     _engramSave(observation.title, observation.content, {
       type: observation.type,
       project: observation.project,
+      scope: observation.scope,
       topic: record.id,
     });
     written += 1;
@@ -987,10 +988,22 @@ function _defaultCheckEngram() {
   return r.status === 0;
 }
 
-function _defaultEngramSave(title, content, { type, project, topic }) {
+// NOTE (C4 review): `engram save` accepts --type/--project/--scope/--topic but
+// has NO timestamp flag, so it cannot carry a record's original `ts` — every
+// hydrated observation is re-stamped with engram's wall-clock insert time. The
+// committed `records/` keeps the correct `ts` (source of truth); only engram's
+// rebuildable local cache loses original recency ordering on pull. Preserving
+// created_at would need an engram-side ingestion verb (tracked as a follow-up).
+function _defaultEngramSave(title, content, { type, project, scope, topic }) {
   execFileSync(
     "engram",
-    ["save", title, content, "--type", type, "--project", project, "--topic", topic],
+    [
+      "save", title, content,
+      "--type", type,
+      "--project", project,
+      ...(scope ? ["--scope", scope] : []),
+      "--topic", topic,
+    ],
     { stdio: ["ignore", "ignore", "pipe"] },
   );
 }
