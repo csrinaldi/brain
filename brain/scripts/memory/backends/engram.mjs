@@ -6,7 +6,7 @@
 //
 // Operations:
 //   share()              — export live memory to .memory/ (engram sync)
-//   pull()               — import .memory/ into engram    (engram sync --import)
+//   pull()               — import .memory/records/ into engram (records-only, D2/C4)
 //   index()              — project brain/ docs into engram (delegates to brain-to-engram.mjs)
 //   setup()              — ensure .engram → .memory symlink + register merge driver
 //   featureCheckpoint()  — dehydrate: stamp + validate + write resume.md (REQ-S2-1, REQ-E-1)
@@ -35,7 +35,8 @@ import { validateResume } from "../lib/resume-schema.mjs";
 import { currentBranch } from "../../lib/git-branch.mjs";
 import { resolveSecretConfig, compilePatterns, scrubChunkFile, scanTextForSecrets } from "../lib/secret-scrub.mjs";
 import { exportObservation } from "../lib/engram-export.mjs";
-import { appendRecord, rebuildIndex, readRecordIds } from "../lib/store.mjs";
+import { importRecord } from "../lib/engram-import.mjs";
+import { appendRecord, rebuildIndex, readRecordIds, readRecordObservations } from "../lib/store.mjs";
 import { serializeRecord } from "../lib/format.mjs";
 import { collectChunkObservations } from "../lib/migrate-v1.mjs";
 import { t } from "../../i18n/t.mjs";
@@ -467,21 +468,88 @@ function _defaultGitPull(root) {
 }
 
 /**
- * importMemory() — import .memory/ chunks into local engram (engram sync --import).
+ * Default seam: read every record observation currently in `.memory/records/`.
  *
- * This is the import-only step, with no git pull. Use it when the working tree
- * is already up-to-date (e.g. after day-start's step-2 git merge, or in the
- * post-merge hook where git itself has already integrated the new commits).
+ * @param {string} root
+ * @returns {object[]}
+ */
+export function _defaultReadRecordObservations(root) {
+  return readRecordObservations({ recordsDir: join(root, ".memory", "records") });
+}
+
+/**
+ * importMemory() — hydrate local engram from `.memory/records/*.jsonl`
+ * (records-only, design.md Decision 2 / D2, C4 #229). Replaces the former
+ * thin `engram sync --import` chunk wrapper — the chunks path is retired,
+ * `records/` is the sole read+write truth (REQ-C4-2).
+ *
+ * Read `.memory/records/*.jsonl` via readRecordObservations → transform each
+ * record via importRecord() → write per-record via `engram save` (the exact
+ * per-observation verb already used by _defaultEngramSave()). No bulk verb
+ * exists, so per-record with progress reporting is the honest primitive for
+ * the ~275 records in the real store.
+ *
+ * IDEMPOTENT (MANDATORY, REQ-C4-2 scenario 2): `topic: record.id` is passed
+ * on every save — the record's own content-addressed id becomes the engram
+ * `topic_key`. engram's real topic_key match (same project+scope) UPSERTS
+ * the existing observation instead of inserting a new one, and — unlike its
+ * separate content-hash dedup path — this match is NOT time-windowed, so it
+ * holds across arbitrarily-spaced re-runs. Re-running pull over an
+ * already-populated engram therefore revises the same 275 observations, it
+ * never duplicates them.
  *
  * Called by:
  *   - pullMemory() as its default _import seam
  *   - cli.mjs "import" verb (import-only, no manifest restore, no git pull)
  *   - post-merge hook (via cli.mjs import)
  *   - day-start step 5 (via cli.mjs import, after step 2 already pulled)
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.root]  Repo root (defaults to this package's root).
+ * @param {() => string} [opts._requireEngram]
+ *   Resolves the engram binary; throws a friendly error if absent.
+ * @param {(root: string) => object[]} [opts._readRecords]
+ *   Returns every record observation under `.memory/records/`.
+ * @param {(record: object) => object} [opts._importRecord]
+ *   Transforms one record into an engram-observation shape.
+ * @param {(title: string, content: string, opts: object) => void} [opts._engramSave]
+ *   Writes one observation to engram. Called once per record.
+ * @param {(line: string) => void} [opts._log]
+ *   Progress/summary sink — defaults to console.log.
+ * @returns {Promise<{written: number}>}
  */
-export async function importMemory() {
-  const engram = requireEngram();
-  execFileSync(engram, ["sync", "--import"], { stdio: "inherit" });
+export async function importMemory({
+  root = repoRoot,
+  _requireEngram = requireEngram,
+  _readRecords = _defaultReadRecordObservations,
+  _importRecord = importRecord,
+  _engramSave = _defaultEngramSave,
+  _log = console.log,
+} = {}) {
+  _requireEngram();
+
+  const records = _readRecords(root);
+  const total = records.length;
+
+  if (total === 0) {
+    _log(await t("memory.import.empty"));
+    return { written: 0 };
+  }
+
+  let written = 0;
+  for (const record of records) {
+    const observation = _importRecord(record);
+    _engramSave(observation.title, observation.content, {
+      type: observation.type,
+      project: observation.project,
+      topic: record.id,
+    });
+    written += 1;
+    _log(await t("memory.import.progress", { written, total }));
+  }
+
+  _log(await t("memory.import.done", { written, total }));
+  return { written };
 }
 
 /**
@@ -538,8 +606,9 @@ export async function pullMemory({
 }
 
 /**
- * pull() — import .memory/ into engram using the churn-resilient safe pull.
- * Replaces the former thin `engram sync --import` wrapper.
+ * pull() — import .memory/records/ into engram using the churn-resilient safe
+ * pull. Replaces the former thin `engram sync --import` chunk wrapper — the
+ * chunks path is retired (records-only, D2/C4).
  * Called by brain/scripts/memory/cli.mjs when op = "pull".
  */
 export async function pull() {

@@ -12,24 +12,24 @@
 | 400-line budget risk | Medium (D2 greenfield wiring is the driver) |
 | Delivery | Standalone PR-as-review into feature/v2.0.0, Part of #229 |
 
-## Phase 1: D4 memory-gate records-only + finding 7 (id:388) — FIRST (RED → GREEN)
-- [ ] 1.1 Test (RED): a `git status --porcelain` deletion of a `.jsonl.gz` chunk (path ends in `.jsonl.gz`) must NOT reach `scrubChunkFile` / must not throw ENOENT in `scrubMaterializedChunks()`.
-- [ ] 1.2 `engram.mjs` `_defaultChangedChunkFiles` (352-372) GREEN: filter out porcelain deletions (and/or guard existence before read in `secret-scrub.mjs:104-115`).
-- [ ] 1.3 Test (RED): the memory-gate computes its observation set from `records/` ALONE (no chunk reader).
-- [ ] 1.4 `run-check.mjs` GREEN: drop `readChunkObservations` from the union → records-only (the #227 transitional OR retired).
+## Phase 1: D4 memory-gate records-only + finding 7 (id:388) — FIRST (RED → GREEN) — DONE (commit f2ae1a8)
+- [x] 1.1 Test (RED): a `git status --porcelain` deletion of a `.jsonl.gz` chunk (path ends in `.jsonl.gz`) must NOT reach `scrubChunkFile` / must not throw ENOENT in `scrubMaterializedChunks()`.
+- [x] 1.2 `engram.mjs` `_defaultChangedChunkFiles` (352-372) GREEN: filter out porcelain deletions (and/or guard existence before read in `secret-scrub.mjs:104-115`). Both: deletions excluded in `_defaultChangedChunkFiles`, plus a defense-in-depth `existsSync` guard added to `scrubChunkFile`.
+- [x] 1.3 Test (RED): the memory-gate computes its observation set from `records/` ALONE (no chunk reader).
+- [x] 1.4 `run-check.mjs` GREEN: drop `readChunkObservations` from the union → records-only (the #227 transitional OR retired).
 
-## Phase 2: D3 retire memory.dualWrite — the three moves (RED → GREEN)
-- [ ] 2.1 Test (RED): `share()` writes records with NO `memory.dualWrite` key present (unconditional record-write, no gate).
-- [ ] 2.2 Move 1 (GREEN): delete the gate at `engram.mjs:176`; record-write runs unconditionally.
-- [ ] 2.3 Move 2: remove `memory.dualWrite` from this repo's root `brain.config.json`.
-- [ ] 2.4 Move 3: remove the 0.6.0 migration entry (`config-migrations.mjs:86-99`) — CONDITIONED on the never-shipped verification (`git tag --contains 654e86c` = NONE; only on feature/v2.0.0, not ancestor of v0.6.0). Capture that verification output as CP-C4 evidence in the PR body. Fallback if any tag shipped it: leave inert key + "RETIRED at C4" marker (documented, not taken).
-- [ ] 2.5 Confirm no runtime code reads `memory.dualWrite` after this phase.
+## Phase 2: D3 retire memory.dualWrite — the three moves (RED → GREEN) — DONE (see apply-progress)
+- [x] 2.1 Test (RED): `share()` writes records with NO `memory.dualWrite` key present (unconditional record-write, no gate).
+- [x] 2.2 Move 1 (GREEN): delete the gate at `engram.mjs:176`; record-write runs unconditionally.
+- [x] 2.3 Move 2: remove `memory.dualWrite` from this repo's root `brain.config.json`.
+- [x] 2.4 Move 3: remove the 0.6.0 migration entry (`config-migrations.mjs:86-99`) — CONDITIONED on the never-shipped verification (`git tag --contains 654e86c` = NONE; only on feature/v2.0.0, not ancestor of v0.6.0). Capture that verification output as CP-C4 evidence in the PR body. Fallback if any tag shipped it: leave inert key + "RETIRED at C4" marker (documented, not taken).
+- [x] 2.5 Confirm no runtime code reads `memory.dualWrite` after this phase.
 
-## Phase 3: D2 pull/import records-only + idempotency (RED → GREEN)
-- [ ] 3.1 Test (RED): records-only `pull` hydrates engram from `.memory/records/*.jsonl` via `importRecord()` + per-record `engram save`, with progress reporting; no chunk path read.
-- [ ] 3.2 Test (RED — MANDATORY): re-running `pull` over an already-populated engram creates NO duplicates (dedup by id/content).
-- [ ] 3.3 `engram.mjs` `pullMemory`/`importMemory` GREEN: read via `readRecordObservations`, transform via `importRecord()`, write per-record via `engram save`; drop `engram sync --import` (chunks).
-- [ ] 3.4 i18n (en + es) for every changed/added CLI string.
+## Phase 3: D2 pull/import records-only + idempotency (RED → GREEN) — DONE (see apply-progress)
+- [x] 3.1 Test (RED): records-only `pull` hydrates engram from `.memory/records/*.jsonl` via `importRecord()` + per-record `engram save`, with progress reporting; no chunk path read.
+- [x] 3.2 Test (RED — MANDATORY): re-running `pull` over an already-populated engram creates NO duplicates (dedup by id/content).
+- [x] 3.3 `engram.mjs` `pullMemory`/`importMemory` GREEN: read via `readRecordObservations`, transform via `importRecord()`, write per-record via `engram save`; drop `engram sync --import` (chunks).
+- [x] 3.4 i18n (en + es) for every changed/added CLI string.
 
 ## Phase 4: D1 round-trip contract on the REAL store (RED → GREEN)
 - [ ] 4.1 Test (RED): for every record in the REAL `.memory/records/2026-06.jsonl` (135 `@legacy`) + `2026-07.jsonl`, `computeRecordId(exportObservation(importRecord(r)).record) === r.id` (read via `readRecordObservations`/`parseRecordLine`).
