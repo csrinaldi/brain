@@ -53,6 +53,38 @@ read MUST come from `ctx.labels` (fresh), NEVER from `CI_MERGE_REQUEST_LABELS`.
 - WHEN `run-check.mjs issue-link` runs
 - THEN it exits non-zero (fail-closed), never exit 0 (ADR-0016 REQUIRED policy)
 
+### REQ-CIC-2 delta (issue #231 A2 phase 2 ADDENDUM) — `ctx.defaultBranch`
+
+**Gap closed:** GitHub bash's `issue-link` job (governance.yml:45-70) is base-branch-conditional —
+`base==main` requires a CLOSING keyword only; `base!=main` (slice) also accepts `Part of #N`. The pure
+`issueLink()` evaluator is NOT base-branch-aware (by design, REQ-CIC-4), so without this delta the Node
+`issue-link` case would wrongly PASS a `Part of #N`-only body on the default branch — a governance hole.
+
+`loadContext()` MUST expose a new `defaultBranch` field, `null` when uncomputable, sourced:
+- GitHub: from the MAPPED env var `DEFAULT_BRANCH` (never a raw `GITHUB_*` payload var read outside
+  ci-context.mjs) — the workflow maps it from `github.event.repository.default_branch` (repo metadata,
+  not trigger identity — coherent with ADR-0016 ruling 1).
+- GitLab: from the standard predefined `CI_DEFAULT_BRANCH` var (free — no extra API call).
+
+`run-check.mjs`'s `issue-link` case (the WRAPPER, never the pure evaluator) MUST apply the
+default-branch-conditional closing-keyword policy: `ctx.targetBranch === ctx.defaultBranch` requires a
+closing keyword; otherwise `Part of #N` is also accepted. If `ctx.targetBranch` or `ctx.defaultBranch` is
+`null` (uncomputable), the REQUIRED gate MUST fail closed — **never assume `'main'`**.
+
+#### Scenario: default-branch target requires a closing keyword
+
+- GIVEN `ctx.targetBranch === ctx.defaultBranch` and a body containing ONLY `Part of #N`
+- WHEN `run-check.mjs issue-link` runs
+- THEN it fails (closing keyword required on the default branch), matching the GitHub-bash `base==main`
+  branch's verdict for the same input
+
+#### Scenario: null defaultBranch fails closed, never assumes 'main'
+
+- GIVEN `ctx.defaultBranch` is `null` (the workflow did not map it) and any body/target
+- WHEN `run-check.mjs issue-link` runs
+- THEN it fails closed with a clear reason — it MUST NOT fall back to comparing `ctx.targetBranch` against
+  a hardcoded `'main'` literal
+
 ## REQ-A2-3: `governance.approvedLabel` is config-driven and provider-resolved (B3)
 
 An additive `config-migrations.mjs` entry MUST introduce `governance.approvedLabel` with default

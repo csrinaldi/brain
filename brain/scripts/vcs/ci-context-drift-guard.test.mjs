@@ -130,3 +130,41 @@ test('CI wiring: governance.yml actor-check job provides PR_NUMBER (author via A
     block, /^\s*PR_AUTHOR:/m,
     'actor-check job must NOT set PR_AUTHOR — the author comes from the API (ADR-0016 Never-do #3), never env');
 });
+
+// ── CI wiring (issue #231 A2 phase 2 ADDENDUM, pattern from #204): every
+// GitHub job whose script calls ci-context's loadContext() must supply the
+// MAPPED default-branch env var (DEFAULT_BRANCH, from repo metadata
+// `github.event.repository.default_branch` — never a raw GITHUB_* trigger
+// var read directly by the job script) so `ctx.defaultBranch` is computable
+// rather than degrading to null. The GitLab side (`CI_DEFAULT_BRANCH`) is a
+// free standard predefined var and lands with `gitlab-governance.yml` in a
+// later phase — not asserted here (that YAML does not exist yet). ─────────
+
+/** Extracts a job's YAML block (job header to the next top-level job header). */
+function extractJobBlock(yml, jobName) {
+  const jobStart = yml.indexOf(`\n  ${jobName}:`);
+  if (jobStart === -1) return null;
+  const rest = yml.slice(jobStart + 1);
+  const nextJobMatch = rest.slice(1).match(/\n  [a-zA-Z][\w-]*:\n/);
+  return nextJobMatch ? rest.slice(0, nextJobMatch.index + 1) : rest;
+}
+
+const CI_CONTEXT_CONSUMING_JOBS = [
+  'memory-gate',
+  'decision-gate',
+  'phase-order',
+  'actor-check',
+  'brain-writes-reviewed',
+];
+
+for (const job of CI_CONTEXT_CONSUMING_JOBS) {
+  test(`CI wiring: governance.yml "${job}" job supplies the mapped DEFAULT_BRANCH env var (ctx.defaultBranch computable, never null-by-omission)`, () => {
+    const yml = readFileSync(
+      join(VCS_DIR, '..', '..', '..', '.github', 'workflows', 'governance.yml'), 'utf8');
+    const block = extractJobBlock(yml, job);
+    assert.ok(block, `${job} job not found in governance.yml`);
+    assert.match(
+      block, /DEFAULT_BRANCH:\s*\$\{\{\s*github\.event\.repository\.default_branch\s*\}\}/,
+      `${job} job must map DEFAULT_BRANCH from github.event.repository.default_branch (repo metadata, never a raw trigger var) so ci-context's loadContext() can compute ctx.defaultBranch`);
+  });
+}

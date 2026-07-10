@@ -33,6 +33,7 @@ function emptyContext(provider) {
     headSha: null,
     sourceBranch: null,
     targetBranch: null,
+    defaultBranch: null,
     labels: null,
     body: null,
     author: null,
@@ -66,6 +67,13 @@ async function loadGithubContext(env, deps) {
   // author comes from the prView API payload ONLY, never from env (ADR-0016
   // Never-do #3). The actor-check job provides PR_NUMBER (governance.yml) so prView
   // runs; absent a PR, author stays null (uncomputable).
+  //
+  // defaultBranch (REQ-CIC-2 delta, issue #231 A2 phase 2 addendum): sourced from
+  // the MAPPED env var DEFAULT_BRANCH, which governance.yml sets from
+  // `github.event.repository.default_branch` — repo metadata, not trigger
+  // identity, so this is coherent with ADR-0016 ruling 1 (never a raw GITHUB_*
+  // payload var read outside this module). `null` when the workflow does not map
+  // it — consumers MUST fail closed on `null`, never assume 'main'.
   return {
     provider: 'github',
     prNumber,
@@ -73,6 +81,7 @@ async function loadGithubContext(env, deps) {
     headSha: env.HEAD_SHA ?? null,
     sourceBranch: env.GITHUB_HEAD_REF ?? null,
     targetBranch: env.BASE_BRANCH ?? null,
+    defaultBranch: env.DEFAULT_BRANCH ?? null,
     labels,
     body,
     author,
@@ -137,6 +146,9 @@ async function loadGitlabContext(env, deps) {
     }
   }
 
+  // defaultBranch (REQ-CIC-2 delta, issue #231 A2 phase 2 addendum): CI_DEFAULT_BRANCH
+  // is a standard GitLab-predefined variable (free — no extra API call), unlike
+  // GitHub's mapping which needs a workflow-level `env:` line.
   return {
     provider: 'gitlab',
     prNumber,
@@ -144,6 +156,7 @@ async function loadGitlabContext(env, deps) {
     headSha: env.CI_COMMIT_SHA ?? null,
     sourceBranch: env.CI_MERGE_REQUEST_SOURCE_BRANCH_NAME ?? null,
     targetBranch: env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME ?? null,
+    defaultBranch: env.CI_DEFAULT_BRANCH ?? null,
     labels,
     body,
     author,
