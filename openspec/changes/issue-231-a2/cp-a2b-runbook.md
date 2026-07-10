@@ -78,6 +78,23 @@ MR-A: `issue-link` red, merge BLOCKED. MR-B: REQUIRED green (issue-link having v
 label AND enforced the closing keyword on the default branch), merge ENABLED. `allow_failure` DETECTION
 never blocks either. **Any divergence from the fixture-predicted verdicts STOPS and returns to the agent.**
 
+## Re-running after a fix (load-bearing — GitLab MR pipelines run the SOURCE tree)
+A GitLab MR pipeline runs the tree of the MR's **source branch** (`refs/merge-requests/N/head`), so a plain
+"retry" re-executes the OLD fragment — a fix merged to `feature/v2.0.0` is NOT picked up by simply retrying
+the existing MRs. After a governance-fragment fix (e.g. findings #12/#13) merges and the mirror is
+re-pushed, refresh BOTH test branches so the MRs re-evaluate against the corrected tree:
+```bash
+git push gitlab origin/feature/v2.0.0:refs/heads/feature/v2.0.0   # mirror carries the fix
+for b in test/cp-a2b-noncompliant test/cp-a2b-compliant; do
+  git fetch gitlab "$b" && git switch -c "$b" FETCH_HEAD 2>/dev/null || git switch "$b"
+  git merge --no-edit origin/feature/v2.0.0     # fold the fixed fragment into the MR source tree
+  git push gitlab "$b:$b"                        # new pipeline runs on the corrected tree
+done
+```
+**Verify:** each MR shows a NEW pipeline whose commit == the merge just pushed; only then are the verdicts
+attributable to the fixed fragment. (First-run findings from CP-A2b: #13 node:20→node:22 glob;
+#12 issueView glab→direct API v4 — both fixed before the re-run.)
+
 ## Cleanup
 Close both MRs, delete `test/cp-a2b-*` branches and the `.cp-a2b-probe*` files. The mirror
 `status::approved` fixture issue can stay for future re-runs.
