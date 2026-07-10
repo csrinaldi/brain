@@ -82,19 +82,13 @@ export const migrations = [
       },
     },
   },
-  {
-    version: '0.6.0',
-    description:
-      'Add memory.dualWrite (default false): the auditable STATE MARKER that activates the ' +
-      'records/ dual-write in memory:share (issue #221, C2b-1). Dormant by default so merging the ' +
-      'machinery never populates records/ ahead of the C2b-2 cutover; the human flips it to true ' +
-      'as a committed runbook step IMMEDIATELY after the real migrate. NOT a CLI bypass switch — a ' +
-      'committed cutover state marker (C1b doctrine: gates live in auditable config). Transitional ' +
-      '— retired when the chunks are (C3/C4).',
-    defaults: {
-      memory: {
-        dualWrite: false,
-      },
-    },
-  },
 ];
+
+// NOTE (D3/C4, issue #229): the 0.6.0 migration entry that added `memory.dualWrite`
+// (issue #221, C2b-1) was REMOVED here, not left inert. This is safe ONLY because
+// the entry was never shipped to any released consumer — verified CLEAN:
+// `git tag --contains 654e86c` (the commit that introduced it) returns NONE; the
+// commit exists only on `feature/v2.0.0`, never on `main`, and is not an ancestor
+// of any tag. Doctrine: never-shipped keys retire BY DELETION pre-release, since
+// there is no consumer to honor. Post-release retirement (the first real one) will
+// use tolerate-and-ignore + deprecation warning instead — see design.md for C4.

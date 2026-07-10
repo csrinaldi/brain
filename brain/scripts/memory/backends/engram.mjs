@@ -165,17 +165,13 @@ export async function share({
   const engram = _requireEngram();
   _export(engram);
   await scrubMaterializedChunks(root, { _changedChunkFiles, _loadConfig, _scrubChunk });
-  // Dual-write is DORMANT by default (design.md Decision 1 + 5). It runs ONLY when
-  // `memory.dualWrite === true` in brain.config.json — the auditable cutover STATE
-  // MARKER the human commits as step 2 of the C2b-2 runbook, IMMEDIATELY after the real
-  // migrate. Absent/false → C1b behavior (export + chunk scrub only), so merging C2b-1
-  // (or C2b-2, which un-refuses the CLI) never populates `records/` ahead of the
-  // migrate's abort-if-populated guard. This is a committed state marker, NOT the
-  // ad-hoc CLI bypass switch rejected in C2-migrate (C1b doctrine: gates live in
-  // auditable config). Transitional — retired when the chunks are (C3/C4).
-  if (_loadConfig(root)?.memory?.dualWrite === true) {
-    await dualWriteRecords(root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig });
-  }
+  // Record-write is UNCONDITIONAL (design.md Decision 1, D3/C4, issue #229 — the
+  // `memory.dualWrite` gate is retired BY DELETION). Records-only is the only
+  // path; there is no flag left to condition on. The transitional cutover state
+  // marker (C2b-1/C2b-2) served its purpose: the key is also removed from
+  // brain.config.json (move 2) and the 0.6.0 migration entry that introduced it
+  // is removed too (move 3) — it was never shipped to any released consumer.
+  await dualWriteRecords(root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig });
 }
 
 /**

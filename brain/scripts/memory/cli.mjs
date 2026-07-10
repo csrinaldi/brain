@@ -101,9 +101,10 @@ if (op === "reindex") {
 // no `--dry-run` → executes the real migration (un-refused, C2b — design.md
 //   Decision 1): the CLI being runnable IS the runbook's intended step 1;
 //   the control is the runbook order + the human keystroke, not a CLI switch
-//   (the `--no-scrub` class C1b prohibited stays rejected). Safe by
-//   construction while `memory.dualWrite` is false. The abort-if-populated
-//   guard in `runMigration()` still protects re-runs.
+//   (the `--no-scrub` class C1b prohibited stays rejected). `memory.dualWrite`
+//   itself is retired (D3/C4, issue #229) — records-only write is now
+//   unconditional. The abort-if-populated guard in `runMigration()` still
+//   protects re-runs.
 // `--rollback` → the inverse (REQ-C2B2-2): restores chunks from `legacy/`,
 //   drops `records/`, reindexes. Rehearsed only in fixtures per the runbook;
 //   the real rollback runs only via the cutover runbook.
