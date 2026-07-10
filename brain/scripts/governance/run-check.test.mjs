@@ -691,3 +691,26 @@ for (const row of diffSizeParityTable) {
       `Node diff-size verdict (${result.pass}) must match GitHub-bash verdict (${row.githubBashVerdict}) for: ${row.label}`);
   });
 }
+
+// ── defaultFetchIssue wiring (issue #231 CP-A2b live-validation finding #12):
+// defaultFetchIssue is NEVER exercised directly in tests (design.md Decision
+// 2 — "no real network in tests"; every test above injects `fetchIssue`).
+// That fixtures-always-inject gap is exactly what hid #12: the real
+// vcs.issueView() call crashed on node:22 (no `glab` binary) and nothing
+// caught it. A source-level wiring assertion is this repo's established
+// pattern for exactly this class of never-directly-exercised default glue
+// (see ci-context.test.mjs's "proxy read from standard env" test and
+// ci-context-drift-guard.test.mjs's CI-wiring tests) — it proves
+// defaultFetchIssue threads the GitLab API config through, without a real
+// network call. ─────────────────────────────────────────────────────────
+test('wiring: defaultFetchIssue sources { apiBase, token, proxyUrl } from ci-context.mjs\'s gitlabApiConfig() and threads them into vcs.issueView() — never reads process.env.CI_API_V4_URL itself', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  assert.match(src, /gitlabApiConfig/, 'defaultFetchIssue must obtain the GitLab API config via ci-context.mjs\'s gitlabApiConfig(), not a local env read');
+  assert.doesNotMatch(src, /process\.env\.CI_API_V4_URL/, 'run-check.mjs is a GATE_FILE — it must never read CI_API_V4_URL directly (drift-guard forbids it)');
+
+  const fnStart = src.indexOf('function defaultFetchIssue(');
+  assert.ok(fnStart !== -1, 'defaultFetchIssue not found');
+  const fnBody = src.slice(fnStart, src.indexOf('\n}', fnStart) + 2);
+  assert.match(fnBody, /vcs\.issueView\(\{[^}]*apiBase[^}]*token[^}]*proxyUrl/s,
+    'defaultFetchIssue must pass apiBase/token/proxyUrl into vcs.issueView(...)');
+});

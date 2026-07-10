@@ -207,15 +207,22 @@ for (const job of CI_CONTEXT_CONSUMING_JOBS) {
 // true` appears IFF the job is in DETECTION_JOBS (Amendment 3, Decision 3 —
 // the two classes must never flatten into one). ──────────────────────────
 
+// Reserved top-level GitLab CI keywords that are NOT jobs — EXCLUDING them
+// keeps the job-name-set comparison below honest. `default:` (issue #231
+// CP-A2b finding #13) is the global image pin all 8 jobs inherit; without
+// this exclusion it would false-positive as a 9th "job" and desync from
+// GOVERNANCE_JOBS.
+const RESERVED_TOP_LEVEL_KEYS = ['default'];
+
 /**
  * Extracts GitLab job names: top-level (zero-indent) YAML keys, EXCLUDING
  * hidden/template keys (GitLab convention: a leading `.` marks a key as a
  * template never instantiated as a real job, e.g. `.governance_mr_rules:`
- * used here via `extends:`).
+ * used here via `extends:`) and reserved top-level keywords (`default:`).
  */
 function extractGitlabJobNames(yml) {
   const matches = [...yml.matchAll(/^([a-zA-Z][\w-]*):\s*$/mg)];
-  return matches.map((m) => m[1]);
+  return matches.map((m) => m[1]).filter((name) => !RESERVED_TOP_LEVEL_KEYS.includes(name));
 }
 
 /** Extracts a GitLab job's YAML block (zero-indent job header to the next zero-indent key). */
@@ -272,4 +279,44 @@ test('CI wiring (GitLab): gitlab-governance.yml never locally overrides CI_DEFAU
     'GitLab CI/CD variable, automatically available to every job; a local override would shadow the ' +
     'platform-provided default branch and reintroduce a hardcoded literal (the exact gap the A2 phase 2 addendum closed).'
   );
+});
+
+// ── Drift-guard extension (issue #231 CP-A2b live-validation finding #13):
+// `node --test "brain/scripts/**/*.test.mjs"` (local-checks job) needs glob
+// expansion support that only landed in Node 21+ — node:20 fails with
+// "Could not find ...". The fix is a SINGLE global `default: image:` pin (one
+// place, all 8 jobs inherit) rather than a per-job `image:` line, so a future
+// consumer editing one job can never silently drift back to node:20. This
+// guard asserts the global pin exists and is >= 22, so a consumer downgrading
+// the fragment back to node:20 (the exact regression this fixes) turns RED —
+// same class of protection as the allow_failure-iff-DETECTION lock above. ──
+test('drift-guard (GitLab): gitlab-governance.yml pins a single global node:22+ image via `default:` (finding #13 — node --test glob expansion needs Node 21+; a per-job image: line, or a downgrade to node:20, must turn this RED)', () => {
+  const yml = readFileSync(GITLAB_GOVERNANCE_YML, 'utf8');
+
+  const defaultMatch = yml.match(/^default:\s*\n\s+image:\s*node:(\d+)/m);
+  assert.ok(
+    defaultMatch,
+    'gitlab-governance.yml must declare a top-level `default:\\n  image: node:<N>` block — ' +
+    'the sole place that pins the image for all 8 jobs.'
+  );
+  const pinnedVersion = Number(defaultMatch[1]);
+  assert.ok(
+    pinnedVersion >= 22,
+    `gitlab-governance.yml's default image pins node:${pinnedVersion}, but node --test glob expansion ` +
+    '("brain/scripts/**/*.test.mjs" in the local-checks job) requires Node 21+ — pin node:22 or later.'
+  );
+
+  // No per-job `image:` override may reintroduce a node:20/21 job-local pin —
+  // the whole point of the global default is ONE place, not eight. Scoped to
+  // each job's own block (not the whole file) so the `default:` block's own
+  // `image:` line is never mistaken for a per-job override.
+  for (const job of GOVERNANCE_JOBS) {
+    const block = extractGitlabJobBlock(yml, job);
+    assert.ok(block, `${job} job not found in gitlab-governance.yml`);
+    assert.doesNotMatch(
+      block, /^\s+image:\s*node:\d+/m,
+      `"${job}" must NOT carry its own \`image:\` line — the global \`default:\` block is the ` +
+      'single source of truth (a per-job override could silently drift back to node:20).'
+    );
+  }
 });

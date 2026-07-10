@@ -9,6 +9,7 @@
 import { run, runJson } from '../lib/exec.mjs';
 import { normalizeCommitStatus, providerState, assigneeParams } from '../lib/normalize.mjs';
 import { vcsToken } from '../lib/token.mjs';
+import { gitlabApiFetch } from '../gitlab-api.mjs';
 
 export const PROVIDER = 'gitlab';
 
@@ -38,9 +39,35 @@ export async function projectResolve({ project }) {
   return project;
 }
 
-export async function issueView({ project, number }) {
+/**
+ * issueView — DIRECT GitLab API v4 fetch (issue #231 CP-A2b live-validation
+ * finding #12), not the `glab` CLI: this verb is CI-consumed (the REQUIRED
+ * issue-link gate's defaultFetchIssue, run-check.mjs), and the node:22 CI
+ * image has no `glab` binary — the CLI dependency crashed the gate on an
+ * INFRA trigger. `apiBase`/`token`/`proxyUrl` are threaded in as parameters
+ * from the caller (never read from the GitLab API base URL pipeline var
+ * directly here — gitlab.mjs is a GATE_FILE and that read is forbidden by
+ * ci-context-drift-guard.test.mjs; the sanctioned resolver is
+ * ci-context.mjs's `gitlabApiConfig()`). Defaults exist so LOCAL/non-CI
+ * callers (ticket-start.mjs, brain-start.mjs) keep working unchanged: public
+ * gitlab.com API base, VCS_TOKEN via the existing `vcsToken()` helper (not a
+ * direct env read either — token.mjs already owns that), no proxy.
+ *
+ * The other GitLab verbs (issueList, mrList, etc.) are NOT migrated — they
+ * are local-interactive only (glab session auth), out of this scope (A3
+ * territory).
+ *
+ * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ */
+export async function issueView({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
-  const r = runJson('glab', ['api', `projects/${encoded}/issues/${number}`]);
+  const r = await gitlabApiFetch({
+    apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+    token: token ?? vcsToken(PROVIDER),
+    proxyUrl: proxyUrl ?? null,
+    path: `projects/${encoded}/issues/${number}`,
+    fetchImpl,
+  });
   return { number: r.iid, title: r.title, labels: r.labels ?? [], body: r.description };
 }
 
