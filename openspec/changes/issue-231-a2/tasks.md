@@ -76,6 +76,35 @@ whole, which was the real value of the cohesion argument.
       GitHub bash paths for identical inputs — body with/without a ref, referenced issue approved/not,
       diff over/under budget, `size:exception` present/absent. Same inputs → same verdicts.
 
+## Phase 2 ADDENDUM: close the issue-link base-branch parity gap (RED → GREEN)
+> Human ruling: close now (option c), not deferred. GitHub bash's `issue-link` job is base-branch-
+> conditional (`base==main` requires a closing keyword only); the ported pure `issueLink()` evaluator is
+> NOT, so the Node path silently diverged on the default-branch case. Fixed via a new `ctx.defaultBranch`
+> (ci-context.mjs, REQ-CIC-2 delta) and a wrapper-level conditional in `run-check.mjs` — the pure
+> evaluator (`checks/issue-link.mjs`) stays UNCHANGED (REQ-CIC-4). Does NOT implement Phases 3-5.
+- [x] A.1 Test (RED): `loadContext()` exposes `ctx.defaultBranch` — GitHub from mapped `DEFAULT_BRANCH`
+      env (never a raw `GITHUB_*` payload var), GitLab from standard `CI_DEFAULT_BRANCH`; `null` when
+      absent on either provider.
+- [x] A.2 GREEN: add `defaultBranch` to `emptyContext()`/`loadGithubContext()`/`loadGitlabContext()` in
+      `ci-context.mjs`.
+- [x] A.3 Test (RED): `run-check.mjs issue-link` — target IS the default branch + body has ONLY
+      `Part of #N` → FAIL; target IS the default branch + `Closes #N` → PASS; target is NOT the default
+      branch + `Part of #N` → PASS (existing chained-PR pattern preserved).
+- [x] A.4 Test (RED — FAIL-CLOSED): `ctx.defaultBranch` (or `ctx.targetBranch`) is `null` → issue-link
+      fails closed with a clear reason, NEVER assumes `'main'` (proven with a body/label combo that would
+      otherwise pass, so the failure is attributable only to the null field).
+- [x] A.5 GREEN: add `requiresClosingKeyword(ctx)` + the conditional check to `runIssueLinkCheck` in
+      `run-check.mjs`. Pure `issueLink()` evaluator UNCHANGED.
+- [x] A.6 Update task 2.6's parity table: add the ruled row (`Part of #N` + `base==default branch` → FAIL
+      on both paths) and an EXPLICIT divergence note (GitHub bash hardcodes `'main'`; Node now uses the
+      real default branch — pre-existing bash limitation, out of scope, follow-up recorded, not implied
+      total parity).
+- [x] A.7 Test (RED) + GREEN (wiring, pattern from #204): `governance.yml` supplies the mapped
+      `DEFAULT_BRANCH` env var to every ci-context-consuming job (`memory-gate`, `decision-gate`,
+      `phase-order`, `actor-check`, `brain-writes-reviewed`); drift-guard asserts it. GitLab's
+      `CI_DEFAULT_BRANCH` wiring deferred to Phase 3/4 (`gitlab-governance.yml` does not exist yet).
+- [x] A.8 `npm test` green (0 failures) · `repo:check` · `brain:nav`.
+
 ## Phase 3: the shipped GitLab pipeline fragment + managed-paths (RED → GREEN)
 - [ ] 3.1 Test (RED): `managed-paths.mjs` `managed[]` contains the literal
       `brain/scripts/ci/gitlab-governance.yml` and NO root `.gitlab-ci.yml` entry.

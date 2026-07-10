@@ -122,6 +122,39 @@ test('loadContext: missing BASE_SHA/HEAD_SHA yields null, never throws', async (
   assert.equal(ctx.headSha, null);
 });
 
+// ── REQ-CIC-2 delta (issue #231 A2 phase 2 addendum) — defaultBranch ──────────
+//
+// GitHub bash's issue-link job branches on whether the PR base is the
+// DEFAULT branch (closing keyword required) or not (Part-of also accepted).
+// The mapped env is repo metadata (github.event.repository.default_branch),
+// NOT trigger identity — coherent with ADR-0016 ruling 1: never a raw
+// GITHUB_* payload var read outside this module. GitLab supplies the
+// equivalent for free via the standard predefined CI_DEFAULT_BRANCH var.
+
+test('loadContext: GitHub defaultBranch is sourced from the mapped DEFAULT_BRANCH env var (never a raw GITHUB_* payload read)', async () => {
+  const ctx = await loadContext({
+    env: { GITHUB_ACTIONS: 'true', DEFAULT_BRANCH: 'develop' },
+  });
+  assert.equal(ctx.defaultBranch, 'develop');
+});
+
+test('loadContext: GitHub defaultBranch is null when DEFAULT_BRANCH env is absent (uncomputable, never a hardcoded fallback)', async () => {
+  const ctx = await loadContext({ env: { GITHUB_ACTIONS: 'true' } });
+  assert.equal(ctx.defaultBranch, null);
+});
+
+test('loadContext: GitLab defaultBranch is sourced from the standard predefined CI_DEFAULT_BRANCH var', async () => {
+  const ctx = await loadContext({
+    env: { GITLAB_CI: 'true', CI_DEFAULT_BRANCH: 'develop' },
+  });
+  assert.equal(ctx.defaultBranch, 'develop');
+});
+
+test('loadContext: GitLab defaultBranch is null when CI_DEFAULT_BRANCH env is absent (uncomputable, never a hardcoded fallback)', async () => {
+  const ctx = await loadContext({ env: { GITLAB_CI: 'true' } });
+  assert.equal(ctx.defaultBranch, null);
+});
+
 test('loadContext: uncomputable labels/body/author (prView fetch failure) are null, not []/""', async () => {
   const ctx = await loadContext({
     env: { GITHUB_ACTIONS: 'true', PR_NUMBER: '5' },
@@ -189,7 +222,7 @@ test('loadContext: GitLab context is normalized to the identical field set as Gi
   assert.equal(ctx.author, 'carol');
   assert.deepEqual(
     Object.keys(ctx).sort(),
-    ['author', 'baseSha', 'body', 'headSha', 'isMergeRequest', 'labels', 'prNumber', 'provider', 'repo', 'sourceBranch', 'targetBranch'].sort(),
+    ['author', 'baseSha', 'body', 'defaultBranch', 'headSha', 'isMergeRequest', 'labels', 'prNumber', 'provider', 'repo', 'sourceBranch', 'targetBranch'].sort(),
   );
 });
 

@@ -41,6 +41,21 @@
 // on `ctx.body === null` — this falls out naturally from issueLink(null)
 // itself returning `{ pass: false }` (typeof-string guard), so no special
 // casing is needed here; a dedicated test still proves it (never exit 0).
+//
+// THE ADDENDUM GOTCHA (issue #231 A2 phase 2 ADDENDUM — base-branch parity
+// gap): GitHub bash's issue-link job (governance.yml:45-70) is BASE-BRANCH-
+// CONDITIONAL — base==default branch requires a CLOSING keyword only; a
+// slice target (base!=default) also accepts "Part of #N". The pure
+// issueLink() evaluator is NOT base-branch-aware (REQ-CIC-4 — it stays
+// UNCHANGED), so without the wrapper-level check below, a "Part of #N"-only
+// body would wrongly PASS the Node path even on the default branch — a
+// governance hole. `runIssueLinkCheck` closes this with
+// `requiresClosingKeyword(ctx)`, fed by ci-context's new `ctx.defaultBranch`
+// (REQ-CIC-2 delta): the platform's actual default branch, never a
+// hardcoded 'main' literal (platforms only run closing keywords on merges
+// to the default branch, GitHub and GitLab alike — this is not a naming
+// convention). `ctx.defaultBranch === null` (uncomputable) FAILS CLOSED,
+// never falls back to comparing against 'main'.
 
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -171,19 +186,64 @@ function extractIssueNumber(body) {
 }
 
 /**
- * issue-link case (REQUIRED, THE GOTCHA — design.md Decision 2): calls the
- * pure issueLink(ctx.body) for the reference pattern, then verifies the
- * referenced issue carries the resolved approved label via an injectable
- * `fetchIssue`. Fails closed on a null/uncomputable body (issueLink() itself
- * returns `{ pass: false }` for a non-string body) and on a fetch failure.
+ * Default-branch-conditionality (issue #231 A2 phase 2 ADDENDUM — closes the
+ * base-branch parity gap vs GitHub bash, governance.yml:45-70): the platform
+ * only runs closing keywords (Closes/Fixes/Resolves) on merges to the
+ * DEFAULT branch (GitHub and GitLab alike), so the gate mirrors where the
+ * keyword actually has effect, not a naming convention ('main'). The pure
+ * issueLink() evaluator stays base-branch-UNAWARE by design (REQ-CIC-4) — the
+ * conditionality lives HERE, in the wrapper, fed by ci-context's
+ * `defaultBranch` (REQ-CIC-2 delta).
  *
- * @param {{ body?: string|null, provider?: string, repo?: string|null }} ctx
+ * @param {{ targetBranch?: string|null, defaultBranch?: string|null }} ctx
+ * @returns {boolean|null} true = closing keyword required (default-branch
+ *   target); false = "Part of #N" also accepted (slice target); null =
+ *   indeterminate — targetBranch or defaultBranch is uncomputable, so the
+ *   conditional cannot be decided.
+ */
+function requiresClosingKeyword(ctx) {
+  if (ctx.targetBranch == null || ctx.defaultBranch == null) return null;
+  return ctx.targetBranch === ctx.defaultBranch;
+}
+
+/**
+ * issue-link case (REQUIRED, THE GOTCHA — design.md Decision 2, extended by
+ * the A2 phase 2 ADDENDUM): calls the pure issueLink(ctx.body) for the
+ * reference pattern, applies the default-branch-conditional closing-keyword
+ * policy (see requiresClosingKeyword — FAIL-CLOSED, never assumes 'main' when
+ * `ctx.defaultBranch` is uncomputable), then verifies the referenced issue
+ * carries the resolved approved label via an injectable `fetchIssue`. Fails
+ * closed on a null/uncomputable body (issueLink() itself returns
+ * `{ pass: false }` for a non-string body), on an uncomputable
+ * target/default branch, and on a fetch failure.
+ *
+ * @param {{ body?: string|null, provider?: string, repo?: string|null, targetBranch?: string|null, defaultBranch?: string|null }} ctx
  * @param {{ fetchIssue?: Function, readConfig?: () => object }} deps
  * @returns {Promise<{ pass: boolean, reason?: string }>}
  */
 async function runIssueLinkCheck(ctx, deps) {
   const linkResult = issueLink(ctx.body);
   if (!linkResult.pass) return linkResult;
+
+  const closingRequired = requiresClosingKeyword(ctx);
+  if (closingRequired === null) {
+    return {
+      pass: false,
+      reason:
+        'issue-link: cannot determine whether the PR targets the default branch ' +
+        '(ctx.targetBranch or ctx.defaultBranch is null/uncomputable) — failing ' +
+        'closed rather than assuming "main".',
+    };
+  }
+  if (closingRequired && !CLOSING_NUM_RE.test(ctx.body)) {
+    return {
+      pass: false,
+      reason:
+        'issue-link: PR targets the default branch and must use a closing ' +
+        'keyword (Closes|Fixes|Resolves #N) — "Part of #N" alone is only ' +
+        'accepted on non-default (slice) targets.',
+    };
+  }
 
   const issueNumber = extractIssueNumber(ctx.body);
   if (issueNumber == null) {

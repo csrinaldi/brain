@@ -230,8 +230,10 @@ test('neutrality source-scan (REQ-NEUTRALITY-2): run-check.mjs source contains n
 // resolveApprovedLabel() never touches the real brain.config.json.
 
 test('runCheck: issue-link — body has "Part of #231", referenced issue carries the approved label → pass (fresh ctx.labels via fetchIssue, never CI_MERGE_REQUEST_LABELS)', async () => {
+  // Slice target (targetBranch !== defaultBranch) — "Part of #N" alone is
+  // the accepted pattern for a chained-PR slice (task 2.1's original scope).
   const result = await runCheck('issue-link', {
-    ctx: { body: 'feat: slice\n\nPart of #231', provider: 'gitlab' },
+    ctx: { body: 'feat: slice\n\nPart of #231', provider: 'gitlab', targetBranch: 'feature/tracker', defaultBranch: 'main' },
     fetchIssue: async (issueNumber) => {
       assert.equal(issueNumber, 231);
       return { labels: ['status::approved'] };
@@ -242,8 +244,10 @@ test('runCheck: issue-link — body has "Part of #231", referenced issue carries
 });
 
 test('runCheck: issue-link — body has "Closes #42", referenced issue carries the approved label → pass', async () => {
+  // Default-branch target — a closing keyword satisfies both the generic
+  // pattern check AND the (addendum) default-branch closing-keyword policy.
   const result = await runCheck('issue-link', {
-    ctx: { body: 'fix: bug\n\nCloses #42', provider: 'github' },
+    ctx: { body: 'fix: bug\n\nCloses #42', provider: 'github', targetBranch: 'main', defaultBranch: 'main' },
     fetchIssue: async () => ({ labels: ['status:approved'] }),
     readConfig: () => ({}),
   });
@@ -252,7 +256,7 @@ test('runCheck: issue-link — body has "Closes #42", referenced issue carries t
 
 test('runCheck: issue-link — referenced issue does NOT carry the approved label → fail with reason', async () => {
   const result = await runCheck('issue-link', {
-    ctx: { body: 'Part of #5', provider: 'gitlab' },
+    ctx: { body: 'Part of #5', provider: 'gitlab', targetBranch: 'feature/tracker', defaultBranch: 'main' },
     fetchIssue: async () => ({ labels: ['status::in-review'] }),
     readConfig: () => ({}),
   });
@@ -262,7 +266,7 @@ test('runCheck: issue-link — referenced issue does NOT carry the approved labe
 
 test('runCheck: issue-link — fetchIssue throws (network/API failure) → fail closed with reason', async () => {
   const result = await runCheck('issue-link', {
-    ctx: { body: 'Closes #9', provider: 'gitlab' },
+    ctx: { body: 'Closes #9', provider: 'gitlab', targetBranch: 'feature/tracker', defaultBranch: 'main' },
     fetchIssue: async () => { throw new Error('GitLab MR API failed: 500'); },
     readConfig: () => ({}),
   });
@@ -299,6 +303,92 @@ test('runCheck: issue-link — body with no reference at all → fail, reference
   });
   assert.equal(result.pass, false);
   assert.equal(fetchCalled, false, 'fetchIssue must not be called when the body carries no reference');
+});
+
+// ── issue-link — default-branch-conditional (issue #231 A2 phase 2 ADDENDUM) ─
+//
+// GAP CLOSED: GitHub bash (governance.yml:45-70) is base-branch-conditional —
+// base=='main' requires a CLOSING keyword ONLY (Part of #N alone is rejected);
+// base!='main' (slice) accepts EITHER. The pure issueLink() evaluator is NOT
+// base-branch-aware (by design — REQ-CIC-4, it stays UNCHANGED), so without
+// this wrapper-level conditional, a "Part of #N"-only body would wrongly PASS
+// the Node path even when targeting the default branch. This wires
+// ctx.targetBranch === ctx.defaultBranch through the WRAPPER, never the pure
+// evaluator.
+
+test('runCheck: issue-link — target IS the default branch, body has ONLY "Part of #N" (no closing keyword) → FAIL (closing keyword required)', async () => {
+  // fetchIssue DELIBERATELY returns the approved label (a would-otherwise-pass
+  // result) so this test only goes GREEN because of the closing-keyword
+  // policy itself — never because the fetch happened to fail for some other
+  // reason (that would be a false-positive RED).
+  const result = await runCheck('issue-link', {
+    ctx: { body: 'feat: slice\n\nPart of #42', provider: 'github', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async () => ({ labels: ['status:approved'] }),
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
+});
+
+test('runCheck: issue-link — target IS the default branch, body has "Closes #N" → PASS (closing keyword satisfies the default-branch policy)', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: { body: 'fix: thing\n\nCloses #42', provider: 'github', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async () => ({ labels: ['status:approved'] }),
+    readConfig: () => ({}),
+  });
+  assert.deepEqual(result, { pass: true });
+});
+
+test('runCheck: issue-link — target is NOT the default branch (slice), body has ONLY "Part of #N" → PASS (existing chained-PR pattern preserved)', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: { body: 'feat: slice\n\nPart of #42', provider: 'github', targetBranch: 'feature/tracker', defaultBranch: 'main' },
+    fetchIssue: async () => ({ labels: ['status:approved'] }),
+    readConfig: () => ({}),
+  });
+  assert.deepEqual(result, { pass: true });
+});
+
+// ── issue-link — FAIL-CLOSED on null defaultBranch (never assume 'main') ────
+//
+// issue-link is REQUIRED. If ctx.defaultBranch is null (uncomputable — the
+// workflow did not map it) the conditional above cannot be decided, so the
+// gate MUST fail closed rather than silently assuming 'main' (that would
+// reintroduce the rejected hardcoded-'main' option). targetBranch below is
+// deliberately NOT 'main' and the body deliberately carries a would-otherwise-
+// pass "Part of #N" + an approved issue, to prove the failure is NOT coming
+// from anything else — it is specifically the null defaultBranch.
+
+test('runCheck: issue-link — ctx.defaultBranch is null → fails closed, NEVER falls back to a hardcoded "main" comparison', async () => {
+  // fetchIssue DELIBERATELY returns the approved label — proves the failure
+  // comes from the null-defaultBranch fail-closed path itself, not from the
+  // fetch/label check (which would otherwise pass, since targetBranch here is
+  // deliberately NOT 'main' — a hardcoded 'main' fallback would treat this as
+  // a slice PR and wrongly PASS on the "Part of #N" pattern).
+  const result = await runCheck('issue-link', {
+    ctx: { body: 'feat: slice\n\nPart of #42', provider: 'github', targetBranch: 'feature/tracker', defaultBranch: null },
+    fetchIssue: async () => ({ labels: ['status:approved'] }),
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
+});
+
+test('main: issue-link — ctx.defaultBranch is null → returns 1 (never 0) on the REQUIRED gate', async () => {
+  const code = await main('issue-link', {
+    ctx: { body: 'Closes #42', provider: 'github', targetBranch: 'main', defaultBranch: null },
+    fetchIssue: async () => ({ labels: ['status:approved'] }),
+    readConfig: () => ({}),
+  });
+  assert.equal(code, 1);
+});
+
+test('runCheck: issue-link — ctx.targetBranch is null (defaultBranch known) → also fails closed (the conditional needs BOTH to be decided)', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: { body: 'Closes #42', provider: 'github', targetBranch: null, defaultBranch: 'main' },
+    fetchIssue: async () => ({ labels: ['status:approved'] }),
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
 });
 
 // ── diff-size — size:exception from FRESH ctx.labels, never CI_MERGE_REQUEST_LABELS (task 2.3) ─
@@ -361,16 +451,30 @@ test('runCheck: diff-size — diffNumstat throws (git uncomputable) → fail clo
 // inputs. This proves routing through Node changed the TRANSPORT, not the
 // VERDICT.
 //
-// Scope note: the bash issue-link job branches on BASE_BRANCH — base=='main'
-// requires a closing keyword (Closes|Fixes|Resolves #N) ONLY; base!='main'
-// (the slice-PR branch, :55-71) accepts EITHER "Part of #N" OR a closing
-// keyword. run-check.mjs's issue-link case (Decision 2) calls the existing
-// pure evaluator issueLink(ctx.body), which is NOT base-branch-conditional —
-// this matches the bash's slice-PR branch (:55-71) exactly, which is the
-// actual port target for GitLab MRs (REQ-A2-2 does not model base-branch
-// differentiation in Node). All rows below use inputs that produce the SAME
-// verdict on the slice-PR branch regardless of which pattern is present, so
-// the table is unambiguous with respect to that documented scope boundary.
+// Scope note (UPDATED — issue #231 A2 phase 2 ADDENDUM closes the gap this
+// note originally flagged): the bash issue-link job branches on BASE_BRANCH
+// — base=='main' requires a closing keyword (Closes|Fixes|Resolves #N)
+// ONLY; base!='main' (the slice-PR branch, :55-71) accepts EITHER "Part of
+// #N" OR a closing keyword. run-check.mjs's issue-link case now ALSO
+// branches — via `requiresClosingKeyword(ctx)`, fed by
+// `ctx.targetBranch`/`ctx.defaultBranch` (REQ-CIC-2 delta) — so the Node
+// path matches BOTH bash branches, not just the slice-PR one. Rows below
+// that omit `targetBranch`/`defaultBranch` default to a SLICE target
+// (targetBranch !== defaultBranch, the original task 2.6 scope); the new row
+// at the bottom explicitly sets a default-branch target to prove the
+// previously-undocumented gap is now closed.
+//
+// EXPLICIT DIVERGENCE (NOT total parity — pre-existing, out of scope here):
+// the GitHub bash literally compares `BASE_BRANCH == 'main'` (a hardcoded
+// string), never the repo's actual default branch. A GitHub consumer whose
+// default branch is NOT 'main' (e.g. 'develop') would have the bash apply
+// the WRONG policy — comparing against a literal that isn't its default —
+// while the Node path (this addendum) correctly compares against
+// `ctx.defaultBranch` (the real default branch, mapped from
+// `github.event.repository.default_branch`). This divergence is a
+// pre-existing bash limitation, not introduced by this addendum, and fixing
+// the bash side is out of scope here — recorded as a follow-up, not implied
+// parity.
 
 const issueLinkParityTable = [
   {
@@ -412,6 +516,23 @@ const issueLinkParityTable = [
     // have a reference → exit 1 → FAIL (before any gh api call).
     githubBashVerdict: false,
   },
+  {
+    label: 'Part of #N present (no closing keyword), base == default branch — RULED ROW (A2 phase 2 addendum)',
+    body: 'feat: slice\n\nPart of #42',
+    issueLabels: ['status:approved'],
+    targetBranch: 'main',
+    defaultBranch: 'main',
+    // bash (governance.yml:45-54): BASE_BRANCH=='main' branch requires a
+    // CLOSING keyword ONLY — the num= extraction on :48-50 (grep for
+    // close[sd]?|fix(e[sd])?|resolve[sd]?) finds nothing in a Part-of-only
+    // body → num empty → ::error:: PR to main must have a Closes/Fixes/
+    // Resolves reference → exit 1 → FAIL.
+    // Node (run-check.mjs, THIS ADDENDUM): ctx.targetBranch===ctx.defaultBranch
+    // → requiresClosingKeyword() returns true → CLOSING_NUM_RE does not match
+    // a Part-of-only body → FAIL. Both paths FAIL — this is the exact input
+    // that used to PASS on Node before this addendum (the gap being closed).
+    githubBashVerdict: false,
+  },
 ];
 
 for (const row of issueLinkParityTable) {
@@ -419,9 +540,16 @@ for (const row of issueLinkParityTable) {
     // provider: 'github' — the bash's own label literal is the unscoped
     // 'status:approved' (governance.yml:78); the fixture issueLabels above
     // use that same unscoped form, so the Node-side resolver must resolve to
-    // the SAME form for an apples-to-apples verdict comparison.
+    // the SAME form for an apples-to-apples verdict comparison. Rows that
+    // don't specify targetBranch/defaultBranch default to a SLICE target
+    // (the original task 2.6 scope, preserved).
     const result = await runCheck('issue-link', {
-      ctx: { body: row.body, provider: 'github' },
+      ctx: {
+        body: row.body,
+        provider: 'github',
+        targetBranch: row.targetBranch ?? 'feature/tracker',
+        defaultBranch: row.defaultBranch ?? 'main',
+      },
       fetchIssue: async () => ({ labels: row.issueLabels }),
       readConfig: () => ({}),
     });

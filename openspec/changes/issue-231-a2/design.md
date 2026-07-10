@@ -47,6 +47,51 @@ Inputs per case:
 GitHub keeps its working bash for these two jobs; only the approved-label read moves to config
 (Decision 4). Converting GitHub wholesale to Node is out of scope (avoids needless churn/risk).
 
+### Decision 2 ADDENDUM (issue #231 A2 phase 2 addendum) — the Node path was base-branch-blind
+
+**The gap:** GitHub bash's `issue-link` job (governance.yml:45-70) is base-branch-conditional —
+`base==main` requires a closing keyword (Closes/Fixes/Resolves) ONLY; `base!=main` (slice) also accepts
+`Part of #N`. The pure `issueLink()` evaluator is NOT base-branch-aware — by design (REQ-CIC-4, it stays
+UNCHANGED). Phase 2 ported `issueLink(ctx.body)` into `run-check.mjs` unconditionally, which matches the
+bash's slice-PR branch exactly but silently diverges from the bash's `base==main` branch: a
+`Part of #N`-only body targeting the default branch would PASS on Node but FAIL on GitHub bash. This was
+identified and documented (not hidden) in Phase 2's apply-progress and the task 2.6 parity table's scope
+note, then ruled by the human to be closed now (option c), not deferred.
+
+**RATIONALE:** the fix is default-BRANCH-conditional, not `base=='main'`-conditional. Platforms only run
+closing keywords (Closes/Fixes/Resolves) on merges to the repository's DEFAULT branch — GitHub and GitLab
+alike. This is where the keyword has real effect (auto-closing the referenced issue), not a naming
+convention: a GitFlow repo whose default branch is `develop` needs the SAME policy applied to `develop`,
+not to a branch literally named `main`. The platform already knows its own default branch (GitHub via
+`github.event.repository.default_branch`, GitLab via the standard predefined `CI_DEFAULT_BRANCH`), so the
+fix reads it from there — never a hardcoded literal, never a new config knob.
+
+**Fix, in two seams:**
+1. `ci-context.mjs`'s `loadContext()` gains a `defaultBranch` field (REQ-CIC-2 delta): GitHub maps it from
+   `github.event.repository.default_branch` via a workflow `env:` line to a plain var (`DEFAULT_BRANCH`)
+   — repo metadata, not trigger identity, coherent with ADR-0016 ruling 1 (never a raw `GITHUB_*` payload
+   var read outside this module). GitLab reads the standard predefined `CI_DEFAULT_BRANCH` — free, no
+   extra API call. `null` when the workflow does not map it (GitHub) or the var is absent (GitLab).
+2. `run-check.mjs`'s `issue-link` case (the WRAPPER — the pure `issueLink()` evaluator stays UNCHANGED,
+   REQ-CIC-4) applies `requiresClosingKeyword(ctx)`: `ctx.targetBranch === ctx.defaultBranch` → closing
+   keyword required; otherwise `Part of #N` is also accepted. `ctx.targetBranch` or `ctx.defaultBranch`
+   being `null` makes the conditional undecidable — the REQUIRED gate FAILS CLOSED, never falls back to
+   comparing against a hardcoded `'main'` (that would silently reintroduce the rejected option (a)).
+
+**Alternatives considered:** (a) hardcode `'main'` as the comparison target in the Node wrapper —
+REJECTED (human ruling): reintroduces the exact bash limitation being fixed (a GitHub/GitLab consumer with
+default≠`main` gets the wrong policy) and is explicitly what this addendum exists to avoid. (b) add a
+config knob for the default branch name — REJECTED: the platform already knows it; a config knob would be
+one more value to keep in sync and could silently drift from the actual repo setting. (c, RULED) —
+compute it from the platform via `ci-context.mjs`, the sole sanctioned seam for pipeline context.
+
+**Scope boundary (explicit, not implied parity):** the GitHub bash `issue-link` job itself is NOT changed
+— it keeps comparing `BASE_BRANCH == 'main'` literally. A GitHub consumer whose default branch is not
+`'main'` therefore still gets the WRONG policy from bash (pre-existing limitation, out of scope here,
+recorded as a follow-up) while the Node path (now used by GitLab, and covered by the parity table) applies
+the CORRECT platform-sourced policy. This divergence is called out explicitly in the parity table and in
+`governance.yml`'s `issue-link` job comment — never silently implied as total parity.
+
 ## Decision 3 — Exit-code → GitLab mapping: REQUIRED normal, DETECTION `allow_failure: true`
 
 Amendment 3 (adr-0016:62-80) fixes the policy: REQUIRED → fail-closed (0/1; uncomputable FAILS CLOSED);
@@ -100,7 +145,10 @@ Decisions 1, 3 to the registry — adding or mis-classifying a job turns the gua
 | File | Action | Description |
 |------|--------|-------------|
 | `brain/scripts/ci/gitlab-governance.yml` | Create | Eight-job GitLab pipeline fragment; REQUIRED normal, DETECTION `allow_failure:true`; each job runs `node run-check.mjs <job>` |
-| `brain/scripts/governance/run-check.mjs` | Modify | Add `issue-link` + `diff-size` cases fed by `loadContext()`; keep memory/decision cases |
+| `brain/scripts/governance/run-check.mjs` | Modify | Add `issue-link` + `diff-size` cases fed by `loadContext()`; keep memory/decision cases. **ADDENDUM:** `issue-link` case applies `requiresClosingKeyword(ctx)` — default-branch-conditional, fail-closed on null |
+| `brain/scripts/vcs/ci-context.mjs` | Modify (ADDENDUM) | Add `defaultBranch` field to `loadContext()` (REQ-CIC-2 delta): GitHub from mapped `DEFAULT_BRANCH` env, GitLab from `CI_DEFAULT_BRANCH` |
+| `.github/workflows/governance.yml` | Modify (ADDENDUM) | Map `DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}` into every ci-context-consuming job (`memory-gate`, `decision-gate`, `phase-order`, `actor-check`, `brain-writes-reviewed`); `issue-link` job gains a KNOWN DIVERGENCE comment |
+| `brain/scripts/vcs/ci-context-drift-guard.test.mjs` | Modify (ADDENDUM) | Wiring test: assert the 5 ci-context-consuming jobs supply the mapped `DEFAULT_BRANCH` env var |
 | `brain/core/config-migrations.mjs` | Modify | Additive `governance.approvedLabel` entry (L6 gate) |
 | `brain/scripts/governance/approved-label.mjs` | Create | `resolveApprovedLabel(config, provider)` + CLI printer for the GitHub bash |
 | `brain/scripts/vcs/actor-check.mjs` | Modify | Replace hardcoded `status:approved` with the resolved lookup |
