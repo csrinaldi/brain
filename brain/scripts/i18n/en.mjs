@@ -303,8 +303,13 @@ export default {
   // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
   'memory.share.secretFoundRecords': 'Secret detected in a candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
 
+  // ── memory/backends/engram.mjs — importMemory() records-only pull (D2/C4, issue #229) ──
+  'memory.import.empty':    'ℹ no records found in .memory/records/ — nothing to import.',
+  'memory.import.progress': '  ✓ {written}/{total} records imported',
+  'memory.import.done':     '✓ import complete — {written}/{total} records imported into engram (records-only, D2/C4).',
+
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──
-  'memory.migrateV1.realRunSummary':        '✓ migration complete — written: {written} | rejected: {rejected} | skipped (personal): {skipped} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations} | index: {indexCount} record(s). Next: commit memory.dualWrite=true (runbook step 2).',
+  'memory.migrateV1.realRunSummary':        '✓ migration complete — written: {written} | rejected: {rejected} | skipped (personal): {skipped} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations} | index: {indexCount} record(s). records/ is now the sole write path (memory.dualWrite retired, D3/C4).',
   'memory.migrateV1.rollbackSummary':       '✓ rollback complete — chunk(s) restored: {restored} | index: {indexCount} record(s).',
   'memory.migrateV1.dryRunHeader':          'Dry-run migration report (issue #217, C2):',
   'memory.migrateV1.summary':               'records: {records} | skipped (personal): {skipped} | rejected: {rejected} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations}',

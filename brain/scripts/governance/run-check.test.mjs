@@ -1,13 +1,11 @@
 // run-check.test.mjs — Unit tests for the thin run-check.mjs runner (REQ-L3-1, REQ-L3-2)
 //
 // CI FRAGILITY: never let these tests read real git state or the real cwd's
-// .memory/ — always inject the fakes. For the memory-gate, whoever injects ONE
-// evidence reader MUST inject BOTH (readChunks AND readRecords): the runner's
-// default readRecords reads the real `.memory/records/`, so a test that injects
-// only readChunks silently couples its verdict to the repo's committed memory
-// state (finding #10 — the fail-expecting tests broke on the cutover branch
-// once real records/ existed). Rule: runCheck memory-gate tests inject ALL
-// evidence sources, never inherit a default that reads the real world.
+// .memory/ — always inject the fakes. The memory-gate is records-only as of
+// C4/D4 (REQ-C4-4): the #227 transitional chunks/records union is retired, so
+// the gate no longer accepts a `readChunks` dep at all. Memory-gate tests
+// inject `readRecords` — never rely on a default that reads the real world
+// (finding #10 — a fail-expecting test broke once real records/ existed).
 // Run with: npm test
 
 import { test } from 'node:test';
@@ -25,82 +23,55 @@ async function captureLog(fn) {
   return logs;
 }
 
-// ── memory-gate ──────────────────────────────────────────────────────────────
-
-test('runCheck: memory-gate — injected chunks include session_summary → pass', () => {
-  const result = runCheck('memory-gate', {
-    readChunks: () => [{ type: 'session_summary', title: 'x' }],
-    readRecords: () => [],
-  });
-  assert.deepEqual(result, { pass: true });
-});
-
-test('runCheck: memory-gate — injected chunks have no session_summary → fail with reason', () => {
-  const result = runCheck('memory-gate', {
-    readChunks: () => [{ type: 'decision' }],
-    readRecords: () => [],
-  });
-  assert.equal(result.pass, false);
-  assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
-});
-
-test('runCheck: memory-gate — never calls readChunkObservations with a raw fs read (uses injected reader)', () => {
-  let receivedCwd;
-  runCheck('memory-gate', {
-    cwd: '/fake/cwd',
-    readChunks: (cwd) => {
-      receivedCwd = cwd;
-      return [{ type: 'session_summary' }];
-    },
-    readRecords: () => [],
-  });
-  assert.equal(receivedCwd, '/fake/cwd');
-});
-
-// ── memory-gate — records/ OR chunks/ union (issue #222 cutover fix) ────────
+// ── memory-gate — records-only (C4/D4, REQ-C4-4) ────────────────────────────
 //
-// Post-cutover, .memory/chunks/ is a legacy transport (empty or delta-only)
-// and session_summary observations live in .memory/records/*.jsonl. The gate
-// must accept EITHER source during this transitional window — never require
-// both. Both readChunks and readRecords are injectable so these tests never
-// touch the real filesystem.
+// The #227 transitional chunks/records union is retired: the gate computes
+// its observation set from `records/` ALONE. `readChunkObservations` is no
+// longer imported by run-check.mjs at all. `readRecords` is injectable so
+// these tests never touch the real filesystem.
 
-test('runCheck: memory-gate — only records has session_summary (chunks empty) → pass', () => {
+test('runCheck: memory-gate — records has session_summary → pass', () => {
   const result = runCheck('memory-gate', {
-    readChunks: () => [],
-    readRecords: () => [{ type: 'session_summary', content: 'recap' }],
+    readRecords: () => [{ type: 'session_summary', title: 'x' }],
   });
   assert.deepEqual(result, { pass: true });
 });
 
-test('runCheck: memory-gate — only chunks has session_summary (records empty) → pass (existing behavior preserved)', () => {
+test('runCheck: memory-gate — records have no session_summary → fail with reason', () => {
   const result = runCheck('memory-gate', {
-    readChunks: () => [{ type: 'session_summary' }],
-    readRecords: () => [],
-  });
-  assert.deepEqual(result, { pass: true });
-});
-
-test('runCheck: memory-gate — neither records nor chunks has session_summary → fail with reason', () => {
-  const result = runCheck('memory-gate', {
-    readChunks: () => [{ type: 'decision' }],
-    readRecords: () => [{ type: 'bugfix' }],
+    readRecords: () => [{ type: 'decision' }],
   });
   assert.equal(result.pass, false);
   assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
 });
 
-test('runCheck: memory-gate — readRecords receives the same cwd as readChunks (injected reader)', () => {
+test('runCheck: memory-gate — records empty → fail with reason', () => {
+  const result = runCheck('memory-gate', {
+    readRecords: () => [],
+  });
+  assert.equal(result.pass, false);
+  assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
+});
+
+test('runCheck: memory-gate — readRecords receives the injected cwd (uses injected reader, never a raw fs read)', () => {
   let receivedCwd;
   runCheck('memory-gate', {
     cwd: '/fake/cwd',
-    readChunks: () => [],
     readRecords: (cwd) => {
       receivedCwd = cwd;
       return [{ type: 'session_summary' }];
     },
   });
   assert.equal(receivedCwd, '/fake/cwd');
+});
+
+test('runCheck: memory-gate — only chunks has session_summary (records empty) → FAIL (chunks are no longer read, #227 union retired)', () => {
+  const result = runCheck('memory-gate', {
+    readChunks: () => [{ type: 'session_summary' }],
+    readRecords: () => [],
+  });
+  assert.equal(result.pass, false, 'a readChunks dep, even if passed, must never be consulted — records/ alone decides the verdict');
+  assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
 });
 
 // ── decision-gate ────────────────────────────────────────────────────────────
@@ -196,7 +167,7 @@ test('runCheck: decision-gate — deps.ctx signaling null baseSha/headSha fails 
 test('main: memory-gate passing → returns 0, prints nothing', async () => {
   let code;
   const logs = await captureLog(() => {
-    code = main('memory-gate', { readChunks: () => [{ type: 'session_summary' }], readRecords: () => [] });
+    code = main('memory-gate', { readRecords: () => [{ type: 'session_summary' }] });
   });
   assert.equal(code, 0);
   assert.deepEqual(logs, []);
@@ -205,7 +176,7 @@ test('main: memory-gate passing → returns 0, prints nothing', async () => {
 test('main: memory-gate failing → returns 1, prints the reason', async () => {
   let code;
   const logs = await captureLog(() => {
-    code = main('memory-gate', { readChunks: () => [], readRecords: () => [] });
+    code = main('memory-gate', { readRecords: () => [] });
   });
   assert.equal(code, 1);
   assert.ok(logs.length === 1 && logs[0].length > 0);

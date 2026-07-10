@@ -6,7 +6,7 @@
 //
 //   pull    — churn-resilient full pull: manifest restore + git pull + engram import.
 //             Use for cross-machine sync (npm run memory:pull).
-//   import  — import-only: engram sync --import, no git pull.
+//   import  — import-only: records-only engram hydrate (D2/C4), no git pull.
 //             Use after git already pulled (post-merge hook, day-start step 5).
 //   reindex — regenerate .memory/index.jsonl from .memory/records/ alone
 //             (REQ-MF-4, issue #205). Backend-agnostic: dispatched directly
@@ -101,9 +101,10 @@ if (op === "reindex") {
 // no `--dry-run` → executes the real migration (un-refused, C2b — design.md
 //   Decision 1): the CLI being runnable IS the runbook's intended step 1;
 //   the control is the runbook order + the human keystroke, not a CLI switch
-//   (the `--no-scrub` class C1b prohibited stays rejected). Safe by
-//   construction while `memory.dualWrite` is false. The abort-if-populated
-//   guard in `runMigration()` still protects re-runs.
+//   (the `--no-scrub` class C1b prohibited stays rejected). `memory.dualWrite`
+//   itself is retired (D3/C4, issue #229) — records-only write is now
+//   unconditional. The abort-if-populated guard in `runMigration()` still
+//   protects re-runs.
 // `--rollback` → the inverse (REQ-C2B2-2): restores chunks from `legacy/`,
 //   drops `records/`, reindexes. Rehearsed only in fixtures per the runbook;
 //   the real rollback runs only via the cutover runbook.

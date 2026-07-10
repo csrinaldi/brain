@@ -21,7 +21,7 @@ import {
   _defaultChangedChunkFiles,
   _defaultReadObservations,
 } from './engram.mjs';
-import { DEFAULT_SECRET_PATTERNS } from '../lib/secret-scrub.mjs';
+import { DEFAULT_SECRET_PATTERNS, scrubChunkFile } from '../lib/secret-scrub.mjs';
 import { buildRecord } from '../lib/format.mjs';
 
 // ---------------------------------------------------------------------------
@@ -86,6 +86,53 @@ test('_defaultChangedChunkFiles: a clean git run (status 0, no changes) returns 
   assert.deepEqual(out, []);
 });
 
+// ── cutover finding 7 (id:388): porcelain deletions must not reach the scrubber ──
+//
+// After the cutover moved chunks to legacy/, `git status --porcelain` on
+// .memory/chunks reports DELETION lines. A deletion whose path still ends in
+// `.jsonl.gz` used to pass the suffix-only filter, so scrubChunkFile() would
+// readFileSync() a path that no longer exists → ENOENT. Fix: exclude porcelain
+// deletions before the suffix filter runs.
+
+test('_defaultChangedChunkFiles: porcelain deletions of .jsonl.gz chunks are excluded, live changes survive (finding 7, id:388)', () => {
+  const out = _defaultChangedChunkFiles('/fake/root', {
+    _spawn: () => ({
+      status: 0,
+      stdout: [
+        ' D .memory/chunks/unstaged-deleted.jsonl.gz',
+        'D  .memory/chunks/staged-deleted.jsonl.gz',
+        'AD .memory/chunks/added-then-deleted.jsonl.gz',
+        ' M .memory/chunks/modified.jsonl.gz',
+        '?? .memory/chunks/new-untracked.jsonl.gz',
+      ].join('\n'),
+      stderr: '',
+    }),
+  });
+  assert.deepEqual(out, [
+    join('/fake/root', '.memory/chunks/modified.jsonl.gz'),
+    join('/fake/root', '.memory/chunks/new-untracked.jsonl.gz'),
+  ]);
+});
+
+test('scrubMaterializedChunks: a porcelain-deleted .jsonl.gz chunk does not reach _scrubChunk / does not throw ENOENT (finding 7, id:388)', async () => {
+  await assert.doesNotReject(() =>
+    scrubMaterializedChunks('/fake/root', {
+      _changedChunkFiles: (root) =>
+        _defaultChangedChunkFiles(root, {
+          _spawn: () => ({
+            status: 0,
+            stdout: ' D .memory/chunks/nonexistent-deleted.jsonl.gz\n',
+            stderr: '',
+          }),
+        }),
+      _loadConfig: () => ({}),
+      // REAL scrubChunkFile — would throw ENOENT if the deletion leaked through
+      // to a readFileSync() on a path that no longer exists on disk.
+      _scrubChunk: scrubChunkFile,
+    }),
+  );
+});
+
 test('scrubMaterializedChunks: default patterns are used when config has no governance keys', async () => {
   let seenPatternSources;
   await scrubMaterializedChunks('/fake/root', {
@@ -135,7 +182,7 @@ test('share() is exported as a callable function', () => {
   assert.equal(typeof share, 'function', 'share must be exported from engram.mjs');
 });
 
-test('share(): dual-write is DORMANT by default — memory.dualWrite absent → C1b behavior (export + chunk scrub only, records/ never touched)', async () => {
+test('share(): records write is UNCONDITIONAL — runs even with NO memory.dualWrite key present (gate retired by deletion, D3/C4, issue #229)', async () => {
   const callLog = [];
   await share({
     root: '/fake/root',
@@ -143,14 +190,14 @@ test('share(): dual-write is DORMANT by default — memory.dualWrite absent → 
     _export: () => { callLog.push('export'); },
     _readObservations: () => { callLog.push('readObservations'); return { observations: [] }; },
     _changedChunkFiles: () => { callLog.push('changedChunkFiles'); return []; },
-    _loadConfig: () => ({}), // no memory.dualWrite → OFF
+    _loadConfig: () => ({}), // no memory key at all — must NOT gate the write
     _scrubChunk: () => null,
   });
-  // dualWriteRecords never ran → readObservations was never called
-  assert.deepEqual(callLog, ['requireEngram', 'export', 'changedChunkFiles']);
+  // record-write runs unconditionally: order requireEngram → export → scrub(chunks) → write(records)
+  assert.deepEqual(callLog, ['requireEngram', 'export', 'changedChunkFiles', 'readObservations']);
 });
 
-test('share(): memory.dualWrite === true ACTIVATES the dual-write — order requireEngram → export → scrub(chunks) → dual-write(records) (issue #221 fix pass: config state marker, reordered so the chunk backstop runs first)', async () => {
+test('share(): records write is UNCONDITIONAL — a leftover memory.dualWrite value in config does not change the order or outcome (the key is retired; no runtime code reads it)', async () => {
   const callLog = [];
   await share({
     root: '/fake/root',
@@ -158,16 +205,15 @@ test('share(): memory.dualWrite === true ACTIVATES the dual-write — order requ
     _export: () => { callLog.push('export'); },
     _readObservations: () => { callLog.push('readObservations'); return { observations: [] }; },
     _changedChunkFiles: () => { callLog.push('changedChunkFiles'); return []; },
-    _loadConfig: () => ({ memory: { dualWrite: true } }), // cutover state marker ON
+    _loadConfig: () => ({ memory: { dualWrite: false } }), // leftover value, if any — irrelevant now
     _scrubChunk: () => null,
   });
   assert.deepEqual(callLog, ['requireEngram', 'export', 'changedChunkFiles', 'readObservations']);
 });
 
-test('share(): even with memory.dualWrite true, a secret in a candidate record aborts before any records/ append (dormant-vs-active does not weaken the scan-then-write guard)', async () => {
-  // The config marker gates WHETHER dual-write runs, never HOW safely: when active,
-  // the pre-append candidate scan still fails closed. Guarded here so a future edit
-  // to the gate can't silently drop the records-log protection.
+test('share(): a secret in a candidate record aborts before any records/ append (the scan-then-write guard holds unconditionally, independent of any config)', async () => {
+  // The write is unconditional now (gate retired, D3/C4) — guarded here so a
+  // future edit can't silently drop the records-log protection.
   await assert.rejects(
     () =>
       share({
@@ -177,7 +223,7 @@ test('share(): even with memory.dualWrite true, a secret in a candidate record a
         _changedChunkFiles: () => [],
         _readObservations: () => ({ observations: [{ id: 1, sync_id: 'obs-1', type: 'decision', title: 'T', content: 'ghp_AAAAAAAAAAAAAAAAAAAA', project: 'brain', scope: 'project', created_at: '2026-07-01 01:19:12' }] }),
         _appendRecord: () => { throw new Error('appendRecord must NOT run when a candidate has a secret'); },
-        _loadConfig: () => ({ memory: { dualWrite: true } }),
+        _loadConfig: () => ({}),
         _scrubChunk: () => null,
       }),
     /ghp_|secret/i,
@@ -560,7 +606,7 @@ test('share(): a secret in a candidate RECORD aborts the share AFTER the chunk b
         _appendRecord: () => { throw new Error('must not append on a secret hit'); },
         _rebuildIndex: () => { throw new Error('must not reindex on a secret hit'); },
         _changedChunkFiles: () => { chunkScrubRan = true; return []; },
-        _loadConfig: () => ({ memory: { dualWrite: true } }), // dual-write ACTIVE to exercise the candidate scan
+        _loadConfig: () => ({}), // write is unconditional now (gate retired, D3/C4) — no config needed to exercise the candidate scan
         _scrubChunk: () => null,
       }),
     /AKIA/,
