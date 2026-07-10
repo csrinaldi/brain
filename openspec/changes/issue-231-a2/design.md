@@ -125,10 +125,12 @@ CP-A2a is the acceptance gate (fixture-tested, hard stop, PR-as-review); CP-A2b 
 
 ## Open questions
 
-- [ ] **Migration version number.** C4 (#229) removed the never-shipped `0.6.0` entry
-      (config-migrations.mjs:87-95); the array now ends at `0.5.0`. Should `governance.approvedLabel`
-      reuse the freed `0.6.0` slot (safe — proven never shipped) or take `0.7.0` (monotonic-forever, no
-      reused-version ambiguity in git history)? Default recommendation: `0.6.0`. Also: A2 and C4 are
-      siblings off `feature/v2.0.0` — whichever lands second must append after the other's version.
+- [x] **Migration version number — RESOLVED (human ruling): `0.7.0`.** Version numbers are
+      content-identifiers and are NEVER reused: a reused `0.6.0` would name two indistinguishable states
+      depending on when it was applied — the exact ambiguity content-hashing exists to prevent — and this
+      repo ran under `0.6.0`-dualWrite during the cutover window, so that window's archaeology needs the
+      number to mean ONE thing. The `0.6.0` gap is not a tolerable cost; it is honest record — a hole in
+      the sequence IS the visible mark of a retirement, readable in the log. DOCTRINE (fixed for all
+      future retirements): retire-by-deletion includes the version slot; the sequence is monotonic-forever.
 - [ ] **CP-A2b endpoint.** The live e2e is blocked on the human restoring GitLab access + a new
       endpoint; not decidable in this slice.
