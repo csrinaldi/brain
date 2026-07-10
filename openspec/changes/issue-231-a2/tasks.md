@@ -12,7 +12,31 @@
 | Decision needed before apply | No |
 | Chained PRs recommended | No |
 | 400-line budget risk | Medium (config-migrations touch + YAML fragment are the drivers) |
-| Delivery | Standalone PR-as-review into `feature/v2.0.0`, Part of #231 |
+| Delivery | 3 SEQUENTIAL chained PRs into `feature/v2.0.0` (see Chain plan) |
+
+## Chain plan (budget split — human ruling)
+
+The forecast above (`~230–360`, `Chained PRs: No`) was WRONG: the real counted diff came to **597 added / 31
+deleted (628)** — nearly double, driven by `run-check.mjs` (+255, the gotcha + base-branch addendum + async
+conversion) and `gitlab-governance.yml` (+137). **Ruling: SPLIT, not `size:exception`.** Rationale (human):
+the `#216` exception precedent was mandated ATOMICITY; here the dependency is LINEAR = a natural chain, and
+the 400 budget is a planning forcing-function — a forecast wrong by 2× is corrected by splitting, not
+excepting.
+
+This is ONE slice, ONE design, ONE checkpoint — delivered in 3 tranches by budget. **NOT** a C2-style
+re-split into new issues (that separated deliverables of different evidentiary nature). All three PRs are
+`Part of #231`; NO new issues.
+
+| PR | Tranche | Focus for its express review |
+|----|---------|------------------------------|
+| **PR-1** | planning + Phase 1 | resolver + migration `0.7.0` |
+| **PR-2** | Phase 2 + addendum | run-check `issue-link`/`diff-size` cases + base-branch conditional + parity row |
+| **PR-3** | Phases 3–5 | GitLab YAML + drift-guard + `allow_failure`-iff-`DETECTION` |
+
+**Sequential, NOT stacked:** PR-1 merges → PR-2 opens off the updated `feature/v2.0.0` → merges → PR-3.
+Each targets `feature/v2.0.0` and stays under 400 counted. **The CP-A2a VERDICT is issued on PR-3**, read
+against the full accumulated tree — the parity story (YAML jobs ↔ run-check cases ↔ drift-guard) verified
+whole, which was the real value of the cohesion argument.
 
 ## Phase 1: `governance.approvedLabel` config + resolver (RED → GREEN)
 > **TASK BOUNDARY — brain/core touch:** task 1.2 edits `brain/core/config-migrations.mjs`, engaging the
