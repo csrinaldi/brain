@@ -64,6 +64,7 @@ import { memoryPresence } from './checks/memory-presence.mjs';
 import { adrPresence } from './checks/adr-presence.mjs';
 import { issueLink } from './checks/issue-link.mjs';
 import { diffSize } from './checks/diff-size.mjs';
+import { CLOSING_RE, CHAIN_RE } from './checks/issue-ref-patterns.mjs';
 import { resolveApprovedLabel } from './approved-label.mjs';
 import { readRecordObservations } from '../memory/lib/store.mjs';
 import { loadContext } from '../vcs/ci-context.mjs';
@@ -162,27 +163,44 @@ function defaultFetchIssue(ctx) {
   };
 }
 
-// Mirrors checks/issue-link.mjs's CLOSING_RE/CHAIN_RE exactly (the pure
-// evaluator stays UNCHANGED per ADR-0016 — this file needs the matched
-// NUMBER, not just pass/fail, to know which issue's labels to verify).
-const CLOSING_NUM_RE = /\b(?:closes|fixes|resolves)\s+#(\d+)/i;
-const CHAIN_NUM_RE = /\bpart\s+of\s+#(\d+)/i;
+// CLOSING_RE/CHAIN_RE come from the shared checks/issue-ref-patterns.mjs
+// (issue #231 CP-A2a review, finding M1 — this file previously duplicated
+// its OWN narrower CLOSING_NUM_RE; deleted in favor of the one shared
+// constant, now imported by issueLink(), this file, AND actor-check.mjs).
+// The pure issueLink() evaluator stays UNCHANGED in shape (per ADR-0016) —
+// this file needs the matched NUMBER, not just pass/fail, to know which
+// issue's labels to verify, so it matches the same shared regex again here.
 
 /**
- * Extracts the referenced issue number from a PR/MR body, using the SAME
- * pattern precedence as issueLink() (closing keyword first, then "Part of
- * #N") — never base-branch-conditional (issueLink() itself is not).
+ * Extracts the referenced issue number from a PR/MR body, mirroring GitHub
+ * bash's OWN branch-conditional precedence (issue #231 CP-A2a review,
+ * finding m2 — governance.yml:55-81) rather than a single fixed order:
+ *   - Default-branch target (`closingRequired`): the default-branch policy
+ *     already requires a closing keyword, so ONLY the closing pattern is
+ *     consulted (mirrors governance.yml:56-64 — no Part-of fallback there).
+ *   - Slice target (`!closingRequired`): Part-of is tried FIRST, then
+ *     closing (mirrors governance.yml:69-76 exactly). This matters when a
+ *     body carries BOTH patterns pointing at DIFFERENT issues — bash always
+ *     resolves the Part-of issue on a slice target; before m2 this file
+ *     always resolved the closing issue instead (a fail-OPEN divergence).
  *
  * @param {string} body
+ * @param {boolean} closingRequired  From requiresClosingKeyword(ctx) — true
+ *   when ctx.targetBranch === ctx.defaultBranch.
  * @returns {number|null}
  */
-function extractIssueNumber(body) {
+function extractIssueNumber(body, closingRequired) {
   if (typeof body !== 'string') return null;
-  const closing = body.match(CLOSING_NUM_RE);
-  if (closing) return Number(closing[1]);
-  const chain = body.match(CHAIN_NUM_RE);
+
+  if (closingRequired) {
+    const closing = body.match(CLOSING_RE);
+    return closing ? Number(closing[2]) : null;
+  }
+
+  const chain = body.match(CHAIN_RE);
   if (chain) return Number(chain[1]);
-  return null;
+  const closing = body.match(CLOSING_RE);
+  return closing ? Number(closing[2]) : null;
 }
 
 /**
@@ -235,17 +253,17 @@ async function runIssueLinkCheck(ctx, deps) {
         'closed rather than assuming "main".',
     };
   }
-  if (closingRequired && !CLOSING_NUM_RE.test(ctx.body)) {
+  if (closingRequired && !CLOSING_RE.test(ctx.body)) {
     return {
       pass: false,
       reason:
         'issue-link: PR targets the default branch and must use a closing ' +
-        'keyword (Closes|Fixes|Resolves #N) — "Part of #N" alone is only ' +
-        'accepted on non-default (slice) targets.',
+        'keyword (Close(s|d)|Fix(es|ed)|Resolve(s|d) #N) — "Part of #N" alone ' +
+        'is only accepted on non-default (slice) targets.',
     };
   }
 
-  const issueNumber = extractIssueNumber(ctx.body);
+  const issueNumber = extractIssueNumber(ctx.body, closingRequired);
   if (issueNumber == null) {
     return {
       pass: false,

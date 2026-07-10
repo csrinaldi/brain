@@ -80,13 +80,19 @@ jobs:
             fi
           fi
 
-          # In both cases the referenced issue must be labelled status:approved.
+          # In both cases the referenced issue must carry the resolved approved
+          # label. Sourced from the config-driven resolver (design.md Decision
+          # 4, REQ-A2-3, issue #231 A2 phase 5) via approved-label.mjs's CLI
+          # printer — never a hardcoded literal, so a consumer-set
+          # governance.approvedLabel value is honored here too.
+          APPROVED_LABEL=$(node brain/scripts/governance/approved-label.mjs github)
+
           # Handle gh failure explicitly: under `set -e` an unguarded non-zero
           # would abort the step with no actionable message.
           labels=$(gh api "repos/${{ github.repository }}/issues/${num}" --jq '.labels[].name') \
             || { echo "::error::Could not fetch issue #${num} (gh api failed — does it exist?)."; exit 1; }
-          if ! printf '%s\n' "$labels" | grep -qx 'status:approved'; then
-            echo "::error::Issue #${num} is not labeled status:approved."
+          if ! printf '%s\n' "$labels" | grep -qx "$APPROVED_LABEL"; then
+            echo "::error::Issue #${num} is not labeled ${APPROVED_LABEL}."
             exit 1
           fi
 

@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 import { loadContext, resolveDetectionBody } from './ci-context.mjs';
 import { resolveApprovedLabel } from '../governance/approved-label.mjs';
+import { CLOSING_RE, CHAIN_RE } from '../governance/checks/issue-ref-patterns.mjs';
 
 // ── Pure evaluator (design §5 step 5) ───────────────────────────────────────
 
@@ -111,10 +112,12 @@ export function evaluateActor({
 //
 // Mirrors the bash regexes in .github/workflows/governance.yml's issue-link job
 // exactly: base=main requires a closing keyword; a slice PR (base!=main) also
-// accepts "Part of #N".
-
-const CLOSING_KEYWORD_RE = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i;
-const PART_OF_RE = /part\s+of\s+#(\d+)/i;
+// accepts "Part of #N". CLOSING_RE/CHAIN_RE come from the shared
+// checks/issue-ref-patterns.mjs (issue #231 CP-A2a review, finding M1) —
+// this file's own CLOSING_KEYWORD_RE/PART_OF_RE were already the BROAD
+// 9-form vocabulary (identical in behavior to the shared pattern), deleted
+// here in favor of the one shared constant now imported by issueLink(),
+// run-check.mjs, AND this file.
 
 /**
  * Extracts the issue number referenced by a PR body, following the same rules
@@ -128,15 +131,15 @@ export function extractIssueNumber(prBody, baseBranch) {
   const body = prBody ?? '';
 
   if (baseBranch === 'main') {
-    const m = body.match(CLOSING_KEYWORD_RE);
-    return m ? Number(m[1]) : null;
+    const m = body.match(CLOSING_RE);
+    return m ? Number(m[2]) : null;
   }
 
-  const partOf = body.match(PART_OF_RE);
+  const partOf = body.match(CHAIN_RE);
   if (partOf) return Number(partOf[1]);
 
-  const closing = body.match(CLOSING_KEYWORD_RE);
-  return closing ? Number(closing[1]) : null;
+  const closing = body.match(CLOSING_RE);
+  return closing ? Number(closing[2]) : null;
 }
 
 // ── gh I/O wrapper ───────────────────────────────────────────────────────────
