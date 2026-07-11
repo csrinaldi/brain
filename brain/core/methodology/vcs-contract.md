@@ -27,6 +27,8 @@ the GitLab status enum, etc.).
 | `issueView` | `({ project, number }) -> { number, title, labels, body, author }` | GL `iid`/`description`/`author.username` → `number`/`body`/`author`; GH `user.login` → `author`. `author` added issue #239 A3 (REQ-L5-1 needs the issue author, same API call — no extra round-trip). |
 | `issueList` | `({ project, state, assignee }) -> [{ number, title, labels }]` | `state:'open'`, `assignee:'me'\|'none'\|undefined`. |
 | `mrList` | `({ project, state }) -> [{ number, title, headBranch }]` | GL `merge_requests`/`source_branch` → `headBranch`. |
+| `mrCreate` | `({ project, title, body, head, base?, labels?, apiBase?, token?, proxyUrl?, fetchImpl? }) -> Promise<{ url }\|{ url: null, error }>` | Opens a PR/MR. `base` defaults to `'main'`; `labels` omitted (not sent empty) when none given. GH: `gh pr create`. GL: `POST projects/{enc}/merge_requests` over `gitlabApiFetch` (issue #239 A3). Never throws — `{ url: null, error }` on failure. |
+| `prView` | `({ project, number, apiBase?, token?, proxyUrl?, fetchImpl? }) -> Promise<{ number, labels, body, author }>` | GL `iid`/`description`/`author.username` → `number`/`body`/`author` (GitLab: direct API v4 over `gitlabApiFetch`); GH `gh pr view --json`. On a fetch failure returns `{ number, labels: null, body: null, author: null }` (uncomputable) — never throws. On a successful fetch, `body` is `''` when genuinely empty, never `null` (issue #239 A3 task 3.7 — `null` means uncomputable, `''` means successfully-empty). |
 | `labelEvents` | `({ project, number, apiBase?, token?, proxyUrl?, fetchImpl? }) -> Promise<Array<{ actor: { login }, action: 'add'\|'remove', label, at }>\|null>` | Provider-agnostic label-history read, dispatched on runtime `ctx.provider` (issue #239 A3). GH `event:'labeled'\|'unlabeled'` → `action`; GL `resource_label_events`' native `action` passes through. Ascending by `at`; `null` = uncomputable (fetch failed), never a fabricated `[]`. |
 | `prReviews` | `({ project, number, apiBase?, token?, proxyUrl?, fetchImpl? }) -> Promise<Array<{ state, author }>\|null>` | Provider-agnostic PR/MR review read, dispatched on runtime `ctx.provider` (issue #239 A3 TASK2). GH: Reviews API `state`/`user.login` pass through. GL: no per-reviewer state history — the approvals API's `approved_by[]` normalizes to one `{state:'APPROVED', author}` entry per approver. `null` = uncomputable (fetch failed); a genuinely empty approvals list is `[]`, not `null`. |
 | `commitStatus` | `({ project, sha }) -> Status\|null` | Normalized enum (see below). |
@@ -56,7 +58,7 @@ check completes, then its `conclusion`. `null` = no status available.
 
 ## How to add a provider
 
-Create `scripts/vcs/providers/<name>.mjs` exporting the 13 verbs and add `<name>` as a
+Create `scripts/vcs/providers/<name>.mjs` exporting the 15 verbs and add `<name>` as a
 valid value of `vcs.provider`. The callers are not touched.
 
 ## Current implementation

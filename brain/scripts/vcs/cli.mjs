@@ -15,11 +15,15 @@
 import { pathToFileURL } from 'node:url';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 
-// The verbs every provider must implement (see vcs-contract.md).
+// The verbs every provider must implement (see vcs-contract.md). Reconciled
+// against the "Required verbs" table + provider exports (issue #239 A3 task
+// 3.6, design Decision 6) — `mrCreate`/`branchProtect`/`capabilities` were
+// implemented by both providers but missing from this array.
 export const VERBS = [
   'authCheck', 'authLogin', 'whoami',
-  'issueView', 'issueList', 'mrList', 'prView', 'labelEvents', 'prReviews',
+  'issueView', 'issueList', 'mrList', 'prView', 'mrCreate', 'labelEvents', 'prReviews',
   'commitStatus', 'repoCloneUrl', 'patSetupUrl', 'projectResolve',
+  'branchProtect', 'capabilities',
 ];
 
 /**
