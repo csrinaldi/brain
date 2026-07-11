@@ -312,6 +312,23 @@ test('runCheck: issue-link — body with no reference at all → fail, reference
   assert.equal(fetchCalled, false, 'fetchIssue must not be called when the body carries no reference');
 });
 
+test('runCheck: issue-link — defaultFetchIssue selects the provider from ctx.provider, not the config default (finding #14 — GitLab job must not dispatch to the github provider)', async () => {
+  let received;
+  const fakeVcs = { issueView: async () => ({ iid: 1, labels: ['status::approved'] }) };
+  const result = await runCheck('issue-link', {
+    // slice target (feature branch) so "Closes #1" passes; provider = the RUNTIME
+    // platform hosting the MR (gitlab), which must win over any config default.
+    ctx: {
+      body: 'Closes #1', provider: 'gitlab', repo: 'x/y',
+      targetBranch: 'feature/tracker', defaultBranch: 'main',
+    },
+    getVcs: async (opts) => { received = opts; return fakeVcs; },
+    readConfig: () => ({ governance: { approvedLabel: 'status:approved' } }),
+  });
+  assert.deepEqual(received, { provider: 'gitlab' }, 'getVcs must be called with the runtime ctx.provider');
+  assert.equal(result.pass, true);
+});
+
 // ── issue-link — default-branch-conditional (issue #231 A2 phase 2 ADDENDUM) ─
 //
 // GAP CLOSED: GitHub bash (governance.yml:45-70) is base-branch-conditional —
