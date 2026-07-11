@@ -95,6 +95,34 @@ done
 attributable to the fixed fragment. (First-run findings from CP-A2b: #13 node:20→node:22 glob;
 #12 issueView glab→direct API v4 — both fixed before the re-run.)
 
+## Results — CP-A2b mirror phase VALIDATED
+Reviewer verdict on the final run against the gitlab.com mirror:
+- **MR-compliant → 8/8 Passed.** issue-link GREEN exercised the WHOLE chain in one gate: live-API MR body →
+  M1 wide closing-keyword vocab → runtime-provider dispatch (#14) → issueView over direct API v4 (#12) →
+  resolver `:`→`::` → the issue's `status::approved` → base-branch addendum on the default branch.
+- **MR-non-compliant → issue-link Failed, the other 7 Passed.** Surgical red + mechanical merge block via
+  "Pipelines must succeed" = **rung 1 GitLab operational**.
+
+### Layered findings (each run peeled one — infra premieres fail in layers)
+| Layer | Finding | Fix (Part of #231) |
+|-------|---------|--------------------|
+| 1 · include | fragment resolved live (ADR-0018 opt-in dogfooded) | #235 (setup) |
+| 2 · image | **#13** node:20 lacks glob in `node --test` | node:22 + drift-guard version pin — #236 |
+| 3 · loader/body | case A (literal `#<IID>` placeholder) — proved the loader reads the MR body via live API | self-diagnostic message — #236 |
+| 4 · dispatch | **#12** issueView ran `glab` (absent); **#14** dispatch used config provider (github) not runtime `ctx.provider` (gitlab) | issueView→direct API v4 (#236) + `getVcs({provider: ctx.provider})` (#237) |
+
+The self-diagnostic issue-link message (names tool + status + which stage failed) turned each layer into a
+~1-hour fix instead of a blind-guess cycle.
+
+### Evidence (final run — paste the mirror job URLs)
+- MR-compliant pipeline (8/8): `<final compliant pipeline URL>`
+- MR-non-compliant pipeline (issue-link red, 7 green): `<final non-compliant pipeline URL>`
+- MR-non-compliant merge panel (blocked): `<screenshot/URL>`
+
+### Still open (the only gap to A2's total closure)
+**CP-A2b SCIT phase** — env-specifics smoke (CE version, corporate proxy via `HTTP(S)_PROXY`, self-hosted
+runners, the new endpoint) when the human restores access. Tracked on #231.
+
 ## Cleanup
 Close both MRs, delete `test/cp-a2b-*` branches and the `.cp-a2b-probe*` files. The mirror
 `status::approved` fixture issue can stay for future re-runs.
