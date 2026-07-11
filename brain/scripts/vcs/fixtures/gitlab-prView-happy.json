@@ -1,0 +1,18 @@
+{
+  "_provenance": {
+    "endpoint": "GET /projects/:id/merge_requests/:iid",
+    "date": "2026-07-11",
+    "derived": true,
+    "note": "No live GitLab mirror is reachable from this environment (CP-A3b deferred to the SCIT phase). Hand-authored from the documented GitLab REST API v4 merge request response shape (https://docs.gitlab.com/ee/api/merge_requests.html#get-single-mr): iid, description, labels[], author.username — the subset gitlab.mjs#prView reads."
+  },
+  "data": {
+    "iid": 42,
+    "title": "feat: derived fixture example MR",
+    "description": "Closes #10\n\nDetails here.",
+    "labels": ["size:exception", "kind:feature"],
+    "author": { "id": 42, "username": "alice" },
+    "source_branch": "feat/example",
+    "target_branch": "main",
+    "web_url": "https://gitlab.example.com/g/r/-/merge_requests/42"
+  }
+}
