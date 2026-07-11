@@ -24,9 +24,11 @@ the GitLab status enum, etc.).
 | `authCheck` | `({ host }) -> boolean` | Is there an authenticated session? |
 | `authLogin` | `({ host, token }) -> boolean` | Authenticate (token via stdin internally). |
 | `whoami` | `() -> { username }` | Current user. GL `.username` / GH `.login` → `username`. |
-| `issueView` | `({ project, number }) -> { number, title, labels, body }` | GL `iid`/`description` → `number`/`body`. |
+| `issueView` | `({ project, number }) -> { number, title, labels, body, author }` | GL `iid`/`description`/`author.username` → `number`/`body`/`author`; GH `user.login` → `author`. `author` added issue #239 A3 (REQ-L5-1 needs the issue author, same API call — no extra round-trip). |
 | `issueList` | `({ project, state, assignee }) -> [{ number, title, labels }]` | `state:'open'`, `assignee:'me'\|'none'\|undefined`. |
 | `mrList` | `({ project, state }) -> [{ number, title, headBranch }]` | GL `merge_requests`/`source_branch` → `headBranch`. |
+| `labelEvents` | `({ project, number, apiBase?, token?, proxyUrl?, fetchImpl? }) -> Promise<Array<{ actor: { login }, action: 'add'\|'remove', label, at }>\|null>` | Provider-agnostic label-history read, dispatched on runtime `ctx.provider` (issue #239 A3). GH `event:'labeled'\|'unlabeled'` → `action`; GL `resource_label_events`' native `action` passes through. Ascending by `at`; `null` = uncomputable (fetch failed), never a fabricated `[]`. |
+| `prReviews` | `({ project, number, apiBase?, token?, proxyUrl?, fetchImpl? }) -> Promise<Array<{ state, author }>\|null>` | Provider-agnostic PR/MR review read, dispatched on runtime `ctx.provider` (issue #239 A3 TASK2). GH: Reviews API `state`/`user.login` pass through. GL: no per-reviewer state history — the approvals API's `approved_by[]` normalizes to one `{state:'APPROVED', author}` entry per approver. `null` = uncomputable (fetch failed); a genuinely empty approvals list is `[]`, not `null`. |
 | `commitStatus` | `({ project, sha }) -> Status\|null` | Normalized enum (see below). |
 | `repoCloneUrl` | `({ host, project, token }) -> string` | Authenticated HTTPS URL. User literal hidden from the caller. |
 | `patSetupUrl` | `({ host, name, scopes }) -> string` | PAT creation URL in the browser. |
@@ -54,7 +56,7 @@ check completes, then its `conclusion`. `null` = no status available.
 
 ## How to add a provider
 
-Create `scripts/vcs/providers/<name>.mjs` exporting the 11 verbs and add `<name>` as a
+Create `scripts/vcs/providers/<name>.mjs` exporting the 13 verbs and add `<name>` as a
 valid value of `vcs.provider`. The callers are not touched.
 
 ## Current implementation

@@ -68,7 +68,16 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
     path: `projects/${encoded}/issues/${number}`,
     fetchImpl,
   });
-  return { number: r.iid, title: r.title, labels: r.labels ?? [], body: r.description };
+  return {
+    number: r.iid,
+    title: r.title,
+    labels: r.labels ?? [],
+    body: r.description,
+    // `author` (issue #239 A3 TASK1): actor-check.mjs's REQ-L5-1 compares the
+    // approval actor against BOTH the PR author and the issue author — the
+    // same API call already carries `author.username`, no extra round-trip.
+    author: r.author?.username ?? null,
+  };
 }
 
 /**
@@ -79,6 +88,86 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
 // eslint-disable-next-line no-unused-vars
 export async function prView({ project, number } = {}) {
   return { number: number ?? null, labels: [], body: '' };
+}
+
+/**
+ * labelEvents — the provider-agnostic `labelEvents` CONTRACT verb (issue
+ * #239 A3, D1) over GitLab's resource-label-events API (`GET
+ * /projects/:id/issues/:iid/resource_label_events`), via the shared
+ * `gitlabApiFetch` transport (never a second hand-rolled fetch). Normalizes
+ * `user.username` → `actor.login`, native `action` (`'add'|'remove'`) passes
+ * through, `label.name` → `label`, `created_at` → `at`; ascending by `at`.
+ *
+ * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS from the
+ * caller (`gitlabApiConfig()`), exactly like `issueView` — this file is a
+ * GATE_FILE and never reads pipeline env directly. Never throws: a fetch
+ * failure is caught and normalized to `null` (uncomputable) — never a
+ * fabricated `[]`.
+ *
+ * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<Array<{ actor: { login: string }, action: 'add'|'remove', label: string, at: string }>|null>}
+ */
+export async function labelEvents({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  let events;
+  try {
+    events = await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/issues/${number}/resource_label_events`,
+      fetchImpl,
+    });
+  } catch {
+    return null;
+  }
+  return events
+    .map(e => ({
+      actor: { login: e.user?.username },
+      action: e.action,
+      label: e.label?.name,
+      at: e.created_at,
+    }))
+    .sort((a, b) => new Date(a.at) - new Date(b.at));
+}
+
+/**
+ * prReviews — the provider-agnostic `prReviews` CONTRACT verb (issue #239
+ * A3 TASK2/4th-violation fix) over GitLab's approvals API (`GET
+ * /projects/:id/merge_requests/:iid/approvals`), via the shared
+ * `gitlabApiFetch` transport. GitLab has no per-reviewer review-STATE
+ * history like GitHub's Reviews API (COMMENTED/CHANGES_REQUESTED/APPROVED)
+ * — approvals is the closest analog, so each entry in `approved_by`
+ * normalizes to one `{ state: 'APPROVED', author }` entry, matching exactly
+ * what `evaluateBrainWritesReviewed` consumes (only `state === 'APPROVED'`
+ * counts toward approvers; a genuinely empty `approved_by` list still warns
+ * via the pure evaluator's existing "no reviews at all" branch — the same
+ * DETECTION outcome, not a fabricated distinction).
+ *
+ * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS from the
+ * caller (`gitlabApiConfig()`), exactly like `issueView`/`labelEvents` —
+ * this file is a GATE_FILE and never reads pipeline env directly. Never
+ * throws: a fetch failure is caught and normalized to `null` (uncomputable)
+ * — never a fabricated `[]`.
+ *
+ * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<Array<{ state: 'APPROVED', author: string }>|null>}
+ */
+export async function prReviews({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  let data;
+  try {
+    data = await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/merge_requests/${number}/approvals`,
+      fetchImpl,
+    });
+  } catch {
+    return null;
+  }
+  return (data.approved_by ?? []).map(a => ({ state: 'APPROVED', author: a.user?.username ?? null }));
 }
 
 export async function issueList({ project, state = 'open', assignee } = {}) {
