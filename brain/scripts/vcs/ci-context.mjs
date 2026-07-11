@@ -12,6 +12,7 @@
 // affected fields only, never an exception (Decision 2 / REQ-CIC-2).
 
 import { prView as githubPrView } from './providers/github.mjs';
+import { gitlabApiFetch } from './gitlab-api.mjs';
 
 /**
  * @param {{ env?: NodeJS.ProcessEnv }} [deps]
@@ -93,36 +94,50 @@ async function loadGithubContext(env, deps) {
 // ── GitLab (Decision 4 — designed in A0, built here; REQ-CIC-5 single MR call) ─
 
 /**
+ * Resolves the GitLab REST v4 API transport config ({ apiBase, token,
+ * proxyUrl }) from the sanctioned env source. This is the SAME resolution
+ * defaultFetchMr uses for the MR fetch (REQ-CIC-5), exposed as its own
+ * function (issue #231 CP-A2b live-validation finding #12) so OTHER
+ * CI-consumed GitLab verbs — providers/gitlab.mjs's issueView, threaded via
+ * run-check.mjs's defaultFetchIssue — can obtain the identical config
+ * WITHOUT reading `process.env.CI_API_V4_URL` themselves. gitlab.mjs and
+ * run-check.mjs are both GATE_FILEs (ci-context-drift-guard.test.mjs); this
+ * function is ci-context.mjs's sole-sanctioned-reader contract extended to a
+ * new consumer, never a second env-reading site.
+ *
+ * Not folded into loadContext()'s returned ctx: this is transport config,
+ * not normalized pipeline context, and ctx's field set must stay identical
+ * across GitHub/GitLab (REQ-CIC-2).
+ *
+ * @param {{ env?: NodeJS.ProcessEnv }} [deps]
+ * @returns {{ apiBase: string, token: string|undefined, proxyUrl: string|null }}
+ */
+export function gitlabApiConfig(deps = {}) {
+  const env = deps.env ?? process.env;
+  return {
+    apiBase: env.CI_API_V4_URL ?? 'https://gitlab.com/api/v4',
+    token: env.VCS_TOKEN,
+    proxyUrl: env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy || null,
+  };
+}
+
+/**
  * Fetches MR description + author + labels in exactly ONE GitLab API call
- * (REQ-CIC-5). Authenticated with VCS_TOKEN. Honors the standard HTTP(S)_PROXY
- * env — never a hard-coded proxy host. Never throws by construction; the
- * caller (loadGitlabContext) treats any rejection as "uncomputable" (null).
+ * (REQ-CIC-5), via the shared gitlab-api.mjs transport (issue #231 CP-A2b
+ * finding #12 — "never a second parser": ONE fetcher, N consumers). Never
+ * throws by construction; the caller (loadGitlabContext) treats any
+ * rejection as "uncomputable" (null).
  */
 async function defaultFetchMr({ env, prNumber, fetchImpl }) {
-  const fetchFn = fetchImpl ?? globalThis.fetch;
-  const apiBase = env.CI_API_V4_URL ?? 'https://gitlab.com/api/v4';
+  const { apiBase, token, proxyUrl } = gitlabApiConfig({ env });
   const projectId = encodeURIComponent(env.CI_PROJECT_ID ?? env.CI_PROJECT_PATH ?? '');
-  const url = `${apiBase}/projects/${projectId}/merge_requests/${prNumber}`;
-  const token = env.VCS_TOKEN;
-  const options = { headers: token ? { 'PRIVATE-TOKEN': token } : {} };
-
-  // Proxy is read from the standard env — never hard-coded (REQ-CIC-5). The
-  // ProxyAgent dispatcher is best-effort: this repo ships zero npm dependencies,
-  // so when 'undici' is not installed the request proceeds unproxied rather
-  // than throwing (never a fabricated failure for the common no-proxy case).
-  const proxyUrl = env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy || null;
-  if (proxyUrl) {
-    try {
-      const { ProxyAgent } = await import('undici');
-      options.dispatcher = new ProxyAgent(proxyUrl);
-    } catch {
-      // undici unavailable — proceed unproxied.
-    }
-  }
-
-  const res = await fetchFn(url, options);
-  if (!res.ok) throw new Error(`GitLab MR API failed: ${res.status}`);
-  const data = await res.json();
+  const data = await gitlabApiFetch({
+    apiBase,
+    token,
+    proxyUrl,
+    path: `projects/${projectId}/merge_requests/${prNumber}`,
+    fetchImpl,
+  });
   return { description: data.description, author: data.author, labels: data.labels };
 }
 

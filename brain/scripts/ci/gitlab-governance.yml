@@ -64,6 +64,20 @@
 # exist on a plain branch-push pipeline; running them there would fail
 # closed for the wrong reason. This mirrors GitHub Actions'
 # `on: pull_request` trigger scoping in governance.yml.
+#
+# IMAGE (issue #231 CP-A2b live-validation finding #13): pinned ONCE here via
+# the global `default:` — every job below inherits it (GitLab CI merges
+# `default:` into each job that does not set its own `image:`). node:20 fails
+# the local-checks job with "Could not find ..." because
+# `node --test "brain/scripts/**/*.test.mjs"` needs Node 21+ glob-expansion
+# support; node:22 is the current LTS. Never add a per-job `image:` override
+# — that would let a future edit silently drift one job back to node:20 while
+# the other seven stay pinned (ci-context-drift-guard.test.mjs asserts this
+# single-source-of-truth invariant and fails red on either a missing/downgraded
+# default or a reintroduced per-job image line).
+
+default:
+  image: node:22
 
 .governance_mr_rules:
   rules:
@@ -73,7 +87,6 @@
 issue-link:
   extends: .governance_mr_rules
   stage: test
-  image: node:20
   script:
     - node brain/scripts/governance/run-check.mjs issue-link
 
@@ -81,7 +94,6 @@ issue-link:
 diff-size:
   extends: .governance_mr_rules
   stage: test
-  image: node:20
   script:
     - node brain/scripts/governance/run-check.mjs diff-size
 
@@ -89,7 +101,6 @@ diff-size:
 local-checks:
   extends: .governance_mr_rules
   stage: test
-  image: node:20
   script:
     - npm run repo:check && npm run brain:nav && npm test
 
@@ -97,7 +108,6 @@ local-checks:
 memory-gate:
   extends: .governance_mr_rules
   stage: test
-  image: node:20
   script:
     - node brain/scripts/governance/run-check.mjs memory-gate
 
@@ -105,7 +115,6 @@ memory-gate:
 decision-gate:
   extends: .governance_mr_rules
   stage: test
-  image: node:20
   script:
     - node brain/scripts/governance/run-check.mjs decision-gate
 
@@ -113,7 +122,6 @@ decision-gate:
 phase-order:
   extends: .governance_mr_rules
   stage: test
-  image: node:20
   allow_failure: true
   script:
     - node brain/scripts/vcs/phase-order-check.mjs
@@ -122,7 +130,6 @@ phase-order:
 actor-check:
   extends: .governance_mr_rules
   stage: test
-  image: node:20
   allow_failure: true
   script:
     - node brain/scripts/vcs/actor-check.mjs
@@ -131,7 +138,6 @@ actor-check:
 brain-writes-reviewed:
   extends: .governance_mr_rules
   stage: test
-  image: node:20
   allow_failure: true
   script:
     - node brain/scripts/vcs/brain-writes-reviewed.mjs

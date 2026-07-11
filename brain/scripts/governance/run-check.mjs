@@ -67,7 +67,7 @@ import { diffSize } from './checks/diff-size.mjs';
 import { CLOSING_RE, CHAIN_RE } from './checks/issue-ref-patterns.mjs';
 import { resolveApprovedLabel } from './approved-label.mjs';
 import { readRecordObservations } from '../memory/lib/store.mjs';
-import { loadContext } from '../vcs/ci-context.mjs';
+import { loadContext, gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { getVcs } from '../vcs/cli.mjs';
 
@@ -149,9 +149,17 @@ function defaultReadConfig() {
 
 /**
  * Default `fetchIssue` dep for issue-link: fetches the referenced issue via
- * the active VCS provider's `issueView` verb (github → gh CLI, gitlab → glab
- * CLI). Never called in tests — always injected there (design.md Decision 2:
- * "no real network in tests").
+ * the active VCS provider's `issueView` verb (github → gh CLI; gitlab →
+ * direct API v4 fetch, issue #231 CP-A2b finding #12 — the `glab` CLI is
+ * absent from the node:22 CI image). Never called in tests — always injected
+ * there (design.md Decision 2: "no real network in tests").
+ *
+ * `gitlabApiConfig()` sources { apiBase, token, proxyUrl } from the
+ * sanctioned env reader (ci-context.mjs) — run-check.mjs itself is a
+ * GATE_FILE and must never read the GitLab API base URL pipeline var
+ * directly (ci-context-drift-guard.test.mjs forbids it). github.mjs's
+ * issueView ignores the extra keys (destructures only `{ project, number }`),
+ * so passing them unconditionally is harmless for GitHub.
  *
  * @param {{ repo?: string|null }} ctx
  * @returns {(issueNumber: number) => Promise<{ labels?: string[] }>}
@@ -159,7 +167,8 @@ function defaultReadConfig() {
 function defaultFetchIssue(ctx) {
   return async (issueNumber) => {
     const vcs = await getVcs();
-    return vcs.issueView({ project: ctx.repo, number: issueNumber });
+    const { apiBase, token, proxyUrl } = gitlabApiConfig();
+    return vcs.issueView({ project: ctx.repo, number: issueNumber, apiBase, token, proxyUrl });
   };
 }
 
@@ -231,8 +240,9 @@ function requiresClosingKeyword(ctx) {
  * policy (see requiresClosingKeyword — FAIL-CLOSED, never assumes 'main' when
  * `ctx.defaultBranch` is uncomputable), then verifies the referenced issue
  * carries the resolved approved label via an injectable `fetchIssue`. Fails
- * closed on a null/uncomputable body (issueLink() itself returns
- * `{ pass: false }` for a non-string body), on an uncomputable
+ * closed with a DISTINCT self-diagnostic reason on a non-string body (the
+ * wrapper catches it before issueLink() — "context API fetch failed", vs the
+ * "no issue reference found" of a string with no link), on an uncomputable
  * target/default branch, and on a fetch failure.
  *
  * @param {{ body?: string|null, provider?: string, repo?: string|null, targetBranch?: string|null, defaultBranch?: string|null }} ctx
@@ -240,6 +250,18 @@ function requiresClosingKeyword(ctx) {
  * @returns {Promise<{ pass: boolean, reason?: string }>}
  */
 async function runIssueLinkCheck(ctx, deps) {
+  // Self-diagnostic distinction (finding #12 follow-up): a NON-STRING body means
+  // ci-context could not fetch the MR description (token/endpoint/API failure) —
+  // an INFRA fail-closed, not a governance miss. Distinguish it in the message so
+  // a failing pipeline log discriminates (A) "no issue link" from (B) "couldn't
+  // read the MR body". The pure issueLink() evaluator stays UNCHANGED (REQ-CIC-4);
+  // it only ever sees a string below.
+  if (typeof ctx.body !== 'string') {
+    return {
+      pass: false,
+      reason: 'issue-link: MR body uncomputable (context API fetch failed) — failing closed',
+    };
+  }
   const linkResult = issueLink(ctx.body);
   if (!linkResult.pass) return linkResult;
 

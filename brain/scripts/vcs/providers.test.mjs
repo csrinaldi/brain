@@ -41,10 +41,64 @@ test('github.issueView returns normalized shape', async () => {
   assert.deepEqual(result, { number: 42, title: 'Test issue', labels: ['bug'], body: 'Fix this' });
 });
 
-test('gitlab.issueView returns normalized shape', async () => {
-  setSpawn(fakeSpawn({ iid: 7, title: 'GL issue', labels: ['feat'], description: 'body text' }));
-  const result = await gitlab.issueView({ project: 'g/r', number: 7 });
+// gitlab.issueView (issue #231 CP-A2b live-validation finding #12): migrated
+// off the `glab` CLI to a direct GitLab API v4 fetch — the node:22 CI image
+// has no `glab` binary, so the REQUIRED issue-link gate's defaultFetchIssue
+// crashed on an INFRA trigger. Exercised here via an injected `fetchImpl`
+// (never real network in tests) — no `setSpawn` fixture at all, which is
+// itself the point: the DEFAULT path must never reach for a CLI.
+test('gitlab.issueView returns normalized shape (direct API v4 fetch, no glab CLI)', async () => {
+  let seenUrl;
+  let seenHeaders;
+  const result = await gitlab.issueView({
+    project: 'g/r',
+    number: 7,
+    apiBase: 'https://gitlab.example.com/api/v4',
+    token: 'tok-abc',
+    fetchImpl: async (url, options) => {
+      seenUrl = url;
+      seenHeaders = options?.headers;
+      return { ok: true, json: async () => ({ iid: 7, title: 'GL issue', labels: ['feat'], description: 'body text' }) };
+    },
+  });
+  assert.equal(seenUrl, 'https://gitlab.example.com/api/v4/projects/g%2Fr/issues/7');
+  assert.equal(seenHeaders?.['PRIVATE-TOKEN'], 'tok-abc');
   assert.deepEqual(result, { number: 7, title: 'GL issue', labels: ['feat'], body: 'body text' });
+});
+
+test('gitlab.issueView defaults apiBase to the public GitLab API when not provided (local/non-CI callers, e.g. ticket-start.mjs)', async () => {
+  let seenUrl;
+  await gitlab.issueView({
+    project: 'g/r',
+    number: 3,
+    fetchImpl: async (url) => {
+      seenUrl = url;
+      return { ok: true, json: async () => ({ iid: 3, title: 't', labels: [], description: '' }) };
+    },
+  });
+  assert.match(seenUrl, /^https:\/\/gitlab\.com\/api\/v4\//);
+});
+
+// ── Testing-lesson (finding #12 — the fixtures-injected-fetchIssue gap that
+// hid this): prove the DEFAULT issueView implementation is CLI-free — it
+// must never spawn `glab` (or any child process) regardless of what
+// transport is injected. This is the exact regression class that let #12
+// through: existing run-check.test.mjs fixtures always injected fetchIssue,
+// so defaultFetchIssue's real vcs.issueView() call was never exercised. ────
+test('gitlab.issueView never spawns a child process (glab CLI) — proves the default path is CLI-free, not just that injected logic works', async () => {
+  let spawnCalled = false;
+  setSpawn((...args) => {
+    spawnCalled = true;
+    return { status: 0, stdout: '{}', stderr: '' };
+  });
+
+  await gitlab.issueView({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ iid: 7, title: 't', labels: [], description: '' }) }),
+  });
+
+  assert.equal(spawnCalled, false, 'issueView must never call spawn/execFile (glab CLI) — direct API v4 fetch only');
 });
 
 // ── issueList ────────────────────────────────────────────────────────────────────

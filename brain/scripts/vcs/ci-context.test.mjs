@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { detectCi, loadContext, resolveDetectionBody } from './ci-context.mjs';
+import { detectCi, loadContext, resolveDetectionBody, gitlabApiConfig } from './ci-context.mjs';
 
 // ── REQ-CIC-1: detectCi() provider resolution ─────────────────────────────────
 
@@ -280,6 +280,44 @@ test('REQ-CIC-5: proxy is read from standard env (HTTPS_PROXY), never a hard-cod
   assert.match(src, /HTTPS_PROXY|HTTP_PROXY/, 'must read the standard proxy env vars');
   assert.equal(/https?:\/\/[a-z0-9.-]+:\d+/i.test(src.replace(/gitlab\.com/gi, '')), false,
     'must not hard-code a proxy host literal in source');
+});
+
+// ── gitlabApiConfig (issue #231 CP-A2b live-validation finding #12): the
+// SOLE sanctioned resolver of { apiBase, token, proxyUrl } from env, so a
+// GATE_FILE consumer (providers/gitlab.mjs, run-check.mjs) can obtain the
+// same GitLab API config defaultFetchMr already uses (REQ-CIC-5) WITHOUT
+// reading process.env.CI_API_V4_URL itself (forbidden by the drift-guard).
+// Exposed as its own function (not folded into ctx) so ctx's field set for
+// GitHub/GitLab stays identical (REQ-CIC-2) — this is transport config, not
+// normalized pipeline context. ─────────────────────────────────────────────
+
+test('gitlabApiConfig: reads apiBase from CI_API_V4_URL, defaulting to the public gitlab.com API', () => {
+  assert.equal(
+    gitlabApiConfig({ env: { CI_API_V4_URL: 'https://gitlab.example.com/api/v4' } }).apiBase,
+    'https://gitlab.example.com/api/v4',
+  );
+  assert.equal(
+    gitlabApiConfig({ env: {} }).apiBase,
+    'https://gitlab.com/api/v4',
+    'must default to the public GitLab API when CI_API_V4_URL is unset (e.g. local/non-CI callers)',
+  );
+});
+
+test('gitlabApiConfig: reads token from VCS_TOKEN and proxyUrl from the standard proxy env', () => {
+  const cfg = gitlabApiConfig({ env: { VCS_TOKEN: 'tok-xyz', HTTPS_PROXY: 'http://proxy:8080' } });
+  assert.equal(cfg.token, 'tok-xyz');
+  assert.equal(cfg.proxyUrl, 'http://proxy:8080');
+});
+
+test('gitlabApiConfig: proxyUrl is null when no proxy env is set (never undefined, never a fabricated literal)', () => {
+  const cfg = gitlabApiConfig({ env: {} });
+  assert.equal(cfg.proxyUrl, null);
+});
+
+test('gitlabApiConfig: defaults deps.env to process.env when no deps are passed (sanity — same default-source pattern as loadContext)', () => {
+  const src = readFileSync(fileURLToPath(new URL('./ci-context.mjs', import.meta.url)), 'utf8');
+  const fn = src.slice(src.indexOf('export function gitlabApiConfig'));
+  assert.match(fn.split('\n').slice(0, 4).join('\n'), /deps\.env \?\? process\.env/);
 });
 
 test('REQ-CIC-5: MR API call failure yields body/labels/author null (never throws, no stale fallback)', async () => {
