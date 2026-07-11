@@ -69,6 +69,46 @@ test('gitlabApiFetch: non-ok response throws with the status and the requested p
   );
 });
 
+// ── POST support (issue #239 A3 Phase 2 — gitlab.mrCreate needs a write call
+// over this SAME shared transport, never a second hand-rolled fetch). Default
+// stays GET (backward-compatible with every read verb above); an explicit
+// `method` + `body` serializes to JSON and sets Content-Type. ──────────────
+
+test('gitlabApiFetch: POST with a JSON body sets method + Content-Type + serializes the body', async () => {
+  let seenUrl;
+  let seenOptions;
+  const result = await gitlabApiFetch({
+    apiBase: 'https://gitlab.com/api/v4',
+    path: 'projects/1/merge_requests',
+    method: 'POST',
+    body: { title: 'x', source_branch: 'a', target_branch: 'main' },
+    fetchImpl: async (url, options) => {
+      seenUrl = url;
+      seenOptions = options;
+      return { ok: true, json: async () => ({ web_url: 'https://gitlab.com/g/r/-/merge_requests/1' }) };
+    },
+  });
+  assert.equal(seenUrl, 'https://gitlab.com/api/v4/projects/1/merge_requests');
+  assert.equal(seenOptions.method, 'POST');
+  assert.equal(seenOptions.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(seenOptions.body), { title: 'x', source_branch: 'a', target_branch: 'main' });
+  assert.deepEqual(result, { web_url: 'https://gitlab.com/g/r/-/merge_requests/1' });
+});
+
+test('gitlabApiFetch: defaults to method GET and sends no body when method/body are not specified (backward compat)', async () => {
+  let seenOptions;
+  await gitlabApiFetch({
+    apiBase: 'https://gitlab.com/api/v4',
+    path: 'projects/1/issues/1',
+    fetchImpl: async (url, options) => {
+      seenOptions = options;
+      return { ok: true, json: async () => ({}) };
+    },
+  });
+  assert.equal(seenOptions.method, 'GET');
+  assert.equal('body' in seenOptions, false);
+});
+
 test('gitlabApiFetch: proxyUrl absent (falsy) never attempts to build a ProxyAgent dispatcher', async () => {
   let sawDispatcher;
   await gitlabApiFetch({

@@ -598,10 +598,82 @@ test('github.mrCreate returns {url:null, error} on failure (never throws)', asyn
     'error should be a non-empty string');
 });
 
-test('gitlab.mrCreate returns {url:null, error} stub — Phase 3', async () => {
-  const result = await gitlab.mrCreate({ project: 'g/r', title: 'T', body: 'B', head: 'h' });
+// gitlab.mrCreate (issue #239 A3 Phase 2 — un-stub over the shared
+// gitlabApiFetch transport, POST /projects/:id/merge_requests). Matches the
+// github.mrCreate contract exactly: { url } on success, { url: null, error }
+// on failure, never throws.
+test('gitlab.mrCreate returns { url } on success, POSTing the normalized payload over gitlabApiFetch', async () => {
+  let seenUrl;
+  let seenOptions;
+  const result = await gitlab.mrCreate({
+    project: 'g/r',
+    title: 'feat: my MR',
+    body: 'Closes #10',
+    head: 'feature/my-branch',
+    base: 'main',
+    labels: ['kind:feature', 'size:m'],
+    apiBase: 'https://gitlab.example.com/api/v4',
+    token: 'tok-abc',
+    fetchImpl: async (url, options) => {
+      seenUrl = url;
+      seenOptions = options;
+      return { ok: true, json: async () => ({ web_url: 'https://gitlab.example.com/g/r/-/merge_requests/42' }) };
+    },
+  });
+  assert.equal(seenUrl, 'https://gitlab.example.com/api/v4/projects/g%2Fr/merge_requests');
+  assert.equal(seenOptions.method, 'POST');
+  assert.equal(seenOptions.headers['PRIVATE-TOKEN'], 'tok-abc');
+  assert.deepEqual(JSON.parse(seenOptions.body), {
+    source_branch: 'feature/my-branch',
+    target_branch: 'main',
+    title: 'feat: my MR',
+    description: 'Closes #10',
+    labels: 'kind:feature,size:m',
+  });
+  assert.deepEqual(result, { url: 'https://gitlab.example.com/g/r/-/merge_requests/42' });
+});
+
+test('gitlab.mrCreate omits the labels field when no labels are given (never sends an empty string)', async () => {
+  let seenOptions;
+  await gitlab.mrCreate({
+    project: 'g/r',
+    title: 'T',
+    body: 'B',
+    head: 'h',
+    fetchImpl: async (url, options) => {
+      seenOptions = options;
+      return { ok: true, json: async () => ({ web_url: 'https://x' }) };
+    },
+  });
+  assert.equal('labels' in JSON.parse(seenOptions.body), false);
+});
+
+test('gitlab.mrCreate base defaults to "main" when not provided', async () => {
+  let sentBody;
+  await gitlab.mrCreate({
+    project: 'g/r',
+    title: 'T',
+    body: 'B',
+    head: 'h',
+    fetchImpl: async (url, options) => {
+      sentBody = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ web_url: 'https://x' }) };
+    },
+  });
+  assert.equal(sentBody.target_branch, 'main');
+});
+
+test('gitlab.mrCreate returns { url: null, error } on failure (never throws)', async () => {
+  const result = await gitlab.mrCreate({
+    project: 'g/r',
+    title: 'T',
+    body: 'B',
+    head: 'h',
+    fetchImpl: async () => ({ ok: false, status: 422 }),
+  });
   assert.equal(result.url, null);
-  assert.ok(typeof result.error === 'string' && result.error.includes('Phase 3'));
+  assert.ok(typeof result.error === 'string' && result.error.length > 0,
+    'error should be a non-empty string');
 });
 
 // ── prView ────────────────────────────────────────────────────────────────────
@@ -646,9 +718,88 @@ test('github.prView author defaults to null when absent from an otherwise-succes
   assert.equal(result.author, null);
 });
 
-test('gitlab.prView returns { number, labels: [], body: "" } stub — Phase 3', async () => {
-  const result = await gitlab.prView({ project: 'g/r', number: 7 });
-  assert.deepEqual(result, { number: 7, labels: [], body: '' });
+// gitlab.prView (issue #239 A3 Phase 2 — un-stub over the shared
+// gitlabApiFetch transport, GET /projects/:id/merge_requests/:iid). Exercised
+// via an injected fetchImpl (no setSpawn fixture), same discipline as
+// issueView/labelEvents/prReviews — the DEFAULT path must never reach for the
+// glab CLI.
+test('gitlab.prView returns { number, labels, body, author } normalized, over the shared gitlabApiFetch transport', async () => {
+  let seenUrl;
+  let seenHeaders;
+  const result = await gitlab.prView({
+    project: 'g/r',
+    number: 42,
+    apiBase: 'https://gitlab.example.com/api/v4',
+    token: 'tok-abc',
+    fetchImpl: async (url, options) => {
+      seenUrl = url;
+      seenHeaders = options?.headers;
+      return {
+        ok: true,
+        json: async () => ({
+          iid: 42,
+          labels: ['size:exception', 'kind:feature'],
+          description: 'Closes #10\n\nDetails here.',
+          author: { username: 'alice' },
+        }),
+      };
+    },
+  });
+  assert.equal(seenUrl, 'https://gitlab.example.com/api/v4/projects/g%2Fr/merge_requests/42');
+  assert.equal(seenHeaders?.['PRIVATE-TOKEN'], 'tok-abc');
+  assert.deepEqual(result, {
+    number: 42,
+    labels: ['size:exception', 'kind:feature'],
+    body: 'Closes #10\n\nDetails here.',
+    author: 'alice',
+  });
+});
+
+test('gitlab.prView returns { number, labels: null, body: null, author: null } on fetch failure (never throws) — uncomputable, not genuinely-empty', async () => {
+  const result = await gitlab.prView({
+    project: 'g/r',
+    number: 99,
+    fetchImpl: async () => ({ ok: false, status: 404 }),
+  });
+  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null });
+});
+
+test('gitlab.prView author defaults to null when absent from an otherwise-successful response', async () => {
+  const result = await gitlab.prView({
+    project: 'g/r',
+    number: 3,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ iid: 3, labels: [], description: '' }) }),
+  });
+  assert.equal(result.author, null);
+});
+
+test('gitlab.prView defaults apiBase to the public GitLab API when not provided (local/non-CI callers)', async () => {
+  let seenUrl;
+  await gitlab.prView({
+    project: 'g/r',
+    number: 3,
+    fetchImpl: async (url) => {
+      seenUrl = url;
+      return { ok: true, json: async () => ({ iid: 3, labels: [], description: '' }) };
+    },
+  });
+  assert.match(seenUrl, /^https:\/\/gitlab\.com\/api\/v4\//);
+});
+
+test('gitlab.prView never spawns a child process (glab CLI) — proves the default path is CLI-free', async () => {
+  let spawnCalled = false;
+  setSpawn(() => {
+    spawnCalled = true;
+    return { status: 0, stdout: '{}', stderr: '' };
+  });
+
+  await gitlab.prView({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ iid: 7, labels: [], description: '' }) }),
+  });
+
+  assert.equal(spawnCalled, false, 'prView must never call spawn/execFile (glab CLI) — direct API v4 fetch only');
 });
 
 // ── labelEvents (issue #239 A3, D1 — the labelEvents CONTRACT verb) ──────────
