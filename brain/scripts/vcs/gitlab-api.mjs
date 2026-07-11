@@ -20,19 +20,32 @@
  * the parsed JSON body. Never falls back to a CLI/spawn transport — this
  * module has no such fallback to fall back to.
  *
+ * `method` defaults to `'GET'` (every read verb above stays unaffected); an
+ * explicit `method` + `body` (issue #239 A3 Phase 2 — `gitlab.mrCreate`'s
+ * write call over this SAME shared transport, never a second hand-rolled
+ * fetch) serializes `body` to JSON and sets `Content-Type: application/json`.
+ *
  * @param {{
  *   apiBase: string,
  *   path: string,
  *   token?: string|null,
  *   proxyUrl?: string|null,
  *   fetchImpl?: Function,
+ *   method?: string,
+ *   body?: any,
  * }} params
  * @returns {Promise<any>}
  */
-export async function gitlabApiFetch({ apiBase, path, token, proxyUrl, fetchImpl } = {}) {
+export async function gitlabApiFetch({ apiBase, path, token, proxyUrl, fetchImpl, method = 'GET', body } = {}) {
   const fetchFn = fetchImpl ?? globalThis.fetch;
   const url = `${apiBase}/${path}`;
-  const options = { headers: token ? { 'PRIVATE-TOKEN': token } : {} };
+  const headers = token ? { 'PRIVATE-TOKEN': token } : {};
+  const options = { method, headers };
+
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
 
   // Proxy is read from whatever the caller resolved — never hard-coded here.
   // The ProxyAgent dispatcher is best-effort: this repo ships zero npm

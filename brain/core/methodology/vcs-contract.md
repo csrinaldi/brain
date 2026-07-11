@@ -70,5 +70,5 @@ behavior of the scripts (parity — a revert leaves the GitLab flow intact).
 |------|--------|--------|
 | `branchProtect` | implemented | implemented (Phase 3 — issue #95) |
 | `capabilities` | implemented | implemented (Phase 3 — issue #95) |
-| `mrCreate` | implemented | stub — not yet implemented |
-| `prView` | implemented | stub — not yet implemented |
+| `mrCreate` | implemented | implemented (A3 — issue #239) |
+| `prView` | implemented | implemented (A3 — issue #239) |

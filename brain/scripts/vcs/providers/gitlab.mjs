@@ -81,13 +81,43 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
 }
 
 /**
- * prView — stub for Phase 3. Returns a graceful empty result so audit callers
- * degrade without error on GitLab repos.
- * @returns {Promise<{ number: number|null, labels: [], body: string }>}
+ * prView — DIRECT GitLab API v4 fetch (issue #239 A3 Phase 2, un-stubbing
+ * REQ-A3-4) over `GET /projects/:id/merge_requests/:iid`, via the shared
+ * `gitlabApiFetch` transport — the same discipline as `issueView`. Normalizes
+ * `iid`/`description`/`author.username` to `number`/`body`/`author`.
+ *
+ * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS from the
+ * caller (`gitlabApiConfig()`), never read from pipeline env directly here —
+ * this file is a GATE_FILE (drift-guard forbids it). Defaults exist so
+ * LOCAL/non-CI callers keep working unchanged: public gitlab.com API base,
+ * `vcsToken()`, no proxy.
+ *
+ * Never throws: a fetch failure is caught and normalized to
+ * `{ number, labels: null, body: null, author: null }` (uncomputable) —
+ * never a fabricated empty `[]`/`''`, matching the `github.prView` contract.
+ *
+ * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null }>}
  */
-// eslint-disable-next-line no-unused-vars
-export async function prView({ project, number } = {}) {
-  return { number: number ?? null, labels: [], body: '' };
+export async function prView({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  try {
+    const r = await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/merge_requests/${number}`,
+      fetchImpl,
+    });
+    return {
+      number: r.iid,
+      labels: r.labels ?? [],
+      body: r.description,
+      author: r.author?.username ?? null,
+    };
+  } catch {
+    return { number, labels: null, body: null, author: null };
+  }
 }
 
 /**
@@ -304,10 +334,53 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
 }
 
 /**
- * Create a merge request — stub for Phase 3.
- * Returns { url: null, error: string } so callers degrade gracefully.
+ * mrCreate — un-stubbed (issue #239 A3 Phase 2, REQ-A3-4) over
+ * `POST /projects/:id/merge_requests`, via the shared `gitlabApiFetch`
+ * transport (never a second hand-rolled fetch). `labels` normalizes to
+ * GitLab's comma-separated string, omitted entirely when empty (never a
+ * fabricated empty-string label). `{ apiBase, token, proxyUrl }` threaded in
+ * as PARAMETERS, same discipline as `prView`/`issueView` — this file is a
+ * GATE_FILE and never reads pipeline env directly.
+ *
+ * Never throws: matches the `github.mrCreate` contract exactly — `{ url }`
+ * on success, `{ url: null, error }` on failure.
+ *
+ * @param {{ project: string, title: string, body: string, head: string, base?: string, labels?: string[], apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ url: string } | { url: null, error: string }>}
  */
-// eslint-disable-next-line no-unused-vars
-export async function mrCreate({ project, title, body, head, base, labels } = {}) {
-  return { url: null, error: 'gitlab.mrCreate: not yet implemented (Phase 3)' };
+export async function mrCreate({
+  project,
+  title,
+  body,
+  head,
+  base = 'main',
+  labels = [],
+  apiBase,
+  token,
+  proxyUrl,
+  fetchImpl,
+} = {}) {
+  const encoded = encodeURIComponent(project);
+  const payload = {
+    source_branch: head,
+    target_branch: base,
+    title,
+    description: body,
+  };
+  if (labels.length > 0) payload.labels = labels.join(',');
+
+  try {
+    const r = await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/merge_requests`,
+      method: 'POST',
+      body: payload,
+      fetchImpl,
+    });
+    return { url: r.web_url };
+  } catch (err) {
+    return { url: null, error: err.message };
+  }
 }

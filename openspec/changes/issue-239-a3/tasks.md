@@ -119,21 +119,26 @@ verified whole.
 ## Phase 2: GitLab `prView`/`mrCreate` un-stub over `gitlabApiFetch` (RED → GREEN)
 > **TASK BOUNDARY — brain/core touch:** task 2.5 flips the `prView`/`mrCreate` GitLab status rows in
 > `vcs-contract.md` (`:65-73`), engaging the L6 gate again — expected PASS+warn, same established path.
-- [ ] 2.1 Test (RED): `gitlab.prView({ project, number, apiBase, token, proxyUrl, fetchImpl })` normalizes
+- [x] 2.1 Test (RED): `gitlab.prView({ project, number, apiBase, token, proxyUrl, fetchImpl })` normalizes
       a `GET /projects/:id/merge_requests/:iid` fixture → `{ number, labels, body, author }` (GL
       `iid`/`description`/`source_branch` hidden); a failed fetch → `null` fields (uncomputable, never a
       fabricated empty); never throws.
-- [ ] 2.2 Test (RED): `gitlab.mrCreate({ project, title, body, head, base, labels })` → `{ url }` on a
+- [x] 2.2 Test (RED): `gitlab.mrCreate({ project, title, body, head, base, labels })` → `{ url }` on a
       successful `POST /projects/:id/merge_requests`; `{ url: null, error }` on failure; never throws
       (matches `github.mjs:197-221`).
-- [ ] 2.3 GREEN: replace the `prView` stub (`gitlab.mjs:79-82`) and `mrCreate` stub (`:221-224`) with real
+- [x] 2.3 GREEN: replace the `prView` stub (`gitlab.mjs:79-82`) and `mrCreate` stub (`:221-224`) with real
       implementations over `gitlabApiFetch`. Config threaded via params (`gitlabApiConfig()` at the caller
       → params), LOCAL defaults like `issueView`. NO direct pipeline-env read in the GATE_FILE (drift-guard
-      stays green).
-- [ ] 2.4 i18n (en + es) for any changed CLI string; docs English.
-- [ ] 2.5 GREEN: flip `vcs-contract.md`'s Phase-3 status rows (`:65-73`) — GitLab `prView`/`mrCreate`
+      stays green). Also extended `gitlab-api.mjs`'s `gitlabApiFetch` with optional `method`/`body` (defaults
+      to `GET`, backward-compatible) so `mrCreate`'s `POST` reuses the SAME shared transport — never a
+      second hand-rolled fetch.
+- [x] 2.4 i18n (en + es) for any changed CLI string; docs English. N/A this phase: `gitlab.mjs`/`gitlab-api.mjs`
+      have no `i18n/t.mjs` importer (same precedent as PR-1 task 1.8); the only new string surface is the
+      internal `err.message` propagated from `gitlabApiFetch`'s existing thrown error, not a new CLI-facing
+      string. No console output was added.
+- [x] 2.5 GREEN: flip `vcs-contract.md`'s Phase-3 status rows (`:65-73`) — GitLab `prView`/`mrCreate`
       "stub" → "implemented (A3 — issue #239)". **L6 gate.**
-- [ ] 2.6 `npm test` green · `repo:check` · `brain:nav`.
+- [x] 2.6 `npm test` green (1178/1178) · `repo:check` · `brain:nav`.
 
 ## Phase 3: shared parameterized contract suite + recorded-from-real fixtures (RED → GREEN)
 > Depends on Phases 1–2 (the suite can only assert verbs that exist). This is the CP-A3a-verdict tranche.
@@ -153,6 +158,15 @@ verified whole.
       `labelEvents`/`prView`/`mrCreate`, via an injected fixture-reading transport. Parity = identical
       assertions. NO live network in `npm test`.
 - [ ] 3.5 `npm test` green (0 failures) · `repo:check` · `brain:nav`.
+- [ ] 3.6 Verb-definition reconciliation (deferred from PR-2 per Decision 6 — the complete pass, verified by
+      the contract suite): add `prView`/`mrCreate` rows to the "Required verbs" table (`vcs-contract.md:22-36`)
+      and add the missing entries (`mrCreate`/`branchProtect`/`capabilities`) to `cli.mjs`'s `VERBS` array —
+      reconcile ALL THREE sources (required-verbs table, Phase-3 status table, `VERBS`) in one pass. No
+      drift-guard covers these today; consider adding one so the three sources can't diverge again.
+- [ ] 3.7 Empty-body representation parity (deferred from PR-2 NIT): decide the canonical empty/uncomputable
+      value for normalized `body` across providers — GitHub uses `?? ''` on success, GitLab `prView`/`issueView`
+      use `?? null` (established convention). The contract suite is where this is asserted, so decide it HERE
+      and align both providers so `null` means uncomputable (fetch failure) and `''` means successfully-empty.
 
 ## Phase 4: baseline + CP-A3a assembly
 - [ ] 4.1 `npm test` green over the full accumulated tree · `brain:repo:check` · `brain:nav`.
