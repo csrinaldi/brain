@@ -164,9 +164,13 @@ function defaultReadConfig() {
  * @param {{ repo?: string|null }} ctx
  * @returns {(issueNumber: number) => Promise<{ labels?: string[] }>}
  */
-function defaultFetchIssue(ctx) {
+function defaultFetchIssue(ctx, { getVcs: getVcsFn = getVcs } = {}) {
   return async (issueNumber) => {
-    const vcs = await getVcs();
+    // finding #14: dispatch on the RUNTIME-detected ctx.provider (the platform
+    // hosting the MR), NOT the repo config default — a GitLab MR's referenced
+    // issue lives on GitLab even when this repo's config says github. Without
+    // this, a GitLab CI job fetched the issue via `gh` and failed.
+    const vcs = await getVcsFn({ provider: ctx.provider });
     const { apiBase, token, proxyUrl } = gitlabApiConfig();
     return vcs.issueView({ project: ctx.repo, number: issueNumber, apiBase, token, proxyUrl });
   };
@@ -293,7 +297,7 @@ async function runIssueLinkCheck(ctx, deps) {
     };
   }
 
-  const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(ctx);
+  const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(ctx, deps);
   let issue;
   try {
     issue = await fetchIssue(issueNumber);

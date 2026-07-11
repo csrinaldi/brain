@@ -29,15 +29,19 @@ export const VERBS = [
  * @param {{ config?: object, env?: object }} [opts]
  * @returns {string}
  */
-export function resolveProviderName({ config, env = process.env } = {}) {
-  const provider = env.VCS_PROVIDER || config?.vcs?.provider;
-  if (!provider) {
+export function resolveProviderName({ config, env = process.env, provider } = {}) {
+  // Precedence: an explicit `provider` (the RUNTIME-detected platform, e.g.
+  // ci-context's ctx.provider — finding #14) wins over VCS_PROVIDER env, which
+  // wins over config.vcs.provider. A CI job on GitLab must dispatch to the
+  // gitlab provider even when this repo's own config says github.
+  const resolved = provider || env.VCS_PROVIDER || config?.vcs?.provider;
+  if (!resolved) {
     throw new Error(
       'vcs: no provider configured. Set "vcs": { "provider": "github" } in ' +
       'brain.config.json (or VCS_PROVIDER in the environment). See ADR-0008.',
     );
   }
-  return provider;
+  return resolved;
 }
 
 /**
@@ -45,9 +49,9 @@ export function resolveProviderName({ config, env = process.env } = {}) {
  * @param {{ config?: object, env?: object }} [opts]
  * @returns {Promise<object>}
  */
-export async function getVcs({ config, env } = {}) {
+export async function getVcs({ config, env, provider } = {}) {
   const cfg = config ?? loadBrainConfig();
-  const name = resolveProviderName({ config: cfg, env });
+  const name = resolveProviderName({ config: cfg, env, provider });
   // Guard the dynamic import path: provider names are simple identifiers, never
   // path fragments. Rejecting anything else prevents path traversal and yields a
   // clearer error than a generic "module not found".
