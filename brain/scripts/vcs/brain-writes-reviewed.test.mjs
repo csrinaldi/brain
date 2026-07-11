@@ -10,6 +10,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { setSpawn } from './lib/exec.mjs';
 
 import {
   evaluateBrainWritesReviewed,
@@ -149,13 +151,13 @@ function makeFakeDeps({ changedFiles = [], reviews = [], botAllowlist = [] } = {
   };
 }
 
-test('gatherBrainWritesReviewedInputs: resolves changedFiles via diffNameOnly, reviews via fetchReviews, allowlist via readBotAllowlist', () => {
+test('gatherBrainWritesReviewedInputs: resolves changedFiles via diffNameOnly, reviews via fetchReviews, allowlist via readBotAllowlist', async () => {
   const deps = makeFakeDeps({
     changedFiles: ['brain/core/foo.mjs'],
     reviews: [{ state: 'APPROVED', author: 'bob' }],
     botAllowlist: ['release-bot'],
   });
-  const inputs = gatherBrainWritesReviewedInputs({
+  const inputs = await gatherBrainWritesReviewedInputs({
     baseSha: 'base',
     headSha: 'head',
     prNumber: 144,
@@ -171,9 +173,9 @@ test('gatherBrainWritesReviewedInputs: resolves changedFiles via diffNameOnly, r
   assert.equal(inputs.adminOverride, false);
 });
 
-test('gatherBrainWritesReviewedInputs: adminOverride true only when an override:* label is BOTH present and allow-listed', () => {
+test('gatherBrainWritesReviewedInputs: adminOverride true only when an override:* label is BOTH present and allow-listed', async () => {
   const deps = makeFakeDeps({ botAllowlist: ['override:incident-response'] });
-  const inputs = gatherBrainWritesReviewedInputs({
+  const inputs = await gatherBrainWritesReviewedInputs({
     baseSha: 'base',
     headSha: 'head',
     prNumber: 144,
@@ -185,9 +187,9 @@ test('gatherBrainWritesReviewedInputs: adminOverride true only when an override:
   assert.equal(inputs.adminOverride, true);
 });
 
-test('gatherBrainWritesReviewedInputs: an override:* label present but NOT allow-listed does not grant adminOverride (no blanket bypass)', () => {
+test('gatherBrainWritesReviewedInputs: an override:* label present but NOT allow-listed does not grant adminOverride (no blanket bypass)', async () => {
   const deps = makeFakeDeps({ botAllowlist: [] });
-  const inputs = gatherBrainWritesReviewedInputs({
+  const inputs = await gatherBrainWritesReviewedInputs({
     baseSha: 'base',
     headSha: 'head',
     prNumber: 144,
@@ -199,32 +201,16 @@ test('gatherBrainWritesReviewedInputs: an override:* label present but NOT allow
   assert.equal(inputs.adminOverride, false);
 });
 
-// ── FIX1-style fail-open guard: unpaginated gh api list fetch truncates to page 1 ─
-//
-// `gh api` does NOT auto-paginate. A PR reviews list can exceed one page on a
-// long-lived PR with many re-review cycles — an unpaginated fetch can silently
-// drop later reviews (including the one human APPROVED review that would flip
-// self-approval to pass, or vice-versa). Guard via source-scan (mirrors
-// actor-check.test.mjs's FIX1 guard).
+// FIX1-style fail-open guard (unpaginated gh api list fetch truncates to page
+// 1) now lives with the code it guards: EXTRACTED into
+// github.mjs#prReviews (issue #239 A3 TASK2/4th-violation fix) — see
+// providers.test.mjs's "github.prReviews source includes --paginate".
 
-test('fail-open guard: defaultFetchReviews source includes --paginate on the gh api reviews call', () => {
-  const srcPath = fileURLToPath(new URL('./brain-writes-reviewed.mjs', import.meta.url));
-  const src = readFileSync(srcPath, 'utf8');
-  const fnStart = src.indexOf('function defaultFetchReviews');
-  assert.notEqual(fnStart, -1, 'defaultFetchReviews not found in source');
-  const fnEnd = src.indexOf('\nfunction ', fnStart + 1);
-  const fnBody = src.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
-  assert.match(fnBody, /pulls\/\$\{prNumber\}\/reviews/, 'sanity: PR reviews endpoint present');
-  assert.match(
-    fnBody,
-    /--paginate/,
-    'reviews fetch must use --paginate — otherwise a truncated page 1 can hide later reviews (fail-open/fail-closed risk)'
-  );
-});
+// ── runBrainWritesReviewedCheck / main — never throws, degrades to warn on
+// failure. Async as of A3 TASK2 (the default fetchReviews wrapper awaits the
+// prReviews CONTRACT verb dispatched via getVcs — a Promise-returning call).
 
-// ── runBrainWritesReviewedCheck / main — never throws, degrades to warn on failure ─
-
-test('runBrainWritesReviewedCheck: gh api failure inside the wrapper → warn + pass, never throws', () => {
+test('runBrainWritesReviewedCheck: gh api failure inside the wrapper → warn + pass, never throws', async () => {
   const deps = {
     baseSha: 'base',
     headSha: 'head',
@@ -238,18 +224,16 @@ test('runBrainWritesReviewedCheck: gh api failure inside the wrapper → warn + 
     },
     readBotAllowlist: () => [],
   };
-  assert.doesNotThrow(() => {
-    const result = runBrainWritesReviewedCheck(deps);
-    assert.equal(result.level, 'warn');
-  });
-});
-
-test('runBrainWritesReviewedCheck: missing BASE_SHA/HEAD_SHA/PR_NUMBER/repo/author context → warn + pass, never throws', () => {
-  const result = runBrainWritesReviewedCheck({ baseSha: undefined, headSha: undefined, repo: undefined, prNumber: undefined, author: undefined });
+  const result = await runBrainWritesReviewedCheck(deps);
   assert.equal(result.level, 'warn');
 });
 
-test('runBrainWritesReviewedCheck: happy path end-to-end through the wrapper — human approval passes', () => {
+test('runBrainWritesReviewedCheck: missing BASE_SHA/HEAD_SHA/PR_NUMBER/repo/author context → warn + pass, never throws', async () => {
+  const result = await runBrainWritesReviewedCheck({ baseSha: undefined, headSha: undefined, repo: undefined, prNumber: undefined, author: undefined });
+  assert.equal(result.level, 'warn');
+});
+
+test('runBrainWritesReviewedCheck: happy path end-to-end through the wrapper — human approval passes', async () => {
   const deps = {
     baseSha: 'base',
     headSha: 'head',
@@ -261,25 +245,25 @@ test('runBrainWritesReviewedCheck: happy path end-to-end through the wrapper —
     fetchReviews: () => [{ state: 'APPROVED', author: 'bob' }],
     readBotAllowlist: () => [],
   };
-  const result = runBrainWritesReviewedCheck(deps);
+  const result = await runBrainWritesReviewedCheck(deps);
   assert.equal(result.level, 'pass');
 });
 
 // ── main() / CLI — exit code mapping ────────────────────────────────────────────
 
-function captureLogs(fn) {
+async function captureLogs(fn) {
   const lines = [];
   const orig = console.log;
   console.log = msg => lines.push(msg);
   try {
-    fn();
+    await fn();
   } finally {
     console.log = orig;
   }
   return lines;
 }
 
-test('main: fail verdict → exit code 1', () => {
+test('main: fail verdict → exit code 1', async () => {
   const deps = {
     baseSha: 'base',
     headSha: 'head',
@@ -292,14 +276,14 @@ test('main: fail verdict → exit code 1', () => {
     readBotAllowlist: () => [],
   };
   let exitCode;
-  const lines = captureLogs(() => {
-    exitCode = main(deps);
+  const lines = await captureLogs(async () => {
+    exitCode = await main(deps);
   });
   assert.equal(exitCode, 1);
   assert.equal(lines[0], 'brain-writes-reviewed: fail');
 });
 
-test('main: warn verdict → exit code 0', () => {
+test('main: warn verdict → exit code 0', async () => {
   const deps = {
     baseSha: 'base',
     headSha: 'head',
@@ -312,14 +296,14 @@ test('main: warn verdict → exit code 0', () => {
     readBotAllowlist: () => [],
   };
   let exitCode;
-  const lines = captureLogs(() => {
-    exitCode = main(deps);
+  const lines = await captureLogs(async () => {
+    exitCode = await main(deps);
   });
   assert.equal(exitCode, 0);
   assert.equal(lines[0], 'brain-writes-reviewed: warn');
 });
 
-test('main: pass verdict → exit code 0', () => {
+test('main: pass verdict → exit code 0', async () => {
   const deps = {
     baseSha: 'base',
     headSha: 'head',
@@ -332,8 +316,8 @@ test('main: pass verdict → exit code 0', () => {
     readBotAllowlist: () => [],
   };
   let exitCode;
-  const lines = captureLogs(() => {
-    exitCode = main(deps);
+  const lines = await captureLogs(async () => {
+    exitCode = await main(deps);
   });
   assert.equal(exitCode, 0);
   assert.equal(lines[0], 'brain-writes-reviewed: pass');
@@ -345,7 +329,7 @@ test('main: pass verdict → exit code 0', () => {
 // `deps.ctx` (ci-context.mjs's loadContext()) instead of process.env.
 // `ctx.labels` (already an array) replaces the PR_LABELS env parsing.
 
-test('ci-context seam: deps.ctx feeds baseSha/headSha/prNumber/repo/author/prLabels when deps.* are absent', () => {
+test('ci-context seam: deps.ctx feeds baseSha/headSha/prNumber/repo/author/prLabels when deps.* are absent', async () => {
   const deps = {
     ctx: {
       baseSha: 'base', headSha: 'head', prNumber: 144, repo: 'org/repo',
@@ -355,16 +339,16 @@ test('ci-context seam: deps.ctx feeds baseSha/headSha/prNumber/repo/author/prLab
     fetchReviews: () => [{ state: 'APPROVED', author: 'bob' }],
     readBotAllowlist: () => ['override:incident-response'],
   };
-  const result = runBrainWritesReviewedCheck(deps);
+  const result = await runBrainWritesReviewedCheck(deps);
   assert.equal(result.level, 'pass');
 });
 
-test('ci-context seam: no ctx and no deps.* context → warn (never reads process.env directly)', () => {
-  const result = runBrainWritesReviewedCheck({ ctx: {} });
+test('ci-context seam: no ctx and no deps.* context → warn (never reads process.env directly)', async () => {
+  const result = await runBrainWritesReviewedCheck({ ctx: {} });
   assert.equal(result.level, 'warn');
 });
 
-test('ci-context seam: ctx.labels (array) feeds adminOverride resolution directly — no PR_LABELS string parsing needed', () => {
+test('ci-context seam: ctx.labels (array) feeds adminOverride resolution directly — no PR_LABELS string parsing needed', async () => {
   const deps = {
     ctx: {
       baseSha: 'base', headSha: 'head', prNumber: 144, repo: 'org/repo',
@@ -374,7 +358,7 @@ test('ci-context seam: ctx.labels (array) feeds adminOverride resolution directl
     fetchReviews: () => [{ state: 'APPROVED', author: 'alice' }], // self-approval — would fail without override
     readBotAllowlist: () => ['override:incident-response'],
   };
-  const result = runBrainWritesReviewedCheck(deps);
+  const result = await runBrainWritesReviewedCheck(deps);
   assert.equal(result.level, 'pass');
   assert.match(result.reason, /override/i);
 });
@@ -392,4 +376,63 @@ test('neutrality source-scan (REQ-NEUTRALITY-2): brain-writes-reviewed.mjs sourc
   const src = readFileSync(srcPath, 'utf8');
   assert.equal(src.includes('.claude'), false, 'source must not reference .claude');
   assert.equal(src.includes('SKILL.md'), false, 'source must not reference SKILL.md');
+});
+
+// ── A3 TASK2 (fresh-context review's class-closure audit — the 4th VIOLATION):
+// defaultFetchReviews was STILL gh-CLI-hardcoded, the SAME defect class as
+// finding #14 (issue-link) and the pre-fix labelEvents/fetchIssue wrappers in
+// actor-check.mjs — on GitLab CI (no `gh` binary) it threw ENOENT, masking
+// the L6 gate behind a permanent `warn`. Per lesson #10/#12, this test does
+// NOT inject deps.fetchReviews — it mocks ONE layer lower, at getVcs, so the
+// REAL defaultFetchReviews wrapper runs end-to-end.
+
+test('A3 TASK2: GitLab self-approval on a brain/core change via the REAL default path (no injected fetchReviews) — defaultFetchReviews dispatches getVcs({provider}).prReviews(...), no gh/glab spawn, evaluateBrainWritesReviewed reaches fail', async () => {
+  let receivedProvider;
+  let calledParams;
+  let spawnCalled = false;
+  const fakeVcs = {
+    prReviews: async (params) => {
+      calledParams = params;
+      return [{ state: 'APPROVED', author: 'alice' }];
+    },
+  };
+  setSpawn(() => {
+    spawnCalled = true;
+    return { status: 0, stdout: '{}', stderr: '' };
+  });
+  try {
+    const result = await runBrainWritesReviewedCheck({
+      baseSha: 'base',
+      headSha: 'head',
+      prNumber: 144,
+      repo: 'g/r',
+      author: 'alice',
+      prLabels: [],
+      provider: 'gitlab',
+      diffNameOnly: () => ['brain/core/foo.mjs'],
+      getVcs: async (opts) => { receivedProvider = opts.provider; return fakeVcs; },
+      readBotAllowlist: () => [],
+      // deliberately NOT fetchReviews — exercising the REAL default wrapper.
+    });
+
+    assert.equal(spawnCalled, false, 'the GitLab default path must never spawn a CLI process (gh/glab)');
+    assert.equal(receivedProvider, 'gitlab', 'getVcs must be called with the runtime ctx.provider (finding #14)');
+    assert.equal(calledParams.project, 'g/r');
+    assert.equal(calledParams.number, 144);
+    assert.equal(result.level, 'fail', 'self-approval on brain/core must EVALUATE to fail via the real default path');
+    assert.match(result.reason, /self/i);
+  } finally {
+    setSpawn(spawnSync);
+  }
+});
+
+test('A3 TASK2 source-scan: defaultFetchReviews no longer contains execFileSync(\'gh\', ...) — structurally proves the default path cannot spawn gh regardless of provider', () => {
+  const srcPath = fileURLToPath(new URL('./brain-writes-reviewed.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  const fnStart = src.indexOf('function defaultFetchReviews');
+  assert.notEqual(fnStart, -1, 'defaultFetchReviews not found in source');
+  const fnEnd = src.indexOf('\nfunction ', fnStart + 1);
+  const fnBody = src.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
+  assert.equal(fnBody.includes('execFileSync'), false, 'defaultFetchReviews must dispatch via getVcs(...).prReviews(...), never a raw execFileSync(\'gh\', ...) call');
+  assert.match(fnBody, /getVcs|prReviews/, 'sanity: dispatch through the vcs adapter is present');
 });

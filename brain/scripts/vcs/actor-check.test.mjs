@@ -9,6 +9,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { setSpawn } from './lib/exec.mjs';
 
 import {
   evaluateActor,
@@ -145,28 +147,10 @@ test('FIX2: actor differs from both PR author and issue author → pass', () => 
   assert.equal(result.level, 'pass');
 });
 
-// ── FIX1 fail-open guard: unpaginated gh api list fetch truncates to page 1 ────
-//
-// `gh api` does NOT auto-paginate. GitHub's Events API is oldest-first, so on an
-// issue with more than ~30 events the most recent `status:approved` labeled
-// event (including a late self-applied one) lands on page 2+ and is silently
-// dropped — self-approval would then wrongly PASS. Guard via source-scan
-// (mirrors the neutrality source-scan style in phase-order-check.test.mjs).
-
-test('FIX1 fail-open guard: defaultFetchLabeledEvents source includes --paginate on the gh api events call', () => {
-  const srcPath = fileURLToPath(new URL('./actor-check.mjs', import.meta.url));
-  const src = readFileSync(srcPath, 'utf8');
-  const fnStart = src.indexOf('function defaultFetchLabeledEvents');
-  assert.notEqual(fnStart, -1, 'defaultFetchLabeledEvents not found in source');
-  const fnEnd = src.indexOf('\nfunction ', fnStart + 1);
-  const fnBody = src.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
-  assert.match(fnBody, /issues\/\$\{issueNumber\}\/events/, 'sanity: events endpoint present');
-  assert.match(
-    fnBody,
-    /--paginate/,
-    'events fetch must use --paginate — otherwise a truncated page 1 can hide the newest labeled event (fail-open)'
-  );
-});
+// FIX1 fail-open guard (unpaginated gh api list fetch truncates to page 1) now
+// lives with the code it guards: EXTRACTED into github.mjs#labelEvents (issue
+// #239 A3, the m3 close) — see providers.test.mjs's
+// "github.labelEvents source includes --paginate" source-scan.
 
 // ── extractIssueNumber (reuses the issue-link extraction rules, governance.yml) ─
 
@@ -203,14 +187,14 @@ function makeFakeDeps({ labeledEvents = [], issueLabels = [], issueAuthor = null
   };
 }
 
-test('gatherActorCheckInputs: resolves issue number, fetches labeled events + issue (labels + author), reads allowlist', () => {
+test('gatherActorCheckInputs: resolves issue number, fetches labeled events + issue (labels + author), reads allowlist', async () => {
   const deps = makeFakeDeps({
     labeledEvents: [{ actor: { login: 'bob' } }],
     issueLabels: ['status:approved'],
     issueAuthor: 'carol',
     botAllowlist: ['release-bot'],
   });
-  const inputs = gatherActorCheckInputs({
+  const inputs = await gatherActorCheckInputs({
     author: 'alice',
     prBody: 'Closes #144',
     baseBranch: 'main',
@@ -224,13 +208,13 @@ test('gatherActorCheckInputs: resolves issue number, fetches labeled events + is
   assert.equal(inputs.adminOverride, false);
 });
 
-test('gatherActorCheckInputs: adminOverride true only when an override:* label is BOTH present and allow-listed', () => {
+test('gatherActorCheckInputs: adminOverride true only when an override:* label is BOTH present and allow-listed', async () => {
   const deps = makeFakeDeps({
     labeledEvents: [{ actor: { login: 'alice' } }],
     issueLabels: ['status:approved', 'override:incident-response'],
     botAllowlist: ['override:incident-response'],
   });
-  const inputs = gatherActorCheckInputs({
+  const inputs = await gatherActorCheckInputs({
     author: 'alice',
     prBody: 'Closes #144',
     baseBranch: 'main',
@@ -240,13 +224,13 @@ test('gatherActorCheckInputs: adminOverride true only when an override:* label i
   assert.equal(inputs.adminOverride, true);
 });
 
-test('gatherActorCheckInputs: an override:* label present but NOT allow-listed does not grant adminOverride (no blanket bypass)', () => {
+test('gatherActorCheckInputs: an override:* label present but NOT allow-listed does not grant adminOverride (no blanket bypass)', async () => {
   const deps = makeFakeDeps({
     labeledEvents: [{ actor: { login: 'alice' } }],
     issueLabels: ['status:approved', 'override:unlisted'],
     botAllowlist: [],
   });
-  const inputs = gatherActorCheckInputs({
+  const inputs = await gatherActorCheckInputs({
     author: 'alice',
     prBody: 'Closes #144',
     baseBranch: 'main',
@@ -256,9 +240,9 @@ test('gatherActorCheckInputs: an override:* label present but NOT allow-listed d
   assert.equal(inputs.adminOverride, false);
 });
 
-test('gatherActorCheckInputs: no resolvable issue number → empty labeledEvents + null issueAuthor (feeds the warn+pass branch)', () => {
+test('gatherActorCheckInputs: no resolvable issue number → empty labeledEvents + null issueAuthor (feeds the warn+pass branch)', async () => {
   const deps = makeFakeDeps({ labeledEvents: [{ actor: { login: 'bob' } }] });
-  const inputs = gatherActorCheckInputs({
+  const inputs = await gatherActorCheckInputs({
     author: 'alice',
     prBody: 'no issue reference',
     baseBranch: 'main',
@@ -275,7 +259,7 @@ test('gatherActorCheckInputs: no resolvable issue number → empty labeledEvents
 // author (`issue.user.login`) must be surfaced from that SAME call, not a
 // second gh round-trip.
 
-test('FIX2: gatherActorCheckInputs surfaces issueAuthor from the same fetchIssue call used for labels (no second API round-trip)', () => {
+test('FIX2: gatherActorCheckInputs surfaces issueAuthor from the same fetchIssue call used for labels (no second API round-trip)', async () => {
   let fetchIssueCallCount = 0;
   const deps = {
     fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
@@ -285,7 +269,7 @@ test('FIX2: gatherActorCheckInputs surfaces issueAuthor from the same fetchIssue
     },
     readBotAllowlist: () => [],
   };
-  const inputs = gatherActorCheckInputs({
+  const inputs = await gatherActorCheckInputs({
     author: 'alice',
     prBody: 'Closes #144',
     baseBranch: 'main',
@@ -296,7 +280,7 @@ test('FIX2: gatherActorCheckInputs surfaces issueAuthor from the same fetchIssue
   assert.equal(fetchIssueCallCount, 1, 'issue must be fetched exactly once — labels and author come from the same call');
 });
 
-test('FIX2 end-to-end: Bob files the issue, Alice opens the PR, Bob self-labels his own issue status:approved → fail', () => {
+test('FIX2 end-to-end: Bob files the issue, Alice opens the PR, Bob self-labels his own issue status:approved → fail', async () => {
   const deps = {
     author: 'alice',
     prBody: 'Closes #144',
@@ -306,14 +290,18 @@ test('FIX2 end-to-end: Bob files the issue, Alice opens the PR, Bob self-labels 
     fetchIssue: () => ({ labels: ['status:approved'], author: 'bob' }),
     readBotAllowlist: () => [],
   };
-  const result = runActorCheck(deps);
+  const result = await runActorCheck(deps);
   assert.equal(result.level, 'fail');
   assert.match(result.reason, /self/i);
 });
 
 // ── runActorCheck / main — never throws, gh failure degrades to warn + pass ────
+//
+// runActorCheck/gatherActorCheckInputs/main are async as of A3 (they await the
+// labelEvents CONTRACT verb dispatched via getVcs — a Promise-returning call);
+// tests here await them directly instead of asserting a synchronous throw.
 
-test('runActorCheck: gh api failure inside the wrapper → warn + pass, never throws', () => {
+test('runActorCheck: gh api failure inside the wrapper → warn + pass, never throws', async () => {
   const deps = {
     author: 'alice',
     prBody: 'Closes #144',
@@ -325,18 +313,16 @@ test('runActorCheck: gh api failure inside the wrapper → warn + pass, never th
     fetchIssue: () => ({ labels: ['status:approved'], author: 'bob' }),
     readBotAllowlist: () => [],
   };
-  assert.doesNotThrow(() => {
-    const result = runActorCheck(deps);
-    assert.equal(result.level, 'warn');
-  });
-});
-
-test('runActorCheck: missing PR_AUTHOR/repo context → warn + pass, never throws', () => {
-  const result = runActorCheck({ author: undefined, repo: undefined });
+  const result = await runActorCheck(deps);
   assert.equal(result.level, 'warn');
 });
 
-test('runActorCheck: happy path end-to-end through the wrapper — human approval passes', () => {
+test('runActorCheck: missing PR_AUTHOR/repo context → warn + pass, never throws', async () => {
+  const result = await runActorCheck({ author: undefined, repo: undefined });
+  assert.equal(result.level, 'warn');
+});
+
+test('runActorCheck: happy path end-to-end through the wrapper — human approval passes', async () => {
   const deps = {
     author: 'alice',
     prBody: 'Closes #144',
@@ -346,25 +332,25 @@ test('runActorCheck: happy path end-to-end through the wrapper — human approva
     fetchIssue: () => ({ labels: ['status:approved'], author: 'alice' }),
     readBotAllowlist: () => [],
   };
-  const result = runActorCheck(deps);
+  const result = await runActorCheck(deps);
   assert.equal(result.level, 'pass');
 });
 
 // ── main() / CLI — exit code mapping ────────────────────────────────────────────
 
-function captureLogs(fn) {
+async function captureLogs(fn) {
   const lines = [];
   const orig = console.log;
   console.log = msg => lines.push(msg);
   try {
-    fn();
+    await fn();
   } finally {
     console.log = orig;
   }
   return lines;
 }
 
-test('main: fail verdict → exit code 1', () => {
+test('main: fail verdict → exit code 1', async () => {
   const deps = {
     author: 'alice',
     prBody: 'Closes #144',
@@ -375,14 +361,14 @@ test('main: fail verdict → exit code 1', () => {
     readBotAllowlist: () => [],
   };
   let exitCode;
-  const lines = captureLogs(() => {
-    exitCode = main(deps);
+  const lines = await captureLogs(async () => {
+    exitCode = await main(deps);
   });
   assert.equal(exitCode, 1);
   assert.equal(lines[0], 'actor-check: fail');
 });
 
-test('main: warn verdict → exit code 0', () => {
+test('main: warn verdict → exit code 0', async () => {
   const deps = {
     author: 'alice',
     prBody: 'no issue reference',
@@ -393,14 +379,14 @@ test('main: warn verdict → exit code 0', () => {
     readBotAllowlist: () => [],
   };
   let exitCode;
-  const lines = captureLogs(() => {
-    exitCode = main(deps);
+  const lines = await captureLogs(async () => {
+    exitCode = await main(deps);
   });
   assert.equal(exitCode, 0);
   assert.equal(lines[0], 'actor-check: warn');
 });
 
-test('main: pass verdict → exit code 0', () => {
+test('main: pass verdict → exit code 0', async () => {
   const deps = {
     author: 'alice',
     prBody: 'Closes #144',
@@ -411,8 +397,8 @@ test('main: pass verdict → exit code 0', () => {
     readBotAllowlist: () => [],
   };
   let exitCode;
-  const lines = captureLogs(() => {
-    exitCode = main(deps);
+  const lines = await captureLogs(async () => {
+    exitCode = await main(deps);
   });
   assert.equal(exitCode, 0);
   assert.equal(lines[0], 'actor-check: pass');
@@ -427,23 +413,23 @@ test('main: pass verdict → exit code 0', () => {
 // unaffected). Per CP-A0 ruling 1, `author` now means the PR AUTHOR sourced
 // from the API payload (ctx.author) — never PR_AUTHOR env.
 
-test('ci-context seam: ctx.author/ctx.repo/ctx.targetBranch feed the wrapper when deps.author/repo/baseBranch are absent', () => {
+test('ci-context seam: ctx.author/ctx.repo/ctx.targetBranch feed the wrapper when deps.author/repo/baseBranch are absent', async () => {
   const deps = {
     ctx: { author: 'alice', repo: 'org/repo', targetBranch: 'main', body: 'Closes #144' },
     fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
     fetchIssue: () => ({ labels: ['status:approved'], author: 'alice' }),
     readBotAllowlist: () => [],
   };
-  const result = runActorCheck(deps);
+  const result = await runActorCheck(deps);
   assert.equal(result.level, 'pass');
 });
 
-test('ci-context seam: no ctx.author and no deps.author → warn (never falls back to process.env.PR_AUTHOR)', () => {
-  const result = runActorCheck({ ctx: { author: null, repo: null } });
+test('ci-context seam: no ctx.author and no deps.author → warn (never falls back to process.env.PR_AUTHOR)', async () => {
+  const result = await runActorCheck({ ctx: { author: null, repo: null } });
   assert.equal(result.level, 'warn');
 });
 
-test('ci-context seam: DETECTION consumer — ctx.body null (API failure) falls back to env.PR_BODY via resolveDetectionBody', () => {
+test('ci-context seam: DETECTION consumer — ctx.body null (API failure) falls back to env.PR_BODY via resolveDetectionBody', async () => {
   const deps = {
     ctx: { author: 'alice', repo: 'org/repo', targetBranch: 'main', body: null },
     env: { PR_BODY: 'Closes #144' },
@@ -451,7 +437,7 @@ test('ci-context seam: DETECTION consumer — ctx.body null (API failure) falls 
     fetchIssue: () => ({ labels: ['status:approved'], author: 'carol' }),
     readBotAllowlist: () => [],
   };
-  const result = runActorCheck(deps);
+  const result = await runActorCheck(deps);
   // extractIssueNumber only resolves an issue (and thus a non-empty labeledEvents
   // path) when prBody carries "Closes #N" — proving the PR_BODY fallback was used.
   assert.equal(result.level, 'pass');
@@ -484,25 +470,33 @@ test('REQ-A2-3: actor-check.mjs source contains no literal status:approved (read
     'source must not hardcode the approved-label literal — use resolveApprovedLabel()');
 });
 
-test('filterLabeledEvents: matches only events labeled with the resolved approvedLabel, not a hardcoded value', () => {
+// filterLabeledEvents (issue #239 A3, D1): became a SHARED post-filter over
+// the normalized labelEvents() shape (`action`/`label` flat fields), applied
+// AFTER either provider's verb normalizes — no longer the raw gh
+// `{event, label:{name}}` shape.
+test('filterLabeledEvents: matches only "add" events labeled with the resolved approvedLabel, not a hardcoded value', () => {
   const events = [
-    { event: 'labeled', label: { name: 'status:approved' } },
-    { event: 'labeled', label: { name: 'status::approved' } },
-    { event: 'commented' },
+    { actor: { login: 'alice' }, action: 'add', label: 'status:approved', at: 'T1' },
+    { actor: { login: 'bob' }, action: 'add', label: 'status::approved', at: 'T2' },
+    { actor: { login: 'carol' }, action: 'remove', label: 'status:approved', at: 'T3' },
   ];
   assert.deepEqual(filterLabeledEvents(events, 'status::approved'), [events[1]]);
   assert.deepEqual(filterLabeledEvents(events, 'status:approved'), [events[0]]);
   assert.deepEqual(filterLabeledEvents(events, 'ready:approved'), []);
 });
 
-test('gatherActorCheckInputs: an injected fetchLabeledEvents still wins over default resolution (provider/readConfig accepted but unused)', () => {
+test('filterLabeledEvents: null (uncomputable labelEvents) → [] (feeds evaluateActor\'s warn branch, REQ-L5-2)', () => {
+  assert.deepEqual(filterLabeledEvents(null, 'status:approved'), []);
+});
+
+test('gatherActorCheckInputs: an injected fetchLabeledEvents still wins over default resolution (provider/readConfig accepted but unused)', async () => {
   const deps = {
     fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
     fetchIssue: () => ({ labels: [], author: null }),
     readBotAllowlist: () => [],
     readConfig: () => ({ governance: { approvedLabel: 'ready:approved' } }),
   };
-  const inputs = gatherActorCheckInputs({
+  const inputs = await gatherActorCheckInputs({
     author: 'alice',
     prBody: 'Closes #144',
     baseBranch: 'main',
@@ -511,4 +505,146 @@ test('gatherActorCheckInputs: an injected fetchLabeledEvents still wins over def
     deps,
   });
   assert.deepEqual(inputs.labeledEvents, [{ actor: { login: 'bob' } }]);
+});
+
+// ── A3 labelEvents dispatch (issue #239 A3, D1/R3 — the m3 close) ─────────────
+//
+// Pre-A3, defaultFetchLabeledEvents was GitHub-only (`gh api` unconditionally)
+// — on a GitLab runner (no `gh` binary) the call threw and the check
+// permanently degraded to `warn`. A3 dispatches labelEvents via
+// getVcs({ provider: ctx.provider }) (the run-check.mjs#defaultFetchIssue
+// finding-#14 pattern) so GitLab EVALUATES (self-approval → fail), not just
+// degrades. The pure evaluateActor is untouched — only the wrapper's
+// provider-resolved fetch changes.
+
+test('A3: GitLab self-approval — labelEvents dispatches to the gitlab provider via getVcs({provider}), evaluateActor returns fail (REQ-L5-1), not a permanent warn', async () => {
+  let receivedProvider;
+  const fakeVcs = {
+    labelEvents: async ({ project, number }) => {
+      assert.equal(project, 'g/r');
+      assert.equal(number, 144);
+      return [{ actor: { login: 'alice' }, action: 'add', label: 'status::approved', at: '2024-01-01T00:00:00Z' }];
+    },
+  };
+  const result = await runActorCheck({
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'g/r',
+    provider: 'gitlab',
+    getVcs: async (opts) => { receivedProvider = opts.provider; return fakeVcs; },
+    fetchIssue: () => ({ labels: ['status::approved'], author: 'alice' }),
+    readBotAllowlist: () => [],
+    readConfig: () => ({}),
+  });
+  assert.equal(receivedProvider, 'gitlab', 'getVcs must be called with the runtime ctx.provider (finding #14)');
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /self/i);
+});
+
+test('A3: labelEvents returns null (uncomputable) → warn, never fail-closed (REQ-L5-2)', async () => {
+  const fakeVcs = { labelEvents: async () => null };
+  const result = await runActorCheck({
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'g/r',
+    provider: 'gitlab',
+    getVcs: async () => fakeVcs,
+    fetchIssue: () => ({ labels: [], author: null }),
+    readBotAllowlist: () => [],
+    readConfig: () => ({}),
+  });
+  assert.equal(result.level, 'warn');
+});
+
+test('A3: labelEvents returns an empty add-filtered list (only "remove" events) → warn, never fail-closed (REQ-L5-2)', async () => {
+  const fakeVcs = {
+    labelEvents: async () => ([
+      { actor: { login: 'alice' }, action: 'remove', label: 'status::approved', at: '2024-01-01T00:00:00Z' },
+    ]),
+  };
+  const result = await runActorCheck({
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'g/r',
+    provider: 'gitlab',
+    getVcs: async () => fakeVcs,
+    fetchIssue: () => ({ labels: [], author: null }),
+    readBotAllowlist: () => [],
+    readConfig: () => ({}),
+  });
+  assert.equal(result.level, 'warn');
+});
+
+// ── A3 TASK 1 (fresh-context review finding): defaultFetchIssue was STILL
+// gh-CLI-hardcoded — gatherActorCheckInputs needs TWO fetches (labelEvents +
+// fetchIssue) before evaluateActor runs; only labelEvents was migrated in the
+// first pass. On GitLab CI (no `gh` binary) defaultFetchIssue's raw
+// execFileSync('gh', ...) threw ENOENT, masking R3 behind a permanent `warn`
+// — the exact same defect class as finding #14 (issue-link) and the
+// pre-fix labelEvents wrapper, now closed a third time.
+//
+// Per lesson #10/#12 (injected deps prove the logic, not that the default is
+// sane): this test does NOT inject deps.fetchIssue or deps.fetchLabeledEvents
+// — it mocks ONE layer lower, at getVcs (the transport/dispatch layer), so
+// the REAL defaultFetchIssue/defaultFetchLabeledEvents wrapper functions run
+// end-to-end. A setSpawn spy proves no CLI process is ever spawned on the
+// GitLab default path.
+
+test('A3 TASK1: GitLab self-approval via the REAL default path (no injected fetchIssue/fetchLabeledEvents) — defaultFetchIssue dispatches getVcs({provider}).issueView(...), no gh/glab spawn, evaluateActor reaches fail (R3 genuinely met)', async () => {
+  const calls = { issueView: null, labelEvents: null };
+  const fakeVcs = {
+    issueView: async (params) => {
+      calls.issueView = params;
+      return { number: 144, title: 'x', labels: ['status::approved'], body: 'y', author: 'alice' };
+    },
+    labelEvents: async (params) => {
+      calls.labelEvents = params;
+      return [{ actor: { login: 'alice' }, action: 'add', label: 'status::approved', at: '2024-01-01T00:00:00Z' }];
+    },
+  };
+  let receivedProvider;
+  let spawnCalled = false;
+  setSpawn(() => {
+    spawnCalled = true;
+    return { status: 0, stdout: '{}', stderr: '' };
+  });
+  try {
+    const result = await runActorCheck({
+      author: 'alice',
+      prBody: 'Closes #144',
+      baseBranch: 'main',
+      repo: 'g/r',
+      provider: 'gitlab',
+      getVcs: async (opts) => { receivedProvider = opts.provider; return fakeVcs; },
+      readBotAllowlist: () => [],
+      readConfig: () => ({}),
+      // deliberately NOT fetchIssue/fetchLabeledEvents — exercising the REAL
+      // default wrappers, not a deps-level bypass.
+    });
+
+    assert.equal(spawnCalled, false, 'the GitLab default path must never spawn a CLI process (gh/glab)');
+    assert.equal(receivedProvider, 'gitlab', 'getVcs must be called with the runtime ctx.provider (finding #14)');
+    assert.ok(calls.issueView, 'defaultFetchIssue must dispatch through vcs.issueView, not execFileSync(\'gh\', ...)');
+    assert.equal(calls.issueView.project, 'g/r');
+    assert.equal(calls.issueView.number, 144);
+    assert.ok(calls.labelEvents, 'defaultFetchLabeledEvents must also have dispatched');
+    assert.equal(result.level, 'fail', 'R3: GitLab self-approval must EVALUATE to fail via the real default path, not degrade to a permanent warn');
+    assert.match(result.reason, /self/i);
+  } finally {
+    setSpawn(spawnSync);
+  }
+});
+
+test('A3 TASK1 source-scan: defaultFetchIssue no longer contains execFileSync(\'gh\', ...) — structurally proves the default path cannot spawn gh regardless of provider', () => {
+  const srcPath = fileURLToPath(new URL('./actor-check.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  const fnStart = src.indexOf('function defaultFetchIssue');
+  assert.notEqual(fnStart, -1, 'defaultFetchIssue not found in source');
+  const fnEnd = src.indexOf('\nfunction ', fnStart + 1);
+  const fnBody = src.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
+  assert.equal(fnBody.includes('execFileSync'), false, 'defaultFetchIssue must dispatch via getVcs(...).issueView(...), never a raw execFileSync(\'gh\', ...) call');
+  assert.match(fnBody, /getVcs|issueView/, 'sanity: dispatch through the vcs adapter is present');
 });

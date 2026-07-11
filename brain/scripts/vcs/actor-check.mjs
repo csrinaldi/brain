@@ -15,12 +15,12 @@
 // `governance.approvedLabel` from brain.config.json and maps it per VCS
 // provider. This file never hardcodes the label literal.
 
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadContext, resolveDetectionBody } from './ci-context.mjs';
+import { loadContext, resolveDetectionBody, gitlabApiConfig } from './ci-context.mjs';
+import { getVcs } from './cli.mjs';
 import { resolveApprovedLabel } from '../governance/approved-label.mjs';
 import { CLOSING_RE, CHAIN_RE } from '../governance/checks/issue-ref-patterns.mjs';
 
@@ -145,45 +145,77 @@ export function extractIssueNumber(prBody, baseBranch) {
 // ── gh I/O wrapper ───────────────────────────────────────────────────────────
 
 /**
- * Filters `gh api .../events` output down to `labeled` events for the
- * resolved approved label. Pure — exported for unit testing the
- * provider-resolved wiring without spawning a real `gh` process (issue #231
- * A2 phase 1).
+ * Filters the `labelEvents()` CONTRACT verb's normalized output (issue #239
+ * A3, D1) down to `add` events for the resolved approved label — the SHARED
+ * post-filter applied to EITHER provider's normalized shape (`action`,
+ * `label`), AFTER the verb normalizes. Pure — exported for unit testing the
+ * provider-resolved wiring without spawning a real `gh`/API call (issue #231
+ * A2 phase 1). `events === null` (labelEvents' uncomputable signal) passes
+ * through as `[]`, feeding evaluateActor's existing "no labeled event found"
+ * → `warn` branch (REQ-L5-2 — never fail on missing evidence).
  *
- * @param {Array<{ event?: string, label?: { name?: string } }>} events
+ * @param {Array<{ action?: string, label?: string }>|null} events
  * @param {string} approvedLabel
- * @returns {Array<{ event: string, label: { name: string } }>}
+ * @returns {Array<{ actor: { login: string }, action: string, label: string, at: string }>}
  */
 export function filterLabeledEvents(events, approvedLabel) {
-  return events.filter(e => e.event === 'labeled' && e.label?.name === approvedLabel);
+  if (!events) return [];
+  return events.filter(e => e.action === 'add' && e.label === approvedLabel);
 }
 
-function defaultFetchLabeledEvents(repo, approvedLabel) {
-  return issueNumber => {
-    // --paginate is REQUIRED: `gh api` does not auto-paginate, and the Events
-    // API is oldest-first — on an issue with >~30 events, an unpaginated fetch
-    // silently drops the newest labeled events (page 2+), including a late
-    // self-applied approved label, which would wrongly PASS (fail-open).
-    const out = execFileSync(
-      'gh',
-      ['api', '--paginate', `repos/${repo}/issues/${issueNumber}/events`],
-      { encoding: 'utf8' }
-    );
-    const events = JSON.parse(out);
+/**
+ * Default `fetchLabeledEvents` dep: dispatches the `labelEvents` CONTRACT
+ * verb (issue #239 A3, D1 — the m3 close) via `getVcs({ provider })` on the
+ * RUNTIME-detected `ctx.provider` — the same finding-#14 pattern
+ * `run-check.mjs#defaultFetchIssue` already uses (`run-check.mjs:167-177`):
+ * a GitLab MR's referenced issue lives on GitLab even when this repo's own
+ * config says github. `{ apiBase, token, proxyUrl }` are threaded in from
+ * `gitlabApiConfig()` (harmless no-op params for the GitHub provider).
+ * `getVcs` is injectable via `{ getVcs }` for tests, mirroring
+ * `defaultFetchIssue`'s own `{ getVcs: getVcsFn = getVcs }` shape.
+ *
+ * @param {string} repo
+ * @param {string|undefined} provider
+ * @param {string} approvedLabel
+ * @param {{ getVcs?: Function }} [deps]
+ * @returns {(issueNumber: number) => Promise<Array<{ actor: { login: string }, action: string, label: string, at: string }>>}
+ */
+function defaultFetchLabeledEvents(repo, provider, approvedLabel, { getVcs: getVcsFn = getVcs } = {}) {
+  return async issueNumber => {
+    const vcs = await getVcsFn({ provider });
+    const { apiBase, token, proxyUrl } = gitlabApiConfig();
+    const events = await vcs.labelEvents({ project: repo, number: issueNumber, apiBase, token, proxyUrl });
     return filterLabeledEvents(events, approvedLabel);
   };
 }
 
-function defaultFetchIssue(repo) {
-  return issueNumber => {
-    // Single-object fetch (not a list endpoint) — no --paginate needed here.
-    const out = execFileSync('gh', ['api', `repos/${repo}/issues/${issueNumber}`], {
-      encoding: 'utf8',
-    });
-    const issue = JSON.parse(out);
+/**
+ * Default `fetchIssue` dep: dispatches `getVcs({ provider }).issueView(...)`
+ * on the RUNTIME-detected `ctx.provider` (issue #239 A3 TASK1 — a
+ * fresh-context review finding, closing the SAME defect class as
+ * `defaultFetchLabeledEvents` above and finding #14/`run-check.mjs`'s
+ * `defaultFetchIssue`, mirrored EXACTLY here). Pre-fix, this wrapper called
+ * the `gh` CLI (via `execFileSync`) UNCONDITIONALLY regardless of provider —
+ * on GitLab CI (no `gh` binary) it threw ENOENT, masking R3 behind a permanent
+ * `warn` even though `labelEvents` had already been migrated. Both providers'
+ * `issueView` (migrated to direct API v4 in A2 finding #12 for GitLab)
+ * expose `author` as of A3 TASK1, so `labels`/`author` both come from the
+ * SAME dispatched call — no second round-trip. `getVcs` is injectable via
+ * `{ getVcs }` for tests, mirroring `defaultFetchLabeledEvents`'s own shape.
+ *
+ * @param {string} repo
+ * @param {string|undefined} provider
+ * @param {{ getVcs?: Function }} [deps]
+ * @returns {(issueNumber: number) => Promise<{ labels: string[], author: string|null }>}
+ */
+function defaultFetchIssue(repo, provider, { getVcs: getVcsFn = getVcs } = {}) {
+  return async issueNumber => {
+    const vcs = await getVcsFn({ provider });
+    const { apiBase, token, proxyUrl } = gitlabApiConfig();
+    const issue = await vcs.issueView({ project: repo, number: issueNumber, apiBase, token, proxyUrl });
     return {
-      labels: (issue.labels ?? []).map(l => l.name),
-      author: issue.user?.login ?? null,
+      labels: issue?.labels ?? [],
+      author: issue?.author ?? null,
     };
   };
 }
@@ -219,20 +251,25 @@ function defaultReadConfig(cwd) {
  * no second gh round-trip — so evaluateActor can compare the approving actor
  * against BOTH the PR author and the issue author (REQ-L5-1).
  *
- * `provider` (github|gitlab, from `ctx.provider`) resolves the approved label
- * (`governance.approvedLabel`, issue #231 A2 phase 1) for the default
- * `fetchLabeledEvents` wrapper; an injected `deps.fetchLabeledEvents` bypasses
- * resolution entirely (as tests do).
+ * `provider` (github|gitlab, from `ctx.provider`) both resolves the approved
+ * label (`governance.approvedLabel`, issue #231 A2 phase 1) AND selects the
+ * VCS adapter (`getVcs({ provider })`, issue #239 A3 D1 — the m3 close) for
+ * the default `fetchLabeledEvents` wrapper; an injected
+ * `deps.fetchLabeledEvents` bypasses resolution entirely (as tests do). This
+ * function is async as of A3 (the default wrapper awaits the `labelEvents`
+ * CONTRACT verb, a Promise-returning dispatch); an injected sync
+ * `deps.fetchLabeledEvents` still works unchanged (`await` on a
+ * non-Promise resolves immediately to that same value).
  *
  * @param {{ author: string, prBody: string, baseBranch: string, repo: string, provider?: string, cwd?: string, deps?: object }} args
- * @returns {{ author: string, issueAuthor: string|null, labeledEvents: Array, botAllowlist: string[], adminOverride: boolean }}
+ * @returns {Promise<{ author: string, issueAuthor: string|null, labeledEvents: Array, botAllowlist: string[], adminOverride: boolean }>}
  */
-export function gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, cwd = process.cwd(), deps = {} } = {}) {
+export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, cwd = process.cwd(), deps = {} } = {}) {
   const readConfig = deps.readConfig ?? defaultReadConfig(cwd);
   const approvedLabel = resolveApprovedLabel(readConfig(), provider);
 
-  const fetchLabeledEvents = deps.fetchLabeledEvents ?? defaultFetchLabeledEvents(repo, approvedLabel);
-  const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(repo);
+  const fetchLabeledEvents = deps.fetchLabeledEvents ?? defaultFetchLabeledEvents(repo, provider, approvedLabel, deps);
+  const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(repo, provider, deps);
   const readBotAllowlist = deps.readBotAllowlist ?? defaultReadBotAllowlist(cwd);
 
   const botAllowlist = readBotAllowlist();
@@ -242,8 +279,8 @@ export function gatherActorCheckInputs({ author, prBody, baseBranch, repo, provi
     return { author, issueAuthor: null, labeledEvents: [], botAllowlist, adminOverride: false };
   }
 
-  const labeledEvents = fetchLabeledEvents(issueNumber);
-  const { labels: issueLabels, author: issueAuthor } = fetchIssue(issueNumber);
+  const labeledEvents = await fetchLabeledEvents(issueNumber);
+  const { labels: issueLabels, author: issueAuthor } = await fetchIssue(issueNumber);
   const adminOverride = issueLabels.some(l => l.startsWith('override:') && botAllowlist.includes(l));
 
   return { author, issueAuthor, labeledEvents, botAllowlist, adminOverride };
@@ -263,10 +300,14 @@ export function gatherActorCheckInputs({ author, prBody, baseBranch, repo, provi
  * `resolveDetectionBody()` when `ctx.body` is uncomputable (amendment 2 — this
  * fallback is sanctioned ONLY for DETECTION consumers like this check).
  *
+ * This function is async as of issue #239 A3 — `gatherActorCheckInputs`
+ * dispatches the `labelEvents` CONTRACT verb via `getVcs({ provider })`, a
+ * Promise-returning call.
+ *
  * @param {{ author?: string, prBody?: string, baseBranch?: string, repo?: string, cwd?: string, ctx?: object } & object} [deps]
- * @returns {{ level: 'pass'|'warn'|'fail', reason: string }}
+ * @returns {Promise<{ level: 'pass'|'warn'|'fail', reason: string }>}
  */
-export function runActorCheck(deps = {}) {
+export async function runActorCheck(deps = {}) {
   const ctx = deps.ctx ?? {};
   const author = deps.author ?? ctx.author ?? undefined;
   const prBody = deps.prBody ?? resolveDetectionBody(ctx, deps) ?? '';
@@ -284,7 +325,7 @@ export function runActorCheck(deps = {}) {
 
   let inputs;
   try {
-    inputs = gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, cwd, deps });
+    inputs = await gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, cwd, deps });
   } catch (err) {
     return {
       level: 'warn',
@@ -299,13 +340,13 @@ export function runActorCheck(deps = {}) {
  * Runs the check, prints the verdict + reason, and returns the process exit
  * code — kept separate from `process.exit()` itself so it stays testable
  * (mirrors run-check.mjs / phase-order-check.mjs's main()). Exit 0 on
- * pass/warn, 1 on fail.
+ * pass/warn, 1 on fail. Async as of A3 (awaits `runActorCheck`).
  *
  * @param {object} [deps]
- * @returns {0|1}
+ * @returns {Promise<0|1>}
  */
-export function main(deps = {}) {
-  const result = runActorCheck(deps);
+export async function main(deps = {}) {
+  const result = await runActorCheck(deps);
   console.log(`actor-check: ${result.level}`);
   if (result.reason) console.log(`  ${result.reason}`);
   return result.level === 'fail' ? 1 : 0;
@@ -315,5 +356,5 @@ export function main(deps = {}) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const ctx = await loadContext();
-  process.exit(main({ ctx }));
+  process.exit(await main({ ctx }));
 }
