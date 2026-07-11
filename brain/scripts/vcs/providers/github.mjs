@@ -39,7 +39,16 @@ export async function projectResolve({ project }) {
 
 export async function issueView({ project, number }) {
   const r = runJson('gh', ['api', `repos/${project}/issues/${number}`]);
-  return { number: r.number, title: r.title, labels: (r.labels ?? []).map(l => l.name), body: r.body };
+  return {
+    number: r.number,
+    title: r.title,
+    labels: (r.labels ?? []).map(l => l.name),
+    body: r.body,
+    // `author` (issue #239 A3 TASK1): actor-check.mjs's REQ-L5-1 compares the
+    // approval actor against BOTH the PR author and the issue author — the
+    // same API call already carries `user.login`, no extra round-trip.
+    author: r.user?.login ?? null,
+  };
 }
 
 export async function branchProtect({ project, branch = 'main', checks, requiredReviews = 1 }) {
@@ -190,6 +199,34 @@ export async function commitStatus({ project, sha }) {
 }
 
 /**
+ * prReviews — the provider-agnostic `prReviews` CONTRACT verb (issue #239
+ * A3 TASK2/4th-violation fix, closing the L6 brain-writes-reviewed gate's
+ * gh-CLI-hardcoded `defaultFetchReviews`). Wraps GitHub's Reviews API
+ * (`pulls/N/reviews`), normalizing `state`/`user.login` to `{ state, author
+ * }`. EXTRACTED from brain-writes-reviewed.mjs's inline
+ * `defaultFetchReviews`, preserving the load-bearing `--paginate` VERBATIM:
+ * `gh api` does not auto-paginate, and a long-lived PR with many re-review
+ * cycles can exceed one page — an unpaginated fetch can silently drop the
+ * one human APPROVED review that would flip a self-approval verdict.
+ *
+ * Never throws: a fetch failure is caught and normalized to `null`
+ * (uncomputable) — never a fabricated `[]`, so callers (the DETECTION gate)
+ * can distinguish "zero reviews" from "couldn't fetch".
+ *
+ * @param {{ project: string, number: number }} params
+ * @returns {Promise<Array<{ state: string, author: string|null }>|null>}
+ */
+export async function prReviews({ project, number } = {}) {
+  let reviews;
+  try {
+    reviews = runJson('gh', ['api', '--paginate', `repos/${project}/pulls/${number}/reviews`]);
+  } catch {
+    return null;
+  }
+  return reviews.map(r => ({ state: r.state, author: r.user?.login ?? null }));
+}
+
+/**
  * Create a pull request via `gh pr create`.
  * Returns { url: string } on success or { url: null, error: string } on failure.
  * Never throws.
@@ -218,6 +255,46 @@ export async function mrCreate({
   const r = run('gh', args);
   if (r.ok) return { url: r.stdout.trim() };
   return { url: null, error: r.stderr.trim() || `gh pr create failed (status ${r.status})` };
+}
+
+/**
+ * labelEvents — the provider-agnostic `labelEvents` CONTRACT verb (issue
+ * #239 A3, D1). Wraps GitHub's Events API (`issues/N/events`), normalizing
+ * `event:'labeled'|'unlabeled'` + `actor.login`/`label.name`/`created_at` to
+ * the shared shape `{ actor: { login }, action: 'add'|'remove', label, at }`,
+ * ascending by `at`. Non-label events (e.g. `commented`) are dropped.
+ *
+ * EXTRACTED from actor-check.mjs's inline `defaultFetchLabeledEvents` (the
+ * A2 `m3` finding close) — preserves the load-bearing `--paginate`
+ * VERBATIM: `gh api` does not auto-paginate, and the Events API is
+ * oldest-first, so an unpaginated fetch silently drops page-2+ events
+ * (including a late self-applied approved label), which would wrongly PASS
+ * the actor-check (fail-open).
+ *
+ * Never throws: a fetch failure (no `gh` binary, rate limit, non-zero exit)
+ * is caught and normalized to `null` (uncomputable) — never a fabricated
+ * `[]`, so callers (the actor-check DETECTION gate) can distinguish "no
+ * events" from "couldn't fetch".
+ *
+ * @param {{ project: string, number: number }} params
+ * @returns {Promise<Array<{ actor: { login: string|undefined }, action: 'add'|'remove', label: string|undefined, at: string|undefined }>|null>}
+ */
+export async function labelEvents({ project, number } = {}) {
+  let events;
+  try {
+    events = runJson('gh', ['api', '--paginate', `repos/${project}/issues/${number}/events`]);
+  } catch {
+    return null;
+  }
+  return events
+    .filter(e => e.event === 'labeled' || e.event === 'unlabeled')
+    .map(e => ({
+      actor: { login: e.actor?.login },
+      action: e.event === 'labeled' ? 'add' : 'remove',
+      label: e.label?.name,
+      at: e.created_at,
+    }))
+    .sort((a, b) => new Date(a.at) - new Date(b.at));
 }
 
 export async function repoCloneUrl({ host, project, token }) {

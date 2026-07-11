@@ -5,6 +5,8 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { setSpawn } from './lib/exec.mjs';
 
 import * as github from './providers/github.mjs';
@@ -36,9 +38,21 @@ test('gitlab.whoami returns normalized username', async () => {
 // ── issueView ────────────────────────────────────────────────────────────────────
 
 test('github.issueView returns normalized shape', async () => {
-  setSpawn(fakeSpawn({ number: 42, title: 'Test issue', labels: [{ name: 'bug' }], body: 'Fix this' }));
+  setSpawn(fakeSpawn({ number: 42, title: 'Test issue', labels: [{ name: 'bug' }], body: 'Fix this', user: { login: 'alice' } }));
   const result = await github.issueView({ project: 'o/r', number: 42 });
-  assert.deepEqual(result, { number: 42, title: 'Test issue', labels: ['bug'], body: 'Fix this' });
+  assert.deepEqual(result, { number: 42, title: 'Test issue', labels: ['bug'], body: 'Fix this', author: 'alice' });
+});
+
+// issueView gains `author` (issue #239 A3 TASK1 — a fresh-context review
+// finding): actor-check.mjs's gatherActorCheckInputs needs the issue AUTHOR
+// (REQ-L5-1 compares against both the PR author and the issue author), which
+// the pre-A3-TASK1 contract never exposed — the same underlying API call
+// already returns it (GH `user.login`, GL `author.username`), no extra
+// round-trip.
+test('github.issueView author defaults to null when the underlying user field is absent', async () => {
+  setSpawn(fakeSpawn({ number: 5, title: 't', labels: [], body: '' }));
+  const result = await github.issueView({ project: 'o/r', number: 5 });
+  assert.equal(result.author, null);
 });
 
 // gitlab.issueView (issue #231 CP-A2b live-validation finding #12): migrated
@@ -58,12 +72,21 @@ test('gitlab.issueView returns normalized shape (direct API v4 fetch, no glab CL
     fetchImpl: async (url, options) => {
       seenUrl = url;
       seenHeaders = options?.headers;
-      return { ok: true, json: async () => ({ iid: 7, title: 'GL issue', labels: ['feat'], description: 'body text' }) };
+      return { ok: true, json: async () => ({ iid: 7, title: 'GL issue', labels: ['feat'], description: 'body text', author: { username: 'bob' } }) };
     },
   });
   assert.equal(seenUrl, 'https://gitlab.example.com/api/v4/projects/g%2Fr/issues/7');
   assert.equal(seenHeaders?.['PRIVATE-TOKEN'], 'tok-abc');
-  assert.deepEqual(result, { number: 7, title: 'GL issue', labels: ['feat'], body: 'body text' });
+  assert.deepEqual(result, { number: 7, title: 'GL issue', labels: ['feat'], body: 'body text', author: 'bob' });
+});
+
+test('gitlab.issueView author defaults to null when the underlying author field is absent', async () => {
+  const result = await gitlab.issueView({
+    project: 'g/r',
+    number: 9,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ iid: 9, title: 't', labels: [], description: '' }) }),
+  });
+  assert.equal(result.author, null);
 });
 
 test('gitlab.issueView defaults apiBase to the public GitLab API when not provided (local/non-CI callers, e.g. ticket-start.mjs)', async () => {
@@ -626,4 +649,162 @@ test('github.prView author defaults to null when absent from an otherwise-succes
 test('gitlab.prView returns { number, labels: [], body: "" } stub — Phase 3', async () => {
   const result = await gitlab.prView({ project: 'g/r', number: 7 });
   assert.deepEqual(result, { number: 7, labels: [], body: '' });
+});
+
+// ── labelEvents (issue #239 A3, D1 — the labelEvents CONTRACT verb) ──────────
+//
+// GitHub: EXTRACTED from actor-check.mjs's inline defaultFetchLabeledEvents
+// (m3 close), preserving --paginate. GitLab: over gitlabApiFetch
+// (resource_label_events), never the glab CLI (a GATE_FILE, same discipline
+// as issueView). Both normalize to { actor: { login }, action, label, at },
+// ascending by `at`; a thrown fetch → null (never a fabricated []).
+
+test('github.labelEvents normalizes labeled/unlabeled events to the shared shape, ascending by at, dropping non-label events', async () => {
+  setSpawn(fakeSpawn([
+    { event: 'commented', actor: { login: 'carol' }, created_at: '2024-01-01T00:00:00Z' },
+    { event: 'unlabeled', label: { name: 'status:approved' }, actor: { login: 'alice' }, created_at: '2024-01-03T00:00:00Z' },
+    { event: 'labeled', label: { name: 'status:approved' }, actor: { login: 'bob' }, created_at: '2024-01-02T00:00:00Z' },
+  ]));
+  const result = await github.labelEvents({ project: 'o/r', number: 42 });
+  assert.deepEqual(result, [
+    { actor: { login: 'bob' }, action: 'add', label: 'status:approved', at: '2024-01-02T00:00:00Z' },
+    { actor: { login: 'alice' }, action: 'remove', label: 'status:approved', at: '2024-01-03T00:00:00Z' },
+  ]);
+});
+
+test('github.labelEvents returns null (never []) when the underlying gh api call throws', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 500: Internal Server Error' }));
+  const result = await github.labelEvents({ project: 'o/r', number: 42 });
+  assert.equal(result, null);
+});
+
+test('gitlab.labelEvents normalizes resource_label_events to the shared shape, ascending by at, over the shared gitlabApiFetch transport', async () => {
+  let seenUrl;
+  const result = await gitlab.labelEvents({
+    project: 'g/r',
+    number: 7,
+    apiBase: 'https://gitlab.example.com/api/v4',
+    token: 'tok-abc',
+    fetchImpl: async (url) => {
+      seenUrl = url;
+      return {
+        ok: true,
+        json: async () => ([
+          { user: { username: 'alice' }, action: 'remove', label: { name: 'status::approved' }, created_at: '2024-01-03T00:00:00Z' },
+          { user: { username: 'bob' }, action: 'add', label: { name: 'status::approved' }, created_at: '2024-01-02T00:00:00Z' },
+        ]),
+      };
+    },
+  });
+  assert.equal(seenUrl, 'https://gitlab.example.com/api/v4/projects/g%2Fr/issues/7/resource_label_events');
+  assert.deepEqual(result, [
+    { actor: { login: 'bob' }, action: 'add', label: 'status::approved', at: '2024-01-02T00:00:00Z' },
+    { actor: { login: 'alice' }, action: 'remove', label: 'status::approved', at: '2024-01-03T00:00:00Z' },
+  ]);
+});
+
+// FIX1 fail-open guard, MOVED with the extraction (issue #239 A3, m3 close):
+// `gh api` does NOT auto-paginate. GitHub's Events API is oldest-first, so on
+// an issue with more than ~30 events the most recent approved-label event
+// (including a late self-applied one) lands on page 2+ and is silently
+// dropped — self-approval would then wrongly PASS. Guard via source-scan
+// (mirrors the neutrality source-scan style in phase-order-check.test.mjs and
+// actor-check.test.mjs's pre-A3 FIX1 guard, now here alongside the code).
+test('github.labelEvents source includes --paginate on the gh api events call (FIX1 fail-open guard)', async () => {
+  const srcPath = fileURLToPath(new URL('./providers/github.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  const fnStart = src.indexOf('export async function labelEvents');
+  assert.notEqual(fnStart, -1, 'labelEvents not found in github.mjs');
+  const fnEnd = src.indexOf('\nexport async function ', fnStart + 1);
+  const fnBody = src.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
+  assert.match(fnBody, /issues\/\$\{number\}\/events/, 'sanity: events endpoint present');
+  assert.match(
+    fnBody,
+    /--paginate/,
+    'events fetch must use --paginate — otherwise a truncated page 1 can hide the newest labeled event (fail-open)'
+  );
+});
+
+test('gitlab.labelEvents returns null (never []) when the underlying fetch throws', async () => {
+  const result = await gitlab.labelEvents({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) }),
+  });
+  assert.equal(result, null);
+});
+
+// ── prReviews (issue #239 A3 TASK2/4th-violation fix — the brain-writes-reviewed
+// L6 gate's defaultFetchReviews was STILL gh-CLI-hardcoded, the same defect
+// class as labelEvents pre-fix and finding #14). GitHub: EXTRACTED from
+// brain-writes-reviewed.mjs's inline defaultFetchReviews, preserving
+// --paginate. GitLab: over gitlabApiFetch's merge_requests/:iid/approvals
+// endpoint (GitLab has no per-reviewer review-state history like GitHub's
+// Reviews API — approvals is the closest analog: each approver normalizes to
+// one { state:'APPROVED', author } entry, matching what
+// evaluateBrainWritesReviewed actually consumes — only APPROVED entries are
+// counted toward approvers; a genuinely empty approvals list still warns via
+// the existing "no reviews at all" branch).
+
+test('github.prReviews normalizes gh reviews to { state, author }', async () => {
+  setSpawn(fakeSpawn([
+    { state: 'COMMENTED', user: { login: 'carol' } },
+    { state: 'APPROVED', user: { login: 'bob' } },
+  ]));
+  const result = await github.prReviews({ project: 'o/r', number: 144 });
+  assert.deepEqual(result, [
+    { state: 'COMMENTED', author: 'carol' },
+    { state: 'APPROVED', author: 'bob' },
+  ]);
+});
+
+test('github.prReviews returns null (never []) when the underlying gh api call throws', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 500: Internal Server Error' }));
+  const result = await github.prReviews({ project: 'o/r', number: 144 });
+  assert.equal(result, null);
+});
+
+test('github.prReviews source includes --paginate on the gh api reviews call (fail-open guard, moved with the extraction)', () => {
+  const srcPath = fileURLToPath(new URL('./providers/github.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  const fnStart = src.indexOf('export async function prReviews');
+  assert.notEqual(fnStart, -1, 'prReviews not found in github.mjs');
+  const fnEnd = src.indexOf('\nexport async function ', fnStart + 1);
+  const fnBody = src.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
+  assert.match(fnBody, /pulls\/\$\{number\}\/reviews/, 'sanity: PR reviews endpoint present');
+  assert.match(fnBody, /--paginate/, 'reviews fetch must use --paginate — otherwise a truncated page 1 can hide later reviews');
+});
+
+test('gitlab.prReviews normalizes approvals.approved_by to one {state:"APPROVED", author} entry per approver, over the shared gitlabApiFetch transport', async () => {
+  let seenUrl;
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    apiBase: 'https://gitlab.example.com/api/v4',
+    token: 'tok-abc',
+    fetchImpl: async (url) => {
+      seenUrl = url;
+      return { ok: true, json: async () => ({ approved_by: [{ user: { username: 'bob' } }] }) };
+    },
+  });
+  assert.equal(seenUrl, 'https://gitlab.example.com/api/v4/projects/g%2Fr/merge_requests/7/approvals');
+  assert.deepEqual(result, [{ state: 'APPROVED', author: 'bob' }]);
+});
+
+test('gitlab.prReviews returns [] (genuinely zero approvals, not uncomputable) when approved_by is empty', async () => {
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ approved_by: [] }) }),
+  });
+  assert.deepEqual(result, []);
+});
+
+test('gitlab.prReviews returns null (never []) when the underlying fetch throws', async () => {
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) }),
+  });
+  assert.equal(result, null);
 });
