@@ -1,0 +1,224 @@
+// vcs.contract.test.mjs — the shared, parameterized CONTRACT suite (issue #239
+// A3 Phase 3, REQ-A3-5). ONE assertion set, run over BOTH providers
+// (`['github', 'gitlab']`), for `labelEvents`, `prView`, `mrCreate`: parity
+// means the SAME test body applies to each provider — not two divergent files
+// that can silently drift apart.
+//
+// This is DISTINCT from `../providers.test.mjs` (provider-specific behavior,
+// e.g. each provider's own URL-building/CLI-arg details) — this suite only
+// asserts what the CONTRACT (vcs-contract.md) promises: normalized shapes,
+// `null`-on-uncomputable, ascending ordering, never-throws.
+//
+// Fixtures live in `../fixtures/*.json` (REQ-A3-6) — recorded from the real
+// GitHub API where reachable (github-labelEvents-happy.json,
+// github-prView-happy.json — see fixtures/record-fixtures.mjs), DERIVED
+// (hand-authored from the documented API shape) everywhere else (all
+// gitlab-*.json — no live GitLab mirror reachable from this environment,
+// deferred to CP-A3b/SCIT; every github-*-failure.json and
+// github-mrCreate-happy.json — forced-failure/mutating-write cases that
+// cannot be recorded). `_provenance.recorded`/`_provenance.derived` is always
+// present and never both true (lesson #12).
+//
+// No live network or CLI spawn happens in this suite — every transport is the
+// injected fixture reader below (github via the existing `setSpawn` seam,
+// gitlab via the existing `fetchImpl` param).
+
+import { test, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { setSpawn } from '../lib/exec.mjs';
+
+import * as github from './github.mjs';
+import * as gitlab from './gitlab.mjs';
+
+afterEach(() => setSpawn(spawnSync));
+
+const FIXTURES_DIR = fileURLToPath(new URL('../fixtures/', import.meta.url));
+
+/** Loads and parses a fixture JSON file by name. */
+function loadFixture(name) {
+  return JSON.parse(readFileSync(`${FIXTURES_DIR}${name}`, 'utf8'));
+}
+
+/** Every fixture MUST declare exactly one of recorded/derived (never both, never neither). */
+function assertProvenance(fixture, fixtureName) {
+  const p = fixture._provenance;
+  assert.ok(p, `${fixtureName}: missing _provenance`);
+  const recorded = p.recorded === true;
+  const derived = p.derived === true;
+  assert.ok(recorded || derived, `${fixtureName}: must be marked recorded or derived — never ambiguous (lesson #12)`);
+  assert.ok(!(recorded && derived), `${fixtureName}: must not be marked BOTH recorded and derived`);
+  assert.ok(p.endpoint, `${fixtureName}: missing _provenance.endpoint`);
+  assert.ok(p.date, `${fixtureName}: missing _provenance.date`);
+}
+
+// ── Per-provider fixture-reading transport glue ─────────────────────────────
+// github verbs read via the `gh` CLI (spawn-based, no fetchImpl param);
+// gitlab verbs read via the shared `gitlabApiFetch` (fetchImpl param). Both
+// glue functions turn ONE fixture shape ({ data } | { throws, ... }) into
+// whatever that provider's real transport seam expects — the fixture format
+// itself is provider-agnostic.
+
+function jsonSpawn(data, status = 0) {
+  return () => ({ status, stdout: JSON.stringify(data), stderr: '' });
+}
+function rawSpawn(stdout, status = 0) {
+  return () => ({ status, stdout, stderr: '' });
+}
+function failSpawn(message = 'fixture: simulated failure') {
+  return () => ({ status: 1, stdout: '', stderr: message });
+}
+
+function githubJsonCallArgs(fixture) {
+  setSpawn(fixture.throws ? failSpawn(fixture.error) : jsonSpawn(fixture.data));
+  return {};
+}
+function githubRawCallArgs(fixture) {
+  setSpawn(fixture.throws ? failSpawn(fixture.error) : rawSpawn(fixture.stdout ?? ''));
+  return {};
+}
+function gitlabCallArgs(fixture) {
+  return {
+    fetchImpl: async () =>
+      fixture.throws
+        ? { ok: false, status: fixture.status ?? 500 }
+        : { ok: true, json: async () => fixture.data },
+  };
+}
+
+const PROVIDERS = {
+  github: {
+    module: github,
+    labelEvents: githubJsonCallArgs,
+    prView: githubJsonCallArgs,
+    mrCreate: githubRawCallArgs,
+  },
+  gitlab: {
+    module: gitlab,
+    labelEvents: gitlabCallArgs,
+    prView: gitlabCallArgs,
+    mrCreate: gitlabCallArgs,
+  },
+};
+
+for (const providerName of Object.keys(PROVIDERS)) {
+  const { module: vcs, labelEvents: labelEventsArgs, prView: prViewArgs, mrCreate: mrCreateArgs } =
+    PROVIDERS[providerName];
+
+  // ── labelEvents ────────────────────────────────────────────────────────
+  test(`${providerName}.labelEvents (contract): happy fixture normalizes to the shared shape, ascending by at`, async () => {
+    const fixtureName = `${providerName}-labelEvents-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.labelEvents({ project: 'x/y', number: 1, ...labelEventsArgs(fixture) });
+
+    assert.ok(Array.isArray(result), 'labelEvents must return an array on a successful fetch');
+    assert.ok(result.length >= 2, 'happy fixture must exercise at least 2 label events');
+    for (const entry of result) {
+      assert.ok('login' in entry.actor, 'each entry must normalize to { actor: { login } }');
+      assert.ok(['add', 'remove'].includes(entry.action), 'action must normalize to add|remove');
+      assert.ok('label' in entry, 'each entry must carry a normalized label');
+      assert.ok('at' in entry, 'each entry must carry a normalized at timestamp');
+      // No provider-specific field name may leak through the contract.
+      assert.ok(!('iid' in entry), 'must not leak GitLab iid');
+      assert.ok(!('username' in entry), 'must not leak raw username (only actor.login)');
+      assert.ok(!('created_at' in entry), 'must not leak raw created_at (only at)');
+    }
+    const ats = result.map(e => new Date(e.at).getTime());
+    const sorted = [...ats].sort((a, b) => a - b);
+    assert.deepEqual(ats, sorted, 'labelEvents must be ordered chronologically ascending');
+  });
+
+  test(`${providerName}.labelEvents (contract): a fetch failure yields null, never a fabricated []`, async () => {
+    const fixtureName = `${providerName}-labelEvents-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.labelEvents({ project: 'x/y', number: 1, ...labelEventsArgs(fixture) });
+    assert.equal(result, null, 'an uncomputable labelEvents fetch must return null, never []');
+  });
+
+  // ── prView ─────────────────────────────────────────────────────────────
+  test(`${providerName}.prView (contract): happy fixture normalizes to { number, labels, body, author }`, async () => {
+    const fixtureName = `${providerName}-prView-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.prView({ project: 'x/y', number: 1, ...prViewArgs(fixture) });
+
+    assert.equal(typeof result.number, 'number', 'number must normalize to a number');
+    assert.ok(Array.isArray(result.labels), 'labels must normalize to an array of names');
+    for (const label of result.labels) assert.equal(typeof label, 'string', 'each label must be a bare name string');
+    assert.equal(typeof result.body, 'string', 'body must be a string on a successful fetch');
+    // REQ-A3-... (task 3.7 body-parity): `null` means uncomputable, `''` means
+    // successfully-empty — a SUCCESSFUL fetch must never surface `null`.
+    assert.notEqual(result.body, null, 'a successful prView fetch must never surface body:null (that means uncomputable)');
+    assert.notEqual(result.author, undefined, 'author key must be present (null is valid — absent-on-provider — undefined is not)');
+  });
+
+  test(`${providerName}.prView (contract): a fetch failure yields the null-shape, never throws`, async () => {
+    const fixtureName = `${providerName}-prView-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.prView({ project: 'x/y', number: 42, ...prViewArgs(fixture) });
+    assert.deepEqual(result, { number: 42, labels: null, body: null, author: null });
+  });
+
+  // Body-parity (task 3.7, empty-vs-uncomputable canonical rule): `null` means
+  // uncomputable (the fetch itself failed — asserted above); `''` means the
+  // fetch SUCCEEDED and the underlying body/description field was genuinely
+  // empty. Prior to A3 Phase 3, GitHub's prView already normalized to `?? ''`
+  // but GitLab's normalized bare `r.description` (→ `null`/`undefined` when
+  // absent) — indistinguishable from the failure case above. This test would
+  // RED on the pre-fix gitlab.mjs.
+  test(`${providerName}.prView (contract): a successful fetch with no body/description normalizes to '' (never null — null means uncomputable)`, async () => {
+    const emptyFixture =
+      providerName === 'github'
+        ? { throws: false, data: { number: 7, labels: [], body: null, author: null } }
+        : { throws: false, data: { iid: 7, labels: [], description: null, author: null } };
+    const result = await vcs.prView({ project: 'x/y', number: 7, ...prViewArgs(emptyFixture) });
+    assert.equal(result.body, '', 'a successfully-fetched-but-empty body must normalize to "", not null/undefined');
+  });
+
+  // ── mrCreate ───────────────────────────────────────────────────────────
+  test(`${providerName}.mrCreate (contract): happy fixture returns { url }`, async () => {
+    const fixtureName = `${providerName}-mrCreate-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.mrCreate({
+      project: 'x/y',
+      title: 'T',
+      body: 'B',
+      head: 'feat/x',
+      base: 'main',
+      ...mrCreateArgs(fixture),
+    });
+
+    assert.equal(typeof result.url, 'string', 'a successful mrCreate must return a string url');
+    assert.ok(result.url.length > 0);
+    assert.equal(result.error, undefined, 'a successful mrCreate must not carry an error key');
+  });
+
+  test(`${providerName}.mrCreate (contract): a create failure returns { url: null, error }, never throws`, async () => {
+    const fixtureName = `${providerName}-mrCreate-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.mrCreate({
+      project: 'x/y',
+      title: 'T',
+      body: 'B',
+      head: 'feat/x',
+      base: 'main',
+      ...mrCreateArgs(fixture),
+    });
+
+    assert.equal(result.url, null, 'a failed mrCreate must never fabricate a url');
+    assert.equal(typeof result.error, 'string', 'a failed mrCreate must carry an error string');
+  });
+}
