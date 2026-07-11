@@ -142,34 +142,43 @@ verified whole.
 
 ## Phase 3: shared parameterized contract suite + recorded-from-real fixtures (RED → GREEN)
 > Depends on Phases 1–2 (the suite can only assert verbs that exist). This is the CP-A3a-verdict tranche.
-- [ ] 3.1 Confirm the fixtures dir + naming convention (design Open Question 2): proposed
+- [x] 3.1 Confirm the fixtures dir + naming convention (design Open Question 2): proposed
       `brain/scripts/vcs/fixtures/` with `<provider>-<verb>-<case>.json` and an in-file
       `_provenance: { endpoint, date, recorded|derived }` stamp.
-- [ ] 3.2 Create `brain/scripts/vcs/fixtures/record-fixtures.mjs` — a COMMITTED script that hits the real
+- [x] 3.2 Create `brain/scripts/vcs/fixtures/record-fixtures.mjs` — a COMMITTED script that hits the real
       APIs ONCE (GitLab: the live mirror; GitHub: this repo), writing raw JSON stamped `endpoint + date`.
       Documents which endpoints it hits; re-runnable to refresh without editing the suite. NOT run by
       `npm test`.
-- [ ] 3.3 Record the real fixtures (`labelEvents`, `prView`, `mrCreate` happy paths) via the script; author
+- [x] 3.3 Record the real fixtures (`labelEvents`, `prView`, `mrCreate` happy paths) via the script; author
       the non-recordable edge cases (forced-failure, fabricated self-approval) marked `DERIVED`.
       Recorded-vs-derived ALWAYS visible (lesson #12).
-- [ ] 3.4 Test (RED → GREEN): create the shared parameterized contract suite
+- [x] 3.4 Test (RED → GREEN): create the shared parameterized contract suite
       (`brain/scripts/vcs/providers/vcs.contract.test.mjs`) over `['github','gitlab']` asserting the SAME
       contract (normalized shapes, `null`-on-uncomputable, ascending ordering, never-throws) for
       `labelEvents`/`prView`/`mrCreate`, via an injected fixture-reading transport. Parity = identical
       assertions. NO live network in `npm test`.
-- [ ] 3.5 `npm test` green (0 failures) · `repo:check` · `brain:nav`.
-- [ ] 3.6 Verb-definition reconciliation (deferred from PR-2 per Decision 6 — the complete pass, verified by
+- [x] 3.5 `npm test` green (0 failures) · `repo:check` · `brain:nav`.
+- [x] 3.6 Verb-definition reconciliation (deferred from PR-2 per Decision 6 — the complete pass, verified by
       the contract suite): add `prView`/`mrCreate` rows to the "Required verbs" table (`vcs-contract.md:22-36`)
       and add the missing entries (`mrCreate`/`branchProtect`/`capabilities`) to `cli.mjs`'s `VERBS` array —
       reconcile ALL THREE sources (required-verbs table, Phase-3 status table, `VERBS`) in one pass. No
       drift-guard covers these today; consider adding one so the three sources can't diverge again.
-- [ ] 3.7 Empty-body representation parity (deferred from PR-2 NIT): decide the canonical empty/uncomputable
+
+      **Fresh-context review addendum (same PR-3):** the first drift-guard version only cross-checked the doc
+      table against `VERBS` — a verb both providers implement but omitted from BOTH would pass silently
+      forever (proven: it would have caught `branchProtect` but NOT `mrCreate`). Added a THIRD check
+      (`sharedFunctionExports` in `verb-contract-drift-guard.test.mjs`) computing the intersection of both
+      providers' actual function exports and asserting each is in `VERBS` or the new `SHARED_NON_VERB_EXPORTS`
+      allowlist (empty today — reserved for future legitimately-shared non-verb exports). RED→GREEN proven via
+      a temporarily-broken stub AND a fake-provider injection test. Also fixed `vcs-contract.md:61`'s stale
+      "13 verbs" prose → 15 (the true row count after this task's table additions).
+- [x] 3.7 Empty-body representation parity (deferred from PR-2 NIT): decide the canonical empty/uncomputable
       value for normalized `body` across providers — GitHub uses `?? ''` on success, GitLab `prView`/`issueView`
       use `?? null` (established convention). The contract suite is where this is asserted, so decide it HERE
       and align both providers so `null` means uncomputable (fetch failure) and `''` means successfully-empty.
 
 ## Phase 4: baseline + CP-A3a assembly
-- [ ] 4.1 `npm test` green over the full accumulated tree · `brain:repo:check` · `brain:nav`.
+- [x] 4.1 `npm test` green over the full accumulated tree · `brain:repo:check` · `brain:nav`.
 - [ ] 4.2 `memory:share` run before push. No `decision` label unless a new promoted decision arises.
       DEFERRED — orchestrator handles the CP-A3a push per this apply run's instructions.
 - [ ] 4.3 STOP at CP-A3a (fixture-tested; live smoke is CP-A3b, DEFERRED to the SCIT phase). Declare in the
@@ -181,6 +190,12 @@ verified whole.
   GitLab mirror; not decidable here (same posture as CP-A2b).
 - **Fixtures dir + naming:** confirm `brain/scripts/vcs/fixtures/` + `_provenance` stamp in task 3.1 before
   committing the recording script.
+- **Follow-up (fresh-review MINOR, PR-3):** align `gitlab.mjs#issueView`'s `body` to the same null-vs-`''`
+  rule `prView` now has (`null` = uncomputable, `''` = successfully-empty) when the shared contract suite is
+  next extended to cover `issueView` — `issueView` is out of the Phase-3 contract-suite scope
+  (`labelEvents`/`prView`/`mrCreate` only), so this was deliberately NOT changed here. Verified ZERO current
+  regression: the only real caller, `selectIssueLinkBody` in `brain/scripts/lib/audit-helpers.mjs:52-54`,
+  treats `null` and `''` identically today. Tracked so the asymmetry isn't forgotten, not urgent.
 
 ## Out of scope
 - Label WRITE verbs (`labelAdd`/`labelRemove`) + `protectBranch` rework (PLAN §A3 background; not needed by

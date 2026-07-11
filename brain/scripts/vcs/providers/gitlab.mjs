@@ -96,6 +96,14 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
  * `{ number, labels: null, body: null, author: null }` (uncomputable) —
  * never a fabricated empty `[]`/`''`, matching the `github.prView` contract.
  *
+ * Body-parity (issue #239 A3 Phase 3 task 3.7): `null` means uncomputable
+ * (the fetch itself failed — the `catch` branch below); `''` means the fetch
+ * SUCCEEDED and the underlying `description` was genuinely empty. `?? ''` on
+ * the success path aligns this with `github.mjs#prView`, which already
+ * normalized this way — pre-A3-Phase-3 this branch returned bare
+ * `r.description` (`null`/`undefined` when GitLab omits it), indistinguishable
+ * from the failure case above.
+ *
  * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
  * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null }>}
  */
@@ -112,7 +120,7 @@ export async function prView({ project, number, apiBase, token, proxyUrl, fetchI
     return {
       number: r.iid,
       labels: r.labels ?? [],
-      body: r.description,
+      body: r.description ?? '',
       author: r.author?.username ?? null,
     };
   } catch {
