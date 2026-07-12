@@ -4,8 +4,9 @@
 // propia estructura SDD. Ver brain/project/decisions/adr-0002-harness-reemplazable-openspec.md
 //
 // Uso:
-//   npm run brain:project:feature -- --issue 104
 //   npm run brain:project:feature -- --issue 104 --title "valuacion masiva"
+// --title (el slug) es OBLIGATORIO (#595 pin 2, REQ-B1-5) — ver
+// brain/core/methodology/sdd-layout.md. Nunca se deriva un placeholder.
 // (alias deprecado: npm run project:feature)
 
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
@@ -43,7 +44,7 @@ const { issue, title } = parseArgs(process.argv.slice(2));
 
 if (!issue || !/^\d+$/.test(issue)) {
   fail(
-    'Falta el ID del issue. Uso: npm run project:feature -- --issue 104 [--title "nombre"]',
+    'Falta el ID del issue. Uso: npm run project:feature -- --issue 104 --title "nombre" (--title es obligatorio)',
   );
 }
 
