@@ -21,6 +21,13 @@ const fakeSpawn = (data, status = 0) => () => ({
   stderr: '',
 });
 
+const FIXTURES_DIR = fileURLToPath(new URL('./fixtures/', import.meta.url));
+
+/** Loads and parses a fixture JSON file by name. */
+function loadFixture(name) {
+  return JSON.parse(readFileSync(`${FIXTURES_DIR}${name}`, 'utf8'));
+}
+
 // ── whoami ───────────────────────────────────────────────────────────────────────
 
 test('github.whoami returns normalized username', async () => {
@@ -558,6 +565,50 @@ test('gitlab.capabilities caches result and does not spawn twice for the same pr
   assert.equal(spawnCount, 1, 'spawn should be called only once (cache hit on second call)');
   assert.strictEqual(r1, r2, 'second call returns the same cached object reference');
   assert.equal(r1.hardEnforcement, 'available');
+});
+
+// ── projectMergeSettings (issue #244 A4) ────────────────────────────────────────
+// The project-level merge gate (only_allow_merge_if_pipeline_succeeds) has no
+// protected_branches equivalent — capabilities()/branchProtect() cannot surface
+// it (design Decision 2). Fixture shape pinned by fixtures/gitlab-project.json
+// (derived, _provenance-stamped — REQ-A4-5).
+
+test('gitlab.projectMergeSettings parses only_allow_merge_if_pipeline_succeeds:true from the fixture', async () => {
+  const fixture = loadFixture('gitlab-project.json');
+  setSpawn(fakeSpawn(fixture.data));
+  const result = await gitlab.projectMergeSettings({ project: 'g/r' });
+  assert.deepEqual(result, { onlyAllowMergeIfPipelineSucceeds: true });
+});
+
+test('gitlab.projectMergeSettings parses only_allow_merge_if_pipeline_succeeds:false', async () => {
+  const fixture = loadFixture('gitlab-project.json');
+  setSpawn(fakeSpawn({ ...fixture.data, only_allow_merge_if_pipeline_succeeds: false }));
+  const result = await gitlab.projectMergeSettings({ project: 'g/r' });
+  assert.deepEqual(result, { onlyAllowMergeIfPipelineSucceeds: false });
+});
+
+test('gitlab.projectMergeSettings returns {onlyAllowMergeIfPipelineSucceeds:null} on a failed glab api read (never a fabricated false)', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'GET https://gitlab.example.com/api/v4/projects/g%2Fr: 404\n{"message":"404 Not Found"}' }));
+  const result = await gitlab.projectMergeSettings({ project: 'g/r' });
+  assert.deepEqual(result, { onlyAllowMergeIfPipelineSucceeds: null });
+});
+
+test('gitlab.projectMergeSettings returns {onlyAllowMergeIfPipelineSucceeds:null} on unparsable JSON, never throws', async () => {
+  setSpawn(() => ({ status: 0, stdout: 'not json', stderr: '' }));
+  await assert.doesNotReject(async () => {
+    const result = await gitlab.projectMergeSettings({ project: 'g/r' });
+    assert.deepEqual(result, { onlyAllowMergeIfPipelineSucceeds: null });
+  });
+});
+
+test('gitlab.projectMergeSettings returns {onlyAllowMergeIfPipelineSucceeds:null} when the glab api read succeeds but the field is absent from the response (never a fabricated false — GitLab permission-gates some project attributes)', async () => {
+  // 200 OK, parseable JSON, but only_allow_merge_if_pipeline_succeeds is
+  // simply missing from the payload (a real case, distinct from a read
+  // failure or unparsable body) — Boolean(undefined) would fabricate `false`
+  // ("readable, not configured") instead of the honest `null` (uncomputable).
+  setSpawn(fakeSpawn({ id: 1, path_with_namespace: 'g/r', default_branch: 'main' }));
+  const result = await gitlab.projectMergeSettings({ project: 'g/r' });
+  assert.deepEqual(result, { onlyAllowMergeIfPipelineSucceeds: null });
 });
 
 // ── mrCreate ──────────────────────────────────────────────────────────────────

@@ -41,11 +41,34 @@ function repoFileExists(relPath) {
 // IS unit-tested — always via injected `probes` overrides, never these real
 // implementations. Called only when the caller does not inject an override.
 
-/** Rung 1 — finer branch-protection read: 200+contexts / 404 / 403. */
-async function realBranchProtectionProbe({ config }) {
+/**
+ * Rung 1 — finer branch-protection read: 200+contexts / 404 / 403. Dispatches
+ * on `config.vcs.provider` (issue #244 A4, mirrors realBrainWritesReviewedProbe
+ * :78-111). GitLab reads the PER-BRANCH protected-branch endpoint inline
+ * (parity with how the GitHub branch below inlines its `gh` read — NOT
+ * `capabilities()`, which false-positives 'available' on an empty
+ * protected_branches COLLECTION, contradicting the CP-A2b mirror evidence,
+ * memory #565) PLUS the new `projectMergeSettings` verb — read off `vcs`
+ * (the already-resolved providerModule detectSubstrate threads through,
+ * exactly like every other injected probe override in this file's tests), not
+ * a fresh dynamic import.
+ */
+async function realBranchProtectionProbe({ config, vcs }) {
+  const provider = config?.vcs?.provider;
   const project = config?.project?.slug;
   const branch = config?.project?.defaultBranch ?? 'main';
   if (!project) return { status: undefined, contexts: [] };
+
+  if (provider === 'gitlab') {
+    const enc = encodeURIComponent(project);
+    const rb = run('glab', ['api', `projects/${enc}/protected_branches/${encodeURIComponent(branch)}`]);
+    let status;
+    if (rb.ok) status = 200;
+    else if (rb.stderr.includes(': 404')) status = 404;
+    else if (rb.stderr.includes(': 401') || rb.stderr.includes(': 403')) status = 403;
+    const { onlyAllowMergeIfPipelineSucceeds } = await vcs.projectMergeSettings({ project });
+    return { status, contexts: [], pipelineMustSucceed: onlyAllowMergeIfPipelineSucceeds };
+  }
 
   const r = run('gh', ['api', `repos/${project}/branches/${branch}/protection`]);
   if (r.ok) {
@@ -141,6 +164,29 @@ function printSubstrateReport(substrate) {
     console.log(`              remedy: ${substrate.remedy}`);
   }
 
+  // Rung-1 sub-gate breakdown (issue #244 A4, REQ-A4-2). Driven SOLELY by
+  // gates.*.active/verifiable — never a hardcoded independent branch. An
+  // API-verified gate (verifiable:true) renders as DETECTED; a config-declared,
+  // non-remotely-verifiable gate (verifiable:false) renders the honest caveat —
+  // never the word "verified". Data (substrate.mjs) and this rendering change
+  // together (the honesty contract).
+  const gates = substrate.rungs?.[1]?.gates ?? {};
+  if (gates.pipelineMustSucceed?.active) {
+    console.log('  merge gate     armed  [only_allow_merge_if_pipeline_succeeds / required checks]');
+  }
+  if (gates.protectedBranches?.active) {
+    console.log('  push gate      armed  [protected branch — direct pushes blocked]');
+  }
+  if (gates.preReceive?.active) {
+    // preReceive is ALWAYS verifiable:false (evalPreReceiveGate, substrate.mjs)
+    // — no endpoint can ever confirm a bare-repo server hook is installed. A4's
+    // entire point is to never claim detection/verification that can't happen,
+    // so there is deliberately no "verified" branch here to keep in sync.
+    console.log(
+      '  pre-receive    armed (config-declared) — not remotely detectable; verify via install runbook (npm run brain:protect-server)',
+    );
+  }
+
   const brainWritesGate = substrate.rungs?.[1]?.gates?.brainWritesReviewed;
   if (brainWritesGate && brainWritesGate.active === false) {
     console.log(
@@ -188,7 +234,9 @@ export async function reportGovernanceStatus({
   // Hooks and brain:audit are always ON regardless of provider tier.
   console.log('  hooks       ON  [universal]');
   console.log('  brain:audit ON  [universal]');
-  console.log('  pre-receive available  [bypass-proof self-hosted hard gate — npm run brain:protect-server]');
+  // pre-receive is NOT universal — it is a rung-1 mechanism, armed only when
+  // config-declared (config.vcs.selfHostedPreReceive). Rendered per-gate below,
+  // in printSubstrateReport's rung-1 sub-gate breakdown (issue #244 A4).
 
   // The platform capability section is independent of the substrate ladder
   // below — it never early-returns anymore, so the substrate report (which
