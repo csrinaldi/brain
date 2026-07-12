@@ -161,6 +161,22 @@ test('repo:check S-1 (Phase 6.2 synthetic — REQ-B1-2 "latent-stricter for futu
   assert.ok(r.stderr.includes('spec.md'), `expected 'spec.md' named as missing in:\n${r.stderr}`);
 });
 
+test('repo:check S-1 (Phase 6.1 synthetic): a new dir with a NESTED specs/<capability>/spec.md (no flat spec.md) passes — flat-OR-nested tolerance holds through the wired site', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'refs-s1-nested-spec-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeMinimalRepo(dir);
+  copyRulesFile(dir);
+  makeChangeDir(dir, 'issue-4-nested', { 'proposal.md': '', 'design.md': '', 'tasks.md': '' });
+  mkdirSync(join(dir, 'openspec', 'changes', 'issue-4-nested', 'specs', 'some-capability'), { recursive: true });
+  writeFileSync(join(dir, 'openspec', 'changes', 'issue-4-nested', 'specs', 'some-capability', 'spec.md'), '');
+  git('add', '-A');
+  git('commit', '-m', 'seed');
+
+  const r = runCheckRefs(dir);
+  assert.equal(r.status, 0, `expected exit 0 (nested spec satisfies the contract), got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+});
+
 test('repo:check S-1 (Phase 6.1 synthetic): a dir with no artifacts at all lists all 4 as missing', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'refs-s1-empty-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
