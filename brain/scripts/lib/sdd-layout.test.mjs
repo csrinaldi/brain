@@ -1,16 +1,15 @@
-// sdd-layout.test.mjs — rehearsal-tests + drift-guard for sdd-layout.mjs (issue #250, B0).
+// sdd-layout.test.mjs — rehearsal-tests + drift-guard for sdd-layout.mjs (issue #250, B0;
+// A3 landed in B1, issue #253).
 // Owner ruling #587, item 2: each helper's test is written AS THE MEASURED SITE
 // WILL CALL IT — citing the site by file:line — so the API is validated by
 // rehearsal, not speculation. Run with: npm test (node --test, no dependencies).
 //
-// Phase 2 (A1 + A2) is the drift-guard: a TEST, not a lint rule (design §3).
-// A3 (consumers reference the module) is DEFERRED to B1 — see the note at the
-// bottom of this file.
+// Phase 2 (A1 + A2 + A3) is the drift-guard: a TEST, not a lint rule (design §3).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Task 1.1 (RED): fails with "module not found" until sdd-layout.mjs exists.
@@ -311,10 +310,137 @@ test('2.5: A2 sealed-12 lock — the real export equals EXACTLY the 12 hardcoded
   assert.deepEqual([...LEGACY_GRANDFATHERED].sort(), [...THE_12_HARDCODED].sort());
 });
 
-// A3 — consumers reference the module. DEFERRED to B1 (design §3): the
-// scattered exempt-lists that pre-date this module — phase-order-check.mjs's
-// BASELINE_EXEMPT_DIRS and the tripwire's EXEMPT_PATH_RE where applicable —
-// do NOT migrate in B0. B1's consolidation targets, recorded here as the
-// literal pointer for the future grep-based assertion (task 2.6):
-//   - brain/scripts/vcs/phase-order-check.mjs: BASELINE_EXEMPT_DIRS
-//   - the plainfiles-actorkind-doc-tripwire.test.mjs's EXEMPT_PATH_RE, where applicable
+// A3 — consumers reference the module via their real ESM import shape (B1,
+// issue #253, design §4, REQ-B1-4). Precision over coverage — the A1 lesson
+// carried forward: never a loose substring, never a single shared depth
+// literal (a shared '../lib/' would false-negative 5 of 6 sites).
+
+const LAYOUT_ABS = fileURLToPath(new URL('./sdd-layout.mjs', import.meta.url));
+
+// The six sites (REQ-B1-1), relative to SCRIPTS_DIR — five physical files
+// (engram's two call sites share one import).
+const CONSUMING_SITE_RELPATHS = [
+  'check-refs.mjs',
+  'session-start.mjs',
+  'new-change.mjs',
+  'vcs/phase-order-check.mjs',
+  'memory/backends/engram.mjs',
+  'memory/lib/feature-resolution.mjs',
+];
+
+/** Never hand-typed — self-corrects if a file moves (design §4). */
+function computeExpectedSpecifier(siteAbsPath) {
+  const rel = relative(dirname(siteAbsPath), LAYOUT_ABS).split(sep).join('/');
+  return rel.startsWith('.') ? rel : `./${rel}`;
+}
+
+const CONSUMING_SITES = CONSUMING_SITE_RELPATHS.map((rel) => {
+  const abs = join(SCRIPTS_DIR, rel);
+  return { rel, abs, specifier: computeExpectedSpecifier(abs) };
+});
+
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** The real A3 assertion (task 4.3): a genuine `import { ... } from '<specifier>'`. */
+function siteImportsLayoutViaRealShape(content, specifier) {
+  const re = new RegExp(`import\\s*\\{[^}]*\\}\\s*from\\s*['"]${escapeRegExp(specifier)}['"]`);
+  return re.test(content);
+}
+
+/** The REJECTED naive approach — a loose substring match (design §4's death mode). */
+function naiveLooseSubstringMatch(content) {
+  return content.includes('sdd-layout');
+}
+
+// ── Task 4.2 — false-positive/false-negative traps, written FIRST, proven
+// against the NAIVE matcher before the real assertion is trusted ───────────
+
+test('A3 trap (a): a doc-comment mention of sdd-layout fools the naive substring matcher (false positive) but NOT the real import-shape assertion', () => {
+  const content = '// see sdd-layout.mjs for the contract this file should eventually consume\nexport const x = 1;\n';
+  assert.equal(naiveLooseSubstringMatch(content), true, 'naive matcher is expected to be fooled here');
+  assert.equal(siteImportsLayoutViaRealShape(content, './lib/sdd-layout.mjs'), false);
+});
+
+test('A3 trap (b): the .test.mjs filename itself satisfies the naive substring matcher (false positive) but NOT the real assertion', () => {
+  const content = "// companion of sdd-layout.test.mjs\nexport const x = 1;\n";
+  assert.equal(naiveLooseSubstringMatch(content), true, 'naive matcher is expected to be fooled here');
+  assert.equal(siteImportsLayoutViaRealShape(content, './lib/sdd-layout.mjs'), false);
+});
+
+test('A3 trap (c): a shared "../lib/" literal false-NEGATIVES a real "./lib/" site — depth precision matters (design §4\'s core concern)', () => {
+  // check-refs.mjs's REAL, correct import (depth './lib/') — but tested
+  // against the WRONG shared specifier a naive single-depth guard would use.
+  const content = "import { CHANGES_ROOT, missingRequiredArtifacts, isGrandfathered } from './lib/sdd-layout.mjs';\n";
+  assert.equal(
+    siteImportsLayoutViaRealShape(content, '../lib/sdd-layout.mjs'),
+    false,
+    'a shared "../lib/" literal must false-negative this real "./lib/" import',
+  );
+  assert.equal(
+    siteImportsLayoutViaRealShape(content, './lib/sdd-layout.mjs'),
+    true,
+    'the correctly computed per-site specifier must match',
+  );
+});
+
+test('A3 trap (d): a bare side-effect import (no braces) satisfies the naive matcher (false positive) but NOT the real assertion (requires a named { } consumption)', () => {
+  const content = "import '../lib/sdd-layout.mjs';\n";
+  assert.equal(naiveLooseSubstringMatch(content), true, 'naive matcher is expected to be fooled here');
+  assert.equal(siteImportsLayoutViaRealShape(content, '../lib/sdd-layout.mjs'), false);
+});
+
+// ── Task 4.3 — the real assertion, run against all six wired sites ─────────
+
+test('A3: all six wired sites reference sdd-layout.mjs via their real, per-site-depth import shape', () => {
+  for (const site of CONSUMING_SITES) {
+    const content = readFileSync(site.abs, 'utf8');
+    assert.ok(
+      siteImportsLayoutViaRealShape(content, site.specifier),
+      `${site.rel}: expected a real "import { ... } from '${site.specifier}'" statement`,
+    );
+  }
+});
+
+test('A3: the per-site specifiers are NOT a single shared literal (proves depth precision is exercised, not vacuously)', () => {
+  const specifiers = new Set(CONSUMING_SITES.map((s) => s.specifier));
+  assert.ok(specifiers.size >= 3, `expected at least 3 distinct depths (./, ../, ../../), got: ${[...specifiers]}`);
+});
+
+// ── Task 4.4 — negative case: a site re-declaring a rival literal fails A3,
+// naming the offending file ─────────────────────────────────────────────────
+
+function scanSitesForA3(sites) {
+  const offenders = [];
+  for (const site of sites) {
+    if (!siteImportsLayoutViaRealShape(site.content, site.specifier)) offenders.push(site.rel);
+  }
+  return offenders;
+}
+
+test('A3 negative case: a hypothetical site re-declaring its own artifact-name array / openspec-changes literal / grandfather list, without importing the accessor, fails A3 and is named', () => {
+  const rivalSite = {
+    rel: 'fixture/rival-site.mjs',
+    specifier: './lib/sdd-layout.mjs',
+    content: [
+      "const REQUIRED_ARTIFACTS = ['proposal.md', 'spec.md', 'design.md', 'tasks.md'];",
+      "const CHANGES_DIR = 'openspec/changes';",
+      "const GRANDFATHERED = ['installer-versionado', 'vcs-adapter', 'cli-i18n'];",
+    ].join('\n'),
+  };
+  const legitSite = {
+    rel: 'fixture/legit-site.mjs',
+    specifier: './lib/sdd-layout.mjs',
+    content: "import { CHANGES_ROOT } from './lib/sdd-layout.mjs';",
+  };
+  const offenders = scanSitesForA3([legitSite, rivalSite]);
+  assert.deepEqual(offenders, ['fixture/rival-site.mjs']);
+});
+
+// ── Task 4.5 — A3 against all six sites as wired in Phases 2–3 ─────────────
+
+test('A3 (task 4.5): scanning the six real wired sites reports zero offenders', () => {
+  const sites = CONSUMING_SITES.map((s) => ({ ...s, content: readFileSync(s.abs, 'utf8') }));
+  assert.deepEqual(scanSitesForA3(sites), []);
+});
