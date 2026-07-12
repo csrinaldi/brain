@@ -39,6 +39,7 @@ import { importRecord } from "../lib/engram-import.mjs";
 import { appendRecord, rebuildIndex, readRecordIds, readRecordObservations } from "../lib/store.mjs";
 import { serializeRecord } from "../lib/format.mjs";
 import { collectChunkObservations } from "../lib/migrate-v1.mjs";
+import { unsupportedOp } from "../lib/unsupported-op.mjs";
 import { t } from "../../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -614,6 +615,24 @@ export async function pullMemory({
  */
 export async function pull() {
   await pullMemory();
+}
+
+// ---------------------------------------------------------------------------
+// save / search — the Q1 asymmetry's engram side (design Decision 5, obs
+// #578's "engram.search stub: YES" ruling). engram already has a native
+// `mem_save`/`mem_search`; a second CLI-mediated door would create a second
+// surface to keep in parity forever. Both refuse loudly via the shared
+// unsupportedOp helper — never cryptic, never a silent no-op, on either verb.
+// ---------------------------------------------------------------------------
+
+/** @returns {Promise<never>} */
+export async function save() {
+  await unsupportedOp("save", "engram", { key: "memory.save.engramUnsupported" });
+}
+
+/** @returns {Promise<never>} */
+export async function search() {
+  await unsupportedOp("search", "engram", { key: "memory.search.engramUnsupported" });
 }
 
 /**

@@ -17,6 +17,7 @@ import {
   parseRecordLine,
   buildIndexEntry,
   serializeIndex,
+  nowUtcSeconds,
 } from './format.mjs';
 
 // ── canonicalJson (RFC 8785 JCS) ──────────────────────────────────────────────
@@ -206,4 +207,36 @@ test('serializeIndex: one entry per physical line, sorted by id', () => {
 
 test('serializeIndex: empty map serializes to empty string', () => {
   assert.equal(serializeIndex(new Map()), '');
+});
+
+// ── nowUtcSeconds (C3, task 1.1) — the C2a canonical UTC-seconds clock ───────
+
+test('nowUtcSeconds: strips millisecond precision (.mmmZ → Z) for an injected fixed clock', () => {
+  const getNow = () => new Date('2026-07-12T09:41:07.123Z');
+  const ts = nowUtcSeconds(getNow);
+  assert.equal(ts, '2026-07-12T09:41:07Z');
+});
+
+test('nowUtcSeconds: the result matches the UTC_TS_RE format validateRecord enforces', () => {
+  const getNow = () => new Date('2026-01-01T00:00:00.000Z');
+  const ts = nowUtcSeconds(getNow);
+  const { valid, errors } = validateRecord({
+    id: 'rec-0000000000000000',
+    ts,
+    actor: 'agent',
+    actorKind: 'agent',
+    type: 'decision',
+    project: 'brain',
+    content: 'x',
+  });
+  assert.equal(valid, true, `expected ts '${ts}' to satisfy UTC_TS_RE: ${errors.join('; ')}`);
+});
+
+test('nowUtcSeconds: defaults to the real clock when getNow is omitted', () => {
+  const before = Date.now();
+  const ts = nowUtcSeconds();
+  const after = Date.now();
+  assert.match(ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  const parsed = new Date(ts).getTime();
+  assert.ok(parsed >= before - 1000 && parsed <= after + 1000, 'nowUtcSeconds() default clock should be near real time');
 });

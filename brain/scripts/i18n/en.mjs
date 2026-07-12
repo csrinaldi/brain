@@ -319,6 +319,18 @@ export default {
   'memory.migrateV1.emptyObservationsHeader': 'Sessions/prompts-only chunks (observations: null — not corruption, 0 contributed):',
   'memory.migrateV1.unparseableHeader':     'Unparseable chunk files (genuinely corrupt — observation count unknown):',
 
+  // ── memory/lib/unsupported-op.mjs — the shared never-cryptic deferral helper (C3, issue #246) ──
+  'memory.op.unsupported':            "op '{op}' is not supported by the '{backend}' memory backend (deferred — see openspec/changes/issue-246-c3).",
+  'memory.save.engramUnsupported':    "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_save / 'engram save' instead.",
+  'memory.search.engramUnsupported':  "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_search / 'engram search' instead.",
+
+  // ── memory/backends/plainfiles.mjs — save/search CLI verbs (C3, issue #246) ──
+  'memory.plainfiles.save.done':    "✓ saved {id} → {file}",
+  'memory.plainfiles.save.secretFound': 'Secret detected in the candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
+  'memory.save.plainfilesIgnoredOpts': 'ignored option(s) {opts} — the plainfiles record format has no field for them (scope/topic are engram-only concepts); the record was still written normally.',
+  'memory.plainfiles.search.empty': 'ℹ no matching records found.',
+  'memory.plainfiles.search.summary': '{count} matching record(s):',
+
   // ── brain-protect.mjs — arm-and-verify (issue #203) ───────────────────────────
   'protect.verify.unverifiable': '  Verify   : no check-runs found yet on {branch} — unverifiable until the first PR runs.',
   'protect.verify.missing':      '  WARNING  : required check "{context}" has no matching check-run yet — confirm the job name is exact.',

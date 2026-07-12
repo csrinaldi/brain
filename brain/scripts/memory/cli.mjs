@@ -60,6 +60,8 @@ const VALID_OPS = [
   "setup",
   "feature-checkpoint",
   "feature-resume",
+  "save",
+  "search",
 ];
 const op = process.argv[2];
 
@@ -232,6 +234,70 @@ try {
 if (typeof backend[fn] !== "function") {
   console.error(`memory/cli: backend '${MEMORY_BACKEND}' does not implement op '${op}'`);
   process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// "save" carries structured flags (--type/--project/--scope/--topic) the
+// generic positional-forward below would mis-pass as extra positionals
+// (design.md Decision 7). A minimal arg parser extracts the two positionals
+// (title, content) and the four flags into {type, project, scope, topic},
+// then calls backend.save(title, content, opts, seams). This keeps the
+// parser backend-agnostic: engram's save receives the same shape and
+// refuses it (Decision 5) via the shared unsupportedOp helper.
+//
+// NO --actor/--actor-kind/--ts flag is recognized ANYWHERE in this parser
+// (Decision 2 — spoof resistance enforced at the parser, never a caller-
+// supplied provenance field).
+//
+// BRAIN_MEMORY_TEST_ROOT (test-only seam, mirrors BRAIN_MIGRATE_V1_TEST_ROOT
+// above): when set, save/search resolve `.memory/` under `<value>` instead
+// of the real repo root. NEVER set this outside tests.
+// ---------------------------------------------------------------------------
+const memoryTestRoot = process.env.BRAIN_MEMORY_TEST_ROOT;
+
+if (op === "save") {
+  const rest = process.argv.slice(3);
+  const positionals = [];
+  const flags = {};
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i];
+    if (arg.startsWith("--")) {
+      flags[arg.slice(2)] = rest[++i];
+    } else {
+      positionals.push(arg);
+    }
+  }
+  const [title, content] = positionals;
+  const opts = { type: flags.type, project: flags.project, scope: flags.scope, topic: flags.topic };
+  const seams = memoryTestRoot ? { root: memoryTestRoot } : {};
+  try {
+    const result = await backend.save(title, content, opts, seams);
+    console.log(`memory/cli: ${await t("memory.plainfiles.save.done", { id: result?.id, file: result?.file })}`);
+    process.exit(0);
+  } catch (err) {
+    console.error(`memory/cli: ${MEMORY_BACKEND}.save() failed — ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (op === "search") {
+  const query = process.argv[3];
+  const searchOpts = memoryTestRoot ? { root: memoryTestRoot } : {};
+  try {
+    const result = await backend.search(query, searchOpts);
+    if (!result?.matches?.length) {
+      console.log(`memory/cli: ${await t("memory.plainfiles.search.empty")}`);
+    } else {
+      console.log(`memory/cli: ${await t("memory.plainfiles.search.summary", { count: result.matches.length })}`);
+      for (const m of result.matches) {
+        console.log(`  - ${m.id} [${m.type}] ${m.content.slice(0, 120)}`);
+      }
+    }
+    process.exit(0);
+  } catch (err) {
+    console.error(`memory/cli: ${MEMORY_BACKEND}.search() failed — ${err.message}`);
+    process.exit(1);
+  }
 }
 
 try {

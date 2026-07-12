@@ -209,3 +209,18 @@ export function serializeIndex(entriesById) {
   const lines = ids.map((id) => JSON.stringify(entriesById.get(id)));
   return lines.length ? lines.join('\n') + '\n' : '';
 }
+
+/**
+ * nowUtcSeconds() — a seam-injected clock producing the C2a canonical
+ * UTC-seconds `ts` (`YYYY-MM-DDTHH:MM:SSZ`) that `UTC_TS_RE` (above) accepts.
+ * Strips millisecond precision the same way `engram-export.mjs#toUtcSeconds`
+ * does — the ONE canonical rule (REQ-MF-2), never a second stripping regex.
+ * Never `new Date().toISOString()` directly: that emits `.mmmZ`, which
+ * `validateRecord()` rejects.
+ *
+ * @param {() => Date} [getNow]  Injectable clock seam — defaults to `new Date()`.
+ * @returns {string}
+ */
+export function nowUtcSeconds(getNow = () => new Date()) {
+  return getNow().toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
