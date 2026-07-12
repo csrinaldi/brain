@@ -4,13 +4,16 @@
 // propia estructura SDD. Ver brain/project/decisions/adr-0002-harness-reemplazable-openspec.md
 //
 // Uso:
-//   npm run brain:project:feature -- --issue 104
 //   npm run brain:project:feature -- --issue 104 --title "valuacion masiva"
+// --title (el slug) es OBLIGATORIO (#595 pin 2, REQ-B1-5) — ver
+// brain/core/methodology/sdd-layout.md. Nunca se deriva un placeholder.
 // (alias deprecado: npm run project:feature)
 
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { changeDir, artifactPaths } from "./lib/sdd-layout.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -41,18 +44,30 @@ const { issue, title } = parseArgs(process.argv.slice(2));
 
 if (!issue || !/^\d+$/.test(issue)) {
   fail(
-    'Falta el ID del issue. Uso: npm run project:feature -- --issue 104 [--title "nombre"]',
+    'Falta el ID del issue. Uso: npm run project:feature -- --issue 104 --title "nombre" (--title es obligatorio)',
   );
 }
 
-const changeId = title ? `issue-${issue}-${slugify(title)}` : `issue-${issue}`;
-const changeDir = join(repoRoot, "openspec", "changes", changeId);
+// REQ-B1-5 (#595 pin 2): the slug is mandatory — symmetric with the --issue
+// check above. NEVER a derived placeholder (e.g. issue-<N>-change): a
+// placeholder would be a silent lie, the same sin as the #216 hand-edit
+// errata. Fail fast with an actionable message instead.
+const slug = title ? slugify(title) : "";
+if (!slug) {
+  fail(
+    'Falta el título/slug del change (obligatorio). Uso: npm run project:feature -- --issue 104 --title "nombre" ' +
+      "— ver brain/core/methodology/sdd-layout.md.",
+  );
+}
 
-if (existsSync(changeDir)) {
+const changeId = `issue-${issue}-${slug}`;
+const targetDir = join(repoRoot, changeDir(changeId));
+
+if (existsSync(targetDir)) {
   fail(`El change "${changeId}" ya existe en openspec/changes/. No se sobrescribe.`);
 }
 
-const heading = title ? `${title} (issue ${issue})` : `Issue ${issue}`;
+const heading = `${title} (issue ${issue})`;
 
 const proposal = `---
 status: draft
@@ -118,14 +133,15 @@ issue: ${issue}
 brain/core/methodology/consolidation-protocol.md>
 `;
 
-mkdirSync(changeDir, { recursive: true });
-writeFileSync(join(changeDir, "proposal.md"), proposal);
-writeFileSync(join(changeDir, "spec.md"), spec);
-writeFileSync(join(changeDir, "design.md"), design);
-writeFileSync(join(changeDir, "tasks.md"), tasks);
+const paths = artifactPaths(changeId);
+mkdirSync(targetDir, { recursive: true });
+writeFileSync(join(repoRoot, paths.proposal), proposal);
+writeFileSync(join(repoRoot, paths.spec), spec);
+writeFileSync(join(repoRoot, paths.design), design);
+writeFileSync(join(repoRoot, paths.tasks), tasks);
 
 console.log(`
-  ✓ Change SDD creado: openspec/changes/${changeId}/
+  ✓ Change SDD creado: ${changeDir(changeId)}/
       proposal.md  spec.md  design.md  tasks.md
 
   Siguiente: completá la propuesta y abrí la rama {tipo}/${changeId}.
