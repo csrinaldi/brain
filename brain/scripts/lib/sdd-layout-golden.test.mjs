@@ -184,9 +184,21 @@ function captureFrozenCorpus() {
   };
 }
 
-// ── CLI entry — regenerate the fixture (pre-wiring use only) ───────────────
+// ── CLI entry — regenerate the fixture (pre-wiring use only, explicit opt-in
+// ONLY) ──────────────────────────────────────────────────────────────────────
+//
+// Guarded by BOTH the direct-invocation check AND an explicit env var. The
+// argv[1] check alone is NOT sufficient here: `node --test <this file>` runs
+// each matched test file in its own child process where argv[1] equals the
+// test file's own path (Node's default per-file process isolation) — without
+// the env-var gate, EVERY `npm test` run would silently re-capture from the
+// LIVE tree and overwrite the committed frozen fixture, exactly the
+// self-referential re-derivation REQ-B1-2's third scenario forbids ("never
+// regenerated from the post-wiring code"). Regeneration requires a human to
+// deliberately run:
+//   SDD_LAYOUT_GOLDEN_CAPTURE=1 node brain/scripts/lib/sdd-layout-golden.test.mjs
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] === fileURLToPath(import.meta.url) && process.env.SDD_LAYOUT_GOLDEN_CAPTURE === '1') {
   const fixture = captureFrozenCorpus();
   writeFileSync(FIXTURE_PATH, `${JSON.stringify(fixture, null, 2)}\n`);
   console.log(`captured ${fixture._frozenCount} frozen keys -> ${FIXTURE_PATH}`);
