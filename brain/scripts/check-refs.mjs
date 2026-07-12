@@ -100,7 +100,7 @@ const structViolations = [];
 // contract (sdd-layout.mjs), enforced here (#595 pin 1). Behavior-preserving
 // over the frozen corpus + B0-contract enforcement going forward — NEVER
 // "pure wiring": every frozen dir already carries all 4 artifacts (see
-// lib/sdd-layout-golden.fixture.json, issue #253/B1), so this changes nothing
+// lib/sdd-layout.golden.json, issue #253/B1), so this changes nothing
 // today; it is latent-stricter for any future incomplete dir.
 const changesDir = join(ROOT, CHANGES_ROOT);
 if (existsSync(changesDir)) {

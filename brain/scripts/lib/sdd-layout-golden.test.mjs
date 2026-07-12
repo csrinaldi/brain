@@ -14,7 +14,7 @@
 // RED→GREEN sequence (design §2.2):
 //   1. Pre-wiring: `node brain/scripts/lib/sdd-layout-golden.test.mjs` (CLI
 //      entry, guarded below) walks the REAL openspec/changes/* tree and writes
-//      sdd-layout-golden.fixture.json. Committed BEFORE any site is touched.
+//      sdd-layout.golden.json. Committed BEFORE any site is touched.
 //   2. Each site is wired (Phase 2, RED→GREEN per site).
 //   3. This file's `test()` blocks recompute every gate's verdict from the
 //      fixture's frozen facts via the (now-wired) library functions and assert
@@ -32,7 +32,11 @@ import { evaluatePhaseOrder, applyBaselineExemption } from '../vcs/phase-order-c
 import { deriveChangeFromBranch } from '../session-start.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..');
-const FIXTURE_PATH = join(dirname(fileURLToPath(import.meta.url)), 'sdd-layout-golden.fixture.json');
+// Suffix `.golden.json` (not `.fixture.json`) is deliberate: it matches the
+// `**/*.golden.json` governance.ignoreList glob (brain.config.json) — a
+// machine-generated snapshot whose generator (this file) is reviewed counts
+// as test data, not review surface, for the diff-size budget gate.
+const FIXTURE_PATH = join(dirname(fileURLToPath(import.meta.url)), 'sdd-layout.golden.json');
 const SELF_CHANGE_ID = 'issue-253-b1';
 
 // ── Facts extraction (capture-time only — reads the REAL tree) ──────────────
