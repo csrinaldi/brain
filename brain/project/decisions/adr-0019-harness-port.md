@@ -1,7 +1,7 @@
-# ADR-0019 (draft) — The `SDD_HARNESS` port: four environment surfaces, artifacts neutral by design
+# ADR-0019 — The `SDD_HARNESS` port: four environment surfaces, artifacts neutral by design
 
-**Status**: Draft (proposed in #250 / B0)
-**Date**: 07/12/2026 — Cristian Rinaldi
+**Status**: Accepted
+**Date**: 2026-07-12 — Cristian Rinaldi (proposed + accepted via #250 / B0; promoted with #253 / B1)
 
 ## Context
 
