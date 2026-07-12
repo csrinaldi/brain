@@ -30,6 +30,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveFeature } from "../lib/feature-resolution.mjs";
+import { changeDir, OPERATIONAL_ARTIFACTS } from "../../lib/sdd-layout.mjs";
 import { parseFrontmatter, serializeFrontmatter } from "../lib/resume-frontmatter.mjs";
 import { validateResume } from "../lib/resume-schema.mjs";
 import { currentBranch } from "../../lib/git-branch.mjs";
@@ -801,8 +802,8 @@ export async function featureCheckpoint(
     return;
   }
 
-  const changeDir = join(root, "openspec", "changes", resolvedFeature);
-  const rp = join(changeDir, "resume.md");
+  const targetDir = join(root, changeDir(resolvedFeature));
+  const rp = join(targetDir, OPERATIONAL_ARTIFACTS[0]);
 
   // 2. Read existing resume.md or build a minimal skeleton.
   let frontmatter = {};
@@ -879,7 +880,7 @@ export async function featureCheckpoint(
 
   // 7. CORE WRITE — pure filesystem; no engram save, no engram sync, no child
   //    process.  This is the REQ-E-1 invariant line.
-  mkdirSync(changeDir, { recursive: true });
+  mkdirSync(targetDir, { recursive: true });
   writeFileSync(rp, serializeFrontmatter(frontmatter, body));
   console.log(`  ✓ resume.md checkpointed for ${resolvedFeature}`);
 }
@@ -922,8 +923,8 @@ export async function featureResume(
     return;
   }
 
-  const changeDir = join(root, "openspec", "changes", resolvedFeature);
-  const rp = join(changeDir, "resume.md");
+  const targetDir = join(root, changeDir(resolvedFeature));
+  const rp = join(targetDir, OPERATIONAL_ARTIFACTS[0]);
 
   // 2. If resume.md is absent → informational message, exit 0.
   if (!existsSync(rp)) {
@@ -962,14 +963,14 @@ export async function featureResume(
   const featureProject = `brain-feature-${resolvedFeature}`;
   let files;
   try {
-    files = readdirSync(changeDir).filter((f) => f.endsWith(".md"));
+    files = readdirSync(targetDir).filter((f) => f.endsWith(".md"));
   } catch {
-    console.warn(`  ⚠ could not read change dir: ${changeDir}`);
+    console.warn(`  ⚠ could not read change dir: ${targetDir}`);
     return;
   }
 
   for (const filename of files) {
-    const filePath = join(changeDir, filename);
+    const filePath = join(targetDir, filename);
     let content;
     try {
       content = readFileSync(filePath, "utf8");
