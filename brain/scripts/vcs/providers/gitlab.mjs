@@ -342,6 +342,35 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
 }
 
 /**
+ * projectMergeSettings — the project-level merge gate with no protected-branch
+ * equivalent (issue #244 A4, Decision 2). only_allow_merge_if_pipeline_succeeds
+ * is GitLab's analog of GitHub required_status_checks and the load-bearing
+ * signal that actually blocks MRs (CP-A2b). Uses the glab session like
+ * capabilities()/branchProtect() — no pipeline-env read (GATE_FILE). `null` =
+ * uncomputable (read failed or unparsable), NEVER a fabricated `false`.
+ *
+ * @param {{ project?: string }}
+ * @returns {Promise<{ onlyAllowMergeIfPipelineSucceeds: boolean|null }>}
+ */
+export async function projectMergeSettings({ project = '' } = {}) {
+  const enc = encodeURIComponent(project);
+  const r = run('glab', ['api', `projects/${enc}`]);
+  if (!r.ok) return { onlyAllowMergeIfPipelineSucceeds: null };
+  try {
+    const v = JSON.parse(r.stdout).only_allow_merge_if_pipeline_succeeds;
+    // A 200 + parseable body does NOT guarantee the field is present — GitLab
+    // permission-gates some project attributes, so a missing field is a real,
+    // distinct case from "read failed"/"unparsable". `Boolean(undefined)`
+    // would fabricate `false` ("readable, not configured"); only a genuine
+    // boolean in the payload counts as computed — anything else is `null`
+    // (uncomputable), never a fabricated `false`.
+    return { onlyAllowMergeIfPipelineSucceeds: typeof v === 'boolean' ? v : null };
+  } catch {
+    return { onlyAllowMergeIfPipelineSucceeds: null };
+  }
+}
+
+/**
  * mrCreate — un-stubbed (issue #239 A3 Phase 2, REQ-A3-4) over
  * `POST /projects/:id/merge_requests`, via the shared `gitlabApiFetch`
  * transport (never a second hand-rolled fetch). `labels` normalizes to
