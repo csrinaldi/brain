@@ -289,6 +289,18 @@ export default {
   'memory.migrateV1.emptyObservationsHeader': 'Chunks solo de sesiones/prompts (observations: null — no es corrupción, 0 observaciones aportadas):',
   'memory.migrateV1.unparseableHeader':     'Archivos chunk no parseables (corrupción real — cantidad de observaciones desconocida):',
 
+  // ── memory/lib/unsupported-op.mjs — helper compartido de rechazo explícito (C3, issue #246) ──
+  'memory.op.unsupported':            "la operación '{op}' no está soportada por el backend de memoria '{backend}' (diferida — ver openspec/changes/issue-246-c3).",
+  'memory.save.engramUnsupported':    "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_save nativo de engram / 'engram save' en su lugar.",
+  'memory.search.engramUnsupported':  "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_search nativo de engram / 'engram search' en su lugar.",
+
+  // ── memory/backends/plainfiles.mjs — verbos cli save/search (C3, issue #246) ──
+  'memory.plainfiles.save.done':    '✓ guardado {id} → {file}',
+  'memory.plainfiles.save.secretFound': 'Se detectó un secreto en el registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
+  'memory.save.plainfilesIgnoredOpts': 'se ignoraron la(s) opción(es) {opts} — el formato de registro de plainfiles no tiene un campo para ellas (scope/topic son conceptos exclusivos de engram); el registro se guardó igualmente.',
+  'memory.plainfiles.search.empty': 'ℹ no se encontraron registros coincidentes.',
+  'memory.plainfiles.search.summary': '{count} registro(s) coincidente(s):',
+
   // ── brain-protect.mjs — arm-and-verify (issue #203) ───────────────────────────
   'protect.verify.unverifiable': '  Verificar: aún no hay check-runs en {branch} — no verificable hasta el primer PR.',
   'protect.verify.missing':      '  AVISO    : el check requerido "{context}" no tiene check-run coincidente aún — confirmar que el nombre del job sea exacto.',
