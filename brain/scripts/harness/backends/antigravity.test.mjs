@@ -7,23 +7,27 @@
 //     never throws (Phase 2, REQ-B2-1/2).
 // (c) end-to-end: real dispatch('antigravity', 'init', []) through the
 //     UNMODIFIED harness/cli.mjs dispatch path — proves n=3 with zero
-//     cli.mjs change (REQ-B2-1). This call also performs the REAL generation
-//     of the committed AGENTS.md at repo root (design's Phase 2.4 apply-time
-//     judgment: fold the real dispatch into the real generation call).
+//     cli.mjs change (REQ-B2-1). HERMETIC BY CONSTRUCTION: the test injects
+//     a capturing fake `_writeAgents`, so `init()` reads the REAL 5
+//     SOURCE_DOCS (default `_readDoc`) but NEVER touches the tracked
+//     `AGENTS.md` on disk. A fresh-context review (post-apply) found the
+//     earlier version wrote the real file as a side effect — masked by file
+//     ordering (the drift-guard happened to run first) but fragile: on
+//     reorder/parallelization, this test would "heal" a hand-edited
+//     `AGENTS.md` BEFORE the drift-guard could catch it, silently defeating
+//     the whole #601 ignoreList classification. The committed `AGENTS.md`'s
+//     regeneration is now EXCLUSIVELY a deliberate CLI act:
+//     `SDD_HARNESS=antigravity node brain/scripts/harness/cli.mjs init`
+//     (task 3.1) — never a side effect of `npm test`.
 //
 // Run with: npm test.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 // RED: fails until antigravity.mjs exists and exports these.
 import { SOURCE_DOCS, AGENTS_EMIT_PATH, compileAgentsMd, init } from './antigravity.mjs';
 import { dispatch } from '../cli.mjs';
-
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
 /** Capture console.warn lines while calling fn(). */
 async function captureWarn(fn) {
@@ -138,15 +142,22 @@ test('2.3: init() never throws when _writeAgents throws — warns, resolves', as
 });
 
 // ── (c) end-to-end: real dispatch through the UNMODIFIED cli.mjs ────────────
-// This is the REAL generation call — writes the actual AGENTS.md at repo root
-// from the actual 5 SOURCE_DOCS (design's Phase 2.4 apply-time judgment).
+// HERMETIC: injects a capturing fake `_writeAgents` so init() compiles from
+// the REAL 5 SOURCE_DOCS (default `_readDoc`, real repoRoot) but the write
+// lands in memory, never on the tracked AGENTS.md. Regenerating the real,
+// committed AGENTS.md is a separate, deliberate CLI act (task 3.1) — never a
+// side effect of running this test suite.
 
-test('2.4/3.1: dispatch("antigravity", "init", []) resolves through the REAL cli.mjs dispatch path with zero cli.mjs change, and generates the real AGENTS.md', async () => {
-  await assert.doesNotReject(dispatch('antigravity', 'init', []));
+test('2.4: dispatch("antigravity", "init", [opts]) resolves through the REAL cli.mjs dispatch path with zero cli.mjs change, compiling the real 5 SOURCE_DOCS to a scratch (non-disk) target — never the tracked AGENTS.md', async () => {
+  const scratchWrites = [];
+  const _writeAgents = (relPath, content) => scratchWrites.push({ relPath, content });
 
-  const generated = readFileSync(join(REPO_ROOT, AGENTS_EMIT_PATH), 'utf8');
-  assert.match(generated, /generated from/);
-  assert.match(generated, /— do not edit/);
+  await assert.doesNotReject(dispatch('antigravity', 'init', [{ _writeAgents }]));
+
+  assert.equal(scratchWrites.length, 1, '_writeAgents must be called exactly once');
+  assert.equal(scratchWrites[0].relPath, AGENTS_EMIT_PATH);
+  assert.match(scratchWrites[0].content, /generated from/);
+  assert.match(scratchWrites[0].content, /— do not edit/);
 });
 
 // Task 2.5 — confirm n=3: SDD_HARNESS=antigravity, plain, and gentle-ai are all
