@@ -24,6 +24,8 @@
 import { readdirSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { CHANGES_ROOT, OPERATIONAL_ARTIFACTS } from '../../lib/sdd-layout.mjs';
+
 /**
  * Resolves the active feature change-folder name.
  *
@@ -34,7 +36,7 @@ import { join } from 'node:path';
  *                         exist and no arg is provided ("ambiguous").
  */
 export function resolveFeature(root, explicitArg) {
-  const changesDir = join(root, 'openspec', 'changes');
+  const changesDir = join(root, CHANGES_ROOT);
 
   if (explicitArg !== undefined && explicitArg !== null && explicitArg !== '') {
     // Precedence 1: explicit arg — validate the dir exists.
@@ -78,7 +80,7 @@ export function resolveFeature(root, explicitArg) {
 
   // Precedence 3: >1 dirs — inspect each for resume.md to disambiguate.
   const withResume = candidates.filter((candidate) =>
-    existsSync(join(changesDir, candidate, 'resume.md')),
+    existsSync(join(changesDir, candidate, OPERATIONAL_ARTIFACTS[0])),
   );
 
   if (withResume.length === 1) {
