@@ -619,6 +619,7 @@ const ALLOWED_IMPORT_SPECIFIERS = [
   './lib/memory-manifest.mjs',
   './memory/lib/auto-resume.mjs',
   './i18n/t.mjs',
+  './lib/sdd-layout.mjs',
 ];
 
 function extractImportSpecifiers(source) {
