@@ -72,6 +72,20 @@ issue: ${issue}
 - No incluye: <...>
 `;
 
+const spec = `---
+status: draft
+issue: ${issue}
+---
+
+# Spec — ${heading}
+
+## Requisitos delta
+<Qué requisitos nuevos o modificados introduce este cambio. Vincular al issue #${issue}.>
+
+## Escenarios
+<GIVEN/WHEN/THEN de los casos que este cambio debe cubrir.>
+`;
+
 const design = `---
 status: draft
 issue: ${issue}
@@ -106,12 +120,13 @@ brain/core/methodology/consolidation-protocol.md>
 
 mkdirSync(changeDir, { recursive: true });
 writeFileSync(join(changeDir, "proposal.md"), proposal);
+writeFileSync(join(changeDir, "spec.md"), spec);
 writeFileSync(join(changeDir, "design.md"), design);
 writeFileSync(join(changeDir, "tasks.md"), tasks);
 
 console.log(`
   ✓ Change SDD creado: openspec/changes/${changeId}/
-      proposal.md  design.md  tasks.md
+      proposal.md  spec.md  design.md  tasks.md
 
   Siguiente: completá la propuesta y abrí la rama {tipo}/${changeId}.
   ({tipo}: feat | fix | chore | refactor | docs | ci | build)
