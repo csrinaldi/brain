@@ -15,6 +15,7 @@ this system. `brain/core/` is upstream and treated as read-only here.
 - [Consolidation protocol](core/methodology/consolidation-protocol.md) — how generic improvements flow upstream
 - [Agent authorities](core/methodology/agent-authorities.md) — what AI agents can and cannot do
 - [Harness contract](core/methodology/harness-contract.md) — abstract SDD verbs any harness must implement
+- [SDD canonical layout](core/methodology/sdd-layout.md) — normative openspec/changes/** layout: naming, required artifacts, operational artifacts, single-source accessor
 - [VCS contract](core/methodology/vcs-contract.md) — abstract VCS verbs any provider must implement
 - [Feature-working-memory contract](core/methodology/feature-working-memory-contract.md) — resume.md schema + checkpoint/resume verbs
 - [Memory record format](core/methodology/memory-format.md) — the brain-owned durable .memory/ record format

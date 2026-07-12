@@ -22,6 +22,7 @@ Reusable documentation — applies to any project that adopts this system.
 - [Consolidation protocol](core/methodology/consolidation-protocol.md) — how generic improvements flow upstream
 - [Agent authorities](core/methodology/agent-authorities.md) — what AI agents can and cannot do
 - [Harness contract](core/methodology/harness-contract.md) — abstract SDD verbs any harness must implement
+- [SDD canonical layout](core/methodology/sdd-layout.md) — normative openspec/changes/** layout: naming, required artifacts, operational artifacts, single-source accessor
 - [VCS contract](core/methodology/vcs-contract.md) — abstract VCS verbs any provider (gh/glab) must implement
 - [Feature-working-memory contract](core/methodology/feature-working-memory-contract.md) — the resume.md schema + feature-checkpoint/resume verbs
 - [Memory record format](core/methodology/memory-format.md) — the brain-owned durable .memory/ record format (schema, union merge, index)
@@ -63,6 +64,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0015](project/decisions/adr-0015-governance-v3-substrate-ladder.md) — Governance v3: six-level fail-closed gate ladder over observable evidence (L1–L6 + substrate rung ladder)
 - [ADR-0016](project/decisions/adr-0016-ci-context-normalization.md) — CI Context Normalization: One Seam Over Provider-Specific Pipeline Evidence
 - [ADR-0017](project/decisions/adr-0017-memory-format-owned-by-brain.md) — The Durable Memory Record Format Is Owned By Brain, Not By Engram
+- [ADR-0019](project/decisions/adr-0019-harness-port.md) — The SDD_HARNESS port: four environment surfaces, artifacts neutral by design
 
 ### Project-specific rules
 
