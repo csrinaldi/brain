@@ -10,21 +10,26 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, cpSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { artifactPaths } from './lib/sdd-layout.mjs';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT_SRC = join(__dirname, 'new-change.mjs');
+const LIB_SRC = join(__dirname, 'lib', 'sdd-layout.mjs');
 
 function makeIsolatedScript() {
   const tmpRoot = mkdtempSync(join(tmpdir(), 'brain-new-change-'));
   const scriptsDir = join(tmpRoot, 'brain', 'scripts');
-  mkdirSync(scriptsDir, { recursive: true });
+  const libDir = join(scriptsDir, 'lib');
+  mkdirSync(libDir, { recursive: true });
   const scriptDest = join(scriptsDir, 'new-change.mjs');
   cpSync(SCRIPT_SRC, scriptDest);
+  cpSync(LIB_SRC, join(libDir, 'sdd-layout.mjs'));
   return { tmpRoot, scriptDest };
 }
 
@@ -45,6 +50,63 @@ test('new-change: scaffolds all four SDD artifacts (proposal, spec, design, task
       ['design.md', 'proposal.md', 'spec.md', 'tasks.md'],
       'scaffold must write exactly the four required SDD artifacts',
     );
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+// ── REQ-B1-1 (task 2.4): the four write targets equal
+// join(repoRoot, artifactPaths(id).*) exactly — the accessor, not a
+// re-derived literal, owns the scaffold paths. ──────────────────────────────
+
+test('new-change: the four write targets are exactly join(repoRoot, artifactPaths(changeId).*)', () => {
+  const { tmpRoot, scriptDest } = makeIsolatedScript();
+  try {
+    const result = spawnSync(
+      'node',
+      [scriptDest, '--issue', '888888', '--title', 'path wiring check'],
+      { encoding: 'utf8' },
+    );
+    assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.stderr}`);
+
+    const changeId = 'issue-888888-path-wiring-check';
+    const paths = artifactPaths(changeId);
+    for (const key of ['proposal', 'spec', 'design', 'tasks']) {
+      const abs = join(tmpRoot, paths[key]);
+      assert.ok(existsSync(abs), `expected ${paths[key]} to exist at ${abs}`);
+    }
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+// ── REQ-B1-5 (task 5.2/5.3): slug mandate — ERROR when absent, never a
+// derived placeholder (#595 pin 2). ──────────────────────────────────────────
+
+test('new-change: rejects (no dir created) when --title/slug is omitted', () => {
+  const { tmpRoot, scriptDest } = makeIsolatedScript();
+  try {
+    const result = spawnSync('node', [scriptDest, '--issue', '777777'], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0, 'expected a non-zero exit when --title is omitted');
+    assert.ok(
+      !existsSync(join(tmpRoot, 'openspec', 'changes', 'issue-777777')),
+      'must NOT create a bare issue-<N> placeholder dir',
+    );
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('new-change: with --title produces issue-<N>-<slug> exactly as before (unchanged path)', () => {
+  const { tmpRoot, scriptDest } = makeIsolatedScript();
+  try {
+    const result = spawnSync(
+      'node',
+      [scriptDest, '--issue', '666666', '--title', 'unchanged path'],
+      { encoding: 'utf8' },
+    );
+    assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.stderr}`);
+    assert.ok(existsSync(join(tmpRoot, 'openspec', 'changes', 'issue-666666-unchanged-path')));
   } finally {
     rmSync(tmpRoot, { recursive: true, force: true });
   }
