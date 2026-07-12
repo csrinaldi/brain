@@ -18,6 +18,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
+import { CHANGES_ROOT } from '../../lib/sdd-layout.mjs';
+
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 // The literal invocation this tripwire cares about, either form.
@@ -44,7 +46,9 @@ const DECISION_REFERENCE_RE = /(sdd\/issue-246-c3\/constraints|obs\s*#?578|actor
 // openspec/changes/** legitimately discuss `memory save` at length while
 // SPECIFYING the feature — they are not runbooks instructing a human, and
 // must never trip the tripwire purely for describing what they design.
-const EXEMPT_PATH_RE = /^openspec\/changes\//;
+// Consolidated onto sdd-layout.mjs's CHANGES_ROOT (B1, REQ-B1-3, design §3) —
+// no independent `openspec/changes` literal in this test file anymore.
+const EXEMPT_PATH_RE = new RegExp(`^${CHANGES_ROOT}/`);
 
 function _defaultListTrackedMarkdownFiles(root) {
   const r = spawnSync('git', ['ls-files', '*.md'], { encoding: 'utf8', cwd: root });

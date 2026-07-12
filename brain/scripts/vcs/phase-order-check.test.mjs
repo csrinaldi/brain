@@ -11,7 +11,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { evaluatePhaseOrder, runPhaseOrderCheck, main, BASELINE_EXEMPT_DIRS } from './phase-order-check.mjs';
+import { evaluatePhaseOrder, runPhaseOrderCheck, main } from './phase-order-check.mjs';
+import { LEGACY_GRANDFATHERED } from '../lib/sdd-layout.mjs';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -420,7 +421,13 @@ test('Gap G1: change dir with specs/foo/spec.md (nested convention) is detected 
 });
 
 test('baseline (REQ-L4-5): pre-v3 legacy dir with no spec artifact → exempt, not fail, in detection mode', () => {
-  for (const legacyDir of BASELINE_EXEMPT_DIRS) {
+  // The original 3-dir BASELINE_EXEMPT_DIRS literal (deleted in B1, REQ-B1-3)
+  // — a strict subset of LEGACY_GRANDFATHERED — is exercised directly here so
+  // this test keeps proving the "no spec artifact at all" exemption case,
+  // independent of the other 9 sealed dirs which all carry a nested spec.
+  const HISTORICAL_BASELINE_EXEMPT_DIRS = ['installer-versionado', 'vcs-adapter', 'cli-i18n'];
+  for (const legacyDir of HISTORICAL_BASELINE_EXEMPT_DIRS) {
+    assert.ok(LEGACY_GRANDFATHERED.includes(legacyDir), `expected ${legacyDir} in LEGACY_GRANDFATHERED`);
     const deps = makeFakeDeps({
       changedFiles: ['brain/scripts/vcs/foo.mjs', `openspec/changes/${legacyDir}/tasks.md`],
       filesAfter: {

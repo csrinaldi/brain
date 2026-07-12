@@ -14,10 +14,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadContext } from './ci-context.mjs';
+import { CHANGES_ROOT, LEGACY_GRANDFATHERED } from '../lib/sdd-layout.mjs';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const CHANGE_DIR_PREFIX = 'openspec/changes/';
+const CHANGE_DIR_PREFIX = `${CHANGES_ROOT}/`;
 
 // Allowlist subtracted from the "impl" set (Rule C): files that never count as
 // implementation code even when they live outside openspec/changes/**.
@@ -175,14 +176,13 @@ export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [] } = {}) 
 
 // ── Baseline / grandfather allowlist (REQ-L4-5, Gap G3) ────────────────────────
 //
-// Pre-v3 legacy openspec/changes/** dirs that carry proposal.md + design.md +
-// tasks.md but no spec artifact under either convention (spec.md or
-// specs/*/spec.md) — they predate even the spec.md convention. Hardcoded per
-// Micro-decisions (tasks.md line 210), analogous to brain-audit.mjs's
-// `governance.auditBaseline`. Not `brain.config.json`-driven yet — promote to
-// config-driven only if a second consumer needs it.
-
-export const BASELINE_EXEMPT_DIRS = ['installer-versionado', 'vcs-adapter', 'cli-i18n'];
+// Pre-v3 legacy openspec/changes/** dirs, sourced from the B0-sealed
+// LEGACY_GRANDFATHERED set (sdd-layout.mjs) — REQ-B1-3. The original 3-dir
+// BASELINE_EXEMPT_DIRS literal (installer-versionado, vcs-adapter, cli-i18n)
+// is a strict subset of the sealed 12 (proven by sdd-layout.test.mjs 1.7), so
+// this swap does not change which dirs are exempted for any existing dir —
+// the 9 additional grandfathered dirs all carry a nested spec artifact and
+// never produced a downgradeable `fail` in the first place (design §2.1).
 
 /**
  * Post-processes an evaluatePhaseOrder() result: any `fail` finding attributed
@@ -194,7 +194,7 @@ export const BASELINE_EXEMPT_DIRS = ['installer-versionado', 'vcs-adapter', 'cli
  * @param {string[]} [baselineDirs]
  * @returns {{level: string, findings: Array}}
  */
-export function applyBaselineExemption(evaluation, baselineDirs = BASELINE_EXEMPT_DIRS) {
+export function applyBaselineExemption(evaluation, baselineDirs = LEGACY_GRANDFATHERED) {
   const findings = evaluation.findings.map(f => {
     if (f.change && baselineDirs.includes(f.change) && f.level === 'fail') {
       return {

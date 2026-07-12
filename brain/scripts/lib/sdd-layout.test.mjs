@@ -28,8 +28,6 @@ import {
   missingRequiredArtifacts,
 } from './sdd-layout.mjs';
 
-import { BASELINE_EXEMPT_DIRS } from '../vcs/phase-order-check.mjs';
-
 const SCRIPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // ── Task 1.2: the four frozen constants ──────────────────────────────────────
@@ -105,9 +103,14 @@ test('1.6: rehearses session-start.mjs:70-77 delimiter-anchored match — "issue
 // ── Task 1.7: isGrandfathered — rehearses phase-order-check.mjs's BASELINE_EXEMPT_DIRS
 // (subset proof) + check-refs.mjs:96-112's S-1 per-dir loop ──
 
-test('1.7: isGrandfathered — BASELINE_EXEMPT_DIRS is a strict subset of LEGACY_GRANDFATHERED (proves B1\'s planned swap is behavior-preserving)', () => {
-  assert.equal(BASELINE_EXEMPT_DIRS.length, 3);
-  for (const dir of BASELINE_EXEMPT_DIRS) {
+test('1.7: isGrandfathered — the historical BASELINE_EXEMPT_DIRS (deleted in B1, REQ-B1-3) is a strict subset of LEGACY_GRANDFATHERED (proves B1\'s swap was behavior-preserving)', () => {
+  // phase-order-check.mjs's own BASELINE_EXEMPT_DIRS export was removed in B1
+  // (issue #253) once its default arg was swapped to LEGACY_GRANDFATHERED —
+  // the 3 historical names are hardcoded here (documentation-only) since
+  // there is no longer a live export to import for the subset proof.
+  const HISTORICAL_BASELINE_EXEMPT_DIRS = ['installer-versionado', 'vcs-adapter', 'cli-i18n'];
+  assert.equal(HISTORICAL_BASELINE_EXEMPT_DIRS.length, 3);
+  for (const dir of HISTORICAL_BASELINE_EXEMPT_DIRS) {
     assert.ok(isGrandfathered(dir), `expected ${dir} to be grandfathered`);
   }
 });
