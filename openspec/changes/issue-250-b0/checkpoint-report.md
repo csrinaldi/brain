@@ -4,6 +4,16 @@
 > port with a second inhabitant on its own `init` op, BEFORE the real baptism (B2/Antigravity).
 > **Hand this report + the package to the external reviewer.** Work pauses for the verdict; B1 does not start
 > until CP-B0 is signed off.
+>
+> **⚠ CP-B0 RE-EMITTED (prior APPROVE annulled).** After the first APPROVE, the `decision-gate` (rung 1) caught
+> a TRUE-POSITIVE promotion-doctrine violation that all three review layers (two fresh-context agent reviews +
+> the external verdict) missed: the normative `brain/core/methodology/sdd-layout.md` + the `HOME.md`/template
+> nav entries were shipped in an AGENT PR. Doc-zone `brain/core/**` + HOME are promoted only by a HUMAN MR,
+> co-promoted with their ADR (the #216 pattern) — never from an agent slice (C1b was CODE zone, not precedent).
+> **Fix (this PR):** `sdd-layout.md` moved to `brain-drafts/` beside the ADR draft; the HOME/template edits
+> reverted; the human co-promotion MR is now an explicit B1 deliverable (below). A checkpoint approves BOTH
+> content AND packaging — the content was correct, so this re-emits over the corrected tree. Moral recorded:
+> the mechanical gate caught what human/agent judgment did not.
 
 ## The reframe, now written as contract
 Measured (engram `sdd/track-b/contract-inventory` #584): the `SDD_HARNESS` dispatcher supports ONE op (`init`);
@@ -19,9 +29,12 @@ pure, neutral core.
 1. **ADR-0019 draft** — `openspec/changes/issue-250-b0/brain-drafts/adr-draft-harness-port.md`. Number
    VERIFIED against both `brain/project/decisions/` and `openspec/**/brain-drafts/`: 0017 = memory-format
    (Accepted), 0018 = gitlab-governance-pipeline (A2 draft), 0019 = free. Monotonic — never reused.
-2. **Normative `sdd-layout.md`** — `brain/core/methodology/sdd-layout.md`. Canonical flat `spec.md` + the
-   LEGACY-ACCEPTED nested `specs/*/spec.md` (15 flat / 10 nested measured; flat preference); mandatory
-   `issue-<N>-<slug>` slug; `resume.md` documented as OPERATIONAL/EPHEMERAL (never a gate); the archive path.
+2. **Normative `sdd-layout.md` (DRAFT)** — `openspec/changes/issue-250-b0/brain-drafts/sdd-layout.md`. Canonical
+   flat `spec.md` + the LEGACY-ACCEPTED nested `specs/*/spec.md` (15 flat / 10 nested measured; flat preference);
+   mandatory `issue-<N>-<slug>` slug; `resume.md` documented as OPERATIONAL/EPHEMERAL (never a gate); the archive
+   path. **Ships as a DRAFT beside the ADR** — the two normative artifacts travel together to their human
+   co-promotion MR (B1). Its `brain/core/methodology/` home + the HOME nav entry are NOT in this agent PR
+   (promotion doctrine — see the re-emission note above).
 3. **The `sdd-layout.mjs` accessor + drift-guard** — `brain/scripts/lib/sdd-layout.mjs`: `REQUIRED_ARTIFACTS`
    (frozen 4), `OPERATIONAL_ARTIFACTS`, `LEGACY_GRANDFATHERED` (the SEALED 12, with the lock comment), path
    helpers (`changeDir`/`artifactPaths`/`archivePath`/`parseChangeId`/`isGrandfathered`/`hasSpec`/
@@ -69,6 +82,11 @@ pure, neutral core.
    — B0's own tests proved `BASELINE_EXEMPT_DIRS` is a strict subset of the sealed 12).
 3. Add drift-guard **A3** (consumers-reference-the-module).
 4. Promote the ADR-0019 draft to `brain/project/decisions/` at B1/archive.
+5. **The HUMAN co-promotion MR** (explicit now, was implicit) — moves BOTH normative artifacts out of
+   `brain-drafts/` in one human MR: `ADR-0019` → `brain/project/decisions/` **and** `sdd-layout.md` →
+   `brain/core/methodology/`, plus the `HOME.md` + `HOME.template.md` nav entries. Run the #216 errata
+   checklist (banner, `Status:`, links, ISO date) and re-verify the number against `brain/project/decisions/`
+   + `openspec/**/brain-drafts/` at promotion time. This is doc-zone work: human MR only, never an agent PR.
 
 ## Acceptance
 - **This slice:** the port contract is written; the accessor + drift-guard exist and self-test; `SDD_HARNESS=plain`

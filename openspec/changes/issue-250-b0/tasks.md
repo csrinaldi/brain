@@ -1,5 +1,13 @@
 # Tasks — The Harness Port Contract, Written Down (slice B0, #250)
 
+> **PLAN-DEVIATION (post-review doctrine fix — CP-B0 re-emitted):** `decision-gate` (rung 1) caught a
+> promotion-doctrine violation the review layers missed — `brain/core/methodology/sdd-layout.md` + HOME/template
+> nav edits were in an agent PR. Doc-zone `brain/core/**` + HOME promote only via a HUMAN co-promotion MR
+> (#216 pattern), never an agent slice. FIX: `sdd-layout.md` now ships as a DRAFT at
+> `openspec/changes/issue-250-b0/brain-drafts/sdd-layout.md` (beside the ADR); HOME/template edits reverted;
+> the human co-promotion MR is an explicit B1 deliverable. So task 4.1 below reads "brain/core/…" but the file
+> actually landed in `brain-drafts/` — corrected, not re-run.
+
 > `sdd-layout.mjs` accessor + drift-guard (A1+A2) + `plain.mjs` backend + `sdd-layout.md` + ADR-0019 draft.
 > B0 does NOT touch the 6 measured call sites (B1). Strict TDD (RED → GREEN) for every code task. Rehearsal
 > tests hardening (owner ruling #587): the accessor's tests are written AS the 6 measured sites will call
