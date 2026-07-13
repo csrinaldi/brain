@@ -14,11 +14,18 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadContext } from './ci-context.mjs';
-import { CHANGES_ROOT, LEGACY_GRANDFATHERED } from '../lib/sdd-layout.mjs';
+import { archivePath, CHANGES_ROOT, LEGACY_GRANDFATHERED } from '../lib/sdd-layout.mjs';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const CHANGE_DIR_PREFIX = `${CHANGES_ROOT}/`;
+
+// The accessor-owned archive container's directory name (issue #264), derived
+// from archivePath() rather than hardcoded — if the archive location ever
+// relocates, this follows the accessor instead of drifting out of sync. It is
+// a container of archived changes, never an in-flight change itself, so it
+// must never be evaluated as a `touchedDirs` entry (Rule A/C false positive).
+const ARCHIVE_DIR_NAME = archivePath('').slice(CHANGE_DIR_PREFIX.length).split('/')[0];
 
 // Allowlist subtracted from the "impl" set (Rule C): files that never count as
 // implementation code even when they live outside openspec/changes/**.
@@ -155,8 +162,10 @@ function evaluateRuleB(touchedDirs) {
 export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [] } = {}) {
   const impl = changedFiles.filter(f => !f.startsWith(CHANGE_DIR_PREFIX) && !isAllowlisted(f));
 
-  const touchedDirs = changeDirs.filter(dir =>
-    changedFiles.some(f => f.startsWith(`${CHANGE_DIR_PREFIX}${dir.name}/`))
+  const touchedDirs = changeDirs.filter(
+    dir =>
+      dir.name !== ARCHIVE_DIR_NAME &&
+      changedFiles.some(f => f.startsWith(`${CHANGE_DIR_PREFIX}${dir.name}/`))
   );
 
   const findings = [

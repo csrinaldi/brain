@@ -211,6 +211,84 @@ test('Rule B: unknown/custom status, unchanged status, absent frontmatter, forwa
   assert.equal(absentFrontmatter.findings.filter(f => f.rule === 'B').length, 0);
 });
 
+// ── Archive-location exclusion (#264) ───────────────────────────────────────
+//
+// E1 introduced the accessor-owned archive container `openspec/changes/archive/<iid>/`
+// (sdd-layout.mjs archivePath()). A PR that touches it must NOT be evaluated as if
+// `archive` were itself an in-flight change dir — it is a container, not a change.
+
+test('#264: a PR touching the archive container plus its own complete change dir produces zero Rule A/C findings for the archive entry', () => {
+  // Mirrors PR #261's real shape: impl code + the archiving change's own
+  // (complete) change dir + the actual archived-into-container files. Before
+  // the fix, `archive` was itself evaluated as a touched change dir and (being
+  // incomplete/unattributed) failed Rule A and Rule C.
+  const result = evaluatePhaseOrder({
+    changedFiles: [
+      'brain/scripts/lib/sdd-layout.mjs',
+      'openspec/changes/issue-999-foo/tasks.md',
+      'openspec/changes/archive/999/proposal.md',
+      'openspec/changes/archive/999/tasks.md',
+    ],
+    changeDirs: [
+      makeDir({ name: 'issue-999-foo' }), // complete, checkedTasks: 1 — the real change
+      // Mirrors what the git-I/O wrapper's buildChangeDir('archive', ...) would
+      // produce today: the archive/ container root carries none of the four
+      // artifacts and no checked tasks — it is not a change dir at all.
+      {
+        name: 'archive',
+        hasProposal: false,
+        hasSpec: false,
+        hasDesign: false,
+        hasTasks: false,
+        checkedTasks: 0,
+        statusBefore: undefined,
+        statusAfter: undefined,
+      },
+    ],
+  });
+  assert.equal(result.findings.filter(f => f.change === 'archive').length, 0, 'expected no finding attributed to the archive container');
+  assert.equal(result.findings.filter(f => f.rule === 'A').length, 0, 'expected no Rule A finding');
+  assert.equal(result.findings.filter(f => f.rule === 'C').length, 0, 'expected no Rule C finding');
+  assert.equal(result.level, 'pass');
+});
+
+test('#264 regression: a real in-flight change with impl code but no spec.md/design.md still triggers Rule A/C', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: [
+      'brain/scripts/lib/sdd-layout.mjs',
+      'openspec/changes/issue-999-x/tasks.md',
+    ],
+    changeDirs: [
+      makeDir({
+        name: 'issue-999-x',
+        hasSpec: false,
+        hasDesign: false,
+        checkedTasks: 0,
+      }),
+    ],
+  });
+  assert.equal(result.level, 'fail');
+  const ruleAFinding = result.findings.find(f => f.rule === 'A');
+  assert.ok(ruleAFinding, 'expected a Rule A finding for the real in-flight change');
+  assert.equal(ruleAFinding.change, 'issue-999-x');
+  const ruleCFinding = result.findings.find(f => f.rule === 'C');
+  assert.ok(ruleCFinding, 'expected a Rule C finding for the real in-flight change');
+  assert.equal(ruleCFinding.change, 'issue-999-x');
+});
+
+test('#264: ARCHIVE_DIR_NAME is derived from sdd-layout.archivePath(), no hardcoded literal string', () => {
+  const srcPath = fileURLToPath(new URL('./phase-order-check.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  assert.match(src, /archivePath\(/, 'expected ARCHIVE_DIR_NAME to be derived via the archivePath() accessor');
+  const derivationLine = src.split('\n').find(l => l.includes('ARCHIVE_DIR_NAME ='));
+  assert.ok(derivationLine, 'expected an ARCHIVE_DIR_NAME assignment line');
+  assert.doesNotMatch(
+    derivationLine,
+    /['"]archive['"]/,
+    "ARCHIVE_DIR_NAME's own assignment line must not hardcode the literal string 'archive'"
+  );
+});
+
 // ── Aggregation — level + findings across rules (REQ-L4-1) ────────────────────
 
 test('aggregation: level is pass and findings is empty when no rule reports a violation', () => {
