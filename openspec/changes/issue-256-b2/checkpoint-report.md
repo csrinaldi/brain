@@ -38,7 +38,12 @@ commit citing the file + tier, artifact-verified (zero commits)**. So the baptis
 - **Classification ordering:** the drift-guard is committed + green BEFORE the ignoreList classification commit
   (Pin 2 — the chain justifies the classification, so the chain comes first).
 - **`npm test` 1441/1441** · `brain:repo:check` · `brain:nav` · `brain:change:verify` green. Counted diff
-  **146/400** (`AGENTS.md` excluded post-classification; tests + openspec budget-free). No `size:exception`.
+  **204/400** (`AGENTS.md` excluded post-classification; tests + openspec budget-free). No `size:exception`.
+- **Inaugural-read fix (Pin 4 did its job):** the debut read caught that spliced source-doc relative links
+  (e.g. `../docs/adoption.md`, correct from `brain/HOME.md`) pointed OUTSIDE the repo from `AGENTS.md` at
+  root — broken nav for a consumer that FOLLOWS the file (Exp 4). Fixed in-PR: `compileAgentsMd` now REBASES
+  each relative link to the emit location (36 links rebased; URLs/anchors untouched); `AGENTS.md` regenerated
+  via the CLI; drift-guard re-green byte-equal; hermeticity intact. `npm test` 1446/1446.
 
 ## Pin 4 — read the inaugural `AGENTS.md` once
 `AGENTS.md` is a 473-line GENERATED file (the drift-guard covers every future regeneration). The debut file
