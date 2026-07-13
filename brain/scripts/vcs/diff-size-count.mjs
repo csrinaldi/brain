@@ -15,6 +15,19 @@
 // `**/*.golden.json` is scoped to that exact suffix in brain.config.json's
 // governance.ignoreList: broad enough to exempt legitimate generated
 // snapshots, narrow enough that it is not a general size-budget escape hatch.
+//
+// DOCTRINE EXTENDED (issue #256/B2, owner ruling #601 Pin 2): a GENERATED
+// operational artifact whose DERIVATION CHAIN is guarded (reviewed generator
+// + reviewed/promoted sources + drift-guard byte-equality) = the review
+// surface is the CHAIN, not the emitted file. Not "it's generated" alone —
+// "generated AND the chain covers it". For `AGENTS.md` (the exact literal in
+// governance.ignoreList, not a glob — narrower than `**/*.golden.json`,
+// correct for a single named artifact): generator =
+// `antigravity.mjs`/`compileAgentsMd` (reviewed); sources = the 5 canonical
+// `brain/` docs (reviewed/promoted, pre-existing); drift-guard =
+// `antigravity.drift.test.mjs` (byte-equality regenerate-and-diff). This is
+// this-repo-local policy, same pattern as B1's `**/*.golden.json` — never
+// promoted into `config-migrations.mjs`'s shipped defaults.
 
 import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';

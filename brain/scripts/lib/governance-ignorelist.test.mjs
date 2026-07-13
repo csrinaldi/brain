@@ -19,3 +19,19 @@ test('brain.config.json governance.ignoreList includes the 3 lockfile globs (ali
     assert.ok(ignoreList.includes(glob), `governance.ignoreList must include ${glob}`);
   }
 });
+
+// Issue #256, B2 Half 1, owner ruling #601 Pin 1: AGENTS.md is a GENERATED
+// operational artifact whose derivation chain is guarded (reviewed generator
+// antigravity.mjs#compileAgentsMd + reviewed/promoted sources + drift-guard
+// byte-equality, antigravity.drift.test.mjs) — the review surface is the
+// chain, not the emitted file. Classified as a LITERAL (root file, not a
+// glob) — this-repo-local policy, same pattern as B1's `**/*.golden.json`,
+// never promoted into config-migrations.mjs's shipped defaults.
+test('brain.config.json governance.ignoreList includes the exact literal AGENTS.md (issue #256 B2, owner ruling #601)', () => {
+  const config = JSON.parse(readFileSync(join(REPO_ROOT, 'brain.config.json'), 'utf8'));
+  const ignoreList = config.governance?.ignoreList ?? [];
+  assert.ok(
+    ignoreList.includes('AGENTS.md'),
+    'governance.ignoreList must include the exact literal "AGENTS.md" (not a glob)',
+  );
+});

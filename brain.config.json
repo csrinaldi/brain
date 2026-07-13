@@ -17,6 +17,7 @@
       "**/*.golden.json",
       "**/*.test.mjs",
       ".memory/**",
+      "AGENTS.md",
       "openspec/changes/**",
       "package-lock.json",
       "pnpm-lock.yaml",
