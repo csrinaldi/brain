@@ -37,30 +37,20 @@ function commit(git, dir, files, message) {
 }
 
 /**
- * Build a real gzip'd chunk Buffer containing a single session_summary observation.
- * This mirrors the engram export format: a gzip of a single JSON object
- * { sessions: [], observations: [...] } (brittle external dependency — see brain-audit.mjs).
+ * Build a plaintext record string containing a single session_summary observation.
  */
-function makeSessionSummaryChunk() {
-  const payload = JSON.stringify({
-    sessions: [],
-    observations: [
-      {
-        id: 1,
-        sync_id: 'sync-1',
-        session_id: 'sess-1',
-        type: 'session_summary',
-        title: 'Session summary: brain',
-        content: 'Test session summary',
-        project: 'brain',
-        scope: 'project',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-    ],
-  });
-  return gzipSync(Buffer.from(payload, 'utf8'));
+function makeSessionSummaryRecord() {
+  return JSON.stringify({
+    id: 'rec-1',
+    ts: '2026-07-12T12:00:00Z',
+    actor: '@test',
+    actorKind: 'human',
+    type: 'session_summary',
+    project: 'brain',
+    content: 'Test session summary',
+  }) + '\n';
 }
+
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -77,10 +67,10 @@ test('brain-audit: PASS merge — emits [PASS] and exits 0', (t) => {
   //   issueLink   → "Closes #1" in commit message
   //   diffSize    → tiny diff
   //   adrPresence → neither ADR nor HOME.md changed → pass (no ADR needed)
-  //   memoryPresence → .memory/chunks/ contains a valid session_summary observation
+  //   memoryPresence → .memory/records/ contains a valid session_summary observation
   git('checkout', '-b', 'feature/good');
   commit(git, dir,
-    { '.memory/chunks/session.jsonl.gz': makeSessionSummaryChunk() },
+    { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() },
     'feat: good feature Closes #1 (#1)');
 
   git('checkout', 'main');
@@ -162,8 +152,8 @@ test('brain-audit: --first-parent excludes nested slice merges', (t) => {
   git('merge', '--no-ff', 'sub/slice1', '-m',
     'Merge sub/slice1 into feature/big (Part of #5)');  // M2 — no Closes #N
 
-  // (D) finalize feature: add memory chunk with a session_summary observation
-  commit(git, dir, { '.memory/chunks/session.jsonl.gz': makeSessionSummaryChunk() },
+  // (D) finalize feature: add memory record with a session_summary observation
+  commit(git, dir, { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() },
     'chore: finalize (Part of #5)');
 
   // (E) merge feature/big into main — M1: the integration merge
@@ -227,7 +217,7 @@ test('brain-audit: baseline skips pre-baseline merges (no false failure)', (t) =
 
   // (D) feature/good — after the baseline tag; has all invariants satisfied
   git('checkout', '-b', 'feature/good');
-  commit(git, dir, { '.memory/chunks/s.jsonl.gz': makeSessionSummaryChunk() },
+  commit(git, dir, { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() },
     'feat: after baseline Closes #1');
   git('checkout', 'main');
   git('merge', '--no-ff', 'feature/good', '-m', 'Merge feature/good Closes #1');  // MERGE_GOOD
@@ -268,7 +258,7 @@ test('brain-audit: invalid baseline ref warns and falls back to auditing all', (
 
   // One good merge after the config
   git('checkout', '-b', 'feature/ok');
-  commit(git, dir, { '.memory/chunks/s.jsonl.gz': makeSessionSummaryChunk() },
+  commit(git, dir, { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() },
     'feat: good Closes #1');
   git('checkout', 'main');
   git('merge', '--no-ff', 'feature/ok', '-m', 'Merge feature/ok Closes #1');
@@ -288,25 +278,25 @@ test('brain-audit: invalid baseline ref warns and falls back to auditing all', (
     `expected [PASS] in stdout after fallback:\n${r.stdout}`);
 });
 
-// ── real gzip chunk path — session_summary causes memoryPresence to pass ─────
+// ── real records path — session_summary causes memoryPresence to pass ─────
 //
-// This test is the canonical proof that the full real-chunk path works end-to-end:
-// brain-audit reads the .memory/chunks/*.jsonl.gz, gunzip+parses the chunk,
+// This test is the canonical proof that the full real-records path works end-to-end:
+// brain-audit reads the .memory/records/*.jsonl, parses the records,
 // extracts the session_summary observation, and memoryPresence returns pass.
-test('brain-audit: real gzip chunk with session_summary → memoryPresence passes', (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'audit-realchunk-'));
+test('brain-audit: real records with session_summary → memoryPresence passes', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-realrecords-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
 
-  git('checkout', '-b', 'feature/real-chunk');
+  git('checkout', '-b', 'feature/real-records');
   commit(git, dir,
-    { '.memory/chunks/real.jsonl.gz': makeSessionSummaryChunk() },
-    'feat: real chunk Closes #2');
+    { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() },
+    'feat: real records Closes #2');
   git('checkout', 'main');
-  git('merge', '--no-ff', 'feature/real-chunk', '-m',
-    'Merge feature/real-chunk Closes #2');
+  git('merge', '--no-ff', 'feature/real-records', '-m',
+    'Merge feature/real-records Closes #2');
 
   const r = spawnSync('node', [AUDIT_SCRIPT, 'HEAD~1..HEAD'], {
     cwd: dir, encoding: 'utf8',
@@ -320,13 +310,13 @@ test('brain-audit: real gzip chunk with session_summary → memoryPresence passe
     `memoryPresence must not appear in output when passing:\n${r.stdout}`);
 });
 
-// ── corrupt chunk is skipped — no crash ───────────────────────────────────────
+// ── corrupt record line is skipped — no crash ─────────────────────────────────
 //
-// When a chunk file is present but is not valid gzip (or has unexpected structure),
+// When a record file is present but has an invalid JSON line,
 // brain-audit must skip it silently and NOT crash.  The merge will fail the
 // memoryPresence check (no valid session_summary), but the audit process itself
 // must exit cleanly (not with an unhandled exception).
-test('brain-audit: corrupt gzip chunk is skipped — audit does not crash', (t) => {
+test('brain-audit: corrupt record line is skipped — audit does not crash', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-corrupt-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -334,10 +324,10 @@ test('brain-audit: corrupt gzip chunk is skipped — audit does not crash', (t) 
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
 
   git('checkout', '-b', 'feature/corrupt');
-  // Write a .jsonl.gz file that is NOT valid gzip — should be caught and skipped
+  // Write a .jsonl file that is NOT valid JSON — should be caught and skipped
   commit(git, dir,
-    { '.memory/chunks/corrupt.jsonl.gz': 'this is not gzip data at all' },
-    'feat: corrupt chunk Closes #3');
+    { '.memory/records/2026-07.jsonl': 'this is not json data at all\n' },
+    'feat: corrupt record Closes #3');
   git('checkout', 'main');
   git('merge', '--no-ff', 'feature/corrupt', '-m',
     'Merge feature/corrupt Closes #3');

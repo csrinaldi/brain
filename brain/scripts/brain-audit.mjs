@@ -25,7 +25,7 @@ import { adrPresence } from './governance/checks/adr-presence.mjs';
 import { memoryPresence } from './governance/checks/memory-presence.mjs';
 import { getVcs } from './vcs/cli.mjs';
 import { parsePrNumber, shouldSkipSize, isAfterBaseline, selectIssueLinkBody } from './lib/audit-helpers.mjs';
-import { readChunkObservations } from './lib/chunk-reader.mjs';
+import { readRecordObservations } from './memory/lib/store.mjs';
 
 function git(args, cwd = process.cwd()) {
   try {
@@ -132,10 +132,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // VCS not configured — size:exception label checks will not run
     }
 
-    // Read the on-disk .memory/chunks/ ONCE (repo-level, not per-merge): the same
+    // Read the on-disk .memory/records/ ONCE (repo-level, not per-merge): the same
     // observations are passed to memoryPresence for every merge. Best-effort — a
-    // missing/corrupt/schema-drifted chunk yields fewer observations, never a crash.
-    const allObservations = readChunkObservations(cwd);
+    // missing/corrupt/schema-drifted record yields fewer observations, never a crash.
+    const allObservations = readRecordObservations({ recordsDir: join(cwd, '.memory', 'records') });
 
     // --first-parent: audit only the INTEGRATION merges that landed on the audited
     // branch (e.g. main), NOT the nested slice merges inside a feature branch.
