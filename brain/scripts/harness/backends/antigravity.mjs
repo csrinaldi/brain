@@ -19,7 +19,7 @@
 //            writes it to AGENTS_EMIT_PATH. Never throws.
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, posix as posixPath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -44,6 +44,59 @@ export const AGENTS_EMIT_PATH = 'AGENTS.md';
 const REGENERATE_HINT = 'SDD_HARNESS=antigravity npm run brain:env:init';
 
 // ---------------------------------------------------------------------------
+// Relative-link rebasing (CP-B2 inaugural-read finding, owner ruling).
+//
+// A splice-verbatim compile reproduces each source doc's relative markdown
+// links UNCHANGED — but a relative link is only correct relative to ITS OWN
+// source doc's location. Spliced into AGENTS.md at repo root, the SAME link
+// text resolves to a DIFFERENT (often outside-the-repo) target: e.g.
+// brain/HOME.md's `../docs/adoption.md` resolves to `<repo>/docs/adoption.md`
+// from brain/, but to a path OUTSIDE the repo from AGENTS.md at repo root.
+// Antigravity follows the file (Exp 4, #604) — a broken link is a real
+// consumer defect. This rewrites each relative link's TARGET (never its
+// visible text) to resolve identically from AGENTS_EMIT_PATH's location.
+// Left untouched: absolute URLs (scheme://…, mailto:…), pure anchors (#…),
+// and links already root-relative (/…).
+// ---------------------------------------------------------------------------
+
+const MARKDOWN_LINK_RE = /\[([^\]]*)\]\(([^)\s]+)((?:\s+"[^"]*")?)\)/g;
+
+function isSchemeAnchorOrRootRelative(url) {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return true; // scheme: http:, https:, mailto:, ...
+  if (url.startsWith('#')) return true;               // pure anchor
+  if (url.startsWith('/')) return true;                // already root-relative
+  return false;
+}
+
+/**
+ * Rebases one relative link target so it resolves identically from
+ * `emitDir` as it did from `sourceDir`. Preserves any `#anchor` suffix.
+ */
+function rebaseLinkTarget(url, sourceDir, emitDir) {
+  const hashIdx = url.indexOf('#');
+  const rawPath = hashIdx === -1 ? url : url.slice(0, hashIdx);
+  const anchor = hashIdx === -1 ? '' : url.slice(hashIdx);
+  const resolved = posixPath.join(sourceDir, rawPath);
+  const rebased = posixPath.relative(emitDir, resolved) || '.';
+  return rebased + anchor;
+}
+
+/**
+ * Rewrites every relative markdown link `[text](url)` in `content` — whose
+ * own location is `sourceRelPath` — to resolve to the SAME target from
+ * `emitRelPath`'s location. Fs-free, pure.
+ */
+function rebaseRelativeLinks(content, sourceRelPath, emitRelPath) {
+  const sourceDir = posixPath.dirname(sourceRelPath);
+  const emitDir = posixPath.dirname(emitRelPath);
+
+  return content.replace(MARKDOWN_LINK_RE, (match, text, url, title) => {
+    if (isSchemeAnchorOrRootRelative(url)) return match;
+    return `[${text}](${rebaseLinkTarget(url, sourceDir, emitDir)}${title})`;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Pure compiler — fs-free by design (design's "one coherent unit" rationale):
 // the same function is exercised by the unit test AND the drift-guard, so a
 // non-deterministic compiler would make byte-equality flaky by construction.
@@ -51,8 +104,12 @@ const REGENERATE_HINT = 'SDD_HARNESS=antigravity npm run brain:env:init';
 
 /**
  * Compiles the self-contained AGENTS.md content from an injected docs map.
- * Splices each SOURCE_DOCS entry's content UNMODIFIED (no re-summarization —
- * REQ-B2-2 binds the outcome, not the mechanism) behind a provenance banner.
+ * Splices each SOURCE_DOCS entry's content behind a provenance banner —
+ * verbatim except for relative markdown links, which are REBASED (target
+ * only, never the visible text) so they resolve correctly from
+ * AGENTS_EMIT_PATH's location instead of the source doc's own location
+ * (REQ-B2-2 binds the outcome — a working, provenance-declared file — not a
+ * byte-identical splice of link targets that would only be correct in situ).
  *
  * @param {{ [relPath: string]: string }} docs Keyed by SOURCE_DOCS relative path.
  * @returns {string} The compiled AGENTS.md content.
@@ -63,9 +120,10 @@ export function compileAgentsMd(docs) {
     `     Regenerate: ${REGENERATE_HINT}\n` +
     `     Drift-guarded by antigravity.drift.test.mjs — hand-edits fail CI. -->`;
 
-  const sections = SOURCE_DOCS.map(
-    (relPath) => `<!-- source: ${relPath} -->\n\n${docs[relPath] ?? ''}`,
-  );
+  const sections = SOURCE_DOCS.map((relPath) => {
+    const rebased = rebaseRelativeLinks(docs[relPath] ?? '', relPath, AGENTS_EMIT_PATH);
+    return `<!-- source: ${relPath} -->\n\n${rebased}`;
+  });
 
   return [banner, ...sections].join('\n\n---\n\n') + '\n';
 }

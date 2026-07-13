@@ -24,10 +24,15 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // RED: fails until antigravity.mjs exists and exports these.
 import { SOURCE_DOCS, AGENTS_EMIT_PATH, compileAgentsMd, init } from './antigravity.mjs';
 import { dispatch } from '../cli.mjs';
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
 /** Capture console.warn lines while calling fn(). */
 async function captureWarn(fn) {
@@ -96,6 +101,66 @@ test('1.4: compileAgentsMd() is deterministic — same docs map twice yields byt
   const first = compileAgentsMd(FAKE_DOCS);
   const second = compileAgentsMd(FAKE_DOCS);
   assert.equal(first, second);
+});
+
+// ── (a2) compileAgentsMd() — relative link rebasing ──────────────────────────
+// CP-B2 inaugural-read finding (owner ruling, fixed in-PR): verbatim splicing
+// alone breaks relative markdown links. A link is correct only from ITS OWN
+// source doc's location — spliced unmodified into AGENTS.md at repo root, the
+// SAME relative link resolves to a DIFFERENT (often outside-the-repo) target.
+// Antigravity follows the file (Exp 4, #604) — a broken link is a real
+// consumer defect, not cosmetic. Fixture, isolated from FAKE_DOCS above so
+// the byte-for-byte verbatim assertions (which use link-free fixtures) stay
+// unaffected by link rewriting.
+
+const LINK_DOCS = {
+  'brain/HOME.md':
+    '[Adoption guide](../docs/adoption.md)\n' +
+    '[Harness contract](core/methodology/harness-contract.md)\n' +
+    '[External](https://example.com/x.md)\n' +
+    '[Anchor only](#section)\n' +
+    '[Already root-relative](/already/root.md)\n' +
+    '[Mail](mailto:foo@bar.com)\n',
+  'brain/core/methodology/agent-authorities.md': '[Anti-patterns](../anti-patterns/README.md)\n',
+  'brain/core/methodology/harness-contract.md': '',
+  'brain/core/methodology/sdd-layout.md': '',
+  'brain/core/methodology/workflow-governance.md': '',
+};
+
+test('link-rebase: a brain/HOME.md-relative "../docs/adoption.md" link rebases to "docs/adoption.md" from repo-root AGENTS.md', () => {
+  const out = compileAgentsMd(LINK_DOCS);
+  assert.ok(out.includes('(docs/adoption.md)'), 'rebased link must resolve correctly from repo root');
+  assert.ok(!out.includes('(../docs/adoption.md)'), 'the un-rebased original relative link must not survive');
+});
+
+test('link-rebase: a brain/HOME.md same-dir-relative "core/methodology/harness-contract.md" link rebases to "brain/core/methodology/harness-contract.md"', () => {
+  const out = compileAgentsMd(LINK_DOCS);
+  assert.ok(out.includes('(brain/core/methodology/harness-contract.md)'));
+});
+
+test('link-rebase: a methodology-doc-relative link is rebased through ITS OWN source dir, not brain/HOME.md\'s', () => {
+  const out = compileAgentsMd(LINK_DOCS);
+  // agent-authorities.md lives at brain/core/methodology/ — "../anti-patterns/README.md"
+  // from there resolves to brain/core/anti-patterns/README.md.
+  assert.ok(out.includes('(brain/core/anti-patterns/README.md)'));
+});
+
+test('link-rebase: absolute URLs, pure anchors, mailto:, and already-root-relative links are left untouched', () => {
+  const out = compileAgentsMd(LINK_DOCS);
+  assert.ok(out.includes('(https://example.com/x.md)'));
+  assert.ok(out.includes('(#section)'));
+  assert.ok(out.includes('(/already/root.md)'));
+  assert.ok(out.includes('(mailto:foo@bar.com)'));
+});
+
+test('link-rebase: compileAgentsMd() over the REAL 5 SOURCE_DOCS rebases brain/HOME.md\'s real "../docs/adoption.md" link', () => {
+  const docs = {};
+  for (const relPath of SOURCE_DOCS) {
+    docs[relPath] = readFileSync(join(REPO_ROOT, relPath), 'utf8');
+  }
+  const out = compileAgentsMd(docs);
+  assert.ok(out.includes('(docs/adoption.md)'), 'the real HOME.md link must rebase to resolve from repo root');
+  assert.ok(!out.includes('(../docs/adoption.md)'), 'the real, un-rebased relative link must not survive');
 });
 
 // ── (b) init() — seam-injected wrapper ───────────────────────────────────────
