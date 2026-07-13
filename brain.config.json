@@ -19,6 +19,8 @@
       ".memory/**",
       "AGENTS.md",
       "openspec/changes/**",
+      "openspec/specs/**",
+      "openspec/changes/archive/**",
       "package-lock.json",
       "pnpm-lock.yaml",
       "yarn.lock"
