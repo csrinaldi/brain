@@ -18,8 +18,8 @@ issue: 247
 - [x] 3.2 Run `npm run brain:repo:check` to ensure no prohibited references or leftover files remain.
 
 ## Phase 4: Commit & PR
-- [ ] 4.1 Commit all changes using conventional commits.
-- [ ] 4.2 Push branch and open PR.
+- [x] 4.1 Commit all changes using conventional commits.
+- [x] 4.2 Push branch and open PR.
 
 ## Micro-decisions en caliente
 <Acuerdos técnicos de la sesión.>
