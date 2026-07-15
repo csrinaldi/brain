@@ -161,9 +161,15 @@ there are exactly two ways an offender leaves the flagged set, and the trailer i
 1. AUTOMATIC — TREE EFFECT ONLY (§3). The offender's touched paths are byte-identical at HEAD to
                their pre-offender state, with the anti-vacuity guard. No message, no ancestry.
 2. HUMAN GATE — a registered, recorded acceptance:
-   node brain/scripts/governance/postmerge/cursor.mjs accept <to-sha> --reason "<justification>"
-     → acceptManually({ git, from, to, reason }) — reads the current cursor as `from`, requires a
-       non-empty `reason`, echoes it to stdout, then performs the SAME CAS advance.
+   node brain/scripts/governance/postmerge/cursor.mjs accept <from-sha> <to-sha> --reason "<justification>"
+     → acceptManually({ git, from, to, reason }) — `from` is the CALLER's (the human's) explicit
+       assertion of the cursor value they reviewed, NOT read from the live cursor. Requires a
+       non-empty `reason` and a 40-hex `from`, echoes the reason to stdout, then performs the SAME
+       CAS advance as the automatic path. This is what gives the CAS its function on the human
+       path: if the live cursor moved between the human's review and this call (e.g. an automatic
+       advance ran in between), the CAS fails loud instead of silently advancing from wherever the
+       cursor now is — fail-closed, so the human re-evaluates instead of unknowingly skipping an
+       interval they never reviewed.
 ```
 
 There is no third path. The commit trailer and the ancestry check are **deleted from the design as
@@ -543,8 +549,8 @@ feature/v2.0.0
 | **1** | `git-seam.mjs` + `cursor.mjs`. Remote-authoritative tri-state, always-`cursor..HEAD` window, CAS advance that cannot create or rewind the ref. Tests **B1–B6**. | **~155** | Core is tested and **unused**. The pre-D2 workflow is untouched and behaves exactly as it does today. |
 | **2** | `resolution.mjs`. Tree-effect proof. Tests **A1–A6**. | **~85** | Still unused. **This is the security-critical PR** — deliberately kept tiny so it can earn a hostile review that answers exactly one question: *can this be forged?* |
 | **3** | `parse-failures.mjs` + `brain-audit.mjs` (emission, resolved-skip, reverter-skip, catch → 2 on stdout). Tests **A1–A6 end-to-end, C3, C6**. | **~100** | The core goes **live via the CLI**: `npm run brain:audit` now emits `[FAIL-SHA]`, skips genuinely-reverted offenders, and reports uncomputable honestly. No workflow change yet. |
-| **4** | The workflow rewrite: **fetch the cursor ref**, window CLI, fail-closed branching, loud-and-red issues + label creation, PR-keyed dedup, per-offender boundary, orphan-branch cleanup, `concurrency:`, terminal-state assertion. Tests **C1, C2, C4, C5, D1, D2**. | **~235** | **The mechanism is live and correct.** The only GitHub-coupled PR in the chain; a GitLab wrapper is now a pure translation of this one file. |
-| **5** | `exit-codes.mjs` + `run-check.mjs` + the both-fixtures drift-guard + the harness-isolation drift-guard. | **~105** | The 0/1/2 contract holds across **every** evaluator, enforced by a guard. |
+| **4** | The workflow rewrite: **fetch the cursor ref**, window CLI, fail-closed branching, loud-and-red issues + label creation, PR-keyed dedup, per-offender boundary, orphan-branch cleanup, `concurrency:`, terminal-state assertion. Tests **C1, C2, C4, C5, D1, D2** (D1/D2 fixed + proved here — born isolated from first RED; generalized into a standing registry in PR 5, §14 Plan Deviation). | **~235** | **The mechanism is live and correct.** The only GitHub-coupled PR in the chain; a GitLab wrapper is now a pure translation of this one file. |
+| **5** | `exit-codes.mjs` + `run-check.mjs` + the both-fixtures drift-guard + the STANDING harness-isolation registry (generalizes PR 4's D1/D2 fix — never re-fixes it; §14 Plan Deviation). | **~105** | The 0/1/2 contract holds across **every** evaluator, enforced by a guard. |
 
 **Headroom is deliberate.** The largest PR is ~235 against 400. After a review whose central finding was
 "3 lines of headroom is itself a signal that the slice is packed too tight", every slice in this chain is
@@ -594,7 +600,7 @@ left. A reset also cleans the mis-authored commits for free.
 | **REQ-D2-11** *(new)* | `refs/governance/*` MUST be **explicitly fetched**. A run MUST distinguish "absent on origin" from "not fetched locally", and MUST NOT bootstrap on `unknown`. |
 | **REQ-D2-12** *(new)* | **Fail-closed.** No error path may produce a PASS verdict or a cursor advance. Every loud path exits non-zero. No `|| true` on a loud path. |
 | **REQ-D2-13** *(new)* | The revert loop MUST have a per-offender failure boundary; an offender that cannot be auto-reverted is a **named, loud, human-owned** outcome, never a silent drop. |
-| **REQ-D2-14** *(new)* | **Adversarial-test contract** (§7, doctrine #900): every security-relevant requirement names the fixture a test must **construct**. Each resolution fixture (A1–A6, C1) MUST be shown to **redden against the prior plausible-but-wrong fix (the ancestry-only `eff4560` code), not merely against un-fixed code** — a test that stays green against the ancestry fix is not a proof. Adversarial fixtures are derived from the attack and authored by the finder or an independent third party, **never by the patch author**. **Plus the harness isolation contract** (§7.4). |
+| **REQ-D2-14** *(new)* | **Adversarial-test contract** (§7, doctrine #900): every security-relevant requirement names the fixture a test must **construct**. Each resolution fixture (A1–A6, C1) MUST be shown to **redden against the prior plausible-but-wrong fix (the ancestry-only `eff4560` code), not merely against un-fixed code** — a test that stays green against the ancestry fix is not a proof. Adversarial fixtures are derived from the attack and authored by the finder or an independent third party, **never by the patch author**. **Plus the harness isolation contract** (§7.4), split **PR 4** (fix + proof, born isolated) / **PR 5** (generalized into a standing registry) — see §14 Plan Deviation. |
 | **REQ-D2-15** *(new)* | The cursor MUST be advanced by an atomic compare-and-swap (local `update-ref <new> <old>` + remote `--force-with-lease`). It can never be created and never move backward. A `concurrency:` group is defence in depth, not the guarantee. |
 
 ### `tasks.md` — Slice-1 phases are withdrawn
@@ -673,8 +679,11 @@ chain in §9.2, with §7's fixture table driving the RED-first tasks. **The Revi
   `update-ref` CAS still holds and the race falls back to the `concurrency:` group — but that MUST be
   discovered by a test, not in production.
 - **R-5 — 3 mis-authored commits** (`github-actions[bot]`) on the current branch, caused by the leaking
-  test harness (§7.4). Resolved by the reset (§9.3). **Do not run the suite again until D1/D2 are in
-  place.**
+  test harness of D2's own discarded v1 work (§7.4). Resolved by the reset (§9.3): the reset branch's
+  `release-postmerge-workflows.test.mjs` is the clean 145-line base (no poisoning `spawnSync`), so running
+  the suite from this point is **safe immediately** — confirmed with file:line git evidence (owner Ruling 1,
+  engram #902). D1/D2 harden PR 4's OWN new workflow-extracting tests at the moment they are authored; they
+  are not a precondition for running the pre-existing suite.
 - **R-6 — Pre-existing, out of scope:** `npm run brain:change:verify` fails on a dangling
   `brain/scripts/lib/chunk-reader.mjs` reference (deleted by issue-247/#257; a static gate-file list in
   `verify-change.mjs` still names it). Present on the base branch. Not D2's to fix — but it means "verify
@@ -688,3 +697,44 @@ The GitLab-porting constraint stays **DRAFTED** under `openspec/changes/issue-25
 HUMAN co-promotes it into the canonical doc zone (ADR / `brain/core/…` / the PLAN) via a **separate** MR.
 
 > **Any D2 commit that writes into ADR / `brain/core` / core methodology / `PLAN` is a STOP-finding.**
+
+---
+
+## 14. Plan Deviation Log
+
+### 2026-07-14 — PR4/PR5 split for the harness-isolation guard (REQ-D2-14, fixtures D1/D2)
+
+**What was wrong:** this document's own §9.2 chain table placed the ENTIRE harness-isolation guard —
+both the fix/proof (fixtures D1, D2) and its generalization into a standing registry — inside **PR 4**'s
+test list, while `spec.md`'s Gate table bound the same D1/D2 fixtures entirely to **PR 5**. The two
+artifacts disagreed on where the guard formally lands. That is doc-drift: a reader of `spec.md` alone would
+plan PR 4 without the isolation fix, and a reader of `design.md` alone would expect PR 5 to duplicate work
+PR 4 already did — exactly the kind of silent disagreement the next reader inherits and has to untangle by
+re-deriving intent from code.
+
+**Reconciled split (owner-confirmed, matches the house detection→prevention ladder already used for the
+both-fixtures exit-code drift-guard, §5.3/5.4):**
+
+- **PR 4 — detect + prove.** The workflow-extracting tests this PR adds are born isolated (`cwd` outside the
+  repo, `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM`/`GIT_CONFIG_NOSYSTEM`, isolated `HOME`, no inherited
+  `GH_TOKEN`) from their first RED — never written un-isolated and patched later. Fixture D1 is a narrow
+  drift-guard proving THIS PR's own test file complies; fixture D2 is the real-repository
+  identity-unchanged regression proof.
+- **PR 5 — generalize to prevention.** `tasks.md` Phase 5.4 promotes PR 4's narrow D1 guard into a
+  **standing registry** (the same shape as Phase 5.3's `CHECKS` registry) that globs every `*.test.mjs`
+  file, so a FUTURE author adding a new workflow-extracting test cannot silently regress the isolation
+  contract. PR 5 does not re-fix or duplicate PR 4's isolation work — it only registers what PR 4 already
+  proved and extends the check to files that do not exist yet.
+
+**Why this split, not one PR doing both:** it mirrors the repo's own detection→prevention escalation
+pattern (fix the instance first, generalize the guard second) and keeps each PR a single reviewable work
+unit. It costs nothing in the 400-line budget either way: both fixture sets live in `.test.mjs` files,
+already excluded from counted lines by `governance.ignoreList`, so the split is a pure clarity/reviewability
+decision, not a line-shifting one — the Review Workload Forecast and the PR footprint table
+(`tasks.md` § Review Workload Forecast, `design.md` §9.2) are unchanged by this deviation.
+
+**Where corrected:** `design.md` §9.2 (PR 4 and PR 5 deliverable rows) and §10 (REQ-D2-14 mapping row);
+`spec.md` Gate table (REQ-D2-14 column for PR 4 and PR 5) and the REQ-D2-14 requirement body; `tasks.md`
+Phase 4.0 (rewritten to state the born-isolated acceptance criterion, replacing the earlier "introduce
+test, then fix isolation later" framing) and Phase 5.4 (already matched this split — cross-referenced here
+for findability).
