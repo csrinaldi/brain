@@ -249,12 +249,14 @@ test('advanceCursor: B5 — second CAS with the same (stale) from fails after th
 });
 
 test('acceptManually: refuses an empty --reason', (t) => {
-  const { cloneDir } = makeBareOriginAndClone(t, { setCursorRef: true });
+  const { cloneDir, sha } = makeBareOriginAndClone(t, { setCursorRef: true });
   const git = realGit(cloneDir);
-  assert.throws(() => acceptManually({ git, to: headSha(cloneDir), reason: '' }));
+  assert.throws(() => acceptManually({
+    git, from: sha, to: headSha(cloneDir), reason: '',
+  }));
 });
 
-test('acceptManually: reads the LIVE cursor as `from`, echoes reason, performs the same CAS advance', (t) => {
+test('acceptManually: caller-supplied `from` matches the live cursor → CAS succeeds, echoes reason (positive case)', (t) => {
   const scratch = mkdtempSync(join(tmpdir(), 'cursor-accept-'));
   t.after(() => rmSync(scratch, { recursive: true, force: true }));
 
@@ -276,11 +278,73 @@ test('acceptManually: reads the LIVE cursor as `from`, echoes reason, performs t
   const to = headSha(workDir);
 
   const git = realGit(workDir);
-  const result = acceptManually({ git, to, reason: 'owner-approved forward-fix' });
+  const result = acceptManually({
+    git, from, to, reason: 'owner-approved forward-fix',
+  });
   assert.deepEqual(result, { from, to });
 
   const after = git.try(['rev-parse', '--verify', `${CURSOR_REF}^{commit}`]);
   assert.equal(after.stdout.trim(), to);
+});
+
+// Owner-ruled fix: the pre-fix `acceptManually({ git, to, reason })` read
+// `from` INTERNALLY via `readCursor()` at execution time, instead of taking
+// it as the caller's (human's) explicit assertion of the cursor value they
+// reviewed. That made the CAS on the human path structurally present but
+// functionally hollow: it degenerated to an unconditional advance from
+// wherever the cursor happened to be at execution time, silently skipping
+// whatever moved it in between (the skip-over class) — the SAME defect
+// class as the withdrawn ancestry-theater (mechanism present, function
+// hollow). This test constructs exactly that race.
+test('acceptManually: RACE — human asserts from=C0, but the live cursor already advanced to C1 by execution time → CAS fails loud, cursor left at C1', (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), 'cursor-accept-race-'));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+
+  const originDir = join(scratch, 'origin.git');
+  mkdirSync(originDir);
+  spawnSync('git', ['init', '--bare', '--initial-branch=main', originDir], { encoding: 'utf8' });
+
+  const workDir = join(scratch, 'work');
+  mkdirSync(workDir);
+  const git0 = makeRepo(workDir);
+  git0('remote', 'add', 'origin', originDir);
+
+  // C0 — what the human reviewed and is about to accept "from".
+  git0('commit', '--allow-empty', '-m', 'C0');
+  const c0 = headSha(workDir);
+  git0('push', 'origin', 'main');
+  git0('update-ref', CURSOR_REF, c0);
+  git0('push', 'origin', `${CURSOR_REF}:${CURSOR_REF}`);
+
+  // C1 — the cron's automatic advance, running in the race window BETWEEN
+  // the human's review of C0 and this call. The live cursor is now C1, not
+  // C0 — exactly what the human's stale assertion does not know about.
+  git0('commit', '--allow-empty', '-m', 'C1');
+  const c1 = headSha(workDir);
+  const git = realGit(workDir);
+  advanceCursor({ git, from: c0, to: c1 });
+
+  // C2 — where the human wanted to move the cursor to, based on their
+  // (now stale) review of C0.
+  git0('commit', '--allow-empty', '-m', 'C2');
+  const c2 = headSha(workDir);
+
+  // The human's assertion is `from: c0` — but the live cursor is c1.
+  // PRE-FIX: `acceptManually({ git, to, reason })` would have IGNORED the
+  // (unused) `from` argument entirely and called `readCursor()` internally,
+  // which returns the LIVE value (c1) — matching the ref's actual current
+  // value. The CAS `update-ref <ref> c2 c1` would then SUCCEED, silently
+  // advancing the cursor from c1 to c2 — an interval the human never
+  // reviewed. This assert.throws proves the fix: with `from` now the
+  // caller's explicit (stale) c0, the CAS `update-ref <ref> c2 c0` is
+  // rejected because the ref's current value is c1, not c0.
+  assert.throws(() => acceptManually({
+    git, from: c0, to: c2, reason: 'owner-approved forward-fix',
+  }));
+
+  // The cursor must be UNCHANGED at c1 — not silently advanced to c2.
+  const after = git.try(['rev-parse', '--verify', `${CURSOR_REF}^{commit}`]);
+  assert.equal(after.stdout.trim(), c1);
 });
 
 // ── CLI mode ───────────────────────────────────────────────────────────────
@@ -312,7 +376,7 @@ test('CLI: `cursor.mjs window` prints UNKNOWN <reason> and exits 2 when origin i
   assert.equal(r.status, 2);
 });
 
-test('CLI: `cursor.mjs accept <sha> --reason "<text>"` invokes acceptManually', (t) => {
+test('CLI: `cursor.mjs accept <from> <to> --reason "<text>"` invokes acceptManually', (t) => {
   const scratch = mkdtempSync(join(tmpdir(), 'cursor-cli-accept-'));
   t.after(() => rmSync(scratch, { recursive: true, force: true }));
 
@@ -332,17 +396,25 @@ test('CLI: `cursor.mjs accept <sha> --reason "<text>"` invokes acceptManually', 
   git0('commit', '--allow-empty', '-m', 'B');
   const to = headSha(workDir);
 
-  const r = spawnSync('node', [CURSOR_SCRIPT, 'accept', to, '--reason', 'owner-approved'], {
+  const r = spawnSync('node', [CURSOR_SCRIPT, 'accept', from, to, '--reason', 'owner-approved'], {
     cwd: workDir, encoding: 'utf8',
   });
   assert.equal(r.status, 0, `stderr: ${r.stderr}`);
   assert.match(r.stdout, /owner-approved/);
+
+  // Discriminates a CLI that only reads the FIRST positional arg (pre-fix
+  // shape: `accept <to>`, `from` sourced internally) from one that reads
+  // BOTH positionals (`accept <from> <to>`): the ref must land on the real
+  // target `to`, not silently no-op at `from`.
+  const git = realGit(workDir);
+  const after = git.try(['rev-parse', '--verify', `${CURSOR_REF}^{commit}`]);
+  assert.equal(after.stdout.trim(), to);
 });
 
 test('CLI: `cursor.mjs accept` with a missing --reason exits non-zero with a usage message', (t) => {
   const { cloneDir, sha } = makeBareOriginAndClone(t, { setCursorRef: true });
 
-  const r = spawnSync('node', [CURSOR_SCRIPT, 'accept', sha], { cwd: cloneDir, encoding: 'utf8' });
+  const r = spawnSync('node', [CURSOR_SCRIPT, 'accept', sha, sha], { cwd: cloneDir, encoding: 'utf8' });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /Usage/);
 });

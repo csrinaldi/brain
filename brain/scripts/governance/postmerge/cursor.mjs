@@ -79,19 +79,25 @@ export function advanceCursor({ git, from, to }) {
 }
 
 /**
- * The ONLY non-tree resolution path (design §2.4). `from` is READ from the
- * live cursor, never caller-supplied, so a stale value can never be used.
+ * The ONLY non-tree resolution path (design §2.4). `from` is the CALLER's
+ * (the human's) explicit assertion of the cursor value they reviewed — it is
+ * NOT read from the live cursor here. That is what gives the CAS its
+ * function on this path: if the live cursor has moved between the human's
+ * review and this call (e.g. an automatic advance ran in between), the CAS
+ * inside `advanceCursor` fails loud instead of silently advancing from
+ * wherever the cursor now is.
  */
-export function acceptManually({ git, to, reason }) {
+export function acceptManually({
+  git, from, to, reason,
+}) {
   if (typeof reason !== 'string' || reason.trim() === '') {
     throw new Error('acceptManually: --reason is required and must be non-empty');
   }
-  const cursor = readCursor({ git });
-  if (cursor.state !== 'present') {
-    throw new Error(`acceptManually: cursor state is '${cursor.state}', nothing to accept from`);
+  if (typeof from !== 'string' || !HEX40.test(from)) {
+    throw new Error('acceptManually: from must be a 40-hex sha');
   }
   process.stdout.write(`accept: ${reason}\n`);
-  return advanceCursor({ git, from: cursor.sha, to });
+  return advanceCursor({ git, from, to });
 }
 
 // ── CLI ────────────────────────────────────────────────────────────────────
@@ -101,7 +107,7 @@ function makeRealGit(cwd) {
 }
 
 function usage() {
-  process.stderr.write('Usage: cursor.mjs window | cursor.mjs accept <sha> --reason "<text>"\n');
+  process.stderr.write('Usage: cursor.mjs window | cursor.mjs accept <from> <to> --reason "<text>"\n');
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -122,15 +128,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exit(2);
     }
   } else if (cmd === 'accept') {
-    const to = rest[0];
+    const from = rest[0];
+    const to = rest[1];
     const reasonIdx = rest.indexOf('--reason');
     const reason = reasonIdx !== -1 ? rest[reasonIdx + 1] : undefined;
-    if (!to || !reason) {
+    if (!from || !to || !reason) {
       usage();
       process.exit(1);
     } else {
       try {
-        acceptManually({ git, to, reason });
+        acceptManually({
+          git, from, to, reason,
+        });
         process.exit(0);
       } catch (err) {
         process.stderr.write(`cursor.mjs accept: ${err.message}\n`);
