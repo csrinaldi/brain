@@ -297,6 +297,84 @@ export async function labelEvents({ project, number } = {}) {
     .sort((a, b) => new Date(a.at) - new Date(b.at));
 }
 
+/**
+ * Posts a COMMENT-state pull request review (issue #266, REQ-266-2). `event`
+ * is HARDCODED to `'COMMENT'` — no parameter, flag, or branch selects a
+ * different review event (lock 2, REQ-266-3). Never throws.
+ *
+ * @param {{ project: string, number: number, body: string }} opts
+ * @returns {Promise<{ url: string } | { url: null, error: string }>}
+ */
+export async function prReviewComment({ project, number, body } = {}) {
+  const r = run(
+    'gh',
+    ['api', '-X', 'POST', `repos/${project}/pulls/${number}/reviews`, '--input', '-'],
+    { input: JSON.stringify({ body, event: 'COMMENT' }) },
+  );
+  if (!r.ok) return { url: null, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
+  try {
+    return { url: JSON.parse(r.stdout).html_url };
+  } catch (err) {
+    return { url: null, error: err.message };
+  }
+}
+
+/**
+ * Posts a plain issue comment — rulings on issues (issue #266, REQ-266-2).
+ * Never throws.
+ *
+ * @param {{ project: string, number: number, body: string }} opts
+ * @returns {Promise<{ url: string } | { url: null, error: string }>}
+ */
+export async function issueComment({ project, number, body } = {}) {
+  const r = run(
+    'gh',
+    ['api', '-X', 'POST', `repos/${project}/issues/${number}/comments`, '--input', '-'],
+    { input: JSON.stringify({ body }) },
+  );
+  if (!r.ok) return { url: null, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
+  try {
+    return { url: JSON.parse(r.stdout).html_url };
+  } catch (err) {
+    return { url: null, error: err.message };
+  }
+}
+
+/**
+ * Adds labels to an issue or PR (issue #266, REQ-266-2). The CALLER enforces
+ * the deny-set (REQ-266-9, monotonic label tightening) — this verb performs
+ * the label API call only, no policy. Never throws.
+ *
+ * @param {{ project: string, number: number, labels: string[] }} opts
+ * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
+ */
+export async function labelAdd({ project, number, labels } = {}) {
+  const r = run(
+    'gh',
+    ['api', '-X', 'POST', `repos/${project}/issues/${number}/labels`, '--input', '-'],
+    { input: JSON.stringify({ labels }) },
+  );
+  if (r.ok) return { ok: true };
+  return { ok: false, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
+}
+
+/**
+ * Removes labels from an issue or PR — monotonic-tightening removals only
+ * (issue #266, REQ-266-9); the caller enforces the deny-set. GitHub has no
+ * bulk-remove endpoint — each label is deleted individually, stopping at the
+ * first failure. Never throws.
+ *
+ * @param {{ project: string, number: number, labels: string[] }} opts
+ * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
+ */
+export async function labelRemove({ project, number, labels } = {}) {
+  for (const label of labels) {
+    const r = run('gh', ['api', '-X', 'DELETE', `repos/${project}/issues/${number}/labels/${encodeURIComponent(label)}`]);
+    if (!r.ok) return { ok: false, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
+  }
+  return { ok: true };
+}
+
 export async function repoCloneUrl({ host, project, token }) {
   return `https://x-access-token:${token}@${host || 'github.com'}/${project}.git`;
 }
