@@ -185,3 +185,13 @@ Session agreements. Promote at MR time — see `brain/core/methodology/consolida
   relied on L6 excluding those identities must now also list them in `governance.reviewActors` (both
   effects require both registrations — explicit, never implicit). Zero live impact on brain itself:
   `approvalActors` is empty here.
+- **RULING (H0-b rev-1, P272-OVERRIDE-KEY): the `override:*` whitelist reads `approvalActors`, not
+  `reviewActors` — option (b).** The rev-1 reviewer found that the REPLACE silently relocated a SECOND
+  function of the old key: the `override:*` label whitelist (`brain-writes-reviewed.mjs:225`) read
+  `botAllowlist`, which now = `reviewActors`. R2 was not violated (reviewActors still feeds one gate),
+  but the relocation was an undocumented side effect and the docstrings (58, 192) still named
+  `approvalActors`. Human decision (comment 4991860920): **option (b)** — the override whitelist gets
+  its OWN `governance.approvalActors` read (`readOverrideActors` / `defaultReadApprovalActors`);
+  `reviewActors` stays a PURE identity list (one key, one meaning). override:* and status:approved are
+  both human-trust grants keyed on `approvalActors`; the reviewer handle is in neither. Docstrings 58
+  and 192 fixed; a sibling test asserts an override:* string in `reviewActors` only is NOT honored.

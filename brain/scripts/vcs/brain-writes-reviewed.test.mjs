@@ -145,11 +145,12 @@ test('bot-only approval (approver is bot-allow-listed, distinct from author but 
 
 // ── gh/git I/O wrapper — gatherBrainWritesReviewedInputs (DI fakes, no real gh/git) ─
 
-function makeFakeDeps({ changedFiles = [], reviews = [], botAllowlist = [] } = {}) {
+function makeFakeDeps({ changedFiles = [], reviews = [], botAllowlist = [], overrideActors = [] } = {}) {
   return {
     diffNameOnly: () => changedFiles,
     fetchReviews: () => reviews,
-    readBotAllowlist: () => botAllowlist,
+    readBotAllowlist: () => botAllowlist,          // governance.reviewActors (L6 human-approver exclusion)
+    readOverrideActors: () => overrideActors,      // governance.approvalActors (override:* whitelist)
   };
 }
 
@@ -175,8 +176,8 @@ test('gatherBrainWritesReviewedInputs: resolves changedFiles via diffNameOnly, r
   assert.equal(inputs.adminOverride, false);
 });
 
-test('gatherBrainWritesReviewedInputs: adminOverride true only when an override:* label is BOTH present and allow-listed', async () => {
-  const deps = makeFakeDeps({ botAllowlist: ['override:incident-response'] });
+test('gatherBrainWritesReviewedInputs: adminOverride true only when an override:* label is BOTH present and listed in governance.approvalActors', async () => {
+  const deps = makeFakeDeps({ overrideActors: ['override:incident-response'] });
   const inputs = await gatherBrainWritesReviewedInputs({
     baseSha: 'base',
     headSha: 'head',
@@ -187,6 +188,24 @@ test('gatherBrainWritesReviewedInputs: adminOverride true only when an override:
     deps,
   });
   assert.equal(inputs.adminOverride, true);
+});
+
+// P272-OVERRIDE-KEY option (b): the override:* whitelist reads
+// governance.approvalActors, NOT governance.reviewActors. reviewActors is a pure
+// identity list — an override:* string listed ONLY there must NOT be honored.
+test('gatherBrainWritesReviewedInputs (P272-OVERRIDE-KEY): an override:* string in governance.reviewActors (botAllowlist) but NOT in governance.approvalActors (overrideActors) does NOT grant adminOverride', async () => {
+  const deps = makeFakeDeps({ botAllowlist: ['override:incident-response'], overrideActors: [] });
+  const inputs = await gatherBrainWritesReviewedInputs({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: ['override:incident-response'],
+    deps,
+  });
+  assert.equal(inputs.adminOverride, false,
+    'override:* strings resolve against approvalActors only — reviewActors is a pure identity list, never an override whitelist');
 });
 
 test('gatherBrainWritesReviewedInputs: an override:* label present but NOT allow-listed does not grant adminOverride (no blanket bypass)', async () => {
@@ -339,7 +358,7 @@ test('ci-context seam: deps.ctx feeds baseSha/headSha/prNumber/repo/author/prLab
     },
     diffNameOnly: () => ['brain/core/foo.mjs'],
     fetchReviews: () => [{ state: 'APPROVED', author: 'bob' }],
-    readBotAllowlist: () => ['override:incident-response'],
+    readOverrideActors: () => ['override:incident-response'],
   };
   const result = await runBrainWritesReviewedCheck(deps);
   assert.equal(result.level, 'pass');
@@ -358,7 +377,7 @@ test('ci-context seam: ctx.labels (array) feeds adminOverride resolution directl
     },
     diffNameOnly: () => ['brain/core/foo.mjs'],
     fetchReviews: () => [{ state: 'APPROVED', author: 'alice' }], // self-approval — would fail without override
-    readBotAllowlist: () => ['override:incident-response'],
+    readOverrideActors: () => ['override:incident-response'],
   };
   const result = await runBrainWritesReviewedCheck(deps);
   assert.equal(result.level, 'pass');
