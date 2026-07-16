@@ -218,17 +218,17 @@ before merge.
 
 ### Phase 2.1 — `changedPaths` and the anti-vacuity guard (§3.2)
 
-- [ ] 2.1.1 RED: `changedPaths(rev, { git })` returns the set of paths from
+- [x] 2.1.1 RED: `changedPaths(rev, { git })` returns the set of paths from
       `git diff --no-renames --name-only -z <rev>^1 <rev>` for a synthetic commit touching 2 files.
-- [ ] 2.1.2 GREEN: implement `changedPaths`.
-- [ ] 2.1.3 RED (**fixture A4** — anti-vacuity): a merge `M` with a genuinely **empty diff** (zero changed
+- [x] 2.1.2 GREEN: implement `changedPaths`.
+- [x] 2.1.3 RED (**fixture A4** — anti-vacuity): a merge `M` with a genuinely **empty diff** (zero changed
       paths). Assert `isResolvedAt` returns `{ resolved: false, reason: 'offender has no changed paths' }`
       — never a vacuous pass.
-- [ ] 2.1.4 GREEN: implement the anti-vacuity guard as the first branch of `isResolvedAt`.
+- [x] 2.1.4 GREEN: implement the anti-vacuity guard as the first branch of `isResolvedAt`.
 
 ### Phase 2.2 — `isResolvedAt` — the tree-effect predicate (§3.2, REQ-D2-10)
 
-- [ ] 2.2.1 RED (**fixture A1** — the security-critical fixture, reddens against `eff4560`): construct
+- [x] 2.2.1 RED (**fixture A1** — the security-critical fixture, reddens against `eff4560`): construct
       offender `M` on `main` (adds a payload file at path `P`). Then construct an **ordinary commit `X` on
       the same lineage** — a REAL descendant of `M` (forked AFTER `M`, the realistic linear-main shape,
       never forked before `M`) — whose commit body contains `This reverts commit <M>.` and whose diff
@@ -237,33 +237,33 @@ before merge.
       descendant of `M`, so `merge-base --is-ancestor` wrongly passes and `eff4560` skips `M`) — this
       RED-against-the-prior-fix result is the actual proof this task exists to produce, not merely
       "fails on unfixed code."
-- [ ] 2.2.2 GREEN: implement `isResolvedAt(offender, tip, { git })` per §3.2 — `P = changedPaths(offender)`,
+- [x] 2.2.2 GREEN: implement `isResolvedAt(offender, tip, { git })` per §3.2 — `P = changedPaths(offender)`,
       `D = changedPaths` between `offender^1` and `tip`, `resolved ⟺ P ∩ D = ∅`, reading **no** commit body.
       Confirm 2.2.1's assertion (against the new code) now passes: `M` stays flagged.
-- [ ] 2.2.3 RED (**fixture A2** — liveness): offender `M`, then a **real `git revert -m 1 M`** merged onto
+- [x] 2.2.3 RED (**fixture A2** — liveness): offender `M`, then a **real `git revert -m 1 M`** merged onto
       `main`. Assert `isResolvedAt(M, tip)` is `true` — the mechanism must not pin on a genuine revert.
-- [ ] 2.2.4 RED (**fixture A3**): `M` touches paths `P1` and `P2`. A revert restores **only `P1`**. Assert
+- [x] 2.2.4 RED (**fixture A3**): `M` touches paths `P1` and `P2`. A revert restores **only `P1`**. Assert
       `isResolvedAt` is `false` — partial reverts do not resolve.
-- [ ] 2.2.5 RED (**fixture A5**): `M` reverted by `R` (genuine, `A2`-shaped), then a **later commit re-adds
+- [x] 2.2.5 RED (**fixture A5**): `M` reverted by `R` (genuine, `A2`-shaped), then a **later commit re-adds
       the payload** to the same path. Assert `isResolvedAt(M, <that later tip>)` is `false` — the predicate
       is anchored at the tip and sees the re-introduction. (This is a liveness property the trailer approach
       could never have had.)
-- [ ] 2.2.6 GREEN: confirm 2.2.2's implementation already satisfies 2.2.3–2.2.5 with no further code (these
+- [x] 2.2.6 GREEN: confirm 2.2.2's implementation already satisfies 2.2.3–2.2.5 with no further code (these
       are properties of the same `P ∩ D = ∅` predicate, not separate branches) — if any fails, the
       implementation is wrong, not the test.
-- [ ] 2.2.7 Drift-guard: assert `isRevertedInRange`, `findTrailerCandidates`, `trailerRegex` do **not** exist
+- [x] 2.2.7 Drift-guard: assert `isRevertedInRange`, `findTrailerCandidates`, `trailerRegex` do **not** exist
       anywhere under `governance/postmerge/` (grep-based static assertion) — a mechanical trip-wire against
       the exact regression this PR exists to prevent.
 
 ### Phase 2.3 — `isReverterOf` — the reverter-skip (§3.3, REQ-D2-10a)
 
-- [ ] 2.3.1 RED (**fixture A6**): construct an `adrPresence`-shaped offender `M` (adds an ADR file without
+- [x] 2.3.1 RED (**fixture A6**): construct an `adrPresence`-shaped offender `M` (adds an ADR file without
       `brain/HOME.md`) and its genuine tree-effect-verified auto-revert `R` (which would otherwise itself
       fail `adrPresence`, since removing an ungoverned ADR without `HOME.md` re-triggers the XOR), landing
       in the SAME window. Assert `isReverterOf(M, R, { git })` is `true`. **Also** construct a merge that
       merely **claims** (via commit message) to be a revert of `M` but has **no tree effect** on `M`'s
       paths; assert `isReverterOf` is `false` for it.
-- [ ] 2.3.2 GREEN: implement `isReverterOf(offender, candidate, { git })` reusing `isResolvedAt` — per
+- [x] 2.3.2 GREEN: implement `isReverterOf(offender, candidate, { git })` reusing `isResolvedAt` — per
       §3.3: `isResolvedAt(offender, candidate)` is true AND `isResolvedAt(offender, candidate^1)` is false
       (the candidate is demonstrably what removed the payload). No new mechanism, no forgeable signal.
 
@@ -272,19 +272,19 @@ before merge.
 This is the mandatory checkpoint named in the design's owner ruling. **This PR does not pass its gate
 without it.**
 
-- [ ] 2.4.1 RED + GREEN: **`diffSize`-shaped scenario** — a synthetic offender `M` whose own diff exceeds
+- [x] 2.4.1 RED + GREEN: **`diffSize`-shaped scenario** — a synthetic offender `M` whose own diff exceeds
       the line budget; a genuine revert of `M` restores its paths. Assert `isResolvedAt` returns `true`
       (mechanism **B — tree-effect skip**). Assert with code evidence (a comment or an assertion message
       citing design §3.5) that this is the SAME predicate used for every class, not a `diffSize`-specific
       branch.
-- [ ] 2.4.2 RED + GREEN: **`adrPresence` forward-fix — THE OWNER'S CASE.** Offender `M` flagged for
+- [x] 2.4.2 RED + GREEN: **`adrPresence` forward-fix — THE OWNER'S CASE.** Offender `M` flagged for
       `adrPresence` (`M`'s own changed path is `P`, an ADR file). A **later commit adds the missing
       `brain/HOME.md`** at a DIFFERENT path `Q` (a forward-fix, never touching `P`). Assert
       `isResolvedAt(M, <that later tip>)` is **`false` forever** — `P` is still on disk, so `P ∩ D ≠ ∅`.
       This is the explicit code-level proof that tree-effect **fails closed** on a forward-fix class: it
       must NEVER be marked resolved, and the only path that clears `M` is the human gate
       (`accept --reason`), which is **outside** `resolution.mjs`'s concern (it lives in `cursor.mjs`, PR 1).
-- [ ] 2.4.3 Confirm (no code, assertion of design intent): write a short table-driven test or a comment
+- [x] 2.4.3 Confirm (no code, assertion of design intent): write a short table-driven test or a comment
       block in `resolution.test.mjs` enumerating all 4 classes (`diffSize`, `issueLink`, `adrPresence`,
       `memoryPresence`) against the mechanism each maps to (tree-effect | re-eval | human-gate | exit-2),
       citing design §3.5's table, so a future reader sees the mapping is deliberate, not incidental.
@@ -295,10 +295,10 @@ without it.**
 
 ### Phase 2.5 — PR 2 gate
 
-- [ ] 2.5.1 `npm test` — the **full suite**, green (no scoping restriction — see PR 1's 1.6.1 note: the
+- [x] 2.5.1 `npm test` — the **full suite**, green (no scoping restriction — see PR 1's 1.6.1 note: the
       harness leak does not exist on this branch until D2's own PR 4 authors new workflow-extracting tests,
       and PR 4 authors them born isolated).
-- [ ] 2.5.2 Budget check: `resolution.mjs` counted lines ≈85 — confirm ≤400, no `size:exception`.
+- [x] 2.5.2 Budget check: `resolution.mjs` counted lines ≈85 — confirm ≤400, no `size:exception`.
 - [ ] 2.5.3 Independent-review flag: this PR's description must explicitly ask the reviewer to confirm
       each A-series fixture matches design §7.1's attack shape (doctrine #900 — the patch author should
       not be the sole confirming authority on their own adversarial fixtures).
