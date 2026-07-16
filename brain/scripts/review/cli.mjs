@@ -2,9 +2,8 @@
 // cli.mjs — REQ-H1-5: `brain:review` CLI skeleton. Wires
 // identity → cold-boot → (H1-1 skeleton verdict) → print. `--dry-run` prints
 // the verdict and posts nothing; H1-1 has NO poster yet (H1-2), so every run
-// behaves the same way regardless of the flag — zero write calls, always.
-// `queue`/`board` dispatch land in H1-5 (design.md §9); this file only wires
-// the `brain:review` review path.
+// behaves the same way — zero write calls, always. `queue`/`board` dispatch
+// land in H1-5 (design.md §9); this file only wires the review path.
 
 import { pathToFileURL } from 'node:url';
 
@@ -13,10 +12,7 @@ import { gatherIdentity } from './identity.mjs';
 import { gatherColdBoot } from './cold-boot.mjs';
 import { buildVerdict, renderVerdict } from './verdict.mjs';
 
-/**
- * @param {string[]} argv
- * @returns {{ pr: number|null, mode: string, dryRun: boolean }}
- */
+/** @returns {{ pr: number|null, mode: string, dryRun: boolean }} */
 export function parseArgs(argv) {
   const args = { pr: null, mode: 'auto', dryRun: false };
   for (let i = 0; i < argv.length; i++) {
@@ -27,13 +23,9 @@ export function parseArgs(argv) {
   return args;
 }
 
-/**
- * @param {object} [deps] — `argv`, `log`, `error`, `project`, `provider`,
- *   `identityDeps` (→ identity.mjs's gatherIdentity), `coldBootDeps` (→
- *   cold-boot.mjs's gatherColdBoot). `writeVerbs` is accepted only so tests
- *   can assert it is NEVER called — H1-1 has no poster.
- * @returns {Promise<0|1>}
- */
+/** `deps`: `argv`, `log`, `error`, `project`, `provider`, `identityDeps` (→
+ * identity.mjs), `coldBootDeps` (→ cold-boot.mjs). `writeVerbs` is accepted
+ * only so tests can assert it is NEVER called — H1-1 has no poster. */
 export async function main(deps = {}) {
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
@@ -61,10 +53,8 @@ export async function main(deps = {}) {
     return 0;
   }
 
-  // H1-1 skeleton: the tranche/checkpoint/ruling evaluators are not wired
-  // yet (H1-2..H1-4) — every run computes a placeholder REVISE and prints
-  // it. `--dry-run` is accepted now so the flag's contract is stable once a
-  // poster exists; it changes nothing yet because nothing posts.
+  // H1-1 skeleton: tranche/checkpoint/ruling evaluators land in H1-2..H1-4;
+  // `--dry-run` is accepted now so its contract is stable once a poster exists.
   const verdict = buildVerdict({
     headSha: boot.headSha,
     conclusion: 'REVISE',

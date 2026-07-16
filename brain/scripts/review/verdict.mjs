@@ -14,14 +14,9 @@ function yamlScalar(val) {
   return s;
 }
 
-/**
- * Applies the evidence gate (findings without `evidence:` are dropped) and
- * the cites gate (a `severity: blocker` finding without `cites:` downgrades
- * to `severity: correction`). Never invents a citation — a downgrade is the
- * ONLY move (protocol §5: applies doctrine, never creates it).
- *
- * @param {Array<{id:string, severity:string, evidence?:string, cites?:string}>} findings
- */
+/** Evidence gate (drops findings without `evidence:`) + cites gate (a
+ * `severity: blocker` finding without `cites:` downgrades to `correction` —
+ * never invents a citation, protocol §5). */
 function processFindings(findings = []) {
   return findings
     .filter(f => Boolean(f?.evidence))
@@ -29,23 +24,10 @@ function processFindings(findings = []) {
 }
 
 /**
- * Pure builder. Throws when `headSha` is absent — there is no headless
- * verdict (protocol §6). `rev` is the count of prior `brain-review/1` blocks
- * on the thread (`priorRevCount`, from cold-boot's doctrine load); at
+ * Pure builder. Throws when `headSha` is absent (protocol §6 — no headless
+ * verdict). `priorRevCount` is the count of prior `brain-review/1` blocks; at
  * `rev >= 3` a REVISE conclusion is replaced with `STOP` + `escalate:human`
  * (protocol §7, REQ-H1-6) — no fourth REVISE is representable.
- *
- * @param {{
- *   headSha: string,
- *   conclusion: 'APPROVE'|'REVISE'|'STOP',
- *   priorRevCount?: number,
- *   findings?: Array<object>,
- *   gates?: { required?: string[], detection?: string[] },
- *   conditions?: string[],
- *   pin?: object,
- *   sequencing?: object,
- *   escalate?: 'human'|null,
- * }} input
  */
 export function buildVerdict({
   headSha,
@@ -63,12 +45,10 @@ export function buildVerdict({
   }
 
   const boundHit = priorRevCount >= 3 && conclusion === 'REVISE';
-  const verdict = boundHit ? 'STOP' : conclusion;
-  const resolvedEscalate = boundHit ? 'human' : escalate;
 
   return {
     protocol: 'brain-review/1',
-    verdict,
+    verdict: boundHit ? 'STOP' : conclusion,
     head_sha: headSha,
     rev: priorRevCount,
     gates: { required: gates.required ?? [], detection: gates.detection ?? [] },
@@ -76,18 +56,13 @@ export function buildVerdict({
     conditions,
     pin,
     sequencing,
-    escalate: resolvedEscalate,
+    escalate: boundHit ? 'human' : escalate,
   };
 }
 
-/**
- * Renders a built verdict object as the fenced `brain-review/1` YAML block
- * (protocol §6 shape) for posting in a review body. Hand-rolled — brain ships
- * zero npm dependencies and this schema is fixed, not generic YAML.
- *
- * @param {ReturnType<typeof buildVerdict>} v
- * @returns {string}
- */
+/** Renders a built verdict as the fenced `brain-review/1` YAML block
+ * (protocol §6 shape). Hand-rolled — brain ships zero npm deps and this
+ * schema is fixed, not generic YAML. */
 export function renderVerdict(v) {
   const lines = [
     '```yaml',
@@ -115,8 +90,7 @@ export function renderVerdict(v) {
   lines.push(`conditions: [${(v.conditions ?? []).map(yamlScalar).join(', ')}]`);
   if (v.pin) lines.push(`pin: ${yamlScalar(JSON.stringify(v.pin))}`);
   if (v.sequencing) lines.push(`sequencing: ${yamlScalar(JSON.stringify(v.sequencing))}`);
-  lines.push(`escalate: ${v.escalate ?? 'null'}`);
-  lines.push('```');
+  lines.push(`escalate: ${v.escalate ?? 'null'}`, '```');
 
   return lines.join('\n');
 }
