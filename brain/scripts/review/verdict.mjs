@@ -23,12 +23,9 @@ function processFindings(findings = []) {
     .map(f => (f.severity === 'blocker' && !f.cites ? { ...f, severity: 'correction' } : f));
 }
 
-/**
- * Pure builder. Throws when `headSha` is absent (protocol §6 — no headless
- * verdict). `priorRevCount` is the count of prior `brain-review/1` blocks; at
- * `rev >= 3` a REVISE conclusion is replaced with `STOP` + `escalate:human`
- * (protocol §7, REQ-H1-6) — no fourth REVISE is representable.
- */
+/** Pure builder. Throws when `headSha` is absent (protocol §6 — no headless
+ * verdict). `priorRevCount` = count of prior blocks; at `rev >= 3` a REVISE
+ * conclusion becomes `STOP` + `escalate:human` (protocol §7, REQ-H1-6). */
 export function buildVerdict({
   headSha,
   conclusion,

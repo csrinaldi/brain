@@ -1,13 +1,10 @@
 // cold-boot.mjs — REQ-H1-2, REQ-H1-3: resolve headRefOid, checkout detached,
 // load doctrine from durable sources only, abstain on self-review (protocol
-// §8, §10 Self-review row; design.md §4).
-//
-// Fork A (D2, issue #266 comment 4993202904): condition 1 — the default
-// `fetchHead` DISPATCHES BY PROVIDER (github via `gh api`, gitlab via the
-// shared gitlabApiFetch transport), never a bare `gh api` call. Condition 2 —
-// TODO(#266): this reader retires in H1-2 when the port exposes headRefOid on
-// `prView`/a rollup verb, its own ADR (tasks.md Group H1-2). No resume.md
-// seam, no branch-name fetch — absent from this file BY CONSTRUCTION (R2).
+// §8, §10 Self-review row; design.md §4). Fork A (D2, comment 4993202904):
+// `fetchHead` DISPATCHES BY PROVIDER (never a bare `gh api` call — condition
+// 1); TODO(#266) retires this reader once the port exposes headRefOid
+// (condition 2, tasks.md Group H1-2). No resume.md/branch-name seam exists —
+// absent BY CONSTRUCTION (R2).
 
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -34,17 +31,14 @@ function defaultFetchHead({ getVcs: getVcsFn = getVcs } = {}) {
   return async ({ project, number, provider }) => {
     const vcs = await getVcsFn({ provider });
     if (vcs.PROVIDER === 'gitlab') {
-      const { apiBase, token, proxyUrl } = gitlabApiConfig();
       // GitLab's MR payload carries the HEAD sha at top level (`sha`),
       // mirrored under `diff_refs.head_sha` — read both, never fabricated.
-      const mr = await gitlabApiFetch({
-        apiBase, token, proxyUrl,
-        path: `projects/${encodeURIComponent(project)}/merge_requests/${number}`,
-      });
+      const { apiBase, token, proxyUrl } = gitlabApiConfig();
+      const path = `projects/${encodeURIComponent(project)}/merge_requests/${number}`;
+      const mr = await gitlabApiFetch({ apiBase, token, proxyUrl, path });
       return mr.sha ?? mr.diff_refs?.head_sha ?? null;
     }
-    // GitHub interim: prView (`gh pr view --json`) does not expose headRefOid
-    // (github.mjs:157-171) — read it directly.
+    // GitHub interim: prView doesn't expose headRefOid (github.mjs:157-171).
     const r = run('gh', ['api', `repos/${project}/pulls/${number}`, '--jq', '.head.sha']);
     if (!r.ok) throw new Error(`cold-boot: could not resolve headRefOid for PR #${number} — ${r.stderr.trim()}`);
     return r.stdout.trim();
@@ -63,10 +57,9 @@ function defaultReadRecords({ cwd = process.cwd() } = {}) {
   return () => readRecordObservations({ recordsDir: join(cwd, '.memory', 'records') });
 }
 
-// NOTE: prReviews's normalized shape is `{ state, author }` only
-// (github.mjs:219-227, gitlab.mjs:194-209) — no `body`, so this default
-// cannot surface a live block yet (flagged with the Fork A slice, H1-2);
-// tests inject `fetchReviews` fixtures with `body` directly.
+// NOTE: prReviews's shape is `{ state, author }` only — no `body` — so this
+// default can't surface a live block yet (flagged with H1-2); tests inject
+// `fetchReviews` fixtures with `body` directly.
 function defaultFetchReviews({ getVcs: getVcsFn = getVcs } = {}) {
   return async ({ project, number, provider }) => {
     const vcs = await getVcsFn({ provider });
@@ -76,11 +69,9 @@ function defaultFetchReviews({ getVcs: getVcsFn = getVcs } = {}) {
   };
 }
 
-/**
- * Runs cold boot: self-review guard, then headRefOid + detached checkout +
- * doctrine load. Returns `{ abstain: true, reason, author }` on self-review,
- * else `{ abstain: false, headSha, prView, doctrine: { records, priorVerdicts } }`.
- */
+/** Self-review guard, then headRefOid + detached checkout + doctrine load.
+ * Returns `{ abstain: true, reason, author }` on self-review, else
+ * `{ abstain: false, headSha, prView, doctrine: { records, priorVerdicts } }`. */
 export async function gatherColdBoot({ project, number, provider, reviewerHandle, deps = {} } = {}) {
   const fetchPr = deps.fetchPr ?? defaultFetchPr(deps);
   const prView = await fetchPr({ project, number, provider });
