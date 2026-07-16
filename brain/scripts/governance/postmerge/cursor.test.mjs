@@ -20,11 +20,20 @@ const CURSOR_SCRIPT = new URL('./cursor.mjs', import.meta.url).pathname;
 
 // ── Fixture helpers (house pattern — brain-audit.test.mjs) ────────────────────
 
+// Every repo AND every clone must carry its own git identity. `git clone`
+// does NOT inherit user.name/user.email, and a fresh runner (actions/checkout)
+// has no ambient identity to auto-detect — so a fixture that commits in a
+// clone without setting identity fails ONLY off the author's machine. Set it
+// on every working tree the fixtures commit into.
+function setIdentity(dir) {
+  spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: dir, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: dir, encoding: 'utf8' });
+}
+
 function makeRepo(dir) {
   const git = (...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
   git('init', '--initial-branch=main');
-  git('config', 'user.email', 'test@test.com');
-  git('config', 'user.name', 'Test');
+  setIdentity(dir);
   return git;
 }
 
@@ -32,8 +41,21 @@ function realGit(cwd) {
   return { try: (argv) => gitTry(argv, { cwd }), orThrow: (argv) => gitOrThrow(argv, { cwd }) };
 }
 
+// A sha PRODUCER: it must explode loudly, never fabricate an empty string. A
+// silent '' here is what let a failed no-identity commit masquerade as a
+// legitimate {state:'unknown'} verdict (the environment-dependent B6 blind
+// spot). If rev-parse fails or the output is not a 40-hex OID, throw.
 function headSha(dir) {
-  return spawnSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).stdout.trim();
+  const r = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' });
+  const sha = (r.stdout ?? '').trim();
+  if (r.status !== 0 || !/^[0-9a-f]{40}$/.test(sha)) {
+    throw new Error(
+      `headSha(${dir}): git rev-parse HEAD did not yield a 40-hex sha `
+      + `(status=${r.status}, stdout=${JSON.stringify(sha)}, stderr=${(r.stderr ?? '').trim()}). `
+      + 'A fixture git step failed — most likely a commit with no configured identity.',
+    );
+  }
+  return sha;
 }
 
 /**
@@ -60,6 +82,7 @@ function makeBareOriginAndClone(t, { setCursorRef = false } = {}) {
 
   const cloneDir = join(scratch, 'clone');
   spawnSync('git', ['clone', originDir, cloneDir], { encoding: 'utf8' });
+  setIdentity(cloneDir); // clones inherit no identity — fixtures commit here
 
   return { originDir, cloneDir, sha };
 }
@@ -102,6 +125,7 @@ function makeOriginWithLinearHistory(t) {
 function plainClone(scratch, originDir, name) {
   const dir = join(scratch, name);
   spawnSync('git', ['clone', originDir, dir], { encoding: 'utf8' });
+  setIdentity(dir); // hermetic: never depend on ambient runner identity
   return dir;
 }
 
