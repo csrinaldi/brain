@@ -1,19 +1,19 @@
 # ADR-0020 — External-reviewer VCS port verbs + the reviewActors/approvalActors two-key split
 
-**Status**: Draft — agent-drafted per ADR-0013; awaiting human signature (the human sets Status: Accepted + their sign-off on approval). DO NOT merge as Draft.
-**Date**: 2026-07-16
+**Status**: Accepted
+**Date**: 2026-07-16 — Cristian Rinaldi
 
 ## Context
 
 The external reviewer is real and load-bearing today but human-mediated: a human relays a
 checkpoint report to the reviewer and relays the verdict back. The role — verify against the
 server, rule design forks against doctrine, sequence parallel work — is mechanizable. The single
-piece of judgment that must stay human is the *keystroke* (`status:approved`, `override:*`,
+piece of judgment that must stay human is the _keystroke_ (`status:approved`, `override:*`,
 `size:exception`), not the whole role.
 
 Automating the reviewer creates one hazard that shapes everything else. `brain:protect` sets
 `required_approving_review_count: 1` on `main`, and L6 (`brain/scripts/vcs/brain-writes-reviewed.mjs`)
-counts any review with `state === 'APPROVED'` from a non-author, non-allow-listed login as *the*
+counts any review with `state === 'APPROVED'` from a non-author, non-allow-listed login as _the_
 human review of a `brain/**` write. A reviewer agent running `gh pr review --approve` would satisfy
 branch protection **and** the brain-writes gate in one call — it would become a merge authorizer.
 The asymmetry cannot be a rule the agent remembers; it must be structurally impossible.
@@ -35,12 +35,12 @@ one config line.
 
 **1. Add four write verbs to the VCS port, all incapable of approving.**
 
-| Verb | Contract |
-|---|---|
+| Verb                                         | Contract                                                       |
+| -------------------------------------------- | -------------------------------------------------------------- |
 | `prReviewComment({ project, number, body })` | `event: 'COMMENT'` **hardcoded** — no APPROVE code path exists |
-| `issueComment({ project, number, body })` | rulings on issues |
-| `labelAdd({ project, number, labels })` | caller enforces the deny-set (monotonic tightening only) |
-| `labelRemove({ project, number, labels })` | caller enforces the deny-set |
+| `issueComment({ project, number, body })`    | rulings on issues                                              |
+| `labelAdd({ project, number, labels })`      | caller enforces the deny-set (monotonic tightening only)       |
+| `labelRemove({ project, number, labels })`   | caller enforces the deny-set                                   |
 
 Both providers (`brain/scripts/vcs/providers/github.mjs`, `.../gitlab.mjs`) implement them or the
 verb-contract drift-guard turns red. Adding verbs to the port is itself a decision (this ADR +
