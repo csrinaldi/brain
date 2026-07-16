@@ -17,7 +17,6 @@ import { readRecordObservations } from '../memory/lib/store.mjs';
 import { parseVerdict } from './lib/parse-verdict.mjs';
 
 const DOCTRINE_TYPES = new Set(['decision', 'architecture']);
-
 /** Pure guard (REQ-H1-3): a reviewer whose handle equals the PR author abstains. */
 export function evaluateSelfReview({ reviewerHandle, author }) {
   return Boolean(reviewerHandle) && Boolean(author) && reviewerHandle === author;
@@ -31,8 +30,7 @@ function defaultFetchHead({ getVcs: getVcsFn = getVcs } = {}) {
   return async ({ project, number, provider }) => {
     const vcs = await getVcsFn({ provider });
     if (vcs.PROVIDER === 'gitlab') {
-      // GitLab's MR payload carries the HEAD sha at top level (`sha`),
-      // mirrored under `diff_refs.head_sha` — read both, never fabricated.
+      // GitLab's MR payload carries the HEAD sha at top level (`sha`), mirrored under `diff_refs.head_sha`.
       const { apiBase, token, proxyUrl } = gitlabApiConfig();
       const path = `projects/${encodeURIComponent(project)}/merge_requests/${number}`;
       const mr = await gitlabApiFetch({ apiBase, token, proxyUrl, path });
@@ -57,9 +55,7 @@ function defaultReadRecords({ cwd = process.cwd() } = {}) {
   return () => readRecordObservations({ recordsDir: join(cwd, '.memory', 'records') });
 }
 
-// NOTE: prReviews's shape is `{ state, author }` only — no `body` — so this
-// default can't surface a live block yet (flagged with H1-2); tests inject
-// `fetchReviews` fixtures with `body` directly.
+// NOTE: prReviews's shape is `{ state, author }` only, no `body` (flagged with H1-2); tests inject fixtures with `body`.
 function defaultFetchReviews({ getVcs: getVcsFn = getVcs } = {}) {
   return async ({ project, number, provider }) => {
     const vcs = await getVcsFn({ provider });

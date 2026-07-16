@@ -1,7 +1,6 @@
 // verdict.mjs — REQ-H1-4, REQ-H1-6: the `brain-review/1` verdict builder.
-// Pure (no seams, design.md §5) — enforces the three §6 hard rules and the
-// §7 rev>=3 bound as BUILD-TIME invariants: a violating verdict is not
-// representable. The only place a `brain-review/1` block is constructed.
+// Pure (no seams, design.md §5) — enforces the §6 hard rules + §7 rev>=3
+// bound as BUILD-TIME invariants. The only place a block is constructed.
 
 const YAML_SCALAR_SAFE_RE = /^[A-Za-z0-9._\-/:]+$/;
 
@@ -14,9 +13,8 @@ function yamlScalar(val) {
   return s;
 }
 
-/** Evidence gate (drops findings without `evidence:`) + cites gate (a
- * `severity: blocker` finding without `cites:` downgrades to `correction` —
- * never invents a citation, protocol §5). */
+// Evidence gate (drops findings without `evidence:`) + cites gate (an
+// uncited blocker downgrades to `correction` — never invents a citation, §5).
 function processFindings(findings = []) {
   return findings
     .filter(f => Boolean(f?.evidence))
@@ -37,10 +35,7 @@ export function buildVerdict({
   sequencing,
   escalate = null,
 } = {}) {
-  if (!headSha) {
-    throw new Error('brain-review/1: head_sha is mandatory — refusing to build a headless verdict.');
-  }
-
+  if (!headSha) throw new Error('brain-review/1: head_sha is mandatory — refusing to build a headless verdict.');
   const boundHit = priorRevCount >= 3 && conclusion === 'REVISE';
 
   return {
@@ -57,9 +52,8 @@ export function buildVerdict({
   };
 }
 
-/** Renders a built verdict as the fenced `brain-review/1` YAML block
- * (protocol §6 shape). Hand-rolled — brain ships zero npm deps and this
- * schema is fixed, not generic YAML. */
+// Renders a built verdict as the fenced brain-review/1 YAML block (§6).
+// Hand-rolled — zero npm deps and this schema is fixed, not generic YAML.
 export function renderVerdict(v) {
   const lines = [
     '```yaml',
