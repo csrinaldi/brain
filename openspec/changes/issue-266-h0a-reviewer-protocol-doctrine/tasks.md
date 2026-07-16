@@ -22,7 +22,7 @@ slice: H0-a
 | Field | Value |
 |-------|-------|
 | H0-a counted lines | **~0 counted.** Everything is under `openspec/changes/**`, `brain-drafts/`, `design-off/` (under the change dir), and `.memory/**` — all in `governance.ignoreList` (`brain.config.json:16-27`) or ignored by convention. The ADR draft lands in `brain-drafts/` (agent-drafts, human-promotes) and does not count until promotion. |
-| H0-b counted lines | **~210** production lines (actuals, PR #271's doctrine already promoted): 4 verbs × 2 providers (`github.mjs` +78, `gitlab.mjs` +108, both include JSDoc), `VERBS` (+5), `vcs-contract.md` (+6/-2), `brain-writes-reviewed.mjs`'s `governance.reviewActors` union read at L6 (+15/-2). Above the ~120–180 estimate (GitLab's notes-API url derivation added JSDoc weight) but well under 400 — no `size:exception` needed. Tests are budget-free (`**/*.test.mjs` ∈ `ignoreList`). |
+| H0-b counted lines | **~210** production lines (actuals, PR #271's doctrine already promoted): 4 verbs × 2 providers (`github.mjs` +78, `gitlab.mjs` +108, both include JSDoc), `VERBS` (+5), `vcs-contract.md` (+6/-2), `brain-writes-reviewed.mjs`'s `governance.reviewActors` replace read at L6 (R2; +~12/-2). Above the ~120–180 estimate (GitLab's notes-API url derivation added JSDoc weight) but well under 400 — no `size:exception` needed. Tests are budget-free (`**/*.test.mjs` ∈ `ignoreList`). |
 | 400-line budget risk | **Low** for both slices. |
 | Chained PRs | H0-a → then H0-b, feature-branch-chain against the `issue-266` tracker branch (H0-a landed via PR #271 to the tracker; H0-b targets the same tracker, not `feature/v2.0.0`). H0-b depends on H0-a's doctrine being promoted — confirmed: `reviewer-protocol.md` + ADR-0020 merged at 77b91f3. |
 | Decision needed before apply | Confirm the H0-a / H0-b split and that the ADR promotion (agent-draft → human-promote) is done by a human, not the apply agent. — **Resolved**: done via PR #271 (merged), human-signed ADR-0020. |
@@ -107,14 +107,16 @@ slice: H0-a
 
 ## Phase 7 — `governance.reviewActors` wiring
 
-- [x] **7.1 RED** — a test that L6's default `readBotAllowlist` reader unions
-      `governance.approvalActors` with `governance.reviewActors`, using a real temp
-      `brain.config.json` (not an injected fake) to exercise the actual default reader. Observed RED:
-      the reviewer-only entry was missing from `inputs.botAllowlist` before the fix.
-- [x] **7.2 GREEN** — implemented the L6 `defaultReadBotAllowlist` union read of
-      `governance.reviewActors` in addition to `governance.approvalActors` (additive — "threads it
-      into its botAllowlist," not a replacement; see Design ambiguity note below). L5
-      (`actor-check.mjs`) is **not** touched — it keeps reading `governance.approvalActors` only.
+- [x] **7.1 RED** — a test that L6's default `readBotAllowlist` reader reads ONLY
+      `governance.reviewActors` and that an identity present ONLY in `governance.approvalActors`
+      (`release-bot`) is EXCLUDED from L6's botAllowlist, using a real temp `brain.config.json` (not
+      an injected fake). Observed RED: the reviewer-only entry was missing from `inputs.botAllowlist`
+      before the fix. (Distinguishing assertion added on review — a union implementation fails it.)
+- [x] **7.2 GREEN** — implemented the L6 `defaultReadBotAllowlist` to read `governance.reviewActors`
+      ONLY. L6's botAllowlist key **moves** off `governance.approvalActors` — it does NOT union them
+      (binding ruling **R2**: "no key feeds two gates"; the union was corrected on orchestrator review
+      — see ruling below). L5 (`actor-check.mjs`) is **not** touched — it keeps reading
+      `governance.approvalActors` only.
 - [ ] **7.3 (deferred — reviewer bot handle undefined; owner decision pending)** — populate
       `governance.reviewActors` with the reviewer handle in `brain.config.json`; confirm the reviewer
       handle is **never** added to `governance.approvalActors` (Fork A, design §11). No dedicated
@@ -170,15 +172,16 @@ Session agreements. Promote at MR time — see `brain/core/methodology/consolida
 - **`vcs-contract.md` is already one verb behind** (`:61` says "15 verbs", `VERBS` has 16). Fix in
   the same MR that adds the four new verbs (6.6).
 - **H0-a is budget-free.** All of it is ignore-listed or owner-managed dirs; no `size:exception`.
-- **Design ambiguity, resolved additively (H0-b, task 7.2).** `design.md` §3's table lists L6's "key
-  it reads" as `governance.reviewActors` singular, which could be read as "L6 stops reading
-  `approvalActors`." The doctrine (`reviewer-protocol.md` §3) has the same phrasing and is
-  human-signed/read-only — not reopened. The H0-b task text itself says L6 "threads it into its
-  botAllowlist," which is additive language. Chosen interpretation: **union** —
-  `defaultReadBotAllowlist` in `brain-writes-reviewed.mjs` now returns
-  `approvalActors ∪ reviewActors`. This satisfies REQ-266-5's scenario and both mandatory lock-3
-  tests (t1, t2) under either reading, and is strictly safer than a replace interpretation (no
-  existing `approvalActors`-driven L6 exclusion capability is silently dropped). Flagging this for
-  reviewer awareness rather than silently picking a reading — not a blocker, since neither
-  governance key is populated in `brain.config.json` today, so no live behavior differs between the
-  two readings yet.
+- **RULING (H0-b, task 7.2): L6 reads `governance.reviewActors` ONLY — REPLACE, not union.** The
+  apply agent first implemented `defaultReadBotAllowlist` as `approvalActors ∪ reviewActors`, reading
+  the H0-b task's "threads it into its botAllowlist" as additive. Corrected on orchestrator review:
+  the **signed** authority — ADR-0020 and binding ruling **R2** ("no key feeds two gates";
+  `approvalActors` is **L5-only") — eliminates the union. The union keeps `approvalActors` feeding
+  both gates, which is exactly the dual-semantics coupling the split exists to dissolve; it defeats
+  the mechanism. `design.md:31-32`'s prose "L6 gains a second config read" was a drafting error
+  contradicting R2 and has been corrected to "moves." A distinguishing test now asserts an
+  `approvalActors`-only identity (`release-bot`) is EXCLUDED from L6's botAllowlist — a union fails
+  it. **Migration note:** REPLACE means a consumer with a populated `governance.approvalActors` who
+  relied on L6 excluding those identities must now also list them in `governance.reviewActors` (both
+  effects require both registrations — explicit, never implicit). Zero live impact on brain itself:
+  `approvalActors` is empty here.

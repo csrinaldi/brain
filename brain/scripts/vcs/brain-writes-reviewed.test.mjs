@@ -441,16 +441,18 @@ test('A3 TASK2 source-scan: defaultFetchReviews no longer contains execFileSync(
 
 // ── governance.reviewActors wiring (issue #266, design §3 two-key split) ──────
 //
-// L6's default botAllowlist reader must also read the NEW governance.reviewActors
-// key and thread it into botAllowlist, in addition to governance.approvalActors —
-// L5 (actor-check.mjs) is untouched and keeps reading approvalActors only.
+// Binding ruling R2 ("no key feeds two gates"): L6's default botAllowlist reader
+// key MOVES from governance.approvalActors to the NEW governance.reviewActors —
+// it does NOT union them. approvalActors is now L5-only (actor-check.mjs). An
+// identity present ONLY in approvalActors must NOT appear in L6's botAllowlist —
+// that is the distinguishing assertion that a union would fail.
 
-test('governance.reviewActors (issue #266): L6 default botAllowlist reader unions governance.approvalActors and governance.reviewActors', async () => {
+test('governance.reviewActors (issue #266, R2): L6 default botAllowlist reader reads ONLY governance.reviewActors — an approvalActors-only identity is excluded (no key feeds two gates)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'brain-config-'));
   writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({
     governance: {
-      approvalActors: ['release-bot'],
-      reviewActors: ['brain-reviewer[bot]'],
+      approvalActors: ['release-bot'],       // L5-only — must NOT leak into L6
+      reviewActors: ['brain-reviewer[bot]'], // L6-only
     },
   }));
   const inputs = await gatherBrainWritesReviewedInputs({
@@ -465,13 +467,17 @@ test('governance.reviewActors (issue #266): L6 default botAllowlist reader union
       diffNameOnly: () => ['brain/core/foo.mjs'],
       fetchReviews: () => [],
       // deliberately NOT injecting readBotAllowlist — exercising the REAL
-      // default reader, which must union both governance keys.
+      // default reader, which must read reviewActors alone.
     },
   });
   assert.deepEqual(
     new Set(inputs.botAllowlist),
-    new Set(['release-bot', 'brain-reviewer[bot]']),
-    'L6 botAllowlist must include identities from BOTH governance.approvalActors and governance.reviewActors',
+    new Set(['brain-reviewer[bot]']),
+    'L6 botAllowlist must contain ONLY governance.reviewActors; an approvalActors-only identity (release-bot) must NOT feed L6 (R2: no key feeds two gates)',
+  );
+  assert.ok(
+    !inputs.botAllowlist.includes('release-bot'),
+    'release-bot is L5-only (governance.approvalActors) — a union implementation would wrongly include it here',
   );
 });
 

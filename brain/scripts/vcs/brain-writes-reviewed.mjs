@@ -163,23 +163,22 @@ function defaultFetchReviews(repo, provider, { getVcs: getVcsFn = getVcs } = {})
 }
 
 /**
- * Default `readBotAllowlist` dep: unions `governance.approvalActors` with
- * `governance.reviewActors` (issue #266, design §3 two-key split). The
- * reviewer identity registers ONLY in `governance.reviewActors` — a NEW,
- * L6-only key — and is NEVER in `governance.approvalActors` (L5-only,
- * permissive there; see `actor-check.mjs`'s `defaultReadBotAllowlist`, which
- * is NOT touched by this change and keeps reading `approvalActors` alone).
- * Threading `reviewActors` in here additionally is what excludes the
- * reviewer from L6's human-approver count without ever admitting it to L5's
- * allow-listed-automation branch.
+ * Default `readBotAllowlist` dep: reads ONLY `governance.reviewActors` (issue
+ * #266, design §3 two-key split, binding ruling R2: "no key feeds two gates").
+ * L6's botAllowlist key MOVES from `governance.approvalActors` to the NEW,
+ * L6-only `governance.reviewActors` — it does NOT union them. `approvalActors`
+ * is now L5-only (`actor-check.mjs`'s reader, untouched); reading it here too
+ * would keep it feeding both gates, which is exactly the dual-semantics
+ * coupling the split exists to dissolve. To exclude an identity from L6's
+ * human-approver count, register it in `reviewActors`; to let an identity
+ * apply `status:approved`, register it in `approvalActors`; both effects
+ * require both registrations — explicit, never implicit.
  */
 function defaultReadBotAllowlist(cwd) {
   return () => {
     try {
       const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
-      const approvalActors = Array.isArray(config?.governance?.approvalActors) ? config.governance.approvalActors : [];
-      const reviewActors = Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
-      return [...new Set([...approvalActors, ...reviewActors])];
+      return Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
     } catch {
       return [];
     }
