@@ -50,6 +50,9 @@
     "brain:save": "node ./brain/scripts/brain-save.mjs",
     "brain:ship": "node ./brain/scripts/brain-ship.mjs",
     "brain:next": "node ./brain/scripts/brain-next.mjs",
-    "brain:adopt": "node ./brain/scripts/adopt.mjs"
+    "brain:adopt": "node ./brain/scripts/adopt.mjs",
+    "brain:review": "node ./brain/scripts/review/cli.mjs",
+    "brain:review:queue": "node ./brain/scripts/review/cli.mjs queue",
+    "brain:review:board": "node ./brain/scripts/review/cli.mjs board"
   }
 }
