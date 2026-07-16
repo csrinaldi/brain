@@ -100,15 +100,15 @@ yet to be affected.
 
 ### Phase 1.1 — `postmerge/git-seam.mjs` (NEW, design §4)
 
-- [ ] 1.1.1 RED: `git-seam.test.mjs` — `gitTry(argv)` never throws on non-zero exit; returns
+- [x] 1.1.1 RED: `git-seam.test.mjs` — `gitTry(argv)` never throws on non-zero exit; returns
       `{ status, stdout, stderr }` for a command that exits 0, a command that exits with a documented
       non-zero code (e.g. `ls-remote --exit-code` against a ref that does not exist → status 2), and a
       command that exits with an unrelated failure code (e.g. unreachable remote → 128).
-- [ ] 1.1.2 GREEN: implement `gitTry(argv)` as a thin `execFileSync` wrapper that captures `status` instead
+- [x] 1.1.2 GREEN: implement `gitTry(argv)` as a thin `execFileSync` wrapper that captures `status` instead
       of throwing.
-- [ ] 1.1.3 RED: `gitOrThrow(argv)` — returns stdout on status 0; throws an `Error` carrying `.status` when
+- [x] 1.1.3 RED: `gitOrThrow(argv)` — returns stdout on status 0; throws an `Error` carrying `.status` when
       non-zero.
-- [ ] 1.1.4 GREEN: implement `gitOrThrow` on top of `gitTry`.
+- [x] 1.1.4 GREEN: implement `gitOrThrow` on top of `gitTry`.
 
 ### Phase 1.2 — `postmerge/cursor.mjs` tri-state read (REQ-D2-2, REQ-D2-11)
 
@@ -116,34 +116,34 @@ yet to be affected.
 `git ls-remote --exit-code origin refs/governance/audit-cursor`. There is no fetch step, no local
 `rev-parse`, and no `syncCursor` helper — the remote's own answer is the entire state machine.
 
-- [ ] 1.2.1 RED (**fixture B1** — the tautological-test trap, reproduced): construct a **bare "origin" repo
+- [x] 1.2.1 RED (**fixture B1** — the tautological-test trap, reproduced): construct a **bare "origin" repo
       with the cursor ref SET on it**, clone it with a **plain `git clone`** (which, exactly like
       `actions/checkout`, fetches only `refs/heads/*` + tags). **First assert the local `git rev-parse`
       against the unfetched ref FAILS** — this proves the fixture reproduces the real production shape,
       not a strawman. **Then** run `readCursor` — a single `ls-remote --exit-code` call, nothing else —
       and assert it returns `{ state: 'present', sha }`, with `sha` parsed directly from `ls-remote`'s own
       stdout (`<sha>\t<ref>`), never from the (still-unfetched, still-unresolved) local ref.
-- [ ] 1.2.2 RED (**fixture B2**): a bare origin with **no** cursor ref at all. Assert `readCursor` returns
+- [x] 1.2.2 RED (**fixture B2**): a bare origin with **no** cursor ref at all. Assert `readCursor` returns
       `{ state: 'absent' }` (from `ls-remote --exit-code` status 2 — git's documented "no matching refs").
-- [ ] 1.2.3 RED (**fixture B3**): an origin URL pointing at a **nonexistent path** (unreachable — any
+- [x] 1.2.3 RED (**fixture B3**): an origin URL pointing at a **nonexistent path** (unreachable — any
       `ls-remote` status other than 0 or the documented 2). Assert `readCursor` returns
       `{ state: 'unknown' }` and explicitly assert it is **NOT** `absent`.
-- [ ] 1.2.4 RED: `ls-remote --exit-code` returns status 0, but the sha parsed from its own stdout is
+- [x] 1.2.4 RED: `ls-remote --exit-code` returns status 0, but the sha parsed from its own stdout is
       malformed/missing (a corrupted or unexpected answer). Assert `{ state: 'unknown' }` — never silently
       downgraded to `absent`, and never a crash.
-- [ ] 1.2.5 GREEN: implement `readCursor({ git })` as the tri-state machine (§2.1) — one `ls-remote
+- [x] 1.2.5 GREEN: implement `readCursor({ git })` as the tri-state machine (§2.1) — one `ls-remote
       --exit-code` call, sha parsed from its stdout on status 0 — satisfying 1.2.1–1.2.4.
 
 ### Phase 1.3 — `resolveWindow` always `cursor..HEAD` (REQ-D2-1)
 
-- [ ] 1.3.1 RED: `resolveWindow({ git, head })` on a `present` cursor at `C` with `head = H` returns
+- [x] 1.3.1 RED: `resolveWindow({ git, head })` on a `present` cursor at `C` with `head = H` returns
       `{ state: 'present', base: C, range: 'C..H', head: H }` — **regardless of any `eventName`/`before`
       argument passed** (there must be no push/schedule branch left to pass).
-- [ ] 1.3.2 RED (**fixture B6**): a cursor sha that is **NOT an ancestor of HEAD** (simulates a rewritten
+- [x] 1.3.2 RED (**fixture B6**): a cursor sha that is **NOT an ancestor of HEAD** (simulates a rewritten
       `main`). Assert `resolveWindow` returns `{ state: 'unknown', reason: 'cursor is not an ancestor of HEAD' }`.
-- [ ] 1.3.3 RED: cursor state is `absent`/`unknown` (from Phase 1.2). Assert `resolveWindow` propagates the
+- [x] 1.3.3 RED: cursor state is `absent`/`unknown` (from Phase 1.2). Assert `resolveWindow` propagates the
       state without computing a range.
-- [ ] 1.3.4 GREEN: implement `resolveWindow` (§2.2) satisfying 1.3.1–1.3.3.
+- [x] 1.3.4 GREEN: implement `resolveWindow` (§2.2) satisfying 1.3.1–1.3.3.
 
 ### Phase 1.4 — `advanceCursor` as atomic CAS, REMOTE ONLY (REQ-D2-15)
 
@@ -151,53 +151,53 @@ yet to be affected.
 plain checkout has no local governance ref to CAS against, and a local CAS would only mask the remote
 lease's own guarantee (§2.3).
 
-- [ ] 1.4.1 RED (**fixture B4**): a repo with **NO** cursor ref on origin. Call
+- [x] 1.4.1 RED (**fixture B4**): a repo with **NO** cursor ref on origin. Call
       `advanceCursor({ git, from: <40-hex>, to })`. Assert it **throws** (the remote lease rejects a
       `from` that cannot match an absent ref's null OID — never auto-creates) and the ref **still does not
       exist on origin** afterward, asserted directly against the core (not the YAML).
-- [ ] 1.4.2 RED: `advanceCursor` called with a non-40-hex `from` (e.g. `undefined`, short sha). Assert it
+- [x] 1.4.2 RED: `advanceCursor` called with a non-40-hex `from` (e.g. `undefined`, short sha). Assert it
       throws before touching git.
-- [ ] 1.4.3 RED: `advanceCursor` with `from` that is not an ancestor of `to`. Assert it throws (the cursor
+- [x] 1.4.3 RED: `advanceCursor` with `from` that is not an ancestor of `to`. Assert it throws (the cursor
       only ever moves forward).
-- [ ] 1.4.4 RED (**fixture B5** — two-clone cross-runner race): two **independent clones** of the same
+- [x] 1.4.4 RED (**fixture B5** — two-clone cross-runner race): two **independent clones** of the same
       origin both observe the cursor at `C0`. Clone A advances `C0→C1` and wins. Clone B, still holding the
       stale `C0`, calls `advanceCursor({ from: C0, to: C2 })`. Assert clone B's call **fails**, that the
       rejection comes from the **push** itself (never a local ref — there is none to check), and that the
       remote cursor is unchanged at `C1` (the winner) afterward.
-- [ ] 1.4.5 GREEN: implement `advanceCursor` (§2.3) — remote-only CAS via
+- [x] 1.4.5 GREEN: implement `advanceCursor` (§2.3) — remote-only CAS via
       `git push --force-with-lease=<ref>:<from> origin <to>:<ref>`, no local `update-ref` — satisfying
       1.4.1–1.4.4.
-- [ ] 1.4.6 RED + GREEN: `acceptManually({ git, from, to, reason })` — throws/refuses when `reason` is
+- [x] 1.4.6 RED + GREEN: `acceptManually({ git, from, to, reason })` — throws/refuses when `reason` is
       empty or `from` is not 40-hex; otherwise echoes `reason` to stdout and performs the SAME remote-only
       CAS advance as 1.4.5 (§2.4), using the **caller-supplied `from`** (the human's own assertion of the
       cursor value they reviewed — never read from the live cursor). Include a fixture on a **plain
       checkout with no local governance ref at all**: assert `acceptManually` still succeeds via the remote
       lease alone — this is the production shape the human escape hatch must work on.
-- [ ] 1.4.7 RED + GREEN: CLI mode — `node postmerge/cursor.mjs window` prints exactly one of
+- [x] 1.4.7 RED + GREEN: CLI mode — `node postmerge/cursor.mjs window` prints exactly one of
       `PRESENT <base> <head>` / `ABSENT` / `UNKNOWN <reason>` and exits `0` (present) or `2` (absent/unknown);
       `node postmerge/cursor.mjs accept <sha> --reason "<text>"` invokes `acceptManually`; missing
       `--reason` exits non-zero with a usage message.
 
 ### Phase 1.5 — GitLab-porting constraint draft (REQ-D2-9, survives verbatim from old Phase 6)
 
-- [ ] 1.5.1 Write/re-confirm `openspec/changes/issue-259-d2/brain-drafts/gitlab-porting-constraint.md`
+- [x] 1.5.1 Write/re-confirm `openspec/changes/issue-259-d2/brain-drafts/gitlab-porting-constraint.md`
       stating rung-3 auto-revert must not port to GitLab until D2's fixes land, and that the GitLab port
       covers PR-time gates (`GOVERNANCE_JOBS`) only.
-- [ ] 1.5.2 Confirm (no code): no ADR / `brain/core/` / PLAN file is touched by this PR — human co-promotes
+- [x] 1.5.2 Confirm (no code): no ADR / `brain/core/` / PLAN file is touched by this PR — human co-promotes
       the draft separately (pattern #216). Confirm via `git status` before commit.
 
 ### Phase 1.6 — PR 1 gate
 
-- [ ] 1.6.1 `npm test` — the **full suite**, green. No scoping restriction: on this (reset) branch,
+- [x] 1.6.1 `npm test` — the **full suite**, green. No scoping restriction: on this (reset) branch,
       `release-postmerge-workflows.test.mjs` is the clean 145-line base — no `probeScript`, no
       identity-poisoning `spawnSync`, no execution of extracted workflow lines. That hazard was introduced
       by D2's OWN now-discarded v1 work (`scrap/d2-v1-broken`), not by anything on this branch or in the
       environment (owner Ruling 1, engram #902 — verified with file:line git evidence). Running the full
       suite from the real worktree is safe in this PR.
-- [ ] 1.6.2 Budget check: `git-seam.mjs` + `cursor.mjs` counted lines ≈155 (test files and
+- [x] 1.6.2 Budget check: `git-seam.mjs` + `cursor.mjs` counted lines ≈155 (test files and
       `openspec/changes/**` excluded per `governance.ignoreList`) — confirm ≤400, no `size:exception`.
-- [ ] 1.6.3 `memory:share` before push, per house convention.
-- [ ] 1.6.4 Push, open PR 1 into `feature/v2.0.0`. Dependency diagram in the PR body marks PR 1 with 📍.
+- [x] 1.6.3 `memory:share` before push, per house convention.
+- [x] 1.6.4 Push, open PR 1 into `feature/v2.0.0`. Dependency diagram in the PR body marks PR 1 with 📍.
 
 ---
 
