@@ -10,9 +10,7 @@ import { getVcs } from '../vcs/cli.mjs';
 export const DEFAULT_TOKEN_ENV = 'BRAIN_REVIEWER_TOKEN';
 export const DEFAULT_SETUP_DOC_PATH = 'docs/reviewer-setup.md';
 
-// PAT scopes per provider, used only to print a "get a token" link
-// (github.mjs / gitlab.mjs's `patSetupUrl({ host, name, scopes })`).
-const PROVIDER_SCOPES = { github: ['repo'], gitlab: ['api'] };
+const PROVIDER_SCOPES = { github: ['repo'], gitlab: ['api'] }; // for the "get a token" link
 
 /** Pure core: resolves identity from config + env, or reports exactly why it
  * cannot. Never touches the network — `patSetupUrl` is pre-resolved by the caller. */
@@ -47,7 +45,7 @@ export async function gatherIdentity({ deps = {} } = {}) {
   return evaluateIdentity({ reviewerConfig, env, patSetupUrl, setupDocPath });
 }
 
-/** Runs the gate and prints the fail-closed instructions. Never throws. */
+// Runs the gate and prints the fail-closed instructions. Never throws.
 export async function main(deps = {}) {
   const result = await gatherIdentity({ deps });
   if (!result.ok) {
