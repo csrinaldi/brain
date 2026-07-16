@@ -27,6 +27,7 @@ Reusable documentation — applies to any project that adopts this system.
 - [Feature-working-memory contract](core/methodology/feature-working-memory-contract.md) — the resume.md schema + feature-checkpoint/resume verbs
 - [Memory record format](core/methodology/memory-format.md) — the brain-owned durable .memory/ record format (schema, union merge, index)
 - [Workflow governance](core/methodology/workflow-governance.md) — four invariants, CI gates, enforce-outputs boundary, lockout recovery
+- [Reviewer protocol](core/methodology/reviewer-protocol.md) — the cold external reviewer as doctrine: three structural locks against reviewer-as-authorizer, the reviewActors/approvalActors two-key split, four COMMENT-only port verbs, and the brain-review/1 verdict schema
 
 ### Anti-patterns (generic)
 
@@ -65,6 +66,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0016](project/decisions/adr-0016-ci-context-normalization.md) — CI Context Normalization: One Seam Over Provider-Specific Pipeline Evidence
 - [ADR-0017](project/decisions/adr-0017-memory-format-owned-by-brain.md) — The Durable Memory Record Format Is Owned By Brain, Not By Engram
 - [ADR-0019](project/decisions/adr-0019-harness-port.md) — The SDD_HARNESS port: four environment surfaces, artifacts neutral by design
+- [ADR-0020](project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md) — External-reviewer VCS port verbs + the reviewActors/approvalActors two-key split
 
 ### Project-specific rules
 
