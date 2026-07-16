@@ -1,10 +1,8 @@
 // identity.mjs — REQ-H1-1: fail-closed reviewer identity gate (protocol §11).
 // Reads `reviewer: { handle, tokenEnv }` — config carries the env var NAME,
-// never the token VALUE (issue #266 comment 4992662021). If
-// `env[tokenEnv]` is absent, brain:review refuses to run before any server
-// call: missing var name, provider `patSetupUrl`, setup doc path. No silent
-// degradation (mirrors governance/run-check.mjs). DI-seam pattern (design.md
-// §3, D1): pure `evaluateIdentity` core + `gatherIdentity({ deps })`.
+// never the token VALUE (issue #266 comment 4992662021). Absent
+// `env[tokenEnv]` refuses to run before any server call: missing var,
+// provider `patSetupUrl`, setup doc path. No silent degradation.
 
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { getVcs } from '../vcs/cli.mjs';
@@ -16,11 +14,8 @@ export const DEFAULT_SETUP_DOC_PATH = 'docs/reviewer-setup.md';
 // (github.mjs / gitlab.mjs's `patSetupUrl({ host, name, scopes })`).
 const PROVIDER_SCOPES = { github: ['repo'], gitlab: ['api'] };
 
-/**
- * Pure core: resolves identity from config + env, or reports exactly why it
- * cannot. Never touches the network — `patSetupUrl` is pre-resolved by the caller.
- * @returns {{ ok: true, handle: string|null, token: string } | { ok: false, missingVar: string, patSetupUrl: string|null, setupDocPath: string }}
- */
+/** Pure core: resolves identity from config + env, or reports exactly why it
+ * cannot. Never touches the network — `patSetupUrl` is pre-resolved by the caller. */
 export function evaluateIdentity({ reviewerConfig = {}, env = {}, patSetupUrl = null, setupDocPath = DEFAULT_SETUP_DOC_PATH } = {}) {
   const tokenEnv = reviewerConfig.tokenEnv || DEFAULT_TOKEN_ENV;
   const token = env[tokenEnv];

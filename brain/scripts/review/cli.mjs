@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // cli.mjs — REQ-H1-5: `brain:review` CLI skeleton. Wires
-// identity → cold-boot → (H1-1 skeleton verdict) → print. `--dry-run` prints
-// the verdict and posts nothing; H1-1 has NO poster yet (H1-2), so every run
-// behaves the same way — zero write calls, always. `queue`/`board` dispatch
-// land in H1-5 (design.md §9); this file only wires the review path.
+// identity → cold-boot → (H1-1 skeleton verdict) → print. H1-1 has NO poster
+// yet (H1-2) — every run makes zero write calls, dry-run or not.
+// `queue`/`board` dispatch land in H1-5 (design.md §9).
 
 import { pathToFileURL } from 'node:url';
 

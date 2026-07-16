@@ -1,12 +1,9 @@
 // parse-verdict.mjs — parses a `brain-review/1` fenced-YAML block out of a
 // review body (protocol §6). Purpose-built for this ONE fixed schema — not a
-// generic YAML parser (brain ships zero npm dependencies). Extracts only the
-// scalars H1-1's consumers need (cold-boot's rev derivation + doctrine load);
-// nested `findings`/`gates` parsing is not needed until H1-5's board.
-//
-// Shared by three consumers (design.md §2): cold-boot (load prior blocks),
-// the anti-loop lock (H1-2), and the board (H1-5) — extracted once so `rev`
-// derivation and label reconciliation read the same parser.
+// generic YAML parser (zero npm deps). Extracts only the scalars H1-1 needs
+// (rev derivation + doctrine load); nested findings/gates land with H1-5's
+// board. Shared by cold-boot, the anti-loop lock (H1-2), and the board
+// (H1-5) — extracted once so they read the same parser (design.md §2).
 
 const FENCE_RE = /```(?:yaml)?\s*\n([\s\S]*?)```/;
 
@@ -15,10 +12,7 @@ function scalar(block, key) {
   return m ? m[1].trim() : null;
 }
 
-/**
- * @param {{ body?: string|null, author?: string|null }} review
- * @returns {{ head_sha: string, rev: number|null, verdict: string, author: string|null } | null}
- */
+/** @returns {{ head_sha: string, rev: number|null, verdict: string, author: string|null } | null} */
 export function parseVerdict({ body, author = null } = {}) {
   if (typeof body !== 'string' || body.length === 0) return null;
 
