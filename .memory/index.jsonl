@@ -15,6 +15,7 @@
 {"id":"rec-146945dfa6e6aeec","ts":"2026-07-02T20:44:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-147a37222c0c2d62","ts":"2026-07-07T16:39:49Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-1dfde628b2f920e6","ts":"2026-06-26T23:57:27Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
+{"id":"rec-1efa1893e1427623","ts":"2026-07-16T00:33:55Z","actor":"feat/issue-266-h0a-reviewer-protocol-doctrine","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-22b31ffcee84de30","ts":"2026-06-26T23:59:27Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-22d08ac984e81809","ts":"2026-07-02T09:46:34Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-234062dc763fb3d4","ts":"2026-06-27T21:53:21Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
@@ -122,6 +123,7 @@
 {"id":"rec-e0c9ce6810bc8c79","ts":"2026-06-27T22:26:07Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-e104e87176c3f8d4","ts":"2026-07-02T11:45:53Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-e6052e9c74c604e6","ts":"2026-06-27T23:10:27Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
+{"id":"rec-ed1c325e24addf22","ts":"2026-07-16T00:33:55Z","actor":"feat/issue-266-h0a-reviewer-protocol-doctrine","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f016f82cdf6bc593","ts":"2026-07-03T01:59:47Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f218021964de11ed","ts":"2026-06-27T18:51:16Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-f38fa3545cb61086","ts":"2026-07-02T14:30:24Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
