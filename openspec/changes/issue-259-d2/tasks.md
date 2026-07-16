@@ -112,25 +112,27 @@ yet to be affected.
 
 ### Phase 1.2 — `postmerge/cursor.mjs` tri-state read (REQ-D2-2, REQ-D2-11)
 
-- [ ] 1.2.1 RED: `syncCursor({ git })` — asserts the exact refspec
-      `git fetch --prune origin '+refs/governance/*:refs/governance/*'` is issued via the injected `git`
-      seam before any state read.
-- [ ] 1.2.2 GREEN: implement `syncCursor`.
-- [ ] 1.2.3 RED (**fixture B1** — the tautological-test trap, reproduced): construct a **bare "origin" repo
+`readCursor` is **remote-authoritative and single-call**: exactly one
+`git ls-remote --exit-code origin refs/governance/audit-cursor`. There is no fetch step, no local
+`rev-parse`, and no `syncCursor` helper — the remote's own answer is the entire state machine.
+
+- [ ] 1.2.1 RED (**fixture B1** — the tautological-test trap, reproduced): construct a **bare "origin" repo
       with the cursor ref SET on it**, clone it with a **plain `git clone`** (which, exactly like
       `actions/checkout`, fetches only `refs/heads/*` + tags). **First assert the local `git rev-parse`
       against the unfetched ref FAILS** — this proves the fixture reproduces the real production shape,
-      not a strawman. **Then** run `readCursor` (which calls `syncCursor` first) and assert it returns
-      `{ state: 'present', sha }`.
-- [ ] 1.2.4 RED (**fixture B2**): a bare origin with **no** cursor ref at all. Assert `readCursor` returns
+      not a strawman. **Then** run `readCursor` — a single `ls-remote --exit-code` call, nothing else —
+      and assert it returns `{ state: 'present', sha }`, with `sha` parsed directly from `ls-remote`'s own
+      stdout (`<sha>\t<ref>`), never from the (still-unfetched, still-unresolved) local ref.
+- [ ] 1.2.2 RED (**fixture B2**): a bare origin with **no** cursor ref at all. Assert `readCursor` returns
       `{ state: 'absent' }` (from `ls-remote --exit-code` status 2 — git's documented "no matching refs").
-- [ ] 1.2.5 RED (**fixture B3**): an origin URL pointing at a **nonexistent path** (unreachable — any
+- [ ] 1.2.3 RED (**fixture B3**): an origin URL pointing at a **nonexistent path** (unreachable — any
       `ls-remote` status other than 0 or the documented 2). Assert `readCursor` returns
       `{ state: 'unknown' }` and explicitly assert it is **NOT** `absent`.
-- [ ] 1.2.6 RED: origin reports the ref present via `ls-remote`, but the local ref fails to resolve **after**
-      a successful fetch (an inconsistency). Assert `{ state: 'unknown' }` — never silently downgraded to
-      `absent`.
-- [ ] 1.2.7 GREEN: implement `readCursor({ git })` as the tri-state machine (§2.1) satisfying 1.2.3–1.2.6.
+- [ ] 1.2.4 RED: `ls-remote --exit-code` returns status 0, but the sha parsed from its own stdout is
+      malformed/missing (a corrupted or unexpected answer). Assert `{ state: 'unknown' }` — never silently
+      downgraded to `absent`, and never a crash.
+- [ ] 1.2.5 GREEN: implement `readCursor({ git })` as the tri-state machine (§2.1) — one `ls-remote
+      --exit-code` call, sha parsed from its stdout on status 0 — satisfying 1.2.1–1.2.4.
 
 ### Phase 1.3 — `resolveWindow` always `cursor..HEAD` (REQ-D2-1)
 
@@ -143,24 +145,34 @@ yet to be affected.
       state without computing a range.
 - [ ] 1.3.4 GREEN: implement `resolveWindow` (§2.2) satisfying 1.3.1–1.3.3.
 
-### Phase 1.4 — `advanceCursor` as atomic CAS (REQ-D2-15)
+### Phase 1.4 — `advanceCursor` as atomic CAS, REMOTE ONLY (REQ-D2-15)
 
-- [ ] 1.4.1 RED (**fixture B4**): a repo with **NO** cursor ref. Call `advanceCursor({ git, from: <40-hex>, to })`.
-      Assert it **throws** (no `from` validation bypass) and the ref **does not exist** afterward, asserted
-      directly against the core (not the YAML).
+`advanceCursor` writes **only** via `git push --force-with-lease`. There is no local `update-ref` step: a
+plain checkout has no local governance ref to CAS against, and a local CAS would only mask the remote
+lease's own guarantee (§2.3).
+
+- [ ] 1.4.1 RED (**fixture B4**): a repo with **NO** cursor ref on origin. Call
+      `advanceCursor({ git, from: <40-hex>, to })`. Assert it **throws** (the remote lease rejects a
+      `from` that cannot match an absent ref's null OID — never auto-creates) and the ref **still does not
+      exist on origin** afterward, asserted directly against the core (not the YAML).
 - [ ] 1.4.2 RED: `advanceCursor` called with a non-40-hex `from` (e.g. `undefined`, short sha). Assert it
       throws before touching git.
 - [ ] 1.4.3 RED: `advanceCursor` with `from` that is not an ancestor of `to`. Assert it throws (the cursor
       only ever moves forward).
-- [ ] 1.4.4 RED (**fixture B5**): two `advanceCursor` calls issued with the **same `from`**, the second
-      **after** the first has already succeeded. Assert the second **fails** (local CAS mismatch via
-      `git update-ref <ref> <to> <from>`, which fails when the ref's current value ≠ `from`).
-- [ ] 1.4.5 GREEN: implement `advanceCursor` (§2.3) — local `update-ref <ref> <to> <from>` CAS, then remote
-      `git push --force-with-lease=<ref>:<from> origin <to>:<ref>` — satisfying 1.4.1–1.4.4.
+- [ ] 1.4.4 RED (**fixture B5** — two-clone cross-runner race): two **independent clones** of the same
+      origin both observe the cursor at `C0`. Clone A advances `C0→C1` and wins. Clone B, still holding the
+      stale `C0`, calls `advanceCursor({ from: C0, to: C2 })`. Assert clone B's call **fails**, that the
+      rejection comes from the **push** itself (never a local ref — there is none to check), and that the
+      remote cursor is unchanged at `C1` (the winner) afterward.
+- [ ] 1.4.5 GREEN: implement `advanceCursor` (§2.3) — remote-only CAS via
+      `git push --force-with-lease=<ref>:<from> origin <to>:<ref>`, no local `update-ref` — satisfying
+      1.4.1–1.4.4.
 - [ ] 1.4.6 RED + GREEN: `acceptManually({ git, from, to, reason })` — throws/refuses when `reason` is
-      empty; otherwise reads the current cursor as `from`, echoes `reason` to stdout, and performs the
-      SAME CAS advance as 1.4.5 (§2.4). Note: `from` is *read* by `acceptManually`, not caller-supplied —
-      assert it fetches the live cursor value, not a stale one.
+      empty or `from` is not 40-hex; otherwise echoes `reason` to stdout and performs the SAME remote-only
+      CAS advance as 1.4.5 (§2.4), using the **caller-supplied `from`** (the human's own assertion of the
+      cursor value they reviewed — never read from the live cursor). Include a fixture on a **plain
+      checkout with no local governance ref at all**: assert `acceptManually` still succeeds via the remote
+      lease alone — this is the production shape the human escape hatch must work on.
 - [ ] 1.4.7 RED + GREEN: CLI mode — `node postmerge/cursor.mjs window` prints exactly one of
       `PRESENT <base> <head>` / `ABSENT` / `UNKNOWN <reason>` and exits `0` (present) or `2` (absent/unknown);
       `node postmerge/cursor.mjs accept <sha> --reason "<text>"` invokes `acceptManually`; missing
@@ -372,7 +384,8 @@ C6.
 **End state:** **the mechanism is live and correct end-to-end.** This is the **only GitHub-coupled PR** in
 the chain — a GitLab wrapper becomes a pure translation of this one file.
 **REQs bound:** REQ-D2-3/4 (dedup + orphan cleanup), REQ-D2-6 (workflow-side normalization + terminal-state
-assertion), REQ-D2-12, REQ-D2-13; REQ-D2-14 (fixture C1 + the D1/D2 harness-isolation fix, since this is
+assertion), REQ-D2-11 (the shallow-clone `merge-base` constraint, Phase 4.1.5 — binding, owner ruling),
+REQ-D2-12, REQ-D2-13; REQ-D2-14 (fixture C1 + the D1/D2 harness-isolation fix, since this is
 the first PR that touches workflow YAML and therefore the first PR that must touch the test harness which
 extracts and executes it).
 **Fixtures:** C1, C2, C4, C5, D1, D2.
@@ -414,11 +427,13 @@ the isolation and PROVES it for the one test file this PR touches. It does not a
 future workflow-extracting test file that might ever be added — that generalization is PR 5's Phase 5.4
 (the standing registry), not a duplicate of this phase.
 
-### Phase 4.1 — Explicit cursor fetch + window CLI (REQ-D2-1, REQ-D2-2, REQ-D2-11)
+### Phase 4.1 — Window CLI, no governance-ref fetch, and the history depth PR4 owes (REQ-D2-1, REQ-D2-2, REQ-D2-11)
 
-- [ ] 4.1.1 Edit the window-resolution step to run `git fetch --prune origin '+refs/governance/*:refs/governance/*'`
-      then call `node postmerge/cursor.mjs window`, replacing the old `git describe --tags --abbrev=0` /
-      push-vs-schedule branch entirely.
+- [ ] 4.1.1 Edit the window-resolution step to call `node postmerge/cursor.mjs window` directly, replacing
+      the old `git describe --tags --abbrev=0` / push-vs-schedule branch entirely. **No
+      `refs/governance/*` fetch step is needed or added here**: `readCursor` is a single remote
+      `git ls-remote --exit-code` call (§2.1) — it never reads, requires, or benefits from a local
+      governance ref, fetched or not.
 - [ ] 4.1.2 Edit the `ABSENT` branch: exit 2, open/update a `governance:cursor-missing`-labeled issue
       containing the exact `git update-ref ...` + `git push ...` init command; never auto-create, never
       revert.
@@ -427,6 +442,17 @@ future workflow-extracting test file that might ever be added — that generaliz
 - [ ] 4.1.4 RED + GREEN (**fixture C2**): inject a crash / kill / garbage-output scenario for the window
       step's node process. Assert the wrapper's `case … *)` catch-all treats any unrecognized output as
       `UNKNOWN` → exit 2 — **never** an inferred empty range that could pass as a clean audit.
+- [ ] 4.1.5 **BINDING (REQ-D2-1, REQ-D2-11 — the shallow-clone trap; owner ruling, Round-2 judge finding):**
+      `resolveWindow` and `advanceCursor` both call **local** `git merge-base --is-ancestor` against the
+      cursor sha and `to` (§2.2, §2.3) — this reads local commit OBJECTS, unlike `readCursor`'s remote-only
+      `ls-remote` read. `actions/checkout@v4`'s default `fetch-depth: 1` (a SHALLOW clone) will not have the
+      cursor commit locally once the cursor is more than one commit behind HEAD, so `merge-base` fails and a
+      LEGITIMATE accept/window dies with a FALSE "not an ancestor" diagnosis — the same failure class as the
+      earlier CRITICAL where the cursor ref itself was never fetched. The workflow checkout step MUST set
+      `fetch-depth: 0` (full history) OR perform an explicit `git fetch` of the commits the ancestry check
+      needs. This MUST be asserted by a workflow-extracting test in **this PR** (fixture, born isolated per
+      §7.4/Phase 4.0) that FAILS if the checkout step uses a shallow clone that starves `merge-base` — never
+      assumed from the YAML alone.
 
 ### Phase 4.2 — Skip-over integration proof (REQ-D2-1, the theorem made concrete)
 
@@ -591,9 +617,11 @@ house detection→prevention ladder, owner-confirmed and logged as a Plan Deviat
   is exit-2-uncomputable-and-loud. Not required for this chain; flag for a follow-up if the owner wants it
   in-scope.
 - **`--force-with-lease` on `refs/governance/*`** (design R-4): must be verified against the real remote in
-  PR 1, not assumed — if the forge rejects the lease form on a non-`refs/heads` namespace, the local
-  `update-ref` CAS still holds and the race falls back to the `concurrency:` group, but this MUST be
-  discovered by a PR 1 test, not in production.
+  PR 1, not assumed. **There is no local fallback** — `advanceCursor` has no local `update-ref` CAS; the
+  remote lease is the sole guarantee. PR 1's local-bare-repo two-clone race test (fixture B5, Phase 1.4.4)
+  proves git's own lease semantics, but whether GitHub itself honors the rejection identically on a
+  non-`refs/heads` namespace remains to be confirmed against the real remote, not assumed from the local
+  test alone.
 
 ## Out of scope
 

@@ -30,6 +30,15 @@ audited interval and the advanced interval are the same interval **by constructi
 the cursor only when the window resolved to `present` (§REQ-D2-2) and the audit reaches exit 0; a run that
 reverts an offender, exits 1, or exits 2 MUST NOT advance the cursor.
 
+**Binding on PR4 (the workflow wrapper):** resolving the window and CAS'ing the advance both require
+`git merge-base --is-ancestor` against the cursor sha (§REQ-D2-15) — unlike the remote-only cursor-state
+read (§REQ-D2-11), `merge-base` reads LOCAL commit OBJECTS. The postmerge workflow MUST provide the git
+history that `merge-base --is-ancestor` requires — full history via `fetch-depth: 0` OR an explicit fetch
+of the commits involved — because a shallow checkout (e.g. `actions/checkout@v4`'s default
+`fetch-depth: 1`) makes `merge-base` fail-closed with a FALSE "not an ancestor" diagnosis and silently
+kills the mechanism for a legitimate accept/window, exactly the failure class the never-fetched cursor ref
+already cost a CRITICAL for. This MUST be asserted by PR4's own workflow-extracting test, not assumed.
+
 #### Scenario: a tag move does not drop a present offender
 
 - GIVEN a persisted cursor at SHA C and an offending merge M landing after C
@@ -50,24 +59,36 @@ reverts an offender, exits 1, or exits 2 MUST NOT advance the cursor.
 - WHEN the audit reaches exit 0
 - THEN the advance uses `from=C` (§REQ-D2-15) — never a different or inferred base
 
+#### Scenario: a shallow checkout starves `merge-base` and must be caught by PR4's own test, not assumed away
+
+- GIVEN a workflow checkout configured with a shallow `fetch-depth` (e.g. the `actions/checkout@v4` default
+  of `fetch-depth: 1`) such that the cursor commit is NOT present locally as a commit object
+- WHEN `resolveWindow` or `advanceCursor` runs `git merge-base --is-ancestor` against the cursor sha
+- THEN a workflow-extracting test authored in PR4 MUST fail against this configuration (proving the false
+  "not an ancestor" diagnosis reproduces), and the shipped workflow MUST instead set `fetch-depth: 0` or
+  perform an explicit fetch of the commits `merge-base` needs, so the same test passes against the real
+  workflow YAML
+
 ## REQ-D2-2: Cursor state is a remote-authoritative tri-state — present / absent / unknown
 
 (Previously: cursor state was read via local `git rev-parse` only, collapsing three distinct worlds —
 present-and-fetched, absent-on-origin, present-but-never-fetched — into a single present/missing binary.)
 
-After the explicit fetch (§REQ-D2-11), cursor state MUST be determined by `git ls-remote --exit-code` as
-the authority, never by a local-only `rev-parse`. The result MUST be one of three states: `present` (origin
-has the ref AND the local ref resolves after fetch) → audit `cursor..HEAD`; `absent` (`ls-remote --exit-code`
-returns status 2, git's documented "no matching refs") → exit 2, a labeled `governance:cursor-missing`
-issue containing the exact init command, never audit, never revert, never auto-create; `unknown` (any other
-`ls-remote` status, OR origin reports present but the local ref fails to resolve after a successful fetch)
+Cursor state MUST be determined by a single `git ls-remote --exit-code` call against the remote directly as
+the sole authority, never by a local-only `rev-parse`, and never preceded by a local fetch of the governance
+ref (§REQ-D2-11 — no such fetch exists or is required). The result MUST be one of three states: `present`
+(`ls-remote --exit-code` returns status 0; the sha MUST be parsed directly from `ls-remote`'s own stdout,
+`<sha>\t<ref>`, never from a local ref) → audit `cursor..HEAD`; `absent` (`ls-remote --exit-code` returns
+status 2, git's documented "no matching refs") → exit 2, a labeled `governance:cursor-missing` issue
+containing the exact init command, never audit, never revert, never auto-create; `unknown` (any other
+`ls-remote` status, OR status 0 with a malformed/missing sha in `ls-remote`'s own stdout — an inconsistency)
 → exit 2, a labeled `governance:cursor-unknown` issue with **no** init command, never audit, never revert.
 `absent` and `unknown` MUST NEVER be conflated.
 
 #### Scenario: absent cursor is proven, not guessed
 
 - GIVEN a bare origin with no cursor ref
-- WHEN `readCursor` resolves state after the explicit fetch
+- WHEN `readCursor` resolves state via `git ls-remote --exit-code`
 - THEN it returns `absent` (`ls-remote` exit code 2) and the workflow opens the `governance:cursor-missing`
   issue with the init command — never auto-creates the ref
 
@@ -76,9 +97,11 @@ issue containing the exact init command, never audit, never revert, never auto-c
 - GIVEN a bare origin repo with the cursor ref SET on it, cloned via a plain `git clone` that (exactly like
   `actions/checkout`) fetches only `refs/heads/*` + tags — first, a local `rev-parse` against the unfetched
   ref FAILS, reproducing the exact production shape the prior fix could not distinguish
-- WHEN `readCursor` runs after the explicit `refs/governance/*` fetch
-- THEN it returns `present` — proving the state machine distinguishes "correctly gated because truly
-  absent" from "the ref was simply never fetched, so every run would wrongly bootstrap"
+- WHEN `readCursor` runs (a single `ls-remote --exit-code` call against the remote directly — no fetch, no
+  local ref read, involved at any point)
+- THEN it returns `present`, with the sha parsed from `ls-remote`'s own stdout — proving the state machine
+  distinguishes "correctly gated because truly absent" from "the ref was simply never fetched, so every run
+  would wrongly bootstrap," without ever needing the local ref to exist
 
 #### Scenario: an unreachable origin resolves to unknown, never absent
 
@@ -326,21 +349,25 @@ any of the four checks run, so a reverted offender is skipped wholesale — whil
   forgeable signal) — AND a merge that merely CLAIMS to be a revert of M in its message but has no tree
   effect on M's paths is NOT skipped
 
-## REQ-D2-11 (NEW): `refs/governance/*` MUST be explicitly fetched before cursor state is read
+## REQ-D2-11 (NEW): Cursor state MUST be resolved directly from the remote — no local governance ref is ever fetched, read, or relied upon
 
-The workflow/core MUST run an explicit `git fetch --prune origin '+refs/governance/*:refs/governance/*'`
-before any cursor-state read. `actions/checkout` fetches only `refs/heads/*` and tags, so a custom-namespace
-ref is never fetched by checkout alone. A run MUST distinguish "the cursor ref is absent on origin" from
-"the cursor ref exists on origin but was never fetched locally" — the latter MUST NEVER collapse into the
-former (§REQ-D2-2). A run MUST NOT bootstrap (auto-create the cursor) on an `unknown` result — bootstrapping
-on a guess is refused.
+Cursor state MUST be determined with exactly one remote call —
+`git ls-remote --exit-code origin refs/governance/audit-cursor` — and nothing else. `actions/checkout` (and
+a plain `git clone`) fetches only `refs/heads/*` and tags, so a custom-namespace ref is never fetched by
+checkout alone; the mechanism MUST NOT depend on it being fetched. `ls-remote`'s own stdout carries both the
+existence check AND the sha on a present ref (`<sha>\t<ref>`), so no local fetch, local `rev-parse`, or any
+other local read of `refs/governance/audit-cursor` MUST ever be performed or required by the cursor-state
+read. A run MUST NOT bootstrap (auto-create the cursor) on an `unknown` result — bootstrapping on a guess is
+refused.
 
-#### Scenario: the fetch step runs on every trigger before any cursor read
+#### Scenario: cursor state is resolved by one remote call, with no local governance-ref read of any kind
 
-- GIVEN a workflow run (push or schedule)
+- GIVEN a workflow run (push or schedule) on a plain checkout that has never fetched
+  `refs/governance/audit-cursor` and holds no local copy of it
 - WHEN it reaches the cursor-resolution step
-- THEN `git fetch --prune origin '+refs/governance/*:refs/governance/*'` has already executed — no code
-  path reads cursor state without first fetching this refspec
+- THEN `readCursor` issues exactly one `git ls-remote --exit-code origin refs/governance/audit-cursor` call
+  and returns a correct state — no `git fetch` of the governance namespace and no local `git rev-parse`
+  against it ever occurs, on any trigger
 
 #### Scenario: an unknown state is never treated as license to auto-create
 
@@ -444,33 +471,35 @@ identically.
   `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` pointed at `/dev/null`, and no inherited `GH_TOKEN` — the real
   repository's git identity is unchanged before and after the full suite runs twice
 
-## REQ-D2-15 (NEW): The cursor is advanced by an atomic compare-and-swap; it can never be created or moved backward by this mechanism
+## REQ-D2-15 (NEW): The cursor is advanced by an atomic compare-and-swap, REMOTE ONLY; it can never be created or moved backward by this mechanism
 
 `advanceCursor` MUST require a 40-hex `from` value (the exact cursor value the window was resolved from,
 §REQ-D2-1) — without it, the function MUST throw and MUST NOT create the ref. It MUST verify `from` is an
-ancestor of `to` before advancing. The LOCAL advance MUST use
-`git update-ref refs/governance/audit-cursor <to> <from>` — git fails the update if the ref's current value
-does not equal `<from>`, and an absent ref (null OID) can never equal a real 40-hex value, so the ref
-cannot be created by this path. The REMOTE advance MUST use
+ancestor of `to` before advancing. The advance MUST be performed by exactly one call —
 `git push --force-with-lease=refs/governance/audit-cursor:<from> origin <to>:refs/governance/audit-cursor`
-— a remote CAS the server verifies, so two concurrent runs cannot both advance and the cursor can never
-move backward regardless of the forge's fast-forward policy on non-`refs/heads` namespaces. A
-`concurrency:` group on the workflow is defense-in-depth ONLY — it MUST NOT be relied upon as the actual
-guarantee.
+— a remote CAS the server verifies before accepting: an absent ref on origin can never equal a real 40-hex
+`from`, so the ref cannot be created by this path either, and two concurrent runs cannot both advance, so
+the cursor can never move backward regardless of the forge's fast-forward policy on non-`refs/heads`
+namespaces. **There is NO local advance and NO local `update-ref` call of any kind** — `advanceCursor` MUST
+NOT read or write a local `refs/governance/audit-cursor`; a plain checkout has none, and a local CAS would
+both duplicate the remote lease's guarantee and break the human `accept` path (§REQ-D2-10) on exactly that
+checkout shape. A `concurrency:` group on the workflow is defense-in-depth ONLY — it MUST NOT be relied
+upon as the actual guarantee.
 
 #### Scenario: `advanceCursor` without a valid `from` never creates the ref
 
-- GIVEN a repo with NO cursor ref
+- GIVEN a repo with NO cursor ref on origin
 - WHEN `advanceCursor` is called requiring a 40-hex `from`
-- THEN it throws and the ref does NOT exist afterward — asserted directly in the core, not against the YAML
+- THEN it throws (the remote lease rejects a `from` that cannot match an absent ref's null OID) and the ref
+  still does NOT exist on origin afterward — asserted directly in the core, not against the YAML
 
-#### Scenario: two concurrent advances with the same `from` — only one wins
+#### Scenario: two independent clones race — only the winner's advance lands
 
-- GIVEN two `advanceCursor` calls issued with the SAME `from` value, the second issued after the first
-  already succeeded
-- WHEN both attempt the CAS
-- THEN the second FAILS (CAS mismatch, local and/or remote) — the cursor cannot move backward or be
-  double-advanced by a race
+- GIVEN two independent clones of the same origin, both observing the cursor at the SAME `from` value; one
+  clone's `advanceCursor` call already succeeded
+- WHEN the second clone attempts `advanceCursor` with the same (now stale) `from`
+- THEN the second call FAILS — the rejection comes from the remote `--force-with-lease` push itself (there
+  is no local ref to check) — the cursor cannot move backward or be double-advanced by a race
 
 ## Out of scope (non-goals)
 
@@ -498,7 +527,7 @@ counted lines, no `size:exception`.**
 | **1** | `git-seam.mjs` + `cursor.mjs` — tri-state cursor, always-`cursor..HEAD` window, CAS advance | REQ-D2-1, REQ-D2-2, REQ-D2-11, REQ-D2-15; REQ-D2-9 (draft re-lands here, 0 counted lines) |
 | **2** | `resolution.mjs` — tree-effect proof (the security-critical PR, kept small for an isolated hostile review) | REQ-D2-10, REQ-D2-10a; REQ-D2-14 (fixtures A1–A6) |
 | **3** | `parse-failures.mjs` + `brain-audit.mjs` — `[FAIL-SHA]` emission, resolved-skip, reverter-skip, top-level catch → 2 | REQ-D2-3 (emission), REQ-D2-5 |
-| **4** | Workflow rewrite — explicit fetch, window CLI, fail-closed branching, PR-keyed dedup, per-offender boundary, `concurrency:`, terminal-state assertion | REQ-D2-3/4 (dedup + orphan cleanup), REQ-D2-6 (workflow-side normalization + assertion), REQ-D2-12, REQ-D2-13; REQ-D2-14 (fixture C1; D1/D2 harness-isolation fix + proof, born isolated per §7.4 — see design.md §14 Plan Deviation) |
+| **4** | Workflow rewrite — window CLI (no governance-ref fetch needed), full-history checkout for `merge-base` ancestry checks, fail-closed branching, PR-keyed dedup, per-offender boundary, `concurrency:`, terminal-state assertion | REQ-D2-3/4 (dedup + orphan cleanup), REQ-D2-6 (workflow-side normalization + assertion), REQ-D2-11 (shallow-clone `merge-base` constraint), REQ-D2-12, REQ-D2-13; REQ-D2-14 (fixture C1; D1/D2 harness-isolation fix + proof, born isolated per §7.4 — see design.md §14 Plan Deviation) |
 | **5** | `exit-codes.mjs` + `run-check.mjs` + both-fixtures drift-guard + standing harness-isolation registry | REQ-D2-6 (cross-evaluator contract), REQ-D2-7; REQ-D2-14 (standing harness-isolation registry, generalizing PR 4's D1/D2 fix — see design.md §14 Plan Deviation) |
 
 **Cross-cutting across all 5 PRs:** REQ-D2-8 (every PR's fixtures are 100% synthetic).
