@@ -22,10 +22,10 @@ slice: H0-a
 | Field | Value |
 |-------|-------|
 | H0-a counted lines | **~0 counted.** Everything is under `openspec/changes/**`, `brain-drafts/`, `design-off/` (under the change dir), and `.memory/**` — all in `governance.ignoreList` (`brain.config.json:16-27`) or ignored by convention. The ADR draft lands in `brain-drafts/` (agent-drafts, human-promotes) and does not count until promotion. |
-| H0-b counted lines | **~120–180** production lines: 4 verbs × 2 providers (~small each, following the existing verb shape), `VERBS` + `vcs-contract.md` edits, `governance.reviewActors` read at L6. Tests are budget-free (`**/*.test.mjs` ∈ `ignoreList`). Well under 400. |
+| H0-b counted lines | **~210** production lines (actuals, PR #271's doctrine already promoted): 4 verbs × 2 providers (`github.mjs` +78, `gitlab.mjs` +108, both include JSDoc), `VERBS` (+5), `vcs-contract.md` (+6/-2), `brain-writes-reviewed.mjs`'s `governance.reviewActors` union read at L6 (+15/-2). Above the ~120–180 estimate (GitLab's notes-API url derivation added JSDoc weight) but well under 400 — no `size:exception` needed. Tests are budget-free (`**/*.test.mjs` ∈ `ignoreList`). |
 | 400-line budget risk | **Low** for both slices. |
-| Chained PRs | H0-a → then H0-b, both to `feature/v2.0.0`. H0-b depends on H0-a's doctrine being promoted. |
-| Decision needed before apply | Confirm the H0-a / H0-b split and that the ADR promotion (agent-draft → human-promote) is done by a human, not the apply agent. |
+| Chained PRs | H0-a → then H0-b, feature-branch-chain against the `issue-266` tracker branch (H0-a landed via PR #271 to the tracker; H0-b targets the same tracker, not `feature/v2.0.0`). H0-b depends on H0-a's doctrine being promoted — confirmed: `reviewer-protocol.md` + ADR-0020 merged at 77b91f3. |
+| Decision needed before apply | Confirm the H0-a / H0-b split and that the ADR promotion (agent-draft → human-promote) is done by a human, not the apply agent. — **Resolved**: done via PR #271 (merged), human-signed ADR-0020. |
 
 ---
 
@@ -42,13 +42,15 @@ slice: H0-a
 
 ## Phase 2 — ADR draft + doctrine (agent drafts, human promotes — Tier 2 / ADR-0013)
 
-- [ ] **2.1** Draft the reviewer-protocol ADR + `reviewer-protocol.md` doctrine body to
+- [x] **2.1** Draft the reviewer-protocol ADR + `reviewer-protocol.md` doctrine body to
       `brain-drafts/` (owner-managed dir). Load-bearing content per REQ-266-1: three locks, two-key
       split, four verbs, verdict schema, bounded revision, cold boot, monotonic labels + deny-set.
-- [ ] **2.2** Draft the `brain/HOME.md` index entry for the new doctrine (co-promoted in the same MR
+- [x] **2.2** Draft the `brain/HOME.md` index entry for the new doctrine (co-promoted in the same MR
       — the #197→#199 lesson; `decision-gate` step 1 enforces ADR + HOME together).
-- [ ] **2.3** *(human)* Promote the ADR draft to `brain/core/methodology/reviewer-protocol.md` and
-      the HOME index — the human keystroke, not the apply agent.
+- [x] **2.3** *(human)* Promote the ADR draft to `brain/core/methodology/reviewer-protocol.md` and
+      the HOME index — the human keystroke, not the apply agent. Done via PR #271 (merged
+      77b91f3): `reviewer-protocol.md` + `ADR-0020` signed Accepted, `brain/HOME.md` updated in the
+      same MR.
 
 ## Phase 3 — design-off record (owner-managed dir)
 
@@ -76,53 +78,74 @@ slice: H0-a
 
 # Group B — H0-b (deferred to a later PR)
 
-## Phase 6 — the four port verbs, both providers (deferred)
+## Phase 6 — the four port verbs, both providers
 
-- [ ] **6.1 (deferred) RED** — extend `providers/vcs.contract.test.mjs`: add
-      `prReviewComment` / `issueComment` / `labelAdd` / `labelRemove` to the contract assertion set
-      run over `['github', 'gitlab']`. Fails: neither provider exports them yet.
-- [ ] **6.2 (deferred) RED** — a unit test asserting `prReviewComment` emits `event: 'COMMENT'` for
-      every input, and that **no** exported verb on either provider can emit an APPROVE review
-      (REQ-266-3). Fails: verb does not exist.
-- [ ] **6.3 (deferred) GREEN** — implement the four verbs on `providers/github.mjs`, following the
-      existing verb shape (normalized `{ url }|{ url: null, error }`, never throws). `prReviewComment`
-      hardcodes `event: 'COMMENT'` — no APPROVE argument, no APPROVE branch.
-- [ ] **6.4 (deferred) GREEN** — implement the same four on `providers/gitlab.mjs`.
-- [ ] **6.5 (deferred)** — add the four verb names to `VERBS` (`brain/scripts/vcs/cli.mjs:22-27`).
-- [ ] **6.6 (deferred)** — update `vcs-contract.md`: add the four verbs to the required-verbs table,
-      **and fix the stale "15 verbs" prose** (line 61) — it is already one verb behind `VERBS`
-      (which includes `capabilities`). Adding these verbs is a decision → `decision` label + ADR.
-- [ ] **6.7 (deferred) GREEN** — the drift-guard (6.1) now passes: both providers export all four.
+- [x] **6.1 RED** — extended `providers/vcs.contract.test.mjs`: added
+      `prReviewComment` / `issueComment` / `labelAdd` / `labelRemove` to a contract assertion set
+      run over `['github', 'gitlab']` (inline mocks, no new fixture files — budget reason). Observed
+      RED: 17 new failures (`vcs.<verb> is not a function`) before implementation.
+- [x] **6.2 RED** — a unit test asserting `prReviewComment` sends `event: 'COMMENT'` to the GitHub
+      API regardless of input, plus a source-scan test asserting no provider source contains any
+      review `event:` literal other than `'COMMENT'` (REQ-266-3). Observed RED alongside 6.1 (verb
+      did not exist yet).
+- [x] **6.3 GREEN** — implemented the four verbs on `providers/github.mjs`, following the existing
+      verb shape (normalized `{ url }|{ url: null, error }` / `{ ok }|{ ok: false, error }`, never
+      throws). `prReviewComment` hardcodes `event: 'COMMENT'` — no APPROVE argument, no APPROVE
+      branch.
+- [x] **6.4 GREEN** — implemented the same four on `providers/gitlab.mjs`. GitLab's notes API has no
+      review-event concept at all (no APPROVE code path exists on this provider either);
+      `labelAdd`/`labelRemove` target the issues endpoint (`PUT .../issues/{n}` with
+      `add_labels`/`remove_labels`), matching `labelEvents`' existing issues-only precedent on this
+      provider.
+- [x] **6.5** — added the four verb names to `VERBS` (`brain/scripts/vcs/cli.mjs`).
+- [x] **6.6** — updated `vcs-contract.md`: added the four verbs to the required-verbs table, and
+      fixed the stale "15 verbs" prose → "20 verbs" (16 pre-existing + 4 new = `VERBS.length`,
+      `capabilities` included). No new ADR — ADR-0020 (already merged) covers this decision per the
+      H0-a/H0-b split; a fresh ADR would re-litigate an already-signed ruling.
+- [x] **6.7 GREEN** — the drift-guard (6.1, plus the pre-existing `verb-contract-drift-guard.test.mjs`)
+      now passes: both providers export all four with normalized shapes.
 
-## Phase 7 — `governance.reviewActors` wiring (deferred)
+## Phase 7 — `governance.reviewActors` wiring
 
-- [ ] **7.1 (deferred) RED** — a test that L6 (`brain-writes-reviewed.mjs`) reads
-      `governance.reviewActors` and threads it into its `botAllowlist`, in addition to / replacing
-      the current `governance.approvalActors` read — per the design's two-key split (§3).
-- [ ] **7.2 (deferred) GREEN** — implement the L6 read of `governance.reviewActors`. L5
+- [x] **7.1 RED** — a test that L6's default `readBotAllowlist` reader unions
+      `governance.approvalActors` with `governance.reviewActors`, using a real temp
+      `brain.config.json` (not an injected fake) to exercise the actual default reader. Observed RED:
+      the reviewer-only entry was missing from `inputs.botAllowlist` before the fix.
+- [x] **7.2 GREEN** — implemented the L6 `defaultReadBotAllowlist` union read of
+      `governance.reviewActors` in addition to `governance.approvalActors` (additive — "threads it
+      into its botAllowlist," not a replacement; see Design ambiguity note below). L5
       (`actor-check.mjs`) is **not** touched — it keeps reading `governance.approvalActors` only.
-- [ ] **7.3 (deferred)** — populate `governance.reviewActors` with the reviewer handle in
-      `brain.config.json`; confirm the reviewer handle is **never** added to
-      `governance.approvalActors` (Fork A, design §11).
+- [ ] **7.3 (deferred — reviewer bot handle undefined; owner decision pending)** — populate
+      `governance.reviewActors` with the reviewer handle in `brain.config.json`; confirm the reviewer
+      handle is **never** added to `governance.approvalActors` (Fork A, design §11). No dedicated
+      reviewer bot identity exists yet — `brain.config.json` is untouched by this PR; both governance
+      keys stay absent, defaulting to `[]`.
 
-## Phase 8 — the two mandatory lock-3 tests (deferred; rev-2 binding condition B)
+## Phase 8 — the two mandatory lock-3 tests (rev-2 binding condition B)
 
-- [ ] **8.1 (deferred) — t1.** `actor-check` test: with the reviewer identity as the approved-label
-      actor, and the reviewer in `governance.reviewActors` but NOT in `governance.approvalActors`,
-      `evaluateActor` does NOT return `pass` via the allow-listed-automation branch — the reviewer
-      cannot self-apply `status:approved` (REQ-266-6 t1, spec scenario).
-- [ ] **8.2 (deferred) — t2.** `brain-writes-reviewed` test: the reviewer identity in L6's
+- [x] **8.1 — t1.** `actor-check` test: with a FIXTURE reviewer identity (`brain-reviewer[bot]`) as
+      the `status:approved` actor, that identity in `governance.reviewActors` but NOT in
+      `governance.approvalActors`, `evaluateActor` does NOT return `pass` via the allow-listed
+      -automation branch — the reviewer cannot self-apply `status:approved` (REQ-266-6 t1, spec
+      scenario). No L5 code change was needed (L5 is untouched by design) — the test was still
+      written first and observed GREEN immediately, proving the pre-existing L5 code already
+      satisfies the invariant once the reviewer is correctly kept out of `approvalActors`.
+- [x] **8.2 — t2.** `brain-writes-reviewed` test: the same fixture reviewer identity in L6's
       `botAllowlist` (from `governance.reviewActors`) is excluded from the human-approver count — an
       APPROVED review authored by the reviewer is not counted as the human review (REQ-266-6 t2).
-- [ ] **8.3 (deferred) GATE** — both tests present and green in the H0-b PR. This is the rev-2
-      binding condition B: the implementation carries both mandatory lock-3 tests. Non-negotiable.
+      Observed RED before 7.2's fix (old code returned `pass`); GREEN after.
+- [x] **8.3 GATE** — both tests present and green in the H0-b PR. Non-negotiable. Confirmed:
+      `npm test` → 1471/1471 green, both t1/t2 included.
 
-## Phase 9 — H0-b close-out (deferred)
+## Phase 9 — H0-b close-out
 
-- [ ] **9.1 (deferred)** — `npm test`, `npm run brain:repo:check`, `npm run brain:change:verify` all
-      green; the drift-guard green; the two lock-3 tests green.
-- [ ] **9.2 (deferred)** — open PR H0-b → `feature/v2.0.0`, `Part of #266`, after H0-a's doctrine is
-      promoted.
+- [x] **9.1** — `npm test` (1471/1471 green) and `npm run repo:check` (clean) both green; the
+      drift-guard green; the two lock-3 tests green. `npm run brain:change:verify` was not run
+      separately (equivalent to `repo:check` in this repo's script aliases — see `package.json`).
+- [ ] **9.2** — open PR H0-b → the `issue-266` tracker branch (feature-branch-chain; not
+      `feature/v2.0.0`), `Part of #266`, after H0-a's doctrine is promoted (confirmed: PR #271
+      merged). Deferred to the orchestrator per the apply-agent's constraints — no PR opened by this
+      agent.
 
 ---
 
@@ -147,3 +170,15 @@ Session agreements. Promote at MR time — see `brain/core/methodology/consolida
 - **`vcs-contract.md` is already one verb behind** (`:61` says "15 verbs", `VERBS` has 16). Fix in
   the same MR that adds the four new verbs (6.6).
 - **H0-a is budget-free.** All of it is ignore-listed or owner-managed dirs; no `size:exception`.
+- **Design ambiguity, resolved additively (H0-b, task 7.2).** `design.md` §3's table lists L6's "key
+  it reads" as `governance.reviewActors` singular, which could be read as "L6 stops reading
+  `approvalActors`." The doctrine (`reviewer-protocol.md` §3) has the same phrasing and is
+  human-signed/read-only — not reopened. The H0-b task text itself says L6 "threads it into its
+  botAllowlist," which is additive language. Chosen interpretation: **union** —
+  `defaultReadBotAllowlist` in `brain-writes-reviewed.mjs` now returns
+  `approvalActors ∪ reviewActors`. This satisfies REQ-266-5's scenario and both mandatory lock-3
+  tests (t1, t2) under either reading, and is strictly safer than a replace interpretation (no
+  existing `approvalActors`-driven L6 exclusion capability is silently dropped). Flagging this for
+  reviewer awareness rather than silently picking a reading — not a blocker, since neither
+  governance key is populated in `brain.config.json` today, so no live behavior differs between the
+  two readings yet.
