@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process';
 
 import { gitTry, gitOrThrow } from './git-seam.mjs';
 import {
-  CURSOR_REF, syncCursor, readCursor, resolveWindow, advanceCursor, acceptManually,
+  CURSOR_REF, readCursor, resolveWindow, advanceCursor, acceptManually,
 } from './cursor.mjs';
 
 const CURSOR_SCRIPT = new URL('./cursor.mjs', import.meta.url).pathname;
@@ -64,16 +64,55 @@ function makeBareOriginAndClone(t, { setCursorRef = false } = {}) {
   return { originDir, cloneDir, sha };
 }
 
-// ── Phase 1.2 — tri-state read ────────────────────────────────────────────────
+/**
+ * Build a bare origin with a LINEAR history C0→C1→C2 on main and the cursor
+ * ref set to C0 on origin. Returns the three shas plus the scratch dir so
+ * callers can make independent clones. A plain `git clone` of this origin
+ * fetches refs/heads/* only — it never creates a local refs/governance/*
+ * ref, exactly like `actions/checkout` on a fresh runner.
+ */
+function makeOriginWithLinearHistory(t) {
+  const scratch = mkdtempSync(join(tmpdir(), 'cursor-race-'));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
 
-test('syncCursor: issues the exact refspec via the injected git seam', () => {
-  const calls = [];
-  const fakeGit = { try: (argv) => { calls.push(argv); return { status: 0, stdout: '', stderr: '' }; } };
-  syncCursor({ git: fakeGit });
-  assert.deepEqual(calls, [
-    ['fetch', '--prune', 'origin', '+refs/governance/*:refs/governance/*'],
-  ]);
-});
+  const originDir = join(scratch, 'origin.git');
+  mkdirSync(originDir);
+  spawnSync('git', ['init', '--bare', '--initial-branch=main', originDir], { encoding: 'utf8' });
+
+  const builderDir = join(scratch, 'builder');
+  mkdirSync(builderDir);
+  const bg = makeRepo(builderDir);
+  bg('remote', 'add', 'origin', originDir);
+  bg('commit', '--allow-empty', '-m', 'C0');
+  const c0 = headSha(builderDir);
+  bg('commit', '--allow-empty', '-m', 'C1');
+  const c1 = headSha(builderDir);
+  bg('commit', '--allow-empty', '-m', 'C2');
+  const c2 = headSha(builderDir);
+  bg('push', 'origin', 'main');
+  // Seed the cursor at C0 on origin ONLY — never as a local ref in any clone.
+  bg('push', 'origin', `${c0}:${CURSOR_REF}`);
+
+  return {
+    scratch, originDir, c0, c1, c2,
+  };
+}
+
+/** A plain clone of origin — fetches heads+tags only, no governance refs. */
+function plainClone(scratch, originDir, name) {
+  const dir = join(scratch, name);
+  spawnSync('git', ['clone', originDir, dir], { encoding: 'utf8' });
+  return dir;
+}
+
+/** Read the cursor sha directly off the bare origin. */
+function remoteCursorSha(originDir) {
+  return spawnSync('git', ['rev-parse', '--verify', `${CURSOR_REF}^{commit}`], {
+    cwd: originDir, encoding: 'utf8',
+  }).stdout.trim();
+}
+
+// ── Phase 1.2 — tri-state read ────────────────────────────────────────────────
 
 // B1 — the tautological-test trap, reproduced.
 test('readCursor: B1 — cursor ref set on origin, plain clone (fetches heads+tags only) → present, via explicit fetch', (t) => {
@@ -112,18 +151,35 @@ test('readCursor: B3 — unreachable origin → unknown, NEVER absent', (t) => {
   assert.notEqual(result.state, 'absent');
 });
 
-// Local/remote inconsistency — ls-remote says present, local rev-parse still fails.
-test('readCursor: origin reports present but local ref fails to resolve after fetch → unknown, never downgraded to absent', () => {
+// Malformed ls-remote answer — status 0 but stdout carries no 40-hex sha.
+// Must be 'unknown', NEVER silently downgraded to 'absent' (which would be a
+// forged proof of absence from a malformed line).
+test('readCursor: origin reports status 0 but stdout has no 40-hex sha → unknown, never downgraded to absent', () => {
   const fakeGit = {
     try: (argv) => {
-      if (argv[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
-      if (argv[0] === 'ls-remote') return { status: 0, stdout: `${'a'.repeat(40)}\trefs/governance/audit-cursor\n`, stderr: '' };
-      if (argv[0] === 'rev-parse') return { status: 128, stdout: '', stderr: 'fatal: bad revision' };
+      if (argv[0] === 'ls-remote') return { status: 0, stdout: 'garbage\trefs/governance/audit-cursor\n', stderr: '' };
       throw new Error(`unexpected git call: ${argv.join(' ')}`);
     },
   };
   const result = readCursor({ git: fakeGit });
   assert.deepEqual(result, { state: 'unknown' });
+});
+
+// readCursor reads the sha off ls-remote's own stdout — no local ref, no fetch.
+test('readCursor: status 0 → present with the sha parsed from ls-remote stdout (remote is the sole authority)', () => {
+  const sha = 'b'.repeat(40);
+  const calls = [];
+  const fakeGit = {
+    try: (argv) => {
+      calls.push(argv[0]);
+      if (argv[0] === 'ls-remote') return { status: 0, stdout: `${sha}\trefs/governance/audit-cursor\n`, stderr: '' };
+      throw new Error(`unexpected git call: ${argv.join(' ')}`);
+    },
+  };
+  const result = readCursor({ git: fakeGit });
+  assert.deepEqual(result, { state: 'present', sha });
+  // No local-ref read and no fetch — the remote answer is authoritative.
+  assert.deepEqual(calls, ['ls-remote']);
 });
 
 // ── Phase 1.3 — resolveWindow is ALWAYS cursor..HEAD ──────────────────────────
@@ -156,9 +212,7 @@ test('resolveWindow: B6 — cursor is not an ancestor of HEAD → unknown, never
   // also being fetchable/present on the (bare) origin remote.
   const fakeGit = {
     try: (argv) => {
-      if (argv[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
       if (argv[0] === 'ls-remote') return { status: 0, stdout: `${foreignSha}\trefs/governance/audit-cursor\n`, stderr: '' };
-      if (argv[0] === 'rev-parse') return { status: 0, stdout: `${foreignSha}\n`, stderr: '' };
       return git.try(argv);
     },
   };
@@ -179,19 +233,33 @@ test('resolveWindow: absent/unknown cursor state is propagated without computing
 
 // ── Phase 1.4 — advanceCursor: atomic CAS ─────────────────────────────────────
 
-test('advanceCursor: B4 — no cursor ref exists → throws, ref still does not exist afterward', (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'cursor-cas-b4-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const git0 = makeRepo(dir);
-  git0('commit', '--allow-empty', '-m', 'A');
-  const from = headSha(dir);
-  git0('commit', '--allow-empty', '-m', 'B');
-  const to = headSha(dir);
-  const git = realGit(dir);
+test('advanceCursor: B4 — no cursor ref on origin → remote lease rejects (never auto-creates), ref still absent afterward', (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), 'cursor-cas-b4-'));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
 
+  const originDir = join(scratch, 'origin.git');
+  mkdirSync(originDir);
+  spawnSync('git', ['init', '--bare', '--initial-branch=main', originDir], { encoding: 'utf8' });
+
+  const workDir = join(scratch, 'work');
+  mkdirSync(workDir);
+  const git0 = makeRepo(workDir);
+  git0('remote', 'add', 'origin', originDir);
+  git0('commit', '--allow-empty', '-m', 'A');
+  const from = headSha(workDir);
+  git0('commit', '--allow-empty', '-m', 'B');
+  const to = headSha(workDir);
+  git0('push', 'origin', 'main');
+  const git = realGit(workDir);
+
+  // The cursor ref is absent on origin. A 40-hex `from` can never match the
+  // ref's null OID, so the remote `--force-with-lease` rejects — the ref is
+  // never auto-created.
   assert.throws(() => advanceCursor({ git, from, to }));
-  const after = git.try(['rev-parse', '--verify', `${CURSOR_REF}^{commit}`]);
-  assert.notEqual(after.status, 0, 'ref must not have been created');
+  const after = spawnSync('git', ['rev-parse', '--verify', `${CURSOR_REF}^{commit}`], {
+    cwd: originDir, encoding: 'utf8',
+  });
+  assert.notEqual(after.status, 0, 'ref must not have been created on origin');
 });
 
 test('advanceCursor: non-40-hex from throws before touching git', () => {
@@ -218,34 +286,86 @@ test('advanceCursor: from that is not an ancestor of to throws (cursor only ever
   assert.throws(() => advanceCursor({ git, from, to }));
 });
 
-// B5 — two advanceCursor calls with the same (now-stale) from.
-test('advanceCursor: B5 — second CAS with the same (stale) from fails after the first succeeds', (t) => {
-  const scratch = mkdtempSync(join(tmpdir(), 'cursor-cas-b5-'));
-  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+// Two-clone cross-runner race (replaces the tautological single-workdir B5).
+// Two INDEPENDENT clones each see the cursor at C0. Clone A advances C0→C1 and
+// wins. Clone B, still holding the stale C0, tries C0→C2 — the REMOTE
+// `--force-with-lease` must reject it, and the rejection must come from the
+// PUSH, not any local update-ref (there is none in the new design). HOUSE BAR:
+// this test goes RED if `--force-with-lease` is swapped for a plain `--force`
+// (see mutation-bar evidence in the remediation report).
+test('advanceCursor: two-clone cross-runner race — stale advance rejected by the REMOTE lease, winner stands', (t) => {
+  const {
+    scratch, originDir, c0, c1, c2,
+  } = makeOriginWithLinearHistory(t);
 
-  const originDir = join(scratch, 'origin.git');
-  mkdirSync(originDir);
-  spawnSync('git', ['init', '--bare', '--initial-branch=main', originDir], { encoding: 'utf8' });
+  const cloneA = plainClone(scratch, originDir, 'cloneA');
+  const cloneB = plainClone(scratch, originDir, 'cloneB');
 
-  const workDir = join(scratch, 'work');
-  mkdirSync(workDir);
-  const git0 = makeRepo(workDir);
-  git0('remote', 'add', 'origin', originDir);
-  git0('commit', '--allow-empty', '-m', 'A');
-  const from = headSha(workDir);
-  git0('push', 'origin', 'main');
-  git0('update-ref', CURSOR_REF, from);
-  git0('push', 'origin', `${CURSOR_REF}:${CURSOR_REF}`);
+  // Both clones observe the cursor at C0 (remote-authoritative read).
+  assert.deepEqual(readCursor({ git: realGit(cloneA) }), { state: 'present', sha: c0 });
+  assert.deepEqual(readCursor({ git: realGit(cloneB) }), { state: 'present', sha: c0 });
 
-  git0('commit', '--allow-empty', '-m', 'B');
-  const to1 = headSha(workDir);
-  git0('commit', '--allow-empty', '-m', 'C');
-  const to2 = headSha(workDir);
+  // Clone A wins: C0 → C1.
+  const winA = advanceCursor({ git: realGit(cloneA), from: c0, to: c1 });
+  assert.deepEqual(winA, { from: c0, to: c1 });
+  assert.equal(remoteCursorSha(originDir), c1);
 
-  const git = realGit(workDir);
-  advanceCursor({ git, from, to: to1 });
+  // Clone B is stale (still holds C0). Its C0 → C2 lease must be rejected by
+  // the remote, whose cursor is now C1.
+  assert.throws(() => advanceCursor({ git: realGit(cloneB), from: c0, to: c2 }));
 
-  assert.throws(() => advanceCursor({ git, from, to: to2 }));
+  // The remote cursor is unchanged at the winner (C1) — the stale advance did
+  // NOT win.
+  assert.equal(remoteCursorSha(originDir), c1);
+
+  // And the rejection came from the push: clone B never wrote a local ref.
+  const localB = realGit(cloneB).try(['rev-parse', '--verify', `${CURSOR_REF}^{commit}`]);
+  assert.notEqual(localB.status, 0, 'loser must not leave a local governance ref');
+});
+
+// accept on a plain checkout (production symptom-2): a clone that NEVER fetched
+// refs/governance/* has NO local cursor ref, yet the remote cursor exists at
+// C0. A human accept with correct from=C0,to=C1 must SUCCEED via the remote
+// lease alone. PRE-FIX this aborted at the local `update-ref <ref> C1 C0`
+// because the local ref was absent — the sole human escape hatch was
+// inoperative in production.
+test('acceptManually: succeeds on a plain checkout with NO local governance ref (remote lease is the only gate)', (t) => {
+  const {
+    scratch, originDir, c0, c1,
+  } = makeOriginWithLinearHistory(t);
+
+  const cloneDir = plainClone(scratch, originDir, 'human');
+  // Fixture sanity: the human's clone genuinely has no local governance ref.
+  const localBefore = realGit(cloneDir).try(['rev-parse', '--verify', `${CURSOR_REF}^{commit}`]);
+  assert.notEqual(localBefore.status, 0, 'fixture: local governance ref must be absent on a plain checkout');
+
+  const git = realGit(cloneDir);
+  const result = acceptManually({
+    git, from: c0, to: c1, reason: 'owner-approved forward-fix',
+  });
+  assert.deepEqual(result, { from: c0, to: c1 });
+  assert.equal(remoteCursorSha(originDir), c1);
+});
+
+// Lease rejection leaves NO local divergence: a rejected advance must not
+// leave a stray local governance ref pointing at the rejected `to`. In the
+// new design nothing writes the ref locally, so its absence is the invariant.
+test('advanceCursor: a lease-rejected advance leaves no divergent local governance ref', (t) => {
+  const {
+    scratch, originDir, c0, c1, c2,
+  } = makeOriginWithLinearHistory(t);
+
+  const cloneA = plainClone(scratch, originDir, 'winner');
+  const cloneB = plainClone(scratch, originDir, 'loser');
+
+  advanceCursor({ git: realGit(cloneA), from: c0, to: c1 });
+  assert.throws(() => advanceCursor({ git: realGit(cloneB), from: c0, to: c2 }));
+
+  // Loser has no local ref at all — certainly not one diverged to c2.
+  const localB = realGit(cloneB).try(['rev-parse', '--verify', `${CURSOR_REF}^{commit}`]);
+  assert.notEqual(localB.status, 0, 'no stray local governance ref may exist after a rejected lease');
+  // And the authority (remote) is exactly the winner.
+  assert.equal(remoteCursorSha(originDir), c1);
 });
 
 test('acceptManually: refuses an empty --reason', (t) => {
@@ -283,68 +403,93 @@ test('acceptManually: caller-supplied `from` matches the live cursor → CAS suc
   });
   assert.deepEqual(result, { from, to });
 
-  const after = git.try(['rev-parse', '--verify', `${CURSOR_REF}^{commit}`]);
+  // Assert on the REMOTE cursor — the sole authority. The new design never
+  // writes a local ref, so the local ref would still be stale here.
+  const after = spawnSync('git', ['rev-parse', '--verify', `${CURSOR_REF}^{commit}`], {
+    cwd: originDir, encoding: 'utf8',
+  });
   assert.equal(after.stdout.trim(), to);
 });
 
-// Owner-ruled fix: the pre-fix `acceptManually({ git, to, reason })` read
-// `from` INTERNALLY via `readCursor()` at execution time, instead of taking
-// it as the caller's (human's) explicit assertion of the cursor value they
-// reviewed. That made the CAS on the human path structurally present but
-// functionally hollow: it degenerated to an unconditional advance from
-// wherever the cursor happened to be at execution time, silently skipping
-// whatever moved it in between (the skip-over class) — the SAME defect
-// class as the withdrawn ancestry-theater (mechanism present, function
-// hollow). This test constructs exactly that race.
-test('acceptManually: RACE — human asserts from=C0, but the live cursor already advanced to C1 by execution time → CAS fails loud, cursor left at C1', (t) => {
-  const scratch = mkdtempSync(join(tmpdir(), 'cursor-accept-race-'));
-  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+// Owner-ruled fix: `from` is the caller's (human's) explicit assertion of the
+// cursor value they reviewed — NOT read from the live cursor. If the live
+// (remote) cursor moved between review and accept, the remote lease must
+// reject the stale assertion instead of silently advancing from wherever the
+// cursor now is (the skip-over class). This is the CROSS-RUNNER race: an
+// automatic cron on a different runner advances the remote cursor C0→C1 in the
+// window between the human's review of C0 and their accept call.
+test('acceptManually: RACE — human asserts stale from=C0 but the REMOTE cursor already advanced to C1 → lease rejects, remote left at C1', (t) => {
+  const {
+    scratch, originDir, c0, c1, c2,
+  } = makeOriginWithLinearHistory(t);
 
-  const originDir = join(scratch, 'origin.git');
-  mkdirSync(originDir);
-  spawnSync('git', ['init', '--bare', '--initial-branch=main', originDir], { encoding: 'utf8' });
+  // The cron runner advances the REMOTE cursor C0 → C1 in the race window.
+  const cronClone = plainClone(scratch, originDir, 'cron');
+  advanceCursor({ git: realGit(cronClone), from: c0, to: c1 });
+  assert.equal(remoteCursorSha(originDir), c1);
 
-  const workDir = join(scratch, 'work');
-  mkdirSync(workDir);
-  const git0 = makeRepo(workDir);
-  git0('remote', 'add', 'origin', originDir);
-
-  // C0 — what the human reviewed and is about to accept "from".
-  git0('commit', '--allow-empty', '-m', 'C0');
-  const c0 = headSha(workDir);
-  git0('push', 'origin', 'main');
-  git0('update-ref', CURSOR_REF, c0);
-  git0('push', 'origin', `${CURSOR_REF}:${CURSOR_REF}`);
-
-  // C1 — the cron's automatic advance, running in the race window BETWEEN
-  // the human's review of C0 and this call. The live cursor is now C1, not
-  // C0 — exactly what the human's stale assertion does not know about.
-  git0('commit', '--allow-empty', '-m', 'C1');
-  const c1 = headSha(workDir);
-  const git = realGit(workDir);
-  advanceCursor({ git, from: c0, to: c1 });
-
-  // C2 — where the human wanted to move the cursor to, based on their
-  // (now stale) review of C0.
-  git0('commit', '--allow-empty', '-m', 'C2');
-  const c2 = headSha(workDir);
-
-  // The human's assertion is `from: c0` — but the live cursor is c1.
-  // PRE-FIX: `acceptManually({ git, to, reason })` would have IGNORED the
-  // (unused) `from` argument entirely and called `readCursor()` internally,
-  // which returns the LIVE value (c1) — matching the ref's actual current
-  // value. The CAS `update-ref <ref> c2 c1` would then SUCCEED, silently
-  // advancing the cursor from c1 to c2 — an interval the human never
-  // reviewed. This assert.throws proves the fix: with `from` now the
-  // caller's explicit (stale) c0, the CAS `update-ref <ref> c2 c0` is
-  // rejected because the ref's current value is c1, not c0.
+  // The human runs accept on their own (plain) checkout, asserting the stale
+  // from=C0 they reviewed, targeting C2. The remote lease (origin is now C1,
+  // not C0) must reject.
+  const humanClone = plainClone(scratch, originDir, 'human');
   assert.throws(() => acceptManually({
-    git, from: c0, to: c2, reason: 'owner-approved forward-fix',
+    git: realGit(humanClone), from: c0, to: c2, reason: 'owner-approved forward-fix',
   }));
 
-  // The cursor must be UNCHANGED at c1 — not silently advanced to c2.
-  const after = git.try(['rev-parse', '--verify', `${CURSOR_REF}^{commit}`]);
-  assert.equal(after.stdout.trim(), c1);
+  // The remote cursor is UNCHANGED at C1 — the stale accept did not skip over.
+  assert.equal(remoteCursorSha(originDir), c1);
+});
+
+// Symmetric `to` validation (owner-ruled, Fix 1): `to` is the human's asserted
+// target and MUST be a pinned 40-hex OID — never a symbolic/moving ref like
+// 'main' resolved at push time. A symbolic `to` would let the cursor jump to
+// main's LIVE tip, skipping PAST unreviewed commits (main's tip is a descendant
+// of C0, so the ancestor check alone passes). HOUSE/MUTATION BAR: this test goes
+// RED if the `HEX40.test(to)` guard in advanceCursor is removed — without it,
+// `to:'main'` would advance instead of throwing.
+test('acceptManually: non-40-hex `to` (symbolic "main" or garbage) throws, remote cursor UNCHANGED', (t) => {
+  const {
+    scratch, originDir, c0,
+  } = makeOriginWithLinearHistory(t);
+
+  const humanClone = plainClone(scratch, originDir, 'human');
+  const git = realGit(humanClone);
+
+  // Symbolic moving ref — the exact hole: main's live tip is a descendant of C0.
+  assert.throws(
+    () => acceptManually({
+      git, from: c0, to: 'main', reason: 'owner-approved forward-fix',
+    }),
+    /to must be a 40-hex sha/,
+  );
+  assert.equal(remoteCursorSha(originDir), c0, 'remote cursor must be unchanged after symbolic `to` rejection');
+
+  // Garbage non-hex target.
+  assert.throws(
+    () => acceptManually({
+      git, from: c0, to: 'not-a-sha', reason: 'owner-approved forward-fix',
+    }),
+    /to must be a 40-hex sha/,
+  );
+  assert.equal(remoteCursorSha(originDir), c0, 'remote cursor must be unchanged after garbage `to` rejection');
+});
+
+// Positive path: the returned `to` is the validated 40-hex OID passed in (never
+// a raw pre-validation input), and it equals the OID the remote cursor lands on.
+test('acceptManually: positive path returns the 40-hex OID passed as `to`', (t) => {
+  const {
+    scratch, originDir, c0, c1,
+  } = makeOriginWithLinearHistory(t);
+
+  const humanClone = plainClone(scratch, originDir, 'human');
+  const git = realGit(humanClone);
+
+  const result = acceptManually({
+    git, from: c0, to: c1, reason: 'owner-approved forward-fix',
+  });
+  assert.equal(result.to, c1, 'returned `to` must be the 40-hex OID passed in');
+  assert.match(result.to, /^[0-9a-f]{40}$/, 'returned `to` must be a full 40-hex OID, never a symbolic name');
+  assert.equal(remoteCursorSha(originDir), c1);
 });
 
 // ── CLI mode ───────────────────────────────────────────────────────────────
@@ -404,10 +549,11 @@ test('CLI: `cursor.mjs accept <from> <to> --reason "<text>"` invokes acceptManua
 
   // Discriminates a CLI that only reads the FIRST positional arg (pre-fix
   // shape: `accept <to>`, `from` sourced internally) from one that reads
-  // BOTH positionals (`accept <from> <to>`): the ref must land on the real
-  // target `to`, not silently no-op at `from`.
-  const git = realGit(workDir);
-  const after = git.try(['rev-parse', '--verify', `${CURSOR_REF}^{commit}`]);
+  // BOTH positionals (`accept <from> <to>`): the REMOTE cursor must land on
+  // the real target `to`, not silently no-op at `from`.
+  const after = spawnSync('git', ['rev-parse', '--verify', `${CURSOR_REF}^{commit}`], {
+    cwd: originDir, encoding: 'utf8',
+  });
   assert.equal(after.stdout.trim(), to);
 });
 

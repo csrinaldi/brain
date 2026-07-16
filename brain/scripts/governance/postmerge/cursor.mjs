@@ -2,41 +2,38 @@
 // postmerge/cursor.mjs — remote-authoritative, tri-state cursor + atomic CAS
 // advance (design §2). `actions/checkout` never fetches `refs/governance/*`,
 // so a never-fetched ref and a genuinely absent ref are indistinguishable to
-// a plain `rev-parse` (the F2 bug). State is read via an explicit fetch plus
-// a remote `ls-remote --exit-code` oracle instead.
+// a plain local `rev-parse` (the F2 bug). The REMOTE is the sole authority:
+// state is read directly from the sha `ls-remote --exit-code` returns, and an
+// advance is gated solely by the remote `push --force-with-lease`. No local
+// governance ref is ever read or written — a plain checkout has none.
 
 import { fileURLToPath } from 'node:url';
 import { gitTry, gitOrThrow } from './git-seam.mjs';
 
 export const CURSOR_REF = 'refs/governance/audit-cursor';
 const REMOTE = 'origin';
-const GOVERNANCE_REFSPEC = '+refs/governance/*:refs/governance/*';
 const HEX40 = /^[0-9a-f]{40}$/;
-
-/** Explicitly fetch the governance namespace — checkout never does this. */
-export function syncCursor({ git }) {
-  return git.try(['fetch', '--prune', REMOTE, GOVERNANCE_REFSPEC]);
-}
 
 /**
  * Tri-state cursor read. The REMOTE is the authority: `ls-remote
  * --exit-code` status 2 is git's own documented proof of absence; any other
  * non-zero status (network/auth/unreachable) is 'unknown', never 'absent'.
+ * On status 0 the ref exists on origin and `ls-remote` already returned its
+ * sha ("<sha>\t<ref>") — the sha is read from that answer directly, so a
+ * never-fetched local ref is irrelevant.
  */
 export function readCursor({ git }) {
-  syncCursor({ git });
-
   const lsRemote = git.try(['ls-remote', '--exit-code', REMOTE, CURSOR_REF]);
   if (lsRemote.status === 2) return { state: 'absent' };
   if (lsRemote.status !== 0) return { state: 'unknown' };
 
-  // ls-remote proves origin has it; confirm the just-fetched local ref
-  // actually resolves. A mismatch is a fetch/read inconsistency — 'unknown',
-  // never silently downgraded to 'absent'.
-  const local = git.try(['rev-parse', '--verify', `${CURSOR_REF}^{commit}`]);
-  if (local.status !== 0) return { state: 'unknown' };
+  // status 0: origin has the ref. Parse the 40-hex sha from ls-remote's own
+  // stdout ("<sha>\t<ref>"). Malformed/missing sha is an inconsistency —
+  // 'unknown', never silently downgraded to 'absent'.
+  const sha = lsRemote.stdout.trim().split(/\s+/)[0];
+  if (!HEX40.test(sha)) return { state: 'unknown' };
 
-  return { state: 'present', sha: local.stdout.trim() };
+  return { state: 'present', sha };
 }
 
 /**
@@ -61,19 +58,29 @@ export function resolveWindow({ git, head }) {
  * Atomic compare-and-swap advance. `from` is REQUIRED and 40-hex, so this
  * function structurally cannot create the ref (an absent ref's null OID can
  * never equal a 40-hex `from`) — "never auto-create" is git's own CAS, not a
- * caller-side check (design §2.3).
+ * caller-side check (design §2.3). The SOLE authority is the remote
+ * `push --force-with-lease`: the server verifies the lease's old value before
+ * accepting. No local governance ref is touched — a plain checkout has none,
+ * and a local CAS here would only mask the remote lease and break the human
+ * accept path on such a checkout.
  */
 export function advanceCursor({ git, from, to }) {
   if (typeof from !== 'string' || !HEX40.test(from)) {
     throw new Error('advanceCursor: from must be a 40-hex sha');
   }
+  // `to` is the human's asserted target (design §2.4): it MUST be a pinned
+  // 40-hex OID, never a symbolic/moving ref (e.g. 'main') resolved at runtime.
+  // Same doctrine as the explicit `from` — validated BEFORE the ancestor check
+  // so a well-formed-but-non-commit sha still fails closed at merge-base.
+  if (typeof to !== 'string' || !HEX40.test(to)) {
+    throw new Error('advanceCursor: to must be a 40-hex sha');
+  }
   const ancestor = git.try(['merge-base', '--is-ancestor', from, to]);
   if (ancestor.status !== 0) {
     throw new Error(`advanceCursor: from (${from}) is not an ancestor of to (${to})`);
   }
-  // Local CAS — fails unless the ref's CURRENT value is exactly `from`.
-  git.orThrow(['update-ref', CURSOR_REF, to, from]);
-  // Remote CAS — the server verifies the lease's old value before accepting.
+  // Remote CAS — the ONLY authority. The server verifies the lease's old
+  // value (`from`) before accepting; a stale `from` is rejected here.
   git.orThrow(['push', `--force-with-lease=${CURSOR_REF}:${from}`, REMOTE, `${to}:${CURSOR_REF}`]);
   return { from, to };
 }
