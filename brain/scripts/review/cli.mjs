@@ -52,8 +52,7 @@ export async function main(deps = {}) {
     return 0;
   }
 
-  // H1-1 skeleton: tranche/checkpoint/ruling evaluators land in H1-2..H1-4;
-  // `--dry-run` is accepted now so its contract is stable once a poster exists.
+  // H1-1 skeleton: tranche/checkpoint/ruling evaluators land in H1-2..H1-4.
   const verdict = buildVerdict({
     headSha: boot.headSha,
     conclusion: 'REVISE',
