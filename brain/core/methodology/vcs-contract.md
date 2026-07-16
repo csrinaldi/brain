@@ -36,6 +36,10 @@ the GitLab status enum, etc.).
 | `patSetupUrl` | `({ host, name, scopes }) -> string` | PAT creation URL in the browser. |
 | `projectResolve` | `({ project }) -> string` | Identity: returns the slug. Both GH and GL address projects by slug/encoded-path, so callers pass the slug everywhere (incl. `repoCloneUrl`). Extension point if a host ever needs a different id. |
 | `branchProtect` | `({ project, branch?, checks, requiredReviews? }) -> { enforced, reason?, remedy? }` | Apply (or refresh) branch protection. `branch` defaults to `'main'`; `checks` is an array of required check context strings; `requiredReviews` defaults to `1`. Returns `{enforced:true}` on success or `{enforced:false,reason,remedy}` on failure (never throws). GitHub: idempotent `PUT repos/{project}/branches/{branch}/protection` via `gh api --input -`; may return `reason:'tier'` on GitHub Free private repos. GitLab: `POST projects/{enc}/protected_branches` (push_access_level=0, allow_force_push=false); idempotent on 409; never returns `reason:'tier'` (protected branches are free on all GitLab tiers). Approval-count enforcement (requiredReviews) requires GitLab Premium and is not enforced in this slice. |
+| `prReviewComment` | `({ project, number, body }) -> Promise<{ url }\|{ url: null, error }>` | Posts a review whose event is **`COMMENT`, hardcoded** (issue #266 lock 2, REQ-266-3) — no parameter, flag, or branch selects a different event. GH: `POST repos/{project}/pulls/{number}/reviews`. GL: no review-state concept on notes — `POST projects/{enc}/merge_requests/{number}/notes`. Never throws. |
+| `issueComment` | `({ project, number, body }) -> Promise<{ url }\|{ url: null, error }>` | Posts a plain issue comment — rulings on issues. GH: `POST repos/{project}/issues/{number}/comments`. GL: `POST projects/{enc}/issues/{number}/notes`. Never throws. |
+| `labelAdd` | `({ project, number, labels }) -> Promise<{ ok }\|{ ok: false, error }>` | Adds labels. The **caller** enforces the deny-set (REQ-266-9), not the verb. GH: `POST repos/{project}/issues/{number}/labels`. GL: `PUT projects/{enc}/issues/{number}` with `add_labels` (issues-only, matching `labelEvents`). Never throws. |
+| `labelRemove` | `({ project, number, labels }) -> Promise<{ ok }\|{ ok: false, error }>` | Removes labels — monotonic-tightening removals only (REQ-266-9). GH: per-label `DELETE .../labels/{label}`, stopping at the first failure (no bulk-remove endpoint). GL: `PUT projects/{enc}/issues/{number}` with `remove_labels`. Never throws. |
 
 ### Normalized `commitStatus` enum
 
@@ -58,7 +62,7 @@ check completes, then its `conclusion`. `null` = no status available.
 
 ## How to add a provider
 
-Create `scripts/vcs/providers/<name>.mjs` exporting the 15 verbs and add `<name>` as a
+Create `scripts/vcs/providers/<name>.mjs` exporting the 20 verbs and add `<name>` as a
 valid value of `vcs.provider`. The callers are not touched.
 
 ## Current implementation

@@ -222,3 +222,108 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assert.equal(typeof result.error, 'string', 'a failed mrCreate must carry an error string');
   });
 }
+
+// ── prReviewComment / issueComment / labelAdd / labelRemove (issue #266,
+// REQ-266-2) — the four COMMENT-only port verbs. ONE assertion set run over
+// both providers, same discipline as the loop above: parity means the same
+// test body applies to each provider. Inline mocks (no fixture files) — these
+// are simple write verbs and the normalized shapes are the whole contract.
+
+const WRITE_VERB_PROVIDERS = {
+  github: {
+    module: github,
+    ok: (data) => { setSpawn(jsonSpawn(data)); return {}; },
+    fail: () => { setSpawn(failSpawn('fixture: simulated failure')); return {}; },
+  },
+  gitlab: {
+    module: gitlab,
+    ok: (data) => ({ fetchImpl: async () => ({ ok: true, json: async () => data }) }),
+    fail: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
+  },
+};
+
+for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
+  const { module: vcs, ok, fail } = WRITE_VERB_PROVIDERS[providerName];
+
+  test(`${providerName}.prReviewComment (contract): posts event:'COMMENT' (hardcoded), returns { url } on success`, async () => {
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      ...ok({ html_url: 'https://example.test/x/y/pull/1#review-1', id: 1 }),
+    });
+    assert.equal(typeof result.url, 'string', 'a successful prReviewComment must return a string url');
+    assert.equal(result.error, undefined, 'a successful prReviewComment must not carry an error key');
+  });
+
+  test(`${providerName}.prReviewComment (contract): a post failure returns { url: null, error }, never throws`, async () => {
+    const result = await vcs.prReviewComment({ project: 'x/y', number: 1, body: 'verdict', ...fail() });
+    assert.equal(result.url, null, 'a failed prReviewComment must never fabricate a url');
+    assert.equal(typeof result.error, 'string', 'a failed prReviewComment must carry an error string');
+  });
+
+  test(`${providerName}.issueComment (contract): returns { url } on success`, async () => {
+    const result = await vcs.issueComment({
+      project: 'x/y', number: 1, body: 'ruling',
+      ...ok({ html_url: 'https://example.test/x/y/issues/1#comment-1', id: 1 }),
+    });
+    assert.equal(typeof result.url, 'string', 'a successful issueComment must return a string url');
+    assert.equal(result.error, undefined);
+  });
+
+  test(`${providerName}.issueComment (contract): a post failure returns { url: null, error }, never throws`, async () => {
+    const result = await vcs.issueComment({ project: 'x/y', number: 1, body: 'ruling', ...fail() });
+    assert.equal(result.url, null, 'a failed issueComment must never fabricate a url');
+    assert.equal(typeof result.error, 'string');
+  });
+
+  test(`${providerName}.labelAdd (contract): returns { ok: true } on success`, async () => {
+    const result = await vcs.labelAdd({
+      project: 'x/y', number: 1, labels: ['seq:1'],
+      ...ok({ labels: [{ name: 'seq:1' }] }),
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.error, undefined, 'a successful labelAdd must not carry an error key');
+  });
+
+  test(`${providerName}.labelAdd (contract): a post failure returns { ok: false, error }, never throws`, async () => {
+    const result = await vcs.labelAdd({ project: 'x/y', number: 1, labels: ['seq:1'], ...fail() });
+    assert.equal(result.ok, false, 'a failed labelAdd must never fabricate ok:true');
+    assert.equal(typeof result.error, 'string');
+  });
+
+  test(`${providerName}.labelRemove (contract): returns { ok: true } on success`, async () => {
+    const result = await vcs.labelRemove({
+      project: 'x/y', number: 1, labels: ['seq:1'],
+      ...ok({ labels: [] }),
+    });
+    assert.equal(result.ok, true);
+  });
+
+  test(`${providerName}.labelRemove (contract): a post failure returns { ok: false, error }, never throws`, async () => {
+    const result = await vcs.labelRemove({ project: 'x/y', number: 1, labels: ['seq:1'], ...fail() });
+    assert.equal(result.ok, false, 'a failed labelRemove must never fabricate ok:true');
+    assert.equal(typeof result.error, 'string');
+  });
+}
+
+// ── REQ-266-3 (lock 2): no code path can emit an APPROVE review, on any provider ──
+
+test('REQ-266-3 lock 2: github.prReviewComment sends event:\'COMMENT\' to the API regardless of input — no argument selects a different event', async () => {
+  let sentPayload;
+  setSpawn((_cmd, _args, opts) => {
+    sentPayload = JSON.parse(opts.input);
+    return { status: 0, stdout: JSON.stringify({ html_url: 'https://example.test/x/y/pull/1#review-1' }), stderr: '' };
+  });
+  await github.prReviewComment({ project: 'x/y', number: 1, body: 'anything, even an approval-sounding body' });
+  assert.equal(sentPayload.event, 'COMMENT', 'the review event sent to the API must always be COMMENT, never derived from input');
+});
+
+test('REQ-266-3 lock 2: no exported verb on either provider references an approval review-event literal — source scan', () => {
+  for (const modName of ['github.mjs', 'gitlab.mjs']) {
+    const src = readFileSync(fileURLToPath(new URL(`./${modName}`, import.meta.url)), 'utf8');
+    assert.doesNotMatch(
+      src,
+      /event\s*:\s*['"](?!COMMENT['"])[A-Z_]+['"]/,
+      `${modName} must not contain any review "event:" literal other than 'COMMENT' — no code path may reach an approval event`,
+    );
+  }
+});

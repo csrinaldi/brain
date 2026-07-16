@@ -28,9 +28,10 @@ writes to the review/comment/label surface**. `mrCreate` and `branchProtect` do 
 and branch-protection surfaces — and therefore enter the deny-set threat model as *existing* write
 surface, but neither touches reviews, comments, or labels. H0 adds four verbs to that surface (§4).
 
-The L5/L6 evaluators are **not rewritten**. The only behavioral change to them is that L6 gains a
-second config read (`governance.reviewActors`) in H0-b; L5 is untouched. Everything else in H0-a is
-doctrine and records — no executable behavior changes in this slice.
+The L5/L6 evaluators are **not rewritten**. The only behavioral change to them is that L6's
+botAllowlist config read **moves** from `governance.approvalActors` to `governance.reviewActors` in
+H0-b — it does not union them (R2: no key feeds two gates); L5 is untouched. Everything else in H0-a
+is doctrine and records — no executable behavior changes in this slice.
 
 | Layer | H0-a (this slice) | H0-b (deferred) |
 |---|---|---|

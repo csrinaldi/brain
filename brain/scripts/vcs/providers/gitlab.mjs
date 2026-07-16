@@ -231,6 +231,114 @@ export async function commitStatus({ project, sha }) {
   return normalizeCommitStatus('gitlab', arr[0]?.status);
 }
 
+/**
+ * Posts a COMMENT-state merge request review (issue #266, REQ-266-2).
+ * GitLab's notes API has no review-event concept (APPROVE/COMMENT/REQUEST
+ * CHANGES) — a plain note is posted, which structurally cannot become an
+ * approval either (lock 2, REQ-266-3: no such code path exists on this
+ * provider). The API response carries no `web_url`, so the display url is
+ * derived from `apiBase` (stripping the trailing `/api/v4`). Never throws.
+ *
+ * @param {{ project: string, number: number, body: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ url: string } | { url: null, error: string }>}
+ */
+export async function prReviewComment({ project, number, body, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const base = apiBase ?? 'https://gitlab.com/api/v4';
+  const encoded = encodeURIComponent(project);
+  try {
+    const r = await gitlabApiFetch({
+      apiBase: base,
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/merge_requests/${number}/notes`,
+      method: 'POST',
+      body: { body },
+      fetchImpl,
+    });
+    return { url: `${base.replace(/\/api\/v4\/?$/, '')}/${project}/-/merge_requests/${number}#note_${r.id}` };
+  } catch (err) {
+    return { url: null, error: err.message };
+  }
+}
+
+/**
+ * Posts a plain issue comment — rulings on issues (issue #266, REQ-266-2).
+ * Never throws.
+ *
+ * @param {{ project: string, number: number, body: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ url: string } | { url: null, error: string }>}
+ */
+export async function issueComment({ project, number, body, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const base = apiBase ?? 'https://gitlab.com/api/v4';
+  const encoded = encodeURIComponent(project);
+  try {
+    const r = await gitlabApiFetch({
+      apiBase: base,
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/issues/${number}/notes`,
+      method: 'POST',
+      body: { body },
+      fetchImpl,
+    });
+    return { url: `${base.replace(/\/api\/v4\/?$/, '')}/${project}/-/issues/${number}#note_${r.id}` };
+  } catch (err) {
+    return { url: null, error: err.message };
+  }
+}
+
+/**
+ * Adds labels to an issue (issue #266, REQ-266-2). Targets the issues
+ * endpoint, matching `labelEvents`' issues-only precedent on this provider.
+ * The CALLER enforces the deny-set (REQ-266-9, monotonic label tightening) —
+ * this verb performs the label API call only, no policy. Never throws.
+ *
+ * @param {{ project: string, number: number, labels: string[], apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
+ */
+export async function labelAdd({ project, number, labels, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  try {
+    await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/issues/${number}`,
+      method: 'PUT',
+      body: { add_labels: labels.join(',') },
+      fetchImpl,
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Removes labels from an issue — monotonic-tightening removals only (issue
+ * #266, REQ-266-9); the caller enforces the deny-set. Never throws.
+ *
+ * @param {{ project: string, number: number, labels: string[], apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
+ */
+export async function labelRemove({ project, number, labels, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  try {
+    await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/issues/${number}`,
+      method: 'PUT',
+      body: { remove_labels: labels.join(',') },
+      fetchImpl,
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 export async function repoCloneUrl({ host, project, token }) {
   return `https://oauth2:${token}@${host}/${project}.git`;
 }

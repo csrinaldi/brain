@@ -7,8 +7,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { setSpawn } from './lib/exec.mjs';
 
@@ -647,4 +649,40 @@ test('A3 TASK1 source-scan: defaultFetchIssue no longer contains execFileSync(\'
   const fnBody = src.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
   assert.equal(fnBody.includes('execFileSync'), false, 'defaultFetchIssue must dispatch via getVcs(...).issueView(...), never a raw execFileSync(\'gh\', ...) call');
   assert.match(fnBody, /getVcs|issueView/, 'sanity: dispatch through the vcs adapter is present');
+});
+
+// ── REQ-266-6 t1 (issue #266, rev-2 binding condition B, lock 3) ──────────────
+//
+// The reviewer identity registers ONLY in governance.reviewActors, never in
+// governance.approvalActors (design §3 two-key split). L5 (actor-check.mjs) is
+// NOT touched by H0-b — it keeps reading governance.approvalActors only. This
+// test uses a test-fixture reviewer identity, not a real registered handle
+// (task 7.3 is deferred — no reviewer bot handle exists yet).
+
+test('REQ-266-6 t1 (lock-3, issue #266): reviewer identity in governance.reviewActors (NOT governance.approvalActors) does not pass L5 via the allow-listed-automation branch when self-applying status:approved', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-config-'));
+  writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({
+    governance: {
+      approvalActors: [], // the reviewer must NEVER be registered here (design §3, R2)
+      reviewActors: ['brain-reviewer[bot]'], // L6-only key (test fixture identity)
+    },
+  }));
+  const result = await runActorCheck({
+    author: 'brain-reviewer[bot]',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    cwd: dir,
+    fetchLabeledEvents: () => [{ actor: { login: 'brain-reviewer[bot]' } }],
+    fetchIssue: () => ({ labels: ['status:approved'], author: 'brain-reviewer[bot]' }),
+    // deliberately NOT injecting readBotAllowlist/readConfig — exercising the
+    // REAL default reader, which sources L5's botAllowlist from
+    // governance.approvalActors ONLY (never governance.reviewActors).
+  });
+  assert.equal(
+    result.level,
+    'fail',
+    'the reviewer must not be admitted by the allow-listed-automation branch — self-approval is caught instead',
+  );
+  assert.match(result.reason, /self/i);
 });
