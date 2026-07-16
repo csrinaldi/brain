@@ -8,8 +8,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { setSpawn } from './lib/exec.mjs';
 
@@ -435,4 +437,69 @@ test('A3 TASK2 source-scan: defaultFetchReviews no longer contains execFileSync(
   const fnBody = src.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
   assert.equal(fnBody.includes('execFileSync'), false, 'defaultFetchReviews must dispatch via getVcs(...).prReviews(...), never a raw execFileSync(\'gh\', ...) call');
   assert.match(fnBody, /getVcs|prReviews/, 'sanity: dispatch through the vcs adapter is present');
+});
+
+// ── governance.reviewActors wiring (issue #266, design §3 two-key split) ──────
+//
+// L6's default botAllowlist reader must also read the NEW governance.reviewActors
+// key and thread it into botAllowlist, in addition to governance.approvalActors —
+// L5 (actor-check.mjs) is untouched and keeps reading approvalActors only.
+
+test('governance.reviewActors (issue #266): L6 default botAllowlist reader unions governance.approvalActors and governance.reviewActors', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-config-'));
+  writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({
+    governance: {
+      approvalActors: ['release-bot'],
+      reviewActors: ['brain-reviewer[bot]'],
+    },
+  }));
+  const inputs = await gatherBrainWritesReviewedInputs({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: [],
+    cwd: dir,
+    deps: {
+      diffNameOnly: () => ['brain/core/foo.mjs'],
+      fetchReviews: () => [],
+      // deliberately NOT injecting readBotAllowlist — exercising the REAL
+      // default reader, which must union both governance keys.
+    },
+  });
+  assert.deepEqual(
+    new Set(inputs.botAllowlist),
+    new Set(['release-bot', 'brain-reviewer[bot]']),
+    'L6 botAllowlist must include identities from BOTH governance.approvalActors and governance.reviewActors',
+  );
+});
+
+// ── REQ-266-6 t2 (issue #266, rev-2 binding condition B, lock 3) ──────────────
+//
+// The reviewer identity (test fixture — task 7.3 is deferred, no real reviewer
+// bot handle exists yet) is registered in governance.reviewActors and threaded
+// into L6's botAllowlist. An APPROVED review it authors must NOT be counted as
+// the human review.
+
+test('REQ-266-6 t2 (lock-3, issue #266): reviewer identity in governance.reviewActors is excluded from L6\'s human-approver count — an APPROVED review it authors does not satisfy brain-writes-reviewed', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-config-'));
+  writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({
+    governance: { approvalActors: [], reviewActors: ['brain-reviewer[bot]'] },
+  }));
+  const result = await runBrainWritesReviewedCheck({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: [],
+    cwd: dir,
+    diffNameOnly: () => ['brain/core/foo.mjs'],
+    fetchReviews: () => [{ state: 'APPROVED', author: 'brain-reviewer[bot]' }],
+    // deliberately NOT injecting readBotAllowlist — exercising the REAL default
+    // reader, which must thread governance.reviewActors into botAllowlist.
+  });
+  assert.notEqual(result.level, 'pass', 'an APPROVED review authored only by the reviewer identity must never satisfy the Tier-2 human-review gate');
+  assert.equal(result.level, 'fail', 'the only APPROVED reviewer is bot-allow-listed (via governance.reviewActors) — same outcome as any bot-only approval');
 });

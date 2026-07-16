@@ -162,11 +162,24 @@ function defaultFetchReviews(repo, provider, { getVcs: getVcsFn = getVcs } = {})
   };
 }
 
+/**
+ * Default `readBotAllowlist` dep: unions `governance.approvalActors` with
+ * `governance.reviewActors` (issue #266, design §3 two-key split). The
+ * reviewer identity registers ONLY in `governance.reviewActors` — a NEW,
+ * L6-only key — and is NEVER in `governance.approvalActors` (L5-only,
+ * permissive there; see `actor-check.mjs`'s `defaultReadBotAllowlist`, which
+ * is NOT touched by this change and keeps reading `approvalActors` alone).
+ * Threading `reviewActors` in here additionally is what excludes the
+ * reviewer from L6's human-approver count without ever admitting it to L5's
+ * allow-listed-automation branch.
+ */
 function defaultReadBotAllowlist(cwd) {
   return () => {
     try {
       const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
-      return Array.isArray(config?.governance?.approvalActors) ? config.governance.approvalActors : [];
+      const approvalActors = Array.isArray(config?.governance?.approvalActors) ? config.governance.approvalActors : [];
+      const reviewActors = Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
+      return [...new Set([...approvalActors, ...reviewActors])];
     } catch {
       return [];
     }
