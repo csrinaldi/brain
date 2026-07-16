@@ -98,18 +98,11 @@ export const migrations = [
   {
     version: '0.8.0',
     description:
-      'Add reviewer.{handle,tokenEnv}: the cold external reviewer\'s identity ' +
-      'pointer (issue #266 H1, comment 4992662021). Git carries the env var ' +
-      'NAME only, never the token VALUE — brain:review refuses to run and ' +
-      'prints instructions when env[tokenEnv] is absent (REQ-H1-1). ' +
-      'governance.reviewActors ships absent until a reviewer identity is ' +
-      'minted (protocol §11) — a decoupled human keystroke, not part of this ' +
-      'migration.',
+      "Add reviewer.{handle,tokenEnv}: the cold reviewer's identity pointer " +
+      '(issue #266 H1, comment 4992662021) — git carries the env var NAME, ' +
+      'never the token VALUE (REQ-H1-1). governance.reviewActors stays absent.',
     defaults: {
-      reviewer: {
-        handle: '',
-        tokenEnv: 'BRAIN_REVIEWER_TOKEN',
-      },
+      reviewer: { handle: '', tokenEnv: 'BRAIN_REVIEWER_TOKEN' },
     },
   },
 ];
