@@ -1,7 +1,7 @@
 # ADR-0021 — Widen the VCS port for the cold reviewer: `headRefOid` on `prView` + a `prStatusRollup` read verb; retire the H1-1 cold-boot seam
 
-**Status**: Draft — agent-drafted per ADR-0013; awaiting human signature (the human sets Status: Accepted + their sign-off on promotion). DO NOT merge as Draft.
-**Date**: 2026-07-17
+**Status**: Accepted
+**Date**: 2026-07-17 -- Cristian Rinaldi
 
 ## Context
 
@@ -25,7 +25,7 @@ Adding to the port is itself a decision (protocol §4, ADR-0020's own rule) — 
 ## Consequences
 
 - **Positive**: the reviewer reaches the head anchor and the required-gate rollup through the single provider-agnostic port — the same seam that already serves GitHub and self-hosted GitLab. The interim reader dies; no drift between a mini-port and the real port.
-- **Positive**: `prStatusRollup` is a read verb with no write surface — it widens the reviewer's *evidence* reach without widening its *authority* (the three §2 locks are untouched).
+- **Positive**: `prStatusRollup` is a read verb with no write surface — it widens the reviewer's _evidence_ reach without widening its _authority_ (the three §2 locks are untouched).
 - **Negative**: touching the port shape + adding a verb is a decision that needs this ADR + a `decision` label + L6 human review at the PR — the deliberate cost of a port change (never a silent widening).
 - **Negative**: both providers must implement `prStatusRollup` or the drift-guard blocks; GitLab's pipeline/checks model differs from GitHub's checks API, so the normalization (`{ name, status, conclusion }`) is the contract both must satisfy.
 
