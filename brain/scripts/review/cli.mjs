@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// cli.mjs — REQ-H1-5, REQ-H1-7, REQ-H1-8, REQ-H1-9: `brain:review` CLI. Wires
-// identity → cold-boot → mode derivation (R6) → the tranche evaluator →
-// verdict → the poster. `ruling`/`checkpoint` modes are explicit
-// not-yet-implemented stubs (their evaluators land in H1-3/H1-4) — never a
-// silent no-op. `queue`/`board` dispatch land in H1-5 (design.md §9).
+// cli.mjs — REQ-H1-5, REQ-H1-7, REQ-H1-8, REQ-H1-9, REQ-H1-10: `brain:review`
+// CLI. Wires identity → cold-boot → mode derivation (R6) → the tranche/
+// checkpoint evaluator → verdict → the poster. `ruling` mode is an explicit
+// not-yet-implemented stub (its evaluator lands in H1-4) — never a silent
+// no-op. `queue`/`board` dispatch land in H1-5 (design.md §9).
 
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -15,6 +15,7 @@ import { gatherColdBoot } from './cold-boot.mjs';
 import { buildVerdict, renderVerdict } from './verdict.mjs';
 import { deriveMode } from './mode.mjs';
 import { evaluateTranche, gatherTrancheInputs } from './evaluators/tranche.mjs';
+import { evaluateCheckpoint, gatherCheckpointInputs } from './evaluators/checkpoint.mjs';
 import { postVerdict } from './poster.mjs';
 
 /** @returns {{ pr: number|null, mode: string, dryRun: boolean }} */
@@ -38,9 +39,12 @@ function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
 /** `deps`: `argv`, `log`, `error`, `project`, `provider`, `identityDeps` (→
  * identity.mjs), `coldBootDeps` (→ cold-boot.mjs), `baseSha` (skips
  * `ci-context.mjs`'s CI-env resolution when injected), `loadCiContext`,
- * `getChangedFiles`, `trancheDeps` (→ evaluators/tranche.mjs), `posterDeps`
- * (→ poster.mjs), `writeVerbs` (a spy/real VCS used as the poster's default
- * `getVcs` when `posterDeps.getVcs` is not separately injected). */
+ * `getChangedFiles`, `trancheDeps` (→ evaluators/tranche.mjs), `checkpointDeps`
+ * (→ evaluators/checkpoint.mjs — carries its OWN `baseSha` seam, resolved
+ * independently of the tranche/ci-context one, see checkpoint.mjs's
+ * docstring), `posterDeps` (→ poster.mjs), `writeVerbs` (a spy/real VCS used
+ * as the poster's default `getVcs` when `posterDeps.getVcs` is not separately
+ * injected). */
 export async function main(deps = {}) {
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
@@ -100,10 +104,24 @@ export async function main(deps = {}) {
       deps: deps.trancheDeps ?? {},
     });
     evalResult = evaluateTranche(trancheInputs);
+  } else if (mode === 'checkpoint') {
+    const checkpointInputs = await gatherCheckpointInputs({
+      project,
+      number: args.pr,
+      provider: deps.provider,
+      headSha: boot.headSha,
+      changedFiles,
+      prBody: boot.prView.body,
+      labels: boot.prView.labels ?? [],
+      worktreePath: boot.worktreePath,
+      doctrineRecords: boot.doctrine.records,
+      deps: deps.checkpointDeps ?? {},
+    });
+    evalResult = evaluateCheckpoint(checkpointInputs);
   } else {
-    // checkpoint (H1-3) / ruling (H1-4): evaluators not yet implemented in
-    // this slice. Explicit stub — never a silent no-op or a guessed verdict.
-    error(`brain:review: mode "${mode}" is not yet implemented (its evaluator lands in H1-3/H1-4) — refusing to guess a verdict.`);
+    // ruling (H1-4): evaluator not yet implemented in this slice. Explicit
+    // stub — never a silent no-op or a guessed verdict.
+    error(`brain:review: mode "${mode}" is not yet implemented (its evaluator lands in H1-4) — refusing to guess a verdict.`);
     return 1;
   }
 
