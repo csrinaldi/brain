@@ -4,8 +4,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
-import { evaluateSelfReview, gatherColdBoot } from './cold-boot.mjs';
+import { evaluateSelfReview, gatherColdBoot, defaultCloneDetached } from './cold-boot.mjs';
+
+const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 
 const PR = { project: 'csrinaldi/brain', number: 42, provider: 'github' };
 
@@ -103,4 +109,40 @@ test('gatherColdBoot: reviewer handle equals PR author → abstains, no doctrine
   assert.equal(result.abstain, true);
   assert.equal(result.headSha, undefined);
   assert.deepEqual(calls, { fetchHead: 0, cloneDetached: 0, readRecords: 0, fetchReviews: 0 });
+});
+
+// ── COLDBOOT-CWD (real default, issue #266): protocol §8 "own clone/worktree" ─
+// The ONE test that exercises the REAL defaultCloneDetached against real git —
+// only the network fetch is stubbed (I/O, not the isolation logic). It must
+// create an isolated detached worktree and NEVER move the operator's HEAD.
+
+test('COLDBOOT-CWD (real default): defaultCloneDetached checks out a SEPARATE detached worktree and never moves the operator HEAD', (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'brain-review-op-'));
+  const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-wt-'));
+  t.after(() => {
+    try { git(repo, 'worktree', 'prune'); } catch { /* best effort */ }
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(wtParent, { recursive: true, force: true });
+  });
+
+  git(repo, 'init', '-q');
+  git(repo, 'config', 'user.email', 't@t.t');
+  git(repo, 'config', 'user.name', 't');
+  writeFileSync(join(repo, 'f.txt'), 'hi');
+  git(repo, 'add', 'f.txt');
+  git(repo, 'commit', '-q', '-m', 'a');
+  const sha = git(repo, 'rev-parse', 'HEAD');
+  const branch = git(repo, 'symbolic-ref', '--short', 'HEAD');
+
+  // Real default; only the network fetch is stubbed (the sha is already local).
+  const clone = defaultCloneDetached({ cwd: repo, fetch: () => {}, tmp: wtParent })({ sha });
+
+  // isolated worktree, detached at the reviewed sha
+  assert.ok(existsSync(clone.worktreePath), 'an isolated worktree must be created');
+  assert.equal(git(clone.worktreePath, 'rev-parse', 'HEAD'), sha, 'worktree HEAD is the reviewed sha');
+  assert.throws(() => git(clone.worktreePath, 'symbolic-ref', '-q', 'HEAD'), 'worktree HEAD must be DETACHED (no branch ref)');
+
+  // the operator's HEAD did NOT move — still on its branch, still at the same sha
+  assert.equal(git(repo, 'symbolic-ref', '--short', 'HEAD'), branch, 'operator HEAD stays on its branch — never detached in cwd');
+  assert.equal(git(repo, 'rev-parse', 'HEAD'), sha, 'operator HEAD did not move');
 });

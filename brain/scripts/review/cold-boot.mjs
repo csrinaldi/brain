@@ -7,6 +7,7 @@
 // absent BY CONSTRUCTION (R2).
 
 import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { getVcs } from '../vcs/cli.mjs';
@@ -43,11 +44,18 @@ function defaultFetchHead({ getVcs: getVcsFn = getVcs } = {}) {
   };
 }
 
-function defaultCloneDetached({ cwd = process.cwd() } = {}) {
+// COLDBOOT-CWD fix (protocol §8 "own clone/worktree"): NEVER `git checkout` in
+// the operator's cwd — that moves their HEAD (state-loss). Fetch the sha into
+// the operator's object db, then check it out in a SEPARATE detached worktree.
+// `fetch`/`tmp` are seams so the isolation logic is testable without a remote.
+export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir() } = {}) {
+  const doFetch = fetch ?? (sha => execFileSync('git', ['fetch', '--depth', '1', 'origin', sha], { cwd, encoding: 'utf8' }));
   return ({ sha }) => {
-    execFileSync('git', ['fetch', '--depth', '1', 'origin', sha], { cwd, encoding: 'utf8' });
-    execFileSync('git', ['checkout', '--detach', sha], { cwd, encoding: 'utf8' });
-    return { detached: true, sha };
+    doFetch(sha);
+    const worktreePath = join(tmp, `brain-review-${sha}`);
+    try { execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' }); } catch { /* no prior worktree at this head */ }
+    execFileSync('git', ['worktree', 'add', '--detach', worktreePath, sha], { cwd, encoding: 'utf8' });
+    return { detached: true, sha, worktreePath };
   };
 }
 
@@ -82,11 +90,12 @@ export async function gatherColdBoot({ project, number, provider, reviewerHandle
   const fetchReviews = deps.fetchReviews ?? defaultFetchReviews(deps);
 
   const headSha = await fetchHead({ project, number, provider });
-  await cloneDetached({ sha: headSha });
+  const clone = await cloneDetached({ sha: headSha });
 
   const records = readRecords().filter(r => DOCTRINE_TYPES.has(r?.type));
   const reviews = await fetchReviews({ project, number, provider });
   const priorVerdicts = reviews.map(r => parseVerdict(r)).filter(Boolean);
 
-  return { abstain: false, headSha, prView, doctrine: { records, priorVerdicts } };
+  // worktreePath: the isolated detached worktree (H1-2 evaluators operate inside it).
+  return { abstain: false, headSha, worktreePath: clone?.worktreePath, prView, doctrine: { records, priorVerdicts } };
 }
