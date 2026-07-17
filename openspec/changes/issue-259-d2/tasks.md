@@ -66,7 +66,7 @@ always-`cursor..HEAD` window + core CAS).
 
 | Field | Value |
 |---|---|
-| Estimated changed lines | PR1 ≈155 · PR2 ≈85 · PR3 ≈100 · PR4 ≈235 · PR5 ≈105 (counted; tests + `openspec/changes/**` excluded per `governance.ignoreList`) |
+| Estimated changed lines | PR1 ≈155 · PR2 ≈150 · PR3 ≈100 · PR4 ≈235 · PR5 ≈105 (counted; tests + `openspec/changes/**` excluded per `governance.ignoreList`) |
 | Total across chain | ≈680 counted lines, none of it in one PR |
 | 400-line budget risk | **Low for every PR.** Largest is PR4 at ~235/400 (~59%) — comfortable headroom even after a further review finding. |
 | Chained PRs recommended | **Yes — mandatory** (owner ruling #901). Feature-branch-chain rejected: the tracker's single integration diff would be ~700 lines, needing the `size:exception` the proposal forbids. |
@@ -78,7 +78,7 @@ always-`cursor..HEAD` window + core CAS).
 ```
 feature/v2.0.0
    └── PR 1  cursor core (git-seam + cursor state machine + CAS)         ~155  [git-seam.mjs, cursor.mjs, GitLab draft]
-        └── PR 2  revert resolution (tree effect)                         ~85  [resolution.mjs — security-critical]
+        └── PR 2  revert resolution (diff-inversion)                     ~150 [resolution.mjs — security-critical]
              └── PR 3  brain-audit: emission + skip classes + exit-2     ~100  [parse-failures.mjs, brain-audit.mjs]
                   └── PR 4  workflow wrapper (only GitHub-coupled PR)     ~235  [governance-postmerge.yml rewrite]
                        └── PR 5  0/1/2 contract across all evaluators     ~105  [exit-codes.mjs, run-check.mjs, drift-guards]
@@ -201,7 +201,7 @@ lease's own guarantee (§2.3).
 
 ---
 
-## PR 2 — Revert resolution: tree effect (`resolution.mjs`), ~85 counted lines
+## PR 2 — Revert resolution: whole-commit diff-inversion (`resolution.mjs`), ~150 counted lines
 
 **Depends on:** PR 1 merged (uses `git-seam.mjs`'s `gitTry`/`gitOrThrow`).
 **End state:** `resolution.mjs` is tested and **still unused** by `brain-audit.mjs` (that wiring is PR 3).
@@ -263,9 +263,11 @@ before merge.
       in the SAME window. Assert `isReverterOf(M, R, { git })` is `true`. **Also** construct a merge that
       merely **claims** (via commit message) to be a revert of `M` but has **no tree effect** on `M`'s
       paths; assert `isReverterOf` is `false` for it.
-- [x] 2.3.2 GREEN: implement `isReverterOf(offender, candidate, { git })` reusing `isResolvedAt` — per
-      §3.3: `isResolvedAt(offender, candidate)` is true AND `isResolvedAt(offender, candidate^1)` is false
-      (the candidate is demonstrably what removed the payload). No new mechanism, no forgeable signal.
+- [ ] 2.3.2 GREEN: implement `isReverterOf(offender, candidate, { git })` on the **same normDiff base** as
+      `isResolvedAt` (§3.3, redesigned): `isReverterOf` is true iff `normDiff(candidate, candidate^1) ===
+      normDiff(offender^1, offender)` (both non-empty) — the candidate's own first-parent contribution is the
+      exact patch-inverse of the offender's. No new mechanism, no forgeable signal. A **pure rename's**
+      contribution is not `¬O`, so it is **not** crowned reverter → no self-exempt `[SKIP]` (closes C5).
 
 ### Phase 2.4 — Checkpoint gate: violation-class → mechanism mapping (REQ-D2-10a, design §3.5)
 
@@ -280,8 +282,9 @@ without it.**
 - [x] 2.4.2 RED + GREEN: **`adrPresence` forward-fix — THE OWNER'S CASE.** Offender `M` flagged for
       `adrPresence` (`M`'s own changed path is `P`, an ADR file). A **later commit adds the missing
       `brain/HOME.md`** at a DIFFERENT path `Q` (a forward-fix, never touching `P`). Assert
-      `isResolvedAt(M, <that later tip>)` is **`false` forever** — `P` is still on disk, so `P ∩ D ≠ ∅`.
-      This is the explicit code-level proof that tree-effect **fails closed** on a forward-fix class: it
+      `isResolvedAt(M, <that later tip>)` is **`false` forever** — the forward-fix commit's contribution is
+      not the patch-inverse of `M` (`normDiff(fix, fix^1) !== normDiff(M^1, M)`), and no other merge inverts
+      `M` either. This is the explicit code-level proof that the mechanism **fails closed** on a forward-fix class: it
       must NEVER be marked resolved, and the only path that clears `M` is the human gate
       (`accept --reason`), which is **outside** `resolution.mjs`'s concern (it lives in `cursor.mjs`, PR 1).
 - [x] 2.4.3 Confirm (no code, assertion of design intent): write a short table-driven test or a comment
@@ -298,7 +301,7 @@ without it.**
 - [x] 2.5.1 `npm test` — the **full suite**, green (no scoping restriction — see PR 1's 1.6.1 note: the
       harness leak does not exist on this branch until D2's own PR 4 authors new workflow-extracting tests,
       and PR 4 authors them born isolated).
-- [x] 2.5.2 Budget check: `resolution.mjs` counted lines ≈85 — confirm ≤400, no `size:exception`.
+- [ ] 2.5.2 Budget check: `resolution.mjs` counted lines ≈150 (149 added vs HEAD) — confirm ≤400, no `size:exception`.
 - [ ] 2.5.3 Independent-review flag: this PR's description must explicitly ask the reviewer to confirm
       each A-series fixture matches design §7.1's attack shape (doctrine #900 — the patch author should
       not be the sole confirming authority on their own adversarial fixtures).
@@ -366,6 +369,17 @@ C6.
       uncomputable (exit 2), never a silent no-op that goes green with nothing reverted.
 - [ ] 3.3.4 GREEN: add the count cross-check — `code === 1` requires `≥1` parsed offender or the run is
       itself uncomputable.
+- [ ] 3.3.5 RED (**root-commit fail-closed, structured — closes point 7 / C5**): construct a window whose
+      offender is (pathologically) the **root commit** — it has no first parent, so `normDiff(offender^1, …)`
+      cannot be computed. Assert the offender is treated as **uncomputable → exit 2** (a loud, honest
+      not-resolved), **not** an unhandled exception and **never** a silent skip. The predicate MUST NOT
+      resolve a commit whose contribution it cannot even read.
+- [ ] 3.3.6 GREEN: make the missing-parent case a **structured fail-closed** outcome, not an ad-hoc
+      `try/catch` swallow: `resolution.mjs` returns an uncomputable/`{ resolved: false }` signal on a missing
+      `^1` (the `git-seam` non-zero status is surfaced, not collapsed), and `brain-audit.mjs` maps it to the
+      same exit-2 uncomputable path as 3.3.2 — the fail-closed principle (design §5) applies structurally, so
+      the root-commit case cannot become a sixth fail-open. Cite design §4 (seam returns status, never a
+      vacuous verdict) in the assertion message.
 
 ### Phase 3.4 — PR 3 gate
 

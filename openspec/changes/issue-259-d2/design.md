@@ -167,8 +167,10 @@ wasting effort racing on the same revert branch.
 there are exactly two ways an offender leaves the flagged set, and the trailer is not one of them.
 
 ```
-1. AUTOMATIC — TREE EFFECT ONLY (§3). The offender's touched paths are byte-identical at HEAD to
-               their pre-offender state, with the anti-vacuity guard. No message, no ancestry.
+1. AUTOMATIC — TREE EFFECT ONLY (§3). A later first-parent merge in the window contributes the
+               exact patch-inverse of the offender's first-parent contribution
+               (normDiff(R,R^1)==normDiff(O^1,O), both non-empty), with the anti-vacuity guard.
+               No message, no ancestry.
 2. HUMAN GATE — a registered, recorded acceptance:
    node brain/scripts/governance/postmerge/cursor.mjs accept <from-sha> <to-sha> --reason "<justification>"
      → acceptManually({ git, from, to, reason }) — `from` is the CALLER's (the human's) explicit
@@ -192,9 +194,11 @@ hatch for every offender class automatic tree-effect deliberately refuses (§3.3
 ### 3.0 The hard rule (absolute — owner ruling, R-1 REPLACED)
 
 > **A revert is a claim about the tree, and only the tree can prove it.** Automatic revert-resolution is
-> **TREE EFFECT ONLY**: the offender's touched paths are byte-identical at HEAD to their pre-offender
-> state, subject to the anti-vacuity guard (§3.2). The **only** other way an offender is resolved is the
-> **human gate** (§2.4). There is no third path.
+> **TREE EFFECT ONLY**: a later first-parent merge in the window contributes the **exact patch-inverse** of
+> the offender's own first-parent contribution — `normDiff(R, R^1) == normDiff(O^1, O)`, both non-empty
+> (§3.2) — proved by whole-commit first-parent diff-inversion, not by path identity. Subject to the
+> anti-vacuity guard (§3.2). The **only** other way an offender is resolved is the **human gate** (§2.4).
+> There is no third path.
 
 Removed from the design, permanently and entirely, as discriminators of resolution:
 
@@ -208,51 +212,137 @@ Removed from the design, permanently and entirely, as discriminators of resoluti
 future reintroduction of a message- or ancestry-based resolution signal is a design regression, and the
 adversarial fixtures in §7.1 (A1) exist to catch exactly that.
 
-### 3.1 The options, and what each can and cannot prove
+### 3.1 The options — judged on which direction they fail
 
-| Option | Proves | Does NOT prove | Runtime cost | Verdict |
-|---|---|---|---|---|
-| **Trailer + ancestry** (v1) | The candidate is a descendant of the offender — true of *every* commit on a linear main | Anything about the code. The trailer is free text an attacker writes. | 1 `git log` + N `merge-base` | **REJECTED — reproduced bypass** |
-| **Inverted-diff comparison** — compare `diff M^1 M` against the candidate's diff, reversed | That the candidate's patch text is the exact inverse of the offender's patch text | Nothing, when intervening commits shift hunk offsets: `git revert` rebases the inverse patch onto the current context, so the *text* legitimately differs. **High false-negative rate on the real auto-revert path** → a legitimate revert would pin the cursor forever. Liveness break. | 2 `git diff` + normalize + compare | **REJECTED — brittle** |
-| **Bot author / verified signature** | That a commit came from an identity | Nothing about the tree. Author is a free-text field; committer+signature needs key material in the runner (new infra, forge-specific). Provenance is not proof. | 1 `git log --format=%G?` + key setup | **REJECTED — provenance ≠ proof, and forge-coupled** |
-| **Revert must be a merge of `auto-revert/<sha>`** | That the revert came through our own PR flow | Nothing about the tree, and it is **forgeable by naming a branch**. Also excludes a human's hand-rolled revert, and hard-couples resolution to the GitHub PR model → m3 fail. | 1 `git log --format=%s` | **REJECTED — forgeable + coupled** |
-| **Tree effect** ✅ | **That the offender's payload is not on disk.** A pure property of the repository state — nothing to forge, no message to write, no identity to spoof. | *Who* undid it, or *why*. We do not care: the governance question is "is the bad change still here?", not "who removed it". | 2 `git diff --name-only` per offender | **CHOSEN** |
+The v1 table ranked options by *robustness*. That was the wrong axis. For a resolution predicate the only
+axis that matters is **which direction does it fail?**, because the two failures are catastrophically
+asymmetric:
+
+- A false **"resolved"** advances the cursor and masks the violation **forever** — the exact catastrophe
+  D2 exists to prevent.
+- A false **"not resolved"** pins the cursor → a LOUD issue → a human runs `acceptManually`. Annoying, SAFE.
+
+An option that can fail **OPEN** is disqualified no matter how robust; an option that only ever fails
+**CLOSED** is admissible even when fragile, because its fragility lands on the safe side. Re-judged on that
+axis (this reverses the v1 rejection of inverted-diff: it was rejected for *brittleness*, an axis that does
+not disqualify a fail-closed mechanism):
+
+| Option | Proves | Which direction does it fail? | Verdict |
+|---|---|---|---|
+| **Trailer + ancestry** (v1) | The candidate is a descendant of the offender — true of *every* commit on a linear main | **OPEN.** The trailer is free text an attacker writes; a descendant that reverts *nothing* is marked resolved → cursor advances → violation masked forever. | **REJECTED — fails open, reproduced bypass** |
+| **Naive text-inversion** — compare the raw `git diff` text of `O^1..O` against the candidate's reversed patch text, byte-for-byte including `@@`/`index` | The candidate's patch text is the exact byte-inverse of the offender's *at identical hunk offsets* | **CLOSED.** Any intervening commit shifts hunk offsets (`@@` line numbers, surrounding `index` oids); `git revert` rebases the inverse onto new context so the *text* legitimately differs → false "not resolved" → cursor pins → human gate. High false-NEGATIVE rate, but every failure is SAFE. | **REJECTED — brittle, but the v1 rejection weighed the wrong axis; refined into normDiff below** |
+| **`git patch-id --stable` inversion** | The offender and candidate patches collide under git's canonical patch identity (offset-tolerant for free) | **OPEN on whitespace.** patch-id strips leading/indentation whitespace with **no off-switch** — `add "PAY"` and `add "        PAY"` hash IDENTICAL (ws.mjs) → an indentation-borne payload (YAML/Python) is laundered as its own revert → cursor advances. A relaxation beyond position with no floor. | **REJECTED — fails open on indentation, uncontrollable (ws.mjs)** |
+| **Bot author / verified signature** | That a commit came from an identity | **OPEN.** Author is a free-text field an attacker sets; a signature needs key material in the runner (new infra, forge-specific). Provenance marks resolution with zero tree fact → cursor advances. | **REJECTED — fails open, provenance ≠ proof, forge-coupled** |
+| **Revert must be a merge of `auto-revert/<sha>`** | That the revert came through our own PR flow | **OPEN.** Forgeable by naming a branch → cursor advances. Also excludes a human's hand-rolled revert and hard-couples resolution to the GitHub PR model → m3 fail. | **REJECTED — fails open, forgeable + coupled** |
+| **normDiff inversion** (hardened command, §3.2) ✅ | **That ∃ a later first-parent merge whose first-parent contribution is the *exact patch-inverse* of the offender's contribution** — offset-tolerant (strips `@@`/`index`) yet whitespace-EXACT (keeps `+/-` bytes, modes, `diff --git` paths, `--binary` blocks). Nothing to forge. | **CLOSED.** Anything short of an exact inverse — partial revert, rename, copy, re-add, bundled change, near-hunk drift within U3 — is not resolved → human gate. The residual fragility (offset drift inside the U3 blast radius) is the naive-inversion fragility, kept on the safe side. | **CHOSEN** |
 
 ### 3.2 The predicate (`postmerge/resolution.mjs`)
 
+The mechanism is **whole-commit first-parent diff-inversion**: an offender is resolved iff a later
+first-parent merge contributes the *exact patch-inverse* of the offender's own first-parent contribution.
+It compares **normalized diffs**, not path sets.
+
 ```
-changedPaths(rev, { git })        → set of paths from
-                                    git diff --no-renames --name-only -z <rev>^1 <rev>
-                                    (--no-renames so a rename yields BOTH names, never a
-                                     half-tracked path; -z so a path with a newline cannot lie)
+normDiff(a, b)  →  the offender/candidate's contribution, rendered under a fully-pinned command
+                   and normalized to be position-tolerant but content-exact:
+
+  git -c diff.algorithm=myers -c diff.renames=false -c core.attributesFile=/dev/null \
+      diff --no-textconv --no-ext-diff --no-renames --binary -U3  <a> <b>
+    | drop only lines matching /^@@ / and /^index /, keep EVERYTHING ELSE byte-exact
+
+  (--binary is the F-4 defense: it renders even a `-diff`-attributed file as a content-bearing
+   base85 patch. NO .git/info/attributes write — a read predicate must not mutate the environment;
+   see §3.2 rendering-surface note and judgment-day Round 1.)
+
+diff(X) := normDiff(X^1, X)        ← FIRST-PARENT contribution of commit X
 
 isResolvedAt(offender, tip, { git }) → boolean
-   P = changedPaths(offender)
-   if P is EMPTY  →  { resolved: false, reason: 'offender has no changed paths' }
-                     ◄── EXPLICIT anti-vacuity guard. An empty path set makes every
-                         set-theoretic test trivially true. This is the exact shape of
-                         bug the last review was built to find; it is refused, loudly.
-   D = paths differing between <offender>^1 and <tip>
-       ( git diff --no-renames --name-only -z <offender>^1 <tip> )
-   resolved  ⟺  P ∩ D = ∅
+   dO = diff(offender) = normDiff(offender^1, offender)
+   if dO is EMPTY  →  { resolved: false, reason: 'offender has no first-parent contribution' }
+                      ◄── EXPLICIT anti-vacuity guard, RE-ESTABLISHED for this mechanism
+                          (not inherited): git emits NOTHING for an empty diff, so an unguarded
+                          `'' == ''` would resolve garbage (F-1). Refused, loudly, first branch.
+   resolved  ⟺  ∃ first-parent merge R ∈ (offender, tip] :  diff(R) == dO
+                (R ranges over the `--first-parent --merges` commits brain-audit already tracks —
+                 no new enumeration mechanism; the revert lives as one of those merges)
 ```
 
-**In words:** the offender is resolved iff **every path the offender touched is, at the tip, byte-identical
-to what it was immediately before the offender landed.** The payload is gone. That is the only fact that
-matters, and it is the only fact that cannot be forged.
+**Why first-parent (mandatory, not a preference).** brain merges PRs with `--merge`, so the offender is a
+merge commit and `git show <merge>` (the combined diff) is **EMPTY** for every clean merge — "¬(full diff
+of O)" is undefined for the dominant production case. `diff(X) := X^1..X` recovers the merge's first-parent
+contribution to main (non-empty). Candidate reverters `R` range over the same first-parent merges, because
+a revert PR is itself merged `--merge`.
+
+**Diff rendering is a security surface (F-4, forged in forge6/insp4).** `git diff` output is **not** a pure
+function of the tree pair — it is governed by config, part of which lives IN THE REPO (`.gitattributes`) and
+is therefore attacker-controlled, and git reads attributes from the **checked-out tip**. So a
+`.gitattributes` landed *after* an old offender could rewrite how THAT offender's diff renders:
+
+- **Attack confirmed (insp4):** `*.md -diff` planted at the tip makes `git diff O^1 O` render the old
+  payload as an opaque `GIT binary patch` (`check-attr` → `diff: unset`).
+- **Defended by `--binary` ALONE (measured, forge6/forge_forkb2):** with `--binary`, even a `-diff`-attributed
+  file emits a base85 `GIT binary patch` that **carries the literal content**, so two distinct payloads stay
+  distinct → the attack is dead. `--binary` is the load-bearing F-4 defense. The rename PAIR `--no-renames` +
+  `diff.renames=false` renders a rename as delete+add (F-4c: exposes *both* paths, vs. `rename from/to` which
+  hides content) — behaviorally tested, but only the PAIR reddens (git's default is `renames=true`, so either
+  half alone still disables renames; see line 301).
+
+> **REJECTED (judgment-day Round 1, both judges forged): a `.git/info/attributes = "* diff"` override.**
+> It was (1) INERT in a linked worktree — it writes to `git rev-parse --absolute-git-dir` (the per-worktree
+> gitdir) while git reads `info/attributes` from `--git-common-dir`; **brain mandates worktree-per-task, so
+> it is inert in the real topology**; (2) DESTRUCTIVE — an unconditional overwrite clobbers a human's
+> pre-existing `.git/info/attributes` (git-crypt filters and all), never restored; (3) REDUNDANT — `--binary`
+> already kills the attack. A read predicate that MUTATES the environment to measure has already lost. **The
+> predicate is pure-read.**
+
+**Two of the pinned flags are load-bearing content/environment defenses (behaviorally tested):** `--binary`
+(attacker content, §above) and **`--no-ext-diff`** — a GLOBAL `diff.external` helper applies to every path
+regardless of attributes and OVERRIDES `--binary`'s rendering entirely, collapsing distinct contents to the
+helper's output, so `--binary` does NOT cover it; dropping `--no-ext-diff` reddens the HOSTILE-ENV safety
+test (judgment-day R2, both judges + author forged). The rename PAIR `--no-renames`+`-c diff.renames=false`
+is also behaviorally tested (only the pair reddens; git's default is `renames=true`).
+
+**The remaining THREE pins are DETERMINISM, not content** (`-c diff.algorithm=myers`,
+`-c core.attributesFile=/dev/null`, `--no-textconv`). These do NOT defend against attacker *content* —
+`--binary` does that — and do NOT redden: they guarantee the verdict does **not depend on the ambient git
+config of the machine the predicate runs on** — the "green that depends on the environment" failure class D2
+exists to kill (the CP-PR1/B6 lesson). Forged under an adversarial `GIT_CONFIG_GLOBAL`
+(forge_forkb2/forge_forkb3): **given `--binary`, dropping any one of these three does not flip a verdict**
+(`--binary` bypasses the textconv driver; the algorithm is run-consistent) — so they are honestly labelled
+**defense-in-depth / determinism, NOT behaviorally reddenable**, never "reddens-on-drop". They are kept
+(cheap; load-bearing only if `--binary` is ever weakened). The behavioral robustness test asserts the
+predicate returns correct verdicts *under* a hostile ambient config.
+
+**RULE:** every flag and config that affects rendering is pinned **explicitly** in the command, NEVER
+inherited from env or repo. The `.gitattributes` at the tip is untrusted repo content — but the predicate
+neutralizes it by READING (`--binary`), never by WRITING.
+
+**The two relaxations, each justified and attack-fixtured** (everything else is kept byte-exact):
+
+- **`/^@@ /`** — the hunk position header (pure line numbers). Stripping it makes the comparison tolerant of
+  offset drift from intervening commits (forge_final drift case → resolved).
+- **`/^index /`** — blob-identity metadata, REDUNDANT to the `+/-` content which is already compared
+  byte-exact. Stripping it lets a hunk match across an unrelated surrounding-blob change without weakening
+  content comparison.
+
+Kept byte-exact (each backed by a forge fixture): `diff --git a/… b/…` paths (F-3), `old/new mode` lines
+(a chmod +x on a payload is visible), `+/-` content **including whitespace** (indentation-borne payload
+fails closed — the one thing patch-id could not guarantee, ws.mjs), and `--binary` GIT-binary-patch blocks
+(F-2: without `--binary`, git emits only "Binary files … differ" with no content, so different binary
+payloads collide). Validated 11/11 in `forge_final.mjs`.
 
 Anchor: `tip` is always `HEAD` — guaranteed by §2.2 (every window ends at HEAD).
 
 **What this deliberately refuses** (all fail **closed** — the offender stays flagged, the cursor stays
-pinned, the job stays red, and the human uses `accept --reason`):
+pinned, the job stays red, and the human uses `accept --reason`; the exhaustive adversarial set is §7.1):
 
 | Situation | Outcome | Why refusing is right |
 |---|---|---|
-| A partial revert (some of the offender's paths restored, not all) | NOT resolved | Half the payload is still on disk. |
-| A later legitimate commit touches one of the offender's paths for an unrelated reason | NOT resolved | We can no longer see the pre-offender state on that path. Refuse rather than guess. |
-| The payload is reverted and then **re-introduced** by a later commit | NOT resolved | The predicate is anchored at the tip, so it sees the re-introduction. This is a *feature* the trailer approach could never have. |
-| The offender is superseded by a proper re-land (same content, correct governance) | NOT resolved | Automatic resolution has no opinion on intent. `accept --reason` exists for exactly this. |
-| The offender merge changed nothing (empty diff) | NOT resolved | Anti-vacuity guard. Never a free pass. |
+| A partial revert (some of the offender's paths restored, not all) | NOT resolved | `diff(R) != diff(O)` — the whole contribution was not inverted. Half the payload is still on disk. |
+| A rename / copy / equivalent-content rewrite that relocates the payload | NOT resolved | The candidate's contribution is not the inverse of O; the payload survives at a new path. |
+| A legitimate revert **bundled** with an unrelated edit in one commit | NOT resolved | Whole-commit inversion: `diff(R)` carries the extra edit → `!= diff(O)`. Fail-closed on the safe side (R-2). |
+| The payload is reverted and then **re-introduced** by a later commit | NOT resolved *at that tip* | The predicate is anchored at the tip; the re-add is a NEW offender for its own audit (§3.6). |
+| The offender merge changed nothing (empty first-parent diff) | NOT resolved | Anti-vacuity guard (F-1). Never a free pass. |
 
 ### 3.3 The reverter-skip — closing the revert-of-revert loop
 
@@ -265,17 +355,20 @@ pinned, the job stays red, and the human uses `accept --reason`):
 | `memoryPresence` | pass | Repo-level check, not per-merge |
 | `adrPresence` | **FAIL — iff the offender's own violation was `adrPresence`** | `adr-presence.mjs:12-19` fails only on `hasAdr XOR hasHome`. Reverting a merge that added an ADR without `brain/HOME.md` removes exactly that ADR → `hasAdr XOR hasHome` again → the revert is flagged → an auto-revert of the auto-revert. |
 
-Fix — **reuse the same predicate, no new mechanism**:
+Fix — **reuse the same mechanism, no new signal**:
 
 ```
 A failing merge R in the window is [SKIP] "revert of <M>" iff there exists a merge M in the
 SAME window such that:
-      isResolvedAt(M, R)   is TRUE    ← M's payload is absent at R
-  AND isResolvedAt(M, R^1) is FALSE   ← M's payload was PRESENT at R's parent
-                                        ⇒ R is demonstrably what removed it
+      isReverterOf(M, R)  ⟺  diff(R) == diff(M)      (both non-empty)
+                          i.e. normDiff(R, R^1) == normDiff(M^1, M)
+      ← R's first-parent contribution is the EXACT patch-inverse of M's contribution,
+        so R is demonstrably what undid M — no message, no ancestry, no identity read.
 ```
 
-Non-forgeable (a pure tree property). Evaluated **only for merges that already failed**, so the cost is
+Non-forgeable (a pure tree property). **A pure rename's contribution is not the inverse of M** → the
+renamer is *not* crowned reverter → it earns no self-exempt `[SKIP]` (PR3): a launder that relocates the
+payload still fails closed. Evaluated **only for merges that already failed**, so the cost is
 zero on the happy path. And the design is closed: `M` and `R` always co-occur in the same window, because
 the cursor cannot advance past `M` until the window containing `M` goes clean — and the window that first
 goes clean is the one `R` landed in.
@@ -305,9 +398,9 @@ class whose real-world resolution is a forward-fix falls to the human gate — n
 
 | Class (source) | What it measures | Input mutability | Automatic tree-effect (revert)? | Forward-fix resolution | Terminal mapping |
 |---|---|---|---|---|---|
-| **`diffSize`** (`diff-size.mjs`) | Line count of **M's own diff** `parent1..M` vs 400 | **Immutable** (M's diff) — except the `size:exception` **label**, fetched fresh via `prView` | **YES.** Revert restores the paths → `P∩D=∅` → tree-effect skip. Correct: M's own diff stays >budget forever, so the skip is the only settle-by-revert path. | Add `size:exception` label → `prView` re-fetch → check **PASSES on re-eval** (true `[PASS]`, mechanism **A**, no skip). Or genuinely shrink via a **new** merge (that new merge is audited on its own). | **automatic tree-effect** (revert) **or automatic re-eval** (label) **or human gate** |
+| **`diffSize`** (`diff-size.mjs`) | Line count of **M's own diff** `parent1..M` vs 400 | **Immutable** (M's diff) — except the `size:exception` **label**, fetched fresh via `prView` | **YES.** A revert whose contribution inverts M's → `diff(R)==diff(M)` → tree-effect skip. Correct: M's own diff stays >budget forever, so the skip is the only settle-by-revert path. | Add `size:exception` label → `prView` re-fetch → check **PASSES on re-eval** (true `[PASS]`, mechanism **A**, no skip). Or genuinely shrink via a **new** merge (that new merge is audited on its own). | **automatic tree-effect** (revert) **or automatic re-eval** (label) **or human gate** |
 | **`issueLink`** (`issue-link.mjs`) | Issue ref in the **PR body** (`prView`) with fallback to the **commit body** | PR body **mutable** via `prView`; commit-body fallback **immutable** | **YES** for the revert case (payload gone → tree-effect skip). | Edit the merged PR's description to add `Closes/Part of #N` → `prView` re-fetch → **PASSES on re-eval** (mechanism **A**). Commit body itself is immutable. | **automatic tree-effect** (revert) **or automatic re-eval** (PR-body edit) **or human gate** |
-| **`adrPresence`** (`adr-presence.mjs`) | `hasAdr XOR hasHome` over **M's own changed files** | **Immutable** (M's diff) — there is **no** mutable input | **YES for revert ONLY.** Reverting M removes the ADR (or restores HOME) → `P∩D=∅` → skip; and the substance (an ungoverned ADR) is gone. | **THE OWNER'S CASE: tree-effect CANNOT prove it.** Adding the missing `brain/HOME.md` (or the missing ADR) is a **forward add** — M's touched path is still on disk at HEAD → `P∩D≠∅` → tree-effect returns **not-resolved (fails closed, correct)**. M's own diff re-flags `adrPresence` **forever**, so re-eval never clears it either. **The forward-fix resolution has NO automatic path.** | **automatic tree-effect** (revert) **or HUMAN GATE** (forward-fix). Never a false "resolved." |
+| **`adrPresence`** (`adr-presence.mjs`) | `hasAdr XOR hasHome` over **M's own changed files** | **Immutable** (M's diff) — there is **no** mutable input | **YES for revert ONLY.** A revert whose contribution inverts M's (removing the ADR / restoring HOME) → `diff(R)==diff(M)` → skip; the substance (an ungoverned ADR) is gone. | **THE OWNER'S CASE: tree-effect CANNOT prove it.** Adding the missing `brain/HOME.md` (or the missing ADR) is a **forward add** — no later merge inverts M's contribution → **no exact inverse** → tree-effect returns **not-resolved (fails closed, correct)**. M's own diff re-flags `adrPresence` **forever**, so re-eval never clears it either. **The forward-fix resolution has NO automatic path.** | **automatic tree-effect** (revert) **or HUMAN GATE** (forward-fix). Never a false "resolved." |
 | **`memoryPresence`** (`memory-presence.mjs`) | ≥1 `session_summary` in **HEAD** `.memory/` — **repo-global**, identical for every merge | **Mutable & global** (read at HEAD, not tied to M's paths) | **Irrelevant.** Tree-effect on M's paths cannot prove a repo-global property. It never fires *for this reason* (though a reverted M is skipped wholesale before this check runs — see note). | Add a `session_summary` at HEAD → **every** merge PASSES `memoryPresence` on the next run (mechanism **A**). The global gap is enforced through every un-reverted merge until it is filled. | **automatic re-eval** (add summary). **Never tree-effect, never a false "resolved."** |
 
 Mechanisms referenced above:
@@ -316,7 +409,8 @@ Mechanisms referenced above:
   PR labels/body via `prView`). The forward-fix makes the check **pass** on the next run. M becomes a real
   `[PASS]` — it never touches the skip class, so there is no path to a false "resolved."
 - **B — automatic tree-effect skip (settled-by-revert):** the check reads M's **immutable** contribution
-  and M has been reverted. §3.2 proves it. This is the ONLY use of the tree-effect skip.
+  and a later first-parent merge contributes its **exact patch-inverse** (`normDiff(R,R^1)==normDiff(M^1,M)`,
+  §3.2). This is the ONLY use of the tree-effect skip.
 - **C — human gate:** the offender is neither reverted nor clearable by re-evaluation (the `adrPresence`
   forward-fix; a content over-budget that is neither reverted nor label-exempted). Tree-effect **fails
   closed** and the human runs `accept --reason`.
@@ -332,6 +426,34 @@ a message, and no class is ever falsely marked resolved.
 > skip). A reverted M is skipped before any of the four checks run — including `memoryPresence`. That is
 > correct: M is settled; the repo-global memory gap is still enforced on every **un-reverted** merge and on
 > the revert commit R itself, so the window cannot go clean while a real global gap remains.
+
+### 3.6 The soundness claim — what the predicate PROVES (C4)
+
+State the claim exactly, because the last review's core finding was a **documentary lie**: the v1 §3.1
+claimed tree-effect *"proves the payload is not on disk"* when the mechanism only proved *"path P returned
+to its prior state"*. Repeating that phrase — in any form — is the failure being fixed here.
+
+**What the predicate proves:** *∃ a later first-parent merge `R` whose first-parent contribution is the
+exact patch-inverse of the offender's own first-parent contribution* (`normDiff(R,R^1) == normDiff(O^1,O)`,
+both non-empty). That is: O's exact contribution to main was undone by a recognized inverse commit.
+
+**What it does NOT prove:** that the payload's *content* is absent from the tree. These are different
+statements, and the predicate makes only the first.
+
+**Written counterexample (correct behaviour, not a bug).** `R` reverts `O` exactly → the predicate says
+**resolved** (correct — O's contribution was inverted). A *later* commit `X` re-adds the same payload. The
+payload **is now on disk**, yet the predicate still reports O as resolved — and that is **correct**, because
+the re-add `X` is a **NEW offender for its own audit** (the predicate is anchored at the tip; §7.1 A5 pins
+the re-add at *its* tip). Resolution is a statement about O's contribution, never a whole-tree content scan.
+
+**Where the unproven cases fall.** Anything that is not an exact inverse — partial revert, rename, copy,
+split, merge, equivalent-content rewrite, bundled revert, near-hunk drift, an empty offender — yields
+`resolved = false` → the **human gate** (`acceptManually`) or **exit-2** when the diff is uncomputable.
+Fail closed. The predicate never guesses in the OPEN direction.
+
+> **Invariant for this document:** the phrase *"proves the payload is not on disk"* (or any equivalent
+> whole-tree absence claim) must NOT appear as a description of what automatic resolution proves. That claim
+> is false and is the exact defect this redesign removes.
 
 ## 4. The git seam must return status, not throw
 
@@ -447,14 +569,33 @@ Three rules govern every fixture in this section. They are acceptance criteria, 
 
 ### 7.1 Revert resolution (§3)
 
-| ID | The test MUST construct | Must prove |
+**Topology contract for every row.** The offender `O` and every candidate reverter `R` are `--no-ff` merge
+commits (brain merges PRs with `--merge`), so the predicate reads first-parent contributions
+`normDiff(X^1, X)`. A genuine reverter is built as `git revert -m 1 <O>` on a branch off `main`, then merged
+`--no-ff`. Each row states what the predicate reports, why that is SAFE, the forge scenario it derives from,
+and the **mutation bar** (the code mutation that MUST redden the row — proving the test kills that mutant).
+
+| ID | The test MUST construct | Must prove (verdict + why safe + forge + mutation bar) |
 |---|---|---|
-| **A1** | Offender `M` on `main` (adds a payload file). Then an **ordinary commit `X` on the same lineage** (a real descendant of `M`, i.e. **forked AFTER `M`** — the realistic linear-main shape) whose body contains `This reverts commit <M>.` and whose diff **does not touch any of M's paths**. | `M` is still `[FAIL]`ed. No `[SKIP] resolved by revert`. Exit 1. **This fixture MUST redden against the ancestry-only fix (`eff4560`), not merely against un-fixed code** — `X` IS a descendant of `M`, so `merge-base --is-ancestor` PASSES and the v1 code wrongly skips `M`. Proving RED here is what proves the ancestry approach is defeated; the v1 tests never built this shape (they forked *before* `M`, the one case ancestry handles). |
-| **A2** | Offender `M`, then a **real `git revert -m 1 M`** merged onto `main`. | `[SKIP] … resolved by revert`, exit 0. (Liveness — the mechanism must not pin on a genuine revert.) |
-| **A3** | `M` touches paths `P1` and `P2`. A revert restores **only `P1`**. | `M` is still `[FAIL]`ed. Partial reverts do not resolve. |
-| **A4** | `M` is a merge with an **empty diff** (zero changed paths). | Automatic resolution does **NOT** fire. Never a vacuous pass. |
-| **A5** | `M` reverted by `R`; then a **later commit re-adds the payload** to the same path. | `M` is **NOT** `[SKIP]`ped at that tip. The predicate is anchored at the tip and sees the re-introduction. |
-| **A6** | An `adrPresence` offender `M` and its auto-revert `R` in the same window. | `R` is `[SKIP] revert of M`. No revert-of-revert. And a merge that merely *claims* to be a revert (no tree effect) is **not** skipped. |
+| **A1** | Offender merge `O` (adds a payload file). Then an **ordinary merge `X` forked AFTER `O`** (a real descendant, the realistic linear-main shape) whose body contains `This reverts commit <O>.` but whose contribution **does not invert `O`**. | `O` still `[FAIL]`ed, no `[SKIP]`, exit 1. **Safe:** a free-text trailer is never read; only `normDiff(X,X^1)==normDiff(O^1,O)` skips, and it is false. **MUST redden against `eff4560`** (ancestry PASSES because `X` descends `O`, so the v1 code wrongly skips). **Mutation bar:** re-introducing any trailer/ancestry read reddens this. |
+| **A2** | The **real D2 loop**: offender merge `O` → `git revert -m 1 O` on a branch → revert PR merged `--merge` as `R`. | `[SKIP] … resolved by revert`, exit 0, payload gone. **Safe/liveness:** the mechanism must recognize its own revert or it is theatre with the sign flipped. **Forge:** forge_final #1 (C2). **Mutation bar:** dropping the `∃R: diff(R)==diff(O)` clause reddens (nothing ever resolves). |
+| **A3** | `O` touches `a.md` and `b.md`; a later merge reverts **only `a.md`**. | `O` still `[FAIL]`ed. **Safe:** `diff(R) != diff(O)` (b.md payload survives) → not resolved. **Forge:** forge_final #5 (partial revert). **Mutation bar:** comparing only a shared subset of hunks (instead of whole-diff equality) reddens. |
+| **A4** | `O` is a merge with an **empty first-parent diff** (no-op). | Automatic resolution does **NOT** fire. **Safe:** git emits nothing for an empty diff, so an unguarded `''==''` would resolve garbage; the non-empty guard (F-1) refuses it. **Forge:** forge_final #8. **Mutation bar:** removing the `dO non-empty` guard reddens (empty offender falsely resolves against any empty candidate). |
+| **A5** | `O` reverted by `R`; then a **later merge re-adds the payload** to the same path. | `O` reports resolved at `R`'s tip, but the re-add is flagged as a **new offender at its own tip** — it is **NOT** silently `[SKIP]`ped. **Safe:** resolution is a statement about O's contribution, not a whole-tree scan (§3.6). **Forge:** derived from forge_final #1 + a re-add merge. **Mutation bar:** anchoring resolution anywhere but the tip reddens. |
+| **A6** | An `adrPresence` offender `O` and its auto-revert `R` in the same window; separately, a merge that merely *claims* to revert `O` with no inverting contribution. | `R` is `[SKIP] revert of O` (no revert-of-revert); the mere-claim merge is **not** skipped. **Safe:** `isReverterOf(O,R)` is `diff(R)==diff(O)`, a pure tree property (§3.3). **Forge:** forge_final #1 for the true `R`; A1 shape for the claim. **Mutation bar:** reading the commit body to crown a reverter reddens. |
+| **T1** | Pure rename: a later merge does `git mv payload.md moved.md`. | NOT resolved. **Safe:** the renamer's contribution (`--no-renames` → delete+add at two paths) is not the inverse of `O`; payload survives at `moved.md`. **Forge:** forge_final #2 (this fixture stays green under either single flag/config drop). **Mutation bar:** dropping the PAIR `--no-renames` + `diff.renames=false` (git's default re-enables `rename from/to`, which hides content) reddens the dedicated `MUTATION GUARD (--no-renames)` test — NOT this row's fixture, and NOT either half alone. |
+| **T2** | Rename + one byte: `git mv payload.md moved.md` then append `#x`. | NOT resolved. **Safe:** contribution differs from `¬O` on content and path. **Forge:** forge_final #3. **Mutation bar:** any blob-OID-only comparison (which would call the moved payload "absent") reddens. |
+| **T3** | Copy launder: `cp payload.md keep.md` then `git rm payload.md`, merged. | NOT resolved. **Safe:** the payload content survives at `keep.md`; the contribution is not `¬O`. **Forge:** forge_final #4. **Mutation bar:** path-set-only resolution (`P∩D=∅`, the old v1 mechanism) reddens — it would falsely resolve. |
+| **T4** | Split: a later merge deletes the offender's file and writes its payload lines into two new files. | NOT resolved (payload survives in both new files). **Safe:** the split contribution is not the byte-inverse of `O`. **Forge:** forge_splitmerge.mjs T4 (dedicated fixture — offender adds `p.md` with two payload lines; splitter writes `p1.md`+`p2.md`, `git rm p.md`; verified `resolved=false`, both payloads survive). **Mutation bar:** hunk-subset matching reddens. |
+| **T5** | Merge-files: a later merge appends the offender's payload file into an existing file and deletes the original. | NOT resolved (payload survives in the host file). **Safe:** contribution `!= ¬O`. **Forge:** forge_splitmerge.mjs T5 (dedicated fixture — offender adds `p.md`; merger folds it into `host.md`, `git rm p.md`; verified `resolved=false`, payload survives). **Mutation bar:** hunk-subset matching reddens. |
+| **T6** | Equivalent-content rewrite: a later merge rewrites the payload to semantically-equal but byte-different text. | NOT resolved. **Safe:** whitespace/byte-exact `+/-` comparison; "equivalent" is not "inverse". **Forge:** forge_splitmerge.mjs T6 (`value = 42` → `value=42 # same`; verified `resolved=false`, payload survives), backed by ws.mjs (content bytes kept exact). **Mutation bar:** normalizing content whitespace (patch-id behaviour) reddens. |
+| **T7** | F-2 binary: (a) a later merge writes a **different** binary payload to the same path; (b) a **genuine** `git revert -m 1 O` of a binary offender. | (a) NOT resolved; (b) resolved. **Safe:** with `--binary`, base85 blocks carry content so different payloads stay distinct, yet a true binary revert still matches. **Forge:** forge5 / forge_final #9. **Mutation bar:** dropping `--binary` (git emits only "Binary files … differ") reddens (a) into a false resolve. |
+| **T8** | F-3 path-in-header: identical payload **content** committed at two different paths, as two independent offenders. | Distinct normDiff → neither is the other's reverter. **Safe:** the `diff --git a/… b/…` header carries the path and is kept byte-exact. **Forge:** insp4/forge6 setup (same content, different paths). **Mutation bar:** stripping the `diff --git` path line reddens. |
+| **T9** | F-4 attribute rendering: attacker plants `.gitattributes` (`*.md -diff`) at the tip, then attempts to launder two distinct payloads as one revert. | NOT resolved (payloads stay distinct). **Safe:** `--binary` renders even a `-diff`-attributed file as a content-bearing base85 `GIT binary patch`, so distinct payloads stay distinct — `--binary` ALONE defeats F-4. **The `.git/info/attributes = "* diff"` override was REMOVED** (judgment-day R1, both judges forged: inert in a linked worktree — writes `--absolute-git-dir`, git reads `--git-common-dir`; destructive to human config; redundant with `--binary`). **Forge:** forge6 / insp4 (attack) + forge_forkb2 (`--binary` alone keeps distinct). **Mutation bar:** dropping `--binary` reddens (payloads collapse → false resolve). |
+| **T10** | Whitespace: the payload differs only by **indentation** (0 vs 4 spaces vs tab) from its purported inverse. | NOT resolved. **Safe:** `+/-` bytes kept exact → an indentation-borne payload (YAML/Python) cannot be laundered — the exact guarantee `git patch-id` could not give (ws.mjs). **Forge:** forge_final #10, ws.mjs. **Mutation bar:** switching the mechanism to patch-id reddens. |
+| **T11** | Liveness / blast radius: a genuine revert preceded by an **intervening merge editing near the offender hunk**, tried at distances 1..8 lines under `-U3`. | Distance **1** → `git revert` itself CONFLICTS → human gate; distance **2–3** → normDiff mismatch → human gate; distance **≥4** → auto-resolves. **Safe:** every pre-auto case fails CLOSED. **Blast radius = 3 lines** — the expected human-gate load (any pre-revert merge touching within 3 lines of an offender hunk). **Measured frequency (brain `git log`, this branch):** 105 first-parent merges, **0** `This reverts commit` trailers, 2 merges with "revert" in the subject → observed human-gate load from this vector ≈ **0** (reverts are ≤2/105 and land fast, so the pre-revert window rarely admits an adjacent edit). A number, not an adjective. **Forge:** blast.mjs. **Mutation bar:** widening context beyond `-U3` or normalizing offsets into content shifts the boundary and reddens the distance assertions. |
+| **T12** | Determinism under a HOSTILE ambient config: run the full predicate with `GIT_CONFIG_GLOBAL` pointing at an adversarial config (hostile `diff.<d>.textconv`, `diff.external`, global `core.attributesFile`, `diff.algorithm=histogram`; `GIT_CONFIG_SYSTEM=/dev/null`). | Genuine revert → resolved; content-launder → NOT resolved. **Safe:** the verdict is INDEPENDENT of the machine's git config — the CP-PR1/B6 "green that depends on the environment" class. **Forge:** forge_forkb3. **Honest note:** `--no-ext-diff` IS behaviorally load-bearing here — a global `diff.external` overrides `--binary`, so dropping `--no-ext-diff` reddens THIS row's safety assertion (judgment-day R2). The OTHER three determinism pins (`--no-textconv`, `core.attributesFile`, `diff.algorithm`) do NOT defend against attacker content (`--binary` does) and do NOT flip a verdict when dropped given `--binary` → **defense-in-depth / determinism, NOT "reddens-on-drop"** (kept; load-bearing only if `--binary` is weakened). So this row is BOTH a positive robustness assertion AND the redden-on-drop coverage for `--no-ext-diff`. |
+| **T13** | J-2 liveness gap: a genuine revert lands as a **squash-merge**, rebase-merge, or **direct non-merge push** rather than a first-parent merge. | NOT resolved → human gate. **Safe (fail-CLOSED — liveness, not security):** candidate enumeration is `git rev-list --first-parent --merges` only, so a non-merge revert is not a candidate. brain merges PRs with `--merge` (§6), so its revert PRs ARE first-parent merges and are seen; a repo using "Squash and merge"/"Rebase and merge" for revert PRs routes **100%** of genuine reverts to `accept --reason`. Documented in `resolution.mjs` itself, not only here. **Forge:** j2.mjs (both judges). |
 
 ### 7.2 The cursor (§2)
 
@@ -512,7 +653,7 @@ New/changed under `brain/scripts/governance/postmerge/` — all platform-neutral
 |---|---|---|---|
 | `git-seam.mjs` | 1 | `gitTry` (status-returning), `gitOrThrow` | **NEW** (§4) |
 | `cursor.mjs` | 1 | `readCursor` (tri-state, single `ls-remote` call, no fetch), `resolveWindow` (always `cursor..HEAD`), `advanceCursor` (remote-only CAS), `acceptManually`, `window`/`accept` CLI | **REWRITTEN** — `isRevertedInRange`, `findTrailerCandidates`, `trailerRegex` **DELETED**; no `syncCursor` (there is no local fetch step) |
-| `resolution.mjs` | 2 | `changedPaths`, `isResolvedAt`, `isReverterOf` | **NEW** (§3) |
+| `resolution.mjs` | 2 | `normDiff`, `isResolvedAt`, `isReverterOf` | **NEW** (§3) |
 | `parse-failures.mjs` | 3 | `parseFailingShas` + CLI | **SURVIVES AS-IS** (the only clean module in v1) |
 | `exit-codes.mjs` | 5 | `EXIT`, `resultToExit` | Unchanged from v1 design |
 
@@ -547,7 +688,7 @@ which is the whole point of the budget.
 ```
 feature/v2.0.0
    └── PR 1  cursor core (git seam + cursor state machine + CAS)          ~155
-        └── PR 2  revert resolution (tree effect)                          ~85
+        └── PR 2  revert resolution (diff-inversion)                     ~150
              └── PR 3  brain-audit: emission + skip classes + exit-2      ~100
                   └── PR 4  the workflow wrapper (the only GitHub-coupled) ~235
                        └── PR 5  0/1/2 contract across all evaluators      ~105
@@ -556,7 +697,7 @@ feature/v2.0.0
 | PR | Deliverable (one work unit) | Counted lines | Coherent end state |
 |---|---|---|---|
 | **1** | `git-seam.mjs` + `cursor.mjs`. Remote-authoritative tri-state, always-`cursor..HEAD` window, CAS advance that cannot create or rewind the ref. Tests **B1–B6**. | **~155** | Core is tested and **unused**. The pre-D2 workflow is untouched and behaves exactly as it does today. |
-| **2** | `resolution.mjs`. Tree-effect proof. Tests **A1–A6**. | **~85** | Still unused. **This is the security-critical PR** — deliberately kept tiny so it can earn a hostile review that answers exactly one question: *can this be forged?* |
+| **2** | `resolution.mjs`. Whole-commit diff-inversion proof. Tests **A1–A6, T1–T11**. | **~150** | Still unused. **This is the security-critical PR** — kept as small as the hardened predicate allows so it can earn a hostile review that answers exactly one question: *can this be forged?* |
 | **3** | `parse-failures.mjs` + `brain-audit.mjs` (emission, resolved-skip, reverter-skip, catch → 2 on stdout). Tests **A1–A6 end-to-end, C3, C6**. | **~100** | The core goes **live via the CLI**: `npm run brain:audit` now emits `[FAIL-SHA]`, skips genuinely-reverted offenders, and reports uncomputable honestly. No workflow change yet. |
 | **4** | The workflow rewrite: **fetch the cursor ref**, window CLI, fail-closed branching, loud-and-red issues + label creation, PR-keyed dedup, per-offender boundary, orphan-branch cleanup, `concurrency:`, terminal-state assertion. Tests **C1, C2, C4, C5, D1, D2** (D1/D2 fixed + proved here — born isolated from first RED; generalized into a standing registry in PR 5, §14 Plan Deviation). | **~235** | **The mechanism is live and correct.** The only GitHub-coupled PR in the chain; a GitLab wrapper is now a pure translation of this one file. |
 | **5** | `exit-codes.mjs` + `run-check.mjs` + the both-fixtures drift-guard + the STANDING harness-isolation registry (generalizes PR 4's D1/D2 fix — never re-fixes it; §14 Plan Deviation). | **~105** | The 0/1/2 contract holds across **every** evaluator, enforced by a guard. |
@@ -681,9 +822,13 @@ chain in §9.2, with §7's fixture table driving the RED-first tasks. **The Revi
   per merge. Bounded by the fact that the job is RED the whole time and a human is being paged. *Optional
   hardening (cheap, recommend for PR 3):* a `maxWindowMerges` guard — exceeding it is **exit 2
   uncomputable + loud**, never a slow silent grind and never a truncated window.
-- **R-2 — Legitimate reverts that touch shared paths will not auto-resolve.** By design (§3.2): the
-  predicate fails **closed** and the human uses `accept --reason`. Watch the rate. If `accept` becomes
-  routine, the predicate is too strict and the *design* needs revisiting — do not weaken it in a patch.
+- **R-2 — Legitimate reverts bundled with unrelated changes will not auto-resolve.** The predicate compares
+  the offender's WHOLE first-parent contribution against the candidate's whole first-parent contribution
+  (§3.2). A revert commit that also carries an unrelated edit has `normDiff(R,R^1) != normDiff(O^1,O)` → no
+  exact inverse → fails **closed** → the human uses `accept --reason`. Same fail-closed direction covers a
+  legitimate revert landing after an intervening edit within the U3 blast radius of an offender hunk (§7.1
+  T11). Accepted: fragility on the safe side. Watch the rate. If `accept` becomes routine, the predicate is
+  too strict and the *design* needs revisiting — do not weaken it in a patch.
 - **R-3 — Dead code on `feature/v2.0.0` for two PRs.** Accepted (§9.2). Confirm no repo lint forbids an
   unimported module.
 - **R-4 — `--force-with-lease` behavior on `refs/governance/*` must be verified against the real remote
