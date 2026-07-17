@@ -46,9 +46,11 @@ slice: H1
       deps })` (`readConfig` → `loadBrainConfig().reviewer`, `readEnv` → `process.env`, `getPatUrl`
       → `getVcs().patSetupUrl`). Fail-closed, mirrors `run-check.mjs`. Default env name
       `BRAIN_REVIEWER_TOKEN`.
-- [x] **2.4** — document `reviewer: { handle, tokenEnv }` in `docs/reviewer-setup.md` (D3, Fork B):
-      env var name, where the team stores it, who grants access, the `patSetupUrl` the gate prints.
-      **No token value.** (Counts against budget — ~30–40 lines.)
+- [x] **2.4** — `docs/reviewer-setup.md` (D3, Fork B): env var name, where the team stores it, who
+      grants access, the `patSetupUrl` the gate prints. **No token value.** **SHIPS IN ITS OWN
+      MICRO-PR** (pre-authorized "split before hiding" — comment 4993202904 — to keep the H1-1 fix
+      under 400; the doc content is written, removed from this branch, opened separately). The gate
+      references `docs/reviewer-setup.md` regardless; the micro-PR lands the file.
 
 ## Phase 3 — cold boot: headRefOid, detached, doctrine load (REQ-H1-2, REQ-H1-3)
 
@@ -235,3 +237,11 @@ slice: H1
   the human keystroke by design.
 - **No watchers/crons/hooks in H1.** Every run is a human invocation; Actions hosting + per-PR
   concurrency mutex is H2, a separate human-opened track, deferred to evidence (issue #266 §H2).
+- **CORE-BOUNDARY resolved: option (a) (comment 4997595427).** The `reviewer` config key ships as a
+  versioned additive migration in `brain/core/config-migrations.mjs` — ratified as the implementer's
+  lane FOR CONFIG PLUMBING ONLY (ADR-0006 pattern, 6 prior slices incl. #231); doctrine files
+  (`brain/core/methodology/`, `brain/project/decisions/`) stay draft-and-promote (ADR-0013). L6
+  reviews the migration at PR.
+- **COLDBOOT-CWD fixed (protocol §8).** `defaultCloneDetached` now `git worktree add --detach`s into
+  an isolated tmp worktree — it NEVER `git checkout`s the operator's cwd. A real-git test proves the
+  operator's HEAD does not move. `gatherColdBoot` returns `worktreePath` for H1-2's evaluators.
