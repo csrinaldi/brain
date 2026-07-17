@@ -16,7 +16,7 @@
 // "never APPROVE on uncomputable evidence") — generalized, not reinvented.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -98,7 +98,8 @@ function checkArtifactCompleteness({ missing = [], hasCheckedTask } = {}) {
 function checkPriorPins(pins = [], exists) {
   const findings = [];
   for (const pin of pins) {
-    if (!pin.citation) {
+    // A truthy non-string citation would throw on `.split(':')` — treat it as a missing/invalid citation, not a crash.
+    if (!pin.citation || typeof pin.citation !== 'string') {
       findings.push({
         id: `pin:${pin.id}`,
         severity: 'blocker',
@@ -204,6 +205,13 @@ function childTestEnv() {
   return env;
 }
 
+// True iff `path` exists at `ref` (non-throwing): `git cat-file -e <ref>:<path>`
+// exits 0 when the blob exists — tells an impl file the PR MODIFIED (exists at
+// base) apart from one it ADDS (absent at base).
+function existsAtRef({ cwd, ref, path }) {
+  try { execFileSync('git', ['cat-file', '-e', `${ref}:${path}`], { cwd, encoding: 'utf8' }); return true; } catch { return false; }
+}
+
 // COLDBOOT-CWD-style isolation (protocol §8): NEVER `git checkout` in the
 // operator's cwd. The revert + the PR's new tests run in a SEPARATE detached
 // worktree, torn down after. Mirrors cold-boot.mjs's defaultCloneDetached.
@@ -211,11 +219,28 @@ export function defaultRunReversion({ cwd = process.cwd(), tmp = tmpdir() } = {}
   return ({ baseSha, headSha, implFiles = [], testFiles = [] }) => {
     if (!baseSha || !headSha) return { uncomputable: true, command: null };
     const worktreePath = join(tmp, `brain-review-reversion-${headSha}`);
-    try { execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' }); } catch { /* no prior worktree */ }
-    execFileSync('git', ['worktree', 'add', '--detach', worktreePath, headSha], { cwd, encoding: 'utf8' });
+    // Wrap the WHOLE body: an unexpected git/fs failure must NOT escape and
+    // crash brain:review — it degrades to fail-closed (uncomputable → REVISE).
     try {
-      if (implFiles.length > 0) execFileSync('git', ['checkout', baseSha, '--', ...implFiles], { cwd: worktreePath, encoding: 'utf8' });
-      const command = `git checkout ${baseSha} -- ${implFiles.join(' ')} && node --test ${testFiles.join(' ')}`;
+      try { execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' }); } catch { /* no prior worktree */ }
+      execFileSync('git', ['worktree', 'add', '--detach', worktreePath, headSha], { cwd, encoding: 'utf8' });
+
+      // Bring each impl file to its BASE state: files that EXIST at base are
+      // reverted; files ABSENT at base (the PR ADDS them) have no base content,
+      // so REMOVE them. Passing an added path to `git checkout <base>` exits 1
+      // (pathspec did not match) and aborts the ENTIRE batch — so partition.
+      const toRevert = [];
+      const toRemove = [];
+      for (const path of implFiles) {
+        if (existsAtRef({ cwd: worktreePath, ref: baseSha, path })) toRevert.push(path);
+        else toRemove.push(path);
+      }
+      if (toRevert.length > 0) execFileSync('git', ['checkout', baseSha, '--', ...toRevert], { cwd: worktreePath, encoding: 'utf8' });
+      for (const path of toRemove) rmSync(join(worktreePath, path), { force: true });
+
+      const revertCmd = toRevert.length > 0 ? `git checkout ${baseSha} -- ${toRevert.join(' ')}` : '';
+      const rmCmd = toRemove.length > 0 ? `rm ${toRemove.join(' ')}` : '';
+      const command = [revertCmd, rmCmd, `node --test ${testFiles.join(' ')}`].filter(Boolean).join(' && ');
       const vacuousTests = [];
       for (const testFile of testFiles) {
         try {
@@ -228,21 +253,26 @@ export function defaultRunReversion({ cwd = process.cwd(), tmp = tmpdir() } = {}
         } catch { /* failed against base — real RED, exactly what TDD requires */ }
       }
       return { uncomputable: false, command, vacuousTests };
+    } catch {
+      // Fail-closed: an unexpected failure is uncomputable evidence, never a crash.
+      return { uncomputable: true, command: null };
     } finally {
       try { execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' }); } catch { /* best effort */ }
     }
   };
 }
 
-function defaultRunAudit({ cwd = process.cwd() } = {}) {
+const defaultExec = (file, args, opts) => execFileSync(file, args, opts);
+
+function defaultRunAudit({ cwd = process.cwd(), exec = defaultExec } = {}) {
   return () => {
-    try { return execFileSync('node', ['brain/scripts/brain-audit.mjs'], { cwd, encoding: 'utf8' }).trim(); } catch (err) { return String(err.stdout ?? err.message ?? '').trim(); }
+    try { return exec('node', ['brain/scripts/brain-audit.mjs'], { cwd, encoding: 'utf8' }).trim(); } catch (err) { return String(err.stdout ?? err.message ?? '').trim(); }
   };
 }
 
-function defaultRunGovernanceStatus({ cwd = process.cwd() } = {}) {
+function defaultRunGovernanceStatus({ cwd = process.cwd(), exec = defaultExec } = {}) {
   return () => {
-    try { return execFileSync('node', ['brain/scripts/brain-governance-status.mjs'], { cwd, encoding: 'utf8' }).trim(); } catch (err) { return String(err.stdout ?? err.message ?? '').trim(); }
+    try { return exec('node', ['brain/scripts/brain-governance-status.mjs'], { cwd, encoding: 'utf8' }).trim(); } catch (err) { return String(err.stdout ?? err.message ?? '').trim(); }
   };
 }
 
@@ -309,8 +339,10 @@ export async function gatherCheckpointInputs({
   const runReversion = deps.runReversion ?? defaultRunReversion(deps);
   const reversion = baseSha ? await runReversion({ baseSha, headSha, implFiles, testFiles }) : { uncomputable: true, command: null };
 
-  const runAudit = deps.runAudit ?? defaultRunAudit(deps);
-  const runGovernanceStatus = deps.runGovernanceStatus ?? defaultRunGovernanceStatus(deps);
+  // §10.5 evidence is gathered against the COLD head (`root` = the isolated
+  // worktree, per cold-boot.mjs's invariant), NOT the operator's live tree.
+  const runAudit = deps.runAudit ?? defaultRunAudit({ cwd: root, exec: deps.exec });
+  const runGovernanceStatus = deps.runGovernanceStatus ?? defaultRunGovernanceStatus({ cwd: root, exec: deps.exec });
 
   return {
     trancheInputs,
