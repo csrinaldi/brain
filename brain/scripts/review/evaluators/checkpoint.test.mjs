@@ -128,6 +128,20 @@ test('evaluateCheckpoint: a pin cited to a file present in the tree → no findi
   assert.ok(!result.findings.some(f => f.id === 'pin:CP-3'));
 });
 
+test('evaluateCheckpoint: a pin with a truthy non-string (numeric) citation → blocker, does not throw (MINOR 4)', () => {
+  let result;
+  assert.doesNotThrow(() => {
+    result = evaluateCheckpoint({
+      trancheInputs: greenTrancheInputs(),
+      pins: [{ id: 'CP-4', citation: 42 }],
+    });
+  }, 'a non-string citation is a missing/invalid citation, not a crash');
+  const finding = result.findings.find(f => f.id === 'pin:CP-4');
+  assert.ok(finding, 'a numeric citation must produce a missing-citation finding');
+  assert.equal(finding.severity, 'blocker');
+  assert.match(finding.evidence, /no file:line citation/);
+});
+
 // ── §10.4 TDD-RED by reversion ──────────────────────────────────────────────
 
 test('evaluateCheckpoint: reversion uncomputable (no base sha) → REVISE, conditions include "evidence uncomputable", never APPROVE', () => {
@@ -318,6 +332,32 @@ test('gatherCheckpointInputs: doctrineRecords with a `pin` field are surfaced as
   assert.deepEqual(inputs.pins, [{ id: 'r1', citation: 'brain/HOME.md:1' }]);
 });
 
+test('gatherCheckpointInputs: default audit + governance-status runners spawn against the cold worktreePath, not the operator cwd (MINOR 3)', async () => {
+  const seen = [];
+  const worktreePath = '/tmp/cold-worktree-minor3';
+  await gatherCheckpointInputs({
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    headSha: 'HEAD',
+    changedFiles: [],
+    worktreePath,
+    deps: {
+      // Capture what the DEFAULT audit/gov runners spawn (runAudit /
+      // runGovernanceStatus are deliberately NOT injected → the real wiring
+      // path is exercised, so this asserts they run against the cold worktree).
+      exec: (file, args, opts) => { seen.push({ script: args[0], cwd: opts.cwd }); return `${args[0]} ran`; },
+      trancheDeps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '', readIgnoreList: () => [] },
+    },
+  });
+  const auditCall = seen.find(c => c.script.includes('brain-audit'));
+  const govCall = seen.find(c => c.script.includes('brain-governance-status'));
+  assert.ok(auditCall, 'brain:audit must be spawned via the injected exec seam');
+  assert.ok(govCall, 'brain:governance-status must be spawned via the injected exec seam');
+  assert.equal(auditCall.cwd, worktreePath);
+  assert.equal(govCall.cwd, worktreePath);
+});
+
 // ── REVERSION-CWD (real default, issue #266 H1-3): isolated worktree, never
 // moves the operator's HEAD — mirrors cold-boot.test.mjs's COLDBOOT-CWD test.
 
@@ -365,4 +405,145 @@ test('REVERSION-CWD (real default): defaultRunReversion reverts impl to base in 
   // operator HEAD never moved.
   assert.equal(git('symbolic-ref', '--short', 'HEAD'), branch);
   assert.equal(git('rev-parse', 'HEAD'), headSha);
+});
+
+// ── REVERSION reversion-semantics (issue #266 H1-3 BLOCKER 1): a checkpoint's
+// dominant case is a PR that ADDS impl+test files. `git checkout <base> -- <p>`
+// exits 1 for any path absent at base — the added file's base state is
+// "absent", so it must be REMOVED, not checked out. Mixed add+modify must not
+// abort the whole checkout, and any unexpected git failure must fail closed.
+
+test('REVERSION-ADD (real default): a PR that ADDS impl+test — reversion removes the added impl (base=absent), the new test FAILS against base (not vacuous), never crashes, operator HEAD unmoved', (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'brain-review-rev-add-op-'));
+  const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-rev-add-wt-'));
+  t.after(() => {
+    try { execFileSync('git', ['worktree', 'prune'], { cwd: repo }); } catch { /* best effort */ }
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(wtParent, { recursive: true, force: true });
+  });
+
+  const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('config', 'user.email', 't@t.t');
+  git('config', 'user.name', 't');
+
+  // base: only an unrelated file. newimpl.mjs does NOT exist at base.
+  writeFileSync(join(repo, 'README.md'), '# base\n');
+  git('add', 'README.md');
+  git('commit', '-q', '-m', 'base');
+  const baseSha = git('rev-parse', 'HEAD');
+  const branch = git('symbolic-ref', '--short', 'HEAD');
+
+  // head: the PR ADDS newimpl.mjs + newimpl.test.mjs (the test imports newimpl).
+  writeFileSync(join(repo, 'newimpl.mjs'), 'export function feature() { return 42; }\n');
+  writeFileSync(join(repo, 'newimpl.test.mjs'), [
+    "import { test } from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "import { feature } from './newimpl.mjs';",
+    "test('feature works', () => { assert.equal(feature(), 42); });",
+  ].join('\n') + '\n');
+  git('add', 'newimpl.mjs', 'newimpl.test.mjs');
+  git('commit', '-q', '-m', 'head adds impl+test');
+  const headSha = git('rev-parse', 'HEAD');
+
+  const runReversion = defaultRunReversion({ cwd: repo, tmp: wtParent });
+  let result;
+  assert.doesNotThrow(() => {
+    result = runReversion({ baseSha, headSha, implFiles: ['newimpl.mjs'], testFiles: ['newimpl.test.mjs'] });
+  }, 'reversion must not crash on a file the PR ADDS');
+
+  assert.equal(result.uncomputable, false);
+  // The added impl was removed → base state = absent → the new test cannot
+  // import it → real RED, correctly NOT flagged vacuous.
+  assert.deepEqual(result.vacuousTests, []);
+
+  // operator HEAD never moved.
+  assert.equal(git('symbolic-ref', '--short', 'HEAD'), branch);
+  assert.equal(git('rev-parse', 'HEAD'), headSha);
+});
+
+test('REVERSION-MIXED (real default): one ADDED impl + one MODIFIED impl — both reach base state (added removed, modified reverted), no whole-checkout abort, no crash', (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'brain-review-rev-mix-op-'));
+  const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-rev-mix-wt-'));
+  t.after(() => {
+    try { execFileSync('git', ['worktree', 'prune'], { cwd: repo }); } catch { /* best effort */ }
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(wtParent, { recursive: true, force: true });
+  });
+
+  const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('config', 'user.email', 't@t.t');
+  git('config', 'user.name', 't');
+
+  // base: modfile exists (V='base'); addfile does NOT exist.
+  writeFileSync(join(repo, 'modfile.mjs'), "export const V = 'base';\n");
+  git('add', 'modfile.mjs');
+  git('commit', '-q', '-m', 'base');
+  const baseSha = git('rev-parse', 'HEAD');
+  const branch = git('symbolic-ref', '--short', 'HEAD');
+
+  // head: modfile modified (V='head'), addfile added, + a test per file pinning
+  // it to its HEAD state (so both FAIL once brought to base → both real RED).
+  writeFileSync(join(repo, 'modfile.mjs'), "export const V = 'head';\n");
+  writeFileSync(join(repo, 'addfile.mjs'), 'export const N = 1;\n');
+  writeFileSync(join(repo, 'mod.test.mjs'), [
+    "import { test } from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "import { V } from './modfile.mjs';",
+    "test('mod at head', () => { assert.equal(V, 'head'); });",
+  ].join('\n') + '\n');
+  writeFileSync(join(repo, 'add.test.mjs'), [
+    "import { test } from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "import { N } from './addfile.mjs';",
+    "test('add exists', () => { assert.equal(N, 1); });",
+  ].join('\n') + '\n');
+  git('add', 'modfile.mjs', 'addfile.mjs', 'mod.test.mjs', 'add.test.mjs');
+  git('commit', '-q', '-m', 'head');
+  const headSha = git('rev-parse', 'HEAD');
+
+  const runReversion = defaultRunReversion({ cwd: repo, tmp: wtParent });
+  let result;
+  assert.doesNotThrow(() => {
+    result = runReversion({ baseSha, headSha, implFiles: ['modfile.mjs', 'addfile.mjs'], testFiles: ['mod.test.mjs', 'add.test.mjs'] });
+  }, 'the added file must not abort the whole checkout of the modified file');
+
+  assert.equal(result.uncomputable, false);
+  // modfile reverted to V='base' → mod.test (expects 'head') FAILS; addfile
+  // removed → add.test import FAILS. Both real RED → neither is vacuous. If the
+  // added path had aborted the checkout, modfile would stay 'head' and mod.test
+  // would PASS → surface as vacuous. Empty vacuousTests proves BOTH reverted.
+  assert.deepEqual(result.vacuousTests, []);
+
+  assert.equal(git('symbolic-ref', '--short', 'HEAD'), branch);
+  assert.equal(git('rev-parse', 'HEAD'), headSha);
+});
+
+test('REVERSION-CRASHSAFE (real default): an unexpected git failure (bogus head sha) folds to uncomputable/fail-closed, never throws', (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'brain-review-rev-crash-op-'));
+  const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-rev-crash-wt-'));
+  t.after(() => {
+    try { execFileSync('git', ['worktree', 'prune'], { cwd: repo }); } catch { /* best effort */ }
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(wtParent, { recursive: true, force: true });
+  });
+
+  const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('config', 'user.email', 't@t.t');
+  git('config', 'user.name', 't');
+  writeFileSync(join(repo, 'README.md'), '# base\n');
+  git('add', 'README.md');
+  git('commit', '-q', '-m', 'base');
+
+  const runReversion = defaultRunReversion({ cwd: repo, tmp: wtParent });
+  let result;
+  // headSha does not exist → `git worktree add` fails unexpectedly. This must
+  // NOT escape and crash brain:review — the headline defense degrades safely.
+  assert.doesNotThrow(() => {
+    result = runReversion({ baseSha: 'HEAD', headSha: '0000000000000000000000000000000000000000', implFiles: ['x.mjs'], testFiles: ['x.test.mjs'] });
+  }, 'an unexpected git failure must not escape the reversion runner');
+  assert.equal(result.uncomputable, true);
+  assert.equal(result.command, null);
 });
