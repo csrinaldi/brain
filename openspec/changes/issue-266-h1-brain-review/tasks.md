@@ -119,14 +119,40 @@ slice: H1
 
 # Group H1-2 — tranche + post *(deferred to a later PR)*
 
-> **Fork A retirement (binding, issue #266 comment 4993202904, condition 2).** H1-1's cold-boot
-> `fetchHead` DI-seam reader (`cold-boot.mjs`'s `defaultFetchHead`) is RETIRED in this group. The
-> port widens — `headRefOid` on `prView` (or a new `statusCheckRollup`/rollup read verb) — as its
-> own `decision` label + ADR (protocol §4: "adding verbs to the port is itself a decision"), driven
-> by H1-2's real need for the full `statusCheckRollup` (which `commitStatus` cannot provide — it
-> needs the sha as input and returns only `check_runs[0]`). Once the port exposes it, `cold-boot.mjs`
-> switches to it and the reader + its `TODO(H1-2 retirement)` comments are deleted — no parallel
-> mini-port survives past this group.
+> **Fork A retirement (binding, issue #266 comment 4993202904, condition 2) — DONE in H1-2b.**
+> H1-1's cold-boot `fetchHead` DI-seam reader (`cold-boot.mjs`'s `defaultFetchHead`) is RETIRED. The
+> port widened — `headRefOid` on `prView` + a new `prStatusRollup` read verb — under its own
+> `decision` label + ADR (ADR-0021, protocol §4: "adding verbs to the port is itself a decision"),
+> driven by H1-2's real need for the full status rollup (which `commitStatus` cannot provide — it
+> needs the sha as input and returns only `check_runs[0]`). `cold-boot.mjs` now reads `headRefOid`
+> from `prView`; the reader and its `TODO(#266)` comments are deleted — no parallel mini-port
+> survives past this group.
+
+## Phase 6b — H1-2b: port widening + cold-boot seam retirement (ADR-0021)
+
+- [x] **6b.1 RED/GREEN** — `prView` on both providers returns `headRefOid`: github adds the field to
+      `gh pr view --json` (`github.mjs`); gitlab reads the MR payload's `sha`, falling back to
+      `diff_refs.head_sha`. The uncomputable path returns `headRefOid: null`, matching the existing
+      fail-safe shape.
+- [x] **6b.2 RED/GREEN** — new READ verb `prStatusRollup({ project, number })` on both providers,
+      normalized `[{ name, status, conclusion }]`, no write/APPROVE/label-mutation path; added to
+      `VERBS` (`cli.mjs`) and the `vcs-contract.md` required-verbs table (doctrine-sync per ADR-0021);
+      the contract drift-guard (`vcs.contract.test.mjs`) runs it over `['github','gitlab']`.
+- [x] **6b.3 REFACTOR** — retire `defaultFetchHead`/its `TODO(#266)` comments from `cold-boot.mjs`;
+      `gatherColdBoot` now reads `headRefOid` straight from `prView` (already fetched via `fetchPr`
+      for the self-review check) — no separate `fetchHead` seam. `cold-boot.test.mjs` updated
+      (injects `prView.headRefOid` instead of `fetchHead`) + a source-scan test proving the seam is
+      gone. COLDBOOT-CWD isolation (real-git test) stays green, unchanged.
+- [ ] **6b.4** — open PR H1-2b → `issue-266` tracker, `Part of #266`. The reviewer never approves or
+      merges — the human keystroke stays human.
+
+### Review Workload Forecast — H1-2b
+
+| Field | Value |
+|-------|-------|
+| Est. counted lines | Production only (`*.test.mjs`/`fixtures/` are budget-free): `github.mjs` (+~45), `gitlab.mjs` (+~55), `cli.mjs` (+3), `cold-boot.mjs` (-13 net, seam removed). Re-derive cold at task 6b.4. |
+| 400-line budget risk | **Low.** Two small provider additions + one net-negative refactor. |
+| Decision before apply | Resolved — ADR-0021 Accepted, this slice implements Decision 1-3. |
 
 ## Phase 7 — mode derivation (REQ-H1-7)
 - [ ] **7.1 RED/GREEN** — `review/mode.mjs`: pure `deriveMode({ labels, changedPaths })` →

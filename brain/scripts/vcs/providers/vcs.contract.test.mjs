@@ -165,7 +165,28 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assertProvenance(fixture, fixtureName);
 
     const result = await vcs.prView({ project: 'x/y', number: 42, ...prViewArgs(fixture) });
-    assert.deepEqual(result, { number: 42, labels: null, body: null, author: null });
+    assert.deepEqual(result, { number: 42, labels: null, body: null, author: null, headRefOid: null });
+  });
+
+  // headRefOid (ADR-0021 Decision 1): the recorded/derived happy fixtures
+  // predate this field (queried BEFORE the widening), so they are exercised
+  // inline here rather than mutating provenance-tracked fixture files.
+  test(`${providerName}.prView (contract): a successful fetch normalizes headRefOid to the API head sha`, async () => {
+    const withHead =
+      providerName === 'github'
+        ? { throws: false, data: { number: 7, labels: [], body: '', author: null, headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d' } }
+        : { throws: false, data: { iid: 7, labels: [], description: '', author: null, sha: 'cafef00dcafef00dcafef00dcafef00dcafef00d' } };
+    const result = await vcs.prView({ project: 'x/y', number: 7, ...prViewArgs(withHead) });
+    assert.equal(result.headRefOid, 'cafef00dcafef00dcafef00dcafef00dcafef00d');
+  });
+
+  test(`${providerName}.prView (contract): headRefOid normalizes to null when uncomputable on an otherwise-successful fetch`, async () => {
+    const noHead =
+      providerName === 'github'
+        ? { throws: false, data: { number: 7, labels: [], body: '', author: null } }
+        : { throws: false, data: { iid: 7, labels: [], description: '', author: null } };
+    const result = await vcs.prView({ project: 'x/y', number: 7, ...prViewArgs(noHead) });
+    assert.equal(result.headRefOid, null);
   });
 
   // Body-parity (task 3.7, empty-vs-uncomputable canonical rule): `null` means
@@ -220,6 +241,68 @@ for (const providerName of Object.keys(PROVIDERS)) {
 
     assert.equal(result.url, null, 'a failed mrCreate must never fabricate a url');
     assert.equal(typeof result.error, 'string', 'a failed mrCreate must carry an error string');
+  });
+}
+
+// ── prStatusRollup (ADR-0021 Decision 2) — READ-only status-check rollup ────
+// One assertion set run over both providers: the normalized shape
+// `[{ name, status, conclusion }]` is the contract both must satisfy, even
+// though GitHub's checks API and GitLab's commit-statuses model differ
+// underneath. Inline mocks (no fixture files) — GitLab's normalization
+// requires TWO chained calls (resolve the MR head sha, then fetch that sha's
+// statuses), which doesn't fit the single-fixture `{data}|{throws}` shape
+// used by the loop above.
+
+const ROLLUP_PROVIDERS = {
+  github: {
+    module: github,
+    ok: (checks) => { setSpawn(jsonSpawn({ statusCheckRollup: checks })); return {}; },
+    fail: () => { setSpawn(failSpawn('fixture: simulated failure')); return {}; },
+  },
+  gitlab: {
+    module: gitlab,
+    ok: (checks) => ({
+      fetchImpl: async (url) => (
+        url.includes('/merge_requests/')
+          ? { ok: true, json: async () => ({ sha: 'cafef00dcafef00dcafef00dcafef00dcafef00d' }) }
+          : { ok: true, json: async () => checks.map(c => ({ name: c.name, status: c.status })) }
+      ),
+    }),
+    fail: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
+  },
+};
+
+for (const providerName of Object.keys(ROLLUP_PROVIDERS)) {
+  const { module: vcs, ok, fail } = ROLLUP_PROVIDERS[providerName];
+
+  test(`${providerName}.prStatusRollup (contract): normalizes to [{ name, status, conclusion }], one entry per check`, async () => {
+    const checks = [
+      { name: 'issue-link', status: 'completed', conclusion: 'success' },
+      { name: 'diff-size', status: 'in_progress', conclusion: null },
+    ];
+    const result = await vcs.prStatusRollup({ project: 'x/y', number: 1, ...ok(checks) });
+
+    assert.ok(Array.isArray(result), 'prStatusRollup must return an array on a successful fetch');
+    assert.ok(result.length >= 1, 'the happy case must exercise at least one check');
+    for (const entry of result) {
+      assert.equal(typeof entry.name, 'string', 'each entry must carry a normalized name');
+      assert.ok('status' in entry, 'each entry must carry a normalized status');
+      assert.ok('conclusion' in entry, 'each entry must carry a normalized conclusion key (null is valid)');
+    }
+  });
+
+  test(`${providerName}.prStatusRollup (contract): a fetch failure yields null, never a fabricated []`, async () => {
+    const result = await vcs.prStatusRollup({ project: 'x/y', number: 1, ...fail() });
+    assert.equal(result, null, 'an uncomputable prStatusRollup fetch must return null, never []');
+  });
+
+  test(`${providerName}.prStatusRollup (contract): is READ-only — no write-verb call is reachable from its source`, () => {
+    const src = readFileSync(fileURLToPath(new URL(`./${providerName}.mjs`, import.meta.url)), 'utf8');
+    const fnBody = src.slice(src.indexOf('export async function prStatusRollup'));
+    const fnEnd = fnBody.indexOf('\nexport ', 1);
+    const scoped = fnEnd === -1 ? fnBody : fnBody.slice(0, fnEnd);
+    assert.doesNotMatch(scoped, /-X['"]?\s*['"]?POST|-X['"]?\s*['"]?PUT|-X['"]?\s*['"]?DELETE|method:\s*['"](POST|PUT|DELETE)['"]/,
+      `${providerName}.prStatusRollup must contain no write HTTP method — it is READ-only (ADR-0021 Decision 2)`);
   });
 }
 

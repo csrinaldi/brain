@@ -729,12 +729,13 @@ test('gitlab.mrCreate returns { url: null, error } on failure (never throws)', a
 
 // ── prView ────────────────────────────────────────────────────────────────────
 
-test('github.prView returns { number, labels, body, author } on success', async () => {
+test('github.prView returns { number, labels, body, author, headRefOid } on success', async () => {
   setSpawn(fakeSpawn({
     number: 42,
     labels: [{ name: 'size:exception' }, { name: 'kind:feature' }],
     body: 'Closes #10\n\nDetails here.',
     author: { login: 'alice' },
+    headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d',
   }));
   const result = await github.prView({ project: 'o/r', number: 42 });
   assert.deepEqual(result, {
@@ -742,19 +743,26 @@ test('github.prView returns { number, labels, body, author } on success', async 
     labels: ['size:exception', 'kind:feature'],
     body: 'Closes #10\n\nDetails here.',
     author: 'alice',
+    headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d',
   });
 });
 
-test('github.prView returns { number, labels: null, body: null, author: null } on gh failure (never throws) — REQ-CIC-2 uncomputable, not genuinely-empty', async () => {
+test('github.prView returns { number, labels: null, body: null, author: null, headRefOid: null } on gh failure (never throws) — REQ-CIC-2 uncomputable, not genuinely-empty', async () => {
   setSpawn(() => ({ status: 1, stdout: '', stderr: 'not found' }));
   const result = await github.prView({ project: 'o/r', number: 99 });
-  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null });
+  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null, headRefOid: null });
 });
 
-test('github.prView returns { number, labels: null, body: null, author: null } on malformed JSON (never throws)', async () => {
+test('github.prView returns { number, labels: null, body: null, author: null, headRefOid: null } on malformed JSON (never throws)', async () => {
   setSpawn(() => ({ status: 0, stdout: 'not-json', stderr: '' }));
   const result = await github.prView({ project: 'o/r', number: 5 });
-  assert.deepEqual(result, { number: 5, labels: null, body: null, author: null });
+  assert.deepEqual(result, { number: 5, labels: null, body: null, author: null, headRefOid: null });
+});
+
+test('github.prView headRefOid defaults to null when absent from an otherwise-successful response', async () => {
+  setSpawn(fakeSpawn({ number: 3, labels: [], body: 'x', author: null }));
+  const result = await github.prView({ project: 'o/r', number: 3 });
+  assert.equal(result.headRefOid, null);
 });
 
 test('github.prView body defaults to "" (genuinely empty) when field absent in an otherwise-successful response', async () => {
@@ -774,7 +782,7 @@ test('github.prView author defaults to null when absent from an otherwise-succes
 // via an injected fetchImpl (no setSpawn fixture), same discipline as
 // issueView/labelEvents/prReviews — the DEFAULT path must never reach for the
 // glab CLI.
-test('gitlab.prView returns { number, labels, body, author } normalized, over the shared gitlabApiFetch transport', async () => {
+test('gitlab.prView returns { number, labels, body, author, headRefOid } normalized, over the shared gitlabApiFetch transport', async () => {
   let seenUrl;
   let seenHeaders;
   const result = await gitlab.prView({
@@ -792,6 +800,7 @@ test('gitlab.prView returns { number, labels, body, author } normalized, over th
           labels: ['size:exception', 'kind:feature'],
           description: 'Closes #10\n\nDetails here.',
           author: { username: 'alice' },
+          sha: 'cafef00dcafef00dcafef00dcafef00dcafef00d',
         }),
       };
     },
@@ -803,16 +812,44 @@ test('gitlab.prView returns { number, labels, body, author } normalized, over th
     labels: ['size:exception', 'kind:feature'],
     body: 'Closes #10\n\nDetails here.',
     author: 'alice',
+    headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d',
   });
 });
 
-test('gitlab.prView returns { number, labels: null, body: null, author: null } on fetch failure (never throws) — uncomputable, not genuinely-empty', async () => {
+test('gitlab.prView headRefOid falls back to diff_refs.head_sha when the top-level sha is absent', async () => {
+  const result = await gitlab.prView({
+    project: 'g/r',
+    number: 42,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        iid: 42,
+        labels: [],
+        description: '',
+        author: { username: 'alice' },
+        diff_refs: { head_sha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' },
+      }),
+    }),
+  });
+  assert.equal(result.headRefOid, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef');
+});
+
+test('gitlab.prView headRefOid defaults to null when neither sha nor diff_refs.head_sha is present', async () => {
+  const result = await gitlab.prView({
+    project: 'g/r',
+    number: 42,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ iid: 42, labels: [], description: '', author: null }) }),
+  });
+  assert.equal(result.headRefOid, null);
+});
+
+test('gitlab.prView returns { number, labels: null, body: null, author: null, headRefOid: null } on fetch failure (never throws) — uncomputable, not genuinely-empty', async () => {
   const result = await gitlab.prView({
     project: 'g/r',
     number: 99,
     fetchImpl: async () => ({ ok: false, status: 404 }),
   });
-  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null });
+  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null, headRefOid: null });
 });
 
 test('gitlab.prView author defaults to null when absent from an otherwise-successful response', async () => {

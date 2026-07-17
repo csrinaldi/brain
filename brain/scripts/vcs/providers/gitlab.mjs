@@ -86,6 +86,13 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
  * `gitlabApiFetch` transport — the same discipline as `issueView`. Normalizes
  * `iid`/`description`/`author.username` to `number`/`body`/`author`.
  *
+ * `headRefOid` (ADR-0021 Decision 1) — the API's head sha for the MR, the
+ * anchor a cold caller checks out **detached** at — normalizes from the
+ * payload's top-level `sha`, falling back to `diff_refs.head_sha` (both
+ * carry the same value on GitLab's MR response). Widened additively:
+ * existing callers reading only `number`/`labels`/`body`/`author` are
+ * unaffected.
+ *
  * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS from the
  * caller (`gitlabApiConfig()`), never read from pipeline env directly here —
  * this file is a GATE_FILE (drift-guard forbids it). Defaults exist so
@@ -93,8 +100,9 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
  * `vcsToken()`, no proxy.
  *
  * Never throws: a fetch failure is caught and normalized to
- * `{ number, labels: null, body: null, author: null }` (uncomputable) —
- * never a fabricated empty `[]`/`''`, matching the `github.prView` contract.
+ * `{ number, labels: null, body: null, author: null, headRefOid: null }`
+ * (uncomputable) — never a fabricated empty `[]`/`''`, matching the
+ * `github.prView` contract.
  *
  * Body-parity (issue #239 A3 Phase 3 task 3.7): `null` means uncomputable
  * (the fetch itself failed — the `catch` branch below); `''` means the fetch
@@ -105,7 +113,7 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
  * from the failure case above.
  *
  * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
- * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null }>}
+ * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null }>}
  */
 export async function prView({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
@@ -122,9 +130,63 @@ export async function prView({ project, number, apiBase, token, proxyUrl, fetchI
       labels: r.labels ?? [],
       body: r.description ?? '',
       author: r.author?.username ?? null,
+      headRefOid: r.sha ?? r.diff_refs?.head_sha ?? null,
     };
   } catch {
-    return { number, labels: null, body: null, author: null };
+    return { number, labels: null, body: null, author: null, headRefOid: null };
+  }
+}
+
+/**
+ * prStatusRollup — the provider-agnostic READ verb `prStatusRollup`
+ * (ADR-0021 Decision 2). Returns the full status-check rollup for an MR's
+ * head commit, normalized to `[{ name, status, conclusion }]` — one entry
+ * per check. This is a READ: no write path exists on this verb.
+ *
+ * GitLab has no single "checks rollup" endpoint like GitHub's — this
+ * resolves the MR's head sha (the same `sha`/`diff_refs.head_sha` fallback
+ * as `prView`), then reads `GET projects/:id/repository/commits/:sha/statuses`
+ * (the same endpoint `commitStatus` reads, but the FULL list rather than
+ * `[0]`). GitLab's commit-status model has no separate "conclusion" field
+ * distinct from its terminal `status` (success/failed/canceled/etc.) — each
+ * entry normalizes to `conclusion: null`, satisfying the shared SHAPE (the
+ * contract both providers must meet) without fabricating a field GitLab
+ * doesn't have.
+ *
+ * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS from the
+ * caller, same discipline as `prView` — this file is a GATE_FILE and never
+ * reads pipeline env directly. Never throws: a fetch failure, or an
+ * unresolvable head sha, normalizes to `null` (uncomputable) — never a
+ * fabricated `[]`.
+ *
+ * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<Array<{ name: string, status: string|null, conclusion: null }>|null>}
+ */
+export async function prStatusRollup({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  const base = apiBase ?? 'https://gitlab.com/api/v4';
+  const tok = token ?? vcsToken(PROVIDER);
+  try {
+    const mr = await gitlabApiFetch({
+      apiBase: base,
+      token: tok,
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/merge_requests/${number}`,
+      fetchImpl,
+    });
+    const sha = mr.sha ?? mr.diff_refs?.head_sha ?? null;
+    if (!sha) return null;
+    const statuses = await gitlabApiFetch({
+      apiBase: base,
+      token: tok,
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/repository/commits/${sha}/statuses`,
+      fetchImpl,
+    });
+    if (!Array.isArray(statuses)) return null;
+    return statuses.map(s => ({ name: s.name ?? null, status: s.status ?? null, conclusion: null }));
+  } catch {
+    return null;
   }
 }
 

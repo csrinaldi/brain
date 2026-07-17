@@ -140,23 +140,29 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
 }
 
 /**
- * Fetch a PR's metadata (number, label names, body, and author) via `gh pr view`.
- * Uses the current repo's git remote — `project` is accepted for contract
- * compatibility but not required by the gh CLI when run from the repo root.
+ * Fetch a PR's metadata (number, label names, body, author, and the head
+ * commit sha) via `gh pr view`. Uses the current repo's git remote —
+ * `project` is accepted for contract compatibility but not required by the
+ * gh CLI when run from the repo root.
  *
- * Never throws: returns { number, labels: null, body: null, author: null } on
- * ANY failure (ci-context.mjs's REQ-CIC-2 uncomputable signal) — distinct from
- * a genuinely empty `[]`/`''` on an otherwise-successful response. Callers that
- * need "no labels" vs "couldn't fetch labels" distinguished (e.g. a REQUIRED
- * gate) MUST treat `null` as uncomputable, never collapse it to a fabricated
- * empty default.
+ * `headRefOid` (ADR-0021 Decision 1) is the API's head sha for the PR — the
+ * anchor a cold caller checks out **detached** at (never a branch name).
+ * Widened additively: existing callers reading only `number`/`labels`/
+ * `body`/`author` are unaffected.
+ *
+ * Never throws: returns { number, labels: null, body: null, author: null,
+ * headRefOid: null } on ANY failure (ci-context.mjs's REQ-CIC-2 uncomputable
+ * signal) — distinct from a genuinely empty `[]`/`''` on an otherwise-
+ * successful response. Callers that need "no labels" vs "couldn't fetch
+ * labels" distinguished (e.g. a REQUIRED gate) MUST treat `null` as
+ * uncomputable, never collapse it to a fabricated empty default.
  *
  * @param {{ project?: string, number: number }} opts
- * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null }>}
+ * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null }>}
  */
 export async function prView({ project, number } = {}) {
-  const r = run('gh', ['pr', 'view', String(number), '--json', 'number,labels,body,author']);
-  if (!r.ok) return { number, labels: null, body: null, author: null };
+  const r = run('gh', ['pr', 'view', String(number), '--json', 'number,labels,body,author,headRefOid']);
+  if (!r.ok) return { number, labels: null, body: null, author: null, headRefOid: null };
   try {
     const data = JSON.parse(r.stdout);
     return {
@@ -164,9 +170,10 @@ export async function prView({ project, number } = {}) {
       labels: (data.labels ?? []).map(l => l.name),
       body: data.body ?? '',
       author: data.author?.login ?? null,
+      headRefOid: data.headRefOid ?? null,
     };
   } catch {
-    return { number, labels: null, body: null, author: null };
+    return { number, labels: null, body: null, author: null, headRefOid: null };
   }
 }
 
@@ -196,6 +203,43 @@ export async function commitStatus({ project, sha }) {
   // (queued/in_progress). Use status until completed, then the conclusion.
   const raw = cr.status === 'completed' ? cr.conclusion : cr.status;
   return normalizeCommitStatus('github', raw);
+}
+
+/**
+ * prStatusRollup — the provider-agnostic READ verb `prStatusRollup`
+ * (ADR-0021 Decision 2). Returns the full status-check rollup for a PR's
+ * head commit, normalized to `[{ name, status, conclusion }]` — one entry
+ * per check. This is a READ: no write path exists on this verb, and it
+ * carries no APPROVE/label-mutation code path (the reviewer's four
+ * COMMENT-only write verbs from ADR-0020 are unaffected).
+ *
+ * Unlike `commitStatus` (which needs a sha as input and collapses to
+ * `check_runs[0]`, a single check), `prStatusRollup` takes the PR number and
+ * returns the FULL rollup via `gh pr view --json statusCheckRollup` — every
+ * required check the tranche evaluator (H1-2c) re-derives cold, not a
+ * collapsed single status.
+ *
+ * Never throws: a fetch failure, or a response with no computable rollup,
+ * normalizes to `null` (uncomputable) — never a fabricated `[]`, matching
+ * `prReviews`/`labelEvents`.
+ *
+ * @param {{ project?: string, number: number }} opts
+ * @returns {Promise<Array<{ name: string, status: string|null, conclusion: string|null }>|null>}
+ */
+export async function prStatusRollup({ project, number } = {}) {
+  let data;
+  try {
+    data = runJson('gh', ['pr', 'view', String(number), '--json', 'statusCheckRollup']);
+  } catch {
+    return null;
+  }
+  const rollup = data.statusCheckRollup;
+  if (!Array.isArray(rollup)) return null;
+  return rollup.map(c => ({
+    name: c.name ?? c.context ?? null,
+    status: c.status ?? c.state ?? null,
+    conclusion: c.conclusion ?? null,
+  }));
 }
 
 /**

@@ -27,8 +27,7 @@ function readyDeps({ vcs }) {
       readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'shh' }),
     },
     coldBootDeps: {
-      fetchPr: async () => ({ number: 42, author: 'alice', labels: [], body: '' }),
-      fetchHead: async () => 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      fetchPr: async () => ({ number: 42, author: 'alice', labels: [], body: '', headRefOid: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' }),
       cloneDetached: async () => ({ detached: true }),
       readRecords: () => [],
       fetchReviews: async () => [],
@@ -100,7 +99,6 @@ test('main: self-review abstains, exits 0, posts nothing', async () => {
     ...readyDeps({ vcs }),
     coldBootDeps: {
       fetchPr: async () => ({ number: 42, author: 'brain-reviewer', labels: [], body: '' }),
-      fetchHead: async () => { throw new Error('must not be called on abstain'); },
       cloneDetached: async () => { throw new Error('must not be called on abstain'); },
       readRecords: () => { throw new Error('must not be called on abstain'); },
       fetchReviews: async () => { throw new Error('must not be called on abstain'); },
