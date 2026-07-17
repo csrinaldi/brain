@@ -1,19 +1,24 @@
-// resolution.test.mjs — tree-effect revert-resolution predicate (design §3).
-// "The entire security thesis of this change." Every fixture A1-A6 below is
-// copied VERBATIM from design §7.1's shape column (doctrine #900, BINDING) —
-// each is built from the ATTACK SHAPE the design describes, NEVER derived from
-// resolution.mjs's own behavior. Fixture → design §7.1 row mapping:
-//   A1 → §7.1 A1 (forged trailer on a real descendant, no tree effect)
-//   A2 → §7.1 A2 (genuine `git revert -m 1` — liveness)
-//   A3 → §7.1 A3 (partial revert)
-//   A4 → §7.1 A4 (empty-diff merge — anti-vacuity)
-//   A5 → §7.1 A5 (reverted then re-introduced)
-//   A6 → §7.1 A6 (adrPresence offender + genuine auto-revert; reverter-skip)
+// resolution.test.mjs — whole-commit first-parent diff-inversion
+// revert-resolution predicate (design §3, revised after judgment-round-1's
+// rename bypass, engram #916). Fixtures below are ported DIRECTLY from the
+// forge scripts that derived and validated this mechanism against every
+// case at once (doctrine #900 — fixtures are derived from the attack, not
+// reverse-engineered from the implementation):
+//   - forge_final.mjs — the 11-case validation matrix (C2 real loop, pure
+//     rename, rename+modify, copy launder, partial revert, invert+extra,
+//     drift liveness, F-1 empty, F-2 binary evil/true, whitespace-exact).
+//   - forge6.mjs / insp4.mjs — F-4, the attacker-planted `.gitattributes
+//     *.md -diff` at tip; content must stay exposed.
+//   - blast.mjs — the U3 context-window blast radius: an intervening
+//     neighbor edit close to the payload line either conflicts a genuine
+//     `git revert` or shifts the rendered hunk so it no longer byte-matches
+//     (a documented, accepted trade-off — NOT resolved falls to the human
+//     gate); far enough away (>=4 lines), the genuine revert still matches.
 //
-// The A1 fixture additionally REDDENS against the prior plausible-but-wrong
-// fix — the shipped ancestry-only `merge-base --is-ancestor` code at commit
-// `eff4560` (doctrine #900 rule 2). That RED-against-the-prior-fix is the
-// actual proof this suite produces, not merely "fails on unfixed code".
+// The mutation-bar section at the bottom names the specific line each test
+// kills if removed (doctrine #900's "reddens against the prior
+// plausible-but-wrong fix" bar, generalized to "reddens against a mutant of
+// the CURRENT fix").
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,23 +28,23 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { gitTry, gitOrThrow } from './git-seam.mjs';
-import { changedPaths, isResolvedAt, isReverterOf } from './resolution.mjs';
+import { isResolvedAt, isReverterOf, makeGit } from './resolution.mjs';
 
 const POSTMERGE_DIR = fileURLToPath(new URL('.', import.meta.url));
-const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
-// ── Fixture helpers (house pattern — cursor.test.mjs) ─────────────────────────
+// ── Fixture helpers (house pattern — cursor.test.mjs, CP-PR1 hermeticity) ──
 
-// Every repo the fixtures commit into MUST carry its own identity. `git clone`
-// inherits none and a fresh runner (actions/checkout) has none to auto-detect,
-// so a fixture that commits without setting identity fails only off the
-// author's machine. This is the CP-PR1 hermeticity lesson, non-negotiable.
+// Every repo the fixtures commit into MUST carry its own identity. `git
+// clone`/`git init` inherit none, and a fresh runner (actions/checkout) has
+// none to auto-detect, so a fixture that commits without setting identity
+// fails only off the author's machine. Non-negotiable (CP-PR1 lesson).
 function setIdentity(dir) {
   spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: dir, encoding: 'utf8' });
   spawnSync('git', ['config', 'user.name', 'Test'], { cwd: dir, encoding: 'utf8' });
+  spawnSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: dir, encoding: 'utf8' });
 }
 
 function makeRepo(t) {
@@ -58,6 +63,15 @@ function run(dir, ...argv) {
     throw new Error(`git ${argv.join(' ')} in ${dir} failed (status=${r.status}): ${(r.stderr ?? '').trim()}`);
   }
   return (r.stdout ?? '').trim();
+}
+
+// `git revert` failing (a genuine merge conflict) is a DISTINCT, expected
+// outcome (blast-radius distance 1 — falls to the human gate, PR4's
+// concern, not this predicate's). Returns { ok, stdout } instead of
+// throwing so callers can assert on the conflict itself.
+function runMaybe(dir, ...argv) {
+  const r = spawnSync('git', argv, { cwd: dir, encoding: 'utf8' });
+  return { ok: r.status === 0, stdout: (r.stdout ?? '').trim(), stderr: (r.stderr ?? '').trim() };
 }
 
 function headSha(dir) {
@@ -86,10 +100,19 @@ function seedBase(dir) {
   return writeAndCommit(dir, 'base.txt', 'base\n', 'C0: base');
 }
 
-// An offender MERGE that adds `payload` files at the given paths (the realistic
-// `--first-parent --merges` shape brain-audit tracks). Returns the merge sha;
-// its first parent is main's tip before the merge, so changedPaths(M) is
-// exactly the payload set.
+// Merge `branch` into `main` with `--no-ff`, returning the merge sha. Every
+// candidate reverter in this mechanism MUST be a first-parent merge (the
+// set `git rev-list --first-parent --merges` enumerates, exactly what
+// brain-audit tracks) — a plain, non-merge commit is never a candidate.
+function mergeIntoMain(dir, branch, message) {
+  run(dir, 'checkout', 'main');
+  run(dir, 'merge', '--no-ff', branch, '-m', message);
+  return headSha(dir);
+}
+
+// An offender MERGE that adds `files` at the given paths (the realistic
+// `--first-parent --merges` shape brain-audit tracks). Returns the merge
+// sha; its first parent is main's tip before the merge.
 function mergeAddingPayload(dir, files, label) {
   run(dir, 'checkout', '-b', `feat-${label}`);
   for (const [path, content] of Object.entries(files)) {
@@ -99,158 +122,421 @@ function mergeAddingPayload(dir, files, label) {
     run(dir, 'add', path);
   }
   run(dir, 'commit', '-m', `${label}: add payload`);
-  run(dir, 'checkout', 'main');
-  run(dir, 'merge', '--no-ff', `feat-${label}`, '-m', `${label}: merge payload`);
-  return headSha(dir);
+  return mergeIntoMain(dir, `feat-${label}`, `${label}: merge payload`);
 }
 
-// Extract eff4560's cursor.mjs (the shipped ancestry-only fix) to a temp file
-// and import its `isRevertedInRange`. eff4560's module is self-contained (only
-// node builtins) and takes a function-form injectable `git` seam. Read-only —
-// no commits, so no identity needed.
-async function loadEff4560(t) {
-  const src = spawnSync('git', ['show', 'eff4560:brain/scripts/governance/postmerge/cursor.mjs'], {
-    cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
-  });
-  if (src.status !== 0) {
-    throw new Error(`cannot extract eff4560 cursor.mjs: ${(src.stderr ?? '').trim()}`);
+// `git revert -m 1 --no-edit <offender>` on a fresh branch off `main`, then
+// merged back in — a GENUINE revert, always landed as a first-parent merge
+// (matching the real auto-revert PR flow, design §6). Returns the merge
+// sha, or `{ conflict: true }` if the revert itself could not be applied
+// cleanly (blast-radius distance 1 — falls to the human gate).
+function genuineRevertMerge(dir, offender, branchName, mergeLabel) {
+  run(dir, 'checkout', '-b', branchName, 'main');
+  const r = runMaybe(dir, 'revert', '-m', '1', '--no-edit', offender);
+  if (!r.ok) {
+    runMaybe(dir, 'revert', '--abort');
+    run(dir, 'checkout', 'main');
+    return { conflict: true };
   }
-  const dir = mkdtempSync(join(tmpdir(), 'eff4560-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const file = join(dir, 'cursor-eff4560.mjs');
-  writeFileSync(file, src.stdout);
-  return import(pathToFileURL(file).href);
+  return { conflict: false, sha: mergeIntoMain(dir, branchName, mergeLabel) };
 }
 
-// Function-form git seam eff4560 expects: returns stdout, throws on non-zero.
-function fnGit(cwd) {
-  return (argv) => {
-    const r = spawnSync('git', argv, { cwd, encoding: 'utf8' });
-    if (r.status !== 0) throw new Error((r.stderr ?? '').trim());
-    return (r.stdout ?? '').trim();
-  };
-}
+// ── F-1 — anti-vacuity guard ──────────────────────────────────────────────
 
-// ── Phase 2.1 — changedPaths + anti-vacuity ───────────────────────────────────
-
-test('2.1.1 changedPaths — returns the set of paths a commit touches (2 files)', (t) => {
+// An offender with an EMPTY first-parent contribution (tree == first
+// parent's tree, via `-s ours`) MUST be refused, loudly, as the FIRST
+// branch of isResolvedAt — never a vacuous pass regardless of what else is
+// in range.
+test('F-1 — an empty-diff offender is refused by the anti-vacuity guard, never a vacuous pass', (t) => {
   const dir = makeRepo(t);
   seedBase(dir);
-  const m = mergeAddingPayload(dir, { 'a/one.txt': '1\n', 'b/two.txt': '2\n' }, 'M');
-  const git = realGit(dir);
-
-  const paths = changedPaths(m, { git });
-  assert.deepEqual(new Set(paths), new Set(['a/one.txt', 'b/two.txt']));
-});
-
-// A4 — anti-vacuity. An empty-diff merge (tree identical to first parent, via
-// `-s ours`) has zero changed paths; a set-theoretic test over the empty set is
-// trivially true, which is the exact vacuous-pass shape the review was built to
-// find. isResolvedAt MUST refuse it, loudly, as the FIRST branch.
-test('2.1.3/2.1.4 A4 — empty-diff merge is refused by the anti-vacuity guard, never a vacuous pass', (t) => {
-  const dir = makeRepo(t);
-  const c0 = seedBase(dir);
   run(dir, 'checkout', '-b', 'feat-empty');
   writeAndCommit(dir, 'sidecar.txt', 'side\n', 'feat work (discarded by -s ours)');
   run(dir, 'checkout', 'main');
-  // `-s ours` records a real 2-parent merge whose tree == first parent's tree.
   run(dir, 'merge', '--no-ff', '-s', 'ours', 'feat-empty', '-m', 'M: empty-effect merge');
   const m = headSha(dir);
-  const head = headSha(dir);
   const git = realGit(dir);
 
-  // Fixture sanity: M genuinely has zero changed paths against its first parent.
-  assert.equal(changedPaths(m, { git }).size ?? [...changedPaths(m, { git })].length, 0);
-
-  const result = isResolvedAt(m, head, { git });
-  assert.deepEqual(result, { resolved: false, reason: 'offender has no changed paths' });
-  assert.equal(c0.length, 40); // c0 is a real base sha (fixture integrity)
+  const result = isResolvedAt(m, m, { git });
+  assert.deepEqual(result, { resolved: false, reason: 'offender has no first-parent contribution' });
 });
 
-// ── Phase 2.2 — isResolvedAt, the tree-effect predicate ───────────────────────
+// ── forge_final case 1 (~ A2 liveness) — C2 real D2 revert loop ────────────
 
-// A1 — THE security-critical fixture. Offender M adds a payload at path P.
-// Then an ORDINARY commit X, a REAL descendant of M (forked AFTER M — the
-// realistic linear-main shape), whose body claims `This reverts commit <M>.`
-// but whose diff does NOT touch P. Tree-effect must keep M flagged (false),
-// AND the SAME fixture must REDDEN against eff4560's ancestry-only fix.
-test('2.2.1 A1 — forged revert trailer on a real descendant does NOT resolve (and reddens against eff4560)', async (t) => {
-  const dir = makeRepo(t);
-  const c0 = seedBase(dir);
-  const m = mergeAddingPayload(dir, { 'payload.txt': 'PAYLOAD\n' }, 'M');
-
-  // X: an ordinary commit forked AFTER M (descendant), touching only other.txt,
-  // whose body carries a forged revert trailer citing M but reverting nothing.
-  writeFileSync(join(dir, 'other.txt'), 'unrelated\n');
-  run(dir, 'add', 'other.txt');
-  run(dir, 'commit', '-m', `X: unrelated change\n\nThis reverts commit ${m}.`);
-  const x = headSha(dir);
-  const git = realGit(dir);
-
-  // Fixture integrity: X really is a descendant of M (ancestry PASSES), and X's
-  // diff does not touch M's payload path.
-  assert.equal(run(dir, 'merge-base', '--is-ancestor', m, x) === '' , true);
-  assert.equal([...changedPaths(x, { git })].includes('payload.txt'), false);
-  assert.equal(c0.length, 40);
-
-  // Tree-effect (this change): M is NOT resolved — payload.txt is still on disk.
-  assert.deepEqual(isResolvedAt(m, x, { git }), { resolved: false });
-
-  // RED-against-the-prior-fix: eff4560's ancestry-only isRevertedInRange WRONGLY
-  // reports M as reverted, because X is a descendant of M so `merge-base
-  // --is-ancestor` passes on a forged trailer. This is the defeat proof.
-  const eff4560 = await loadEff4560(t);
-  const wronglyResolved = eff4560.isRevertedInRange(m, { git: fnGit(dir), range: `${c0}..${x}` });
-  assert.equal(wronglyResolved, true, 'eff4560 MUST wrongly resolve M — proving ancestry is defeated');
-});
-
-// A2 — liveness. A genuine `git revert -m 1 M` restores the tree; the mechanism
-// must not pin on a real revert.
-test('2.2.3 A2 — a genuine `git revert -m 1 M` resolves the offender (liveness)', (t) => {
+test('C2 — a genuine revert merge resolves the offender (liveness, the real D2 loop shape)', (t) => {
   const dir = makeRepo(t);
   seedBase(dir);
-  const m = mergeAddingPayload(dir, { 'payload.txt': 'PAYLOAD\n' }, 'M');
-  run(dir, 'revert', '-m', '1', '--no-edit', m);
-  const r = headSha(dir);
+  const m = mergeAddingPayload(dir, { 'p.md': 'SECRET_PAYLOAD\n' }, 'M');
+  const r = genuineRevertMerge(dir, m, 'rv', 'PR2: revert M');
+  assert.equal(r.conflict, false);
   const git = realGit(dir);
 
-  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: true });
+  assert.deepEqual(isResolvedAt(m, r.sha, { git }), { resolved: true });
 });
 
-// A3 — partial revert. M touches P1 and P2; only P1 is restored. Half the
-// payload is still on disk → not resolved.
-test('2.2.4 A3 — a partial revert (some paths restored, not all) does NOT resolve', (t) => {
+// ── forge_final case 2 — pure rename does NOT resolve ──────────────────────
+// THE security-critical fixture: judgment-round-1 (#916) reproduced a
+// bypass here against the prior path-scoped `P ∩ D = ∅` predicate — a
+// rename made the offender's original path absent from the diff set while
+// the payload survived, unmoved in content, at a new path. This mechanism
+// compares whole diff TEXT, never paths in isolation, so a rename that does
+// not restore the pre-offender content can never match.
+test('pure rename does NOT resolve the offender (the #916 bypass shape)', (t) => {
   const dir = makeRepo(t);
   seedBase(dir);
-  const m = mergeAddingPayload(dir, { 'p1.txt': 'ONE\n', 'p2.txt': 'TWO\n' }, 'M');
-  run(dir, 'rm', 'p1.txt');
-  run(dir, 'commit', '-m', 'restore only P1');
-  const tip = headSha(dir);
+  const m = mergeAddingPayload(dir, { 'p.md': 'SECRET_PAYLOAD\n' }, 'M');
+  run(dir, 'checkout', '-b', 'rn', 'main');
+  run(dir, 'mv', 'p.md', 'q.md');
+  run(dir, 'commit', '-m', 'rn: rename only');
+  const r = mergeIntoMain(dir, 'rn', 'PR2: rename launder');
   const git = realGit(dir);
 
-  assert.deepEqual(isResolvedAt(m, tip, { git }), { resolved: false });
+  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: false });
+  // Fixture integrity: the payload really does survive, just relocated.
+  const grep = spawnSync('git', ['grep', '-qa', 'SECRET_PAYLOAD', r], { cwd: dir });
+  assert.equal(grep.status, 0, 'payload must still be present on disk at the renamed path');
 });
 
-// A5 — reverted then RE-INTRODUCED. The predicate is anchored at the tip and
-// sees the re-introduction. A liveness property the trailer approach never had.
-test('2.2.5 A5 — payload reverted then re-added at the tip does NOT resolve (anchored at tip)', (t) => {
+// ── forge_final case 3 — rename + modify does NOT resolve ──────────────────
+
+test('rename + content modification does NOT resolve the offender', (t) => {
   const dir = makeRepo(t);
   seedBase(dir);
-  const m = mergeAddingPayload(dir, { 'payload.txt': 'PAYLOAD\n' }, 'M');
-  run(dir, 'revert', '-m', '1', '--no-edit', m);
-  writeFileSync(join(dir, 'payload.txt'), 'PAYLOAD-AGAIN\n');
-  run(dir, 'add', 'payload.txt');
-  run(dir, 'commit', '-m', 're-introduce the payload');
-  const tip = headSha(dir);
+  const m = mergeAddingPayload(dir, { 'p.md': 'SECRET_PAYLOAD\n' }, 'M');
+  run(dir, 'checkout', '-b', 'rnm', 'main');
+  run(dir, 'mv', 'p.md', 'q.md');
+  writeFileSync(join(dir, 'q.md'), 'SECRET_PAYLOAD\n#x\n');
+  run(dir, 'add', 'q.md');
+  run(dir, 'commit', '-m', 'rnm: rename + modify');
+  const r = mergeIntoMain(dir, 'rnm', 'PR2: rename+modify launder');
   const git = realGit(dir);
 
-  assert.deepEqual(isResolvedAt(m, tip, { git }), { resolved: false });
+  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: false });
 });
 
-// 2.2.7 drift-guard — the deleted discriminators must not exist anywhere in the
-// postmerge SOURCE (non-test .mjs). A mechanical trip-wire against the exact
-// regression this PR exists to prevent (design §3.0).
-test('2.2.7 drift-guard — isRevertedInRange/findTrailerCandidates/trailerRegex are absent from postmerge source', () => {
+// ── forge_final case 4 — copy launder does NOT resolve ─────────────────────
+
+test('a copy-then-remove launder does NOT resolve the offender', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const m = mergeAddingPayload(dir, { 'p.md': 'SECRET_PAYLOAD\n' }, 'M');
+  run(dir, 'checkout', '-b', 'cp', 'main');
+  const src = readFileSync(join(dir, 'p.md'));
+  writeFileSync(join(dir, 'keep.md'), src);
+  run(dir, 'rm', 'p.md');
+  run(dir, 'add', 'keep.md');
+  run(dir, 'commit', '-m', 'cp: copy then remove original');
+  const r = mergeIntoMain(dir, 'cp', 'PR2: copy launder');
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: false });
+});
+
+// ── forge_final case 5 (~ A3) — partial revert does NOT resolve ────────────
+
+test('a partial revert (some paths restored, not all) does NOT resolve', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const m = mergeAddingPayload(dir, { 'a.md': 'SEC_A\n', 'b.md': 'SEC_B\n' }, 'M');
+  run(dir, 'checkout', '-b', 'pr', 'main');
+  run(dir, 'rm', 'a.md');
+  run(dir, 'commit', '-m', 'restore only a.md');
+  const r = mergeIntoMain(dir, 'pr', 'PR2: partial restore');
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: false });
+});
+
+// ── forge_final case 6 — invert + extra damage does NOT resolve ────────────
+// A candidate that DOES restore the offender's path but ALSO introduces
+// unrelated extra content in the SAME commit is not a clean inversion — the
+// candidate's own contribution, read backward, carries the extra damage
+// too, so it cannot byte-match the offender's (smaller) contribution.
+
+test('inverting the payload while also introducing extra damage does NOT resolve', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const m = mergeAddingPayload(dir, { 'a.md': 'SEC_A\n' }, 'M');
+  run(dir, 'checkout', '-b', 'ie', 'main');
+  run(dir, 'rm', 'a.md');
+  writeFileSync(join(dir, 'evil.md'), 'EVIL\n');
+  run(dir, 'add', 'evil.md');
+  run(dir, 'commit', '-m', 'ie: restore + smuggle evil.md');
+  const r = mergeIntoMain(dir, 'ie', 'PR2: invert+extra');
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: false });
+});
+
+// ── forge_final case 7 — drift liveness ─────────────────────────────────────
+// An unrelated intervening commit shifts line numbers elsewhere in the
+// file (outside the payload's own context window). A genuine revert still
+// matches: normDiff drops the position-only `@@ ...@@` header, keeping only
+// the byte-exact content, which is unaffected by the shift.
+
+test('drift liveness — an unrelated intervening edit does not pin a genuine revert', (t) => {
+  const dir = makeRepo(t);
+  writeAndCommit(dir, 'c.txt', 'L1\nL2\nL3\n', 'base');
+  const m = mergeAddingPayload(dir, { 'c.txt': 'L1\nL2\nL3\nSECRET_PAYLOAD\n' }, 'M');
+  writeAndCommit(dir, 'c.txt', 'TOP\nL1\nL2\nL3\nSECRET_PAYLOAD\n', 'shift: unrelated prepend, far from the payload line');
+  const r = genuineRevertMerge(dir, m, 'rv', 'PR2: revert despite drift');
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(m, r.sha, { git }), { resolved: true });
+});
+
+// ── forge_final case 9/10 — F-2 binary payloads ─────────────────────────────
+
+test('F-2 — a different binary payload at the same path does NOT resolve the offender', (t) => {
+  const dir = makeRepo(t);
+  writeAndCommit(dir, 'a.bin', Buffer.from([0x00, 0x6f, 0x72, 0x69, 0x67]), 'binary base');
+  const m = mergeAddingPayload(dir, { 'a.bin': Buffer.from([0x00, 0x41, 0x41, 0x41]) }, 'M');
+  run(dir, 'checkout', '-b', 'ev', 'main');
+  writeFileSync(join(dir, 'a.bin'), Buffer.from([0x00, 0x42, 0x42, 0x42]));
+  run(dir, 'add', 'a.bin');
+  run(dir, 'commit', '-m', 'ev: different binary payload, not a real revert');
+  const r = mergeIntoMain(dir, 'ev', 'PR2: binary evil-modify');
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: false });
+});
+
+test('F-2 — a genuine revert of a binary payload resolves the offender (liveness)', (t) => {
+  const dir = makeRepo(t);
+  writeAndCommit(dir, 'a.bin', Buffer.from([0x00, 0x6f, 0x72, 0x69, 0x67]), 'binary base');
+  const m = mergeAddingPayload(dir, { 'a.bin': Buffer.from([0x00, 0x41, 0x41, 0x41]) }, 'M');
+  const r = genuineRevertMerge(dir, m, 'rv', 'PR2: revert binary payload');
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(m, r.sha, { git }), { resolved: true });
+});
+
+// ── forge_final case 11 — whitespace is part of content, never normalized ──
+
+test('whitespace-only differences (indentation) are NOT treated as a match', (t) => {
+  const dir = makeRepo(t);
+  writeAndCommit(dir, 'w.txt', 'x\ny\n', 'base');
+  const m = mergeAddingPayload(dir, { 'w.txt': 'x\nPAY\ny\n' }, 'M');
+  run(dir, 'checkout', '-b', 'b', 'main');
+  writeFileSync(join(dir, 'w.txt'), 'x\n    PAY\ny\n'); // re-indented, not byte-identical
+  run(dir, 'add', 'w.txt');
+  run(dir, 'commit', '-m', 'b: indented differently, not a byte-exact revert');
+  const r = mergeIntoMain(dir, 'b', 'PR2: whitespace drift');
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: false });
+});
+
+// ── F-4 (forge6.mjs / insp4.mjs) — attacker-planted .gitattributes ─────────
+// An attacker plants `*.md -diff` in `.gitattributes` at tip AFTER the
+// offender lands, to make git render the payload as an opaque binary stub.
+// `--binary` ALONE defeats this (the predicate is pure-read — no
+// `.git/info/attributes` write): a `-diff`-attributed file still renders as
+// a content-bearing base85 patch, so a non-revert candidate with DIFFERENT
+// content is still correctly refused. (The ADD-shaped case below passes via
+// path asymmetry; the MODIFY+MODIFY case is the one that actually reddens if
+// `--binary` is dropped — see 'F-4 same-path MODIFY' below.)
+test('F-4 — a planted .gitattributes "-diff" does not launder a non-revert candidate', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const m = mergeAddingPayload(dir, { 'secret.md': 'PAYLOAD_AAA\n' }, 'M');
+  // Attacker plants the attribute AFTER the offender, directly on main.
+  writeAndCommit(dir, '.gitattributes', '*.md -diff\n', 'chore: attributes (attacker-planted)');
+  run(dir, 'checkout', '-b', 'ev', 'main');
+  writeFileSync(join(dir, 'secret.md'), 'PAYLOAD_BBB\n');
+  run(dir, 'add', 'secret.md');
+  run(dir, 'commit', '-m', 'ev: different content, not a real revert');
+  const r = mergeIntoMain(dir, 'ev', 'PR2: attribute-shielded launder attempt');
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: false });
+});
+
+// F-4 same-path MODIFY — the test that actually exercises the `--binary`
+// defense (judgment-round-2, Judge A). The offender MODIFIES a pre-existing
+// file (its diff has no `/dev/null` side), and a non-revert candidate
+// MODIFIES the same path to DIFFERENT content, under the attacker's
+// `*.md -diff`. WITHOUT `--binary` both first-parent diffs render as the
+// identical content-blind "Binary files a/secret.md and b/secret.md differ"
+// stub → they compare EQUAL → false `resolved:true`. WITH `--binary` the
+// base85 blocks carry content → distinct → correctly refused. So dropping
+// `--binary` reddens THIS test (the ADD-shaped F-4 case above cannot).
+test('F-4 same-path MODIFY — a planted "-diff" cannot launder a modify-to-different-content (reddens on --binary drop)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  writeAndCommit(dir, 'secret.md', 'ORIGINAL\n', 'seed: secret.md pre-exists so the offender MODIFIES it');
+  run(dir, 'checkout', '-b', 'off', 'main');
+  writeFileSync(join(dir, 'secret.md'), 'PAYLOAD_AAA\n');
+  run(dir, 'add', 'secret.md');
+  run(dir, 'commit', '-m', 'off: modify secret.md to AAA');
+  const m = mergeIntoMain(dir, 'off', 'PR1: modify offender');
+  // attacker plants -diff, then a MODIFY fake-reverter to DIFFERENT content
+  writeAndCommit(dir, '.gitattributes', '*.md -diff\n', 'chore: attributes (attacker-planted)');
+  run(dir, 'checkout', '-b', 'ev', 'main');
+  writeFileSync(join(dir, 'secret.md'), 'PAYLOAD_BBB\n');
+  run(dir, 'add', 'secret.md');
+  run(dir, 'commit', '-m', 'ev: modify to BBB, not a revert');
+  const r = mergeIntoMain(dir, 'ev', 'PR2: modify launder under -diff');
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: false });
+});
+
+// A genuine revert must ALSO still resolve under the same planted
+// attribute — the hardening must not create a false NEGATIVE either.
+test('F-4 — a genuine revert still resolves despite the planted .gitattributes', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const m = mergeAddingPayload(dir, { 'secret.md': 'PAYLOAD_AAA\n' }, 'M');
+  writeAndCommit(dir, '.gitattributes', '*.md -diff\n', 'chore: attributes (attacker-planted)');
+  const r = genuineRevertMerge(dir, m, 'rv', 'PR2: genuine revert under attribute attack');
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(m, r.sha, { git }), { resolved: true });
+});
+
+// ── blast.mjs — the U3 context-window blast radius (documented tradeoff) ───
+// A single-line payload edit at position P; an intervening, unrelated
+// neighbor edit near P. Distance measured in lines from the payload.
+
+function blastTrial(t, distance) {
+  const dir = makeRepo(t);
+  const N = 60;
+  const P = 30;
+  const base = Array.from({ length: N }, (_, i) => `line_${i}`);
+  writeAndCommit(dir, 'f.txt', `${base.join('\n')}\n`, 'base');
+  const withPayload = [...base];
+  withPayload[P - 1] = 'line_PAYLOAD';
+  const m = mergeAddingPayload(dir, { 'f.txt': `${withPayload.join('\n')}\n` }, 'M');
+  if (distance !== null) {
+    const shifted = [...withPayload];
+    shifted[P - 1 - distance] = 'line_NEIGHBOR';
+    writeAndCommit(dir, 'f.txt', `${shifted.join('\n')}\n`, `neighbor edit at distance ${distance}`);
+  }
+  const r = genuineRevertMerge(dir, m, `rv-${distance}`, `PR2: revert at distance ${distance}`);
+  return { dir, m, r };
+}
+
+test('blast radius — no intervening edit: genuine revert resolves', (t) => {
+  const { dir, m, r } = blastTrial(t, null);
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+  assert.deepEqual(isResolvedAt(m, r.sha, { git }), { resolved: true });
+});
+
+test('blast radius — neighbor edit at distance 1 conflicts the revert itself (falls to the human gate)', (t) => {
+  const { r } = blastTrial(t, 1);
+  assert.equal(r.conflict, true);
+});
+
+test('blast radius — neighbor edit at distance 2 (within context) does NOT resolve', (t) => {
+  const { dir, m, r } = blastTrial(t, 2);
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+  assert.deepEqual(isResolvedAt(m, r.sha, { git }), { resolved: false });
+});
+
+test('blast radius — neighbor edit at distance 4 (outside context) resolves normally', (t) => {
+  const { dir, m, r } = blastTrial(t, 4);
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+  assert.deepEqual(isResolvedAt(m, r.sha, { git }), { resolved: true });
+});
+
+// ── isReverterOf — the reverter-skip (design §3.3) ──────────────────────────
+
+test('isReverterOf — a genuine auto-revert is a reverter; a claim-only merge is not', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const m = mergeAddingPayload(dir, { 'docs/adr/0001-thing.md': '# ADR 1\n' }, 'M');
+  const r = genuineRevertMerge(dir, m, 'rv', 'PR2: genuine auto-revert');
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+
+  assert.equal(isReverterOf(m, r.sha, { git }), true);
+
+  // A merge that merely CLAIMS (via commit message) to revert M but has no
+  // tree effect on M's own contribution.
+  run(dir, 'checkout', '-b', 'rc', 'main');
+  writeAndCommit(dir, 'other.txt', 'noise\n', `Rc: claims revert\n\nThis reverts commit ${m}.`);
+  const rc = mergeIntoMain(dir, 'rc', 'PR3: claim-only merge');
+
+  assert.equal(isReverterOf(m, rc, { git }), false);
+});
+
+// ── Checkpoint gate — violation-class → mechanism mapping (design §3.5) ────
+
+// 2.4.1-equivalent: diffSize-shaped — a genuine revert resolves via the
+// SAME predicate used for every class; there is no diffSize-specific
+// branch.
+test('diffSize-shaped offender — a genuine revert resolves via the same predicate (design §3.5 mechanism B)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const big = `${Array.from({ length: 500 }, (_, i) => `line ${i}`).join('\n')}\n`;
+  const m = mergeAddingPayload(dir, { 'big.txt': big }, 'M');
+  const r = genuineRevertMerge(dir, m, 'rv', 'PR2: revert oversized offender');
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(m, r.sha, { git }), { resolved: true });
+});
+
+// THE OWNER'S CASE — adrPresence forward-fix. M adds an ADR at path P. A
+// LATER merge adds the missing brain/HOME.md at a DIFFERENT path Q, never
+// touching P. Tree-effect (now diff-inversion) fails CLOSED forever: no
+// merge's own contribution can ever equal pO, because none of them touch
+// P at all. The ONLY path that clears M is the human gate
+// (cursor.mjs accept, PR1) — outside resolution.mjs's concern by design.
+test("owner's case — an adrPresence forward-fix (adds a DIFFERENT path) is NOT resolved, fails closed forever", (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const m = mergeAddingPayload(dir, { 'docs/adr/0002-thing.md': '# ADR 2\n' }, 'M');
+  const forwardFix = mergeAddingPayload(dir, { 'brain/HOME.md': '# HOME\n' }, 'fix');
+  const later = mergeAddingPayload(dir, { 'more.txt': 'later\n' }, 'later');
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(m, forwardFix, { git }), { resolved: false });
+  assert.deepEqual(isResolvedAt(m, later, { git }), { resolved: false });
+});
+
+// Design-intent assertion (no new code exercised) — enumerates the four
+// violation classes brain-audit emits against the resolution mechanism each
+// maps to, citing design §3.5's table, so a future reader sees the mapping
+// is deliberate, not incidental.
+test('violation-class -> resolution-mechanism mapping is deliberate (design §3.5)', () => {
+  // Mechanisms per design §3.5:
+  //   A = automatic re-evaluation (mutable input makes the check PASS)
+  //   B = automatic diff-inversion skip (settled-by-revert; the ONLY use)
+  //   C = human gate (accept --reason)
+  //   D = exit-2 (uncomputable)
+  const MECHANISMS_BY_CLASS = {
+    diffSize: ['B', 'A', 'C'],
+    issueLink: ['B', 'A', 'C'],
+    adrPresence: ['B', 'C'], // revert ONLY — NO automatic forward-fix path
+    memoryPresence: ['A'], // repo-global; re-eval ONLY, never tree-effect
+  };
+
+  assert.deepEqual(
+    Object.keys(MECHANISMS_BY_CLASS).sort(),
+    ['adrPresence', 'diffSize', 'issueLink', 'memoryPresence'],
+    'exactly the four classes brain-audit emits (brain-audit.mjs:254-262)',
+  );
+  assert.equal(MECHANISMS_BY_CLASS.adrPresence.includes('A'), false);
+  assert.equal(MECHANISMS_BY_CLASS.memoryPresence.includes('B'), false);
+  const diffInversionClasses = Object.entries(MECHANISMS_BY_CLASS)
+    .filter(([, m]) => m.includes('B')).map(([c]) => c).sort();
+  assert.deepEqual(diffInversionClasses, ['adrPresence', 'diffSize', 'issueLink']);
+});
+
+// ── Drift guards ─────────────────────────────────────────────────────────
+
+// The deleted discriminators must not exist anywhere in the postmerge
+// SOURCE (non-test .mjs) — a mechanical trip-wire against the exact
+// regression this module exists to prevent (design §3.0).
+test('drift-guard — isRevertedInRange/findTrailerCandidates/trailerRegex are absent from postmerge source', () => {
   const banned = ['isRevertedInRange', 'findTrailerCandidates', 'trailerRegex'];
   const files = readdirSync(POSTMERGE_DIR).filter((f) => f.endsWith('.mjs') && !f.endsWith('.test.mjs'));
   assert.ok(files.length > 0, 'expected at least one non-test .mjs under postmerge/');
@@ -263,9 +549,8 @@ test('2.2.7 drift-guard — isRevertedInRange/findTrailerCandidates/trailerRegex
 });
 
 // §3.4 drift-guard — no \x1e/\x1f record framing may reappear in postmerge
-// source. NUL (-z / %x00) is the only byte git cannot store in a commit
-// message; tree-effect reads no bodies, so the framing must simply be gone.
-test('§3.4 drift-guard — no \\x1e/\\x1f framing constant exists in postmerge source', () => {
+// source. Tree-effect/diff-inversion reads no commit bodies at all.
+test('drift-guard — no \\x1e/\\x1f framing constant exists in postmerge source', () => {
   const files = readdirSync(POSTMERGE_DIR).filter((f) => f.endsWith('.mjs') && !f.endsWith('.test.mjs'));
   for (const f of files) {
     const src = readFileSync(join(POSTMERGE_DIR, f), 'utf8');
@@ -274,104 +559,187 @@ test('§3.4 drift-guard — no \\x1e/\\x1f framing constant exists in postmerge 
   }
 });
 
-// ── Phase 2.3 — isReverterOf, the reverter-skip ───────────────────────────────
+// ── MUTATION BAR — each test below reddens if the named guard is removed ───
+// These are not hypothetical: every collision asserted "must NOT happen"
+// here was empirically reproduced (in a throwaway scratch harness) by
+// actually dropping the named flag/call and observing the predicate flip
+// to a false positive. The comment on each test names the exact mutation.
 
-// A6 — an adrPresence-shaped offender M (adds an ADR without brain/HOME.md) and
-// its genuine tree-effect-verified auto-revert R. isReverterOf(M, R) is true.
-// A merge that merely CLAIMS to revert M (no tree effect) is NOT a reverter.
-test('2.3.1 A6 — genuine auto-revert R of M is a reverter; a claim-only merge is not', (t) => {
+// MUTATION: remove the `pO === ''` anti-vacuity guard (the first branch of
+// isResolvedAt). Without it, an empty-diff offender's pO ('') would be
+// compared against every candidate's reverse diff, including another,
+// UNRELATED empty-diff merge later in the same range (also '') — a trivial
+// match, falsely resolving an offender that never contributed anything.
+test('MUTATION GUARD (F-1) — an empty-diff offender never matches an unrelated later empty-diff merge', (t) => {
   const dir = makeRepo(t);
   seedBase(dir);
-  const m = mergeAddingPayload(dir, { 'docs/adr/0001-thing.md': '# ADR 1\n' }, 'M');
-  run(dir, 'revert', '-m', '1', '--no-edit', m);
-  const r = headSha(dir);
+  // M: an empty-effect merge (-s ours discards the feature branch's diff).
+  run(dir, 'checkout', '-b', 'feat-empty');
+  writeAndCommit(dir, 'sidecar.txt', 'side\n', 'feat work (discarded by -s ours)');
+  run(dir, 'checkout', 'main');
+  run(dir, 'merge', '--no-ff', '-s', 'ours', 'feat-empty', '-m', 'M: empty-effect merge');
+  const m = headSha(dir);
+  // A distinct, LATER empty-effect merge — also zero first-parent contribution.
+  run(dir, 'checkout', '-b', 'feat-empty-2');
+  writeAndCommit(dir, 'sidecar2.txt', 'side2\n', 'unrelated feat work (also discarded)');
+  run(dir, 'checkout', 'main');
+  run(dir, 'merge', '--no-ff', '-s', 'ours', 'feat-empty-2', '-m', 'N: unrelated empty-effect merge');
+  const tip = headSha(dir);
   const git = realGit(dir);
 
-  // R demonstrably removed M's payload: resolved AT R, but NOT at R^1 (== M).
-  assert.equal(isReverterOf(m, r, { git }), true);
-
-  // A claim-only merge: touches other.txt, cites a revert trailer, but leaves
-  // M's ADR on disk → no tree effect on M's paths → not a reverter.
-  writeFileSync(join(dir, 'other.txt'), 'noise\n');
-  run(dir, 'add', 'other.txt');
-  run(dir, 'commit', '-m', `Rc: claims revert\n\nThis reverts commit ${m}.`);
-  const rc = headSha(dir);
-
-  assert.equal(isReverterOf(m, rc, { git }), false);
+  // WITH the guard: refused before the empty-vs-empty comparison is even
+  // attempted (M's own pO is '', so the function returns immediately).
+  assert.deepEqual(isResolvedAt(m, tip, { git }), { resolved: false, reason: 'offender has no first-parent contribution' });
 });
 
-// ── Phase 2.4 — checkpoint gate: violation-class → mechanism (design §3.5) ─────
-
-// 2.4.1 diffSize-shaped: M's own diff exceeds the line budget; a genuine revert
-// restores its paths → tree-effect skip (mechanism B). The predicate is the
-// SAME `P ∩ D = ∅` used for every class — there is NO diffSize-specific branch
-// (design §3.5, mechanism B: "the ONLY use of the tree-effect skip").
-test('2.4.1 diffSize-shaped — genuine revert resolves via the SAME tree-effect predicate (design §3.5 mechanism B)', (t) => {
+// MUTATION: drop `--binary` from DIFF_ARGS. Without it, git's fallback for
+// a binary-attributed/binary-content MODIFY is the content-blind stub
+// "Binary files a/<path> and b/<path> differ" — IDENTICAL text for ANY two
+// different binary payloads modifying the SAME path, collapsing a
+// non-revert "evil" candidate onto the offender's own contribution.
+// `--binary` is the load-bearing content/tree defense here (design §3.2) —
+// this predicate is pure-read (no `hardenDiffRendering`/info-attributes
+// write, judgment-round-1, engram #916/#921), so `--binary` alone is what
+// stands between this attack and a false `resolved: true`. Behaviorally
+// verified to redden on drop (see Definition of Done below).
+test('MUTATION GUARD (--binary) — two different binary payloads at the same path never collapse to the content-blind stub', (t) => {
   const dir = makeRepo(t);
-  seedBase(dir);
-  const big = `${Array.from({ length: 500 }, (_, i) => `line ${i}`).join('\n')}\n`;
-  const m = mergeAddingPayload(dir, { 'big.txt': big }, 'M');
-  run(dir, 'revert', '-m', '1', '--no-edit', m);
-  const r = headSha(dir);
+  writeAndCommit(dir, 'a.bin', Buffer.from([0x00, 0x6f, 0x72, 0x69, 0x67]), 'binary base');
+  const m = mergeAddingPayload(dir, { 'a.bin': Buffer.from([0x00, 0x41, 0x41, 0x41]) }, 'M');
+  run(dir, 'checkout', '-b', 'ev', 'main');
+  writeFileSync(join(dir, 'a.bin'), Buffer.from([0x00, 0x42, 0x42, 0x42]));
+  run(dir, 'add', 'a.bin');
+  run(dir, 'commit', '-m', 'ev: different binary payload, not a real revert');
+  const r = mergeIntoMain(dir, 'ev', 'PR2: binary stub-collapse attempt');
   const git = realGit(dir);
 
-  // Identical call shape as A2/A6 — no class-specific parameter exists.
-  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: true });
+  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: false });
 });
 
-// 2.4.2 THE OWNER'S CASE — adrPresence forward-fix. M adds an ADR at path P. A
-// LATER commit adds the missing brain/HOME.md at a DIFFERENT path Q, never
-// touching P. Tree-effect fails CLOSED forever: P is still on disk so P∩D≠∅.
-// The ONLY path that clears M is the human gate (cursor.mjs accept, PR1) —
-// which is OUTSIDE resolution.mjs's concern by design (§3.5).
-test('2.4.2 OWNER\'S CASE — adrPresence forward-fix is NOT resolved by tree-effect, fails closed forever', (t) => {
+// MUTATION: drop BOTH `--no-renames` AND `diff.renames=false` (git's
+// default is renames=true, so only dropping the PAIR re-enables rename
+// detection; dropping either one alone leaves renames off and stays green).
+// A PURE
+// rename (100% similarity, no content modification in the SAME commit)
+// renders as "similarity index 100%\nrename from X\nrename to Y" with
+// ZERO content bytes — self-consistent regardless of what the actual bytes
+// are. An offender that is itself a pure rename, followed by tampering the
+// content IN PLACE, followed by a "reverter" that pure-renames the
+// (now-tampered) file back to the original path collapses to the SAME
+// zero-content rename text as the offender's own contribution — laundering
+// tampered content through a name-only match, exactly the class of bypass
+// (#916) this module exists to close.
+test('MUTATION GUARD (--no-renames) — a 100%-similarity rename never launders tampered content', (t) => {
   const dir = makeRepo(t);
-  seedBase(dir);
-  const m = mergeAddingPayload(dir, { 'docs/adr/0002-thing.md': '# ADR 2\n' }, 'M');
-  // Forward-fix: add the missing HOME.md at a DIFFERENT path, never touching P.
-  writeAndCommit(dir, 'brain/HOME.md', '# HOME\n', 'forward-fix: add missing HOME.md');
-  const tip1 = headSha(dir);
-  // Even a second, later unrelated commit does not clear it — "false forever".
-  writeAndCommit(dir, 'more.txt', 'later\n', 'later unrelated work');
-  const tip2 = headSha(dir);
+  mkdirSync(join(dir, 'templates'), { recursive: true });
+  mkdirSync(join(dir, 'docs', 'adr'), { recursive: true });
+  writeAndCommit(dir, 'templates/adr-template.md', 'ORIGINAL_CONTENT_C\n', 'base');
+
+  // M: a PURE rename (the violation is the relocation itself), content C unchanged.
+  run(dir, 'checkout', '-b', 'f');
+  run(dir, 'mv', 'templates/adr-template.md', 'docs/adr/0099-secret.md');
+  run(dir, 'commit', '-m', 'o: pure rename (the violation)');
+  const m = mergeIntoMain(dir, 'f', 'PR1: pure rename offender');
+
+  // Tamper: an ordinary commit corrupts the content IN PLACE (C -> D).
+  writeAndCommit(dir, 'docs/adr/0099-secret.md', 'TAMPERED_CONTENT_D\n', 'tamper: corrupt content in place');
+
+  // Attacker's fake reverter: a PURE rename back, content D left UNCHANGED
+  // (never restored to C) — still 100% self-similar within this commit.
+  run(dir, 'checkout', '-b', 'ev', 'main');
+  mkdirSync(join(dir, 'templates'), { recursive: true });
+  run(dir, 'mv', 'docs/adr/0099-secret.md', 'templates/adr-template.md');
+  run(dir, 'commit', '-m', 'ev: pure rename back, content NOT restored');
+  const r = mergeIntoMain(dir, 'ev', 'PR2: rename-back launder attempt');
   const git = realGit(dir);
 
-  assert.deepEqual(isResolvedAt(m, tip1, { git }), { resolved: false });
-  assert.deepEqual(isResolvedAt(m, tip2, { git }), { resolved: false });
+  // WITHOUT --no-renames, BOTH M's own contribution and R's reverse
+  // contribution render as "similarity index 100%\nrename from ... to ...\n"
+  // with ZERO content — byte-identical regardless of C vs D, and this
+  // assertion FAILS.
+  assert.deepEqual(isResolvedAt(m, r, { git }), { resolved: false });
 });
 
-// 2.4.3 — design-intent assertion (no new code exercised). Enumerates all four
-// violation classes brain-audit emits against the resolution mechanism each
-// maps to, citing design §3.5's table, so a future reader sees the mapping is
-// deliberate, not incidental. memoryPresence's "never tree-effect, re-eval
-// only" claim is a repo-global property OUTSIDE resolution.mjs's per-offender
-// predicate — documented here as a boundary; the cross-file wiring proof lands
-// in PR 3 (Phase 3.2).
-test('2.4.3 — violation-class → resolution-mechanism mapping is deliberate (design §3.5)', () => {
-  // Mechanisms per design §3.5:
-  //   A = automatic re-evaluation (mutable input makes the check PASS)
-  //   B = automatic tree-effect skip (settled-by-revert; the ONLY tree-effect use)
-  //   C = human gate (accept --reason)
-  //   D = exit-2 (uncomputable)
-  const MECHANISMS_BY_CLASS = {
-    diffSize: ['B', 'A', 'C'], // revert | size:exception label re-eval | human gate
-    issueLink: ['B', 'A', 'C'], // revert | PR-body edit re-eval | human gate
-    adrPresence: ['B', 'C'], // revert ONLY — NO automatic forward-fix path
-    memoryPresence: ['A'], // repo-global; re-eval ONLY, never tree-effect
-  };
+// ── HOSTILE-ENV ROBUSTNESS (ports forge_forkb3.mjs) — the verdict must be
+// INDEPENDENT of the ambient git config of the machine the predicate runs
+// on, not merely "defended by one specific flag". Runs the FULL public API
+// (`isResolvedAt`) under an adversarial `GIT_CONFIG_GLOBAL`: a hostile
+// textconv driver + `diff.external` + a global attributesFile (both
+// referencing a helper that collapses content to a constant string) +
+// `diff.algorithm=histogram`, with `GIT_CONFIG_SYSTEM=/dev/null` so no real
+// system config leaks in. `--binary` (plus the other pinned flags) must
+// still: (a) let a genuine revert resolve true (liveness) and (b) refuse a
+// content-launder (safety) — replacing the deleted tautologies (a source
+// grep for `--binary`, a direct `.git/info/attributes` content assertion)
+// with an honest behavioral proof that the verdict does not depend on the
+// environment (design §3.2, the CP-PR1/B6 "green that depends on the
+// environment" failure class). Liveness and safety are asserted in TWO
+// separate repos/offenders (not one shared history) — a genuine revert
+// commit that lands before a later, unrelated launder merge would
+// otherwise fall inside the ALREADY-resolved `(offender, tip]` range and
+// make the launder assertion vacuously pass for the wrong reason.
+function withHostileEnv(dir, t) {
+  const helper = join(dir, 'constant.sh');
+  writeFileSync(helper, '#!/bin/sh\necho COLLAPSED\n');
+  spawnSync('chmod', ['+x', helper]);
+  const globalAttrsPath = join(dir, 'hostile.attributes');
+  writeFileSync(globalAttrsPath, '*.md diff=hide\n*.bin diff=hide\n');
+  const hostileConfigPath = join(dir, 'hostile.gitconfig');
+  writeFileSync(hostileConfigPath, [
+    '[diff "hide"]',
+    `\ttextconv = ${helper}`,
+    '[diff]',
+    `\texternal = ${helper}`,
+    '\talgorithm = histogram',
+    '[core]',
+    `\tattributesFile = ${globalAttrsPath}`,
+  ].join('\n'));
+
+  const savedGlobal = process.env.GIT_CONFIG_GLOBAL;
+  const savedSystem = process.env.GIT_CONFIG_SYSTEM;
+  process.env.GIT_CONFIG_GLOBAL = hostileConfigPath;
+  process.env.GIT_CONFIG_SYSTEM = '/dev/null';
+  t.after(() => {
+    if (savedGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = savedGlobal;
+    if (savedSystem === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+    else process.env.GIT_CONFIG_SYSTEM = savedSystem;
+  });
+}
+
+test('HOSTILE-ENV ROBUSTNESS — liveness: a genuine revert still resolves under adversarial ambient git config (forge_forkb3)', (t) => {
+  const dir = makeRepo(t);
+  withHostileEnv(dir, t);
+
+  seedBase(dir);
+  const m = mergeAddingPayload(dir, { 'secret.md': 'PAYLOAD_AAA\n' }, 'M');
+  const genuine = genuineRevertMerge(dir, m, 'rv', 'PR2: genuine revert under hostile ambient config');
+  assert.equal(genuine.conflict, false);
+  const git = realGit(dir);
 
   assert.deepEqual(
-    Object.keys(MECHANISMS_BY_CLASS).sort(),
-    ['adrPresence', 'diffSize', 'issueLink', 'memoryPresence'],
-    'exactly the four classes brain-audit emits (brain-audit.mjs:254-262)',
+    isResolvedAt(m, genuine.sha, { git }),
+    { resolved: true },
+    'liveness: a genuine revert must still resolve under a hostile ambient git config',
   );
-  // The owner's case: adrPresence has NO automatic re-eval (A) path.
-  assert.equal(MECHANISMS_BY_CLASS.adrPresence.includes('A'), false);
-  // memoryPresence is NEVER tree-effect (B): a repo-global property.
-  assert.equal(MECHANISMS_BY_CLASS.memoryPresence.includes('B'), false);
-  // Tree-effect (B) — the ONLY mechanism resolution.mjs implements — appears for
-  // exactly the classes with an immutable, revert-shaped contribution.
-  const treeEffectClasses = Object.entries(MECHANISMS_BY_CLASS)
-    .filter(([, m]) => m.includes('B')).map(([c]) => c).sort();
-  assert.deepEqual(treeEffectClasses, ['adrPresence', 'diffSize', 'issueLink']);
+});
+
+test('HOSTILE-ENV ROBUSTNESS — safety: a content-launder is still refused under adversarial ambient git config (forge_forkb3)', (t) => {
+  const dir = makeRepo(t);
+  withHostileEnv(dir, t);
+
+  seedBase(dir);
+  const m = mergeAddingPayload(dir, { 'secret.md': 'PAYLOAD_AAA\n' }, 'M');
+  run(dir, 'checkout', '-b', 'ev', 'main');
+  writeFileSync(join(dir, 'secret.md'), 'PAYLOAD_BBB\n');
+  run(dir, 'add', 'secret.md');
+  run(dir, 'commit', '-m', 'ev: different content, not a real revert');
+  const launder = mergeIntoMain(dir, 'ev', 'PR2: content-launder attempt under hostile ambient config');
+  const git = realGit(dir);
+
+  assert.deepEqual(
+    isResolvedAt(m, launder, { git }),
+    { resolved: false },
+    'safety: a content-launder must still be refused under a hostile ambient git config',
+  );
 });
