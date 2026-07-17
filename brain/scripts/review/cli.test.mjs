@@ -1,11 +1,15 @@
-// cli.test.mjs — Unit tests for the `brain:review` CLI skeleton (REQ-H1-5;
-// design.md §2). No test spawns a real gh/glab/git process — identity and
-// cold-boot seams are injected exactly like their own unit tests.
+// cli.test.mjs — Unit tests for the `brain:review` CLI (REQ-H1-5, REQ-H1-7,
+// REQ-H1-8, REQ-H1-9; design.md §2). No test spawns a real gh/glab/git
+// process — identity, cold-boot, tranche, and poster seams are all injected,
+// exactly like their own unit tests.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { parseArgs, main } from './cli.mjs';
+import { REQUIRED_JOBS } from '../vcs/governance-checks.mjs';
+
+const HEAD = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
 
 function spyVcs() {
   const calls = { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 };
@@ -15,22 +19,34 @@ function spyVcs() {
     issueComment: async () => { calls.issueComment++; return { url: 'unused' }; },
     labelAdd: async () => { calls.labelAdd++; return { ok: true }; },
     labelRemove: async () => { calls.labelRemove++; return { ok: true }; },
+    prView: async () => { calls.prView = (calls.prView ?? 0) + 1; return { headRefOid: HEAD }; },
   };
 }
 
-function readyDeps({ vcs }) {
+function greenRollup() {
+  return REQUIRED_JOBS.map(name => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' }));
+}
+
+function readyDeps({ vcs, labels = [] } = {}) {
   return {
     project: 'csrinaldi/brain',
     provider: 'github',
+    baseSha: 'BASE',
+    getChangedFiles: () => [],
     identityDeps: {
       readConfig: () => ({ handle: 'brain-reviewer', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
       readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'shh' }),
     },
     coldBootDeps: {
-      fetchPr: async () => ({ number: 42, author: 'alice', labels: [], body: '', headRefOid: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' }),
+      fetchPr: async () => ({ number: 42, author: 'alice', labels, body: '', headRefOid: HEAD }),
       cloneDetached: async () => ({ detached: true }),
       readRecords: () => [],
       fetchReviews: async () => [],
+    },
+    trancheDeps: {
+      fetchRollup: async () => greenRollup(),
+      diffNumstat: () => '10\t5\tfoo.mjs\n',
+      readIgnoreList: () => [],
     },
     writeVerbs: vcs,
   };
@@ -48,7 +64,7 @@ test('parseArgs: defaults mode to auto, dryRun to false', () => {
   assert.deepEqual(parseArgs(['--pr', '7']), { pr: 7, mode: 'auto', dryRun: false });
 });
 
-// ── --dry-run: prints the verdict, posts nothing ────────────────────────────
+// ── --dry-run: computes the real verdict, posts nothing ─────────────────────
 
 test('main --dry-run: prints the verdict to stdout and invokes zero write verbs', async () => {
   const vcs = spyVcs();
@@ -61,13 +77,62 @@ test('main --dry-run: prints the verdict to stdout and invokes zero write verbs'
 
   assert.equal(code, 0);
   assert.ok(lines.some(l => /protocol: brain-review\/1/.test(l)));
+  assert.ok(lines.some(l => /verdict: APPROVE/.test(l)), 'green gates + budget in range → APPROVE');
   assert.deepEqual(vcs.calls, { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 });
 });
 
-test('main WITHOUT --dry-run also invokes zero write verbs — H1-1 has no poster yet', async () => {
+// ── real posting: H1-2c wires the real poster ───────────────────────────────
+
+test('main WITHOUT --dry-run (mode auto → tranche): posts the verdict via prReviewComment exactly once', async () => {
   const vcs = spyVcs();
-  const code = await main({ argv: ['--pr', '42'], log: () => {}, ...readyDeps({ vcs }) });
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42'], log: (s) => lines.push(s), ...readyDeps({ vcs }) });
   assert.equal(code, 0);
+  assert.equal(vcs.calls.prReviewComment, 1);
+  assert.equal(vcs.calls.issueComment, 0);
+  assert.equal(vcs.calls.labelAdd, 0);
+  assert.ok(lines.some(l => /protocol: brain-review\/1/.test(l)));
+});
+
+test('main: a failing required gate produces a REVISE verdict that still posts (the reviewer never approves/blocks merge itself)', async () => {
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.trancheDeps.fetchRollup = async () =>
+    greenRollup().map(g => (g.name === 'memory-gate' ? { ...g, conclusion: 'FAILURE' } : g));
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42'], log: (s) => lines.push(s), ...deps });
+  assert.equal(code, 0);
+  assert.ok(lines.some(l => /verdict: REVISE/.test(l)));
+  assert.equal(vcs.calls.prReviewComment, 1);
+});
+
+// ── mode ruling/checkpoint: explicit not-yet-implemented stub, never silent ─
+
+test('main: mode derives to "ruling" (needs-ruling label) → explicit not-yet-implemented, exits non-zero, posts nothing', async () => {
+  const vcs = spyVcs();
+  const errors = [];
+  const code = await main({
+    argv: ['--pr', '42'],
+    log: () => {},
+    error: (s) => errors.push(s),
+    ...readyDeps({ vcs, labels: ['needs-ruling'] }),
+  });
+  assert.equal(code, 1);
+  assert.ok(errors.some(l => /ruling/.test(l) && /not.*yet.*implement/i.test(l)));
+  assert.deepEqual(vcs.calls, { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 });
+});
+
+test('main: an explicit --mode checkpoint → explicit not-yet-implemented, exits non-zero, posts nothing', async () => {
+  const vcs = spyVcs();
+  const errors = [];
+  const code = await main({
+    argv: ['--pr', '42', '--mode', 'checkpoint'],
+    log: () => {},
+    error: (s) => errors.push(s),
+    ...readyDeps({ vcs }),
+  });
+  assert.equal(code, 1);
+  assert.ok(errors.some(l => /checkpoint/.test(l) && /not.*yet.*implement/i.test(l)));
   assert.deepEqual(vcs.calls, { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 });
 });
 

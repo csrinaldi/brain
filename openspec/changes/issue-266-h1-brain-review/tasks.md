@@ -155,21 +155,21 @@ slice: H1
 | Decision before apply | Resolved — ADR-0021 Accepted, this slice implements Decision 1-3. |
 
 ## Phase 7 — mode derivation (REQ-H1-7)
-- [ ] **7.1 RED/GREEN** — `review/mode.mjs`: pure `deriveMode({ labels, changedPaths })` →
+- [x] **7.1 RED/GREEN** — `review/mode.mjs`: pure `deriveMode({ labels, changedPaths })` →
       needs-ruling→ruling / touches `checkpoint-report.md`→checkpoint / else→tranche. Table-driven test.
 
 ## Phase 8 — tranche evaluator (REQ-H1-8)
-- [ ] **8.1 RED/GREEN** — required gates from the server `statusCheckRollup` re-derived cold
+- [x] **8.1 RED/GREEN** — required gates from the server `statusCheckRollup` re-derived cold
       (`REQUIRED_JOBS`); detection warns quoted verbatim; budget re-derived via `diff-size-count`,
       never read from a report; Tier-2 frontier (`brain/core`,`brain/project`) agent-author flag;
       Tier-3 AI-attribution flag.
-- [ ] **8.2 RED/GREEN** — uncomputable evidence (`gh` down) → `REVISE` + `conditions:[evidence
+- [x] **8.2 RED/GREEN** — uncomputable evidence (`gh` down) → `REVISE` + `conditions:[evidence
       uncomputable]`, never APPROVE (fail-closed, §10).
 
 ## Phase 9 — poster: anti-stale + anti-loop (REQ-H1-9)
-- [ ] **9.1 RED/GREEN** — post via `prReviewComment`/`issueComment` (spy VCS asserts no APPROVE path).
-- [ ] **9.2 RED/GREEN** — anti-stale: head moved mid-run ⇒ post nothing, `reviewed:stale`.
-- [ ] **9.3 RED/GREEN** — anti-loop: last block is this reviewer's AND `head_sha` unchanged ⇒ skip.
+- [x] **9.1 RED/GREEN** — post via `prReviewComment`/`issueComment` (spy VCS asserts no APPROVE path).
+- [x] **9.2 RED/GREEN** — anti-stale: head moved mid-run ⇒ post nothing, `reviewed:stale`.
+- [x] **9.3 RED/GREEN** — anti-loop: last block is this reviewer's AND `head_sha` unchanged ⇒ skip.
 
 ### Review Workload Forecast — H1-2
 | Field | Value |
