@@ -23,12 +23,15 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 // REQ-266-2): four COMMENT-only write verbs. prReviewComment hardcodes
 // event: 'COMMENT' on both providers — no APPROVE code path exists (lock 2,
 // REQ-266-3).
+// prStatusRollup (ADR-0021 Decision 2): READ-only status-check rollup — no
+// write path, no APPROVE path, no label mutation.
 export const VERBS = [
   'authCheck', 'authLogin', 'whoami',
   'issueView', 'issueList', 'mrList', 'prView', 'mrCreate', 'labelEvents', 'prReviews',
   'commitStatus', 'repoCloneUrl', 'patSetupUrl', 'projectResolve',
   'branchProtect', 'capabilities',
   'prReviewComment', 'issueComment', 'labelAdd', 'labelRemove',
+  'prStatusRollup',
 ];
 
 /**
