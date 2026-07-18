@@ -729,32 +729,97 @@ test('gitlab.mrCreate returns { url: null, error } on failure (never throws)', a
 
 // ── prView ────────────────────────────────────────────────────────────────────
 
-test('github.prView returns { number, labels, body, author } on success', async () => {
-  setSpawn(fakeSpawn({
+/**
+ * Fake spawn distinguishing the two calls prView now makes: the main
+ * `gh pr view --json ...` call (`args[0] === 'pr'`) and the supplementary
+ * `gh api repos/{owner}/{repo}/pulls/{n} --jq .base.sha` call
+ * (`args[0] === 'api'`, ADR-0022) — which returns a RAW trimmed sha string,
+ * not JSON, so it cannot share `fakeSpawn`'s uniform JSON-stringify shape.
+ */
+function fakePrViewSpawn(mainData, baseSha) {
+  return (_cmd, args) =>
+    args[0] === 'pr'
+      ? { status: 0, stdout: JSON.stringify(mainData), stderr: '' }
+      : { status: 0, stdout: `${baseSha}\n`, stderr: '' };
+}
+
+test('github.prView returns { number, labels, body, author, headRefOid, baseRefOid } on success', async () => {
+  setSpawn(fakePrViewSpawn({
     number: 42,
     labels: [{ name: 'size:exception' }, { name: 'kind:feature' }],
     body: 'Closes #10\n\nDetails here.',
     author: { login: 'alice' },
-  }));
+    headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d',
+  }, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'));
   const result = await github.prView({ project: 'o/r', number: 42 });
   assert.deepEqual(result, {
     number: 42,
     labels: ['size:exception', 'kind:feature'],
     body: 'Closes #10\n\nDetails here.',
     author: 'alice',
+    headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d',
+    baseRefOid: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
   });
 });
 
-test('github.prView returns { number, labels: null, body: null, author: null } on gh failure (never throws) — REQ-CIC-2 uncomputable, not genuinely-empty', async () => {
+test('github.prView returns { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null } on gh failure (never throws) — REQ-CIC-2 uncomputable, not genuinely-empty', async () => {
   setSpawn(() => ({ status: 1, stdout: '', stderr: 'not found' }));
   const result = await github.prView({ project: 'o/r', number: 99 });
-  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null });
+  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null });
 });
 
-test('github.prView returns { number, labels: null, body: null, author: null } on malformed JSON (never throws)', async () => {
+test('github.prView returns { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null } on malformed JSON (never throws)', async () => {
   setSpawn(() => ({ status: 0, stdout: 'not-json', stderr: '' }));
   const result = await github.prView({ project: 'o/r', number: 5 });
-  assert.deepEqual(result, { number: 5, labels: null, body: null, author: null });
+  assert.deepEqual(result, { number: 5, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null });
+});
+
+test('github.prView headRefOid defaults to null when absent from an otherwise-successful response', async () => {
+  setSpawn(fakePrViewSpawn({ number: 3, labels: [], body: 'x', author: null }, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'));
+  const result = await github.prView({ project: 'o/r', number: 3 });
+  assert.equal(result.headRefOid, null);
+});
+
+// baseRefOid (ADR-0022 Decision 1) — the strict supplementary `gh api
+// repos/{owner}/{repo}/pulls/{n} --jq .base.sha` call.
+
+test('github.prView baseRefOid comes from the supplementary gh api .../pulls/{n} --jq .base.sha call', async () => {
+  setSpawn(fakePrViewSpawn(
+    { number: 7, labels: [], body: '', author: null, headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d' },
+    'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+  ));
+  const result = await github.prView({ project: 'o/r', number: 7 });
+  assert.equal(result.baseRefOid, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef');
+});
+
+test('github.prView baseRefOid defaults to null when the supplementary call fails but the main fetch succeeded (other fields preserved)', async () => {
+  setSpawn((_cmd, args) =>
+    args[0] === 'pr'
+      ? { status: 0, stdout: JSON.stringify({ number: 7, labels: [], body: '', author: null, headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d' }), stderr: '' }
+      : { status: 1, stdout: '', stderr: 'not found' }
+  );
+  const result = await github.prView({ project: 'o/r', number: 7 });
+  assert.equal(result.baseRefOid, null);
+  assert.equal(result.headRefOid, 'cafef00dcafef00dcafef00dcafef00dcafef00d', 'a failed supplementary call must not blank out fields the main fetch already resolved');
+  assert.equal(result.body, '', 'a failed supplementary call must not blank out fields the main fetch already resolved');
+});
+
+test('github.prView baseRefOid is null (not the string "null") when the supplementary call returns a JSON-null base.sha', async () => {
+  // `gh api --jq .base.sha` prints the literal "null" when base.sha is JSON-null;
+  // it must normalize to null, matching gitlab.mjs's `diff_refs?.base_sha ?? null` discipline.
+  setSpawn(fakePrViewSpawn(
+    { number: 7, labels: [], body: '', author: null, headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d' },
+    'null',
+  ));
+  const result = await github.prView({ project: 'o/r', number: 7 });
+  assert.equal(result.baseRefOid, null);
+});
+
+test('github.prView does not attempt the supplementary gh api call when the main gh pr view call fails', async () => {
+  let calls = 0;
+  setSpawn(() => { calls++; return { status: 1, stdout: '', stderr: 'not found' }; });
+  await github.prView({ project: 'o/r', number: 99 });
+  assert.equal(calls, 1, 'a main-fetch failure must short-circuit before the supplementary call — never a second spawn');
 });
 
 test('github.prView body defaults to "" (genuinely empty) when field absent in an otherwise-successful response', async () => {
@@ -774,7 +839,7 @@ test('github.prView author defaults to null when absent from an otherwise-succes
 // via an injected fetchImpl (no setSpawn fixture), same discipline as
 // issueView/labelEvents/prReviews — the DEFAULT path must never reach for the
 // glab CLI.
-test('gitlab.prView returns { number, labels, body, author } normalized, over the shared gitlabApiFetch transport', async () => {
+test('gitlab.prView returns { number, labels, body, author, headRefOid, baseRefOid } normalized, over the shared gitlabApiFetch transport', async () => {
   let seenUrl;
   let seenHeaders;
   const result = await gitlab.prView({
@@ -792,6 +857,8 @@ test('gitlab.prView returns { number, labels, body, author } normalized, over th
           labels: ['size:exception', 'kind:feature'],
           description: 'Closes #10\n\nDetails here.',
           author: { username: 'alice' },
+          sha: 'cafef00dcafef00dcafef00dcafef00dcafef00d',
+          diff_refs: { base_sha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' },
         }),
       };
     },
@@ -803,16 +870,69 @@ test('gitlab.prView returns { number, labels, body, author } normalized, over th
     labels: ['size:exception', 'kind:feature'],
     body: 'Closes #10\n\nDetails here.',
     author: 'alice',
+    headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d',
+    baseRefOid: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
   });
 });
 
-test('gitlab.prView returns { number, labels: null, body: null, author: null } on fetch failure (never throws) — uncomputable, not genuinely-empty', async () => {
+test('gitlab.prView headRefOid falls back to diff_refs.head_sha when the top-level sha is absent', async () => {
+  const result = await gitlab.prView({
+    project: 'g/r',
+    number: 42,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        iid: 42,
+        labels: [],
+        description: '',
+        author: { username: 'alice' },
+        diff_refs: { head_sha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' },
+      }),
+    }),
+  });
+  assert.equal(result.headRefOid, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef');
+});
+
+test('gitlab.prView headRefOid defaults to null when neither sha nor diff_refs.head_sha is present', async () => {
+  const result = await gitlab.prView({
+    project: 'g/r',
+    number: 42,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ iid: 42, labels: [], description: '', author: null }) }),
+  });
+  assert.equal(result.headRefOid, null);
+});
+
+// baseRefOid (ADR-0022 Decision 1) — read directly off the already-fetched MR
+// payload's diff_refs.base_sha, no second request (unlike GitHub).
+
+test('gitlab.prView baseRefOid normalizes from diff_refs.base_sha', async () => {
+  const result = await gitlab.prView({
+    project: 'g/r',
+    number: 42,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ iid: 42, labels: [], description: '', author: null, diff_refs: { base_sha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' } }),
+    }),
+  });
+  assert.equal(result.baseRefOid, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef');
+});
+
+test('gitlab.prView baseRefOid defaults to null when diff_refs.base_sha is absent on an otherwise-successful fetch', async () => {
+  const result = await gitlab.prView({
+    project: 'g/r',
+    number: 42,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ iid: 42, labels: [], description: '', author: null }) }),
+  });
+  assert.equal(result.baseRefOid, null);
+});
+
+test('gitlab.prView returns { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null } on fetch failure (never throws) — uncomputable, not genuinely-empty', async () => {
   const result = await gitlab.prView({
     project: 'g/r',
     number: 99,
     fetchImpl: async () => ({ ok: false, status: 404 }),
   });
-  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null });
+  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null });
 });
 
 test('gitlab.prView author defaults to null when absent from an otherwise-successful response', async () => {

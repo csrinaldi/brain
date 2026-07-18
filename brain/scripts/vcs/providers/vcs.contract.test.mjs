@@ -165,7 +165,28 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assertProvenance(fixture, fixtureName);
 
     const result = await vcs.prView({ project: 'x/y', number: 42, ...prViewArgs(fixture) });
-    assert.deepEqual(result, { number: 42, labels: null, body: null, author: null });
+    assert.deepEqual(result, { number: 42, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null });
+  });
+
+  // headRefOid (ADR-0021 Decision 1): the recorded/derived happy fixtures
+  // predate this field (queried BEFORE the widening), so they are exercised
+  // inline here rather than mutating provenance-tracked fixture files.
+  test(`${providerName}.prView (contract): a successful fetch normalizes headRefOid to the API head sha`, async () => {
+    const withHead =
+      providerName === 'github'
+        ? { throws: false, data: { number: 7, labels: [], body: '', author: null, headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d' } }
+        : { throws: false, data: { iid: 7, labels: [], description: '', author: null, sha: 'cafef00dcafef00dcafef00dcafef00dcafef00d' } };
+    const result = await vcs.prView({ project: 'x/y', number: 7, ...prViewArgs(withHead) });
+    assert.equal(result.headRefOid, 'cafef00dcafef00dcafef00dcafef00dcafef00d');
+  });
+
+  test(`${providerName}.prView (contract): headRefOid normalizes to null when uncomputable on an otherwise-successful fetch`, async () => {
+    const noHead =
+      providerName === 'github'
+        ? { throws: false, data: { number: 7, labels: [], body: '', author: null } }
+        : { throws: false, data: { iid: 7, labels: [], description: '', author: null } };
+    const result = await vcs.prView({ project: 'x/y', number: 7, ...prViewArgs(noHead) });
+    assert.equal(result.headRefOid, null);
   });
 
   // Body-parity (task 3.7, empty-vs-uncomputable canonical rule): `null` means
@@ -222,3 +243,232 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assert.equal(typeof result.error, 'string', 'a failed mrCreate must carry an error string');
   });
 }
+
+// ── prView baseRefOid (ADR-0022 Decision 1) ─────────────────────────────────
+// GH sources it via a SECOND, supplementary `gh api repos/{owner}/{repo}/
+// pulls/{n} --jq .base.sha` call — `gh pr view --json` has no baseRefOid
+// field. GL reads the already-fetched MR payload's `diff_refs.base_sha`
+// (mirrors headRefOid's diff_refs.head_sha; no second request). GitHub's
+// mechanism needs a SECOND spawn call returning a raw (not JSON) sha string —
+// this doesn't fit the single-fixture `prViewArgs` glue used by the loop
+// above (which mocks one uniform response for every spawn/fetch call), so
+// these are exercised per-provider, same discipline as the prStatusRollup
+// block below.
+
+const BASE_REF_PROVIDERS = {
+  github: {
+    module: github,
+    ok: (baseSha) => {
+      setSpawn((_cmd, args) =>
+        args[0] === 'pr'
+          ? { status: 0, stdout: JSON.stringify({ number: 7, labels: [], body: '', author: null, headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d' }), stderr: '' }
+          : { status: 0, stdout: `${baseSha}\n`, stderr: '' }
+      );
+      return {};
+    },
+    supplementFails: () => {
+      setSpawn((_cmd, args) =>
+        args[0] === 'pr'
+          ? { status: 0, stdout: JSON.stringify({ number: 7, labels: [], body: '', author: null, headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d' }), stderr: '' }
+          : { status: 1, stdout: '', stderr: 'fixture: simulated failure' }
+      );
+      return {};
+    },
+  },
+  gitlab: {
+    module: gitlab,
+    ok: (baseSha) => ({
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ iid: 7, labels: [], description: '', author: null, diff_refs: { base_sha: baseSha } }),
+      }),
+    }),
+    supplementFails: () => ({
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ iid: 7, labels: [], description: '', author: null }),
+      }),
+    }),
+  },
+};
+
+for (const providerName of Object.keys(BASE_REF_PROVIDERS)) {
+  const { module: vcs, ok, supplementFails } = BASE_REF_PROVIDERS[providerName];
+
+  test(`${providerName}.prView (contract): a successful fetch normalizes baseRefOid to the API base sha`, async () => {
+    const result = await vcs.prView({ project: 'x/y', number: 7, ...ok('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef') });
+    assert.equal(result.baseRefOid, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef');
+  });
+
+  test(`${providerName}.prView (contract): baseRefOid normalizes to null when uncomputable on an otherwise-successful fetch`, async () => {
+    const result = await vcs.prView({ project: 'x/y', number: 7, ...supplementFails() });
+    assert.equal(result.baseRefOid, null);
+  });
+}
+
+// ── prStatusRollup (ADR-0021 Decision 2) — READ-only status-check rollup ────
+// One assertion set run over both providers: the normalized shape
+// `[{ name, status, conclusion }]` is the contract both must satisfy, even
+// though GitHub's checks API and GitLab's commit-statuses model differ
+// underneath. Inline mocks (no fixture files) — GitLab's normalization
+// requires TWO chained calls (resolve the MR head sha, then fetch that sha's
+// statuses), which doesn't fit the single-fixture `{data}|{throws}` shape
+// used by the loop above.
+
+const ROLLUP_PROVIDERS = {
+  github: {
+    module: github,
+    ok: (checks) => { setSpawn(jsonSpawn({ statusCheckRollup: checks })); return {}; },
+    fail: () => { setSpawn(failSpawn('fixture: simulated failure')); return {}; },
+  },
+  gitlab: {
+    module: gitlab,
+    ok: (checks) => ({
+      fetchImpl: async (url) => (
+        url.includes('/merge_requests/')
+          ? { ok: true, json: async () => ({ sha: 'cafef00dcafef00dcafef00dcafef00dcafef00d' }) }
+          : { ok: true, json: async () => checks.map(c => ({ name: c.name, status: c.status })) }
+      ),
+    }),
+    fail: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
+  },
+};
+
+for (const providerName of Object.keys(ROLLUP_PROVIDERS)) {
+  const { module: vcs, ok, fail } = ROLLUP_PROVIDERS[providerName];
+
+  test(`${providerName}.prStatusRollup (contract): normalizes to [{ name, status, conclusion }], one entry per check`, async () => {
+    const checks = [
+      { name: 'issue-link', status: 'completed', conclusion: 'success' },
+      { name: 'diff-size', status: 'in_progress', conclusion: null },
+    ];
+    const result = await vcs.prStatusRollup({ project: 'x/y', number: 1, ...ok(checks) });
+
+    assert.ok(Array.isArray(result), 'prStatusRollup must return an array on a successful fetch');
+    assert.ok(result.length >= 1, 'the happy case must exercise at least one check');
+    for (const entry of result) {
+      assert.equal(typeof entry.name, 'string', 'each entry must carry a normalized name');
+      assert.ok('status' in entry, 'each entry must carry a normalized status');
+      assert.ok('conclusion' in entry, 'each entry must carry a normalized conclusion key (null is valid)');
+    }
+  });
+
+  test(`${providerName}.prStatusRollup (contract): a fetch failure yields null, never a fabricated []`, async () => {
+    const result = await vcs.prStatusRollup({ project: 'x/y', number: 1, ...fail() });
+    assert.equal(result, null, 'an uncomputable prStatusRollup fetch must return null, never []');
+  });
+
+  test(`${providerName}.prStatusRollup (contract): is READ-only — no write-verb call is reachable from its source`, () => {
+    const src = readFileSync(fileURLToPath(new URL(`./${providerName}.mjs`, import.meta.url)), 'utf8');
+    const fnBody = src.slice(src.indexOf('export async function prStatusRollup'));
+    const fnEnd = fnBody.indexOf('\nexport ', 1);
+    const scoped = fnEnd === -1 ? fnBody : fnBody.slice(0, fnEnd);
+    assert.doesNotMatch(scoped, /-X['"]?\s*['"]?POST|-X['"]?\s*['"]?PUT|-X['"]?\s*['"]?DELETE|method:\s*['"](POST|PUT|DELETE)['"]/,
+      `${providerName}.prStatusRollup must contain no write HTTP method — it is READ-only (ADR-0021 Decision 2)`);
+  });
+}
+
+// ── prReviewComment / issueComment / labelAdd / labelRemove (issue #266,
+// REQ-266-2) — the four COMMENT-only port verbs. ONE assertion set run over
+// both providers, same discipline as the loop above: parity means the same
+// test body applies to each provider. Inline mocks (no fixture files) — these
+// are simple write verbs and the normalized shapes are the whole contract.
+
+const WRITE_VERB_PROVIDERS = {
+  github: {
+    module: github,
+    ok: (data) => { setSpawn(jsonSpawn(data)); return {}; },
+    fail: () => { setSpawn(failSpawn('fixture: simulated failure')); return {}; },
+  },
+  gitlab: {
+    module: gitlab,
+    ok: (data) => ({ fetchImpl: async () => ({ ok: true, json: async () => data }) }),
+    fail: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
+  },
+};
+
+for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
+  const { module: vcs, ok, fail } = WRITE_VERB_PROVIDERS[providerName];
+
+  test(`${providerName}.prReviewComment (contract): posts event:'COMMENT' (hardcoded), returns { url } on success`, async () => {
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      ...ok({ html_url: 'https://example.test/x/y/pull/1#review-1', id: 1 }),
+    });
+    assert.equal(typeof result.url, 'string', 'a successful prReviewComment must return a string url');
+    assert.equal(result.error, undefined, 'a successful prReviewComment must not carry an error key');
+  });
+
+  test(`${providerName}.prReviewComment (contract): a post failure returns { url: null, error }, never throws`, async () => {
+    const result = await vcs.prReviewComment({ project: 'x/y', number: 1, body: 'verdict', ...fail() });
+    assert.equal(result.url, null, 'a failed prReviewComment must never fabricate a url');
+    assert.equal(typeof result.error, 'string', 'a failed prReviewComment must carry an error string');
+  });
+
+  test(`${providerName}.issueComment (contract): returns { url } on success`, async () => {
+    const result = await vcs.issueComment({
+      project: 'x/y', number: 1, body: 'ruling',
+      ...ok({ html_url: 'https://example.test/x/y/issues/1#comment-1', id: 1 }),
+    });
+    assert.equal(typeof result.url, 'string', 'a successful issueComment must return a string url');
+    assert.equal(result.error, undefined);
+  });
+
+  test(`${providerName}.issueComment (contract): a post failure returns { url: null, error }, never throws`, async () => {
+    const result = await vcs.issueComment({ project: 'x/y', number: 1, body: 'ruling', ...fail() });
+    assert.equal(result.url, null, 'a failed issueComment must never fabricate a url');
+    assert.equal(typeof result.error, 'string');
+  });
+
+  test(`${providerName}.labelAdd (contract): returns { ok: true } on success`, async () => {
+    const result = await vcs.labelAdd({
+      project: 'x/y', number: 1, labels: ['seq:1'],
+      ...ok({ labels: [{ name: 'seq:1' }] }),
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.error, undefined, 'a successful labelAdd must not carry an error key');
+  });
+
+  test(`${providerName}.labelAdd (contract): a post failure returns { ok: false, error }, never throws`, async () => {
+    const result = await vcs.labelAdd({ project: 'x/y', number: 1, labels: ['seq:1'], ...fail() });
+    assert.equal(result.ok, false, 'a failed labelAdd must never fabricate ok:true');
+    assert.equal(typeof result.error, 'string');
+  });
+
+  test(`${providerName}.labelRemove (contract): returns { ok: true } on success`, async () => {
+    const result = await vcs.labelRemove({
+      project: 'x/y', number: 1, labels: ['seq:1'],
+      ...ok({ labels: [] }),
+    });
+    assert.equal(result.ok, true);
+  });
+
+  test(`${providerName}.labelRemove (contract): a post failure returns { ok: false, error }, never throws`, async () => {
+    const result = await vcs.labelRemove({ project: 'x/y', number: 1, labels: ['seq:1'], ...fail() });
+    assert.equal(result.ok, false, 'a failed labelRemove must never fabricate ok:true');
+    assert.equal(typeof result.error, 'string');
+  });
+}
+
+// ── REQ-266-3 (lock 2): no code path can emit an APPROVE review, on any provider ──
+
+test('REQ-266-3 lock 2: github.prReviewComment sends event:\'COMMENT\' to the API regardless of input — no argument selects a different event', async () => {
+  let sentPayload;
+  setSpawn((_cmd, _args, opts) => {
+    sentPayload = JSON.parse(opts.input);
+    return { status: 0, stdout: JSON.stringify({ html_url: 'https://example.test/x/y/pull/1#review-1' }), stderr: '' };
+  });
+  await github.prReviewComment({ project: 'x/y', number: 1, body: 'anything, even an approval-sounding body' });
+  assert.equal(sentPayload.event, 'COMMENT', 'the review event sent to the API must always be COMMENT, never derived from input');
+});
+
+test('REQ-266-3 lock 2: no exported verb on either provider references an approval review-event literal — source scan', () => {
+  for (const modName of ['github.mjs', 'gitlab.mjs']) {
+    const src = readFileSync(fileURLToPath(new URL(`./${modName}`, import.meta.url)), 'utf8');
+    assert.doesNotMatch(
+      src,
+      /event\s*:\s*['"](?!COMMENT['"])[A-Z_]+['"]/,
+      `${modName} must not contain any review "event:" literal other than 'COMMENT' — no code path may reach an approval event`,
+    );
+  }
+});

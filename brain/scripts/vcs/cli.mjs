@@ -19,11 +19,19 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 // against the "Required verbs" table + provider exports (issue #239 A3 task
 // 3.6, design Decision 6) — `mrCreate`/`branchProtect`/`capabilities` were
 // implemented by both providers but missing from this array.
+// prReviewComment / issueComment / labelAdd / labelRemove (issue #266,
+// REQ-266-2): four COMMENT-only write verbs. prReviewComment hardcodes
+// event: 'COMMENT' on both providers — no APPROVE code path exists (lock 2,
+// REQ-266-3).
+// prStatusRollup (ADR-0021 Decision 2): READ-only status-check rollup — no
+// write path, no APPROVE path, no label mutation.
 export const VERBS = [
   'authCheck', 'authLogin', 'whoami',
   'issueView', 'issueList', 'mrList', 'prView', 'mrCreate', 'labelEvents', 'prReviews',
   'commitStatus', 'repoCloneUrl', 'patSetupUrl', 'projectResolve',
   'branchProtect', 'capabilities',
+  'prReviewComment', 'issueComment', 'labelAdd', 'labelRemove',
+  'prStatusRollup',
 ];
 
 /**

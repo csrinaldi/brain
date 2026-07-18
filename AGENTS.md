@@ -35,6 +35,7 @@ Reusable documentation — applies to any project that adopts this system.
 - [Feature-working-memory contract](brain/core/methodology/feature-working-memory-contract.md) — the resume.md schema + feature-checkpoint/resume verbs
 - [Memory record format](brain/core/methodology/memory-format.md) — the brain-owned durable .memory/ record format (schema, union merge, index)
 - [Workflow governance](brain/core/methodology/workflow-governance.md) — four invariants, CI gates, enforce-outputs boundary, lockout recovery
+- [Reviewer protocol](brain/core/methodology/reviewer-protocol.md) — the cold external reviewer as doctrine: three structural locks against reviewer-as-authorizer, the reviewActors/approvalActors two-key split, four COMMENT-only port verbs, and the brain-review/1 verdict schema
 
 ### Anti-patterns (generic)
 
@@ -73,6 +74,9 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0016](brain/project/decisions/adr-0016-ci-context-normalization.md) — CI Context Normalization: One Seam Over Provider-Specific Pipeline Evidence
 - [ADR-0017](brain/project/decisions/adr-0017-memory-format-owned-by-brain.md) — The Durable Memory Record Format Is Owned By Brain, Not By Engram
 - [ADR-0019](brain/project/decisions/adr-0019-harness-port.md) — The SDD_HARNESS port: four environment surfaces, artifacts neutral by design
+- [ADR-0020](brain/project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md) — External-reviewer VCS port verbs + the reviewActors/approvalActors two-key split
+- [ADR-0021](brain/project/decisions/adr-0021-reviewer-port-head-and-rollup.md) — Widen the VCS port for the cold reviewer: headRefOid on prView + a prStatusRollup read verb; retire the H1-1 cold-boot seam
+- [ADR-0022](brain/project/decisions/adr-0022-reviewer-port-base.md) — Widen the VCS port for the cold reviewer: baseRefOid on prView (closes H1-2C-BASE)
 
 ### Project-specific rules
 

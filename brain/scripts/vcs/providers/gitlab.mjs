@@ -86,6 +86,19 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
  * `gitlabApiFetch` transport — the same discipline as `issueView`. Normalizes
  * `iid`/`description`/`author.username` to `number`/`body`/`author`.
  *
+ * `headRefOid` (ADR-0021 Decision 1) — the API's head sha for the MR, the
+ * anchor a cold caller checks out **detached** at — normalizes from the
+ * payload's top-level `sha`, falling back to `diff_refs.head_sha` (both
+ * carry the same value on GitLab's MR response). Widened additively:
+ * existing callers reading only `number`/`labels`/`body`/`author` are
+ * unaffected.
+ *
+ * `baseRefOid` (ADR-0022 Decision 1) — the base branch's tip sha, normalized
+ * from the payload's `diff_refs.base_sha` (the mirror of how `headRefOid`
+ * uses `diff_refs.head_sha`). Unlike GitHub, no second request is needed —
+ * the already-fetched MR payload carries it. Widened additively, same
+ * discipline as `headRefOid`.
+ *
  * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS from the
  * caller (`gitlabApiConfig()`), never read from pipeline env directly here —
  * this file is a GATE_FILE (drift-guard forbids it). Defaults exist so
@@ -93,8 +106,9 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
  * `vcsToken()`, no proxy.
  *
  * Never throws: a fetch failure is caught and normalized to
- * `{ number, labels: null, body: null, author: null }` (uncomputable) —
- * never a fabricated empty `[]`/`''`, matching the `github.prView` contract.
+ * `{ number, labels: null, body: null, author: null, headRefOid: null,
+ * baseRefOid: null }` (uncomputable) — never a fabricated empty `[]`/`''`,
+ * matching the `github.prView` contract.
  *
  * Body-parity (issue #239 A3 Phase 3 task 3.7): `null` means uncomputable
  * (the fetch itself failed — the `catch` branch below); `''` means the fetch
@@ -105,7 +119,7 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
  * from the failure case above.
  *
  * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
- * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null }>}
+ * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null }>}
  */
 export async function prView({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
@@ -122,9 +136,64 @@ export async function prView({ project, number, apiBase, token, proxyUrl, fetchI
       labels: r.labels ?? [],
       body: r.description ?? '',
       author: r.author?.username ?? null,
+      headRefOid: r.sha ?? r.diff_refs?.head_sha ?? null,
+      baseRefOid: r.diff_refs?.base_sha ?? null,
     };
   } catch {
-    return { number, labels: null, body: null, author: null };
+    return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
+  }
+}
+
+/**
+ * prStatusRollup — the provider-agnostic READ verb `prStatusRollup`
+ * (ADR-0021 Decision 2). Returns the full status-check rollup for an MR's
+ * head commit, normalized to `[{ name, status, conclusion }]` — one entry
+ * per check. This is a READ: no write path exists on this verb.
+ *
+ * GitLab has no single "checks rollup" endpoint like GitHub's — this
+ * resolves the MR's head sha (the same `sha`/`diff_refs.head_sha` fallback
+ * as `prView`), then reads `GET projects/:id/repository/commits/:sha/statuses`
+ * (the same endpoint `commitStatus` reads, but the FULL list rather than
+ * `[0]`). GitLab's commit-status model has no separate "conclusion" field
+ * distinct from its terminal `status` (success/failed/canceled/etc.) — each
+ * entry normalizes to `conclusion: null`, satisfying the shared SHAPE (the
+ * contract both providers must meet) without fabricating a field GitLab
+ * doesn't have.
+ *
+ * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS from the
+ * caller, same discipline as `prView` — this file is a GATE_FILE and never
+ * reads pipeline env directly. Never throws: a fetch failure, or an
+ * unresolvable head sha, normalizes to `null` (uncomputable) — never a
+ * fabricated `[]`.
+ *
+ * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<Array<{ name: string, status: string|null, conclusion: null }>|null>}
+ */
+export async function prStatusRollup({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  const base = apiBase ?? 'https://gitlab.com/api/v4';
+  const tok = token ?? vcsToken(PROVIDER);
+  try {
+    const mr = await gitlabApiFetch({
+      apiBase: base,
+      token: tok,
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/merge_requests/${number}`,
+      fetchImpl,
+    });
+    const sha = mr.sha ?? mr.diff_refs?.head_sha ?? null;
+    if (!sha) return null;
+    const statuses = await gitlabApiFetch({
+      apiBase: base,
+      token: tok,
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/repository/commits/${sha}/statuses`,
+      fetchImpl,
+    });
+    if (!Array.isArray(statuses)) return null;
+    return statuses.map(s => ({ name: s.name ?? null, status: s.status ?? null, conclusion: null }));
+  } catch {
+    return null;
   }
 }
 
@@ -229,6 +298,114 @@ export async function commitStatus({ project, sha }) {
   const encoded = encodeURIComponent(project);
   const arr = runJson('glab', ['api', `projects/${encoded}/commits/${sha}/statuses?per_page=1`]);
   return normalizeCommitStatus('gitlab', arr[0]?.status);
+}
+
+/**
+ * Posts a COMMENT-state merge request review (issue #266, REQ-266-2).
+ * GitLab's notes API has no review-event concept (APPROVE/COMMENT/REQUEST
+ * CHANGES) — a plain note is posted, which structurally cannot become an
+ * approval either (lock 2, REQ-266-3: no such code path exists on this
+ * provider). The API response carries no `web_url`, so the display url is
+ * derived from `apiBase` (stripping the trailing `/api/v4`). Never throws.
+ *
+ * @param {{ project: string, number: number, body: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ url: string } | { url: null, error: string }>}
+ */
+export async function prReviewComment({ project, number, body, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const base = apiBase ?? 'https://gitlab.com/api/v4';
+  const encoded = encodeURIComponent(project);
+  try {
+    const r = await gitlabApiFetch({
+      apiBase: base,
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/merge_requests/${number}/notes`,
+      method: 'POST',
+      body: { body },
+      fetchImpl,
+    });
+    return { url: `${base.replace(/\/api\/v4\/?$/, '')}/${project}/-/merge_requests/${number}#note_${r.id}` };
+  } catch (err) {
+    return { url: null, error: err.message };
+  }
+}
+
+/**
+ * Posts a plain issue comment — rulings on issues (issue #266, REQ-266-2).
+ * Never throws.
+ *
+ * @param {{ project: string, number: number, body: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ url: string } | { url: null, error: string }>}
+ */
+export async function issueComment({ project, number, body, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const base = apiBase ?? 'https://gitlab.com/api/v4';
+  const encoded = encodeURIComponent(project);
+  try {
+    const r = await gitlabApiFetch({
+      apiBase: base,
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/issues/${number}/notes`,
+      method: 'POST',
+      body: { body },
+      fetchImpl,
+    });
+    return { url: `${base.replace(/\/api\/v4\/?$/, '')}/${project}/-/issues/${number}#note_${r.id}` };
+  } catch (err) {
+    return { url: null, error: err.message };
+  }
+}
+
+/**
+ * Adds labels to an issue (issue #266, REQ-266-2). Targets the issues
+ * endpoint, matching `labelEvents`' issues-only precedent on this provider.
+ * The CALLER enforces the deny-set (REQ-266-9, monotonic label tightening) —
+ * this verb performs the label API call only, no policy. Never throws.
+ *
+ * @param {{ project: string, number: number, labels: string[], apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
+ */
+export async function labelAdd({ project, number, labels, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  try {
+    await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/issues/${number}`,
+      method: 'PUT',
+      body: { add_labels: labels.join(',') },
+      fetchImpl,
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Removes labels from an issue — monotonic-tightening removals only (issue
+ * #266, REQ-266-9); the caller enforces the deny-set. Never throws.
+ *
+ * @param {{ project: string, number: number, labels: string[], apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
+ */
+export async function labelRemove({ project, number, labels, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  try {
+    await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/issues/${number}`,
+      method: 'PUT',
+      body: { remove_labels: labels.join(',') },
+      fetchImpl,
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 export async function repoCloneUrl({ host, project, token }) {

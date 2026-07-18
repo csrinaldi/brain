@@ -8,8 +8,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { setSpawn } from './lib/exec.mjs';
 
@@ -143,11 +145,12 @@ test('bot-only approval (approver is bot-allow-listed, distinct from author but 
 
 // ── gh/git I/O wrapper — gatherBrainWritesReviewedInputs (DI fakes, no real gh/git) ─
 
-function makeFakeDeps({ changedFiles = [], reviews = [], botAllowlist = [] } = {}) {
+function makeFakeDeps({ changedFiles = [], reviews = [], botAllowlist = [], overrideActors = [] } = {}) {
   return {
     diffNameOnly: () => changedFiles,
     fetchReviews: () => reviews,
-    readBotAllowlist: () => botAllowlist,
+    readBotAllowlist: () => botAllowlist,          // governance.reviewActors (L6 human-approver exclusion)
+    readOverrideActors: () => overrideActors,      // governance.approvalActors (override:* whitelist)
   };
 }
 
@@ -173,8 +176,8 @@ test('gatherBrainWritesReviewedInputs: resolves changedFiles via diffNameOnly, r
   assert.equal(inputs.adminOverride, false);
 });
 
-test('gatherBrainWritesReviewedInputs: adminOverride true only when an override:* label is BOTH present and allow-listed', async () => {
-  const deps = makeFakeDeps({ botAllowlist: ['override:incident-response'] });
+test('gatherBrainWritesReviewedInputs: adminOverride true only when an override:* label is BOTH present and listed in governance.approvalActors', async () => {
+  const deps = makeFakeDeps({ overrideActors: ['override:incident-response'] });
   const inputs = await gatherBrainWritesReviewedInputs({
     baseSha: 'base',
     headSha: 'head',
@@ -185,6 +188,24 @@ test('gatherBrainWritesReviewedInputs: adminOverride true only when an override:
     deps,
   });
   assert.equal(inputs.adminOverride, true);
+});
+
+// P272-OVERRIDE-KEY option (b): the override:* whitelist reads
+// governance.approvalActors, NOT governance.reviewActors. reviewActors is a pure
+// identity list — an override:* string listed ONLY there must NOT be honored.
+test('gatherBrainWritesReviewedInputs (P272-OVERRIDE-KEY): an override:* string in governance.reviewActors (botAllowlist) but NOT in governance.approvalActors (overrideActors) does NOT grant adminOverride', async () => {
+  const deps = makeFakeDeps({ botAllowlist: ['override:incident-response'], overrideActors: [] });
+  const inputs = await gatherBrainWritesReviewedInputs({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: ['override:incident-response'],
+    deps,
+  });
+  assert.equal(inputs.adminOverride, false,
+    'override:* strings resolve against approvalActors only — reviewActors is a pure identity list, never an override whitelist');
 });
 
 test('gatherBrainWritesReviewedInputs: an override:* label present but NOT allow-listed does not grant adminOverride (no blanket bypass)', async () => {
@@ -337,7 +358,7 @@ test('ci-context seam: deps.ctx feeds baseSha/headSha/prNumber/repo/author/prLab
     },
     diffNameOnly: () => ['brain/core/foo.mjs'],
     fetchReviews: () => [{ state: 'APPROVED', author: 'bob' }],
-    readBotAllowlist: () => ['override:incident-response'],
+    readOverrideActors: () => ['override:incident-response'],
   };
   const result = await runBrainWritesReviewedCheck(deps);
   assert.equal(result.level, 'pass');
@@ -356,7 +377,7 @@ test('ci-context seam: ctx.labels (array) feeds adminOverride resolution directl
     },
     diffNameOnly: () => ['brain/core/foo.mjs'],
     fetchReviews: () => [{ state: 'APPROVED', author: 'alice' }], // self-approval — would fail without override
-    readBotAllowlist: () => ['override:incident-response'],
+    readOverrideActors: () => ['override:incident-response'],
   };
   const result = await runBrainWritesReviewedCheck(deps);
   assert.equal(result.level, 'pass');
@@ -435,4 +456,75 @@ test('A3 TASK2 source-scan: defaultFetchReviews no longer contains execFileSync(
   const fnBody = src.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
   assert.equal(fnBody.includes('execFileSync'), false, 'defaultFetchReviews must dispatch via getVcs(...).prReviews(...), never a raw execFileSync(\'gh\', ...) call');
   assert.match(fnBody, /getVcs|prReviews/, 'sanity: dispatch through the vcs adapter is present');
+});
+
+// ── governance.reviewActors wiring (issue #266, design §3 two-key split) ──────
+//
+// Binding ruling R2 ("no key feeds two gates"): L6's default botAllowlist reader
+// key MOVES from governance.approvalActors to the NEW governance.reviewActors —
+// it does NOT union them. approvalActors is now L5-only (actor-check.mjs). An
+// identity present ONLY in approvalActors must NOT appear in L6's botAllowlist —
+// that is the distinguishing assertion that a union would fail.
+
+test('governance.reviewActors (issue #266, R2): L6 default botAllowlist reader reads ONLY governance.reviewActors — an approvalActors-only identity is excluded (no key feeds two gates)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-config-'));
+  writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({
+    governance: {
+      approvalActors: ['release-bot'],       // L5-only — must NOT leak into L6
+      reviewActors: ['brain-reviewer[bot]'], // L6-only
+    },
+  }));
+  const inputs = await gatherBrainWritesReviewedInputs({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: [],
+    cwd: dir,
+    deps: {
+      diffNameOnly: () => ['brain/core/foo.mjs'],
+      fetchReviews: () => [],
+      // deliberately NOT injecting readBotAllowlist — exercising the REAL
+      // default reader, which must read reviewActors alone.
+    },
+  });
+  assert.deepEqual(
+    new Set(inputs.botAllowlist),
+    new Set(['brain-reviewer[bot]']),
+    'L6 botAllowlist must contain ONLY governance.reviewActors; an approvalActors-only identity (release-bot) must NOT feed L6 (R2: no key feeds two gates)',
+  );
+  assert.ok(
+    !inputs.botAllowlist.includes('release-bot'),
+    'release-bot is L5-only (governance.approvalActors) — a union implementation would wrongly include it here',
+  );
+});
+
+// ── REQ-266-6 t2 (issue #266, rev-2 binding condition B, lock 3) ──────────────
+//
+// The reviewer identity (test fixture — task 7.3 is deferred, no real reviewer
+// bot handle exists yet) is registered in governance.reviewActors and threaded
+// into L6's botAllowlist. An APPROVED review it authors must NOT be counted as
+// the human review.
+
+test('REQ-266-6 t2 (lock-3, issue #266): reviewer identity in governance.reviewActors is excluded from L6\'s human-approver count — an APPROVED review it authors does not satisfy brain-writes-reviewed', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-config-'));
+  writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({
+    governance: { approvalActors: [], reviewActors: ['brain-reviewer[bot]'] },
+  }));
+  const result = await runBrainWritesReviewedCheck({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: [],
+    cwd: dir,
+    diffNameOnly: () => ['brain/core/foo.mjs'],
+    fetchReviews: () => [{ state: 'APPROVED', author: 'brain-reviewer[bot]' }],
+    // deliberately NOT injecting readBotAllowlist — exercising the REAL default
+    // reader, which must thread governance.reviewActors into botAllowlist.
+  });
+  assert.notEqual(result.level, 'pass', 'an APPROVED review authored only by the reviewer identity must never satisfy the Tier-2 human-review gate');
+  assert.equal(result.level, 'fail', 'the only APPROVED reviewer is bot-allow-listed (via governance.reviewActors) — same outcome as any bot-only approval');
 });

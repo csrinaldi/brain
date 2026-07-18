@@ -95,6 +95,16 @@ export const migrations = [
       },
     },
   },
+  {
+    version: '0.8.0',
+    description:
+      "Add reviewer.{handle,tokenEnv}: the cold reviewer's identity pointer " +
+      '(issue #266 H1, comment 4992662021) — git carries the env var NAME, ' +
+      'never the token VALUE (REQ-H1-1). governance.reviewActors stays absent.',
+    defaults: {
+      reviewer: { handle: '', tokenEnv: 'BRAIN_REVIEWER_TOKEN' },
+    },
+  },
 ];
 
 // NOTE (issue #231 A2, human ruling in tasks.md/design.md): this entry is versioned

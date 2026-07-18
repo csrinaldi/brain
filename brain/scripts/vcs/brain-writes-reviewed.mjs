@@ -54,8 +54,10 @@ const BRAIN_MANAGED_PREFIXES = ['brain/core/', 'brain/project/'];
  *   PR reviews from the VCS adapter (`state` is GitHub's review state string;
  *   only `'APPROVED'` counts toward approvers).
  * @param {string} input.author  PR author login.
- * @param {string[]} [input.botAllowlist]  Allow-listed actor logins / override
- *   label strings (`config.governance.approvalActors`).
+ * @param {string[]} [input.botAllowlist]  Actor logins that do NOT count as the
+ *   human reviewer at L6 (`config.governance.reviewActors` — a pure identity
+ *   list; issue #266 two-key split, R2). Override:* label strings are NOT here;
+ *   they resolve separately against `config.governance.approvalActors`.
  * @param {boolean} [input.adminOverride]  Whether an allow-listed `override:*`
  *   label is present on the PR (resolved by the wrapper against
  *   `botAllowlist` — never a blanket bypass).
@@ -162,7 +164,39 @@ function defaultFetchReviews(repo, provider, { getVcs: getVcsFn = getVcs } = {})
   };
 }
 
+/**
+ * Default `readBotAllowlist` dep: reads ONLY `governance.reviewActors` (issue
+ * #266, design §3 two-key split, binding ruling R2: "no key feeds two gates").
+ * L6's botAllowlist key MOVES from `governance.approvalActors` to the NEW,
+ * L6-only `governance.reviewActors` — it does NOT union them. `approvalActors`
+ * is now L5-only (`actor-check.mjs`'s reader, untouched); reading it here too
+ * would keep it feeding both gates, which is exactly the dual-semantics
+ * coupling the split exists to dissolve. To exclude an identity from L6's
+ * human-approver count, register it in `reviewActors`; to let an identity
+ * apply `status:approved`, register it in `approvalActors`; both effects
+ * require both registrations — explicit, never implicit.
+ */
 function defaultReadBotAllowlist(cwd) {
+  return () => {
+    try {
+      const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
+      return Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
+    } catch {
+      return [];
+    }
+  };
+}
+
+/**
+ * Default `readOverrideActors` dep: reads `governance.approvalActors` — the
+ * whitelist of `override:*` label strings honored at L6 (issue #266,
+ * P272-OVERRIDE-KEY option (b)). Kept SEPARATE from `readBotAllowlist`
+ * (`reviewActors`, the L6 human-approver exclusion) so `reviewActors` stays a
+ * pure identity list — one key, one meaning. `approvalActors` is the same
+ * human-trust grant that authorizes `status:approved` at L5
+ * (`actor-check.mjs`); the reviewer handle is in neither.
+ */
+function defaultReadApprovalActors(cwd) {
   return () => {
     try {
       const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
@@ -176,10 +210,11 @@ function defaultReadBotAllowlist(cwd) {
 /**
  * Gathers evaluateBrainWritesReviewed()'s inputs from git + the gh API (or
  * from injected `deps` in tests). `adminOverride` is resolved here — an
- * override:* label is only honored when it is BOTH present on the PR AND
- * listed in `botAllowlist` (`config.governance.approvalActors`); an unlisted
- * override:* label grants nothing (no blanket bypass, same discipline as
- * actor-check's `gatherActorCheckInputs`).
+ * override:* label is only honored when it is BOTH present on the PR AND listed
+ * in `config.governance.approvalActors` (read via `readOverrideActors`, SEPARATE
+ * from `botAllowlist`/`reviewActors`; issue #266 P272-OVERRIDE-KEY option (b) —
+ * one key, one meaning); an unlisted override:* label grants nothing (no blanket
+ * bypass, same discipline as actor-check's `gatherActorCheckInputs`).
  *
  * `provider` (github|gitlab, from `ctx.provider`) selects the VCS adapter
  * (`getVcs({ provider })`, issue #239 A3 TASK2) for the default
@@ -206,11 +241,13 @@ export async function gatherBrainWritesReviewedInputs({
   const diffNameOnly = deps.diffNameOnly ?? defaultDiffNameOnly(cwd);
   const fetchReviews = deps.fetchReviews ?? defaultFetchReviews(repo, provider, deps);
   const readBotAllowlist = deps.readBotAllowlist ?? defaultReadBotAllowlist(cwd);
+  const readOverrideActors = deps.readOverrideActors ?? defaultReadApprovalActors(cwd);
 
   const botAllowlist = readBotAllowlist();
+  const overrideActors = readOverrideActors();
   const changedFiles = diffNameOnly(baseSha, headSha);
   const reviews = await fetchReviews(prNumber);
-  const adminOverride = prLabels.some(l => l.startsWith('override:') && botAllowlist.includes(l));
+  const adminOverride = prLabels.some(l => l.startsWith('override:') && overrideActors.includes(l));
 
   return { changedFiles, reviews, author, botAllowlist, adminOverride };
 }

@@ -26,5 +26,9 @@
       "yarn.lock"
     ]
   },
+  "reviewer": {
+    "handle": "",
+    "tokenEnv": "BRAIN_REVIEWER_TOKEN"
+  },
   "schemaVersion": "0.3.0"
 }

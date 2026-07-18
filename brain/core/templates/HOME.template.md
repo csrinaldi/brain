@@ -20,6 +20,7 @@ this system. `brain/core/` is upstream and treated as read-only here.
 - [Feature-working-memory contract](core/methodology/feature-working-memory-contract.md) — resume.md schema + checkpoint/resume verbs
 - [Memory record format](core/methodology/memory-format.md) — the brain-owned durable .memory/ record format
 - [Workflow governance](core/methodology/workflow-governance.md) — invariants, CI gates, lockout recovery
+- [Reviewer protocol](core/methodology/reviewer-protocol.md) — the cold external reviewer as doctrine: three structural locks, the reviewActors/approvalActors split, COMMENT-only port verbs, brain-review/1 verdicts
 
 ### Anti-patterns (generic)
 
