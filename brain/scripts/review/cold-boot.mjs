@@ -9,6 +9,7 @@
 // CONSTRUCTION (R2).
 
 import { execFileSync } from 'node:child_process';
+import { existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -28,17 +29,34 @@ function defaultFetchPr({ getVcs: getVcsFn = getVcs } = {}) {
 }
 
 // COLDBOOT-CWD fix (protocol §8 "own clone/worktree"): NEVER `git checkout` in
-// the operator's cwd — that moves their HEAD (state-loss). Fetch the sha into
-// the operator's object db, then check it out in a SEPARATE detached worktree.
-// `fetch`/`tmp` are seams so the isolation logic is testable without a remote.
+// the operator's cwd — that moves their HEAD (state-loss). Fetch the shas into
+// the operator's object db, then check the head out in a SEPARATE detached
+// worktree. `fetch`/`tmp` are seams so the isolation logic is testable without
+// a remote.
+//
+// COLDBOOT-DEPTH fix (issue #291, I291-AMBIENT-STATE): fetch WITH history (NO
+// `--depth 1`) and fetch BOTH the head AND the base. A shallow head graft has
+// no ancestors, so the three-dot `git diff base...head` (cli.mjs
+// getChangedFiles) finds no merge-base and the §10.4 reversion has no base
+// tree — the #290 crasher. Cold boot must be self-sufficient: bring both prView
+// shas explicitly, never leaning on whatever the operator's clone happens to
+// contain (Law 2 at the plumbing layer). Full-history-both is the obvious
+// simple choice at this repo's size (reviewer ruling #291); revisit only if
+// fetch cost bites on CI shallow clones.
 export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir() } = {}) {
-  const doFetch = fetch ?? (sha => execFileSync('git', ['fetch', '--depth', '1', 'origin', sha], { cwd, encoding: 'utf8' }));
-  return ({ sha }) => {
+  const doFetch = fetch ?? (sha => execFileSync('git', ['fetch', 'origin', sha], { cwd, encoding: 'utf8' }));
+  return ({ sha, baseSha } = {}) => {
+    if (baseSha) doFetch(baseSha);
     doFetch(sha);
     const worktreePath = join(tmp, `brain-review-${sha}`);
-    try { execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' }); } catch { /* no prior worktree at this head */ }
+    // Clear any prior worktree at this path so `worktree add` never fails:
+    // `remove` unregisters a registered one; `prune` + rm clears a bare
+    // leftover dir (the "is not a working tree" noise, issue #291 secondary).
+    try { execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' }); } catch { /* not a registered worktree */ }
+    try { execFileSync('git', ['worktree', 'prune'], { cwd, encoding: 'utf8' }); } catch { /* best effort */ }
+    if (existsSync(worktreePath)) rmSync(worktreePath, { recursive: true, force: true });
     execFileSync('git', ['worktree', 'add', '--detach', worktreePath, sha], { cwd, encoding: 'utf8' });
-    return { detached: true, sha, worktreePath };
+    return { detached: true, sha, baseSha: baseSha ?? null, worktreePath };
   };
 }
 
@@ -75,7 +93,11 @@ export async function gatherColdBoot({ project, number, provider, reviewerHandle
   const fetchReviews = deps.fetchReviews ?? defaultFetchReviews(deps);
 
   const headSha = prView.headRefOid;
-  const clone = await cloneDetached({ sha: headSha });
+  // Fetch the PR's base tip too (issue #291): the diff/reversion downstream need
+  // it present with history. `null` when the port can't compute it — cloneDetached
+  // then skips the base fetch (same as before), no regression.
+  const baseSha = prView.baseRefOid ?? null;
+  const clone = await cloneDetached({ sha: headSha, baseSha });
 
   const records = readRecords().filter(r => DOCTRINE_TYPES.has(r?.type));
   const reviews = await fetchReviews({ project, number, provider });

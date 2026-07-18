@@ -87,6 +87,7 @@
 {"id":"rec-964735d2098984cf","ts":"2026-07-02T12:39:42Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-97684a011716de8f","ts":"2026-06-27T13:47:43Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-983b93a1cc9d1cb9","ts":"2026-07-07T19:43:42Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-9c52ca412ebb0f97","ts":"2026-07-18T18:54:55Z","actor":"fix/issue-291-coldboot-fetch-base","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-9cfdf8f6aa51359a","ts":"2026-07-02T21:00:47Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-9d654541f2fee079","ts":"2026-07-07T17:08:41Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-9e3192f14d713ec9","ts":"2026-06-26T17:14:05Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}

@@ -58,9 +58,34 @@ test('gatherColdBoot: checks out detached at prView\'s headRefOid, never a branc
   assert.equal(result.abstain, false);
   assert.equal(result.headSha, 'cafef00dcafef00dcafef00dcafef00dcafef00d');
   assert.equal(cloneCalls.length, 1);
-  // The clone seam receives ONLY the sha — no `branch` key exists on the call.
-  assert.deepEqual(cloneCalls[0], { sha: 'cafef00dcafef00dcafef00dcafef00dcafef00d' });
+  // The clone seam receives shas only — `sha` (head) + `baseSha` (null here, the
+  // fixture has no baseRefOid). NO `branch` key exists on the call (R2 — the
+  // anchor is always an oid, never a branch name).
+  assert.deepEqual(cloneCalls[0], { sha: 'cafef00dcafef00dcafef00dcafef00dcafef00d', baseSha: null });
   assert.deepEqual(fetchPrCalls[0], { project: PR.project, number: PR.number, provider: PR.provider });
+});
+
+// ── gatherColdBoot: the base tip flows to the clone (issue #291) ─────────────
+
+test('gatherColdBoot: prView.baseRefOid flows to cloneDetached as baseSha (so the diff/reversion have the base)', async () => {
+  const cloneCalls = [];
+  await gatherColdBoot({
+    ...PR,
+    reviewerHandle: 'brain-reviewer',
+    deps: baseDeps({
+      fetchPr: async () => ({
+        number: 42, author: 'alice', labels: [], body: '',
+        headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d',
+        baseRefOid: 'ba5eba5eba5eba5eba5eba5eba5eba5eba5eba5e',
+      }),
+      cloneDetached: async (args) => { cloneCalls.push(args); return { detached: true }; },
+    }),
+  });
+
+  assert.deepEqual(cloneCalls[0], {
+    sha: 'cafef00dcafef00dcafef00dcafef00dcafef00d',
+    baseSha: 'ba5eba5eba5eba5eba5eba5eba5eba5eba5eba5e',
+  });
 });
 
 // ── gatherColdBoot: doctrine is only records + prior verdicts ───────────────
@@ -158,4 +183,66 @@ test('COLDBOOT-CWD (real default): defaultCloneDetached checks out a SEPARATE de
   // the operator's HEAD did NOT move — still on its branch, still at the same sha
   assert.equal(git(repo, 'symbolic-ref', '--short', 'HEAD'), branch, 'operator HEAD stays on its branch — never detached in cwd');
   assert.equal(git(repo, 'rev-parse', 'HEAD'), sha, 'operator HEAD did not move');
+});
+
+// ── COLDBOOT-DEPTH (issue #291): fetch BOTH head and base WITH history ───────
+// Second instance of the COLDBOOT-CWD class — "a DI seam tested only through its
+// injected stub never exercises the real default". The `--depth 1` head-only
+// fetch left the head a shallow graft (no ancestors → no merge-base) and never
+// brought the base at all, so downstream `git diff base...head` (cli.mjs
+// getChangedFiles) and `git checkout base -- <files>` (checkpoint §10.4
+// reversion) both fail — the exact #290 crash (`fatal: <base>...<head>: no
+// merge base`). Real git, real fetch from a local bare remote where the
+// operator starts WITHOUT either commit (I291-AMBIENT-STATE: cold boot must be
+// self-sufficient, never leaning on the operator's ambient clone state).
+test('COLDBOOT-DEPTH (real default): defaultCloneDetached fetches head AND base with history — base...head diff resolves and the §10.4 base checkout works', (t) => {
+  const remote = mkdtempSync(join(tmpdir(), 'brain-review-remote-'));
+  const seed = mkdtempSync(join(tmpdir(), 'brain-review-seed-'));
+  const op = mkdtempSync(join(tmpdir(), 'brain-review-op-'));
+  const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-wt-'));
+  t.after(() => {
+    try { git(op, 'worktree', 'prune'); } catch { /* best effort */ }
+    for (const d of [remote, seed, op, wtParent]) rmSync(d, { recursive: true, force: true });
+  });
+
+  // Bare remote: a base and a head that DIVERGE from a common ancestor A.
+  git(remote, 'init', '-q', '--bare');
+  git(seed, 'init', '-q');
+  git(seed, 'config', 'user.email', 't@t.t'); git(seed, 'config', 'user.name', 't');
+  writeFileSync(join(seed, 'impl.mjs'), 'export const x = 1;\n');
+  git(seed, 'add', 'impl.mjs'); git(seed, 'commit', '-q', '-m', 'A (common ancestor)');
+  git(seed, 'checkout', '-q', '-b', 'base-branch');
+  writeFileSync(join(seed, 'base-only.txt'), 'base\n');
+  git(seed, 'add', 'base-only.txt'); git(seed, 'commit', '-q', '-m', 'B (base tip)');
+  const baseSha = git(seed, 'rev-parse', 'HEAD');
+  git(seed, 'checkout', '-q', '-b', 'head-branch', 'base-branch~1'); // diverge from A
+  writeFileSync(join(seed, 'impl.mjs'), 'export const x = 2;\n');
+  git(seed, 'add', 'impl.mjs'); git(seed, 'commit', '-q', '-m', 'H (head tip)');
+  const headSha = git(seed, 'rev-parse', 'HEAD');
+  git(seed, 'remote', 'add', 'origin', remote);
+  git(seed, 'push', '-q', 'origin', 'base-branch', 'head-branch');
+
+  // Operator repo: valid, but does NOT yet have base or head.
+  git(op, 'init', '-q');
+  git(op, 'config', 'user.email', 't@t.t'); git(op, 'config', 'user.name', 't');
+  writeFileSync(join(op, 'unrelated.txt'), 'x'); git(op, 'add', 'unrelated.txt'); git(op, 'commit', '-q', '-m', 'unrelated');
+  git(op, 'remote', 'add', 'origin', remote);
+
+  // Real default fetch (no stub): must bring head AND base with history.
+  const clone = defaultCloneDetached({ cwd: op, tmp: wtParent })({ sha: headSha, baseSha });
+  assert.equal(clone.sha, headSha);
+
+  // 1) the three-dot diff (cli.mjs getChangedFiles) resolves a merge-base (A)
+  const changed = git(op, 'diff', '--name-only', `${baseSha}...${headSha}`);
+  assert.match(changed, /impl\.mjs/, 'base...head diff must resolve — merge-base A reachable');
+
+  // 2) the §10.4 reversion actually runs: inside the detached head worktree,
+  //    `git checkout <base> -- impl.mjs` must succeed and revert the file to
+  //    its base content (proves the base TREE — not just the commit — is local).
+  git(clone.worktreePath, 'checkout', baseSha, '--', 'impl.mjs');
+  assert.equal(
+    readFileSync(join(clone.worktreePath, 'impl.mjs'), 'utf8'),
+    'export const x = 1;\n',
+    'the base checkout must revert impl.mjs to its base content (§10.4 TDD-RED reversion)',
+  );
 });
