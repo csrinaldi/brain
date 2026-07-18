@@ -335,10 +335,31 @@ verdict blocks** on each thread (verdicts are truth, labels are the derived inde
 is a rebuildable no-op. The board reconciles labels via `labelAdd` / `labelRemove` only within the
 `seq:*` / `reviewed:*` namespaces.
 
+**Composition [H1-5c]**: `mrList` (open PRs) + per-PR `prReviews` (the verdict thread) + `prView`
+(current labels). The **LATEST** `brain-review/1` block on the thread determines the desired label
+set: its `verdict` scalar denormalizes to `reviewed:approved` / `reviewed:revised` /
+`reviewed:stopped` (APPROVE/REVISE/STOP respectively). An optional `sequencing` payload on the
+verdict block contributes `seq:*` labels when an evaluator sets it (none does yet in H1; the
+reconciliation path exists and is tested ahead of that evaluator). Labels outside the
+`seq:*`/`reviewed:*` namespaces (`decision`, `status:approved`, ...) are never added or removed by
+the board, even when they are not part of the "desired" set. Adds go through `guardedLabelAdd`,
+removes through `guardedLabelRemove` (REQ-H1-14). An already-synced PR makes zero write calls.
+
 #### Scenario: a desynced label is rebuilt from the verdict
 - **GIVEN** a thread whose latest verdict implies `reviewed:approved` but the label is missing
 - **WHEN** `brain:review:board` runs
 - **THEN** it re-applies `reviewed:approved` derived from the verdict block
+
+#### Scenario: a stale reviewed:* label is removed while the current one is added
+- **GIVEN** a thread's latest verdict implies `reviewed:approved` but the PR carries the earlier
+  `reviewed:revised` label
+- **WHEN** `brain:review:board` runs
+- **THEN** `reviewed:approved` is added and `reviewed:revised` is removed, both through the deny-set
+
+#### Scenario: labels outside the board namespace are never touched
+- **GIVEN** a PR carries `decision` and `status:approved` alongside a synced `reviewed:*` label
+- **WHEN** `brain:review:board` runs
+- **THEN** `decision` and `status:approved` are neither added nor removed
 
 ---
 
@@ -351,10 +372,12 @@ caller**, checked before every `labelAdd`, and refuse the label before it reache
 `actor-check` is the independent L5 backstop (the reviewer is never in `governance.approvalActors`,
 §3), so a deny-set bug is still visible — but the deny-set is the first line.
 
-> **The narrower REMOVE allow-list + `guardedLabelRemove` land in H1-5c** (with `board.mjs`, the
-> only path that removes labels): only `seq:*` / `reviewed:*` — the reviewer's own derived index —
-> may ever be removed; `decision` / `needs-ruling` / `needs-decision` are addable but never
-> removable (removing them loosens), and `status:approved` stays human-only on both paths.
+**The REMOVE allow-list is NARROWER than the ADD allow-list [H1-5c, `guardedLabelRemove`].** The
+reviewer MAY remove only its own derived index — `seq:*` / `reviewed:*` — via `labelRemove`.
+`decision`, `needs-ruling`, and `needs-decision` are addable (tightening) but MUST NEVER be removed
+by the reviewer (removing them is loosening, not tightening — they carry human/circuit intent);
+`status:approved` remains human-only on both paths. This is checked and refused before every
+`labelRemove`, the same fail-closed way as the ADD path. `board.mjs` is the only caller.
 
 #### Scenario: an unlock label is refused before the provider
 - **GIVEN** the caller is asked to apply `status:approved`
@@ -370,6 +393,17 @@ caller**, checked before every `labelAdd`, and refuse the label before it reache
 - **GIVEN** the caller applies `needs-decision`
 - **WHEN** the deny-set is checked
 - **THEN** the label is allowed through to `labelAdd`
+
+#### Scenario: an addable-but-not-removable label is refused on the remove path
+- **GIVEN** the caller is asked to REMOVE `needs-ruling` (or `decision`, or `needs-decision`)
+- **WHEN** the REMOVE deny-set is checked
+- **THEN** the label is refused and `labelRemove` is never invoked, even though the same label is
+  allowed on the ADD path
+
+#### Scenario: a seq:*/reviewed:* label passes the remove path
+- **GIVEN** the caller is asked to REMOVE `reviewed:revised`
+- **WHEN** the REMOVE deny-set is checked
+- **THEN** the label is allowed through to `labelRemove`
 
 ---
 

@@ -20,6 +20,7 @@ import { evaluateCheckpoint, gatherCheckpointInputs } from './evaluators/checkpo
 import { evaluateRuling, gatherRulingInputs } from './evaluators/ruling.mjs';
 import { postVerdict } from './poster.mjs';
 import { gatherQueue } from './queue.mjs';
+import { runBoard } from './board.mjs';
 
 /** @returns {{ pr: number|null, mode: string, dryRun: boolean }} */
 export function parseArgs(argv) {
@@ -51,6 +52,23 @@ async function runQueueCommand(deps, log) {
   return 0;
 }
 
+/** `board` subcommand (H1-5c, task 13.3b): dispatches to board.mjs's
+ * runBoard, reconciles the seq:* and reviewed:* label namespaces across
+ * every open PR. */
+async function runBoardCommand(deps, log) {
+  const project = deps.project ?? loadBrainConfig().project?.slug;
+  const results = await runBoard({ project, provider: deps.provider, deps: deps.boardDeps ?? {} });
+
+  for (const r of results) {
+    if (r.toAdd.length > 0 || r.toRemove.length > 0) {
+      log(`brain:review:board — #${r.number}: +[${r.toAdd.join(', ')}] -[${r.toRemove.join(', ')}]`);
+    }
+  }
+  log(`brain:review:board — reconciled ${results.length} open PR(s).`);
+
+  return 0;
+}
+
 function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
   return (baseSha, headSha) =>
     execFileSync('git', ['diff', '--name-only', `${baseSha}...${headSha}`], { cwd, encoding: 'utf8' })
@@ -67,19 +85,20 @@ function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
  * docstring), `rulingDeps` (→ evaluators/ruling.mjs), `posterDeps` (→
  * poster.mjs), `writeVerbs` (a spy/real VCS used as the poster's default
  * `getVcs` when `posterDeps.getVcs` is not separately injected), `queueDeps`
- * (→ queue.mjs, `queue` subcommand only). */
+ * (→ queue.mjs, `queue` subcommand only), `boardDeps` (→ board.mjs, `board`
+ * subcommand only). */
 export async function main(deps = {}) {
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
   const rawArgv = deps.argv ?? process.argv.slice(2);
 
   // Positional subcommand dispatch (H1-5b, task 13.3, design.md §9): the
-  // FIRST token, when it is `queue`, selects an entirely different read
-  // path — it never reaches identity/cold-boot/the evaluators below.
-  // Anything else (including no subcommand, or a leading `--flag`) falls
-  // through to the existing single-PR review flow unchanged. (`board`
-  // dispatch lands in H1-5c.)
+  // FIRST token, when it is `queue` or `board`, selects an entirely
+  // different read path — neither reaches identity/cold-boot/the evaluators
+  // below. Anything else (including no subcommand, or a leading `--flag`)
+  // falls through to the existing single-PR review flow unchanged.
   if (rawArgv[0] === 'queue') return runQueueCommand(deps, log);
+  if (rawArgv[0] === 'board') return runBoardCommand(deps, log);
 
   const args = parseArgs(rawArgv);
   const project = deps.project ?? loadBrainConfig().project?.slug;

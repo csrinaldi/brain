@@ -12,7 +12,26 @@ function scalar(block, key) {
   return m ? m[1].trim() : null;
 }
 
-/** @returns {{ head_sha: string, rev: number|null, verdict: string, author: string|null } | null} */
+// Reverses verdict.mjs's `yamlScalar(JSON.stringify(...))` encoding: strips
+// the outer quotes (if present) and un-escapes `\X` -> `X` (covers both
+// `\\` -> `\` and `\"` -> `"`, the only two escapes yamlScalar ever
+// produces), then JSON.parses the result. Never throws — an unparseable
+// scalar (hand-edited comment, corruption) yields `null`, tolerated by the
+// caller (board.mjs treats an absent/unparseable sequencing as "nothing to
+// reconcile from this block", never a crash).
+function parseJsonScalar(raw) {
+  try {
+    const unquoted =
+      raw.length >= 2 && raw[0] === '"' && raw[raw.length - 1] === '"'
+        ? raw.slice(1, -1).replace(/\\(.)/g, '$1')
+        : raw;
+    return JSON.parse(unquoted);
+  } catch {
+    return null;
+  }
+}
+
+/** @returns {{ head_sha: string, rev: number|null, verdict: string, author: string|null, sequencing?: * } | null} */
 export function parseVerdict({ body, author = null } = {}) {
   if (typeof body !== 'string' || body.length === 0) return null;
 
@@ -27,10 +46,21 @@ export function parseVerdict({ body, author = null } = {}) {
   if (!headSha || !verdict) return null;
 
   const revRaw = scalar(block, 'rev');
-  return {
+  const result = {
     head_sha: headSha,
     rev: revRaw !== null ? Number(revRaw) : null,
     verdict,
     author,
   };
+
+  // Optional (H1-5c board.mjs) — only set when the block actually carries a
+  // parseable `sequencing:` line; omitted otherwise (not `null`), so a
+  // block without it round-trips through parseVerdict unchanged.
+  const sequencingRaw = scalar(block, 'sequencing');
+  if (sequencingRaw !== null) {
+    const parsed = parseJsonScalar(sequencingRaw);
+    if (parsed !== null) result.sequencing = parsed;
+  }
+
+  return result;
 }
