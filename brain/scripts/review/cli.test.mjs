@@ -106,20 +106,47 @@ test('main: a failing required gate produces a REVISE verdict that still posts (
   assert.equal(vcs.calls.prReviewComment, 1);
 });
 
-// ── mode ruling/checkpoint: explicit not-yet-implemented stub, never silent ─
+// ── mode ruling: wired (H1-4, REQ-H1-11) — Option (B), never auto-rules ─────
 
-test('main: mode derives to "ruling" (needs-ruling label) → explicit not-yet-implemented, exits non-zero, posts nothing', async () => {
+function validForkBody() {
+  return [
+    '## FORK',
+    '',
+    '### Option A',
+    'cost: 2 days of rework',
+    'consequence: widens the port surface',
+    '',
+    '### Option B',
+    'cost: a new mini-port',
+    'consequence: calcifies into a parallel seam',
+    '',
+    'Recommendation: Option A',
+  ].join('\n');
+}
+
+test('main: mode derives to "ruling" (needs-ruling label) with a well-formed ## FORK → reaches evaluateRuling, posts STOP + escalate:human, never a ruled/APPROVE verdict', async () => {
   const vcs = spyVcs();
-  const errors = [];
-  const code = await main({
-    argv: ['--pr', '42'],
-    log: () => {},
-    error: (s) => errors.push(s),
-    ...readyDeps({ vcs, labels: ['needs-ruling'] }),
-  });
-  assert.equal(code, 1);
-  assert.ok(errors.some(l => /ruling/.test(l) && /not.*yet.*implement/i.test(l)));
-  assert.deepEqual(vcs.calls, { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 });
+  const lines = [];
+  const deps = readyDeps({ vcs, labels: ['needs-ruling'] });
+  deps.coldBootDeps.fetchPr = async () => ({ number: 42, author: 'alice', labels: ['needs-ruling'], body: validForkBody(), headRefOid: HEAD });
+  const code = await main({ argv: ['--pr', '42'], log: (s) => lines.push(s), ...deps });
+  assert.equal(code, 0);
+  assert.ok(lines.some(l => /verdict: STOP/.test(l)));
+  assert.ok(lines.some(l => /escalate: human/.test(l)));
+  assert.ok(!lines.some(l => /verdict: APPROVE/.test(l)), 'the ruling evaluator never emits APPROVE');
+  assert.equal(vcs.calls.issueComment, 1, 'ruling verdicts post via issueComment (R1, design.md §6), not prReviewComment');
+  assert.equal(vcs.calls.prReviewComment, 0);
+});
+
+test('main: an explicit --mode ruling with a malformed ## FORK (single option) → REVISE, "a fork without options is a request to design", still posts', async () => {
+  const vcs = spyVcs();
+  const lines = [];
+  const deps = readyDeps({ vcs });
+  deps.coldBootDeps.fetchPr = async () => ({ number: 42, author: 'alice', labels: [], body: 'no fork section here', headRefOid: HEAD });
+  const code = await main({ argv: ['--pr', '42', '--mode', 'ruling'], log: (s) => lines.push(s), ...deps });
+  assert.equal(code, 0);
+  assert.ok(lines.some(l => /verdict: REVISE/.test(l)));
+  assert.equal(vcs.calls.issueComment, 1);
 });
 
 // ── mode checkpoint: wired (H1-3) — REQ-H1-10 ───────────────────────────────
