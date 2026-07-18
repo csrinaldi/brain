@@ -231,19 +231,38 @@ slice: H1
 
 ---
 
-# Group H1-5 — queue + board + deny-set *(deferred to a later PR)*
+# Group H1-5 — queue + board + deny-set *(deferred to later PRs)*
 
-> **Not-yet-scoped candidate (issue #266 comment 4993202904, noted not decided):** on
+> **Budget re-split (issue #266, owner ruling in-session).** H1-5 was already cut into H1-5a
+> (deny-set authority lock, PR #286 ✅) + H1-5b (queue+board). H1-5b re-derived cold at **422
+> counted** production lines — 22 over the 400 ceiling — so it is split again on the real
+> **read/write seam**: **H1-5b = queue + escalation inbox (READ-ONLY)** and
+> **H1-5c = board (WRITE-reconcile, the only path that removes labels)**. Both land comfortably
+> under 400 (H1-5b re-derived at 176). feature-branch-chain: H1-5b → tracker `issue-266`;
+> H1-5c → H1-5b.
+
+> **Candidate (issue #266 comment 4993202904) — DECIDED IN by plan 5011584432, H1-5b.** On
 > `escalate: human`, apply a `needs-decision` label (pure tightening, §9-legal) and have
-> `brain:review:queue` list pending escalations alongside the review queue. Deferred to this
-> group's own scoping pass — NOT implemented in H1-1.
+> `brain:review:queue` list pending escalations alongside the review queue. Implemented in H1-5b:
+> `poster.mjs` applies `needs-decision` via `guardedLabelAdd` once a verdict with
+> `escalate: 'human'` actually posts (never on an anti-stale/anti-loop skip); `queue.mjs` lists
+> `needs-decision` PRs as a separate "pending escalations" section alongside the review queue.
+> Removing `needs-decision` once the human decides stays OUT OF SCOPE for H1 — human/manual.
 
-## Phase 12 — queue (REQ-H1-12)
-- [ ] **12.1 RED/GREEN** — `review/queue.mjs`: list open `needs-review`/`needs-ruling` PRs, oldest
-      first; read-only (no labels, no posts).
+## Phase 12 — queue (REQ-H1-12) — **H1-5b**
+- [x] **12.1 RED/GREEN** — `review/queue.mjs`: list open `needs-review`/`needs-ruling` PRs, oldest
+      first; read-only (no labels, no posts). **H1-5b, done.** Composes SHIPPED verbs only
+      (`mrList` + per-PR `prView`), no port change. **Ordering (owner ruling, issue #266 comment
+      5011731983, Option A):** sorted by PR **number ascending** — documented as **EXACT creation
+      order**, not a proxy (PR/issue numbers are monotonic at creation on both providers; verified
+      by the reviewer, comment 5011702460, finding H15B-FORK-BFREE; the fork itself was comment
+      5011695053). Pinned as a durable record (`rec-fd2cc044376e5e4c`). The N+1 `prView` cost is
+      accepted at H1 scale (ruling §2), folded into the holistic prView/list-read unification
+      fast-follow, not optimized here. **Escalation inbox (queue half):** also lists PRs carrying
+      `needs-decision` as a separate "pending escalations" section.
 
-## Phase 13 — board + deny-set (REQ-H1-13, REQ-H1-14)
-- [x] **13.1 RED/GREEN** — `review/deny-set.mjs`: hardcoded tightening-allow / loosen-deny; refuses
+## Phase 13 — deny-set ADD + escalation inbox (REQ-H1-14) — **H1-5b**
+- [x] **13.1a RED/GREEN** — `review/deny-set.mjs`: hardcoded tightening-allow / loosen-deny; refuses
       `status:approved`/`size:exception`/`skip:*`/`override:*` before `labelAdd` (spy VCS asserts
       never sent); allows `decision`/`seq:*`/`reviewed:*`/`needs-ruling`. **Fixture identities.**
       **H1-5a, done.** ALLOW-LIST (fail-closed) is the fence — an unknown label not in the deny
@@ -251,17 +270,45 @@ slice: H1
       5004345710, "the constant is the seed, not the fence"): `poster.mjs`'s `reviewed:stale`
       anti-stale labelAdd now routes through `guardedLabelAdd` instead of calling `vcs.labelAdd`
       bare — behavior unchanged (`reviewed:stale` matches `reviewed:*`, still allowed), but the
-      label now clears the same hardcoded chokepoint `board.mjs` (H1-5b) will share.
-- [ ] **13.2 RED/GREEN** — `review/board.mjs`: rebuild `seq:*`/`reviewed:*` from the verdict blocks
-      (`lib/parse-verdict`); a desynced label is rebuilt; reconciles via `labelAdd`/`labelRemove`
-      within those namespaces only, through the deny-set.
-- [ ] **13.3** — wire `queue`/`board` dispatch in `review/cli.mjs` (stubs from 5.4).
+      label now clears the same hardcoded chokepoint `board.mjs` (H1-5c) will share.
+      **H1-5b addendum:** `needs-decision` joins the ADD allow-list (escalation inbox), applied by
+      `poster.mjs` on `escalate: 'human'` once the verdict actually posts.
+- [x] **13.3a** — wire the `queue` dispatch in `review/cli.mjs` (stub from 5.4). **H1-5b, done.**
+      The first positional argv token `queue` dispatches to `gatherQueue` before
+      identity/cold-boot/the evaluators; anything else falls through to the single-PR flow. (`board`
+      dispatch is H1-5c.)
 
-### Review Workload Forecast — H1-5
+### Review Workload Forecast — H1-5b (queue + escalation inbox)
 | Field | Value |
 |-------|-------|
-| Est. counted lines | **~230** (`queue.mjs` ~60, `board.mjs` ~120, `deny-set.mjs` ~50). |
-| 400-line budget risk | **Med.** |
+| **Actual counted lines (re-derived cold, `81b9fa5...HEAD`)** | **176/400** — `queue.mjs` (77), `cli.mjs` queue-dispatch delta, `deny-set.mjs` needs-decision ADD delta, `poster.mjs` escalation delta. Tests/fixtures/`.memory`/`openspec` excluded (governance.ignoreList). Under budget, no `size:exception`. |
+| 400-line budget risk | **None** — read-only slice, 176 counted. |
+
+---
+
+# Group H1-5c — board (WRITE-reconcile) *(deferred to a later PR)*
+
+## Phase 13c — board + deny-set REMOVE (REQ-H1-13, REQ-H1-14 remove allow-list) — **H1-5c**
+- [ ] **13.1b RED/GREEN** — extend `review/deny-set.mjs` with `guardedLabelRemove` + a REMOVE
+      allow-list **narrower than ADD**: only `seq:*`/`reviewed:*` (the reviewer's own derived index)
+      may ever be removed — `decision`/`needs-ruling`/`needs-decision` (human/circuit intent —
+      adding is tightening, removing is loosening) and `status:approved` (human-only) are refused on
+      the remove path even though the first three are allowed on the add path. Fail-closed and
+      spy-proven (`labelRemove` never invoked for a denied removal); `board.mjs` is the first and
+      only caller.
+- [ ] **13.2 RED/GREEN** — `review/board.mjs`: rebuild `seq:*`/`reviewed:*` from the verdict blocks
+      (`lib/parse-verdict`, extended with an optional `sequencing` payload); a desynced label is
+      rebuilt; reconciles via `guardedLabelAdd`/`guardedLabelRemove` within those namespaces only.
+      Composes `mrList` + per-PR `prReviews` + `prView`; the LATEST verdict denormalizes to
+      `reviewed:approved`/`reviewed:revised`/`reviewed:stopped`. An already-synced PR makes zero
+      write calls.
+- [ ] **13.3b** — wire the `board` dispatch in `review/cli.mjs` (stub from 5.4).
+
+### Review Workload Forecast — H1-5c (board)
+| Field | Value |
+|-------|-------|
+| Est. counted lines | **~230** (`board.mjs` ~130, `lib/parse-verdict.mjs` sequencing ~34, `deny-set.mjs` REMOVE ~50, `cli.mjs` board dispatch). |
+| 400-line budget risk | **Low.** Re-derive cold at PR time (`H1-5b-tip...HEAD`). |
 
 ---
 

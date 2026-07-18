@@ -207,6 +207,23 @@ The poster MUST post verdicts through the H0-b port verbs `prReviewComment` (PR 
 - **WHEN** the poster runs
 - **THEN** it skips (no duplicate comment)
 
+**Escalation inbox extension [H1-5b]** (candidate issue #266 comment 4993202904, decided IN by plan
+5011584432): when a verdict carries `escalate: 'human'` (rulings always do, REQ-H1-11; `rev >= 3`
+also forces it, REQ-H1-6) AND the post actually lands — past both anti-stale and anti-loop, since an
+unposted verdict never bound to this head — the poster applies `needs-decision` through the same
+`guardedLabelAdd` chokepoint `reviewed:stale` already shares. Removing `needs-decision` once the
+human decides is OUT OF SCOPE for H1 — a human/manual keystroke, not automated.
+
+#### Scenario: an escalating, successfully posted verdict applies needs-decision
+- **GIVEN** a verdict with `escalate: 'human'` is about to post
+- **WHEN** the post lands (not skipped by anti-stale or anti-loop)
+- **THEN** `needs-decision` is applied via `guardedLabelAdd`, after the comment posts
+
+#### Scenario: a skipped (anti-stale/anti-loop) run never escalates
+- **GIVEN** a verdict with `escalate: 'human'` is anti-stale (head moved mid-run)
+- **WHEN** the poster runs
+- **THEN** only `reviewed:stale` is applied — `needs-decision` is never applied, because the verdict never landed at this head
+
 ---
 
 ## REQ-H1-10 [H1-3]: Checkpoint evaluation contract (issue #266 §H1 Checkpoint)
@@ -284,10 +301,30 @@ durable-record seed, protocol §8): `{ fork, options: [{ id, cost, consequence }
 `brain:review:queue` MUST list the open PRs carrying `needs-review` / `needs-ruling` (the label is
 the mailbox), ordered **oldest first**. It is read-only — it applies no labels and posts nothing.
 
+**Ordering is PR number ascending, and this is EXACT creation order, not a proxy** (owner ruling,
+issue #266 comment 5011731983, Option A). PR/issue numbers are monotonic counters assigned at
+creation by both GitHub and GitLab — there is no interleaving, reuse, or renumbering path on either
+provider, so ascending-number sort carries zero approximation error versus a true `createdAt` sort
+(verified: issue #266 comment 5011702460, finding H15B-FORK-BFREE; the fork itself: comment
+5011695053). Pinned as a durable record (`rec-fd2cc044376e5e4c`). The composition is `mrList` (open
+PRs) + per-PR `prView` (labels) — SHIPPED verbs only, no port change; the resulting N+1 read cost is
+accepted at H1 scale and folded into a later holistic `prView`/list-read unification, not optimized
+in this slice.
+
+**Escalation inbox** (candidate issue #266 comment 4993202904, decided IN by plan 5011584432):
+`brain:review:queue` ALSO lists open PRs carrying `needs-decision` — the tightening label the poster
+applies on a verdict with `escalate: 'human'` (REQ-H1-9 extension, above) — as a separate "pending
+escalations" section, same ordering (PR number ascending).
+
 #### Scenario: oldest first
 - **GIVEN** three open PRs carry `needs-review` with different created dates
 - **WHEN** `brain:review:queue` runs
-- **THEN** they are listed oldest-created first
+- **THEN** they are listed oldest-created first (PR number ascending — exact creation order)
+
+#### Scenario: pending escalations are listed alongside the review queue
+- **GIVEN** an open PR carries `needs-decision`
+- **WHEN** `brain:review:queue` runs
+- **THEN** it appears in the escalation-inbox section, ordered by PR number ascending
 
 ---
 
@@ -308,11 +345,16 @@ is a rebuildable no-op. The board reconciles labels via `labelAdd` / `labelRemov
 ## REQ-H1-14 [H1-5, enforced everywhere labelAdd is called]: The hardcoded deny-set (protocol §9)
 
 The reviewer MAY apply only **tightening** labels (`decision`, `seq:*`, `reviewed:*`,
-`needs-ruling`) and MUST NEVER apply labels that **loosen** (`size:exception`, `skip:*`) or
-**unlock** (`status:approved`, `override:*`). The deny-set MUST be **hardcoded in the caller**,
-checked before every `labelAdd`, and refuse the label before it reaches the provider. `actor-check`
-is the independent L5 backstop (the reviewer is never in `governance.approvalActors`, §3), so a
-deny-set bug is still visible — but the deny-set is the first line.
+`needs-ruling`, `needs-decision`) and MUST NEVER apply labels that **loosen** (`size:exception`,
+`skip:*`) or **unlock** (`status:approved`, `override:*`). The deny-set MUST be **hardcoded in the
+caller**, checked before every `labelAdd`, and refuse the label before it reaches the provider.
+`actor-check` is the independent L5 backstop (the reviewer is never in `governance.approvalActors`,
+§3), so a deny-set bug is still visible — but the deny-set is the first line.
+
+> **The narrower REMOVE allow-list + `guardedLabelRemove` land in H1-5c** (with `board.mjs`, the
+> only path that removes labels): only `seq:*` / `reviewed:*` — the reviewer's own derived index —
+> may ever be removed; `decision` / `needs-ruling` / `needs-decision` are addable but never
+> removable (removing them loosens), and `status:approved` stays human-only on both paths.
 
 #### Scenario: an unlock label is refused before the provider
 - **GIVEN** the caller is asked to apply `status:approved`
@@ -321,6 +363,11 @@ deny-set bug is still visible — but the deny-set is the first line.
 
 #### Scenario: a tightening label passes
 - **GIVEN** the caller applies `seq:blocked-by-#5`
+- **WHEN** the deny-set is checked
+- **THEN** the label is allowed through to `labelAdd`
+
+#### Scenario: needs-decision is a tightening ADD label
+- **GIVEN** the caller applies `needs-decision`
 - **WHEN** the deny-set is checked
 - **THEN** the label is allowed through to `labelAdd`
 

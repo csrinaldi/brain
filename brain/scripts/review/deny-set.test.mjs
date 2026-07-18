@@ -60,7 +60,11 @@ for (const label of DENIED) {
 
 // ── ALLOW: the tightening namespaces ────────────────────────────────────────
 
-const ALLOWED = ['decision', 'seq:1', 'reviewed:approved', 'reviewed:stale', 'needs-ruling'];
+// `needs-decision` (H1-5b, REQ-H1-13/escalation inbox candidate 4993202904,
+// decided IN by plan 5011584432): the escalation-inbox tightening label —
+// applied when a verdict carries `escalate: 'human'`. Pure tightening,
+// same rationale as `needs-ruling`.
+const ALLOWED = ['decision', 'seq:1', 'reviewed:approved', 'reviewed:stale', 'needs-ruling', 'needs-decision'];
 
 for (const label of ALLOWED) {
   test(`isAllowedLabel("${label}") is true`, () => {

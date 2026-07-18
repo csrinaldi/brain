@@ -1,23 +1,28 @@
 // deny-set.mjs — REQ-H1-14: the hardcoded label deny-set (protocol §9,
-// design.md §7). A fail-closed ALLOW-LIST every `labelAdd` MUST pass
-// through, hardcoded in the caller, not left to the model to remember.
+// design.md §7). A fail-closed ALLOW-LIST every `labelAdd`/`labelRemove`
+// MUST pass through, hardcoded in the caller, not left to the model to
+// remember.
 //
-// ALLOW (tightening, protocol §9): `decision`, `seq:*`, `reviewed:*`,
-// `needs-ruling`. Everything else is DENIED — including the named
-// loosen/unlock labels (`status:approved`, `size:exception`, `skip:*`,
-// `override:*`) AND any unknown label not on the allow-list. The allow-list
-// IS the fence; the named examples are illustrations of what it catches,
-// not an exhaustive blacklist.
+// ADD allow-list (tightening, protocol §9): `decision`, `seq:*`,
+// `reviewed:*`, `needs-ruling`, `needs-decision`. Everything else is
+// DENIED — including the named loosen/unlock labels (`status:approved`,
+// `size:exception`, `skip:*`, `override:*`) AND any unknown label not on
+// the allow-list. The allow-list IS the fence; the named examples are
+// illustrations of what it catches, not an exhaustive blacklist.
 //
-// `guardedLabelAdd` is the single chokepoint every reviewer write-path
+// `needs-decision` (H1-5b, the escalation inbox, candidate 4993202904,
+// decided IN by plan 5011584432): applied when a verdict carries
+// `escalate: 'human'` — pure tightening, same rationale as `needs-ruling`.
+//
+// `guardedLabelAdd` is the single chokepoint every reviewer `labelAdd`
 // SHOULD share: `poster.mjs`'s anti-stale `reviewed:stale` label add is
 // folded under it (standing condition 1, issue #266 comment 5004345710:
-// "the constant is the seed, not the fence") and `board.mjs` (H1-5b) will
-// pass through the same gate. The refusal happens BEFORE the provider is
-// ever reached — `assertAllowed` throws synchronously, so `vcs.labelAdd`
-// is never invoked for a denied label.
+// "the constant is the seed, not the fence"). The refusal happens BEFORE
+// the provider is ever reached — `assertAllowed` throws synchronously, so
+// `vcs.labelAdd` is never invoked for a denied label. (The narrower REMOVE
+// allow-list + `guardedLabelRemove` land with `board.mjs` in H1-5c.)
 
-const ALLOWED_EXACT = new Set(['decision', 'needs-ruling']);
+const ALLOWED_EXACT = new Set(['decision', 'needs-ruling', 'needs-decision']);
 const ALLOWED_PREFIXES = ['seq:', 'reviewed:'];
 
 /**
@@ -44,7 +49,7 @@ export function assertAllowed(labels) {
     if (!isAllowedLabel(label)) {
       throw new Error(
         `deny-set: refused label "${label}" — the reviewer may only apply tightening labels ` +
-          '(decision, seq:*, reviewed:*, needs-ruling); loosen/unlock labels ' +
+          '(decision, seq:*, reviewed:*, needs-ruling, needs-decision); loosen/unlock labels ' +
           '(status:approved, size:exception, skip:*, override:*) and any label outside the ' +
           'allow-list are refused before labelAdd is invoked (protocol §9, REQ-H1-14).',
       );

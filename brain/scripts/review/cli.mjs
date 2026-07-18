@@ -19,6 +19,7 @@ import { evaluateTranche, gatherTrancheInputs } from './evaluators/tranche.mjs';
 import { evaluateCheckpoint, gatherCheckpointInputs } from './evaluators/checkpoint.mjs';
 import { evaluateRuling, gatherRulingInputs } from './evaluators/ruling.mjs';
 import { postVerdict } from './poster.mjs';
+import { gatherQueue } from './queue.mjs';
 
 /** @returns {{ pr: number|null, mode: string, dryRun: boolean }} */
 export function parseArgs(argv) {
@@ -29,6 +30,25 @@ export function parseArgs(argv) {
     else if (argv[i] === '--dry-run') args.dryRun = true;
   }
   return args;
+}
+
+/** `queue` subcommand (H1-5b, task 13.3): dispatches to queue.mjs's
+ * gatherQueue, prints the review queue + the escalation inbox. Read-only. */
+async function runQueueCommand(deps, log) {
+  const project = deps.project ?? loadBrainConfig().project?.slug;
+  const { reviewQueue, escalations } = await gatherQueue({
+    project,
+    provider: deps.provider,
+    deps: deps.queueDeps ?? {},
+  });
+
+  log(`brain:review:queue — ${reviewQueue.length} PR(s) awaiting review (oldest first, by number):`);
+  for (const pr of reviewQueue) log(`  #${pr.number} ${pr.title}`);
+
+  log(`brain:review:queue — ${escalations.length} pending escalation(s) (needs-decision):`);
+  for (const pr of escalations) log(`  #${pr.number} ${pr.title}`);
+
+  return 0;
 }
 
 function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
@@ -46,11 +66,22 @@ function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
  * `checkpointDeps.baseSha` is a test-side override only, see checkpoint.mjs's
  * docstring), `rulingDeps` (→ evaluators/ruling.mjs), `posterDeps` (→
  * poster.mjs), `writeVerbs` (a spy/real VCS used as the poster's default
- * `getVcs` when `posterDeps.getVcs` is not separately injected). */
+ * `getVcs` when `posterDeps.getVcs` is not separately injected), `queueDeps`
+ * (→ queue.mjs, `queue` subcommand only). */
 export async function main(deps = {}) {
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
-  const args = parseArgs(deps.argv ?? process.argv.slice(2));
+  const rawArgv = deps.argv ?? process.argv.slice(2);
+
+  // Positional subcommand dispatch (H1-5b, task 13.3, design.md §9): the
+  // FIRST token, when it is `queue`, selects an entirely different read
+  // path — it never reaches identity/cold-boot/the evaluators below.
+  // Anything else (including no subcommand, or a leading `--flag`) falls
+  // through to the existing single-PR review flow unchanged. (`board`
+  // dispatch lands in H1-5c.)
+  if (rawArgv[0] === 'queue') return runQueueCommand(deps, log);
+
+  const args = parseArgs(rawArgv);
   const project = deps.project ?? loadBrainConfig().project?.slug;
 
   const identity = await gatherIdentity({ deps: deps.identityDeps ?? {} });
@@ -173,6 +204,7 @@ export async function main(deps = {}) {
     renderedBody: rendered,
     reviewerHandle: identity.handle,
     priorVerdicts: boot.doctrine.priorVerdicts,
+    escalate: verdict.escalate,
     deps: posterDeps,
   });
 

@@ -219,6 +219,52 @@ test('main: --mode checkpoint local run (no ci-context) feeds boot.prView.baseRe
   assert.equal(reversionBaseSha, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', 'the checkpoint reversion must receive the port-resolved baseSha, not null — the wiring that takes §10.4 live');
 });
 
+// ── escalation inbox wiring (H1-5b): cli passes verdict.escalate through ───
+// to the poster, which applies needs-decision on escalate:'human'. ─────────
+
+test('main: mode "ruling" with a well-formed FORK always escalates -> cli forwards escalate:"human" to the poster, which applies needs-decision', async () => {
+  const vcs = spyVcs();
+  const lines = [];
+  const deps = readyDeps({ vcs, labels: ['needs-ruling'] });
+  deps.coldBootDeps.fetchPr = async () => ({ number: 42, author: 'alice', labels: ['needs-ruling'], body: validForkBody(), headRefOid: HEAD });
+  const code = await main({ argv: ['--pr', '42'], log: (s) => lines.push(s), ...deps });
+  assert.equal(code, 0);
+  assert.ok(lines.some(l => /escalate: human/.test(l)));
+  assert.equal(vcs.calls.labelAdd, 1, 'needs-decision must be applied when the verdict escalates to human');
+});
+
+test('main: mode "tranche" (no escalation) never calls labelAdd for needs-decision', async () => {
+  const vcs = spyVcs();
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42'], log: (s) => lines.push(s), ...readyDeps({ vcs }) });
+  assert.equal(code, 0);
+  assert.equal(vcs.calls.labelAdd, 0);
+});
+
+// ── subcommand dispatch (H1-5b, task 13.3): `queue` reaches queue.mjs's real
+// composition function — proven end to end, not stubbed. (`board` in H1-5c.) ─
+
+test('main("queue"): dispatches to queue.mjs\'s gatherQueue, prints the review queue AND the escalation inbox', async () => {
+  const lines = [];
+  const code = await main({
+    argv: ['queue'],
+    log: (s) => lines.push(s),
+    project: 'csrinaldi/brain',
+    provider: 'github',
+    queueDeps: {
+      listOpenPrs: async () => [{ number: 5, title: 'escalated one' }, { number: 2, title: 'plain review' }],
+      fetchLabels: async ({ number }) => (number === 2 ? ['needs-review'] : ['needs-decision']),
+    },
+  });
+  assert.equal(code, 0);
+  assert.ok(lines.some(l => /#2\b.*plain review/.test(l)), 'the review queue section must list PR #2 (needs-review)');
+  assert.ok(lines.some(l => /#5\b.*escalated one/.test(l)), 'the escalation inbox section must list PR #5 (needs-decision)');
+});
+
+test('main: an ordinary run (--pr flag, no subcommand) is UNAFFECTED by the queue dispatch check', () => {
+  assert.deepEqual(parseArgs(['--pr', '42']), { pr: 42, mode: 'auto', dryRun: false });
+});
+
 // ── absent token: fail-closed (wires Phase 2) ───────────────────────────────
 
 test('main: absent BRAIN_REVIEWER_TOKEN exits non-zero with the fail-closed message', async () => {
