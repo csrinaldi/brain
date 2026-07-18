@@ -111,6 +111,16 @@ export async function main(deps = {}) {
     return 1;
   }
 
+  // P290-ABSTAIN-FAIL-OPEN (§10 Self-review): the self-review guard is fail-open
+  // on an unset handle (evaluateSelfReview returns false when reviewerHandle is
+  // empty), so pre-task-7.3 — when the reviewer runs under the operator's own
+  // identity — author == operator and the §10 lock is silently inactive. Make
+  // the inactivity LOUD, not closed (a strict guard would abstain from
+  // everything). Non-fatal warning; binds before any H2-era unattended run.
+  if (!identity.handle) {
+    error('brain:review: self-review guard inactive — populate reviewer.handle (task 7.3).');
+  }
+
   const boot = await gatherColdBoot({
     project,
     number: args.pr,

@@ -54,30 +54,38 @@ test('buildVerdict: no head_sha throws — no headless verdict is representable'
   assert.throws(() => buildVerdict({ conclusion: 'REVISE', findings: [] }), /head_sha/);
 });
 
-// ── rev bound (REQ-H1-6) ──────────────────────────────────────────────────
+// ── rev semantics + bound (REQ-H1-6, protocol §7) ─────────────────────────
+// The EMITTED `rev` is 1-INDEXED: the first review is rev 1 (harmonized with the
+// human-mediated practice — #290 A/B harmonization item 1). The bounded-revision
+// LOCK is UNCHANGED — it counts PRIOR blocks (`priorRevCount >= 3`), so the 4th
+// review (emitted as rev 4) forces STOP; exactly three REVISEs (rev 1, 2, 3) are
+// allowed before the escalation.
 
-test('buildVerdict: rev >= 3 forces STOP + escalate:human instead of a 4th REVISE', () => {
-  const v = buildVerdict({
-    headSha: HEAD_SHA,
-    conclusion: 'REVISE',
-    priorRevCount: 3,
-    findings: [],
-  });
-  assert.equal(v.verdict, 'STOP');
-  assert.equal(v.escalate, 'human');
-  assert.equal(v.rev, 3);
+test('buildVerdict: the first review is rev 1 (1-indexed), not rev 0', () => {
+  const v = buildVerdict({ headSha: HEAD_SHA, conclusion: 'REVISE', priorRevCount: 0, findings: [] });
+  assert.equal(v.rev, 1);
+  assert.equal(v.verdict, 'REVISE');
 });
 
-test('buildVerdict: rev < 3 with a REVISE conclusion stays REVISE', () => {
+test('buildVerdict: the third REVISE (2 priors) is rev 3 and still REVISE — the lock has not fired', () => {
   const v = buildVerdict({ headSha: HEAD_SHA, conclusion: 'REVISE', priorRevCount: 2, findings: [] });
+  assert.equal(v.rev, 3);
   assert.equal(v.verdict, 'REVISE');
   assert.equal(v.escalate, null);
 });
 
-test('buildVerdict: rev >= 3 does NOT force STOP on a non-REVISE conclusion (e.g. APPROVE-path is never reached, but STOP stays STOP)', () => {
+test('buildVerdict: the 4th review (3 priors) is rev 4 and forces STOP + escalate:human — lock is priorRevCount >= 3, unchanged', () => {
+  const v = buildVerdict({ headSha: HEAD_SHA, conclusion: 'REVISE', priorRevCount: 3, findings: [] });
+  assert.equal(v.verdict, 'STOP');
+  assert.equal(v.escalate, 'human');
+  assert.equal(v.rev, 4);
+});
+
+test('buildVerdict: rev >= 3 does NOT force STOP on a non-REVISE conclusion (STOP stays STOP); rev stays 1-indexed', () => {
   const v = buildVerdict({ headSha: HEAD_SHA, conclusion: 'STOP', priorRevCount: 5, findings: [], escalate: 'human' });
   assert.equal(v.verdict, 'STOP');
   assert.equal(v.escalate, 'human');
+  assert.equal(v.rev, 6);
 });
 
 // ── renderVerdict — fenced brain-review/1 YAML ───────────────────────────
@@ -89,5 +97,6 @@ test('renderVerdict: emits a fenced yaml block naming protocol, verdict, and hea
   assert.match(block, /protocol: brain-review\/1/);
   assert.match(block, new RegExp(`head_sha: ${HEAD_SHA}`));
   assert.match(block, /verdict: REVISE/);
+  assert.match(block, /rev: 1/); // first review, 1-indexed (default priorRevCount 0)
   assert.match(block, /```\s*$/);
 });
