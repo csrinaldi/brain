@@ -40,8 +40,8 @@ function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
  * identity.mjs), `coldBootDeps` (→ cold-boot.mjs), `baseSha` (skips
  * `ci-context.mjs`'s CI-env resolution when injected), `loadCiContext`,
  * `getChangedFiles`, `trancheDeps` (→ evaluators/tranche.mjs), `checkpointDeps`
- * (→ evaluators/checkpoint.mjs — carries its OWN `baseSha` seam, resolved
- * independently of the tranche/ci-context one, see checkpoint.mjs's
+ * (→ evaluators/checkpoint.mjs — fed cli's one resolved `baseSha`; a
+ * `checkpointDeps.baseSha` is a test-side override only, see checkpoint.mjs's
  * docstring), `posterDeps` (→ poster.mjs), `writeVerbs` (a spy/real VCS used
  * as the poster's default `getVcs` when `posterDeps.getVcs` is not separately
  * injected). */
@@ -115,7 +115,9 @@ export async function main(deps = {}) {
       labels: boot.prView.labels ?? [],
       worktreePath: boot.worktreePath,
       doctrineRecords: boot.doctrine.records,
-      deps: deps.checkpointDeps ?? {},
+      // The resolved baseSha (ci-context → port prView.baseRefOid, ADR-0022) feeds
+      // the checkpoint seam — takes §10.4 reversion live; checkpointDeps overrides.
+      deps: { baseSha, ...(deps.checkpointDeps ?? {}) },
     });
     evalResult = evaluateCheckpoint(checkpointInputs);
   } else {

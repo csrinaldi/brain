@@ -6,14 +6,12 @@
 // step-2 warn converted into a hard finding (design.md §2).
 //
 // §10.4's base sha (the reversion's own anchor) is an INJECTED dependency,
-// `deps.baseSha` — deliberately NOT `ci-context.mjs`'s CI-only BASE_SHA/HEAD_SHA
-// resolution (that gap is already documented in tranche.mjs's own docstring),
-// and NEVER a hardcoded branch name. Production default: `prView().baseRefOid`
-// — a port verb that does not exist yet; ADR-0022's widening is drafted,
-// pending owner promotion (#266 H1-2C-BASE). Until then this seam resolves to
-// `null` and both the reversion AND the tranche re-derivation it feeds fold
-// into the SAME fail-closed rule tranche.mjs already documents (protocol §10,
-// "never APPROVE on uncomputable evidence") — generalized, not reinvented.
+// `deps.baseSha`, fed by cli.mjs's one resolved baseSha (ci-context BASE_SHA →
+// `prView().baseRefOid`, ADR-0022 — landed #266 H1-2C-BASE) and NEVER a
+// hardcoded branch. When it is null (genuinely uncomputable), both the reversion
+// AND the tranche re-derivation it feeds fold into the SAME fail-closed rule
+// tranche.mjs documents (protocol §10, "never APPROVE on uncomputable
+// evidence") — generalized, not reinvented.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -298,7 +296,7 @@ export async function gatherCheckpointInputs({
   doctrineRecords = [],
   deps = {},
 } = {}) {
-  const baseSha = deps.baseSha ?? (/* prView().baseRefOid — pending ADR-0022 widening (#266 H1-2C-BASE) */ null);
+  const baseSha = deps.baseSha ?? null; // fed by cli.mjs (ci-context → prView.baseRefOid, ADR-0022); tests inject directly
 
   const trancheInputs = await gatherTrancheInputs({
     project, number, provider, headSha, baseSha, changedFiles, prBody, deps: deps.trancheDeps ?? {},
