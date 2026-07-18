@@ -256,6 +256,93 @@ test('poster fold guard: the exact chokepoint poster.mjs now shares (guardedLabe
   assert.deepEqual(calls, [], 'a hypothetical denied label pushed through the poster\'s gate must never reach vcs.labelAdd');
 });
 
+// ── escalation inbox (H1-5b, candidate 4993202904, decided IN by plan
+// 5011584432): a POSTED verdict carrying escalate: 'human' applies
+// needs-decision, through the SAME guardedLabelAdd chokepoint. ──────────────
+
+test('escalate:"human" on a successfully posted verdict applies needs-decision via guardedLabelAdd (after the comment posts)', async () => {
+  const { vcs, calls } = allowlistSpy();
+  const result = await postVerdict({
+    headSha: HEAD,
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    mode: 'ruling',
+    renderedBody: '```yaml\nprotocol: brain-review/1\nverdict: STOP\nescalate: human\n```',
+    reviewerHandle: 'brain-reviewer',
+    priorVerdicts: [],
+    escalate: 'human',
+    deps: { getVcs: async () => vcs },
+  });
+  assert.equal(result.posted, true);
+  assert.ok(calls.includes('issueComment'));
+  assert.ok(calls.includes('labelAdd'), 'needs-decision must be applied on the escalation path');
+});
+
+test('escalate:"human" applies EXACTLY ["needs-decision"] via labelAdd, no other label', async () => {
+  const seenLabels = [];
+  const vcs = {
+    prView: async () => ({ headRefOid: HEAD }),
+    prReviewComment: async () => ({ url: 'x' }),
+    labelAdd: async ({ labels }) => { seenLabels.push(...labels); return { ok: true }; },
+  };
+  await postVerdict({
+    headSha: HEAD,
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    mode: 'tranche',
+    renderedBody: 'irrelevant',
+    reviewerHandle: 'brain-reviewer',
+    priorVerdicts: [],
+    escalate: 'human',
+    deps: { getVcs: async () => vcs },
+  });
+  assert.deepEqual(seenLabels, ['needs-decision']);
+});
+
+test('escalate not "human" (null, the default) never calls labelAdd — no escalation label on a normal posted verdict', async () => {
+  const { vcs, calls } = allowlistSpy();
+  const result = await postVerdict({
+    headSha: HEAD,
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    mode: 'tranche',
+    renderedBody: 'irrelevant',
+    reviewerHandle: 'brain-reviewer',
+    priorVerdicts: [],
+    deps: { getVcs: async () => vcs },
+  });
+  assert.equal(result.posted, true);
+  assert.ok(!calls.includes('labelAdd'), 'no escalate param passed -> defaults to null -> no needs-decision');
+});
+
+test('escalate:"human" on an anti-stale (skipped) run never applies needs-decision — only reviewed:stale, and the post never happened', async () => {
+  const seenLabels = [];
+  const vcs = {
+    prView: async () => ({ headRefOid: MOVED }),
+    labelAdd: async ({ labels }) => { seenLabels.push(...labels); return { ok: true }; },
+    prReviewComment: async () => { throw new Error('must not be called'); },
+    issueComment: async () => { throw new Error('must not be called'); },
+  };
+  const result = await postVerdict({
+    headSha: HEAD,
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    mode: 'tranche',
+    renderedBody: 'irrelevant',
+    reviewerHandle: 'brain-reviewer',
+    priorVerdicts: [],
+    escalate: 'human',
+    deps: { getVcs: async () => vcs },
+  });
+  assert.equal(result.posted, false);
+  assert.equal(result.skipped, 'anti-stale');
+  assert.deepEqual(seenLabels, ['reviewed:stale'], 'anti-stale wins — the verdict never actually landed at this head, so escalation never fires');
+});
+
 test('anti-stale path still applies reviewed:stale (allowed, tightening) end-to-end after the deny-set fold', async () => {
   const seenLabels = [];
   const vcs = {

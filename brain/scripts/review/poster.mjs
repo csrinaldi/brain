@@ -8,7 +8,9 @@
 // structurally, because the port itself (`vcs/cli.mjs`'s VERBS) defines no
 // approve verb. `postVerdict` only ever calls `prReviewComment` (PR verdicts,
 // `mode !== 'ruling'`) or `issueComment` (issue rulings, `mode === 'ruling'`),
-// plus `labelAdd` for `reviewed:stale` ONLY.
+// plus `labelAdd` for `reviewed:stale` (anti-stale) and `needs-decision`
+// (escalation inbox, H1-5b, only when `escalate: 'human'` and the post
+// actually landed) — both through `guardedLabelAdd`, never bare.
 //
 // Standing condition 1 (issue #266 comment 5004345710, "the constant is the
 // seed, not the fence"): the `reviewed:stale` labelAdd is folded through
@@ -16,11 +18,23 @@
 // reviewer label add (this module's and `board.mjs`'s, H1-5b) passes
 // through. Behavior is unchanged (`reviewed:stale` matches `reviewed:*` —
 // allowed), but the label now clears the same fence, not a bare provider call.
+//
+// Escalation inbox, post half (H1-5b, candidate 4993202904, decided IN by
+// plan 5011584432): when the verdict being posted carries
+// `escalate: 'human'` (rulings always do — REQ-H1-11; `rev >= 3` also forces
+// it — REQ-H1-6) AND the post actually lands (not skipped by anti-stale or
+// anti-loop — an unposted verdict never touched this head, so nothing to
+// escalate), the caller applies `needs-decision` through the same
+// `guardedLabelAdd` chokepoint. This is what makes an escalation visible in
+// `brain:review:queue`'s pending-escalations section (queue.mjs, REQ-H1-12).
+// Removing `needs-decision` once the human decides is OUT OF SCOPE for H1 —
+// a human/manual keystroke, not automated here.
 
 import { getVcs } from '../vcs/cli.mjs';
 import { guardedLabelAdd } from './deny-set.mjs';
 
 const STALE_LABEL = 'reviewed:stale';
+const ESCALATION_LABEL = 'needs-decision';
 
 /**
  * @param {object} args
@@ -33,6 +47,9 @@ const STALE_LABEL = 'reviewed:stale';
  * @param {string} args.reviewerHandle
  * @param {Array<{head_sha:string, verdict:string, author:string|null}>} [args.priorVerdicts]
  *   Prior `brain-review/1` blocks on the thread, oldest-first (cold-boot's `doctrine.priorVerdicts`).
+ * @param {'human'|null} [args.escalate]
+ *   The verdict's own `escalate` field (`buildVerdict`'s output, verdict.mjs). When `'human'` AND the
+ *   post actually lands, `needs-decision` is applied (escalation inbox, H1-5b).
  * @param {{ getVcs?: Function, reResolveHead?: Function }} [args.deps]
  * @returns {Promise<{ posted: true, result: object } | { posted: false, skipped: 'anti-loop'|'anti-stale' }>}
  */
@@ -45,6 +62,7 @@ export async function postVerdict({
   renderedBody,
   reviewerHandle,
   priorVerdicts = [],
+  escalate = null,
   deps = {},
 } = {}) {
   // Anti-loop FIRST (protocol §10, "comment loop"): purely computed from
@@ -75,5 +93,13 @@ export async function postVerdict({
   // `prReviewComment` hardcodes `event: 'COMMENT'` on both providers.
   const postFn = mode === 'ruling' ? vcs.issueComment : vcs.prReviewComment;
   const result = await postFn({ project, number, body: renderedBody });
+
+  // Escalation inbox, post half: only reachable once the verdict actually
+  // landed at this head (past both anti-stale and anti-loop) — an unposted
+  // verdict never bound to the current tree, so nothing to escalate yet.
+  if (escalate === 'human') {
+    await guardedLabelAdd(vcs, { project, number, labels: [ESCALATION_LABEL] });
+  }
+
   return { posted: true, result };
 }

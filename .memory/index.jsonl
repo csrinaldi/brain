@@ -136,6 +136,7 @@
 {"id":"rec-f49cade9bf4ee4c3","ts":"2026-06-26T15:43:24Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-f506887e3ef89db5","ts":"2026-07-02T20:10:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-fc89b156edded06b","ts":"2026-07-04T14:47:47Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-fd2cc044376e5e4c","ts":"2026-07-18T15:18:59Z","actor":"feat/issue-266-h1-5b-queue-board","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-fd2e63da1bf318a6","ts":"2026-07-01T00:46:35Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-fd7e908348912399","ts":"2026-07-02T22:00:03Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-fda4634ee60aa75a","ts":"2026-06-27T00:34:33Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
