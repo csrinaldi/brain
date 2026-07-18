@@ -107,6 +107,7 @@
 {"id":"rec-be0d539fad481935","ts":"2026-06-27T18:51:27Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-be8631f346beef6b","ts":"2026-06-30T22:33:52Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-c00bf627031c4646","ts":"2026-06-27T18:27:52Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
+{"id":"rec-c2c162a51dc7b046","ts":"2026-07-18T02:58:16Z","actor":"feat/issue-266-h1-4-ruling","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-c2e13102f53a594e","ts":"2026-06-27T02:09:23Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-c2e6e20ef00f18f2","ts":"2026-06-26T23:32:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-c7539d18935764f0","ts":"2026-06-27T19:11:56Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
