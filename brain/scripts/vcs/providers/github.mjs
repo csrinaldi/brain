@@ -181,7 +181,10 @@ export async function prView({ project, number } = {}) {
   try {
     const data = JSON.parse(r.stdout);
     const br = run('gh', ['api', `repos/{owner}/{repo}/pulls/${number}`, '--jq', '.base.sha']);
-    const baseRefOid = br.ok && br.stdout.trim() ? br.stdout.trim() : null;
+    // `gh api --jq .base.sha` prints the literal "null" on a JSON-null base.sha —
+    // normalize it to null, matching gitlab.mjs's `diff_refs?.base_sha ?? null`.
+    const baseSha = br.ok ? br.stdout.trim() : '';
+    const baseRefOid = baseSha && baseSha !== 'null' ? baseSha : null;
     return {
       number: data.number,
       labels: (data.labels ?? []).map(l => l.name),

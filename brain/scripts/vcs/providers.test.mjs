@@ -804,6 +804,17 @@ test('github.prView baseRefOid defaults to null when the supplementary call fail
   assert.equal(result.body, '', 'a failed supplementary call must not blank out fields the main fetch already resolved');
 });
 
+test('github.prView baseRefOid is null (not the string "null") when the supplementary call returns a JSON-null base.sha', async () => {
+  // `gh api --jq .base.sha` prints the literal "null" when base.sha is JSON-null;
+  // it must normalize to null, matching gitlab.mjs's `diff_refs?.base_sha ?? null` discipline.
+  setSpawn(fakePrViewSpawn(
+    { number: 7, labels: [], body: '', author: null, headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d' },
+    'null',
+  ));
+  const result = await github.prView({ project: 'o/r', number: 7 });
+  assert.equal(result.baseRefOid, null);
+});
+
 test('github.prView does not attempt the supplementary gh api call when the main gh pr view call fails', async () => {
   let calls = 0;
   setSpawn(() => { calls++; return { status: 1, stdout: '', stderr: 'not found' }; });
