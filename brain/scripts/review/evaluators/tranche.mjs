@@ -8,17 +8,15 @@
 // (`gh` down), this evaluator NEVER approves — it fails closed to REVISE with
 // `conditions: [evidence uncomputable]` (protocol §10). Budget is re-derived
 // the same way: `git diff --numstat base...head | diff-size-count.mjs`, never
-// trusted from a report; when `base`/`head` are not resolvable (a human running
-// `brain:review` outside CI, where `ci-context.mjs`'s BASE_SHA/HEAD_SHA env
-// vars are unset — see `ci-context.mjs`'s own docstring: it is the SOLE
-// sanctioned reader of those vars, reused here rather than re-implemented),
-// the budget is ALSO uncomputable and folds into the SAME fail-closed rule —
-// this generalizes protocol §10's "never APPROVE on uncomputable evidence"
-// rather than inventing a new one. See the H1-2c apply report for this
-// documented interpretation (no `baseRefOid`/`baseRefName` verb exists on the
-// port yet; adding one is a Fork-A-shaped decision out of scope here, and
-// H1-2b just retired the last DI-seam reader precisely so no parallel
-// mini-port would reappear).
+// trusted from a report; when `base`/`head` are not resolvable, the budget is
+// ALSO uncomputable and folds into the SAME fail-closed rule — this
+// generalizes protocol §10's "never APPROVE on uncomputable evidence" rather
+// than inventing a new one. `base` (this file's caller, `cli.mjs`) resolves
+// from `ci-context.mjs`'s CI-env BASE_SHA when set, else from `prView`'s
+// `baseRefOid` (ADR-0022 Decision 1/2, the port widening that closed
+// H1-2C-BASE) — so this fail-closed branch now only fires when BOTH sources
+// are genuinely uncomputable (e.g. the `gh`/`glab` fetch itself failed), not
+// merely "running outside CI" as before the widening landed.
 
 import { execFileSync } from 'node:child_process';
 

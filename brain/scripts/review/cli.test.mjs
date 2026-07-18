@@ -153,6 +153,47 @@ test('main: absent BRAIN_REVIEWER_TOKEN exits non-zero with the fail-closed mess
   assert.ok(errors.some(l => /BRAIN_REVIEWER_TOKEN/.test(l)));
 });
 
+// ── H1-2C-BASE closure: local runs resolve baseSha from the port ────────────
+// (ADR-0022 Decision 2). No ci-context.mjs BASE_SHA (a LOCAL run) + the
+// port's prView.baseRefOid present → baseSha resolves from the port, the
+// budget computes, the tranche path is NOT fail-closed. Mirrors the existing
+// ci-context precedence: an explicit deps.baseSha still wins, then
+// ctx?.baseSha (CI), then boot.prView.baseRefOid (the port, now the
+// provider-agnostic default that also serves local runs).
+
+test('main: local run (no ci-context baseSha) falls back to boot.prView.baseRefOid — H1-2C-BASE closes for the tranche path', async () => {
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  delete deps.baseSha; // exercise the ctx?.baseSha ?? boot.prView.baseRefOid fallback, not the injected override
+  deps.loadCiContext = async () => ({ baseSha: null }); // simulates a LOCAL run — ci-context unset
+  deps.coldBootDeps.fetchPr = async () => ({
+    number: 42, author: 'alice', labels: [], body: '', headRefOid: HEAD, baseRefOid: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+  });
+  const seenBaseShas = [];
+  deps.getChangedFiles = (baseSha) => { seenBaseShas.push(baseSha); return ['foo.mjs']; };
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), ...deps });
+
+  assert.equal(code, 0);
+  assert.deepEqual(seenBaseShas, ['deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'], 'baseSha must resolve from the port when ci-context is unset locally');
+  assert.ok(!lines.some(l => /evidence uncomputable/.test(l)), 'the budget dimension must not fail closed once baseSha resolves from the port');
+  assert.ok(lines.some(l => /verdict: APPROVE/.test(l)), 'green gates + a resolved, in-range budget → APPROVE, proving the budget actually computed');
+});
+
+test('main: local run with no port baseRefOid either (uncomputable) still fails closed — the port widening never relaxes protocol §10', async () => {
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  delete deps.baseSha;
+  deps.loadCiContext = async () => ({ baseSha: null });
+  deps.coldBootDeps.fetchPr = async () => ({ number: 42, author: 'alice', labels: [], body: '', headRefOid: HEAD, baseRefOid: null });
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), ...deps });
+
+  assert.equal(code, 0);
+  assert.ok(lines.some(l => /verdict: REVISE/.test(l)));
+  assert.ok(lines.some(l => /evidence uncomputable/.test(l)), 'baseSha genuinely uncomputable (no ci-context, no port value) must still fail closed');
+});
+
 // ── self-review abstention wired end-to-end ─────────────────────────────────
 
 test('main: self-review abstains, exits 0, posts nothing', async () => {

@@ -140,40 +140,61 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
 }
 
 /**
- * Fetch a PR's metadata (number, label names, body, author, and the head
- * commit sha) via `gh pr view`. Uses the current repo's git remote —
- * `project` is accepted for contract compatibility but not required by the
- * gh CLI when run from the repo root.
+ * Fetch a PR's metadata (number, label names, body, author, the head commit
+ * sha, and the base commit sha) via `gh pr view`. Uses the current repo's
+ * git remote — `project` is accepted for contract compatibility but not
+ * required by the gh CLI when run from the repo root.
  *
  * `headRefOid` (ADR-0021 Decision 1) is the API's head sha for the PR — the
  * anchor a cold caller checks out **detached** at (never a branch name).
- * Widened additively: existing callers reading only `number`/`labels`/
- * `body`/`author` are unaffected.
+ *
+ * `baseRefOid` (ADR-0022 Decision 1) is the base branch's tip sha. `gh pr
+ * view --json` does NOT expose it (verified: its field set offers
+ * `baseRefName`/`headRefName`/`headRefOid`, but no `baseRefOid` — `gh pr view
+ * --json baseRefOid` errors "Unknown JSON field"). So it is sourced via a
+ * SECOND, supplementary call: `gh api repos/{owner}/{repo}/pulls/{number}
+ * --jq .base.sha` (the REST endpoint's authoritative `base.sha`; `gh` itself
+ * expands the literal `{owner}/{repo}` placeholders from the current repo's
+ * git remote, preserving this verb's "works from repo root, `project`
+ * optional" property). The main `gh pr view --json …,headRefOid` call above
+ * is left UNTOUCHED — `baseRefOid` is a strictly additive supplement: if it
+ * fails, every other field from the main fetch is still returned, only
+ * `baseRefOid` folds to `null`.
+ *
+ * Widened additively (both ADR-0021 and ADR-0022): existing callers reading
+ * only `number`/`labels`/`body`/`author` are unaffected.
  *
  * Never throws: returns { number, labels: null, body: null, author: null,
- * headRefOid: null } on ANY failure (ci-context.mjs's REQ-CIC-2 uncomputable
- * signal) — distinct from a genuinely empty `[]`/`''` on an otherwise-
- * successful response. Callers that need "no labels" vs "couldn't fetch
- * labels" distinguished (e.g. a REQUIRED gate) MUST treat `null` as
- * uncomputable, never collapse it to a fabricated empty default.
+ * headRefOid: null, baseRefOid: null } on ANY main-fetch failure
+ * (ci-context.mjs's REQ-CIC-2 uncomputable signal) — distinct from a
+ * genuinely empty `[]`/`''` on an otherwise-successful response. Callers
+ * that need "no labels" vs "couldn't fetch labels" distinguished (e.g. a
+ * REQUIRED gate) MUST treat `null` as uncomputable, never collapse it to a
+ * fabricated empty default.
  *
  * @param {{ project?: string, number: number }} opts
- * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null }>}
+ * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null }>}
  */
 export async function prView({ project, number } = {}) {
   const r = run('gh', ['pr', 'view', String(number), '--json', 'number,labels,body,author,headRefOid']);
-  if (!r.ok) return { number, labels: null, body: null, author: null, headRefOid: null };
+  if (!r.ok) return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
   try {
     const data = JSON.parse(r.stdout);
+    const br = run('gh', ['api', `repos/{owner}/{repo}/pulls/${number}`, '--jq', '.base.sha']);
+    // `gh api --jq .base.sha` prints the literal "null" on a JSON-null base.sha —
+    // normalize it to null, matching gitlab.mjs's `diff_refs?.base_sha ?? null`.
+    const baseSha = br.ok ? br.stdout.trim() : '';
+    const baseRefOid = baseSha && baseSha !== 'null' ? baseSha : null;
     return {
       number: data.number,
       labels: (data.labels ?? []).map(l => l.name),
       body: data.body ?? '',
       author: data.author?.login ?? null,
       headRefOid: data.headRefOid ?? null,
+      baseRefOid,
     };
   } catch {
-    return { number, labels: null, body: null, author: null, headRefOid: null };
+    return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
   }
 }
 

@@ -93,6 +93,12 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
  * existing callers reading only `number`/`labels`/`body`/`author` are
  * unaffected.
  *
+ * `baseRefOid` (ADR-0022 Decision 1) — the base branch's tip sha, normalized
+ * from the payload's `diff_refs.base_sha` (the mirror of how `headRefOid`
+ * uses `diff_refs.head_sha`). Unlike GitHub, no second request is needed —
+ * the already-fetched MR payload carries it. Widened additively, same
+ * discipline as `headRefOid`.
+ *
  * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS from the
  * caller (`gitlabApiConfig()`), never read from pipeline env directly here —
  * this file is a GATE_FILE (drift-guard forbids it). Defaults exist so
@@ -100,9 +106,9 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
  * `vcsToken()`, no proxy.
  *
  * Never throws: a fetch failure is caught and normalized to
- * `{ number, labels: null, body: null, author: null, headRefOid: null }`
- * (uncomputable) — never a fabricated empty `[]`/`''`, matching the
- * `github.prView` contract.
+ * `{ number, labels: null, body: null, author: null, headRefOid: null,
+ * baseRefOid: null }` (uncomputable) — never a fabricated empty `[]`/`''`,
+ * matching the `github.prView` contract.
  *
  * Body-parity (issue #239 A3 Phase 3 task 3.7): `null` means uncomputable
  * (the fetch itself failed — the `catch` branch below); `''` means the fetch
@@ -113,7 +119,7 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
  * from the failure case above.
  *
  * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
- * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null }>}
+ * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null }>}
  */
 export async function prView({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
@@ -131,9 +137,10 @@ export async function prView({ project, number, apiBase, token, proxyUrl, fetchI
       body: r.description ?? '',
       author: r.author?.username ?? null,
       headRefOid: r.sha ?? r.diff_refs?.head_sha ?? null,
+      baseRefOid: r.diff_refs?.base_sha ?? null,
     };
   } catch {
-    return { number, labels: null, body: null, author: null, headRefOid: null };
+    return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
   }
 }
 

@@ -165,7 +165,7 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assertProvenance(fixture, fixtureName);
 
     const result = await vcs.prView({ project: 'x/y', number: 42, ...prViewArgs(fixture) });
-    assert.deepEqual(result, { number: 42, labels: null, body: null, author: null, headRefOid: null });
+    assert.deepEqual(result, { number: 42, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null });
   });
 
   // headRefOid (ADR-0021 Decision 1): the recorded/derived happy fixtures
@@ -241,6 +241,68 @@ for (const providerName of Object.keys(PROVIDERS)) {
 
     assert.equal(result.url, null, 'a failed mrCreate must never fabricate a url');
     assert.equal(typeof result.error, 'string', 'a failed mrCreate must carry an error string');
+  });
+}
+
+// ── prView baseRefOid (ADR-0022 Decision 1) ─────────────────────────────────
+// GH sources it via a SECOND, supplementary `gh api repos/{owner}/{repo}/
+// pulls/{n} --jq .base.sha` call — `gh pr view --json` has no baseRefOid
+// field. GL reads the already-fetched MR payload's `diff_refs.base_sha`
+// (mirrors headRefOid's diff_refs.head_sha; no second request). GitHub's
+// mechanism needs a SECOND spawn call returning a raw (not JSON) sha string —
+// this doesn't fit the single-fixture `prViewArgs` glue used by the loop
+// above (which mocks one uniform response for every spawn/fetch call), so
+// these are exercised per-provider, same discipline as the prStatusRollup
+// block below.
+
+const BASE_REF_PROVIDERS = {
+  github: {
+    module: github,
+    ok: (baseSha) => {
+      setSpawn((_cmd, args) =>
+        args[0] === 'pr'
+          ? { status: 0, stdout: JSON.stringify({ number: 7, labels: [], body: '', author: null, headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d' }), stderr: '' }
+          : { status: 0, stdout: `${baseSha}\n`, stderr: '' }
+      );
+      return {};
+    },
+    supplementFails: () => {
+      setSpawn((_cmd, args) =>
+        args[0] === 'pr'
+          ? { status: 0, stdout: JSON.stringify({ number: 7, labels: [], body: '', author: null, headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d' }), stderr: '' }
+          : { status: 1, stdout: '', stderr: 'fixture: simulated failure' }
+      );
+      return {};
+    },
+  },
+  gitlab: {
+    module: gitlab,
+    ok: (baseSha) => ({
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ iid: 7, labels: [], description: '', author: null, diff_refs: { base_sha: baseSha } }),
+      }),
+    }),
+    supplementFails: () => ({
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ iid: 7, labels: [], description: '', author: null }),
+      }),
+    }),
+  },
+};
+
+for (const providerName of Object.keys(BASE_REF_PROVIDERS)) {
+  const { module: vcs, ok, supplementFails } = BASE_REF_PROVIDERS[providerName];
+
+  test(`${providerName}.prView (contract): a successful fetch normalizes baseRefOid to the API base sha`, async () => {
+    const result = await vcs.prView({ project: 'x/y', number: 7, ...ok('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef') });
+    assert.equal(result.baseRefOid, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef');
+  });
+
+  test(`${providerName}.prView (contract): baseRefOid normalizes to null when uncomputable on an otherwise-successful fetch`, async () => {
+    const result = await vcs.prView({ project: 'x/y', number: 7, ...supplementFails() });
+    assert.equal(result.baseRefOid, null);
   });
 }
 
