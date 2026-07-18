@@ -231,24 +231,51 @@ The `decision-gate` step-2 warn MUST be converted into a ruling ("is this a deci
 
 ---
 
-## REQ-H1-11 [H1-4]: Ruling evaluation contract (protocol §5, §6)
+## REQ-H1-11 [H1-4]: Ruling evaluation contract — Option (B), the evaluator never auto-rules
+(protocol §5, §6; owner ruling issue #266 comment 5009584044)
 
-The ruling evaluator MUST require a `## FORK` section with **≥2 options**, each with a cost and a
-consequence, plus the implementer's recommendation. A fork without ≥2 options is a request to
-design → **REVISE**, never a ruling. When it rules, it MUST follow §5 (enumerate constraining
-authorities, eliminate options doctrine excludes **citing each**, rule only if exactly one
-survives; if ≥2 survive → `STOP` + `escalate: human` — "this is an ADR, not a ruling") and emit a
-`pin:` payload.
+**Option (B), binding.** The ruling evaluator is a **structure validator + conservative
+escalator**, never an ADR-writer. Protocol §5's elimination path — "enumerate constraining
+authorities, eliminate options doctrine excludes citing each, rule only if exactly one survives" —
+is **NOT implemented** in this deterministic evaluator; that upgrade (§5 option (A): a real
+elimination-annotation format plus a citation resolver) is **out of scope, gated on issue #266
+#284**. Rationale (pinned as `.memory/records/2026-07.jsonl#rec-c2c162a51dc7b046`, citing findings
+H14-FORK-PREMISE and H14-FORK-LAUNDERING from the reviewer verification, issue #266 comment
+5009577822): auto-ruling on unrefuted inferential eliminations the evaluator itself performed is
+authority laundering; in H1 a human is at the keyboard for every review, so always escalating a
+structurally valid fork costs ~0.
+
+**The minimal `## FORK` parser contract.** The PR body's `## FORK` section MUST parse as:
+
+- a `## FORK` heading;
+- **≥2 options**, each as a `### Option <id>` heading (a list-equivalent form — `- Option <id>` /
+  `* Option <id>` — is also accepted), each carrying a `cost:` line and a `consequence:` line;
+- **exactly one** `Recommendation:` line (the implementer's recommendation) within the section.
+
+**Malformed → REVISE, never a ruling.** Any of: no `## FORK` section; fewer than 2 options; any
+option missing `cost:` or `consequence:`; zero or more-than-one `Recommendation:` line. The
+verdict is `REVISE` with a `blocker` finding "a fork without options is a request to design",
+`evidence:` = what the parser found malformed, `cites: reviewer-protocol.md §5`.
+
+**Structurally valid → STOP + escalate, always.** A `## FORK` with ≥2 well-formed options and one
+recommendation ALWAYS produces `verdict: STOP`, `escalate: 'human'`, and a finding "≥2 options — a
+new decision, not a ruling; escalating to human" (`cites: reviewer-protocol.md §5`). This is the
+**only** conclusion path for a valid fork — there is no branch where the evaluator rules
+(APPROVE, or any conclusion asserting one option "won"). The evaluator emits a `pin:` payload (the
+durable-record seed, protocol §8): `{ fork, options: [{ id, cost, consequence }], recommendation }`.
 
 #### Scenario: a fork without options is REVISE
 - **GIVEN** the PR body has a `## FORK` with a single option
 - **WHEN** the ruling evaluator runs
 - **THEN** the verdict is `REVISE` ("a fork without options is a request to design"), not a ruling
 
-#### Scenario: two surviving options escalate
-- **GIVEN** ≥2 options survive doctrine elimination
+#### Scenario: a structurally valid fork always escalates, never rules
+- **GIVEN** the PR body's `## FORK` has ≥2 options, each with `cost:`/`consequence:`, and exactly
+  one `Recommendation:` line
 - **WHEN** the evaluator concludes
-- **THEN** the verdict is `STOP` with `escalate: human`, never a ruling
+- **THEN** the verdict is `STOP` with `escalate: human` and a `pin:` payload — never APPROVE and
+  never a ruled conclusion, regardless of how many options a §5 elimination pass would leave
+  standing
 
 ---
 
