@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// cli.mjs — REQ-H1-5, REQ-H1-7, REQ-H1-8, REQ-H1-9, REQ-H1-10: `brain:review`
-// CLI. Wires identity → cold-boot → mode derivation (R6) → the tranche/
-// checkpoint evaluator → verdict → the poster. `ruling` mode is an explicit
-// not-yet-implemented stub (its evaluator lands in H1-4) — never a silent
-// no-op. `queue`/`board` dispatch land in H1-5 (design.md §9).
+// cli.mjs — REQ-H1-5, REQ-H1-7, REQ-H1-8, REQ-H1-9, REQ-H1-10, REQ-H1-11:
+// `brain:review` CLI. Wires identity → cold-boot → mode derivation (R6) →
+// the tranche/checkpoint/ruling evaluator → verdict → the poster. `ruling`
+// (H1-4, Option B — issue #266 comment 5009584044) NEVER auto-rules; a
+// well-formed `## FORK` always escalates. `queue`/`board` dispatch land in
+// H1-5 (design.md §9).
 
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -16,6 +17,7 @@ import { buildVerdict, renderVerdict } from './verdict.mjs';
 import { deriveMode } from './mode.mjs';
 import { evaluateTranche, gatherTrancheInputs } from './evaluators/tranche.mjs';
 import { evaluateCheckpoint, gatherCheckpointInputs } from './evaluators/checkpoint.mjs';
+import { evaluateRuling, gatherRulingInputs } from './evaluators/ruling.mjs';
 import { postVerdict } from './poster.mjs';
 
 /** @returns {{ pr: number|null, mode: string, dryRun: boolean }} */
@@ -42,9 +44,9 @@ function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
  * `getChangedFiles`, `trancheDeps` (→ evaluators/tranche.mjs), `checkpointDeps`
  * (→ evaluators/checkpoint.mjs — fed cli's one resolved `baseSha`; a
  * `checkpointDeps.baseSha` is a test-side override only, see checkpoint.mjs's
- * docstring), `posterDeps` (→ poster.mjs), `writeVerbs` (a spy/real VCS used
- * as the poster's default `getVcs` when `posterDeps.getVcs` is not separately
- * injected). */
+ * docstring), `rulingDeps` (→ evaluators/ruling.mjs), `posterDeps` (→
+ * poster.mjs), `writeVerbs` (a spy/real VCS used as the poster's default
+ * `getVcs` when `posterDeps.getVcs` is not separately injected). */
 export async function main(deps = {}) {
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
@@ -120,10 +122,22 @@ export async function main(deps = {}) {
       deps: { baseSha, ...(deps.checkpointDeps ?? {}) },
     });
     evalResult = evaluateCheckpoint(checkpointInputs);
+  } else if (mode === 'ruling') {
+    // ruling (H1-4, REQ-H1-11, Option (B) — issue #266 comment 5009584044):
+    // the evaluator NEVER auto-rules; a well-formed ## FORK always
+    // escalates to a human (STOP + escalate:'human'), a malformed one
+    // REVISEs. No server round trip — the PR body is already cold-booted.
+    const rulingInputs = await gatherRulingInputs({
+      project,
+      number: args.pr,
+      prBody: boot.prView.body,
+      deps: deps.rulingDeps ?? {},
+    });
+    evalResult = evaluateRuling(rulingInputs);
   } else {
-    // ruling (H1-4): evaluator not yet implemented in this slice. Explicit
+    // Any other derived/explicit mode is not (yet) implemented. Explicit
     // stub — never a silent no-op or a guessed verdict.
-    error(`brain:review: mode "${mode}" is not yet implemented (its evaluator lands in H1-4) — refusing to guess a verdict.`);
+    error(`brain:review: mode "${mode}" is not yet implemented — refusing to guess a verdict.`);
     return 1;
   }
 
@@ -134,6 +148,11 @@ export async function main(deps = {}) {
     gates: evalResult.gates,
     findings: evalResult.findings,
     conditions: evalResult.conditions,
+    // undefined for tranche/checkpoint (they never set these) — buildVerdict's
+    // own defaults (`pin` undefined, `escalate` null) apply unchanged, so this
+    // is a no-op for those two modes.
+    pin: evalResult.pin,
+    escalate: evalResult.escalate,
   });
 
   const rendered = renderVerdict(verdict);
