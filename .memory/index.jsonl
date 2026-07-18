@@ -92,6 +92,7 @@
 {"id":"rec-9d654541f2fee079","ts":"2026-07-07T17:08:41Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-9e3192f14d713ec9","ts":"2026-06-26T17:14:05Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-a2c16e24d4a8762c","ts":"2026-06-27T13:01:48Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-06.jsonl"}
+{"id":"rec-a33bcc26cfe00a89","ts":"2026-07-18T20:11:23Z","actor":"fix/issue-293-coldboot-shallow","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-a3b81386bba70132","ts":"2026-06-27T18:16:50Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-a780c53b2fbf53d9","ts":"2026-06-29T01:35:16Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-ad460df06ca40ba0","ts":"2026-06-27T12:56:23Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}

@@ -48,6 +48,18 @@ export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir(
   return ({ sha, baseSha } = {}) => {
     if (baseSha) doFetch(baseSha);
     doFetch(sha);
+    // COLDBOOT-SHALLOW fix (issue #293): a shallow operator clone truncates
+    // history — `base...head` has no reachable merge-base (and the §10.4
+    // reversion no base tree) even with both tips fetched, because re-fetching
+    // an already-present graft never deepens. Unshallow so full history
+    // connects them. Guarded: on a complete clone `--unshallow` errors by
+    // design, so only run it when the repo is actually shallow. This carries
+    // I291-AMBIENT-STATE to its conclusion — cold boot is robust to the
+    // operator's clone depth, not just its fetch state.
+    try {
+      const shallow = execFileSync('git', ['rev-parse', '--is-shallow-repository'], { cwd, encoding: 'utf8' }).trim();
+      if (shallow === 'true') execFileSync('git', ['fetch', '--unshallow', 'origin'], { cwd, encoding: 'utf8' });
+    } catch { /* best effort: a complete clone, or nothing left to deepen */ }
     const worktreePath = join(tmp, `brain-review-${sha}`);
     // Clear any prior worktree at this path so `worktree add` never fails:
     // `remove` unregisters a registered one; `prune` + rm clears a bare
