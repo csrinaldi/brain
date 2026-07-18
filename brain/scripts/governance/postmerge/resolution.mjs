@@ -1,17 +1,24 @@
 // postmerge/resolution.mjs — revert-resolution proved by WHOLE-COMMIT
 // FIRST-PARENT DIFF-INVERSION, never by a message (design §3, revised after
 // judgment-round-1's rename bypass, engram #916, against the prior
-// path-scoped `P ∩ D = ∅` predicate). An offender O is resolved at tip iff
-// there exists a first-parent merge R in (O, tip] whose own first-parent
-// contribution, READ BACKWARD (R to R^1 — "what would restore R^1 from R"),
-// is the byte-exact inverse of O's own first-parent contribution (O^1 to
-// O) — i.e. some R exactly undid what O did to the tree. This is a claim
-// that ∃ R that exactly inverted O's first-parent contribution; it is NOT a
-// claim that "the payload is not on disk" — that phrasing described the
-// collapsed, rename-forgeable predicate this module replaces. A rename or
-// copy can make a payload absent from its original PATH while the content
-// survives elsewhere; this predicate never inspects paths in isolation, it
-// compares whole, byte-exact, normalized diff text. A commit trailer,
+// path-scoped `P ∩ D = ∅` predicate; the AGGREGATION was later re-anchored
+// to the NET tree state at HEAD after judgment-day Round 3, design §15). An
+// offender O is resolved at tip iff its own first-parent contribution is
+// NET-ABSENT from the tree at `tip` under exact-`normDiff` accounting:
+//   netPresent(O, tip) = 1 + Σ_{W ∈ (O, tip]} sign(normDiff(W^1,W), dO)  ≤ 0
+// where dO = normDiff(O^1, O), and each first-parent merge W strictly after
+// O counts +1 when it RE-INTRODUCES O's contribution (fW == dO), −1 when it
+// INVERTS it (fW == dOinv, the byte-exact backward diff O to O^1), and 0
+// otherwise. This SUPERSEDES the earlier `∃ R` existence test: a single
+// inverse commit no longer settles O — a revert that is itself later
+// reverted (a revert-of-a-revert re-adding the payload) is net-present and
+// stays flagged (design §15.3, REQ-D2-16; fixtures A5/A7). It is NOT a claim
+// that "the payload is not on disk" — that phrasing described the collapsed,
+// rename-forgeable predicate this module replaces. A rename or copy can make
+// a payload absent from its original PATH while the content survives
+// elsewhere (its contribution matches neither sign → counts 0 → O stays
+// flagged); this predicate never inspects paths in isolation, it compares
+// whole, byte-exact, normalized diff text. A commit trailer,
 // ancestry, an author, a signature, or a branch name are NEVER consulted —
 // they are free text or forgeable, and the tree is not. The only other
 // resolution path is the recorded human gate (cursor.mjs accept), which
@@ -164,41 +171,181 @@ function firstParentMergesAfter(git, offender, tip) {
 }
 
 /**
- * Is `offender` resolved at `tip`?
- *   pO = normDiff(offender^1, offender)     — offender's own first-parent
- *                                              contribution
- *   if pO === ''  →  { resolved: false,
- *                       reason: 'offender has no first-parent contribution' }
- *                     ◄── EXPLICIT anti-vacuity guard (F-1), the FIRST
- *                         branch. An empty contribution would otherwise be
- *                         able to match ANY other empty-diff merge
- *                         trivially — refused, loudly, never a vacuous
- *                         pass.
- *   for each first-parent merge R in (offender, tip]:
- *     if normDiff(R, R^1) === pO  →  { resolved: true }
- *                     ◄── R's own contribution, READ BACKWARD, is
- *                         byte-identical to what the offender introduced —
- *                         R demonstrably, exactly inverted the offender's
- *                         contribution.
- *   →  { resolved: false }
+ * `sign` of a candidate merge against a target payload signature — the
+ * per-candidate term of the net-parity aggregation (design §15.3). Given the
+ * candidate's own first-parent contribution `fW = normDiff(W^1, W)`, a target
+ * signature `s`, and that target's EXACT reverse patch `sInv`:
+ *   +1  if fW === s      (W RE-INTRODUCES the payload)
+ *   −1  if fW === sInv   (W INVERTS the payload)
+ *    0  otherwise         (unrelated — e.g. a rename, whose delete+add text
+ *                          matches neither → the payload stays counted)
+ * `sInv` is a DISTINCT git computation (a `normDiff` read backward), never a
+ * textual reversal of `s`, so it is passed precomputed. For any non-empty
+ * `s`, `s !== sInv` (a forward add and its reverse differ in +/- polarity),
+ * so the two branches never both fire.
+ *
+ * CONTRACT (F-1, sound on the EXPORTED surface) — an empty target signature
+ * `s === ''` is VACUOUS and is refused fail-closed by THROWING, right here,
+ * before either branch is consulted. An empty `s` would otherwise make an
+ * empty `fW` match `fW === s` and return a spurious +1, misclassifying a
+ * content-free candidate as a re-add. The refusal lives on the primitive
+ * itself (not only in the callers) so `sign` is sound when called directly:
+ * its internal callers (`netPresent`, `netAddFull`) already reject their own
+ * empty payload signature first, so this throw is unreachable via them and
+ * exists solely to keep the export honest for future direct callers.
  */
-export function isResolvedAt(offender, tip, { git }) {
-  const pO = normDiff(git, `${offender}^1`, offender);
-  if (pO === '') return { resolved: false, reason: 'offender has no first-parent contribution' };
-
-  for (const candidate of firstParentMergesAfter(git, offender, tip)) {
-    if (normDiff(git, candidate, `${candidate}^1`) === pO) return { resolved: true };
+export function sign(fW, s, sInv) {
+  if (s === '') {
+    throw new Error('sign: empty target signature (F-1 vacuity) — refused fail-closed');
   }
-  return { resolved: false };
+  if (fW === s) return 1;
+  if (fW === sInv) return -1;
+  return 0;
 }
 
 /**
- * Is `candidate` the reverter of `offender`? (design §3.3) — reuses the
- * SAME diff-inversion primitive as `isResolvedAt`, no new mechanism, no
- * forgeable signal: `candidate`'s own contribution, read backward, is
- * byte-identical to what the offender introduced. Closes the
- * revert-of-revert loop (an auto-revert of an adrPresence offender would
- * itself re-trigger the XOR) without reading any message.
+ * `netPresent(O, tip)` — the DIRECTIONAL net-parity of O's first-parent
+ * payload signature at `tip` (design §15.3, REQ-D2-16):
+ *
+ *   netPresent(O, tip) = 1 + Σ_{W ∈ (O, tip]} sign(normDiff(W^1,W), dO, dOinv)
+ *
+ * O's own contribution is the `+1` base term; every first-parent merge
+ * STRICTLY AFTER O (the half-open `(O, tip]` range — O's own boundary is
+ * EXCLUDED, so the HEAD-most merge is never wholesale cancelled as its own
+ * canceller) adds its `sign`. `≤ 0` ⟺ the payload signature is net-ABSENT at
+ * the tip. The DIRECTIONAL range is deliberate and asymmetric with
+ * `netAddFull`'s full-window range (design §15.3's "why the ranges differ"
+ * note): a live re-add sitting at HEAD must always reach the checks, so it
+ * can never be resolved away by counting only merges that precede it.
+ *
+ * CONTRACT (F-1, sound on the EXPORTED surface) — an offender whose own
+ * first-parent contribution is EMPTY (`dO === ''`, e.g. an empty-effect
+ * `-s ours` merge) is VACUOUS and is refused fail-closed by THROWING, before
+ * any counting. An unguarded count would seed `+1` and then let empty-diff
+ * merges in range match `fW === dO` (`'' === ''`), reporting a spurious
+ * net-present total for a payload that has no signature at all. `isResolvedAt`
+ * guards this same case UPSTREAM (its F-1 first branch, which still fires
+ * first on the production path), but `netPresent` is EXPORTED: its soundness
+ * must NOT depend on how a caller reaches it, so the guard is duplicated here,
+ * on the primitive itself, for future direct callers (PR3 is the first new
+ * one). This mirrors `isResolvedAt`'s fail-closed F-1 (never a vacuous
+ * net-absent verdict) rather than weakening it.
+ *
+ * PURE-READ — every term is a `normDiff`, which never mutates `.git` or the
+ * work tree. Anchored at `tip` (always HEAD by §2.2).
+ */
+export function netPresent(offender, tip, { git }) {
+  const dO = normDiff(git, `${offender}^1`, offender);
+  if (dO === '') {
+    throw new Error('netPresent: offender has no first-parent contribution (F-1 vacuity) — refused fail-closed');
+  }
+  const dOinv = normDiff(git, offender, `${offender}^1`);
+  let net = 1;
+  for (const w of firstParentMergesAfter(git, offender, tip)) {
+    net += sign(normDiff(git, `${w}^1`, w), dO, dOinv);
+  }
+  return net;
+}
+
+/**
+ * Is `offender` resolved at `tip`?  (design §15.3, REQ-D2-16 — net-parity)
+ *   dO = normDiff(offender^1, offender)     — offender's own first-parent
+ *                                              contribution (payload signature)
+ *   if dO === ''  →  { resolved: false,
+ *                       reason: 'offender has no first-parent contribution' }
+ *                     ◄── EXPLICIT anti-vacuity guard (F-1): its return object
+ *                         and reason string are preserved and it remains the
+ *                         FIRST branch; only the condition variable was renamed
+ *                         (`pO` → `dO`). git emits nothing for an empty diff, so
+ *                         an unguarded net count would resolve garbage —
+ *                         refused, loudly, first, never a vacuous pass.
+ *   resolved  ⟺  netPresent(offender, tip) ≤ 0
+ *                     ◄── O's contribution is NET-ABSENT at the tip under
+ *                         exact-normDiff accounting. A single later inverse no
+ *                         longer suffices: a revert-of-a-revert that re-adds
+ *                         the payload leaves it net-present → still flagged
+ *                         (the §15 CRITICAL; fixtures A5/A7).
+ */
+export function isResolvedAt(offender, tip, { git }) {
+  const dO = normDiff(git, `${offender}^1`, offender);
+  if (dO === '') return { resolved: false, reason: 'offender has no first-parent contribution' };
+  return netPresent(offender, tip, { git }) <= 0 ? { resolved: true } : { resolved: false };
+}
+
+/**
+ * The first-parent merges in the CLOSED window `[from, to]` — inclusive of
+ * BOTH endpoints, unlike `firstParentMergesAfter`'s half-open `(from, to]`.
+ * Enumerated as `${from}^1..${to}` so the merge AT `from` is itself counted.
+ * This is the range the FULL-WINDOW reverter-skip primitive needs: its signed
+ * count must see the offender sitting at the window base BEHIND a cleanup
+ * revert that lands at the tip. PURE-READ.
+ */
+function firstParentMergesInclusive(git, from, to) {
+  const out = git.orThrow(['rev-list', '--first-parent', '--merges', `${from}^1..${to}`]);
+  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * `netAddFull(C)` — the FULL-WINDOW net-parity of candidate C's OWN
+ * first-parent payload signature over the CLOSED window `[from, to]`
+ * (design §15.3, the reverter-skip primitive). This is GROUNDWORK for PR3's
+ * `reverterExempt`; it is deliberately NOT wired into `brain-audit.mjs` here
+ * (that rebase is PR3, design §15.9). The whole-window invariant lives HERE,
+ * in `resolution.mjs`, rather than being re-derived by the caller:
+ *
+ *   dC = normDiff(C^1, C)
+ *   netAddFull(C) = |{ W ∈ [from,to] : normDiff(W^1,W) == dC }|
+ *                 − |{ W ∈ [from,to] : normDiff(W^1,W) == dCinv }|
+ *
+ * Unlike `netPresent` there is NO `+1` base term and the range is FULL-WINDOW
+ * (inclusive of `from`), because a legitimate cleanup revert `C` sitting at
+ * the tip — with nothing after it to cancel it — must still see the offender
+ * it inverted BEHIND it in the window to earn its tree-keyed exemption. A
+ * DIRECTIONAL-only count over `(C, tip]` (empty for a tip-most C) would wrongly
+ * fail to exempt the legit reverter (design §15.3's range-asymmetry note).
+ * `≤ 0` ⟺ C's own contribution is net-absent across the window.
+ *
+ * CONTRACT (F-1, sound on the EXPORTED surface) — a candidate whose own
+ * first-parent contribution is EMPTY (`dC === ''`) is VACUOUS and is refused
+ * fail-closed by THROWING, before any counting: an unguarded count would let
+ * empty-diff merges in the window match `fW === dC` (`'' === ''`) and could
+ * report a `≤ 0` total, spuriously exempting a content-free candidate. PR3's
+ * `reverterExempt` composition ALSO short-circuits on `dC ≠ ''` (design §15.3:
+ * exempt ⟺ `dC ≠ '' AND netAddFull(C) ≤ 0`, together with the
+ * `TREE_KEYED_CHECKS` restriction), but that upstream guard protects only that
+ * one caller. `netAddFull` is EXPORTED, so its soundness must NOT depend on
+ * how a caller reaches it — the vacuity refusal lives on the primitive itself,
+ * consistent with `netPresent`/`isResolvedAt`'s fail-closed F-1. Given a
+ * non-empty `dC`, this primitive computes the signed count.
+ */
+export function netAddFull(candidate, { git, from, to }) {
+  const dC = normDiff(git, `${candidate}^1`, candidate);
+  if (dC === '') {
+    throw new Error('netAddFull: candidate has no first-parent contribution (F-1 vacuity) — refused fail-closed');
+  }
+  const dCinv = normDiff(git, candidate, `${candidate}^1`);
+  let net = 0;
+  for (const w of firstParentMergesInclusive(git, from, to)) {
+    net += sign(normDiff(git, `${w}^1`, w), dC, dCinv);
+  }
+  return net;
+}
+
+/**
+ * Is `candidate` the reverter of `offender`? (design §3.3) — the PAIRWISE
+ * diff-inversion primitive: `candidate`'s own contribution, read backward, is
+ * byte-identical to what the offender introduced.
+ *
+ * ⚠ SUPERSEDED by `netAddFull` (design §15.3, judgment-day Round 3). The
+ * pairwise "∃ one inverse" crowning is defeated by a revert-of-a-revert
+ * (`R2 = git revert R`), which this wrongly crowns as "revert of R" while
+ * re-introducing the payload at HEAD. The full-window `netAddFull(C) ≤ 0` is
+ * the net-anchored replacement, and `netAddFull` supersedes this export as the
+ * reverter predicate. This export is RETAINED (not deleted) only because its
+ * own export surface and its pre-existing dedicated test in
+ * `resolution.test.mjs` are frozen for this PR. PR3 rewrites the reverter-skip
+ * onto `netAddFull` and removes `isReverterOf` (design §15.9). Do NOT build new
+ * callers on it — use `netAddFull`.
  */
 export function isReverterOf(offender, candidate, { git }) {
   const pO = normDiff(git, `${offender}^1`, offender);

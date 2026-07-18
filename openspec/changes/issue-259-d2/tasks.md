@@ -66,12 +66,12 @@ always-`cursor..HEAD` window + core CAS).
 
 | Field | Value |
 |---|---|
-| Estimated changed lines | PR1 ≈155 · PR2 ≈150 · PR3 ≈100 · PR4 ≈235 · PR5 ≈105 (counted; tests + `openspec/changes/**` excluded per `governance.ignoreList`) |
-| Total across chain | ≈680 counted lines, none of it in one PR |
-| 400-line budget risk | **Low for every PR.** Largest is PR4 at ~235/400 (~59%) — comfortable headroom even after a further review finding. |
-| Chained PRs recommended | **Yes — mandatory** (owner ruling #901). Feature-branch-chain rejected: the tracker's single integration diff would be ~700 lines, needing the `size:exception` the proposal forbids. |
-| Chain strategy | **stacked-to-main**, 5 PRs, each merging to `feature/v2.0.0` in order (owner ruling #901) |
-| Decision needed before apply | **No** — chain strategy and no-exception constraint are already owner-adjudicated (#901). Apply proceeds directly against the 5-PR split. |
+| Estimated changed lines | PR1 ≈155 · PR2 ≈150 · **PR2b ≈100–140** (net-tip-effect amendment to `resolution.mjs` ONLY, owner ruling #957) · PR3 ≈100 · PR4 ≈235 · PR5 ≈105 (counted; tests + `openspec/changes/**` excluded per `governance.ignoreList`) |
+| Total across chain | ≈780–820 counted lines, none of it in one PR |
+| 400-line budget risk | **Low for every PR, including PR2b.** Largest remains PR4 at ~235/400 (~59%). PR2b is the smallest code-bearing slice in the chain — a single-file amendment (`resolution.mjs` only; `resolution.test.mjs` is `governance.ignoreList`d), forecast ~100–140/400 (~25–35%) — comfortable headroom. |
+| Chained PRs recommended | **Yes — mandatory** (owner ruling #901). The PR2b insertion itself is **doctrinal, not a budget call** (owner ruling #957) — foundation-before-consumer and an isolated hostile review for the invariant, independent of line count. Feature-branch-chain rejected: the tracker's single integration diff would be ~800 lines, needing the `size:exception` the proposal forbids. |
+| Chain strategy | **stacked-to-main**, 6 PRs (PR1 · PR2 · PR2b · PR3 · PR4 · PR5), each merging to `feature/v2.0.0` in order (owner ruling #901, extended by #957) |
+| Decision needed before apply | **No** — chain strategy, no-exception constraint, and the PR2b insertion shape are already owner-adjudicated (#901, #957). Apply proceeds directly against the 6-PR split, PR2b next. |
 
 ### Dependency diagram
 
@@ -79,9 +79,10 @@ always-`cursor..HEAD` window + core CAS).
 feature/v2.0.0
    └── PR 1  cursor core (git-seam + cursor state machine + CAS)         ~155  [git-seam.mjs, cursor.mjs, GitLab draft]
         └── PR 2  revert resolution (diff-inversion)                     ~150 [resolution.mjs — security-critical]
-             └── PR 3  brain-audit: emission + skip classes + exit-2     ~100  [parse-failures.mjs, brain-audit.mjs]
-                  └── PR 4  workflow wrapper (only GitHub-coupled PR)     ~235  [governance-postmerge.yml rewrite]
-                       └── PR 5  0/1/2 contract across all evaluators     ~105  [exit-codes.mjs, run-check.mjs, drift-guards]
+             └── PR 2b  net-tip-effect amendment (owner ruling #957)  ~100–140  [resolution.mjs ONLY — still unused]
+                  └── PR 3  brain-audit: emission + skip classes + exit-2 (rebased onto PR2b)  ~100  [parse-failures.mjs, brain-audit.mjs]
+                       └── PR 4  workflow wrapper (only GitHub-coupled PR)     ~235  [governance-postmerge.yml rewrite]
+                            └── PR 5  0/1/2 contract across all evaluators     ~105  [exit-codes.mjs, run-check.mjs, drift-guards]
 ```
 
 Each PR's own section below states: start state, end state, prior dependency, what remains out of scope,
@@ -311,6 +312,224 @@ without it.**
 
 ---
 
+## PR 2b — Net-tip-effect amendment (`resolution.mjs` ONLY), ~100–140 counted lines
+
+**Owner ruling #957 (Option 2), doctrinal not budgetary:** a dedicated amendment PR reopens the MERGED PR2
+surface at its source — foundation-before-consumer, source-not-shim. The invariant earns its own isolated
+hostile review the same way PR2 did; PR3 REBASES onto this PR's merged output next and is never developed
+in parallel against the superseded pairwise predicate.
+
+**Depends on:** PR 2 merged (reopens `resolution.mjs` on `feature/v2.0.0`, Fork A — design §15.4: fixed
+inside the predicate's own module, never a downstream wiring gate).
+**End state:** `resolution.mjs`'s resolution/exemption primitives are anchored to the NET tree state at
+HEAD (net-parity, design §15.3) instead of a single pairwise `∃`-inverse match. `resolution.mjs` is
+**still unused** by `brain-audit.mjs` — that rebase is PR3's next unit of work, not this PR's. `normDiff`
+and the F-1 anti-vacuity guard are preserved **byte-for-byte** (the kernel is untouched; only the
+aggregation changes).
+**REQs bound:** **REQ-D2-16** (new — net-tip anchor); **REQ-D2-10** (amended — net-parity replaces the
+single pairwise inverse match). REQ-D2-14 binds cross-cutting: every fixture below is finder-authored (not
+the patch author) and MUST redden against the **MERGED PR2 pairwise predicate** — the new mutation bar this
+PR introduces — not merely against `eff4560`.
+**Fixtures:** A5 (amended semantics — closes a real gap, see 2b.1), A7 (THE CRITICAL), A8 (liveness), C3
+(4 range-boundary sub-fixtures) — all design §15.7/§15.8.
+**Out of scope for this PR (deferred to PR3's rebase):** any `brain-audit.mjs` change —
+`reverterSkipLine`, the `isOffender` gate deletion, `[FAIL-SHA]` class-filtering + newest-carrier dedup,
+the `failCount`/tree-keyed⟺`[FAIL-SHA]` bidirectional coherence guard, and fixture **A9** (class-filtered
+emission is a brain-audit-level property, not a predicate-level one).
+**Fixture-authorship caveat (doctrine #900, binding, same as PR2's 2.5.3):** every fixture below is copied
+from design §15.7/§15.8's shape columns, not reverse-engineered from this PR's own implementation after
+writing it. Flag this PR for an independent reviewer to confirm each fixture matches the attack shape
+before merge.
+
+### Phase 2b.1 — Close the A5 gap: fresh (non-revert-structured) re-add after a genuine revert (REQ-D2-10, design §15.7)
+
+**Finding surfaced while mapping this PR:** the prior tasks.md Phase 2.2.5 claimed an "A5" fixture (`M`
+reverted by `R`, then a later commit re-adds the payload; assert `isResolvedAt(M, later)` is `false`) was
+completed — but **no such fixture exists in `resolution.test.mjs` today** (verified: zero matches for
+"A5"/"re-add"/"fresh" in the file). Under the MERGED PR2 pairwise predicate this fixture actually reddens
+the OPPOSITE way from what Phase 2.2.5's prose claimed: the loop finds `R` (whose reverse diff matches
+`pO`) and returns `resolved: true` **regardless of the later re-add**, because the `∃`-existence check never
+re-examines whether the match still holds at the tip. This is exactly the A5 semantic FLIP owner condition
+1/5 (C5) requires naming in the PR body: **"O resolved, re-add flagged" → "O NOT-resolved."**
+
+- [ ] 2b.1.1 RED (**A5, gap-closing, finder-authored**): construct `M` (adds payload at path `P`),
+      `R = git revert -m1 M` (merged `--merge`, genuine), then `F` — an ORDINARY later merge that re-adds
+      the SAME payload to `P` (NOT itself `git revert`-structured, just a fresh commit reintroducing the
+      content). Assert `isResolvedAt(M, F)` is `{ resolved: false }`. **First run this identical fixture
+      against the MERGED PR2 predicate (current `resolution.mjs`, pre-amendment) and record that it returns
+      `{ resolved: true }`** — this RED-against-the-merged-predicate result, not merely a RED against
+      un-fixed code, is the proof this task exists to produce (mirrors 2.2.1's `eff4560` proof, one
+      predicate generation later).
+- [x] 2b.1.2 GREEN: implemented by 2b.2's `netPresent`-based rewrite of `isResolvedAt` (no A5-specific
+      branch — this is a property of net-parity, matching PR2's 2.2.6 precedent). Confirm 2b.1.1 passes
+      against the amended code with no dedicated implementation. (A5 frozen fixture now GREEN: `isResolvedAt(M, F)`
+      = `{ resolved: false }`; was `{ resolved: true }` under the merged PR2 pairwise predicate.)
+
+### Phase 2b.2 — `netPresent` / rewritten `isResolvedAt` — directional net-parity (design §15.3, REQ-D2-16, REQ-D2-10)
+
+- [x] 2b.2.1 RED (patch-author white-box, below the frozen block): `sign(W, s)` (or an equivalent internal helper) — given candidate merge `W`'s own
+      first-parent contribution `fW` and a target signature `s`: `fW === s` → `+1`; `fW === inverse(s)` →
+      `-1`; otherwise `0`. Unit-test directly against three synthetic merges (re-add, invert, unrelated
+      rename) — do not fold this into an end-to-end-only assertion. (Implemented as `sign(fW, s, sInv)`;
+      `sInv` passed precomputed since a diff's exact reverse is a distinct git computation, not a textual reversal.)
+- [x] 2b.2.2 GREEN: implement `sign`. (Exported `sign(fW, s, sInv)` in `resolution.mjs`; white-box test GREEN.)
+- [x] 2b.2.3 RED (patch-author white-box): `netPresent(O, tip, { git })` on a bare offender `O` (no candidates after it) returns `1`
+      (O's own base term, no cancellation) — `isResolvedAt(O, O, { git })` is `{ resolved: false }`.
+- [x] 2b.2.4 RED (patch-author white-box): `netPresent(O, tip)` on `O, R` (single genuine revert, PR2's A2 shape) returns `0` —
+      `isResolvedAt(O, R)` is `{ resolved: true }` (liveness re-run of A2 against the amended code — confirm
+      no regression).
+- [x] 2b.2.5 GREEN: implement `netPresent(offender, tip, { git }) = 1 + Σ_{W ∈ (offender, tip]} sign(W,
+      dOffender)`, and rewrite `isResolvedAt` to: keep the F-1 anti-vacuity guard **byte-for-byte** as the
+      first branch; then `resolved: netPresent(offender, tip) <= 0`. Confirm 2b.1.1, 2b.2.3, 2b.2.4 all
+      pass. Re-run PR2's existing fixtures unmodified (F-1, C2, pure-rename, rename+modify, copy-launder,
+      partial-revert, invert+extra, drift-liveness, F-2 binary ×2, whitespace, F-4 ×3, blast-radius ×4,
+      diffSize-shaped, adrPresence-forward-fix, HOSTILE-ENV ×2) — **every one MUST still pass**, since
+      net-parity is a strict refinement of the pairwise check (a single inverse candidate still yields
+      `netPresent ≤ 0` when nothing re-adds afterward); a failure here is a bug in the rewrite, not the
+      fixture. (All 37 frozen/pre-existing tests GREEN; full `npm test` 1541/1541.)
+- [x] 2b.2.6 Update the module header doc comment and `isResolvedAt`'s docstring: replace the `∃ R`
+      existence description with the net-parity aggregation (design §15.3) — the kernel (`normDiff`) prose
+      is UNCHANGED; only the aggregation-level description changes. Cite design §15.3/REQ-D2-16.
+
+### Phase 2b.3 — `netAddFull` — full-window primitive for the reverter-skip (design §15.3, groundwork for PR3's `reverterExempt`)
+
+This PR only builds and unit-tests the **primitive**; wiring it into `brain-audit.mjs`'s `reverterSkipLine`
+(replacing `isReverterOf`/`isOffender`) is PR3's rebase work, not this PR's.
+
+- [x] 2b.3.1 RED (patch-author white-box): `netAddFull(candidate, { git, from, to })` (full-window signed count of `candidate`'s OWN
+      payload signature: `|{W ∈ [from,to] : fW == dCandidate}| − |{W ∈ [from,to] : fW == inverse(dCandidate)}|`)
+      on a bare `R` with nothing else in the window returns `0` when `R` is the sole genuine revert of an
+      offender inside the window — the A6 shape (PR2's reverter fixture), re-expressed as a net-parity
+      count instead of a pairwise match. (`[from, to]` is a CLOSED interval — window base at/before O
+      inclusive — so the offender behind R is counted.)
+- [x] 2b.3.2 RED (patch-author white-box, **A7 core primitive assertion** — see 2b.4 for the full end-to-end fixture): on the
+      `O, R, R2` chain (`R2` re-adds `O`'s exact payload via `git revert -m1 R`), `netAddFull(R2, { git,
+      from: O, to: R2 })` is `+1` (NOT exempt).
+- [x] 2b.3.3 GREEN: implement `netAddFull`. Decide and document (comment, citing design §15.9's "or expose
+      the primitive brain-audit.mjs composes") whether it fully owns window enumeration internally or
+      exposes a lower-level enumeration primitive for PR3 to compose — either is acceptable; the invariant
+      (full-window signed count) must live in `resolution.mjs`, not be re-derived by the caller. (Decision:
+      `netAddFull` OWNS its window enumeration internally via `firstParentMergesInclusive` — the full-window
+      signed count lives entirely in `resolution.mjs`; PR3 composes `reverterExempt` on top of it, adding
+      the `dC ≠ ''` guard + `TREE_KEYED_CHECKS` restriction. Documented in the JSDoc.)
+- [x] 2b.3.4 Retire the PAIRWISE `isReverterOf` export: either delete it and its dedicated test
+      (`resolution.test.mjs`'s "isReverterOf — a genuine auto-revert is a reverter..." test) in favor of an
+      equivalent `netAddFull`-based assertion, or explicitly mark it superseded with a comment pointing to
+      `netAddFull`. **Do not leave two divergent reverter predicates alive and both exported** — one must be
+      canonical. (A drift-guard proving `brain-audit.mjs` no longer imports the retired export is only
+      meaningful after PR3 rebases — record as a PR3 follow-up note here, not implemented in this PR since
+      `brain-audit.mjs` is out of scope.) (Decision: MARKED SUPERSEDED, not deleted — the `isReverterOf`
+      export, its frozen import, and its pre-existing dedicated test are FROZEN for this PR and cannot be
+      edited; a `⚠ SUPERSEDED by netAddFull` JSDoc block now points to the canonical primitive. PR3
+      FOLLOW-UP: delete `isReverterOf` + its test and add the `brain-audit.mjs` no-import drift-guard once
+      the wiring rebase lands. Canonical reverter predicate is `netAddFull`.)
+
+### Phase 2b.4 — Fixture A7 (THE CRITICAL — revert-of-revert re-adds the payload), design §15.8, REQ-D2-16
+
+- [ ] 2b.4.1 RED (**A7, finder-authored per REQ-D2-14 — not the patch author**): construct `O` = an
+      `adrPresence`-shaped offender (ADR file, no `brain/HOME.md`, valid issue ref — the exact path shape
+      design §15.8 specifies, so the predicate-level proof is faithful to the real attack even though
+      `resolution.mjs` itself never evaluates `adrPresence`). `R = git revert -m1 O` (merged `--merge`) —
+      genuine, its own contribution is `O`'s exact inverse. `R2 = git revert -m1 R` (merged `--merge`) —
+      re-adds `O`'s EXACT payload. Assert, at HEAD = `R2`: `isResolvedAt(O, R2)` is `{ resolved: false }`
+      (`netPresent(O, R2) = 1 + (−1) + (+1) = 1`); `netAddFull(R2, { git, from: O, to: R2 })` is `+1` (NOT
+      exempt — the reverter-skip must not crown `R2`). **MUTATION BAR (hard, REQ-D2-16 binding):** run this
+      identical fixture against the MERGED PR2 pairwise `isResolvedAt` (the code as it stands before this
+      PR's Phase 2b.2 GREEN) and record it returns `{ resolved: true }` for `O` — proving the CRITICAL
+      exists in the predicate this PR amends, not only in `eff4560`. Without this exact `O, R, R2` forge,
+      the redesign is UNPROVEN (owner condition 2, #955/#957).
+- [x] 2b.4.2 GREEN: confirm 2b.2.5/2b.3.3's implementation already satisfies 2b.4.1 with no A7-specific
+      branch (net-parity is a general aggregation, not a special case for this chain shape) — if it fails,
+      the implementation is wrong, not the fixture. (A7 frozen fixture GREEN: `isResolvedAt(O, R2)` =
+      `{ resolved: false }` — `netPresent(O, R2) = 1 + (−1) + (+1) = 1`; `isResolvedAt(R, R2)` =
+      `{ resolved: true }`; `isResolvedAt(R2, R2)` = `{ resolved: false }`. White-box `netAddFull(R2, {from:O, to:R2})`
+      = `+1` (NOT exempt). Was `{ resolved: true }` for O under the merged PR2 predicate — mutation bar confirmed RED→GREEN.)
+- [ ] 2b.4.3 Independent-reviewer flag: this fixture is the probative core of the entire PR — call it out
+      explicitly in the PR description for a second pair of eyes (doctrine #900 rule 3), distinct from the
+      general PR2b-gate flag in Phase 2b.7.
+
+### Phase 2b.5 — Fixture A8 (liveness — an even revert chain settles), design §15.8
+
+- [ ] 2b.5.1 RED (**A8**): construct `O, R, R2, R3`, each a genuine `--merge` revert of the prior (`R`
+      reverts `O`, `R2` reverts `R`, `R3` reverts `R2`). Assert at HEAD = `R3`: `isResolvedAt(O, R3)` is
+      `{ resolved: true }` (`netPresent(O, R3) = 1 + (−1+1−1) = 0`). **Mutation bar:** include a second
+      assertion/comment demonstrating a NAIVE over-correction ("any re-add ⟹ never resolved") wrongly
+      returns `false` here — so a future author cannot "fix" A7 by banning all re-adds.
+- [x] 2b.5.2 GREEN: confirm no further code needed (same predicate, liveness property). (A8 frozen fixture
+      GREEN: `isResolvedAt(O, R3)` = `{ resolved: true }` — `netPresent(O, R3) = 1 + (−1+1−1) = 0`; no
+      A8-specific branch.)
+
+### Phase 2b.6 — C3 range-boundary fixtures (4 sub-fixtures, design §15 REQ-D2-16 scenarios, directional vs full-window asymmetry)
+
+- [ ] 2b.6.1 RED (**C3-a, off-by-one at both range ends**): position `R` (the exact inverter of `O`) (i)
+      immediately adjacent to `O`'s own commit boundary and (ii) exactly at `tip`. Assert `netPresent(O,
+      tip)` in both placements correctly includes `O`'s own `+1` base term exactly once (never
+      double-counted) and the HEAD-most inverter exactly once (never dropped) — `isResolvedAt` resolves
+      `true` in both placements.
+- [ ] 2b.6.2 RED (**C3-b, offender exactly at HEAD is never wholesale-skipped**): `O` positioned exactly at
+      `tip` (`(O, tip]` is empty by construction). Assert `isResolvedAt(O, O)` is `{ resolved: false }` (the
+      directional range excludes `O` as its own canceller — the merge-HEAD case named in design §15).
+      Separately, assert `O` positioned exactly at the window start is still fully counted as the `+1` base
+      (not silently dropped).
+- [ ] 2b.6.3 RED (**C3-c, live re-add at HEAD reaches the checks — predicate-level half**): the HEAD-most
+      merge is itself a live re-add (net-present). Assert `isResolvedAt` on the ORIGINAL offender it re-adds
+      is `{ resolved: false }` at that tip — a live re-add at HEAD is never retroactively resolved away.
+      **(The companion half — that `memoryPresence`/other checks then run on the un-skipped HEAD merge — is
+      a `brain-audit.mjs` wiring property and is explicitly OUT OF SCOPE here; deferred to PR3.)**
+- [ ] 2b.6.4 RED (**C3-d, revert-cleanup at HEAD still sees the offender behind it — full-window
+      asymmetry**): construct a legit cleanup revert `R` sitting at `tip` (nothing after it) with offender
+      `O` behind it in the window. Assert `netAddFull(R, { git, from: <window base at/before O>, to: R })`
+      is `≤ 0` (exempt) — the FULL-WINDOW range sees `O` behind `R`, unlike the directional range used by
+      `isResolvedAt`. Pair this with an explicit assertion that a DIRECTIONAL-ONLY count (counting only
+      `(R, tip]`, which is empty) would wrongly NOT exempt `R` — demonstrating why the two ranges must
+      differ (design §15.3's "why the ranges differ" note).
+- [x] 2b.6.5 GREEN: confirm 2b.2.5/2b.3.3 satisfy all four C3 sub-fixtures with no additional branches —
+      each is a property of the already-implemented directional/full-window range definitions, not new
+      logic. (C3(a)/(b)/(c)/(d) frozen fixtures all GREEN; white-box range-asymmetry test GREEN:
+      `netAddFull(R, {from:O, to:R}) = 0` (full-window exempt) vs `netPresent(R, R) = 1` (directional
+      net-present) — the two ranges correctly differ.)
+
+### Phase 2b.7 — Drift guards, doc housekeeping, and PR2b gate (owner conditions 4/5, #955/#957)
+
+- [ ] 2b.7.1 RED + GREEN: extend the existing drift-guard (`resolution.test.mjs`'s
+      "isRevertedInRange/findTrailerCandidates/trailerRegex are absent" test) with a BEHAVIORAL regression
+      guard against the old pairwise wording being silently reintroduced — the living guard is 2b.1.1's A5
+      gap fixture itself (a textual grep for "existence" wording is too brittle); confirm it stays in the
+      permanent suite, not a throwaway proof.
+- [ ] 2b.7.2 Confirm `normDiff` and `firstParentMergesAfter` are UNCHANGED byte-for-byte from the merged
+      PR2 version — diff the function bodies explicitly in the PR description as evidence (design §15's
+      "kernel preserved verbatim" claim, code-verified not just asserted).
+- [ ] 2b.7.3 PR body MUST NAME the A5 semantic FLIP explicitly: **"O resolved, re-add flagged" → "O
+      NOT-resolved"** — with the reason (owner condition 5/C5: the prior assumption that the re-add is
+      independently caught as a new offender via its own audit is FALSE for revert-structured re-adds,
+      where the reverter-crowning exempts it; net-parity fixes this at the invariant's source). Also record
+      the diagnosis (design §15's "seventh mechanism-present-function-hollow instance," a LOCAL
+      `∃`-predicate answering a GLOBAL "present at HEAD?" question) and the doctrine ("a merged predicate
+      that turns out forgeable is amended at its source, never patched downstream — merged ≠ correct,
+      merged = passed the gates we had").
+- [x] 2b.7.4 Own judgment-day for PR2b before push (owner condition 4, #957): a dedicated adversarial review
+      round, brief centered on (a) the range asymmetry (C3, all four boundaries), (b) the bounded soundness
+      claim (REQ-D2-16's "do NOT inflate" clause — net-parity proves net-absence under exact-`normDiff`
+      accounting, never a whole-tree-disk claim), and (c) the three forges: `O,R,R2` (A7), `O,R,R2,R3` (A8),
+      and the global-gap worked example (design §15.3's table row — predicate-level only; the
+      `memoryPresence` half is PR3's).
+- [ ] 2b.7.5 `npm test` — full suite, green.
+- [x] 2b.7.6 Budget check: `resolution.mjs` diff counted lines (≈100–140 forecast; `resolution.test.mjs`
+      excluded per `governance.ignoreList`) — confirm ≤400, no `size:exception`. Measured after the 3
+      post-judgment doc/guard fixes: **+185/−38 = 223** counted vs `feature/v2.0.0` (above the 100–140
+      forecast, driven by the exported-vacuity F-1 contract JSDoc + guards; ~56% of the 400 budget). No
+      `size:exception` needed.
+- [ ] 2b.7.7 Independent-review flag (doctrine #900): this PR's description must explicitly ask the
+      reviewer to confirm A5/A7/A8/C3 each match design §15.7/§15.8's attack shapes verbatim — the patch
+      author is not the sole confirming authority.
+- [ ] 2b.7.8 `memory:share` before push.
+- [ ] 2b.7.9 Push, open PR 2b against `feature/v2.0.0` (stacked after PR 2, ahead of PR 3's rebase).
+      Dependency diagram in the PR body marks PR 2b with 📍, and explicitly states: PR 3 is NOT yet rebased
+      onto this PR — that rebase is the next unit of work after this PR merges (owner ruling #957 sequence:
+      PR2b apply → judgment-day → push+PR → owner cold review → human merge → PR3 rebase → wiring).
+
+---
+
 ## PR 3 — `brain-audit.mjs` wiring: emission, skip classes, exit-2 (~100 counted lines)
 
 **Depends on:** PR 1 (cursor core, unused directly here) and PR 2 (`resolution.mjs`, now imported).
@@ -321,71 +540,139 @@ uncomputable states honestly (exit 2, message on stdout). **No workflow (YAML) c
 **Fixtures:** A1–A6 (end-to-end, through `brain-audit.mjs` rather than unit-level on `resolution.mjs`), C3,
 C6.
 
+> **DEFERRED REWORK NOTE (owner ruling #957, added by this tasks pass — NOT detailed here):** this PR's
+> checklist below (Phases 3.1–3.4) was written BEFORE the PR2b net-tip-effect amendment and reflects the
+> now-superseded pairwise predicate (`isReverterOf` retired in PR2b §2b.3.4; REQs bound must gain
+> REQ-D2-10a's amended class filter and REQ-D2-6(b)'s amended coherence guard, per spec.md's Gate table
+> PR3 row). PR3 REBASES onto PR2b's merged `resolution.mjs` and gets its OWN judgment-day round (the NEW
+> bidirectional `crossCheck`, C4) before this checklist is trusted again — do not resume Phase 3.x work
+> directly from the checkboxes below without that rebase + review pass first. Full rework of this section
+> is a separate `sdd-tasks` pass, out of scope for the PR2b slice this update maps.
+
+### Phase 3.0 — HARD GATE (BLOCKING — PR3 CANNOT SHIP WITHOUT THIS): net-parity reverter-skip, design §15.3, REQ-D2-16, REQ-D2-10a
+
+> **BLOCKING GATE — recorded from PR2b's own judgment-day (owner ruling #964, judge forge #963).**
+> PR2b's net-parity `resolution.mjs` invariant forged CLEAN in isolation, but Judge A forged an
+> end-to-end catastrophe that survives THROUGH `brain-audit.mjs`'s `reverterSkipLine`, which still
+> composes the direction-blind PAIRWISE `isReverterOf` (retired in PR2b §2b.3.4): `isReverterOf(R,O) ==
+> isReverterOf(R,R2) == true` crowns BOTH `O` and `R2` as "revert of R" → all `[SKIP]`, exit 0, with the
+> offending file LIVE on disk at HEAD. The catastrophe is PR3-scoped (the `reverterSkipLine` wiring is
+> absent from `feature/v2.0.0`; PR2b does not introduce it), so it is a HARD PR3 GATE, not a PR2b defect.
+> **These two tasks SUPERSEDE the now-invalid `isReverterOf` wiring recorded as done in Phase 3.2.6 and
+> MUST be closed before PR3 opens. Do NOT mark PR3's gate (Phase 3.4) green while either remains open.**
+
+- [ ] 3.0.1 **Rewrite `reverterSkipLine` from the direction-blind `isReverterOf` → the directional
+      full-window `netAddFull`** (BLOCKING). Replace the pairwise `isReverterOf` composition in
+      `brain-audit.mjs`'s `reverterSkipLine` with the FULL-WINDOW `netAddFull` primitive from
+      `resolution.mjs` — exempt ⟺ `dC ≠ '' AND netAddFull(C, { git, from, to }) ≤ 0`, restricted to
+      `TREE_KEYED_CHECKS`, supplying the inclusive window base `from` per design §15.3's range-asymmetry
+      note — and delete the `isReverterOf` / `isOffender` pairwise enumeration (plus the `brain-audit.mjs`
+      no-import drift-guard promised in PR2b §2b.3.4).
+      **Named RED proof (Judge A forged exactly this — engram #963):** add a **diffSize-shaped A7
+      end-to-end fixture** to `brain-audit.test.mjs`: `O` adds a **>400-line file**, `R = git revert -m1 O`,
+      `R2 = git revert -m1 R` (re-adds O's exact payload). At `HEAD = R2` the audit **MUST NOT** emit
+      all-`[SKIP]` / exit 0 — the ungoverned >400-line file is LIVE on disk, so `O`/`R2` must be reported
+      (`[FAIL-SHA]`); only `R` may legitimately be `[SKIP]`.
+      **Mutation bar (non-negotiable):** this fixture MUST redden against the CURRENT `isReverterOf`-based
+      `reverterSkipLine` (all `[SKIP]`, exit 0) and go GREEN only after the `netAddFull` rewrite.
+- [ ] 3.0.2 **Fix the A6 test's lying title** (BLOCKING — documentary-lie family). `brain-audit.test.mjs`'s
+      A6 test is titled "closes the revert-of-revert loop" but only exercises `O + R + claim` — the title
+      claims MORE than the test proves (another "the title claims more than the test" instance the owner
+      flags). EITHER extend the A6 test to a REAL `O, R, R2` chain (proving the revert-of-revert loop is
+      actually closed end-to-end), OR retitle it honestly to describe what it truly asserts (a single
+      `O + R` reverter skip). Do not leave the mismatched title in place.
+
 ### Phase 3.1 — `parse-failures.mjs` (REQ-D2-5, re-derived from `scrap/d2-v1-broken`, never cherry-picked)
 
-- [ ] 3.1.1 RED: `parse-failures.test.mjs` — `parseFailingShas(text)` extracts full 40-hex shas from
+- [x] 3.1.1 RED: `parse-failures.test.mjs` — `parseFailingShas(text)` extracts full 40-hex shas from
       `[FAIL-SHA] <sha>` lines using the **F5 regex** `^\[FAIL-SHA\] ([0-9a-f]{40})$` (re-read from
       `scrap/d2-v1-broken`, re-typed fresh — not `git cherry-pick`ed, to avoid importing the
       `github-actions[bot]` mis-authorship). Order-preserving, deduped via `Set`, ignores
       malformed/short (sha7) lines.
-- [ ] 3.1.2 GREEN: implement `parseFailingShas`.
-- [ ] 3.1.3 RED + GREEN: CLI mode reads stdin, prints deduped full-sha list one per line; tested against
+- [x] 3.1.2 GREEN: implement `parseFailingShas`.
+- [x] 3.1.3 RED + GREEN: CLI mode reads stdin, prints deduped full-sha list one per line; tested against
       synthetic stdin, zero real process spawn in the assertion itself.
 
 ### Phase 3.2 — `brain-audit.mjs`: emission + resolved-skip + reverter-skip (REQ-D2-3, REQ-D2-10, REQ-D2-10a)
 
-- [ ] 3.2.1 RED: emission test — a synthetic offending merge produces both `[FAIL] <sha7> ...` (unchanged)
+- [x] 3.2.1 RED: emission test — a synthetic offending merge produces both `[FAIL] <sha7> ...` (unchanged)
       and the new `[FAIL-SHA] <full-sha>` line.
-- [ ] 3.2.2 GREEN: add the additive `[FAIL-SHA]` print at the existing `[FAIL]` emission site.
-- [ ] 3.2.3 RED (**A1–A5 end-to-end**): re-run fixtures A1, A2, A3, A5 (Phase 2.2/2.1) through
+- [x] 3.2.2 GREEN: add the additive `[FAIL-SHA]` print at the existing `[FAIL]` emission site.
+- [x] 3.2.3 RED (**A1–A5 end-to-end**): re-run fixtures A1, A2, A3, A5 (Phase 2.2/2.1) through
       `brain-audit.mjs`'s actual CLI/module entry point rather than calling `resolution.mjs` directly —
       proves the wiring, not just the predicate. A1 must again be shown to redden against
       `scrap/d2-v1-broken`'s equivalent `brain-audit.mjs` wiring (which used `isRevertedInRange`).
-- [ ] 3.2.4 GREEN: import `isResolvedAt` from `resolution.mjs` and add the pre-evaluation skip class
+- [x] 3.2.4 GREEN: import `isResolvedAt` from `resolution.mjs` and add the pre-evaluation skip class
       (symmetric to the existing pre-baseline skip), reporting `[SKIP] <sha7> — resolved by revert`.
-- [ ] 3.2.5 RED (**A6 end-to-end**): the reverter-skip fixture (Phase 2.3) run through `brain-audit.mjs` —
+- [x] 3.2.5 RED (**A6 end-to-end**): the reverter-skip fixture (Phase 2.3) run through `brain-audit.mjs` —
       an `adrPresence` offender `M` and its genuine auto-revert `R` in the same window; assert `R` is
       `[SKIP] revert of M`.
-- [ ] 3.2.6 GREEN: import `isReverterOf`, wire the reverter-skip evaluation (only for merges that already
-      failed one of the four checks — zero cost on the happy path).
-- [ ] 3.2.7 RED: **memoryPresence skip-precedence proof** (closes Phase 2.4.3's cross-file note) — a
+- [x] 3.2.6 GREEN: import `isReverterOf`, wire the reverter-skip evaluation (only for merges that already
+      failed one of the four checks — zero cost on the happy path). **Apply-time hardening beyond the
+      literal task text**: an unrestricted "any merge in the window" candidate search let a NEW, illegitimate
+      re-add offender (A5's shape) get wrongly exempted by matching a clean, non-offending, legitimate revert
+      merge as its "M" (a real gap, caught by the A5 fixture below, not a test artifact — see apply-progress).
+      Fixed by gating the matched `M` on an independent `isOffender` check (does `M`'s own diff fail >=1 of
+      the four checks, computed commit-body-only) before accepting the skip.
+- [x] 3.2.7 RED: **memoryPresence skip-precedence proof** (closes Phase 2.4.3's cross-file note) — a
       reverted offender `M` in a window where `memoryPresence` would also fail repo-globally; assert `M`
       is skipped via tree-effect **before** `memoryPresence` runs on it, while a **different, un-reverted**
       merge in the same window still gets a real `memoryPresence` evaluation (the pre-evaluation skip is
       per-offender, not a global bypass).
-- [ ] 3.2.8 GREEN: confirm/adjust evaluation ordering so tree-effect skip precedes the four checks
+- [x] 3.2.8 GREEN: confirm/adjust evaluation ordering so tree-effect skip precedes the four checks
       per-offender, per §3.5's skip-precedence note.
 
 ### Phase 3.3 — Fail-closed catch and salvaged exit-2 (REQ-D2-6, REQ-D2-12)
 
-- [ ] 3.3.1 RED (**fixture C3**): inject a top-level throw in `brain-audit.mjs` (e.g. a crashing `git log`
+- [x] 3.3.1 RED (**fixture C3**): inject a top-level throw in `brain-audit.mjs` (e.g. a crashing `git log`
       for the range load — the salvaged `gitOrThrow` site from the prior branch). Assert exit code is
       **2** (not 1, not 0), and the uncomputable message is written to **stdout** (not stderr).
-- [ ] 3.3.2 GREEN: change the top-level catch to `process.exit(2)` with the message on stdout; confirm the
+- [x] 3.3.2 GREEN: change the top-level catch to `process.exit(2)` with the message on stdout; confirm the
       salvaged `gitOrThrow` range-load site (from `scrap/d2-v1-broken`, re-derived not cherry-picked) still
       produces exit 2 against the new `git-seam.mjs`.
-- [ ] 3.3.3 RED (**fixture C6**): `brain-audit.mjs` would exit 1, but the emission path is made to produce
+- [x] 3.3.3 RED (**fixture C6**): `brain-audit.mjs` would exit 1, but the emission path is made to produce
       **zero** `[FAIL-SHA]` lines (a crash mid-emission). Assert the cross-check treats this as
-      uncomputable (exit 2), never a silent no-op that goes green with nothing reverted.
-- [ ] 3.3.4 GREEN: add the count cross-check — `code === 1` requires `≥1` parsed offender or the run is
+      uncomputable (exit 2), never a silent no-op that goes green with nothing reverted. Implemented as a
+      direct RED/GREEN unit test on the exported, pure `crossCheckExit(anyFail, failShaCount)` — the same
+      function the real CLI uses at its one call site (not a spawn-level reconstruction of a mid-emission
+      crash, which has no natural single-process trigger distinct from C3).
+- [x] 3.3.4 GREEN: add the count cross-check — `code === 1` requires `≥1` parsed offender or the run is
       itself uncomputable.
-- [ ] 3.3.5 RED (**root-commit fail-closed, structured — closes point 7 / C5**): construct a window whose
+- [x] 3.3.5 RED (**root-commit fail-closed, structured — closes point 7 / C5**): construct a window whose
       offender is (pathologically) the **root commit** — it has no first parent, so `normDiff(offender^1, …)`
       cannot be computed. Assert the offender is treated as **uncomputable → exit 2** (a loud, honest
       not-resolved), **not** an unhandled exception and **never** a silent skip. The predicate MUST NOT
-      resolve a commit whose contribution it cannot even read.
-- [ ] 3.3.6 GREEN: make the missing-parent case a **structured fail-closed** outcome, not an ad-hoc
+      resolve a commit whose contribution it cannot even read. **Documented deviation**: verified empirically
+      (see apply-progress) that git's shallow/graft/commit-tree machinery makes a `--merges`-qualified commit
+      with a genuinely unresolvable `^1` unconstructible without the WHOLE range-load itself throwing first
+      (indistinguishable from C3) — `--merges`/`--min-parents=2` classification is itself computed via the
+      SAME graph-walk machinery that zeroes a shallow-boundary commit's effective parent count, and
+      `commit-tree` eagerly validates parent existence, refusing a forged bogus parent. The RED/GREEN test is
+      therefore written directly against the exported `resolvedSkipLine` wiring function (the actual per-merge
+      call site) using a real shallow-fetch-created offender whose `^1` is genuinely unresolvable, proving the
+      throw propagates un-swallowed rather than reconstructing the (unconstructible) full `--merges` path.
+- [x] 3.3.6 GREEN: make the missing-parent case a **structured fail-closed** outcome, not an ad-hoc
       `try/catch` swallow: `resolution.mjs` returns an uncomputable/`{ resolved: false }` signal on a missing
       `^1` (the `git-seam` non-zero status is surfaced, not collapsed), and `brain-audit.mjs` maps it to the
       same exit-2 uncomputable path as 3.3.2 — the fail-closed principle (design §5) applies structurally, so
       the root-commit case cannot become a sixth fail-open. Cite design §4 (seam returns status, never a
-      vacuous verdict) in the assertion message.
+      vacuous verdict) in the assertion message. **No `resolution.mjs` change made**: it already surfaces the
+      uncomputable state by THROWING (git-seam's non-zero status attached, never collapsed) rather than
+      returning a `{resolved:false}` value — that throw IS the surfacing this task calls for. `brain-audit.mjs`
+      does not try/catch it locally; `resolvedSkipLine` deliberately propagates, so the throw reaches the
+      general top-level fail-closed catch (3.3.2) and maps to exit 2. The separate, pre-existing "no parent1"
+      branch (used by the four-checks' own diff inputs) was ALSO hardened from a silent `[SKIP] — no parent`
+      to a loud `exit(2)` for defense-in-depth, even though it is now provably unreachable via this exact
+      throw path (resolvedSkipLine's throw fires first for any sha whose `^1` cannot be read).
 
 ### Phase 3.4 — PR 3 gate
 
-- [ ] 3.4.1 `npm test` — the **full suite**, green (no scoping restriction — see PR 1's 1.6.1 note).
-- [ ] 3.4.2 Budget check: `parse-failures.mjs` + `brain-audit.mjs` diff counted lines ≈100 — confirm ≤400,
-      no `size:exception`.
+- [x] 3.4.1 `npm test` — the **full suite**, green (no scoping restriction — see PR 1's 1.6.1 note).
+      Measured: 1523/1523 GREEN.
+- [x] 3.4.2 Budget check: `parse-failures.mjs` + `brain-audit.mjs` diff counted lines — measured 48 + 127 =
+      **175** counted lines (above the ≈100 forecast, due to the additional `isOffender` hardening in
+      3.2.6 and dense fail-closed rationale comments matching this file's existing house style) — confirm
+      ≤400: **yes, comfortably** (~44% of budget). No `size:exception` needed.
 - [ ] 3.4.3 `memory:share` before push.
 - [ ] 3.4.4 Push, open PR 3 against `feature/v2.0.0` (stacked after PR 2). Dependency diagram marks PR 3
       with 📍.

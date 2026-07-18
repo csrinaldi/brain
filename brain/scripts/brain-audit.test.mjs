@@ -364,3 +364,331 @@ test('brain-audit: prView() null labels/body are NOT coerced to []/\'\' before r
   assert.equal(src.includes('pr.body ?? \'\''), false,
     'must not fabricate an empty body default over a possibly-null pr.body — let null reach selectIssueLinkBody()');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// D2 PR3 — [FAIL-SHA] emission, resolved-skip, reverter-skip, fail-closed
+// exit-2 (REQ-D2-3, REQ-D2-5, REQ-D2-10, REQ-D2-10a, REQ-D2-6, REQ-D2-12).
+// Fixtures A1–A6 run END-TO-END through this file's own CLI/module entry
+// (design §7.1, tasks §Phase 3.2) — never at resolution.mjs's unit level.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { crossCheckExit, resolvedSkipLine } from './brain-audit.mjs';
+import { gitTry, gitOrThrow } from './governance/postmerge/git-seam.mjs';
+
+function sessionSummaryFile() {
+  return { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() };
+}
+
+// A merge adding `files`, with a message satisfying issueLink (`Closes #N`)
+// unless `closesRef` is explicitly null (used to force an issueLink FAIL).
+function mergeAdding(git, dir, branch, files, closesRef = '#1') {
+  git('checkout', '-b', branch);
+  commit(git, dir, files, closesRef ? `feat: ${branch} Closes ${closesRef}` : `feat: ${branch}`);
+  git('checkout', 'main');
+  const subject = closesRef ? `Merge ${branch} Closes ${closesRef}` : `Merge ${branch}`;
+  git('merge', '--no-ff', branch, '-m', subject);
+  return spawnSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).stdout.trim();
+}
+
+// A genuine `git revert -m 1 --no-edit <offender>` merged back with a
+// Closes-carrying message — the real D2 auto-revert loop shape (design §6).
+function revertMerge(git, dir, offender, branch, closesRef = '#1') {
+  git('checkout', '-b', branch, 'main');
+  spawnSync('git', ['revert', '-m', '1', '--no-edit', offender], { cwd: dir, encoding: 'utf8' });
+  git('checkout', 'main');
+  git('merge', '--no-ff', branch, '-m', `Revert ${branch} Closes ${closesRef}`);
+  return spawnSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).stdout.trim();
+}
+
+// A merge that merely CLAIMS to revert `offender` in its message but whose
+// contribution does NOT invert it (design §7.1 A1's shape).
+function claimOnlyMerge(git, dir, offender, branch, files) {
+  git('checkout', '-b', branch, 'main');
+  commit(git, dir, files, `Rc: claims revert\n\nThis reverts commit ${offender}.`);
+  git('checkout', 'main');
+  git('merge', '--no-ff', branch, '-m', `Merge ${branch}\n\nThis reverts commit ${offender}.`);
+  return spawnSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).stdout.trim();
+}
+
+test('D2 emission — [FAIL] carries an additive [FAIL-SHA] <full-sha> line', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-failsha-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const m = mergeAdding(git, dir, 'feat-bad', { 'src/x.mjs': 'export const x = 1;' }, null);
+
+  const r = spawnSync('node', [AUDIT_SCRIPT], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.ok(r.stdout.includes(`[FAIL-SHA] ${m}`), `expected [FAIL-SHA] ${m}:\n${r.stdout}`);
+});
+
+test('D2 A1 — a forged revert trailer on a real descendant does NOT resolve the offender', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a1-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init', ...sessionSummaryFile() }, 'chore: initial (#0)');
+  const m = mergeAdding(git, dir, 'feat-m', { 'p.md': 'SECRET_PAYLOAD\n' }, null);
+  claimOnlyMerge(git, dir, m, 'feat-claim', { 'other.txt': 'noise\n' });
+
+  const r = spawnSync('node', [AUDIT_SCRIPT], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 1, r.stdout);
+  assert.ok(r.stdout.includes(`[FAIL-SHA] ${m}`), `M must still FAIL:\n${r.stdout}`);
+  assert.ok(!r.stdout.includes('resolved by revert'), `M must NOT be skipped:\n${r.stdout}`);
+});
+
+test('D2 A2 — a genuine revert resolves the offender (liveness), exit 0', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a2-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init', ...sessionSummaryFile() }, 'chore: initial (#0)');
+  const m = mergeAdding(git, dir, 'feat-m', { 'p.md': 'SECRET_PAYLOAD\n' }, null);
+  revertMerge(git, dir, m, 'rv');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout);
+  assert.ok(r.stdout.includes(`[SKIP]`) && r.stdout.includes('resolved by revert'),
+    `expected resolved-by-revert skip:\n${r.stdout}`);
+  assert.ok(!r.stdout.includes(`[FAIL-SHA] ${m}`), `M must not FAIL:\n${r.stdout}`);
+});
+
+test('D2 A3 — a partial revert does NOT resolve the offender', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a3-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init', ...sessionSummaryFile() }, 'chore: initial (#0)');
+  const m = mergeAdding(git, dir, 'feat-m', { 'a.md': 'A_PAYLOAD\n', 'b.md': 'B_PAYLOAD\n' }, null);
+  // Partial "fix": restores a.md only, via an ordinary commit (not `git revert`).
+  git('checkout', '-b', 'fix-partial');
+  writeFileSync(join(dir, 'a.md'), '');
+  spawnSync('git', ['rm', '-q', 'a.md'], { cwd: dir });
+  git('commit', '-m', 'fix: remove a.md only');
+  git('checkout', 'main');
+  git('merge', '--no-ff', 'fix-partial', '-m', 'Merge fix-partial Closes #2');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT], { cwd: dir, encoding: 'utf8' });
+  assert.ok(r.stdout.includes(`[FAIL-SHA] ${m}`), `M must still FAIL (partial revert):\n${r.stdout}`);
+});
+
+test('D2 A5 — re-introduction after revert is a NEW offender at its own tip, never silently skipped', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a5-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init', ...sessionSummaryFile() }, 'chore: initial (#0)');
+  const m = mergeAdding(git, dir, 'feat-m', { 'p.md': 'SECRET_PAYLOAD\n' }, null);
+  revertMerge(git, dir, m, 'rv');
+  const later = mergeAdding(git, dir, 'feat-readd', { 'p.md': 'SECRET_PAYLOAD\n' }, null);
+
+  const r = spawnSync('node', [AUDIT_SCRIPT], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 1, r.stdout);
+  assert.ok(r.stdout.includes('resolved by revert'), `M must still resolve at this tip:\n${r.stdout}`);
+  assert.ok(r.stdout.includes(`[FAIL-SHA] ${later}`),
+    `re-add must be a NEW offender, not silently skipped:\n${r.stdout}`);
+});
+
+test('D2 A6 — the reverter-skip closes the revert-of-revert loop; a mere claim is not skipped', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a6-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init', ...sessionSummaryFile() }, 'chore: initial (#0)');
+  const m = mergeAdding(git, dir, 'feat-adr',
+    { 'brain/project/decisions/adr-9001-thing.md': '# ADR\n' }, null);
+  const r = revertMerge(git, dir, m, 'rv-adr');
+  const c = claimOnlyMerge(git, dir, m, 'feat-claim', { 'other.txt': 'noise\n' });
+
+  const out = spawnSync('node', [AUDIT_SCRIPT], { cwd: dir, encoding: 'utf8' });
+  assert.ok(out.stdout.includes('resolved by revert'), `M must resolve:\n${out.stdout}`);
+  assert.ok(out.stdout.includes(`revert of ${m.slice(0, 7)}`),
+    `R (auto-revert of an adrPresence offender) must be [SKIP] revert of M:\n${out.stdout}`);
+  assert.ok(!out.stdout.includes(`[FAIL-SHA] ${r}`), `R must not FAIL:\n${out.stdout}`);
+  assert.ok(out.stdout.includes(`[FAIL-SHA] ${c}`), `claim-only merge must still FAIL:\n${out.stdout}`);
+});
+
+test('D2 FIX1 — reverter-skip exempts ONLY the mirrored check; R\'s own independent issueLink failure survives as [FAIL], not [SKIP]', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-fix1-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init', ...sessionSummaryFile() }, 'chore: initial (#0)');
+  // O: adrPresence offender ONLY — ADR added without brain/HOME.md, but its
+  // own commit body DOES carry a valid issue ref (passes issueLink).
+  const o = mergeAdding(git, dir, 'feat-adr',
+    { 'brain/project/decisions/adr-9002-thing.md': '# ADR\n' }, '#1');
+  // R: a genuine `git revert -m 1 O`, merged, but R's OWN body carries NO
+  // issue ref — R independently fails issueLink. This is NOT mirrored by O
+  // (O passed issueLink), so it must survive as [FAIL], not be swallowed
+  // whole by the reverter-skip (owner ruling — FIX1).
+  const r = revertMerge(git, dir, o, 'rv-adr-noissue', null);
+
+  const out = spawnSync('node', [AUDIT_SCRIPT], { cwd: dir, encoding: 'utf8' });
+  const rLine = out.stdout.split('\n').find((l) => l.includes(r.slice(0, 7)));
+  assert.ok(rLine, `R must appear in output:\n${out.stdout}`);
+  assert.ok(rLine.startsWith('[FAIL]'),
+    `R must be [FAIL] (own issueLink failure not mirrored), not [SKIP]:\n${out.stdout}`);
+  assert.ok(rLine.includes('issueLink'),
+    `R's surviving failure must be issueLink:\n${rLine}`);
+  assert.ok(!rLine.includes('adrPresence'),
+    `R's mirrored adrPresence failure must be exempted, not listed:\n${rLine}`);
+  assert.ok(out.stdout.includes(`[FAIL-SHA] ${r}`), `R must emit [FAIL-SHA]:\n${out.stdout}`);
+});
+
+test('D2 FORGE-C — issueLink is body-keyed, never mirrored by tree inversion: R must FAIL its own issueLink even when the reverted offender O ALSO lacked a ref', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-forgec-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init', ...sessionSummaryFile() }, 'chore: initial (#0)');
+  // O: adrPresence offender that ALSO lacks an issue ref — fails {adrPresence, issueLink}.
+  const o = mergeAdding(git, dir, 'feat-adr-noissue',
+    { 'brain/project/decisions/adr-9003-thing.md': '# ADR\n' }, null);
+  // R: a genuine `git revert -m 1 O`, merged, R's OWN body ALSO lacks a ref.
+  // issueLink is keyed off R's OWN commit/PR body, never off the tree — the
+  // fact that O's body coincidentally ALSO lacked a ref must not exempt R
+  // from its own, independent issueLink violation (owner ruling — tree-keyed
+  // restriction). Only adrPresence (tree-derived: R touches the same ADR
+  // path O did) may ever be mirrored.
+  const r = revertMerge(git, dir, o, 'rv-adr-noissue2', null);
+
+  const out = spawnSync('node', [AUDIT_SCRIPT], { cwd: dir, encoding: 'utf8' });
+  const rLine = out.stdout.split('\n').find((l) => l.includes(r.slice(0, 7)));
+  assert.ok(rLine, `R must appear in output:\n${out.stdout}`);
+  assert.ok(rLine.startsWith('[FAIL]'),
+    `R must be [FAIL] (issueLink is body-keyed, never mirrored by tree inversion), not [SKIP]:\n${out.stdout}`);
+  assert.ok(rLine.includes('issueLink'),
+    `R's surviving failure must be issueLink:\n${rLine}`);
+  assert.ok(!rLine.includes('adrPresence'),
+    `R's mirrored adrPresence failure must still be exempted (it IS tree-derived):\n${rLine}`);
+  assert.ok(out.stdout.includes(`[FAIL-SHA] ${r}`), `R must emit [FAIL-SHA]:\n${out.stdout}`);
+  const oLine = out.stdout.split('\n').find((l) => l.includes(o.slice(0, 7)));
+  assert.ok(oLine && oLine.startsWith('[SKIP]') && oLine.includes('resolved by revert'),
+    `O must still be resolved-skipped (pre-evaluation, unaffected by FIX):\n${out.stdout}`);
+  assert.equal(out.status, 1, `expected exit 1 (R still fails):\n${out.stdout}`);
+});
+
+// FORGE-E (multi-match, both recency orderings): R's tree is the byte-exact
+// inverse of TWO prior offenders sharing the identical tree-derived failing
+// set (both touch the same ADR path, so both fail ONLY adrPresence among the
+// tree-keyed checks) but differing in their OWN, unmirrored issueLink status.
+// Because the mirrored set is now restricted to tree-keyed checks only,
+// EVERY candidate m that matches `isReverterOf` has the SAME tree-derived
+// failing set ({adrPresence}) regardless of its own issueLink status — so
+// which one the loop happens to visit first can no longer flip R's verdict.
+// Two variants below swap which offender is CLOSER to R (i.e. visited first
+// by the reverse-chronological `merges` iteration) to prove this.
+function forgeEFixture(dir, { closerHasRef }) {
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init', ...sessionSummaryFile() }, 'chore: initial (#0)');
+  const adrFile = { 'brain/project/decisions/adr-9004-thing.md': '# ADR\n' };
+
+  // Offender WITH a valid ref (fails only adrPresence).
+  const withRef = () => mergeAdding(git, dir, `feat-adr-ref-${Math.random().toString(36).slice(2)}`, adrFile, '#1');
+  // Offender WITHOUT a ref (fails adrPresence + issueLink).
+  const noRef = () => mergeAdding(git, dir, `feat-adr-noref-${Math.random().toString(36).slice(2)}`, adrFile, null);
+
+  let farOffender, farRevert, closeOffender;
+  if (closerHasRef) {
+    // far = no-ref offender, reverted; close = valid-ref offender (re-add), reverted by R.
+    farOffender = noRef();
+    farRevert = revertMerge(git, dir, farOffender, 'rv-far', '#1');
+    closeOffender = withRef();
+  } else {
+    // far = valid-ref offender, reverted; close = no-ref offender (re-add), reverted by R.
+    farOffender = withRef();
+    farRevert = revertMerge(git, dir, farOffender, 'rv-far', '#1');
+    closeOffender = noRef();
+  }
+  void farRevert;
+  // R: genuine revert of the CLOSE offender; R's own body lacks a ref.
+  const r = revertMerge(git, dir, closeOffender, 'rv-close', null);
+  return { farOffender, closeOffender, r };
+}
+
+test('D2 FORGE-E — multi-match: R\'s verdict does not depend on which tree-inverse offender is more recent (closer offender lacks ref)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-forgee-a-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { r } = forgeEFixture(dir, { closerHasRef: false });
+
+  const out = spawnSync('node', [AUDIT_SCRIPT], { cwd: dir, encoding: 'utf8' });
+  const rLine = out.stdout.split('\n').find((l) => l.includes(r.slice(0, 7)));
+  assert.ok(rLine, `R must appear in output:\n${out.stdout}`);
+  assert.ok(rLine.startsWith('[FAIL]'),
+    `R must be [FAIL] regardless of match order:\n${out.stdout}`);
+  assert.ok(rLine.includes('issueLink'), `R's surviving failure must be issueLink:\n${rLine}`);
+  assert.ok(!rLine.includes('adrPresence'), `adrPresence must still be mirrored/exempted:\n${rLine}`);
+});
+
+test('D2 FORGE-E — multi-match: R\'s verdict does not depend on which tree-inverse offender is more recent (closer offender has valid ref)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-forgee-b-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { r } = forgeEFixture(dir, { closerHasRef: true });
+
+  const out = spawnSync('node', [AUDIT_SCRIPT], { cwd: dir, encoding: 'utf8' });
+  const rLine = out.stdout.split('\n').find((l) => l.includes(r.slice(0, 7)));
+  assert.ok(rLine, `R must appear in output:\n${out.stdout}`);
+  assert.ok(rLine.startsWith('[FAIL]'),
+    `R must be [FAIL] regardless of match order:\n${out.stdout}`);
+  assert.ok(rLine.includes('issueLink'), `R's surviving failure must be issueLink:\n${rLine}`);
+  assert.ok(!rLine.includes('adrPresence'), `adrPresence must still be mirrored/exempted:\n${rLine}`);
+});
+
+test('D2 — memoryPresence skip-precedence: a resolved offender never reaches memoryPresence; an un-reverted merge still does', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-skipprec-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  // No session_summary anywhere — memoryPresence fails repo-globally for
+  // every un-reverted (and un-resolved) merge in this fixture.
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const m = mergeAdding(git, dir, 'feat-m', { 'p.md': 'PAYLOAD\n' });
+  revertMerge(git, dir, m, 'rv');
+  const n = mergeAdding(git, dir, 'feat-n', { 'q.md': 'OTHER\n' });
+
+  const r = spawnSync('node', [AUDIT_SCRIPT], { cwd: dir, encoding: 'utf8' });
+  const mLine = r.stdout.split('\n').find((l) => l.startsWith('[SKIP]') && l.includes(m.slice(0, 7)));
+  assert.ok(mLine && !mLine.includes('memoryPresence'),
+    `M must be skipped BEFORE memoryPresence runs:\n${r.stdout}`);
+  assert.ok(r.stdout.includes(`[FAIL-SHA] ${n}`) && r.stdout.includes('memoryPresence'),
+    `un-reverted N must still fail memoryPresence:\n${r.stdout}`);
+});
+
+test('D2 C3 — a crashing range load exits 2 (not 1, not 0), message on stdout', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-c3-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, 'not-a-real-ref..HEAD'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 2, `expected exit 2, got ${r.status}\nstdout:${r.stdout}\nstderr:${r.stderr}`);
+  assert.ok(r.stdout.includes('governance:audit-uncomputable'), `message must be on stdout:\n${r.stdout}`);
+});
+
+test('D2 crossCheckExit — code 1 requires >=1 recorded offender, or the run is itself uncomputable', () => {
+  assert.equal(crossCheckExit(false, 0), 0);
+  assert.equal(crossCheckExit(true, 3), 1);
+  assert.equal(crossCheckExit(true, 0), 2, 'anyFail=true with zero recorded offenders must be uncomputable');
+});
+
+test('D2 — resolvedSkipLine never swallows an uncomputable offender (root-commit / missing-parent shape)', (t) => {
+  // A merge whose own first-parent contribution cannot be read locally
+  // (REQ-D2-12 "point 7" — the offender's diff is uncomputable, e.g. via a
+  // shallow clone boundary). `--merges` itself treats a shallow-boundary
+  // commit as parentless (excluding it from any real `--merges` walk — a
+  // property of git's own shallow machinery, verified empirically), so this
+  // shape cannot be reached by a NATURAL `--merges` enumeration; it is
+  // exercised directly against the exported wiring function brain-audit's
+  // own loop calls, proving the fail-closed contract at the exact call site
+  // (never an ad-hoc try/catch swallow — design §5, REQ-D2-12).
+  const origin = mkdtempSync(join(tmpdir(), 'audit-root-origin-'));
+  const clone = mkdtempSync(join(tmpdir(), 'audit-root-clone-'));
+  t.after(() => { rmSync(origin, { recursive: true, force: true }); rmSync(clone, { recursive: true, force: true }); });
+  const git = makeRepo(origin);
+  commit(git, origin, { 'base.txt': 'base\n' }, 'C0 base');
+  git('checkout', '-b', 'feat');
+  commit(git, origin, { 'p.md': 'p\n' }, 'feat add');
+  git('checkout', 'main');
+  git('merge', '--no-ff', 'feat', '-m', 'M: merge payload');
+  const m = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: origin, encoding: 'utf8' }).stdout.trim();
+
+  spawnSync('git', ['init', '-q', clone], { encoding: 'utf8' });
+  spawnSync('git', ['-C', clone, 'fetch', '-q', '--depth', '1', `file://${origin}`, m], { encoding: 'utf8' });
+
+  const seam = { try: (argv) => gitTry(argv, { cwd: clone }), orThrow: (argv) => gitOrThrow(argv, { cwd: clone }) };
+  assert.throws(() => resolvedSkipLine(m, 'M: merge payload', { git: seam }),
+    /exited|bad|ambiguous|unknown revision/i);
+});
