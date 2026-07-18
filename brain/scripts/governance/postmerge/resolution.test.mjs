@@ -743,3 +743,305 @@ test('HOSTILE-ENV ROBUSTNESS — safety: a content-launder is still refused unde
     'safety: a content-launder must still be refused under a hostile ambient git config',
   );
 });
+
+// ===== PR2b FINDER FIXTURES — FROZEN at RED (REQ-D2-14) — patcher MUST NOT edit; escalate instead =====
+//
+// Property under attack (all this block is given): isResolvedAt(m, tip)
+// must return { resolved: true } IFF m's first-parent payload is NET-ABSENT
+// from the tree at `tip`. A payload that was reverted and then
+// RE-INTRODUCED by ANY means (a fresh re-add, OR a revert-of-the-revert) is
+// NET-PRESENT and MUST be { resolved: false }. The offender is NOT settled
+// merely because SOME inverse of it exists somewhere in `(offender, tip]`.
+// These fixtures assert ONLY on the public `isResolvedAt` return value.
+
+// A5 — a fresh re-add AFTER a genuine revert is NET-PRESENT again.
+// M adds payload P; R genuinely reverts M (P removed); a LATER, non-revert
+// merge X re-adds P's EXACT content. The verdict is TIP-RELATIVE: at tip=R
+// the payload is net-absent (resolved), but at tip=X it is net-present, so
+// the offence is LIVE and MUST NOT be resolved. A predicate that only asks
+// "does some inverse (R) exist in range?" wrongly clears M at X.
+test('A5 — a fresh re-add after a genuine revert is NET-PRESENT: offender NOT resolved at the re-add tip', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const m = mergeAddingPayload(dir, { 'p.md': 'A5_PAYLOAD\n' }, 'M');
+  const r = genuineRevertMerge(dir, m, 'rv', 'PR-R: genuine revert of M');
+  assert.equal(r.conflict, false);
+  // A LATER, non-revert merge re-adds P's EXACT content (P was deleted by R).
+  const x = mergeAddingPayload(dir, { 'p.md': 'A5_PAYLOAD\n' }, 'X');
+  const git = realGit(dir);
+
+  // Liveness anchor: at tip=R the payload is net-ABSENT → resolved.
+  assert.deepEqual(isResolvedAt(m, r.sha, { git }), { resolved: true });
+  // THE ATTACK: at tip=X the payload is net-PRESENT again → NOT resolved.
+  assert.deepEqual(isResolvedAt(m, x, { git }), { resolved: false });
+});
+
+// A7 — revert-of-a-revert (THE CRITICAL). O adds payload (an independent
+// offender: an ADR with no paired brain/HOME.md). R = genuine revert of O
+// (removes it; R is itself record-less — an independent offender in its own
+// right). R2 = genuine revert of R — re-adds O's EXACT payload. At tip=R2:
+//   - O's payload is LIVE at HEAD via R2  → isResolvedAt(O)  = false
+//   - R was itself reverted by R2         → isResolvedAt(R)  = true
+//   - nothing after R2 inverts it         → isResolvedAt(R2) = false
+// The current predicate finds R (an inverse of O) in range and clears O —
+// the exact over-resolution this fixture reddens.
+test('A7 — revert-of-a-revert re-introduces the payload: O NOT resolved, R resolved, R2 NOT resolved (THE CRITICAL)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'docs/adr/0007-thing.md': '# ADR 7\n' }, 'O');
+  const r = genuineRevertMerge(dir, o, 'rv', 'PR-R: genuine revert of O');
+  assert.equal(r.conflict, false);
+  const r2 = genuineRevertMerge(dir, r.sha, 'rv2', 'PR-R2: genuine revert of R (re-adds O)');
+  assert.equal(r2.conflict, false);
+  const git = realGit(dir);
+
+  // THE ATTACK: O's payload is live at HEAD via R2 → NOT resolved.
+  assert.deepEqual(isResolvedAt(o, r2.sha, { git }), { resolved: false });
+  // R was itself reverted by R2 → resolved.
+  assert.deepEqual(isResolvedAt(r.sha, r2.sha, { git }), { resolved: true });
+  // Nothing after R2 inverts it → NOT resolved.
+  assert.deepEqual(isResolvedAt(r2.sha, r2.sha, { git }), { resolved: false });
+});
+
+// A8 — an EVEN chain settles (liveness / no over-correction). O, R, R2, R3
+// each a genuine merged revert of the prior. At tip=R3 O's payload is
+// net-ABSENT → resolved. This may already be GREEN against the current
+// code; its job is to stop a FUTURE over-correction that would wrongly
+// redden a genuinely-settled chain, not to redden today.
+test('A8 — an EVEN chain of genuine reverts settles: O is net-absent, resolved (liveness / no over-correction)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'p.md': 'A8_PAYLOAD\n' }, 'O');
+  const r = genuineRevertMerge(dir, o, 'rv', 'PR-R: revert O');
+  assert.equal(r.conflict, false);
+  const r2 = genuineRevertMerge(dir, r.sha, 'rv2', 'PR-R2: revert R');
+  assert.equal(r2.conflict, false);
+  const r3 = genuineRevertMerge(dir, r2.sha, 'rv3', 'PR-R3: revert R2');
+  assert.equal(r3.conflict, false);
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(o, r3.sha, { git }), { resolved: true });
+});
+
+// C3(a) — RANGE EDGE: the inverter R immediately after O's own commit
+// boundary. At tip=R the payload is net-absent → resolved.
+test('C3(a) — inverter immediately after the offender boundary resolves it (range edge)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'p.md': 'C3A_PAYLOAD\n' }, 'O');
+  const r = genuineRevertMerge(dir, o, 'rv', 'PR-R: revert immediately after O');
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(o, r.sha, { git }), { resolved: true });
+});
+
+// C3(b) — RANGE EDGE: the inverter R exactly at tip (HEAD-most), with an
+// unrelated merge sitting between O and R. At tip=R the payload is
+// net-absent → resolved.
+test('C3(b) — inverter exactly at tip (HEAD-most), unrelated merge between, resolves the offender (range edge)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'p.md': 'C3B_PAYLOAD\n' }, 'O');
+  mergeAddingPayload(dir, { 'unrelated.txt': 'noise\n' }, 'U'); // between O and R
+  const r = genuineRevertMerge(dir, o, 'rv', 'PR-R: revert at HEAD');
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(o, r.sha, { git }), { resolved: true });
+});
+
+// C3(c) — RANGE EDGE: the offender O itself exactly at tip (HEAD). A merge
+// at HEAD must NEVER be wholesale-resolved as its own canceller — the
+// half-open range (O, O] is empty, so nothing inverts it → NOT resolved.
+test('C3(c) — the offender itself at HEAD is NEVER wholesale-resolved as its own canceller (range edge)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'p.md': 'C3C_PAYLOAD\n' }, 'O');
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(o, o, { git }), { resolved: false });
+});
+
+// C3(d) — RANGE EDGE: a genuine cleanup revert R sitting at HEAD with the
+// offender O behind it. O really is net-absent at tip=R → resolved.
+test('C3(d) — a genuine cleanup revert at HEAD with the offender behind it resolves the offender (range edge)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'p.md': 'C3D_PAYLOAD\n' }, 'O');
+  const r = genuineRevertMerge(dir, o, 'rv', 'PR-R: cleanup revert at HEAD');
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(o, r.sha, { git }), { resolved: true });
+});
+
+// global-gap — the sole, HEAD-most merge that carries a live payload is NOT
+// self-resolved: with no later merge to invert it, the offence stands.
+test('global-gap — the sole, HEAD-most merge carrying a live payload is NOT self-resolved', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const headMerge = mergeAddingPayload(dir, { 'p.md': 'GLOBAL_GAP_PAYLOAD\n' }, 'M');
+  const git = realGit(dir);
+
+  assert.deepEqual(isResolvedAt(headMerge, headMerge, { git }), { resolved: false });
+});
+
+// ===== END PR2b FINDER FIXTURES =====
+
+// ===== PR2b PATCH-AUTHOR WHITE-BOX PRIMITIVE TESTS (below the frozen block) =====
+// Unit tests for the net-parity primitives the frozen isResolvedAt fixtures
+// compose (design §15.3). These exercise `sign`, `netPresent`, and
+// `netAddFull` DIRECTLY — none of these exports exist under the merged PR2
+// pairwise predicate, so this whole block is RED against that code (an import
+// error) and GREEN only after the net-parity rewrite. They live OUTSIDE the
+// frozen finder block by contract (the finder owns the end-to-end
+// `isResolvedAt` fixtures; the patch author owns the primitive white-box).
+
+import { sign, netPresent, netAddFull } from './resolution.mjs';
+
+// 2b.2.1 — `sign` is a pure 3-way classifier over (fW, s, sInv): re-add,
+// invert, or unrelated. `sInv` is a DISTINCT computation, never a textual
+// reversal of `s`, so it is passed in precomputed.
+test('sign — +1 when the candidate re-introduces s, −1 when it inverts s, 0 otherwise', () => {
+  const s = 'PATCH_S'; // a target signature (opaque diff text)
+  const sInv = 'PATCH_S_INV'; // its exact reverse patch (a distinct git computation)
+  assert.equal(sign(s, s, sInv), 1); // re-add
+  assert.equal(sign(sInv, s, sInv), -1); // invert
+  assert.equal(sign('UNRELATED_RENAME', s, sInv), 0); // neither (e.g. a rename)
+});
+
+// 2b.2.3 — netPresent on a bare offender (nothing after it) is its own +1 base.
+test('netPresent — a bare offender with no candidates after it counts 1 (its own base term)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'p.md': 'WB_BARE\n' }, 'O');
+  const git = realGit(dir);
+  assert.equal(netPresent(o, o, { git }), 1);
+  assert.deepEqual(isResolvedAt(o, o, { git }), { resolved: false });
+});
+
+// 2b.2.4 — netPresent on O,R (single genuine revert, A2 shape) nets to 0.
+test('netPresent — a single genuine revert cancels the offender to net 0 (liveness)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'p.md': 'WB_OR\n' }, 'O');
+  const r = genuineRevertMerge(dir, o, 'rv', 'PR2: revert O');
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+  assert.equal(netPresent(o, r.sha, { git }), 0);
+  assert.deepEqual(isResolvedAt(o, r.sha, { git }), { resolved: true });
+});
+
+// 2b.3.1 — netAddFull on a sole genuine reverter over its window nets to 0
+// (the A6 shape re-expressed as a full-window signed count; exempt).
+test('netAddFull — a sole genuine reverter over its window nets to 0 (exempt)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'docs/adr/0001-x.md': '# ADR 1\n' }, 'O');
+  const r = genuineRevertMerge(dir, o, 'rv', 'PR2: revert O');
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+  // window [O, R] sees O (fW == dRinv) and R (fW == dR): 1 − 1 = 0.
+  assert.equal(netAddFull(r.sha, { git, from: o, to: r.sha }), 0);
+});
+
+// 2b.3.2 — netAddFull on the A7 R2 carrier is +1 (NOT exempt): O and R2 both
+// carry dO, only R inverts it (2 − 1 = +1). This is the reverter-skip half of
+// THE CRITICAL — the net-anchored replacement must NOT crown R2.
+test('netAddFull — the revert-of-a-revert carrier (A7 R2) nets to +1, NOT exempt', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'docs/adr/0007-thing.md': '# ADR 7\n' }, 'O');
+  const r = genuineRevertMerge(dir, o, 'rv', 'PR-R: revert O');
+  assert.equal(r.conflict, false);
+  const r2 = genuineRevertMerge(dir, r.sha, 'rv2', 'PR-R2: revert R (re-adds O)');
+  assert.equal(r2.conflict, false);
+  const git = realGit(dir);
+  // window [O, R2]: {O, R2} carry dO (== dR2) → 2; {R} inverts it → 1. 2 − 1 = +1.
+  assert.equal(netAddFull(r2.sha, { git, from: o, to: r2.sha }), 1);
+});
+
+// 2b.6.4 — full-window vs directional asymmetry: a cleanup revert R sitting at
+// HEAD is reverter-EXEMPT (full-window netAddFull sees O behind it → 0) even
+// though it is NOT resolved-skipped (directional netPresent counts its own +1
+// → 1). A directional-only reverter count over (R, tip] (empty) would wrongly
+// leave R un-exempt — this is exactly why the two ranges MUST differ (design
+// §15.3's "why the ranges differ" note).
+test('range asymmetry — a tip-most cleanup revert is full-window exempt yet directionally net-present', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'p.md': 'WB_ASYM\n' }, 'O');
+  const r = genuineRevertMerge(dir, o, 'rv', 'PR-R: cleanup revert at HEAD');
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+  // FULL-WINDOW [O, R] sees O behind R → exempt (≤ 0).
+  assert.equal(netAddFull(r.sha, { git, from: o, to: r.sha }), 0);
+  // DIRECTIONAL netPresent(R, R): R's own +1 base, nothing after it to cancel
+  // → net-present (1), so R is (correctly) NOT resolved-skipped.
+  assert.equal(netPresent(r.sha, r.sha, { git }), 1);
+  assert.deepEqual(isResolvedAt(r.sha, r.sha, { git }), { resolved: false });
+});
+
+// ===== PR2b PATCH-AUTHOR EXPORTED-VACUITY GUARD (F-1 on the export surface) =====
+// The F-1 anti-vacuity guard must hold on the EXPORTED primitives themselves,
+// not only upstream in `isResolvedAt`. `netPresent`/`netAddFull`/`sign` are all
+// exported: their contract is for FUTURE direct callers (PR3 is the first new
+// one), so an empty payload signature (`dO`/`dC`/`s` === '') MUST be refused
+// fail-closed — never a vacuous net-present/exempt verdict.
+//
+// MUTATION BAR (RED→GREEN): each assertion reddens if its guard is dropped.
+//   - Drop `netPresent`'s `if (dO === '') throw` → `sign('', ...)` returns +1
+//     for empty-diff merges in range → a spurious net count, NO throw → RED.
+//   - Drop `netAddFull`'s `if (dC === '') throw` → a content-free candidate can
+//     score `≤ 0` and be spuriously exempted, NO throw → RED.
+//   - Drop `sign`'s `if (s === '') throw` → `sign('', '', '')` returns +1 → RED.
+// These call the exports DIRECTLY with an empty-diff offender/candidate (built
+// with `-s ours`, the same empty-effect merge the frozen F-1 fixture uses), so
+// they are sound in isolation regardless of any upstream guard.
+
+// An empty-effect (`-s ours`) merge: its tree equals its first parent's, so
+// `normDiff(m^1, m) === ''` — a vacuous payload signature.
+function emptyEffectMerge(dir, branchLabel, mergeLabel) {
+  run(dir, 'checkout', '-b', `feat-${branchLabel}`);
+  writeAndCommit(dir, `sidecar-${branchLabel}.txt`, 'side\n', 'feat work (discarded by -s ours)');
+  run(dir, 'checkout', 'main');
+  run(dir, 'merge', '--no-ff', '-s', 'ours', `feat-${branchLabel}`, '-m', mergeLabel);
+  return headSha(dir);
+}
+
+// F-1/export — netPresent called DIRECTLY with an empty-diff offender THROWS
+// fail-closed; it never returns a vacuous net-present count.
+test('F-1/export — netPresent refuses an empty-diff offender fail-closed (never a vacuous count)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const m = emptyEffectMerge(dir, 'np-empty', 'M: empty-effect merge');
+  const git = realGit(dir);
+  assert.throws(
+    () => netPresent(m, m, { git }),
+    /no first-parent contribution.*F-1 vacuity|F-1 vacuity.*refused/,
+    'netPresent must throw (fail-closed) on an empty-diff offender, not return a count',
+  );
+});
+
+// F-1/export — netAddFull called DIRECTLY with an empty-diff candidate THROWS
+// fail-closed; it never returns a vacuous (spuriously exempt) count.
+test('F-1/export — netAddFull refuses an empty-diff candidate fail-closed (never a vacuous exempt)', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const m = emptyEffectMerge(dir, 'naf-empty', 'M: empty-effect merge');
+  const git = realGit(dir);
+  assert.throws(
+    () => netAddFull(m, { git, from: m, to: m }),
+    /no first-parent contribution.*F-1 vacuity|F-1 vacuity.*refused/,
+    'netAddFull must throw (fail-closed) on an empty-diff candidate, not return a count',
+  );
+});
+
+// F-1/export — sign called DIRECTLY with an empty target signature THROWS,
+// closing the same exported-vacuity class at the primitive term (an empty `s`
+// would otherwise match an empty `fW` and return a spurious +1).
+test('F-1/export — sign refuses an empty target signature fail-closed', () => {
+  assert.throws(() => sign('', '', ''), /empty target signature.*F-1 vacuity/);
+  assert.throws(() => sign('anything', '', 'x'), /empty target signature.*F-1 vacuity/);
+});

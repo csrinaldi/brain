@@ -11,8 +11,9 @@
 > conflict. Cursor state is remote-authoritative tri-state (`present`/`absent`/`unknown`, REQ-D2-2/11) and
 > the audit window is `cursor..HEAD` on **every** trigger (REQ-D2-1). Emission = stdout `[FAIL-SHA] <sha>`
 > via one shared parser (REQ-D2-5). Exit contract = 0 pass / 1 violation / 2 uncomputable-infra, fail-closed
-> (REQ-D2-6/7/12). Chain = **5 PRs stacked to `feature/v2.0.0`**, each <400 counted lines, no
-> `size:exception` (design §9.2 — see Gate). Every security-relevant scenario below follows the
+> (REQ-D2-6/7/12). Chain = **6 PRs stacked to `feature/v2.0.0`** — PR1 · PR2 · **PR2b** (net-tip-effect
+> amendment to `resolution.mjs`, owner ruling #957, design §15) · PR3 (rebased onto PR2b) · PR4 · PR5 —
+> each <400 counted lines, no `size:exception` (design §9.2/§15 — see Gate). Every security-relevant scenario below follows the
 > adversarial-test doctrine (engram `doctrine/adversarial-test-derivation` #900, REQ-D2-14): each fixture is
 > derived from the attack and MUST redden against the prior ancestry-only fix (commit `eff4560`), not
 > merely against un-fixed code. See [proposal.md](proposal.md) / [design.md](design.md) / [tasks.md](tasks.md).
@@ -115,8 +116,15 @@ containing the exact init command, never audit, never revert, never auto-create;
 (Previously: dedup keyed on offender SHA via branch-existence check, with no stated cleanup for a branch
 left behind by a failed `gh pr create`.)
 
-`brain-audit.mjs` MUST print one `[FAIL-SHA] <full-sha>` line per offending merge to stdout, additive to
-the existing `[FAIL]`/`[PASS]` output. The auto-revert loop MUST key idempotency on the **PR**, not the
+`brain-audit.mjs` MUST print one `[FAIL-SHA] <full-sha>` line per **auto-revertible** offending merge — a
+merge with ≥1 un-exempted **tree-keyed** failure (`adrPresence`/`diffSize`) surviving reverter-skip —
+**deduped to the newest net-present carrier per payload signature**: when several merges share the same
+`normDiff` payload signature (e.g. offender O and a later revert-of-revert R2 both re-adding it), only the
+**newest** carrier emits `[FAIL-SHA]`; older carriers stay `[FAIL]` but emit no auto-revert signal, so PR4
+reverts the live carrier exactly once and never double-removes O + R2 nor resurrects the payload via the
+intermediate legit reverter. This is additive to the existing `[FAIL]`/`[PASS]` output; a merge whose only
+failures are `issueLink`/`memoryPresence` prints `[FAIL]` but NO `[FAIL-SHA]` (§REQ-D2-10a class filter).
+The auto-revert loop MUST key idempotency on the **PR**, not the
 branch: `gh pr list --head "auto-revert/<full-sha>" --state all`. If `gh pr create` fails after the branch
 was pushed, the workflow MUST delete the pushed branch so no orphan branch can permanently suppress a
 retry. A revert PR a human closed without merging (`--state all`) MUST NOT be re-opened or duplicated —
@@ -140,6 +148,15 @@ the offender stays flagged until a genuine revert or `accept --reason`.
 - GIVEN a human closes the auto-revert PR for offender O without merging it
 - WHEN a later cycle re-evaluates O
 - THEN `--state all` finds the closed PR and neither reopens it nor creates a new one — O remains flagged
+
+#### Scenario: two merges sharing a payload signature emit exactly one `[FAIL-SHA]` (newest-carrier dedup)
+
+- GIVEN offender O and a later revert-of-revert R2 that both carry the same `normDiff` payload signature
+  (`normDiff == dO`), net-present at HEAD
+- WHEN `brain-audit` emits
+- THEN only R2 (the newest net-present carrier) prints `[FAIL-SHA]`; O prints `[FAIL]` with no `[FAIL-SHA]`
+  — PR4 reverts the single live carrier and never double-removes O + R2 nor resurrects the payload by
+  reverting the intermediate legit reverter
 
 ## REQ-D2-5: One shared, tested parser function — no inline YAML grep
 
@@ -170,9 +187,17 @@ were deferred.)
 Every evaluator and `brain-audit.mjs` MUST exit 0 (pass), 1 (violation, with ≥1 `[FAIL-SHA]` line on
 stdout), or 2 (uncomputable-infra). The workflow MUST branch on the captured NUMERIC exit code, never an
 Actions boolean `outcome`. In addition: (a) any exit code outside `{0,1,2}` (3+, 127, SIGKILL/137, empty)
-MUST be normalized to 2 before branching; (b) `code == 1` MUST correspond to ≥1 parsed `[FAIL-SHA]`
-offender — zero offenders parsed on code 1 is itself uncomputable and MUST resolve to exit 2, never a
-silent no-op; (c) a final `if: always()` terminal-state assertion step MUST fail the job unless the
+MUST be normalized to 2 before branching; (b) exit code MUST be driven by a `failCount` of human-readable
+`[FAIL]` lines of ANY class, **decoupled** from the `[FAIL-SHA]` count: `code == 1` ⟺ `failCount ≥ 1`, and
+a run that reports code 1 with `failCount == 0` is itself uncomputable → exit 2. Because emission is
+class-filtered (§REQ-D2-10a — only tree-keyed classes emit `[FAIL-SHA]`), `code == 1` with **zero**
+`[FAIL-SHA]` lines is now LEGITIMATE (all violations are `issueLink`/`memoryPresence`, non-auto-revertible)
+and MUST NOT be misclassified as uncomputable. The coherence guard that survives class-filtering is instead
+the **bidirectional tree-keyed⟺`[FAIL-SHA]` invariant**: **≥1 un-exempted tree-keyed failure
+(`adrPresence`/`diffSize`) ⟺ ≥1 `[FAIL-SHA]` line**. A violation of EITHER direction is uncomputable → exit
+2: (i) an un-exempted tree-keyed failure recorded but zero `[FAIL-SHA]` emitted (a crash mid-emission), and
+(ii) a `[FAIL-SHA]` emitted with no backing un-exempted tree-keyed failure. (A guard relaxed without a
+replacement is a guard deleted — see design §15.5.) (c) a final `if: always()` terminal-state assertion step MUST fail the job unless the
 captured exit code is exactly 0, 1, or 2 — including the case where the audit step was killed and produced
 no output at all.
 
@@ -197,11 +222,28 @@ no output at all.
   MUST redden against a workflow with no `case … *)` catch-all arm, where an unmatched `if:` condition
   skips every step and the job goes green
 
-#### Scenario: zero parsed offenders on code 1 is treated as uncomputable, not a silent pass
+#### Scenario: exit 1 with zero `[FAIL-SHA]` is LEGITIMATE when all violations are non-tree-keyed
 
-- GIVEN `brain-audit` exits 1 but the parser returns zero SHAs (a crash mid-emission)
+- GIVEN `brain-audit` exits 1 because merges fail ONLY `issueLink` and/or `memoryPresence`, with no
+  un-exempted tree-keyed failure anywhere in the window (so zero `[FAIL-SHA]` lines are emitted)
 - WHEN the workflow cross-checks the count against the exit code
-- THEN it treats the run as uncomputable (exit 2, loud issue) rather than reverting nothing and going green
+- THEN this is a VALID exit 1 with zero `[FAIL-SHA]`: the job stays red (human gate / re-eval), NO
+  auto-revert fires, and it MUST NOT be misclassified as uncomputable — this is the exact case the old
+  `anyFail ⇒ ≥1 [FAIL-SHA]` guard would have wrongly flipped to exit 2
+
+#### Scenario: an un-exempted tree-keyed failure with zero `[FAIL-SHA]` is uncomputable (crash mid-emission)
+
+- GIVEN ≥1 un-exempted tree-keyed failure (`adrPresence`/`diffSize`) is recorded but zero corresponding
+  `[FAIL-SHA]` lines reach stdout (a crash between verdict and emission)
+- WHEN the bidirectional coherence guard runs
+- THEN the run resolves to exit 2 (loud issue), never reverting nothing and going green
+
+#### Scenario: a `[FAIL-SHA]` with no backing tree-keyed failure is uncomputable
+
+- GIVEN a `[FAIL-SHA]` line is emitted but no un-exempted tree-keyed failure was recorded for that merge
+- WHEN the bidirectional coherence guard runs
+- THEN the run resolves to exit 2 — an auto-revert signal with no governing tree-keyed offense is incoherent
+  and MUST NOT drive a revert
 
 ## REQ-D2-7: Drift-guard asserts every evaluator implements 0/1/2 with both fixtures
 
@@ -265,10 +307,16 @@ gates (`GOVERNANCE_JOBS`) only. The D2 PR MUST NOT commit this constraint to the
 
 ## REQ-D2-10 (NEW): Automatic revert resolution MUST be proved by tree effect only
 
-Automatic resolution of a flagged offender MUST be proved by **tree effect ONLY**: the offender's touched
-paths are byte-identical at HEAD to their pre-offender state (`P ∩ D = ∅`, design §3.2), subject to the
-anti-vacuity guard — an offender with an EMPTY changed-path set MUST NOT be auto-resolved; it is refused,
-loudly, as `not resolved`. A commit trailer (`This reverts commit <sha>.`), ancestry
+Automatic resolution of a flagged offender MUST be proved by **tree effect ONLY**, anchored to the **net
+tree state at HEAD**: the offender is resolved iff its own first-parent contribution — the
+**whole-commit diff-inversion** signature `normDiff(O^1, O)` (design §3.2, which REPLACED the earlier
+path-scoped `P ∩ D = ∅` set-intersection; the spec's prior `P ∩ D = ∅` wording is stale) — is **net-absent**
+at HEAD, i.e. the signed net-parity of that payload signature over the window's first-parent merges is ≤ 0
+(§REQ-D2-16). A **single pairwise inverse match MUST NOT** resolve the offender: a payload re-introduced by
+a **revert-of-a-revert** (or any odd re-introduction) is net-present at HEAD and MUST NOT be resolved. This
+is subject to the anti-vacuity guard — an offender with an EMPTY first-parent contribution (`dO == ''`)
+MUST NOT be auto-resolved; it is refused, loudly, as `not resolved`. A commit trailer
+(`This reverts commit <sha>.`), ancestry
 (`git merge-base --is-ancestor`), an author identity, a cryptographic signature, or a branch name (e.g.
 `auto-revert/*`) MUST NEVER be sufficient to resolve an offender automatically — not as a hint, a
 pre-filter, or a tiebreaker. `brain-audit` MUST read no commit body for resolution. The ONLY other path by
@@ -304,11 +352,14 @@ same CAS advance (§REQ-D2-15). There is no third path.
 - WHEN the automatic resolution predicate runs
 - THEN it does NOT fire — never a vacuous pass
 
-#### Scenario: re-introduction after revert is not resolved
+#### Scenario: re-introduction after revert is not resolved (fresh re-add OR revert-of-revert)
 
-- GIVEN M reverted by R, then a later commit re-adds the payload to the same path
+- GIVEN M reverted by R, then the payload re-introduced at a later tip either by (a) a fresh commit re-adding
+  it to the same path, or (b) a revert-of-a-revert `R2 = git revert -m1 R` (re-adding M's exact payload)
 - WHEN audited at that later tip
-- THEN M is NOT `[SKIP]`ped — the predicate is anchored at the tip and sees the re-introduction
+- THEN M is NOT `[SKIP]`ped — net-parity sees the payload net-present at HEAD (`netPresent(M) > 0`),
+  independent of whether the re-add is itself revert-structured; a single pairwise inverse (R) no longer
+  flips the verdict (§REQ-D2-16, fixture A7)
 
 ## REQ-D2-10a (NEW): Every violation class maps to exactly one resolution mechanism; forward-fix classes are never tree-effect-resolvable
 
@@ -317,19 +368,30 @@ map to exactly one of: automatic tree-effect (revert, §REQ-D2-10), automatic re
 input — e.g. a PR label or PR body re-fetched via `prView` — makes the check pass on the next run), the
 human gate, or exit-2. A class whose real-world resolution is a FORWARD-FIX (adding a missing artifact,
 not restoring a prior state) MUST NOT be resolvable by tree-effect — tree-effect MUST fail closed on it
-(the offender's touched path is still on disk, so `P ∩ D ≠ ∅` forever) and the class MUST fall to the
-human gate or automatic re-evaluation instead. No class may ever be marked "resolved" by a commit message.
-The tree-effect skip MUST be evaluated only for merges that already failed, as a pre-evaluation skip before
-any of the four checks run, so a reverted offender is skipped wholesale — while the repo-global gap
-`memoryPresence` measures remains enforced on every un-reverted merge.
+(the offender's own first-parent contribution `normDiff(O^1, O)` is never net-inverted at HEAD, because a
+forward-fix adds a DIFFERENT path rather than inverting M's contribution, so the payload stays net-present
+forever) and the class MUST fall to the human gate or automatic re-evaluation instead. No class may ever be
+marked "resolved" by a commit message. The tree-effect skip MUST be evaluated only for merges that already
+failed, as a pre-evaluation skip before any of the four checks run, so a reverted offender is skipped
+wholesale — while the repo-global gap `memoryPresence` measures remains enforced on every un-reverted merge.
+
+**Binding `[FAIL-SHA]` class filter (wire format enforces the class→mechanism map).** The `[FAIL-SHA]`
+auto-revert signal MUST be emitted ONLY for un-exempted **tree-keyed** classes (`adrPresence`, `diffSize`)
+— the only classes whose terminal mechanism can be a tree-effect revert. `issueLink` (body-keyed, resolved
+by a re-eval PR-body edit) and `memoryPresence` (repo-global, resolved by adding a `session_summary`) MUST
+NEVER emit `[FAIL-SHA]`; they print `[FAIL]` only. Filtering at the emitter — not documenting the map and
+trusting a downstream consumer to re-filter — is mandatory: a repo-global `memoryPresence` gap must not
+auto-revert every innocent merge, and a legit reverter's own `issueLink` gap must not auto-revert it and
+resurrect O.
 
 #### Scenario: `adrPresence` has no automatic forward-fix path
 
 - GIVEN an offender M flagged for `adrPresence` (added an ADR without `brain/HOME.md`), and a LATER commit
   adds the missing `HOME.md` as a forward fix (never touching M's own paths)
 - WHEN the audit re-runs at that later tip
-- THEN tree-effect returns `not resolved` (M's own changed path is still on disk, `P ∩ D ≠ ∅`) and M remains
-  flagged via tree-effect/re-eval forever — the ONLY way to clear it is the human gate (`accept --reason`)
+- THEN tree-effect returns `not resolved` (M's own first-parent contribution `normDiff(O^1,O)` is never
+  net-inverted — the forward `HOME.md` add is a different path, not an inverse of M) and M remains flagged
+  forever — the ONLY way to clear it is the human gate (`accept --reason`)
 
 #### Scenario: `memoryPresence` self-heals only through re-evaluation, never tree-effect
 
@@ -345,9 +407,20 @@ any of the four checks run, so a reverted offender is skipped wholesale — whil
   audit window (R would otherwise itself fail `adrPresence`, since removing an ungoverned ADR without
   `HOME.md` re-triggers the XOR)
 - WHEN the audit evaluates R
-- THEN R is `[SKIP] revert of M` via the SAME `isResolvedAt` predicate reused (no new mechanism, no
-  forgeable signal) — AND a merge that merely CLAIMS to be a revert of M in its message but has no tree
-  effect on M's paths is NOT skipped
+- THEN R is `[SKIP] revert of M` via the SAME net-parity predicate reused (no new mechanism, no forgeable
+  signal) — AND a merge that merely CLAIMS to be a revert of M in its message but has no tree effect on M's
+  paths is NOT skipped
+
+#### Scenario: only tree-keyed classes emit `[FAIL-SHA]` (class-filtered emission, A9)
+
+- GIVEN (a) a merge failing ONLY `memoryPresence` (a repo-global gap) or ONLY `issueLink`; and (b) a legit
+  reverter R that, after its tree-keyed exemption, still fails only `issueLink`
+- WHEN `brain-audit` emits
+- THEN (a) prints `[FAIL]` and drives exit 1 but emits ZERO `[FAIL-SHA]` — resolution is a human
+  `session_summary` add / PR-body edit (re-eval), never a mass auto-revert; and (b) R emits NO `[FAIL-SHA]`,
+  so PR4 never auto-reverts the legit reverter and O is never resurrected
+- AND (mutation bar) this MUST redden against class-blind emission (today's `brain-audit.mjs:496`), which
+  emits `[FAIL-SHA]` for the `memoryPresence`-only merge and for R
 
 ## REQ-D2-11 (NEW): Cursor state MUST be resolved directly from the remote — no local governance ref is ever fetched, read, or relied upon
 
@@ -501,6 +574,100 @@ upon as the actual guarantee.
 - THEN the second call FAILS — the rejection comes from the remote `--force-with-lease` push itself (there
   is no local ref to check) — the cursor cannot move backward or be double-advanced by a race
 
+## REQ-D2-16 (NEW): Automatic resolution/exemption MUST be anchored to the NET tree state at HEAD
+
+Automatic resolution (resolved-skip) and automatic tree-keyed exemption (reverter-skip) MUST be anchored to
+the **net tree state at HEAD**, computed as a signed **net-parity** count over the window's first-parent
+merges — NOT a single pairwise `∃`-inverse match. A merge is resolved/exempted for its tree-keyed offense
+only when that offense's payload signature is **net-absent** at HEAD; a **revert-of-a-revert** (any odd
+re-introduction) leaves the payload **net-present** and MUST be flagged. The HEAD-most merge MUST NEVER be
+wholesale resolved-skipped: the resolved-skip range is **directional** (merges STRICTLY AFTER O only), so a
+live re-add at HEAD — and any repo-global `memoryPresence` gap it carries — always reaches the four checks.
+The reverter-skip range is **full-window** (a legit cleanup revert at HEAD can still see the offender
+behind it and have its tree-keyed mirror-failure exempted, while its `memoryPresence` still runs). This
+directional/full-window range asymmetry is a security surface and MUST carry boundary fixtures at both ends.
+
+**Bounded soundness claim — state it EXACTLY, do NOT inflate.** Net-parity proves the offender's payload
+signature is **net-absent under EXACT-diff (`normDiff`) accounting** over the first-parent window. It does
+**NOT** prove "the payload is not present on disk" or any whole-tree absence claim. A relocation that is not
+an exact inverse — rename+modify re-add, copy, split, equivalent-content rewrite — yields `sign 0` for every
+candidate → net-parity **fails closed** → the offense **stays counted** (never a false "resolved"). Any REQ
+or scenario text claiming net-parity "proves the payload is not on disk" is WRONG and MUST be rejected — it
+is the documentary-lie class this redesign removes (design §3.6).
+
+#### Scenario: revert-of-revert re-adds the payload and IS flagged (A7 — THE CRITICAL)
+
+- GIVEN `O` = an `adrPresence` offender (ADR without `brain/HOME.md`, valid issue ref); `R = git revert -m1 O`
+  (merged `--merge`) that carries its OWN technical failure — `R` re-trips `adrPresence` AND has
+  `memoryPresence` absent, so `isOffender(R) = true` under the merged PR2 pairwise predicate; and
+  `R2 = git revert -m1 R` (merged `--merge`, re-adding O's EXACT payload). Audit at HEAD = R2
+- WHEN the audit runs at HEAD
+- THEN `R2` is `[FAIL] adrPresence` + `[FAIL-SHA]` (`netAddFull(R2) = +1`, net-present); `O` is `[FAIL]` with
+  NO `[FAIL-SHA]` (deduped to the newest carrier R2); `R` is `[SKIP] resolved` (`netPresent(R) ≤ 0`);
+  **exit 1** — the ungoverned ADR live at HEAD is caught
+- AND (MUTATION BAR — hard) this fixture MUST redden against the **merged PR2 pairwise predicate**, not only
+  against pre-fix `eff4560`: under the `∃`-existence `isResolvedAt`, R2 is crowned reverter-of-R while R and
+  O are both `[SKIP]`ped → exit 0 with the payload LIVE at HEAD. Without this exact `O, R, R2` forge — with
+  `R` carrying its own `memoryPresence`-absent failure that crowns R2 — the redesign is UNPROVEN
+
+#### Scenario: an even revert chain settles and is NOT falsely flagged (A8 — liveness)
+
+- GIVEN `O, R, R2, R3`, each a genuine `--merge` revert of the prior; audit at HEAD = R3
+- WHEN the audit runs
+- THEN `O` is `[SKIP] resolved` (`netPresent = 0`), exit 0 — a fully-settled revert chain must not be
+  falsely flagged
+- AND (mutation bar) a naive over-correction ("any re-add ⟹ never resolved") wrongly flags this → reddens
+
+#### Scenario: resolved-skip is directional — off-by-one at BOTH range ends (C3)
+
+- GIVEN offender O and its exact inverter R, tested with R positioned (i) immediately after O's own commit
+  boundary and (ii) exactly at HEAD
+- WHEN net-parity counts over `(O, tip]`
+- THEN the count includes O's own `+1` plus every merge STRICTLY AFTER O and the HEAD-most inverter — an
+  off-by-one at EITHER range end (double-counting O, or dropping the HEAD-most inverter) MUST redden
+
+#### Scenario: offender exactly at the window edge is not skipped over (C3)
+
+- GIVEN O positioned exactly at the audit-window start (`cursor`), and separately O positioned exactly at
+  HEAD (the merge-HEAD case)
+- WHEN the net-parity predicate evaluates
+- THEN O at HEAD is NEVER wholesale resolved-skipped (the directional range excludes O itself as its own
+  canceller); O at the window start is fully counted as the `+1` base — neither edge silently drops it
+
+#### Scenario: a live re-add at HEAD always reaches the checks (merge-HEAD, C3)
+
+- GIVEN the HEAD-most merge re-adds a payload (net-present) and also carries a repo-global `memoryPresence`
+  gap
+- WHEN the audit runs
+- THEN HEAD is NOT wholesale skipped; BOTH its tree-keyed offense (`[FAIL-SHA]`) and its `memoryPresence`
+  gap surface — the directional resolved-skip range guarantees the HEAD-most merge always runs the checks
+
+#### Scenario: a revert-cleanup sitting at HEAD still sees the offender behind it (full-window reverter-skip, C3)
+
+- GIVEN a legit cleanup revert `R` at HEAD (nothing after it to cancel it) and offender `O` behind it in the
+  window
+- WHEN the reverter-skip evaluates `R`
+- THEN `R`'s tree-keyed mirror-failure (`adrPresence`) is exempted (`netAddFull(R) ≤ 0`, the FULL-WINDOW
+  range sees `O` behind `R`) WHILE `R`'s `memoryPresence` still runs (partial exemption) — a directional-only
+  range would wrongly flag the legit cleanup, and a full-only range would wrongly wholesale-skip `R` and lose
+  the global-gap check
+
+### Amendment provenance & doctrine (net-tip redesign — traceability, C5)
+
+This amendment reopens **MERGED** surface: `resolution.mjs` on `feature/v2.0.0` (PR2, already merged). The
+following MUST be recorded/named when the amendment PR is built (design §15, owner ruling #955):
+
+- **Diagnosis (root pattern, name it).** A LOCAL predicate (`∃` pairwise "is there one inverse commit?") was
+  answering a GLOBAL question ("is the payload present at HEAD?") — the seventh "mechanism present, function
+  hollow" instance. Net-parity does not add a check; it MOVES the predicate into the question's domain.
+- **Merged-surface reopen is done in the open.** The fix lives at the predicate's source (`resolution.mjs`),
+  never as a downstream wiring shim. Doctrine: *a merged predicate that turns out forgeable is amended at its
+  source, never patched downstream — and the prior merge does not protect it: merged ≠ correct; merged =
+  passed the gates we had.*
+- **The A5 fixture's asserted semantics FLIP** — from "O resolved, the re-add flagged" to "**O NOT-resolved**"
+  (now matching REQ-D2-10's literal wording, since under net-parity a net-present payload leaves O
+  unresolved). This flip MUST be NAMED explicitly in the amendment PR body.
+
 ## Out of scope (non-goals)
 
 - **Porting rung-3 auto-revert to GitLab.** D2 unblocks it, does not do it.
@@ -519,18 +686,22 @@ TDD: synthetic fixtures for every scenario above are written FIRST (RED→GREEN)
 fixture (REQ-D2-14) MUST additionally be shown RED against the ancestry-only `eff4560` code before it
 counts as coverage.
 
-**Chain (design §9.2 — supersedes the prior 2-slice split): 5 PRs, stacked to `feature/v2.0.0`, each <400
-counted lines, no `size:exception`.**
+**Chain (design §9.2 — supersedes the prior 2-slice split; extended by design §15 / owner ruling #957): 6
+PRs, stacked to `feature/v2.0.0`, each <400 counted lines, no `size:exception`. PR2b is a dedicated
+amendment PR inserted between PR2 and PR3 — foundation-before-consumer: the net-tip-effect invariant is
+fixed at its source (`resolution.mjs`) before PR3 rebases its wiring onto it.**
 
 | PR | Deliverable | REQs bound |
 |---|---|---|
 | **1** | `git-seam.mjs` + `cursor.mjs` — tri-state cursor, always-`cursor..HEAD` window, CAS advance | REQ-D2-1, REQ-D2-2, REQ-D2-11, REQ-D2-15; REQ-D2-9 (draft re-lands here, 0 counted lines) |
 | **2** | `resolution.mjs` — tree-effect proof (the security-critical PR, kept small for an isolated hostile review) | REQ-D2-10, REQ-D2-10a; REQ-D2-14 (fixtures A1–A6) |
-| **3** | `parse-failures.mjs` + `brain-audit.mjs` — `[FAIL-SHA]` emission, resolved-skip, reverter-skip, top-level catch → 2 | REQ-D2-3 (emission), REQ-D2-5 |
+| **2b** | `resolution.mjs` **ONLY** — net-tip-effect amendment (reopens merged PR2 surface, owner ruling #957/design §15): replace the `∃`-existence `isResolvedAt` with directional **net-parity** (`netPresent(O,tip) ≤ 0`); add the full-window `netAddFull` primitive for the reverter-skip; `normDiff` and the F-1 anti-vacuity guard kept byte-for-byte. Lands **still unused** by `brain-audit.mjs` — PR3 rebases onto it next | **REQ-D2-16** (new — net-tip anchor); **REQ-D2-10** (amended — net-parity replaces the single pairwise inverse match); REQ-D2-14 (fixtures A7 THE CRITICAL, A8 liveness, C3 range-boundary — all proven at the predicate level in `resolution.test.mjs`, mutation bar = the MERGED PR2 pairwise predicate, not only `eff4560`) |
+| **3** | `parse-failures.mjs` + `brain-audit.mjs` — `[FAIL-SHA]` emission, resolved-skip, reverter-skip, top-level catch → 2 (rebased onto PR2b's amended `resolution.mjs`) | REQ-D2-3 (emission, amended newest-carrier dedup); REQ-D2-5; **REQ-D2-10a** (amended — binding `[FAIL-SHA]` class filter, fixture A9); **REQ-D2-6(b)** (amended — `failCount`/tree-keyed⟺`[FAIL-SHA]` bidirectional coherence guard) |
 | **4** | Workflow rewrite — window CLI (no governance-ref fetch needed), full-history checkout for `merge-base` ancestry checks, fail-closed branching, PR-keyed dedup, per-offender boundary, `concurrency:`, terminal-state assertion | REQ-D2-3/4 (dedup + orphan cleanup), REQ-D2-6 (workflow-side normalization + assertion), REQ-D2-11 (shallow-clone `merge-base` constraint), REQ-D2-12, REQ-D2-13; REQ-D2-14 (fixture C1; D1/D2 harness-isolation fix + proof, born isolated per §7.4 — see design.md §14 Plan Deviation) |
 | **5** | `exit-codes.mjs` + `run-check.mjs` + both-fixtures drift-guard + standing harness-isolation registry | REQ-D2-6 (cross-evaluator contract), REQ-D2-7; REQ-D2-14 (standing harness-isolation registry, generalizing PR 4's D1/D2 fix — see design.md §14 Plan Deviation) |
 
-**Cross-cutting across all 5 PRs:** REQ-D2-8 (every PR's fixtures are 100% synthetic).
+**Cross-cutting across all 6 PRs:** REQ-D2-8 (every PR's fixtures are 100% synthetic).
 
 No slice/PR uses `size:exception`. Fix-forward on the current 8-commit branch is rejected (design §9.3);
-the branch resets to `feature/v2.0.0` and re-lands as this 5-PR chain.
+the branch resets to `feature/v2.0.0` and re-lands as this 6-PR chain (PR1 · PR2 · PR2b · PR3 · PR4 · PR5,
+owner ruling #957).
