@@ -76,6 +76,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0019](brain/project/decisions/adr-0019-harness-port.md) — The SDD_HARNESS port: four environment surfaces, artifacts neutral by design
 - [ADR-0020](brain/project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md) — External-reviewer VCS port verbs + the reviewActors/approvalActors two-key split
 - [ADR-0021](brain/project/decisions/adr-0021-reviewer-port-head-and-rollup.md) — Widen the VCS port for the cold reviewer: headRefOid on prView + a prStatusRollup read verb; retire the H1-1 cold-boot seam
+- [ADR-0022](brain/project/decisions/adr-0022-reviewer-port-base.md) — Widen the VCS port for the cold reviewer: baseRefOid on prView (closes H1-2C-BASE)
 
 ### Project-specific rules
 
