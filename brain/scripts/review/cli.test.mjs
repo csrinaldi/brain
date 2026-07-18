@@ -241,8 +241,8 @@ test('main: mode "tranche" (no escalation) never calls labelAdd for needs-decisi
   assert.equal(vcs.calls.labelAdd, 0);
 });
 
-// ── subcommand dispatch (H1-5b, task 13.3): `queue` reaches queue.mjs's real
-// composition function — proven end to end, not stubbed. (`board` in H1-5c.) ─
+// ── subcommand dispatch (H1-5b, task 13.3): `queue`/`board` reach their own
+// module's real composition function — proven end to end, not stubbed. ────
 
 test('main("queue"): dispatches to queue.mjs\'s gatherQueue, prints the review queue AND the escalation inbox', async () => {
   const lines = [];
@@ -261,7 +261,33 @@ test('main("queue"): dispatches to queue.mjs\'s gatherQueue, prints the review q
   assert.ok(lines.some(l => /#5\b.*escalated one/.test(l)), 'the escalation inbox section must list PR #5 (needs-decision)');
 });
 
-test('main: an ordinary run (--pr flag, no subcommand) is UNAFFECTED by the queue dispatch check', () => {
+test('main("board"): dispatches to board.mjs\'s runBoard, reconciles the open PRs it is given through the real deny-set', async () => {
+  const labelAddCalls = [];
+  const vcs = {
+    labelAdd: async ({ labels }) => { labelAddCalls.push(labels); return { ok: true }; },
+    labelRemove: async () => ({ ok: true }),
+  };
+  const code = await main({
+    argv: ['board'],
+    log: () => {},
+    project: 'csrinaldi/brain',
+    provider: 'github',
+    boardDeps: {
+      listOpenPrs: async () => [{ number: 9 }],
+      fetchPr: async () => ({ number: 9, labels: [] }),
+      fetchReviews: async () => [{
+        state: 'COMMENTED',
+        author: 'brain-reviewer',
+        body: '```yaml\nprotocol: brain-review/1\nverdict: APPROVE\nhead_sha: a\nrev: 0\n```',
+      }],
+      getVcs: async () => vcs,
+    },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(labelAddCalls, [['reviewed:approved']], 'board must actually reconcile via the real reconcileOnePr/guardedLabelAdd path');
+});
+
+test('main: an ordinary run (--pr flag, no subcommand) is UNAFFECTED by the queue/board dispatch check', () => {
   assert.deepEqual(parseArgs(['--pr', '42']), { pr: 42, mode: 'auto', dryRun: false });
 });
 
