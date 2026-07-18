@@ -246,3 +246,74 @@ test('COLDBOOT-DEPTH (real default): defaultCloneDetached fetches head AND base 
     'the base checkout must revert impl.mjs to its base content (§10.4 TDD-RED reversion)',
   );
 });
+
+// ── COLDBOOT-SHALLOW (issue #293): a SHALLOW operator clone truncates history ─
+// #291/#292 fixed the "base never fetched" half, but the REAL operator repo is a
+// shallow clone AND the base/head tips are ALREADY present as depth-1 grafts
+// (the #290 reality: the tracker already had both). Re-`git fetch origin <sha>`
+// on an already-present graft is a no-op — it never deepens — so the merge-base
+// (M, below both grafts) stays absent and base...head still fails. Third
+// instance of the class: the fixture must match the real ENVIRONMENT (shallow +
+// grafts already local), not merely exercise the real default.
+// defaultCloneDetached must DEEPEN (unshallow) so the merge-base connects.
+//
+// History: root R -> M (merge-base); base = M->Pb->B; head = M->Ph->H. The op is
+// a depth-1 clone of base-branch (has B, graft at Pb) + a depth-1 fetch of
+// head-branch (has H, graft at Ph) — so M is two commits below each graft and
+// absent, exactly like feature/v2.0.0 vs issue-266.
+test('COLDBOOT-SHALLOW (real default): shallow op with both tips already grafted is deepened so base...head resolves and the §10.4 base checkout works', (t) => {
+  const remote = mkdtempSync(join(tmpdir(), 'brain-review-remote-'));
+  const seed = mkdtempSync(join(tmpdir(), 'brain-review-seed-'));
+  const opParent = mkdtempSync(join(tmpdir(), 'brain-review-opp-'));
+  const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-wt-'));
+  const op = join(opParent, 'op');
+  t.after(() => {
+    try { git(op, 'worktree', 'prune'); } catch { /* best effort */ }
+    for (const d of [remote, seed, opParent, wtParent]) rmSync(d, { recursive: true, force: true });
+  });
+
+  git(remote, 'init', '-q', '--bare');
+  git(seed, 'init', '-q', '-b', 'main');
+  git(seed, 'config', 'user.email', 't@t.t'); git(seed, 'config', 'user.name', 't');
+  writeFileSync(join(seed, 'r.txt'), 'r\n');
+  git(seed, 'add', 'r.txt'); git(seed, 'commit', '-q', '-m', 'R (root)');
+  writeFileSync(join(seed, 'impl.mjs'), 'export const x = 0;\n');
+  git(seed, 'add', 'impl.mjs'); git(seed, 'commit', '-q', '-m', 'M (merge-base)');
+  const m = git(seed, 'rev-parse', 'HEAD');
+  // base-branch: M -> Pb -> B  (B's grandparent is M)
+  git(seed, 'checkout', '-q', '-b', 'base-branch', m);
+  writeFileSync(join(seed, 'pb.txt'), 'pb\n'); git(seed, 'add', 'pb.txt'); git(seed, 'commit', '-q', '-m', 'Pb');
+  writeFileSync(join(seed, 'impl.mjs'), 'export const x = 1;\n');
+  git(seed, 'add', 'impl.mjs'); git(seed, 'commit', '-q', '-m', 'B (base tip)');
+  const baseSha = git(seed, 'rev-parse', 'HEAD');
+  // head-branch: M -> Ph -> H
+  git(seed, 'checkout', '-q', '-b', 'head-branch', m);
+  writeFileSync(join(seed, 'ph.txt'), 'ph\n'); git(seed, 'add', 'ph.txt'); git(seed, 'commit', '-q', '-m', 'Ph');
+  writeFileSync(join(seed, 'impl.mjs'), 'export const x = 2;\n');
+  git(seed, 'add', 'impl.mjs'); git(seed, 'commit', '-q', '-m', 'H (head tip)');
+  const headSha = git(seed, 'rev-parse', 'HEAD');
+  git(seed, 'remote', 'add', 'origin', remote);
+  git(seed, 'push', '-q', 'origin', 'main', 'base-branch', 'head-branch');
+
+  // Operator repo: shallow, with BOTH tips already present as depth-1 grafts and
+  // the merge-base M absent. `file://` so git honours --depth (a local-path
+  // clone hardlinks the full store and ignores --depth).
+  git(opParent, 'clone', '-q', '--depth', '1', '--branch', 'base-branch', `file://${remote}`, op);
+  git(op, 'fetch', '-q', '--depth', '1', 'origin', 'head-branch');
+  assert.equal(git(op, 'rev-parse', '--is-shallow-repository'), 'true', 'fixture must be a shallow clone');
+  assert.throws(() => git(op, 'merge-base', baseSha, headSha), 'precondition: the merge-base is absent before the fix deepens');
+
+  // Real default: fetch both shas (no-ops — already grafted) AND deepen.
+  const clone = defaultCloneDetached({ cwd: op, tmp: wtParent })({ sha: headSha, baseSha });
+  assert.equal(clone.sha, headSha);
+
+  const changed = git(op, 'diff', '--name-only', `${baseSha}...${headSha}`);
+  assert.match(changed, /impl\.mjs/, 'base...head must resolve from a shallow clone — merge-base M reachable after deepen');
+
+  git(clone.worktreePath, 'checkout', baseSha, '--', 'impl.mjs');
+  assert.equal(
+    readFileSync(join(clone.worktreePath, 'impl.mjs'), 'utf8'),
+    'export const x = 1;\n',
+    'the §10.4 base checkout must revert to base content from a shallow clone too',
+  );
+});
