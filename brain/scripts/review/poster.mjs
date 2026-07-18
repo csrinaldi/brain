@@ -8,11 +8,17 @@
 // structurally, because the port itself (`vcs/cli.mjs`'s VERBS) defines no
 // approve verb. `postVerdict` only ever calls `prReviewComment` (PR verdicts,
 // `mode !== 'ruling'`) or `issueComment` (issue rulings, `mode === 'ruling'`),
-// plus `labelAdd` for `reviewed:stale` ONLY (never any other label — the
-// general deny-set lands in H1-5, but this module never reaches for anything
-// beyond that one tightening label).
+// plus `labelAdd` for `reviewed:stale` ONLY.
+//
+// Standing condition 1 (issue #266 comment 5004345710, "the constant is the
+// seed, not the fence"): the `reviewed:stale` labelAdd is folded through
+// `deny-set.mjs`'s `guardedLabelAdd` — the SAME hardcoded chokepoint every
+// reviewer label add (this module's and `board.mjs`'s, H1-5b) passes
+// through. Behavior is unchanged (`reviewed:stale` matches `reviewed:*` —
+// allowed), but the label now clears the same fence, not a bare provider call.
 
 import { getVcs } from '../vcs/cli.mjs';
+import { guardedLabelAdd } from './deny-set.mjs';
 
 const STALE_LABEL = 'reviewed:stale';
 
@@ -60,7 +66,7 @@ export async function postVerdict({
   const reResolveHead = deps.reResolveHead ?? (async () => (await vcs.prView({ project, number })).headRefOid);
   const currentHead = await reResolveHead();
   if (currentHead !== headSha) {
-    await vcs.labelAdd({ project, number, labels: [STALE_LABEL] });
+    await guardedLabelAdd(vcs, { project, number, labels: [STALE_LABEL] });
     return { posted: false, skipped: 'anti-stale' };
   }
 

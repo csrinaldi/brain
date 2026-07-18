@@ -5,8 +5,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { postVerdict } from './poster.mjs';
+import { guardedLabelAdd } from './deny-set.mjs';
 import { VERBS } from '../vcs/cli.mjs';
 
 const HEAD = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
@@ -220,4 +223,59 @@ test('reResolveHead injected seam overrides the default prView re-fetch', async 
   });
   assert.equal(result.posted, true);
   assert.equal(prViewCalled, false, 'the injected reResolveHead seam must be used instead of the default prView call');
+});
+
+// ── deny-set fold (standing condition 1, issue #266 comment 5004345710) ────
+// "The constant is the seed, not the fence" — poster.mjs's anti-stale
+// reviewed:stale labelAdd now routes through the SAME hardcoded chokepoint
+// (deny-set.mjs's guardedLabelAdd) every other reviewer label add passes
+// through, instead of calling vcs.labelAdd bare.
+
+test('poster.mjs source routes its labelAdd call through guardedLabelAdd, not a bare vcs.labelAdd', () => {
+  const src = readFileSync(fileURLToPath(new URL('./poster.mjs', import.meta.url)), 'utf8');
+  assert.match(src, /guardedLabelAdd/, 'poster.mjs must import and call guardedLabelAdd from deny-set.mjs');
+  assert.doesNotMatch(
+    src,
+    /\bvcs\.labelAdd\(/,
+    'poster.mjs must never call vcs.labelAdd directly — it must fold through guardedLabelAdd',
+  );
+});
+
+test('poster fold guard: the exact chokepoint poster.mjs now shares (guardedLabelAdd) refuses a denied label BEFORE the provider — proves the fold is real, not cosmetic', async () => {
+  const calls = [];
+  const vcs = {
+    labelAdd: async (...args) => {
+      calls.push(args);
+      throw new Error('labelAdd must NEVER be invoked for a denied label');
+    },
+  };
+  await assert.rejects(
+    () => guardedLabelAdd(vcs, { project: 'csrinaldi/brain', number: 42, labels: ['status:approved'] }),
+    /refused label/,
+  );
+  assert.deepEqual(calls, [], 'a hypothetical denied label pushed through the poster\'s gate must never reach vcs.labelAdd');
+});
+
+test('anti-stale path still applies reviewed:stale (allowed, tightening) end-to-end after the deny-set fold', async () => {
+  const seenLabels = [];
+  const vcs = {
+    prView: async () => ({ headRefOid: MOVED }),
+    labelAdd: async ({ labels }) => { seenLabels.push(...labels); return { ok: true }; },
+    prReviewComment: async () => { throw new Error('must not be called'); },
+    issueComment: async () => { throw new Error('must not be called'); },
+  };
+  const result = await postVerdict({
+    headSha: HEAD,
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    mode: 'tranche',
+    renderedBody: 'irrelevant',
+    reviewerHandle: 'brain-reviewer',
+    priorVerdicts: [],
+    deps: { getVcs: async () => vcs },
+  });
+  assert.equal(result.posted, false);
+  assert.equal(result.skipped, 'anti-stale');
+  assert.deepEqual(seenLabels, ['reviewed:stale'], 'reviewed:stale matches reviewed:* — allowed through the deny-set unchanged');
 });
