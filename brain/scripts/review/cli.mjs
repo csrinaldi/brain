@@ -74,7 +74,14 @@ export async function main(deps = {}) {
   // Tier-2 checks, resolved ONCE and shared (design.md §2, §4).
   const loadCiContext = deps.loadCiContext ?? loadContext;
   const ctx = deps.baseSha !== undefined ? null : await loadCiContext();
-  const baseSha = deps.baseSha !== undefined ? deps.baseSha : ctx?.baseSha ?? null;
+  // Precedence: an explicit injected deps.baseSha (tests) wins; then
+  // ci-context.mjs's CI-env BASE_SHA; then the port's prView.baseRefOid
+  // (ADR-0022 Decision 2) — the provider-agnostic default that ALSO serves
+  // local runs, where ci-context is unset. `null` here is genuinely
+  // uncomputable (no CI env, no port value) and still folds to tranche.mjs's
+  // protocol §10 fail-closed rule — this widens the *reach* of the evidence,
+  // never relaxes the rule. Closes H1-2C-BASE for the tranche path.
+  const baseSha = deps.baseSha !== undefined ? deps.baseSha : ctx?.baseSha ?? boot.prView.baseRefOid ?? null;
   const getChangedFiles = deps.getChangedFiles ?? defaultGetChangedFiles();
   const changedFiles = baseSha ? getChangedFiles(baseSha, boot.headSha) : [];
 
