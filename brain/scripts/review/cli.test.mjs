@@ -122,18 +122,74 @@ test('main: mode derives to "ruling" (needs-ruling label) → explicit not-yet-i
   assert.deepEqual(vcs.calls, { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 });
 });
 
-test('main: an explicit --mode checkpoint → explicit not-yet-implemented, exits non-zero, posts nothing', async () => {
+// ── mode checkpoint: wired (H1-3) — REQ-H1-10 ───────────────────────────────
+
+test('main: an explicit --mode checkpoint → wires gatherCheckpointInputs + evaluateCheckpoint, posts the verdict', async () => {
   const vcs = spyVcs();
-  const errors = [];
-  const code = await main({
-    argv: ['--pr', '42', '--mode', 'checkpoint'],
-    log: () => {},
-    error: (s) => errors.push(s),
-    ...readyDeps({ vcs }),
+  const lines = [];
+  const deps = readyDeps({ vcs });
+  deps.checkpointDeps = {
+    baseSha: 'BASE',
+    exists: () => true,
+    listDir: () => [],
+    readFile: () => { throw new Error('no checkpoint-report.md in this fixture'); },
+    runReversion: async () => ({ uncomputable: false, command: 'cmd', vacuousTests: [] }),
+    runAudit: () => '',
+    runGovernanceStatus: () => '',
+    trancheDeps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '10\t5\tfoo.mjs\n', readIgnoreList: () => [] },
+  };
+  const code = await main({ argv: ['--pr', '42', '--mode', 'checkpoint'], log: (s) => lines.push(s), ...deps });
+  assert.equal(code, 0);
+  assert.equal(vcs.calls.prReviewComment, 1);
+  assert.ok(lines.some(l => /protocol: brain-review\/1/.test(l)));
+});
+
+test('main: --mode checkpoint with a genuinely uncomputable base (no ci-context, no port baseRefOid) → reversion skipped, fail-closed REVISE (never a silent APPROVE)', async () => {
+  const vcs = spyVcs();
+  const lines = [];
+  const deps = readyDeps({ vcs });
+  delete deps.baseSha; // no injected override
+  deps.loadCiContext = async () => ({ baseSha: null }); // no CI env
+  deps.coldBootDeps.fetchPr = async () => ({ number: 42, author: 'alice', labels: [], body: '', headRefOid: HEAD, baseRefOid: null }); // no port value
+  let reversionCalled = false;
+  deps.checkpointDeps = {
+    exists: () => true,
+    listDir: () => [],
+    readFile: () => { throw new Error('no report'); },
+    runReversion: async () => { reversionCalled = true; return { uncomputable: false, command: 'cmd', vacuousTests: [] }; },
+    runAudit: () => '',
+    runGovernanceStatus: () => '',
+    trancheDeps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '10\t5\tfoo.mjs\n', readIgnoreList: () => [] },
+  };
+  const code = await main({ argv: ['--pr', '42', '--mode', 'checkpoint', '--dry-run'], log: (s) => lines.push(s), ...deps });
+  assert.equal(code, 0);
+  assert.equal(reversionCalled, false, 'a genuinely uncomputable base must skip the reversion, not run it against a bogus sha');
+  assert.ok(lines.some(l => /verdict: REVISE/.test(l)));
+  assert.ok(lines.some(l => /evidence uncomputable/.test(l)), 'the base is genuinely uncomputable → must fail closed');
+});
+
+test('main: --mode checkpoint local run (no ci-context) feeds boot.prView.baseRefOid into the checkpoint reversion — H1-2C-BASE closure reaches the checkpoint path', async () => {
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  delete deps.baseSha; // exercise the port fallback, not the injected override
+  deps.loadCiContext = async () => ({ baseSha: null }); // LOCAL run — ci-context unset
+  deps.coldBootDeps.fetchPr = async () => ({
+    number: 42, author: 'alice', labels: [], body: '', headRefOid: HEAD, baseRefOid: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
   });
-  assert.equal(code, 1);
-  assert.ok(errors.some(l => /checkpoint/.test(l) && /not.*yet.*implement/i.test(l)));
-  assert.deepEqual(vcs.calls, { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 });
+  let reversionBaseSha;
+  deps.checkpointDeps = {
+    exists: () => true,
+    listDir: () => [],
+    readFile: () => { throw new Error('no report'); },
+    runReversion: async ({ baseSha }) => { reversionBaseSha = baseSha; return { uncomputable: false, command: 'cmd', vacuousTests: [] }; },
+    runAudit: () => '',
+    runGovernanceStatus: () => '',
+    trancheDeps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '10\t5\tfoo.mjs\n', readIgnoreList: () => [] },
+  };
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42', '--mode', 'checkpoint', '--dry-run'], log: (s) => lines.push(s), ...deps });
+  assert.equal(code, 0);
+  assert.equal(reversionBaseSha, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', 'the checkpoint reversion must receive the port-resolved baseSha, not null — the wiring that takes §10.4 live');
 });
 
 // ── absent token: fail-closed (wires Phase 2) ───────────────────────────────

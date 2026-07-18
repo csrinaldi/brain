@@ -183,15 +183,15 @@ slice: H1
 # Group H1-3 — checkpoint *(deferred to a later PR)*
 
 ## Phase 10 — checkpoint evaluator (REQ-H1-10)
-- [ ] **10.1 RED/GREEN** — report-vs-tree drift: every number in `checkpoint-report.md` recomputed
+- [x] **10.1 RED/GREEN** — report-vs-tree drift: every number in `checkpoint-report.md` recomputed
       cold; overstatement is a **blocker**.
-- [ ] **10.2 RED/GREEN** — artifact completeness per `sdd-layout` `REQUIRED_ARTIFACTS` + ≥1 `- [x]`
+- [x] **10.2 RED/GREEN** — artifact completeness per `sdd-layout` `REQUIRED_ARTIFACTS` + ≥1 `- [x]`
       in `tasks.md`.
-- [ ] **10.3 RED/GREEN** — prior pins applied, each cited `file:line`.
-- [ ] **10.4 RED/GREEN** — **TDD-RED by reversion**: `git checkout <base> -- <impl-files>`, run the
+- [x] **10.3 RED/GREEN** — prior pins applied, each cited `file:line`.
+- [x] **10.4 RED/GREEN** — **TDD-RED by reversion**: `git checkout <base> -- <impl-files>`, run the
       PR's new tests, require them to **fail**; a passing test against base is a **blocker**. Fixture:
       a deliberately vacuous test (issue #266 acceptance).
-- [ ] **10.5 RED/GREEN** — `brain:audit` + `brain:governance-status` output quoted; `decision-gate`
+- [x] **10.5 RED/GREEN** — `brain:audit` + `brain:governance-status` output quoted; `decision-gate`
       step-2 warn converted into a ruling ("is this a decision?").
 
 ### Review Workload Forecast — H1-3
@@ -199,6 +199,8 @@ slice: H1
 |-------|-------|
 | Est. counted lines | **~280** (`evaluators/checkpoint.mjs` + a small reversion runner). |
 | 400-line budget risk | **Med-high.** The reversion runner shells git; keep its seam thin. |
+| **Actual counted lines (re-derived cold, `44b88be...HEAD`)** | **367/400** — `checkpoint.mjs` (327), `cli.mjs` delta (40, wiring). Tests/fixtures excluded (`**/*.test.mjs` ignoreList). Under budget, no `size:exception`. |
+| **Open PR** | **Not opened.** Per owner ruling (issue #266 comment 5008243569, "Lectura i"), this slice's PR does not open until ADR-0022's `baseRefOid` port widening lands (tracked #266 H1-2C-BASE). Branch `feat/issue-266-h1-3-checkpoint` stays local, ready. |
 
 ---
 
