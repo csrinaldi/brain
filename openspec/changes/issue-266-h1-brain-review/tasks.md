@@ -243,9 +243,15 @@ slice: H1
       first; read-only (no labels, no posts).
 
 ## Phase 13 — board + deny-set (REQ-H1-13, REQ-H1-14)
-- [ ] **13.1 RED/GREEN** — `review/deny-set.mjs`: hardcoded tightening-allow / loosen-deny; refuses
+- [x] **13.1 RED/GREEN** — `review/deny-set.mjs`: hardcoded tightening-allow / loosen-deny; refuses
       `status:approved`/`size:exception`/`skip:*`/`override:*` before `labelAdd` (spy VCS asserts
       never sent); allows `decision`/`seq:*`/`reviewed:*`/`needs-ruling`. **Fixture identities.**
+      **H1-5a, done.** ALLOW-LIST (fail-closed) is the fence — an unknown label not in the deny
+      examples is refused too. **Standing condition 1 folded in the same slice** (issue #266 comment
+      5004345710, "the constant is the seed, not the fence"): `poster.mjs`'s `reviewed:stale`
+      anti-stale labelAdd now routes through `guardedLabelAdd` instead of calling `vcs.labelAdd`
+      bare — behavior unchanged (`reviewed:stale` matches `reviewed:*`, still allowed), but the
+      label now clears the same hardcoded chokepoint `board.mjs` (H1-5b) will share.
 - [ ] **13.2 RED/GREEN** — `review/board.mjs`: rebuild `seq:*`/`reviewed:*` from the verdict blocks
       (`lib/parse-verdict`); a desynced label is rebuilt; reconciles via `labelAdd`/`labelRemove`
       within those namespaces only, through the deny-set.
