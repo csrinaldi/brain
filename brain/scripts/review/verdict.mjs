@@ -36,13 +36,20 @@ export function buildVerdict({
   escalate = null,
 } = {}) {
   if (!headSha) throw new Error('brain-review/1: head_sha is mandatory — refusing to build a headless verdict.');
+  // Protocol §7 (REQ-H1-6): the bounded-revision LOCK counts PRIOR blocks —
+  // `priorRevCount >= 3` (the 4th review) forces STOP + escalate. This is
+  // deliberately left on the 0-based PRIOR count and is NOT touched. The EMITTED
+  // `rev` is 1-INDEXED (`priorRevCount + 1`, first review = rev 1), harmonizing
+  // the label with the human-mediated practice (#290 A/B harmonization item 1)
+  // so "rev N" reads the same for both authors: exactly three REVISEs (rev 1, 2,
+  // 3) are allowed, and rev 4 is the STOP.
   const boundHit = priorRevCount >= 3 && conclusion === 'REVISE';
 
   return {
     protocol: 'brain-review/1',
     verdict: boundHit ? 'STOP' : conclusion,
     head_sha: headSha,
-    rev: priorRevCount,
+    rev: priorRevCount + 1,
     gates: { required: gates.required ?? [], detection: gates.detection ?? [] },
     findings: processFindings(findings),
     conditions,
