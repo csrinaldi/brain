@@ -1,10 +1,3 @@
-> **DRAFT — agent-authored, awaiting human promotion.** This is a `brain-drafts/`
-> artifact (Tier 2 / ADR-0013: the agent drafts, the human promotes to
-> `brain/project/decisions/` and signs). **Promotion is the human keystroke.**
-> Proposed number **ADR-0022** (next free after ADR-0021) — confirm on promotion.
-> Co-promote the `brain/HOME.md` index entry in the same MR (`decision-gate`
-> step 1; the #197→#199 lesson). Nothing below is in force while it lives here.
-
 # ADR-0022 — Widen the VCS port for the cold reviewer: `baseRefOid` on `prView`
 
 **Status**: Accepted
