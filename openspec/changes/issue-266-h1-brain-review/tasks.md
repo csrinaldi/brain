@@ -206,18 +206,28 @@ slice: H1
 
 # Group H1-4 — ruling *(deferred to a later PR)*
 
-## Phase 11 — ruling evaluator (REQ-H1-11)
-- [ ] **11.1 RED/GREEN** — entry requires `## FORK` with ≥2 options each with cost+consequence; a
-      fork without ≥2 options ⇒ **REVISE**, not a ruling.
-- [ ] **11.2 RED/GREEN** — §5 elimination: enumerate authorities, eliminate citing each, rule only
-      if exactly one survives; ≥2 survive ⇒ `STOP` + `escalate: human`.
-- [ ] **11.3 RED/GREEN** — output carries a `pin:` payload (the durable-record seed, protocol §8).
+## Phase 11 — ruling evaluator (REQ-H1-11, Option (B) — owner ruling, issue #266 comment 5009584044)
+- [x] **11.1 RED/GREEN** — entry requires `## FORK` with ≥2 options each with cost+consequence and
+      exactly one `Recommendation:` line; a fork without ≥2 options (or missing cost/consequence,
+      or not exactly one Recommendation) ⇒ **REVISE**, not a ruling.
+- [x] **11.2 RED/GREEN** — Option (B): the evaluator NEVER auto-rules. §5's elimination path
+      ("rule only if exactly one survives") does NOT exist here — a structurally valid fork ALWAYS
+      ⇒ `STOP` + `escalate: human`. The elimination-annotation format + citation resolver (§5
+      option (A)) are out of scope, gated on #284.
+- [x] **11.3 RED/GREEN** — output carries a `pin:` payload (the durable-record seed, protocol §8):
+      `{ fork, options: [{id,cost,consequence}], recommendation }`.
+- [x] **11.4** — pin the Option (B) decision as a `.memory/records/` durable record
+      (`rec-c2c162a51dc7b046`), citing issue #266 comment 5009584044 and findings H14-FORK-PREMISE
+      + H14-FORK-LAUNDERING (reviewer verification comment 5009577822).
+- [ ] **11.5** — open PR H1-4 → `issue-266` tracker, `Part of #266`. The reviewer never approves or
+      merges — the human keystroke stays human.
 
 ### Review Workload Forecast — H1-4
 | Field | Value |
 |-------|-------|
 | Est. counted lines | **~150** (`evaluators/ruling.mjs`). |
 | 400-line budget risk | **Low.** |
+| **Actual counted lines (re-derived cold)** | See apply-progress / PR description — `ruling.mjs` + `cli.mjs`/`mode.mjs` wiring delta. Tests/fixtures excluded (`**/*.test.mjs` ignoreList). |
 
 ---
 
