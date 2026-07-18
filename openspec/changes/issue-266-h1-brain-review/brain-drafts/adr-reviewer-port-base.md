@@ -7,8 +7,8 @@
 
 # ADR-0022 — Widen the VCS port for the cold reviewer: `baseRefOid` on `prView`
 
-**Status**: Draft — agent-drafted per ADR-0013; awaiting human signature (the human sets Status: Accepted + sign-off on promotion). DO NOT merge as Draft.
-**Date**: 2026-07-17
+**Status**: Accepted
+**Date**: 2026-07-17 - Cristian Rinaldi
 
 ## Context
 
