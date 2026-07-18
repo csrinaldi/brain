@@ -289,26 +289,31 @@ slice: H1
 # Group H1-5c — board (WRITE-reconcile) *(deferred to a later PR)*
 
 ## Phase 13c — board + deny-set REMOVE (REQ-H1-13, REQ-H1-14 remove allow-list) — **H1-5c**
-- [ ] **13.1b RED/GREEN** — extend `review/deny-set.mjs` with `guardedLabelRemove` + a REMOVE
+- [x] **13.1b RED/GREEN** — extend `review/deny-set.mjs` with `guardedLabelRemove` + a REMOVE
       allow-list **narrower than ADD**: only `seq:*`/`reviewed:*` (the reviewer's own derived index)
       may ever be removed — `decision`/`needs-ruling`/`needs-decision` (human/circuit intent —
       adding is tightening, removing is loosening) and `status:approved` (human-only) are refused on
       the remove path even though the first three are allowed on the add path. Fail-closed and
       spy-proven (`labelRemove` never invoked for a denied removal); `board.mjs` is the first and
-      only caller.
-- [ ] **13.2 RED/GREEN** — `review/board.mjs`: rebuild `seq:*`/`reviewed:*` from the verdict blocks
+      only caller. **H1-5c, done.**
+- [x] **13.2 RED/GREEN** — `review/board.mjs`: rebuild `seq:*`/`reviewed:*` from the verdict blocks
       (`lib/parse-verdict`, extended with an optional `sequencing` payload); a desynced label is
       rebuilt; reconciles via `guardedLabelAdd`/`guardedLabelRemove` within those namespaces only.
       Composes `mrList` + per-PR `prReviews` + `prView`; the LATEST verdict denormalizes to
-      `reviewed:approved`/`reviewed:revised`/`reviewed:stopped`. An already-synced PR makes zero
-      write calls.
-- [ ] **13.3b** — wire the `board` dispatch in `review/cli.mjs` (stub from 5.4).
+      `reviewed:approved`/`reviewed:revised`/`reviewed:stopped` (`reviewedLabelForVerdict`). The
+      optional `sequencing` payload contributes `seq:*` labels — no H1 evaluator emits it yet, so
+      that path is exercised by tests only, ready for the first evaluator that does. Labels outside
+      the `seq:*`/`reviewed:*` namespaces are never touched. An already-synced PR makes zero write
+      calls. **H1-5c, done.**
+- [x] **13.3b** — wire the `board` dispatch in `review/cli.mjs` (stub from 5.4). **H1-5c, done.**
+      The first positional argv token `board` dispatches to `runBoard`; the single-PR flow and the
+      `queue` dispatch (H1-5b) are unchanged.
 
 ### Review Workload Forecast — H1-5c (board)
 | Field | Value |
 |-------|-------|
-| Est. counted lines | **~230** (`board.mjs` ~130, `lib/parse-verdict.mjs` sequencing ~34, `deny-set.mjs` REMOVE ~50, `cli.mjs` board dispatch). |
-| 400-line budget risk | **Low.** Re-derive cold at PR time (`H1-5b-tip...HEAD`). |
+| **Actual counted lines (re-derived cold, `H1-5b-tip...HEAD`)** | Re-derived at PR time — `board.mjs` (130), `lib/parse-verdict.mjs` sequencing delta, `deny-set.mjs` REMOVE delta, `cli.mjs` board-dispatch delta. Tests/fixtures/`.memory`/`openspec` excluded (governance.ignoreList). |
+| 400-line budget risk | **Low.** |
 
 ---
 
