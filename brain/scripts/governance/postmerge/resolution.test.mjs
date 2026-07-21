@@ -1045,3 +1045,102 @@ test('F-1/export — sign refuses an empty target signature fail-closed', () => 
   assert.throws(() => sign('', '', ''), /empty target signature.*F-1 vacuity/);
   assert.throws(() => sign('anything', '', 'x'), /empty target signature.*F-1 vacuity/);
 });
+
+// ===== PR3 — the (c′) LIVENESS GUARD on the reverter exemption ==============
+// `addedPathsAbsentAt(C, tip)` — C's OWN ADDED paths (first-parent diff, added
+// status) must ALL be ABSENT from the tree at the audited tip for the reverter
+// exemption to be available (external ruling rev 4, issue #297).
+//
+// WHY THIS PRIMITIVE EXISTS. `netAddFull` is a signed count over a WINDOW: it
+// answers "did C's contribution cancel out inside [from,to]?", never "is C's
+// payload live right now?". When the payload's ORIGINAL introduction sits
+// BEHIND the window base, the window sees only a delete and a re-add and nets
+// to 0 — so a live-at-tip offender earned the exemption and the audit exited 0
+// (the A8 fail-open, frozen end-to-end in brain-audit.test.mjs). The rejected
+// rev-3 binding gated the exemption on `isResolvedAt`, whose DIRECTIONAL
+// `(C, tip]` range is EMPTY for any tip-most merge → resolved:false always →
+// it denied the exemption to every legitimate tip-most cleanup revert (frozen
+// A2/A6). This primitive tests the tree at the tip DIRECTLY, so it is blind to
+// both ranges and to how the payload got there.
+//
+// FAILURE DIRECTION (closed): denying an available exemption yields an EXTRA
+// [FAIL], never a missed one. The empty added-set → `true` branch is the
+// cleanup shape (pure deletes) and is exemptible BY RULING, not by accident.
+//
+// MUTATION BAR (RED→GREEN) — each test below kills a specific mutant:
+//   - Drop the `added.length === 0` early return → `ls-tree ... --` with ZERO
+//     pathspecs lists the WHOLE tree → every pure-delete reverter scores
+//     "present" → the cleanup-revert test RED (and A2/A6 with it).
+//   - Drop the `--no-renames`/`diff.renames=false` PAIR → a 100%-similar rename
+//     renders as `R`, never `A` → the added-set is empty → a renamed live
+//     payload is vacuously "absent" → the rename test RED. As in `normDiff`,
+//     only dropping BOTH reddens: git's default is `diff.renames=true`.
+//   - Anchor at the candidate instead of `tip` → the tip-anchor test RED.
+
+import { addedPathsAbsentAt } from './resolution.mjs';
+
+// c′.1 — the CLEANUP shape (frozen A2/A6): a genuine revert of an add-only
+// offender contributes pure deletes, so its added-set is EMPTY → vacuously
+// absent → the exemption stays available. This is the test the whole guard has
+// to not break; it is also the zero-pathspec mutant's grave.
+test("addedPathsAbsentAt — a pure-delete cleanup revert adds nothing: vacuously absent (exemption stays available)", (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'docs/adr/0009-cleanup.md': '# ADR 9\n' }, 'O');
+  const r = genuineRevertMerge(dir, o, 'rv', 'PR-R: cleanup revert at HEAD');
+  assert.equal(r.conflict, false);
+  const git = realGit(dir);
+  assert.equal(addedPathsAbsentAt(r.sha, r.sha, { git }), true,
+    'a tip-most cleanup revert adds no path — its exemption must stay available');
+});
+
+// c′.2 — the RE-ADD carrier (frozen A7 R2 / A8 O): the candidate's own added
+// path is LIVE in the tree at the tip → exemption DENIED, regardless of what
+// any windowed count says about it.
+test('addedPathsAbsentAt — a re-add carrier whose added path is live at the tip is refused the exemption', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'docs/adr/0010-readd.md': '# ADR 10\n' }, 'O');
+  const r = genuineRevertMerge(dir, o, 'rv', 'PR-R: revert O');
+  assert.equal(r.conflict, false);
+  const r2 = genuineRevertMerge(dir, r.sha, 'rv2', 'PR-R2: revert R (re-adds the payload)');
+  assert.equal(r2.conflict, false);
+  const git = realGit(dir);
+  assert.equal(addedPathsAbsentAt(r2.sha, r2.sha, { git }), false,
+    'R2 re-adds the payload and it is live at the tip — the exemption must be denied');
+});
+
+// c′.3 — the TIP is the anchor, not the candidate. The SAME offender O is
+// refused at its own tip (payload live) and allowed once a later revert has
+// removed the payload from the tree at the audited tip.
+test('addedPathsAbsentAt — the audited tip is the anchor: the same offender flips once its payload is gone', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  const o = mergeAddingPayload(dir, { 'docs/adr/0011-anchor.md': '# ADR 11\n' }, 'O');
+  const git = realGit(dir);
+  assert.equal(addedPathsAbsentAt(o, o, { git }), false,
+    'at O the payload O added is live — refused');
+  const r = genuineRevertMerge(dir, o, 'rv', 'PR-R: revert O');
+  assert.equal(r.conflict, false);
+  assert.equal(addedPathsAbsentAt(o, r.sha, { git }), true,
+    'at R the payload O added is gone from the tree — absent');
+});
+
+// c′.4 — MUTATION GUARD (--no-renames PAIR): a 100%-similarity rename relocates
+// a LIVE payload. With git's default rename detection the new path renders as
+// `R`, never `A`, so an unpinned implementation sees an EMPTY added-set and
+// vacuously exempts a candidate that put content back on the tree under a new
+// name — the rename-laundering class the module already defends in `normDiff`,
+// re-armed here on the path surface.
+test('addedPathsAbsentAt — MUTATION GUARD (--no-renames): a 100%-similar rename never launders a live payload into a vacuous absence', (t) => {
+  const dir = makeRepo(t);
+  seedBase(dir);
+  mergeAddingPayload(dir, { 'docs/adr/0012-rename.md': '# ADR 12\n' }, 'O');
+  run(dir, 'checkout', '-b', 'mv-payload', 'main');
+  run(dir, 'mv', 'docs/adr/0012-rename.md', 'docs/adr/0012-renamed.md');
+  run(dir, 'commit', '-m', 'C: relocate the payload (100% similarity)');
+  const c = mergeIntoMain(dir, 'mv-payload', 'C: merge relocation');
+  const git = realGit(dir);
+  assert.equal(addedPathsAbsentAt(c, c, { git }), false,
+    'the relocated payload is live at the tip under its new path — the exemption must be denied');
+});

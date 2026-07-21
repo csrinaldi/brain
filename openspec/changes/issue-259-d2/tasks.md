@@ -221,11 +221,25 @@ before merge.
 
 - [x] 2.1.1 RED: `changedPaths(rev, { git })` returns the set of paths from
       `git diff --no-renames --name-only -z <rev>^1 <rev>` for a synthetic commit touching 2 files.
+      **[STALE-SUPERSEDED — net-parity, `49fd4dd → 29ca6dc → 5987840`]**: `changedPaths`'s path-set diff
+      read no longer exists under that name; the read it fed was replaced by whole-diff-TEXT comparison.
+      Current home: `normDiff` (`resolution.mjs:140`).
 - [x] 2.1.2 GREEN: implement `changedPaths`.
+      **[STALE-SUPERSEDED]**: rewritten as `normDiff` (`resolution.mjs:140`) under the net-parity design
+      (design §15.3); path-set diffing was replaced by whole-diff-text comparison to close the #916
+      rename-bypass (proof at `resolution.test.mjs:184`).
 - [x] 2.1.3 RED (**fixture A4** — anti-vacuity): a merge `M` with a genuinely **empty diff** (zero changed
       paths). Assert `isResolvedAt` returns `{ resolved: false, reason: 'offender has no changed paths' }`
       — never a vacuous pass.
+      **[STALE-SUPERSEDED]**: the F-1 anti-vacuity guard now keys on `dO === ''` (offender's own
+      first-parent `normDiff`), not a changed-paths set. Current home: `resolution.mjs:269-273`
+      (`isResolvedAt`'s first branch) and `resolution.test.mjs:150` (`'F-1 — an empty-diff offender is
+      refused by the anti-vacuity guard, never a vacuous pass'`).
 - [x] 2.1.4 GREEN: implement the anti-vacuity guard as the first branch of `isResolvedAt`.
+      **[STALE-SUPERSEDED]**: still the first branch of `isResolvedAt` today, but gated on the `dO === ''`
+      first-parent-contribution condition, not a `changedPaths` empty set. Current home:
+      `resolution.mjs:269-273`; duplicated on the exported `netPresent`/`sign` primitives per F-1's
+      export-surface contract (`resolution.mjs:197-204,237-241`).
 
 ### Phase 2.2 — `isResolvedAt` — the tree-effect predicate (§3.2, REQ-D2-10)
 
@@ -238,9 +252,19 @@ before merge.
       descendant of `M`, so `merge-base --is-ancestor` wrongly passes and `eff4560` skips `M`) — this
       RED-against-the-prior-fix result is the actual proof this task exists to produce, not merely
       "fails on unfixed code."
+      **[STALE-SUPERSEDED — net-parity, `49fd4dd → 29ca6dc → 5987840`]**: the `P ∩ D = ∅` path-set
+      predicate this fixture proved sound against `eff4560` was itself superseded by whole-diff-TEXT
+      net-parity after judgment-round-1 (#916) found a rename bypass against `P ∩ D = ∅`. The A1
+      security-critical role is carried today by `resolution.test.mjs:184`
+      (`'pure rename does NOT resolve the offender (the #916 bypass shape)'`), proved against
+      `isResolvedAt` (`resolution.mjs:269`).
 - [x] 2.2.2 GREEN: implement `isResolvedAt(offender, tip, { git })` per §3.2 — `P = changedPaths(offender)`,
       `D = changedPaths` between `offender^1` and `tip`, `resolved ⟺ P ∩ D = ∅`, reading **no** commit body.
       Confirm 2.2.1's assertion (against the new code) now passes: `M` stays flagged.
+      **[STALE-SUPERSEDED]**: `isResolvedAt` no longer computes `P ∩ D = ∅` — it was rewritten to the
+      net-parity predicate `netPresent(offender, tip) ≤ 0` by Phase 2b.2.5. Current home:
+      `resolution.mjs:269-273` (`isResolvedAt`), built on `netPresent` (`resolution.mjs:237`) and `sign`
+      (`resolution.mjs:197`).
 - [x] 2.2.3 RED (**fixture A2** — liveness): offender `M`, then a **real `git revert -m 1 M`** merged onto
       `main`. Assert `isResolvedAt(M, tip)` is `true` — the mechanism must not pin on a genuine revert.
 - [x] 2.2.4 RED (**fixture A3**): `M` touches paths `P1` and `P2`. A revert restores **only `P1`**. Assert
@@ -249,6 +273,13 @@ before merge.
       the payload** to the same path. Assert `isResolvedAt(M, <that later tip>)` is `false` — the predicate
       is anchored at the tip and sees the re-introduction. (This is a liveness property the trailer approach
       could never have had.)
+      **[C-e AUDIT — false-at-merge, now covered]**: this checkmark was false at PR2 merge time — no A5
+      fixture existed in `resolution.test.mjs` (confirmed by Phase 2b.1's own finding note above). A5
+      predicate coverage EXISTS TODAY at `resolution.test.mjs:763`
+      (`'A5 — a fresh re-add after a genuine revert is NET-PRESENT: offender NOT resolved at the re-add
+      tip'`), closed by Phase 2b.1.1/2b.1.2's `netPresent`-based rewrite, not by the code this task
+      originally claimed. This false-at-merge checkmark is the named class the C-e ledger audit
+      (governance issue #297) exists to catch.
 - [x] 2.2.6 GREEN: confirm 2.2.2's implementation already satisfies 2.2.3–2.2.5 with no further code (these
       are properties of the same `P ∩ D = ∅` predicate, not separate branches) — if any fails, the
       implementation is wrong, not the test.
@@ -584,61 +615,61 @@ C6.
 
 ### Phase 3.1 — `parse-failures.mjs` (REQ-D2-5, re-derived from `scrap/d2-v1-broken`, never cherry-picked)
 
-- [x] 3.1.1 RED: `parse-failures.test.mjs` — `parseFailingShas(text)` extracts full 40-hex shas from
+- [ ] 3.1.1 RED: `parse-failures.test.mjs` — `parseFailingShas(text)` extracts full 40-hex shas from
       `[FAIL-SHA] <sha>` lines using the **F5 regex** `^\[FAIL-SHA\] ([0-9a-f]{40})$` (re-read from
       `scrap/d2-v1-broken`, re-typed fresh — not `git cherry-pick`ed, to avoid importing the
       `github-actions[bot]` mis-authorship). Order-preserving, deduped via `Set`, ignores
-      malformed/short (sha7) lines.
-- [x] 3.1.2 GREEN: implement `parseFailingShas`.
-- [x] 3.1.3 RED + GREEN: CLI mode reads stdin, prints deduped full-sha list one per line; tested against
-      synthetic stdin, zero real process spawn in the assertion itself.
+      malformed/short (sha7) lines. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.1.2 GREEN: implement `parseFailingShas`. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.1.3 RED + GREEN: CLI mode reads stdin, prints deduped full-sha list one per line; tested against
+      synthetic stdin, zero real process spawn in the assertion itself. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
 
 ### Phase 3.2 — `brain-audit.mjs`: emission + resolved-skip + reverter-skip (REQ-D2-3, REQ-D2-10, REQ-D2-10a)
 
-- [x] 3.2.1 RED: emission test — a synthetic offending merge produces both `[FAIL] <sha7> ...` (unchanged)
-      and the new `[FAIL-SHA] <full-sha>` line.
-- [x] 3.2.2 GREEN: add the additive `[FAIL-SHA]` print at the existing `[FAIL]` emission site.
-- [x] 3.2.3 RED (**A1–A5 end-to-end**): re-run fixtures A1, A2, A3, A5 (Phase 2.2/2.1) through
+- [ ] 3.2.1 RED: emission test — a synthetic offending merge produces both `[FAIL] <sha7> ...` (unchanged)
+      and the new `[FAIL-SHA] <full-sha>` line. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.2.2 GREEN: add the additive `[FAIL-SHA]` print at the existing `[FAIL]` emission site. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.2.3 RED (**A1–A5 end-to-end**): re-run fixtures A1, A2, A3, A5 (Phase 2.2/2.1) through
       `brain-audit.mjs`'s actual CLI/module entry point rather than calling `resolution.mjs` directly —
       proves the wiring, not just the predicate. A1 must again be shown to redden against
-      `scrap/d2-v1-broken`'s equivalent `brain-audit.mjs` wiring (which used `isRevertedInRange`).
-- [x] 3.2.4 GREEN: import `isResolvedAt` from `resolution.mjs` and add the pre-evaluation skip class
-      (symmetric to the existing pre-baseline skip), reporting `[SKIP] <sha7> — resolved by revert`.
-- [x] 3.2.5 RED (**A6 end-to-end**): the reverter-skip fixture (Phase 2.3) run through `brain-audit.mjs` —
+      `scrap/d2-v1-broken`'s equivalent `brain-audit.mjs` wiring (which used `isRevertedInRange`). (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.2.4 GREEN: import `isResolvedAt` from `resolution.mjs` and add the pre-evaluation skip class
+      (symmetric to the existing pre-baseline skip), reporting `[SKIP] <sha7> — resolved by revert`. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.2.5 RED (**A6 end-to-end**): the reverter-skip fixture (Phase 2.3) run through `brain-audit.mjs` —
       an `adrPresence` offender `M` and its genuine auto-revert `R` in the same window; assert `R` is
-      `[SKIP] revert of M`.
-- [x] 3.2.6 GREEN: import `isReverterOf`, wire the reverter-skip evaluation (only for merges that already
+      `[SKIP] revert of M`. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.2.6 GREEN: import `isReverterOf`, wire the reverter-skip evaluation (only for merges that already
       failed one of the four checks — zero cost on the happy path). **Apply-time hardening beyond the
       literal task text**: an unrestricted "any merge in the window" candidate search let a NEW, illegitimate
       re-add offender (A5's shape) get wrongly exempted by matching a clean, non-offending, legitimate revert
       merge as its "M" (a real gap, caught by the A5 fixture below, not a test artifact — see apply-progress).
       Fixed by gating the matched `M` on an independent `isOffender` check (does `M`'s own diff fail >=1 of
-      the four checks, computed commit-body-only) before accepting the skip.
-- [x] 3.2.7 RED: **memoryPresence skip-precedence proof** (closes Phase 2.4.3's cross-file note) — a
+      the four checks, computed commit-body-only) before accepting the skip. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.2.7 RED: **memoryPresence skip-precedence proof** (closes Phase 2.4.3's cross-file note) — a
       reverted offender `M` in a window where `memoryPresence` would also fail repo-globally; assert `M`
       is skipped via tree-effect **before** `memoryPresence` runs on it, while a **different, un-reverted**
       merge in the same window still gets a real `memoryPresence` evaluation (the pre-evaluation skip is
-      per-offender, not a global bypass).
-- [x] 3.2.8 GREEN: confirm/adjust evaluation ordering so tree-effect skip precedes the four checks
-      per-offender, per §3.5's skip-precedence note.
+      per-offender, not a global bypass). (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.2.8 GREEN: confirm/adjust evaluation ordering so tree-effect skip precedes the four checks
+      per-offender, per §3.5's skip-precedence note. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
 
 ### Phase 3.3 — Fail-closed catch and salvaged exit-2 (REQ-D2-6, REQ-D2-12)
 
-- [x] 3.3.1 RED (**fixture C3**): inject a top-level throw in `brain-audit.mjs` (e.g. a crashing `git log`
+- [ ] 3.3.1 RED (**fixture C3**): inject a top-level throw in `brain-audit.mjs` (e.g. a crashing `git log`
       for the range load — the salvaged `gitOrThrow` site from the prior branch). Assert exit code is
-      **2** (not 1, not 0), and the uncomputable message is written to **stdout** (not stderr).
-- [x] 3.3.2 GREEN: change the top-level catch to `process.exit(2)` with the message on stdout; confirm the
+      **2** (not 1, not 0), and the uncomputable message is written to **stdout** (not stderr). (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.3.2 GREEN: change the top-level catch to `process.exit(2)` with the message on stdout; confirm the
       salvaged `gitOrThrow` range-load site (from `scrap/d2-v1-broken`, re-derived not cherry-picked) still
-      produces exit 2 against the new `git-seam.mjs`.
-- [x] 3.3.3 RED (**fixture C6**): `brain-audit.mjs` would exit 1, but the emission path is made to produce
+      produces exit 2 against the new `git-seam.mjs`. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.3.3 RED (**fixture C6**): `brain-audit.mjs` would exit 1, but the emission path is made to produce
       **zero** `[FAIL-SHA]` lines (a crash mid-emission). Assert the cross-check treats this as
       uncomputable (exit 2), never a silent no-op that goes green with nothing reverted. Implemented as a
       direct RED/GREEN unit test on the exported, pure `crossCheckExit(anyFail, failShaCount)` — the same
       function the real CLI uses at its one call site (not a spawn-level reconstruction of a mid-emission
-      crash, which has no natural single-process trigger distinct from C3).
-- [x] 3.3.4 GREEN: add the count cross-check — `code === 1` requires `≥1` parsed offender or the run is
-      itself uncomputable.
-- [x] 3.3.5 RED (**root-commit fail-closed, structured — closes point 7 / C5**): construct a window whose
+      crash, which has no natural single-process trigger distinct from C3). (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.3.4 GREEN: add the count cross-check — `code === 1` requires `≥1` parsed offender or the run is
+      itself uncomputable. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.3.5 RED (**root-commit fail-closed, structured — closes point 7 / C5**): construct a window whose
       offender is (pathologically) the **root commit** — it has no first parent, so `normDiff(offender^1, …)`
       cannot be computed. Assert the offender is treated as **uncomputable → exit 2** (a loud, honest
       not-resolved), **not** an unhandled exception and **never** a silent skip. The predicate MUST NOT
@@ -650,8 +681,8 @@ C6.
       `commit-tree` eagerly validates parent existence, refusing a forged bogus parent. The RED/GREEN test is
       therefore written directly against the exported `resolvedSkipLine` wiring function (the actual per-merge
       call site) using a real shallow-fetch-created offender whose `^1` is genuinely unresolvable, proving the
-      throw propagates un-swallowed rather than reconstructing the (unconstructible) full `--merges` path.
-- [x] 3.3.6 GREEN: make the missing-parent case a **structured fail-closed** outcome, not an ad-hoc
+      throw propagates un-swallowed rather than reconstructing the (unconstructible) full `--merges` path. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.3.6 GREEN: make the missing-parent case a **structured fail-closed** outcome, not an ad-hoc
       `try/catch` swallow: `resolution.mjs` returns an uncomputable/`{ resolved: false }` signal on a missing
       `^1` (the `git-seam` non-zero status is surfaced, not collapsed), and `brain-audit.mjs` maps it to the
       same exit-2 uncomputable path as 3.3.2 — the fail-closed principle (design §5) applies structurally, so
@@ -663,16 +694,16 @@ C6.
       general top-level fail-closed catch (3.3.2) and maps to exit 2. The separate, pre-existing "no parent1"
       branch (used by the four-checks' own diff inputs) was ALSO hardened from a silent `[SKIP] — no parent`
       to a loud `exit(2)` for defense-in-depth, even though it is now provably unreachable via this exact
-      throw path (resolvedSkipLine's throw fires first for any sha whose `^1` cannot be read).
+      throw path (resolvedSkipLine's throw fires first for any sha whose `^1` cannot be read). (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
 
 ### Phase 3.4 — PR 3 gate
 
-- [x] 3.4.1 `npm test` — the **full suite**, green (no scoping restriction — see PR 1's 1.6.1 note).
-      Measured: 1523/1523 GREEN.
-- [x] 3.4.2 Budget check: `parse-failures.mjs` + `brain-audit.mjs` diff counted lines — measured 48 + 127 =
+- [ ] 3.4.1 `npm test` — the **full suite**, green (no scoping restriction — see PR 1's 1.6.1 note).
+      Measured: 1523/1523 GREEN. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
+- [ ] 3.4.2 Budget check: `parse-failures.mjs` + `brain-audit.mjs` diff counted lines — measured 48 + 127 =
       **175** counted lines (above the ≈100 forecast, due to the additional `isOffender` hardening in
       3.2.6 and dense fail-closed rationale comments matching this file's existing house style) — confirm
-      ≤400: **yes, comfortably** (~44% of budget). No `size:exception` needed.
+      ≤400: **yes, comfortably** (~44% of budget). No `size:exception` needed. (SIGNED DEBT — impl lives only on archive/d2-pr3-superseded-9233880, never merged to feature/v2.0.0; rebuilt greenfield by PR3)
 - [ ] 3.4.3 `memory:share` before push.
 - [ ] 3.4.4 Push, open PR 3 against `feature/v2.0.0` (stacked after PR 2). Dependency diagram marks PR 3
       with 📍.
