@@ -87,3 +87,41 @@ export function chunkObservations(parsed) {
 export function isAfterBaseline(baseline, sha, isAncestorFn) {
   return isAncestorFn(baseline, sha);
 }
+
+/**
+ * The AUDITED TIP of a git range — the revision every net-parity skip must
+ * anchor its liveness question to (design §2.2, MINOR 1 of the external ruling
+ * rev 3 on #297).
+ *
+ *   'origin/main..HEAD'  → 'HEAD'
+ *   'v1.0.0..release-2'  → 'release-2'
+ *   'main...release-2'   → 'release-2'   (symmetric difference — still the RHS)
+ *   'origin/main..'      → 'HEAD'        (git reads an omitted RHS as HEAD)
+ *   'HEAD' / 'v2.0.0'    → itself        (a bare revision IS the tip)
+ *
+ * WHY THIS IS NOT A CONSTANT. `resolveRange` accepts an arbitrary range from
+ * `process.argv[2]`, but the skips used to ask "is this payload net-absent at
+ * `'HEAD'`?" regardless. Auditing a NON-HEAD tip then answered a question about
+ * a different commit: an offender reverted somewhere PAST the audited tip would
+ * be exempted out of a window that never contained the revert. §2.2 recorded
+ * "the window ends at the tip" as a precondition and nothing enforced it; this
+ * makes it code.
+ *
+ * The three-dot case is split FIRST on purpose — splitting on `'..'` first
+ * would cut `'A...B'` into `['A', '.B']` and hand back a ref with a stray
+ * leading dot.
+ *
+ * @param {string} range  A git range or bare revision.
+ * @returns {string}      The revision the audit is anchored at.
+ */
+export function auditedTip(range) {
+  const trimmed = String(range).trim();
+  for (const sep of ['...', '..']) {
+    const i = trimmed.indexOf(sep);
+    if (i !== -1) {
+      const rhs = trimmed.slice(i + sep.length).trim();
+      return rhs || 'HEAD';
+    }
+  }
+  return trimmed;
+}

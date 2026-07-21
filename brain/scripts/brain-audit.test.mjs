@@ -847,3 +847,100 @@ test('brain-audit: A8 payload predating the window base — a delete + a live re
   assert.ok(anyFail,
     `a live-at-HEAD ungoverned ADR must be reported as an offender ([FAIL]/[FAIL-SHA]); all-[SKIP] whitewash:\n${r.stdout}`);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELD ITEMS from the external ruling rev 3 on #297 — MINOR 1 (anchor liveness
+// at the AUDITED TIP, not literal 'HEAD'), MINOR 2 (the per-merge reads route
+// through the THROWING git path), and the SIG-mirror drift-guard.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { resolvedSkipLine } from './brain-audit.mjs';
+
+const AUDIT_SRC = readFileSync(fileURLToPath(new URL('./brain-audit.mjs', import.meta.url)), 'utf8');
+const RESOLUTION_SRC = readFileSync(
+  fileURLToPath(new URL('./governance/postmerge/resolution.mjs', import.meta.url)), 'utf8');
+
+// ── MINOR 1 — the tip is a PARAMETER, and it is required on the export ───────
+// DOCTRINE (owner, engram #964): an exported guard whose soundness depends on
+// the caller is unsound by design. A defaulted `tip = 'HEAD'` would let a
+// future caller auditing a non-HEAD tip silently get HEAD's answer — the exact
+// unenforced §2.2 precondition MINOR 1 exists to convert into code. So the
+// contract is a THROW, not a default.
+test('MINOR 1 — resolvedSkipLine refuses to run without an explicit audited tip (never defaults to HEAD)', () => {
+  const git = { orThrow: () => { throw new Error('the predicate must never be reached'); } };
+  assert.throws(
+    () => resolvedSkipLine('deadbee', 'M: subject', { git }),
+    /audited tip/i,
+    'a missing tip must throw fail-closed, never silently anchor at HEAD',
+  );
+});
+
+test('MINOR 1 — resolvedSkipLine threads the caller-supplied tip into the predicate verbatim', () => {
+  const seen = [];
+  // Stub the seam at the argv level: record every rev the predicate asks about.
+  const git = {
+    orThrow: (argv) => { seen.push(argv.join(' ')); return 'PATCH\n'; },
+  };
+  resolvedSkipLine('deadbee', 'M: subject', { git, tip: 'release-2' });
+  assert.ok(seen.some((cmd) => cmd.includes('release-2')),
+    `the audited tip must reach git, not 'HEAD':\n${seen.join('\n')}`);
+  assert.ok(!seen.some((cmd) => /\bHEAD\b/.test(cmd)),
+    `'HEAD' must never appear when auditing a non-HEAD tip:\n${seen.join('\n')}`);
+});
+
+// ── MINOR 2 — no error-swallowing git reads survive on the per-merge path ────
+// The defect was `numstat`/`changedFiles`/`body` routing through a helper that
+// returned '' on ANY git failure: a transient failure produced an EMPTY diff, so
+// diffSize and adrPresence PASSED — a silent fail-open inside the very slice
+// whose thesis is "never a silent PASS" (already enforced for range-load and
+// missing-parent → exit 2). Guarded by source scan rather than behaviorally, and
+// deliberately so: every hermetic way to break `git diff` in a fixture (a bogus
+// `diff.algorithm`, a deleted blob) ALSO breaks the range-load or the
+// resolved-skip, both of which already exit 2 — so a "behavioral" test would
+// pass against the unfixed code and prove nothing. The honest guard is
+// structural: the swallowing helper does not exist to be called.
+test('MINOR 2 — brain-audit defines no error-swallowing git helper (the silent fail-open cannot return)', () => {
+  assert.equal(/catch\s*\{\s*return\s*'';?\s*\}/.test(AUDIT_SRC), false,
+    'a git helper that swallows failure into an empty string re-opens the diffSize/adrPresence fail-open');
+});
+
+test('MINOR 2 — the per-merge reads route through the throwing seam', () => {
+  for (const read of ['--numstat', '--name-only', '--format=%B', '--format=%P']) {
+    const re = new RegExp(`gitOrThrow\\(\\[[^\\]]*'${read.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`);
+    assert.ok(re.test(AUDIT_SRC),
+      `the ${read} read must go through gitOrThrow so a transient failure is exit 2, not a silent PASS`);
+  }
+});
+
+// ── SIG drift-guard (ruling rev 3, the R3 source-scan precedent) ─────────────
+// `payloadSignature` is a LOCAL mirror of resolution.mjs's module-private
+// `normDiff` pins, accepted for PR3 only because reopening the PR2b-frozen
+// export surface is the owner's keystroke. The fence is this test. The risk
+// direction is the CORRECTED one: a COARSER local signature collides two
+// distinct payloads onto one dedup key and SUPPRESSES a needed [FAIL-SHA] — a
+// MISSED emission, fail-open for PR4's consumer. (The original claim that
+// coarsening yields an EXTRA [FAIL-SHA] was inverted; see
+// openspec/changes/issue-259-d2/brain-drafts/local-mirror-of-a-frozen-pin.md.) crossCheckExit
+// compares booleans (>0), so it can never detect a partial suppression.
+test('SIG drift-guard — the local payload-signature pins stay byte-aligned with resolution.mjs normDiff', () => {
+  // Compare the VALUES, not the formatting: extract the quoted entries in
+  // order. A guard that reddens on a line break is a guard nobody keeps.
+  const pins = (src, name) => {
+    const m = src.match(new RegExp(`const ${name} = (\\[[\\s\\S]*?\\]);`));
+    assert.ok(m, `${name} not found — the drift-guard cannot verify what it cannot read`);
+    return (m[1].match(/'[^']*'/g) || []).map((s) => s.slice(1, -1));
+  };
+  assert.deepEqual(pins(AUDIT_SRC, 'SIG_CONFIG'), pins(RESOLUTION_SRC, 'HARDENED_CONFIG'),
+    'SIG_CONFIG drifted from resolution.mjs HARDENED_CONFIG — a coarser signature SUPPRESSES [FAIL-SHA]');
+  assert.deepEqual(pins(AUDIT_SRC, 'SIG_ARGS'), pins(RESOLUTION_SRC, 'DIFF_ARGS'),
+    'SIG_ARGS drifted from resolution.mjs DIFF_ARGS — a coarser signature SUPPRESSES [FAIL-SHA]');
+});
+
+// The mirror must also strip the SAME position-only lines normDiff strips
+// (`@@ ...` hunk headers and `index ...` blob ids). Aligning the pins but not
+// the normalization would still let two distinct payloads collapse.
+test('SIG drift-guard — the local signature strips the same position-only lines as normDiff', () => {
+  const filters = (src) => (src.match(/!\/\^(@@ |index )\/\.test\(line\)/g) || []).sort();
+  assert.deepEqual(filters(AUDIT_SRC), filters(RESOLUTION_SRC),
+    'the local mirror normalizes differently from normDiff — distinct payloads can collapse to one dedup key');
+});
