@@ -39,7 +39,7 @@ import { issueLink } from './governance/checks/issue-link.mjs';
 import { adrPresence } from './governance/checks/adr-presence.mjs';
 import { memoryPresence } from './governance/checks/memory-presence.mjs';
 import { getVcs } from './vcs/cli.mjs';
-import { parsePrNumber, shouldSkipSize, isAfterBaseline, selectIssueLinkBody } from './lib/audit-helpers.mjs';
+import { parsePrNumber, shouldSkipSize, isAfterBaseline, selectIssueLinkBody, auditedTip } from './lib/audit-helpers.mjs';
 import { readRecordObservations } from './memory/lib/store.mjs';
 import { gitOrThrow } from './governance/postmerge/git-seam.mjs';
 // COMPOSE the frozen net-parity primitives (design §15, PR2b). NEVER import the
@@ -47,13 +47,14 @@ import { gitOrThrow } from './governance/postmerge/git-seam.mjs';
 // (brain-audit.test.mjs) asserts it never reappears in this file.
 import { isResolvedAt, netAddFull, addedPathsAbsentAt, makeGit } from './governance/postmerge/resolution.mjs';
 
-function git(args, cwd = process.cwd()) {
-  try {
-    return execSync(`git ${args}`, { encoding: 'utf8', cwd, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-  } catch {
-    return '';
-  }
-}
+// NOTE (MINOR 2, external ruling rev 3 on #297): there is deliberately NO
+// error-swallowing `git()` helper here. The per-merge reads (numstat,
+// changed files, commit body, parents) go through `gitOrThrow`, so a transient
+// git failure becomes exit 2 at the top-level catch instead of an EMPTY diff
+// that makes diffSize and adrPresence PASS. Returning '' on failure was a
+// silent fail-open inside the one slice whose thesis is "never a silent PASS" —
+// which it already enforced for the range-load and the missing-parent paths.
+// A source-scan test in brain-audit.test.mjs keeps the helper from returning.
 
 /**
  * The subset of the four checks whose PASS/FAIL verdict is a pure function of
@@ -77,8 +78,18 @@ export const TREE_KEYED_CHECKS = new Set(['adrPresence', 'diffSize']);
  * throw is allowed to surface is the CLI's top-level fail-closed catch → exit 2.
  * Anchored at HEAD (§2.2 — every window ends at HEAD).
  */
-export function resolvedSkipLine(sha, subject, { git }) {
-  const { resolved } = isResolvedAt(sha, 'HEAD', { git });
+export function resolvedSkipLine(sha, subject, { git, tip }) {
+  // MINOR 1 (ruling rev 3) — the tip is REQUIRED, never defaulted to 'HEAD'.
+  // `resolveRange` accepts an arbitrary range, so anchoring liveness at a
+  // hardcoded 'HEAD' answers a question about a different commit than the one
+  // being audited: an offender reverted PAST the audited tip would be exempted
+  // out of a window that never contained the revert. A default would leave that
+  // fail-open one careless caller away — and an exported guard whose soundness
+  // depends on its caller is unsound by design. So: throw.
+  if (!tip) {
+    throw new Error('resolvedSkipLine: no audited tip supplied — refused fail-closed (design §2.2)');
+  }
+  const { resolved } = isResolvedAt(sha, tip, { git });
   return resolved ? `[SKIP] ${sha.slice(0, 7)} ${subject} — resolved by revert` : null;
 }
 
@@ -117,10 +128,23 @@ export function crossCheckExit(failCount, treeKeyedFailCount, failShaCount) {
  * comparisons all run inside `resolution.mjs`'s `normDiff` (which is
  * module-private and frozen for this PR — hence this thin mirror). It reproduces
  * that pinned command byte-for-byte so two DISTINCT payloads never collapse to
- * one key (which would wrongly SUPPRESS a needed [FAIL-SHA]); if it ever drifted
- * COARSER the worst case is an EXTRA [FAIL-SHA] — exactly the pre-dedup fail-safe
- * behavior (PR4 keys revert idempotency on the PR, not the sha). Kept in lockstep
- * with resolution.mjs by the behavioral dedup fixture (brain-audit.test.mjs).
+ * one key.
+ *
+ * RISK DIRECTION (corrected — the original note here was INVERTED, and the
+ * inversion is the reason this comment is now this long). Drift COARSER does NOT
+ * yield a harmless EXTRA [FAIL-SHA]: a coarser signature collides two distinct
+ * payloads onto ONE dedup key, so the second payload's [FAIL-SHA] is SUPPRESSED
+ * — a MISSED emission, fail-open for PR4's consumer. `crossCheckExit` compares
+ * booleans (`> 0`), so it can never detect a partial suppression. Today the
+ * mirror is byte-identical to `normDiff` (no live exploit) and it is FENCED by
+ * the SIG drift-guard source-scan test in brain-audit.test.mjs, which reddens on
+ * any divergence. See openspec/changes/issue-259-d2/brain-drafts/local-mirror-of-a-frozen-pin.md.
+ *
+ * This mirror is accepted for PR3 ONLY (external ruling rev 3, #297): exporting
+ * a signature helper from resolution.mjs is the single-source-of-truth fix, but
+ * it reopens the PR2b-frozen export surface, which is the owner's keystroke —
+ * routed to the owner's backlog as the fast-follow. The mirror never decides
+ * exempt/resolved: every security-critical comparison stays in resolution.mjs.
  */
 const SIG_CONFIG = ['-c', 'diff.algorithm=myers', '-c', 'diff.renames=false', '-c', 'core.attributesFile=/dev/null'];
 const SIG_ARGS = ['diff', '--no-textconv', '--no-ext-diff', '--no-renames', '--binary', '-U3'];
@@ -268,7 +292,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // the window (git log is newest-first) — a merge, so `from^1` always resolves,
     // and the inclusive window then covers every audited merge. `to` is always HEAD.
     const windowFrom = merges[merges.length - 1].sha;
-    const windowTo = 'HEAD';
+    // MINOR 1 (ruling rev 3) — anchor at the AUDITED TIP, not a literal 'HEAD'.
+    // `resolveRange` accepts an arbitrary range from argv; §2.2's "the window
+    // ends at the tip" was a precondition nobody enforced. Now it is code, and
+    // it is the single tip every skip and the reverter exemption share.
+    const windowTo = auditedTip(range);
 
     let failCount = 0;          // [FAIL] lines of ANY class — governs exit 1.
     let treeKeyedFailCount = 0; // merges with ≥1 un-exempted tree-keyed failure.
@@ -290,13 +318,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // Runs BEFORE the four checks, symmetric to the baseline skip above. A
       // genuinely settled offender (payload net-absent at HEAD) is skipped
       // wholesale — including memoryPresence.
-      const resolvedLine = resolvedSkipLine(sha, subject, { git: resolutionGit });
+      const resolvedLine = resolvedSkipLine(sha, subject, { git: resolutionGit, tip: windowTo });
       if (resolvedLine) {
         console.log(resolvedLine);
         continue;
       }
 
-      const parents = git(`log -1 --format=%P ${sha}`, cwd).split(/\s+/).filter(Boolean);
+      const parents = gitOrThrow(['log', '-1', '--format=%P', sha], { cwd })
+        .trim().split(/\s+/).filter(Boolean);
       const parent1 = parents[0];
       if (!parent1) {
         // A --merges-qualified commit always has ≥2 parents; reaching here means
@@ -305,10 +334,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         process.exit(2);
       }
 
-      const numstat = git(`diff --numstat ${parent1} ${sha}`, cwd);
-      const changedFiles = git(`diff --name-only ${parent1} ${sha}`, cwd)
+      // MINOR 2 — the THROWING seam: a transient git failure is exit 2 at the
+      // top-level catch, never an empty diff that silently PASSes diffSize and
+      // adrPresence.
+      const numstat = gitOrThrow(['diff', '--numstat', parent1, sha], { cwd }).trim();
+      const changedFiles = gitOrThrow(['diff', '--name-only', parent1, sha], { cwd })
         .split('\n').filter(Boolean);
-      const body = git(`log -1 --format=%B ${sha}`, cwd);
+      const body = gitOrThrow(['log', '-1', '--format=%B', sha], { cwd }).trim();
 
       // ── Best-effort PR metadata fetch (single call for labels + body) ─────
       // Parse the PR number from the merge subject, then fetch the PR once for:
