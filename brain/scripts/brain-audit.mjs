@@ -386,7 +386,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // `isResolvedAt`: that predicate's DIRECTIONAL `(C, tip]` range is empty
       // for any tip-most merge, so it would deny the exemption to every
       // legitimate tip-most cleanup revert (A2/A6) — see
-      // brain/core/anti-patterns/ruling-bound-to-an-unrun-mechanism.md.
+      // openspec/changes/issue-259-d2/brain-drafts/ruling-bound-to-an-unrun-mechanism.md.
       //
       // (`dC ≠ ''` is guaranteed here — any tree-keyed FAILING merge has a
       // non-empty contribution — so netAddFull never hits its F-1 vacuity throw

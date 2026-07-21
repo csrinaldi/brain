@@ -52,7 +52,6 @@ Navigable index — add an entry here when promoting a new anti-pattern
 - [Self-updating installers are not innocuous](instaladores-autoactualizantes-no-inocuos.md)
 - [Pre-v0.8.0 upgrader clobbers consumer identity and locks out future upgrades](pre-v0-8-0-upgrade-clobber-lockout.md)
 - [Evidence reader returns empty on failure (fail-open in REQUIRED gates)](evidence-reader-empty-on-failure.md)
-- [A ruling binds a correct property to a mechanism nobody ran](ruling-bound-to-an-unrun-mechanism.md)
 
 > Only generic harness anti-patterns. Project-specific ones (stack, infra,
 > domain) are indexed by the consuming project separately — `core/` does not reference `project/`,

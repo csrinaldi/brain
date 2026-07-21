@@ -369,7 +369,7 @@ const ADDED_PATHS_ARGS = [
  * which is EMPTY for any tip-most merge → `resolved:false` categorically → it
  * denies the exemption to EVERY legitimate tip-most cleanup revert, the exact
  * case the reverter-skip exists to serve (frozen A2/A6). Right property, wrong
- * mechanism; see brain/core/anti-patterns/ruling-bound-to-an-unrun-mechanism.md.
+ * mechanism; see openspec/changes/issue-259-d2/brain-drafts/ruling-bound-to-an-unrun-mechanism.md.
  *
  * THE EMPTY ADDED-SET IS `true` BY RULING, NOT BY ACCIDENT. A candidate that
  * only DELETES — the cleanup-revert shape — adds no path, so the ∀ is vacuously

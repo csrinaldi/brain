@@ -1,5 +1,9 @@
 # A ruling binds a correct property to a mechanism nobody ran
 
+> **DRAFT — promotion candidate for `brain/core/anti-patterns/`.** Written by an
+> agent, awaiting the owner's promotion and indexing (ADR-0013 draft-and-promote).
+> It is NOT indexed in `brain/core/anti-patterns/README.md` until then.
+
 - **Discovered in:** issue #297 (D2 PR3 reverter-skip) / the rev-3 ruling itself,
   authored by the external reviewer
 - **Applies to:** any review verdict, ruling, or design note that names a
@@ -70,6 +74,6 @@ the error cost one escalation instead of a silently weakened guard.
 Related, same class one layer down: an author's claim about a flag ("this
 reddens on drop") is worth nothing until the mutant is forged and the test
 actually goes red. See
-[Evidence reader returns empty on failure](evidence-reader-empty-on-failure.md)
+[Evidence reader returns empty on failure](../../../../brain/core/anti-patterns/evidence-reader-empty-on-failure.md)
 for the fail-open flavor of the same root cause — a state nobody checked
 becoming an approval.
