@@ -732,3 +732,118 @@ test('D2 fail-closed — an uncomputable git range exits 2 with the message on s
   assert.ok(r.stdout.includes('uncomputable'),
     `the uncomputable message must be on stdout (captured), not stderr:\n${r.stdout}\n${r.stderr}`);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── A8 — payload PREDATING the audit window base: a delete + a live re-add ────
+//
+// PROPERTY (same frozen property as A7, attacker's chair): a merge that fails a
+// tree-keyed governance check (adrPresence / diffSize) may be EXEMPTED from that
+// failure ONLY IF its payload is NET-ABSENT from the tree at HEAD. An offending
+// artifact LIVE on disk at HEAD must ALWAYS be reported, no matter what
+// revert / re-revert operations sit in the window.
+//
+// THE ATTACK (A8 — the distinguishing twist from A7): the offending payload's
+// ORIGINAL introduction sits BEHIND the audit window base — it is already present
+// before the range starts. Only a DELETE and a RE-ADD sit inside the audited
+// window:
+//   base = a commit that ALREADY contains an ungoverned ADR (no HOME.md entry →
+//          fails adrPresence). The audit range STARTS at this commit, so the
+//          original add is OUTSIDE the window.
+//   R    = a merge that DELETES the ADR (inside the window).
+//   O    = a merge that RE-ADDS the exact ADR (inside the window) — the ungoverned
+//          artifact is LIVE on disk at HEAD = O.
+//
+// A window-scoped net check that only sees `R` (delete) then `O` (re-add) can
+// wrongly conclude the payload is "already present at the window base, no net
+// addition here" and EXEMPT O — collapsing the window into all-[SKIP] / exit 0
+// even though the ungoverned ADR is sitting in the tree at HEAD. This fixture
+// pins the PROPERTY through the real CLI: the live-at-HEAD offender must be
+// REPORTED (never on a [SKIP] line) and the audit must exit non-zero. It asserts
+// WHAT is reported / the exit code — never HOW net-absence is computed.
+//
+// Each of R / O carries a Closes #N ref and a valid session_summary record sits
+// at HEAD, so adrPresence is the only governance axis in play on the live re-add:
+// R legitimately removes the payload, while O keeps the ungoverned ADR live and
+// MUST surface as an offender.
+
+/**
+ * A merge that DELETES `path` and lands as a first-parent merge on main. Mirrors
+ * the `mergeAddingPayload` shape (branch off main, commit, --no-ff merge back).
+ * `mergeMsg` carries the Closes #N ref. Returns the merge sha.
+ */
+function mergeDeletingPath(git, dir, path, label, mergeMsg) {
+  git('checkout', '-b', `del-${label}`, 'main');
+  const rm = git('rm', path);
+  assert.equal(rm.status, 0, `git rm ${path} failed: ${rm.stderr}`);
+  git('commit', '-m', `${label}: delete payload`);
+  git('checkout', 'main');
+  const m = git('merge', '--no-ff', `del-${label}`, '-m', mergeMsg);
+  assert.equal(m.status, 0, `merge ${label} failed: ${m.stderr}`);
+  return headShaOf(git);
+}
+
+test('brain-audit: A8 payload predating the window base — a delete + a live re-add of an ungoverned ADR at HEAD is reported, never all-[SKIP]', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a8-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+
+  // The exact ungoverned ADR payload. Its ORIGINAL introduction lands in the
+  // base commit BELOW — behind the audit window — so the range never sees the
+  // original add. R (delete) and O (re-add) are the only in-window carriers.
+  const A8_ADR = '# ADR 901 payload\n\nBody predating the audit window.\n';
+
+  // Base on main: README + a valid session_summary record (memoryPresence passes
+  // repo-wide, read once at HEAD) + the ungoverned ADR ALREADY present. The audit
+  // range starts HERE, so the original add of the ADR is OUTSIDE the window.
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+    [ADR_FILE]: A8_ADR,
+  }, 'chore: initial with pre-existing ADR (#0)');
+  const base = headShaOf(git);
+
+  // R — genuine cleanup merge that DELETES the ADR (inside the window). Removes
+  // the payload; may legitimately be [SKIP]/[PASS] — not asserted either way.
+  mergeDeletingPath(git, dir, ADR_FILE, 'R', 'R: delete ungoverned ADR Closes #2');
+
+  // O — merge that RE-ADDS the EXACT ADR (inside the window) with no HOME.md
+  // entry → fails adrPresence. The ungoverned ADR is LIVE on disk at HEAD = O.
+  const oSha = mergeAddingPayload(git, dir, { [ADR_FILE]: A8_ADR }, 'O',
+    'O: re-add ungoverned ADR Closes #3');
+
+  // Sanity: the offending ADR really is live in the working tree at HEAD=O.
+  assert.ok(existsSync(join(dir, ADR_FILE)),
+    'fixture invariant: the ungoverned ADR must be live on disk at HEAD=O');
+
+  // Audit the whole window base..HEAD (covers R, O on the first-parent chain).
+  // The original add sits AT base, so it is excluded from the range.
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], {
+    cwd: dir, encoding: 'utf8',
+  });
+
+  // ── PROPERTY assertions — WHAT is reported / exit code, never the mechanism ──
+
+  // 1. The live-at-HEAD ungoverned ADR must fail the audit. A window-scoped net
+  //    check that misses the original add (behind base) emits all-[SKIP] / exit 0
+  //    here — that is the WRONG answer.
+  assert.notEqual(r.status, 0,
+    `a live-at-HEAD ungoverned ADR must fail the audit (exit non-zero); got exit ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+
+  const lines = r.stdout.split('\n').filter(Boolean);
+
+  // 2. O — the re-add that puts the ungoverned ADR back on disk at HEAD — must be
+  //    REPORTED, and must NOT be exempted on a [SKIP] line. Format-agnostic:
+  //    matches [FAIL] <sha7> and [FAIL-SHA] <full-sha> alike, reddens on [SKIP].
+  const oLine = lines.find(l => l.includes(oSha) || l.includes(oSha.slice(0, 7)));
+  assert.ok(oLine,
+    `O (the live re-add at HEAD) must appear in the audit output:\n${r.stdout}`);
+  assert.ok(!oLine.startsWith('[SKIP]'),
+    `O re-adds a live ungoverned ADR at HEAD — it must NOT be [SKIP]-exempted:\n${oLine}`);
+
+  // 3. The offender must actually be reported as a failure (never a whitewash):
+  //    at least one [FAIL] / [FAIL-SHA] line is emitted for the live-at-HEAD ADR.
+  const anyFail = lines.some(l => /^\[(FAIL|FAIL-SHA)\]/.test(l));
+  assert.ok(anyFail,
+    `a live-at-HEAD ungoverned ADR must be reported as an offender ([FAIL]/[FAIL-SHA]); all-[SKIP] whitewash:\n${r.stdout}`);
+});
