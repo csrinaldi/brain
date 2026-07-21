@@ -944,3 +944,85 @@ test('SIG drift-guard — the local signature strips the same position-only line
   assert.deepEqual(filters(AUDIT_SRC), filters(RESOLUTION_SRC),
     'the local mirror normalizes differently from normDiff — distinct payloads can collapse to one dedup key');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A10 — FROZEN FINDER FIXTURE (governance #297, finder≠patcher split).
+//
+// Labelled A10, not A9: the D2 emission series already owns "D2 A9(a)", and a
+// shared label would make `--test-name-pattern="A9"` select three unrelated
+// tests — which is precisely the selector this workflow pastes output from.
+//
+// The candidate attack the rev-4 ruling ROUTED here, stated mechanism-blind as
+// the reviewer stated it: "the offending content arrives by EDITING AN EXISTING
+// FILE." Nothing below inspects how net-absence, exemption, or liveness is
+// computed — it builds a commit chain and reads the audit's own output.
+//
+// Attacker's chair: the ungoverned ADR text is introduced BEHIND the audit
+// window (in the base commit), then removed and restored INSIDE the window by
+// MODIFYING the file rather than adding it. The file's path is never `A` in any
+// audited merge, so any exemption reasoning scoped to a candidate's ADDED paths
+// has nothing to look at, while the ungoverned text sits LIVE at HEAD.
+//
+// This is A8's shape with one variable changed — modify instead of delete+add —
+// which is exactly why it is worth freezing separately: A8 pins the ADD channel,
+// A10 pins the MODIFY channel of the same property.
+//
+// The property, unchanged across both: A LIVE-AT-HEAD UNGOVERNED ARTIFACT MUST
+// ALWAYS BE REPORTED. Each of R / O carries a Closes #N ref and a valid
+// session_summary sits at HEAD, so adrPresence is the only governance axis in
+// play — the audit has exactly one honest thing to say about O.
+
+test('brain-audit: A10 modification-shaped payload — an ungoverned ADR edited back in and LIVE at HEAD is reported, never all-[SKIP]', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a10-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+
+  // The ADR exists BEFORE the audit window in its OFFENDING state. Both later
+  // merges only ever EDIT this file — its path is never added by either of them.
+  const A10_OFFENDING = '# ADR 902 example\n\nBody.\n\nUngoverned decision text.\n';
+  const A10_CLEANED = '# ADR 902 example\n\nBody.\n';
+
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+    [ADR_FILE]: A10_OFFENDING,
+  }, 'chore: initial with pre-existing ungoverned ADR (#0)');
+  const base = headShaOf(git);
+
+  // R — cleanup merge that EDITS the offending text out (inside the window).
+  // May legitimately be [SKIP]/[PASS]; not asserted either way.
+  mergeAddingPayload(git, dir, { [ADR_FILE]: A10_CLEANED }, 'R',
+    'R: remove ungoverned decision text Closes #2');
+
+  // O — merge that EDITS the offending text back in (inside the window). No
+  // brain/HOME.md entry accompanies it, and the text is LIVE on disk at HEAD.
+  const oSha = mergeAddingPayload(git, dir, { [ADR_FILE]: A10_OFFENDING }, 'O',
+    'O: restore ungoverned decision text Closes #3');
+
+  // Fixture invariants — if these break, the fixture is not testing the attack.
+  assert.ok(existsSync(join(dir, ADR_FILE)),
+    'fixture invariant: the ADR must be live on disk at HEAD=O');
+  assert.ok(readFileSync(join(dir, ADR_FILE), 'utf8').includes('Ungoverned decision text'),
+    'fixture invariant: the OFFENDING text must be live in the tree at HEAD=O');
+  const oStatus = git('diff', '--name-status', `${oSha}^1`, oSha).stdout;
+  assert.match(oStatus, /^M\s/m,
+    `fixture invariant: O must MODIFY the ADR (never add it) — got:\n${oStatus}`);
+  assert.doesNotMatch(oStatus, /^A\s/m,
+    `fixture invariant: O must add NO path — that is the attack — got:\n${oStatus}`);
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], {
+    cwd: dir, encoding: 'utf8',
+  });
+
+  // ── PROPERTY assertions — WHAT is reported / exit code, never the mechanism ──
+
+  assert.notEqual(r.status, 0,
+    `a live-at-HEAD ungoverned ADR must fail the audit (exit non-zero); got exit ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+
+  const lines = r.stdout.split('\n').filter(Boolean);
+  const oLine = lines.find(l => l.includes(oSha) || l.includes(oSha.slice(0, 7)));
+  assert.ok(oLine, `O must appear in the audit output:\n${r.stdout}`);
+  assert.ok(!oLine.startsWith('[SKIP]'),
+    `O restored the ungoverned ADR and it is LIVE at HEAD — it must never be exempted on a [SKIP] line:\n${r.stdout}`);
+});
