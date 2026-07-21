@@ -16,6 +16,8 @@ import { gzipSync } from 'node:zlib';
 
 const AUDIT_SCRIPT = new URL('./brain-audit.mjs', import.meta.url).pathname;
 
+import { crossCheckExit } from './brain-audit.mjs';
+
 // ── Fixture helpers ───────────────────────────────────────────────────────────
 
 function makeRepo(dir) {
@@ -501,4 +503,232 @@ test('brain-audit: prView() null labels/body are NOT coerced to []/\'\' before r
     'must not fabricate an empty labels default over a possibly-null pr.labels — let null reach shouldSkipSize()');
   assert.equal(src.includes('pr.body ?? \'\''), false,
     'must not fabricate an empty body default over a possibly-null pr.body — let null reach selectIssueLinkBody()');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// D2 PR3 — net-parity resolved-skip + reverter-skip, class-filtered [FAIL-SHA],
+// newest-carrier dedup, fail-closed exit contract (design §15, REQ-D2-3/-6/-10/
+// -10a/-16). These fixtures drive the REAL CLI end-to-end; the frozen A7 finder
+// fixture above pins the same net-parity property from the attacker's chair.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ADR_FILE = 'brain/project/decisions/adr-901-example.md';
+
+/** A merge whose diff ADDS an ADR without brain/HOME.md → fails adrPresence. */
+function mergeAddingAdr(git, dir, label, mergeMsg) {
+  return mergeAddingPayload(git, dir, { [ADR_FILE]: `# ADR 901 ${label}\n\nBody.\n` }, label, mergeMsg);
+}
+
+// ── Emission — an un-exempted tree-keyed offender emits [FAIL] + [FAIL-SHA] ──
+test('D2 emission — a diffSize offender carries an additive [FAIL-SHA] <full-sha> line', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-emit-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  const bigFile = Array.from({ length: 500 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+  const o = mergeAddingPayload(git, dir, { 'src/big.mjs': bigFile }, 'O', 'O: oversized Closes #1');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 1, `expected exit 1\n${r.stdout}\n${r.stderr}`);
+  assert.ok(r.stdout.includes(`[FAIL] ${o.slice(0, 7)}`), `expected [FAIL] sha7:\n${r.stdout}`);
+  assert.ok(r.stdout.includes(`[FAIL-SHA] ${o}`), `expected [FAIL-SHA] full-sha:\n${r.stdout}`);
+});
+
+// ── Resolved-skip liveness (A2) — a genuine revert resolves the offender ─────
+test('D2 A2 — a genuine revert resolves the offender: O [SKIP] resolved by revert, exit 0', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a2-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  const bigFile = Array.from({ length: 500 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+  const o = mergeAddingPayload(git, dir, { 'src/big.mjs': bigFile }, 'O', 'O: oversized Closes #1');
+  genuineRevertMerge(git, dir, o, 'revert-O', 'R: revert O Closes #2');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 0, `expected exit 0 (payload net-absent)\n${r.stdout}\n${r.stderr}`);
+  const oLine = r.stdout.split('\n').find(l => l.includes(o.slice(0, 7)));
+  assert.ok(oLine && oLine.startsWith('[SKIP]') && oLine.includes('resolved by revert'),
+    `O must be [SKIP] resolved by revert:\n${r.stdout}`);
+  assert.ok(!r.stdout.includes('[FAIL-SHA]'), `no [FAIL-SHA] when fully resolved:\n${r.stdout}`);
+});
+
+// ── A6 (HONEST title, task 3.0.2) — a single O+R reverter pair: the genuine
+// revert is tree-keyed-exempted, the offender resolves, exit 0. (Does NOT claim
+// to close the revert-of-revert loop — that is the frozen A7 fixture's job.) ──
+test('D2 A6 — a genuine O(adrPresence)+R reverter pair: R is tree-keyed exempted, O resolved, exit 0', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a6-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  const o = mergeAddingAdr(git, dir, 'O', 'O: add ungoverned ADR Closes #1');
+  const rSha = genuineRevertMerge(git, dir, o, 'revert-O', 'R: revert O Closes #2');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 0, `expected exit 0\n${r.stdout}\n${r.stderr}`);
+  const lines = r.stdout.split('\n').filter(Boolean);
+  const rLine = lines.find(l => l.includes(rSha.slice(0, 7)));
+  assert.ok(rLine && rLine.startsWith('[SKIP]'),
+    `R (genuine revert of an adrPresence offender) must be [SKIP], not itself flagged:\n${r.stdout}`);
+  assert.ok(!r.stdout.includes('[FAIL-SHA]'), `no [FAIL-SHA] on a settled O+R pair:\n${r.stdout}`);
+});
+
+// ── claim-only merge is NOT skipped (spec REQ-D2-10a reverter-skip scenario) ──
+test('D2 — a merge that merely CLAIMS a revert but has no tree inverse is NOT skipped', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-claim-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  const bigFile = Array.from({ length: 500 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+  const o = mergeAddingPayload(git, dir, { 'src/big.mjs': bigFile }, 'O', 'O: oversized Closes #1');
+  // C: adds a DIFFERENT >400-line file; message falsely claims to revert O.
+  const other = Array.from({ length: 500 }, (_, i) => `other ${i + 1}`).join('\n') + '\n';
+  const c = mergeAddingPayload(git, dir, { 'src/other.mjs': other }, 'C',
+    `C: This reverts commit ${o}. Closes #2`);
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 1, `expected exit 1\n${r.stdout}\n${r.stderr}`);
+  const cLine = r.stdout.split('\n').find(l => l.includes(c.slice(0, 7)) || l.includes(c));
+  assert.ok(cLine && !cLine.startsWith('[SKIP]'),
+    `a claim-only merge with no tree inverse must NOT be [SKIP]-exempted:\n${r.stdout}`);
+  assert.ok(r.stdout.includes(`[FAIL-SHA] ${c}`), `C must emit [FAIL-SHA]:\n${r.stdout}`);
+});
+
+// ── A9(a) — class-filtered emission: memoryPresence-only / issueLink-only
+// merges drive exit 1 but emit ZERO [FAIL-SHA] (non-tree-keyed → human gate) ──
+test('D2 A9(a) — a memoryPresence-only failure drives exit 1 but emits ZERO [FAIL-SHA]', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a9mem-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  // NO session_summary anywhere → memoryPresence fails repo-wide.
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  mergeAddingPayload(git, dir, { 'src/small.mjs': 'export const x = 1;\n' }, 'N',
+    'N: small clean Closes #1');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 1, `expected exit 1 (memoryPresence gap)\n${r.stdout}\n${r.stderr}`);
+  assert.ok(r.stdout.includes('memoryPresence'), `expected memoryPresence in output:\n${r.stdout}`);
+  assert.ok(!r.stdout.includes('[FAIL-SHA]'),
+    `memoryPresence is repo-global — MUST NOT emit [FAIL-SHA]:\n${r.stdout}`);
+});
+
+test('D2 A9(a) — an issueLink-only failure drives exit 1 but emits ZERO [FAIL-SHA]', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a9issue-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  // small diff, memory present, no ADR, but merge message carries NO issue ref.
+  mergeAddingPayload(git, dir, { 'src/small.mjs': 'export const x = 1;\n' }, 'N',
+    'N: small clean merge with no issue reference');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 1, `expected exit 1 (issueLink gap)\n${r.stdout}\n${r.stderr}`);
+  assert.ok(r.stdout.includes('issueLink'), `expected issueLink in output:\n${r.stdout}`);
+  assert.ok(!r.stdout.includes('[FAIL-SHA]'),
+    `issueLink is body-keyed — MUST NOT emit [FAIL-SHA]:\n${r.stdout}`);
+});
+
+// ── Newest-carrier dedup (REQ-D2-3) — O and R2 share a payload signature;
+// only the newest net-present carrier (R2) emits [FAIL-SHA]; O emits none. ────
+test('D2 dedup — O and R2 share a payload; only the newest carrier R2 emits [FAIL-SHA]', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-dedup-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  const bigFile = Array.from({ length: 500 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+  const o = mergeAddingPayload(git, dir, { 'src/big.mjs': bigFile }, 'O', 'O: oversized Closes #1');
+  genuineRevertMerge(git, dir, o, 'revert-O', 'R: revert O Closes #2');
+  const r2 = genuineRevertMerge(git, dir, headShaOf(git), 'revert-R', 'R2: revert R Closes #3');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 1, `expected exit 1\n${r.stdout}\n${r.stderr}`);
+  const failShaLines = r.stdout.split('\n').filter(l => l.startsWith('[FAIL-SHA]'));
+  assert.equal(failShaLines.length, 1, `exactly one [FAIL-SHA] (newest carrier):\n${r.stdout}`);
+  assert.equal(failShaLines[0], `[FAIL-SHA] ${r2}`, `the newest carrier R2 must be the one emitted:\n${r.stdout}`);
+  assert.ok(!r.stdout.includes(`[FAIL-SHA] ${o}`), `O (older carrier) must NOT emit [FAIL-SHA]:\n${r.stdout}`);
+});
+
+// ── adrPresence [FAIL] line carries the human-gate remediation (§15.6a) ──────
+test('D2 — an adrPresence [FAIL] line appends the human-gate remediation (accept --reason)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-adrrem-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  mergeAddingAdr(git, dir, 'O', 'O: add ungoverned ADR Closes #1');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 1, `expected exit 1\n${r.stdout}\n${r.stderr}`);
+  const failLine = r.stdout.split('\n').find(l => l.startsWith('[FAIL]') && l.includes('adrPresence'));
+  assert.ok(failLine && failLine.includes('accept'),
+    `adrPresence [FAIL] must append the accept --reason human-gate remediation:\n${r.stdout}`);
+});
+
+// ── no-import drift-guard (PR2b §2b.3.4) — the direction-blind pairwise
+// isReverterOf must never be re-imported into brain-audit.mjs ────────────────
+test('D2 drift-guard — brain-audit.mjs does NOT import the retired pairwise isReverterOf', () => {
+  const src = readFileSync(fileURLToPath(new URL('./brain-audit.mjs', import.meta.url)), 'utf8');
+  // The true no-import guard (PR2b §2b.3.4): assert no resolution.mjs import
+  // binding pulls in isReverterOf. Checks the actual import specifier — the only
+  // place the retired export could enter — so rationale comments may still name
+  // it. isReverterOf is exported ONLY by resolution.mjs, so this is exhaustive.
+  const importMatch = src.match(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*resolution\.mjs['"]/);
+  assert.ok(importMatch, 'expected a resolution.mjs import in brain-audit.mjs');
+  assert.equal(/\bisReverterOf\b/.test(importMatch[1]), false,
+    'brain-audit.mjs must compose netAddFull (net-parity), never import the retired direction-blind isReverterOf');
+});
+
+// ── crossCheckExit — the fail-closed exit contract (REQ-D2-6b, §15.5) ────────
+test('D2 crossCheckExit — decoupled failCount / tree-keyed⟺[FAIL-SHA] coherence', () => {
+  // Clean run.
+  assert.equal(crossCheckExit(0, 0, 0), 0);
+  // Legit exit 1 with ZERO [FAIL-SHA]: all violations non-tree-keyed.
+  assert.equal(crossCheckExit(2, 0, 0), 1);
+  // A7-shaped: tree-keyed failures present, at least one [FAIL-SHA] emitted.
+  assert.equal(crossCheckExit(2, 2, 1), 1);
+  // Un-exempted tree-keyed failure recorded but ZERO [FAIL-SHA] → crash mid-emission → exit 2.
+  assert.equal(crossCheckExit(1, 1, 0), 2);
+  // A [FAIL-SHA] with no backing tree-keyed failure → incoherent → exit 2.
+  assert.equal(crossCheckExit(1, 0, 1), 2);
+});
+
+// ── Fail-closed top-level catch — an uncomputable range exits 2 on stdout ────
+test('D2 fail-closed — an uncomputable git range exits 2 with the message on stdout', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-uncomputable-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+
+  // A range referencing a nonexistent ref → git log throws → fail-closed exit 2.
+  const r = spawnSync('node', [AUDIT_SCRIPT, 'no-such-ref-xyz..HEAD'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 2, `expected exit 2 (uncomputable), got ${r.status}\n${r.stdout}\n${r.stderr}`);
+  assert.ok(r.stdout.includes('uncomputable'),
+    `the uncomputable message must be on stdout (captured), not stderr:\n${r.stdout}\n${r.stderr}`);
 });
