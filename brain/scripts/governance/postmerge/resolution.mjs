@@ -331,6 +331,82 @@ export function netAddFull(candidate, { git, from, to }) {
   return net;
 }
 
+// The added-paths query. Reuses `HARDENED_CONFIG`'s rename PAIR — the CONFIG
+// half `diff.renames=false` plus the FLAG half `--no-renames` below — because
+// rename detection is the whole attack surface here: at 100% similarity git
+// renders a relocation as `R`, never as `A`, so a rename-laundered payload
+// would present an EMPTY added-set and be vacuously "absent" while sitting live
+// on the tree under a new name. As in `normDiff`, only dropping BOTH reddens
+// (git's default is `diff.renames=true`). `diff.relative=false` pins the paths
+// to the repo root regardless of the cwd the seam was bound to, so a caller
+// running from a subdirectory cannot silently shrink the pathspec. `--binary`
+// and `-U3` are deliberately ABSENT: this query reads NAMES, never content, so
+// there is no rendering to harden — the content defense stays in `normDiff`,
+// where the comparison that needs it lives.
+const ADDED_PATHS_ARGS = [
+  '-c', 'diff.relative=false',
+  'diff', '--no-textconv', '--no-ext-diff', '--no-renames',
+  '--diff-filter=A', '--name-only', '-z',
+];
+
+/**
+ * `addedPathsAbsentAt(C, tip)` — are ALL of candidate C's OWN ADDED paths
+ * ABSENT from the tree at `tip`? (external ruling rev 4, issue #297 — the
+ * `(c′)` liveness guard on the reverter exemption.)
+ *
+ *   added(C) = { p : p is ADDED by normDiff-pinned first-parent diff C^1..C }
+ *   addedPathsAbsentAt(C, tip)  ⟺  ∀ p ∈ added(C) : p ∉ tree(tip)
+ *
+ * WHY A TREE READ AND NOT ANOTHER SIGNED COUNT. `netAddFull` answers "did C's
+ * contribution cancel out INSIDE the window [from,to]?" — never "is C's payload
+ * live right now?". When the payload's ORIGINAL introduction sits BEHIND the
+ * window base, the window contains only a delete and a re-add, nets to 0, and a
+ * live-at-tip offender earns the exemption: the A8 fail-open. This predicate
+ * asks the tip itself, so it is blind to the window entirely.
+ *
+ * WHY NOT `isResolvedAt` (the rejected rev-3 binding, recorded so it is not
+ * re-proposed): `isResolvedAt` counts the DIRECTIONAL half-open `(C, tip]`,
+ * which is EMPTY for any tip-most merge → `resolved:false` categorically → it
+ * denies the exemption to EVERY legitimate tip-most cleanup revert, the exact
+ * case the reverter-skip exists to serve (frozen A2/A6). Right property, wrong
+ * mechanism; see brain/core/anti-patterns/ruling-bound-to-an-unrun-mechanism.md.
+ *
+ * THE EMPTY ADDED-SET IS `true` BY RULING, NOT BY ACCIDENT. A candidate that
+ * only DELETES — the cleanup-revert shape — adds no path, so the ∀ is vacuously
+ * satisfied and the exemption stays available; `netAddFull` keeps deciding
+ * whether it is actually earned. The early return is also LOAD-BEARING: `ls-tree
+ * ... --` with zero pathspecs lists the WHOLE tree, which would score every pure
+ * delete as "present" and break A2/A6 (mutation bar, resolution.test.mjs).
+ *
+ * FAILURE DIRECTION IS CLOSED. This predicate can only WITHHOLD an exemption,
+ * never manufacture one: a wrong `false` yields an EXTRA `[FAIL]`, never a
+ * missed offender. Both git calls are `orThrow`, so an uncomputable tree is a
+ * throw that surfaces at the CLI's fail-closed catch (exit 2) — never a silent
+ * exemption.
+ *
+ * KNOWN EDGE, recorded not hidden (ruling rev 4): this is path-scoped to ADDED
+ * paths. A MODIFICATION-shaped payload — offending content injected into a
+ * pre-existing file, so the path is never `A` — is outside both this guard and
+ * the frozen fixture set. No machinery is built for it here on purpose
+ * (evidence-first); it is routed to the finder as a named candidate attack.
+ *
+ * PURE-READ — a diff and a tree listing; never mutates `.git` or the work tree.
+ */
+export function addedPathsAbsentAt(candidate, tip, { git }) {
+  const raw = git.orThrow([
+    ...HARDENED_CONFIG, ...ADDED_PATHS_ARGS, `${candidate}^1`, candidate,
+  ]);
+  const added = raw.split('\0').filter(Boolean);
+  if (added.length === 0) return true; // pure deletes — vacuously absent (see above)
+  // `--full-tree` makes both the listing and the pathspecs root-relative
+  // regardless of cwd; `-z` keeps unusual path bytes intact. Non-empty output
+  // means at least one added path still exists at the tip.
+  const present = git.orThrow([
+    'ls-tree', '-r', '-z', '--name-only', '--full-tree', tip, '--', ...added,
+  ]);
+  return present.split('\0').filter(Boolean).length === 0;
+}
+
 /**
  * Is `candidate` the reverter of `offender`? (design §3.3) — the PAIRWISE
  * diff-inversion primitive: `candidate`'s own contribution, read backward, is

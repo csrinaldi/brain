@@ -11,11 +11,14 @@
 //   • resolved-skip  — a merge whose own first-parent contribution is NET-ABSENT
 //     at HEAD (`isResolvedAt`, directional net-parity) is skipped BEFORE the four
 //     checks run: `[SKIP] … resolved by revert`.
-//   • reverter-skip  — a FAILING merge whose own contribution is net-absent
-//     across the full window (`netAddFull ≤ 0`) is exempt from its TREE-KEYED
-//     failures only (adrPresence/diffSize); issueLink/memoryPresence always
-//     survive. A tip-most cleanup revert therefore settles without itself being
-//     flagged, while a revert-of-a-revert that re-adds a payload stays flagged.
+//   • reverter-skip  — a FAILING merge is exempt from its TREE-KEYED failures
+//     only (adrPresence/diffSize; issueLink/memoryPresence always survive) iff
+//     every path it ADDS is absent from the tree at the audited tip
+//     (`addedPathsAbsentAt`, the liveness guard) AND its own contribution is
+//     net-absent across the full window (`netAddFull ≤ 0`). A tip-most cleanup
+//     revert adds nothing, so it settles without itself being flagged; a merge
+//     that puts a payload back on the tree — a revert-of-a-revert, or a re-add
+//     of a payload first introduced BEHIND the window base — stays flagged.
 //
 // Output (one line per merge):
 //   [PASS] <sha7> <subject>
@@ -42,7 +45,7 @@ import { gitOrThrow } from './governance/postmerge/git-seam.mjs';
 // COMPOSE the frozen net-parity primitives (design §15, PR2b). NEVER import the
 // retired direction-blind pairwise `isReverterOf` — a no-import drift-guard test
 // (brain-audit.test.mjs) asserts it never reappears in this file.
-import { isResolvedAt, netAddFull, makeGit } from './governance/postmerge/resolution.mjs';
+import { isResolvedAt, netAddFull, addedPathsAbsentAt, makeGit } from './governance/postmerge/resolution.mjs';
 
 function git(args, cwd = process.cwd()) {
   try {
@@ -361,19 +364,42 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         continue;
       }
 
-      // ── Reverter-skip (design §15.3, REQ-D2-10a) — FULL-WINDOW net-parity,
-      // evaluated ONLY for a merge that already failed, so the happy path pays
-      // zero extra cost. A merge C is exempt from its TREE-KEYED failures iff its
-      // own contribution is net-absent across the window: `netAddFull(C) ≤ 0`.
+      // ── Reverter-skip (design §15.3, REQ-D2-10a; guard (c′) per the external
+      // ruling rev 4 on #297) — evaluated ONLY for a merge that already failed,
+      // so the happy path pays zero extra cost. A merge C is exempt from its
+      // TREE-KEYED failures iff BOTH hold:
+      //
+      //   (1) LIVENESS — every path C itself ADDS is absent from the tree at the
+      //       audited tip (`addedPathsAbsentAt`). A candidate that put a payload
+      //       back on the tree can never be exempted, however the window counts.
+      //       A pure-delete cleanup revert adds nothing → vacuously absent → the
+      //       exemption stays available for (2) to decide.
+      //   (2) NET-PARITY — C's own contribution is net-absent across the window:
+      //       `netAddFull(C) ≤ 0`, deciding exactly as before.
+      //
+      // (1) exists because (2) alone FAILS OPEN when the payload's ORIGINAL add
+      // sits BEHIND the window base: the window then sees only a delete and a
+      // re-add, nets to 0, and a live-at-HEAD offender is exempted while the
+      // audit exits 0 (the A8 fixture). (1) is ordered FIRST — it is two git
+      // calls against `netAddFull`'s one-per-window-merge, and short-circuiting
+      // on a live payload skips the whole count. It is NOT gated on
+      // `isResolvedAt`: that predicate's DIRECTIONAL `(C, tip]` range is empty
+      // for any tip-most merge, so it would deny the exemption to every
+      // legitimate tip-most cleanup revert (A2/A6) — see
+      // brain/core/anti-patterns/ruling-bound-to-an-unrun-mechanism.md.
+      //
       // (`dC ≠ ''` is guaranteed here — any tree-keyed FAILING merge has a
       // non-empty contribution — so netAddFull never hits its F-1 vacuity throw
-      // on this path; any throw it does raise is a genuine uncomputable that
-      // propagates to the top-level catch → exit 2, never a silent exemption.)
+      // on this path; any throw either primitive does raise is a genuine
+      // uncomputable that propagates to the top-level catch → exit 2, never a
+      // silent exemption.)
       // issueLink/memoryPresence NEVER qualify for exemption (they are not
       // tree-mirrored) — a legit reverter's own body/global gaps still survive.
       const failingNames = failures.map(([name]) => name);
       const hasTreeKeyed = failingNames.some((name) => TREE_KEYED_CHECKS.has(name));
-      const exempt = hasTreeKeyed && netAddFull(sha, { git: resolutionGit, from: windowFrom, to: windowTo }) <= 0;
+      const exempt = hasTreeKeyed
+        && addedPathsAbsentAt(sha, windowTo, { git: resolutionGit })
+        && netAddFull(sha, { git: resolutionGit, from: windowFrom, to: windowTo }) <= 0;
 
       const surviving = failures.filter(([name]) => !(exempt && TREE_KEYED_CHECKS.has(name)));
 
