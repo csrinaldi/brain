@@ -1110,6 +1110,41 @@ Track a `failCount` (human-readable `[FAIL]` lines, any class) separate from the
   failure → exit 2. `failCount` (any class) governs exit **1**; this tree-keyed⟺`[FAIL-SHA]` coherence guard
   is the separate check that replaces the dissolved one.
 
+#### 15.5a The payload-signature mirror — decision, corrected risk direction, and its fence
+
+**Recorded at the external reviewer's direction (ruling rev 3 on #297), because a decision that lives only in a
+thread is a decision the next implementer will re-litigate.**
+
+The newest-carrier dedup above needs a payload **signature** per merge to group carriers. `resolution.mjs`
+deliberately keeps `normDiff` **module-private**, and its exported primitives (`sign` / `netPresent` /
+`netAddFull`) return **net integers only** — no signature is exposed. Two options:
+
+| Option | Cost |
+|---|---|
+| Export a signature helper from `resolution.mjs` (single source of truth) | Reopens the **PR2b-frozen export surface** — a chain-level decision, the owner's keystroke, not the implementer's |
+| A thin LOCAL mirror of the pins in `brain-audit.mjs` (`SIG_CONFIG` / `SIG_ARGS`) | Two copies of one pin, which can drift |
+
+**Ruled: the local mirror is ACCEPTED for PR3, with a non-optional drift-guard.** Grounds: the mirror never
+decides `exempt`/`resolved` — every security-critical comparison stays inside `resolution.mjs` behind the
+net-integer primitives — so it is an implementation detail below ADR level, *provided* the drift is fenced.
+The signature-export question routes to the **owner's backlog** as the fast-follow where the PR2b freeze is
+revisited deliberately, not incidentally.
+
+**The risk direction, CORRECTED.** The mirror's original in-code note claimed that drifting COARSER yields at
+worst an *extra* `[FAIL-SHA]` — "the pre-dedup fail-safe behavior". **That is inverted.** Coarser ⇒ more
+dedup-key **collisions** ⇒ two distinct payloads share one key ⇒ the second payload's `[FAIL-SHA]` is
+**SUPPRESSED**: a *missed* emission, fail-OPEN for PR4's consumer. The inversion matters because it flips the
+mirror from "safe by construction" to "safe only while it is byte-identical". Note also that
+`crossCheckExit` compares booleans (`> 0`), so it can **never** detect a partial suppression — there is no
+downstream net to catch this.
+
+**The fence (shipped with the guard commit).** A source-scan drift-guard test in `brain-audit.test.mjs`
+asserting `SIG_CONFIG`/`SIG_ARGS` stay **value-aligned** (not format-aligned — a guard that reddens on a line
+break is a guard nobody keeps) with `resolution.mjs`'s `HARDENED_CONFIG`/`DIFF_ARGS`, plus a second assertion
+that the mirror strips the same position-only lines (`@@ …`, `index …`). Forged before being trusted: dropping
+`--binary` from the mirror reddens it. The durable record is
+`openspec/changes/issue-259-d2/brain-drafts/local-mirror-of-a-frozen-pin.md`.
+
 ### 15.6 Minor rulings (confirmed SUGGESTIONs)
 
 - **(a) `adrPresence` `[FAIL]` remediation.** `adrPresence` is the one class with **no automatic

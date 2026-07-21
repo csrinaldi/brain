@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parsePrNumber, shouldSkipSize, isAfterBaseline, selectIssueLinkBody, chunkObservations } from './audit-helpers.mjs';
+import { parsePrNumber, shouldSkipSize, isAfterBaseline, selectIssueLinkBody, chunkObservations, auditedTip } from './audit-helpers.mjs';
 import { issueLink } from '../governance/checks/issue-link.mjs';
 
 // ── parsePrNumber ─────────────────────────────────────────────────────────────
@@ -152,4 +152,41 @@ test('chunkObservations: undefined input → returns []', () => {
 
 test('chunkObservations: empty object → returns []', () => {
   assert.deepEqual(chunkObservations({}), []);
+});
+
+// ── auditedTip (MINOR 1, ruling rev 3 on #297) ────────────────────────────────
+// The net-parity skips anchor liveness at a TIP. Hardcoding `'HEAD'` while
+// `resolveRange` accepts an arbitrary range makes "resolved at HEAD" decide an
+// audit of a NON-HEAD tip — an offender already reverted somewhere past the
+// audited tip would be exempted out of a window that never contained the revert.
+// `auditedTip` turns design §2.2's unenforced "the window ends at the tip"
+// precondition into code.
+
+test('auditedTip: a two-dot range anchors at its right-hand side', () => {
+  assert.equal(auditedTip('origin/main..HEAD'), 'HEAD');
+  assert.equal(auditedTip('v1.0.0..release-2'), 'release-2');
+});
+
+test('auditedTip: a bare revision IS the tip (the `HEAD` / single-ref form)', () => {
+  assert.equal(auditedTip('HEAD'), 'HEAD');
+  assert.equal(auditedTip('feature/v2.0.0'), 'feature/v2.0.0');
+});
+
+test('auditedTip: an omitted right-hand side means HEAD, exactly as git reads `A..`', () => {
+  assert.equal(auditedTip('origin/main..'), 'HEAD');
+});
+
+test('auditedTip: an omitted left-hand side still anchors at the right-hand side', () => {
+  assert.equal(auditedTip('..release-2'), 'release-2');
+});
+
+test('auditedTip: a three-dot range anchors at its right-hand side, never on the dots', () => {
+  // `A...B` is git's symmetric difference; the audited tip is still B. The
+  // two-dot split MUST NOT run first and yield a stray leading '.' from 'A...B'.
+  assert.equal(auditedTip('origin/main...HEAD'), 'HEAD');
+  assert.equal(auditedTip('main...release-2'), 'release-2');
+});
+
+test('auditedTip: surrounding whitespace never becomes part of the ref', () => {
+  assert.equal(auditedTip('  origin/main..HEAD  '), 'HEAD');
 });
