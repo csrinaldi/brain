@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mkdtempSync, mkdirSync, writeFileSync, rmSync,
+  mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -345,6 +345,144 @@ test('brain-audit: corrupt record line is skipped — audit does not crash', (t)
   // No unhandled exception
   assert.ok(!r.stderr.includes('brain-audit: unexpected error'),
     `unexpected top-level error logged:\n${r.stderr}`);
+});
+
+// ── A7 — revert-of-a-revert: a re-added offender is LIVE at HEAD, must be reported ─
+//
+// PROPERTY (attacker's chair): a merge that fails a tree-keyed governance check
+// (diffSize / adrPresence) may only be EXEMPTED if its payload is NET-ABSENT from
+// the tree at HEAD.  Equivalently: an offending artifact that is LIVE on disk at
+// HEAD must ALWAYS be reported, no matter how many revert / re-revert operations
+// sit in the window.  Any audit that lets a live-at-HEAD ungoverned artifact
+// escape reporting is WRONG.
+//
+// THE ATTACK (A7 — the revert-of-a-revert):
+//   O   = a merge that ADDS a >400-line file → fails the diffSize tree-keyed check.
+//   R   = git revert -m1 O (landed as a first-parent merge) → REMOVES O's payload.
+//   R2  = git revert -m1 R (landed as a first-parent merge) → RE-ADDS O's exact
+//         payload.  The >400-line file is LIVE on disk at HEAD = R2.
+//
+// A direction-blind reverter-skip reads R2 as "the revert's own reverter" and
+// wrongly exempts it — chaining O (resolved by R) and R (resolved by R2) into a
+// full all-[SKIP] / exit-0 whitewash, even though the offending file is sitting
+// in the tree at HEAD.  This fixture pins the PROPERTY through the real CLI: the
+// live-at-HEAD offender must be REPORTED (never on a [SKIP] line) and the audit
+// must exit non-zero.  It asserts WHAT is reported / the exit code — never HOW
+// net-absence is computed.
+//
+// Each of O / R / R2 carries a Closes #N ref and a valid session_summary record
+// sits at HEAD, so diffSize is the ONLY governance axis in play: R legitimately
+// removes the payload (may be [SKIP] under a correct net-parity audit), while O
+// and R2 keep the >400-line file live and MUST surface as offenders.
+
+/** HEAD sha of the fixture repo — a producer that never fabricates an empty string. */
+function headShaOf(git) {
+  const sha = git('rev-parse', 'HEAD').stdout.trim();
+  assert.match(sha, /^[0-9a-f]{40}$/, `headShaOf: not a 40-hex sha: ${JSON.stringify(sha)}`);
+  return sha;
+}
+
+/**
+ * An offender MERGE that adds `files` and lands as a first-parent merge on main
+ * (the `--first-parent --merges` shape brain-audit tracks).  `mergeMsg` carries
+ * the Closes #N ref that issueLink reads.  Returns the merge sha.
+ */
+function mergeAddingPayload(git, dir, files, label, mergeMsg) {
+  git('checkout', '-b', `feat-${label}`, 'main');
+  commit(git, dir, files, `${label}: add payload`);
+  git('checkout', 'main');
+  const m = git('merge', '--no-ff', `feat-${label}`, '-m', mergeMsg);
+  assert.equal(m.status, 0, `merge ${label} failed: ${m.stderr}`);
+  return headShaOf(git);
+}
+
+/**
+ * `git revert -m 1 --no-edit <offender>` on a fresh branch off main, merged back
+ * with --no-ff — a GENUINE revert that lands as a first-parent merge (the real
+ * auto-revert PR flow).  `mergeMsg` carries the revert PR's own Closes #N ref.
+ * Returns the merge sha.
+ */
+function genuineRevertMerge(git, dir, offenderSha, branchName, mergeMsg) {
+  git('checkout', '-b', branchName, 'main');
+  const rv = git('revert', '-m', '1', '--no-edit', offenderSha);
+  assert.equal(rv.status, 0, `revert of ${offenderSha} failed: ${rv.stderr}`);
+  git('checkout', 'main');
+  const m = git('merge', '--no-ff', branchName, '-m', mergeMsg);
+  assert.equal(m.status, 0, `merge ${branchName} failed: ${m.stderr}`);
+  return headShaOf(git);
+}
+
+test('brain-audit: A7 revert-of-a-revert — a re-added >400-line offender LIVE at HEAD is reported, never all-[SKIP]', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a7-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+
+  // Base on main: README + a valid session_summary record so memoryPresence
+  // passes repo-wide (it is read once at HEAD). This isolates diffSize as the
+  // only governance axis, so O/R2's offender status is purely the LIVE big file.
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  // A >400-line file → fails the diffSize tree-keyed check (budget 400).
+  const bigFile = Array.from({ length: 500 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+
+  // O — offender merge: adds the >400-line file. diffSize FAIL.
+  const oSha = mergeAddingPayload(git, dir, { 'src/big.mjs': bigFile }, 'O',
+    'O: add oversized payload Closes #1');
+
+  // R — genuine revert of O (as a merge): REMOVES the payload. May legitimately
+  // be [SKIP] under a correct net-parity audit; not asserted either way.
+  genuineRevertMerge(git, dir, oSha, 'revert-O', 'R: revert O Closes #2');
+
+  // R2 — revert of R (as a merge): RE-ADDS O's exact payload. The >400-line file
+  // is LIVE on disk at HEAD = R2. MUST be reported as an offender.
+  const r2Sha = genuineRevertMerge(git, dir, headShaOf(git), 'revert-R',
+    'R2: revert R Closes #3');
+
+  // Sanity: the offending file really is live in the working tree at HEAD.
+  assert.ok(existsSync(join(dir, 'src/big.mjs')),
+    'fixture invariant: the >400-line offender must be live on disk at HEAD=R2');
+
+  // Audit the whole window base..HEAD (covers O, R, R2 on the first-parent chain).
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], {
+    cwd: dir, encoding: 'utf8',
+  });
+
+  // ── PROPERTY assertions — WHAT is reported / exit code, never the mechanism ──
+
+  // 1. The live-at-HEAD offender must fail the audit. A direction-blind
+  //    reverter-skip emits all-[SKIP] / exit 0 here — that is the WRONG answer.
+  assert.notEqual(r.status, 0,
+    `a live-at-HEAD >400-line ungoverned artifact must fail the audit (exit non-zero); got exit ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+
+  // 2. R2 — the re-add that puts the offender back on disk at HEAD — must be
+  //    REPORTED, and must NOT be exempted on a [SKIP] line. Format-agnostic:
+  //    matches [FAIL] <sha7> and [FAIL-SHA] <full-sha> alike, reddens on [SKIP].
+  const lines = r.stdout.split('\n').filter(Boolean);
+  const r2Line = lines.find(l => l.includes(r2Sha) || l.includes(r2Sha.slice(0, 7)));
+  assert.ok(r2Line,
+    `R2 (the live re-add at HEAD) must appear in the audit output:\n${r.stdout}`);
+  assert.ok(!r2Line.startsWith('[SKIP]'),
+    `R2 re-adds a live >400-line offender at HEAD — it must NOT be [SKIP]-exempted:\n${r2Line}`);
+
+  // 3. O — the original offender whose payload is live again at HEAD — must
+  //    likewise be reported, never [SKIP]-exempted as "resolved by revert".
+  const oLine = lines.find(l => l.includes(oSha) || l.includes(oSha.slice(0, 7)));
+  assert.ok(oLine,
+    `O (the original >400-line offender, live again at HEAD) must appear in the audit output:\n${r.stdout}`);
+  assert.ok(!oLine.startsWith('[SKIP]'),
+    `O's payload is live at HEAD via R2 — it must NOT be [SKIP]-exempted:\n${oLine}`);
+
+  // 4. The window must NOT collapse into an all-[SKIP] whitewash: at least one
+  //    merge is reported as an offender (the anti-whitewash property).
+  const skipCount = lines.filter(l => l.startsWith('[SKIP]')).length;
+  const auditedCount = lines.filter(l => /^\[(PASS|FAIL|FAIL-SHA|SKIP)\]/.test(l)).length;
+  assert.ok(skipCount < auditedCount,
+    `all-[SKIP] whitewash — every audited merge was exempted despite a live offender at HEAD:\n${r.stdout}`);
 });
 
 // ── prView fix-at-source disposition ──────────────────────────────────────────
