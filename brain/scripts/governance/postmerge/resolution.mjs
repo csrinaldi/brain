@@ -346,16 +346,23 @@ export function netAddFull(candidate, { git, from, to }) {
 const ADDED_PATHS_ARGS = [
   '-c', 'diff.relative=false',
   'diff', '--no-textconv', '--no-ext-diff', '--no-renames',
-  '--diff-filter=A', '--name-only', '-z',
+  '--diff-filter=AM', '--name-only', '-z',
 ];
 
 /**
- * `addedPathsAbsentAt(C, tip)` — are ALL of candidate C's OWN ADDED paths
- * ABSENT from the tree at `tip`? (external ruling rev 4, issue #297 — the
- * `(c′)` liveness guard on the reverter exemption.)
+ * `addedPathsAbsentAt(C, tip)` — are ALL of candidate C's OWN TOUCHED-BY-WRITE
+ * paths ABSENT from the tree at `tip`? (external ruling rev 4 introduced this as
+ * the `(c′)` liveness guard over ADDED paths; ruling rev 11 widened it to ADDED
+ * ∪ MODIFIED to close A10 — issue #297.)
  *
- *   added(C) = { p : p is ADDED by normDiff-pinned first-parent diff C^1..C }
- *   addedPathsAbsentAt(C, tip)  ⟺  ∀ p ∈ added(C) : p ∉ tree(tip)
+ *   touched(C) = { p : p is ADDED or MODIFIED by the normDiff-pinned
+ *                      first-parent diff C^1..C }
+ *   addedPathsAbsentAt(C, tip)  ⟺  ∀ p ∈ touched(C) : p ∉ tree(tip)
+ *
+ * NAME: the export is still `addedPathsAbsentAt` because renaming it is a
+ * public-surface change beyond the one-character shape rev 11 ruled. The name is
+ * now narrower than the behavior; flagged in PR3c for the owner rather than
+ * widened unilaterally.
  *
  * WHY A TREE READ AND NOT ANOTHER SIGNED COUNT. `netAddFull` answers "did C's
  * contribution cancel out INSIDE the window [from,to]?" — never "is C's payload
@@ -384,11 +391,27 @@ const ADDED_PATHS_ARGS = [
  * throw that surfaces at the CLI's fail-closed catch (exit 2) — never a silent
  * exemption.
  *
- * KNOWN EDGE, recorded not hidden (ruling rev 4): this is path-scoped to ADDED
- * paths. A MODIFICATION-shaped payload — offending content injected into a
- * pre-existing file, so the path is never `A` — is outside both this guard and
- * the frozen fixture set. No machinery is built for it here on purpose
- * (evidence-first); it is routed to the finder as a named candidate attack.
+ * WHY `AM` AND NOT `A` (A10, ruling rev 11 — the KNOWN EDGE this comment used to
+ * record as OPEN, now CLOSED). Scoped to ADDED paths only, a MODIFICATION-shaped
+ * payload — offending content injected into a pre-existing file, so the path is
+ * never `A` — presented an EMPTY set and passed VACUOUSLY, while the content sat
+ * live at the tip. The finder froze it as A10 and it reproduced. Widening to
+ * `AM` closes it: a modified path is present at the tip, so the exemption is
+ * denied. Measured, not argued — the frozen set is 1822/1822 with A10 green.
+ *
+ * MEASURED COST, and the guard it is bound to. Widening ALSO denies the
+ * exemption to a LEGITIMATE modify-shaped tip-most cleanup reverter, which then
+ * emits `[FAIL-SHA]` — the auto-revert signal — on a merge whose whole
+ * contribution was removal. PR4 acting on that would revert the cleanup and
+ * RESURRECT the payload (the harm §15.5 names). Rev 11 ruled STAGED C: this fix
+ * lands now because A10 is a LIVE fail-open, and the suppression of that
+ * `[FAIL-SHA]` is a HARD PRECONDITION OF PR4 — PR4 does not consume `[FAIL-SHA]`
+ * until the modify-shaped-denial suppression and its frozen fixture land.
+ *
+ * STILL UNCOVERED, recorded not hidden: `--diff-filter=AM` does not select `T`
+ * (typechange, e.g. a file replaced by a symlink). No fixture exercises it and
+ * no machinery is built for it — evidence-first, as with A10 before the finder
+ * proved it.
  *
  * PURE-READ — a diff and a tree listing; never mutates `.git` or the work tree.
  */
