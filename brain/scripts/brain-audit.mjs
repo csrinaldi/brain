@@ -13,10 +13,11 @@
 //     checks run: `[SKIP] … resolved by revert`.
 //   • reverter-skip  — a FAILING merge is exempt from its TREE-KEYED failures
 //     only (adrPresence/diffSize; issueLink/memoryPresence always survive) iff
-//     every path it ADDS is absent from the tree at the audited tip
+//     every path it ADDS OR MODIFIES is absent from the tree at the audited tip
 //     (`addedPathsAbsentAt`, the liveness guard) AND its own contribution is
 //     net-absent across the full window (`netAddFull ≤ 0`). A tip-most cleanup
-//     revert adds nothing, so it settles without itself being flagged; a merge
+//     revert that only DELETES touches no surviving path, so it settles without
+//     itself being flagged; a merge
 //     that puts a payload back on the tree — a revert-of-a-revert, or a re-add
 //     of a payload first introduced BEHIND the window base — stays flagged.
 //
@@ -401,11 +402,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // so the happy path pays zero extra cost. A merge C is exempt from its
       // TREE-KEYED failures iff BOTH hold:
       //
-      //   (1) LIVENESS — every path C itself ADDS is absent from the tree at the
-      //       audited tip (`addedPathsAbsentAt`). A candidate that put a payload
-      //       back on the tree can never be exempted, however the window counts.
-      //       A pure-delete cleanup revert adds nothing → vacuously absent → the
-      //       exemption stays available for (2) to decide.
+      //   (1) LIVENESS — every path C itself ADDS **or MODIFIES** is absent from
+      //       the tree at the audited tip (`addedPathsAbsentAt`). A candidate that
+      //       put a payload back on the tree can never be exempted, however the
+      //       window counts — whether it arrived as a new file (A8) or as an edit
+      //       to a pre-existing one (A10, ruling rev 11). A pure-delete cleanup
+      //       revert touches no surviving path → vacuously absent → the exemption
+      //       stays available for (2) to decide.
       //   (2) NET-PARITY — C's own contribution is net-absent across the window:
       //       `netAddFull(C) ≤ 0`, deciding exactly as before.
       //
