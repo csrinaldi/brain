@@ -1026,3 +1026,96 @@ test('brain-audit: A10 modification-shaped payload — an ungoverned ADR edited 
   assert.ok(!oLine.startsWith('[SKIP]'),
     `O restored the ungoverned ADR and it is LIVE at HEAD — it must never be exempted on a [SKIP] line:\n${r.stdout}`);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A11 — FROZEN FINDER FIXTURE (governance #297, finder≠patcher split).
+//
+// Stage two of the rev-11 STAGED C ruling. Stage one (PR3c) widened the
+// reverter-exemption liveness guard to MODIFIED paths, closing A10. That fix
+// has a KNOWN, MEASURED cost, recorded at the time rather than discovered
+// later: a LEGITIMATE modify-shaped cleanup reverter — a merge whose entire
+// contribution is REMOVING offending content from a pre-existing file — now
+// loses its exemption. Losing the exemption is acceptable; it yields an extra
+// [FAIL], and an extra [FAIL] is the closed direction.
+//
+// What is NOT acceptable is the second half: that merge also emits
+// [FAIL-SHA], the AUTO-REVERT signal. PR4 consumes [FAIL-SHA] to revert. So
+// the signal points PR4 at the good citizen, and reverting a cleanup
+// RESURRECTS the payload it removed — the precise harm design §15.5 names when
+// it requires "never revert the intermediate legit reverter".
+//
+// THE PROPERTY, stated mechanism-blind and from the attacker's chair even
+// though the "attacker" here is our own emitter: A MERGE WHOSE WHOLE
+// CONTRIBUTION IS REMOVAL MUST NEVER CARRY [FAIL-SHA]. It may be reported —
+// never a silent PASS — but it must not be nominated for automatic reversion.
+//
+// Nothing below inspects HOW exemption, denial or emission are computed. It
+// builds a commit chain and reads the audit's own output lines.
+//
+// This fixture BLOCKS NOTHING TODAY (rev 11): it gates the pre-PR4 suppression
+// work, and PR4 is bound by rec-779629c7… not to consume [FAIL-SHA] until this
+// fixture and that suppression have landed.
+
+test('brain-audit: A11 good-citizen emission — a modify-shaped cleanup reverter is reported but NEVER carries [FAIL-SHA]', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a11-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+
+  const A11_CLEAN = '# ADR 904 example\n\nBody.\n';
+  const A11_DIRTY = '# ADR 904 example\n\nBody.\n\nUngoverned decision text.\n';
+
+  // Base: the ADR exists and is CLEAN. Inside the window, O dirties it and R
+  // cleans it back — both by EDITING, never by adding or deleting the path.
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+    [ADR_FILE]: A11_CLEAN,
+  }, 'chore: initial with a clean ADR (#0)');
+  const base = headShaOf(git);
+
+  // O — edits the offending text IN. The genuine offender.
+  const oSha = mergeAddingPayload(git, dir, { [ADR_FILE]: A11_DIRTY }, 'O',
+    'O: add ungoverned decision text Closes #1');
+
+  // R — edits the offending text back OUT, tip-most. THE GOOD CITIZEN: its
+  // entire contribution is removal.
+  const rSha = mergeAddingPayload(git, dir, { [ADR_FILE]: A11_CLEAN }, 'R',
+    'R: remove ungoverned decision text Closes #2');
+
+  // ── Fixture invariants — if these break, this is not testing the property ──
+  assert.ok(existsSync(join(dir, ADR_FILE)),
+    'fixture invariant: the ADR itself must survive at HEAD (R edits, never deletes)');
+  assert.equal(readFileSync(join(dir, ADR_FILE), 'utf8').includes('Ungoverned decision text'), false,
+    'fixture invariant: R must have REMOVED the offending text — the tree at HEAD is clean');
+  const rStatus = git('diff', '--name-status', `${rSha}^1`, rSha).stdout;
+  assert.match(rStatus, /^M\s/m,
+    `fixture invariant: R must MODIFY the ADR — got:\n${rStatus}`);
+  assert.doesNotMatch(rStatus, /^[AD]\s/m,
+    `fixture invariant: R must neither add nor delete a path — that is what makes it the good citizen — got:\n${rStatus}`);
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], {
+    cwd: dir, encoding: 'utf8',
+  });
+
+  // ── PROPERTY assertions — WHAT is emitted, never HOW it is decided ────────
+
+  // 1. THE PROPERTY. R contributed only removal, so it must never be nominated
+  //    for automatic reversion. Format-agnostic: any [FAIL-SHA] carrying R's
+  //    sha — abbreviated or full — violates it.
+  const failShaLines = r.stdout.split('\n').filter(l => l.startsWith('[FAIL-SHA]'));
+  const rNominated = failShaLines.some(l => l.includes(rSha) || l.includes(rSha.slice(0, 7)));
+  assert.equal(rNominated, false,
+    `R's whole contribution is REMOVAL — nominating it for auto-revert would resurrect the payload (§15.5).\n`
+    + `stdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+
+  // 2. The other half of the property, so a fix cannot satisfy (1) by going
+  //    silent: R may be reported. What it must not be is invisible.
+  const rLine = r.stdout.split('\n').filter(Boolean).find(l => l.includes(rSha.slice(0, 7)));
+  assert.ok(rLine, `R must still appear in the audit output — never a silent PASS:\n${r.stdout}`);
+
+  // 3. The offender itself stays accounted for: O introduced the text, and the
+  //    audit must not lose track of it while getting R right.
+  const oLine = r.stdout.split('\n').filter(Boolean).find(l => l.includes(oSha.slice(0, 7)));
+  assert.ok(oLine, `O must appear in the audit output:\n${r.stdout}`);
+});
