@@ -43,7 +43,7 @@ test('drift-guard: compileAgentsMd() over the REAL 5 SOURCE_DOCS is byte-equal t
     fresh,
     committed,
     'AGENTS.md has drifted from its 5 canonical SOURCE_DOCS — regenerate via ' +
-      '`SDD_HARNESS=antigravity node brain/scripts/harness/cli.mjs init` (never hand-edit AGENTS.md)',
+      '`AGENT_PLATFORM=antigravity node brain/scripts/harness/cli.mjs init` (never hand-edit AGENTS.md)',
   );
 });
 

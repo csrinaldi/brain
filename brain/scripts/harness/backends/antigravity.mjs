@@ -44,7 +44,7 @@ export const AGENTS_EMIT_PATH = 'AGENTS.md';
 /** Repo-root-relative path for Antigravity native settings hooks (issue #305). */
 export const GEMINI_SETTINGS_EMIT_PATH = '.gemini/settings.json';
 
-const REGENERATE_HINT = 'SDD_HARNESS=antigravity npm run brain:env:init';
+const REGENERATE_HINT = 'AGENT_PLATFORM=antigravity npm run brain:env:init';
 
 /**
  * Compiles .gemini/settings.json content with native workspace hooks.

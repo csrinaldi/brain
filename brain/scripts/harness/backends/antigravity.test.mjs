@@ -17,7 +17,7 @@
 //     `AGENTS.md` BEFORE the drift-guard could catch it, silently defeating
 //     the whole #601 ignoreList classification. The committed `AGENTS.md`'s
 //     regeneration is now EXCLUSIVELY a deliberate CLI act:
-//     `SDD_HARNESS=antigravity node brain/scripts/harness/cli.mjs init`
+//     `AGENT_PLATFORM=antigravity node brain/scripts/harness/cli.mjs init`
 //     (task 3.1) — never a side effect of `npm test`.
 //
 // Run with: npm test.

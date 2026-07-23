@@ -1,5 +1,5 @@
 <!-- generated from brain/HOME.md, brain/core/methodology/agent-authorities.md, brain/core/methodology/harness-contract.md, brain/core/methodology/sdd-layout.md, brain/core/methodology/workflow-governance.md — do not edit.
-     Regenerate: SDD_HARNESS=antigravity npm run brain:env:init
+     Regenerate: AGENT_PLATFORM=antigravity npm run brain:env:init
      Drift-guarded by antigravity.drift.test.mjs — hand-edits fail CI. -->
 
 ---
