@@ -88,8 +88,8 @@ jobs:
               echo ""
               echo "Initialize it (human action) with:"
               echo '```'
-              echo "git update-ref refs/governance/cursor \$(git rev-list --max-parents=0 HEAD | tail -n1)"
-              echo "git push origin refs/governance/cursor"
+              echo "git update-ref refs/governance/audit-cursor \$(git rev-list --max-parents=0 HEAD | tail -n1)"
+              echo "git push origin refs/governance/audit-cursor"
               echo '```'
             } > "$RUNNER_TEMP/body.md"
           else
