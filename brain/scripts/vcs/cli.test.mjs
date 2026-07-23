@@ -25,6 +25,22 @@ test('resolveProviderName: VCS_PROVIDER env overrides config', () => {
   );
 });
 
+test('resolveProviderName: an explicit provider arg wins over VCS_PROVIDER env AND config (runtime provider — finding #14)', () => {
+  assert.equal(
+    resolveProviderName({
+      provider: 'gitlab',
+      env: { VCS_PROVIDER: 'github' },
+      config: { vcs: { provider: 'github' } },
+    }),
+    'gitlab',
+  );
+  // A null/absent override falls through to the existing env>config precedence.
+  assert.equal(
+    resolveProviderName({ provider: null, env: {}, config: { vcs: { provider: 'github' } } }),
+    'github',
+  );
+});
+
 test('resolveProviderName throws a helpful error when unset', () => {
   assert.throws(
     () => resolveProviderName({ config: {}, env: {} }),

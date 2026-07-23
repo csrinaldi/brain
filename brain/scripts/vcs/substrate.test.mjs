@@ -10,13 +10,18 @@
 //
 // Run with: npm test (node --test)
 
-import { test } from 'node:test';
+import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 import { detectSubstrate } from './substrate.mjs';
 import { checkContexts } from './governance-checks.mjs';
+import { setSpawn } from './lib/exec.mjs';
+import * as gitlab from './providers/gitlab.mjs';
+
+afterEach(() => setSpawn(spawnSync));
 
 // ── Floor fallback (no probes/config) ───────────────────────────────────────────
 
@@ -175,6 +180,138 @@ test('detectSubstrate: rung 1 armed via self-hosted pre-receive floor, bypassing
 
   assert.equal(result.rung, 1);
   assert.equal(result.enforced, true);
+});
+
+// ── GitLab rung-1 sub-gates (issue #244 A4) ─────────────────────────────────────
+//
+// GitLab rung-1 splits into three honestly-reported sub-gates —
+// pipelineMustSucceed (load-bearing, verifiable:true), protectedBranches
+// (complementary, verifiable:true), preReceive (config-declared,
+// verifiable:false) — OR-composed. This replaces the selfHostedPreReceive
+// short-circuit (:98-100). The no-provider (GitHub) cases above MUST stay
+// green with ZERO assertion changes (behavior-preservation, Phase 3).
+
+test('detectSubstrate: GitLab rung-1 — pipelineMustSucceed alone arms rung 1 (CP-A2b mirror state)', async () => {
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'gitlab' } },
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 404, contexts: [], pipelineMustSucceed: true }),
+    },
+  });
+
+  const gates = result.rungs[1].gates;
+  assert.equal(gates.pipelineMustSucceed.active, true, 'pipelineMustSucceed must arm rung-1 alone — presence-alone would wrongly report absent here');
+  assert.equal(gates.pipelineMustSucceed.verifiable, true);
+  assert.equal(gates.pipelineMustSucceed.mechanism, 'branch-merge-gate-api');
+  assert.equal(gates.protectedBranches.active, false, 'no protected branches configured on the mirror — honestly inactive');
+  assert.equal(result.rung, 1);
+  assert.equal(result.rungs[1].active, true);
+});
+
+test('detectSubstrate: GitLab rung-1 — neither sub-gate armed → rung-1 inactive with a remedy', async () => {
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'gitlab' } },
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 404, contexts: [], pipelineMustSucceed: false }),
+    },
+  });
+
+  assert.equal(result.rungs[1].active, false);
+  assert.notEqual(result.rung, 1);
+  assert.ok(typeof result.rungs[1].remedy === 'string' && result.rungs[1].remedy.length > 0);
+});
+
+test('detectSubstrate: GitLab rung-1 — protectedBranches alone arms rung 1 (per-branch push gate present)', async () => {
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'gitlab' } },
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 200, contexts: [], pipelineMustSucceed: false }),
+    },
+  });
+
+  const gates = result.rungs[1].gates;
+  assert.equal(gates.protectedBranches.active, true);
+  assert.equal(gates.protectedBranches.verifiable, true);
+  assert.equal(gates.protectedBranches.mechanism, 'protected-branch-api');
+  assert.equal(gates.pipelineMustSucceed.active, false);
+  assert.equal(result.rung, 1);
+});
+
+test('detectSubstrate: GitLab rung-1 — selfHostedPreReceive arms via the preReceive sub-gate, not a short-circuit', async () => {
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'gitlab', selfHostedPreReceive: true } },
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 403, contexts: [], pipelineMustSucceed: false }),
+    },
+  });
+
+  const gates = result.rungs[1].gates;
+  assert.equal(gates.preReceive.active, true);
+  assert.equal(gates.preReceive.verifiable, false, 'THE honesty flag — no endpoint reports a bare-repo hook');
+  assert.equal(gates.preReceive.mechanism, 'pre-receive-config-declared');
+  assert.equal(result.rung, 1, 'the short-circuit is gone — the preReceive sub-gate arms rung-1 itself');
+  assert.equal(result.enforced, true);
+});
+
+test('detectSubstrate: GitLab rung-1 — pipelineMustSucceed uncomputable (undefined) reports available:false honestly, never a fabricated "not armed"', async () => {
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'gitlab' } },
+    env: {},
+    probes: {
+      branchProtection: async () => ({ status: 404, contexts: [] }), // no pipelineMustSucceed field — uncomputable
+    },
+  });
+
+  const gate = result.rungs[1].gates.pipelineMustSucceed;
+  assert.equal(gate.available, false, 'uncomputable must surface as available:false, not silently "not configured"');
+  assert.equal(gate.active, false);
+  assert.ok(typeof gate.remedy === 'string' && gate.remedy.length > 0);
+});
+
+// ── Propagation proof: the REAL gitlab.mjs#projectMergeSettings null-coercion
+// fix survives end-to-end into evalPipelineMustSucceedGate (fresh-context
+// review MAJOR — issue #244 A4). Wires the ACTUAL provider function (not a
+// hand-rolled fixture returning `null`) as the branchProtection probe, via the
+// shared `setSpawn` seam. `GET /projects/:id` succeeds (200, parseable) but
+// the body OMITS `only_allow_merge_if_pipeline_succeeds` — a case distinct
+// from a failed/unreachable read. Before the null-coercion fix, gitlab.mjs's
+// `Boolean(undefined)` fabricated `false` here, which evalPipelineMustSucceedGate
+// would have reported as `available:true` ("readable, not configured"),
+// masking the honesty violation completely. This test fails if that coercion
+// regresses, independent of the providers.test.mjs unit test on gitlab.mjs alone.
+
+test('propagation proof: null from the REAL gitlab.mjs#projectMergeSettings (field absent from a successful read) reaches evalPipelineMustSucceedGate as available:false, never fabricated as "not configured"', async () => {
+  setSpawn((cmd, args) => {
+    if (cmd === 'glab' && args[0] === 'api' && args[1] === 'projects/csrinaldi%2Fbrain') {
+      // 200, parseable, but only_allow_merge_if_pipeline_succeeds is absent.
+      return { status: 0, stdout: JSON.stringify({ id: 1, path_with_namespace: 'csrinaldi/brain', default_branch: 'main' }), stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: 'unexpected call: ' + cmd + ' ' + args.join(' ') };
+  });
+
+  const result = await detectSubstrate({
+    config: { vcs: { provider: 'gitlab' } },
+    env: {},
+    probes: {
+      // Mirrors realBranchProtectionProbe's GitLab normalization, but calls
+      // the REAL gitlab.mjs function under test (not a fixture double).
+      branchProtection: async () => {
+        const { onlyAllowMergeIfPipelineSucceeds } = await gitlab.projectMergeSettings({ project: 'csrinaldi/brain' });
+        return { status: 404, contexts: [], pipelineMustSucceed: onlyAllowMergeIfPipelineSucceeds };
+      },
+    },
+  });
+
+  const gate = result.rungs[1].gates.pipelineMustSucceed;
+  assert.equal(gate.available, false, 'the real function\'s null must survive as available:false — a fabricated false would have reported available:true');
+  assert.equal(gate.active, false);
+  assert.match(gate.reason, /uncomputable/i);
+  assert.doesNotMatch(gate.reason, /is not set/i, 'must not be the "readable, not configured" reason — that would mean null was coerced to false');
+  assert.notEqual(result.rung, 1);
 });
 
 // ── rungs[1].gates.brainWritesReviewed — per-provider L6 rung-1 sub-probe ───────

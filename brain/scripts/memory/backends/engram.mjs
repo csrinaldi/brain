@@ -6,7 +6,7 @@
 //
 // Operations:
 //   share()              — export live memory to .memory/ (engram sync)
-//   pull()               — import .memory/ into engram    (engram sync --import)
+//   pull()               — import .memory/records/ into engram (records-only, D2/C4)
 //   index()              — project brain/ docs into engram (delegates to brain-to-engram.mjs)
 //   setup()              — ensure .engram → .memory symlink + register merge driver
 //   featureCheckpoint()  — dehydrate: stamp + validate + write resume.md (REQ-S2-1, REQ-E-1)
@@ -30,9 +30,18 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveFeature } from "../lib/feature-resolution.mjs";
+import { changeDir, OPERATIONAL_ARTIFACTS } from "../../lib/sdd-layout.mjs";
 import { parseFrontmatter, serializeFrontmatter } from "../lib/resume-frontmatter.mjs";
 import { validateResume } from "../lib/resume-schema.mjs";
 import { currentBranch } from "../../lib/git-branch.mjs";
+import { resolveSecretConfig, compilePatterns, scrubChunkFile, scanTextForSecrets } from "../lib/secret-scrub.mjs";
+import { exportObservation } from "../lib/engram-export.mjs";
+import { importRecord } from "../lib/engram-import.mjs";
+import { appendRecord, rebuildIndex, readRecordIds, readRecordObservations } from "../lib/store.mjs";
+import { serializeRecord } from "../lib/format.mjs";
+import { collectChunkObservations } from "../lib/migrate-v1.mjs";
+import { unsupportedOp } from "../lib/unsupported-op.mjs";
+import { t } from "../../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -103,12 +112,311 @@ function requireEngram() {
 }
 
 /**
- * share() — export live engram memory to .memory/ (idempotent, content-addressed).
- * Equivalent to what `memory:share` used to do directly.
+ * share() — export live engram memory to .memory/ (idempotent, content-addressed),
+ * fail-closed secret-scrub whatever chunks were materialized this run as the
+ * transitional backstop (issue #214, C1b), THEN dual-write the exported
+ * observations into `.memory/records/` under scan-then-write (issue #221,
+ * C2b-1, design.md Decision 1).
+ *
+ * Order (issue #221 fix pass, MINOR): the chunk backstop runs BEFORE the
+ * records dual-write. Rationale — `dualWriteRecords()` APPENDS to the
+ * append-only `records/` log; if it ran first and a LATER gate (the chunk
+ * backstop) then failed, `records/` would already be mutated on an aborted
+ * share. Scanning chunks first means a chunk-only secret (e.g. a
+ * `scope:personal` observation the records candidate filter already
+ * excluded) aborts the share before `records/` is ever touched.
+ *
+ * Scrub scope: TWO independent fail-closed scans run, never one gating
+ * the other's write:
+ *   1. scrubMaterializedChunks() — the chunks engram's export just wrote are
+ *      scanned AFTER materialization (C1b's original design, unchanged): a
+ *      hit blocks the push but the chunk itself was already written locally.
+ *   2. dualWriteRecords() — candidate records (transformed from observations
+ *      via exportObservation) are scanned BEFORE any `records/` append; a hit
+ *      aborts before the append-only log is ever touched (Decision 1). It
+ *      also dedups by content-addressed `id` against what `records/` already
+ *      has (issue #221 fix pass, BLOCKER) — a retry after ANY abort is safe.
+ * There is NO `--no-scrub` flag for either path; the only bypass is the
+ * config allowlist (`governance.memorySecretAllowPatterns`).
+ *
+ * @param {object} [opts]  Injectable seams for testing — production defaults
+ *   call the real engram binary, git, and filesystem.
+ * @param {string} [opts.root]  Repo root.
+ * @param {() => string} [opts._requireEngram]  Resolves the engram binary; throws if absent.
+ * @param {(engram: string) => void} [opts._export]  Runs `engram sync --export`.
+ * @param {(root: string) => {observations: object[], unparseable: string[], emptyObservations: string[]}} [opts._readObservations]
+ *   Observations materialized this run, plus the chunk-level accounting buckets.
+ * @param {typeof exportObservation} [opts._exportObservation]
+ * @param {typeof appendRecord} [opts._appendRecord]
+ * @param {typeof rebuildIndex} [opts._rebuildIndex]
+ * @param {(root: string) => string[]} [opts._changedChunkFiles]  Chunk files materialized this run.
+ * @param {(root: string) => object} [opts._loadConfig]  Reads brain.config.json.
+ * @param {(path: string, patterns: RegExp[], allowPatterns: RegExp[]) => object|null} [opts._scrubChunk]
  */
-export async function share() {
-  const engram = requireEngram();
+export async function share({
+  root = repoRoot,
+  _requireEngram = requireEngram,
+  _export = _defaultShareExport,
+  _readObservations = _defaultReadObservations,
+  _exportObservation = exportObservation,
+  _appendRecord = appendRecord,
+  _rebuildIndex = rebuildIndex,
+  _changedChunkFiles = _defaultChangedChunkFiles,
+  _loadConfig = _defaultLoadBrainConfig,
+  _scrubChunk = scrubChunkFile,
+} = {}) {
+  const engram = _requireEngram();
+  _export(engram);
+  await scrubMaterializedChunks(root, { _changedChunkFiles, _loadConfig, _scrubChunk });
+  // Record-write is UNCONDITIONAL (design.md Decision 1, D3/C4, issue #229 — the
+  // `memory.dualWrite` gate is retired BY DELETION). Records-only is the only
+  // path; there is no flag left to condition on. The transitional cutover state
+  // marker (C2b-1/C2b-2) served its purpose: the key is also removed from
+  // brain.config.json (move 2) and the 0.6.0 migration entry that introduced it
+  // is removed too (move 3) — it was never shipped to any released consumer.
+  await dualWriteRecords(root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig });
+}
+
+/**
+ * Default seam: the observations materialized by this run's `engram sync
+ * --export` — read back from the gzip chunks it just wrote under
+ * `.memory/chunks` (reuses migrate-v1.mjs's collectChunkObservations, never a
+ * second reader). Returns the FULL bucket shape — `observations` plus the
+ * `unparseable`/`emptyObservations` chunk-level buckets — so dualWriteRecords()
+ * can account for every chunk, not just the ones that parsed into observations
+ * (issue #221 fix pass, MAJOR).
+ *
+ * @param {string} root
+ * @returns {{observations: object[], unparseable: string[], emptyObservations: string[]}}
+ */
+export function _defaultReadObservations(root) {
+  return collectChunkObservations(join(root, ".memory", "chunks"));
+}
+
+/**
+ * dualWriteRecords() — scan-then-write over the RECORDS log (issue #221,
+ * C2b-1; design.md Decision 1, REQ-C2B1-3). Independent of requireEngram()/
+ * the real export so it is unit-testable with zero engram/git dependency,
+ * mirroring scrubMaterializedChunks()'s testable-core pattern.
+ *
+ * Order: read observations → transform each into a CANDIDATE record via
+ * exportObservation() → scan the candidate record LINES for secrets → only
+ * if clean, dedup by content-addressed `id` against what `records/` already
+ * has (issue #221 fix pass, BLOCKER) → append every NEW candidate to
+ * `records/` + rebuild the index. A secret hit aborts BEFORE any
+ * `appendRecord` call — the append-only `records/` log is never written with
+ * a secret.
+ *
+ * Accounting (issue #221 fix pass, MAJOR — mirrors migrate-v1.mjs's
+ * buildMigrationReport() honesty contract): every observation is accounted
+ * for exactly once, never silently dropped. `errored` (a throwing
+ * exportObservation), `rejected` (non-enum type), and `skippedPersonal`
+ * (scope:personal) each get their own counter — none of them abort the run
+ * for the others (per-observation isolation) — and the chunk-level
+ * `unparseableChunks`/`emptyObservationsChunks` buckets from
+ * `_readObservations()` are surfaced too. `deduped` counts candidates whose
+ * `id` was already present in `records/` (a prior run) OR earlier in THIS
+ * batch (two observations exporting to the same content-addressed record).
+ *
+ * @param {string} root
+ * @param {object} [opts]
+ * @param {(root: string) => {observations: object[], unparseable?: string[], emptyObservations?: string[]}} [opts._readObservations]
+ * @param {typeof exportObservation} [opts._exportObservation]
+ * @param {typeof appendRecord} [opts._appendRecord]
+ * @param {typeof rebuildIndex} [opts._rebuildIndex]
+ * @param {typeof readRecordIds} [opts._readRecordIds]
+ * @param {(root: string) => object} [opts._loadConfig]
+ * @returns {Promise<{written: number, deduped: number, errored: number, rejected: number,
+ *   skippedPersonal: number, unparseableChunks: number, emptyObservationsChunks: number,
+ *   indexCount?: number}>}
+ */
+export async function dualWriteRecords(
+  root,
+  {
+    _readObservations = _defaultReadObservations,
+    _exportObservation = exportObservation,
+    _appendRecord = appendRecord,
+    _rebuildIndex = rebuildIndex,
+    _readRecordIds = readRecordIds,
+    _loadConfig = _defaultLoadBrainConfig,
+  } = {},
+) {
+  const { observations, unparseable = [], emptyObservations = [] } = _readObservations(root);
+
+  const candidates = [];
+  let errored = 0;
+  let rejected = 0;
+  let skippedPersonal = 0;
+  for (const obs of observations) {
+    let result;
+    try {
+      result = _exportObservation(obs);
+    } catch {
+      errored += 1; // one bad observation must never abort the whole share
+      continue;
+    }
+    if (result.skipped) {
+      skippedPersonal += 1;
+      continue;
+    }
+    if (result.rejected) {
+      rejected += 1;
+      continue;
+    }
+    candidates.push(result.record);
+  }
+
+  const accounting = {
+    written: 0,
+    deduped: 0,
+    errored,
+    rejected,
+    skippedPersonal,
+    unparseableChunks: unparseable.length,
+    emptyObservationsChunks: emptyObservations.length,
+  };
+
+  if (candidates.length === 0) return accounting;
+
+  const { patternSources, allowPatternSources } = resolveSecretConfig(_loadConfig(root));
+  const patterns = compilePatterns(patternSources);
+  const allowPatterns = compilePatterns(allowPatternSources);
+
+  const candidateText = candidates.map(serializeRecord).join("\n");
+  const hit = scanTextForSecrets(candidateText, patterns, allowPatterns);
+  if (hit) {
+    throw new Error(
+      await t("memory.share.secretFoundRecords", {
+        line: hit.lineNumber,
+        pattern: hit.pattern,
+      }),
+    );
+  }
+
+  const recordsDir = join(root, ".memory", "records");
+  const indexPath = join(root, ".memory", "index.jsonl");
+
+  const existingIds = _readRecordIds({ recordsDir });
+  const seenInBatch = new Set();
+  const toAppend = [];
+  for (const record of candidates) {
+    if (existingIds.has(record.id) || seenInBatch.has(record.id)) {
+      accounting.deduped += 1;
+      continue;
+    }
+    seenInBatch.add(record.id);
+    toAppend.push(record);
+  }
+
+  for (const record of toAppend) {
+    _appendRecord(record, { recordsDir });
+  }
+  accounting.written = toAppend.length;
+  if (toAppend.length > 0) {
+    const { count } = _rebuildIndex({ recordsDir, indexPath });
+    accounting.indexCount = count;
+  }
+  return accounting;
+}
+
+function _defaultShareExport(engram) {
   execFileSync(engram, ["sync", "--export"], { stdio: "inherit" });
+}
+
+/**
+ * Default seam: reads `brain.config.json` for the `governance.memorySecret*`
+ * keys. Never throws — an absent/unparseable config falls back to `{}`, which
+ * resolveSecretConfig() turns into the default pattern set.
+ *
+ * @param {string} root
+ * @returns {object}
+ */
+function _defaultLoadBrainConfig(root) {
+  try {
+    return JSON.parse(readFileSync(join(root, "brain.config.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Default seam: the `.memory/chunks/*.jsonl.gz` files `git status` reports as
+ * changed (new or modified) after `engram sync --export` ran. Chunks are
+ * content-addressed, so an untouched chunk never appears here — this is the
+ * "materialized THIS run" boundary the scrubber respects (never the whole store).
+ *
+ * Excludes porcelain DELETIONS (cutover finding 7, id:388): once chunks moved
+ * to `legacy/`, `git status --porcelain` on `.memory/chunks` reports deletion
+ * lines (` D`, `D `, `AD`, …) whose path still ends in `.jsonl.gz`. Left
+ * unfiltered, a deletion would pass the suffix-only filter and `scrubChunkFile`
+ * would `readFileSync` a path that no longer exists → ENOENT. A status code
+ * containing `D` in either column is a deletion and is dropped before the
+ * suffix filter runs.
+ *
+ * @param {string} root
+ * @returns {string[]}  Absolute paths.
+ */
+export function _defaultChangedChunkFiles(root, { _spawn = spawnSync } = {}) {
+  const r = _spawn("git", ["status", "--porcelain", "--", ".memory/chunks"], {
+    encoding: "utf8",
+    cwd: root,
+  });
+  // Fail CLOSED on any git failure (binary absent, not a repo, or the common
+  // safe.directory "dubious ownership" → status 128 with empty stdout). A silent
+  // [] here would scan ZERO chunks and let a secret through — the one path that
+  // must never fail open in a fail-closed slice (matches the r.status guard in
+  // _defaultIsManifestDirty / _defaultRestoreManifest).
+  if (r.error || r.status !== 0) {
+    throw new Error(
+      `secret-scrub: 'git status' failed — cannot determine which chunks were materialized this run; refusing to share (fail closed): ${r.stderr || r.error || `exit ${r.status}`}`
+    );
+  }
+  return (r.stdout ?? "")
+    .split("\n")
+    .filter((line) => line.length > 3 && !line.slice(0, 2).includes("D"))
+    .map((line) => line.slice(3).trim())
+    .filter((p) => p.endsWith(".jsonl.gz"))
+    .map((p) => join(root, p));
+}
+
+/**
+ * scrubMaterializedChunks() — the fail-closed core, independent of requireEngram()
+ * so it is unit-testable with zero real engram/git/gzip dependency. Resolves
+ * the effective pattern set (defaults + `governance.memorySecretPatterns`,
+ * additive) and the allowlist (`governance.memorySecretAllowPatterns`, the sole
+ * bypass — no CLI flag), then scans every changed chunk. Throws on the FIRST
+ * hit, naming the matched pattern and the file:line location.
+ *
+ * @param {string} root
+ * @param {object} [opts]
+ * @param {(root: string) => string[]} [opts._changedChunkFiles]
+ * @param {(root: string) => object} [opts._loadConfig]
+ * @param {(path: string, patterns: RegExp[], allowPatterns: RegExp[]) => object|null} [opts._scrubChunk]
+ */
+export async function scrubMaterializedChunks(
+  root,
+  {
+    _changedChunkFiles = _defaultChangedChunkFiles,
+    _loadConfig = _defaultLoadBrainConfig,
+    _scrubChunk = scrubChunkFile,
+  } = {},
+) {
+  const { patternSources, allowPatternSources } = resolveSecretConfig(_loadConfig(root));
+  const patterns = compilePatterns(patternSources);
+  const allowPatterns = compilePatterns(allowPatternSources);
+
+  for (const chunkPath of _changedChunkFiles(root)) {
+    const hit = _scrubChunk(chunkPath, patterns, allowPatterns);
+    if (hit) {
+      throw new Error(
+        await t("memory.share.secretFound", {
+          file: chunkPath,
+          line: hit.lineNumber,
+          pattern: hit.pattern,
+        }),
+      );
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -162,21 +470,89 @@ function _defaultGitPull(root) {
 }
 
 /**
- * importMemory() — import .memory/ chunks into local engram (engram sync --import).
+ * Default seam: read every record observation currently in `.memory/records/`.
  *
- * This is the import-only step, with no git pull. Use it when the working tree
- * is already up-to-date (e.g. after day-start's step-2 git merge, or in the
- * post-merge hook where git itself has already integrated the new commits).
+ * @param {string} root
+ * @returns {object[]}
+ */
+export function _defaultReadRecordObservations(root) {
+  return readRecordObservations({ recordsDir: join(root, ".memory", "records") });
+}
+
+/**
+ * importMemory() — hydrate local engram from `.memory/records/*.jsonl`
+ * (records-only, design.md Decision 2 / D2, C4 #229). Replaces the former
+ * thin `engram sync --import` chunk wrapper — the chunks path is retired,
+ * `records/` is the sole read+write truth (REQ-C4-2).
+ *
+ * Read `.memory/records/*.jsonl` via readRecordObservations → transform each
+ * record via importRecord() → write per-record via `engram save` (the exact
+ * per-observation verb already used by _defaultEngramSave()). No bulk verb
+ * exists, so per-record with progress reporting is the honest primitive for
+ * the ~275 records in the real store.
+ *
+ * IDEMPOTENT (MANDATORY, REQ-C4-2 scenario 2): `topic: record.id` is passed
+ * on every save — the record's own content-addressed id becomes the engram
+ * `topic_key`. engram's real topic_key match (same project+scope) UPSERTS
+ * the existing observation instead of inserting a new one, and — unlike its
+ * separate content-hash dedup path — this match is NOT time-windowed, so it
+ * holds across arbitrarily-spaced re-runs. Re-running pull over an
+ * already-populated engram therefore revises the same 275 observations, it
+ * never duplicates them.
  *
  * Called by:
  *   - pullMemory() as its default _import seam
  *   - cli.mjs "import" verb (import-only, no manifest restore, no git pull)
  *   - post-merge hook (via cli.mjs import)
  *   - day-start step 5 (via cli.mjs import, after step 2 already pulled)
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.root]  Repo root (defaults to this package's root).
+ * @param {() => string} [opts._requireEngram]
+ *   Resolves the engram binary; throws a friendly error if absent.
+ * @param {(root: string) => object[]} [opts._readRecords]
+ *   Returns every record observation under `.memory/records/`.
+ * @param {(record: object) => object} [opts._importRecord]
+ *   Transforms one record into an engram-observation shape.
+ * @param {(title: string, content: string, opts: object) => void} [opts._engramSave]
+ *   Writes one observation to engram. Called once per record.
+ * @param {(line: string) => void} [opts._log]
+ *   Progress/summary sink — defaults to console.log.
+ * @returns {Promise<{written: number}>}
  */
-export async function importMemory() {
-  const engram = requireEngram();
-  execFileSync(engram, ["sync", "--import"], { stdio: "inherit" });
+export async function importMemory({
+  root = repoRoot,
+  _requireEngram = requireEngram,
+  _readRecords = _defaultReadRecordObservations,
+  _importRecord = importRecord,
+  _engramSave = _defaultEngramSave,
+  _log = console.log,
+} = {}) {
+  _requireEngram();
+
+  const records = _readRecords(root);
+  const total = records.length;
+
+  if (total === 0) {
+    _log(await t("memory.import.empty"));
+    return { written: 0 };
+  }
+
+  let written = 0;
+  for (const record of records) {
+    const observation = _importRecord(record);
+    _engramSave(observation.title, observation.content, {
+      type: observation.type,
+      project: observation.project,
+      scope: observation.scope,
+      topic: record.id,
+    });
+    written += 1;
+    _log(await t("memory.import.progress", { written, total }));
+  }
+
+  _log(await t("memory.import.done", { written, total }));
+  return { written };
 }
 
 /**
@@ -233,12 +609,31 @@ export async function pullMemory({
 }
 
 /**
- * pull() — import .memory/ into engram using the churn-resilient safe pull.
- * Replaces the former thin `engram sync --import` wrapper.
+ * pull() — import .memory/records/ into engram using the churn-resilient safe
+ * pull. Replaces the former thin `engram sync --import` chunk wrapper — the
+ * chunks path is retired (records-only, D2/C4).
  * Called by brain/scripts/memory/cli.mjs when op = "pull".
  */
 export async function pull() {
   await pullMemory();
+}
+
+// ---------------------------------------------------------------------------
+// save / search — the Q1 asymmetry's engram side (design Decision 5, obs
+// #578's "engram.search stub: YES" ruling). engram already has a native
+// `mem_save`/`mem_search`; a second CLI-mediated door would create a second
+// surface to keep in parity forever. Both refuse loudly via the shared
+// unsupportedOp helper — never cryptic, never a silent no-op, on either verb.
+// ---------------------------------------------------------------------------
+
+/** @returns {Promise<never>} */
+export async function save() {
+  await unsupportedOp("save", "engram", { key: "memory.save.engramUnsupported" });
+}
+
+/** @returns {Promise<never>} */
+export async function search() {
+  await unsupportedOp("search", "engram", { key: "memory.search.engramUnsupported" });
 }
 
 /**
@@ -407,8 +802,8 @@ export async function featureCheckpoint(
     return;
   }
 
-  const changeDir = join(root, "openspec", "changes", resolvedFeature);
-  const rp = join(changeDir, "resume.md");
+  const targetDir = join(root, changeDir(resolvedFeature));
+  const rp = join(targetDir, OPERATIONAL_ARTIFACTS[0]);
 
   // 2. Read existing resume.md or build a minimal skeleton.
   let frontmatter = {};
@@ -485,7 +880,7 @@ export async function featureCheckpoint(
 
   // 7. CORE WRITE — pure filesystem; no engram save, no engram sync, no child
   //    process.  This is the REQ-E-1 invariant line.
-  mkdirSync(changeDir, { recursive: true });
+  mkdirSync(targetDir, { recursive: true });
   writeFileSync(rp, serializeFrontmatter(frontmatter, body));
   console.log(`  ✓ resume.md checkpointed for ${resolvedFeature}`);
 }
@@ -528,8 +923,8 @@ export async function featureResume(
     return;
   }
 
-  const changeDir = join(root, "openspec", "changes", resolvedFeature);
-  const rp = join(changeDir, "resume.md");
+  const targetDir = join(root, changeDir(resolvedFeature));
+  const rp = join(targetDir, OPERATIONAL_ARTIFACTS[0]);
 
   // 2. If resume.md is absent → informational message, exit 0.
   if (!existsSync(rp)) {
@@ -568,14 +963,14 @@ export async function featureResume(
   const featureProject = `brain-feature-${resolvedFeature}`;
   let files;
   try {
-    files = readdirSync(changeDir).filter((f) => f.endsWith(".md"));
+    files = readdirSync(targetDir).filter((f) => f.endsWith(".md"));
   } catch {
-    console.warn(`  ⚠ could not read change dir: ${changeDir}`);
+    console.warn(`  ⚠ could not read change dir: ${targetDir}`);
     return;
   }
 
   for (const filename of files) {
-    const filePath = join(changeDir, filename);
+    const filePath = join(targetDir, filename);
     let content;
     try {
       content = readFileSync(filePath, "utf8");
@@ -613,10 +1008,22 @@ function _defaultCheckEngram() {
   return r.status === 0;
 }
 
-function _defaultEngramSave(title, content, { type, project, topic }) {
+// NOTE (C4 review): `engram save` accepts --type/--project/--scope/--topic but
+// has NO timestamp flag, so it cannot carry a record's original `ts` — every
+// hydrated observation is re-stamped with engram's wall-clock insert time. The
+// committed `records/` keeps the correct `ts` (source of truth); only engram's
+// rebuildable local cache loses original recency ordering on pull. Preserving
+// created_at would need an engram-side ingestion verb (tracked as a follow-up).
+function _defaultEngramSave(title, content, { type, project, scope, topic }) {
   execFileSync(
     "engram",
-    ["save", title, content, "--type", type, "--project", project, "--topic", topic],
+    [
+      "save", title, content,
+      "--type", type,
+      "--project", project,
+      ...(scope ? ["--scope", scope] : []),
+      "--topic", topic,
+    ],
     { stdio: ["ignore", "ignore", "pipe"] },
   );
 }

@@ -19,6 +19,8 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { CHANGES_ROOT, missingRequiredArtifacts, isGrandfathered } from './lib/sdd-layout.mjs';
+
 const ROOT = process.cwd();
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -93,20 +95,31 @@ for (const file of files) {
 // Structural validations (generic — always active)
 const structViolations = [];
 
-// S-1: every active change in openspec/changes/ must have proposal.md and tasks.md
-const changesDir = join(ROOT, 'openspec/changes');
+// S-1: every active, non-grandfathered change in openspec/changes/ must carry
+// all REQUIRED_ARTIFACTS (proposal.md, spec.md, design.md, tasks.md) — the B0
+// contract (sdd-layout.mjs), enforced here (#595 pin 1). Behavior-preserving
+// over the frozen corpus + B0-contract enforcement going forward — NEVER
+// "pure wiring": every frozen dir already carries all 4 artifacts (see
+// lib/sdd-layout.golden.json, issue #253/B1), so this changes nothing
+// today; it is latent-stricter for any future incomplete dir.
+const changesDir = join(ROOT, CHANGES_ROOT);
 if (existsSync(changesDir)) {
+  const fsSeam = {
+    exists: (p) => existsSync(join(ROOT, p)),
+    listDir: (p) => readdirSync(join(ROOT, p)),
+  };
   for (const entry of readdirSync(changesDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name === 'archive') continue;
-    const dir = join(changesDir, entry.name);
-    for (const required of ['proposal.md', 'tasks.md']) {
-      if (!existsSync(join(dir, required))) {
-        structViolations.push({
-          path: `openspec/changes/${entry.name}/${required}`,
-          rule: 'openspec-incomplete',
-          reason: `Active change missing ${required} — required by the SDD workflow.`,
-        });
-      }
+    if (isGrandfathered(entry.name)) continue;
+    const missing = missingRequiredArtifacts(entry.name, fsSeam);
+    if (missing.length > 0) {
+      structViolations.push({
+        path: `${CHANGES_ROOT}/${entry.name}`,
+        rule: 'openspec-incomplete',
+        reason:
+          `Active change missing ${missing.join(', ')} — required by the SDD workflow ` +
+          '(see brain/core/methodology/sdd-layout.md).',
+      });
     }
   }
 }

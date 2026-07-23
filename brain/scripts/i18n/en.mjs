@@ -292,4 +292,47 @@ export default {
   'session.manifest.restored':  'manifest: churn restored (safe)',
   'session.ticket.label':       'ticket:',
   'session.ticket.none':        '(no active ticket memory)',
+
+  // ── memory/cli.mjs — reindex (issue #205, C1) ─────────────────────────────────
+  'memory.reindex.done':   '✓ reindex complete — {count} record(s) indexed.',
+  'memory.reindex.failed': '✗ reindex failed — {message}',
+
+  // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
+  'memory.share.secretFound': 'Secret detected in {file}:{line} — pattern "{pattern}" matched. Redact the secret, or add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive. Run `gunzip -c {file} | jq .` to inspect (the line number is against that pretty-printed view).',
+
+  // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
+  'memory.share.secretFoundRecords': 'Secret detected in a candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
+
+  // ── memory/backends/engram.mjs — importMemory() records-only pull (D2/C4, issue #229) ──
+  'memory.import.empty':    'ℹ no records found in .memory/records/ — nothing to import.',
+  'memory.import.progress': '  ✓ {written}/{total} records imported',
+  'memory.import.done':     '✓ import complete — {written}/{total} records imported into engram (records-only, D2/C4).',
+
+  // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──
+  'memory.migrateV1.realRunSummary':        '✓ migration complete — written: {written} | rejected: {rejected} | skipped (personal): {skipped} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations} | index: {indexCount} record(s). records/ is now the sole write path (memory.dualWrite retired, D3/C4).',
+  'memory.migrateV1.rollbackSummary':       '✓ rollback complete — chunk(s) restored: {restored} | index: {indexCount} record(s).',
+  'memory.migrateV1.dryRunHeader':          'Dry-run migration report (issue #217, C2):',
+  'memory.migrateV1.summary':               'records: {records} | skipped (personal): {skipped} | rejected: {rejected} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations}',
+  'memory.migrateV1.typesHistogramHeader':  'Types histogram:',
+  'memory.migrateV1.provenanceHistogramHeader': 'Provenance histogram: {recovered} recovered / {fallback} fallback',
+  'memory.migrateV1.rejectedHeader':        'Rejected records:',
+  'memory.migrateV1.emptyObservationsHeader': 'Sessions/prompts-only chunks (observations: null — not corruption, 0 contributed):',
+  'memory.migrateV1.unparseableHeader':     'Unparseable chunk files (genuinely corrupt — observation count unknown):',
+
+  // ── memory/lib/unsupported-op.mjs — the shared never-cryptic deferral helper (C3, issue #246) ──
+  'memory.op.unsupported':            "op '{op}' is not supported by the '{backend}' memory backend (deferred — see openspec/changes/issue-246-c3).",
+  'memory.save.engramUnsupported':    "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_save / 'engram save' instead.",
+  'memory.search.engramUnsupported':  "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_search / 'engram search' instead.",
+
+  // ── memory/backends/plainfiles.mjs — save/search CLI verbs (C3, issue #246) ──
+  'memory.plainfiles.save.done':    "✓ saved {id} → {file}",
+  'memory.plainfiles.save.secretFound': 'Secret detected in the candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
+  'memory.save.plainfilesIgnoredOpts': 'ignored option(s) {opts} — the plainfiles record format has no field for them (scope/topic are engram-only concepts); the record was still written normally.',
+  'memory.plainfiles.search.empty': 'ℹ no matching records found.',
+  'memory.plainfiles.search.summary': '{count} matching record(s):',
+
+  // ── brain-protect.mjs — arm-and-verify (issue #203) ───────────────────────────
+  'protect.verify.unverifiable': '  Verify   : no check-runs found yet on {branch} — unverifiable until the first PR runs.',
+  'protect.verify.missing':      '  WARNING  : required check "{context}" has no matching check-run yet — confirm the job name is exact.',
+  'protect.verify.unsupported':  '  Verify   : run verification not supported on provider {provider} — armed contexts not cross-checked.',
 };

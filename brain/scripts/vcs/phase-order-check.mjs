@@ -13,9 +13,19 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { loadContext } from './ci-context.mjs';
+import { archivePath, CHANGES_ROOT, LEGACY_GRANDFATHERED } from '../lib/sdd-layout.mjs';
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const CHANGE_DIR_PREFIX = 'openspec/changes/';
+const CHANGE_DIR_PREFIX = `${CHANGES_ROOT}/`;
+
+// The accessor-owned archive container's directory name (issue #264), derived
+// from archivePath() rather than hardcoded — if the archive location ever
+// relocates, this follows the accessor instead of drifting out of sync. It is
+// a container of archived changes, never an in-flight change itself, so it
+// must never be evaluated as a `touchedDirs` entry (Rule A/C false positive).
+const ARCHIVE_DIR_NAME = archivePath('').slice(CHANGE_DIR_PREFIX.length).split('/')[0];
 
 // Allowlist subtracted from the "impl" set (Rule C): files that never count as
 // implementation code even when they live outside openspec/changes/**.
@@ -152,8 +162,10 @@ function evaluateRuleB(touchedDirs) {
 export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [] } = {}) {
   const impl = changedFiles.filter(f => !f.startsWith(CHANGE_DIR_PREFIX) && !isAllowlisted(f));
 
-  const touchedDirs = changeDirs.filter(dir =>
-    changedFiles.some(f => f.startsWith(`${CHANGE_DIR_PREFIX}${dir.name}/`))
+  const touchedDirs = changeDirs.filter(
+    dir =>
+      dir.name !== ARCHIVE_DIR_NAME &&
+      changedFiles.some(f => f.startsWith(`${CHANGE_DIR_PREFIX}${dir.name}/`))
   );
 
   const findings = [
@@ -173,14 +185,13 @@ export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [] } = {}) 
 
 // ── Baseline / grandfather allowlist (REQ-L4-5, Gap G3) ────────────────────────
 //
-// Pre-v3 legacy openspec/changes/** dirs that carry proposal.md + design.md +
-// tasks.md but no spec artifact under either convention (spec.md or
-// specs/*/spec.md) — they predate even the spec.md convention. Hardcoded per
-// Micro-decisions (tasks.md line 210), analogous to brain-audit.mjs's
-// `governance.auditBaseline`. Not `brain.config.json`-driven yet — promote to
-// config-driven only if a second consumer needs it.
-
-export const BASELINE_EXEMPT_DIRS = ['installer-versionado', 'vcs-adapter', 'cli-i18n'];
+// Pre-v3 legacy openspec/changes/** dirs, sourced from the B0-sealed
+// LEGACY_GRANDFATHERED set (sdd-layout.mjs) — REQ-B1-3. The original 3-dir
+// BASELINE_EXEMPT_DIRS literal (installer-versionado, vcs-adapter, cli-i18n)
+// is a strict subset of the sealed 12 (proven by sdd-layout.test.mjs 1.7), so
+// this swap does not change which dirs are exempted for any existing dir —
+// the 9 additional grandfathered dirs all carry a nested spec artifact and
+// never produced a downgradeable `fail` in the first place (design §2.1).
 
 /**
  * Post-processes an evaluatePhaseOrder() result: any `fail` finding attributed
@@ -192,7 +203,7 @@ export const BASELINE_EXEMPT_DIRS = ['installer-versionado', 'vcs-adapter', 'cli
  * @param {string[]} [baselineDirs]
  * @returns {{level: string, findings: Array}}
  */
-export function applyBaselineExemption(evaluation, baselineDirs = BASELINE_EXEMPT_DIRS) {
+export function applyBaselineExemption(evaluation, baselineDirs = LEGACY_GRANDFATHERED) {
   const findings = evaluation.findings.map(f => {
     if (f.change && baselineDirs.includes(f.change) && f.level === 'fail') {
       return {
@@ -364,13 +375,14 @@ export function gatherPhaseOrderInputs({ baseSha, headSha, cwd = process.cwd(), 
  * degrades to `warn` rather than `fail`, keeping REQ-L4-5's zero-false-positive
  * goal intact while this job is detection-only (DETECTION_JOBS).
  *
- * @param {{ cwd?: string, baseSha?: string, headSha?: string, deps?: object }} [deps]
+ * @param {{ cwd?: string, baseSha?: string, headSha?: string, ctx?: object, deps?: object }} [deps]
  * @returns {{ level: 'pass'|'warn'|'fail', findings: Array }}
  */
 export function runPhaseOrderCheck(deps = {}) {
   const cwd = deps.cwd ?? process.cwd();
-  const baseSha = deps.baseSha ?? process.env.BASE_SHA;
-  const headSha = deps.headSha ?? process.env.HEAD_SHA;
+  const ctx = deps.ctx ?? {};
+  const baseSha = deps.baseSha ?? ctx.baseSha;
+  const headSha = deps.headSha ?? ctx.headSha;
 
   if (!baseSha || !headSha) {
     return {
@@ -430,5 +442,6 @@ export function main(deps = {}) {
 // ── CLI entrypoint ───────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  process.exit(main());
+  const ctx = await loadContext();
+  process.exit(main({ ctx }));
 }

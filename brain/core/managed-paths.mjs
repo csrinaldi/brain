@@ -28,17 +28,33 @@ export const MANAGED_SCRIPT_KEYS = [
   'brain:change:verify',
 ];
 
+// The .gitattributes line declaring git's BUILT-IN `union` merge driver for the
+// brain-owned durable record log (ADR-0017, REQ-MF-3, issue #214/C1b). Unlike
+// the legacy `merge=engram-manifest` line, this needs NO per-clone `git config`
+// registration. Single source of truth — drift-guarded against the real
+// `.gitattributes` file by managed-paths.test.mjs.
+export const RECORDS_UNION_MERGE_GITATTRIBUTES_LINE = '/.memory/records/*.jsonl merge=union';
+
 // Paths brain owns. The upgrade OVERWRITES these in the consumer.
 export const managed = [
   'brain/core/**',
   'brain/scripts/**',
   '.gitattributes',
   '.github/workflows/governance.yml',   // the L1 gate travels with brain (ADR-0014)
+  'brain/scripts/ci/gitlab-governance.yml', // opt-in GitLab governance pipeline fragment (issue #231
+                                             // A2, design.md Decision 1). LITERAL only — brain never
+                                             // manages the consumer's root .gitlab-ci.yml (that file
+                                             // stays LOCAL; adoption is a single `include: local:` line
+                                             // the consumer adds themselves).
   '.github/workflows/release.yml',      // L2 rung-2/rung-3 enforcement travels with brain (issue #176)
   '.github/workflows/governance-postmerge.yml', // L2 rung-2/rung-3 enforcement travels with brain (issue #176)
   '.github/PULL_REQUEST_TEMPLATE.md',   // the Closes/Fixes scaffold the gate parses (ADR-0014)
   '.github/CODEOWNERS',                 // L6 rung-1 enhancement, optional (REQ-L6-1, design §6.2)
   '.claude/settings.json',              // Claude Code harness hook — no-verify policy (ADR-0014 §9)
+  'AGENTS.md',                          // generated Antigravity/AGENTS-standard context (issue #256 B2).
+                                         // LITERAL — repo root, outside every existing glob. Regenerated
+                                         // by antigravity.mjs#init; brain:upgrade ships it because its
+                                         // sources (brain/core/**) are already managed.
   'package.json', // additive brain:* verb injection via specialMerge (S5, issue #137).
                   // MUST stay registered in brain-upgrade.mjs specialMerge — a plain copy would overwrite the consumer's package.json.
 ];

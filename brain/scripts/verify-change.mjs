@@ -11,6 +11,8 @@
 // Sin dependencias externas.
 
 import { execSync, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { detectPM } from './lib/pm.mjs';
 
 const ROOT = process.cwd();
@@ -60,9 +62,11 @@ const MATRIX = [
     match: (f) => f.startsWith('brain/scripts/') || f === 'package.json',
     commands: (files) => [
       ...files
-        .filter((f) => /\.(mjs|js|cjs)$/.test(f))
+        .filter((f) => /\.(mjs|js|cjs)$/.test(f) && existsSync(join(ROOT, f)))
         .map((f) => ['node', '--check', f]),
-      ...files.filter((f) => f.endsWith('.sh')).map((f) => ['bash', '-n', f]),
+      ...files
+        .filter((f) => f.endsWith('.sh') && existsSync(join(ROOT, f)))
+        .map((f) => ['bash', '-n', f]),
     ],
   },
   // brain/**, openspec/**, docs: sin validación extra — repo:check (always) cubre.

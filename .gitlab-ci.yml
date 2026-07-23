@@ -1,0 +1,7 @@
+# Brain as its OWN GitLab consumer — the ADR-0018 `include:` opt-in, dogfooded.
+# This repo is the future GitLab consumer (public gitlab.com mirror now, SCIT self-hosted later),
+# so it opts itself in via the sanctioned one line. INERT on GitHub (GitHub ignores .gitlab-ci.yml).
+# The governance jobs (issue-link, diff-size, local-checks, memory-gate, decision-gate REQUIRED;
+# phase-order, actor-check, brain-writes-reviewed DETECTION via allow_failure) live in the fragment.
+include:
+  - local: 'brain/scripts/ci/gitlab-governance.yml'

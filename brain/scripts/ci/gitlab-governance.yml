@@ -1,0 +1,143 @@
+# gitlab-governance.yml — GitLab governance pipeline fragment (ADR-0014,
+# ADR-0016, ADR-0018 draft; issue #231 A2, design.md Decisions 1-3).
+#
+# OPT-IN — brain never manages the consumer's root `.gitlab-ci.yml` (GitLab
+# allows exactly one root pipeline file per project, and brain writing it
+# would clobber whatever else the consumer runs there — design.md Decision
+# 1). This file is a managed LITERAL (brain/core/managed-paths.mjs) that
+# travels with `brain:upgrade`; it is inert until the consumer opts in with
+# ONE line in their root `.gitlab-ci.yml`:
+#
+#   include:
+#     - local: 'brain/scripts/ci/gitlab-governance.yml'
+#
+# REQUIRED CI/CD VARIABLES (Settings > CI/CD > Variables in the consumer's
+# GitLab project) — never hardcode a token or proxy host in this file or in
+# any brain source:
+#   - VCS_TOKEN            a GitLab access token with API scope, read by
+#                          ci-context.mjs's loadGitlabContext() (PRIVATE-TOKEN
+#                          header) to fetch the MR body/labels/author in one
+#                          call (REQ-CIC-5).
+#   - HTTPS_PROXY / HTTP_PROXY (optional) standard proxy env — ci-context.mjs
+#                          honors these automatically (REQ-CIC-5) if the
+#                          runner sits behind one. Never set a proxy host
+#                          literal here.
+# GitLab CI/CD variables configured in project settings are injected into
+# every job's environment automatically — no per-job `variables:` mapping is
+# needed for VCS_TOKEN/HTTPS_PROXY/HTTP_PROXY.
+#
+# CI_DEFAULT_BRANCH is a standard GitLab-PREDEFINED variable (free — no
+# project configuration, no extra API call) and is available to every job
+# automatically; ci-context.mjs's loadGitlabContext() reads it directly to
+# compute `ctx.defaultBranch` (REQ-CIC-2 delta, issue #231 A2 phase 2
+# addendum). Nothing in this fragment needs to map it explicitly (unlike
+# GitHub Actions, where `.github/workflows/governance.yml` must map
+# `github.event.repository.default_branch` into a job `env:` line).
+#
+# THE GOTCHA (design.md Decision 2): GitLab exposes no
+# CI_MERGE_REQUEST_DESCRIPTION variable and CI_MERGE_REQUEST_LABELS FREEZES
+# at pipeline creation (ADR-0016:45) — bash cannot implement issue-link or
+# diff-size on GitLab the way GitHub Actions can. All eight jobs below
+# therefore route through Node entrypoints that consume `loadContext()`
+# (ci-context.mjs), which fetches the MR body + FRESH labels in one
+# proxy-aware API call. Pure evaluators (issueLink, diffSize, memoryPresence,
+# adrPresence, evaluatePhaseOrder, evaluateActor,
+# evaluateBrainWritesReviewed) stay UNCHANGED (ADR-0016 boundary).
+#
+# EXIT-CODE MAPPING (Decision 3, Amendment 3 — never flatten):
+#   REQUIRED jobs  (issue-link, diff-size, local-checks, memory-gate,
+#                   decision-gate) are NORMAL jobs — a non-zero exit BLOCKS
+#                   the MR.
+#   DETECTION jobs (phase-order, actor-check, brain-writes-reviewed) carry
+#                   `allow_failure: true` — a non-zero exit is VISIBLE
+#                   (red) but does NOT block the MR. This mirrors GitHub's
+#                   two-tier REQUIRED_JOBS/DETECTION_JOBS registry
+#                   (governance-checks.mjs) — see also REQ-A2-4.
+#
+# Job names below are load-bearing: they MUST equal GOVERNANCE_JOBS
+# (governance-checks.mjs) exactly. A drift-guard test
+# (ci-context-drift-guard.test.mjs) string-slices this file and fails red on
+# any job-set or allow_failure mismatch (REQ-A2-5, Decision 5).
+#
+# Scoped to merge-request pipelines only (`rules:` below) — these checks
+# read MR-specific context (ctx.body/labels/targetBranch) that does not
+# exist on a plain branch-push pipeline; running them there would fail
+# closed for the wrong reason. This mirrors GitHub Actions'
+# `on: pull_request` trigger scoping in governance.yml.
+#
+# IMAGE (issue #231 CP-A2b live-validation finding #13): pinned ONCE here via
+# the global `default:` — every job below inherits it (GitLab CI merges
+# `default:` into each job that does not set its own `image:`). node:20 fails
+# the local-checks job with "Could not find ..." because
+# `node --test "brain/scripts/**/*.test.mjs"` needs Node 21+ glob-expansion
+# support; node:22 is the current LTS. Never add a per-job `image:` override
+# — that would let a future edit silently drift one job back to node:20 while
+# the other seven stay pinned (ci-context-drift-guard.test.mjs asserts this
+# single-source-of-truth invariant and fails red on either a missing/downgraded
+# default or a reintroduced per-job image line).
+
+default:
+  image: node:22
+
+.governance_mr_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ── Invariant 1 — Every MR links an approved issue (REQUIRED) ───────────────
+issue-link:
+  extends: .governance_mr_rules
+  stage: test
+  script:
+    - node brain/scripts/governance/run-check.mjs issue-link
+
+# ── Invariant 2 — MR diff fits within the review budget (REQUIRED) ─────────
+diff-size:
+  extends: .governance_mr_rules
+  stage: test
+  script:
+    - node brain/scripts/governance/run-check.mjs diff-size
+
+# ── Invariant 3 (L1) — local-only checks run in CI too (REQUIRED) ──────────
+local-checks:
+  extends: .governance_mr_rules
+  stage: test
+  script:
+    - npm run repo:check && npm run brain:nav && npm test
+
+# ── Invariant 4 (L3) — session memory was captured (REQUIRED) ──────────────
+memory-gate:
+  extends: .governance_mr_rules
+  stage: test
+  script:
+    - node brain/scripts/governance/run-check.mjs memory-gate
+
+# ── Invariant 5 (L3) — architectural changes carry an ADR (REQUIRED) ───────
+decision-gate:
+  extends: .governance_mr_rules
+  stage: test
+  script:
+    - node brain/scripts/governance/run-check.mjs decision-gate
+
+# ── Invariant 6 (L4, detection-only) — SDD phase order ──────────────────────
+phase-order:
+  extends: .governance_mr_rules
+  stage: test
+  allow_failure: true
+  script:
+    - node brain/scripts/vcs/phase-order-check.mjs
+
+# ── Invariant 7 (L5, detection-only) — human-approval actor ────────────────
+actor-check:
+  extends: .governance_mr_rules
+  stage: test
+  allow_failure: true
+  script:
+    - node brain/scripts/vcs/actor-check.mjs
+
+# ── Invariant 8 (L6, detection-only) — brain-writes reviewed ───────────────
+brain-writes-reviewed:
+  extends: .governance_mr_rules
+  stage: test
+  allow_failure: true
+  script:
+    - node brain/scripts/vcs/brain-writes-reviewed.mjs

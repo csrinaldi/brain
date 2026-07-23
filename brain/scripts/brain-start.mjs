@@ -3,7 +3,8 @@
 //
 // Usage: npm run brain:start <issue-number>
 //   1. Calls issueView() via the configured VCS provider.
-//   2. Checks that the issue has a "status:approved" label.
+//   2. Checks that the issue has the approved label (governance.approvedLabel,
+//      provider-resolved — issue #231 A2 phase 1, design.md Decision 4).
 //   3. Creates a local branch: feature/<number>-<title-slug>.
 //   4. Exits 0 on success; exits 1 if unapproved or issue not found.
 //
@@ -14,6 +15,8 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+
+import { resolveApprovedLabel } from './governance/approved-label.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -45,9 +48,12 @@ function gitCreateBranch(branch) {
  * @param {string} opts.project         VCS project slug (e.g. "owner/repo").
  * @param {Function} opts.issueViewFn   Async fn({project,number}) → issue object. Injected for tests.
  * @param {Function} opts.createBranchFn Async fn(branchName) → {ok,error?}. Injected for tests.
+ * @param {string} [opts.approvedLabel] Resolved approved label (governance.approvedLabel,
+ *   provider-resolved). Defaults to resolveApprovedLabel()'s base form when omitted.
  * @returns {Promise<{exitCode: number, message: string}>}
  */
-export async function runStart({ issueNumber, project, issueViewFn, createBranchFn }) {
+export async function runStart({ issueNumber, project, issueViewFn, createBranchFn, approvedLabel }) {
+  const label = approvedLabel ?? resolveApprovedLabel({}, undefined);
   const num = parseInt(issueNumber, 10);
   if (!num || num <= 0) {
     return { exitCode: 1, message: `brain:start: invalid issue number: ${issueNumber}` };
@@ -64,13 +70,13 @@ export async function runStart({ issueNumber, project, issueViewFn, createBranch
   }
 
   const labels = issue.labels ?? [];
-  if (!labels.includes('status:approved')) {
+  if (!labels.includes(label)) {
     return {
       exitCode: 1,
       message:
         `brain:start: issue #${num} ("${issue.title}") is not approved.\n` +
         `  Labels found: [${labels.join(', ')}]\n` +
-        `  Add "status:approved" before starting work.`,
+        `  Add "${label}" before starting work.`,
     };
   }
 
@@ -128,6 +134,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     project,
     issueViewFn: (args) => providerModule.issueView(args),
     createBranchFn: gitCreateBranch,
+    approvedLabel: resolveApprovedLabel(config, provider),
   });
 
   if (result.exitCode === 0) {

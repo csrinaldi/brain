@@ -25,8 +25,10 @@
     "brain:tracker:board": "node ./brain/scripts/tracker-board.mjs",
     "brain:repo:check": "node ./brain/scripts/check-refs.mjs",
     "brain:change:verify": "node ./brain/scripts/verify-change.mjs",
+    "brain:change:archive": "node ./brain/scripts/archive.mjs",
     "repo:check": "node ./brain/scripts/check-refs.mjs",
     "change:verify": "node ./brain/scripts/verify-change.mjs",
+    "change:archive": "node ./brain/scripts/archive.mjs",
     "brain:upgrade": "node ./brain/scripts/brain-upgrade.mjs",
     "brain:protect": "node ./brain/scripts/brain-protect.mjs",
     "brain:protect-server": "node ./brain/scripts/brain-protect-server.mjs",
@@ -37,6 +39,8 @@
     "memory:index": "node ./brain/scripts/memory/cli.mjs index",
     "memory:share": "node ./brain/scripts/memory/cli.mjs share",
     "memory:pull": "node ./brain/scripts/memory/cli.mjs pull",
+    "memory:reindex": "node ./brain/scripts/memory/cli.mjs reindex",
+    "memory:migrate-v1": "node ./brain/scripts/memory/cli.mjs migrate-v1",
     "feature:checkpoint": "node ./brain/scripts/memory/cli.mjs feature-checkpoint",
     "feature:resume": "node ./brain/scripts/memory/cli.mjs feature-resume",
     "tools:install": "bash ./brain/scripts/install-tools.sh",
@@ -46,6 +50,9 @@
     "brain:save": "node ./brain/scripts/brain-save.mjs",
     "brain:ship": "node ./brain/scripts/brain-ship.mjs",
     "brain:next": "node ./brain/scripts/brain-next.mjs",
-    "brain:adopt": "node ./brain/scripts/adopt.mjs"
+    "brain:adopt": "node ./brain/scripts/adopt.mjs",
+    "brain:review": "node ./brain/scripts/review/cli.mjs",
+    "brain:review:queue": "node ./brain/scripts/review/cli.mjs queue",
+    "brain:review:board": "node ./brain/scripts/review/cli.mjs board"
   }
 }

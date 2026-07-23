@@ -1,15 +1,19 @@
 // issue-link.mjs — check for a GitHub-style issue reference in a commit message or PR body.
 //
 // Accepts two reference patterns (case-insensitive):
-//   • Closing reference:  Closes|Fixes|Resolves #N   — used by integration PRs to main
+//   • Closing reference:  Close(s|d)|Fix(es|ed)|Resolve(s|d) #N — all 9
+//     GitHub-documented forms; used by integration PRs to the default branch.
 //   • Chain reference:    Part of #N                  — used by slice PRs in a chained-PR flow
+//
+// Patterns are shared via issue-ref-patterns.mjs (issue #231 CP-A2a review,
+// finding M1) — this file previously defined its OWN narrower 3-form closing
+// pattern (closes|fixes|resolves only), which diverged from GitHub bash's and
+// actor-check.mjs's broader 9-form vocabulary. Widened to match; see that
+// module's header comment for the full rationale.
 //
 // Returns { pass: boolean, reason?: string }.
 
-// Closing keywords per GitHub documentation (case-insensitive).
-const CLOSING_RE = /\b(closes|fixes|resolves)\s+#\d+/i;
-// Chained-PR partial reference: "Part of #N".
-const CHAIN_RE = /\bpart\s+of\s+#\d+/i;
+import { CLOSING_RE, CHAIN_RE } from './issue-ref-patterns.mjs';
 
 /**
  * @param {string} body  Commit message or PR description.
@@ -21,6 +25,8 @@ export function issueLink(body) {
   }
   return {
     pass: false,
-    reason: 'no issue reference found — body must contain Closes|Fixes|Resolves #N or Part of #N',
+    reason:
+      'no issue reference found — body must contain a closing keyword ' +
+      '(Close(s|d)|Fix(es|ed)|Resolve(s|d)) #N or Part of #N',
   };
 }

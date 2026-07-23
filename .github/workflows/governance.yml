@@ -25,6 +25,16 @@ jobs:
   # and legitimately carry "Part of #N" instead of "Closes #N".  The integration
   # PR (base == main) must still use Closes|Fixes|Resolves #N.  Both patterns
   # must reference an issue labelled status:approved.
+  #
+  # KNOWN DIVERGENCE (issue #231 A2 phase 2 addendum, pre-existing, out of
+  # scope here): this job compares BASE_BRANCH against the LITERAL 'main',
+  # not the repo's actual default branch — a consumer whose default branch is
+  # not 'main' inherits the wrong policy here. The Node run-check.mjs
+  # issue-link case (used by GitLab, and by this run-check.test.mjs's parity
+  # table) was fixed to compare against ctx.defaultBranch (the real default
+  # branch) instead — see run-check.mjs's "THE ADDENDUM GOTCHA" comment.
+  # Porting this bash job to the same ctx.defaultBranch-aware policy is a
+  # recorded follow-up, not done in this addendum (this job stays bash).
   issue-link:
     name: issue-link
     runs-on: ubuntu-latest
@@ -70,13 +80,19 @@ jobs:
             fi
           fi
 
-          # In both cases the referenced issue must be labelled status:approved.
+          # In both cases the referenced issue must carry the resolved approved
+          # label. Sourced from the config-driven resolver (design.md Decision
+          # 4, REQ-A2-3, issue #231 A2 phase 5) via approved-label.mjs's CLI
+          # printer — never a hardcoded literal, so a consumer-set
+          # governance.approvedLabel value is honored here too.
+          APPROVED_LABEL=$(node brain/scripts/governance/approved-label.mjs github)
+
           # Handle gh failure explicitly: under `set -e` an unguarded non-zero
           # would abort the step with no actionable message.
           labels=$(gh api "repos/${{ github.repository }}/issues/${num}" --jq '.labels[].name') \
             || { echo "::error::Could not fetch issue #${num} (gh api failed — does it exist?)."; exit 1; }
-          if ! printf '%s\n' "$labels" | grep -qx 'status:approved'; then
-            echo "::error::Issue #${num} is not labeled status:approved."
+          if ! printf '%s\n' "$labels" | grep -qx "$APPROVED_LABEL"; then
+            echo "::error::Issue #${num} is not labeled ${APPROVED_LABEL}."
             exit 1
           fi
 
@@ -148,8 +164,10 @@ jobs:
   # ── Invariant 4 (L3, governance v3) — session memory was captured ──────────
   #
   # Wraps the existing pure memoryPresence check: fails when no committed
-  # .memory/chunks/ observation is a session_summary. Thin runner keeps the
-  # logic in the tested pure function (design §4).
+  # .memory/records/ OR .memory/chunks/ observation is a session_summary
+  # (transitional: both sources are unioned during the chunks→records cutover
+  # window — see run-check.mjs). Thin runner keeps the logic in the tested
+  # pure function (design §4).
   memory-gate:
     name: memory-gate
     runs-on: ubuntu-latest
@@ -157,6 +175,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: memory-gate (session summary captured)
+        env:
+          # Repo metadata (never trigger identity — ADR-0016 ruling 1), mapped
+          # so ci-context.mjs's loadContext() can compute ctx.defaultBranch
+          # (issue #231 A2 phase 2 addendum). memory-gate itself does not
+          # consume this field today; every run-check.mjs-invoking job is wired
+          # uniformly so the seam degrades to null only when truly uncomputable.
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node brain/scripts/governance/run-check.mjs memory-gate
 
   # ── Invariant 5 (L3, governance v3) — architectural changes carry an ADR ────
@@ -175,6 +200,8 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # See memory-gate above (issue #231 A2 phase 2 addendum).
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node brain/scripts/governance/run-check.mjs decision-gate
 
   # ── Invariant 6 (L4, governance v3, detection-only) — SDD phase order ──────
@@ -196,6 +223,8 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # See memory-gate above (issue #231 A2 phase 2 addendum).
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node brain/scripts/vcs/phase-order-check.mjs
 
   # ── Invariant 7 (L5, governance v3, detection-only) — human-approval actor ──
@@ -214,9 +243,14 @@ jobs:
       - name: actor-check (status:approved actor differs from the author, detection-only)
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # PR_NUMBER lets ci-context.mjs source the author from the prView API
+          # (ADR-0016 Never-do #3: never the author from env). PR_BODY stays as the
+          # DETECTION-only body fallback; PR_AUTHOR removed (author now via API).
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          # See memory-gate above (issue #231 A2 phase 2 addendum).
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node brain/scripts/vcs/actor-check.mjs
 
   # ── Invariant 8 (L6, governance v3, detection-only) — brain-writes reviewed ─
@@ -243,4 +277,6 @@ jobs:
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # See memory-gate above (issue #231 A2 phase 2 addendum).
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node brain/scripts/vcs/brain-writes-reviewed.mjs
