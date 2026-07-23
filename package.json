@@ -53,6 +53,8 @@
     "brain:adopt": "node ./brain/scripts/adopt.mjs",
     "brain:review": "node ./brain/scripts/review/cli.mjs",
     "brain:review:queue": "node ./brain/scripts/review/cli.mjs queue",
-    "brain:review:board": "node ./brain/scripts/review/cli.mjs board"
+    "brain:review:board": "node ./brain/scripts/review/cli.mjs board",
+    "brain:context:compile": "node ./brain/scripts/context/cli.mjs",
+    "context:compile": "node ./brain/scripts/context/cli.mjs"
   }
 }

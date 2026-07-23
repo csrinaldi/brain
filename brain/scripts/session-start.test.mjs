@@ -20,6 +20,7 @@ import {
   step2HydrateEngram,
   step3ResolveChange,
   step4LoadTicketMemory,
+  step5SynthesizeContext,
   runSessionStart,
   resolveSessionStrings,
 } from './session-start.mjs';
@@ -468,6 +469,15 @@ test('step4LoadTicketMemory: _resume throws → null, never throws', () => {
   assert.equal(step4LoadTicketMemory('/repo', { _resume }), null);
 });
 
+test('step5SynthesizeContext: _synthesize throws → isolated failure shape with core floor, never throws', async () => {
+  const _synthesize = () => { throw new Error('synthesizer error'); };
+  assert.doesNotThrow(() => step5SynthesizeContext('/repo', { _synthesize }));
+  const result = await step5SynthesizeContext('/repo', { _synthesize });
+  assert.ok(result.coreFloor.length > 0, 'core floor must be populated on throw');
+  assert.equal(result.failsafeActivated, true);
+  assert.ok(result.markdown.includes('Core Methodology Baseline Floor'));
+});
+
 // MAJOR 2 regression (fresh review): step4 only accepted a full `_resume`
 // override and otherwise called the REAL tryFeatureResume (real spawnSync),
 // completely ignoring deps._spawn — bypassing the gate AND making the
@@ -618,6 +628,7 @@ const ALLOWED_IMPORT_SPECIFIERS = [
   './lib/git-branch.mjs',
   './lib/memory-manifest.mjs',
   './memory/lib/auto-resume.mjs',
+  './context/synthesizer.mjs',
   './i18n/t.mjs',
   './lib/sdd-layout.mjs',
 ];
