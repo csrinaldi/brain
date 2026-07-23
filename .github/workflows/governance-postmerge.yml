@@ -1,4 +1,4 @@
-# governance-postmerge.yml — L2 post-merge auto-revert (rung 3)
+# governance-postmerge.yml — L2 post-merge auto-revert (rung 3), D2 cursor model.
 #
 # Reuses brain/scripts/brain-audit.mjs UNCHANGED, run in the trusted post-merge
 # context (code already on main) — which is why contents: write is safe here
@@ -6,8 +6,16 @@
 # SEPARATE workflow from governance.yml (design.md §10-B, gap B): the read-only
 # PR gate must never gain write scope.
 #
-# On audit failure, opens an auto-revert PR so bad state does not persist on
-# main (design.md §3, REQ-L2-2).
+# D2 (issue #259) — the auto-revert EXECUTOR, cursor-windowed and fail-closed:
+#   • The audit window is the governance CURSOR range (cursor..HEAD), never the
+#     push payload's before..sha — so an offender that landed while an earlier
+#     run was pinned is never skipped (REQ-D2-1, the skip-over theorem).
+#   • The audit's NUMERIC exit code is authoritative: 0 → advance the cursor;
+#     1 → revert exactly the parsed [FAIL-SHA] offenders; 2 → loud infra issue,
+#     never revert, never advance; anything else → normalized to 2 (REQ-D2-6).
+#   • Reverts consume the ONE tested parser (parse-failures.mjs, REQ-D2-5) — the
+#     class-filtered, deduped, resurrection-suppressed [FAIL-SHA] signal, never
+#     github.sha blindly.
 
 name: governance-postmerge
 
@@ -19,69 +27,270 @@ on:
 
 permissions: { contents: write, pull-requests: write } # trusted: runs post-merge on main
 
+# Defense-in-depth against overlapping runs (the CAS in cursor.mjs advanceCursor
+# is the actual guarantee; this only narrows the window). REQ-D2-12 / §5.3.
+concurrency: { group: governance-postmerge, cancel-in-progress: false }
+
 jobs:
   audit-and-revert:
     name: audit-and-revert
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 is BINDING (REQ-D2-1/-11): resolveWindow/advanceCursor run
+      # LOCAL `git merge-base --is-ancestor` against the cursor sha, which starves
+      # on a shallow clone once the cursor is >1 commit behind HEAD — a legitimate
+      # window then dies with a false "not an ancestor". Full history, always.
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      - id: audit
-        name: Run brain-audit over the last push range
+      - id: gitidentity
+        name: Configure a git identity for the runner
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            # No push payload on cron: github.event.before does not exist, so the
-            # naive "${{ github.event.before }}..${{ github.sha }}" range collapses
-            # to sha..sha (empty) and the daily backstop would never catch anything.
-            # Audit unreleased merges since the last tag instead.
-            BASE=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
-          else
-            BASE="${{ github.event.before }}"
-          fi
-          node brain/scripts/brain-audit.mjs "${BASE}..${{ github.sha }}"
-        continue-on-error: true
+          set -euo pipefail
+          # A bare runner has no git identity — `git revert` / `cursor.mjs accept`
+          # fail without author/committer info configured.
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Open auto-revert PR on audit failure
-        if: steps.audit.outcome == 'failure'
+      - id: window
+        name: Resolve the audit window from the governance cursor
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          # Operational-robustness item 1: a bare runner has no git identity —
-          # `git revert` fails without author/committer info configured.
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # cursor.mjs window prints one of:
+          #   PRESENT <base> <head>   (exit 0) — audit base..head
+          #   ABSENT                  (exit 2) — the cursor ref does not exist
+          #   UNKNOWN <reason>        (exit 2) — the cursor could not be computed
+          # Capture BOTH output and code; never let a non-zero code abort silently.
+          set +e
+          win_out="$(node brain/scripts/governance/postmerge/cursor.mjs window)"
+          win_code=$?
+          set -e
 
-          sha="${{ github.sha }}"
-          br="auto-revert/${sha:0:7}"
+          state="$(printf '%s\n' "$win_out" | head -n1 | cut -d' ' -f1)"
 
-          # Operational-robustness item 3 (idempotency, #165): a re-run on the
-          # same SHA — a retry, or the daily cron re-hitting an already-flagged
-          # commit before its revert PR merges — must not fail loudly on an
-          # existing branch/PR. If the auto-revert branch already exists on
-          # origin, the revert PR was already opened; no-op and exit cleanly.
-          if git ls-remote --exit-code --heads origin "$br" >/dev/null 2>&1; then
-            echo "auto-revert branch $br already exists — revert PR already opened for $sha; skipping."
+          if [ "$win_code" -eq 0 ] && [ "$state" = "PRESENT" ]; then
+            base="$(printf '%s\n' "$win_out" | head -n1 | cut -d' ' -f2)"
+            head="$(printf '%s\n' "$win_out" | head -n1 | cut -d' ' -f3)"
+            echo "range=${base}..${head}" >> "$GITHUB_OUTPUT"
+            echo "resolved audit window: ${base}..${head}"
             exit 0
           fi
 
-          # Operational-robustness item 2: `git revert -m 1` errors out if $sha
-          # is NOT a merge commit (e.g. squash or fast-forward merges have a
-          # single parent). Only pass -m 1 when the commit actually has 2+
-          # parents; otherwise revert it as a normal single-parent commit.
-          parent_count="$(git cat-file -p "$sha" | grep -c '^parent ')"
-          if [ "$parent_count" -ge 2 ]; then
-            git revert -m 1 --no-edit "$sha"
+          # ABSENT / UNKNOWN / any non-PRESENT output → loud issue, exit 2, NEVER
+          # audit an inferred range, NEVER revert, NEVER auto-create the cursor.
+          if [ "$state" = "ABSENT" ]; then
+            label="governance:cursor-missing"
+            {
+              echo "The governance cursor ref does not exist. Post-merge auditing is halted until it is initialized."
+              echo ""
+              echo "Initialize it (human action) with:"
+              echo '```'
+              echo "git update-ref refs/governance/cursor \$(git rev-list --max-parents=0 HEAD | tail -n1)"
+              echo "git push origin refs/governance/cursor"
+              echo '```'
+            } > "$RUNNER_TEMP/body.md"
           else
-            git revert --no-edit "$sha"
+            label="governance:cursor-unknown"
+            reason="$(printf '%s\n' "$win_out" | head -n1 | cut -d' ' -f2-)"
+            {
+              echo "The governance cursor could not be computed — auditing is halted (fail-closed, never a guess)."
+              echo ""
+              echo "Reason: ${reason:-unspecified}"
+              echo ""
+              echo "No init command is offered: bootstrapping the cursor on a guess is refused. A human must diagnose."
+            } > "$RUNNER_TEMP/body.md"
           fi
 
-          git switch -c "$br"
-          git push origin "$br"
+          gh label create "$label" --color B60205 --description "governance postmerge halt" --force
+          if [ -n "$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')" ]; then
+            num="$(gh issue list --label "$label" --state open --json number --jq '.[0].number')"
+            gh issue comment "$num" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh issue create --title "governance: postmerge halted — ${label#governance:}" \
+              --label "$label" --body-file "$RUNNER_TEMP/body.md"
+          fi
+          exit 2
 
-          gh pr create --base main --head "$br" \
-            --title "revert: governance audit failed on ${sha:0:7}" \
-            --body "Automated revert — post-merge brain:audit failed. Part of #144" \
-            --label size:exception
+      - id: audit
+        name: Run brain-audit over the cursor window
+        run: |
+          set -euo pipefail
+          range="${{ steps.window.outputs.range }}"
+
+          # The audit's NUMERIC exit code is authoritative — capture it, never a
+          # boolean outcome (continue-on-error flattens 1 and 2). A [FAIL-SHA]-like
+          # string in stdout is NEVER pattern-matched to decide a revert.
+          set +e
+          audit_out="$(node brain/scripts/brain-audit.mjs "$range")"
+          code=$?
+          set -e
+
+          # Normalize any unmapped/kill code to 2 (uncomputable) BEFORE branching.
+          case "$code" in
+            0|1|2) ;;
+            *) code=2 ;;
+          esac
+
+          printf '%s\n' "$audit_out"
+          {
+            echo "code=${code}"
+            echo 'stdout<<AUDIT_EOF'
+            printf '%s\n' "$audit_out"
+            echo 'AUDIT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - id: advance
+        name: Advance the cursor on a clean audit (code 0)
+        if: steps.audit.outputs.code == '0'
+        run: |
+          set -euo pipefail
+          range="${{ steps.window.outputs.range }}"
+          base="${range%%..*}"
+          head="${range##*..}"
+          node brain/scripts/governance/postmerge/cursor.mjs accept "$base" "$head" \
+            --reason "post-merge audit clean over ${range}"
+          echo "cursor advanced to ${head}"
+
+      - id: revert
+        name: Revert the parsed offenders (code 1)
+        if: steps.audit.outputs.code == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_STDOUT: ${{ steps.audit.outputs.stdout }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+
+          # Parse offenders through the ONE tested parser (REQ-D2-5). The parser's
+          # stdout goes through a plain command substitution so its failure trips
+          # set -e; the mapfile then reads that captured value. A parser crash
+          # aborts the job — never a silently empty offender list.
+          parsed="$(printf '%s' "$AUDIT_STDOUT" | node brain/scripts/governance/postmerge/parse-failures.mjs)"
+          offenders=()
+          while IFS= read -r line; do
+            [ -n "$line" ] && offenders+=("$line")
+          done <<< "$parsed"
+
+          if [ "${#offenders[@]}" -eq 0 ]; then
+            echo "code was 1 but the tested parser yielded no [FAIL-SHA] offenders — incoherent, failing closed."
+            exit 2
+          fi
+
+          failed=()
+          for sha in "${offenders[@]}"; do
+            (
+              set -euo pipefail
+              br="auto-revert/${sha}"
+
+              # PR-keyed idempotency (REQ-D2-13): a PR for this offender — open,
+              # merged, OR closed-without-merge — is never duplicated or reopened.
+              if [ -n "$(gh pr list --head "$br" --state all --json number --jq '.[0].number // empty')" ]; then
+                echo "auto-revert PR for ${sha} already exists — skipping."
+                exit 0
+              fi
+
+              # Parents-only count (REQ-D2-4): `git show -s --format=%P` lists ONLY
+              # the parent shas. The rejected alternative counted "parent " lines
+              # in the raw object, which also matches commit-MESSAGE lines that
+              # happen to begin with that word — a false merge classification.
+              nparents="$(git show -s --format=%P "$sha" | wc -w)"
+              git checkout --detach "$head_sha"
+              if [ "$nparents" -ge 2 ]; then
+                git revert -m 1 --no-edit "$sha"
+              else
+                git revert --no-edit "$sha"
+              fi
+
+              git switch -c "$br"
+              git push origin "$br"
+
+              body="$RUNNER_TEMP/revert-${sha}.md"
+              {
+                echo "Automated revert — post-merge brain:audit reported ${sha} as an un-exempted tree-keyed offender live at HEAD."
+                echo ""
+                echo "Part of #259."
+              } > "$body"
+              gh pr create --base main --head "$br" \
+                --title "revert: governance audit failed on ${sha:0:7}" \
+                --body-file "$body" --label size:exception
+            ) || {
+              # Per-offender failure boundary: abort any half-applied revert, reset
+              # to a clean detached HEAD, clean up an orphan branch so it can never
+              # permanently suppress a retry, record the offender, and CONTINUE.
+              git revert --abort 2>/dev/null || true
+              git checkout --detach "$head_sha" 2>/dev/null || true
+              git push origin --delete "auto-revert/${sha}" 2>/dev/null || true
+              failed+=("$sha")
+            }
+          done
+
+          if [ "${#failed[@]}" -gt 0 ]; then
+            label="governance:revert-blocked"
+            {
+              echo "The post-merge auto-revert could not revert the following offenders (conflict or push/PR failure):"
+              echo ""
+              for s in "${failed[@]}"; do
+                echo "- \`${s}\` — manual: \`git revert -m 1 --no-edit ${s}\` (or without -m 1 for a non-merge commit)"
+              done
+              echo ""
+              echo "The cursor stays PINNED until these are resolved. Part of #259."
+            } > "$RUNNER_TEMP/revert-blocked.md"
+            gh label create "$label" --color B60205 --description "auto-revert blocked" --force
+            if [ -n "$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')" ]; then
+              num="$(gh issue list --label "$label" --state open --json number --jq '.[0].number')"
+              gh issue comment "$num" --body-file "$RUNNER_TEMP/revert-blocked.md"
+            else
+              gh issue create --title "governance: auto-revert blocked" \
+                --label "$label" --body-file "$RUNNER_TEMP/revert-blocked.md"
+            fi
+            echo "reverts blocked for ${#failed[@]} offender(s); cursor stays pinned."
+            exit 1
+          fi
+
+          echo "reverted ${#offenders[@]} offender(s); cursor stays pinned until the revert PR(s) merge."
+
+      - id: uncomputable
+        name: Raise a loud infra issue on an uncomputable audit (code 2)
+        if: steps.audit.outputs.code == '2'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_STDOUT: ${{ steps.audit.outputs.stdout }}
+        run: |
+          set -euo pipefail
+          label="governance:audit-uncomputable"
+          {
+            echo "The post-merge audit exited uncomputable (code 2) over the cursor window — NO revert and NO cursor advance was performed (fail-closed, REQ-D2-6/-12)."
+            echo ""
+            echo "Audit output:"
+            echo '```'
+            printf '%s\n' "$AUDIT_STDOUT"
+            echo '```'
+            echo ""
+            echo "Part of #259."
+          } > "$RUNNER_TEMP/uncomputable.md"
+          gh label create "$label" --color B60205 --description "postmerge audit uncomputable" --force
+          if [ -n "$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')" ]; then
+            num="$(gh issue list --label "$label" --state open --json number --jq '.[0].number')"
+            gh issue comment "$num" --body-file "$RUNNER_TEMP/uncomputable.md"
+          else
+            gh issue create --title "governance: postmerge audit uncomputable" \
+              --label "$label" --body-file "$RUNNER_TEMP/uncomputable.md"
+          fi
+          exit 2
+
+      - id: terminal
+        name: Terminal-state assertion (the audit code was exactly 0, 1, or 2)
+        if: always()
+        run: |
+          set -euo pipefail
+          code="${{ steps.audit.outputs.code }}"
+          # If the audit step itself was killed and wrote no output, code is empty:
+          # that is an uncomputable terminal state — fail the job loudly rather
+          # than let a killed audit pass as a clean run.
+          case "$code" in
+            0|1|2) echo "terminal audit code: ${code}" ;;
+            *) echo "audit produced no mapped terminal code ('${code}') — uncomputable; failing the job."; exit 1 ;;
+          esac
