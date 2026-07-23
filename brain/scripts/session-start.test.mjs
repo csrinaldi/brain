@@ -618,6 +618,7 @@ const ALLOWED_IMPORT_SPECIFIERS = [
   './lib/git-branch.mjs',
   './lib/memory-manifest.mjs',
   './memory/lib/auto-resume.mjs',
+  './context/synthesizer.mjs',
   './i18n/t.mjs',
   './lib/sdd-layout.mjs',
 ];

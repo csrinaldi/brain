@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { currentBranch } from './lib/git-branch.mjs';
 import { restoreManifestChurn } from './lib/memory-manifest.mjs';
 import { tryFeatureResume } from './memory/lib/auto-resume.mjs';
+import { synthesizeContext } from './context/synthesizer.mjs';
 import { t } from './i18n/t.mjs';
 import { CHANGES_ROOT, parseChangeId } from './lib/sdd-layout.mjs';
 
@@ -320,6 +321,20 @@ export function step4LoadTicketMemory(cwd, deps = {}) {
     return tryFeatureResume(cwd, { _runner: runner }) ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Step 5 — synthesize targeted agent context floor + ADRs (REQ-CTX-4).
+ * @returns {Promise<{ coreFloor: string[], matchedDecisions: string[], markdown: string }>}
+ */
+export async function step5SynthesizeContext(cwd, deps = {}) {
+  try {
+    const change = step3ResolveChange(cwd, deps);
+    const synth = deps._synthesize ?? synthesizeContext;
+    return await synth({ touchedFiles: change.matches, rootDir: cwd });
+  } catch {
+    return { coreFloor: [], matchedDecisions: [], matchedMemories: [], failsafeActivated: false, failsafeMode: 'core_floor', markdown: '' };
   }
 }
 
