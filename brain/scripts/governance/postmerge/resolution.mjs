@@ -431,6 +431,80 @@ export function addedPathsAbsentAt(candidate, tip, { git }) {
 }
 
 /**
+ * `revertResurrectsAt(C, tip)` — would reverting candidate C RE-ADD content that
+ * is ABSENT from the tree at `tip`? (PR4 precondition; external ruling rev 1 on
+ * #302 — Option C, payload-anchored liveness, operationalised against the
+ * PROPERTY fixtures A11/A12 froze.)
+ *
+ *   revertResurrectsAt(C, tip)
+ *     = ∃ path p, ∃ line L : L is REMOVED by the normDiff-pinned first-parent
+ *       diff C^1..C on p, AND L is ABSENT from the blob at tip:p
+ *
+ * WHY THIS IS THE DISCRIMINATOR. `[FAIL-SHA]` nominates C for AUTOMATIC reversion
+ * (PR4). Reverting C applies its inverse — it RE-ADDS whatever C removed. If any
+ * line C removed is absent from the tip, reverting C resurrects it. When that
+ * resurrected content is the ungoverned payload a prior merge cleaned up, the
+ * nomination is the §15.5 harm: PR4 would revert the cleanup and put the payload
+ * back. So a merge that resurrects on revert is REPORTED (never a silent PASS)
+ * but never nominated. A merge that only ADDS (no removed lines) resurrects
+ * nothing → nominable; reverting it purely removes what it added.
+ *
+ * WHY IT READS THE TIP, NOT THE WINDOW. A windowed net count cannot see the base
+ * state (the A8/A10 blindness), and it cannot tell a pure-removal cleanup (A11,
+ * nets 0) from a live re-add (A10, also nets 0). And it cannot tell either from a
+ * REPLACE-shaped cleanup (A12), whose merge ADDS a live line while its NET effect
+ * is removal — the shape that refuted the line-membership primitive `[candidate
+ * 1]`. The removed-line-absent-at-tip test keys on what reverting would
+ * RESURRECT, which is exactly the harm, and reads the tip tree directly.
+ *
+ * IDENTIFICATION NOTE (ruling rev 1 §mechanism-boundary). The ruling names the
+ * offending payload for `adrPresence` (the ungoverned ADR content). Rather than
+ * re-identify "the offending content" per check — which is genuinely ambiguous
+ * for a REPLACE (is it the removed offender, or the added placeholder?) and for
+ * `diffSize` (churn has no content identity) — this predicate binds to the
+ * frozen PROPERTY instead: "a merge whose net effect removes the offending
+ * payload must never carry [FAIL-SHA]" (A12). Reverting-resurrects is that
+ * property made operational and check-agnostic. Where a future check needs a
+ * finer identity than "any removed line", that is the escalation the ruling
+ * reserves — not improvised here.
+ *
+ * EXACT-LINE, byte-compared against the tip blob via the SAME pinned diff
+ * `normDiff` uses (no rename laundering, root-relative), so two distinct payloads
+ * never collapse. A path C deleted entirely is absent at tip ⇒ every line it
+ * removed resurrects ⇒ not nominable. PURE-READ.
+ */
+export function revertResurrectsAt(candidate, tip, { git }) {
+  const raw = git.orThrow([
+    ...HARDENED_CONFIG, '-c', 'diff.relative=false',
+    'diff', '--no-textconv', '--no-ext-diff', '--no-renames',
+    '--diff-filter=AMD', '-U0', `${candidate}^1`, candidate,
+  ]);
+  // Collect (path -> removed line bodies) from the diff.
+  const removedByPath = new Map();
+  let cur = null;
+  for (const line of raw.split('\n')) {
+    const m = /^--- a\/(.*)$/.exec(line);
+    if (m) { cur = m[1]; if (!removedByPath.has(cur)) removedByPath.set(cur, []); continue; }
+    const mp = /^\+\+\+ b\/(.*)$/.exec(line);
+    if (mp) { cur = mp[1]; if (!removedByPath.has(cur)) removedByPath.set(cur, []); continue; }
+    if (cur && line.startsWith('-') && !line.startsWith('---')) {
+      removedByPath.get(cur).push(line.slice(1));
+    }
+  }
+  for (const [path, removed] of removedByPath) {
+    if (removed.length === 0) continue;
+    let blobLines;
+    try {
+      blobLines = new Set(git.orThrow(['show', `${tip}:${path}`]).split('\n'));
+    } catch {
+      return true; // path absent at tip → every removed line resurrects
+    }
+    if (removed.some((L) => !blobLines.has(L))) return true;
+  }
+  return false;
+}
+
+/**
  * Is `candidate` the reverter of `offender`? (design §3.3) — the PAIRWISE
  * diff-inversion primitive: `candidate`'s own contribution, read backward, is
  * byte-identical to what the offender introduced.
