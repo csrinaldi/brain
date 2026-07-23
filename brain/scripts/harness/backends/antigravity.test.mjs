@@ -17,7 +17,7 @@
 //     `AGENTS.md` BEFORE the drift-guard could catch it, silently defeating
 //     the whole #601 ignoreList classification. The committed `AGENTS.md`'s
 //     regeneration is now EXCLUSIVELY a deliberate CLI act:
-//     `SDD_HARNESS=antigravity node brain/scripts/harness/cli.mjs init`
+//     `AGENT_PLATFORM=antigravity node brain/scripts/harness/cli.mjs init`
 //     (task 3.1) — never a side effect of `npm test`.
 //
 // Run with: npm test.
@@ -29,7 +29,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // RED: fails until antigravity.mjs exists and exports these.
-import { SOURCE_DOCS, AGENTS_EMIT_PATH, compileAgentsMd, init } from './antigravity.mjs';
+import { SOURCE_DOCS, AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH, compileAgentsMd, compileGeminiSettingsJson, init } from './antigravity.mjs';
 import { dispatch } from '../cli.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
@@ -225,8 +225,6 @@ test('2.4: dispatch("antigravity", "init", [opts]) resolves through the REAL cli
   assert.match(scratchWrites[0].content, /— do not edit/);
 });
 
-// Task 2.5 — confirm n=3: SDD_HARNESS=antigravity, plain, and gentle-ai are all
-// real, dispatchable init() inhabitants of the same dispatch path.
 test('2.5: n=3 — antigravity, plain, and gentle-ai all resolve through dispatch() to a real init() export', async () => {
   const antigravity = await import('./antigravity.mjs');
   const plain = await import('./plain.mjs');
@@ -235,3 +233,25 @@ test('2.5: n=3 — antigravity, plain, and gentle-ai all resolve through dispatc
   assert.equal(typeof plain.init, 'function');
   assert.equal(typeof gentleAi.init, 'function');
 });
+
+// ── issue #305: .gemini/settings.json emission ───────────────────────────────
+
+test('GEMINI_SETTINGS_EMIT_PATH === ".gemini/settings.json"', () => {
+  assert.equal(GEMINI_SETTINGS_EMIT_PATH, '.gemini/settings.json');
+});
+
+test('compileGeminiSettingsJson() emits valid JSON with SessionStart and PreToolUse hooks', () => {
+  const jsonStr = compileGeminiSettingsJson();
+  const parsed = JSON.parse(jsonStr);
+
+  assert.ok(parsed.hooks);
+  assert.ok(Array.isArray(parsed.hooks.PreToolUse));
+  assert.ok(Array.isArray(parsed.hooks.SessionStart));
+
+  const sessionStartHook = parsed.hooks.SessionStart[0].hooks[0].command;
+  assert.equal(sessionStartHook, 'npm run brain:session:start');
+
+  const preToolUseHook = parsed.hooks.PreToolUse[0].hooks[0].command;
+  assert.match(preToolUseHook, /--no-verify/);
+});
+

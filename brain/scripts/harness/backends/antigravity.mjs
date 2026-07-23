@@ -18,7 +18,7 @@
 //   init() — reads the 5 SOURCE_DOCS, compiles AGENTS.md via compileAgentsMd(),
 //            writes it to AGENTS_EMIT_PATH. Never throws.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, posix as posixPath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -41,7 +41,45 @@ export const SOURCE_DOCS = Object.freeze([
 /** Repo-root-relative path Antigravity reads (measured, Exp 1). */
 export const AGENTS_EMIT_PATH = 'AGENTS.md';
 
-const REGENERATE_HINT = 'SDD_HARNESS=antigravity npm run brain:env:init';
+/** Repo-root-relative path for Antigravity native settings hooks (issue #305). */
+export const GEMINI_SETTINGS_EMIT_PATH = '.gemini/settings.json';
+
+const REGENERATE_HINT = 'AGENT_PLATFORM=antigravity npm run brain:env:init';
+
+/**
+ * Compiles .gemini/settings.json content with native workspace hooks.
+ * Pure, fs-free.
+ *
+ * @returns {string} The formatted JSON content.
+ */
+export function compileGeminiSettingsJson() {
+  const obj = {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Bash',
+          hooks: [
+            {
+              type: 'command',
+              command: "node -e \"const cmd = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).tool_input?.command ?? ''; if (/--no-verify/.test(cmd) || /\\bgit commit\\b[^|&\\n]*\\s+-n\\b/.test(cmd)) { process.stderr.write('\\n[brain:hook] BLOCKED: --no-verify / git commit -n bypasses governance hooks.\\nSee ADR-0014 §9. Fix the hook that is causing the false-positive instead.\\n'); process.exit(2); }\"",
+            },
+          ],
+        },
+      ],
+      SessionStart: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: 'npm run brain:session:start',
+            },
+          ],
+        },
+      ],
+    },
+  };
+  return JSON.stringify(obj, null, 2) + '\n';
+}
 
 // ---------------------------------------------------------------------------
 // Relative-link rebasing (CP-B2 inaugural-read finding, owner ruling).
@@ -136,8 +174,10 @@ function _defaultReadDoc(relPath, root) {
   return readFileSync(join(root, relPath), 'utf8');
 }
 
-function _defaultWriteAgents(relPath, content, root) {
-  writeFileSync(join(root, relPath), content, 'utf8');
+function _defaultWriteFile(relPath, content, root) {
+  const fullPath = join(root, relPath);
+  mkdirSync(dirname(fullPath), { recursive: true });
+  writeFileSync(fullPath, content, 'utf8');
 }
 
 // ---------------------------------------------------------------------------
@@ -145,26 +185,28 @@ function _defaultWriteAgents(relPath, content, root) {
 // ---------------------------------------------------------------------------
 
 /**
- * Compiles and writes AGENTS.md from the 5 canonical SOURCE_DOCS. Never
- * throws — a failing read is warned and treated as empty content for that
- * source; a failing write is warned; neither aborts the other step.
+ * Compiles and writes AGENTS.md from the 5 canonical SOURCE_DOCS and
+ * emits .gemini/settings.json hooks. Never throws.
  *
  * @param {object} [opts] Injectable seams.
  * @param {(relPath: string) => string} [opts._readDoc]
  *   Reads one source doc's content. Defaults to real readFileSync from _repoRoot.
  * @param {(relPath: string, content: string) => void} [opts._writeAgents]
- *   Writes the compiled content to relPath. Defaults to real writeFileSync
- *   against _repoRoot.
+ *   Writes the compiled content to relPath.
+ * @param {(relPath: string, content: string) => void} [opts._writeGeminiSettings]
+ *   Writes the compiled .gemini/settings.json content.
  * @param {string} [opts._repoRoot] Repo root used by the default seams.
  * @returns {Promise<void>}
  */
 export async function init({
   _readDoc,
   _writeAgents,
+  _writeGeminiSettings,
   _repoRoot = repoRoot,
 } = {}) {
   const readDoc = _readDoc ?? ((relPath) => _defaultReadDoc(relPath, _repoRoot));
-  const writeAgents = _writeAgents ?? ((relPath, content) => _defaultWriteAgents(relPath, content, _repoRoot));
+  const writeAgents = _writeAgents ?? ((relPath, content) => _defaultWriteFile(relPath, content, _repoRoot));
+  const writeGeminiSettings = _writeGeminiSettings ?? ((relPath, content) => _defaultWriteFile(relPath, content, _repoRoot));
 
   const docs = {};
   for (const relPath of SOURCE_DOCS) {
@@ -182,5 +224,12 @@ export async function init({
     writeAgents(AGENTS_EMIT_PATH, content);
   } catch (err) {
     console.warn(`  harness: antigravity could not write ${AGENTS_EMIT_PATH} — ${err.message}`);
+  }
+
+  const settingsContent = compileGeminiSettingsJson();
+  try {
+    writeGeminiSettings(GEMINI_SETTINGS_EMIT_PATH, settingsContent);
+  } catch (err) {
+    console.warn(`  harness: antigravity could not write ${GEMINI_SETTINGS_EMIT_PATH} — ${err.message}`);
   }
 }

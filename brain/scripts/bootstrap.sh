@@ -249,15 +249,17 @@ fi
 # Runs BEFORE the memory sync so the ecosystem (skills, engram, gga) is
 # ready when memory is imported.
 say "$I18N_BOOTSTRAP_SDD_SECTION"
-SDD_HARNESS="$(env_get SDD_HARNESS)"
-if [ -z "$SDD_HARNESS" ]; then
-  if [ -t 0 ]; then
-    read -r -p "  $I18N_BOOTSTRAP_SDD_PROMPT" SDD_HARNESS
-  fi
-  SDD_HARNESS="${SDD_HARNESS:-gentle-ai}"
-  env_set SDD_HARNESS "$SDD_HARNESS"
+AGENT_PLATFORM="$(env_get AGENT_PLATFORM)"
+[ -n "$AGENT_PLATFORM" ] || AGENT_PLATFORM="antigravity"
+env_set AGENT_PLATFORM "$AGENT_PLATFORM"
+
+SDD_ENGINE="$(env_get SDD_ENGINE)"
+if [ -z "$SDD_ENGINE" ]; then
+  _LEGACY_HARNESS="$(env_get SDD_HARNESS)"
+  SDD_ENGINE="${_LEGACY_HARNESS:-gentle-ai}"
+  env_set SDD_ENGINE "$SDD_ENGINE"
 fi
-ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_HARNESS")"
+ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_ENGINE ($AGENT_PLATFORM)")"
 node brain/scripts/harness/cli.mjs init \
   || warn "$I18N_BOOTSTRAP_SDD_INITFAILED"
 

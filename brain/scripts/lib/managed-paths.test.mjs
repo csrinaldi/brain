@@ -183,3 +183,12 @@ test('managed includes AGENTS.md (exact literal, issue #256 B2, REQ-B2-4)', () =
     'managed must contain the exact literal "AGENTS.md"',
   );
 });
+
+// issue #305: .gemini/settings.json must travel with brain on upgrade
+test('managed includes .gemini/settings.json (exact literal, issue #305)', () => {
+  assert.ok(
+    managed.includes('.gemini/settings.json'),
+    'managed must contain the exact literal ".gemini/settings.json"',
+  );
+});
+
