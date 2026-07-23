@@ -20,6 +20,7 @@ import {
   step2HydrateEngram,
   step3ResolveChange,
   step4LoadTicketMemory,
+  step5SynthesizeContext,
   runSessionStart,
   resolveSessionStrings,
 } from './session-start.mjs';
@@ -466,6 +467,15 @@ test('step4LoadTicketMemory: _resume throws → null, never throws', () => {
   const _resume = () => { throw new Error('cli not found'); };
   assert.doesNotThrow(() => step4LoadTicketMemory('/repo', { _resume }));
   assert.equal(step4LoadTicketMemory('/repo', { _resume }), null);
+});
+
+test('step5SynthesizeContext: _synthesize throws → isolated failure shape with core floor, never throws', async () => {
+  const _synthesize = () => { throw new Error('synthesizer error'); };
+  assert.doesNotThrow(() => step5SynthesizeContext('/repo', { _synthesize }));
+  const result = await step5SynthesizeContext('/repo', { _synthesize });
+  assert.ok(result.coreFloor.length > 0, 'core floor must be populated on throw');
+  assert.equal(result.failsafeActivated, true);
+  assert.ok(result.markdown.includes('Core Methodology Baseline Floor'));
 });
 
 // MAJOR 2 regression (fresh review): step4 only accepted a full `_resume`
