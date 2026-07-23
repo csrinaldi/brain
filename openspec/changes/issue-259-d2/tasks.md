@@ -788,11 +788,15 @@ future workflow-extracting test file that might ever be added — that generaliz
 
 ### Phase 4.2 — Skip-over integration proof (REQ-D2-1, the theorem made concrete)
 
-- [ ] 4.2.1 RED (**fixture C1**, against v1 behavior on `scrap/d2-v1-broken`): cursor at `C`. Offender `M`
-      lands (exit 1, cursor pinned at `C`). Then a **clean merge `P2`** lands. Assert the window for the
-      `P2` run is exactly `C..P2` (still containing `M`) — the run exits 1 again and the cursor does **not**
-      advance past `M`. Against `scrap/d2-v1-broken`'s workflow, this fixture demonstrates the cursor
-      jumping to `P2`, skipping `M` — record that RED explicitly as the regression proof.
+- [ ] 4.2.1 RED (**fixture C1**, SELF-CONTAINED — corrected per `I304-C1-TARGET-ABSENT`, #304 rev 1): the
+      fixture MINTS its own temp repo (`mkdtemp`, no live server branch) with the skip-over topology —
+      cursor at `C`; offender `M` lands (exit 1, cursor pinned at `C`); then a **clean merge `P2`** lands.
+      Assert the window for the `P2` run is exactly `C..P2` (still containing `M`) — the run exits 1 again
+      and the cursor does **not** advance past `M`. The RED baseline is the **v1 range behavior reproduced
+      inside the fixture** (a `github.event.before..HEAD`-style window that jumps to `P2`, skipping `M`) —
+      constructed locally, never read from a server branch. The historical `scrap/d2-v1-broken` (local-only,
+      never on origin) is **provenance prose**: the demonstration that v1 let the cursor skip `M`; preserve
+      it as an `archive/` tag (per the `9233880` precedent) if warranted, but the test never reads it.
 - [ ] 4.2.2 GREEN: confirm the always-`cursor..HEAD` resolution (already implemented in PR 1's
       `resolveWindow`) satisfies 4.2.1 once wired through the workflow's window step (4.1.1) — this task is
       integration wiring, not new core logic.
