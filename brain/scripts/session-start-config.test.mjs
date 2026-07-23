@@ -9,11 +9,20 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+// The bare `session:start` alias is NOT in MANAGED_SCRIPT_KEYS, so it is not
+// injected into a consumer's package.json (only the canonical `brain:session:start`
+// is). Guard that one assertion to the brain source repo (via the .brain-source
+// marker); the canonical-script and .claude/settings.json tests below stay active
+// in consumers because those artifacts ARE vendored.
+const aliasSkip = existsSync(join(ROOT, '.brain-source'))
+  ? false
+  : 'deprecated session:start alias is not injected into consumers';
 
 // ---------------------------------------------------------------------------
 // package.json — "brain:session:start" canonical script + "session:start" alias
@@ -25,7 +34,7 @@ test('package.json: has a brain:session:start script invoking session-start.mjs'
   assert.equal(pkg.scripts?.['brain:session:start'], 'node ./brain/scripts/session-start.mjs');
 });
 
-test('package.json: session:start deprecated alias still points to session-start.mjs (dual-alias, shipped in v0.8.0)', () => {
+test('package.json: session:start deprecated alias still points to session-start.mjs (dual-alias, shipped in v0.8.0)', { skip: aliasSkip }, () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts?.['session:start'], 'node ./brain/scripts/session-start.mjs');
 });

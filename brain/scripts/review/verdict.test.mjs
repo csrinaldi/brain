@@ -100,3 +100,59 @@ test('renderVerdict: emits a fenced yaml block naming protocol, verdict, and hea
   assert.match(block, /rev: 1/); // first review, 1-indexed (default priorRevCount 0)
   assert.match(block, /```\s*$/);
 });
+
+// ── Causal Admission Rules (REQ-H2-3) ──────────────────────────────────────
+
+test('buildVerdict: pre-existing or base-only findings do NOT trigger REVISE and are routed to follow_ups[]', () => {
+  const v = buildVerdict({
+    headSha: HEAD_SHA,
+    conclusion: 'REVISE',
+    protocol: 'brain-review/2',
+    findings: [
+      {
+        id: 'f1',
+        severity: 'blocker',
+        evidence: 'ran tests',
+        cites: 'REQ-1',
+        causal_disposition: 'pre-existing',
+        evidence_class: 'deterministic',
+      },
+      {
+        id: 'f2',
+        severity: 'blocker',
+        evidence: 'ran tests',
+        cites: 'REQ-2',
+        causal_disposition: 'base-only',
+        evidence_class: 'deterministic',
+      },
+    ],
+  });
+
+  assert.equal(v.verdict, 'APPROVE');
+  assert.equal(v.findings.length, 0);
+  assert.deepEqual(v.follow_ups, [
+    { id: 'f1', severity: 'blocker', evidence: 'ran tests', cites: 'REQ-1', causal_disposition: 'pre-existing', evidence_class: 'deterministic' },
+    { id: 'f2', severity: 'blocker', evidence: 'ran tests', cites: 'REQ-2', causal_disposition: 'base-only', evidence_class: 'deterministic' },
+  ]);
+});
+
+test('buildVerdict: causal_disposition "unknown" forces escalate: human and verdict STOP', () => {
+  const v = buildVerdict({
+    headSha: HEAD_SHA,
+    conclusion: 'REVISE',
+    protocol: 'brain-review/2',
+    findings: [
+      {
+        id: 'f1',
+        severity: 'blocker',
+        evidence: 'ran tests',
+        cites: 'REQ-1',
+        causal_disposition: 'unknown',
+        evidence_class: 'inferential',
+      },
+    ],
+  });
+
+  assert.equal(v.verdict, 'STOP');
+  assert.equal(v.escalate, 'human');
+});

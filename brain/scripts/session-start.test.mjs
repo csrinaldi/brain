@@ -724,13 +724,16 @@ test('no-network: the pull codepath is never reached even when manifest churn is
 // resolveSessionStrings() — real i18n wiring end-to-end (design §1.8, REQ-8)
 // ---------------------------------------------------------------------------
 
-test('resolveSessionStrings: resolves every field from the real en.mjs catalog (default locale)', async () => {
-  const strings = await resolveSessionStrings();
+test('resolveSessionStrings: resolves every field from the real en.mjs catalog (en locale)', async () => {
+  // Pin the locale explicitly: passing 'en' resolves against the English
+  // catalog independent of the ambient brain.config.json, so this test stays
+  // green when the whole suite runs from a consumer repo with docs.language !== en.
+  const strings = await resolveSessionStrings('en');
   assert.deepEqual(strings, SESSION_STRINGS);
 });
 
 test('resolveSessionStrings: output feeds renderContextBlock end-to-end (no hardcoded fallback)', async () => {
-  const strings = await resolveSessionStrings();
+  const strings = await resolveSessionStrings('en');
   const model = {
     manifest: { restored: false },
     engram: { ok: true },

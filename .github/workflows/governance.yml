@@ -130,11 +130,21 @@ jobs:
 
   # ── Invariant 3 (L1, governance v3) — local-only checks run in CI too ───────
   #
-  # repo:check, brain:nav, and npm test previously ran only in the local
-  # pre-push hook (brain/scripts/hooks/pre-push), which is bypassable via
-  # `git push --no-verify` or simply not installed. This job closes that gap
+  # repo:check and brain:nav previously ran only in the local pre-push hook
+  # (brain/scripts/hooks/pre-push), which is bypassable via `git push
+  # --no-verify` or simply not installed. This job closes that gap
   # author-agnostically: it runs on every PR event covered by the workflow
   # trigger above, regardless of whether the contributor's local hook ran.
+  #
+  # repo:check and brain:nav validate the CONSUMER's own brain/ state, so they
+  # run everywhere this vendored workflow lands. `npm test` is different: it is
+  # brain's INTERNAL unit suite (node --test brain/scripts/**), which exercises
+  # brain's own tooling against brain-repo state — ambient docs.language,
+  # brain/project/** files, brain-repo paths — that a consumer does not have.
+  # Running it in a consumer is a portability treadmill (issues #206, #211).
+  # Gate it to the brain SOURCE repo via the .brain-source marker (present only
+  # here, never a managed path, so never vendored). Consumers skip it and stay
+  # green; brain's own CI still runs the full suite.
   local-checks:
     name: local-checks
     runs-on: ubuntu-latest
@@ -147,7 +157,8 @@ jobs:
       - name: brain:nav (navigation/link integrity)
         run: npm run brain:nav
 
-      - name: test (unit test suite)
+      - name: test (brain internal unit suite — brain source only)
+        if: ${{ hashFiles('.brain-source') != '' }}
         run: npm test
 
   # ── Invariant 4 (L3, governance v3) — session memory was captured ──────────

@@ -1,6 +1,6 @@
 {
   "name": "brain",
-  "version": "0.9.3",
+  "version": "0.9.5",
   "private": true,
   "description": "Generic AI-assisted development harness — knowledge base, SDD scaffolding, and team memory.",
   "repository": {

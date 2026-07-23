@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { translate, t } from './t.mjs';
+import { translate, t, loadCatalog } from './t.mjs';
 import en from './en.mjs';
 
 // ── translate() — pure function ───────────────────────────────────────────────
@@ -54,19 +54,46 @@ test('translate: partial params — known slot replaced, unknown slot kept', () 
   assert.equal(result, 'Authenticated as @bob ({provider}).');
 });
 
-// ── t() — async end-to-end (uses actual brain.config.json: docs.language=en) ──
+// ── loadCatalog() — explicit-locale seam (no ambient cache) ───────────────────
+// Locks the documented contract of the exported hermetic seam: English/empty →
+// {}, unknown locale → {} (import failure caught), known locale → its catalog.
+
+test('loadCatalog: English resolves to an empty catalog (English is the fallback base)', async () => {
+  assert.deepEqual(await loadCatalog('en'), {});
+});
+
+test('loadCatalog: undefined/empty locale resolves to an empty catalog', async () => {
+  assert.deepEqual(await loadCatalog(), {});
+  assert.deepEqual(await loadCatalog(''), {});
+});
+
+test('loadCatalog: unknown locale resolves to {} (import failure is caught, never throws)', async () => {
+  assert.deepEqual(await loadCatalog('zz-nonexistent'), {});
+});
+
+test('loadCatalog: a known locale resolves to a non-empty catalog', async () => {
+  const es = await loadCatalog('es');
+  assert.ok(Object.keys(es).length > 0, 'es catalog must resolve real keys');
+  assert.equal(es['common.none'], '(ninguno)');
+});
+
+// ── t() — async end-to-end ────────────────────────────────────────────────────
+// These pin locale: 'en' explicitly so they assert English output independent of
+// the ambient brain.config.json. Without the pin, the same suite run from a
+// consumer repo with docs.language: es would resolve Spanish and fail.
 
 test('t: known English key returns the English value', async () => {
-  const result = await t('common.none');
+  const result = await t('common.none', {}, { locale: 'en' });
   assert.equal(result, '(none)');
 });
 
 test('t: completely unknown key returns the key string itself', async () => {
+  // Locale-independent: an unknown key resolves to itself in every catalog.
   const result = await t('totally.unknown.key');
   assert.equal(result, 'totally.unknown.key');
 });
 
 test('t: placeholder interpolation works end-to-end', async () => {
-  const result = await t('day.auth.ok', { user: 'tester', provider: 'gitlab' });
+  const result = await t('day.auth.ok', { user: 'tester', provider: 'gitlab' }, { locale: 'en' });
   assert.equal(result, 'Authenticated as @tester (gitlab).');
 });
