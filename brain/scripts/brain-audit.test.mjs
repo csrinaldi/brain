@@ -1119,3 +1119,97 @@ test('brain-audit: A11 good-citizen emission — a modify-shaped cleanup reverte
   const oLine = r.stdout.split('\n').filter(Boolean).find(l => l.includes(oSha.slice(0, 7)));
   assert.ok(oLine, `O must appear in the audit output:\n${r.stdout}`);
 });
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A12 — FROZEN FINDER FIXTURE (governance #302, finder≠patcher split).
+//
+// The shape that candidate 1 (measured green on the whole frozen set, #302)
+// gets WRONG: a REPLACE-shaped cleanup. A11 only exercised PURE-removal
+// cleanups (zero `+` lines), so any "does the merge add live content" primitive
+// passes A11 while resurrecting payloads on a replace.
+//
+// The chair, mechanism-blind: the ungoverned offending text is introduced
+// BEHIND the audit window (base commit). Inside the window a single tip-most
+// merge R REPLACES it — removes the offending text AND writes different,
+// unrelated text in its place. R's net effect on the offending payload is
+// REMOVAL, so reverting R would re-add the offending text (and delete the
+// replacement) — the §15.5 resurrection. But R also ADDS a line ("replacement
+// text") that is LIVE at the tip, so any primitive keyed on "did R add live
+// content" wrongly keeps R's auto-revert signal.
+//
+// THE PROPERTY: a merge whose NET EFFECT removes the offending payload must
+// never carry [FAIL-SHA], EVEN WHEN it also adds unrelated content live at the
+// tip. R may be reported ([FAIL], human gate) — it may not be nominated for
+// automatic reversion.
+//
+// RED against the shipped state (no suppression exists): R touches a live ADR
+// path, fails adrPresence, is denied the exemption, and carries [FAIL-SHA].
+// It stays RED under candidate 1 (`addsLiveContentAt` line-membership), because
+// R's replacement line is live at the tip — that is the whole demonstration.
+// GREEN only under a payload-anchored primitive that asks whether the OFFENDING
+// content (not just any added line) is live at the tip.
+
+test('brain-audit: A12 replace-shaped cleanup — a merge whose net effect removes the offending payload is never nominated for auto-revert, even while adding live text', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a12-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+
+  const OFFENDING = 'Ungoverned decision text.';
+  const REPLACEMENT = 'Governed summary placeholder line.';
+  const A12_DIRTY = `# ADR 905 example\n\nBody.\n\n${OFFENDING}\n`;
+  const A12_REPLACED = `# ADR 905 example\n\nBody.\n\n${REPLACEMENT}\n`;
+
+  // Base (outside the window): the ADR already holds the OFFENDING text.
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+    [ADR_FILE]: A12_DIRTY,
+  }, 'chore: initial with pre-existing offending ADR (#0)');
+  const base = headShaOf(git);
+
+  // R (tip-most, in-window): REPLACES the offending text with different text.
+  // Removes the payload AND adds a live replacement line. Modifies the ADR
+  // without brain/HOME.md → fails adrPresence.
+  const rSha = mergeAddingPayload(git, dir, { [ADR_FILE]: A12_REPLACED }, 'R',
+    'R: replace ungoverned text with a governed placeholder Closes #2');
+
+  // ── Fixture invariants — assert the attack shape BEFORE the property ───────
+  const liveBlob = readFileSync(join(dir, ADR_FILE), 'utf8');
+  assert.ok(existsSync(join(dir, ADR_FILE)),
+    'fixture invariant: the ADR survives at HEAD (R modifies, never deletes)');
+  assert.equal(liveBlob.includes(OFFENDING), false,
+    'fixture invariant: the OFFENDING text must be GONE from the tree at HEAD (R removed it)');
+  assert.ok(liveBlob.includes(REPLACEMENT),
+    'fixture invariant: R\'s REPLACEMENT line must be LIVE at HEAD — this is what breaks a content-liveness primitive');
+  const rStatus = git('diff', '--name-status', `${rSha}^1`, rSha).stdout;
+  assert.match(rStatus, /^M\s/m,
+    `fixture invariant: R must MODIFY the ADR — got:\n${rStatus}`);
+  assert.doesNotMatch(rStatus, /^[AD]\s/m,
+    `fixture invariant: R must neither add nor delete a path — got:\n${rStatus}`);
+  // R's own diff genuinely ADDS the replacement line (a `+` line) — so any
+  // "did the merge add live content" test sees it and wrongly nominates R.
+  const rDiff = git('diff', '-U0', `${rSha}^1`, rSha).stdout;
+  assert.ok(rDiff.split('\n').some(l => l.startsWith('+') && l.includes(REPLACEMENT)),
+    `fixture invariant: R must ADD the replacement line in its own diff — got:\n${rDiff}`);
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], {
+    cwd: dir, encoding: 'utf8',
+  });
+
+  // ── PROPERTY assertions — WHAT is emitted, never HOW it is decided ─────────
+
+  // 1. THE PROPERTY. R's net effect removed the offending payload, so it must
+  //    never be nominated for automatic reversion. Format-agnostic.
+  const failShaLines = r.stdout.split('\n').filter(l => l.startsWith('[FAIL-SHA]'));
+  const rNominated = failShaLines.some(l => l.includes(rSha) || l.includes(rSha.slice(0, 7)));
+  assert.equal(rNominated, false,
+    `R replaced the offending payload with unrelated text — reverting it resurrects the payload (§15.5). `
+    + `It must never carry [FAIL-SHA].\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+
+  // 2. R must still be REPORTED — a fix may not satisfy the property by going
+  //    silent (that trades an auto-revert hazard for a silent PASS).
+  const rLine = r.stdout.split('\n').filter(Boolean).find(l => l.includes(rSha.slice(0, 7)));
+  assert.ok(rLine, `R must still appear in the audit output — never a silent PASS:\n${r.stdout}`);
+});
