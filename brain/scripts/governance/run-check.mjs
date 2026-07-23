@@ -67,6 +67,7 @@ import { diffSize } from './checks/diff-size.mjs';
 import { CLOSING_RE, CHAIN_RE } from './checks/issue-ref-patterns.mjs';
 import { resolveApprovedLabel } from './approved-label.mjs';
 import { readRecordObservations } from '../memory/lib/store.mjs';
+import { resultToExit } from './postmerge/exit-codes.mjs';
 import { loadContext, gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { getVcs } from '../vcs/cli.mjs';
@@ -263,6 +264,7 @@ async function runIssueLinkCheck(ctx, deps) {
   if (typeof ctx.body !== 'string') {
     return {
       pass: false,
+      uncomputable: true,
       reason: 'issue-link: MR body uncomputable (context API fetch failed) — failing closed',
     };
   }
@@ -273,6 +275,7 @@ async function runIssueLinkCheck(ctx, deps) {
   if (closingRequired === null) {
     return {
       pass: false,
+      uncomputable: true,
       reason:
         'issue-link: cannot determine whether the PR targets the default branch ' +
         '(ctx.targetBranch or ctx.defaultBranch is null/uncomputable) — failing ' +
@@ -304,7 +307,8 @@ async function runIssueLinkCheck(ctx, deps) {
   } catch (err) {
     return {
       pass: false,
-      reason: `issue-link: could not fetch issue #${issueNumber} — failing closed: ${err.message}`,
+      uncomputable: true,
+      reason: `issue-link: could not fetch issue #${issueNumber} — failing closed (uncomputable): ${err.message}`,
     };
   }
 
@@ -343,7 +347,8 @@ async function runDiffSizeCheck(ctx, deps) {
   } catch (err) {
     return {
       pass: false,
-      reason: `cannot compute diff — failing closed: ${err.message}`,
+      uncomputable: true,
+      reason: `cannot compute diff — failing closed (uncomputable): ${err.message}`,
     };
   }
 
@@ -368,7 +373,22 @@ export async function runCheck(checkName, deps = {}) {
   const diffNameOnly = deps.diffNameOnly ?? (() => defaultDiffNameOnly(ctx));
 
   if (checkName === 'memory-gate') {
-    return memoryPresence(readRecords(cwd));
+    // A THROWING read (IO/permission failure) is UNCOMPUTABLE (→2) — never a
+    // false "resolved". An EMPTY read is a genuine violation (→1): memoryPresence
+    // returns pass:false. This is the code-level proof of memoryPresence's
+    // "re-eval only, never a tree-effect, never a false resolved" property
+    // (design §3.5 / REQ-D2-10a).
+    let records;
+    try {
+      records = readRecords(cwd);
+    } catch (err) {
+      return {
+        pass: false,
+        uncomputable: true,
+        reason: `memory-gate: cannot read records — failing closed (uncomputable): ${err.message}`,
+      };
+    }
+    return memoryPresence(records);
   }
   if (checkName === 'decision-gate') {
     let changedFiles;
@@ -377,7 +397,8 @@ export async function runCheck(checkName, deps = {}) {
     } catch (err) {
       return {
         pass: false,
-        reason: `cannot compute diff — failing closed: ${err.message}`,
+        uncomputable: true,
+        reason: `cannot compute diff — failing closed (uncomputable): ${err.message}`,
       };
     }
     return adrPresence(changedFiles);
@@ -393,16 +414,18 @@ export async function runCheck(checkName, deps = {}) {
 
 /**
  * Runs the named check, prints the reason (if any), and returns the process
- * exit code — kept separate from `process.exit()` itself so it stays testable.
+ * exit code via the shared 0/1/2 contract (`resultToExit`, REQ-D2-6) — kept
+ * separate from `process.exit()` itself so it stays testable. An infra failure
+ * (`uncomputable: true`) is 2, never a false 0/1.
  *
  * @param {string} checkName
  * @param {object} [deps]
- * @returns {Promise<0|1>}
+ * @returns {Promise<0|1|2>}
  */
 export async function main(checkName, deps = {}) {
   const result = await runCheck(checkName, deps);
   if (result.reason) console.log(result.reason);
-  return result.pass ? 0 : 1;
+  return resultToExit(result);
 }
 
 // ── CLI entrypoint ───────────────────────────────────────────────────────────
