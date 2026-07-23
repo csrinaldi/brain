@@ -35,15 +35,62 @@ function readEnvFile(root = repoRoot) {
 }
 
 /**
- * Resolves the active harness name.
- * Pure — takes env + envVars explicitly so it can be unit-tested without side effects.
- * SDD_HARNESS env var wins over .env file value; default is 'gentle-ai'.
+ * Resolves the active agent platform.
+ * Pure — takes env + envVars + config explicitly for testing.
  *
- * @param {{ env?: object, envVars?: object }} [opts]
+ * @param {{ env?: object, envVars?: object, config?: object }} [opts]
  * @returns {string}
  */
-export function resolveHarness({ env = process.env, envVars = {} } = {}) {
-  return env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? 'gentle-ai';
+export function resolvePlatform({ env = process.env, envVars = {}, config = {} } = {}) {
+  const platformVal = env.AGENT_PLATFORM ?? envVars.AGENT_PLATFORM ?? config.platform;
+  if (platformVal) return platformVal;
+
+  const harnessVal = env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness;
+  if (harnessVal && ['antigravity', 'claude', 'openai', 'opencode', 'pi', 'plain'].includes(harnessVal)) {
+    return harnessVal;
+  }
+
+  return 'antigravity';
+}
+
+/**
+ * Resolves the active SDD engine.
+ * Pure — takes env + envVars + config explicitly for testing.
+ *
+ * @param {{ env?: object, envVars?: object, config?: object }} [opts]
+ * @returns {string}
+ */
+export function resolveEngine({ env = process.env, envVars = {}, config = {} } = {}) {
+  const engineVal = env.SDD_ENGINE ?? envVars.SDD_ENGINE ?? config.engine;
+  if (engineVal) return engineVal;
+
+  const harnessVal = env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness;
+  if (harnessVal && ['gentle-ai', 'plain'].includes(harnessVal)) {
+    return harnessVal;
+  }
+
+  return 'gentle-ai';
+}
+
+/**
+ * Resolves the active memory backend.
+ * Pure — takes env + envVars + config explicitly for testing.
+ *
+ * @param {{ env?: object, envVars?: object, config?: object }} [opts]
+ * @returns {string}
+ */
+export function resolveMemory({ env = process.env, envVars = {}, config = {} } = {}) {
+  return env.MEMORY_BACKEND ?? envVars.MEMORY_BACKEND ?? config.memory ?? 'engram';
+}
+
+/**
+ * Resolves the active harness name (legacy backwards compatibility).
+ *
+ * @param {{ env?: object, envVars?: object, config?: object }} [opts]
+ * @returns {string}
+ */
+export function resolveHarness({ env = process.env, envVars = {}, config = {} } = {}) {
+  return env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness ?? resolveEngine({ env, envVars, config });
 }
 
 // ---------------------------------------------------------------------------
@@ -107,7 +154,8 @@ export async function dispatch(harness, op, args = [], { backendLoader = default
 const isMain = import.meta.url === pathToFileURL(process.argv[1] ?? '').href;
 if (isMain) {
   const envVars = readEnvFile();
-  const harness = resolveHarness({ env: process.env, envVars });
+  const platform = resolvePlatform({ env: process.env, envVars });
+  const engine = resolveEngine({ env: process.env, envVars });
 
   const op = process.argv[2];
   if (!op) {
@@ -121,9 +169,12 @@ if (isMain) {
   }
 
   try {
-    await dispatch(harness, op, process.argv.slice(3));
+    await dispatch(platform, op, process.argv.slice(3));
+    if (engine !== platform) {
+      await dispatch(engine, op, process.argv.slice(3));
+    }
   } catch (err) {
-    console.error(`harness/cli: ${harness}.${op}() failed — ${err.message}`);
+    console.error(`harness/cli: ${op}() failed — ${err.message}`);
     process.exit(1);
   }
 }

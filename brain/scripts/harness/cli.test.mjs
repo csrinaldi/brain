@@ -14,17 +14,55 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-// RED: these imports fail until cli.mjs exports resolveHarness + dispatch.
-import { resolveHarness, dispatch, VALID_OPS } from './cli.mjs';
+import { resolveHarness, resolvePlatform, resolveEngine, resolveMemory, dispatch, VALID_OPS } from './cli.mjs';
 
-// ── (a) resolveHarness: env var wins ─────────────────────────────────────────
+// ── 3-axis resolution tests (issue #305) ───────────────────────────────────
 
-test('resolveHarness: env SDD_HARNESS wins over envVars', () => {
-  const result = resolveHarness({
-    env: { SDD_HARNESS: 'from-env' },
-    envVars: { SDD_HARNESS: 'from-file' },
+test('resolvePlatform: env AGENT_PLATFORM wins over envVars and config', () => {
+  const result = resolvePlatform({
+    env: { AGENT_PLATFORM: 'claude' },
+    envVars: { AGENT_PLATFORM: 'antigravity' },
   });
-  assert.equal(result, 'from-env');
+  assert.equal(result, 'claude');
+});
+
+test('resolvePlatform: falls back to legacy SDD_HARNESS when platform absent', () => {
+  const result = resolvePlatform({
+    env: {},
+    envVars: { SDD_HARNESS: 'claude' },
+  });
+  assert.equal(result, 'claude');
+});
+
+test('resolvePlatform: defaults to antigravity when absent', () => {
+  const result = resolvePlatform({ env: {}, envVars: {} });
+  assert.equal(result, 'antigravity');
+});
+
+test('resolveEngine: env SDD_ENGINE wins over envVars', () => {
+  const result = resolveEngine({
+    env: { SDD_ENGINE: 'plain' },
+    envVars: { SDD_ENGINE: 'gentle-ai' },
+  });
+  assert.equal(result, 'plain');
+});
+
+test('resolveEngine: falls back to legacy SDD_HARNESS when engine absent', () => {
+  const result = resolveEngine({
+    env: {},
+    envVars: { SDD_HARNESS: 'plain' },
+  });
+  assert.equal(result, 'plain');
+});
+
+test('resolveEngine: defaults to gentle-ai when absent', () => {
+  const result = resolveEngine({ env: {}, envVars: {} });
+  assert.equal(result, 'gentle-ai');
+});
+
+test('resolveMemory: defaults to engram when absent', () => {
+  const result = resolveMemory({ env: {}, envVars: {} });
+  assert.equal(result, 'engram');
 });
 
 // ── (b) resolveHarness: .env value used when env var absent ──────────────────

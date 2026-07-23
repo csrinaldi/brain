@@ -63,6 +63,10 @@ export const prohibitedRefs = [
       'brain/project/check-refs-rules.mjs',
       'brain/scripts/check-refs.test.mjs',
       'brain/scripts/lib/installer.test.mjs',
+      'brain/scripts/harness/backends/antigravity.mjs',
+      'brain/scripts/harness/backends/antigravity.test.mjs',
+      'brain/scripts/harness/backends/claude.mjs',
+      'brain/scripts/harness/backends/claude.test.mjs',
     ],
   },
 ];

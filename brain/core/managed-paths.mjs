@@ -51,6 +51,7 @@ export const managed = [
   '.github/PULL_REQUEST_TEMPLATE.md',   // the Closes/Fixes scaffold the gate parses (ADR-0014)
   '.github/CODEOWNERS',                 // L6 rung-1 enhancement, optional (REQ-L6-1, design §6.2)
   '.claude/settings.json',              // Claude Code harness hook — no-verify policy (ADR-0014 §9)
+  '.gemini/settings.json',              // Antigravity harness hook — SessionStart & PreToolUse (issue #305)
   'AGENTS.md',                          // generated Antigravity/AGENTS-standard context (issue #256 B2).
                                          // LITERAL — repo root, outside every existing glob. Regenerated
                                          // by antigravity.mjs#init; brain:upgrade ships it because its

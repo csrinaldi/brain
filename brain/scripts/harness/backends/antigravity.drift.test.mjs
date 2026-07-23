@@ -14,11 +14,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SOURCE_DOCS, AGENTS_EMIT_PATH, compileAgentsMd } from './antigravity.mjs';
+import { SOURCE_DOCS, AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH, compileAgentsMd, compileGeminiSettingsJson } from './antigravity.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
@@ -62,3 +62,15 @@ test('drift-guard proof: a mutated copy of a fresh compile is NOT byte-equal to 
     'the byte-equality comparison must distinguish a drifted copy from a non-drifted one',
   );
 });
+
+test('drift-guard: compileGeminiSettingsJson() is valid JSON and byte-equal to .gemini/settings.json if present', () => {
+  const fresh = compileGeminiSettingsJson();
+  assert.doesNotThrow(() => JSON.parse(fresh));
+
+  const path = join(REPO_ROOT, GEMINI_SETTINGS_EMIT_PATH);
+  if (existsSync(path)) {
+    const committed = readFileSync(path, 'utf8');
+    assert.equal(fresh, committed);
+  }
+});
+
