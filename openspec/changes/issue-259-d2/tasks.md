@@ -875,37 +875,37 @@ drift-guard, generalized from PR 4's D1 fix).
 
 ### Phase 5.1 — `postmerge/exit-codes.mjs` (REQ-D2-6)
 
-- [ ] 5.1.1 RED: `exit-codes.test.mjs` — `resultToExit({ uncomputable: true }) === 2`;
+- [x] 5.1.1 RED: `exit-codes.test.mjs` — `resultToExit({ uncomputable: true }) === 2`;
       `resultToExit({ pass: true }) === 0`; `resultToExit({ pass: false }) === 1`.
-- [ ] 5.1.2 GREEN: implement `EXIT = { PASS: 0, VIOLATION: 1, UNCOMPUTABLE: 2 }` and `resultToExit(result)`.
+- [x] 5.1.2 GREEN: implement `EXIT = { PASS: 0, VIOLATION: 1, UNCOMPUTABLE: 2 }` and `resultToExit(result)`.
 
 ### Phase 5.2 — `run-check.mjs` wiring across all evaluators (REQ-D2-6, REQ-D2-7)
 
-- [ ] 5.2.1 RED: `decision-gate`/`diff-size` runners — inject a throwing `defaultDiffNameOnly`/
+- [x] 5.2.1 RED: `decision-gate`/`diff-size` runners — inject a throwing `defaultDiffNameOnly`/
       `defaultDiffNumstat`; assert `uncomputable: true` on the returned result.
-- [ ] 5.2.2 GREEN: add `uncomputable: true` to the existing infra fail-closed returns for those two runners.
-- [ ] 5.2.3 RED: `issue-link` runner — inject a non-string body / uncomputable `defaultBranch` / a
+- [x] 5.2.2 GREEN: add `uncomputable: true` to the existing infra fail-closed returns for those two runners.
+- [x] 5.2.3 RED: `issue-link` runner — inject a non-string body / uncomputable `defaultBranch` / a
       throwing `fetchIssue`; assert `uncomputable: true`.
-- [ ] 5.2.4 GREEN: wire the same flag into `runIssueLinkCheck`'s fail-closed paths.
-- [ ] 5.2.5 RED (memory-gate genuine → 2): inject a throwing `readRecords` (IO/permission failure) vs. an
+- [x] 5.2.4 GREEN: wire the same flag into `runIssueLinkCheck`'s fail-closed paths.
+- [x] 5.2.5 RED (memory-gate genuine → 2): inject a throwing `readRecords` (IO/permission failure) vs. an
       empty-array `readRecords`; assert the throw maps to `uncomputable: true` (→2) and the empty array
       stays a real violation (→1) — this is the concrete code-level proof of `memoryPresence`'s "re-eval
       only, never tree-effect, never a false resolved" property named in design §3.5/REQ-D2-10a.
-- [ ] 5.2.6 GREEN: wrap the memory-gate's `readRecords` call at the runner boundary per the throw/empty
+- [x] 5.2.6 GREEN: wrap the memory-gate's `readRecords` call at the runner boundary per the throw/empty
       distinction.
-- [ ] 5.2.7 RED + GREEN: `main()` in `run-check.mjs` uses `resultToExit(result)` for `process.exit`,
+- [x] 5.2.7 RED + GREEN: `main()` in `run-check.mjs` uses `resultToExit(result)` for `process.exit`,
       replacing any ad-hoc 0/1 mapping.
 
 ### Phase 5.3 — Both-fixtures drift-guard (REQ-D2-7)
 
-- [ ] 5.3.1 RED: `exit-code-contract-drift-guard.test.mjs` — define the `CHECKS` registry (`decision-gate`,
+- [x] 5.3.1 RED: `exit-code-contract-drift-guard.test.mjs` — define the `CHECKS` registry (`decision-gate`,
       `diff-size`, `issue-link`, `memory-gate`, `brain-audit`); assert each drives to both
       `resultToExit === 1` (violation fixture) and `resultToExit === 2` (uncomputable fixture).
-- [ ] 5.3.2 GREEN: wire each check's real runner into the registry so 5.3.1 passes for all 5.
-- [ ] 5.3.3 RED + GREEN: a hypothetical evaluator exiting only 0/1 (no 2 path) fails the guard, naming the
+- [x] 5.3.2 GREEN: wire each check's real runner into the registry so 5.3.1 passes for all 5.
+- [x] 5.3.3 RED + GREEN: a hypothetical evaluator exiting only 0/1 (no 2 path) fails the guard, naming the
       missing evaluator — prove the guard's teeth via a deliberately incomplete stub before trusting it
       against the real 5.
-- [ ] 5.3.4 RED + GREEN: an evaluator missing its → 2 fixture (but with correct logic) fails the guard,
+- [x] 5.3.4 RED + GREEN: an evaluator missing its → 2 fixture (but with correct logic) fails the guard,
       naming the missing fixture.
 
 ### Phase 5.4 — Standing harness-isolation drift-guard (REQ-D2-14, generalizes PR 4's D1)
@@ -917,23 +917,23 @@ silently regress the isolation contract. This PR4 (fix+prove) / PR5 (generalize-
 house detection→prevention ladder, owner-confirmed and logged as a Plan Deviation in design.md §14
 (2026-07-14) — `design.md` and `spec.md` are reconciled to state it identically.
 
-- [ ] 5.4.1 RED: a repo-wide meta-test globbing all `*.test.mjs` files for `spawnSync`/`execFileSync` calls
+- [x] 5.4.1 RED: a repo-wide meta-test globbing all `*.test.mjs` files for `spawnSync`/`execFileSync` calls
       that pass a `run:`-derived script string; assert every match sets the four isolation properties from
       §7.4 (`cwd` outside repo, `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM`/`GIT_CONFIG_NOSYSTEM`, isolated
       `HOME`). Seed the test with a deliberately non-compliant stub file first to prove the guard has teeth
       (mirrors 5.3.3's pattern), then confirm it passes against the real (now-fixed) test suite.
-- [ ] 5.4.2 GREEN: register `release-postmerge-workflows.test.mjs` (fixed in PR 4) as the first compliant
+- [x] 5.4.2 GREEN: register `release-postmerge-workflows.test.mjs` (fixed in PR 4) as the first compliant
       entry; remove the deliberately non-compliant stub.
-- [ ] 5.4.3 No new isolation-fixing code expected here — if 5.4.1 reds against the real suite, that is a
+- [x] 5.4.3 No new isolation-fixing code expected here — if 5.4.1 reds against the real suite, that is a
       signal PR 4's fix (4.0.2) was incomplete and must be revisited, not patched locally in PR 5.
 
 ### Phase 5.5 — PR 5 gate
 
-- [ ] 5.5.1 `npm test` full suite green (including both drift-guards) · `brain:repo:check` ·
+- [x] 5.5.1 `npm test` full suite green (including both drift-guards) · `brain:repo:check` ·
       `brain:change:verify` (note the pre-existing, out-of-scope `chunk-reader.mjs` dangling-reference
       failure per design §12 R-6 — confirm it is still the ONLY failure and still pre-existing on the base
       branch, not introduced by this change).
-- [ ] 5.5.2 Budget check: `exit-codes.mjs` + `run-check.mjs` + drift-guard diffs ≈105 counted lines —
+- [x] 5.5.2 Budget check: `exit-codes.mjs` + `run-check.mjs` + drift-guard diffs ≈105 counted lines —
       confirm ≤400, no `size:exception`.
 - [ ] 5.5.3 `memory:share` before push.
 - [ ] 5.5.4 Push, open PR 5 against `feature/v2.0.0` (stacked after PR 4, the last in the chain). Dependency

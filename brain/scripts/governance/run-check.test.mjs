@@ -200,14 +200,15 @@ test('main: decision-gate passing (non-architectural PR) → returns 0, prints n
   assert.deepEqual(logs, []);
 });
 
-test('main: decision-gate — diff uncomputable → returns 1, prints fail-closed reason', async () => {
+test('main: decision-gate — diff uncomputable → returns 2 (PR5 contract), prints fail-closed reason', async () => {
   let code;
   const logs = await captureLog(async () => {
     code = await main('decision-gate', {
       diffNameOnly: () => { throw new Error('no BASE_SHA/HEAD_SHA'); },
     });
   });
-  assert.equal(code, 1);
+  // PR5 (#310): an infra-uncomputable diff is 2, not a false violation (1).
+  assert.equal(code, 2);
   assert.ok(logs.length === 1);
   assert.match(logs[0], /cannot compute diff — failing closed/i);
 });
@@ -289,13 +290,13 @@ test('runCheck: issue-link — ctx.body is null (uncomputable) → fails closed,
   assert.match(result.reason, /MR body uncomputable \(context API fetch failed\) — failing closed/);
 });
 
-test('main: issue-link — ctx.body is null → returns 1 (never 0) on the REQUIRED gate', async () => {
+test('main: issue-link — ctx.body is null → returns 2 (PR5: uncomputable, never 0/1) on the REQUIRED gate', async () => {
   const code = await main('issue-link', {
     ctx: { body: null, provider: 'gitlab' },
     fetchIssue: async () => { throw new Error('must not be called'); },
     readConfig: () => ({}),
   });
-  assert.equal(code, 1);
+  assert.equal(code, 2); // PR5: a non-string body (API fetch failed) is uncomputable
 });
 
 test('runCheck: issue-link — body with no reference at all → fail, referenced-issue fetch never attempted', async () => {
@@ -397,13 +398,13 @@ test('runCheck: issue-link — ctx.defaultBranch is null → fails closed, NEVER
   assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
 });
 
-test('main: issue-link — ctx.defaultBranch is null → returns 1 (never 0) on the REQUIRED gate', async () => {
+test('main: issue-link — ctx.defaultBranch is null → returns 2 (PR5: uncomputable, never 0/1) on the REQUIRED gate', async () => {
   const code = await main('issue-link', {
     ctx: { body: 'Closes #42', provider: 'github', targetBranch: 'main', defaultBranch: null },
     fetchIssue: async () => ({ labels: ['status:approved'] }),
     readConfig: () => ({}),
   });
-  assert.equal(code, 1);
+  assert.equal(code, 2); // PR5: an uncomputable branch context is uncomputable, never 1
 });
 
 test('runCheck: issue-link — ctx.targetBranch is null (defaultBranch known) → also fails closed (the conditional needs BOTH to be decided)', async () => {
@@ -737,4 +738,86 @@ test('wiring: defaultFetchIssue sources { apiBase, token, proxyUrl } from ci-con
   const fnBody = src.slice(fnStart, src.indexOf('\n}', fnStart) + 2);
   assert.match(fnBody, /vcs\.issueView\(\{[^}]*apiBase[^}]*token[^}]*proxyUrl/s,
     'defaultFetchIssue must pass apiBase/token/proxyUrl into vcs.issueView(...)');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PR5 (#310) Phase 5.2 — the 0/1/2 exit contract wired across evaluators. An
+// INFRA failure (git/IO/API) returns `uncomputable: true` → exit 2; a genuine
+// governance miss stays `pass: false` → exit 1. Proven RED-first per check.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { resultToExit } from './postmerge/exit-codes.mjs';
+
+// ── decision-gate (5.2.1/2): a throwing diffNameOnly is uncomputable, not a violation ──
+test('PR5 decision-gate: a throwing diff (infra) is uncomputable → 2, not a violation → 1', async () => {
+  const r = await runCheck('decision-gate', {
+    diffNameOnly: () => { throw new Error('git exploded'); },
+  });
+  assert.equal(r.uncomputable, true, 'a git failure must be uncomputable, not a false violation');
+  assert.equal(resultToExit(r), 2);
+});
+
+// ── diff-size (5.2.1/2): a throwing diffNumstat is uncomputable ──
+test('PR5 diff-size: a throwing numstat (infra) is uncomputable → 2', async () => {
+  const r = await runCheck('diff-size', {
+    ctx: { labels: [] },
+    diffNumstat: () => { throw new Error('git exploded'); },
+  });
+  assert.equal(r.uncomputable, true);
+  assert.equal(resultToExit(r), 2);
+});
+
+// ── issue-link (5.2.3/4): infra paths uncomputable, governance misses stay violations ──
+test('PR5 issue-link: a non-string body (API fetch failed) is uncomputable → 2', async () => {
+  const r = await runCheck('issue-link', { ctx: { body: null } });
+  assert.equal(r.uncomputable, true);
+  assert.equal(resultToExit(r), 2);
+});
+
+test('PR5 issue-link: an uncomputable branch context is uncomputable → 2', async () => {
+  const r = await runCheck('issue-link', {
+    ctx: { body: 'Closes #1', targetBranch: null, defaultBranch: null },
+  });
+  assert.equal(r.uncomputable, true);
+  assert.equal(resultToExit(r), 2);
+});
+
+test('PR5 issue-link: a throwing fetchIssue (infra) is uncomputable → 2', async () => {
+  const r = await runCheck('issue-link', {
+    ctx: { body: 'Closes #7', targetBranch: 'x', defaultBranch: 'main' },
+    fetchIssue: async () => { throw new Error('network'); },
+  });
+  assert.equal(r.uncomputable, true);
+  assert.equal(resultToExit(r), 2);
+});
+
+test('PR5 issue-link: a genuine "not approved" miss stays a VIOLATION → 1 (never uncomputable)', async () => {
+  const r = await runCheck('issue-link', {
+    ctx: { body: 'Closes #7', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async () => ({ labels: [] }), // exists, but not status:approved
+    readConfig: () => ({}),
+  });
+  assert.notEqual(r.uncomputable, true, 'a real governance miss must NOT be uncomputable');
+  assert.equal(r.pass, false);
+  assert.equal(resultToExit(r), 1);
+});
+
+// ── memory-gate (5.2.5/6): a THROWING read is uncomputable → 2; an EMPTY read
+// stays a real violation → 1 (memoryPresence's "re-eval only, never a false
+// resolved" property, §3.5/REQ-D2-10a). ──
+test('PR5 memory-gate: a throwing readRecords (IO) is uncomputable → 2', async () => {
+  const r = await runCheck('memory-gate', {
+    readRecords: () => { throw new Error('EACCES'); },
+  });
+  assert.equal(r.uncomputable, true);
+  assert.equal(resultToExit(r), 2);
+});
+
+test('PR5 memory-gate: an EMPTY readRecords stays a real VIOLATION → 1 (never uncomputable)', async () => {
+  const r = await runCheck('memory-gate', {
+    readRecords: () => [], // no session_summary → genuine miss, not infra failure
+  });
+  assert.notEqual(r.uncomputable, true, 'an empty record set is a real violation, not uncomputable');
+  assert.equal(r.pass, false);
+  assert.equal(resultToExit(r), 1);
 });
