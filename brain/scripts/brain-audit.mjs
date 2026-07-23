@@ -46,7 +46,7 @@ import { gitOrThrow } from './governance/postmerge/git-seam.mjs';
 // COMPOSE the frozen net-parity primitives (design §15, PR2b). NEVER import the
 // retired direction-blind pairwise `isReverterOf` — a no-import drift-guard test
 // (brain-audit.test.mjs) asserts it never reappears in this file.
-import { isResolvedAt, netAddFull, addedPathsAbsentAt, makeGit } from './governance/postmerge/resolution.mjs';
+import { isResolvedAt, netAddFull, addedPathsAbsentAt, revertResurrectsAt, makeGit } from './governance/postmerge/resolution.mjs';
 
 // NOTE (MINOR 2, external ruling rev 3 on #297): there is deliberately NO
 // error-swallowing `git()` helper here. The per-merge reads (numstat,
@@ -102,24 +102,36 @@ export function resolvedSkipLine(sha, subject, { git, tip }) {
  *   • exit 1 ⟺ failCount ≥ 1 (any class). A `[FAIL-SHA]` count of 0 on exit 1 is
  *     LEGITIMATE (all violations are issueLink/memoryPresence — non-auto-revertible).
  *   • The old "any violation ⟹ ≥1 [FAIL-SHA]" coherence guard is REPLACED (not
- *     dropped) by the BIDIRECTIONAL tree-keyed⟺[FAIL-SHA] invariant: ≥1 un-exempted
+ *     dropped) by the BIDIRECTIONAL NOMINABLE⟺[FAIL-SHA] invariant: ≥1 NOMINABLE
  *     tree-keyed failure ⟺ ≥1 [FAIL-SHA] line. A violation of EITHER direction is
- *     uncomputable → exit 2: (i) a tree-keyed failure recorded but zero [FAIL-SHA]
- *     emitted (a crash mid-emission); (ii) a [FAIL-SHA] with no backing tree-keyed
+ *     uncomputable → exit 2: (i) a nominable failure recorded but zero [FAIL-SHA]
+ *     emitted (a crash mid-emission); (ii) a [FAIL-SHA] with no backing nominable
  *     failure. (A guard relaxed without a replacement is a guard deleted.)
  *
- * @param {number} failCount           merges reported as [FAIL] (any class).
- * @param {number} treeKeyedFailCount  merges with ≥1 un-exempted tree-keyed failure.
- * @param {number} failShaCount        [FAIL-SHA] lines emitted (deduped carriers).
+ *   • WHY "NOMINABLE", NOT "tree-keyed" (PR4 precondition, #302). Not every
+ *     un-exempted tree-keyed failure is auto-revert-nominable: a removal-shaped
+ *     cleanup (A11) or a replace-shaped cleanup (A12) fails a tree-keyed check,
+ *     is (correctly) denied the exemption, yet is SUPPRESSED from [FAIL-SHA]
+ *     because reverting it would RESURRECT a payload (§15.5). Those survivors
+ *     legitimately emit `[FAIL]` (counted in failCount) with zero `[FAIL-SHA]`.
+ *     So the coherence invariant re-anchors from "tree-keyed" to "nominable"
+ *     (tree-keyed survivors whose revert does NOT resurrect); the old form would
+ *     fire a spurious exit 2 the moment a cleanup is suppressed. `failCount`
+ *     still governs exit 1 — a suppressed cleanup is a real [FAIL].
+ *
+ * @param {number} failCount               merges reported as [FAIL] (any class).
+ * @param {number} nominableTreeKeyedCount tree-keyed survivors whose revert does NOT
+ *                                         resurrect a payload (auto-revert-nominable).
+ * @param {number} failShaCount            [FAIL-SHA] lines emitted (deduped carriers).
  * @returns {0|1|2}
  */
-export function crossCheckExit(failCount, treeKeyedFailCount, failShaCount) {
-  // Bidirectional tree-keyed ⟺ [FAIL-SHA] coherence. Newest-carrier dedup keeps
-  // ≥1 emission per payload, so treeKeyedFailCount>0 ⟹ failShaCount>0 always holds
-  // on the healthy path; a mismatch is a genuine mid-emission crash / incoherence.
-  const treeKeyed = treeKeyedFailCount > 0;
+export function crossCheckExit(failCount, nominableTreeKeyedCount, failShaCount) {
+  // Bidirectional NOMINABLE ⟺ [FAIL-SHA] coherence. Newest-carrier dedup keeps
+  // ≥1 emission per payload, so nominableTreeKeyedCount>0 ⟹ failShaCount>0 always
+  // holds on the healthy path; a mismatch is a genuine mid-emission crash.
+  const nominable = nominableTreeKeyedCount > 0;
   const emitted = failShaCount > 0;
-  if (treeKeyed !== emitted) return 2;
+  if (nominable !== emitted) return 2;
   return failCount > 0 ? 1 : 0;
 }
 
@@ -300,7 +312,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const windowTo = auditedTip(range);
 
     let failCount = 0;          // [FAIL] lines of ANY class — governs exit 1.
-    let treeKeyedFailCount = 0; // merges with ≥1 un-exempted tree-keyed failure.
+    let nominableTreeKeyedCount = 0; // tree-keyed survivors whose revert does NOT resurrect a payload (auto-revert-nominable, §15.5).
     let failShaCount = 0;       // [FAIL-SHA] lines actually emitted (deduped).
     const emittedSignatures = new Set(); // payload signatures already carried by a [FAIL-SHA].
 
@@ -467,20 +479,33 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // legit reverter. issueLink/memoryPresence-only merges emit nothing here.
       const survivesTreeKeyed = survivingNames.some((name) => TREE_KEYED_CHECKS.has(name));
       if (survivesTreeKeyed) {
-        treeKeyedFailCount += 1;
-        const sig = payloadSignature(resolutionGit, sha);
-        if (!emittedSignatures.has(sig)) {
-          emittedSignatures.add(sig);
-          console.log(`[FAIL-SHA] ${sha}`);
-          failShaCount += 1;
+        // [FAIL-SHA] nominates a merge for AUTOMATIC reversion (PR4). A merge
+        // whose revert would RESURRECT a payload — re-add content a prior merge
+        // removed and that is absent from the tip — must NEVER be nominated,
+        // even though it legitimately fails a tree-keyed check and is (correctly)
+        // denied the exemption. Reverting it is the §15.5 harm (put the payload
+        // back). `revertResurrectsAt` reads the tip tree directly, because a
+        // windowed count cannot separate a pure-removal cleanup (A11), a
+        // replace-shaped cleanup (A12), and a live re-add (A10) — all net to 0.
+        // Removal-shaped survivors still print [FAIL] above (never a silent
+        // PASS); they simply carry no auto-revert signal.
+        const nominable = !revertResurrectsAt(sha, windowTo, { git: resolutionGit });
+        if (nominable) {
+          nominableTreeKeyedCount += 1;
+          const sig = payloadSignature(resolutionGit, sha);
+          if (!emittedSignatures.has(sig)) {
+            emittedSignatures.add(sig);
+            console.log(`[FAIL-SHA] ${sha}`);
+            failShaCount += 1;
+          }
         }
       }
     }
 
-    const exitCode = crossCheckExit(failCount, treeKeyedFailCount, failShaCount);
+    const exitCode = crossCheckExit(failCount, nominableTreeKeyedCount, failShaCount);
     if (exitCode === 2) {
       console.log('[FAIL] governance:audit-uncomputable — tree-keyed⟺[FAIL-SHA] coherence violated '
-        + `(failCount=${failCount}, treeKeyedFailCount=${treeKeyedFailCount}, failShaCount=${failShaCount})`);
+        + `(failCount=${failCount}, nominableTreeKeyedCount=${nominableTreeKeyedCount}, failShaCount=${failShaCount})`);
     }
     process.exit(exitCode);
   })().catch(err => {
