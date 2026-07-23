@@ -27,6 +27,7 @@ function processFindings(findings = []) {
 export function buildVerdict({
   headSha,
   conclusion,
+  protocol = 'brain-review/1',
   priorRevCount = 0,
   findings = [],
   gates = {},
@@ -36,35 +37,57 @@ export function buildVerdict({
   escalate = null,
 } = {}) {
   if (!headSha) throw new Error('brain-review/1: head_sha is mandatory — refusing to build a headless verdict.');
-  // Protocol §7 (REQ-H1-6): the bounded-revision LOCK counts PRIOR blocks —
-  // `priorRevCount >= 3` (the 4th review) forces STOP + escalate. This is
-  // deliberately left on the 0-based PRIOR count and is NOT touched. The EMITTED
-  // `rev` is 1-INDEXED (`priorRevCount + 1`, first review = rev 1), harmonizing
-  // the label with the human-mediated practice (#290 A/B harmonization item 1)
-  // so "rev N" reads the same for both authors: exactly three REVISEs (rev 1, 2,
-  // 3) are allowed, and rev 4 is the STOP.
+
+  const processed = processFindings(findings);
+  const candidateFindings = [];
+  const followUps = [];
+  let unknownCausality = false;
+
+  for (const f of processed) {
+    const disp = f.causal_disposition;
+    if (disp === 'unknown') {
+      unknownCausality = true;
+      candidateFindings.push(f);
+    } else if (disp === 'pre-existing' || disp === 'base-only') {
+      followUps.push(f);
+    } else {
+      candidateFindings.push(f);
+    }
+  }
+
   const boundHit = priorRevCount >= 3 && conclusion === 'REVISE';
+  const shouldEscalate = boundHit || unknownCausality;
+  const finalEscalate = shouldEscalate ? 'human' : escalate;
+  
+  let finalVerdict = conclusion;
+  if (boundHit || unknownCausality) {
+    finalVerdict = 'STOP';
+  } else if (protocol === 'brain-review/2' && findings.length > 0 && candidateFindings.length === 0 && conclusion === 'REVISE') {
+    finalVerdict = 'APPROVE';
+  }
 
   return {
-    protocol: 'brain-review/1',
-    verdict: boundHit ? 'STOP' : conclusion,
+    protocol,
+    verdict: finalVerdict,
     head_sha: headSha,
     rev: priorRevCount + 1,
     gates: { required: gates.required ?? [], detection: gates.detection ?? [] },
-    findings: processFindings(findings),
+    findings: candidateFindings,
+    follow_ups: followUps,
     conditions,
     pin,
     sequencing,
-    escalate: boundHit ? 'human' : escalate,
+    escalate: finalEscalate,
   };
 }
 
-// Renders a built verdict as the fenced brain-review/1 YAML block (§6).
+// Renders a built verdict as the fenced brain-review/1 or brain-review/2 YAML block (§6).
 // Hand-rolled — zero npm deps and this schema is fixed, not generic YAML.
 export function renderVerdict(v) {
+  const proto = v.protocol ?? 'brain-review/1';
   const lines = [
     '```yaml',
-    'protocol: brain-review/1',
+    `protocol: ${proto}`,
     `verdict: ${v.verdict}`,
     `head_sha: ${v.head_sha}`,
     `rev: ${v.rev}`,
@@ -82,6 +105,20 @@ export function renderVerdict(v) {
       lines.push(`    severity: ${f.severity}`);
       lines.push(`    evidence: ${yamlScalar(f.evidence)}`);
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
+      if (f.evidence_class) lines.push(`    evidence_class: ${f.evidence_class}`);
+      if (f.causal_disposition) lines.push(`    causal_disposition: ${f.causal_disposition}`);
+    }
+  }
+
+  if (v.follow_ups && v.follow_ups.length > 0) {
+    lines.push('follow_ups:');
+    for (const f of v.follow_ups) {
+      lines.push(`  - id: ${yamlScalar(f.id)}`);
+      lines.push(`    severity: ${f.severity}`);
+      lines.push(`    evidence: ${yamlScalar(f.evidence)}`);
+      if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
+      if (f.evidence_class) lines.push(`    evidence_class: ${f.evidence_class}`);
+      if (f.causal_disposition) lines.push(`    causal_disposition: ${f.causal_disposition}`);
     }
   }
 

@@ -39,7 +39,8 @@ export function parseVerdict({ body, author = null } = {}) {
   if (!fence) return null;
   const block = fence[1];
 
-  if (scalar(block, 'protocol') !== 'brain-review/1') return null;
+  const proto = scalar(block, 'protocol');
+  if (proto !== 'brain-review/1' && proto !== 'brain-review/2') return null;
 
   const headSha = scalar(block, 'head_sha');
   const verdict = scalar(block, 'verdict');
@@ -52,6 +53,9 @@ export function parseVerdict({ body, author = null } = {}) {
     verdict,
     author,
   };
+  if (proto === 'brain-review/2') {
+    result.protocol = proto;
+  }
 
   // Optional (H1-5c board.mjs) — only set when the block actually carries a
   // parseable `sequencing:` line; omitted otherwise (not `null`), so a
@@ -60,6 +64,13 @@ export function parseVerdict({ body, author = null } = {}) {
   if (sequencingRaw !== null) {
     const parsed = parseJsonScalar(sequencingRaw);
     if (parsed !== null) result.sequencing = parsed;
+  }
+
+  // Optional (v2 REQ-H2-2) — parse findings array if JSON-scalar encoded.
+  const findingsRaw = scalar(block, 'findings');
+  if (findingsRaw !== null) {
+    const parsed = parseJsonScalar(findingsRaw);
+    if (parsed !== null) result.findings = parsed;
   }
 
   return result;

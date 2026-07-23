@@ -93,3 +93,42 @@ test('parseVerdict: an unparseable sequencing scalar is tolerated — omitted, n
   const result = parseVerdict({ body });
   assert.equal('sequencing' in result, false);
 });
+
+// ── brain-review/2 support (REQ-H2-2, REQ-H2-4) ───────────────────────────
+
+test('parseVerdict: accepts protocol: brain-review/2 alongside brain-review/1', () => {
+  const body = [
+    '```yaml',
+    'protocol: brain-review/2',
+    'verdict: REVISE',
+    'head_sha: def456',
+    'rev: 1',
+    '```',
+  ].join('\n');
+
+  const result = parseVerdict({ body, author: 'reviewer-v2' });
+  assert.deepEqual(result, {
+    protocol: 'brain-review/2',
+    head_sha: 'def456',
+    rev: 1,
+    verdict: 'REVISE',
+    author: 'reviewer-v2',
+  });
+});
+
+test('parseVerdict: extracts findings with evidence_class and causal_disposition from brain-review/2 block', () => {
+  const body = [
+    '```yaml',
+    'protocol: brain-review/2',
+    'verdict: REVISE',
+    'head_sha: def456',
+    'rev: 1',
+    'findings: "[{\\"id\\":\\"R3-001\\",\\"evidence_class\\":\\"inferential\\",\\"causal_disposition\\":\\"introduced\\"}]"',
+    '```',
+  ].join('\n');
+
+  const result = parseVerdict({ body, author: 'reviewer-v2' });
+  assert.deepEqual(result.findings, [
+    { id: 'R3-001', evidence_class: 'inferential', causal_disposition: 'introduced' },
+  ]);
+});
