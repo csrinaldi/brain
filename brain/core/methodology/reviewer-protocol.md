@@ -286,6 +286,26 @@ keystrokes. **A reviewer that cannot bend is exactly the reviewer you can automa
 
 ---
 
+## 13. Subagent Executor Doctrine — invocation via canonical entrypoints
+
+When an agent platform or orchestrator launches a subagent in the reviewer role, the subagent
+**MUST NOT** be given ad-hoc manual execution prompts (such as manual diff reading or ad-hoc `gh pr comment` calls).
+
+The subagent is strictly a **command executor** of the deterministic VCS review entrypoint:
+
+```bash
+npm run brain:review -- --pr <id>
+# or for issue rulings:
+npm run brain:review -- --issue <id> --mode ruling
+```
+
+### Why this is load-bearing:
+1. **Zero Prompt Drift**: Guarantees that the subagent invokes `cli.mjs`, wiring `identity` → `cold-boot` → `mode` → `evaluators` → `verdict` → `poster` deterministically.
+2. **Standardized Protocol Compliance**: Enforces that all review output strictly produces `brain-review/2` fenced blocks with full causal admission and evidence validation.
+3. **Token Minimization**: Leverages the $0-token deterministic pre-checks in `cli.mjs` before executing any LLM evaluation.
+
+---
+
 ## References
 
 - Reviewer port-verbs + two-key-split ADR (`brain-drafts/adr-reviewer-port-verbs-and-two-key-split.md`).
