@@ -69,6 +69,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0020](project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md) — External-reviewer VCS port verbs + the reviewActors/approvalActors two-key split
 - [ADR-0021](project/decisions/adr-0021-reviewer-port-head-and-rollup.md) — Widen the VCS port for the cold reviewer: headRefOid on prView + a prStatusRollup read verb; retire the H1-1 cold-boot seam
 - [ADR-0022](project/decisions/adr-0022-reviewer-port-base.md) — Widen the VCS port for the cold reviewer: baseRefOid on prView (closes H1-2C-BASE)
+- [ADR-0024](project/decisions/adr-0024-three-axis-decoupling.md) — Three-axis decoupling: AGENT_PLATFORM · SDD_ENGINE · MEMORY_BACKEND (extends ADR-0005/0019; trims the phantom platform allow-list)
 
 ### Project-specific rules
 
