@@ -46,7 +46,7 @@ export function resolvePlatform({ env = process.env, envVars = {}, config = {} }
   if (platformVal) return platformVal;
 
   const harnessVal = env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness;
-  if (harnessVal && ['antigravity', 'claude', 'openai', 'opencode', 'pi', 'plain'].includes(harnessVal)) {
+  if (harnessVal && ['antigravity', 'claude', 'plain'].includes(harnessVal)) {
     return harnessVal;
   }
 
