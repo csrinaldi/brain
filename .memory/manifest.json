@@ -208,6 +208,14 @@
       "sessions": 15,
       "memories": 1039,
       "prompts": 0
+    },
+    {
+      "id": "110fe2ca",
+      "created_by": "gandalf",
+      "created_at": "2026-07-25T22:54:30Z",
+      "sessions": 1,
+      "memories": 1184,
+      "prompts": 0
     }
   ]
 }
