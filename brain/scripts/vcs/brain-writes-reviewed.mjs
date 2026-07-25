@@ -16,6 +16,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { loadContext, gitlabApiConfig } from './ci-context.mjs';
+import { getVcs } from './cli.mjs';
+
 // ── Pure evaluator (design §6.1) ────────────────────────────────────────────
 
 const BRAIN_MANAGED_PREFIXES = ['brain/core/', 'brain/project/'];
@@ -51,8 +54,10 @@ const BRAIN_MANAGED_PREFIXES = ['brain/core/', 'brain/project/'];
  *   PR reviews from the VCS adapter (`state` is GitHub's review state string;
  *   only `'APPROVED'` counts toward approvers).
  * @param {string} input.author  PR author login.
- * @param {string[]} [input.botAllowlist]  Allow-listed actor logins / override
- *   label strings (`config.governance.approvalActors`).
+ * @param {string[]} [input.botAllowlist]  Actor logins that do NOT count as the
+ *   human reviewer at L6 (`config.governance.reviewActors` — a pure identity
+ *   list; issue #266 two-key split, R2). Override:* label strings are NOT here;
+ *   they resolve separately against `config.governance.approvalActors`.
  * @param {boolean} [input.adminOverride]  Whether an allow-listed `override:*`
  *   label is present on the PR (resolved by the wrapper against
  *   `botAllowlist` — never a blanket bypass).
@@ -134,24 +139,64 @@ function defaultDiffNameOnly(cwd) {
   };
 }
 
-function defaultFetchReviews(repo) {
-  return prNumber => {
-    // --paginate is REQUIRED: `gh api` does not auto-paginate. A long-lived PR
-    // with many re-review cycles can exceed one page — an unpaginated fetch
-    // can silently drop later reviews (page 2+), including the one human
-    // APPROVED review that would flip a self-approval verdict, which would
-    // wrongly leave the evaluator undercounting evidence.
-    const out = execFileSync(
-      'gh',
-      ['api', '--paginate', `repos/${repo}/pulls/${prNumber}/reviews`],
-      { encoding: 'utf8' }
-    );
-    const reviews = JSON.parse(out);
-    return reviews.map(r => ({ state: r.state, author: r.user?.login ?? null }));
+/**
+ * Default `fetchReviews` dep: dispatches `getVcs({ provider }).prReviews(...)`
+ * on the RUNTIME-detected `ctx.provider` (issue #239 A3 TASK2 — the
+ * class-closure audit's 4th VIOLATION, the same defect class as
+ * actor-check.mjs's pre-fix `defaultFetchLabeledEvents`/`defaultFetchIssue`
+ * and finding #14). Pre-fix, this wrapper called the `gh` CLI (via
+ * `execFileSync`) UNCONDITIONALLY regardless of provider — on GitLab CI (no
+ * `gh` binary) it threw ENOENT, masking the L6 gate behind a permanent
+ * `warn`. `getVcs` is injectable via `{ getVcs }` for tests, mirroring
+ * actor-check.mjs's `defaultFetchLabeledEvents`/`defaultFetchIssue` shape.
+ *
+ * @param {string} repo
+ * @param {string|undefined} provider
+ * @param {{ getVcs?: Function }} [deps]
+ * @returns {(prNumber: number) => Promise<Array<{ state: string, author: string|null }>>}
+ */
+function defaultFetchReviews(repo, provider, { getVcs: getVcsFn = getVcs } = {}) {
+  return async prNumber => {
+    const vcs = await getVcsFn({ provider });
+    const { apiBase, token, proxyUrl } = gitlabApiConfig();
+    const reviews = await vcs.prReviews({ project: repo, number: prNumber, apiBase, token, proxyUrl });
+    return reviews ?? [];
   };
 }
 
+/**
+ * Default `readBotAllowlist` dep: reads ONLY `governance.reviewActors` (issue
+ * #266, design §3 two-key split, binding ruling R2: "no key feeds two gates").
+ * L6's botAllowlist key MOVES from `governance.approvalActors` to the NEW,
+ * L6-only `governance.reviewActors` — it does NOT union them. `approvalActors`
+ * is now L5-only (`actor-check.mjs`'s reader, untouched); reading it here too
+ * would keep it feeding both gates, which is exactly the dual-semantics
+ * coupling the split exists to dissolve. To exclude an identity from L6's
+ * human-approver count, register it in `reviewActors`; to let an identity
+ * apply `status:approved`, register it in `approvalActors`; both effects
+ * require both registrations — explicit, never implicit.
+ */
 function defaultReadBotAllowlist(cwd) {
+  return () => {
+    try {
+      const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
+      return Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
+    } catch {
+      return [];
+    }
+  };
+}
+
+/**
+ * Default `readOverrideActors` dep: reads `governance.approvalActors` — the
+ * whitelist of `override:*` label strings honored at L6 (issue #266,
+ * P272-OVERRIDE-KEY option (b)). Kept SEPARATE from `readBotAllowlist`
+ * (`reviewActors`, the L6 human-approver exclusion) so `reviewActors` stays a
+ * pure identity list — one key, one meaning. `approvalActors` is the same
+ * human-trust grant that authorizes `status:approved` at L5
+ * (`actor-check.mjs`); the reviewer handle is in neither.
+ */
+function defaultReadApprovalActors(cwd) {
   return () => {
     try {
       const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
@@ -165,38 +210,46 @@ function defaultReadBotAllowlist(cwd) {
 /**
  * Gathers evaluateBrainWritesReviewed()'s inputs from git + the gh API (or
  * from injected `deps` in tests). `adminOverride` is resolved here — an
- * override:* label is only honored when it is BOTH present on the PR AND
- * listed in `botAllowlist` (`config.governance.approvalActors`); an unlisted
- * override:* label grants nothing (no blanket bypass, same discipline as
- * actor-check's `gatherActorCheckInputs`).
+ * override:* label is only honored when it is BOTH present on the PR AND listed
+ * in `config.governance.approvalActors` (read via `readOverrideActors`, SEPARATE
+ * from `botAllowlist`/`reviewActors`; issue #266 P272-OVERRIDE-KEY option (b) —
+ * one key, one meaning); an unlisted override:* label grants nothing (no blanket
+ * bypass, same discipline as actor-check's `gatherActorCheckInputs`).
  *
- * @param {{ baseSha: string, headSha: string, prNumber: number|string, repo: string, author: string, prLabels?: string[], cwd?: string, deps?: object }} args
- * @returns {{ changedFiles: string[], reviews: Array, author: string, botAllowlist: string[], adminOverride: boolean }}
+ * `provider` (github|gitlab, from `ctx.provider`) selects the VCS adapter
+ * (`getVcs({ provider })`, issue #239 A3 TASK2) for the default
+ * `fetchReviews` wrapper; an injected `deps.fetchReviews` bypasses
+ * resolution entirely (as tests do). This function is async as of A3 TASK2
+ * (the default wrapper awaits the `prReviews` CONTRACT verb, a
+ * Promise-returning dispatch); an injected sync `deps.fetchReviews` still
+ * works unchanged (`await` on a non-Promise resolves immediately).
+ *
+ * @param {{ baseSha: string, headSha: string, prNumber: number|string, repo: string, author: string, provider?: string, prLabels?: string[], cwd?: string, deps?: object }} args
+ * @returns {Promise<{ changedFiles: string[], reviews: Array, author: string, botAllowlist: string[], adminOverride: boolean }>}
  */
-export function gatherBrainWritesReviewedInputs({
+export async function gatherBrainWritesReviewedInputs({
   baseSha,
   headSha,
   prNumber,
   repo,
   author,
+  provider,
   prLabels = [],
   cwd = process.cwd(),
   deps = {},
 } = {}) {
   const diffNameOnly = deps.diffNameOnly ?? defaultDiffNameOnly(cwd);
-  const fetchReviews = deps.fetchReviews ?? defaultFetchReviews(repo);
+  const fetchReviews = deps.fetchReviews ?? defaultFetchReviews(repo, provider, deps);
   const readBotAllowlist = deps.readBotAllowlist ?? defaultReadBotAllowlist(cwd);
+  const readOverrideActors = deps.readOverrideActors ?? defaultReadApprovalActors(cwd);
 
   const botAllowlist = readBotAllowlist();
+  const overrideActors = readOverrideActors();
   const changedFiles = diffNameOnly(baseSha, headSha);
-  const reviews = fetchReviews(prNumber);
-  const adminOverride = prLabels.some(l => l.startsWith('override:') && botAllowlist.includes(l));
+  const reviews = await fetchReviews(prNumber);
+  const adminOverride = prLabels.some(l => l.startsWith('override:') && overrideActors.includes(l));
 
   return { changedFiles, reviews, author, botAllowlist, adminOverride };
-}
-
-function parsePrLabels(raw) {
-  return (raw ?? '').split(/\s+/).filter(Boolean);
 }
 
 /**
@@ -206,16 +259,30 @@ function parsePrLabels(raw) {
  * zero-false-positive detection goal intact while this job is
  * detection-only (DETECTION_JOBS).
  *
- * @param {{ baseSha?: string, headSha?: string, prNumber?: number|string, repo?: string, author?: string, prLabels?: string[], cwd?: string } & object} [deps]
- * @returns {{ level: 'pass'|'warn'|'fail', reason: string }}
+ * baseSha/headSha/prNumber/repo/author/prLabels source from the normalized
+ * ci-context (`ctx.*`, ADR-0016) — never from process.env directly (a
+ * drift-guard test enforces this). `ctx.labels` is already an array, so it
+ * replaces the former `PR_LABELS` space-separated env parsing outright.
+ *
+ * This function is async as of issue #239 A3 TASK2 — `gatherBrainWritesReviewedInputs`
+ * dispatches the `prReviews` CONTRACT verb via `getVcs({ provider })`, a
+ * Promise-returning call.
+ *
+ * @param {{ baseSha?: string, headSha?: string, prNumber?: number|string, repo?: string, author?: string, prLabels?: string[], cwd?: string, ctx?: object } & object} [deps]
+ * @returns {Promise<{ level: 'pass'|'warn'|'fail', reason: string }>}
  */
-export function runBrainWritesReviewedCheck(deps = {}) {
-  const baseSha = deps.baseSha ?? process.env.BASE_SHA;
-  const headSha = deps.headSha ?? process.env.HEAD_SHA;
-  const prNumber = deps.prNumber ?? process.env.PR_NUMBER;
-  const repo = deps.repo ?? process.env.GITHUB_REPOSITORY;
-  const author = deps.author ?? process.env.PR_AUTHOR;
-  const prLabels = deps.prLabels ?? parsePrLabels(process.env.PR_LABELS);
+export async function runBrainWritesReviewedCheck(deps = {}) {
+  const ctx = deps.ctx ?? {};
+  const baseSha = deps.baseSha ?? ctx.baseSha ?? undefined;
+  const headSha = deps.headSha ?? ctx.headSha ?? undefined;
+  const prNumber = deps.prNumber ?? ctx.prNumber ?? undefined;
+  const repo = deps.repo ?? ctx.repo ?? undefined;
+  const author = deps.author ?? ctx.author ?? undefined;
+  const provider = deps.provider ?? ctx.provider ?? undefined;
+  // ctx.labels may be null (uncomputable fetch); collapsing to [] here is the SAFE
+  // direction for this DETECTION gate — no labels ⇒ no admin-override applies ⇒
+  // stricter enforcement, never a fail-open (unlike the empty-on-failure anti-pattern).
+  const prLabels = deps.prLabels ?? ctx.labels ?? [];
   const cwd = deps.cwd ?? process.cwd();
 
   if (!baseSha || !headSha || !prNumber || !repo || !author) {
@@ -229,7 +296,7 @@ export function runBrainWritesReviewedCheck(deps = {}) {
 
   let inputs;
   try {
-    inputs = gatherBrainWritesReviewedInputs({ baseSha, headSha, prNumber, repo, author, prLabels, cwd, deps });
+    inputs = await gatherBrainWritesReviewedInputs({ baseSha, headSha, prNumber, repo, author, provider, prLabels, cwd, deps });
   } catch (err) {
     return {
       level: 'warn',
@@ -243,13 +310,14 @@ export function runBrainWritesReviewedCheck(deps = {}) {
 /**
  * Runs the check, prints the verdict + reason, and returns the process exit
  * code — kept separate from `process.exit()` itself so it stays testable
- * (mirrors actor-check.mjs's main()). Exit 0 on pass/warn, 1 on fail.
+ * (mirrors actor-check.mjs's main()). Exit 0 on pass/warn, 1 on fail. Async
+ * as of A3 TASK2 (awaits `runBrainWritesReviewedCheck`).
  *
  * @param {object} [deps]
- * @returns {0|1}
+ * @returns {Promise<0|1>}
  */
-export function main(deps = {}) {
-  const result = runBrainWritesReviewedCheck(deps);
+export async function main(deps = {}) {
+  const result = await runBrainWritesReviewedCheck(deps);
   console.log(`brain-writes-reviewed: ${result.level}`);
   if (result.reason) console.log(`  ${result.reason}`);
   return result.level === 'fail' ? 1 : 0;
@@ -258,5 +326,6 @@ export function main(deps = {}) {
 // ── CLI entrypoint ───────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  process.exit(main());
+  const ctx = await loadContext();
+  process.exit(await main({ ctx }));
 }

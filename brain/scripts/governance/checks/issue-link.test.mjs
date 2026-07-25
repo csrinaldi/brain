@@ -39,3 +39,29 @@ test('issueLink: body with no issue reference → fail, reason mentions Part of 
   assert.equal(r.pass, false);
   assert.ok(r.reason.includes('Part of'), `reason must mention "Part of", got: ${r.reason}`);
 });
+
+// ── 9-form closing-keyword vocabulary (issue #231 CP-A2a review, finding M1)
+// — issueLink() was NARROW (closes|fixes|resolves only, 3 of 9 GitHub-
+// documented forms); widened to match GitHub bash + actor-check.mjs's
+// existing BROAD vocabulary: close, closes, closed, fix, fixes, fixed,
+// resolve, resolves, resolved.
+
+test('issueLink: "Fixed #42" (past-tense form) → pass (M1 widen)', () => {
+  assert.deepEqual(issueLink('Fixed #42'), { pass: true });
+});
+
+test('issueLink: "Close #10" (bare present-tense form) → pass (M1 widen)', () => {
+  assert.deepEqual(issueLink('Close #10'), { pass: true });
+});
+
+test('issueLink: "Closed #3" (past-tense form) → pass (M1 widen)', () => {
+  assert.deepEqual(issueLink('Closed #3'), { pass: true });
+});
+
+test('issueLink: "Resolved #5" (past-tense form) → pass (M1 widen)', () => {
+  assert.deepEqual(issueLink('Resolved #5'), { pass: true });
+});
+
+test('issueLink: "resolve #8" (bare present-tense form) → pass (M1 widen)', () => {
+  assert.deepEqual(issueLink('resolve #8'), { pass: true });
+});

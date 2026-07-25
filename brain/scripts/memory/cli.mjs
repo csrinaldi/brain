@@ -2,12 +2,16 @@
 // brain/scripts/memory/cli.mjs — MEMORY_BACKEND dispatcher.
 //
 // Usage: node brain/scripts/memory/cli.mjs <op>
-//   op: share | pull | import | index | setup | feature-checkpoint | feature-resume
+//   op: share | pull | import | index | reindex | setup | feature-checkpoint | feature-resume
 //
-//   pull   — churn-resilient full pull: manifest restore + git pull + engram import.
-//            Use for cross-machine sync (npm run memory:pull).
-//   import — import-only: engram sync --import, no git pull.
-//            Use after git already pulled (post-merge hook, day-start step 5).
+//   pull    — churn-resilient full pull: manifest restore + git pull + engram import.
+//             Use for cross-machine sync (npm run memory:pull).
+//   import  — import-only: records-only engram hydrate (D2/C4), no git pull.
+//             Use after git already pulled (post-merge hook, day-start step 5).
+//   reindex — regenerate .memory/index.jsonl from .memory/records/ alone
+//             (REQ-MF-4, issue #205). Backend-agnostic: dispatched directly
+//             here, not through backends/<backend>.mjs — the record format is
+//             brain-owned and independent of the live memory backend.
 //
 // Reads MEMORY_BACKEND from the environment or .env (default: engram).
 // Imports the corresponding backend from ./backends/<backend>.mjs and
@@ -18,6 +22,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { t } from "../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -49,9 +55,13 @@ const VALID_OPS = [
   "pull",
   "import",
   "index",
+  "reindex",
+  "migrate-v1",
   "setup",
   "feature-checkpoint",
   "feature-resume",
+  "save",
+  "search",
 ];
 const op = process.argv[2];
 
@@ -63,6 +73,139 @@ if (!op) {
 if (!VALID_OPS.includes(op)) {
   console.error(`memory/cli: unknown op '${op}'. Valid ops: ${VALID_OPS.join(", ")}`);
   process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// "reindex" is backend-agnostic: the durable record format (.memory/records/,
+// .memory/index.jsonl) is brain-owned (ADR-0017), not a MEMORY_BACKEND concern.
+// Dispatched directly here instead of through backends/<backend>.mjs.
+// ---------------------------------------------------------------------------
+if (op === "reindex") {
+  const { rebuildIndex } = await import("./lib/store.mjs");
+  try {
+    const { count } = rebuildIndex({
+      recordsDir: join(repoRoot, ".memory", "records"),
+      indexPath: join(repoRoot, ".memory", "index.jsonl"),
+    });
+    console.log(`memory/cli: ${await t("memory.reindex.done", { count })}`);
+    process.exit(0);
+  } catch (err) {
+    console.error(`memory/cli: ${await t("memory.reindex.failed", { message: err.message })}`);
+    process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// "migrate-v1" is likewise backend-agnostic (chunks → records is a durable-
+// format concern, ADR-0017 — not a MEMORY_BACKEND one).
+//
+// `--dry-run`  → the C2a report only, never mutates `.memory/`.
+// no `--dry-run` → executes the real migration (un-refused, C2b — design.md
+//   Decision 1): the CLI being runnable IS the runbook's intended step 1;
+//   the control is the runbook order + the human keystroke, not a CLI switch
+//   (the `--no-scrub` class C1b prohibited stays rejected). `memory.dualWrite`
+//   itself is retired (D3/C4, issue #229) — records-only write is now
+//   unconditional. The abort-if-populated guard in `runMigration()` still
+//   protects re-runs.
+// `--rollback` → the inverse (REQ-C2B2-2): restores chunks from `legacy/`,
+//   drops `records/`, reindexes. Rehearsed only in fixtures per the runbook;
+//   the real rollback runs only via the cutover runbook.
+//
+// BRAIN_MIGRATE_V1_TEST_ROOT (test-only seam): when set, this op resolves
+// `.memory/` under `<value>/.memory` instead of the real repo root. NEVER
+// set this outside tests — it exists solely so cli.migrate-v1.test.mjs can
+// drive this op end-to-end against a fixture without ever touching the
+// real `.memory/`.
+// ---------------------------------------------------------------------------
+if (op === "migrate-v1") {
+  const testRoot = process.env.BRAIN_MIGRATE_V1_TEST_ROOT;
+  const memoryRoot = testRoot ? join(testRoot, ".memory") : join(repoRoot, ".memory");
+  const chunksDir = join(memoryRoot, "chunks");
+  const recordsDir = join(memoryRoot, "records");
+  const legacyDir = join(memoryRoot, "legacy");
+  const indexPath = join(memoryRoot, "index.jsonl");
+
+  if (process.argv.includes("--rollback")) {
+    const { rollbackMigration } = await import("./lib/migrate-v1.mjs");
+    try {
+      const summary = rollbackMigration({ chunksDir, recordsDir, legacyDir, indexPath });
+      console.log(
+        await t("memory.migrateV1.rollbackSummary", {
+          restored: summary.restored,
+          indexCount: summary.indexCount,
+        }),
+      );
+      process.exit(0);
+    } catch (err) {
+      console.error(`memory/cli: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
+  if (!process.argv.includes("--dry-run")) {
+    const { runMigration } = await import("./lib/migrate-v1.mjs");
+    try {
+      const summary = runMigration({ chunksDir, recordsDir, legacyDir, indexPath });
+      console.log(
+        await t("memory.migrateV1.realRunSummary", {
+          written: summary.written,
+          rejected: summary.rejected,
+          skipped: summary.skipped,
+          unparseable: summary.unparseableChunks,
+          emptyObservations: summary.emptyObservationsChunks,
+          indexCount: summary.indexCount,
+        }),
+      );
+      process.exit(0);
+    } catch (err) {
+      console.error(`memory/cli: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
+  const { collectChunkObservations, buildMigrationReport } = await import(
+    "./lib/migrate-v1.mjs"
+  );
+
+  const { observations, unparseable, emptyObservations } = collectChunkObservations(chunksDir);
+  const report = buildMigrationReport(observations, { unparseable, emptyObservations });
+
+  console.log(await t("memory.migrateV1.dryRunHeader"));
+  console.log(
+    await t("memory.migrateV1.summary", {
+      records: report.recordCount,
+      skipped: report.skippedPersonal,
+      rejected: report.rejected.length,
+      unparseable: report.unparseableChunks.length,
+      emptyObservations: report.emptyObservationsChunks.length,
+    }),
+  );
+  console.log(await t("memory.migrateV1.typesHistogramHeader"));
+  for (const [type, count] of Object.entries(report.typesHistogram).sort()) {
+    console.log(`  ${type}: ${count}`);
+  }
+  console.log(
+    await t("memory.migrateV1.provenanceHistogramHeader", {
+      recovered: report.provenanceHistogram.recovered,
+      fallback: report.provenanceHistogram.fallback,
+    }),
+  );
+  if (report.rejected.length > 0) {
+    console.log(await t("memory.migrateV1.rejectedHeader"));
+    for (const r of report.rejected) {
+      console.log(`  - id=${r.id} type=${r.type} title="${r.title}" reason=${r.reason}`);
+    }
+  }
+  if (report.emptyObservationsChunks.length > 0) {
+    console.log(await t("memory.migrateV1.emptyObservationsHeader"));
+    for (const f of report.emptyObservationsChunks) console.log(`  - ${f}`);
+  }
+  if (report.unparseableChunks.length > 0) {
+    console.log(await t("memory.migrateV1.unparseableHeader"));
+    for (const f of report.unparseableChunks) console.log(`  - ${f}`);
+    console.log(`  ${report.unparseableNote}`);
+  }
+  process.exit(0);
 }
 
 // Map verb strings that cannot be valid JS export names to their actual export name.
@@ -91,6 +234,70 @@ try {
 if (typeof backend[fn] !== "function") {
   console.error(`memory/cli: backend '${MEMORY_BACKEND}' does not implement op '${op}'`);
   process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// "save" carries structured flags (--type/--project/--scope/--topic) the
+// generic positional-forward below would mis-pass as extra positionals
+// (design.md Decision 7). A minimal arg parser extracts the two positionals
+// (title, content) and the four flags into {type, project, scope, topic},
+// then calls backend.save(title, content, opts, seams). This keeps the
+// parser backend-agnostic: engram's save receives the same shape and
+// refuses it (Decision 5) via the shared unsupportedOp helper.
+//
+// NO --actor/--actor-kind/--ts flag is recognized ANYWHERE in this parser
+// (Decision 2 — spoof resistance enforced at the parser, never a caller-
+// supplied provenance field).
+//
+// BRAIN_MEMORY_TEST_ROOT (test-only seam, mirrors BRAIN_MIGRATE_V1_TEST_ROOT
+// above): when set, save/search resolve `.memory/` under `<value>` instead
+// of the real repo root. NEVER set this outside tests.
+// ---------------------------------------------------------------------------
+const memoryTestRoot = process.env.BRAIN_MEMORY_TEST_ROOT;
+
+if (op === "save") {
+  const rest = process.argv.slice(3);
+  const positionals = [];
+  const flags = {};
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i];
+    if (arg.startsWith("--")) {
+      flags[arg.slice(2)] = rest[++i];
+    } else {
+      positionals.push(arg);
+    }
+  }
+  const [title, content] = positionals;
+  const opts = { type: flags.type, project: flags.project, scope: flags.scope, topic: flags.topic };
+  const seams = memoryTestRoot ? { root: memoryTestRoot } : {};
+  try {
+    const result = await backend.save(title, content, opts, seams);
+    console.log(`memory/cli: ${await t("memory.plainfiles.save.done", { id: result?.id, file: result?.file })}`);
+    process.exit(0);
+  } catch (err) {
+    console.error(`memory/cli: ${MEMORY_BACKEND}.save() failed — ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (op === "search") {
+  const query = process.argv[3];
+  const searchOpts = memoryTestRoot ? { root: memoryTestRoot } : {};
+  try {
+    const result = await backend.search(query, searchOpts);
+    if (!result?.matches?.length) {
+      console.log(`memory/cli: ${await t("memory.plainfiles.search.empty")}`);
+    } else {
+      console.log(`memory/cli: ${await t("memory.plainfiles.search.summary", { count: result.matches.length })}`);
+      for (const m of result.matches) {
+        console.log(`  - ${m.id} [${m.type}] ${m.content.slice(0, 120)}`);
+      }
+    }
+    process.exit(0);
+  } catch (err) {
+    console.error(`memory/cli: ${MEMORY_BACKEND}.search() failed — ${err.message}`);
+    process.exit(1);
+  }
 }
 
 try {

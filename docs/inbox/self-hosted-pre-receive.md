@@ -75,6 +75,24 @@ for the exact paths and configuration.
 > command targets bare repos and self-hosted Gitea/Gitosis/plain-git setups
 > where you have direct filesystem access.
 
+## Ladder Awareness (GitLab)
+
+`npm run brain:governance-status` reports rung-1 as three honestly-distinguished
+sub-gates on GitLab: `merge gate` and `push gate` are API-verified (read
+directly from GitLab), while `pre-receive` — the server hook described above —
+is **not remotely detectable**. When `vcs.selfHostedPreReceive: true` is set in
+`brain.config.json`, the report renders:
+
+```
+  pre-receive    armed (config-declared) — not remotely detectable; verify via install runbook (npm run brain:protect-server)
+```
+
+No GitLab API reports whether a `custom_hooks/pre-receive` script is actually
+installed on a bare repository, so this line is a **declaration**, not a
+**verification**. The runbook above (Install — GitLab Self-Hosted) is how you
+confirm what the ladder itself cannot probe — install the hook per the manual
+steps, then treat the config flag as your own attestation that you did.
+
 ## Limitations
 
 The `pre-receive` hook can only inspect **what is in the pushed commits** — it

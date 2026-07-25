@@ -262,4 +262,47 @@ export default {
   'session.manifest.restored':  'manifest:  cambios descartados (seguro)',
   'session.ticket.label':       'ticket:',
   'session.ticket.none':        '(sin memoria de ticket activa)',
+
+  // ── memory/cli.mjs — reindex (issue #205, C1) ─────────────────────────────────
+  'memory.reindex.done':   '✓ reindex completo — {count} registro(s) indexado(s).',
+  'memory.reindex.failed': '✗ reindex falló — {message}',
+
+  // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
+  'memory.share.secretFound': 'Se detectó un secreto en {file}:{line} — coincide con el patrón "{pattern}". Eliminá el secreto o agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo. Ejecutá `gunzip -c {file} | jq .` para inspeccionar (el número de línea corresponde a esa vista formateada).',
+
+  // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
+  'memory.share.secretFoundRecords': 'Se detectó un secreto en un registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
+
+  // ── memory/backends/engram.mjs — importMemory() pull solo-records (D2/C4, issue #229) ──
+  'memory.import.empty':    'ℹ no se encontraron registros en .memory/records/ — nada para importar.',
+  'memory.import.progress': '  ✓ {written}/{total} registros importados',
+  'memory.import.done':     '✓ importación completa — {written}/{total} registros importados a engram (solo records, D2/C4).',
+
+  // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──
+  'memory.migrateV1.realRunSummary':        '✓ migración completa — escritos: {written} | rechazados: {rejected} | omitidos (personal): {skipped} | chunks no parseables: {unparseable} | chunks sin observaciones: {emptyObservations} | índice: {indexCount} registro(s). records/ es ahora la única vía de escritura (memory.dualWrite retirado, D3/C4).',
+  'memory.migrateV1.rollbackSummary':       '✓ rollback completo — chunk(s) restaurado(s): {restored} | índice: {indexCount} registro(s).',
+  'memory.migrateV1.dryRunHeader':          'Reporte de migración en dry-run (issue #217, C2):',
+  'memory.migrateV1.summary':               'registros: {records} | omitidos (personal): {skipped} | rechazados: {rejected} | chunks no parseables: {unparseable} | chunks sin observaciones: {emptyObservations}',
+  'memory.migrateV1.typesHistogramHeader':  'Histograma de tipos:',
+  'memory.migrateV1.provenanceHistogramHeader': 'Histograma de procedencia: {recovered} recuperados / {fallback} por convención de respaldo',
+  'memory.migrateV1.rejectedHeader':        'Registros rechazados:',
+  'memory.migrateV1.emptyObservationsHeader': 'Chunks solo de sesiones/prompts (observations: null — no es corrupción, 0 observaciones aportadas):',
+  'memory.migrateV1.unparseableHeader':     'Archivos chunk no parseables (corrupción real — cantidad de observaciones desconocida):',
+
+  // ── memory/lib/unsupported-op.mjs — helper compartido de rechazo explícito (C3, issue #246) ──
+  'memory.op.unsupported':            "la operación '{op}' no está soportada por el backend de memoria '{backend}' (diferida — ver openspec/changes/issue-246-c3).",
+  'memory.save.engramUnsupported':    "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_save nativo de engram / 'engram save' en su lugar.",
+  'memory.search.engramUnsupported':  "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_search nativo de engram / 'engram search' en su lugar.",
+
+  // ── memory/backends/plainfiles.mjs — verbos cli save/search (C3, issue #246) ──
+  'memory.plainfiles.save.done':    '✓ guardado {id} → {file}',
+  'memory.plainfiles.save.secretFound': 'Se detectó un secreto en el registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
+  'memory.save.plainfilesIgnoredOpts': 'se ignoraron la(s) opción(es) {opts} — el formato de registro de plainfiles no tiene un campo para ellas (scope/topic son conceptos exclusivos de engram); el registro se guardó igualmente.',
+  'memory.plainfiles.search.empty': 'ℹ no se encontraron registros coincidentes.',
+  'memory.plainfiles.search.summary': '{count} registro(s) coincidente(s):',
+
+  // ── brain-protect.mjs — arm-and-verify (issue #203) ───────────────────────────
+  'protect.verify.unverifiable': '  Verificar: aún no hay check-runs en {branch} — no verificable hasta el primer PR.',
+  'protect.verify.missing':      '  AVISO    : el check requerido "{context}" no tiene check-run coincidente aún — confirmar que el nombre del job sea exacto.',
+  'protect.verify.unsupported':  '  Verificar: verificación por check-runs no soportada en el provider {provider} — los contexts armados no se cruzan.',
 };

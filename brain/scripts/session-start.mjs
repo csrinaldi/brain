@@ -33,7 +33,9 @@ import { fileURLToPath } from 'node:url';
 import { currentBranch } from './lib/git-branch.mjs';
 import { restoreManifestChurn } from './lib/memory-manifest.mjs';
 import { tryFeatureResume } from './memory/lib/auto-resume.mjs';
+import { synthesizeContext } from './context/synthesizer.mjs';
 import { t } from './i18n/t.mjs';
+import { CHANGES_ROOT, parseChangeId } from './lib/sdd-layout.mjs';
 
 // ── deriveChangeFromBranch — branch → openspec/changes/* resolver (design §1.4) ──
 
@@ -67,13 +69,14 @@ export function deriveChangeFromBranch(branchName, changesDir, { _readdir = read
     out.matches = entries
       .filter((e) => e && typeof e.isDirectory === 'function' && e.isDirectory() && e.name !== 'archive')
       .map((e) => e.name)
-      // Delimiter-anchored match (NOT substring `.includes`): a dir name only
-      // matches when it IS the token (bare `issue-<N>`) or starts with
-      // `<token>-` (the usual `issue-<N>-<slug>` shape). Plain `.includes`
-      // let a short token substring-match a longer one, e.g.
+      // Delimiter-anchored match via parseChangeId's dir-shape parser (NOT
+      // substring `.includes`): a dir name only matches when its parsed iid
+      // equals the branch token's iid — bare `issue-<N>` or the usual
+      // `issue-<N>-<slug>` shape. Plain `.includes` let a short token
+      // substring-match a longer one, e.g.
       // 'issue-138-session-start'.includes('issue-13') === true — a
       // confident WRONG resolution for branch `issue-13`.
-      .filter((name) => name === out.token || name.startsWith(`${out.token}-`))
+      .filter((name) => parseChangeId(name)?.iid === m[1])
       .sort();
     return out;
   } catch {
@@ -290,7 +293,7 @@ export function step3ResolveChange(cwd, deps = {}) {
   try {
     const branchFn = deps._branch ?? ((c) => currentBranch(c, { _spawn: boundGatedSpawn(deps) }));
     const branch = branchFn(cwd);
-    const changesDir = join(cwd, 'openspec', 'changes');
+    const changesDir = join(cwd, CHANGES_ROOT);
     const readdir = deps._changes ?? readdirSync;
     const { token, matches } = deriveChangeFromBranch(branch, changesDir, { _readdir: readdir });
     return { branch: branch ?? null, token, matches };
@@ -318,6 +321,33 @@ export function step4LoadTicketMemory(cwd, deps = {}) {
     return tryFeatureResume(cwd, { _runner: runner }) ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Step 5 — synthesize targeted agent context floor + ADRs (REQ-CTX-4).
+ * @returns {Promise<{ coreFloor: string[], matchedDecisions: string[], markdown: string }>}
+ */
+export async function step5SynthesizeContext(cwd, deps = {}) {
+  try {
+    const change = step3ResolveChange(cwd, deps);
+    const synth = deps._synthesize ?? synthesizeContext;
+    return await synth({ touchedFiles: change.matches, rootDir: cwd });
+  } catch {
+    const defaultFloor = [
+      'brain/core/methodology/agent-authorities.md',
+      'brain/core/methodology/sdd-layout.md',
+      'brain/core/methodology/workflow-governance.md',
+      'brain/core/methodology/reviewer-protocol.md',
+    ];
+    return {
+      coreFloor: defaultFloor,
+      matchedDecisions: [],
+      matchedMemories: [],
+      failsafeActivated: true,
+      failsafeMode: 'core_floor',
+      markdown: '# Synthesized Agent Context (.brain-context.md)\n\n## Core Methodology Baseline Floor (Mandatory)\n- [agent-authorities.md](brain/core/methodology/agent-authorities.md)\n- [sdd-layout.md](brain/core/methodology/sdd-layout.md)\n- [workflow-governance.md](brain/core/methodology/workflow-governance.md)\n- [reviewer-protocol.md](brain/core/methodology/reviewer-protocol.md)\n\n> [!NOTE]\n> Core Baseline Floor Activated: Synthesizer execution fallback.',
+    };
   }
 }
 

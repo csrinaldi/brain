@@ -25,13 +25,20 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | `npm run brain:env:init` | `env:init` | — | Environment bootstrap: installs tools, configures auth, imports memory, refreshes skill registry. Idempotent. |
 | `npm run brain:day:start` | `day:start` | — | Daily startup: VCS auth, ecosystem updates, team memory, ticket board. |
 | `npm run brain:session:start` | `session:start` | — | Session context loader: restores manifest churn, hydrates local engram, resolves active change and ticket memory. Read-only, local-only, no network. |
-| `npm run brain:ticket:start -- <id>` | `ticket:start -- <id>` | `/ticket-start <id>` | Takes an issue, creates the branch with the convention `{type}/issue-{number}-{slug}` from main. |
+| `npm run brain:ticket:start -- <id> --worktree --base <tracker>` | `ticket:start -- <id>` | `/ticket-start <id>` | Task start. Creates the branch `{type}/issue-{number}-{slug}` in an ISOLATED WORKTREE off `<tracker>`. **Always an isolated worktree; NEVER a branch in the main checkout when parallel work is possible.** `<tracker>` is the integration base (e.g. `feature/v2.0.0`), not `main`, while an epic is in flight. |
 | `npm run brain:project:feature -- --issue <id>` | `project:feature -- --issue <id>` | `/sdd-new <id>` | Starts an SDD change: creates `openspec/changes/issue-<id>-<slug>/` with `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
 | `npm run brain:repo:check` | `repo:check` | — | Validates prohibited references across the entire tree. Minimum gate before any commit. |
 | `npm run brain:change:verify` | `change:verify` | `/sdd-verify` | Validates the scope of the active change: classifies the diff, runs only the necessary verifications. |
 | `npm run memory:share` | — | — | Exports local engram → `.memory/` (versioned in git). Run before pushing. |
 | `npm run memory:pull` | — | — | Imports `.memory/` → local engram. Brings the team's memory. |
 | `npm run memory:index` | — | — | Reprojects `brain/` → local engram. Needed when ADRs or glossary change. |
+
+> **Worktree convention (load-bearing):** task start is
+> `npm run brain:ticket:start -- <id> --worktree --base <tracker>`. The isolated worktree is
+> mandatory whenever parallel work is possible — it gives one-branch-per-worktree isolation
+> over a shared object store (single fetch, zero extra clone). A branch in the main checkout
+> is only acceptable for strictly solo, serial work. This rule prevents the whole team from
+> colliding on one working tree.
 
 ## Optional verbs (recommended)
 

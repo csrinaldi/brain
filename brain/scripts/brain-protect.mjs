@@ -19,9 +19,65 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { checkContexts } from './vcs/governance-checks.mjs';
+import { checkContexts, diffArmedChecks } from './vcs/governance-checks.mjs';
+import { t } from './i18n/t.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Best-effort post-arm verification (issue #203, design.md §3 — arm-and-verify).
+ * Warns, never fails: a freshly protected branch legitimately has zero
+ * check-runs before its first PR runs, so zero runs yields ONE "unverifiable"
+ * note rather than one warning per required context. `listCheckRuns` is
+ * injectable so tests never spawn a real `gh` (mirrors ci-context.mjs's `deps`
+ * seam).
+ *
+ * @param {{ checks: string[], project: string, branch?: string, listCheckRuns: (args: {project: string, branch: string}) => Promise<string[]>, log?: (msg: string) => void }} opts
+ */
+export async function verifyArmedProtection({ checks, project, branch = 'main', listCheckRuns, log = console.log }) {
+  let runNames;
+  try {
+    runNames = await listCheckRuns({ project, branch });
+  } catch {
+    // A provider's listCheckRuns/checkRuns rejecting is a verification-layer bug,
+    // not an armed-protection failure — branch protection already succeeded by
+    // the time this runs. Degrade to the same unverifiable note (issue #203
+    // review fix F1) rather than letting the rejection propagate into
+    // activateProtection and look like the arm step itself failed.
+    log(await t('protect.verify.unverifiable', { branch }));
+    return;
+  }
+  const { unverifiable, missing } = diffArmedChecks(checks, runNames);
+  if (unverifiable) {
+    log(await t('protect.verify.unverifiable', { branch }));
+    return;
+  }
+  for (const context of missing) {
+    log(await t('protect.verify.missing', { context }));
+  }
+}
+
+/**
+ * Dispatches post-arm verification based on provider capability (issue #203
+ * review fix F2). A provider without a `checkRuns` verb (e.g. a hypothetical
+ * GitLab provider) has no way to ever self-resolve the "no runs yet" note — it
+ * will NEVER report runs, so that note would be misleading. Such a provider
+ * gets a distinct "not supported" note instead, and run-based verification
+ * (`verifyArmedProtection`) is skipped entirely.
+ *
+ * Exported for testing — activateProtection's provider module is loaded via a
+ * real dynamic import with no seam, so this dispatch step is factored out to be
+ * exercised directly with a fake provider module.
+ *
+ * @param {{ checks: string[], project: string, branch: string, provider: string, providerModule: object, log?: (msg: string) => void }} opts
+ */
+export async function verifyAfterArm({ checks, project, branch, provider, providerModule, log = console.log }) {
+  if (typeof providerModule.checkRuns === 'function') {
+    await verifyArmedProtection({ checks, project, branch, listCheckRuns: providerModule.checkRuns, log });
+  } else {
+    log(await t('protect.verify.unsupported', { provider }));
+  }
+}
 
 /**
  * Activate branch protection on main via the configured VCS provider.
@@ -63,12 +119,17 @@ export async function activateProtection() {
   }
 
   const checks = checkContexts();
+  // Single-sourced (issue #203 review fix F5): branchProtect and verifyAfterArm
+  // must agree on the armed branch by construction, not by coincidence — both
+  // are passed this same variable explicitly rather than each hardcoding 'main'
+  // independently.
+  const branch = 'main';
   console.log(`Activating branch protection on ${project} (provider: ${provider})`);
   console.log(`  Required checks: ${checks.join(', ')}`);
 
   let result;
   try {
-    result = await providerModule.branchProtect({ project, checks });
+    result = await providerModule.branchProtect({ project, checks, branch });
   } catch (e) {
     // branchProtect should not throw in the v2 adapter, but guard against
     // unexpected runtime errors (e.g. network timeout, unhandled edge case).
@@ -78,6 +139,9 @@ export async function activateProtection() {
 
   if (result.enforced) {
     console.log('Branch protection activated successfully.');
+    // Dispatches to run-based verification only when the provider supports it,
+    // else logs a distinct "unsupported" note (issue #203 review fix F2).
+    await verifyAfterArm({ checks, project, branch, provider, providerModule });
   } else {
     console.log('Branch protection could not be enforced.');
     console.log(`  Reason : ${result.reason ?? 'unknown'}`);

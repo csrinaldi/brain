@@ -19,7 +19,7 @@ import { diffSize } from './governance/checks/diff-size.mjs';
 import { issueLink } from './governance/checks/issue-link.mjs';
 import { adrPresence } from './governance/checks/adr-presence.mjs';
 import { memoryPresence } from './governance/checks/memory-presence.mjs';
-import { readChunkObservations } from './lib/chunk-reader.mjs';
+import { readRecordObservations } from './memory/lib/store.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -119,7 +119,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const prBody = git('log -1 --format=%B HEAD', cwd);
   const ignoreList = loadIgnoreList(cwd);
 
-  const observations = readChunkObservations(cwd);
+  const observations = readRecordObservations({ recordsDir: join(cwd, '.memory', 'records') });
 
   const result = await runCheck({
     numstat,

@@ -100,3 +100,96 @@ test('repo:check (no-verify-bypass): clean .mjs file passes', (t) => {
   assert.equal(r.status, 0,
     `expected exit 0 (clean), got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
 });
+
+// ── S-1 (#595 pin 1a): 4-artifact enforcement via sdd-layout.mjs's
+// missingRequiredArtifacts, wired in B1 (issue #253). Behavior-preserving over
+// the frozen corpus (proven by the golden fixture, sdd-layout-golden.test.mjs)
+// + B0-contract enforcement going forward — never "pure wiring". ────────────
+
+function makeChangeDir(dir, name, files) {
+  const changeDir = join(dir, 'openspec', 'changes', name);
+  mkdirSync(changeDir, { recursive: true });
+  for (const [fname, content] of Object.entries(files)) {
+    writeFileSync(join(changeDir, fname), content);
+  }
+}
+
+test('repo:check S-1: a new dir missing spec.md and design.md is flagged, naming BOTH missing artifacts and pointing to sdd-layout.md (never-cryptic, #595 pin 1b)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'refs-s1-missing-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeMinimalRepo(dir);
+  copyRulesFile(dir);
+  makeChangeDir(dir, 'issue-1-new', { 'proposal.md': '', 'tasks.md': '' });
+  git('add', '-A');
+  git('commit', '-m', 'seed');
+
+  const r = runCheckRefs(dir);
+  assert.equal(r.status, 1, `expected exit 1, got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+  assert.ok(r.stderr.includes('openspec-incomplete'), `expected 'openspec-incomplete' in:\n${r.stderr}`);
+  assert.ok(r.stderr.includes('spec.md'), `expected 'spec.md' named in:\n${r.stderr}`);
+  assert.ok(r.stderr.includes('design.md'), `expected 'design.md' named in:\n${r.stderr}`);
+  assert.ok(r.stderr.includes('sdd-layout.md'), `expected a pointer to sdd-layout.md in:\n${r.stderr}`);
+});
+
+test('repo:check S-1: a grandfathered dir (vcs-adapter) with no spec/design artifacts at all is never flagged (sealed-set short-circuit)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'refs-s1-grandfathered-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeMinimalRepo(dir);
+  copyRulesFile(dir);
+  makeChangeDir(dir, 'vcs-adapter', { 'proposal.md': '', 'tasks.md': '' });
+  git('add', '-A');
+  git('commit', '-m', 'seed');
+
+  const r = runCheckRefs(dir);
+  assert.equal(r.status, 0, `expected exit 0 (grandfathered, exempt), got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+});
+
+test('repo:check S-1 (Phase 6.2 synthetic — REQ-B1-2 "latent-stricter for future new dirs"): a dir missing exactly ONE of the 4 (spec.md) is caught — the OLD 2-of-4 loop would have missed this since proposal.md+tasks.md are both present', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'refs-s1-one-missing-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeMinimalRepo(dir);
+  copyRulesFile(dir);
+  makeChangeDir(dir, 'issue-2-partial', { 'proposal.md': '', 'design.md': '', 'tasks.md': '' });
+  git('add', '-A');
+  git('commit', '-m', 'seed');
+
+  const r = runCheckRefs(dir);
+  assert.equal(r.status, 1, `expected exit 1, got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+  assert.ok(r.stderr.includes('spec.md'), `expected 'spec.md' named as missing in:\n${r.stderr}`);
+});
+
+test('repo:check S-1 (Phase 6.1 synthetic): a new dir with a NESTED specs/<capability>/spec.md (no flat spec.md) passes — flat-OR-nested tolerance holds through the wired site', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'refs-s1-nested-spec-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeMinimalRepo(dir);
+  copyRulesFile(dir);
+  makeChangeDir(dir, 'issue-4-nested', { 'proposal.md': '', 'design.md': '', 'tasks.md': '' });
+  mkdirSync(join(dir, 'openspec', 'changes', 'issue-4-nested', 'specs', 'some-capability'), { recursive: true });
+  writeFileSync(join(dir, 'openspec', 'changes', 'issue-4-nested', 'specs', 'some-capability', 'spec.md'), '');
+  git('add', '-A');
+  git('commit', '-m', 'seed');
+
+  const r = runCheckRefs(dir);
+  assert.equal(r.status, 0, `expected exit 0 (nested spec satisfies the contract), got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+});
+
+test('repo:check S-1 (Phase 6.1 synthetic): a dir with no artifacts at all lists all 4 as missing', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'refs-s1-empty-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeMinimalRepo(dir);
+  copyRulesFile(dir);
+  makeChangeDir(dir, 'issue-3-empty', {});
+  git('add', '-A');
+  git('commit', '-m', 'seed');
+
+  const r = runCheckRefs(dir);
+  assert.equal(r.status, 1, `expected exit 1, got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+  for (const artifact of ['proposal.md', 'spec.md', 'design.md', 'tasks.md']) {
+    assert.ok(r.stderr.includes(artifact), `expected '${artifact}' named as missing in:\n${r.stderr}`);
+  }
+});

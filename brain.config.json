@@ -14,9 +14,21 @@
   },
   "governance": {
     "ignoreList": [
+      "**/*.golden.json",
       "**/*.test.mjs",
-      "openspec/changes/**"
+      ".memory/**",
+      "AGENTS.md",
+      "openspec/changes/**",
+      "openspec/specs/**",
+      "openspec/changes/archive/**",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "yarn.lock"
     ]
+  },
+  "reviewer": {
+    "handle": "",
+    "tokenEnv": "BRAIN_REVIEWER_TOKEN"
   },
   "schemaVersion": "0.3.0"
 }

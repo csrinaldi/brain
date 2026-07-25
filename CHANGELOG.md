@@ -5,6 +5,22 @@ upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
 breaking changes** before upgrading — additive `brain.config.json` migrations
 apply automatically, but renames need manual action.
 
+## v1.0.0 — first stable (controlled pilot) (#319)
+
+First stable tag. **1.0 is a controlled-pilot release** — intended for repos the
+maintainer controls, not yet open external adoption. Read `docs/KNOWN-LIMITATIONS.md`
+before relying on it: `brain:upgrade` has no rollback and is not yet safe for
+uncontrolled adopters, the external reviewer's flow-guarantees are inert in prod
+(#317), distribution needs a manual `package.json` step, and rung-2/3 governance is
+GitHub-only. The remaining path (1.1 line) is tracked in the epic #313 and
+`docs/inbox/MASTER-PLAN-1.0.md`; the hard gate before external adoption is
+auto-update-safety (rollback / clobber-safety / lockout).
+
+Highlights of the v2 line landing as 1.0: three-axis decoupling
+(`AGENT_PLATFORM` · `SDD_ENGINE` · `MEMORY_BACKEND`, ADR-0024), git-native durable
+team memory (engram + plainfiles), VCS-agnostic PR-time governance (GitHub + GitLab),
+the external cold reviewer (security boundary sound), and the SDD artifact contract.
+
 ## v0.9.5 — consumers no longer run brain's internal unit suite (#211)
 
 Closes the portability treadmill v0.9.4 started down. v0.9.4 made two coupled

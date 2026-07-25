@@ -89,29 +89,61 @@ async function evalRung2({ config, env, probes }) {
 }
 
 // ── Rung 1 — merge ───────────────────────────────────────────────────────────────
-// Armed when branch protection (or a self-hosted pre-receive hook) is active with
-// OUR required check contexts. This is the finer read `capabilities()` cannot do
-// (github.mjs:96-100 maps both 200 and 404 to 'available' — correct for "can I call
-// brain:protect?", but blind to armed-vs-unset). The 200/404/403 interpretation
-// lives HERE (unit-testable); the raw HTTP read is the injected `probes.branchProtection`.
-async function evalRung1({ config, vcs, env, probes }) {
-  if (config?.vcs?.selfHostedPreReceive === true) {
-    return { available: true, active: true, reason: null, remedy: null };
+// Armed when ANY of three per-provider sub-gates is active — pipelineMustSucceed
+// (GitLab's required_status_checks analog, load-bearing per CP-A2b),
+// protectedBranches (complementary push gate), or preReceive (config-declared,
+// non-remotely-verifiable server hook). This is the finer read `capabilities()`
+// cannot do (github.mjs:96-100 maps both 200 and 404 to 'available' — correct for
+// "can I call brain:protect?", but blind to armed-vs-unset). The 200/404/403
+// interpretation lives HERE (unit-testable); the raw HTTP read is the injected
+// `probes.branchProtection` (issue #244 A4, design Decision 1).
+
+/**
+ * evalPipelineMustSucceedGate — MERGE gate, GitHub required_status_checks analog.
+ * GitLab: API-readable project setting (verifiable:true). GitHub/unset: the
+ * EXISTING contexts-based 200/404/403/unknown ladder, reproduced byte-for-byte
+ * (behavior-preservation — issue #244 A4 Phase 3).
+ */
+function evalPipelineMustSucceedGate({ provider, status, hasOurContexts, result }) {
+  if (provider === 'gitlab') {
+    // Three-way, never a fabricated false: true=armed, false=readable-but-unset,
+    // null/undefined=uncomputable (the GET /projects/:id read failed or was
+    // unreachable — REQ-A4-3 scenario 2 requires this to report available:false,
+    // not silently collapse into "not armed").
+    const raw = result?.pipelineMustSucceed;
+    if (raw === true) {
+      return { available: true, active: true, verifiable: true, mechanism: 'branch-merge-gate-api', reason: null, remedy: null };
+    }
+    if (raw === false) {
+      return {
+        available: true,
+        active: false,
+        verifiable: true,
+        mechanism: 'branch-merge-gate-api',
+        reason: 'no GitLab merge gate configured (only_allow_merge_if_pipeline_succeeds is not set)',
+        remedy: 'run npm run brain:protect to enable only_allow_merge_if_pipeline_succeeds',
+      };
+    }
+    return {
+      available: false,
+      active: false,
+      verifiable: true,
+      mechanism: 'branch-merge-gate-api',
+      reason: 'GitLab merge-gate setting is uncomputable (GET /projects/:id failed or unreachable)',
+      remedy: 'verify glab auth/connectivity and GitLab API access, then retry',
+    };
   }
 
-  const result = await safeProbe(probes.branchProtection, { config, vcs, env });
-  const status = result?.status;
-  const contexts = Array.isArray(result?.contexts) ? result.contexts : [];
-  const ourContexts = checkContexts();
-  const hasOurContexts = ourContexts.length > 0 && ourContexts.every(c => contexts.includes(c));
-
+  // else (github / unset) — today's contexts-based logic, verbatim.
   if (status === 200 && hasOurContexts) {
-    return { available: true, active: true, reason: null, remedy: null };
+    return { available: true, active: true, verifiable: true, mechanism: 'branch-merge-gate-api', reason: null, remedy: null };
   }
   if (status === 200) {
     return {
       available: true,
       active: false,
+      verifiable: true,
+      mechanism: 'branch-merge-gate-api',
       reason: 'branch protection active but missing our required governance check contexts',
       remedy: 'run npm run brain:protect to (re)apply the required check contexts',
     };
@@ -120,6 +152,8 @@ async function evalRung1({ config, vcs, env, probes }) {
     return {
       available: true,
       active: false,
+      verifiable: true,
+      mechanism: 'branch-merge-gate-api',
       reason: 'branch protection available but not configured (unset) — not armed',
       remedy: 'run npm run brain:protect to activate branch protection',
     };
@@ -128,6 +162,8 @@ async function evalRung1({ config, vcs, env, probes }) {
     return {
       available: false,
       active: false,
+      verifiable: true,
+      mechanism: 'branch-merge-gate-api',
       reason: 'branch protection unavailable — tier-locked',
       remedy: 'upgrade plan (e.g. GitHub Pro for private repos) or make the repo public',
     };
@@ -135,8 +171,92 @@ async function evalRung1({ config, vcs, env, probes }) {
   return {
     available: false,
     active: false,
+    verifiable: true,
+    mechanism: 'branch-merge-gate-api',
     reason: 'branch protection status unknown (no probe wired, or probe failed)',
     remedy: 'wire a branchProtection probe and verify VCS provider connectivity',
+  };
+}
+
+/**
+ * evalProtectedBranchesGate — PUSH gate, complementary NOT equivalent to the
+ * merge gate. GitLab: per-branch protected-branch presence (verifiable:true).
+ * GitHub/unset: does NOT independently arm rung-1 — governance arming is keyed
+ * on required checks (pipelineMustSucceed); a bare protected branch alone must
+ * stay `rung !== 1` (behavior-preservation).
+ */
+function evalProtectedBranchesGate({ provider, status }) {
+  if (provider === 'gitlab') {
+    const active = status === 200;
+    return {
+      available: status !== 403,
+      active,
+      verifiable: true,
+      mechanism: 'protected-branch-api',
+      reason: active ? null : 'no protected-branch push gate configured for the default branch',
+      remedy: active ? null : 'run npm run brain:protect to protect the default branch (push_access_level=0)',
+    };
+  }
+
+  // else (github / unset) — never independently arms rung-1 on this provider.
+  return {
+    available: status !== 403,
+    active: false,
+    verifiable: true,
+    mechanism: 'protected-branch-api',
+    reason: 'protected-branch presence does not independently arm rung-1 on this provider',
+    remedy: null,
+  };
+}
+
+/**
+ * evalPreReceiveGate — server-side hook, NOT remotely detectable (provider-
+ * agnostic). Replaces the :98-100 short-circuit: same arming truth
+ * (config.vcs.selfHostedPreReceive), now carrying the honest verifiable:false
+ * signal instead of masquerading as a verified probe result.
+ */
+function evalPreReceiveGate({ config }) {
+  const active = config?.vcs?.selfHostedPreReceive === true;
+  return {
+    available: true,
+    active,
+    verifiable: false,
+    mechanism: 'pre-receive-config-declared',
+    reason: active ? null : 'self-hosted pre-receive not declared (vcs.selfHostedPreReceive !== true)',
+    remedy: active ? null : 'install the server hook (docs/inbox/self-hosted-pre-receive.md) and set vcs.selfHostedPreReceive=true',
+  };
+}
+
+async function evalRung1({ config, vcs, env, probes }) {
+  const provider = config?.vcs?.provider;
+  const result = await safeProbe(probes.branchProtection, { config, vcs, env });
+  const status = result?.status;
+  const contexts = Array.isArray(result?.contexts) ? result.contexts : [];
+  const ourContexts = checkContexts();
+  const hasOurContexts = ourContexts.length > 0 && ourContexts.every(c => contexts.includes(c));
+
+  const gates = {
+    pipelineMustSucceed: evalPipelineMustSucceedGate({ provider, status, hasOurContexts, result }),
+    protectedBranches: evalProtectedBranchesGate({ provider, status }),
+    preReceive: evalPreReceiveGate({ config }),
+  };
+  const active = gates.pipelineMustSucceed.active || gates.protectedBranches.active || gates.preReceive.active;
+
+  if (active) {
+    return { available: true, active: true, reason: null, remedy: null, gates };
+  }
+
+  // Not armed by ANY sub-gate — surface the primary (merge-gate) blocker,
+  // preserving today's exact strings (403-without-preReceive stays available:false).
+  // `active` is always false here (guarded by the `if (active) return` above),
+  // so the availability is just the primary gate's own — no OR needed.
+  const primary = gates.pipelineMustSucceed;
+  return {
+    available: primary.available,
+    active: false,
+    reason: primary.reason,
+    remedy: primary.remedy,
+    gates,
   };
 }
 
@@ -227,7 +347,7 @@ export async function detectSubstrate({ config = {}, vcs, env = process.env, pro
   const rungs = {};
 
   rungs[1] = await evalRung1({ config, vcs, env, probes });
-  rungs[1].gates = { brainWritesReviewed: await evalBrainWritesReviewedGate({ config, vcs, env, probes }) };
+  rungs[1].gates.brainWritesReviewed = await evalBrainWritesReviewedGate({ config, vcs, env, probes });
   rungs[3] = await evalRung3({ config, env, probes });
   rungs[2] = await evalRung2({ config, env, probes });
   rungs[4] = evalRung4();

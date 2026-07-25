@@ -39,7 +39,16 @@ export async function projectResolve({ project }) {
 
 export async function issueView({ project, number }) {
   const r = runJson('gh', ['api', `repos/${project}/issues/${number}`]);
-  return { number: r.number, title: r.title, labels: (r.labels ?? []).map(l => l.name), body: r.body };
+  return {
+    number: r.number,
+    title: r.title,
+    labels: (r.labels ?? []).map(l => l.name),
+    body: r.body,
+    // `author` (issue #239 A3 TASK1): actor-check.mjs's REQ-L5-1 compares the
+    // approval actor against BOTH the PR author and the issue author — the
+    // same API call already carries `user.login`, no extra round-trip.
+    author: r.user?.login ?? null,
+  };
 }
 
 export async function branchProtect({ project, branch = 'main', checks, requiredReviews = 1 }) {
@@ -77,6 +86,25 @@ export async function branchProtect({ project, branch = 'main', checks, required
   };
 }
 
+/**
+ * Optional, non-contract verb (github only — `brain:protect`'s arm-and-verify
+ * step, issue #203). Returns the check-run names reported for the branch's
+ * latest commit. Never throws: a fetch failure degrades to `[]`, which
+ * `verifyArmedProtection` (brain-protect.mjs) treats as "unverifiable" rather
+ * than a crash.
+ *
+ * @param {{ project: string, branch?: string }} opts
+ * @returns {Promise<string[]>}
+ */
+export async function checkRuns({ project, branch = 'main' } = {}) {
+  try {
+    const resp = runJson('gh', ['api', `repos/${project}/commits/${branch}/check-runs`]);
+    return (resp.check_runs ?? []).map(cr => cr.name);
+  } catch {
+    return [];
+  }
+}
+
 // Capability cache — keyed by "project:branch" to avoid cross-test interference.
 const _capabilityCache = new Map();
 
@@ -112,29 +140,61 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
 }
 
 /**
- * Fetch a PR's metadata (number, label names, and body) via `gh pr view`.
- * Uses the current repo's git remote — `project` is accepted for contract
- * compatibility but not required by the gh CLI when run from the repo root.
+ * Fetch a PR's metadata (number, label names, body, author, the head commit
+ * sha, and the base commit sha) via `gh pr view`. Uses the current repo's
+ * git remote — `project` is accepted for contract compatibility but not
+ * required by the gh CLI when run from the repo root.
  *
- * Never throws: returns { number, labels: [], body: '' } on any failure so
- * callers can treat this as best-effort supplementary data (e.g. audit
- * size:exception check and issueLink-via-PR-description).
+ * `headRefOid` (ADR-0021 Decision 1) is the API's head sha for the PR — the
+ * anchor a cold caller checks out **detached** at (never a branch name).
+ *
+ * `baseRefOid` (ADR-0022 Decision 1) is the base branch's tip sha. `gh pr
+ * view --json` does NOT expose it (verified: its field set offers
+ * `baseRefName`/`headRefName`/`headRefOid`, but no `baseRefOid` — `gh pr view
+ * --json baseRefOid` errors "Unknown JSON field"). So it is sourced via a
+ * SECOND, supplementary call: `gh api repos/{owner}/{repo}/pulls/{number}
+ * --jq .base.sha` (the REST endpoint's authoritative `base.sha`; `gh` itself
+ * expands the literal `{owner}/{repo}` placeholders from the current repo's
+ * git remote, preserving this verb's "works from repo root, `project`
+ * optional" property). The main `gh pr view --json …,headRefOid` call above
+ * is left UNTOUCHED — `baseRefOid` is a strictly additive supplement: if it
+ * fails, every other field from the main fetch is still returned, only
+ * `baseRefOid` folds to `null`.
+ *
+ * Widened additively (both ADR-0021 and ADR-0022): existing callers reading
+ * only `number`/`labels`/`body`/`author` are unaffected.
+ *
+ * Never throws: returns { number, labels: null, body: null, author: null,
+ * headRefOid: null, baseRefOid: null } on ANY main-fetch failure
+ * (ci-context.mjs's REQ-CIC-2 uncomputable signal) — distinct from a
+ * genuinely empty `[]`/`''` on an otherwise-successful response. Callers
+ * that need "no labels" vs "couldn't fetch labels" distinguished (e.g. a
+ * REQUIRED gate) MUST treat `null` as uncomputable, never collapse it to a
+ * fabricated empty default.
  *
  * @param {{ project?: string, number: number }} opts
- * @returns {Promise<{ number: number, labels: string[], body: string }>}
+ * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null }>}
  */
 export async function prView({ project, number } = {}) {
-  const r = run('gh', ['pr', 'view', String(number), '--json', 'number,labels,body']);
-  if (!r.ok) return { number, labels: [], body: '' };
+  const r = run('gh', ['pr', 'view', String(number), '--json', 'number,labels,body,author,headRefOid']);
+  if (!r.ok) return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
   try {
     const data = JSON.parse(r.stdout);
+    const br = run('gh', ['api', `repos/{owner}/{repo}/pulls/${number}`, '--jq', '.base.sha']);
+    // `gh api --jq .base.sha` prints the literal "null" on a JSON-null base.sha —
+    // normalize it to null, matching gitlab.mjs's `diff_refs?.base_sha ?? null`.
+    const baseSha = br.ok ? br.stdout.trim() : '';
+    const baseRefOid = baseSha && baseSha !== 'null' ? baseSha : null;
     return {
       number: data.number,
       labels: (data.labels ?? []).map(l => l.name),
       body: data.body ?? '',
+      author: data.author?.login ?? null,
+      headRefOid: data.headRefOid ?? null,
+      baseRefOid,
     };
   } catch {
-    return { number, labels: [], body: '' };
+    return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
   }
 }
 
@@ -167,6 +227,71 @@ export async function commitStatus({ project, sha }) {
 }
 
 /**
+ * prStatusRollup — the provider-agnostic READ verb `prStatusRollup`
+ * (ADR-0021 Decision 2). Returns the full status-check rollup for a PR's
+ * head commit, normalized to `[{ name, status, conclusion }]` — one entry
+ * per check. This is a READ: no write path exists on this verb, and it
+ * carries no APPROVE/label-mutation code path (the reviewer's four
+ * COMMENT-only write verbs from ADR-0020 are unaffected).
+ *
+ * Unlike `commitStatus` (which needs a sha as input and collapses to
+ * `check_runs[0]`, a single check), `prStatusRollup` takes the PR number and
+ * returns the FULL rollup via `gh pr view --json statusCheckRollup` — every
+ * required check the tranche evaluator (H1-2c) re-derives cold, not a
+ * collapsed single status.
+ *
+ * Never throws: a fetch failure, or a response with no computable rollup,
+ * normalizes to `null` (uncomputable) — never a fabricated `[]`, matching
+ * `prReviews`/`labelEvents`.
+ *
+ * @param {{ project?: string, number: number }} opts
+ * @returns {Promise<Array<{ name: string, status: string|null, conclusion: string|null }>|null>}
+ */
+export async function prStatusRollup({ project, number } = {}) {
+  let data;
+  try {
+    data = runJson('gh', ['pr', 'view', String(number), '--json', 'statusCheckRollup']);
+  } catch {
+    return null;
+  }
+  const rollup = data.statusCheckRollup;
+  if (!Array.isArray(rollup)) return null;
+  return rollup.map(c => ({
+    name: c.name ?? c.context ?? null,
+    status: c.status ?? c.state ?? null,
+    conclusion: c.conclusion ?? null,
+  }));
+}
+
+/**
+ * prReviews — the provider-agnostic `prReviews` CONTRACT verb (issue #239
+ * A3 TASK2/4th-violation fix, closing the L6 brain-writes-reviewed gate's
+ * gh-CLI-hardcoded `defaultFetchReviews`). Wraps GitHub's Reviews API
+ * (`pulls/N/reviews`), normalizing `state`/`user.login` to `{ state, author
+ * }`. EXTRACTED from brain-writes-reviewed.mjs's inline
+ * `defaultFetchReviews`, preserving the load-bearing `--paginate` VERBATIM:
+ * `gh api` does not auto-paginate, and a long-lived PR with many re-review
+ * cycles can exceed one page — an unpaginated fetch can silently drop the
+ * one human APPROVED review that would flip a self-approval verdict.
+ *
+ * Never throws: a fetch failure is caught and normalized to `null`
+ * (uncomputable) — never a fabricated `[]`, so callers (the DETECTION gate)
+ * can distinguish "zero reviews" from "couldn't fetch".
+ *
+ * @param {{ project: string, number: number }} params
+ * @returns {Promise<Array<{ state: string, author: string|null }>|null>}
+ */
+export async function prReviews({ project, number } = {}) {
+  let reviews;
+  try {
+    reviews = runJson('gh', ['api', '--paginate', `repos/${project}/pulls/${number}/reviews`]);
+  } catch {
+    return null;
+  }
+  return reviews.map(r => ({ state: r.state, author: r.user?.login ?? null }));
+}
+
+/**
  * Create a pull request via `gh pr create`.
  * Returns { url: string } on success or { url: null, error: string } on failure.
  * Never throws.
@@ -195,6 +320,124 @@ export async function mrCreate({
   const r = run('gh', args);
   if (r.ok) return { url: r.stdout.trim() };
   return { url: null, error: r.stderr.trim() || `gh pr create failed (status ${r.status})` };
+}
+
+/**
+ * labelEvents — the provider-agnostic `labelEvents` CONTRACT verb (issue
+ * #239 A3, D1). Wraps GitHub's Events API (`issues/N/events`), normalizing
+ * `event:'labeled'|'unlabeled'` + `actor.login`/`label.name`/`created_at` to
+ * the shared shape `{ actor: { login }, action: 'add'|'remove', label, at }`,
+ * ascending by `at`. Non-label events (e.g. `commented`) are dropped.
+ *
+ * EXTRACTED from actor-check.mjs's inline `defaultFetchLabeledEvents` (the
+ * A2 `m3` finding close) — preserves the load-bearing `--paginate`
+ * VERBATIM: `gh api` does not auto-paginate, and the Events API is
+ * oldest-first, so an unpaginated fetch silently drops page-2+ events
+ * (including a late self-applied approved label), which would wrongly PASS
+ * the actor-check (fail-open).
+ *
+ * Never throws: a fetch failure (no `gh` binary, rate limit, non-zero exit)
+ * is caught and normalized to `null` (uncomputable) — never a fabricated
+ * `[]`, so callers (the actor-check DETECTION gate) can distinguish "no
+ * events" from "couldn't fetch".
+ *
+ * @param {{ project: string, number: number }} params
+ * @returns {Promise<Array<{ actor: { login: string|undefined }, action: 'add'|'remove', label: string|undefined, at: string|undefined }>|null>}
+ */
+export async function labelEvents({ project, number } = {}) {
+  let events;
+  try {
+    events = runJson('gh', ['api', '--paginate', `repos/${project}/issues/${number}/events`]);
+  } catch {
+    return null;
+  }
+  return events
+    .filter(e => e.event === 'labeled' || e.event === 'unlabeled')
+    .map(e => ({
+      actor: { login: e.actor?.login },
+      action: e.event === 'labeled' ? 'add' : 'remove',
+      label: e.label?.name,
+      at: e.created_at,
+    }))
+    .sort((a, b) => new Date(a.at) - new Date(b.at));
+}
+
+/**
+ * Posts a COMMENT-state pull request review (issue #266, REQ-266-2). `event`
+ * is HARDCODED to `'COMMENT'` — no parameter, flag, or branch selects a
+ * different review event (lock 2, REQ-266-3). Never throws.
+ *
+ * @param {{ project: string, number: number, body: string }} opts
+ * @returns {Promise<{ url: string } | { url: null, error: string }>}
+ */
+export async function prReviewComment({ project, number, body } = {}) {
+  const r = run(
+    'gh',
+    ['api', '-X', 'POST', `repos/${project}/pulls/${number}/reviews`, '--input', '-'],
+    { input: JSON.stringify({ body, event: 'COMMENT' }) },
+  );
+  if (!r.ok) return { url: null, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
+  try {
+    return { url: JSON.parse(r.stdout).html_url };
+  } catch (err) {
+    return { url: null, error: err.message };
+  }
+}
+
+/**
+ * Posts a plain issue comment — rulings on issues (issue #266, REQ-266-2).
+ * Never throws.
+ *
+ * @param {{ project: string, number: number, body: string }} opts
+ * @returns {Promise<{ url: string } | { url: null, error: string }>}
+ */
+export async function issueComment({ project, number, body } = {}) {
+  const r = run(
+    'gh',
+    ['api', '-X', 'POST', `repos/${project}/issues/${number}/comments`, '--input', '-'],
+    { input: JSON.stringify({ body }) },
+  );
+  if (!r.ok) return { url: null, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
+  try {
+    return { url: JSON.parse(r.stdout).html_url };
+  } catch (err) {
+    return { url: null, error: err.message };
+  }
+}
+
+/**
+ * Adds labels to an issue or PR (issue #266, REQ-266-2). The CALLER enforces
+ * the deny-set (REQ-266-9, monotonic label tightening) — this verb performs
+ * the label API call only, no policy. Never throws.
+ *
+ * @param {{ project: string, number: number, labels: string[] }} opts
+ * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
+ */
+export async function labelAdd({ project, number, labels } = {}) {
+  const r = run(
+    'gh',
+    ['api', '-X', 'POST', `repos/${project}/issues/${number}/labels`, '--input', '-'],
+    { input: JSON.stringify({ labels }) },
+  );
+  if (r.ok) return { ok: true };
+  return { ok: false, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
+}
+
+/**
+ * Removes labels from an issue or PR — monotonic-tightening removals only
+ * (issue #266, REQ-266-9); the caller enforces the deny-set. GitHub has no
+ * bulk-remove endpoint — each label is deleted individually, stopping at the
+ * first failure. Never throws.
+ *
+ * @param {{ project: string, number: number, labels: string[] }} opts
+ * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
+ */
+export async function labelRemove({ project, number, labels } = {}) {
+  for (const label of labels) {
+    const r = run('gh', ['api', '-X', 'DELETE', `repos/${project}/issues/${number}/labels/${encodeURIComponent(label)}`]);
+    if (!r.ok) return { ok: false, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
+  }
+  return { ok: true };
 }
 
 export async function repoCloneUrl({ host, project, token }) {

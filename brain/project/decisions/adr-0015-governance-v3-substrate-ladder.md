@@ -12,7 +12,7 @@ gates (`issue-link`, `diff-size`, and the promised-but-unbuilt `memory-gate` /
 1. **No gate was actually fail-closed.** Branch protection on `main` (L1's "real
    guarantee") is inactive on brain's own free-tier-private repo (`403` on
    `repos/csrinaldi/brain/branches/main/protection`), so `issue-link` and `diff-size`
-   *rendered* but nothing *required* them.
+   _rendered_ but nothing _required_ them.
 2. **SDD phase discipline lived outside the repo.** The actual proposal → spec →
    design → tasks → apply order, human approval, and Tier-2 "no agent writes to
    `brain/`" were encoded only in `gentle-ai`'s `SKILL.md` prompt files — harness-locked
@@ -31,14 +31,14 @@ parallel mechanism (openspec/changes/issue-144-governance-v3/design.md §0).
 
 ### The six levels
 
-| Level | Enforces | Mechanism | Req IDs |
-|---|---|---|---|
-| **L1** | `repo:check` + `brain:nav` + `npm test` run in CI, author-agnostically — closes the `--no-verify`-bypassable pre-push-hook gap | `.github/workflows/governance.yml` (`local-checks` job) | REQ-L1-1 |
-| **L2** | `brain:audit` fails closed on the release/tag path (rung 2) and auto-reverts post-merge failures (rung 3) | `.github/workflows/release.yml`, `.github/workflows/governance-postmerge.yml` — both wrap `brain/scripts/brain-audit.mjs` unchanged | REQ-L2-1, REQ-L2-2 |
-| **L3** | `memory-gate` (memory dumped before closing) and `decision-gate` (ADR ships for a labeled decision) as required CI jobs | `brain/scripts/governance/run-check.mjs` over `governance/checks/memory-presence.mjs` / `adr-presence.mjs` | REQ-L3-1, REQ-L3-2, REQ-L3-3 |
-| **L4** | SDD phase order — spec.md + design.md exist, status transitions are monotonic, no code lands outside `openspec/changes/**` before `tasks.md` has ≥1 checked item — as an in-repo evidence check, not a harness prompt | `brain/scripts/vcs/phase-order-check.mjs` (sibling to `check-refs.mjs`) | REQ-L4-1 .. REQ-L4-5 |
-| **L5** | The actor who applies `status:approved` differs from the PR author and the issue author (no self-approval) | `brain/scripts/vcs/actor-check.mjs` | REQ-L5-1, REQ-L5-2 |
-| **L6** | `brain/core/**` / `brain/project/**` writes are approved by a human other than the author (Tier-2 "no agent writes to `brain/`"); CODEOWNERS is an optional rung-1 enhancement, not the enforcement | `brain/scripts/vcs/brain-writes-reviewed.mjs` (evidence-based) + optional `.github/CODEOWNERS` | REQ-L6-1 |
+| Level  | Enforces                                                                                                                                                                                                              | Mechanism                                                                                                                           | Req IDs                      |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| **L1** | `repo:check` + `brain:nav` + `npm test` run in CI, author-agnostically — closes the `--no-verify`-bypassable pre-push-hook gap                                                                                        | `.github/workflows/governance.yml` (`local-checks` job)                                                                             | REQ-L1-1                     |
+| **L2** | `brain:audit` fails closed on the release/tag path (rung 2) and auto-reverts post-merge failures (rung 3)                                                                                                             | `.github/workflows/release.yml`, `.github/workflows/governance-postmerge.yml` — both wrap `brain/scripts/brain-audit.mjs` unchanged | REQ-L2-1, REQ-L2-2           |
+| **L3** | `memory-gate` (memory dumped before closing) and `decision-gate` (ADR ships for a labeled decision) as required CI jobs                                                                                               | `brain/scripts/governance/run-check.mjs` over `governance/checks/memory-presence.mjs` / `adr-presence.mjs`                          | REQ-L3-1, REQ-L3-2, REQ-L3-3 |
+| **L4** | SDD phase order — spec.md + design.md exist, status transitions are monotonic, no code lands outside `openspec/changes/**` before `tasks.md` has ≥1 checked item — as an in-repo evidence check, not a harness prompt | `brain/scripts/vcs/phase-order-check.mjs` (sibling to `check-refs.mjs`)                                                             | REQ-L4-1 .. REQ-L4-5         |
+| **L5** | The actor who applies `status:approved` differs from the PR author and the issue author (no self-approval)                                                                                                            | `brain/scripts/vcs/actor-check.mjs`                                                                                                 | REQ-L5-1, REQ-L5-2           |
+| **L6** | `brain/core/**` / `brain/project/**` writes are approved by a human other than the author (Tier-2 "no agent writes to `brain/`"); CODEOWNERS is an optional rung-1 enhancement, not the enforcement                   | `brain/scripts/vcs/brain-writes-reviewed.mjs` (evidence-based) + optional `.github/CODEOWNERS`                                      | REQ-L6-1                     |
 
 Every gate is split into a pure evaluator (fixture-testable, no I/O) and a thin git/`gh`
 wrapper — the same discipline `brain-audit.mjs` already uses — so the whole set is
@@ -51,12 +51,12 @@ generalizes the `{enforced, reason, remedy}` shape `protectBranch()` already ret
 **every** gate, and each gate enforces at the **highest rung its substrate allows**,
 degrading gracefully:
 
-| Rung | Where fail-closed lives | Guarantee | Requires |
-|---|---|---|---|
-| **1 — merge** | branch protection / self-hosted `pre-receive` | bad state never enters `main` | Pro/public repo, or self-hosted |
-| **2 — release** | the publish/tag script runs `brain:audit` fail-closed | bad state may enter `main` but is never **released** | the project controls its own release (always true) |
-| **3 — auto-correct** | post-merge CI opens an auto-revert PR on failure | bad state does not **persist** | CI presence (free tier has it) |
-| **4 — floor** | detection + loud signal only (`brain:governance-status`) | nothing hidden | nothing |
+| Rung                 | Where fail-closed lives                                  | Guarantee                                            | Requires                                           |
+| -------------------- | -------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------- |
+| **1 — merge**        | branch protection / self-hosted `pre-receive`            | bad state never enters `main`                        | Pro/public repo, or self-hosted                    |
+| **2 — release**      | the publish/tag script runs `brain:audit` fail-closed    | bad state may enter `main` but is never **released** | the project controls its own release (always true) |
+| **3 — auto-correct** | post-merge CI opens an auto-revert PR on failure         | bad state does not **persist**                       | CI presence (free tier has it)                     |
+| **4 — floor**        | detection + loud signal only (`brain:governance-status`) | nothing hidden                                       | nothing                                            |
 
 No gate depends on any single rung being available — rung 2 is the primary enforcing
 guarantee for repos that can never reach rung 1 (including brain's own), which is why
@@ -71,8 +71,18 @@ surfaced as release-blocking-visible, never rendered as a passing/neutral status
 `governance-checks.mjs` splits its single job list into two:
 
 ```js
-export const REQUIRED_JOBS  = ['issue-link', 'diff-size', 'memory-gate', 'decision-gate'];
-export const DETECTION_JOBS = ['phase-order', 'actor-check', 'brain-writes-reviewed'];
+export const REQUIRED_JOBS = [
+  "issue-link",
+  "diff-size",
+  "memory-gate",
+  "decision-gate",
+  "local-checks",
+];
+export const DETECTION_JOBS = [
+  "phase-order",
+  "actor-check",
+  "brain-writes-reviewed",
+];
 export const GOVERNANCE_JOBS = [...REQUIRED_JOBS, ...DETECTION_JOBS];
 ```
 
@@ -85,7 +95,7 @@ job code change, for gates that already fail closed on an uncomputable diff (e.g
 cannot drift from the YAML.
 
 **Documented exception — `phase-order`.** Unlike `decision-gate`,
-`phase-order-check.mjs`'s wrapper deliberately degrades an *uncomputable* diff (missing
+`phase-order-check.mjs`'s wrapper deliberately degrades an _uncomputable_ diff (missing
 `BASE_SHA`/`HEAD_SHA`, git failure) to `warn` → exit `0` while it is detection-only, to
 protect REQ-L4-5's zero-false-positive requirement. Promoting `phase-order` to
 `REQUIRED_JOBS` **verbatim** would turn that into a silent fail-open — a required gate
@@ -102,7 +112,7 @@ completed in order with the required artifacts, approval was applied by a human,
 `brain/core` / `brain/project` writes were reviewed — never that the work is
 **correct**. It MUST NOT claim to enforce judgment-level correctness: review quality,
 slice quality ("sliced well" vs. merely under 400 lines), and whether a memory capture
-is *good* (vs. merely present) stay guide + audit only, per ADR-0014's enforce-outputs /
+is _good_ (vs. merely present) stay guide + audit only, per ADR-0014's enforce-outputs /
 guide-judgment boundary. Every gate inspects **evidence** (file state, git history, PR/
 issue metadata, merged diff), never the **producing tool** — no gate branches on which
 harness, agent, or human authored a commit — which is what makes the whole set
@@ -111,7 +121,7 @@ harness-agnostic by construction and preserves ADR-0001 and ADR-0002.
 ## Never do
 
 - **Never claim to enforce judgment.** No gate output, log line, or status report may
-  imply that a passing gate means the work is *correct* — only that the process
+  imply that a passing gate means the work is _correct_ — only that the process
   happened. This is the Epic Invariant; it is a non-goal, not a residual gap to close
   later.
 - **Never promote `phase-order` to `REQUIRED_JOBS` without first fixing its
@@ -129,11 +139,10 @@ harness-agnostic by construction and preserves ADR-0001 and ADR-0002.
   visually/textually, never equivalent to an enforcing rung.
 - **Never build L6's enforcement on CODEOWNERS alone.** CODEOWNERS is platform- and
   rung-1-dependent (GitHub needs branch protection, GitLab needs Premium+, Bitbucket has
-  none) — it is an *optional* rung-1 enhancement on top of the evidence-based
+  none) — it is an _optional_ rung-1 enhancement on top of the evidence-based
   `brain-writes-reviewed` check, never the sole mechanism.
-- **Never ship `.github/CODEOWNERS` as part of a `.github/**` glob.** It is an exact
-  managed-path literal, mirroring `governance.yml` and `PULL_REQUEST_TEMPLATE.md`
-  (ADR-0014) — a glob would clobber a consumer's own `.github/` tree.
+- **Never ship `.github/CODEOWNERS` as part of a `.github/**`glob.** It is an exact
+managed-path literal, mirroring`governance.yml`and`PULL_REQUEST_TEMPLATE.md`(ADR-0014) — a glob would clobber a consumer's own`.github/` tree.
 
 ## Consequences
 

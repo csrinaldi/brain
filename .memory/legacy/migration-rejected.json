@@ -1,0 +1,30 @@
+{
+  "rejected": [
+    {
+      "id": "obs-2a96b57742106649",
+      "title": "temp search",
+      "type": "manual",
+      "reason": "non-enum type 'manual' — rejected, not coerced (REQ-MF-6)"
+    },
+    {
+      "id": "obs-976ce2ce59f26e97",
+      "title": "Convention: chained PRs use a tracker/history branch (feature-branch-chain)",
+      "type": "preference",
+      "reason": "non-enum type 'preference' — rejected, not coerced (REQ-MF-6)"
+    },
+    {
+      "id": "obs-f74beee30f67572d",
+      "title": "Rule: comments in core AND scripts must be English (non-negotiable)",
+      "type": "preference",
+      "reason": "non-enum type 'preference' — rejected, not coerced (REQ-MF-6)"
+    }
+  ],
+  "skipped": [],
+  "unparseableChunks": [],
+  "emptyObservationsChunks": [
+    "12ebc552.jsonl.gz",
+    "51f6b5a8.jsonl.gz",
+    "b5472899.jsonl.gz",
+    "df8fe2cf.jsonl.gz"
+  ]
+}
