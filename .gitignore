@@ -77,3 +77,8 @@ openspec/changes/*/scratch/
 
 # VARIABLES DE ENTORNO (secretos): .env real NO se commitea; sí el .env.example
 .env
+
+# CHUNKS DE ENGRAM (transporte, no verdad): .memory/records/ es la fuente durable.
+# Los chunks .jsonl.gz son el formato de sync de engram — regenerables con `memory:share`.
+# Ver brain/core/methodology/memory-format.md y ADR-0002. Issue #247 / M0.
+.memory/chunks/
