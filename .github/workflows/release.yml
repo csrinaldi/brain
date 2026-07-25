@@ -21,6 +21,12 @@
 name: release
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag name (e.g. v1.1.0)'
+        required: false
+        type: string
   push:
     tags: ['v*']
 
@@ -34,11 +40,16 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Run brain-audit over the previous release tag..HEAD
         run: |
-          # Audit every merge since the previous release tag (origin/main is at/ahead
-          # of the tag on brain's tag-after-merge flow, so origin/main..HEAD would be
-          # empty).
-          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          # Audit every merge since the previous release tag (PREV_TAG..HEAD).
+          REF_TAG="${GITHUB_REF_NAME:-HEAD}"
+          PREV_TAG=$(git describe --tags --abbrev=0 "${REF_TAG}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
           node brain/scripts/brain-audit.mjs "${PREV_TAG}..HEAD"
-        # exit 1 blocks the tag/publish — fail closed.
+
+
