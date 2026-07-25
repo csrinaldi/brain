@@ -1,5 +1,15 @@
 # brain — Master Plan (1.0 cut → 1.1 line)
 
+> ## ⚠️ SNAPSHOT — not the source of truth
+>
+> This file was written **before the v1.0.0 cut** and frozen at commit `c85386a`
+> (2026-07-24 14:19). The cut happened at 22:01 the same day; decisions taken after that
+> point are **not** reflected in the sections below except where explicitly patched.
+>
+> **The source of truth is issue #313** (the epic body). On any conflict, #313 wins.
+> Do not plan from this file alone — open #313 first, then use this file for the detail
+> it links to (audit, epic breakdown, reviewer comparison).
+
 > Consolidated record of the 2026-07-24 audit + planning session. Single entry point so nothing is
 > lost. Detailed docs linked inline; decisions and tickets captured here in full.
 
@@ -55,16 +65,24 @@ Full plan: [`brain-v2-epic-plan.md`](./brain-v2-epic-plan.md). Epic tracking iss
 | M | Milestone | Tickets |
 |---|-----------|---------|
 | M0 | Housekeeping | close #217/#222, #314 (dup 267 dir), `.gitignore` chunks (#247) |
-| M1 | Merge-integrity gates (G1–G4) | #210, #94, #305 (ADR-0024 ✓ + trim ✓ done here) |
+| M1 | Merge-integrity gates (G1–G4) | G3 #305 ADR-0024 ✓ + G4 trim ✓ **landed in 1.0** · G1 #210 + G2 #94 **still open — deferred to 1.1** |
 | M2 | Decoupling reaches the user | #123, #315 (hook dedup), #316 (.env unify) |
 | M3 | Reviewer = real code-review (the moat) | #284, **#317** (CRITICAL), inline per-line comments |
 | M4 | Distribution + self-update to product bar | npx init, registry, adopt S2, upgrade-safety (rollback/clobber/lockout) |
 | M5 | Role-as-port (C) | #312 + ADR-0023 (draft in `brain-drafts/`) |
 | M6 | Provider parity | #130, #124, #131, #129 |
 | M7 | Backlog & scope | #268, #280, #263, #256, #247, #117 (close/defer), test brain-to-engram |
-| M8 | Per-stage SDD engine routing | new — supersedes ADR-0019; depends on M5 |
+| M8 | Per-stage SDD engine routing | **no ticket yet** — amends/supersedes ADR-0019; depends on M5 |
+| M9 | Governance observability | **no ticket yet** — `brain:metrics`; premise #8 scores 50% because nothing is measured |
 
-Suggested 1.1 order: `M2 → M3 → M4 → M5 → M8 → M6 → M7`.
+Suggested 1.1 order (patched after the cut — supersedes the line originally published here):
+
+`#210 → M2 → M3 → M4 → M5 → M8 → M9 → M6(rest) → M7`, with M0 running in parallel.
+
+**#210 leads the line**: at the v1.0.0 cut `release.yml` returned `failure` because it fires on the
+tag *after* the tag already exists, so it cannot block — the release-integrity gate is decorative
+until this is fixed. M9 has no dependency and may start any time; an earlier start buys a longer
+measurement window.
 
 ---
 

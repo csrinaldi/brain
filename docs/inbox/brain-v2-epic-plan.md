@@ -1,5 +1,17 @@
 # EPIC — Terminar brain v2.0.0 (plan de acción sobre `feature/v2.0.0`)
 
+> ## ⚠️ SNAPSHOT — no es la fuente de verdad
+>
+> Este archivo se escribió **antes del corte de v1.0.0** y quedó congelado en el commit
+> `c85386a` (2026-07-24 14:19). El corte ocurrió a las 22:01 del mismo día, y las decisiones
+> posteriores **no** están reflejadas acá.
+>
+> **La fuente de verdad es el issue #313** (el body del épico). Ante cualquier conflicto, gana #313.
+>
+> Desvíos conocidos de este archivo: la secuencia sugerida no incluye #210 al frente ni el
+> milestone M9 (`brain:metrics`), y `feature/v2.0.0` ya está mergeada y retirada — las slices de
+> 1.1 salen de `main`.
+
 > Fecha: 2026-07-24 · Basado en: auditoría de merge (`brain-v2-merge-audit.md`) + 3 escaneos
 > (salud general, instalación·distribución, instalación·auto-update).
 > Objetivo: **producto serio** — mergeable a `main`, adoptable por otros proyectos y capaz de
