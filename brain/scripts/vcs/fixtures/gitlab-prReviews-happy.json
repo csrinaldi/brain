@@ -1,0 +1,14 @@
+{
+  "_provenance": {
+    "endpoint": "GET /projects/:id/merge_requests/:iid/approvals",
+    "date": "2026-07-26",
+    "derived": true,
+    "note": "Not reachable from this sandbox (no live GitLab mirror — same CP-A3b deferral as every other gitlab-*.json). Hand-authored from the documented GitLab REST API v4 approvals response shape (https://docs.gitlab.com/ee/api/merge_request_approvals.html#get-configuration-1): `approved_by[].user.username` — the subset gitlab.mjs#prReviews reads. GitLab's approvals API carries no per-reviewer review-state history and no review body — each approver normalizes to exactly one `{state:'APPROVED', author}` entry (gitlab.mjs#prReviews), which is why this fixture, unlike the GitHub happy fixture, has no `body` field to drop: there is none to drop."
+  },
+  "data": {
+    "approved_by": [
+      { "user": { "id": 42, "username": "alice" } },
+      { "user": { "id": 43, "username": "bob" } }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "_provenance": {
+    "endpoint": "gh api --paginate repos/csrinaldi/brain/pulls/307/reviews",
+    "date": "2026-07-26",
+    "recorded": true,
+    "note": "Trimmed to the fields github.mjs#prReviews reads/could read (state, user.login) PLUS the raw `body` field (deliberately RETAINED, unlike other fixtures' consumed-fields-only trimming) so the contract test can assert the normalizer DROPS it (design D2/D5) — values are unmodified from the live API. No PR in this repository has ever received a GitHub-native APPROVED review (solo-maintainer repo; every review recorded here is the `brain-review` bot-protocol's own COMMENTED verdict) — this fixture exercises the happy-path SHAPE/body-drop assertions (spec Requirement 1 & 2 & 3) with real API data. The chain assertion's APPROVED-reviewer case (spec Requirement 4) uses an inline fixture instead, following the exact same precedent as this file's own `headRefOid`/`baseRefOid`/`prStatusRollup` inline-mock blocks (fields/states not obtainable from a real recordable response)."
+  },
+  "data": [
+    {
+      "state": "COMMENTED",
+      "user": { "login": "csrinaldi" },
+      "body": "```yaml\nprotocol: brain-review/2\nverdict: APPROVE\nhead_sha: dd8b6bd4069bab18dac304d958aeb654d720b6ba\nrev: 1\ngates:\n  required: [issue-link, diff-size, memory-gate, decision-gate]\n  detection: []\nfindings: []\nconditions: []\nsequencing:\n  reviewed: 307\nescalate: null\n```\n\n## Cold Review Verdict — PR #307\n\n- **Re-derived checks:**\n  - `brain:repo:check`: Clean (no prohibited references, structure valid).\n  - Test suite: 1837/1837 tests passed.\n  - Diff budget: 16 files, +480/-39 lines (within budget).\n- **Doctrine compliance:**\n  - 3-axis decoupling (`AGENT_PLATFORM`, `SDD_ENGINE`, `MEMORY_BACKEND`) implemented cleanly with backward compatibility for `SDD_HARNESS`.\n  - Deterministic hook generation for `.gemini/settings.json` and `.claude/settings.json`.\n  - All 4 SDD canonical artifacts (`proposal.md`, `spec.md`, `design.md`, `tasks.md`) present and approved.\n\nVerdict: **APPROVE**",
+      "commit_id": "dd8b6bd4069bab18dac304d958aeb654d720b6ba"
+    },
+    {
+      "state": "COMMENTED",
+      "user": { "login": "csrinaldi" },
+      "body": "```yaml\nprotocol: brain-review/1\nverdict: REVISE\nhead_sha: 7f2d90b5d25b27a2e5ec4a1fb5f85f250a104eb3\nrev: 1\ngates:\n  required: [issue-link, diff-size, local-checks, memory-gate, decision-gate]\n  detection: [phase-order, actor-check, brain-writes-reviewed]\nfindings:\n  - id: gate:issue-link\n    severity: blocker\n    evidence: \"prStatusRollup: issue-link status=COMPLETED conclusion=FAILURE\"\n    cites: \"governance-checks.mjs REQUIRED_JOBS\"\n  - id: tier2-frontier\n    severity: correction\n    evidence: \"git diff --name-only touches Tier-2: brain/core/managed-paths.mjs, brain/project/check-refs-rules.mjs\"\n    cites: \"agent-authorities.md Tier-2\"\nconditions: []\nescalate: null\n```",
+      "commit_id": "7f2d90b5d25b27a2e5ec4a1fb5f85f250a104eb3"
+    }
+  ]
+}

@@ -14,6 +14,7 @@
 // hits"):
 //   - github labelEvents → `gh api --paginate repos/<project>/issues/<n>/events`
 //   - github prView      → `gh pr view <n> --json number,labels,body,author`
+//   - github prReviews   → `gh api --paginate repos/<project>/pulls/<n>/reviews`
 //
 // Deliberately NOT auto-recorded by this script, ever:
 //   - github mrCreate  → `gh pr create` is a MUTATING write (creates a real PR
@@ -88,16 +89,36 @@ async function recordGithubPrView(project, number) {
   );
 }
 
+async function recordGithubPrReviews(project, number) {
+  const endpoint = `gh api --paginate repos/${project}/pulls/${number}/reviews`;
+  const reviews = runJson('gh', ['api', '--paginate', `repos/${project}/pulls/${number}/reviews`]);
+  writeFixture(
+    'github-prReviews-happy.json',
+    {
+      endpoint,
+      date: today(),
+      recorded: true,
+      note:
+        'Trimmed to the fields github.mjs#prReviews reads (state, user.login) PLUS the raw `body` field ' +
+        '(deliberately RETAINED so the contract test can assert the normalizer DROPS it) — values are ' +
+        'unmodified from the live API. Re-recording overwrites any prior note about this repo having no ' +
+        'GitHub-native APPROVED reviews; update that note by hand if the source PR/repo changes.',
+    },
+    reviews.map(r => ({ state: r.state, user: { login: r.user?.login ?? null }, body: r.body })),
+  );
+}
+
 const CASES = {
   labelEvents: recordGithubLabelEvents,
   prView: recordGithubPrView,
+  prReviews: recordGithubPrReviews,
 };
 
 async function main() {
   const [provider, verb, project, number] = process.argv.slice(2);
   if (provider !== 'github' || !CASES[verb]) {
     console.error(
-      'usage: node record-fixtures.mjs github <labelEvents|prView> <project> <number>\n' +
+      'usage: node record-fixtures.mjs github <labelEvents|prView|prReviews> <project> <number>\n' +
       '  (mrCreate and every gitlab-* fixture are deliberately NOT recordable by this script — see header comment)',
     );
     process.exit(1);

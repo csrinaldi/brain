@@ -32,6 +32,7 @@ import { setSpawn } from '../lib/exec.mjs';
 
 import * as github from './github.mjs';
 import * as gitlab from './gitlab.mjs';
+import { gatherBrainWritesReviewedInputs, evaluateBrainWritesReviewed } from '../brain-writes-reviewed.mjs';
 
 afterEach(() => setSpawn(spawnSync));
 
@@ -93,19 +94,26 @@ const PROVIDERS = {
     module: github,
     labelEvents: githubJsonCallArgs,
     prView: githubJsonCallArgs,
+    prReviews: githubJsonCallArgs,
     mrCreate: githubRawCallArgs,
   },
   gitlab: {
     module: gitlab,
     labelEvents: gitlabCallArgs,
     prView: gitlabCallArgs,
+    prReviews: gitlabCallArgs,
     mrCreate: gitlabCallArgs,
   },
 };
 
 for (const providerName of Object.keys(PROVIDERS)) {
-  const { module: vcs, labelEvents: labelEventsArgs, prView: prViewArgs, mrCreate: mrCreateArgs } =
-    PROVIDERS[providerName];
+  const {
+    module: vcs,
+    labelEvents: labelEventsArgs,
+    prView: prViewArgs,
+    prReviews: prReviewsArgs,
+    mrCreate: mrCreateArgs,
+  } = PROVIDERS[providerName];
 
   // ── labelEvents ────────────────────────────────────────────────────────
   test(`${providerName}.labelEvents (contract): happy fixture normalizes to the shared shape, ascending by at`, async () => {
@@ -203,6 +211,114 @@ for (const providerName of Object.keys(PROVIDERS)) {
         : { throws: false, data: { iid: 7, labels: [], description: null, author: null } };
     const result = await vcs.prView({ project: 'x/y', number: 7, ...prViewArgs(emptyFixture) });
     assert.equal(result.body, '', 'a successfully-fetched-but-empty body must normalize to "", not null/undefined');
+  });
+
+  // ── prReviews (issue #317 M10 Phase 2) ──────────────────────────────────
+  test(`${providerName}.prReviews (contract): happy fixture normalizes to entries of EXACTLY { state, author } — no body leak`, async () => {
+    const fixtureName = `${providerName}-prReviews-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.prReviews({ project: 'x/y', number: 1, ...prReviewsArgs(fixture) });
+
+    assert.ok(Array.isArray(result), 'prReviews must return an array on a successful fetch');
+    assert.ok(result.length >= 1, 'the happy fixture must exercise at least one review');
+    for (const entry of result) {
+      assert.deepEqual(
+        Object.keys(entry).sort(),
+        ['author', 'state'],
+        'each prReviews entry must contain EXACTLY { author, state } — a body key (or any other future widening) must fail this lock',
+      );
+    }
+  });
+
+  test(`${providerName}.prReviews (contract): a fetch failure yields null, never a fabricated []`, async () => {
+    const fixtureName = `${providerName}-prReviews-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.prReviews({ project: 'x/y', number: 42, ...prReviewsArgs(fixture) });
+    assert.equal(result, null, 'an uncomputable prReviews fetch must return null, never []');
+  });
+
+  // Zero-review success (distinct from the failure-yields-null case above):
+  // a successful fetch that genuinely found no reviews normalizes to `[]`,
+  // never `null` — `null` means uncomputable, `[]` means computed-and-empty
+  // (design D3). Inline mocks, same discipline as prView's empty-body case.
+  test(`${providerName}.prReviews (contract): a successful fetch with zero reviews normalizes to [] (never null — null means uncomputable)`, async () => {
+    const emptyFixture =
+      providerName === 'github'
+        ? { throws: false, data: [] }
+        : { throws: false, data: { approved_by: [] } };
+    const result = await vcs.prReviews({ project: 'x/y', number: 1, ...prReviewsArgs(emptyFixture) });
+    assert.deepEqual(result, [], 'a successfully-fetched-but-empty prReviews must normalize to [], not null');
+  });
+
+  // ── Chain assertion (issue #317 M10 Phase 2, spec Requirement 4, design D4) ──
+  // Drives a `prReviews`-shaped normalizer output into the REAL
+  // `gatherBrainWritesReviewedInputs` → `evaluateBrainWritesReviewed` chain —
+  // no inline fakes stand in for the normalizer or for the `null → []`
+  // fallback (design D4: that collapse lives in `defaultFetchReviews`,
+  // brain-writes-reviewed.mjs, NOT in the evaluator). Only the TRANSPORT is
+  // injected (`deps.getVcs`), via the same fixture-glue seam
+  // (`githubJsonCallArgs`/`gitlabCallArgs`) already used above — the
+  // normalizer (`vcs.prReviews`) and the wrapper (`defaultFetchReviews`) run
+  // for real.
+  function chainVcs(fixture) {
+    return providerName === 'github'
+      ? (() => { githubJsonCallArgs(fixture); return github; })()
+      : { prReviews: (a) => gitlab.prReviews({ ...a, ...gitlabCallArgs(fixture) }) };
+  }
+
+  test(`${providerName} chain: a PR with an APPROVED review distinct from the author passes the DETECTION gate (never warn)`, async () => {
+    // No PR in this repository has ever received a GitHub-native APPROVED
+    // review (verified live via `gh`/GraphQL search — solo-maintainer repo;
+    // see github-prReviews-happy.json's _provenance note), so the recorded
+    // happy fixture cannot exercise this branch with real API bytes. This
+    // inline APPROVED fixture follows the SAME inline-mock precedent already
+    // used in this file for cases a real recordable fixture cannot reach
+    // (headRefOid/baseRefOid/prStatusRollup above) — only the fixture DATA is
+    // inline; the transport seam, normalizer, and wrapper are all real.
+    const approvedFixture =
+      providerName === 'github'
+        ? { throws: false, data: [{ state: 'APPROVED', user: { login: 'reviewer-bot' }, body: 'lgtm' }] }
+        : { throws: false, data: { approved_by: [{ user: { username: 'reviewer-bot' } }] } };
+
+    const inputs = await gatherBrainWritesReviewedInputs({
+      baseSha: 'a', headSha: 'b', prNumber: 1, repo: 'x/y', author: 'pr-author', provider: providerName,
+      deps: {
+        getVcs: async () => chainVcs(approvedFixture),
+        diffNameOnly: () => ['brain/core/methodology/vcs-contract.md'],
+        readBotAllowlist: () => [],
+        readOverrideActors: () => [],
+      },
+    });
+    const verdict = evaluateBrainWritesReviewed(inputs);
+
+    assert.notEqual(verdict.level, 'warn', 'a reviewed PR must not warn for missing reviews');
+    assert.equal(verdict.level, 'pass', 'an APPROVED review from a distinct author must pass the gate');
+    assert.match(verdict.reason, /reviewer-bot/, "the gate's reasoning must reflect the real normalized entry, not a fixture-shaped fake");
+  });
+
+  test(`${providerName} chain: a prReviews fetch failure propagates through the REAL null → [] fallback to a warn, never a throw`, async () => {
+    const fixtureName = `${providerName}-prReviews-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const inputs = await gatherBrainWritesReviewedInputs({
+      baseSha: 'a', headSha: 'b', prNumber: 1, repo: 'x/y', author: 'pr-author', provider: providerName,
+      deps: {
+        getVcs: async () => chainVcs(fixture),
+        diffNameOnly: () => ['brain/core/methodology/vcs-contract.md'],
+        readBotAllowlist: () => [],
+        readOverrideActors: () => [],
+      },
+    });
+    assert.deepEqual(inputs.reviews, [], 'defaultFetchReviews must collapse a null prReviews fetch to [] (design D4)');
+
+    const verdict = evaluateBrainWritesReviewed(inputs);
+    assert.equal(verdict.level, 'warn', 'missing/unfetchable reviews on a brain/-touching PR must warn, never fail or throw');
+    assert.match(verdict.reason, /no PR reviews found/, 'the reason must cite missing/unsupported reviews');
   });
 
   // ── mrCreate ───────────────────────────────────────────────────────────
