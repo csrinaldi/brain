@@ -1,0 +1,10 @@
+{
+  "_provenance": {
+    "endpoint": "gh api --paginate repos/{project}/pulls/{n}/reviews",
+    "date": "2026-07-26",
+    "derived": true,
+    "note": "A forced-failure response cannot be recorded from a real API call — hand-authored to exercise github.mjs#prReviews's catch → null path."
+  },
+  "throws": true,
+  "error": "no pull requests found for branch"
+}

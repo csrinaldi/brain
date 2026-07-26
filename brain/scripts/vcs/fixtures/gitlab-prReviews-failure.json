@@ -1,0 +1,10 @@
+{
+  "_provenance": {
+    "endpoint": "GET /projects/:id/merge_requests/:iid/approvals",
+    "date": "2026-07-26",
+    "derived": true,
+    "note": "Forced-failure case — hand-authored to exercise gitlab.mjs#prReviews's catch-and-return-null path."
+  },
+  "throws": true,
+  "status": 404
+}
