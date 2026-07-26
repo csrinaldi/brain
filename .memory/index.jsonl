@@ -637,6 +637,7 @@
 {"id":"rec-68caadd900d731b3","ts":"2026-07-11T12:41:10Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-68cf799e33e1d95d","ts":"2026-07-13T00:22:06Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-694146a51f3f7f77","ts":"2026-07-25T00:46:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-6943f054ecc4e406","ts":"2026-07-26T00:25:47Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-69593dd542a90d0a","ts":"2026-07-16T14:49:50Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-697764b4e5acf40d","ts":"2026-07-11T12:33:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-697d243116cb3daa","ts":"2026-07-11T12:32:46Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
