@@ -572,6 +572,58 @@ test('gitlab.labelList (contract): paginates until a short page — a many-page 
   assert.ok(result.includes('type:bug'), 'labels from a later page must be included, never dropped');
 });
 
+// ── branchProtect (M10 Phase 2, issue #335 rank 2) — mutating write verb.
+// `({ project, branch?, checks, requiredReviews? }) -> { enforced: boolean,
+// reason?: string, remedy?: string }`. Both providers' impls call `run()`
+// from the SAME shared spawn seam (github via `gh`, gitlab via `glab`), so
+// ONE setSpawn-based glue serves both providers — unlike WRITE_VERB_PROVIDERS,
+// no gitlab `fetchImpl` branch is needed here (design D2). `checks` is always
+// supplied, even on the failure path: `github.branchProtect` does
+// `checks.map()` with no default and THROWS on `undefined` — omitting it
+// would fail the never-throws test for the wrong reason (an unhandled
+// TypeError building the request payload, not the branchProtect contract).
+// `reason`/`remedy` vocabulary legitimately differs per provider ('tier' is
+// GitHub-only; 'auth'/'permission' are GitLab-only) — only type/presence is
+// asserted here, never exact-string equality across providers (design D4).
+
+const BRANCH_PROTECT_PROVIDERS = {
+  github: {
+    module: github,
+    ok: (checks) => { setSpawn(rawSpawn('', 0)); return { checks }; },
+    // Trips github.mjs's `r.stderr.includes('403') || /upgrade.*pro/i.test(r.stderr)` tier-block branch.
+    fail: (checks) => { setSpawn(failSpawn('403: upgrade to GitHub Pro for private-repo branch protection')); return { checks }; },
+  },
+  gitlab: {
+    module: gitlab,
+    ok: (checks) => { setSpawn(rawSpawn('', 0)); return { checks }; },
+    // Trips gitlab.mjs's `r.stderr.includes(': 403') || /forbidden/i.test(r.stderr)` permission-block branch.
+    fail: (checks) => { setSpawn(failSpawn('glab: 403 Forbidden')); return { checks }; },
+  },
+};
+
+for (const providerName of Object.keys(BRANCH_PROTECT_PROVIDERS)) {
+  const { module: vcs, ok, fail } = BRANCH_PROTECT_PROVIDERS[providerName];
+
+  test(`${providerName}.branchProtect (contract): a successful protect returns exactly { enforced: true }`, async () => {
+    const result = await vcs.branchProtect({ project: 'x/y', ...ok(['ci']) });
+    assert.deepEqual(result, { enforced: true }, 'a successful branchProtect must return exactly { enforced: true } — no enabled/rules leakage into the contract shape');
+  });
+
+  test(`${providerName}.branchProtect (contract): a protect failure returns { enforced: false, reason, remedy } — never throws`, async () => {
+    const result = await vcs.branchProtect({ project: 'x/y', ...fail(['ci']) });
+    assert.equal(result.enforced, false, 'a failed branchProtect must never fabricate enforced:true');
+    assert.equal(typeof result.reason, 'string', 'reason must be a string — vocabulary is provider-specific, asserted in providers.test.mjs, not here');
+    assert.equal(typeof result.remedy, 'string', 'remedy must be a string — presence/type only, never compared across providers');
+  });
+
+  test(`${providerName}.branchProtect (contract): never throws, even under a mocked transport failure`, async () => {
+    await assert.doesNotReject(
+      () => vcs.branchProtect({ project: 'x/y', ...fail(['ci']) }),
+      `${providerName}.branchProtect must resolve, not throw, on a mocked transport failure`,
+    );
+  });
+}
+
 // ── REQ-266-3 (lock 2): no code path can emit an APPROVE review, on any provider ──
 
 test('REQ-266-3 lock 2: github.prReviewComment sends event:\'COMMENT\' to the API regardless of input — no argument selects a different event', async () => {
@@ -593,4 +645,46 @@ test('REQ-266-3 lock 2: no exported verb on either provider references an approv
       `${modName} must not contain any review "event:" literal other than 'COMMENT' — no code path may reach an approval event`,
     );
   }
+});
+
+// ── branchProtect requiredReviews no-op (M10 Phase 2, design D1/D3) —
+// FUNCTION-SCOPED source-scan lock. gitlab.mjs's branchProtect accepts a
+// `requiredReviews` param but never enforces it (GitLab's approval-count
+// enforcement needs the Premium approval-rules API, not called here — see
+// the JSDoc above the function). This scan is deliberately scoped to the
+// branchProtect function body's OWN source slice, never file-wide: a
+// file-wide scan for /approvals/ would false-positive on gitlab.mjs:271
+// (prReviews), which legitimately calls `.../approvals` for an unrelated,
+// correct reason. The lock is intentionally BIDIRECTIONAL — if a future
+// change adds an approval-rules call inside branchProtect, this test FAILS
+// and forces that decision into the open (design D1), rather than drifting
+// silently either way.
+test('branchProtect (M10 Phase 2): GitLab requiredReviews is accepted but never enforced — scoped source-scan lock', () => {
+  const src = readFileSync(fileURLToPath(new URL('./gitlab.mjs', import.meta.url)), 'utf8');
+  const start = src.indexOf('export async function branchProtect');
+  assert.ok(start !== -1, 'gitlab.mjs must still export branchProtect');
+  const end = src.indexOf('\n}\n', start);
+  assert.ok(end !== -1, 'branchProtect function body must have a closing brace at column 0');
+  const body = src.slice(start, end);
+
+  // Function-scoped: no approval/approval-rules endpoint call inside branchProtect's own body.
+  assert.doesNotMatch(
+    body,
+    /approvals|approval[_-]?rules/i,
+    'gitlab.branchProtect must not call any approvals/approval-rules endpoint — requiredReviews is accepted but not enforced (pinned, not fixed, per design D1)',
+  );
+
+  // requiredReviews must be declared (the destructured parameter) but never referenced again in the body.
+  const occurrences = (body.match(/requiredReviews/g) || []).length;
+  assert.equal(occurrences, 1, 'requiredReviews must occur exactly once in the function body — the parameter signature — proving it is declared but never read/enforced');
+
+  // Proves the narrow scope above is load-bearing, not incidentally passing:
+  // the SAME pattern DOES match file-wide, via prReviews' legitimate
+  // .../approvals call (~gitlab.mjs:271). A file-wide doesNotMatch on `src`
+  // would fail here — this is the false positive the scoped scan avoids.
+  assert.match(
+    src,
+    /approvals|approval[_-]?rules/i,
+    'the full gitlab.mjs file DOES contain an approvals reference (prReviews) — proving the branchProtect-scoped scan above is a genuine narrowing, not a no-op',
+  );
 });
