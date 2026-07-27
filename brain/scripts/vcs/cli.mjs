@@ -31,7 +31,7 @@ export const VERBS = [
   'commitStatus', 'repoCloneUrl', 'patSetupUrl', 'projectResolve',
   'branchProtect', 'capabilities',
   'prReviewComment', 'issueComment', 'labelAdd', 'labelRemove',
-  'prStatusRollup',
+  'prStatusRollup', 'labelList',
 ];
 
 /**

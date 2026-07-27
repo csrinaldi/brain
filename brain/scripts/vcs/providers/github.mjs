@@ -440,6 +440,27 @@ export async function labelRemove({ project, number, labels } = {}) {
   return { ok: true };
 }
 
+/**
+ * labelList — the provider-agnostic `labelList` verb (issue #334,
+ * vcs-label-preflight spec): the remote's full declared label set, normalized
+ * to bare name strings. Consumed by `labelPreflight` (vcs/label-preflight.mjs)
+ * as the pre-write conformance check before `mrCreate` — a hard-error on an
+ * unknown GitHub label, caught BEFORE the write rather than after (design A2).
+ *
+ * `--paginate` is load-bearing, same discipline as `labelEvents`/`prReviews`:
+ * a repo with more labels than one page would otherwise silently drop a real
+ * label and false-reject a valid ship. May throw like its sibling normalized
+ * READs (`prView` fixture aside) — `labelPreflight`, not this verb, is the
+ * total/never-throws policy layer (design A1).
+ *
+ * @param {{ project: string }} opts
+ * @returns {Promise<string[]>}
+ */
+export async function labelList({ project } = {}) {
+  const arr = runJson('gh', ['api', '--paginate', `repos/${project}/labels?per_page=100`]);
+  return arr.map(l => l.name);
+}
+
 export async function repoCloneUrl({ host, project, token }) {
   return `https://x-access-token:${token}@${host || 'github.com'}/${project}.git`;
 }

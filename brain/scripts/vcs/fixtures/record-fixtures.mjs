@@ -9,11 +9,13 @@
 //
 //   node brain/scripts/vcs/fixtures/record-fixtures.mjs github labelEvents <project> <issueNumber>
 //   node brain/scripts/vcs/fixtures/record-fixtures.mjs github prView <project> <prNumber>
+//   node brain/scripts/vcs/fixtures/record-fixtures.mjs github issueView <project> <issueNumber>
 //
 // Endpoints hit (documented per REQ-A3-6 — "documents which real endpoints it
 // hits"):
 //   - github labelEvents → `gh api --paginate repos/<project>/issues/<n>/events`
 //   - github prView      → `gh pr view <n> --json number,labels,body,author`
+//   - github issueView   → `gh api repos/<project>/issues/<n>` (issue #334, M10 Gap-A)
 //
 // Deliberately NOT auto-recorded by this script, ever:
 //   - github mrCreate  → `gh pr create` is a MUTATING write (creates a real PR
@@ -88,16 +90,51 @@ async function recordGithubPrView(project, number) {
   );
 }
 
+/**
+ * Records `github-issueView-happy.json` from a real issue via
+ * `gh api repos/<project>/issues/<n>` — the exact call `github.mjs#issueView`
+ * makes. Trimmed to the fields `issueView` actually consumes (number, title,
+ * labels[].name, body, user.login), same discipline as `recordGithubLabelEvents`.
+ * The recorded issue MUST carry a `type:*` label (M10 Gap-A / issue #334's
+ * `ship-pr-label-resolution` spec needs a happy fixture whose label round-trips
+ * through `findTypeLabel`).
+ */
+async function recordGithubIssueView(project, number) {
+  const endpoint = `GET repos/${project}/issues/${number}`;
+  const r = runJson('gh', ['api', `repos/${project}/issues/${number}`]);
+  writeFixture(
+    'github-issueView-happy.json',
+    {
+      endpoint,
+      date: today(),
+      recorded: true,
+      note:
+        'Trimmed to the fields github.mjs#issueView actually consumes (number, title, ' +
+        'labels[].name, body, user.login) via a jq-equivalent projection of the real ' +
+        'response — values are unmodified from the live API, only unused issue metadata ' +
+        'is dropped to keep the fixture reviewable.',
+    },
+    {
+      number: r.number,
+      title: r.title,
+      labels: (r.labels ?? []).map(l => ({ name: l.name })),
+      body: r.body,
+      user: { login: r.user?.login ?? null },
+    },
+  );
+}
+
 const CASES = {
   labelEvents: recordGithubLabelEvents,
   prView: recordGithubPrView,
+  issueView: recordGithubIssueView,
 };
 
 async function main() {
   const [provider, verb, project, number] = process.argv.slice(2);
   if (provider !== 'github' || !CASES[verb]) {
     console.error(
-      'usage: node record-fixtures.mjs github <labelEvents|prView> <project> <number>\n' +
+      'usage: node record-fixtures.mjs github <labelEvents|prView|issueView> <project> <number>\n' +
       '  (mrCreate and every gitlab-* fixture are deliberately NOT recordable by this script — see header comment)',
     );
     process.exit(1);

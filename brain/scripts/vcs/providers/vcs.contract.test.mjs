@@ -94,18 +94,25 @@ const PROVIDERS = {
     labelEvents: githubJsonCallArgs,
     prView: githubJsonCallArgs,
     mrCreate: githubRawCallArgs,
+    issueView: githubJsonCallArgs,
   },
   gitlab: {
     module: gitlab,
     labelEvents: gitlabCallArgs,
     prView: gitlabCallArgs,
     mrCreate: gitlabCallArgs,
+    issueView: gitlabCallArgs,
   },
 };
 
 for (const providerName of Object.keys(PROVIDERS)) {
-  const { module: vcs, labelEvents: labelEventsArgs, prView: prViewArgs, mrCreate: mrCreateArgs } =
-    PROVIDERS[providerName];
+  const {
+    module: vcs,
+    labelEvents: labelEventsArgs,
+    prView: prViewArgs,
+    mrCreate: mrCreateArgs,
+    issueView: issueViewArgs,
+  } = PROVIDERS[providerName];
 
   // ── labelEvents ────────────────────────────────────────────────────────
   test(`${providerName}.labelEvents (contract): happy fixture normalizes to the shared shape, ascending by at`, async () => {
@@ -203,6 +210,49 @@ for (const providerName of Object.keys(PROVIDERS)) {
         : { throws: false, data: { iid: 7, labels: [], description: null, author: null } };
     const result = await vcs.prView({ project: 'x/y', number: 7, ...prViewArgs(emptyFixture) });
     assert.equal(result.body, '', 'a successfully-fetched-but-empty body must normalize to "", not null/undefined');
+  });
+
+  // ── issueView (issue #334, M10 Gap-A) ─────────────────────────────────
+  // `({ project, number }) -> { number, title, labels, body, author }`. `labels`
+  // is always a `string[]`, never null, possibly empty — the source of the
+  // issue's `type:*` label consumed by `ship-pr-label-resolution` /
+  // `findTypeLabel`. Unlike `prView`, a fetch failure REJECTS (design A5) —
+  // `brain-start.mjs:65` already depends on that, so this is PINNED, not fixed.
+  test(`${providerName}.issueView (contract): happy fixture normalizes to { number, title, labels, body, author }`, async () => {
+    const fixtureName = `${providerName}-issueView-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.issueView({ project: 'x/y', number: 1, ...issueViewArgs(fixture) });
+
+    assert.equal(typeof result.number, 'number', 'number must normalize to a number');
+    assert.equal(typeof result.title, 'string', 'title must be a string');
+    assert.ok(Array.isArray(result.labels), 'labels must always normalize to an array, never null/undefined');
+    for (const label of result.labels) {
+      assert.equal(typeof label, 'string', 'each label must be a bare name string — no leaked provider object shape');
+    }
+    assert.equal(typeof result.body, 'string', 'body must be a string on a successful fetch');
+    assert.notEqual(result.author, undefined, 'author key must be present (null is valid — undefined is not)');
+  });
+
+  test(`${providerName}.issueView (contract): a fetch failure REJECTS — never a fabricated null/empty shape (A5)`, async () => {
+    const fixtureName = `${providerName}-issueView-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.rejects(
+      () => vcs.issueView({ project: 'x/y', number: 9999, ...issueViewArgs(fixture) }),
+      'issueView must REJECT on a fetch failure — brain-start.mjs:65 depends on that, unlike prView\'s null-shape',
+    );
+  });
+
+  test(`${providerName}.issueView (contract): a successful fetch with no labels normalizes to [], never null/undefined`, async () => {
+    const emptyFixture =
+      providerName === 'github'
+        ? { throws: false, data: { number: 7, title: 'x', labels: [], body: '', user: { login: null } } }
+        : { throws: false, data: { iid: 7, title: 'x', labels: [], description: '', author: null } };
+    const result = await vcs.issueView({ project: 'x/y', number: 7, ...issueViewArgs(emptyFixture) });
+    assert.deepEqual(result.labels, [], 'an empty label set must normalize to [], not null/undefined');
   });
 
   // ── mrCreate ───────────────────────────────────────────────────────────
@@ -449,6 +499,73 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
     assert.equal(typeof result.error, 'string');
   });
 }
+
+// ── labelList (issue #334, vcs-label-preflight contract) — inline mocks, no
+// fixture files: a simple normalized READ verb, same precedent as
+// labelAdd/prStatusRollup. `({ project }) -> string[]` — MAY throw like its
+// siblings (labelPreflight, not this verb, is the total/never-throws layer —
+// design A1). Pagination is exercised explicitly: a repo with >30/>100 labels
+// must not silently drop real labels and false-reject a valid ship.
+
+const LABEL_LIST_PROVIDERS = {
+  github: {
+    module: github,
+    ok: (names) => { setSpawn(jsonSpawn(names.map(name => ({ name, color: 'ededed', description: '' })))); return {}; },
+    fail: () => { setSpawn(failSpawn('fixture: simulated failure')); return {}; },
+  },
+  gitlab: {
+    module: gitlab,
+    ok: (names) => ({
+      fetchImpl: async () => ({ ok: true, json: async () => names.map(name => ({ name, color: '#ededed', description: '' })) }),
+    }),
+    fail: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
+  },
+};
+
+for (const providerName of Object.keys(LABEL_LIST_PROVIDERS)) {
+  const { module: vcs, ok, fail } = LABEL_LIST_PROVIDERS[providerName];
+
+  test(`${providerName}.labelList (contract): normalizes to an array of bare label name strings`, async () => {
+    const result = await vcs.labelList({ project: 'x/y', ...ok(['type:bug', 'type:feature', 'status:approved']) });
+    assert.ok(Array.isArray(result), 'labelList must return an array');
+    assert.deepEqual([...result].sort(), ['status:approved', 'type:bug', 'type:feature']);
+    for (const name of result) assert.equal(typeof name, 'string', 'each entry must be a bare label name string');
+  });
+
+  test(`${providerName}.labelList (contract): names pass through verbatim — no case-folding`, async () => {
+    const result = await vcs.labelList({ project: 'x/y', ...ok(['Type:Bug']) });
+    assert.deepEqual(result, ['Type:Bug']);
+  });
+
+  test(`${providerName}.labelList (contract): a fetch failure throws (this verb is a normalized READ, not the total policy layer)`, async () => {
+    await assert.rejects(() => vcs.labelList({ project: 'x/y', ...fail() }));
+  });
+}
+
+test('github.labelList (contract): uses `gh api --paginate` — a many-page label set must not be silently truncated', async () => {
+  let capturedArgs;
+  setSpawn((_cmd, args) => {
+    capturedArgs = args;
+    return { status: 0, stdout: JSON.stringify([{ name: 'type:bug' }]), stderr: '' };
+  });
+  await github.labelList({ project: 'x/y' });
+  assert.ok(capturedArgs.includes('--paginate'), 'github.labelList must call `gh api --paginate` — a single unpaginated page can silently drop real labels on a >30-label repo');
+});
+
+test('gitlab.labelList (contract): paginates until a short page — a many-page label set must not be silently truncated', async () => {
+  let callCount = 0;
+  const fullPage = Array.from({ length: 100 }, (_, i) => ({ name: `label-${i}` }));
+  const shortPage = [{ name: 'type:bug' }];
+  const result = await gitlab.labelList({
+    project: 'x/y',
+    fetchImpl: async () => {
+      callCount += 1;
+      return { ok: true, json: async () => (callCount === 1 ? fullPage : shortPage) };
+    },
+  });
+  assert.equal(callCount, 2, 'gitlab.labelList must fetch a second page when the first page is full (per_page-sized)');
+  assert.ok(result.includes('type:bug'), 'labels from a later page must be included, never dropped');
+});
 
 // ── REQ-266-3 (lock 2): no code path can emit an APPROVE review, on any provider ──
 
