@@ -66,6 +66,33 @@ function titleFromBranch(branch, type) {
   return `${type}: ${slug}`;
 }
 
+/**
+ * Resolves the issue number encoded in the branch name
+ * (`<prefix>/<number>-<slug>`, the shape `brain:start` creates).
+ *
+ * FAILS CLOSED rather than falling back to a placeholder: a silent `'0'`
+ * fallback produced a PR whose body said `Closes #0` and whose issue lookup
+ * queried a non-existent issue — a fabricated answer to an uncomputable
+ * question. An unparseable branch is a real, actionable operator error, so it
+ * is reported as one.
+ *
+ * @param {string} branch
+ * @returns {{ issueNumber: string } | { exitCode: 1, message: string }}
+ */
+export function resolveIssueNumber(branch) {
+  const issueMatch = String(branch ?? '').match(/\/(\d+)-/);
+  if (!issueMatch) {
+    return {
+      exitCode: 1,
+      message:
+        `brain:ship: cannot determine issue number from branch "${branch}" — ` +
+        `expected <prefix>/<number>-<slug> (e.g. feature/42-add-cli-i18n). ` +
+        `Run "npm run brain:start" to create a correctly-named branch.`,
+    };
+  }
+  return { issueNumber: issueMatch[1] };
+}
+
 // ── core logic (injectable for tests) ────────────────────────────────────────
 
 /**
@@ -213,9 +240,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
 
-  // Extract issue number from branch name (feature/<number>-<slug>)
-  const issueMatch = branch.match(/\/(\d+)-/);
-  const issueNumber = issueMatch ? issueMatch[1] : '0';
+  // Extract issue number from branch name (feature/<number>-<slug>) — fails
+  // closed on an unparseable branch rather than fabricating a placeholder.
+  const resolved = resolveIssueNumber(branch);
+  if (resolved.exitCode) {
+    console.error(resolved.message);
+    process.exit(resolved.exitCode);
+  }
+  const { issueNumber } = resolved;
 
   const template = readTemplate(repoRoot);
 

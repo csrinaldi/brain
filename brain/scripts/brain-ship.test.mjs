@@ -196,3 +196,36 @@ test('brain-ship: mrCreate failure → exits 1 with error message', async () => 
   assert.ok(result.message.includes('422') || result.message.toLowerCase().includes('failed'),
     `message should include error: ${result.message}`);
 });
+
+// ── resolveIssueNumber (branch → issue number, fails CLOSED) ──────────────────
+// The CLI entry-point used to fall back to '0' on an unparseable branch, which
+// fabricated a `Closes #0` footer and looked up a non-existent issue. An
+// uncomputable issue number is now an actionable refusal, not a placeholder.
+
+test('brain-ship: resolveIssueNumber extracts the issue number from a conventional branch name', async () => {
+  const { resolveIssueNumber } = await import('./brain-ship.mjs');
+
+  assert.deepEqual(resolveIssueNumber('feature/42-add-cli-i18n'), { issueNumber: '42' });
+  assert.deepEqual(resolveIssueNumber('fix/7-thing'), { issueNumber: '7' });
+  assert.deepEqual(resolveIssueNumber('chore/334-brain-ship-labels'), { issueNumber: '334' });
+});
+
+test('brain-ship: resolveIssueNumber on an unparseable branch → exitCode 1, NEVER a fabricated "0"', async () => {
+  const { resolveIssueNumber } = await import('./brain-ship.mjs');
+
+  const result = resolveIssueNumber('main');
+
+  assert.equal(result.exitCode, 1, 'an unparseable branch must fail closed, not fall back to issue "0"');
+  assert.equal(result.issueNumber, undefined, 'no issue number may be fabricated when the branch does not encode one');
+  assert.match(result.message, /main/, `message must quote the offending branch: ${result.message}`);
+  assert.match(result.message, /<prefix>\/<number>-<slug>/, `message must state the expected shape: ${result.message}`);
+});
+
+test('brain-ship: resolveIssueNumber rejects branches that carry no <number>- segment', async () => {
+  const { resolveIssueNumber } = await import('./brain-ship.mjs');
+
+  for (const branch of ['feature/no-number-here', 'feature/42', '42-no-prefix', '', undefined]) {
+    const result = resolveIssueNumber(branch);
+    assert.equal(result.exitCode, 1, `branch "${branch}" must not resolve to an issue number`);
+  }
+});

@@ -52,16 +52,20 @@ warnings_detail:
     recommendation: "Requires explicit governance-scope confirmation before follow-up change"
 
 # Archive Contents
+# Paths point INTO this archive folder — the live
+# openspec/changes/issue-334-brain-ship-labels/ folder no longer exists.
+# An archive whose manifest referenced the live tree was a split brain: the
+# change read as both open and closed depending on which side you looked at.
 archived_artifacts:
   - type: proposal
-    file: openspec/changes/issue-334-brain-ship-labels/proposal.md
+    file: openspec/changes/archive/2026-07-26-issue-334-brain-ship-labels/proposal.md
   - type: spec
-    file: openspec/changes/issue-334-brain-ship-labels/specs/vcs-issue-view-contract/spec.md
+    file: openspec/changes/archive/2026-07-26-issue-334-brain-ship-labels/specs/vcs-issue-view-contract/spec.md
   - type: spec
-    file: openspec/changes/issue-334-brain-ship-labels/specs/vcs-label-preflight/spec.md
+    file: openspec/changes/archive/2026-07-26-issue-334-brain-ship-labels/specs/vcs-label-preflight/spec.md
   - type: spec
-    file: openspec/changes/issue-334-brain-ship-labels/specs/ship-pr-label-resolution/spec.md
+    file: openspec/changes/archive/2026-07-26-issue-334-brain-ship-labels/specs/ship-pr-label-resolution/spec.md
   - type: design
-    file: openspec/changes/issue-334-brain-ship-labels/design.md
+    file: openspec/changes/archive/2026-07-26-issue-334-brain-ship-labels/design.md
   - type: tasks
-    file: openspec/changes/issue-334-brain-ship-labels/tasks.md
+    file: openspec/changes/archive/2026-07-26-issue-334-brain-ship-labels/tasks.md

@@ -247,10 +247,15 @@ for (const providerName of Object.keys(PROVIDERS)) {
   });
 
   test(`${providerName}.issueView (contract): a successful fetch with no labels normalizes to [], never null/undefined`, async () => {
+    // The `labels` key is OMITTED from the payload DELIBERATELY. A payload
+    // that already carried `labels: []` would satisfy the assertion below
+    // without the provider's `?? []` guard ever running — a vacuous test that
+    // would still pass if the guard were deleted. With the key absent, `[]`
+    // can only come from the guard, so the invariant is genuinely pinned.
     const emptyFixture =
       providerName === 'github'
-        ? { throws: false, data: { number: 7, title: 'x', labels: [], body: '', user: { login: null } } }
-        : { throws: false, data: { iid: 7, title: 'x', labels: [], description: '', author: null } };
+        ? { throws: false, data: { number: 7, title: 'x', body: '', user: { login: null } } }
+        : { throws: false, data: { iid: 7, title: 'x', description: '', author: null } };
     const result = await vcs.issueView({ project: 'x/y', number: 7, ...issueViewArgs(emptyFixture) });
     assert.deepEqual(result.labels, [], 'an empty label set must normalize to [], not null/undefined');
   });
