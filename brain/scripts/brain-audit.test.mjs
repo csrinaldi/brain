@@ -497,8 +497,15 @@ test('brain-audit: A7 revert-of-a-revert — a re-added >400-line offender LIVE 
 // and `selectIssueLinkBody(null, commitBody)` (audit-helpers.test.mjs) already
 // prove the downstream pure functions handle `null` safely; this proves the
 // null actually reaches them, unmangled.
-test('brain-audit: prView() null labels/body are NOT coerced to []/\'\' before reaching the pure helpers (fix dies at source)', () => {
-  const src = readFileSync(fileURLToPath(new URL('./brain-audit.mjs', import.meta.url)), 'utf8');
+// GUARD RE-POINT (issue #324 Phase 2): `fetchPrMeta` — the prView() fetch this
+// guard fences — moved to lib/merge-walk.mjs (EVIDENCE layer) during the
+// brain-metrics extraction. Re-pointing at the literal path where the guarded
+// code NOW lives is not optional: leaving this guard aimed at brain-audit.mjs
+// after the code moved out would make it pass vacuously forever (the pattern
+// it forbids can never appear in a file that no longer contains the logic),
+// silently deleting the safety net (design "Safety note (blocking for apply)").
+test('brain-audit (merge-walk): prView() null labels/body are NOT coerced to []/\'\' before reaching the pure helpers (fix dies at source)', () => {
+  const src = readFileSync(fileURLToPath(new URL('./lib/merge-walk.mjs', import.meta.url)), 'utf8');
   assert.equal(src.includes('pr.labels ?? []'), false,
     'must not fabricate an empty labels default over a possibly-null pr.labels — let null reach shouldSkipSize()');
   assert.equal(src.includes('pr.body ?? \'\''), false,
@@ -692,17 +699,26 @@ test('D2 — an adrPresence [FAIL] line appends the human-gate remediation (acce
 });
 
 // ── no-import drift-guard (PR2b §2b.3.4) — the direction-blind pairwise
-// isReverterOf must never be re-imported into brain-audit.mjs ────────────────
-test('D2 drift-guard — brain-audit.mjs does NOT import the retired pairwise isReverterOf', () => {
-  const src = readFileSync(fileURLToPath(new URL('./brain-audit.mjs', import.meta.url)), 'utf8');
+// isReverterOf must never be re-imported into the merge walk ────────────────
+//
+// GUARD RE-POINT (issue #324 Phase 2): the reverter-exemption composition this
+// guard fences (`netAddFull`/`addedPathsAbsentAt`/`revertResurrectsAt`) moved
+// to lib/merge-walk.mjs (VERDICT layer) during the brain-metrics extraction —
+// brain-audit.mjs no longer imports resolution.mjs directly at all. Re-pointed
+// at the literal path where the resolution.mjs import now lives so this guard
+// stays a REAL assertion (it would otherwise fail outright — `importMatch`
+// would be null — rather than passing vacuously, but either way the old
+// target no longer tests what it claims to).
+test('D2 drift-guard — lib/merge-walk.mjs does NOT import the retired pairwise isReverterOf', () => {
+  const src = readFileSync(fileURLToPath(new URL('./lib/merge-walk.mjs', import.meta.url)), 'utf8');
   // The true no-import guard (PR2b §2b.3.4): assert no resolution.mjs import
   // binding pulls in isReverterOf. Checks the actual import specifier — the only
   // place the retired export could enter — so rationale comments may still name
   // it. isReverterOf is exported ONLY by resolution.mjs, so this is exhaustive.
   const importMatch = src.match(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*resolution\.mjs['"]/);
-  assert.ok(importMatch, 'expected a resolution.mjs import in brain-audit.mjs');
+  assert.ok(importMatch, 'expected a resolution.mjs import in lib/merge-walk.mjs');
   assert.equal(/\bisReverterOf\b/.test(importMatch[1]), false,
-    'brain-audit.mjs must compose netAddFull (net-parity), never import the retired direction-blind isReverterOf');
+    'lib/merge-walk.mjs must compose netAddFull (net-parity), never import the retired direction-blind isReverterOf');
 });
 
 // ── crossCheckExit — the fail-closed exit contract (REQ-D2-6b, §15.5) ────────
@@ -854,9 +870,22 @@ test('brain-audit: A8 payload predating the window base — a delete + a live re
 // through the THROWING git path), and the SIG-mirror drift-guard.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { resolvedSkipLine } from './brain-audit.mjs';
+// GUARD RE-POINT (issue #324 Phase 2): `resolvedSkipLine` moved to
+// lib/merge-walk.mjs (VERDICT layer) during the brain-metrics extraction.
+// Imported directly from its new home rather than via a brain-audit.mjs
+// re-export, so this stays a straight-line import a future reader can follow.
+import { resolvedSkipLine } from './lib/merge-walk.mjs';
 
 const AUDIT_SRC = readFileSync(fileURLToPath(new URL('./brain-audit.mjs', import.meta.url)), 'utf8');
+// GUARD RE-POINT (issue #324 Phase 2): the per-merge evidence reads (numstat,
+// changed files, commit body, parent) MINOR 2 fences moved to
+// lib/merge-walk.mjs's `readMergeDiff`/`readMergeParent` — re-pointed below so
+// the guards keep reading the file that actually contains the git calls.
+// `AUDIT_SRC` above stays targeted at brain-audit.mjs: the SIG drift-guard's
+// `payloadSignature`/`SIG_CONFIG`/`SIG_ARGS` DID NOT move (design's Emission
+// layer stays local), so that guard's target is unchanged.
+const MERGE_WALK_SRC = readFileSync(
+  fileURLToPath(new URL('./lib/merge-walk.mjs', import.meta.url)), 'utf8');
 const RESOLUTION_SRC = readFileSync(
   fileURLToPath(new URL('./governance/postmerge/resolution.mjs', import.meta.url)), 'utf8');
 
@@ -899,15 +928,15 @@ test('MINOR 1 — resolvedSkipLine threads the caller-supplied tip into the pred
 // resolved-skip, both of which already exit 2 — so a "behavioral" test would
 // pass against the unfixed code and prove nothing. The honest guard is
 // structural: the swallowing helper does not exist to be called.
-test('MINOR 2 — brain-audit defines no error-swallowing git helper (the silent fail-open cannot return)', () => {
-  assert.equal(/catch\s*\{\s*return\s*'';?\s*\}/.test(AUDIT_SRC), false,
+test('MINOR 2 — lib/merge-walk.mjs defines no error-swallowing git helper (the silent fail-open cannot return)', () => {
+  assert.equal(/catch\s*\{\s*return\s*'';?\s*\}/.test(MERGE_WALK_SRC), false,
     'a git helper that swallows failure into an empty string re-opens the diffSize/adrPresence fail-open');
 });
 
 test('MINOR 2 — the per-merge reads route through the throwing seam', () => {
   for (const read of ['--numstat', '--name-only', '--format=%B', '--format=%P']) {
     const re = new RegExp(`gitOrThrow\\(\\[[^\\]]*'${read.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`);
-    assert.ok(re.test(AUDIT_SRC),
+    assert.ok(re.test(MERGE_WALK_SRC),
       `the ${read} read must go through gitOrThrow so a transient failure is exit 2, not a silent PASS`);
   }
 });
