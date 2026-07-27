@@ -179,6 +179,36 @@ test('renderMarkdown: memory records "Unavailable" caveat when coverage is unava
   assert.match(md, /Unavailable/);
 });
 
+test('renderMarkdown: "Exception usage by author" section breaks size:exception down by author and period (spec "by author" requirement)', () => {
+  const rowWithAuthors = { ...sampleRow('2026-07'), bypassByAuthor: { alice: 2, bob: 1 } };
+  const md = renderMarkdown({
+    rows: [rowWithAuthors],
+    memGate: { pass: true },
+    memCoverage: {
+      available: true, total: 0, tagged: 0, coveragePct: 0,
+    },
+    range: 'HEAD',
+    period: 'month',
+  });
+  assert.match(md, /## Exception usage by author/);
+  assert.match(md, /\| 2026-07 \| alice \| 2 \|/);
+  assert.match(md, /\| 2026-07 \| bob \| 1 \|/);
+});
+
+test('renderMarkdown: "Exception usage by author" prints a no-usage message when no author data exists', () => {
+  const md = renderMarkdown({
+    rows: [sampleRow('2026-07')],
+    memGate: { pass: true },
+    memCoverage: {
+      available: true, total: 0, tagged: 0, coveragePct: 0,
+    },
+    range: 'HEAD',
+    period: 'month',
+  });
+  assert.match(md, /## Exception usage by author/);
+  assert.match(md, /No `size:exception` usage recorded/);
+});
+
 test('renderJson (H2): a flat, parseable array of period objects, superset of the markdown data', () => {
   const out = renderJson({
     rows: [sampleRow('2026-07'), sampleRow('2026-08')],

@@ -54,6 +54,12 @@ function newRow(period) {
     leadTimes: [],
     gates: Object.fromEntries(PER_PERIOD_GATES.map((g) => [g, { raw: 0, enforced: 0 }])),
     bypass: { sizeException: 0, skipMemoryGate: 0 },
+    // size:exception usage broken down by author (spec's Bypass usage
+    // reporting requirement — "by gate, by author, and by period"). Keyed by
+    // the label-adding actor's login; an unresolvable actor (labelEvents
+    // unavailable, or no matching add event) is bucketed under "unknown" —
+    // NEVER dropped, mirroring D2's "count visibly, never hide" discipline.
+    bypassByAuthor: {},
     detection: Object.fromEntries(DETECTION_JOB_NAMES.map((j) => [j, { pass: 0, fail: 0 }])),
   };
 }
@@ -70,6 +76,9 @@ function newRow(period) {
  * @param {string} m.sha
  * @param {string} m.mergedAt        ISO merge-commit date (`%cI`).
  * @param {string[]|null} m.prLabels
+ * @param {string|null} [m.exceptionAuthor]  Login of the actor who added the
+ *   `size:exception` label (resolved from PR labelEvents), or `null` when
+ *   unresolvable — folded into "unknown" by-author bucket, never dropped.
  * @param {number|null} m.leadTimeDays
  * @param {'evaluated'|'baseline-skip'|'resolved-skip'|'uncomputable'} m.kind
  * @param {object|null} m.evalRec    lib/merge-walk.mjs `evaluateMerge()` output, iff kind==='evaluated'.
@@ -91,7 +100,11 @@ export function foldMerge(rows, m) {
   if (typeof m.leadTimeDays === 'number') row.leadTimes.push(m.leadTimeDays);
 
   const prLabels = Array.isArray(m.prLabels) ? m.prLabels : [];
-  if (prLabels.includes('size:exception')) row.bypass.sizeException += 1;
+  if (prLabels.includes('size:exception')) {
+    row.bypass.sizeException += 1;
+    const author = m.exceptionAuthor ?? 'unknown';
+    row.bypassByAuthor[author] = (row.bypassByAuthor[author] ?? 0) + 1;
+  }
   if (prLabels.includes('skip:memory-gate')) row.bypass.skipMemoryGate += 1;
 
   if (m.detection) {

@@ -212,6 +212,59 @@ test('bypass usage is visible across weekly buckets (H3 — a rising trend must 
   assert.equal(byPeriod['2026-W29'], 1);
 });
 
+test('bypass usage tracks size:exception usage by author, per period (spec "by author" breakdown)', () => {
+  let rows = emptyRows();
+  rows = foldMerge(rows, {
+    sha: 'a1', mergedAt: '2026-07-05T00:00:00Z', prLabels: ['size:exception'], leadTimeDays: null,
+    kind: 'evaluated', evalRec: evalDiffSizeFail({ prLabels: ['size:exception'] }), detection: null, period: 'month',
+    exceptionAuthor: 'alice',
+  });
+  rows = foldMerge(rows, {
+    sha: 'a2', mergedAt: '2026-07-06T00:00:00Z', prLabels: ['size:exception'], leadTimeDays: null,
+    kind: 'evaluated', evalRec: evalDiffSizeFail({ prLabels: ['size:exception'] }), detection: null, period: 'month',
+    exceptionAuthor: 'alice',
+  });
+  rows = foldMerge(rows, {
+    sha: 'a3', mergedAt: '2026-07-10T00:00:00Z', prLabels: ['size:exception'], leadTimeDays: null,
+    kind: 'evaluated', evalRec: evalDiffSizeFail({ prLabels: ['size:exception'] }), detection: null, period: 'month',
+    exceptionAuthor: 'bob',
+  });
+  const out = finalizeRows(rows);
+  assert.deepEqual(out[0].bypassByAuthor, { alice: 2, bob: 1 });
+});
+
+test('bypass usage by author falls back to "unknown" when the exception author cannot be resolved (never dropped)', () => {
+  let rows = emptyRows();
+  rows = foldMerge(rows, {
+    sha: 'u1', mergedAt: '2026-07-05T00:00:00Z', prLabels: ['size:exception'], leadTimeDays: null,
+    kind: 'evaluated', evalRec: evalDiffSizeFail({ prLabels: ['size:exception'] }), detection: null, period: 'month',
+    exceptionAuthor: null,
+  });
+  const out = finalizeRows(rows);
+  assert.deepEqual(out[0].bypassByAuthor, { unknown: 1 });
+});
+
+test('bypass usage by author is per-period, distinct from the overall sizeException count', () => {
+  let rows = emptyRows();
+  rows = foldMerge(rows, {
+    sha: 'p1', mergedAt: '2026-07-05T00:00:00Z', prLabels: ['size:exception'], leadTimeDays: null,
+    kind: 'evaluated', evalRec: evalDiffSizeFail({ prLabels: ['size:exception'] }), detection: null, period: 'month',
+    exceptionAuthor: 'alice',
+  });
+  rows = foldMerge(rows, {
+    sha: 'p2', mergedAt: '2026-08-05T00:00:00Z', prLabels: ['size:exception'], leadTimeDays: null,
+    kind: 'evaluated', evalRec: evalDiffSizeFail({ prLabels: ['size:exception'] }), detection: null, period: 'month',
+    exceptionAuthor: 'alice',
+  });
+  const out = finalizeRows(rows);
+  const julyRow = out.find((r) => r.period === '2026-07');
+  const augRow = out.find((r) => r.period === '2026-08');
+  assert.deepEqual(julyRow.bypassByAuthor, { alice: 1 });
+  assert.deepEqual(augRow.bypassByAuthor, { alice: 1 });
+  assert.equal(julyRow.bypass.sizeException, 1);
+  assert.equal(augRow.bypass.sizeException, 1);
+});
+
 test('detection jobs render as a single pass/fail count column, no raw/enforced split (D6)', () => {
   let rows = emptyRows();
   rows = foldMerge(rows, {

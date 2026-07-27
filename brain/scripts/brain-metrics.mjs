@@ -49,7 +49,7 @@ import { resolveApprovedLabel } from './governance/approved-label.mjs';
 import {
   emptyRows, foldMerge, finalizeRows, PER_PERIOD_GATES, DETECTION_JOB_NAMES,
 } from './lib/metrics-aggregate.mjs';
-import { leadTimeDays } from './lib/lead-time.mjs';
+import { leadTimeDays, selectApprovalEvent } from './lib/lead-time.mjs';
 import { computeMemoryCoverage } from './lib/memory-coverage.mjs';
 
 // ── Argument parsing (Phase 4.1) ─────────────────────────────────────────────
@@ -162,9 +162,12 @@ function fmtGate(cell) {
 }
 
 /**
- * Render the markdown report: one row per period bucket, plus the two
- * repo-level lines (memory-gate at HEAD, memory-records coverage) — both
- * deliberately OUTSIDE the per-period table (design D3 / Phase 5).
+ * Render the markdown report: one row per period bucket, an "Exception usage
+ * by author" breakdown (spec's Bypass usage requirement — `size:exception`
+ * broken down by author and period; `unknown` when the label-adding actor
+ * cannot be resolved), plus the two repo-level lines (memory-gate at HEAD,
+ * memory-records coverage) — both deliberately OUTSIDE the per-period table
+ * (design D3 / Phase 5).
  *
  * @param {{ rows: object[], memGate: {pass: boolean}, memCoverage: object, range: string, period: string }} opts
  * @returns {string}
@@ -199,6 +202,33 @@ export function renderMarkdown({
         String(row.uncomputable),
       ];
       lines.push(`| ${cells.join(' | ')} |`);
+    }
+  }
+
+  lines.push('');
+  lines.push('## Exception usage by author');
+  lines.push('');
+  if (rows.length === 0) {
+    lines.push('No `size:exception` usage recorded in this window.');
+  } else {
+    const authorRows = [];
+    for (const row of rows) {
+      for (const [author, count] of Object.entries(row.bypassByAuthor ?? {})) {
+        authorRows.push({ period: row.period, author, count });
+      }
+    }
+    if (authorRows.length === 0) {
+      lines.push('No `size:exception` usage recorded in this window.');
+    } else {
+      authorRows.sort((a, b) => {
+        if (a.period !== b.period) return a.period < b.period ? -1 : 1;
+        return a.author.localeCompare(b.author);
+      });
+      lines.push('| Period | Author | size:exception |');
+      lines.push('| --- | --- | --- |');
+      for (const { period: p, author, count } of authorRows) {
+        lines.push(`| ${p} | ${author} | ${count} |`);
+      }
     }
   }
 
@@ -238,6 +268,7 @@ export function renderJson({ rows, memGate, memCoverage }) {
       medianLeadTimeDays: row.medianLeadTimeDays,
       gates: row.gates,
       bypass: row.bypass,
+      bypassByAuthor: row.bypassByAuthor ?? {},
       detection: row.detection,
       uncomputable: row.uncomputable,
       memoryGatePassAtHead: memGate.pass,
@@ -264,7 +295,7 @@ export function renderJson({ rows, memGate, memCoverage }) {
 async function evaluateOneMerge(sha, subject, ctx) {
   const {
     cwd, resolutionGit, windowFrom, windowTo, allObservations, ignoreList, vcs, config, approvedLabel, period,
-    leadTimeCache,
+    leadTimeCache, bypassAuthorCache,
   } = ctx;
 
   // Same net-parity resolved-skip brain-audit applies — a merge brain-audit
@@ -333,8 +364,33 @@ async function evaluateOneMerge(sha, subject, ctx) {
       }
     }
 
+    // size:exception label-adding actor (spec's Bypass usage requirement —
+    // "broken down by gate, by author, and by period"). The label lives on
+    // the PR (prView, via fetchPrMeta above), not the linked issue, so this
+    // reads labelEvents for the PR NUMBER (GitHub PRs are issues under the
+    // hood — same events endpoint), never the issue number leadTimeCache
+    // keys on. `bypassAuthorCache` (keyed by PR number) mirrors
+    // leadTimeCache's "1 fetch per entity" de-dup discipline. Best-effort:
+    // an unresolvable actor is `null` here and folds into the "unknown"
+    // by-author bucket in lib/metrics-aggregate.mjs — never dropped.
+    let exceptionAuthor = null;
+    if (
+      Array.isArray(prLabels) && prLabels.includes('size:exception')
+      && prNumForRollup !== null && vcs && typeof vcs.labelEvents === 'function'
+    ) {
+      if (!bypassAuthorCache.has(prNumForRollup)) {
+        bypassAuthorCache.set(
+          prNumForRollup,
+          vcs.labelEvents({ project: config?.project?.slug, number: prNumForRollup }).catch(() => null),
+        );
+      }
+      const events = await bypassAuthorCache.get(prNumForRollup);
+      const exceptionEvent = selectApprovalEvent(events, 'size:exception', mergedAt);
+      exceptionAuthor = exceptionEvent?.actor?.login ?? null;
+    }
+
     return {
-      sha, mergedAt, prLabels, leadTimeDays: leadTime, kind: 'evaluated', evalRec, detection, period,
+      sha, mergedAt, prLabels, leadTimeDays: leadTime, kind: 'evaluated', evalRec, detection, exceptionAuthor, period,
     };
   } catch {
     // Any git-plumbing throw (missing parent, diff read failure, reverter-
@@ -402,12 +458,13 @@ export async function runMetrics({ argv, cwd = process.cwd() }) {
   const { merges, windowFrom, windowTo } = walk;
   let rows = emptyRows();
   const leadTimeCache = new Map(); // issue number -> Promise<labelEvents() result> (design Data Flow: 1 call/issue)
+  const bypassAuthorCache = new Map(); // PR number -> Promise<labelEvents() result> (size:exception by-author breakdown)
   for (const { sha, subject } of merges) {
     let m;
     try {
       m = await evaluateOneMerge(sha, subject, {
         cwd, resolutionGit, windowFrom, windowTo, allObservations, ignoreList, vcs, config, approvedLabel, period,
-        leadTimeCache,
+        leadTimeCache, bypassAuthorCache,
       });
     } catch (err) {
       // Could not even date the merge (a `git log -1 --format=%cI` failure on

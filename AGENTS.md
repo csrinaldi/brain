@@ -517,6 +517,7 @@ a `--range=` flag) — `git log` already accepts range syntax like `HEAD~30..HEA
 | Median lead time | Median of: issue's **last** `status:approved` label-add at-or-before merge → merge date |
 | `diff-size` / `issue-link` / `decision-gate` (raw / enforced) | `raw` = the check's real result, ignoring any exemption; `enforced` = `raw` minus `size:exception`-labeled and net-parity-exempted merges (the same exemption decisions `brain-audit` itself makes) |
 | `size:exception` / `skip:memory-gate` usage | Raw count of merges whose PR carries the label, by period |
+| `size:exception` usage by author | A separate "Exception usage by author" table: `size:exception` count per (period, label-adding actor) pair. The actor is read from the PR's own label-add events, not the linked issue's; unresolvable actors (VCS not configured, `labelEvents` fetch failure) are bucketed as `unknown` — never dropped |
 | `phase-order` / `actor-check` / `brain-writes-reviewed` | Single pass/fail count column (DETECTION_JOBS never block merge, so there is no raw/enforced split) |
 | Uncomputable | Merges where a per-merge git-plumbing read failed — counted visibly, never silently dropped or silently passed |
 
