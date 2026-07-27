@@ -85,10 +85,28 @@ async function realBranchProtectionProbe({ config, vcs }) {
   return { status: r.status ?? undefined, contexts: [] };
 }
 
-/** Rung 2 — release-gate presence: release.yml or config.governance.releaseGate. */
+/**
+ * Rung 2 — release-gate RAW EVIDENCE, never a verdict (issue #337, design D1).
+ * All interpretation (trigger classification, audit-invocation + permissions
+ * check) lives in evalRung2/classifyReleaseWorkflow (substrate.mjs), where it
+ * stays unit-testable with injected text fixtures. This probe is a dumb I/O
+ * wrapper: it reads config + the workflow file and hands back structured
+ * evidence. A read failure (missing file caught by existsSync already, or any
+ * other fs error) degrades `workflowText` to `null` — never thrown, never
+ * silently coerced into a false "not wired".
+ */
 async function realReleaseGateProbe({ config }) {
-  if (config?.governance?.releaseGate === true) return true;
-  return repoFileExists('.github/workflows/release.yml');
+  const declared = config?.governance?.releaseGate === true;
+  const workflowPresent = repoFileExists('.github/workflows/release.yml');
+  let workflowText = null;
+  if (workflowPresent) {
+    try {
+      workflowText = readFileSync(resolve(REPO_ROOT, '.github/workflows/release.yml'), 'utf8');
+    } catch {
+      workflowText = null; // honestly unparseable — never fabricate content
+    }
+  }
+  return { declared, workflowPresent, workflowText };
 }
 
 /** Rung 3 — post-merge CI presence: governance-postmerge.yml or env.GITHUB_ACTIONS. */
@@ -192,6 +210,32 @@ function printSubstrateReport(substrate) {
     console.log(
       `  brain-writes-reviewed enforced at evidence rung; CODEOWNERS rung-1 enhancement unavailable: ${brainWritesGate.reason}`,
     );
+  }
+
+  // Rung-2 release-gate breakdown (issue #337, REQ-L2-1/REQ-HONESTY-1). Driven
+  // SOLELY by rungs[2].active/verifiable/mechanism — never a hardcoded
+  // independent branch, mirroring the rung-1 preReceive caveat above. A
+  // structurally-proven armed gate (verifiable:true) renders as armed with no
+  // caveat; a config-declared armed gate (verifiable:false) renders the honest
+  // caveat — never the word "verified". A present-but-inert workflow (e.g.
+  // brain's own post-tag release.yml) surfaces its reason + remedy even when
+  // rung 2 is not the selected rung, so the ladder's efficacy story never
+  // silently disappears once the report demotes below it.
+  const rung2 = substrate.rungs?.[2];
+  if (rung2?.active && rung2.verifiable === false) {
+    // Mirrors preReceive: a bare config declaration is armed but NEVER
+    // "verified" — no structural read backs it (unverified, Phase 4 #210
+    // would replace the declaration with a proven workflow).
+    console.log(
+      '  release gate   armed (config-declared) — unverified; not structurally confirmed against a workflow',
+    );
+  } else if (rung2 && rung2.active === false && rung2.mechanism === 'release-gate-workflow-structural') {
+    // The workflow IS structurally readable but cannot block (e.g. brain's own
+    // post-tag trigger) — honestly surfaced even though rung 2 is not selected.
+    console.log(`  release gate   present but cannot block (post-tag trigger): ${rung2.reason}`);
+    if (rung2.remedy) console.log(`                 remedy: ${rung2.remedy}`);
+  } else if (rung2?.active && rung2.verifiable) {
+    console.log('  release gate   armed  [workflow triggers pre-tag, invokes brain:audit, holds contents:write]');
   }
 
   console.log('');
