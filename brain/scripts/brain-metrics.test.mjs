@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
-  parseArgs, renderMarkdown, renderJson, detectionConclusion, extractIssueNumber,
+  parseArgs, renderMarkdown, renderJson, detectionConclusion, extractIssueNumber, runMetrics,
 } from './brain-metrics.mjs';
 
 const METRICS_SCRIPT = new URL('./brain-metrics.mjs', import.meta.url).pathname;
@@ -111,6 +111,32 @@ test('detectionConclusion: also accepts lowercase conclusions (defensive — som
   ];
   assert.equal(detectionConclusion(rollup, 'phase-order'), 'pass');
   assert.equal(detectionConclusion(rollup, 'actor-check'), 'fail');
+});
+
+test('detectionConclusion (C2): falls back to `status` when `conclusion` is null (GitLab-shaped fixture — GitLab has no conclusion field, always null per its own contract)', () => {
+  // gitlab.mjs#prStatusRollup ALWAYS normalizes `conclusion: null` (GitLab's
+  // commit-status model has no separate conclusion field distinct from its
+  // terminal `status`). Before this fix, `detectionConclusion()` only ever
+  // read `conclusion`, so every GitLab repo silently reported 0/0 for all
+  // three detection jobs, forever.
+  const rollup = [
+    { name: 'phase-order', status: 'success', conclusion: null },
+    { name: 'actor-check', status: 'failed', conclusion: null },
+    { name: 'brain-writes-reviewed', status: 'running', conclusion: null },
+  ];
+  assert.equal(detectionConclusion(rollup, 'phase-order'), 'pass');
+  assert.equal(detectionConclusion(rollup, 'actor-check'), 'fail');
+  assert.equal(detectionConclusion(rollup, 'brain-writes-reviewed'), null, 'a non-terminal GitLab status must never fabricate pass/fail');
+});
+
+test('detectionConclusion (C2): a real (non-null) conclusion is never overridden by an unrelated status value', () => {
+  // Guards against the fallback becoming too eager: GitHub's `NEUTRAL`
+  // conclusion is a genuine terminal-but-neither-pass-nor-fail result — it
+  // must stay null even if `status` happens to say something else.
+  const rollup = [
+    { name: 'brain-writes-reviewed', status: 'COMPLETED', conclusion: 'NEUTRAL' },
+  ];
+  assert.equal(detectionConclusion(rollup, 'brain-writes-reviewed'), null);
 });
 
 test('extractIssueNumber: reads a closing reference or a chain reference', () => {
@@ -301,6 +327,115 @@ test('integration smoke — a small real history produces sane markdown counts (
   assert.equal(parsed[0].uncomputable, 0);
 });
 
+// ── VCS injection seam (issue #324 C1 review finding) ────────────────────────
+// Before this fix, `runMetrics()` always resolved the VCS adapter internally
+// via `resolveVcs()`/`getVcs()`, with no way to substitute a fake in a test.
+// None of the fixtures above configure `vcs.provider` in `brain.config.json`,
+// so `resolveVcs()` silently returns `null` in every test above — the
+// lead-time, detection-rollup, and by-author code paths (all gated on
+// `vcs` being truthy in `evaluateOneMerge`) had ZERO test coverage. This is
+// exactly how the uppercase-conclusion bug (fix round, commit b9cc412)
+// shipped undetected. `runMetrics({ ..., vcs })` now accepts an injected
+// fake so these three paths are directly testable, offline, no real
+// network/gh calls.
+
+test('lead-time (C1): an injected vcs.labelEvents resolves the ISSUE\'s status:approved label-add timestamp', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'metrics-vcs-leadtime-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  mergeAddingPayload(
+    git, dir, { 'src/a.mjs': 'export const a = 1;\n' }, 'A',
+    'Merge pull request #5 from x/y\n\nCloses #1',
+  );
+
+  let queriedNumber;
+  const mockVcs = {
+    prView: async () => ({ labels: [], body: 'Closes #1' }),
+    labelEvents: async ({ number }) => {
+      queriedNumber = number;
+      return [
+        { action: 'add', label: 'status:approved', at: '2026-07-01T00:00:00Z', actor: { login: 'reviewer' } },
+      ];
+    },
+  };
+
+  const { output, exitCode } = await runMetrics({ argv: [`${base}..HEAD`, '--json'], cwd: dir, vcs: mockVcs });
+  assert.equal(exitCode, 0);
+  const parsed = JSON.parse(output);
+  assert.equal(parsed.length, 1);
+  assert.equal(queriedNumber, 1, 'lead time must query the ISSUE number (#1), not the PR number (#5)');
+  assert.ok(
+    typeof parsed[0].medianLeadTimeDays === 'number' && parsed[0].medianLeadTimeDays > 0,
+    `expected a positive computed lead time, got ${parsed[0].medianLeadTimeDays}`,
+  );
+});
+
+test('detection rollup (C1): an injected vcs.prStatusRollup populates DETECTION_JOBS pass/fail counts', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'metrics-vcs-detection-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  mergeAddingPayload(
+    git, dir, { 'src/a.mjs': 'export const a = 1;\n' }, 'A',
+    'Merge pull request #7 from x/y\n\nCloses #2',
+  );
+
+  let queriedNumber;
+  const mockVcs = {
+    prView: async () => ({ labels: [], body: 'Closes #2' }),
+    // Lead time also fires (issue #2 is referenced) — a fake with no
+    // `labelEvents` would throw synchronously inside evaluateOneMerge's lead-
+    // time block, folding the WHOLE merge into 'uncomputable' before the
+    // detection-rollup block below ever runs. Stub it out (no qualifying
+    // approval event) so this test isolates the detection-rollup path only.
+    labelEvents: async () => null,
+    prStatusRollup: async ({ number }) => {
+      queriedNumber = number;
+      return [
+        { name: 'phase-order', status: 'COMPLETED', conclusion: 'SUCCESS' },
+        { name: 'actor-check', status: 'COMPLETED', conclusion: 'FAILURE' },
+      ];
+    },
+  };
+
+  const { output, exitCode } = await runMetrics({ argv: [`${base}..HEAD`, '--json'], cwd: dir, vcs: mockVcs });
+  assert.equal(exitCode, 0);
+  const parsed = JSON.parse(output);
+  assert.equal(parsed.length, 1);
+  assert.equal(queriedNumber, 7, 'detection rollup must query the PR number (#7)');
+  assert.deepEqual(parsed[0].detection['phase-order'], { pass: 1, fail: 0 });
+  assert.deepEqual(parsed[0].detection['actor-check'], { pass: 0, fail: 1 });
+});
+
+test('by-author (C1): an injected vcs.labelEvents resolves the size:exception label-adding actor', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'metrics-vcs-byauthor-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  const bigFile = Array.from({ length: 500 }, (_, i) => `line ${i}`).join('\n') + '\n';
+  mergeAddingPayload(
+    git, dir, { 'src/big.mjs': bigFile }, 'A',
+    'Merge pull request #9 from x/y\n\nCloses #3',
+  );
+
+  const mockVcs = {
+    prView: async () => ({ labels: ['size:exception'], body: 'Closes #3' }),
+    labelEvents: async () => ([
+      { action: 'add', label: 'size:exception', at: '2026-07-01T00:00:00Z', actor: { login: 'alice' } },
+    ]),
+  };
+
+  const { output, exitCode } = await runMetrics({ argv: [`${base}..HEAD`, '--json'], cwd: dir, vcs: mockVcs });
+  assert.equal(exitCode, 0);
+  const parsed = JSON.parse(output);
+  assert.equal(parsed.length, 1);
+  assert.deepEqual(parsed[0].bypassByAuthor, { alice: 1 });
+});
+
 // ── auditBaseline parity (issue #324 B2 fix round) ───────────────────────────
 // brain-audit respects `governance.auditBaseline` (skips pre-baseline merges
 // rather than failing them). Before this fix, brain-metrics had no baseline
@@ -352,6 +487,36 @@ test('brain-metrics: a pre-baseline merge is skipped, not counted as a raw gate 
   assert.equal(parsed[0].gates['diff-size'].raw, 0,
     'pre-baseline merge is oversized, but brain-audit never evaluated it — metrics must not either');
   assert.equal(parsed[0].uncomputable, 0, 'a baseline-skip is a deliberate skip, not an uncomputable failure');
+});
+
+// ── --help + error-prefix dedup (issue #324 C3 review finding) ───────────────
+// Before this fix: `node brain-metrics.mjs --help` exited 1 with a DOUBLED
+// prefix (`parseArgs` already prefixes its thrown message with
+// "brain-metrics: "; `runMetrics`'s catch re-prefixed it a second time), and
+// `--help` was not a recognized flag at all — it fell through to the generic
+// "unrecognized flag" rejection.
+
+test('--help (C3): prints usage and exits 0, via runMetrics directly (no subprocess)', async () => {
+  const { output, exitCode } = await runMetrics({ argv: ['--help'], cwd: '.' });
+  assert.equal(exitCode, 0);
+  assert.match(output, /Usage: brain:metrics/i);
+  assert.doesNotMatch(output, /unrecognized flag/i);
+});
+
+test('--help (C3): CLI subprocess exits 0 and prints usage, not the doubled-prefix error', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'metrics-help-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const r = spawnSync('node', [METRICS_SCRIPT, '--help'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 0, `expected exit 0\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /Usage: brain:metrics/i);
+  assert.doesNotMatch(r.stdout, /brain-metrics: brain-metrics:/, 'error prefix must never be doubled');
+});
+
+test('parseArgs rejection (C3): the error message is never double-prefixed', async () => {
+  const { output, exitCode } = await runMetrics({ argv: ['--bogus'], cwd: '.' });
+  assert.equal(exitCode, 1);
+  assert.doesNotMatch(output, /brain-metrics: brain-metrics:/);
+  assert.match(output, /^brain-metrics: unrecognized flag/);
 });
 
 test('--period=week buckets the same history into ISO week keys', (t) => {

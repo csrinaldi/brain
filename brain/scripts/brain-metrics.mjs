@@ -85,6 +85,25 @@ export function parseArgs(argv) {
   return { range, json, period };
 }
 
+/** `--help` usage text (issue #324 C3 review finding). */
+export const HELP_TEXT = `Usage: brain:metrics [<git-range>] [--json] [--period=month|week]
+
+Read-only governance-effectiveness reporting verb, re-derived from brain's
+own merged git history (issue #324, M9). Introduces zero new governance
+gates, invariants, or CI-blocking behavior.
+
+Arguments:
+  <git-range>          Optional positional git range (e.g. "HEAD~30..HEAD",
+                        "origin/main..HEAD"). Defaults to "origin/main..HEAD"
+                        (falls back to "HEAD" when origin/main is absent).
+
+Options:
+  --json                Emit a flat JSON array (one object per period
+                        bucket) instead of a markdown table.
+  --period=month|week   Bucket period. Defaults to "month".
+  --help                Show this help text and exit 0.
+`;
+
 /** Default range resolution — audit parity (origin/main..HEAD, else HEAD). */
 function resolveDefaultRange(cwd) {
   try {
@@ -135,7 +154,20 @@ export function extractIssueNumber(body) {
  * Mirrors `review/evaluators/tranche.mjs`'s `isGateGreen()` normalization
  * (the established pattern for provider `conclusion` values in this codebase).
  *
- * @param {Array<{name: string|null, conclusion: string|null}>|null} rollup
+ * GitLab fallback (issue #324 C2 review finding): `gitlab.mjs#prStatusRollup`
+ * ALWAYS normalizes `conclusion: null` by contract (vcs-contract.md —
+ * GitLab's commit-status model has no separate "conclusion" field distinct
+ * from its terminal `status`). Reading `conclusion` alone made every GitLab
+ * repo silently report 0/0 for all three detection jobs, forever. When
+ * `conclusion` is `null`, this falls back to `status`, mapping GitLab's own
+ * terminal vocabulary — `success` → pass, `failed` → fail (NOTE: GitLab uses
+ * `failed`, not GitHub's `failure`) — anything else (`pending`, `running`,
+ * `canceled`, `skipped`, `created`, `manual`, ...) stays uncounted `null`,
+ * same fail-closed honesty as the `conclusion` path. A genuinely terminal-
+ * but-neither GitHub `conclusion` (e.g. `NEUTRAL`) is NOT `null`, so it never
+ * reaches this fallback and correctly stays `null` too.
+ *
+ * @param {Array<{name: string|null, status: string|null, conclusion: string|null}>|null} rollup
  * @param {string} jobName
  * @returns {'pass'|'fail'|null}
  */
@@ -146,6 +178,11 @@ export function detectionConclusion(rollup, jobName) {
   const conclusion = (entry.conclusion ?? '').toLowerCase();
   if (conclusion === 'success') return 'pass';
   if (conclusion === 'failure') return 'fail';
+  if (entry.conclusion == null) {
+    const status = (entry.status ?? '').toLowerCase();
+    if (status === 'success') return 'pass';
+    if (status === 'failed') return 'fail';
+  }
   return null;
 }
 
@@ -428,17 +465,37 @@ function readMergedAt(sha, cwd) {
  * separate from `process.exit()` so it stays testable (mirrors
  * brain-governance-status.mjs's injectable-orchestration convention).
  *
- * @param {{ argv: string[], cwd?: string }} opts
+ * `vcs` is an optional injection seam (issue #324 C1 review finding): when
+ * provided (tests), it is used AS-IS instead of resolving a real adapter via
+ * `resolveVcs()`/`getVcs()`. Production (CLI entrypoint below) never passes
+ * it, so `resolveVcs(config)` still runs exactly as before. Before this seam,
+ * `resolveVcs()` always called `getVcs()` directly with no way to substitute
+ * a fake — the lead-time, detection-rollup, and by-author code paths (all of
+ * which call `vcs.prView`/`vcs.prStatusRollup`/`vcs.labelEvents`) had ZERO
+ * test coverage, which is how the uppercase-conclusion bug (fix round,
+ * commit b9cc412) shipped undetected.
+ *
+ * @param {{ argv: string[], cwd?: string, vcs?: object|null }} opts
  * @returns {Promise<{ output: string, exitCode: number }>}
  */
-export async function runMetrics({ argv, cwd = process.cwd() }) {
+export async function runMetrics({ argv, cwd = process.cwd(), vcs: injectedVcs }) {
+  // `--help` is handled BEFORE parseArgs (issue #324 C3 review finding) —
+  // parseArgs has no concept of it and would otherwise reject it as an
+  // "unrecognized flag", exiting 1 instead of printing usage and exiting 0.
+  if (argv.includes('--help')) {
+    return { output: HELP_TEXT, exitCode: 0 };
+  }
+
   let range;
   let json;
   let period;
   try {
     ({ range, json, period } = parseArgs(argv));
   } catch (err) {
-    return { output: `brain-metrics: ${err.message}`, exitCode: 1 };
+    // `parseArgs` already prefixes its thrown message with "brain-metrics: "
+    // — re-prefixing here doubled it (issue #324 C3 review finding). Return
+    // the message AS-IS.
+    return { output: err.message, exitCode: 1 };
   }
   if (!range) range = resolveDefaultRange(cwd);
 
@@ -446,7 +503,7 @@ export async function runMetrics({ argv, cwd = process.cwd() }) {
   const ignoreList = Array.isArray(config?.governance?.ignoreList) ? config.governance.ignoreList : [];
   const approvedLabel = resolveApprovedLabel(config, config?.vcs?.provider);
   const resolutionGit = makeGit(cwd);
-  const vcs = await resolveVcs(config);
+  const vcs = injectedVcs !== undefined ? injectedVcs : await resolveVcs(config);
   const allObservations = readRecordObservations({ recordsDir: join(cwd, '.memory', 'records') });
   const memGate = memoryPresence(allObservations);
   const memCoverage = computeMemoryCoverage(cwd);

@@ -503,6 +503,7 @@ npm run brain:metrics                                    # origin/main..HEAD, mo
 npm run brain:metrics -- <git-range>                     # e.g. HEAD~30..HEAD, origin/main..HEAD
 npm run brain:metrics -- <git-range> --json               # flat JSON array, one object per period
 npm run brain:metrics -- <git-range> --period=week         # ISO 8601 weekly buckets instead of monthly
+npm run brain:metrics -- --help                            # usage text, exits 0
 ```
 
 The range argument is **positional**, mirroring `brain:audit`'s own signature (never
@@ -518,7 +519,7 @@ a `--range=` flag) — `git log` already accepts range syntax like `HEAD~30..HEA
 | `diff-size` / `issue-link` / `decision-gate` (raw / enforced) | `raw` = the check's real result, ignoring any exemption; `enforced` = `raw` minus `size:exception`-labeled and net-parity-exempted merges (the same exemption decisions `brain-audit` itself makes) |
 | `size:exception` / `skip:memory-gate` usage | Raw count of merges whose PR carries the label, by period |
 | `size:exception` usage by author | A separate "Exception usage by author" table: `size:exception` count per (period, label-adding actor) pair. The actor is read from the PR's own label-add events, not the linked issue's; unresolvable actors (VCS not configured, `labelEvents` fetch failure) are bucketed as `unknown` — never dropped |
-| `phase-order` / `actor-check` / `brain-writes-reviewed` | Single pass/fail count column (DETECTION_JOBS never block merge, so there is no raw/enforced split) |
+| `phase-order` / `actor-check` / `brain-writes-reviewed` | Single pass/fail count column (DETECTION_JOBS never block merge, so there is no raw/enforced split). Supported on both providers — see the GitLab caveat below |
 | Uncomputable | Merges where a per-merge git-plumbing read failed — counted visibly, never silently dropped or silently passed |
 
 **Reported once, separately from the per-period table (repo-level, not a time series):**
@@ -551,6 +552,16 @@ a `--range=` flag) — `git log` already accepts range syntax like `HEAD~30..HEA
 - **`decision-gate` counts are label-conditional.** Only PRs carrying the `decision`
   label contribute to its raw/enforced counts, matching its mixed (Step 1 hard /
   Step 2 heuristic) enforcement described above.
+- **GitLab detection-job reporting uses a `status` fallback.** GitLab's
+  `prStatusRollup` always normalizes `conclusion: null` (its commit-status model has
+  no field distinct from the terminal `status`) — reading `conclusion` alone would
+  silently report 0/0 for all three detection jobs on every GitLab repo forever.
+  `detectionConclusion()` falls back to `status` when `conclusion` is `null`, mapping
+  GitLab's own vocabulary (`success` → pass, `failed` → fail; anything else —
+  `pending`/`running`/`canceled`/`skipped`/etc. — stays uncounted). This is verified
+  against a GitLab-shaped fixture in `brain-metrics.test.mjs`, but has not yet been
+  confirmed end-to-end against a live GitLab repo (GitHub is the only provider
+  exercised in brain's own real-history integration run, Phase 8).
 
 **Failure policy differs from `brain-audit` on purpose.** `brain-audit` is
 fail-closed and exits 2 on an uncomputable merge (never a silent PASS on an
