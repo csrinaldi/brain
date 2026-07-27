@@ -45,6 +45,7 @@
     "feature:resume": "node ./brain/scripts/memory/cli.mjs feature-resume",
     "tools:install": "bash ./brain/scripts/install-tools.sh",
     "brain:audit": "node ./brain/scripts/brain-audit.mjs",
+    "brain:metrics": "node ./brain/scripts/brain-metrics.mjs",
     "brain:start": "node ./brain/scripts/brain-start.mjs",
     "brain:check": "node ./brain/scripts/brain-check.mjs",
     "brain:save": "node ./brain/scripts/brain-save.mjs",
