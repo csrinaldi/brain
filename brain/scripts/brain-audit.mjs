@@ -30,7 +30,7 @@
 // Exit (fail-closed, REQ-D2-6): 0 all pass/legitimately skipped · 1 ≥1 [FAIL]
 // (any class) · 2 uncomputable-infra (never a silent PASS).
 
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -53,6 +53,7 @@ import { makeGit } from './governance/postmerge/resolution.mjs';
 // helper from returning (re-pointed at lib/merge-walk.mjs, issue #324 Phase 2).
 import {
   resolvedSkipLine, listMerges, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge,
+  resolveBaseline, makeGitIsAncestor,
 } from './lib/merge-walk.mjs';
 
 /**
@@ -139,55 +140,6 @@ function loadConfig(cwd) {
   }
 }
 
-/**
- * Resolve the audit baseline ref from config.
- * Validates it against the repo; warns and returns null if it doesn't resolve.
- *
- * @param {string|null|undefined} baseline  Raw value from brain.config.json.
- * @param {string} cwd
- * @returns {string|null}
- */
-function resolveBaseline(baseline, cwd) {
-  if (!baseline) return null;
-  // execFileSync (argv, not a shell string) so a config-supplied baseline can
-  // never inject shell — the ref is passed as a literal argument.
-  let resolved = '';
-  try {
-    resolved = execFileSync('git', ['rev-parse', '--verify', baseline], {
-      encoding: 'utf8', cwd, stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-  } catch {
-    resolved = '';
-  }
-  if (!resolved) {
-    process.stderr.write(
-      `[WARN] audit baseline '${baseline}' does not resolve in this repo — auditing all merges\n`,
-    );
-    return null;
-  }
-  return baseline;
-}
-
-/**
- * Build an isAncestor function backed by real git for production use.
- * Returns a function that answers: is `baseline` an ancestor of `sha`?
- */
-function makeGitIsAncestor(cwd) {
-  return function gitIsAncestor(baseline, sha) {
-    try {
-      // execFileSync (argv) — never expands shell metacharacters in the ref.
-      execFileSync('git', ['merge-base', '--is-ancestor', baseline, sha], {
-        encoding: 'utf8',
-        cwd,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      return true; // exit 0 → baseline IS ancestor → sha is after baseline
-    } catch {
-      return false; // non-zero → not ancestor → sha is before baseline
-    }
-  };
-}
-
 function resolveRange(cwd) {
   const arg = process.argv[2];
   if (arg) return arg;
@@ -213,8 +165,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // When governance.auditBaseline is set, only merges that are "after" that
     // ref are audited.  Merges before it are skipped as pre-baseline without
     // failing the audit.  This lets teams adopt governance incrementally.
+    // `resolveBaseline`/`makeGitIsAncestor` are SHARED with brain-metrics (design
+    // D1, lib/merge-walk.mjs) — before issue #324's fix round, brain-metrics had
+    // no baseline awareness at all and silently diverged from this decision.
     const rawBaseline = config?.governance?.auditBaseline ?? null;
-    const baseline = resolveBaseline(rawBaseline, cwd);
+    const { ref: baseline, warning: baselineWarning } = resolveBaseline(rawBaseline, cwd);
+    if (baselineWarning) process.stderr.write(`${baselineWarning}\n`);
     const gitIsAncestor = baseline ? makeGitIsAncestor(cwd) : null;
     const resolutionGit = makeGit(cwd);
 

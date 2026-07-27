@@ -27,7 +27,7 @@
 
 import { getVcs } from '../vcs/cli.mjs';
 import { parsePrNumber, shouldSkipSize, selectIssueLinkBody, auditedTip } from './audit-helpers.mjs';
-import { gitOrThrow } from '../governance/postmerge/git-seam.mjs';
+import { gitOrThrow, gitTry } from '../governance/postmerge/git-seam.mjs';
 import { diffSize } from '../governance/checks/diff-size.mjs';
 import { issueLink } from '../governance/checks/issue-link.mjs';
 import { adrPresence } from '../governance/checks/adr-presence.mjs';
@@ -47,6 +47,55 @@ import { isResolvedAt, netAddFull, addedPathsAbsentAt, revertResurrectsAt } from
  * `[FAIL-SHA]` auto-revert signal (design §15.5, REQ-D2-10a).
  */
 export const TREE_KEYED_CHECKS = new Set(['adrPresence', 'diffSize']);
+
+/**
+ * Resolve the audit baseline ref from `config.governance.auditBaseline`
+ * (evidence-layer, design D1 — SHARED with brain-metrics): validates it
+ * against the repo and falls back to auditing/measuring ALL merges (no
+ * baseline) when the configured ref does not resolve. Fixture ref: issue #324
+ * B2 fix round — before this moved here, brain-metrics had NO baseline
+ * awareness at all, so it reported gate failures on pre-baseline merges
+ * brain-audit itself never evaluated (a divergence between measurement and
+ * enforcement the shared-lib extraction exists to prevent).
+ *
+ * Uses `gitTry` (never throws) — an unresolvable ref is a configuration
+ * mistake to warn about and recover from, not a fail-closed infra error.
+ * Returns the warning message as DATA rather than writing to stderr directly:
+ * emission (deciding WHERE a warning goes) stays with each CLI (design table's
+ * "Emission stays local" split), not this shared evidence layer.
+ *
+ * @param {string|null|undefined} baseline  Raw value from brain.config.json.
+ * @param {string} cwd
+ * @returns {{ ref: string|null, warning: string|null }}
+ */
+export function resolveBaseline(baseline, cwd) {
+  if (!baseline) return { ref: null, warning: null };
+  const result = gitTry(['rev-parse', '--verify', baseline], { cwd });
+  if (result.status !== 0 || !result.stdout.trim()) {
+    return {
+      ref: null,
+      warning: `[WARN] audit baseline '${baseline}' does not resolve in this repo — auditing all merges`,
+    };
+  }
+  return { ref: baseline, warning: null };
+}
+
+/**
+ * Build an isAncestor function backed by real git for production use.
+ * Returns a function that answers: is `baseline` an ancestor of `sha`? Shared
+ * with brain-metrics (design D1) via the same `resolveBaseline` above — both
+ * verbs must agree on which merges are "before the baseline" or metrics
+ * measures merges audit never evaluated.
+ *
+ * @param {string} cwd
+ * @returns {(baseline: string, sha: string) => boolean}
+ */
+export function makeGitIsAncestor(cwd) {
+  return function gitIsAncestor(baseline, sha) {
+    const result = gitTry(['merge-base', '--is-ancestor', baseline, sha], { cwd });
+    return result.status === 0; // exit 0 → baseline IS ancestor → sha is after baseline
+  };
+}
 
 /**
  * Pre-evaluation resolved-skip (design §3.5/§15.3, REQ-D2-10): a merge whose own

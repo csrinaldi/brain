@@ -279,6 +279,28 @@ test('detection jobs render as a single pass/fail count column, no raw/enforced 
   assert.deepEqual(out[0].detection['brain-writes-reviewed'], { pass: 0, fail: 0 });
 });
 
+// ── baseline-skip (issue #324 B2 fix round) ──────────────────────────────────
+// brain-audit skips (not fails) merges before `governance.auditBaseline` — it
+// never runs the 4 checks on them at all. Before this fix, brain-metrics had
+// no equivalent kind, so a pre-baseline merge fell through to 'evaluated' and
+// contributed raw/enforced gate counts brain-audit itself never computed —
+// exactly the measurement/enforcement divergence design D1 exists to prevent.
+test('foldMerge: a baseline-skip merge counts toward changesMerged but contributes NO gate/bypass/detection signal (mirrors resolved-skip)', () => {
+  let rows = emptyRows();
+  // Mirrors resolved-skip's descriptor shape: the baseline gate runs BEFORE
+  // fetchPrMeta in brain-audit.mjs, so a real baseline-skipped merge never has
+  // labels fetched either — prLabels stays null, exactly like resolved-skip.
+  rows = foldMerge(rows, {
+    sha: 'pre1', mergedAt: '2026-07-05T00:00:00Z', prLabels: null, leadTimeDays: null,
+    kind: 'baseline-skip', evalRec: null, detection: null, period: 'month',
+  });
+  const out = finalizeRows(rows);
+  assert.equal(out[0].changesMerged, 1, 'a pre-baseline merge still happened — it counts as a change merged');
+  assert.equal(out[0].uncomputable, 0, 'baseline-skip is a deliberate skip, not an uncomputable failure');
+  assert.deepEqual(out[0].gates['diff-size'], { raw: 0, enforced: 0 }, 'brain-audit never evaluated this merge — metrics must not invent a verdict');
+  assert.equal(out[0].bypass.sizeException, 0, 'brain-audit never evaluated the label on a skipped merge — metrics must not count it either');
+});
+
 test('rows are sorted chronologically by period key', () => {
   let rows = emptyRows();
   rows = foldMerge(rows, {

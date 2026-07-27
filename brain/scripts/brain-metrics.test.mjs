@@ -301,6 +301,59 @@ test('integration smoke — a small real history produces sane markdown counts (
   assert.equal(parsed[0].uncomputable, 0);
 });
 
+// ── auditBaseline parity (issue #324 B2 fix round) ───────────────────────────
+// brain-audit respects `governance.auditBaseline` (skips pre-baseline merges
+// rather than failing them). Before this fix, brain-metrics had no baseline
+// awareness at all, so a pre-baseline merge that brain-audit itself never
+// evaluated (and never failed) would still show up as a raw/enforced gate
+// failure in brain-metrics — a measurement that diverges from brain-audit's
+// own verdict (spec's Historical re-execution requirement, REQ-7).
+//
+// Pattern mirrors brain-audit.test.mjs's baseline fixture exactly:
+//   A (initial) → MERGE_BAD (no issue link, oversized) → E (config, tag v0.1.0) → MERGE_GOOD (Closes #1)
+test('brain-metrics: a pre-baseline merge is skipped, not counted as a raw gate failure (parity with brain-audit)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'metrics-baseline-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+
+  // MERGE_BAD: pre-baseline, no issue link AND an oversized diff — would be
+  // TWO raw gate failures (issue-link, diff-size) if metrics evaluated it.
+  git('checkout', '-b', 'feature/bad');
+  const bigFile = Array.from({ length: 500 }, (_, i) => `line ${i}`).join('\n') + '\n';
+  commit(git, dir, { 'src/bad.mjs': bigFile }, 'feat: pre-baseline oversized work');
+  git('checkout', 'main');
+  git('merge', '--no-ff', 'feature/bad', '-m', 'Merge feature/bad (no issue ref)');
+
+  // Config carrying the baseline, tagged v0.1.0 AFTER MERGE_BAD.
+  commit(git, dir, {
+    'brain.config.json': JSON.stringify({ governance: { auditBaseline: 'v0.1.0' } }),
+  }, 'chore: add audit config');
+  git('tag', 'v0.1.0');
+
+  // MERGE_GOOD: after the baseline tag, all invariants satisfied.
+  git('checkout', '-b', 'feature/good');
+  commit(git, dir, { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() },
+    'feat: after baseline Closes #1');
+  git('checkout', 'main');
+  git('merge', '--no-ff', 'feature/good', '-m', 'Merge feature/good Closes #1');
+
+  const r = spawnSync('node', [METRICS_SCRIPT, '--json'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 0, `expected exit 0\n${r.stdout}\n${r.stderr}`);
+  const parsed = JSON.parse(r.stdout);
+  assert.equal(parsed.length, 1, 'both merges land in the same month bucket');
+
+  // 2 changes merged total (MERGE_BAD + MERGE_GOOD), but MERGE_BAD contributes
+  // ZERO raw gate failures — brain-audit never evaluated it either.
+  assert.equal(parsed[0].changesMerged, 2);
+  assert.equal(parsed[0].gates['issue-link'].raw, 0,
+    'pre-baseline merge has no issue link, but brain-audit never evaluated it — metrics must not either');
+  assert.equal(parsed[0].gates['diff-size'].raw, 0,
+    'pre-baseline merge is oversized, but brain-audit never evaluated it — metrics must not either');
+  assert.equal(parsed[0].uncomputable, 0, 'a baseline-skip is a deliberate skip, not an uncomputable failure');
+});
+
 test('--period=week buckets the same history into ISO week keys', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-week-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

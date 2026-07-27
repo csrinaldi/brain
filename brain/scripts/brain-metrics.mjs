@@ -38,7 +38,9 @@ import { join } from 'node:path';
 
 import {
   listMerges, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge, resolvedSkipLine,
+  resolveBaseline, makeGitIsAncestor,
 } from './lib/merge-walk.mjs';
+import { isAfterBaseline } from './lib/audit-helpers.mjs';
 import { selectIssueLinkBody, parsePrNumber } from './lib/audit-helpers.mjs';
 import { readRecordObservations } from './memory/lib/store.mjs';
 import { makeGit } from './governance/postmerge/resolution.mjs';
@@ -295,7 +297,7 @@ export function renderJson({ rows, memGate, memCoverage }) {
 async function evaluateOneMerge(sha, subject, ctx) {
   const {
     cwd, resolutionGit, windowFrom, windowTo, allObservations, ignoreList, vcs, config, approvedLabel, period,
-    leadTimeCache, bypassAuthorCache,
+    leadTimeCache, bypassAuthorCache, baseline, gitIsAncestor,
   } = ctx;
 
   // Same net-parity resolved-skip brain-audit applies — a merge brain-audit
@@ -309,6 +311,21 @@ async function evaluateOneMerge(sha, subject, ctx) {
     // the CLI's own fail-closed handling (an infra-level failure, not a
     // per-merge governance signal).
     throw new Error(`brain-metrics: could not read merge date for ${sha.slice(0, 7)} ${subject}`);
+  }
+
+  // ── Baseline gate (issue #324 B2 fix round) ──────────────────────────────
+  // Mirrors brain-audit.mjs's own baseline gate EXACTLY (same order: baseline
+  // check first, before the resolved-skip check, before any of the 4 checks
+  // run) — brain-audit.mjs's `resolveBaseline`/`isAfterBaseline` via the
+  // SHARED lib/merge-walk.mjs (design D1). A pre-baseline merge is something
+  // brain-audit itself never evaluated: reporting a raw/enforced gate failure
+  // for it here would be a measurement that brain-audit's own verdict never
+  // produced — the exact divergence the shared-lib extraction exists to
+  // prevent (spec's Historical re-execution requirement, REQ-7).
+  if (baseline && !isAfterBaseline(baseline, sha, gitIsAncestor)) {
+    return {
+      sha, mergedAt, prLabels: null, leadTimeDays: null, kind: 'baseline-skip', evalRec: null, detection: null, period,
+    };
   }
 
   let resolvedLine;
@@ -434,6 +451,15 @@ export async function runMetrics({ argv, cwd = process.cwd() }) {
   const memGate = memoryPresence(allObservations);
   const memCoverage = computeMemoryCoverage(cwd);
 
+  // ── Audit baseline (optional, issue #324 B2 fix round) ───────────────────
+  // SHARED with brain-audit.mjs via lib/merge-walk.mjs (design D1): metrics
+  // must skip the same pre-baseline merges brain-audit skips, or it reports
+  // gate failures on merges brain-audit itself never evaluated.
+  const rawBaseline = config?.governance?.auditBaseline ?? null;
+  const { ref: baseline, warning: baselineWarning } = resolveBaseline(rawBaseline, cwd);
+  if (baselineWarning) process.stderr.write(`${baselineWarning}\n`);
+  const gitIsAncestor = baseline ? makeGitIsAncestor(cwd) : null;
+
   let walk;
   try {
     walk = listMerges(range, cwd);
@@ -464,7 +490,7 @@ export async function runMetrics({ argv, cwd = process.cwd() }) {
     try {
       m = await evaluateOneMerge(sha, subject, {
         cwd, resolutionGit, windowFrom, windowTo, allObservations, ignoreList, vcs, config, approvedLabel, period,
-        leadTimeCache, bypassAuthorCache,
+        leadTimeCache, bypassAuthorCache, baseline, gitIsAncestor,
       });
     } catch (err) {
       // Could not even date the merge (a `git log -1 --format=%cI` failure on
