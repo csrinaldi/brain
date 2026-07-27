@@ -408,6 +408,52 @@ export async function labelRemove({ project, number, labels, apiBase, token, pro
   }
 }
 
+/**
+ * labelList — the provider-agnostic `labelList` verb (issue #334,
+ * vcs-label-preflight spec): the remote's full declared label set, normalized
+ * to bare name strings. Consumed by `labelPreflight` as the pre-write
+ * conformance check — GitLab's MR-create payload otherwise SILENTLY CREATES
+ * an unknown label, polluting the project taxonomy (design A2); a pre-flight
+ * catches that BEFORE the write.
+ *
+ * `gitlabApiFetch` returns only the parsed JSON body (no response headers),
+ * so pagination cannot follow GitLab's `Link` header the way `gh api
+ * --paginate` does — instead this fetches page-by-page (`per_page=100`) and
+ * stops once a page comes back short (fewer than `per_page` entries), the
+ * standard REST-pagination termination condition. Load-bearing, same as
+ * GitHub's `--paginate`: a repo with >100 labels must not silently drop a
+ * real label and false-reject a valid ship.
+ *
+ * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS from the
+ * caller, same discipline as every other verb in this GATE_FILE. May throw
+ * like its sibling normalized READs — `labelPreflight`, not this verb, is
+ * the total/never-throws policy layer (design A1).
+ *
+ * @param {{ project: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} opts
+ * @returns {Promise<string[]>}
+ */
+export async function labelList({ project, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  const base = apiBase ?? 'https://gitlab.com/api/v4';
+  const tok = token ?? vcsToken(PROVIDER);
+  const perPage = 100;
+  const names = [];
+  let page = 1;
+  for (;;) {
+    const arr = await gitlabApiFetch({
+      apiBase: base,
+      token: tok,
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/labels?per_page=${perPage}&page=${page}`,
+      fetchImpl,
+    });
+    for (const l of arr) names.push(l.name);
+    if (arr.length < perPage) break;
+    page += 1;
+  }
+  return names;
+}
+
 export async function repoCloneUrl({ host, project, token }) {
   return `https://oauth2:${token}@${host}/${project}.git`;
 }

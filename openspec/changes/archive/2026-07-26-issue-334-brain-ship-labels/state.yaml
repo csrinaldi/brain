@@ -1,0 +1,71 @@
+---
+issue: 334
+epic: 335
+change: issue-334-brain-ship-labels
+artifact_store: hybrid
+archived_date: 2026-07-26
+
+# Verification Verdict
+verification_verdict: PASS WITH WARNINGS
+critical_issues: 0
+warnings: 2
+suggestions: 1
+
+# Observation IDs for Traceability
+observations:
+  proposal: 1355
+  spec: 1356
+  design: 1357
+  tasks: 1358
+  apply_progress: 1360
+  verify_report: 1361
+
+# Test Metrics
+tests:
+  total_passed: 1935
+  baseline: 1907
+  new_tests: 28
+  regressions: 0
+
+# Specs Merged to Main
+specs_merged:
+  - vcs-issue-view-contract/spec.md
+  - vcs-label-preflight/spec.md
+  - ship-pr-label-resolution/spec.md
+
+# Governance Phase Status
+governance_phase_3:
+  status: SKIPPED
+  reason: "Not confirmed this batch — Phase 3 explicitly deferred per apply-time instruction"
+  location: "ship-pr-label-resolution/spec.md contains cross-reference only, openspec/specs/governance/spec.md untouched"
+  action_required: "Follow-up change needed if governance/spec.md REQ-S5-4 amendment is later approved"
+
+# Outstanding Items
+warnings_detail:
+  - id: 1
+    type: review-workload
+    description: "Actual diff ~563 changed lines vs. ~350-line forecast; exceeds 400-line reviewer-cognitive-load budget"
+    recommendation: "Consider splitting into Unit A (contract coverage) / Unit B (brain-ship refactor) PRs before merge"
+  - id: 2
+    type: phase-3-deferral
+    description: "Phase 3 governance cross-reference deferred; REQ-S5-4 definition captured in spec-only cross-reference"
+    recommendation: "Requires explicit governance-scope confirmation before follow-up change"
+
+# Archive Contents
+# Paths point INTO this archive folder — the live
+# openspec/changes/issue-334-brain-ship-labels/ folder no longer exists.
+# An archive whose manifest referenced the live tree was a split brain: the
+# change read as both open and closed depending on which side you looked at.
+archived_artifacts:
+  - type: proposal
+    file: openspec/changes/archive/2026-07-26-issue-334-brain-ship-labels/proposal.md
+  - type: spec
+    file: openspec/changes/archive/2026-07-26-issue-334-brain-ship-labels/specs/vcs-issue-view-contract/spec.md
+  - type: spec
+    file: openspec/changes/archive/2026-07-26-issue-334-brain-ship-labels/specs/vcs-label-preflight/spec.md
+  - type: spec
+    file: openspec/changes/archive/2026-07-26-issue-334-brain-ship-labels/specs/ship-pr-label-resolution/spec.md
+  - type: design
+    file: openspec/changes/archive/2026-07-26-issue-334-brain-ship-labels/design.md
+  - type: tasks
+    file: openspec/changes/archive/2026-07-26-issue-334-brain-ship-labels/tasks.md

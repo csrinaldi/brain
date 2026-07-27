@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { deriveBranchType } from './branch-type.mjs';
+import { deriveBranchType, findTypeLabel } from './branch-type.mjs';
 
 // ── The bug this fixes: namespaced type: labels must map ─────────────────────
 const NAMESPACED = [
@@ -53,4 +53,43 @@ test('deriveBranchType: empty / missing labels → feat', () => {
 
 test('deriveBranchType: case-insensitive', () => {
   assert.equal(deriveBranchType(['TYPE:BUG']), 'fix');
+});
+
+// ── GitLab's `::` scoped-label form (issue #334 A3) ──────────────────────────
+// Regression guard: `deriveBranchType` used to strip only `/^type:/`, so
+// GitLab's `type::bug` yielded `:bug` (leading colon retained) — no LABEL_TYPE
+// entry matches a leading colon, so every GitLab-sourced type label silently
+// fell back to `feat`. Widened to `/^type::?/`.
+test('deriveBranchType: GitLab scoped type::bug → fix (was silently feat before the #334 fix)', () => {
+  assert.equal(deriveBranchType(['type::bug']), 'fix');
+});
+
+test('deriveBranchType: GitLab scoped type::feature → feat', () => {
+  assert.equal(deriveBranchType(['type::feature']), 'feat');
+});
+
+// ── findTypeLabel (issue #334, ship-pr-label-resolution) ─────────────────────
+test('findTypeLabel: returns the first type:* label verbatim, unmodified', () => {
+  assert.equal(findTypeLabel(['status:approved', 'type:bug']), 'type:bug');
+});
+
+test('findTypeLabel: matches GitLab\'s scoped type:: form verbatim', () => {
+  assert.equal(findTypeLabel(['status::approved', 'type::bug']), 'type::bug');
+});
+
+test('findTypeLabel: preserves original case — no case-folding (label travels verbatim to the write)', () => {
+  assert.equal(findTypeLabel(['TYPE:BUG']), 'TYPE:BUG');
+});
+
+test('findTypeLabel: no type:* label present → undefined', () => {
+  assert.equal(findTypeLabel(['status:approved', 'good first issue']), undefined);
+});
+
+test('findTypeLabel: empty / missing labels → undefined', () => {
+  assert.equal(findTypeLabel([]), undefined);
+  assert.equal(findTypeLabel(undefined), undefined);
+});
+
+test('findTypeLabel: first mapping label wins when multiple type:* labels are present', () => {
+  assert.equal(findTypeLabel(['type:docs', 'type:bug']), 'type:docs');
 });

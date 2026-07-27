@@ -41,6 +41,7 @@ the GitLab status enum, etc.).
 | `issueComment` | `({ project, number, body }) -> Promise<{ url }\|{ url: null, error }>` | Posts a plain issue comment — rulings on issues. GH: `POST repos/{project}/issues/{number}/comments`. GL: `POST projects/{enc}/issues/{number}/notes`. Never throws. |
 | `labelAdd` | `({ project, number, labels }) -> Promise<{ ok }\|{ ok: false, error }>` | Adds labels. The **caller** enforces the deny-set (REQ-266-9), not the verb. GH: `POST repos/{project}/issues/{number}/labels`. GL: `PUT projects/{enc}/issues/{number}` with `add_labels` (issues-only, matching `labelEvents`). Never throws. |
 | `labelRemove` | `({ project, number, labels }) -> Promise<{ ok }\|{ ok: false, error }>` | Removes labels — monotonic-tightening removals only (REQ-266-9). GH: per-label `DELETE .../labels/{label}`, stopping at the first failure (no bulk-remove endpoint). GL: `PUT projects/{enc}/issues/{number}` with `remove_labels`. Never throws. |
+| `labelList` | `({ project, apiBase?, token?, proxyUrl?, fetchImpl? }) -> Promise<string[]>` | The remote's full declared label set, normalized to bare name strings (issue #334, vcs-label-preflight contract). Consumed by `vcs/label-preflight.mjs`'s `labelPreflight` as the pre-write conformance check before `mrCreate` — the two providers disagree on an unknown label (GitHub hard-errors, GitLab silently creates it), so this verb + its policy wrapper catch that BEFORE the write. GH: `gh api --paginate repos/{project}/labels?per_page=100` (paginate is load-bearing — a single page can silently drop labels on a >30-label repo). GL: manual page-by-page fetch (`projects/{enc}/labels?per_page=100&page=N`) over `gitlabApiFetch`, stopping once a page comes back short — `gitlabApiFetch` returns only the JSON body (no `Link` header to follow). MAY throw like its sibling normalized READs; `labelPreflight` is the total/never-throws layer, not this verb. |
 
 ### Normalized `commitStatus` enum
 
@@ -61,9 +62,21 @@ check completes, then its `conclusion`. `null` = no status available.
   GitHub and GitLab address projects by slug / URL-encoded path, so it is the identity.
   It stays in the contract as an extension point for a host that needs a different id.
 
+## Label-resolution rule (issue #334)
+
+`brain:ship`'s PR label is sourced VERBATIM from the linked issue's own `type:*` label
+(matched provider-agnostically via `/^type::?/` — both GitHub's `type:bug` and GitLab's
+scoped `type::bug` forms), never re-mapped, never inferred from the branch or config when
+present. Before that label is sent to `mrCreate`, `vcs/label-preflight.mjs`'s
+`labelPreflight({ provider, project, label })` confirms it exists in the remote's declared
+label set (via `labelList`) — this converts the two providers' divergent unknown-label
+behavior (GitHub hard-errors; GitLab silently CREATES the label) into one uniform, local
+refusal before the write. `labelPreflight` never throws and never caches: an uncomputable
+lookup fails CLOSED (`{ exists: false, error }`), never treated as "label exists".
+
 ## How to add a provider
 
-Create `scripts/vcs/providers/<name>.mjs` exporting the 20 verbs and add `<name>` as a
+Create `scripts/vcs/providers/<name>.mjs` exporting the 21 verbs and add `<name>` as a
 valid value of `vcs.provider`. The callers are not touched.
 
 ## Current implementation
@@ -79,3 +92,5 @@ behavior of the scripts (parity — a revert leaves the GitLab flow intact).
 | `capabilities` | implemented | implemented (Phase 3 — issue #95) |
 | `mrCreate` | implemented | implemented (A3 — issue #239) |
 | `prView` | implemented | implemented (A3 — issue #239) |
+| `issueView` | implemented | implemented (A2b — issue #231; contract-pinned issue #334) |
+| `labelList` | implemented (issue #334) | implemented (issue #334) |
