@@ -127,6 +127,12 @@ export function extractIssueNumber(body) {
  * pass or fail — it is silently uncounted by `foldMerge` (D2-style honesty
  * for a non-blocking signal: current CI state, not a historical verdict, D6).
  *
+ * `conclusion` is normalized to lowercase before comparison — GitHub's real
+ * GraphQL/REST rollup returns uppercase enum values (`SUCCESS`, `FAILURE`),
+ * not the lowercase `success`/`failure` this originally compared against.
+ * Mirrors `review/evaluators/tranche.mjs`'s `isGateGreen()` normalization
+ * (the established pattern for provider `conclusion` values in this codebase).
+ *
  * @param {Array<{name: string|null, conclusion: string|null}>|null} rollup
  * @param {string} jobName
  * @returns {'pass'|'fail'|null}
@@ -135,8 +141,9 @@ export function detectionConclusion(rollup, jobName) {
   if (!Array.isArray(rollup)) return null;
   const entry = rollup.find((c) => c.name === jobName);
   if (!entry) return null;
-  if (entry.conclusion === 'success') return 'pass';
-  if (entry.conclusion === 'failure') return 'fail';
+  const conclusion = (entry.conclusion ?? '').toLowerCase();
+  if (conclusion === 'success') return 'pass';
+  if (conclusion === 'failure') return 'fail';
   return null;
 }
 

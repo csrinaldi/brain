@@ -86,17 +86,31 @@ test('parseArgs: rejects an invalid --period value', () => {
 
 // ── detectionConclusion / extractIssueNumber ─────────────────────────────────
 
-test('detectionConclusion: maps success/failure, never fabricates pass/fail for anything else', () => {
+test('detectionConclusion: maps success/failure (real-shaped UPPERCASE GraphQL enums), never fabricates pass/fail for anything else', () => {
+  // GitHub's real `gh pr view --json statusCheckRollup` returns `conclusion`
+  // as an UPPERCASE GraphQL enum (SUCCESS/FAILURE/NEUTRAL/...), never
+  // lowercase — this fixture must match the real provider shape, or the test
+  // can pass while the real integration silently reports 0/0 (the bug this
+  // fixture regression-guards against).
   const rollup = [
-    { name: 'phase-order', status: 'completed', conclusion: 'success' },
-    { name: 'actor-check', status: 'completed', conclusion: 'failure' },
-    { name: 'brain-writes-reviewed', status: 'completed', conclusion: 'neutral' },
+    { name: 'phase-order', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'actor-check', status: 'COMPLETED', conclusion: 'FAILURE' },
+    { name: 'brain-writes-reviewed', status: 'COMPLETED', conclusion: 'NEUTRAL' },
   ];
   assert.equal(detectionConclusion(rollup, 'phase-order'), 'pass');
   assert.equal(detectionConclusion(rollup, 'actor-check'), 'fail');
   assert.equal(detectionConclusion(rollup, 'brain-writes-reviewed'), null);
   assert.equal(detectionConclusion(rollup, 'not-present'), null);
   assert.equal(detectionConclusion(null, 'phase-order'), null);
+});
+
+test('detectionConclusion: also accepts lowercase conclusions (defensive — some providers/fixtures may already be lowercase)', () => {
+  const rollup = [
+    { name: 'phase-order', status: 'completed', conclusion: 'success' },
+    { name: 'actor-check', status: 'completed', conclusion: 'failure' },
+  ];
+  assert.equal(detectionConclusion(rollup, 'phase-order'), 'pass');
+  assert.equal(detectionConclusion(rollup, 'actor-check'), 'fail');
 });
 
 test('extractIssueNumber: reads a closing reference or a chain reference', () => {
