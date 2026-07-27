@@ -35,64 +35,25 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
-import { diffSize } from './governance/checks/diff-size.mjs';
-import { issueLink } from './governance/checks/issue-link.mjs';
-import { adrPresence } from './governance/checks/adr-presence.mjs';
-import { memoryPresence } from './governance/checks/memory-presence.mjs';
-import { getVcs } from './vcs/cli.mjs';
-import { parsePrNumber, shouldSkipSize, isAfterBaseline, selectIssueLinkBody, auditedTip } from './lib/audit-helpers.mjs';
+import { isAfterBaseline, selectIssueLinkBody } from './lib/audit-helpers.mjs';
 import { readRecordObservations } from './memory/lib/store.mjs';
-import { gitOrThrow } from './governance/postmerge/git-seam.mjs';
-// COMPOSE the frozen net-parity primitives (design §15, PR2b). NEVER import the
-// retired direction-blind pairwise `isReverterOf` — a no-import drift-guard test
-// (brain-audit.test.mjs) asserts it never reappears in this file.
-import { isResolvedAt, netAddFull, addedPathsAbsentAt, revertResurrectsAt, makeGit } from './governance/postmerge/resolution.mjs';
-
+import { makeGit } from './governance/postmerge/resolution.mjs';
+// The first-parent merge walk (EVIDENCE + VERDICT layers) is SHARED with
+// brain-metrics — see lib/merge-walk.mjs's module header (design D1, issue
+// #324). Emission ([PASS]/[FAIL]/[SKIP], [FAIL-SHA] dedup, crossCheckExit)
+// stays local: it is a judgment about how to REPORT a verdict, not the
+// verdict itself.
+//
 // NOTE (MINOR 2, external ruling rev 3 on #297): there is deliberately NO
-// error-swallowing `git()` helper here. The per-merge reads (numstat,
-// changed files, commit body, parents) go through `gitOrThrow`, so a transient
-// git failure becomes exit 2 at the top-level catch instead of an EMPTY diff
-// that makes diffSize and adrPresence PASS. Returning '' on failure was a
-// silent fail-open inside the one slice whose thesis is "never a silent PASS" —
-// which it already enforced for the range-load and the missing-parent paths.
-// A source-scan test in brain-audit.test.mjs keeps the helper from returning.
-
-/**
- * The subset of the four checks whose PASS/FAIL verdict is a pure function of
- * the commit's TREE (changed paths / the diff itself) — as opposed to its
- * commit/PR body (`issueLink`, free text) or repo-global state at HEAD
- * (`memoryPresence`). Only a tree-keyed check can be causally mirrored by a
- * commit's contribution being the net-inverse of an offender's, so ONLY these
- * classes are ever exempted by the reverter-skip and ONLY these emit the
- * `[FAIL-SHA]` auto-revert signal (design §15.5, REQ-D2-10a).
- */
-export const TREE_KEYED_CHECKS = new Set(['adrPresence', 'diffSize']);
-
-/**
- * Pre-evaluation resolved-skip (design §3.5/§15.3, REQ-D2-10): a merge whose own
- * first-parent contribution is NET-ABSENT at HEAD under exact-normDiff net-parity
- * accounting is skipped BEFORE any of the four checks run — including
- * memoryPresence. `isResolvedAt` is pure-read and fail-CLOSED: an offender whose
- * own contribution cannot be computed THROWS rather than returning a verdict.
- * This function deliberately does NOT try/catch that throw — swallowing it here
- * would be the ad-hoc silent skip design §5/REQ-D2-12 forbids. The one place the
- * throw is allowed to surface is the CLI's top-level fail-closed catch → exit 2.
- * Anchored at HEAD (§2.2 — every window ends at HEAD).
- */
-export function resolvedSkipLine(sha, subject, { git, tip }) {
-  // MINOR 1 (ruling rev 3) — the tip is REQUIRED, never defaulted to 'HEAD'.
-  // `resolveRange` accepts an arbitrary range, so anchoring liveness at a
-  // hardcoded 'HEAD' answers a question about a different commit than the one
-  // being audited: an offender reverted PAST the audited tip would be exempted
-  // out of a window that never contained the revert. A default would leave that
-  // fail-open one careless caller away — and an exported guard whose soundness
-  // depends on its caller is unsound by design. So: throw.
-  if (!tip) {
-    throw new Error('resolvedSkipLine: no audited tip supplied — refused fail-closed (design §2.2)');
-  }
-  const { resolved } = isResolvedAt(sha, tip, { git });
-  return resolved ? `[SKIP] ${sha.slice(0, 7)} ${subject} — resolved by revert` : null;
-}
+// error-swallowing `git()` helper anywhere in the walk. The per-merge reads
+// (numstat, changed files, commit body, parents) go through `gitOrThrow`
+// (lib/merge-walk.mjs), so a transient git failure becomes exit 2 at the
+// top-level catch below instead of an EMPTY diff that makes diffSize and
+// adrPresence PASS. A source-scan test in brain-audit.test.mjs keeps the
+// helper from returning (re-pointed at lib/merge-walk.mjs, issue #324 Phase 2).
+import {
+  resolvedSkipLine, listMerges, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge,
+} from './lib/merge-walk.mjs';
 
 /**
  * REQ-D2-6(b) / design §15.5 — the fail-closed exit contract, with `failCount`
@@ -260,12 +221,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // ── VCS adapter for size:exception label check (best-effort) ────────────
     // If the adapter is unavailable or misconfigured, audit runs without the
     // size:exception bypass — never crash on a missing VCS config.
-    let vcs = null;
-    try {
-      vcs = await getVcs({ config });
-    } catch {
-      // VCS not configured — size:exception label checks will not run
-    }
+    const vcs = await resolveVcs(config);
 
     // Read the on-disk .memory/records/ ONCE (repo-level, not per-merge): the same
     // observations are passed to memoryPresence for every merge. Best-effort — a
@@ -282,34 +238,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // against git-seam.mjs — never cherry-picked; design §8): a throwing call
     // distinguishes "git could not compute the range" (infra → exit 2) from
     // "the range genuinely has zero merges" (→ exit 0, below).
-    let log;
+    let walk;
     try {
-      log = gitOrThrow(['log', '--first-parent', '--merges', '--format=%H%x09%s', range], { cwd }).trim();
+      walk = listMerges(range, cwd);
     } catch (err) {
       console.log(`[FAIL] governance:audit-uncomputable — could not compute merge range ${range}: ${err.message}`);
       process.exit(2);
     }
-    if (!log) {
+    if (walk.merges.length === 0) {
       console.log(`[INFO] No merge commits found in range: ${range}`);
       process.exit(0);
     }
-
-    const merges = log.split('\n').filter(Boolean).map(line => {
-      const i = line.indexOf('\t');
-      return { sha: line.slice(0, i), subject: line.slice(i + 1) };
-    });
-
-    // The reverter-skip is FULL-WINDOW (design §15.3): its signed count must see
-    // an offender sitting at the window base BEHIND a tip-most cleanup revert.
-    // `netAddFull` enumerates `${from}^1..${to}`, so `from` is the OLDEST merge in
-    // the window (git log is newest-first) — a merge, so `from^1` always resolves,
-    // and the inclusive window then covers every audited merge. `to` is always HEAD.
-    const windowFrom = merges[merges.length - 1].sha;
-    // MINOR 1 (ruling rev 3) — anchor at the AUDITED TIP, not a literal 'HEAD'.
-    // `resolveRange` accepts an arbitrary range from argv; §2.2's "the window
-    // ends at the tip" was a precondition nobody enforced. Now it is code, and
-    // it is the single tip every skip and the reverter exemption share.
-    const windowTo = auditedTip(range);
+    const { merges, windowFrom, windowTo } = walk;
 
     let failCount = 0;          // [FAIL] lines of ANY class — governs exit 1.
     let nominableTreeKeyedCount = 0; // tree-keyed survivors whose revert does NOT resurrect a payload (auto-revert-nominable, §15.5).
@@ -337,120 +277,41 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         continue;
       }
 
-      const parents = gitOrThrow(['log', '-1', '--format=%P', sha], { cwd })
-        .trim().split(/\s+/).filter(Boolean);
-      const parent1 = parents[0];
-      if (!parent1) {
-        // A --merges-qualified commit always has ≥2 parents; reaching here means
-        // the local git state cannot answer — never a silent [SKIP] (design §5).
-        console.log(`[FAIL] governance:audit-uncomputable — ${sha.slice(0, 7)} ${subject}: no resolvable parent`);
-        process.exit(2);
-      }
-
-      // MINOR 2 — the THROWING seam: a transient git failure is exit 2 at the
-      // top-level catch, never an empty diff that silently PASSes diffSize and
-      // adrPresence.
-      const numstat = gitOrThrow(['diff', '--numstat', parent1, sha], { cwd }).trim();
-      const changedFiles = gitOrThrow(['diff', '--name-only', parent1, sha], { cwd })
-        .split('\n').filter(Boolean);
-      const body = gitOrThrow(['log', '-1', '--format=%B', sha], { cwd }).trim();
+      // MINOR 2 — the THROWING seam (lib/merge-walk.mjs): a transient git
+      // failure is exit 2 at the top-level catch, never an empty diff that
+      // silently PASSes diffSize and adrPresence. A missing parent1 (design
+      // §5) also throws — never a silent [SKIP].
+      const parent1 = readMergeParent(sha, subject, cwd);
+      const { numstat, changedFiles, body } = readMergeDiff(parent1, sha, cwd);
 
       // ── Best-effort PR metadata fetch (single call for labels + body) ─────
-      // Parse the PR number from the merge subject, then fetch the PR once for:
-      //   • labels  → size:exception check (diffSize skip)
-      //   • body    → issueLink check (PR description has Closes/Part of #N;
-      //               merge commit body is typically "Merge pull request #N")
-      //
-      // Any failure (VCS unconfigured, adapter error, no PR number found) leaves
-      // both null (uncomputable — REQ-CIC-2) and falls back to commit-body
-      // behavior.  NEVER crash, and NEVER collapse a fetched-but-null value back
-      // into a fabricated [] / '' default — shouldSkipSize()/selectIssueLinkBody()
-      // already treat null as "no evidence" correctly; re-fabricating an empty
-      // default here would re-introduce the exact fail-open the seam removes,
-      // just on a parallel path (prView fix-at-source disposition).
-      let prLabels = null;
-      let prBody = null;
-      const prNum = parsePrNumber(subject);
-      if (prNum !== null && vcs) {
-        try {
-          const pr = await vcs.prView({
-            project: config.project?.slug,
-            number: prNum,
-          });
-          prLabels = pr.labels;
-          prBody = pr.body;
-        } catch {
-          // VCS call failed — proceed without PR metadata (audit normally)
-        }
-      }
-
-      const sizeSkipped = shouldSkipSize(prLabels);
+      // Any failure (VCS unconfigured, adapter error, no PR number found)
+      // leaves both null (uncomputable — REQ-CIC-2) and falls back to
+      // commit-body behavior. NEVER crash, and NEVER collapse a
+      // fetched-but-null value back into a fabricated [] / '' default —
+      // shouldSkipSize()/selectIssueLinkBody() already treat null as "no
+      // evidence" correctly; re-fabricating an empty default here would
+      // re-introduce the exact fail-open the seam removes, just on a
+      // parallel path (prView fix-at-source disposition).
+      const { prLabels, prBody } = await fetchPrMeta(subject, vcs, config);
 
       // Use the PR description for issueLink when available (it contains the
       // actual Closes/Part of #N reference).  Fall back to the raw commit body
       // when the PR description is absent or empty.
       const issueLinkBody = selectIssueLinkBody(prBody, body);
 
-      const results = {
-        // Skip diffSize when the PR explicitly carries size:exception.
-        diffSize: sizeSkipped
-          ? { pass: true, note: 'size:exception label present — diffSize skipped' }
-          : diffSize(numstat, ignoreList),
-        issueLink: issueLink(issueLinkBody),
-        adrPresence: adrPresence(changedFiles),
-        memoryPresence: memoryPresence(allObservations),
-      };
+      const rec = evaluateMerge(sha, {
+        numstat, changedFiles, issueLinkBody, prLabels, ignoreList, allObservations,
+        resolutionGit, windowFrom, windowTo,
+      });
 
-      const failures = Object.entries(results).filter(([, r]) => !r.pass);
-
-      if (failures.length === 0) {
-        const sizeNote = sizeSkipped ? ' [size:exception]' : '';
+      if (rec.kind === 'pass') {
+        const sizeNote = rec.sizeSkipped ? ' [size:exception]' : '';
         console.log(`[PASS] ${sha.slice(0, 7)} ${subject}${sizeNote}`);
         continue;
       }
 
-      // ── Reverter-skip (design §15.3, REQ-D2-10a; guard (c′) per the external
-      // ruling rev 4 on #297) — evaluated ONLY for a merge that already failed,
-      // so the happy path pays zero extra cost. A merge C is exempt from its
-      // TREE-KEYED failures iff BOTH hold:
-      //
-      //   (1) LIVENESS — every path C itself ADDS **or MODIFIES** is absent from
-      //       the tree at the audited tip (`addedPathsAbsentAt`). A candidate that
-      //       put a payload back on the tree can never be exempted, however the
-      //       window counts — whether it arrived as a new file (A8) or as an edit
-      //       to a pre-existing one (A10, ruling rev 11). A pure-delete cleanup
-      //       revert touches no surviving path → vacuously absent → the exemption
-      //       stays available for (2) to decide.
-      //   (2) NET-PARITY — C's own contribution is net-absent across the window:
-      //       `netAddFull(C) ≤ 0`, deciding exactly as before.
-      //
-      // (1) exists because (2) alone FAILS OPEN when the payload's ORIGINAL add
-      // sits BEHIND the window base: the window then sees only a delete and a
-      // re-add, nets to 0, and a live-at-HEAD offender is exempted while the
-      // audit exits 0 (the A8 fixture). (1) is ordered FIRST — it is two git
-      // calls against `netAddFull`'s one-per-window-merge, and short-circuiting
-      // on a live payload skips the whole count. It is NOT gated on
-      // `isResolvedAt`: that predicate's DIRECTIONAL `(C, tip]` range is empty
-      // for any tip-most merge, so it would deny the exemption to every
-      // legitimate tip-most cleanup revert (A2/A6) — see
-      // openspec/changes/issue-259-d2/brain-drafts/ruling-bound-to-an-unrun-mechanism.md.
-      //
-      // (`dC ≠ ''` is guaranteed here — any tree-keyed FAILING merge has a
-      // non-empty contribution — so netAddFull never hits its F-1 vacuity throw
-      // on this path; any throw either primitive does raise is a genuine
-      // uncomputable that propagates to the top-level catch → exit 2, never a
-      // silent exemption.)
-      // issueLink/memoryPresence NEVER qualify for exemption (they are not
-      // tree-mirrored) — a legit reverter's own body/global gaps still survive.
-      const failingNames = failures.map(([name]) => name);
-      const hasTreeKeyed = failingNames.some((name) => TREE_KEYED_CHECKS.has(name));
-      const exempt = hasTreeKeyed
-        && addedPathsAbsentAt(sha, windowTo, { git: resolutionGit })
-        && netAddFull(sha, { git: resolutionGit, from: windowFrom, to: windowTo }) <= 0;
-
-      const surviving = failures.filter(([name]) => !(exempt && TREE_KEYED_CHECKS.has(name)));
-
-      if (surviving.length === 0) {
+      if (rec.kind === 'reverter-skip') {
         // Every failure was a tree-keyed failure the net-parity exemption covers.
         console.log(`[SKIP] ${sha.slice(0, 7)} ${subject} — reverts offender (net-absent at HEAD)`);
         continue;
@@ -458,8 +319,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
       // ── [FAIL] (any surviving class) — governs exit 1 ────────────────────
       failCount += 1;
-      const survivingNames = surviving.map(([name]) => name);
-      let reasons = surviving.map(([name, r]) => `${name}: ${r.reason}`).join('; ');
+      const survivingNames = rec.surviving.map(([name]) => name);
+      let reasons = rec.surviving.map(([name, r]) => `${name}: ${r.reason}`).join('; ');
       // adrPresence is the one class with NO automatic forward-fix path
       // (REQ-D2-10a): append the human-gate remediation so the [FAIL] line is
       // self-documenting (design §15.6a).
@@ -472,32 +333,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
       // ── [FAIL-SHA] (auto-revert signal) — class-filtered + newest-carrier
       // dedup (design §15.5, REQ-D2-3). Emitted ONLY for a surviving un-exempted
-      // TREE-KEYED failure, and ONLY for the newest carrier of each payload
-      // signature (git log is newest-first, so the first-seen carrier is the
-      // newest). Older carriers stay [FAIL] but emit no auto-revert signal, so
-      // PR4 reverts the live carrier once — never O AND R2, never the intermediate
-      // legit reverter. issueLink/memoryPresence-only merges emit nothing here.
-      const survivesTreeKeyed = survivingNames.some((name) => TREE_KEYED_CHECKS.has(name));
-      if (survivesTreeKeyed) {
-        // [FAIL-SHA] nominates a merge for AUTOMATIC reversion (PR4). A merge
-        // whose revert would RESURRECT a payload — re-add content a prior merge
-        // removed and that is absent from the tip — must NEVER be nominated,
-        // even though it legitimately fails a tree-keyed check and is (correctly)
-        // denied the exemption. Reverting it is the §15.5 harm (put the payload
-        // back). `revertResurrectsAt` reads the tip tree directly, because a
-        // windowed count cannot separate a pure-removal cleanup (A11), a
-        // replace-shaped cleanup (A12), and a live re-add (A10) — all net to 0.
-        // Removal-shaped survivors still print [FAIL] above (never a silent
-        // PASS); they simply carry no auto-revert signal.
-        const nominable = !revertResurrectsAt(sha, windowTo, { git: resolutionGit });
-        if (nominable) {
-          nominableTreeKeyedCount += 1;
-          const sig = payloadSignature(resolutionGit, sha);
-          if (!emittedSignatures.has(sig)) {
-            emittedSignatures.add(sig);
-            console.log(`[FAIL-SHA] ${sha}`);
-            failShaCount += 1;
-          }
+      // TREE-KEYED failure that is auto-revert-nominable (rec.nominable, from
+      // lib/merge-walk.mjs's evaluateMerge — `!revertResurrectsAt(...)`), and
+      // ONLY for the newest carrier of each payload signature (git log is
+      // newest-first, so the first-seen carrier is the newest). Older carriers
+      // stay [FAIL] but emit no auto-revert signal, so PR4 reverts the live
+      // carrier once — never O AND R2, never the intermediate legit reverter.
+      // issueLink/memoryPresence-only merges emit nothing here.
+      if (rec.nominable) {
+        nominableTreeKeyedCount += 1;
+        const sig = payloadSignature(resolutionGit, sha);
+        if (!emittedSignatures.has(sig)) {
+          emittedSignatures.add(sig);
+          console.log(`[FAIL-SHA] ${sha}`);
+          failShaCount += 1;
         }
       }
     }
