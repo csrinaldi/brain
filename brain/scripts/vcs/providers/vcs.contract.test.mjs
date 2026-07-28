@@ -612,6 +612,7 @@ for (const providerName of Object.keys(BRANCH_PROTECT_PROVIDERS)) {
   test(`${providerName}.branchProtect (contract): a protect failure returns { enforced: false, reason, remedy } — never throws`, async () => {
     const result = await vcs.branchProtect({ project: 'x/y', ...fail(['ci']) });
     assert.equal(result.enforced, false, 'a failed branchProtect must never fabricate enforced:true');
+    assert.deepEqual(Object.keys(result).sort(), ['enforced', 'reason', 'remedy'].sort(), 'a failed branchProtect must return exactly these three keys — no enabled/rules/requiredReviews leakage into the contract shape');
     assert.equal(typeof result.reason, 'string', 'reason must be a string — vocabulary is provider-specific, asserted in providers.test.mjs, not here');
     assert.equal(typeof result.remedy, 'string', 'remedy must be a string — presence/type only, never compared across providers');
   });
