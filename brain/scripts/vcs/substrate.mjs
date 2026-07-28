@@ -191,8 +191,11 @@ function classifyReleaseWorkflow(workflowText) {
   }
 
   // antecedent-capable — the remaining two legs of the D3 triple.
-  const hasAuditInvocation = /brain[-:\s]*audit/i.test(workflowText);
-  const hasContentsWrite = /contents:\s*write/.test(workflowText);
+  // Narrow the search to job/step bodies: require `run:` or direct invocation,
+  // and scope permissions to explicit settings, not comments. This avoids
+  // false positives on "# TODO: wire brain:audit" or "brain_audit_not_ready".
+  const hasAuditInvocation = /(?:run:|brain-audit\.mjs|brain:audit)/i.test(workflowText);
+  const hasContentsWrite = /permissions:\s*[\n\s]*contents:\s*write/.test(workflowText);
 
   if (hasAuditInvocation && hasContentsWrite) {
     return { blocking: true, verifiable: true, reason: null, remedy: null };

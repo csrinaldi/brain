@@ -214,6 +214,44 @@ test('rung 2 verdict matrix: a workflowText read error (null, e.g. fs read failu
   assert.equal(result.rungs[2].verifiable, false);
 });
 
+test('rung 2 verdict matrix (deferred to #210): audit job present but DAG unproven (no needs: link to tag-creation step) — must report verifiable:false', async () => {
+  // This scenario is documented in spec.md but currently undetectable without
+  // parsing the full job DAG (detecting needs: links). Phase 3 only checks trigger
+  // type + audit invocation + permissions; Phase 4 (#210) will add full DAG
+  // validation. For now, this test marks the test expectation and documents that
+  // it is deferred.
+  const workflowText = `name: release
+on:
+  workflow_dispatch:
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - run: node brain-audit.mjs HEAD~1..HEAD
+  tag:
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - run: git tag v1.0.0
+`;
+  const result = await detectSubstrate({
+    env: {},
+    probes: { releaseGate: async () => ({ declared: false, workflowPresent: true, workflowText }) },
+  });
+
+  // DEFERRED: This should report verifiable: false (audit job present but not
+  // provably linked to tag step via needs:). Currently reports verifiable: true
+  // because DAG validation is Phase 4 work. This test documents the gap and will
+  // be tightened when #210 implements full DAG checking.
+  assert.equal(
+    result.rungs[2].active,
+    true,
+    'audit + contents:write detected → active:true (correct for current impl)',
+  );
+  // TODO(#210): Change to assert.equal(result.rungs[2].verifiable, false) once
+  // Phase 4 adds needs: link validation.
+});
+
 // ── classifyReleaseWorkflowTrigger — both trigger shapes, exercised through
 // evalRung2 (module-local, unit-tested via detectSubstrate + injected text,
 // same convention as evalPipelineMustSucceedGate elsewhere in this file) ───────
