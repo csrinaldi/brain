@@ -72,19 +72,188 @@ async function evalRung3({ config, env, probes }) {
 }
 
 // ── Rung 2 — release ─────────────────────────────────────────────────────────────
-// Armed when the publish/tag path runs brain:audit fail-closed. Evidence:
-// `probes.releaseGate({ config, env })` — real wiring checks presence of
-// .github/workflows/release.yml or config.governance.releaseGate === true.
-async function evalRung2({ config, env, probes }) {
-  const active = Boolean(await safeProbe(probes.releaseGate, { config, env }));
-  if (active) {
-    return { available: true, active: true, reason: null, remedy: null };
-  }
+// Armed when the publish/tag path can STRUCTURALLY block a release/tag before it
+// exists — never inferred from mere file presence (issue #337, REQ-L2-1). Evidence:
+// `probes.releaseGate({ config, env })` — real wiring (realReleaseGateProbe,
+// brain-governance-status.mjs) reads config.governance.releaseGate and the raw text
+// of .github/workflows/release.yml. ALL interpretation happens here, in this pure
+// module, so it stays unit-testable with injected text fixtures (design D1) — the
+// probe itself is a dumb I/O wrapper, never a classifier.
+//
+// The efficacy distinction (design D3): a workflow's ability to block a tag depends
+// on its TRIGGER, not merely on whether an audit-gate job exists. brain's own
+// release.yml already has an audit-gate job, but it fires `on: push: tags` — the
+// tag has already been created by the time the workflow starts, so nothing
+// downstream can un-create it (post-fact). A workflow can only gate a release if it
+// fires BEFORE the tag exists (antecedent-capable: workflow_dispatch or push:
+// branches) AND it invokes brain:audit AND it holds `permissions: contents: write`
+// (the workflow must itself be able to create the tag it gates, per #210's target
+// shape). That triple is what issue #210 will rebuild release.yml to satisfy — until
+// then, brain's own repo honestly demotes rung 2 -> rung 3 (see PR body).
+
+/**
+ * Bare-boolean-or-object evidence normalizer. A bare `true`/`false` (legacy probe
+ * shape, and still how `config.governance.releaseGate === true` short-circuits)
+ * is treated as a DECLARATION, not a verification — same honesty shape as
+ * `evalPreReceiveGate` (config-declared, verifiable:false). An evidence object
+ * carries the raw probe read: `{ declared, workflowPresent, workflowText }`.
+ */
+function normalizeReleaseGateEvidence(raw) {
+  if (raw === true) return { declared: true, workflowPresent: false, workflowText: null };
+  if (!raw || typeof raw !== 'object') return { declared: false, workflowPresent: false, workflowText: null };
   return {
-    available: true, // the project always controls its own release path
-    active: false,
-    reason: 'no release-gate wired (no release.yml, governance.releaseGate not set)',
-    remedy: 'add .github/workflows/release.yml running brain:audit fail-closed before tag, or set governance.releaseGate=true',
+    declared: raw.declared === true,
+    workflowPresent: Boolean(raw.workflowPresent),
+    workflowText: typeof raw.workflowText === 'string' ? raw.workflowText : null,
+  };
+}
+
+/**
+ * classifyReleaseWorkflowTrigger — pure text-scan classifier (design D2: no
+ * js-yaml, brain has zero runtime dependencies; line-scan the `on:` block,
+ * mirroring release-postmerge-workflows.test.mjs's extractRunScript precedent).
+ *
+ * Isolates the top-level `on:` block, then classifies it as:
+ *   - 'post-fact'          — push:tags, release:, workflow_run: — the tag/release
+ *                            ALREADY EXISTS when the workflow starts; nothing it
+ *                            does can prevent that tag from having been created.
+ *   - 'antecedent-capable' — workflow_dispatch: or push:branches: — the workflow
+ *                            can run and fail BEFORE the tag is created.
+ *   - 'unknown'            — no recognizable `on:` block (unparseable).
+ *
+ * @param {string} workflowText raw release.yml contents
+ * @returns {{ type: 'post-fact'|'antecedent-capable'|'unknown', trigger: string, reason: string }}
+ */
+function classifyReleaseWorkflowTrigger(workflowText) {
+  if (typeof workflowText !== 'string' || workflowText.trim() === '') {
+    return { type: 'unknown', trigger: 'none', reason: 'workflow text is empty or unreadable' };
+  }
+
+  const lines = workflowText.split('\n');
+  const onIdx = lines.findIndex((l) => /^on:/.test(l));
+  if (onIdx === -1) {
+    return { type: 'unknown', trigger: 'none', reason: 'no top-level "on:" trigger block found' };
+  }
+  let onEnd = lines.length;
+  for (let i = onIdx + 1; i < lines.length; i++) {
+    if (/^\S/.test(lines[i])) { onEnd = i; break; }
+  }
+  const onBlock = lines.slice(onIdx, onEnd).join('\n');
+
+  const isPostFact = /\btags\s*:/.test(onBlock) || /^\s*release\s*:/m.test(onBlock) || /\bworkflow_run\s*:/.test(onBlock);
+  if (isPostFact) {
+    return {
+      type: 'post-fact',
+      trigger: onBlock.trim(),
+      reason: 'workflow cannot block tags (fires post-tag)',
+    };
+  }
+
+  const isAntecedentCapable = /\bworkflow_dispatch\s*:/.test(onBlock) || /\bbranches\s*:/.test(onBlock);
+  if (isAntecedentCapable) {
+    return {
+      type: 'antecedent-capable',
+      trigger: onBlock.trim(),
+      reason: 'workflow can run before the tag/release is created',
+    };
+  }
+
+  return { type: 'unknown', trigger: onBlock.trim(), reason: 'unrecognized "on:" trigger shape' };
+}
+
+/**
+ * classifyReleaseWorkflow — composes the trigger classification with the
+ * remaining two legs of the D3 blocking triple (audit invocation + write
+ * permissions) into a single verdict for evalRung2.
+ *
+ * @param {string} workflowText raw release.yml contents
+ * @returns {{ blocking: boolean, verifiable: boolean, reason: string, remedy: string }}
+ */
+function classifyReleaseWorkflow(workflowText) {
+  const trigger = classifyReleaseWorkflowTrigger(workflowText);
+
+  if (trigger.type === 'unknown') {
+    return {
+      blocking: false,
+      verifiable: false,
+      reason: `workflow structure could not be parsed (${trigger.reason})`,
+      remedy: 'ensure release.yml has a recognizable "on:" trigger block, or set governance.releaseGate=true to declare it manually',
+    };
+  }
+
+  if (trigger.type === 'post-fact') {
+    return {
+      blocking: false,
+      verifiable: true,
+      reason: trigger.reason,
+      remedy: 'rebuild release.yml to trigger before the tag exists (workflow_dispatch or push:branches), invoke brain:audit, and grant permissions: contents: write — see #210',
+    };
+  }
+
+  // antecedent-capable — the remaining two legs of the D3 triple.
+  const hasAuditInvocation = /brain[-:\s]*audit/i.test(workflowText);
+  const hasContentsWrite = /contents:\s*write/.test(workflowText);
+
+  if (hasAuditInvocation && hasContentsWrite) {
+    return { blocking: true, verifiable: true, reason: null, remedy: null };
+  }
+
+  const missing = !hasAuditInvocation && !hasContentsWrite
+    ? 'does not invoke brain:audit and lacks permissions: contents: write'
+    : !hasAuditInvocation
+      ? 'does not invoke brain:audit before creating the release/tag'
+      : 'lacks permissions: contents: write to gate the tag it audits';
+
+  return {
+    blocking: false,
+    verifiable: true,
+    reason: `workflow ${missing}`,
+    remedy: 'add brain:audit invocation and permissions: contents: write so the workflow can gate the release/tag it fires before — see #210',
+  };
+}
+
+async function evalRung2({ config, env, probes }) {
+  const raw = await safeProbe(probes.releaseGate, { config, env });
+  const evidence = normalizeReleaseGateEvidence(raw);
+
+  // Declared (config.governance.releaseGate === true, or a bare-boolean-true
+  // legacy probe): armed, but a declaration is not a verification (design D4) —
+  // same honesty shape as evalPreReceiveGate.
+  if (evidence.declared) {
+    return {
+      available: true,
+      active: true,
+      verifiable: false,
+      mechanism: 'release-gate-config-declared',
+      reason: null,
+      remedy: null,
+    };
+  }
+
+  if (!evidence.workflowPresent) {
+    return {
+      available: true, // the project always controls its own release path
+      active: false,
+      verifiable: true,
+      mechanism: 'release-gate-absent',
+      reason: 'no release-gate wired (no release.yml, governance.releaseGate not set)',
+      remedy: 'add .github/workflows/release.yml running brain:audit fail-closed before tag, or set governance.releaseGate=true',
+    };
+  }
+
+  // The workflow file exists but its text could not be read (probe-level read
+  // error, e.g. a permissions error or a race with a deletion) — distinct from
+  // "not wired": something IS wired, but we cannot honestly confirm what it
+  // does. Routed through classifyReleaseWorkflow(null), which reports this as
+  // unparseable (verifiable:false), never a confirmed absent (verifiable:true).
+  const verdict = classifyReleaseWorkflow(evidence.workflowText);
+  return {
+    available: true,
+    active: verdict.blocking,
+    verifiable: verdict.verifiable,
+    mechanism: verdict.verifiable ? 'release-gate-workflow-structural' : 'release-gate-unparseable',
+    reason: verdict.blocking ? null : verdict.reason,
+    remedy: verdict.blocking ? null : verdict.remedy,
   };
 }
 

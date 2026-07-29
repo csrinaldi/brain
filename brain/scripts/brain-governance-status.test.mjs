@@ -184,6 +184,80 @@ test('reportGovernanceStatus: L6 sub-status line is absent when brainWritesRevie
   assert.doesNotMatch(output, /brain-writes-reviewed enforced at evidence rung/);
 });
 
+// ── Rung-2 release-gate render caveat (issue #337, REQ-L2-1/REQ-HONESTY-1) ─────
+//
+// realReleaseGateProbe now returns structured evidence
+// { declared, workflowPresent, workflowText } instead of a bare boolean — every
+// scenario below injects that evidence shape via `probes.releaseGate` (never a
+// legacy bare boolean) so the render tests exercise the SAME shape production
+// wiring produces.
+
+test('printSubstrateReport: config-declared release gate (verifiable:false) renders the caveat, never "verified"', async () => {
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => ({ declared: true, workflowPresent: false, workflowText: null }),
+        postMergeCi: async () => false,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /RUNG 2\b/);
+  assert.match(output, /release gate\s+armed \(config-declared\)/i);
+  assert.doesNotMatch(output, /release gate[^\n]*\bverified\b/i, 'a config declaration must never render as "verified"');
+});
+
+test('printSubstrateReport: structurally-proven active release gate (verifiable:true) renders armed with NO caveat', async () => {
+  const workflowText = 'on:\n  workflow_dispatch:\npermissions: { contents: write }\njobs:\n  gate:\n    steps:\n      - run: node brain/scripts/brain-audit.mjs HEAD~1..HEAD\n';
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => ({ declared: false, workflowPresent: true, workflowText }),
+        postMergeCi: async () => false,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /RUNG 2\b/);
+  assert.match(output, /release gate\s+armed\s+\[workflow triggers pre-tag/i);
+  assert.doesNotMatch(output, /config-declared/i, 'a structurally-proven gate must not carry the declaration caveat');
+});
+
+test('printSubstrateReport: present-but-inert post-tag workflow (brain\'s own release.yml shape) surfaces reason + remedy even though rung demotes to 3', async () => {
+  const workflowText = "on:\n  push:\n    tags: ['v*']\npermissions: { contents: read }\njobs:\n  gate:\n    steps:\n      - run: node brain/scripts/brain-audit.mjs HEAD~1..HEAD\n";
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => ({ declared: false, workflowPresent: true, workflowText }),
+        postMergeCi: async () => true,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /RUNG 3\b/, 'post-fact trigger cannot block — demotes to rung 3, never masquerades as rung 2');
+  assert.match(output, /release gate\s+present but cannot block/i);
+  assert.match(output, /cannot block tags/i);
+  assert.match(output, /remedy:.*#210/is);
+});
+
 // ── GitLab rung-1 ladder awareness (issue #244 A4) ──────────────────────────────
 //
 // realBranchProtectionProbe dispatches on config.vcs.provider, mirroring
