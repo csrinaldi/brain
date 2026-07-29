@@ -266,6 +266,9 @@ export default {
   // ── memory/cli.mjs — reindex (issue #205, C1) ─────────────────────────────────
   'memory.reindex.done':   '✓ reindex completo — {count} registro(s) indexado(s).',
   'memory.reindex.failed': '✗ reindex falló — {message}',
+  'memory.resolveIndex.done':   '✓ índice regenerado desde records/ — {count} registro(s). No había nada en conflicto, no se agregó nada al stage.',
+  'memory.resolveIndex.staged': '✓ conflicto del índice resuelto — {count} registro(s) regenerados desde records/ y agregados al stage. Completá el merge con `git commit`.',
+  'memory.resolveIndex.failed': '✗ resolve-index falló — {message}',
 
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.secretFound': 'Se detectó un secreto en {file}:{line} — coincide con el patrón "{pattern}". Eliminá el secreto o agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo. Ejecutá `gunzip -c {file} | jq .` para inspeccionar (el número de línea corresponde a esa vista formateada).',

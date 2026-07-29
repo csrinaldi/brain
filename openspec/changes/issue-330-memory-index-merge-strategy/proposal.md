@@ -6,9 +6,14 @@ artifact_store: openspec
 topic_key: sdd/issue-330-memory-index-merge-strategy/proposal
 ---
 
-# Proposal: give `.memory/index.jsonl` a merge strategy (issue 330)
+# Proposal: a one-command resolution for a conflicted `.memory/index.jsonl` (issue 330)
 
 Issue #330. Epic #313. Change folder: `openspec/changes/issue-330-memory-index-merge-strategy/`.
+
+> **This proposal was rewritten after the first delivery was blocked.** The original framing —
+> "assign `merge=union` to `/.memory/index.jsonl`" — shipped as commit `ff4ee8a` / PR #360 and was
+> found to **reverse two normative documents**. The rewrite keeps the real problem (#330's
+> ergonomics complaint) and replaces the mechanism. See *What the first attempt got wrong*, below.
 
 ## Intent
 
@@ -17,76 +22,78 @@ Issue #330. Epic #313. Change folder: `openspec/changes/issue-330-memory-index-m
 
 - `/.memory/manifest.json` → `merge=engram-manifest` (custom driver, registered by `brain:env:init`)
 - `/.memory/records/*.jsonl` → `merge=union` (git built-in, no per-clone registration)
-- `/.memory/index.jsonl` → **nothing** — falls back to default text merge
+- `/.memory/index.jsonl` → **nothing, deliberately** (`memory-format.md:145-153`)
 
-So the one file with no assigned strategy conflicts on every parallel branch that ran
-`memory:share`, which the memory-gate makes near-certain since it effectively requires a memory
-write per slice. Observed 2026-07-25 merging `main` into `chore/issue-325-persist-loose-artifacts`:
-the manifest driver and the records union both resolved silently, and `index.jsonl` was the only
-conflict.
+The absence is not the bug. Doctrine excludes the index from the union driver on purpose and fixes
+the resolution: *"a git merge conflict on `index.jsonl` is resolved by **discarding both sides and
+running `memory:reindex`** — it is NEVER hand-merged and NEVER union-merged"*
+(`brain/core/methodology/memory-format.md:145-153`, ADR-0017:121-129).
 
-The fix is one `.gitattributes` line. The work in this change is the **evidence** that the line is
-correct and stays wired: a real three-way-merge regression test, a negative control proving the
-attribute is what resolves the conflict, and a tripwire proving the repo's own `.gitattributes`
-actually carries it.
-
-## Grounding — what the code says (verified, not assumed)
-
-Three findings from reading the implementation shift this change away from a naive "same as
-records" framing:
-
-1. **`index.jsonl` is not append-only.** `serializeIndex()` (`brain/scripts/memory/lib/format.mjs:207-211`)
-   emits the whole file sorted by `id`, and `rebuildIndex()` (`brain/scripts/memory/lib/store.mjs:91`)
-   writes it with a single `writeFileSync`. It is a **deterministic full rewrite**, not an append.
-   Union's behaviour on it therefore differs from `records/*.jsonl`: entries interleave at arbitrary
-   sort positions and the merged file may come out **unsorted**, not merely duplicated.
-
-2. **Nothing reads `index.jsonl`.** Every `indexPath` site in `brain/scripts/**` is a *write* through
-   `rebuildIndex` (`cli.mjs:88,126`, `backends/engram.mjs:297`, `backends/plainfiles.mjs:99,172,192,205`).
-   `readRecordIds()` explicitly documents `records/` — not the index — as the authoritative dedup
-   source (`store.mjs:97-99`). No reader depends on the index's ordering, so a transiently unsorted
-   index has no correctness consequence.
-
-3. **Self-healing is already partly in place, and is backend-asymmetric.**
-   `plainfiles` reindexes unconditionally in `share()`, `pull()`, `save()` and `setup()`.
-   `engram`'s `share()` reindexes **only when at least one new record was appended**
-   (`engram.mjs:315-318`), and `engram`'s `pull()` does not reindex at all
-   (`engram.mjs:589-619` — `git pull` + `importMemory`, no index step).
-
-Together these make `merge=union` the right strategy and make its worst case harmless: the file is
-derived, regenerable, unread, and `memory:reindex` restores the canonical byte-for-byte form.
+What is genuinely missing is the **ergonomics** that same doctrine explicitly sanctions: *"The
+conflict ergonomics MAY be a helper or a post-merge hook, but MUST NOT require a custom merge
+driver for `index.jsonl`"* (`memory-format.md:140-144`, ADR-0017:143-147). Today the operator has
+to know that `git checkout --theirs` is wrong, that hand-merging is wrong, that the remedy is
+`memory:reindex`, and that the path still has to be `git add`-ed to finish the merge. Four pieces
+of tribal knowledge for a machine-generated file. That is the gap #330 was actually filed about.
 
 ## Scope
 
-In scope:
+In scope — the two layers the owner ruled (both, layered, not one or the other):
 
-- One line in `.gitattributes`: `/.memory/index.jsonl merge=union`, mirroring the records rule and
-  its comment, including the note that `union` is a git built-in needing no per-clone registration.
-- `brain/scripts/memory/lib/index-merge.integration.test.mjs` — a real temp-git three-way merge over
-  `index.jsonl`, modelled on the existing `records-merge.integration.test.mjs`, with a **negative
-  control** (same scenario without the attribute → conflicts) and a **repo tripwire** (the shipped
-  `.gitattributes` really carries the rule).
-- `brain/core/methodology/memory-format.md` — document the index's merge strategy alongside the
-  records', and state the union-on-a-rewritten-file consequence (possible unsorted/duplicated
-  entries until the next reindex) rather than implying append-only semantics.
+1. **`memory:resolve-index`, the unit of truth.** An invokable verb on `memory/cli.mjs` that
+   performs the doctrine-fixed resolution with no operator judgment: discard whatever the merge
+   left in the working tree, regenerate `index.jsonl` from `records/`, and `git add` it **only if**
+   git still considers the path unmerged. It works in every clone with zero installation.
+2. **The `post-merge` hook as a thin caller.** The existing hook gains one non-blocking
+   `resolve-index` call after its `import` call. No logic is duplicated between the two paths — the
+   hook has none.
+3. **A repo tripwire asserting the index has NO declared strategy**, so a future change cannot
+   silently re-introduce the union line this change removes.
+4. **`brain/core/methodology/memory-format.md`** — name the helper that fulfils the already-
+   sanctioned "MAY be a helper or a post-merge hook". Tier 2: drafted here, promoted by the human.
 
 Out of scope — recorded, not silently dropped:
 
-- **Changing `share()` to reindex unconditionally.** The issue's "consider also". On `plainfiles` it
-  is already true; on `engram` it would change a contract pinned by an existing test
-  (`engram.share.test.mjs` asserts no reindex when there is nothing to append). Deferred to a
-  follow-up issue with the backend asymmetry (finding 3) as its evidence.
-- **Un-committing the index** (gitignore it, since nothing reads it). That contradicts
-  `memory-format.md:26`'s deliberate "committed for zero-tool querying" and is an ADR-0017-level
+- **Changing `share()` to reindex unconditionally.** The issue's "consider also". `plainfiles`
+  already does; `engram`'s `share()` reindexes only when it appended a record
+  (`engram.mjs:315-318`) and its `pull()` never reindexes (`engram.mjs:589-619`). **Filed as #361**
+  with that asymmetry as its evidence.
+- **Un-committing the index** (gitignore it, since nothing reads it). Contradicts
+  `memory-format.md:26`'s deliberate "committed for zero-tool querying" — an ADR-0017-level
   decision, not a bug fix.
+- **A custom merge driver.** Forbidden by name for this path (`memory-format.md:140-144`).
+
+## What the first attempt got wrong
+
+The union line passed all eight governance jobs, a negative control, and a repo tripwire — and was
+still wrong, because **no gate reads doctrine**. A cold external review caught it. Recorded here
+rather than quietly rewritten, because the failure mode is the reusable lesson:
+
+1. **The mechanism reversed doctrine.** `merge=union` on `index.jsonl` is excluded by name in
+   `memory-format.md:145-153` and ADR-0017:121-129. The original design argued union was safe from
+   three verified code properties (nothing reads the index, line integrity holds, reindex repairs
+   it) — all three true, and all three irrelevant: the exclusion is not justified by *danger*, it is
+   justified by **shape**. A reindex REPLACES and REORDERS every line, so a line-based union of two
+   independently regenerated indexes concatenates both sides' now-superseded snapshots. Union does
+   not merge two rewrites; it stacks them.
+2. **The tests were green and inert against the real question.** The tripwire asserted the union
+   line was *present*. It could not detect that its presence was itself the defect. A test pinned to
+   a mechanism cannot question the mechanism.
+3. **The premise was never measured.** #330 asserts the conflict is intolerable. Measured on the
+   real index shape at brain's actual store size (n=1575): **0–4.5%** for a typical share, and the
+   rate is a function of store size — frequent only for young stores. So the resolution path needs
+   to be **cheap and correct**, not automatic and permanent. That measurement is what makes a
+   two-layer helper the right size of answer and an always-on merge attribute the wrong one.
 
 ## Why now
 
-Every open parallel branch is exposed until this lands, and this repo currently has 25+ live
-worktrees. The epic #313 body promotes #330 to be done next for exactly this reason: it is cheap,
-it unblocks nothing, and the exposure is continuous.
+Every open parallel branch still hits the conflict, and this repo currently has 25+ live worktrees.
+The exposure is real; it is just smaller and more repairable than #330 assumed. Epic #313 promotes
+#330 to be done next.
 
 ## Risk
 
-Low. Test-and-config only; no production code path changes. The one behavioural surface is git's
-merge of a derived file that no code reads and that a single documented command regenerates.
+Low. One new backend-agnostic verb over the existing deterministic `rebuildIndex()`, one
+non-blocking hook line, one removed `.gitattributes` declaration, and a documentation draft. The
+verb fails **closed**: it refuses to regenerate from a `records/` log that is itself conflicted,
+rather than baking conflict markers into the index and reporting success.
