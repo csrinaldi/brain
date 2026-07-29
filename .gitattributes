@@ -8,3 +8,15 @@
 # issue #214/C1b). Unlike the line above, this uses git's BUILT-IN `union`
 # merge driver — no per-clone `git config` registration required.
 /.memory/records/*.jsonl merge=union
+
+# Union-merge for the derived index (issue #330). Same BUILT-IN driver as the
+# records line above — no per-clone registration — but for a different reason:
+# index.jsonl is a deterministic FULL REWRITE sorted by id
+# (format.mjs#serializeIndex), not an append-only log, so a union merge may
+# leave it unsorted or carrying a duplicate line. That is harmless and
+# transient: the index is derived, never authoritative, no code reads it
+# (records/ is the dedup source — store.mjs#readRecordIds), and
+# `npm run memory:reindex` restores it byte-for-byte. Without this line the
+# file falls through to the default text merge and conflicts on every parallel
+# branch that ran memory:share.
+/.memory/index.jsonl merge=union
