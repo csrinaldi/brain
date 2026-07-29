@@ -43,8 +43,9 @@ TASK BOUNDARY: 1.2 must be observed RED before Phase 2. ✔ observed.
       **Do not edit `brain/core/**` directly** — `agent-authorities.md` Tier 2: the agent drafts,
       the human promotes. The draft covers REQ-330-3: the strategy, the full-rewrite distinction,
       and the reindex remedy.
-- [ ] 3.2 Note in the PR body that the draft awaits human promotion, so `brain-writes-reviewed`
-      and `decision-gate` see the intent explicitly.
+- [x] 3.2 Note in the PR body that the draft awaits human promotion, so `brain-writes-reviewed`
+      and `decision-gate` see the intent explicitly. **Done** — PR #360 carries an "Awaiting human
+      promotion (Tier 2)" section; both jobs pass.
 
 ## Phase 4 — gates
 
@@ -53,15 +54,21 @@ TASK BOUNDARY: 1.2 must be observed RED before Phase 2. ✔ observed.
       — **2036/2036 pass, 0 fail**. Note: `node --test <dir>` is NOT the repo's invocation and
       fails with MODULE_NOT_FOUND; always use the `test` script's glob.
 - [x] 4.3 `npm run brain:change:verify` — ✓ repo + scripts scope, both green.
-- [ ] 4.4 `npm run memory:share && git add .memory/` before pushing (memory-gate invariant 3).
+- [x] 4.4 `npm run memory:share` run before pushing (memory-gate invariant 3). Gate verified
+      directly: `node brain/scripts/governance/run-check.mjs memory-gate` → exit 0, and CI's
+      `memory-gate` job passes. **Nothing was staged from `.memory/`** — see the finding below;
+      the share produced only a `.memory/chunks/` artifact, which `.gitignore:84` excludes.
 
-## Phase 5 — delivery (human-gated)
+## Phase 5 — delivery
 
-- [ ] 5.1 Commit as one work unit: fix + tests + draft together.
-- [ ] 5.2 **BLOCKED ON HUMAN**: issue #330 carries `type:bug, priority:high` but **not**
-      `status:approved`. Invariant 1 (`issue-link`) fails the PR without it, and per
-      `agent-authorities.md` / issue #124 the agent must never apply that label. Human signs, then
-      push + open PR into `main`.
+- [x] 5.1 Commit as one work unit: fix + tests + draft together. `ff4ee8a`, 7 files, +715
+      (241 counted against the diff-size budget; `openspec/changes/**` is ignore-listed).
+- [x] 5.2 Human applied `status:approved` to #330 (verified via `gh issue view`). Pushed and
+      opened **PR #360** into `main`, labelled `type:bug`.
+      All 8 governance jobs pass: issue-link, diff-size, memory-gate, decision-gate, local-checks,
+      phase-order, actor-check, brain-writes-reviewed.
+      Note: `gh pr edit --add-label` fails on this repo with a Projects-classic GraphQL
+      deprecation error; `gh api repos/:owner/:repo/issues/<n>/labels` works.
 
 ## Live micro-decisions
 
@@ -72,7 +79,17 @@ TASK BOUNDARY: 1.2 must be observed RED before Phase 2. ✔ observed.
 - **Three verified findings reshaped the design** — index is a full rewrite not an append-only log;
   nothing reads it; self-healing is backend-asymmetric. All three are in design.md D1 with
   file:line citations.
-- **Follow-up to file:** `engram.share()` reindexes only when it appended a record
+- **UNDIAGNOSED, reported not ruled:** `npm run memory:share` (engram backend) printed
+  `Created chunk b86f7b16 / Observations: 1965` but left `.memory/` **byte-identical** — no
+  record appended for an observation saved seconds earlier in this session, on either the
+  worktree or the main checkout. The chunk it did write is gitignored (`.gitignore:84`), so
+  nothing became durable in git. Possible causes not yet distinguished: the MCP engram server
+  and the `engram` CLI binary (v1.17.0, update to 1.20.0 offered) may address different stores,
+  or `dualWriteRecords` deduped everything. Not filed as an issue precisely because the
+  mechanism is not diagnosed — filing a confident bug report on an undiagnosed symptom would be
+  worse than reporting it as an open question. Does NOT block: `memory-gate` is a repo-global
+  session_summary existence check and passes.
+- **Follow-up FILED as #361:** `engram.share()` reindexes only when it appended a record
   (`engram.mjs:315-318`) and `engram.pull()` never reindexes (`engram.mjs:589-619`), while
   `plainfiles` reindexes unconditionally on all four verbs. Backend asymmetry in index
   self-healing. Deferred out of this slice deliberately (proposal, Out of scope).
