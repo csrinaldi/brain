@@ -71,7 +71,11 @@ function failSpawn(message = 'fixture: simulated failure') {
   return () => ({ status: 1, stdout: '', stderr: message });
 }
 
-function githubJsonCallArgs(fixture) {
+// Named for the seam (JSON-over-spawn), not the provider — `mrList` proves
+// GitLab needs this same spawn glue too (gitlab.mrList spawns `glab` via
+// `runJson` rather than fetching over `gitlabApiFetch`, so `gitlabCallArgs`'s
+// `fetchImpl` injection does not apply to it).
+function jsonSpawnCallArgs(fixture) {
   setSpawn(fixture.throws ? failSpawn(fixture.error) : jsonSpawn(fixture.data));
   return {};
 }
@@ -91,10 +95,11 @@ function gitlabCallArgs(fixture) {
 const PROVIDERS = {
   github: {
     module: github,
-    labelEvents: githubJsonCallArgs,
-    prView: githubJsonCallArgs,
+    labelEvents: jsonSpawnCallArgs,
+    prView: jsonSpawnCallArgs,
     mrCreate: githubRawCallArgs,
-    issueView: githubJsonCallArgs,
+    issueView: jsonSpawnCallArgs,
+    mrList: jsonSpawnCallArgs,
   },
   gitlab: {
     module: gitlab,
@@ -102,6 +107,12 @@ const PROVIDERS = {
     prView: gitlabCallArgs,
     mrCreate: gitlabCallArgs,
     issueView: gitlabCallArgs,
+    // gitlab.mrList spawns `glab` via runJson rather than fetching over
+    // gitlabApiFetch (design D1) — it shares GitHub's spawn-transport seam,
+    // so PROVIDERS.gitlab.mrList is the SAME function object as
+    // PROVIDERS.github.mrList. That is the honest encoding of "both
+    // providers share one transport for this verb", not a copy-paste error.
+    mrList: jsonSpawnCallArgs,
   },
 };
 
@@ -112,6 +123,7 @@ for (const providerName of Object.keys(PROVIDERS)) {
     prView: prViewArgs,
     mrCreate: mrCreateArgs,
     issueView: issueViewArgs,
+    mrList: mrListArgs,
   } = PROVIDERS[providerName];
 
   // ── labelEvents ────────────────────────────────────────────────────────
@@ -258,6 +270,69 @@ for (const providerName of Object.keys(PROVIDERS)) {
         : { throws: false, data: { iid: 7, title: 'x', description: '', author: null } };
     const result = await vcs.issueView({ project: 'x/y', number: 7, ...issueViewArgs(emptyFixture) });
     assert.deepEqual(result.labels, [], 'an empty label set must normalize to [], not null/undefined');
+  });
+
+  // ── mrList (issue #355, M10 Phase 2 rank-3) ─────────────────────────────
+  // `({ project, state }) -> [{ number, title, headBranch }]`. Unlike its
+  // sibling read verbs (prView/prReviews/labelEvents/prStatusRollup), `mrList`
+  // does NOT wrap its transport call — `runJson` throws on a non-zero exit or
+  // malformed JSON (exec.mjs:31-32), and neither provider catches it. This is
+  // PINNED here (design D3) because changing it is out of scope for this
+  // change, NOT because a caller depends on the throw — the opposite of why
+  // issueView's failure-REJECTS test above is pinned.
+  test(`${providerName}.mrList (contract): happy fixture normalizes to exactly { number, title, headBranch } per entry`, async () => {
+    const fixtureName = `${providerName}-mrList-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.mrList({ project: 'x/y', state: 'open', ...mrListArgs(fixture) });
+
+    assert.ok(result.length >= 2, 'happy fixture must exercise at least 2 entries');
+    for (const entry of result) {
+      assert.deepEqual(
+        Object.keys(entry).sort(),
+        ['headBranch', 'number', 'title'],
+        'each mrList entry must normalize to EXACTLY { number, title, headBranch } — no narrowed or widened shape',
+      );
+    }
+    // Full-array lock: pins values AND order (neither provider sorts —
+    // callers index into the list, so preserving the API's own ordering
+    // matters). Expected values are hardcoded from the fixture's own known
+    // content rather than re-derived from fixture.data via the same
+    // number/head.ref/source_branch mapping the normalizer performs — doing
+    // so would let a normalizer bug that mirrors this test's mapping pass
+    // undetected.
+    const expected =
+      providerName === 'github'
+        ? [
+            { number: 342, title: 'M10: seam-contract-coverage epic tracker', headBranch: 'feature/m10-seam-contract-coverage' },
+            { number: 331, title: 'fix(governance): re-order release audit gate to audit-then-tag and add audit baseline', headBranch: 'fix/issue-210-fixgovernance-releaseyml-audit-gate-cann' },
+          ]
+        : [
+            { number: 42, title: 'Add pagination guard to labelList', headBranch: 'feat/label-pagination' },
+            { number: 41, title: 'Fix issueView author normalization', headBranch: 'fix/issue-author-null' },
+          ];
+    assert.deepEqual(result, expected);
+  });
+
+  test(`${providerName}.mrList (contract): an empty open-list yields [], never a fabricated null/undefined`, async () => {
+    const fixtureName = `${providerName}-mrList-empty.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.mrList({ project: 'x/y', state: 'open', ...mrListArgs(fixture) });
+    assert.deepEqual(result, [], 'board.mjs/queue.mjs iterate the mrList result unguarded — [] is required, null/undefined would crash them');
+  });
+
+  test(`${providerName}.mrList (contract): a transport failure REJECTS — pinned as a documented divergence, not fixed here`, async () => {
+    const fixtureName = `${providerName}-mrList-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.rejects(
+      () => vcs.mrList({ project: 'x/y', state: 'open', ...mrListArgs(fixture) }),
+      'mrList must REJECT on a transport failure — unlike prView/prReviews/labelEvents/prStatusRollup\'s never-throws convention, mrList does not wrap runJson in a try/catch (design D3); this is PINNED because changing it is out of scope here, not because a caller depends on it',
+    );
   });
 
   // ── mrCreate ───────────────────────────────────────────────────────────
