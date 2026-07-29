@@ -128,14 +128,32 @@ TASK BOUNDARY: 7.2 must be observed RED before 7.3. ✔ (observed in the rework 
 - [x] 8.4 Commit the rework as one work unit on top of `ff4ee8a` (fix + tests + artifacts + draft).
       **Not a force-push, not an amend** — `ff4ee8a` is published and `agent-authorities.md` Tier 3
       forbids rewriting published history. The reversal is a forward commit.
-- [ ] 8.5 Retitle PR #360 — its current title, *"fix(memory): give .memory/index.jsonl a union merge
-      strategy"*, now describes the opposite of what the branch does. Update the body: the
-      superseded mechanism, the block, the measurement, the two-layer rework, and the Tier 2 draft
-      still awaiting human promotion.
-- [ ] 8.6 Push and re-verify all 8 governance jobs.
-- [ ] 8.7 Ask the cold reviewer for a re-review (`npm run brain:review -- --pr 360`). The prior
-      verdict was BLOCK at a `head_sha` that no longer exists; a new verdict is required, and the
-      reviewer re-derives it cold rather than reading this file (`reviewer-protocol.md` §8).
+- [x] 8.5 Retitled PR #360 to `fix(memory): resolve index conflicts via memory:resolve-index, not
+      merge=union` and rewrote the body (superseded mechanism, the block, the measurement, the
+      two-layer rework, the Tier 2 draft still awaiting promotion).
+      **`gh pr edit` does NOT work on this repo** — it dies on
+      `GraphQL: Projects (classic) is being deprecated ... (repository.pullRequest.projectCards)`,
+      for `--title`/`--body` exactly as it does for `--add-label`. Working path:
+      `gh api -X PATCH repos/csrinaldi/brain/pulls/<n> --input <json>`.
+- [x] 8.6 Pushed `7038332..d5a5227`. **All 8 governance jobs SUCCESS** on `d5a5227`: issue-link,
+      diff-size, memory-gate, decision-gate, local-checks, phase-order, actor-check,
+      brain-writes-reviewed.
+- [ ] 8.7 **BLOCKED — cold re-review not obtained.** The prior verdict was BLOCK at a `head_sha`
+      that no longer exists (`reviewed:stale`, `reviewer-protocol.md` §8), so `d5a5227` currently
+      carries **no** cold verdict. Two obstacles found, one fixed and one open:
+      - **Fixed (operator workaround):** `npm run brain:review` refuses with
+        `env var "BRAIN_REVIEWER_TOKEN" is not set` even though the var IS present in `.env`.
+        `review/identity.mjs:19` reads `env[tokenEnv]` and **nothing in `brain/scripts/review/**`
+        parses the dotenv file** — `rg '\.env|process\.env' review/cli.mjs` returns nothing. Export
+        it into the environment before invoking. This is the same defect class already reported on
+        **#316** (unify `.env` parsers), with `review/identity.mjs:34` cited there.
+      - **Open:** the §13 subagent executor could not be launched — three consecutive
+        `API Error: 529 Overloaded`. Deliberately NOT worked around: §13 forbids substituting an
+        ad-hoc manual review for the canonical entrypoint, and the orchestrator running it itself
+        would forfeit the context-coldness that is the whole point (the orchestrator authored
+        `d5a5227`; §10 makes self-review an abstention case).
+      Re-run when the API recovers:
+      `export BRAIN_REVIEWER_TOKEN=... && npm run brain:review -- --pr 360`.
 
 ---
 
