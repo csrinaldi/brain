@@ -142,6 +142,10 @@ const SOURCE_SCAN_TARGETS = [
   './phase-order-check.mjs',
   './actor-check.mjs',
   './brain-writes-reviewed.mjs',
+  // relabel-retrigger.mjs (issue #328): dispatches PR discovery (mrList/
+  // prView) and the rerun capability (rerunWorkflowRun) exclusively through
+  // getVcs({ provider }) — never a raw gh/glab spawn of its own.
+  '../governance/relabel-retrigger.mjs',
 ];
 
 test('A3 TASK3 structural guard: none of the governance-job wrapper source files contain a raw execFileSync/spawn(\'gh\'|\'glab\', ...) call', () => {

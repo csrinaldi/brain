@@ -1,0 +1,71 @@
+# governance-relabel.yml — re-triggers governance.yml on approval (issue #328).
+#
+# governance.yml runs on `pull_request` events only. Two of its gates depend
+# on human approval that can arrive AFTER a PR already opened — the
+# status:approved label applied to the issue the PR references (per #124):
+#   - issue-link (bash, REQUIRED): fails if the issue isn't yet approved when
+#     the job runs → stale RED.
+#   - actor-check (DETECTION, brain/scripts/vcs/actor-check.mjs): returns a
+#     green warn when zero `labeled` events exist yet (REQ-L5-2 — never fail
+#     on missing evidence). Once approval lands this should re-evaluate to
+#     fail (self-approval) or pass — but nothing ever triggers that re-run →
+#     stale GREEN, the worse failure.
+#
+# Both evaluators already read CURRENT state every time they run — the only
+# missing piece is a trigger. This workflow supplies it: on the approved
+# label landing on an issue, it finds every OPEN PR whose body references
+# that issue and forces a FULL rerun of governance.yml for each one.
+#
+# `gh run rerun --failed` is deliberately NOT used — it only reruns jobs that
+# already failed, silently skipping an already-green job stuck on stale
+# evidence (exactly actor-check's stale-GREEN case). relabel-retrigger.mjs
+# calls the GitHub-only `rerunWorkflowRun` verb, which POSTs the FULL rerun
+# endpoint instead.
+#
+# Note (#329, tracked separately, out of scope here): once this fix lands,
+# actor-check (DETECTION_JOBS, non-blocking) will start correctly detecting
+# self-approval on this repo's own PRs — expected and safe, since it never
+# blocks merge.
+
+name: governance-relabel
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  actions: write
+
+jobs:
+  relabel-retrigger:
+    name: relabel-retrigger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: gate
+        name: Resolve the configured approved-issue label and short-circuit on a mismatch
+        env:
+          EVENT_LABEL: ${{ github.event.label.name }}
+        run: |
+          set -euo pipefail
+          # Sourced from the config-driven resolver (design.md Decision 4,
+          # issue #231 A2 phase 1) — never a hardcoded 'status:approved'
+          # literal, so a consumer-set governance.approvedLabel is honored.
+          approved_label=$(node brain/scripts/governance/approved-label.mjs github)
+          if [ "$EVENT_LABEL" != "$approved_label" ]; then
+            echo "label '${EVENT_LABEL}' is not the approved label ('${approved_label}') — nothing to do."
+            echo "match=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "match=true" >> "$GITHUB_OUTPUT"
+
+      - name: Force a full rerun of governance.yml on open PRs referencing this issue
+        if: steps.gate.outputs.match == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: node brain/scripts/governance/relabel-retrigger.mjs
