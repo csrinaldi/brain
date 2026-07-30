@@ -494,7 +494,7 @@ for (const providerName of Object.keys(PROVIDERS)) {
     const fixture = loadFixture(fixtureName);
     assertProvenance(fixture, fixtureName);
 
-    const result = await vcs.authLogin({ host: 'github.com', token: 'test-token', ...authLoginArgs(fixture) });
+    const result = await vcs.authLogin({ host: 'github.com', token: 'tok', ...authLoginArgs(fixture) });
     assert.equal(result, true, 'authLogin must return the exact boolean true on a successful login, not merely a truthy value');
   });
 
@@ -505,7 +505,7 @@ for (const providerName of Object.keys(PROVIDERS)) {
 
     await assert.doesNotReject(
       async () => {
-        const result = await vcs.authLogin({ host: 'github.com', token: 'test-token', ...authLoginArgs(fixture) });
+        const result = await vcs.authLogin({ host: 'github.com', token: 'tok', ...authLoginArgs(fixture) });
         assert.equal(result, false, 'authLogin must return the exact boolean false on a non-zero exit, not merely a falsy value');
       },
       'authLogin must resolve on a non-zero exit — run() never throws (exec.mjs:20-23)',
@@ -600,19 +600,19 @@ test('authLogin (contract): host-default divergence — GitHub defaults to githu
 });
 
 test('authLogin (contract): the token is delivered via stdin on both providers, never via argv', async () => {
-  const TOKEN = 'super-secret-token-value';
+  const CREDENTIAL_VALUE = 'sample-cred-9x7';
 
   let githubArgs, githubOpts;
   setSpawn((_cmd, args, opts) => { githubArgs = args; githubOpts = opts; return { status: 0, stdout: '', stderr: '' }; });
-  await github.authLogin({ host: 'github.com', token: TOKEN });
-  assert.equal(githubOpts.input, TOKEN, 'github.mjs#authLogin must deliver the token via opts.input (stdin)');
-  assert.ok(!githubArgs.includes(TOKEN), 'the token must never appear in the argv array passed to gh — a credential-leak guard');
+  await github.authLogin({ host: 'github.com', token: CREDENTIAL_VALUE });
+  assert.equal(githubOpts.input, CREDENTIAL_VALUE, 'github.mjs#authLogin must deliver the token via opts.input (stdin)');
+  assert.ok(!githubArgs.includes(CREDENTIAL_VALUE), 'the token must never appear in the argv array passed to gh — a credential-leak guard');
 
   let gitlabArgs, gitlabOpts;
   setSpawn((_cmd, args, opts) => { gitlabArgs = args; gitlabOpts = opts; return { status: 0, stdout: '', stderr: '' }; });
-  await gitlab.authLogin({ host: 'gitlab.com', token: TOKEN });
-  assert.equal(gitlabOpts.input, TOKEN, 'gitlab.mjs#authLogin must deliver the token via opts.input (stdin)');
-  assert.ok(!gitlabArgs.includes(TOKEN), 'the token must never appear in the argv array passed to glab — a credential-leak guard');
+  await gitlab.authLogin({ host: 'gitlab.com', token: CREDENTIAL_VALUE });
+  assert.equal(gitlabOpts.input, CREDENTIAL_VALUE, 'gitlab.mjs#authLogin must deliver the token via opts.input (stdin)');
+  assert.ok(!gitlabArgs.includes(CREDENTIAL_VALUE), 'the token must never appear in the argv array passed to glab — a credential-leak guard');
 });
 
 // ── issueList pull_request filter (issue #362, M10 Phase 2 rank-4) ─────────
