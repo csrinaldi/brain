@@ -44,18 +44,28 @@ import { CLOSING_RE, CHAIN_RE } from './checks/issue-ref-patterns.mjs';
  * digit run ("3288", "32" respectively, never truncated to "328"), and this
  * function compares that captured number verbatim against `issueNumber`.
  *
+ * Scans EVERY closing/chain reference in the body, not just the first —
+ * `CLOSING_RE`/`CHAIN_RE` are matched with a per-call global flag (`matchAll`)
+ * so a body like "Closes #10\n\nAlso closes #328 as a followup" still matches
+ * issue 328 even though it isn't the first reference (a real PR shape; the
+ * first-match-only version of this function missed it — see #328 review).
+ *
  * @param {Array<{ number: number, headRefName?: string, body?: string|null }>} candidatePrs
  * @param {number} issueNumber
  * @returns {Array<{ number: number, headRefName?: string, body?: string|null }>}
  */
+function referencesIssue(body, issueNumber, re, group) {
+  const global = new RegExp(re.source, `${re.flags.includes('g') ? re.flags : `${re.flags}g`}`);
+  for (const match of body.matchAll(global)) {
+    if (Number(match[group]) === issueNumber) return true;
+  }
+  return false;
+}
+
 export function selectReferencingPrs(candidatePrs, issueNumber) {
   return (candidatePrs ?? []).filter(pr => {
     const body = pr.body ?? '';
-    const closing = body.match(CLOSING_RE);
-    if (closing && Number(closing[2]) === issueNumber) return true;
-    const chain = body.match(CHAIN_RE);
-    if (chain && Number(chain[1]) === issueNumber) return true;
-    return false;
+    return referencesIssue(body, issueNumber, CLOSING_RE, 2) || referencesIssue(body, issueNumber, CHAIN_RE, 1);
   });
 }
 
@@ -107,16 +117,16 @@ export async function run(deps = {}) {
   try {
     vcs = await getVcsFn({ provider });
   } catch (err) {
-    console.log(`relabel-retrigger: could not resolve vcs provider — ${err.message}`);
-    return { triggered: [], failed: [] };
+    console.log(`::warning::relabel-retrigger: could not resolve vcs provider — ${err.message}. Issue #${issueNumber}'s approval-dependent gates will NOT be re-triggered; this is a silent-staleness risk, not just a no-op.`);
+    return { triggered: [], failed: [{ number: null, reason: `vcs resolution failed: ${err.message}` }] };
   }
 
   let candidates;
   try {
     candidates = await discoverCandidatePrs(vcs, project);
   } catch (err) {
-    console.log(`relabel-retrigger: could not discover open PRs — ${err.message}`);
-    return { triggered: [], failed: [] };
+    console.log(`::warning::relabel-retrigger: could not discover open PRs — ${err.message}. Issue #${issueNumber}'s approval-dependent gates will NOT be re-triggered; this is a silent-staleness risk, not just a no-op.`);
+    return { triggered: [], failed: [{ number: null, reason: `PR discovery failed: ${err.message}` }] };
   }
 
   const matches = selectReferencingPrs(candidates, issueNumber);
@@ -143,6 +153,10 @@ export async function run(deps = {}) {
       console.log(`relabel-retrigger: PR #${pr.number} (${pr.headRefName}) — unexpected error: ${err.message}.`);
       failed.push({ number: pr.number, reason: err.message });
     }
+  }
+
+  if (failed.length > 0) {
+    console.log(`::warning::relabel-retrigger: ${failed.length} PR(s) failed to retrigger for issue #${issueNumber}: ${failed.map(f => `#${f.number ?? '?'} (${f.reason})`).join('; ')}. These PRs keep their stale verdict until their next natural pull_request trigger — this run should not be treated as green if it reports failures.`);
   }
 
   return { triggered, failed };

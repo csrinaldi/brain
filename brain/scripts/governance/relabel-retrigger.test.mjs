@@ -67,6 +67,14 @@ test('selectReferencingPrs: a null/missing body never throws and is excluded', (
   assert.deepEqual(selectReferencingPrs([{ number: 1, headRefName: 'a', body: null }], 328), []);
 });
 
+test('selectReferencingPrs: a non-first closing reference in the body still matches (regression: matching must not stop at the first hit)', () => {
+  const prs = [
+    { number: 1, headRefName: 'a', body: 'Closes #10\n\nAlso closes #328 as a followup fix.' },
+    { number: 2, headRefName: 'b', body: 'Part of #10, part of #999, part of #328.' },
+  ];
+  assert.deepEqual(selectReferencingPrs(prs, 328).map(p => p.number), [1, 2]);
+});
+
 // ── run(): discovery + filter + rerun wiring (dependency-injected, no network) ──
 
 test('run(): discovers open PRs via mrList+prView, filters to referencing PRs, and forces a full rerun for each match', async () => {
@@ -103,6 +111,22 @@ test('run(): never throws even when the vcs provider or PR discovery fails unexp
       getVcs: async () => ({ mrList: async () => { throw new Error('transport failure'); } }),
     }),
   );
+});
+
+test('run(): a failed retrigger is never silent — it surfaces a ::error/warning-style annotation and a non-empty `failed` list, so a broken retrigger mechanism cannot masquerade as a clean no-op run', async () => {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (...args) => logs.push(args.join(' '));
+  try {
+    const result = await run({ project: 'x/y', issueNumber: 328, getVcs: async () => { throw new Error('vcs down'); } });
+    assert.equal(result.failed.length > 0, true, 'a vcs-resolution failure must be reported in `failed`, not swallowed into an empty result');
+    assert.ok(
+      logs.some(l => l.includes('::warning::')),
+      'a vcs-resolution failure must emit a GitHub Actions ::warning:: annotation so it is visible without reading raw step logs',
+    );
+  } finally {
+    console.log = originalLog;
+  }
 });
 
 // ── stale-GREEN regression proof (issue #328) ───────────────────────────────
