@@ -92,6 +92,18 @@ function gitlabCallArgs(fixture) {
   };
 }
 
+// authCheck/authLogin (issues #364/#365, M10 Phase 2 ranks 5-6) call the raw
+// `run()` wrapper, not `runJson()` — there is no JSON body to parse, only an
+// exit status (`run()`'s `ok: r.status === 0`). Reusing `jsonSpawnCallArgs`
+// would JSON-serialize the fixture's data as stdout, fabricating a JSON body
+// neither verb ever parses. This glue drives `_spawn` directly off the
+// fixture's own `status`/`stdout`/`stderr` fields — the exact mechanism both
+// verbs' boolean return value depends on (design D1).
+function rawStatusCallArgs(fixture) {
+  setSpawn(() => ({ status: fixture.status, stdout: fixture.stdout ?? '', stderr: fixture.stderr ?? '' }));
+  return {};
+}
+
 const PROVIDERS = {
   github: {
     module: github,
@@ -101,6 +113,8 @@ const PROVIDERS = {
     issueView: jsonSpawnCallArgs,
     mrList: jsonSpawnCallArgs,
     issueList: jsonSpawnCallArgs,
+    authCheck: rawStatusCallArgs,
+    authLogin: rawStatusCallArgs,
   },
   gitlab: {
     module: gitlab,
@@ -117,6 +131,11 @@ const PROVIDERS = {
     // gitlab.issueList spawns `glab` via runJson for the same reason
     // gitlab.mrList does (design D1) — same shared function object.
     issueList: jsonSpawnCallArgs,
+    // gitlab.authCheck/authLogin spawn `glab` via the raw run() wrapper, the
+    // same shared spawn-transport seam github's boolean verbs use — same
+    // shared function object, same "one transport, both providers" honesty.
+    authCheck: rawStatusCallArgs,
+    authLogin: rawStatusCallArgs,
   },
 };
 
@@ -129,6 +148,8 @@ for (const providerName of Object.keys(PROVIDERS)) {
     issueView: issueViewArgs,
     mrList: mrListArgs,
     issueList: issueListArgs,
+    authCheck: authCheckArgs,
+    authLogin: authLoginArgs,
   } = PROVIDERS[providerName];
 
   // ── labelEvents ────────────────────────────────────────────────────────
@@ -435,6 +456,62 @@ for (const providerName of Object.keys(PROVIDERS)) {
     );
   });
 
+  // ── authCheck (issue #365, M10 Phase 2 rank-6) ──────────────────────────
+  // `({ host }) -> boolean` (vcs-contract.md row 24). Corrected premise
+  // (design.md): the originating task brief assumed a `{ username }` object
+  // shape; both providers call the raw `run()` wrapper (never `runJson()`)
+  // and return `.ok` — a plain boolean. `run()` never throws (exec.mjs:20-23)
+  // — a non-zero exit normalizes to `false`, it does not reject. This is the
+  // OPPOSITE divergence from mrList/issueList, which are pinned as throwing.
+  test(`${providerName}.authCheck (contract): an authenticated session returns exactly true`, async () => {
+    const fixtureName = `${providerName}-authCheck-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.authCheck({ host: 'github.com', ...authCheckArgs(fixture) });
+    assert.equal(result, true, 'authCheck must return the exact boolean true on an authenticated session, not merely a truthy value');
+  });
+
+  test(`${providerName}.authCheck (contract): an unauthenticated session returns exactly false, and never rejects`, async () => {
+    const fixtureName = `${providerName}-authCheck-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.doesNotReject(
+      async () => {
+        const result = await vcs.authCheck({ host: 'github.com', ...authCheckArgs(fixture) });
+        assert.equal(result, false, 'authCheck must return the exact boolean false on a non-zero exit, not merely a falsy value');
+      },
+      'authCheck must resolve on a non-zero exit — run() never throws (exec.mjs:20-23) — unlike mrList/issueList, which are pinned as rejecting',
+    );
+  });
+
+  // ── authLogin (issue #364, M10 Phase 2 rank-5) ──────────────────────────
+  // `({ host, token }) -> boolean` (vcs-contract.md row 25). Same corrected
+  // premise as authCheck — see design.md's "Corrected premise" section.
+  test(`${providerName}.authLogin (contract): a successful login returns exactly true`, async () => {
+    const fixtureName = `${providerName}-authLogin-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.authLogin({ host: 'github.com', token: 'tok', ...authLoginArgs(fixture) });
+    assert.equal(result, true, 'authLogin must return the exact boolean true on a successful login, not merely a truthy value');
+  });
+
+  test(`${providerName}.authLogin (contract): a failed login returns exactly false, and never rejects`, async () => {
+    const fixtureName = `${providerName}-authLogin-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.doesNotReject(
+      async () => {
+        const result = await vcs.authLogin({ host: 'github.com', token: 'tok', ...authLoginArgs(fixture) });
+        assert.equal(result, false, 'authLogin must return the exact boolean false on a non-zero exit, not merely a falsy value');
+      },
+      'authLogin must resolve on a non-zero exit — run() never throws (exec.mjs:20-23)',
+    );
+  });
+
   // ── mrCreate ───────────────────────────────────────────────────────────
   test(`${providerName}.mrCreate (contract): happy fixture returns { url }`, async () => {
     const fixtureName = `${providerName}-mrCreate-happy.json`;
@@ -473,6 +550,70 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assert.equal(typeof result.error, 'string', 'a failed mrCreate must carry an error string');
   });
 }
+
+// ── authCheck/authLogin argument-building divergence + token security ──────
+// (issues #364/#365, M10 Phase 2 ranks 5-6). Both verbs' fixture-driven
+// happy/failure tests live in the main parity loop above (they only vary
+// `status`, never call args). These three tests assert on the ARGS the
+// mocked `_spawn` actually receives — a real per-provider code divergence
+// (D4) that no fixture-driven test can see, since fixtures only vary the
+// exit status. Standalone tests (no fixture, no loop), same precedent as the
+// `github.issueList` pull_request-filter test directly below.
+
+test('authCheck (contract): host-argument-building divergence — GitHub omits --hostname when host is falsy, GitLab always includes it', async () => {
+  let githubArgs;
+  setSpawn((_cmd, args) => { githubArgs = args; return { status: 0, stdout: '', stderr: '' }; });
+  await github.authCheck({});
+  assert.ok(
+    !githubArgs.includes('--hostname'),
+    'github.mjs#authCheck branches on a falsy host and omits --hostname entirely (github.mjs:20-23)',
+  );
+
+  let gitlabArgs;
+  setSpawn((_cmd, args) => { gitlabArgs = args; return { status: 0, stdout: '', stderr: '' }; });
+  await gitlab.authCheck({});
+  assert.ok(
+    gitlabArgs.includes('--hostname'),
+    'gitlab.mjs#authCheck never branches — it always includes --hostname, even passing the omitted host value through as undefined (gitlab.mjs:22-24)',
+  );
+});
+
+test('authLogin (contract): host-default divergence — GitHub defaults to github.com when host is omitted, GitLab does not', async () => {
+  let githubArgs;
+  setSpawn((_cmd, args) => { githubArgs = args; return { status: 0, stdout: '', stderr: '' }; });
+  await github.authLogin({ token: 'tok' });
+  assert.ok(
+    githubArgs.includes('github.com'),
+    "github.mjs#authLogin substitutes the literal default 'github.com' when host is omitted (host || 'github.com', github.mjs:25-28)",
+  );
+
+  let gitlabArgs;
+  setSpawn((_cmd, args) => { gitlabArgs = args; return { status: 0, stdout: '', stderr: '' }; });
+  await gitlab.authLogin({ token: 'tok' });
+  const hostnameIdx = gitlabArgs.indexOf('--hostname');
+  assert.ok(hostnameIdx !== -1, 'gitlab.mjs#authLogin always passes --hostname');
+  assert.equal(
+    gitlabArgs[hostnameIdx + 1],
+    undefined,
+    'gitlab.mjs#authLogin does NOT default host — the omitted value is passed through unguarded, unlike GitHub (gitlab.mjs:26-29)',
+  );
+});
+
+test('authLogin (contract): the token is delivered via stdin on both providers, never via argv', async () => {
+  const CREDENTIAL_VALUE = 'sample-cred-9x7';
+
+  let githubArgs, githubOpts;
+  setSpawn((_cmd, args, opts) => { githubArgs = args; githubOpts = opts; return { status: 0, stdout: '', stderr: '' }; });
+  await github.authLogin({ host: 'github.com', token: CREDENTIAL_VALUE });
+  assert.equal(githubOpts.input, CREDENTIAL_VALUE, 'github.mjs#authLogin must deliver the token via opts.input (stdin)');
+  assert.ok(!githubArgs.includes(CREDENTIAL_VALUE), 'the token must never appear in the argv array passed to gh — a credential-leak guard');
+
+  let gitlabArgs, gitlabOpts;
+  setSpawn((_cmd, args, opts) => { gitlabArgs = args; gitlabOpts = opts; return { status: 0, stdout: '', stderr: '' }; });
+  await gitlab.authLogin({ host: 'gitlab.com', token: CREDENTIAL_VALUE });
+  assert.equal(gitlabOpts.input, CREDENTIAL_VALUE, 'gitlab.mjs#authLogin must deliver the token via opts.input (stdin)');
+  assert.ok(!gitlabArgs.includes(CREDENTIAL_VALUE), 'the token must never appear in the argv array passed to glab — a credential-leak guard');
+});
 
 // ── issueList pull_request filter (issue #362, M10 Phase 2 rank-4) ─────────
 // GitHub-only: GitLab's `projects/:id/issues` endpoint returns only issues —
