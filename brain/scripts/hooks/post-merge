@@ -29,4 +29,12 @@ repo_root=$(git rev-parse --show-toplevel)
 # || true: a failed import is informational, not a merge blocker.
 node "$repo_root/brain/scripts/memory/cli.mjs" import >/dev/null 2>&1 || true
 
+# Keep the derived index canonical after a merge git resolved on its own
+# (issue #330). This does NOT rescue a conflicted merge — git never fires
+# post-merge when the merge fails; that case is the operator running
+# `npm run memory:resolve-index` by hand. Here nothing is unmerged, so the
+# command only regenerates and stages nothing.
+# || true: index hygiene is informational, never a merge blocker.
+node "$repo_root/brain/scripts/memory/cli.mjs" resolve-index >/dev/null 2>&1 || true
+
 exit 0

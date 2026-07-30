@@ -296,6 +296,9 @@ export default {
   // ── memory/cli.mjs — reindex (issue #205, C1) ─────────────────────────────────
   'memory.reindex.done':   '✓ reindex complete — {count} record(s) indexed.',
   'memory.reindex.failed': '✗ reindex failed — {message}',
+  'memory.resolveIndex.done':   '✓ index regenerated from records/ — {count} record(s). Nothing was unmerged, so nothing was staged.',
+  'memory.resolveIndex.staged': '✓ index conflict resolved — {count} record(s) regenerated from records/ and staged. Finish the merge with `git commit`.',
+  'memory.resolveIndex.failed': '✗ resolve-index failed — {message}',
 
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.secretFound': 'Secret detected in {file}:{line} — pattern "{pattern}" matched. Redact the secret, or add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive. Run `gunzip -c {file} | jq .` to inspect (the line number is against that pretty-printed view).',

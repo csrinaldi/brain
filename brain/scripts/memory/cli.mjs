@@ -56,6 +56,7 @@ const VALID_OPS = [
   "import",
   "index",
   "reindex",
+  "resolve-index",
   "migrate-v1",
   "setup",
   "feature-checkpoint",
@@ -91,6 +92,25 @@ if (op === "reindex") {
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.reindex.failed", { message: err.message })}`);
+    process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// "resolve-index" — the doctrine-fixed resolution for a conflicted
+// .memory/index.jsonl: discard both sides, regenerate from records/, and stage
+// it only if git still considers the path unmerged (adr-0017:121-129, 143-147).
+// Backend-agnostic for the same reason as "reindex" above.
+// ---------------------------------------------------------------------------
+if (op === "resolve-index") {
+  const { resolveIndex } = await import("./lib/resolve-index.mjs");
+  try {
+    const { count, staged } = resolveIndex({ repoRoot });
+    const key = staged ? "memory.resolveIndex.staged" : "memory.resolveIndex.done";
+    console.log(`memory/cli: ${await t(key, { count })}`);
+    process.exit(0);
+  } catch (err) {
+    console.error(`memory/cli: ${await t("memory.resolveIndex.failed", { message: err.message })}`);
     process.exit(1);
   }
 }
