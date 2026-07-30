@@ -100,6 +100,7 @@ const PROVIDERS = {
     mrCreate: githubRawCallArgs,
     issueView: jsonSpawnCallArgs,
     mrList: jsonSpawnCallArgs,
+    issueList: jsonSpawnCallArgs,
   },
   gitlab: {
     module: gitlab,
@@ -113,6 +114,9 @@ const PROVIDERS = {
     // PROVIDERS.github.mrList. That is the honest encoding of "both
     // providers share one transport for this verb", not a copy-paste error.
     mrList: jsonSpawnCallArgs,
+    // gitlab.issueList spawns `glab` via runJson for the same reason
+    // gitlab.mrList does (design D1) — same shared function object.
+    issueList: jsonSpawnCallArgs,
   },
 };
 
@@ -124,6 +128,7 @@ for (const providerName of Object.keys(PROVIDERS)) {
     mrCreate: mrCreateArgs,
     issueView: issueViewArgs,
     mrList: mrListArgs,
+    issueList: issueListArgs,
   } = PROVIDERS[providerName];
 
   // ── labelEvents ────────────────────────────────────────────────────────
@@ -335,6 +340,101 @@ for (const providerName of Object.keys(PROVIDERS)) {
     );
   });
 
+  // ── issueList (issue #362, M10 Phase 2 rank-4) ──────────────────────────
+  // `({ project, state, assignee }) -> [{ number, title, labels }]`. Like
+  // `mrList`, `issueList` does NOT wrap its transport call — `runJson` throws
+  // on a non-zero exit or malformed JSON (exec.mjs:31-32), and neither
+  // provider catches it. BUT the reason this throw is pinned is the OPPOSITE
+  // of why mrList's is (design D3): every `issueList` call site already
+  // ABSORBS the throw — `tracker-board.mjs:44-47`'s `safeList` wraps it in
+  // try/catch and returns `[]`; `project-status.mjs:115-130` wraps the call
+  // (and the sibling `mrList` call) in its own try/catch. So the throw is
+  // CONTAINED and load-bearing here, not merely out of scope to fix.
+  //
+  // D1 — the `assignee` parameter is DELIBERATELY EXCLUDED from this loop.
+  // Every assignee value produces the identical result shape from the
+  // identical response payload; only the query string varies, and that is
+  // already unit-tested at `cli.test.mjs:110-116`. Tracing what would
+  // silently go green if `assignee: 'me'` were added under this loop's
+  // uniform-response stub (one fixed response for every spawn call): `
+  // whoami()` would receive the ISSUES ARRAY back instead of a user object,
+  // so `resp.login`/`resp.username` would be `undefined`;
+  // `assigneeParams('github', 'me', undefined)` falls back to a
+  // plausible-looking `{ assignee: '@me' }`; `assigneeParams('gitlab', 'me',
+  // undefined)` yields `{ assignee_username: undefined }`, which `toQs`
+  // filters out but still leaves a truthy `extra`, producing a malformed
+  // trailing `&` in the endpoint. The second `runJson` call then returns the
+  // same array again and normalizes cleanly — a GREEN test for the WRONG
+  // reason. Do not "improve" this coverage by adding `assignee` here.
+  test(`${providerName}.issueList (contract): happy fixture normalizes to exactly { number, title, labels } per entry`, async () => {
+    const fixtureName = `${providerName}-issueList-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.issueList({ project: 'x/y', state: 'open', ...issueListArgs(fixture) });
+
+    assert.ok(result.length >= 2, 'happy fixture must exercise at least 2 surviving entries');
+    for (const entry of result) {
+      assert.deepEqual(
+        Object.keys(entry).sort(),
+        ['labels', 'number', 'title'],
+        'each issueList entry must normalize to EXACTLY { number, title, labels } — no narrowed or widened shape',
+      );
+      for (const label of entry.labels) {
+        assert.equal(
+          typeof label,
+          'string',
+          'each label must be a bare name string — GitHub unwraps label objects via .map(l => l.name), GitLab is already a flat string array',
+        );
+      }
+    }
+    // Full-array lock: pins values AND order (neither provider sorts — the
+    // API's own ordering surfaces as-is, and project-status.mjs:118 prints in
+    // that order). Expected values are hardcoded from the fixture's own known
+    // content rather than re-derived from fixture.data via the same
+    // number/iid/labels mapping the normalizer performs — doing so would let
+    // a normalizer bug that mirrors this test's mapping pass undetected.
+    const expected =
+      providerName === 'github'
+        ? [
+            { number: 362, title: 'feat(m10-phase2): issueList contract-parity coverage (rank 4)', labels: ['type:feature', 'status:needs-review'] },
+            { number: 361, title: 'fix(memory): index self-healing is backend-asymmetric — engram.share() reindexes conditionally and engram.pull() never does', labels: [] },
+            { number: 358, title: 'Q5 — Architecture decision: doctrine tiers (lite/standard/regulated)', labels: [] },
+            { number: 340, title: 'fix(governance): issue-link local check and CI job implement the same rule differently — brain:check greenlights PRs that CI rejects', labels: ['type:bug', 'status:needs-review'] },
+            { number: 336, title: 'feat(vcs): M10 Phase 1 — port-verb contract coverage audit (detection only)', labels: ['type:feature', 'status:needs-review'] },
+            { number: 329, title: 'fix(governance): actor-check L5 and #124 are mutually unsatisfiable for a solo maintainer', labels: ['type:bug'] },
+          ]
+        : [
+            { number: 42, title: 'Add pagination guard to labelList', labels: ['type:bug', 'status:needs-review'] },
+            { number: 41, title: 'Fix issueView author normalization', labels: [] },
+          ];
+    assert.deepEqual(result, expected);
+  });
+
+  test(`${providerName}.issueList (contract): an empty open-list yields [], never a fabricated null/undefined`, async () => {
+    const fixtureName = `${providerName}-issueList-empty.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.issueList({ project: 'x/y', state: 'open', ...issueListArgs(fixture) });
+    assert.deepEqual(
+      result,
+      [],
+      "tracker-board.mjs:58's myIssues.length is unguarded — null/undefined would crash it with an uncaught TypeError at ESM top level; [] is the only safe return",
+    );
+  });
+
+  test(`${providerName}.issueList (contract): a transport failure REJECTS — caller-absorbed at both call sites, unlike mrList's out-of-scope pin`, async () => {
+    const fixtureName = `${providerName}-issueList-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.rejects(
+      () => vcs.issueList({ project: 'x/y', state: 'open', ...issueListArgs(fixture) }),
+      "issueList must REJECT on a transport failure — tracker-board.mjs:44-47's safeList catches it and returns [], and project-status.mjs:115-130 wraps the call in its own try/catch; both sites already absorb the throw, so it is CONTAINED and load-bearing here, not merely pinned because fixing it is out of scope (contrast with mrList's design D3 rationale)",
+    );
+  });
+
   // ── mrCreate ───────────────────────────────────────────────────────────
   test(`${providerName}.mrCreate (contract): happy fixture returns { url }`, async () => {
     const fixtureName = `${providerName}-mrCreate-happy.json`;
@@ -373,6 +473,38 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assert.equal(typeof result.error, 'string', 'a failed mrCreate must carry an error string');
   });
 }
+
+// ── issueList pull_request filter (issue #362, M10 Phase 2 rank-4) ─────────
+// GitHub-only: GitLab's `projects/:id/issues` endpoint returns only issues —
+// there is nothing to filter, so an `if (providerName === 'github')` branch
+// inside the parity loop above would be exactly the provider-asymmetric
+// concern that loop exists to prevent (design D2). This follows the file's
+// own precedent for asymmetric concerns (BASE_REF_PROVIDERS below,
+// prStatusRollup, labelList). The assertion is ARITHMETIC, not a fixture
+// spot-check the reader must count by hand: `prCount >= 1` fails loudly if
+// the fixture is ever re-recorded from a repo with no open PRs, rather than
+// silently degrading into a tautology — this is the one assertion in this
+// change that guards the fixture itself, not the normalizer.
+test('github.issueList (contract): the pull_request filter is proven arithmetically against the recorded happy fixture', async () => {
+  const fixtureName = 'github-issueList-happy.json';
+  const fixture = loadFixture(fixtureName);
+  assertProvenance(fixture, fixtureName);
+  setSpawn(jsonSpawn(fixture.data));
+
+  const result = await github.issueList({ project: 'x/y', state: 'open' });
+
+  const prCount = fixture.data.filter(r => r.pull_request).length;
+  assert.ok(prCount >= 1, 'the recorded fixture must contain at least one PR entry — otherwise this test is vacuous');
+  assert.equal(
+    result.length,
+    fixture.data.length - prCount,
+    'every PR-carrying entry must be filtered out, and no non-PR entry may be dropped alongside them',
+  );
+  for (const entry of result) {
+    const source = fixture.data.find(r => r.number === entry.number);
+    assert.ok(!source.pull_request, 'no PR-carrying source entry may survive the filter');
+  }
+});
 
 // ── prView baseRefOid (ADR-0022 Decision 1) ─────────────────────────────────
 // GH sources it via a SECOND, supplementary `gh api repos/{owner}/{repo}/
