@@ -138,7 +138,7 @@ TASK BOUNDARY: 7.2 must be observed RED before 7.3. ✔ (observed in the rework 
 - [x] 8.6 Pushed `7038332..d5a5227`. **All 8 governance jobs SUCCESS** on `d5a5227`: issue-link,
       diff-size, memory-gate, decision-gate, local-checks, phase-order, actor-check,
       brain-writes-reviewed.
-- [ ] 8.7 **BLOCKED — cold re-review not obtained.** The prior verdict was BLOCK at a `head_sha`
+- [x] 8.7a **Two obstacles found on the way to a re-review.** The prior verdict was BLOCK at a `head_sha`
       that no longer exists (`reviewed:stale`, `reviewer-protocol.md` §8), so `d5a5227` currently
       carries **no** cold verdict. Two obstacles found, one fixed and one open:
       - **Fixed (operator workaround):** `npm run brain:review` refuses with
@@ -152,8 +152,43 @@ TASK BOUNDARY: 7.2 must be observed RED before 7.3. ✔ (observed in the rework 
         ad-hoc manual review for the canonical entrypoint, and the orchestrator running it itself
         would forfeit the context-coldness that is the whole point (the orchestrator authored
         `d5a5227`; §10 makes self-review an abstention case).
-      Re-run when the API recovers:
-      `export BRAIN_REVIEWER_TOKEN=... && npm run brain:review -- --pr 360`.
+- [x] 8.7b **Verdict obtained by the owner running the command directly** —
+      `brain-review/1`, `verdict: APPROVE`, `head_sha: c9cd10b`, `rev: 1`, `findings: []`,
+      `conditions: []`, `escalate: null`. Gates re-derived cold: required
+      `[issue-link, diff-size, local-checks, memory-gate, decision-gate]`, detection
+      `[phase-order, actor-check, brain-writes-reviewed]`. Posted as
+      `pullrequestreview-4814049813`.
+      **Read this APPROVE with its stated caveat — it is NOT an independent cold verdict.** The run
+      opened with `brain:review: self-review guard inactive — populate reviewer.handle (task 7.3)`.
+      `brain.config.json` has `reviewer.handle: ""`, the posting identity is `csrinaldi`, and the PR
+      author is `csrinaldi` — so §10 ("a reviewer whose handle equals the PR author MUST abstain")
+      should have fired and structurally could not. That fail-open is **deliberate and documented**:
+      `P290-ABSTAIN-FAIL-OPEN` at `review/cli.mjs:114-122` — pre-task-7.3 no dedicated reviewer
+      identity exists (§11), so a strict guard would abstain from everything; the design chooses a
+      LOUD warning over a closed door. Procedurally valid output; not independent judgment.
+      **The §2 locks held regardless**: both reviews on #360 are `COMMENTED`, never `APPROVED`, so
+      the verdict contributes nothing to L6's approver set
+      (`brain-writes-reviewed.mjs:99` filters `state === 'APPROVED'`) and nothing to `main`'s
+      `required_approving_review_count`. The merge keystroke remains human-only, as designed.
+      **Nothing to fix from the verdict** — `findings: []`. No work was invented to fill it.
+
+## Open findings from the review RUN (not from its verdict)
+
+Three observations about the tooling, none blocking this PR:
+
+- **`fatal: '/tmp/brain-review-<sha>' is not a working tree` is benign noise.**
+  `review/cold-boot.mjs:67` wraps `git worktree remove --force` in `try/catch` ("not a registered
+  worktree") before `worktree add`; the child's stderr just leaks through. **But there is no
+  teardown** — each run leaves its worktree registered
+  (`/tmp/brain-review-c9cd10bb...` is live now; a prunable `/tmp/brain-review-70383327...` survived
+  the previous run). Registrations accumulate, which is why the remove-before-add dance is needed
+  at all.
+- **`reviewer-protocol.md` contradicts itself on the verdict protocol version.** §6 (line 153)
+  defines the schema as `brain-review/1`; §13 (line 304) requires that output "strictly produces
+  `brain-review/2` fenced blocks with full causal admission and evidence validation". The tool emits
+  `/1`, following §6. The doc is still `status: proposed — pending human signature`, so this is doc
+  drift to resolve at signature time, not a code defect.
+- **`brain:review`'s token refusal misdiagnoses itself** — see 8.7's first bullet above and #316.
 
 ---
 
