@@ -973,6 +973,67 @@ for (const providerName of Object.keys(BRANCH_PROTECT_PROVIDERS)) {
   });
 }
 
+// ── rerunWorkflowRun (GitHub-only, issue #328) ──────────────────────────────
+// No GitLab equivalent is implemented (deliberately out of scope) — this verb
+// is absent from cli.mjs's VERBS array on purpose (that array is reserved for
+// verbs BOTH providers implement, enforced by verb-contract-drift-guard's
+// "every function exported by BOTH REAL providers" check; since gitlab.mjs
+// has no sibling export, this verb never trips it). GitHub-only, hence no
+// parity loop over PROVIDERS — a single direct suite against `github.mjs`,
+// same precedent as the `github.issueList` pull_request-filter test and the
+// `github.labelList --paginate` test above (both GitHub-only, both outside
+// the shared loop).
+
+test('github.rerunWorkflowRun (contract): picks the newest run matching the target workflow path and POSTs a FULL rerun (never rerun-failed-jobs)', async () => {
+  const fixtureName = 'github-rerunWorkflowRun-happy.json';
+  const fixture = loadFixture(fixtureName);
+  assertProvenance(fixture, fixtureName);
+
+  const calls = [];
+  setSpawn((_cmd, args) => {
+    calls.push(args);
+    if (args.includes('-X')) return { status: 0, stdout: '', stderr: '' };
+    return { status: 0, stdout: JSON.stringify(fixture.data), stderr: '' };
+  });
+
+  const result = await github.rerunWorkflowRun({ project: 'x/y', ref: 'fix/issue-328-x', workflow: 'governance.yml' });
+
+  assert.deepEqual(
+    result,
+    { ok: true, runId: 55500 },
+    'must pick the newest governance.yml run (55500) — never the non-matching release.yml run (55501) above it, nor the older governance.yml run (55499) below it',
+  );
+
+  const rerunCall = calls.find(a => a.includes('-X'));
+  assert.ok(rerunCall, 'a rerun API call must have been made');
+  assert.ok(
+    rerunCall.some(a => /\/actions\/runs\/55500\/rerun$/.test(a)),
+    'must POST to the FULL rerun endpoint for the matched run (55500)',
+  );
+  assert.ok(
+    !rerunCall.some(a => /rerun-failed-jobs/.test(a)),
+    'must NEVER call rerun-failed-jobs — that silently skips an already-green job stuck on stale evidence, the exact stale-GREEN bug this verb exists to fix (issue #328)',
+  );
+});
+
+test('github.rerunWorkflowRun (contract): no run matches the target workflow — returns { ok: false, reason }, never throws', async () => {
+  const fixtureName = 'github-rerunWorkflowRun-empty.json';
+  const fixture = loadFixture(fixtureName);
+  assertProvenance(fixture, fixtureName);
+  setSpawn(jsonSpawn(fixture.data));
+
+  const result = await github.rerunWorkflowRun({ project: 'x/y', ref: 'fix/issue-328-x', workflow: 'governance.yml' });
+  assert.equal(result.ok, false, 'no matching run must never fabricate ok:true');
+  assert.equal(typeof result.reason, 'string', 'must carry a reason string');
+});
+
+test('github.rerunWorkflowRun (contract): a list-runs API failure returns { ok: false, reason }, never throws', async () => {
+  setSpawn(failSpawn('fixture: simulated failure'));
+  const result = await github.rerunWorkflowRun({ project: 'x/y', ref: 'fix/issue-328-x' });
+  assert.equal(result.ok, false, 'a transport failure must never fabricate ok:true');
+  assert.equal(typeof result.reason, 'string', 'must carry a reason string');
+});
+
 // ── REQ-266-3 (lock 2): no code path can emit an APPROVE review, on any provider ──
 
 test('REQ-266-3 lock 2: github.prReviewComment sends event:\'COMMENT\' to the API regardless of input — no argument selects a different event', async () => {
