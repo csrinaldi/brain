@@ -21,6 +21,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { evaluateActor } from './actor-check.mjs';
+
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 function shippedConfig() {
@@ -89,4 +91,38 @@ test('the two governance actor keys share no identity at all (no key feeds two g
   // cannot quietly acquire both semantics.
   const overlap = review.filter(a => approval.includes(a));
   assert.deepEqual(overlap, [], `identities must not appear in both reviewActors and approvalActors — found: ${overlap.join(', ')}`);
+});
+
+// ── issue #375 — the shipped config must actually DENY, not just be well-shaped
+//
+// The four tests above assert the config's SHAPE. This one asserts its
+// BEHAVIOUR: it feeds the shipped `governance.reviewActors` straight into the
+// real L5 evaluator and pins that the shipped `reviewer.handle` is refused.
+//
+// Kept separate from `actor-check.test.mjs`'s unit tests on purpose. Those use
+// a fixture identity, so they would stay green if the shipped config named a
+// handle that no longer matched the deny list — the exact green-in-test /
+// inert-in-production gap that let the reviewer unlock a real PR (#374's
+// transient `actor-check` SUCCESS, caused by csrinaldibot applying the approved
+// label). Shape and behaviour are two different claims; assert both.
+
+test('#375: the SHIPPED reviewer handle is DENIED by L5 when it applies the approved label', () => {
+  const config = shippedConfig();
+  const handle = config?.reviewer?.handle;
+
+  const result = evaluateActor({
+    // Neither author is the reviewer — so rule 5 (self-approval) cannot be what
+    // catches it. Only the deny-set can.
+    author: 'some-pr-author',
+    issueAuthor: 'some-issue-author',
+    labeledEvents: [{ actor: { login: handle } }],
+    denyActors: actorList(config, 'reviewActors'),
+    botAllowlist: actorList(config, 'approvalActors'),
+  });
+
+  assert.equal(
+    result.level,
+    'fail',
+    `the shipped reviewer.handle "${handle}" must be refused by L5 — a review identity may never unlock the approved label (reviewer-protocol.md §9)`,
+  );
 });
