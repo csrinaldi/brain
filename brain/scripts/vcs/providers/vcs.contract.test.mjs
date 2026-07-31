@@ -11,7 +11,8 @@
 //
 // Fixtures live in `../fixtures/*.json` (REQ-A3-6) — recorded from the real
 // GitHub API where reachable (github-labelEvents-happy.json,
-// github-prView-happy.json — see fixtures/record-fixtures.mjs), DERIVED
+// github-prView-happy.json, github-prReviews-happy.json — see
+// fixtures/record-fixtures.mjs), DERIVED
 // (hand-authored from the documented API shape) everywhere else (all
 // gitlab-*.json — no live GitLab mirror reachable from this environment,
 // deferred to CP-A3b/SCIT; every github-*-failure.json and
@@ -29,6 +30,11 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { setSpawn } from '../lib/exec.mjs';
+// The REAL production parser the reviewer's flow guarantees run on (issue
+// #317). Imported here on purpose: the `prReviews` block below feeds this
+// suite's REAL normalizer output straight into it, so "the adapter emits a
+// parseable verdict" is asserted end-to-end rather than assumed.
+import { parseVerdict } from '../../review/lib/parse-verdict.mjs';
 
 import * as github from './github.mjs';
 import * as gitlab from './gitlab.mjs';
@@ -92,6 +98,25 @@ function gitlabCallArgs(fixture) {
   };
 }
 
+// gitlab.prReviews (issue #317) is the ONLY verb that reads TWO endpoints —
+// MR notes (the verdict thread) and MR approvals (the L6 approver roster) —
+// so the uniform single-payload `gitlabCallArgs` above cannot serve it: one
+// fixed response for both calls would feed the notes payload to the approvals
+// normalizer (and vice versa), producing a green test for the wrong reason.
+// This glue dispatches on the request URL, serving each endpoint its own half
+// of `fixture.data`. `page`-aware: any page past the first returns `[]`, the
+// short-page terminator the verb's pagination loop stops on.
+function gitlabPrReviewsCallArgs(fixture) {
+  return {
+    fetchImpl: async (url) => {
+      if (fixture.throws) return { ok: false, status: fixture.status ?? 500 };
+      if (url.includes('/approvals')) return { ok: true, json: async () => fixture.data.approvals };
+      const firstPage = !/[?&]page=(?!1\b)\d+/.test(url);
+      return { ok: true, json: async () => (firstPage ? fixture.data.notes : []) };
+    },
+  };
+}
+
 // authCheck/authLogin (issues #364/#365, M10 Phase 2 ranks 5-6) call the raw
 // `run()` wrapper, not `runJson()` — there is no JSON body to parse, only an
 // exit status (`run()`'s `ok: r.status === 0`). Reusing `jsonSpawnCallArgs`
@@ -115,6 +140,7 @@ const PROVIDERS = {
     issueList: jsonSpawnCallArgs,
     authCheck: rawStatusCallArgs,
     authLogin: rawStatusCallArgs,
+    prReviews: jsonSpawnCallArgs,
   },
   gitlab: {
     module: gitlab,
@@ -136,6 +162,9 @@ const PROVIDERS = {
     // shared function object, same "one transport, both providers" honesty.
     authCheck: rawStatusCallArgs,
     authLogin: rawStatusCallArgs,
+    // gitlab.prReviews reads TWO endpoints over gitlabApiFetch (issue #317),
+    // so it needs the URL-dispatching glue rather than the uniform one.
+    prReviews: gitlabPrReviewsCallArgs,
   },
 };
 
@@ -150,6 +179,7 @@ for (const providerName of Object.keys(PROVIDERS)) {
     issueList: issueListArgs,
     authCheck: authCheckArgs,
     authLogin: authLoginArgs,
+    prReviews: prReviewsArgs,
   } = PROVIDERS[providerName];
 
   // ── labelEvents ────────────────────────────────────────────────────────
@@ -509,6 +539,97 @@ for (const providerName of Object.keys(PROVIDERS)) {
         assert.equal(result, false, 'authLogin must return the exact boolean false on a non-zero exit, not merely a falsy value');
       },
       'authLogin must resolve on a non-zero exit — run() never throws (exec.mjs:20-23)',
+    );
+  });
+
+  // ── prReviews (issue #317) ──────────────────────────────────────────────
+  //
+  // `({ project, number, ... }) -> Promise<Array<{ state, author, body }>|null>`.
+  //
+  // WHY THIS BLOCK EXISTS. Every one of the reviewer's flow guarantees —
+  // the anti-loop lock (poster.mjs's `lastVerdict`), the `rev >= 3 -> STOP`
+  // bound (verdict.mjs's `priorRevCount`), the §8 prior-verdict doctrine
+  // load, and board reconciliation — is reconstructed from ONE input:
+  // `cold-boot`'s `doctrine.priorVerdicts`, which is `prReviews(...)` mapped
+  // through `parseVerdict`. `parseVerdict` needs a STRING `body`.
+  //
+  // Before #317 neither provider emitted one. GitHub's normalizer dropped
+  // `body`; GitLab's read the APPROVALS endpoint, which has no bodies at all
+  // and no verdict thread. So `priorVerdicts` was ALWAYS `[]` in production
+  // and all four guarantees were inert — while their unit tests stayed green
+  // because cold-boot.test.mjs and board.test.mjs injected a `body` no real
+  // adapter ever emitted (cold-boot.mjs even carried a comment admitting it).
+  //
+  // The masking is what these tests exist to kill, so the central assertion
+  // is deliberately NOT "the shape has a body key". It is: run the REAL
+  // normalizer output through the REAL `parseVerdict` and require a verdict
+  // back. That is the only assertion an adapter cannot satisfy while still
+  // being broken in production — a shape-only check would go green again the
+  // moment someone normalized `body` to `undefined`, and a hand-written
+  // review object in the test would reintroduce exactly the injection this
+  // block replaces.
+  test(`${providerName}.prReviews (contract): happy fixture normalizes to exactly { state, author, body } per entry`, async () => {
+    const fixtureName = `${providerName}-prReviews-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.prReviews({ project: 'x/y', number: 1, ...prReviewsArgs(fixture) });
+
+    assert.ok(Array.isArray(result), 'prReviews must return an array on a successful fetch');
+    assert.ok(result.length >= 2, 'happy fixture must exercise at least 2 entries');
+    for (const entry of result) {
+      assert.deepEqual(
+        Object.keys(entry).sort(),
+        ['author', 'body', 'state'],
+        'each prReviews entry must normalize to EXACTLY { state, author, body } — a narrowed shape is the #317 defect itself',
+      );
+      assert.equal(
+        typeof entry.body,
+        'string',
+        'body must ALWAYS be a string — parse-verdict.mjs:36 rejects a non-string outright, so null/undefined silently empties priorVerdicts',
+      );
+      assert.notEqual(entry.author, undefined, 'author key must be present (null is valid — undefined is not)');
+      // No provider-specific field name may leak through the contract.
+      assert.ok(!('user' in entry), 'must not leak GitHub user object (only author)');
+      assert.ok(!('username' in entry), 'must not leak raw GitLab username (only author)');
+      assert.ok(!('system' in entry), 'must not leak GitLab note system flag');
+      assert.ok(!('created_at' in entry), 'must not leak raw created_at');
+    }
+  });
+
+  // THE anti-masking test. This is the assertion #317 turns on.
+  test(`${providerName}.prReviews (contract): the REAL normalizer output parses into a verdict via the REAL parseVerdict — priorVerdicts is no longer always empty`, async () => {
+    const fixtureName = `${providerName}-prReviews-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.prReviews({ project: 'x/y', number: 1, ...prReviewsArgs(fixture) });
+
+    // Exactly cold-boot.mjs's `reviews.map(r => parseVerdict(r)).filter(Boolean)`
+    // — the same expression, not a re-implementation, so a divergence between
+    // this suite and production cannot hide here.
+    const priorVerdicts = result.map(r => parseVerdict(r)).filter(Boolean);
+
+    assert.ok(
+      priorVerdicts.length >= 1,
+      'the adapter\'s own output must yield at least one parsed verdict — an empty priorVerdicts is the #317 production defect: anti-loop dead, rev-bound dead, doctrine load dead, board reconciliation dead',
+    );
+    const latest = priorVerdicts[priorVerdicts.length - 1];
+    assert.equal(typeof latest.head_sha, 'string', 'the parsed verdict must carry head_sha — poster.mjs compares it against the current head to suppress a duplicate re-post');
+    assert.ok(['APPROVE', 'REVISE', 'STOP'].includes(latest.verdict), 'the parsed verdict must carry a recognized verdict scalar — board.mjs denormalizes it to reviewed:*');
+    assert.notEqual(latest.author, undefined, 'the parsed verdict must carry author — poster.mjs\'s anti-loop compares it against the reviewer handle');
+  });
+
+  test(`${providerName}.prReviews (contract): a fetch failure yields null, never a fabricated []`, async () => {
+    const fixtureName = `${providerName}-prReviews-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.prReviews({ project: 'x/y', number: 1, ...prReviewsArgs(fixture) });
+    assert.equal(
+      result,
+      null,
+      'an uncomputable prReviews fetch must return null, never [] — the L6 gate distinguishes "nobody approved" from "could not fetch"',
     );
   });
 
@@ -1036,4 +1157,169 @@ test('branchProtect (M10 Phase 2): GitLab requiredReviews is accepted but never 
     /approvals|approval[_-]?rules/i,
     'the full gitlab.mjs file DOES contain an approvals reference (prReviews) — proving the branchProtect-scoped scan above is a genuine narrowing, not a no-op',
   );
+});
+
+// ── prReviews provider-specific divergences (issue #317) ────────────────────
+//
+// The parameterized block above pins what BOTH providers must promise. These
+// pin the two places they legitimately differ, plus the security boundary
+// that difference creates.
+
+test('github.prReviews (contract): a review with no comment normalizes body to \'\' (never null — null means uncomputable)', async () => {
+  // GitHub returns `body: null` for a review submitted with no comment (the
+  // common case for a bare APPROVED). The key is present in the payload but
+  // null, so `''` can only come from the normalizer's `?? ''` guard — the
+  // same empty-vs-uncomputable rule prView.body follows (A3 task 3.7).
+  setSpawn(jsonSpawn([{ state: 'APPROVED', user: { login: 'bob' }, body: null }]));
+  const result = await github.prReviews({ project: 'o/r', number: 144 });
+  assert.deepEqual(result, [{ state: 'APPROVED', author: 'bob', body: '' }]);
+});
+
+test('github.prReviews (contract): body passes through VERBATIM — no trimming, no re-encoding of the fenced verdict block', async () => {
+  // parseVerdict matches on the fence and on line-anchored `key: value`
+  // scalars, so any normalization of whitespace or fences would break the
+  // recovery while leaving a plausible-looking string in place.
+  const body = '```yaml\nprotocol: brain-review/1\nverdict: STOP\nhead_sha: abc123\nrev: 4\n```';
+  setSpawn(jsonSpawn([{ state: 'COMMENTED', user: { login: 'brain-reviewer' }, body }]));
+  const [entry] = await github.prReviews({ project: 'o/r', number: 144 });
+  assert.equal(entry.body, body, 'body must be byte-identical to the API payload');
+  assert.deepEqual(parseVerdict(entry), { head_sha: 'abc123', rev: 4, verdict: 'STOP', author: 'brain-reviewer' });
+});
+
+// SECURITY BOUNDARY. GitLab's verdict thread lives in MR notes, but the L6
+// brain-writes-reviewed gate counts ONLY `state === 'APPROVED'`. If notes
+// normalized to APPROVED, anyone could clear the self-approval gate by typing
+// a comment. The happy fixture's approver ('bob') is a different identity from
+// every note author, so this cannot pass by coincidence.
+test('gitlab.prReviews (contract): MR notes normalize to COMMENTED and NEVER to APPROVED — only the approvals endpoint may produce an approver', async () => {
+  const fixture = loadFixture('gitlab-prReviews-happy.json');
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    ...gitlabPrReviewsCallArgs(fixture),
+  });
+
+  const approvers = result.filter(r => r.state === 'APPROVED').map(r => r.author);
+  assert.deepEqual(
+    approvers,
+    ['bob'],
+    'the ONLY APPROVED entry must be the approvals endpoint\'s approver — a note author appearing here would let a plain MR comment clear the L6 self-approval gate',
+  );
+
+  const noteAuthors = new Set(result.filter(r => r.state === 'COMMENTED').map(r => r.author));
+  assert.ok(noteAuthors.has('brain-reviewer'), 'the reviewer\'s verdict note must be present, as COMMENTED');
+  assert.ok(noteAuthors.has('alice'), 'a plain human note must be present, as COMMENTED');
+  assert.ok(!noteAuthors.has('bob'), 'sanity: the approver is not also a note author, so the assertion above is load-bearing');
+});
+
+test('gitlab.prReviews (contract): GitLab system notes are dropped — activity records are not reviewer speech', async () => {
+  const fixture = loadFixture('gitlab-prReviews-happy.json');
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    ...gitlabPrReviewsCallArgs(fixture),
+  });
+  assert.ok(
+    fixture.data.notes.some(n => n.system === true),
+    'sanity: the fixture must actually contain a system note, or this assertion is vacuous',
+  );
+  assert.ok(
+    !result.some(r => r.author === 'gitlab-bot'),
+    'the system note\'s author must not appear — system notes ("changed target branch from ...") are GitLab\'s own activity records',
+  );
+});
+
+test('gitlab.prReviews (contract): requests notes oldest-first — poster.mjs/board.mjs take the LAST parsed verdict as current', async () => {
+  // GitLab's notes endpoint defaults to NEWEST-first, which would invert
+  // "latest verdict wins" and make the anti-loop compare against the oldest
+  // verdict on the thread. The sort must be requested explicitly.
+  const urls = [];
+  await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async (url) => {
+      urls.push(url);
+      return { ok: true, json: async () => (url.includes('/approvals') ? { approved_by: [] } : []) };
+    },
+  });
+  const notesUrl = urls.find(u => u.includes('/notes'));
+  assert.ok(notesUrl, 'sanity: a notes request must have been made');
+  assert.match(notesUrl, /sort=asc/, 'notes must be requested ascending — GitLab defaults to newest-first');
+  assert.match(notesUrl, /order_by=created_at/, 'notes must be ordered by created_at, not the default id ordering');
+});
+
+test('gitlab.prReviews (contract): paginates the notes thread — with sort=asc an unpaginated fetch drops the LATEST verdict', async () => {
+  // This is sharper than GitHub's --paginate guard: page 1 holds the OLDEST
+  // notes, so truncation loses exactly the verdict the anti-loop needs.
+  const perPage = 100;
+  const page1 = Array.from({ length: perPage }, (_, i) => ({
+    id: i,
+    body: 'noise',
+    author: { username: 'alice' },
+    created_at: '2026-07-10T10:00:00.000Z',
+    system: false,
+  }));
+  const page2 = [{
+    id: 999,
+    body: '```yaml\nprotocol: brain-review/1\nverdict: REVISE\nhead_sha: deadbeef\nrev: 2\n```',
+    author: { username: 'brain-reviewer' },
+    created_at: '2026-07-10T12:00:00.000Z',
+    system: false,
+  }];
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async (url) => {
+      if (url.includes('/approvals')) return { ok: true, json: async () => ({ approved_by: [] }) };
+      const page = Number(new URL(url).searchParams.get('page'));
+      return { ok: true, json: async () => (page === 1 ? page1 : page === 2 ? page2 : []) };
+    },
+  });
+
+  assert.equal(result.length, perPage + 1, 'both pages of notes must be present');
+  const verdicts = result.map(r => parseVerdict(r)).filter(Boolean);
+  assert.equal(verdicts.length, 1, 'the page-2 verdict must survive');
+  assert.equal(verdicts[0].head_sha, 'deadbeef', 'the LATEST verdict lives on page 2 — an unpaginated fetch would silently lose it');
+});
+
+test('gitlab.prReviews (contract): an approvals failure yields null even when notes succeed — a notes-only result would fail-OPEN on the L6 gate', async () => {
+  // The dangerous shape: returning the notes half alone hands
+  // evaluateBrainWritesReviewed an empty approver set that is
+  // indistinguishable from a genuine "nobody approved".
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async (url) =>
+      url.includes('/approvals')
+        ? { ok: false, status: 403 }
+        : { ok: true, json: async () => [{ id: 1, body: 'hi', author: { username: 'alice' }, system: false }] },
+  });
+  assert.equal(result, null, 'a partial fetch must degrade to null (uncomputable), never to a half-populated array');
+});
+
+test('gitlab.prReviews (contract): a notes failure yields null even when approvals succeed — a half result would silently empty the verdict thread', async () => {
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async (url) =>
+      url.includes('/approvals')
+        ? { ok: true, json: async () => ({ approved_by: [{ user: { username: 'bob' } }] }) }
+        : { ok: false, status: 500 },
+  });
+  assert.equal(result, null, 'losing the notes half must be uncomputable, not a verdict-free approvals list');
+});
+
+test('gitlab.prReviews (contract): source reads BOTH the notes and approvals endpoints — neither half may be dropped', () => {
+  // Structural companion to the behavioral tests above: a regression that
+  // reverts to approvals-only (the #317 defect) or drops approvals in favor
+  // of notes-only (the fail-open) is caught here even if a future fixture
+  // stops exercising one half.
+  const src = readFileSync(fileURLToPath(new URL('./gitlab.mjs', import.meta.url)), 'utf8');
+  const start = src.indexOf('export async function prReviews');
+  assert.notEqual(start, -1, 'gitlab.mjs must still export prReviews');
+  const end = src.indexOf('\nexport ', start + 1);
+  const body = src.slice(start, end === -1 ? undefined : end);
+
+  assert.match(body, /merge_requests\/\$\{number\}\/notes/, 'prReviews must fetch MR notes — the verdict thread lives there, and approvals alone carries no body (the #317 defect)');
+  assert.match(body, /merge_requests\/\$\{number\}\/approvals/, 'prReviews must still fetch approvals — the L6 brain-writes-reviewed gate reads only APPROVED entries');
 });
