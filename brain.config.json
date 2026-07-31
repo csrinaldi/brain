@@ -13,6 +13,7 @@
     "provider": "github"
   },
   "governance": {
+    "auditBaseline": "v1.0.0",
     "tier": "lite",
     "ignoreList": [
       "**/*.golden.json",
