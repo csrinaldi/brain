@@ -36,6 +36,7 @@ harness-agnostic backstop.
 | REQ-L3-1 | L3 | `memory-gate` job exists and is registered in `GOVERNANCE_JOBS` | Unit (`node --test`) + CI-behavior |
 | REQ-L3-2 | L3 | `decision-gate` job exists and is registered in `GOVERNANCE_JOBS` | Unit (`node --test`) + CI-behavior |
 | REQ-L3-3 | L3 | Drift-guard test keeps `GOVERNANCE_JOBS` and `governance.yml` in sync after L3–L5 land | Unit (`node --test`) |
+| REQ-L3-4 | L3 | `memory-gate` is issue-scoped: it verifies a `session_summary` scoped to the CURRENT change's issue, not merely global existence; falls back to the global check when no issue is detectable | Unit (`node --test`) |
 | REQ-L4-1 | L4 | Phase-order checker is a generic script over `openspec/changes/**` file state + `git blame`, sibling to `check-refs.mjs`, not embedded in any `SKILL.md` | Unit (`node --test`) + file assertion |
 | REQ-L4-2 | L4 | Gate requires `spec.md` AND `design.md` to exist, not just `proposal.md` + `tasks.md` | Unit (`node --test`) |
 | REQ-L4-3 | L4 | Gate rejects backward/non-monotonic phase-status transitions | Unit (`node --test`) |
@@ -235,6 +236,60 @@ commit.
 - GIVEN a new job name is added to `governance.yml` but not to `GOVERNANCE_JOBS`
 - WHEN the drift-guard test runs
 - THEN it fails, citing the mismatch
+
+---
+
+### Requirement REQ-L3-4: `memory-gate` Is Issue-Scoped (T2.1)
+
+REQ-L3-1's `memory-gate` job MUST NOT stop at a global existence check once the
+current change's issue number is detectable. `brain/scripts/governance/run-check.mjs`
+MUST resolve the issue number the current PR/MR targets from `ctx.body` (reusing this
+file's own existing `extractIssueNumber`/`requiresClosingKeyword` — no new extraction
+implementation), then filter `.memory/records/` observations to `record.issue ===
+issueNumber` (via `checks/memory-retrieval.mjs`'s `memoryRetrieval(observations,
+issueNumber)`) before verifying coverage. The gate MUST:
+
+- FAIL when no record at all is scoped to the issue (memory cache MISSING).
+- PASS with a WARN-flavored reason (`pass: true`, non-blocking — this contract has no
+  distinct warn exit code) when scoped records exist but none is a `session_summary`
+  (PARTIAL coverage).
+- PASS cleanly when a scoped `session_summary` exists (HIT).
+- FALL BACK to the pre-existing global `memoryPresence()` check (REQ-L3-1's original
+  behavior) when no issue number can be resolved from `ctx` — either `ctx.body` is
+  absent (non-string) or `ctx.body` is present but carries no detectable issue
+  reference. This is a deliberate choice not to fail-closed on "no issue detectable":
+  that would introduce a new blocking surface outside T2.1's scope (see
+  `openspec/changes/issue-379-t21-memory-retrieval/design.md`).
+
+[**unit-testable**: `memoryRetrieval` is a pure evaluator (fixture-testable, no I/O);
+the wrapper (`runMemoryGateCheck`) and its fallback are covered by `run-check.test.mjs`]
+
+#### Scenario: PR references an issue and a scoped session_summary exists
+
+- GIVEN `ctx.body` contains a detectable issue reference (e.g. `Closes #379`) resolving to issue N
+- AND `.memory/records/` contains a `session_summary` record with `issue === N`
+- WHEN the `memory-gate` job runs
+- THEN it passes cleanly
+
+#### Scenario: PR references an issue but no record is scoped to it
+
+- GIVEN `ctx.body` resolves to issue N
+- AND no record in `.memory/records/` has `issue === N` (even if other issues' records exist)
+- WHEN the `memory-gate` job runs
+- THEN it fails, citing issue N by number
+
+#### Scenario: PR references an issue with scoped records but no session_summary
+
+- GIVEN `ctx.body` resolves to issue N
+- AND `.memory/records/` has at least one record with `issue === N`, but none has `type === 'session_summary'`
+- WHEN the `memory-gate` job runs
+- THEN it passes (`pass: true`) but the reason flags partial/warn coverage — non-blocking
+
+#### Scenario: No issue number is detectable — fallback to the global check
+
+- GIVEN `ctx.body` is absent, or present but contains no closing keyword or "Part of #N" reference
+- WHEN the `memory-gate` job runs
+- THEN it degrades to the pre-T2.1 global `memoryPresence()` check (passes if ANY `session_summary` exists anywhere in `.memory/records/`)
 
 ---
 
