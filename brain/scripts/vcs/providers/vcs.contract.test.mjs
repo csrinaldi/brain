@@ -141,6 +141,11 @@ const PROVIDERS = {
     authCheck: rawStatusCallArgs,
     authLogin: rawStatusCallArgs,
     prReviews: jsonSpawnCallArgs,
+    // whoami/commitStatus (issue #385, M10 Phase 2 final Gap-A batch) spawn
+    // `gh api` via runJson — the same JSON-over-spawn seam mrList/issueList
+    // use.
+    whoami: jsonSpawnCallArgs,
+    commitStatus: jsonSpawnCallArgs,
   },
   gitlab: {
     module: gitlab,
@@ -165,6 +170,10 @@ const PROVIDERS = {
     // gitlab.prReviews reads TWO endpoints over gitlabApiFetch (issue #317),
     // so it needs the URL-dispatching glue rather than the uniform one.
     prReviews: gitlabPrReviewsCallArgs,
+    // gitlab.whoami/commitStatus spawn `glab` via runJson for the same reason
+    // gitlab.mrList/issueList do (design D1) — SAME shared function object.
+    whoami: jsonSpawnCallArgs,
+    commitStatus: jsonSpawnCallArgs,
   },
 };
 
@@ -180,6 +189,8 @@ for (const providerName of Object.keys(PROVIDERS)) {
     authCheck: authCheckArgs,
     authLogin: authLoginArgs,
     prReviews: prReviewsArgs,
+    whoami: whoamiArgs,
+    commitStatus: commitStatusArgs,
   } = PROVIDERS[providerName];
 
   // ── labelEvents ────────────────────────────────────────────────────────
