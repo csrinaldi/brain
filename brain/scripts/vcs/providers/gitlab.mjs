@@ -314,7 +314,7 @@ export async function prReviews({ project, number, apiBase, token, proxyUrl, fet
         path: `projects/${encoded}/merge_requests/${number}/notes?order_by=created_at&sort=asc&per_page=${perPage}&page=${page}`,
         fetchImpl,
       });
-      if (!Array.isArray(arr)) break;
+      if (!Array.isArray(arr)) return null;
       notes.push(...arr);
       if (arr.length < perPage) break;
     }

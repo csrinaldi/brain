@@ -633,6 +633,21 @@ for (const providerName of Object.keys(PROVIDERS)) {
     );
   });
 
+  if (providerName === 'gitlab') {
+    test(`${providerName}.prReviews (contract): malformed notes response (200 OK, non-array body) yields null, matching prStatusRollup discipline`, async () => {
+      const fixtureName = `${providerName}-prReviews-malformed.json`;
+      const fixture = loadFixture(fixtureName);
+      assertProvenance(fixture, fixtureName);
+
+      const result = await vcs.prReviews({ project: 'x/y', number: 1, ...prReviewsArgs(fixture) });
+      assert.equal(
+        result,
+        null,
+        'prReviews must return null on a malformed notes response (200 OK with non-array body), not fabricate [] — all-or-nothing invariant',
+      );
+    });
+  }
+
   // ── mrCreate ───────────────────────────────────────────────────────────
   test(`${providerName}.mrCreate (contract): happy fixture returns { url }`, async () => {
     const fixtureName = `${providerName}-mrCreate-happy.json`;
