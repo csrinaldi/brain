@@ -1060,23 +1060,33 @@ test('gitlab.labelEvents returns null (never []) when the underlying fetch throw
 // L6 gate's defaultFetchReviews was STILL gh-CLI-hardcoded, the same defect
 // class as labelEvents pre-fix and finding #14). GitHub: EXTRACTED from
 // brain-writes-reviewed.mjs's inline defaultFetchReviews, preserving
-// --paginate. GitLab: over gitlabApiFetch's merge_requests/:iid/approvals
-// endpoint (GitLab has no per-reviewer review-state history like GitHub's
-// Reviews API — approvals is the closest analog: each approver normalizes to
-// one { state:'APPROVED', author } entry, matching what
-// evaluateBrainWritesReviewed actually consumes — only APPROVED entries are
-// counted toward approvers; a genuinely empty approvals list still warns via
-// the existing "no reviews at all" branch).
+// --paginate.
+//
+// Issue #317 widened this verb on BOTH providers from `{ state, author }` to
+// `{ state, author, body }`, and CHANGED GitLab's source endpoints. `body`
+// carries the reviewer's `brain-review/N` block, which `parse-verdict.mjs`
+// needs; without it cold-boot's `priorVerdicts` was always `[]` in production
+// and the anti-loop lock, the rev-bound, the doctrine load and board
+// reconciliation were all inert.
+//
+// GitLab now reads TWO endpoints: MR **notes** (where verdicts are actually
+// posted — approvals carries no body at all, so the verdict thread used to be
+// structurally invisible on GitLab) plus **approvals**, still the only source
+// of `state:'APPROVED'` and therefore the only thing the L6 gate counts. The
+// cross-provider shape parity, the parseVerdict round-trip, the
+// notes-are-never-APPROVED security boundary, the ordering/pagination locks
+// and the all-or-nothing failure rule live in the shared contract suite
+// (providers/vcs.contract.test.mjs); these are the provider-local unit tests.
 
-test('github.prReviews normalizes gh reviews to { state, author }', async () => {
+test('github.prReviews normalizes gh reviews to { state, author, body }', async () => {
   setSpawn(fakeSpawn([
-    { state: 'COMMENTED', user: { login: 'carol' } },
-    { state: 'APPROVED', user: { login: 'bob' } },
+    { state: 'COMMENTED', user: { login: 'carol' }, body: 'looks good' },
+    { state: 'APPROVED', user: { login: 'bob' }, body: '' },
   ]));
   const result = await github.prReviews({ project: 'o/r', number: 144 });
   assert.deepEqual(result, [
-    { state: 'COMMENTED', author: 'carol' },
-    { state: 'APPROVED', author: 'bob' },
+    { state: 'COMMENTED', author: 'carol', body: 'looks good' },
+    { state: 'APPROVED', author: 'bob', body: '' },
   ]);
 });
 
@@ -1097,27 +1107,52 @@ test('github.prReviews source includes --paginate on the gh api reviews call (fa
   assert.match(fnBody, /--paginate/, 'reviews fetch must use --paginate — otherwise a truncated page 1 can hide later reviews');
 });
 
-test('gitlab.prReviews normalizes approvals.approved_by to one {state:"APPROVED", author} entry per approver, over the shared gitlabApiFetch transport', async () => {
-  let seenUrl;
+test('gitlab.prReviews normalizes notes to {state:"COMMENTED", author, body} and approvals.approved_by to {state:"APPROVED", author, body:""}, both over the shared gitlabApiFetch transport', async () => {
+  const seenUrls = [];
+  const seenHeaders = [];
   const result = await gitlab.prReviews({
     project: 'g/r',
     number: 7,
     apiBase: 'https://gitlab.example.com/api/v4',
     token: 'tok-abc',
-    fetchImpl: async (url) => {
-      seenUrl = url;
-      return { ok: true, json: async () => ({ approved_by: [{ user: { username: 'bob' } }] }) };
+    fetchImpl: async (url, options) => {
+      seenUrls.push(url);
+      seenHeaders.push(options?.headers);
+      if (url.includes('/approvals')) {
+        return { ok: true, json: async () => ({ approved_by: [{ user: { username: 'bob' } }] }) };
+      }
+      return {
+        ok: true,
+        json: async () => [
+          { id: 1, body: 'changed title', author: { username: 'gitlab-bot' }, system: true },
+          { id: 2, body: 'a human comment', author: { username: 'carol' }, system: false },
+        ],
+      };
     },
   });
-  assert.equal(seenUrl, 'https://gitlab.example.com/api/v4/projects/g%2Fr/merge_requests/7/approvals');
-  assert.deepEqual(result, [{ state: 'APPROVED', author: 'bob' }]);
+
+  assert.deepEqual(seenUrls, [
+    'https://gitlab.example.com/api/v4/projects/g%2Fr/merge_requests/7/notes?order_by=created_at&sort=asc&per_page=100&page=1',
+    'https://gitlab.example.com/api/v4/projects/g%2Fr/merge_requests/7/approvals',
+  ]);
+  for (const headers of seenHeaders) assert.equal(headers?.['PRIVATE-TOKEN'], 'tok-abc');
+  // The system note is dropped; the human note becomes COMMENTED (never
+  // APPROVED — see the security-boundary test in the contract suite); the
+  // approver is appended after the chronological notes.
+  assert.deepEqual(result, [
+    { state: 'COMMENTED', author: 'carol', body: 'a human comment' },
+    { state: 'APPROVED', author: 'bob', body: '' },
+  ]);
 });
 
-test('gitlab.prReviews returns [] (genuinely zero approvals, not uncomputable) when approved_by is empty', async () => {
+test('gitlab.prReviews returns [] (genuinely zero notes AND zero approvals, not uncomputable) when both endpoints come back empty', async () => {
   const result = await gitlab.prReviews({
     project: 'g/r',
     number: 7,
-    fetchImpl: async () => ({ ok: true, json: async () => ({ approved_by: [] }) }),
+    fetchImpl: async (url) =>
+      url.includes('/approvals')
+        ? { ok: true, json: async () => ({ approved_by: [] }) }
+        : { ok: true, json: async () => [] },
   });
   assert.deepEqual(result, []);
 });

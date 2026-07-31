@@ -76,7 +76,14 @@ function defaultReadRecords({ cwd = process.cwd() } = {}) {
   return () => readRecordObservations({ recordsDir: join(cwd, '.memory', 'records') });
 }
 
-// NOTE: prReviews's shape is `{ state, author }` only, no `body` (flagged with H1-2); tests inject fixtures with `body`.
+// `prReviews` normalizes to `{ state, author, body }` on BOTH providers (issue
+// #317). `body` is what `parseVerdict` needs, so `priorVerdicts` below is now
+// populated from the real adapters — before #317 the shape was `{ state,
+// author }` only and this whole doctrine load was inert in production, green
+// solely because the tests injected a `body` no adapter ever emitted. The
+// contract suite (vcs.contract.test.mjs) now pins `body` on the REAL
+// normalizer output and runs it through `parseVerdict`, so that masking
+// cannot return.
 function defaultFetchReviews({ getVcs: getVcsFn = getVcs } = {}) {
   return async ({ project, number, provider }) => {
     const vcs = await getVcsFn({ provider });
