@@ -13,6 +13,7 @@
     "provider": "github"
   },
   "governance": {
+    "tier": "lite",
     "ignoreList": [
       "**/*.golden.json",
       "**/*.test.mjs",
