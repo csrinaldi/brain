@@ -150,35 +150,38 @@ test('release.yml references brain-audit.mjs', () => {
   assert.match(text, /brain-audit\.mjs/, 'release.yml must invoke brain-audit.mjs');
 });
 
-test('release.yml triggers on tags matching v*', () => {
+test('release.yml triggers on workflow_dispatch with required tag_name input (audit-then-tag)', () => {
   const text = readFileSync(RELEASE_YML, 'utf8');
-  assert.match(text, /tags:\s*\[\s*['"]v\*['"]\s*\]/, "release.yml must trigger on push tags: ['v*']");
+  assert.match(text, /workflow_dispatch:/, 'release.yml must trigger on workflow_dispatch (audit-then-tag)');
+  assert.match(text, /tag_name:/, 'release.yml must accept tag_name input');
+  assert.match(text, /required:\s*true/, 'release.yml tag_name must be required');
 });
 
-test('release.yml declares read-only contents permission (fail-closed, no write scope)', () => {
+test('release.yml does NOT have push:tags trigger (audit-then-tag prevents post-fact execution)', () => {
   const text = readFileSync(RELEASE_YML, 'utf8');
-  assert.match(text, /permissions:\s*\{\s*contents:\s*read\s*\}/, 'release.yml must declare permissions: { contents: read }');
+  assert.doesNotMatch(text, /push:\s*tags:/, 'release.yml must not have push:tags (would enable post-fact, non-enforcing mode)');
 });
 
-// brain merges the release PR to main, THEN tags that commit. On the tag push,
-// origin/main is at/ahead of the tagged commit, so origin/main..HEAD is EMPTY —
-// brain-audit.mjs logs "No merge commits found" and exits 0 unconditionally,
-// making the rung-2 gate a silent no-op. The audit must instead run from the
-// PREVIOUS release tag to the tagged commit, which is always non-empty.
-test('release.yml does NOT use the empty origin/main..HEAD range on a tag push', () => {
+test('release.yml declares write contents permission (needed to create and push tags)', () => {
   const text = readFileSync(RELEASE_YML, 'utf8');
-  assert.doesNotMatch(
-    text,
-    /brain-audit\.mjs\s+origin\/main\.\.HEAD/,
-    'release.yml must not invoke brain-audit.mjs with origin/main..HEAD — that literal range is empty on brain\'s tag-after-merge flow'
-  );
+  assert.match(text, /permissions:\s*\{\s*contents:\s*write\s*\}/, 'release.yml must declare permissions: { contents: write } (to create/push tags)');
 });
 
-test('release.yml derives the audit range from the previous release tag', () => {
+// audit-then-tag mode: the audit runs BEFORE tag creation, from PREV_TAG..HEAD
+// (the commits being tagged), which is always non-empty. This enforces that
+// brain-audit must pass before any tag is created.
+test('release.yml derives the audit range from the previous release tag to HEAD', () => {
   const text = readFileSync(RELEASE_YML, 'utf8');
   assert.match(text, /git describe --tags/, 'release.yml must locate the previous release tag via git describe --tags');
-  assert.match(text, /GITHUB_REF_NAME/, 'release.yml must use GITHUB_REF_NAME to identify the tag being released');
-  assert.match(text, /PREV_TAG\}?\.\.HEAD/, 'release.yml must audit PREV_TAG..HEAD (previous tag to the tagged commit)');
+  assert.match(text, /PREV_TAG/, 'release.yml must reference PREV_TAG (the previous release)');
+  assert.match(text, /PREV_TAG\}?\.\.HEAD/, 'release.yml must audit PREV_TAG..HEAD (commits to be tagged)');
+});
+
+test('release.yml has a step that creates and pushes the tag (only after audit succeeds)', () => {
+  const text = readFileSync(RELEASE_YML, 'utf8');
+  assert.match(text, /git tag/, 'release.yml must create a tag via `git tag`');
+  assert.match(text, /git push origin/, 'release.yml must push the tag via `git push origin`');
+  assert.match(text, /inputs\.tag_name/, 'release.yml must use the workflow input tag_name for the tag value');
 });
 
 // ── governance-postmerge.yml (rung 3, auto-revert) — REQ-L2-2 ──────────────
