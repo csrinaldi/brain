@@ -25,12 +25,10 @@ on:
     inputs:
       tag_name:
         description: 'Release tag name (e.g. v1.1.0)'
-        required: false
+        required: true
         type: string
-  push:
-    tags: ['v*']
 
-permissions: { contents: read }
+permissions: { contents: write }
 
 jobs:
   audit-gate:
@@ -48,8 +46,22 @@ jobs:
       - name: Run brain-audit over the previous release tag..HEAD
         run: |
           # Audit every merge since the previous release tag (PREV_TAG..HEAD).
-          REF_TAG="${GITHUB_REF_NAME:-HEAD}"
-          PREV_TAG=$(git describe --tags --abbrev=0 "${REF_TAG}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          # audit-then-tag: this gate MUST pass before tag creation.
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
           node brain/scripts/brain-audit.mjs "${PREV_TAG}..HEAD"
+
+      - name: Create and push release tag
+        env:
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          # Tag and release creation: only after brain-audit exits 0.
+          if [ -z "$TAG_NAME" ]; then
+            echo "::error::tag_name input is required"
+            exit 1
+          fi
+          git config user.name "brain-ci"
+          git config user.email "noreply@github.com"
+          git tag "$TAG_NAME" HEAD
+          git push origin "$TAG_NAME"
 
 
