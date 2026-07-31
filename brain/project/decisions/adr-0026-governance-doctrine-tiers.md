@@ -1,7 +1,7 @@
 # ADR-0026 — Governance Doctrine Tiers: A Declared Axis Orthogonal to the Detected Substrate Ladder
 
-**Status**: Proposed (ready for human ratification and promotion)  
-**Date**: 31/07/2026 — draft → promotion by Cristian Rinaldi
+**Status**: Accepted  
+**Date**: 31/07/2026 — Cristian Rinaldi
 
 ## Context
 
