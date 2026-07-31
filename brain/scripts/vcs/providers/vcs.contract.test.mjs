@@ -129,6 +129,12 @@ function rawStatusCallArgs(fixture) {
   return {};
 }
 
+// repoCloneUrl (issue #385, M10 Phase 2 final Gap-A batch) — an obviously
+// synthetic placeholder, never a realistic secret shape (no ghp_/glpat-/gho_
+// prefix, no base62 entropy run), matching the existing 'sample-cred-9x7'
+// precedent (:739).
+const PLACEHOLDER_CREDENTIAL = 'placeholder-not-a-real-token';
+
 const PROVIDERS = {
   github: {
     module: github,
@@ -141,6 +147,11 @@ const PROVIDERS = {
     authCheck: rawStatusCallArgs,
     authLogin: rawStatusCallArgs,
     prReviews: jsonSpawnCallArgs,
+    // whoami/commitStatus (issue #385, M10 Phase 2 final Gap-A batch) spawn
+    // `gh api` via runJson — the same JSON-over-spawn seam mrList/issueList
+    // use.
+    whoami: jsonSpawnCallArgs,
+    commitStatus: jsonSpawnCallArgs,
   },
   gitlab: {
     module: gitlab,
@@ -165,6 +176,10 @@ const PROVIDERS = {
     // gitlab.prReviews reads TWO endpoints over gitlabApiFetch (issue #317),
     // so it needs the URL-dispatching glue rather than the uniform one.
     prReviews: gitlabPrReviewsCallArgs,
+    // gitlab.whoami/commitStatus spawn `glab` via runJson for the same reason
+    // gitlab.mrList/issueList do (design D1) — SAME shared function object.
+    whoami: jsonSpawnCallArgs,
+    commitStatus: jsonSpawnCallArgs,
   },
 };
 
@@ -180,6 +195,8 @@ for (const providerName of Object.keys(PROVIDERS)) {
     authCheck: authCheckArgs,
     authLogin: authLoginArgs,
     prReviews: prReviewsArgs,
+    whoami: whoamiArgs,
+    commitStatus: commitStatusArgs,
   } = PROVIDERS[providerName];
 
   // ── labelEvents ────────────────────────────────────────────────────────
@@ -648,6 +665,118 @@ for (const providerName of Object.keys(PROVIDERS)) {
     });
   }
 
+  // ── whoami (issue #385, M10 Phase 2 final Gap-A batch) ──────────────────
+  // `() -> { username }` (vcs-contract.md row 26). Transport is `runJson` on
+  // both providers (design D1) — the same seam mrList/issueList use, so a
+  // transport failure REJECTS rather than yielding a null-shape. `whoami()`
+  // is declared with no parameter list on either provider (github.mjs:30,
+  // gitlab.mjs:31) — `whoamiArgs(fixture)` is called purely for its
+  // `setSpawn` side effect (design D1 gotcha).
+  test(`${providerName}.whoami (contract): happy fixture normalizes to exactly { username }`, async () => {
+    const fixtureName = `${providerName}-whoami-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.whoami({ ...whoamiArgs(fixture) });
+    // Hardcoded expected value — never re-derived from fixture.data.login/
+    // .username, which would let a mirrored normalizer bug pass (design D3,
+    // matching the mrList/issueList precedent at :354-360/:442-447).
+    assert.deepEqual(
+      result,
+      providerName === 'github' ? { username: 'csrinaldi' } : { username: 'brain-bot' },
+      'whoami must normalize to EXACTLY { username } — no login/id/avatar_url or other raw field name may leak through the contract',
+    );
+  });
+
+  test(`${providerName}.whoami (contract): a transport failure REJECTS — no null-shape fallback exists for this verb`, async () => {
+    const fixtureName = `${providerName}-whoami-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.rejects(
+      () => vcs.whoami({ ...whoamiArgs(fixture) }),
+      'whoami must REJECT on a transport failure — runJson throws (exec.mjs:31-32) and neither provider wraps it; a failed lookup must never fabricate { username: undefined }',
+    );
+  });
+
+  // ── commitStatus (issue #385, M10 Phase 2 final Gap-A batch) ────────────
+  // `({ project, sha }) -> Status|null` (vcs-contract.md row 35). Transport is
+  // `runJson` on both providers (design D1) — a transport failure REJECTS,
+  // the mrList flavor (pinned out-of-scope, design D2), not the issueList
+  // flavor (caller-absorbed).
+  test(`${providerName}.commitStatus (contract): a completed check normalizes to the canonical enum value`, async () => {
+    const fixtureName = `${providerName}-commitStatus-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.commitStatus({ project: 'x/y', sha: 'cafef00d', ...commitStatusArgs(fixture) });
+    assert.equal(result, 'success', 'a completed, successful check must normalize to the canonical "success" enum value on both providers');
+  });
+
+  test(`${providerName}.commitStatus (contract): no computable status normalizes to null — a SUCCESSFUL call with nothing to report`, async () => {
+    const fixtureName = `${providerName}-commitStatus-empty.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.commitStatus({ project: 'x/y', sha: 'cafef00d', ...commitStatusArgs(fixture) });
+    assert.equal(result, null, 'an empty check set is a SUCCESSFUL call with nothing to report — null, not a rejection; the failure case below is what rejects');
+  });
+
+  test(`${providerName}.commitStatus (contract): a transport failure REJECTS — pinned out-of-scope, not because a caller depends on the throw`, async () => {
+    const fixtureName = `${providerName}-commitStatus-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.rejects(
+      () => vcs.commitStatus({ project: 'x/y', sha: 'cafef00d', ...commitStatusArgs(fixture) }),
+      'commitStatus must REJECT on a transport failure — runJson throws (exec.mjs:31-32) and neither provider wraps it; PINNED as out-of-scope (the mrList rationale, design D2 there), NOT because a caller depends on the throw',
+    );
+  });
+
+  // ── projectResolve (issue #385, M10 Phase 2 final Gap-A batch) ──────────
+  // `({ project }) -> string` (vcs-contract.md row 38). Both implementations
+  // are `return project` — no transport, no failure mode, no empty case
+  // (design D6). No fixture, no PROVIDERS key: there is nothing to inject.
+  test(`${providerName}.projectResolve (contract): returns the slug unchanged — identity on both providers, the documented extension point`, async () => {
+    assert.equal(await vcs.projectResolve({ project: 'x/y' }), 'x/y');
+    // Nested GitLab group path: proves projectResolve does NOT url-encode —
+    // each verb encodes locally at its own call site (gitlab.mjs:371), so
+    // encoding here would double-encode every downstream request.
+    assert.equal(await vcs.projectResolve({ project: 'group/sub/repo' }), 'group/sub/repo');
+  });
+
+  // ── repoCloneUrl (issue #385, M10 Phase 2 final Gap-A batch) ────────────
+  // `({ host, project, token }) -> string` (vcs-contract.md row 36). No
+  // transport (design D1) — no fixture, no PROVIDERS key. `new URL()` parses
+  // the result rather than grepping it, so the credential is proven to sit in
+  // a specific structural position, not merely "somewhere in the string"
+  // (design D4) — the string-construction analogue of the authLogin
+  // stdin-vs-argv guard (:738-752).
+  test(`${providerName}.repoCloneUrl (contract): the credential sits in the userinfo segment, and the provider's user literal is not a caller concern`, async () => {
+    const url = await vcs.repoCloneUrl({ host: 'vcs.example.test', project: 'x/y', token: PLACEHOLDER_CREDENTIAL });
+    const parsed = new URL(url);
+
+    assert.equal(parsed.protocol, 'https:', 'the clone URL must be https — a git-protocol or http URL would carry the credential in clear');
+    assert.equal(parsed.password, PLACEHOLDER_CREDENTIAL, 'the credential must sit in the userinfo PASSWORD position — the only place git consumes it');
+    assert.equal(parsed.host, 'vcs.example.test', 'the supplied host must be honored verbatim when present');
+    assert.equal(parsed.pathname, '/x/y.git', 'the project slug must reach the path unencoded and .git-suffixed');
+    assert.equal(parsed.search, '', 'the credential must NEVER ride in the query string — proxies and servers log query strings, they do not log userinfo');
+    assert.ok(parsed.username.length > 0, "a user literal must be present; WHICH literal is provider-specific (x-access-token vs oauth2) and is never compared across providers here");
+  });
+
+  // ── patSetupUrl (issue #385, M10 Phase 2 final Gap-A batch) ─────────────
+  // `({ host, name, scopes }) -> string` (vcs-contract.md row 37). No
+  // transport (design D1) — no fixture, no PROVIDERS key. This verb is mostly
+  // NOT parity (divergence locks below, design D5) — this is the thin floor
+  // genuinely common to both providers: comparing VALUES, not query KEYS,
+  // since the key itself diverges (GH `description=`, GL `name=`).
+  test(`${providerName}.patSetupUrl (contract): returns an absolute https URL carrying the requested name and comma-joined scopes`, async () => {
+    const parsed = new URL(await vcs.patSetupUrl({ host: 'vcs.example.test', name: 'brain', scopes: ['api', 'read_user'] }));
+    assert.equal(parsed.protocol, 'https:');
+    assert.equal(parsed.searchParams.get('scopes'), 'api,read_user', 'scopes must be comma-joined on both providers');
+    assert.ok([...parsed.searchParams.values()].includes('brain'), 'the requested token name must reach the URL — the query KEY differs per provider (GH description=, GL name=), so only the VALUE is compared in the parity loop');
+  });
+
   // ── mrCreate ───────────────────────────────────────────────────────────
   test(`${providerName}.mrCreate (contract): happy fixture returns { url }`, async () => {
     const fixtureName = `${providerName}-mrCreate-happy.json`;
@@ -686,6 +815,119 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assert.equal(typeof result.error, 'string', 'a failed mrCreate must carry an error string');
   });
 }
+
+// ── commitStatus/repoCloneUrl/patSetupUrl divergence locks (issue #385, M10
+// Phase 2 final Gap-A batch) ─────────────────────────────────────────────────
+//
+// Standalone, no loop, same precedent as the authCheck/authLogin divergence
+// block below (:819-856) and the github.issueList pull_request-filter test
+// (:~890). Three latent production defects are LOCKED as current behavior
+// here, never fixed — each assertion message says PINNED NOT FIXED and names
+// the follow-up issue filed in Phase 6.
+
+// GitHub-only commitStatus mechanics (design D2) — no fixture-driven parity
+// test can see these; the payload SHAPE is the assertion.
+
+test('github.commitStatus (contract): an unfinished check reads status, not conclusion — in_progress normalizes to "running"', async () => {
+  setSpawn(jsonSpawn({ check_runs: [{ name: 'ci/build', status: 'in_progress', conclusion: null }] }));
+  const result = await github.commitStatus({ project: 'x/y', sha: 'cafef00d' });
+  assert.equal(
+    result,
+    'running',
+    'github.mjs:225 reads `status` (not `conclusion`) while status !== "completed" — proven here because conclusion is null and only status carries "in_progress"',
+  );
+});
+
+test('github.commitStatus (contract): a completed check with conclusion neutral or skipped collapses to null — indistinguishable from "no checks ran"', async () => {
+  for (const conclusion of ['neutral', 'skipped']) {
+    setSpawn(jsonSpawn({ check_runs: [{ name: 'ci/build', status: 'completed', conclusion }] }));
+    const result = await github.commitStatus({ project: 'x/y', sha: 'cafef00d' });
+    assert.equal(
+      result,
+      null,
+      `a COMPLETED check with conclusion:'${conclusion}' must normalize to null (normalize.mjs:24-25's GITHUB_STATUS_MAP) — the previously-undocumented collapse this batch adds to vcs-contract.md, indistinguishable at the contract boundary from "no checks ran"`,
+    );
+  }
+});
+
+test('commitStatus (contract): selection asymmetry — GitHub takes check_runs[0] client-side, GitLab requests per_page=1 server-side', async () => {
+  setSpawn(jsonSpawn({
+    check_runs: [
+      { name: 'ci/build', status: 'completed', conclusion: 'success' },
+      { name: 'ci/lint', status: 'completed', conclusion: 'failure' },
+    ],
+  }));
+  const ghResult = await github.commitStatus({ project: 'x/y', sha: 'cafef00d' });
+  assert.equal(
+    ghResult,
+    'success',
+    'github.mjs:221 takes check_runs[0] CLIENT-side — with two entries in the fixture, the FIRST one\'s mapped status must win, never the second',
+  );
+
+  let gitlabArgs;
+  setSpawn((_cmd, args) => { gitlabArgs = args; return { status: 0, stdout: JSON.stringify([{ status: 'success' }]), stderr: '' }; });
+  await gitlab.commitStatus({ project: 'x/y', sha: 'cafef00d' });
+  assert.ok(
+    gitlabArgs.some(a => String(a).includes('per_page=1')),
+    'gitlab.mjs:372 selects a single status SERVER-side via `per_page=1` in the request, not by slicing a larger array client-side',
+  );
+});
+
+// repoCloneUrl host-default divergence (design D4) — following the shape of
+// the authLogin host-default divergence test at :819-856.
+
+test('repoCloneUrl (contract): host-default divergence — GitHub falls back to github.com, GitLab emits a literal "undefined" host', async () => {
+  const gh = new URL(await github.repoCloneUrl({ project: 'x/y', token: PLACEHOLDER_CREDENTIAL }));
+  assert.equal(gh.host, 'github.com', "github.mjs:481 substitutes the literal default (host || 'github.com') when host is omitted");
+  assert.equal(gh.username, 'x-access-token', 'the GitHub user literal is x-access-token');
+
+  const gl = new URL(await gitlab.repoCloneUrl({ project: 'x/y', token: PLACEHOLDER_CREDENTIAL }));
+  assert.equal(
+    gl.host,
+    'undefined',
+    'LATENT DEFECT, PINNED NOT FIXED (follow-up filed) — gitlab.mjs:531 interpolates ${host} with no fallback, so an omitted host produces the literally broken https://oauth2:***@undefined/x/y.git; locked as current behavior — fixing it is a production change, out of scope for this test-only slice',
+  );
+  assert.equal(gl.username, 'oauth2', 'the GitLab user literal is oauth2');
+});
+
+// patSetupUrl divergence locks (design D5) — GitHub ignores `host` entirely
+// (GHES-breaking), GitLab is correctly host-driven; and the shared
+// no-URL-encoding gap that affects both providers.
+
+test('github.patSetupUrl (contract): the host parameter is IGNORED — the URL is hardcoded to github.com', async () => {
+  const parsed = new URL(await github.patSetupUrl({ host: 'ghes.example.test', name: 'brain', scopes: ['repo'] }));
+  assert.equal(
+    parsed.host,
+    'github.com',
+    'LATENT DEFECT, PINNED NOT FIXED (follow-up filed) — github.mjs:485 hardcodes github.com and never reads `host`, so a GitHub Enterprise Server operator is silently sent to the public github.com PAT page',
+  );
+  assert.equal(parsed.pathname, '/settings/tokens/new');
+  assert.equal(parsed.searchParams.get('description'), 'brain', 'GitHub keys the token name as `description`');
+});
+
+test('gitlab.patSetupUrl (contract): the URL is host-driven — the supplied host appears verbatim', async () => {
+  const parsed = new URL(await gitlab.patSetupUrl({ host: 'gitlab.example.test', name: 'brain', scopes: ['api'] }));
+  assert.equal(
+    parsed.host,
+    'gitlab.example.test',
+    'gitlab.mjs:535 interpolates the supplied host — the divergence from GitHub above, and the reason self-hosted GitLab works while GHES does not',
+  );
+  assert.equal(parsed.pathname, '/-/user_settings/personal_access_tokens');
+  assert.equal(parsed.searchParams.get('name'), 'brain', 'GitLab keys the token name as `name`');
+});
+
+test('patSetupUrl (contract): neither provider URL-encodes the token name — a name containing & injects a spurious query parameter', async () => {
+  for (const [label, url] of [
+    ['github', await github.patSetupUrl({ host: 'h.example.test', name: 'brain & co', scopes: ['repo'] })],
+    ['gitlab', await gitlab.patSetupUrl({ host: 'h.example.test', name: 'brain & co', scopes: ['api'] })],
+  ]) {
+    const parsed = new URL(url);
+    assert.ok(
+      parsed.searchParams.has(' co'),
+      `${label}: LATENT DEFECT, PINNED NOT FIXED (follow-up filed) — the raw & splits the name into a second, spurious query parameter; neither provider calls encodeURIComponent on name/scopes`,
+    );
+  }
+});
 
 // ── authCheck/authLogin argument-building divergence + token security ──────
 // (issues #364/#365, M10 Phase 2 ranks 5-6). Both verbs' fixture-driven
