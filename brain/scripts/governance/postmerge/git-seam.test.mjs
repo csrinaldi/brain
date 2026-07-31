@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -53,6 +53,48 @@ test('gitTry: never throws on an unrelated failure (unreachable remote → non-z
   const r = gitTry(['ls-remote', '--exit-code', bogus, 'refs/heads/main'], { cwd: dir });
   assert.notEqual(r.status, 0);
   assert.notEqual(r.status, 2);
+});
+
+// A `git diff --binary` over a memory-sync merge routinely exceeds Node's 1 MiB
+// execFileSync default. Without an explicit maxBuffer the spawn dies with
+// ENOBUFS, err.status is undefined, and gitTry collapses it to -1 — which
+// brain-audit reports as `governance:audit-uncomputable`, reddening the release
+// gate for an infra limit rather than a governance violation (issue #332).
+test('gitTry: captures git output larger than the 1 MiB execFileSync default', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'git-seam-bigdiff-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  git('commit', '--allow-empty', '-m', 'init');
+
+  // ~2 MiB of incompressible-enough text: the diff carries the literal content,
+  // so the captured payload is comfortably over the default ceiling.
+  const line = 'the quick brown fox jumps over the lazy dog 0123456789\n';
+  writeFileSync(join(dir, 'big.txt'), line.repeat(40000));
+  git('add', 'big.txt');
+  git('commit', '-m', 'add big file');
+
+  const r = gitTry(['diff', '--binary', '-U3', 'HEAD^1', 'HEAD'], { cwd: dir });
+
+  assert.equal(r.status, 0, `expected status 0, got ${r.status} (stderr: ${r.stderr})`);
+  assert.ok(
+    r.stdout.length > 1024 * 1024,
+    `expected the full diff to be captured, got ${r.stdout.length} bytes`,
+  );
+});
+
+// The -1 collapse is deliberate (an unmapped status is uncomputable, never a
+// verdict) but it must not erase WHY. A self-inflicted buffer limit has to read
+// as a buffer limit, not as an unmappable git tri-state.
+test('gitTry: an exceeded output buffer reports a legible reason, not an empty stderr', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'git-seam-enobufs-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  git('commit', '--allow-empty', '-m', 'init');
+
+  const r = gitTry(['log', '--format=%H'], { cwd: dir, maxBuffer: 8 });
+
+  assert.equal(r.status, -1);
+  assert.match(r.stderr, /exceeded the .* output buffer/i);
 });
 
 test('gitOrThrow: returns stdout on status 0', (t) => {

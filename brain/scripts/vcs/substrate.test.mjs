@@ -102,6 +102,181 @@ test('detectSubstrate: rung 2 wins over rung 3 when both are armed (higher rung 
   assert.equal(result.rung, 2);
 });
 
+// ── Rung 2 verdict matrix — structural efficacy, not file presence (#337) ───────
+//
+// evalRung2 now derives its verdict from STRUCTURAL evidence (trigger + audit
+// invocation + write permissions), never from mere workflow-file presence
+// (REQ-L2-1). All six rows of design.md's verdict matrix, each independently
+// injected via `probes.releaseGate` — fully offline, zero fs coupling (fixtures
+// are inline template literals, not disk reads).
+
+test('rung 2 verdict matrix (1/6): config.governance.releaseGate declared true — armed but unverified (declaration, not proof)', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      releaseGate: async () => ({ declared: true, workflowPresent: false, workflowText: null }),
+    },
+  });
+
+  assert.equal(result.rungs[2].active, true);
+  assert.equal(result.rungs[2].verifiable, false, 'a declaration is not a structural proof');
+  assert.equal(result.rungs[2].mechanism, 'release-gate-config-declared');
+  assert.equal(result.rung, 2);
+});
+
+test('rung 2 verdict matrix (2/6): antecedent-capable trigger + brain:audit + contents:write — active AND verifiable', async () => {
+  const workflowText = `name: release\n\non:\n  workflow_dispatch:\n\npermissions: { contents: write }\n\njobs:\n  audit-gate:\n    steps:\n      - run: node brain/scripts/brain-audit.mjs "$PREV_TAG..HEAD"\n`;
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      releaseGate: async () => ({ declared: false, workflowPresent: true, workflowText }),
+    },
+  });
+
+  assert.equal(result.rungs[2].active, true);
+  assert.equal(result.rungs[2].verifiable, true, 'a structural read of trigger+audit+permissions IS a proof');
+  assert.equal(result.rungs[2].mechanism, 'release-gate-workflow-structural');
+  assert.equal(result.rungs[2].reason, null);
+  assert.equal(result.rung, 2);
+});
+
+test('rung 2 verdict matrix (3/6): post-fact trigger only (brain\'s actual release.yml shape: push:tags) — inert, verifiable', async () => {
+  // Mirrors brain's real .github/workflows/release.yml: on push:tags, the tag
+  // already exists by the time the workflow starts — nothing it does can block
+  // that tag's creation (design D3), regardless of the audit-gate job inside it.
+  const workflowText = `name: release\n\non:\n  push:\n    tags: ['v*']\n\npermissions: { contents: read }\n\njobs:\n  audit-gate:\n    steps:\n      - run: node brain/scripts/brain-audit.mjs "$PREV_TAG..HEAD"\n`;
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      releaseGate: async () => ({ declared: false, workflowPresent: true, workflowText }),
+    },
+  });
+
+  assert.equal(result.rungs[2].active, false, 'post-fact trigger cannot block a tag that already exists');
+  assert.equal(result.rungs[2].verifiable, true, 'the trigger IS structurally readable — the verdict is a confirmed inert, not an unknown');
+  assert.equal(result.rungs[2].mechanism, 'release-gate-workflow-structural');
+  assert.match(result.rungs[2].reason, /cannot block tags/i);
+  assert.match(result.rungs[2].remedy, /#210/);
+  assert.notEqual(result.rung, 2, 'rung 2 must not be selected when inert — brain\'s own repo demotes 2 -> 3');
+});
+
+test('rung 2 verdict matrix (4/6): antecedent-capable trigger + audit present but missing contents:write — inert, verifiable', async () => {
+  const workflowText = `name: release\n\non:\n  push:\n    branches: [main]\n\npermissions: { contents: read }\n\njobs:\n  audit-gate:\n    steps:\n      - run: node brain/scripts/brain-audit.mjs HEAD~1..HEAD\n`;
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      releaseGate: async () => ({ declared: false, workflowPresent: true, workflowText }),
+    },
+  });
+
+  assert.equal(result.rungs[2].active, false, 'without contents:write the workflow cannot itself gate tag creation');
+  assert.equal(result.rungs[2].verifiable, true);
+  assert.match(result.rungs[2].reason, /contents:\s*write/i);
+});
+
+test('rung 2 verdict matrix (5/6): no workflow wired and not declared — inert, verifiable (absent)', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      releaseGate: async () => ({ declared: false, workflowPresent: false, workflowText: null }),
+    },
+  });
+
+  assert.equal(result.rungs[2].active, false);
+  assert.equal(result.rungs[2].verifiable, true);
+  assert.equal(result.rungs[2].mechanism, 'release-gate-absent');
+  assert.match(result.rungs[2].reason, /no release-gate wired/i);
+});
+
+test('rung 2 verdict matrix (6/6): workflow present but unparseable (no recognizable on: block) — inert AND unverifiable', async () => {
+  const workflowText = 'this is not a valid workflow file at all, no trigger block present';
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      releaseGate: async () => ({ declared: false, workflowPresent: true, workflowText }),
+    },
+  });
+
+  assert.equal(result.rungs[2].active, false);
+  assert.equal(result.rungs[2].verifiable, false, 'unparseable must be honestly unverifiable, never a confirmed inert');
+  assert.equal(result.rungs[2].mechanism, 'release-gate-unparseable');
+});
+
+test('rung 2 verdict matrix: a workflowText read error (null, e.g. fs read failure) is treated as unparseable, never crashes', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      releaseGate: async () => ({ declared: false, workflowPresent: true, workflowText: null }),
+    },
+  });
+
+  assert.equal(result.rungs[2].active, false);
+  assert.equal(result.rungs[2].verifiable, false);
+});
+
+test('rung 2 verdict matrix (deferred to #210): audit job present but DAG unproven (no needs: link to tag-creation step) — must report verifiable:false', async () => {
+  // This scenario is documented in spec.md but currently undetectable without
+  // parsing the full job DAG (detecting needs: links). Phase 3 only checks trigger
+  // type + audit invocation + permissions; Phase 4 (#210) will add full DAG
+  // validation. For now, this test marks the test expectation and documents that
+  // it is deferred.
+  const workflowText = `name: release
+on:
+  workflow_dispatch:
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - run: node brain-audit.mjs HEAD~1..HEAD
+  tag:
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - run: git tag v1.0.0
+`;
+  const result = await detectSubstrate({
+    env: {},
+    probes: { releaseGate: async () => ({ declared: false, workflowPresent: true, workflowText }) },
+  });
+
+  // DEFERRED: This should report verifiable: false (audit job present but not
+  // provably linked to tag step via needs:). Currently reports verifiable: true
+  // because DAG validation is Phase 4 work. This test documents the gap and will
+  // be tightened when #210 implements full DAG checking.
+  assert.equal(
+    result.rungs[2].active,
+    true,
+    'audit + contents:write detected → active:true (correct for current impl)',
+  );
+  // TODO(#210): Change to assert.equal(result.rungs[2].verifiable, false) once
+  // Phase 4 adds needs: link validation.
+});
+
+// ── classifyReleaseWorkflowTrigger — both trigger shapes, exercised through
+// evalRung2 (module-local, unit-tested via detectSubstrate + injected text,
+// same convention as evalPipelineMustSucceedGate elsewhere in this file) ───────
+
+test('classifyReleaseWorkflowTrigger (post-fact): on.release: is classified post-fact, same as push:tags', async () => {
+  const workflowText = `name: release\n\non:\n  release:\n    types: [published]\n\npermissions: { contents: write }\n\njobs:\n  gate:\n    steps:\n      - run: node brain/scripts/brain-audit.mjs HEAD~1..HEAD\n`;
+  const result = await detectSubstrate({
+    env: {},
+    probes: { releaseGate: async () => ({ declared: false, workflowPresent: true, workflowText }) },
+  });
+
+  assert.equal(result.rungs[2].active, false, 'on.release fires after the release exists — post-fact, cannot block');
+  assert.match(result.rungs[2].reason, /cannot block tags/i);
+});
+
+test('classifyReleaseWorkflowTrigger (antecedent-capable): on.workflow_dispatch is distinguished from post-fact triggers', async () => {
+  const workflowText = `name: release\n\non:\n  workflow_dispatch:\n\npermissions: { contents: write }\n\njobs:\n  gate:\n    steps:\n      - run: node brain/scripts/brain-audit.mjs HEAD~1..HEAD\n`;
+  const result = await detectSubstrate({
+    env: {},
+    probes: { releaseGate: async () => ({ declared: false, workflowPresent: true, workflowText }) },
+  });
+
+  assert.equal(result.rungs[2].active, true, 'workflow_dispatch can run before the tag exists — antecedent-capable');
+});
+
 // ── Rung 1 — merge (finer branch-protection read, beyond capabilities()) ────────
 //
 // capabilities() (github.mjs:96-100) maps BOTH 200 and 404 to 'available' — correct

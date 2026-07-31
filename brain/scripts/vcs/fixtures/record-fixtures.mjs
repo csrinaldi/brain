@@ -9,11 +9,19 @@
 //
 //   node brain/scripts/vcs/fixtures/record-fixtures.mjs github labelEvents <project> <issueNumber>
 //   node brain/scripts/vcs/fixtures/record-fixtures.mjs github prView <project> <prNumber>
+//   node brain/scripts/vcs/fixtures/record-fixtures.mjs github issueView <project> <issueNumber>
+//   node brain/scripts/vcs/fixtures/record-fixtures.mjs github mrList <project>
+//   node brain/scripts/vcs/fixtures/record-fixtures.mjs github issueList <project>
+//   node brain/scripts/vcs/fixtures/record-fixtures.mjs github prReviews <project> <prNumber>
 //
 // Endpoints hit (documented per REQ-A3-6 — "documents which real endpoints it
 // hits"):
 //   - github labelEvents → `gh api --paginate repos/<project>/issues/<n>/events`
 //   - github prView      → `gh pr view <n> --json number,labels,body,author`
+//   - github issueView   → `gh api repos/<project>/issues/<n>` (issue #334, M10 Gap-A)
+//   - github mrList      → `gh api repos/<project>/pulls?state=open&per_page=100` (issue #355, M10 Phase 2 rank-3)
+//   - github issueList   → `gh api repos/<project>/issues?state=open&per_page=100` (issue #362, M10 Phase 2 rank-4)
+//   - github prReviews   → `gh api --paginate repos/<project>/pulls/<n>/reviews` (issue #317)
 //
 // Deliberately NOT auto-recorded by this script, ever:
 //   - github mrCreate  → `gh pr create` is a MUTATING write (creates a real PR
@@ -88,16 +96,166 @@ async function recordGithubPrView(project, number) {
   );
 }
 
+/**
+ * Records `github-issueView-happy.json` from a real issue via
+ * `gh api repos/<project>/issues/<n>` — the exact call `github.mjs#issueView`
+ * makes. Trimmed to the fields `issueView` actually consumes (number, title,
+ * labels[].name, body, user.login), same discipline as `recordGithubLabelEvents`.
+ * The recorded issue MUST carry a `type:*` label (M10 Gap-A / issue #334's
+ * `ship-pr-label-resolution` spec needs a happy fixture whose label round-trips
+ * through `findTypeLabel`).
+ */
+async function recordGithubIssueView(project, number) {
+  const endpoint = `GET repos/${project}/issues/${number}`;
+  const r = runJson('gh', ['api', `repos/${project}/issues/${number}`]);
+  writeFixture(
+    'github-issueView-happy.json',
+    {
+      endpoint,
+      date: today(),
+      recorded: true,
+      note:
+        'Trimmed to the fields github.mjs#issueView actually consumes (number, title, ' +
+        'labels[].name, body, user.login) via a jq-equivalent projection of the real ' +
+        'response — values are unmodified from the live API, only unused issue metadata ' +
+        'is dropped to keep the fixture reviewable.',
+    },
+    {
+      number: r.number,
+      title: r.title,
+      labels: (r.labels ?? []).map(l => ({ name: l.name })),
+      body: r.body,
+      user: { login: r.user?.login ?? null },
+    },
+  );
+}
+
+/**
+ * Records `github-mrList-happy.json` from the exact call `github.mjs#mrList`
+ * makes — `gh api repos/<project>/pulls?state=open&per_page=100` — then
+ * projects the response down to `{ number, title, head: { ref } }` per entry,
+ * same jq-equivalent trimming as `recordGithubLabelEvents`/`recordGithubIssueView`.
+ * An untrimmed `pulls` response carries tens of kilobytes per PR of metadata
+ * the normalizer never reads.
+ *
+ * Arity 1 (project only) — unlike every other case here, `mrList` is a
+ * per-project read with no PR/issue number. The dispatch line below still
+ * passes a second argument (`Number(number)`, `NaN` when omitted); it is
+ * simply unread by this function.
+ */
+async function recordGithubMrList(project) {
+  const endpoint = `GET repos/${project}/pulls?state=open&per_page=100`;
+  const arr = runJson('gh', ['api', `repos/${project}/pulls?state=open&per_page=100`]);
+  writeFixture(
+    'github-mrList-happy.json',
+    {
+      endpoint,
+      date: today(),
+      recorded: true,
+      note:
+        'Trimmed to the fields github.mjs#mrList actually consumes (number, title, head.ref) ' +
+        'via a jq-equivalent projection of the real response — values are unmodified from the ' +
+        'live API, only unused per-PR metadata is dropped to keep the fixture reviewable.',
+    },
+    arr.map(r => ({ number: r.number, title: r.title, head: { ref: r.head.ref } })),
+  );
+}
+
+/**
+ * Records `github-issueList-happy.json` from the exact call
+ * `github.mjs#issueList` makes — `gh api repos/<project>/issues?state=open&per_page=100`
+ * — then projects the response down before writing (issue #362, M10 Phase 2
+ * rank-4). Arity 1 (project only), same precedent as `recordGithubMrList` —
+ * `issueList` is a per-project read with no issue number.
+ *
+ * The projection keeps **fields the normalizer reads, not fields it maps**:
+ * `pull_request` is never emitted by `issueList`'s result, but `github.mjs`
+ * reads it to filter PR entries out of the issues list — trimming it away
+ * here would produce a fixture in which every entry survives the filter,
+ * silently destroying the coverage this fixture exists to provide. `labels`
+ * is kept as `[{ name }]` objects, NOT pre-flattened to strings, or the
+ * label-unwrap assertion in the contract suite goes vacuous.
+ */
+async function recordGithubIssueList(project) {
+  const endpoint = `GET repos/${project}/issues?state=open&per_page=100`;
+  const arr = runJson('gh', ['api', `repos/${project}/issues?state=open&per_page=100`]);
+  writeFixture(
+    'github-issueList-happy.json',
+    {
+      endpoint,
+      date: today(),
+      recorded: true,
+      note:
+        'Trimmed to the fields github.mjs#issueList actually consumes — kept per the ' +
+        '"fields the normalizer reads, not fields it maps" rule: pull_request (read as ' +
+        'filter input, never emitted by the result) is kept as { url }, and labels is kept ' +
+        'as [{ name }] objects rather than pre-flattened to strings, so the contract ' +
+        'suite\'s PR-filter and label-unwrap assertions exercise real behavior, not a ' +
+        'pre-normalized fixture.',
+    },
+    arr.map(r => ({
+      number: r.number,
+      title: r.title,
+      labels: (r.labels ?? []).map(l => ({ name: l.name })),
+      ...(r.pull_request ? { pull_request: { url: r.pull_request.url } } : {}),
+    })),
+  );
+}
+
+/**
+ * Records `github-prReviews-happy.json` from the exact call
+ * `github.mjs#prReviews` makes — `gh api --paginate repos/<project>/pulls/<n>/reviews`
+ * (issue #317).
+ *
+ * The recorded PR MUST have at least one review whose body carries a real
+ * `brain-review/N` fenced block. That is the entire point of this fixture:
+ * the contract suite runs the REAL normalizer output through `parseVerdict`
+ * and asserts a verdict is recovered. Before #317 the normalizer dropped
+ * `body`, so `cold-boot`'s `priorVerdicts` was always `[]` in production
+ * while its tests stayed green on injected bodies no adapter ever emitted —
+ * a fixture recorded from live traffic is what makes that masking
+ * impossible to reintroduce.
+ *
+ * `body` is kept VERBATIM and untruncated, unlike the field-trimming the
+ * other recorders apply: a truncated body would lose the closing fence and
+ * `parseVerdict` would return `null`, turning the suite's central assertion
+ * into a false negative.
+ */
+async function recordGithubPrReviews(project, number) {
+  const endpoint = `GET repos/${project}/pulls/${number}/reviews`;
+  const arr = runJson('gh', ['api', '--paginate', `repos/${project}/pulls/${number}/reviews`]);
+  writeFixture(
+    'github-prReviews-happy.json',
+    {
+      endpoint,
+      date: today(),
+      recorded: true,
+      note:
+        'Trimmed to the fields github.mjs#prReviews actually consumes (state, user.login, ' +
+        'body) via a jq-equivalent projection of the real response — values are unmodified ' +
+        'from the live API. body is kept VERBATIM and untruncated: it carries the real ' +
+        'brain-review/1 fenced block the contract suite feeds through parseVerdict, and ' +
+        'truncating it would drop the closing fence and silently defeat that assertion.',
+    },
+    arr.map(r => ({ state: r.state, user: { login: r.user?.login ?? null }, body: r.body })),
+  );
+}
+
 const CASES = {
   labelEvents: recordGithubLabelEvents,
   prView: recordGithubPrView,
+  issueView: recordGithubIssueView,
+  mrList: recordGithubMrList,
+  issueList: recordGithubIssueList,
+  prReviews: recordGithubPrReviews,
 };
 
 async function main() {
   const [provider, verb, project, number] = process.argv.slice(2);
   if (provider !== 'github' || !CASES[verb]) {
     console.error(
-      'usage: node record-fixtures.mjs github <labelEvents|prView> <project> <number>\n' +
+      'usage: node record-fixtures.mjs github <labelEvents|prView|issueView|prReviews> <project> <number>\n' +
+      '       node record-fixtures.mjs github <mrList|issueList> <project>\n' +
       '  (mrCreate and every gitlab-* fixture are deliberately NOT recordable by this script — see header comment)',
     );
     process.exit(1);

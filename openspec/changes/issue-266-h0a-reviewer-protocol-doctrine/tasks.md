@@ -117,11 +117,17 @@ slice: H0-a
       (binding ruling **R2**: "no key feeds two gates"; the union was corrected on orchestrator review
       — see ruling below). L5 (`actor-check.mjs`) is **not** touched — it keeps reading
       `governance.approvalActors` only.
-- [ ] **7.3 (deferred — reviewer bot handle undefined; owner decision pending)** — populate
-      `governance.reviewActors` with the reviewer handle in `brain.config.json`; confirm the reviewer
-      handle is **never** added to `governance.approvalActors` (Fork A, design §11). No dedicated
-      reviewer bot identity exists yet — `brain.config.json` is untouched by this PR; both governance
-      keys stay absent, defaulting to `[]`.
+- [x] **7.3 — DONE, in issue #367** (was: deferred, reviewer bot handle undefined). The owner minted
+      the identity, so the blocker cleared: **`csrinaldibot`** (GitHub User, `pull`/`push`/`triage`,
+      no `admin`/`maintain`), distinct from the author `csrinaldi`. `brain.config.json` now carries
+      `reviewer.handle: "csrinaldibot"` and `governance.reviewActors: ["csrinaldibot"]`.
+      **`governance.approvalActors` was NOT created and the handle is not in it** (Fork A, design
+      §11 — *"Do not register any reviewer handle in `governance.approvalActors` — ever."*). L5
+      (`actor-check.mjs`) remains untouched.
+      Shipped-config tripwire added in `brain/scripts/vcs/reviewer-identity-config.test.mjs`, because
+      8.1/8.2 below both use a FIXTURE identity and would stay green if the REAL config violated
+      lock 3 — the same green-in-test/inert-in-production gap M10 (#335) exists to close. Its
+      load-bearing assertion is an **absence** check, which no wrong value can satisfy.
 
 ## Phase 8 — the two mandatory lock-3 tests (rev-2 binding condition B)
 

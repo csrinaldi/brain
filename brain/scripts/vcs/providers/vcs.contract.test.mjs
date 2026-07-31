@@ -11,7 +11,8 @@
 //
 // Fixtures live in `../fixtures/*.json` (REQ-A3-6) — recorded from the real
 // GitHub API where reachable (github-labelEvents-happy.json,
-// github-prView-happy.json — see fixtures/record-fixtures.mjs), DERIVED
+// github-prView-happy.json, github-prReviews-happy.json — see
+// fixtures/record-fixtures.mjs), DERIVED
 // (hand-authored from the documented API shape) everywhere else (all
 // gitlab-*.json — no live GitLab mirror reachable from this environment,
 // deferred to CP-A3b/SCIT; every github-*-failure.json and
@@ -29,6 +30,11 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { setSpawn } from '../lib/exec.mjs';
+// The REAL production parser the reviewer's flow guarantees run on (issue
+// #317). Imported here on purpose: the `prReviews` block below feeds this
+// suite's REAL normalizer output straight into it, so "the adapter emits a
+// parseable verdict" is asserted end-to-end rather than assumed.
+import { parseVerdict } from '../../review/lib/parse-verdict.mjs';
 
 import * as github from './github.mjs';
 import * as gitlab from './gitlab.mjs';
@@ -71,7 +77,11 @@ function failSpawn(message = 'fixture: simulated failure') {
   return () => ({ status: 1, stdout: '', stderr: message });
 }
 
-function githubJsonCallArgs(fixture) {
+// Named for the seam (JSON-over-spawn), not the provider — `mrList` proves
+// GitLab needs this same spawn glue too (gitlab.mrList spawns `glab` via
+// `runJson` rather than fetching over `gitlabApiFetch`, so `gitlabCallArgs`'s
+// `fetchImpl` injection does not apply to it).
+function jsonSpawnCallArgs(fixture) {
   setSpawn(fixture.throws ? failSpawn(fixture.error) : jsonSpawn(fixture.data));
   return {};
 }
@@ -88,24 +98,106 @@ function gitlabCallArgs(fixture) {
   };
 }
 
+// gitlab.prReviews (issue #317) is the ONLY verb that reads TWO endpoints —
+// MR notes (the verdict thread) and MR approvals (the L6 approver roster) —
+// so the uniform single-payload `gitlabCallArgs` above cannot serve it: one
+// fixed response for both calls would feed the notes payload to the approvals
+// normalizer (and vice versa), producing a green test for the wrong reason.
+// This glue dispatches on the request URL, serving each endpoint its own half
+// of `fixture.data`. `page`-aware: any page past the first returns `[]`, the
+// short-page terminator the verb's pagination loop stops on.
+function gitlabPrReviewsCallArgs(fixture) {
+  return {
+    fetchImpl: async (url) => {
+      if (fixture.throws) return { ok: false, status: fixture.status ?? 500 };
+      if (url.includes('/approvals')) return { ok: true, json: async () => fixture.data.approvals };
+      const firstPage = !/[?&]page=(?!1\b)\d+/.test(url);
+      return { ok: true, json: async () => (firstPage ? fixture.data.notes : []) };
+    },
+  };
+}
+
+// authCheck/authLogin (issues #364/#365, M10 Phase 2 ranks 5-6) call the raw
+// `run()` wrapper, not `runJson()` — there is no JSON body to parse, only an
+// exit status (`run()`'s `ok: r.status === 0`). Reusing `jsonSpawnCallArgs`
+// would JSON-serialize the fixture's data as stdout, fabricating a JSON body
+// neither verb ever parses. This glue drives `_spawn` directly off the
+// fixture's own `status`/`stdout`/`stderr` fields — the exact mechanism both
+// verbs' boolean return value depends on (design D1).
+function rawStatusCallArgs(fixture) {
+  setSpawn(() => ({ status: fixture.status, stdout: fixture.stdout ?? '', stderr: fixture.stderr ?? '' }));
+  return {};
+}
+
+// repoCloneUrl (issue #385, M10 Phase 2 final Gap-A batch) — an obviously
+// synthetic placeholder, never a realistic secret shape (no ghp_/glpat-/gho_
+// prefix, no base62 entropy run), matching the existing 'sample-cred-9x7'
+// precedent (:739).
+const PLACEHOLDER_CREDENTIAL = 'placeholder-not-a-real-token';
+
 const PROVIDERS = {
   github: {
     module: github,
-    labelEvents: githubJsonCallArgs,
-    prView: githubJsonCallArgs,
+    labelEvents: jsonSpawnCallArgs,
+    prView: jsonSpawnCallArgs,
     mrCreate: githubRawCallArgs,
+    issueView: jsonSpawnCallArgs,
+    mrList: jsonSpawnCallArgs,
+    issueList: jsonSpawnCallArgs,
+    authCheck: rawStatusCallArgs,
+    authLogin: rawStatusCallArgs,
+    prReviews: jsonSpawnCallArgs,
+    // whoami/commitStatus (issue #385, M10 Phase 2 final Gap-A batch) spawn
+    // `gh api` via runJson — the same JSON-over-spawn seam mrList/issueList
+    // use.
+    whoami: jsonSpawnCallArgs,
+    commitStatus: jsonSpawnCallArgs,
   },
   gitlab: {
     module: gitlab,
     labelEvents: gitlabCallArgs,
     prView: gitlabCallArgs,
     mrCreate: gitlabCallArgs,
+    issueView: gitlabCallArgs,
+    // gitlab.mrList spawns `glab` via runJson rather than fetching over
+    // gitlabApiFetch (design D1) — it shares GitHub's spawn-transport seam,
+    // so PROVIDERS.gitlab.mrList is the SAME function object as
+    // PROVIDERS.github.mrList. That is the honest encoding of "both
+    // providers share one transport for this verb", not a copy-paste error.
+    mrList: jsonSpawnCallArgs,
+    // gitlab.issueList spawns `glab` via runJson for the same reason
+    // gitlab.mrList does (design D1) — same shared function object.
+    issueList: jsonSpawnCallArgs,
+    // gitlab.authCheck/authLogin spawn `glab` via the raw run() wrapper, the
+    // same shared spawn-transport seam github's boolean verbs use — same
+    // shared function object, same "one transport, both providers" honesty.
+    authCheck: rawStatusCallArgs,
+    authLogin: rawStatusCallArgs,
+    // gitlab.prReviews reads TWO endpoints over gitlabApiFetch (issue #317),
+    // so it needs the URL-dispatching glue rather than the uniform one.
+    prReviews: gitlabPrReviewsCallArgs,
+    // gitlab.whoami/commitStatus spawn `glab` via runJson for the same reason
+    // gitlab.mrList/issueList do (design D1) — SAME shared function object.
+    whoami: jsonSpawnCallArgs,
+    commitStatus: jsonSpawnCallArgs,
   },
 };
 
 for (const providerName of Object.keys(PROVIDERS)) {
-  const { module: vcs, labelEvents: labelEventsArgs, prView: prViewArgs, mrCreate: mrCreateArgs } =
-    PROVIDERS[providerName];
+  const {
+    module: vcs,
+    labelEvents: labelEventsArgs,
+    prView: prViewArgs,
+    mrCreate: mrCreateArgs,
+    issueView: issueViewArgs,
+    mrList: mrListArgs,
+    issueList: issueListArgs,
+    authCheck: authCheckArgs,
+    authLogin: authLoginArgs,
+    prReviews: prReviewsArgs,
+    whoami: whoamiArgs,
+    commitStatus: commitStatusArgs,
+  } = PROVIDERS[providerName];
 
   // ── labelEvents ────────────────────────────────────────────────────────
   test(`${providerName}.labelEvents (contract): happy fixture normalizes to the shared shape, ascending by at`, async () => {
@@ -205,6 +297,486 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assert.equal(result.body, '', 'a successfully-fetched-but-empty body must normalize to "", not null/undefined');
   });
 
+  // ── issueView (issue #334, M10 Gap-A) ─────────────────────────────────
+  // `({ project, number }) -> { number, title, labels, body, author }`. `labels`
+  // is always a `string[]`, never null, possibly empty — the source of the
+  // issue's `type:*` label consumed by `ship-pr-label-resolution` /
+  // `findTypeLabel`. Unlike `prView`, a fetch failure REJECTS (design A5) —
+  // `brain-start.mjs:65` already depends on that, so this is PINNED, not fixed.
+  test(`${providerName}.issueView (contract): happy fixture normalizes to { number, title, labels, body, author }`, async () => {
+    const fixtureName = `${providerName}-issueView-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.issueView({ project: 'x/y', number: 1, ...issueViewArgs(fixture) });
+
+    assert.equal(typeof result.number, 'number', 'number must normalize to a number');
+    assert.equal(typeof result.title, 'string', 'title must be a string');
+    assert.ok(Array.isArray(result.labels), 'labels must always normalize to an array, never null/undefined');
+    for (const label of result.labels) {
+      assert.equal(typeof label, 'string', 'each label must be a bare name string — no leaked provider object shape');
+    }
+    assert.equal(typeof result.body, 'string', 'body must be a string on a successful fetch');
+    assert.notEqual(result.author, undefined, 'author key must be present (null is valid — undefined is not)');
+  });
+
+  test(`${providerName}.issueView (contract): a fetch failure REJECTS — never a fabricated null/empty shape (A5)`, async () => {
+    const fixtureName = `${providerName}-issueView-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.rejects(
+      () => vcs.issueView({ project: 'x/y', number: 9999, ...issueViewArgs(fixture) }),
+      'issueView must REJECT on a fetch failure — brain-start.mjs:65 depends on that, unlike prView\'s null-shape',
+    );
+  });
+
+  test(`${providerName}.issueView (contract): a successful fetch with no labels normalizes to [], never null/undefined`, async () => {
+    // The `labels` key is OMITTED from the payload DELIBERATELY. A payload
+    // that already carried `labels: []` would satisfy the assertion below
+    // without the provider's `?? []` guard ever running — a vacuous test that
+    // would still pass if the guard were deleted. With the key absent, `[]`
+    // can only come from the guard, so the invariant is genuinely pinned.
+    const emptyFixture =
+      providerName === 'github'
+        ? { throws: false, data: { number: 7, title: 'x', body: '', user: { login: null } } }
+        : { throws: false, data: { iid: 7, title: 'x', description: '', author: null } };
+    const result = await vcs.issueView({ project: 'x/y', number: 7, ...issueViewArgs(emptyFixture) });
+    assert.deepEqual(result.labels, [], 'an empty label set must normalize to [], not null/undefined');
+  });
+
+  // ── mrList (issue #355, M10 Phase 2 rank-3) ─────────────────────────────
+  // `({ project, state }) -> [{ number, title, headBranch }]`. Unlike its
+  // sibling read verbs (prView/prReviews/labelEvents/prStatusRollup), `mrList`
+  // does NOT wrap its transport call — `runJson` throws on a non-zero exit or
+  // malformed JSON (exec.mjs:31-32), and neither provider catches it. This is
+  // PINNED here (design D3) because changing it is out of scope for this
+  // change, NOT because a caller depends on the throw — the opposite of why
+  // issueView's failure-REJECTS test above is pinned.
+  test(`${providerName}.mrList (contract): happy fixture normalizes to exactly { number, title, headBranch } per entry`, async () => {
+    const fixtureName = `${providerName}-mrList-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.mrList({ project: 'x/y', state: 'open', ...mrListArgs(fixture) });
+
+    assert.ok(result.length >= 2, 'happy fixture must exercise at least 2 entries');
+    for (const entry of result) {
+      assert.deepEqual(
+        Object.keys(entry).sort(),
+        ['headBranch', 'number', 'title'],
+        'each mrList entry must normalize to EXACTLY { number, title, headBranch } — no narrowed or widened shape',
+      );
+    }
+    // Full-array lock: pins values AND order (neither provider sorts —
+    // callers index into the list, so preserving the API's own ordering
+    // matters). Expected values are hardcoded from the fixture's own known
+    // content rather than re-derived from fixture.data via the same
+    // number/head.ref/source_branch mapping the normalizer performs — doing
+    // so would let a normalizer bug that mirrors this test's mapping pass
+    // undetected.
+    const expected =
+      providerName === 'github'
+        ? [
+            { number: 342, title: 'M10: seam-contract-coverage epic tracker', headBranch: 'feature/m10-seam-contract-coverage' },
+            { number: 331, title: 'fix(governance): re-order release audit gate to audit-then-tag and add audit baseline', headBranch: 'fix/issue-210-fixgovernance-releaseyml-audit-gate-cann' },
+          ]
+        : [
+            { number: 42, title: 'Add pagination guard to labelList', headBranch: 'feat/label-pagination' },
+            { number: 41, title: 'Fix issueView author normalization', headBranch: 'fix/issue-author-null' },
+          ];
+    assert.deepEqual(result, expected);
+  });
+
+  test(`${providerName}.mrList (contract): an empty open-list yields [], never a fabricated null/undefined`, async () => {
+    const fixtureName = `${providerName}-mrList-empty.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.mrList({ project: 'x/y', state: 'open', ...mrListArgs(fixture) });
+    assert.deepEqual(result, [], 'board.mjs/queue.mjs iterate the mrList result unguarded — [] is required, null/undefined would crash them');
+  });
+
+  test(`${providerName}.mrList (contract): a transport failure REJECTS — pinned as a documented divergence, not fixed here`, async () => {
+    const fixtureName = `${providerName}-mrList-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.rejects(
+      () => vcs.mrList({ project: 'x/y', state: 'open', ...mrListArgs(fixture) }),
+      'mrList must REJECT on a transport failure — unlike prView/prReviews/labelEvents/prStatusRollup\'s never-throws convention, mrList does not wrap runJson in a try/catch (design D3); this is PINNED because changing it is out of scope here, not because a caller depends on it',
+    );
+  });
+
+  // ── issueList (issue #362, M10 Phase 2 rank-4) ──────────────────────────
+  // `({ project, state, assignee }) -> [{ number, title, labels }]`. Like
+  // `mrList`, `issueList` does NOT wrap its transport call — `runJson` throws
+  // on a non-zero exit or malformed JSON (exec.mjs:31-32), and neither
+  // provider catches it. BUT the reason this throw is pinned is the OPPOSITE
+  // of why mrList's is (design D3): every `issueList` call site already
+  // ABSORBS the throw — `tracker-board.mjs:44-47`'s `safeList` wraps it in
+  // try/catch and returns `[]`; `project-status.mjs:115-130` wraps the call
+  // (and the sibling `mrList` call) in its own try/catch. So the throw is
+  // CONTAINED and load-bearing here, not merely out of scope to fix.
+  //
+  // D1 — the `assignee` parameter is DELIBERATELY EXCLUDED from this loop.
+  // Every assignee value produces the identical result shape from the
+  // identical response payload; only the query string varies, and that is
+  // already unit-tested at `cli.test.mjs:110-116`. Tracing what would
+  // silently go green if `assignee: 'me'` were added under this loop's
+  // uniform-response stub (one fixed response for every spawn call): `
+  // whoami()` would receive the ISSUES ARRAY back instead of a user object,
+  // so `resp.login`/`resp.username` would be `undefined`;
+  // `assigneeParams('github', 'me', undefined)` falls back to a
+  // plausible-looking `{ assignee: '@me' }`; `assigneeParams('gitlab', 'me',
+  // undefined)` yields `{ assignee_username: undefined }`, which `toQs`
+  // filters out but still leaves a truthy `extra`, producing a malformed
+  // trailing `&` in the endpoint. The second `runJson` call then returns the
+  // same array again and normalizes cleanly — a GREEN test for the WRONG
+  // reason. Do not "improve" this coverage by adding `assignee` here.
+  test(`${providerName}.issueList (contract): happy fixture normalizes to exactly { number, title, labels } per entry`, async () => {
+    const fixtureName = `${providerName}-issueList-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.issueList({ project: 'x/y', state: 'open', ...issueListArgs(fixture) });
+
+    assert.ok(result.length >= 2, 'happy fixture must exercise at least 2 surviving entries');
+    for (const entry of result) {
+      assert.deepEqual(
+        Object.keys(entry).sort(),
+        ['labels', 'number', 'title'],
+        'each issueList entry must normalize to EXACTLY { number, title, labels } — no narrowed or widened shape',
+      );
+      for (const label of entry.labels) {
+        assert.equal(
+          typeof label,
+          'string',
+          'each label must be a bare name string — GitHub unwraps label objects via .map(l => l.name), GitLab is already a flat string array',
+        );
+      }
+    }
+    // Full-array lock: pins values AND order (neither provider sorts — the
+    // API's own ordering surfaces as-is, and project-status.mjs:118 prints in
+    // that order). Expected values are hardcoded from the fixture's own known
+    // content rather than re-derived from fixture.data via the same
+    // number/iid/labels mapping the normalizer performs — doing so would let
+    // a normalizer bug that mirrors this test's mapping pass undetected.
+    const expected =
+      providerName === 'github'
+        ? [
+            { number: 362, title: 'feat(m10-phase2): issueList contract-parity coverage (rank 4)', labels: ['type:feature', 'status:needs-review'] },
+            { number: 361, title: 'fix(memory): index self-healing is backend-asymmetric — engram.share() reindexes conditionally and engram.pull() never does', labels: [] },
+            { number: 358, title: 'Q5 — Architecture decision: doctrine tiers (lite/standard/regulated)', labels: [] },
+            { number: 340, title: 'fix(governance): issue-link local check and CI job implement the same rule differently — brain:check greenlights PRs that CI rejects', labels: ['type:bug', 'status:needs-review'] },
+            { number: 336, title: 'feat(vcs): M10 Phase 1 — port-verb contract coverage audit (detection only)', labels: ['type:feature', 'status:needs-review'] },
+            { number: 329, title: 'fix(governance): actor-check L5 and #124 are mutually unsatisfiable for a solo maintainer', labels: ['type:bug'] },
+          ]
+        : [
+            { number: 42, title: 'Add pagination guard to labelList', labels: ['type:bug', 'status:needs-review'] },
+            { number: 41, title: 'Fix issueView author normalization', labels: [] },
+          ];
+    assert.deepEqual(result, expected);
+  });
+
+  test(`${providerName}.issueList (contract): an empty open-list yields [], never a fabricated null/undefined`, async () => {
+    const fixtureName = `${providerName}-issueList-empty.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.issueList({ project: 'x/y', state: 'open', ...issueListArgs(fixture) });
+    assert.deepEqual(
+      result,
+      [],
+      "tracker-board.mjs:58's myIssues.length is unguarded — null/undefined would crash it with an uncaught TypeError at ESM top level; [] is the only safe return",
+    );
+  });
+
+  test(`${providerName}.issueList (contract): a transport failure REJECTS — caller-absorbed at both call sites, unlike mrList's out-of-scope pin`, async () => {
+    const fixtureName = `${providerName}-issueList-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.rejects(
+      () => vcs.issueList({ project: 'x/y', state: 'open', ...issueListArgs(fixture) }),
+      "issueList must REJECT on a transport failure — tracker-board.mjs:44-47's safeList catches it and returns [], and project-status.mjs:115-130 wraps the call in its own try/catch; both sites already absorb the throw, so it is CONTAINED and load-bearing here, not merely pinned because fixing it is out of scope (contrast with mrList's design D3 rationale)",
+    );
+  });
+
+  // ── authCheck (issue #365, M10 Phase 2 rank-6) ──────────────────────────
+  // `({ host }) -> boolean` (vcs-contract.md row 24). Corrected premise
+  // (design.md): the originating task brief assumed a `{ username }` object
+  // shape; both providers call the raw `run()` wrapper (never `runJson()`)
+  // and return `.ok` — a plain boolean. `run()` never throws (exec.mjs:20-23)
+  // — a non-zero exit normalizes to `false`, it does not reject. This is the
+  // OPPOSITE divergence from mrList/issueList, which are pinned as throwing.
+  test(`${providerName}.authCheck (contract): an authenticated session returns exactly true`, async () => {
+    const fixtureName = `${providerName}-authCheck-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.authCheck({ host: 'github.com', ...authCheckArgs(fixture) });
+    assert.equal(result, true, 'authCheck must return the exact boolean true on an authenticated session, not merely a truthy value');
+  });
+
+  test(`${providerName}.authCheck (contract): an unauthenticated session returns exactly false, and never rejects`, async () => {
+    const fixtureName = `${providerName}-authCheck-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.doesNotReject(
+      async () => {
+        const result = await vcs.authCheck({ host: 'github.com', ...authCheckArgs(fixture) });
+        assert.equal(result, false, 'authCheck must return the exact boolean false on a non-zero exit, not merely a falsy value');
+      },
+      'authCheck must resolve on a non-zero exit — run() never throws (exec.mjs:20-23) — unlike mrList/issueList, which are pinned as rejecting',
+    );
+  });
+
+  // ── authLogin (issue #364, M10 Phase 2 rank-5) ──────────────────────────
+  // `({ host, token }) -> boolean` (vcs-contract.md row 25). Same corrected
+  // premise as authCheck — see design.md's "Corrected premise" section.
+  test(`${providerName}.authLogin (contract): a successful login returns exactly true`, async () => {
+    const fixtureName = `${providerName}-authLogin-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.authLogin({ host: 'github.com', token: 'tok', ...authLoginArgs(fixture) });
+    assert.equal(result, true, 'authLogin must return the exact boolean true on a successful login, not merely a truthy value');
+  });
+
+  test(`${providerName}.authLogin (contract): a failed login returns exactly false, and never rejects`, async () => {
+    const fixtureName = `${providerName}-authLogin-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.doesNotReject(
+      async () => {
+        const result = await vcs.authLogin({ host: 'github.com', token: 'tok', ...authLoginArgs(fixture) });
+        assert.equal(result, false, 'authLogin must return the exact boolean false on a non-zero exit, not merely a falsy value');
+      },
+      'authLogin must resolve on a non-zero exit — run() never throws (exec.mjs:20-23)',
+    );
+  });
+
+  // ── prReviews (issue #317) ──────────────────────────────────────────────
+  //
+  // `({ project, number, ... }) -> Promise<Array<{ state, author, body }>|null>`.
+  //
+  // WHY THIS BLOCK EXISTS. Every one of the reviewer's flow guarantees —
+  // the anti-loop lock (poster.mjs's `lastVerdict`), the `rev >= 3 -> STOP`
+  // bound (verdict.mjs's `priorRevCount`), the §8 prior-verdict doctrine
+  // load, and board reconciliation — is reconstructed from ONE input:
+  // `cold-boot`'s `doctrine.priorVerdicts`, which is `prReviews(...)` mapped
+  // through `parseVerdict`. `parseVerdict` needs a STRING `body`.
+  //
+  // Before #317 neither provider emitted one. GitHub's normalizer dropped
+  // `body`; GitLab's read the APPROVALS endpoint, which has no bodies at all
+  // and no verdict thread. So `priorVerdicts` was ALWAYS `[]` in production
+  // and all four guarantees were inert — while their unit tests stayed green
+  // because cold-boot.test.mjs and board.test.mjs injected a `body` no real
+  // adapter ever emitted (cold-boot.mjs even carried a comment admitting it).
+  //
+  // The masking is what these tests exist to kill, so the central assertion
+  // is deliberately NOT "the shape has a body key". It is: run the REAL
+  // normalizer output through the REAL `parseVerdict` and require a verdict
+  // back. That is the only assertion an adapter cannot satisfy while still
+  // being broken in production — a shape-only check would go green again the
+  // moment someone normalized `body` to `undefined`, and a hand-written
+  // review object in the test would reintroduce exactly the injection this
+  // block replaces.
+  test(`${providerName}.prReviews (contract): happy fixture normalizes to exactly { state, author, body } per entry`, async () => {
+    const fixtureName = `${providerName}-prReviews-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.prReviews({ project: 'x/y', number: 1, ...prReviewsArgs(fixture) });
+
+    assert.ok(Array.isArray(result), 'prReviews must return an array on a successful fetch');
+    assert.ok(result.length >= 2, 'happy fixture must exercise at least 2 entries');
+    for (const entry of result) {
+      assert.deepEqual(
+        Object.keys(entry).sort(),
+        ['author', 'body', 'state'],
+        'each prReviews entry must normalize to EXACTLY { state, author, body } — a narrowed shape is the #317 defect itself',
+      );
+      assert.equal(
+        typeof entry.body,
+        'string',
+        'body must ALWAYS be a string — parse-verdict.mjs:36 rejects a non-string outright, so null/undefined silently empties priorVerdicts',
+      );
+      assert.notEqual(entry.author, undefined, 'author key must be present (null is valid — undefined is not)');
+      // No provider-specific field name may leak through the contract.
+      assert.ok(!('user' in entry), 'must not leak GitHub user object (only author)');
+      assert.ok(!('username' in entry), 'must not leak raw GitLab username (only author)');
+      assert.ok(!('system' in entry), 'must not leak GitLab note system flag');
+      assert.ok(!('created_at' in entry), 'must not leak raw created_at');
+    }
+  });
+
+  // THE anti-masking test. This is the assertion #317 turns on.
+  test(`${providerName}.prReviews (contract): the REAL normalizer output parses into a verdict via the REAL parseVerdict — priorVerdicts is no longer always empty`, async () => {
+    const fixtureName = `${providerName}-prReviews-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.prReviews({ project: 'x/y', number: 1, ...prReviewsArgs(fixture) });
+
+    // Exactly cold-boot.mjs's `reviews.map(r => parseVerdict(r)).filter(Boolean)`
+    // — the same expression, not a re-implementation, so a divergence between
+    // this suite and production cannot hide here.
+    const priorVerdicts = result.map(r => parseVerdict(r)).filter(Boolean);
+
+    assert.ok(
+      priorVerdicts.length >= 1,
+      'the adapter\'s own output must yield at least one parsed verdict — an empty priorVerdicts is the #317 production defect: anti-loop dead, rev-bound dead, doctrine load dead, board reconciliation dead',
+    );
+    const latest = priorVerdicts[priorVerdicts.length - 1];
+    assert.equal(typeof latest.head_sha, 'string', 'the parsed verdict must carry head_sha — poster.mjs compares it against the current head to suppress a duplicate re-post');
+    assert.ok(['APPROVE', 'REVISE', 'STOP'].includes(latest.verdict), 'the parsed verdict must carry a recognized verdict scalar — board.mjs denormalizes it to reviewed:*');
+    assert.notEqual(latest.author, undefined, 'the parsed verdict must carry author — poster.mjs\'s anti-loop compares it against the reviewer handle');
+  });
+
+  test(`${providerName}.prReviews (contract): a fetch failure yields null, never a fabricated []`, async () => {
+    const fixtureName = `${providerName}-prReviews-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.prReviews({ project: 'x/y', number: 1, ...prReviewsArgs(fixture) });
+    assert.equal(
+      result,
+      null,
+      'an uncomputable prReviews fetch must return null, never [] — the L6 gate distinguishes "nobody approved" from "could not fetch"',
+    );
+  });
+
+  if (providerName === 'gitlab') {
+    test(`${providerName}.prReviews (contract): malformed notes response (200 OK, non-array body) yields null, matching prStatusRollup discipline`, async () => {
+      const fixtureName = `${providerName}-prReviews-malformed.json`;
+      const fixture = loadFixture(fixtureName);
+      assertProvenance(fixture, fixtureName);
+
+      const result = await vcs.prReviews({ project: 'x/y', number: 1, ...prReviewsArgs(fixture) });
+      assert.equal(
+        result,
+        null,
+        'prReviews must return null on a malformed notes response (200 OK with non-array body), not fabricate [] — all-or-nothing invariant',
+      );
+    });
+  }
+
+  // ── whoami (issue #385, M10 Phase 2 final Gap-A batch) ──────────────────
+  // `() -> { username }` (vcs-contract.md row 26). Transport is `runJson` on
+  // both providers (design D1) — the same seam mrList/issueList use, so a
+  // transport failure REJECTS rather than yielding a null-shape. `whoami()`
+  // is declared with no parameter list on either provider (github.mjs:30,
+  // gitlab.mjs:31) — `whoamiArgs(fixture)` is called purely for its
+  // `setSpawn` side effect (design D1 gotcha).
+  test(`${providerName}.whoami (contract): happy fixture normalizes to exactly { username }`, async () => {
+    const fixtureName = `${providerName}-whoami-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.whoami({ ...whoamiArgs(fixture) });
+    // Hardcoded expected value — never re-derived from fixture.data.login/
+    // .username, which would let a mirrored normalizer bug pass (design D3,
+    // matching the mrList/issueList precedent at :354-360/:442-447).
+    assert.deepEqual(
+      result,
+      providerName === 'github' ? { username: 'csrinaldi' } : { username: 'brain-bot' },
+      'whoami must normalize to EXACTLY { username } — no login/id/avatar_url or other raw field name may leak through the contract',
+    );
+  });
+
+  test(`${providerName}.whoami (contract): a transport failure REJECTS — no null-shape fallback exists for this verb`, async () => {
+    const fixtureName = `${providerName}-whoami-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.rejects(
+      () => vcs.whoami({ ...whoamiArgs(fixture) }),
+      'whoami must REJECT on a transport failure — runJson throws (exec.mjs:31-32) and neither provider wraps it; a failed lookup must never fabricate { username: undefined }',
+    );
+  });
+
+  // ── commitStatus (issue #385, M10 Phase 2 final Gap-A batch) ────────────
+  // `({ project, sha }) -> Status|null` (vcs-contract.md row 35). Transport is
+  // `runJson` on both providers (design D1) — a transport failure REJECTS,
+  // the mrList flavor (pinned out-of-scope, design D2), not the issueList
+  // flavor (caller-absorbed).
+  test(`${providerName}.commitStatus (contract): a completed check normalizes to the canonical enum value`, async () => {
+    const fixtureName = `${providerName}-commitStatus-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.commitStatus({ project: 'x/y', sha: 'cafef00d', ...commitStatusArgs(fixture) });
+    assert.equal(result, 'success', 'a completed, successful check must normalize to the canonical "success" enum value on both providers');
+  });
+
+  test(`${providerName}.commitStatus (contract): no computable status normalizes to null — a SUCCESSFUL call with nothing to report`, async () => {
+    const fixtureName = `${providerName}-commitStatus-empty.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.commitStatus({ project: 'x/y', sha: 'cafef00d', ...commitStatusArgs(fixture) });
+    assert.equal(result, null, 'an empty check set is a SUCCESSFUL call with nothing to report — null, not a rejection; the failure case below is what rejects');
+  });
+
+  test(`${providerName}.commitStatus (contract): a transport failure REJECTS — pinned out-of-scope, not because a caller depends on the throw`, async () => {
+    const fixtureName = `${providerName}-commitStatus-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.rejects(
+      () => vcs.commitStatus({ project: 'x/y', sha: 'cafef00d', ...commitStatusArgs(fixture) }),
+      'commitStatus must REJECT on a transport failure — runJson throws (exec.mjs:31-32) and neither provider wraps it; PINNED as out-of-scope (the mrList rationale, design D2 there), NOT because a caller depends on the throw',
+    );
+  });
+
+  // ── projectResolve (issue #385, M10 Phase 2 final Gap-A batch) ──────────
+  // `({ project }) -> string` (vcs-contract.md row 38). Both implementations
+  // are `return project` — no transport, no failure mode, no empty case
+  // (design D6). No fixture, no PROVIDERS key: there is nothing to inject.
+  test(`${providerName}.projectResolve (contract): returns the slug unchanged — identity on both providers, the documented extension point`, async () => {
+    assert.equal(await vcs.projectResolve({ project: 'x/y' }), 'x/y');
+    // Nested GitLab group path: proves projectResolve does NOT url-encode —
+    // each verb encodes locally at its own call site (gitlab.mjs:371), so
+    // encoding here would double-encode every downstream request.
+    assert.equal(await vcs.projectResolve({ project: 'group/sub/repo' }), 'group/sub/repo');
+  });
+
+  // ── repoCloneUrl (issue #385, M10 Phase 2 final Gap-A batch) ────────────
+  // `({ host, project, token }) -> string` (vcs-contract.md row 36). No
+  // transport (design D1) — no fixture, no PROVIDERS key. `new URL()` parses
+  // the result rather than grepping it, so the credential is proven to sit in
+  // a specific structural position, not merely "somewhere in the string"
+  // (design D4) — the string-construction analogue of the authLogin
+  // stdin-vs-argv guard (:738-752).
+  test(`${providerName}.repoCloneUrl (contract): the credential sits in the userinfo segment, and the provider's user literal is not a caller concern`, async () => {
+    const url = await vcs.repoCloneUrl({ host: 'vcs.example.test', project: 'x/y', token: PLACEHOLDER_CREDENTIAL });
+    const parsed = new URL(url);
+
+    assert.equal(parsed.protocol, 'https:', 'the clone URL must be https — a git-protocol or http URL would carry the credential in clear');
+    assert.equal(parsed.password, PLACEHOLDER_CREDENTIAL, 'the credential must sit in the userinfo PASSWORD position — the only place git consumes it');
+    assert.equal(parsed.host, 'vcs.example.test', 'the supplied host must be honored verbatim when present');
+    assert.equal(parsed.pathname, '/x/y.git', 'the project slug must reach the path unencoded and .git-suffixed');
+    assert.equal(parsed.search, '', 'the credential must NEVER ride in the query string — proxies and servers log query strings, they do not log userinfo');
+    assert.ok(parsed.username.length > 0, "a user literal must be present; WHICH literal is provider-specific (x-access-token vs oauth2) and is never compared across providers here");
+  });
+
+  // ── patSetupUrl (issue #385, M10 Phase 2 final Gap-A batch) ─────────────
+  // `({ host, name, scopes }) -> string` (vcs-contract.md row 37). No
+  // transport (design D1) — no fixture, no PROVIDERS key. This verb is mostly
+  // NOT parity (divergence locks below, design D5) — this is the thin floor
+  // genuinely common to both providers: comparing VALUES, not query KEYS,
+  // since the key itself diverges (GH `description=`, GL `name=`).
+  test(`${providerName}.patSetupUrl (contract): returns an absolute https URL carrying the requested name and comma-joined scopes`, async () => {
+    const parsed = new URL(await vcs.patSetupUrl({ host: 'vcs.example.test', name: 'brain', scopes: ['api', 'read_user'] }));
+    assert.equal(parsed.protocol, 'https:');
+    assert.equal(parsed.searchParams.get('scopes'), 'api,read_user', 'scopes must be comma-joined on both providers');
+    assert.ok([...parsed.searchParams.values()].includes('brain'), 'the requested token name must reach the URL — the query KEY differs per provider (GH description=, GL name=), so only the VALUE is compared in the parity loop');
+  });
+
   // ── mrCreate ───────────────────────────────────────────────────────────
   test(`${providerName}.mrCreate (contract): happy fixture returns { url }`, async () => {
     const fixtureName = `${providerName}-mrCreate-happy.json`;
@@ -243,6 +815,215 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assert.equal(typeof result.error, 'string', 'a failed mrCreate must carry an error string');
   });
 }
+
+// ── commitStatus/repoCloneUrl/patSetupUrl divergence locks (issue #385, M10
+// Phase 2 final Gap-A batch) ─────────────────────────────────────────────────
+//
+// Standalone, no loop, same precedent as the authCheck/authLogin divergence
+// block below (:819-856) and the github.issueList pull_request-filter test
+// (:~890). Three latent production defects are LOCKED as current behavior
+// here, never fixed — each assertion message says PINNED NOT FIXED and names
+// the follow-up issue filed in Phase 6.
+
+// GitHub-only commitStatus mechanics (design D2) — no fixture-driven parity
+// test can see these; the payload SHAPE is the assertion.
+
+test('github.commitStatus (contract): an unfinished check reads status, not conclusion — in_progress normalizes to "running"', async () => {
+  setSpawn(jsonSpawn({ check_runs: [{ name: 'ci/build', status: 'in_progress', conclusion: null }] }));
+  const result = await github.commitStatus({ project: 'x/y', sha: 'cafef00d' });
+  assert.equal(
+    result,
+    'running',
+    'github.mjs:225 reads `status` (not `conclusion`) while status !== "completed" — proven here because conclusion is null and only status carries "in_progress"',
+  );
+});
+
+test('github.commitStatus (contract): a completed check with conclusion neutral or skipped collapses to null — indistinguishable from "no checks ran"', async () => {
+  for (const conclusion of ['neutral', 'skipped']) {
+    setSpawn(jsonSpawn({ check_runs: [{ name: 'ci/build', status: 'completed', conclusion }] }));
+    const result = await github.commitStatus({ project: 'x/y', sha: 'cafef00d' });
+    assert.equal(
+      result,
+      null,
+      `a COMPLETED check with conclusion:'${conclusion}' must normalize to null (normalize.mjs:24-25's GITHUB_STATUS_MAP) — the previously-undocumented collapse this batch adds to vcs-contract.md, indistinguishable at the contract boundary from "no checks ran"`,
+    );
+  }
+});
+
+test('commitStatus (contract): selection asymmetry — GitHub takes check_runs[0] client-side, GitLab requests per_page=1 server-side', async () => {
+  setSpawn(jsonSpawn({
+    check_runs: [
+      { name: 'ci/build', status: 'completed', conclusion: 'success' },
+      { name: 'ci/lint', status: 'completed', conclusion: 'failure' },
+    ],
+  }));
+  const ghResult = await github.commitStatus({ project: 'x/y', sha: 'cafef00d' });
+  assert.equal(
+    ghResult,
+    'success',
+    'github.mjs:221 takes check_runs[0] CLIENT-side — with two entries in the fixture, the FIRST one\'s mapped status must win, never the second',
+  );
+
+  let gitlabArgs;
+  setSpawn((_cmd, args) => { gitlabArgs = args; return { status: 0, stdout: JSON.stringify([{ status: 'success' }]), stderr: '' }; });
+  await gitlab.commitStatus({ project: 'x/y', sha: 'cafef00d' });
+  assert.ok(
+    gitlabArgs.some(a => String(a).includes('per_page=1')),
+    'gitlab.mjs:372 selects a single status SERVER-side via `per_page=1` in the request, not by slicing a larger array client-side',
+  );
+});
+
+// repoCloneUrl host-default divergence (design D4) — following the shape of
+// the authLogin host-default divergence test at :819-856.
+
+test('repoCloneUrl (contract): host-default divergence — GitHub falls back to github.com, GitLab emits a literal "undefined" host', async () => {
+  const gh = new URL(await github.repoCloneUrl({ project: 'x/y', token: PLACEHOLDER_CREDENTIAL }));
+  assert.equal(gh.host, 'github.com', "github.mjs:481 substitutes the literal default (host || 'github.com') when host is omitted");
+  assert.equal(gh.username, 'x-access-token', 'the GitHub user literal is x-access-token');
+
+  const gl = new URL(await gitlab.repoCloneUrl({ project: 'x/y', token: PLACEHOLDER_CREDENTIAL }));
+  assert.equal(
+    gl.host,
+    'undefined',
+    'LATENT DEFECT, PINNED NOT FIXED (follow-up filed) — gitlab.mjs:531 interpolates ${host} with no fallback, so an omitted host produces the literally broken https://oauth2:***@undefined/x/y.git; locked as current behavior — fixing it is a production change, out of scope for this test-only slice',
+  );
+  assert.equal(gl.username, 'oauth2', 'the GitLab user literal is oauth2');
+});
+
+// patSetupUrl divergence locks (design D5) — GitHub ignores `host` entirely
+// (GHES-breaking), GitLab is correctly host-driven; and the shared
+// no-URL-encoding gap that affects both providers.
+
+test('github.patSetupUrl (contract): the host parameter is IGNORED — the URL is hardcoded to github.com', async () => {
+  const parsed = new URL(await github.patSetupUrl({ host: 'ghes.example.test', name: 'brain', scopes: ['repo'] }));
+  assert.equal(
+    parsed.host,
+    'github.com',
+    'LATENT DEFECT, PINNED NOT FIXED (follow-up filed) — github.mjs:485 hardcodes github.com and never reads `host`, so a GitHub Enterprise Server operator is silently sent to the public github.com PAT page',
+  );
+  assert.equal(parsed.pathname, '/settings/tokens/new');
+  assert.equal(parsed.searchParams.get('description'), 'brain', 'GitHub keys the token name as `description`');
+});
+
+test('gitlab.patSetupUrl (contract): the URL is host-driven — the supplied host appears verbatim', async () => {
+  const parsed = new URL(await gitlab.patSetupUrl({ host: 'gitlab.example.test', name: 'brain', scopes: ['api'] }));
+  assert.equal(
+    parsed.host,
+    'gitlab.example.test',
+    'gitlab.mjs:535 interpolates the supplied host — the divergence from GitHub above, and the reason self-hosted GitLab works while GHES does not',
+  );
+  assert.equal(parsed.pathname, '/-/user_settings/personal_access_tokens');
+  assert.equal(parsed.searchParams.get('name'), 'brain', 'GitLab keys the token name as `name`');
+});
+
+test('patSetupUrl (contract): neither provider URL-encodes the token name — a name containing & injects a spurious query parameter', async () => {
+  for (const [label, url] of [
+    ['github', await github.patSetupUrl({ host: 'h.example.test', name: 'brain & co', scopes: ['repo'] })],
+    ['gitlab', await gitlab.patSetupUrl({ host: 'h.example.test', name: 'brain & co', scopes: ['api'] })],
+  ]) {
+    const parsed = new URL(url);
+    assert.ok(
+      parsed.searchParams.has(' co'),
+      `${label}: LATENT DEFECT, PINNED NOT FIXED (follow-up filed) — the raw & splits the name into a second, spurious query parameter; neither provider calls encodeURIComponent on name/scopes`,
+    );
+  }
+});
+
+// ── authCheck/authLogin argument-building divergence + token security ──────
+// (issues #364/#365, M10 Phase 2 ranks 5-6). Both verbs' fixture-driven
+// happy/failure tests live in the main parity loop above (they only vary
+// `status`, never call args). These three tests assert on the ARGS the
+// mocked `_spawn` actually receives — a real per-provider code divergence
+// (D4) that no fixture-driven test can see, since fixtures only vary the
+// exit status. Standalone tests (no fixture, no loop), same precedent as the
+// `github.issueList` pull_request-filter test directly below.
+
+test('authCheck (contract): host-argument-building divergence — GitHub omits --hostname when host is falsy, GitLab always includes it', async () => {
+  let githubArgs;
+  setSpawn((_cmd, args) => { githubArgs = args; return { status: 0, stdout: '', stderr: '' }; });
+  await github.authCheck({});
+  assert.ok(
+    !githubArgs.includes('--hostname'),
+    'github.mjs#authCheck branches on a falsy host and omits --hostname entirely (github.mjs:20-23)',
+  );
+
+  let gitlabArgs;
+  setSpawn((_cmd, args) => { gitlabArgs = args; return { status: 0, stdout: '', stderr: '' }; });
+  await gitlab.authCheck({});
+  assert.ok(
+    gitlabArgs.includes('--hostname'),
+    'gitlab.mjs#authCheck never branches — it always includes --hostname, even passing the omitted host value through as undefined (gitlab.mjs:22-24)',
+  );
+});
+
+test('authLogin (contract): host-default divergence — GitHub defaults to github.com when host is omitted, GitLab does not', async () => {
+  let githubArgs;
+  setSpawn((_cmd, args) => { githubArgs = args; return { status: 0, stdout: '', stderr: '' }; });
+  await github.authLogin({ token: 'tok' });
+  assert.ok(
+    githubArgs.includes('github.com'),
+    "github.mjs#authLogin substitutes the literal default 'github.com' when host is omitted (host || 'github.com', github.mjs:25-28)",
+  );
+
+  let gitlabArgs;
+  setSpawn((_cmd, args) => { gitlabArgs = args; return { status: 0, stdout: '', stderr: '' }; });
+  await gitlab.authLogin({ token: 'tok' });
+  const hostnameIdx = gitlabArgs.indexOf('--hostname');
+  assert.ok(hostnameIdx !== -1, 'gitlab.mjs#authLogin always passes --hostname');
+  assert.equal(
+    gitlabArgs[hostnameIdx + 1],
+    undefined,
+    'gitlab.mjs#authLogin does NOT default host — the omitted value is passed through unguarded, unlike GitHub (gitlab.mjs:26-29)',
+  );
+});
+
+test('authLogin (contract): the token is delivered via stdin on both providers, never via argv', async () => {
+  const CREDENTIAL_VALUE = 'sample-cred-9x7';
+
+  let githubArgs, githubOpts;
+  setSpawn((_cmd, args, opts) => { githubArgs = args; githubOpts = opts; return { status: 0, stdout: '', stderr: '' }; });
+  await github.authLogin({ host: 'github.com', token: CREDENTIAL_VALUE });
+  assert.equal(githubOpts.input, CREDENTIAL_VALUE, 'github.mjs#authLogin must deliver the token via opts.input (stdin)');
+  assert.ok(!githubArgs.includes(CREDENTIAL_VALUE), 'the token must never appear in the argv array passed to gh — a credential-leak guard');
+
+  let gitlabArgs, gitlabOpts;
+  setSpawn((_cmd, args, opts) => { gitlabArgs = args; gitlabOpts = opts; return { status: 0, stdout: '', stderr: '' }; });
+  await gitlab.authLogin({ host: 'gitlab.com', token: CREDENTIAL_VALUE });
+  assert.equal(gitlabOpts.input, CREDENTIAL_VALUE, 'gitlab.mjs#authLogin must deliver the token via opts.input (stdin)');
+  assert.ok(!gitlabArgs.includes(CREDENTIAL_VALUE), 'the token must never appear in the argv array passed to glab — a credential-leak guard');
+});
+
+// ── issueList pull_request filter (issue #362, M10 Phase 2 rank-4) ─────────
+// GitHub-only: GitLab's `projects/:id/issues` endpoint returns only issues —
+// there is nothing to filter, so an `if (providerName === 'github')` branch
+// inside the parity loop above would be exactly the provider-asymmetric
+// concern that loop exists to prevent (design D2). This follows the file's
+// own precedent for asymmetric concerns (BASE_REF_PROVIDERS below,
+// prStatusRollup, labelList). The assertion is ARITHMETIC, not a fixture
+// spot-check the reader must count by hand: `prCount >= 1` fails loudly if
+// the fixture is ever re-recorded from a repo with no open PRs, rather than
+// silently degrading into a tautology — this is the one assertion in this
+// change that guards the fixture itself, not the normalizer.
+test('github.issueList (contract): the pull_request filter is proven arithmetically against the recorded happy fixture', async () => {
+  const fixtureName = 'github-issueList-happy.json';
+  const fixture = loadFixture(fixtureName);
+  assertProvenance(fixture, fixtureName);
+  setSpawn(jsonSpawn(fixture.data));
+
+  const result = await github.issueList({ project: 'x/y', state: 'open' });
+
+  const prCount = fixture.data.filter(r => r.pull_request).length;
+  assert.ok(prCount >= 1, 'the recorded fixture must contain at least one PR entry — otherwise this test is vacuous');
+  assert.equal(
+    result.length,
+    fixture.data.length - prCount,
+    'every PR-carrying entry must be filtered out, and no non-PR entry may be dropped alongside them',
+  );
+  for (const entry of result) {
+    const source = fixture.data.find(r => r.number === entry.number);
+    assert.ok(!source.pull_request, 'no PR-carrying source entry may survive the filter');
+  }
+});
 
 // ── prView baseRefOid (ADR-0022 Decision 1) ─────────────────────────────────
 // GH sources it via a SECOND, supplementary `gh api repos/{owner}/{repo}/
@@ -450,6 +1231,187 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
   });
 }
 
+// ── labelList (issue #334, vcs-label-preflight contract) — inline mocks, no
+// fixture files: a simple normalized READ verb, same precedent as
+// labelAdd/prStatusRollup. `({ project }) -> string[]` — MAY throw like its
+// siblings (labelPreflight, not this verb, is the total/never-throws layer —
+// design A1). Pagination is exercised explicitly: a repo with >30/>100 labels
+// must not silently drop real labels and false-reject a valid ship.
+
+const LABEL_LIST_PROVIDERS = {
+  github: {
+    module: github,
+    ok: (names) => { setSpawn(jsonSpawn(names.map(name => ({ name, color: 'ededed', description: '' })))); return {}; },
+    fail: () => { setSpawn(failSpawn('fixture: simulated failure')); return {}; },
+  },
+  gitlab: {
+    module: gitlab,
+    ok: (names) => ({
+      fetchImpl: async () => ({ ok: true, json: async () => names.map(name => ({ name, color: '#ededed', description: '' })) }),
+    }),
+    fail: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
+  },
+};
+
+for (const providerName of Object.keys(LABEL_LIST_PROVIDERS)) {
+  const { module: vcs, ok, fail } = LABEL_LIST_PROVIDERS[providerName];
+
+  test(`${providerName}.labelList (contract): normalizes to an array of bare label name strings`, async () => {
+    const result = await vcs.labelList({ project: 'x/y', ...ok(['type:bug', 'type:feature', 'status:approved']) });
+    assert.ok(Array.isArray(result), 'labelList must return an array');
+    assert.deepEqual([...result].sort(), ['status:approved', 'type:bug', 'type:feature']);
+    for (const name of result) assert.equal(typeof name, 'string', 'each entry must be a bare label name string');
+  });
+
+  test(`${providerName}.labelList (contract): names pass through verbatim — no case-folding`, async () => {
+    const result = await vcs.labelList({ project: 'x/y', ...ok(['Type:Bug']) });
+    assert.deepEqual(result, ['Type:Bug']);
+  });
+
+  test(`${providerName}.labelList (contract): a fetch failure throws (this verb is a normalized READ, not the total policy layer)`, async () => {
+    await assert.rejects(() => vcs.labelList({ project: 'x/y', ...fail() }));
+  });
+}
+
+test('github.labelList (contract): uses `gh api --paginate` — a many-page label set must not be silently truncated', async () => {
+  let capturedArgs;
+  setSpawn((_cmd, args) => {
+    capturedArgs = args;
+    return { status: 0, stdout: JSON.stringify([{ name: 'type:bug' }]), stderr: '' };
+  });
+  await github.labelList({ project: 'x/y' });
+  assert.ok(capturedArgs.includes('--paginate'), 'github.labelList must call `gh api --paginate` — a single unpaginated page can silently drop real labels on a >30-label repo');
+});
+
+test('gitlab.labelList (contract): paginates until a short page — a many-page label set must not be silently truncated', async () => {
+  let callCount = 0;
+  const fullPage = Array.from({ length: 100 }, (_, i) => ({ name: `label-${i}` }));
+  const shortPage = [{ name: 'type:bug' }];
+  const result = await gitlab.labelList({
+    project: 'x/y',
+    fetchImpl: async () => {
+      callCount += 1;
+      return { ok: true, json: async () => (callCount === 1 ? fullPage : shortPage) };
+    },
+  });
+  assert.equal(callCount, 2, 'gitlab.labelList must fetch a second page when the first page is full (per_page-sized)');
+  assert.ok(result.includes('type:bug'), 'labels from a later page must be included, never dropped');
+});
+
+// ── branchProtect (M10 Phase 2, issue #335 rank 2) — mutating write verb.
+// `({ project, branch?, checks, requiredReviews? }) -> { enforced: boolean,
+// reason?: string, remedy?: string }`. Both providers' impls call `run()`
+// from the SAME shared spawn seam (github via `gh`, gitlab via `glab`), so
+// ONE setSpawn-based glue serves both providers — unlike WRITE_VERB_PROVIDERS,
+// no gitlab `fetchImpl` branch is needed here (design D2). `checks` is always
+// supplied, even on the failure path: `github.branchProtect` does
+// `checks.map()` with no default and THROWS on `undefined` — omitting it
+// would fail the never-throws test for the wrong reason (an unhandled
+// TypeError building the request payload, not the branchProtect contract).
+// `reason`/`remedy` vocabulary legitimately differs per provider ('tier' is
+// GitHub-only; 'auth'/'permission' are GitLab-only) — only type/presence is
+// asserted here, never exact-string equality across providers (design D4).
+
+const BRANCH_PROTECT_PROVIDERS = {
+  github: {
+    module: github,
+    ok: (checks) => { setSpawn(rawSpawn('', 0)); return { checks }; },
+    // Trips github.mjs's `r.stderr.includes('403') || /upgrade.*pro/i.test(r.stderr)` tier-block branch.
+    fail: (checks) => { setSpawn(failSpawn('403: upgrade to GitHub Pro for private-repo branch protection')); return { checks }; },
+  },
+  gitlab: {
+    module: gitlab,
+    ok: (checks) => { setSpawn(rawSpawn('', 0)); return { checks }; },
+    // Trips gitlab.mjs's `r.stderr.includes(': 403') || /forbidden/i.test(r.stderr)` permission-block branch.
+    fail: (checks) => { setSpawn(failSpawn('glab: 403 Forbidden')); return { checks }; },
+  },
+};
+
+for (const providerName of Object.keys(BRANCH_PROTECT_PROVIDERS)) {
+  const { module: vcs, ok, fail } = BRANCH_PROTECT_PROVIDERS[providerName];
+
+  test(`${providerName}.branchProtect (contract): a successful protect returns exactly { enforced: true }`, async () => {
+    const result = await vcs.branchProtect({ project: 'x/y', ...ok(['ci']) });
+    assert.deepEqual(result, { enforced: true }, 'a successful branchProtect must return exactly { enforced: true } — no enabled/rules leakage into the contract shape');
+  });
+
+  test(`${providerName}.branchProtect (contract): a protect failure returns { enforced: false, reason, remedy } — never throws`, async () => {
+    const result = await vcs.branchProtect({ project: 'x/y', ...fail(['ci']) });
+    assert.equal(result.enforced, false, 'a failed branchProtect must never fabricate enforced:true');
+    assert.deepEqual(Object.keys(result).sort(), ['enforced', 'reason', 'remedy'].sort(), 'a failed branchProtect must return exactly these three keys — no enabled/rules/requiredReviews leakage into the contract shape');
+    assert.equal(typeof result.reason, 'string', 'reason must be a string — vocabulary is provider-specific, asserted in providers.test.mjs, not here');
+    assert.equal(typeof result.remedy, 'string', 'remedy must be a string — presence/type only, never compared across providers');
+  });
+
+  test(`${providerName}.branchProtect (contract): never throws, even under a mocked transport failure`, async () => {
+    await assert.doesNotReject(
+      () => vcs.branchProtect({ project: 'x/y', ...fail(['ci']) }),
+      `${providerName}.branchProtect must resolve, not throw, on a mocked transport failure`,
+    );
+  });
+}
+
+// ── rerunWorkflowRun (GitHub-only, issue #328) ──────────────────────────────
+// No GitLab equivalent is implemented (deliberately out of scope) — this verb
+// is absent from cli.mjs's VERBS array on purpose (that array is reserved for
+// verbs BOTH providers implement, enforced by verb-contract-drift-guard's
+// "every function exported by BOTH REAL providers" check; since gitlab.mjs
+// has no sibling export, this verb never trips it). GitHub-only, hence no
+// parity loop over PROVIDERS — a single direct suite against `github.mjs`,
+// same precedent as the `github.issueList` pull_request-filter test and the
+// `github.labelList --paginate` test above (both GitHub-only, both outside
+// the shared loop).
+
+test('github.rerunWorkflowRun (contract): picks the newest run matching the target workflow path and POSTs a FULL rerun (never rerun-failed-jobs)', async () => {
+  const fixtureName = 'github-rerunWorkflowRun-happy.json';
+  const fixture = loadFixture(fixtureName);
+  assertProvenance(fixture, fixtureName);
+
+  const calls = [];
+  setSpawn((_cmd, args) => {
+    calls.push(args);
+    if (args.includes('-X')) return { status: 0, stdout: '', stderr: '' };
+    return { status: 0, stdout: JSON.stringify(fixture.data), stderr: '' };
+  });
+
+  const result = await github.rerunWorkflowRun({ project: 'x/y', ref: 'fix/issue-328-x', workflow: 'governance.yml' });
+
+  assert.deepEqual(
+    result,
+    { ok: true, runId: 55500 },
+    'must pick the newest governance.yml run (55500) — never the non-matching release.yml run (55501) above it, nor the older governance.yml run (55499) below it',
+  );
+
+  const rerunCall = calls.find(a => a.includes('-X'));
+  assert.ok(rerunCall, 'a rerun API call must have been made');
+  assert.ok(
+    rerunCall.some(a => /\/actions\/runs\/55500\/rerun$/.test(a)),
+    'must POST to the FULL rerun endpoint for the matched run (55500)',
+  );
+  assert.ok(
+    !rerunCall.some(a => /rerun-failed-jobs/.test(a)),
+    'must NEVER call rerun-failed-jobs — that silently skips an already-green job stuck on stale evidence, the exact stale-GREEN bug this verb exists to fix (issue #328)',
+  );
+});
+
+test('github.rerunWorkflowRun (contract): no run matches the target workflow — returns { ok: false, reason }, never throws', async () => {
+  const fixtureName = 'github-rerunWorkflowRun-empty.json';
+  const fixture = loadFixture(fixtureName);
+  assertProvenance(fixture, fixtureName);
+  setSpawn(jsonSpawn(fixture.data));
+
+  const result = await github.rerunWorkflowRun({ project: 'x/y', ref: 'fix/issue-328-x', workflow: 'governance.yml' });
+  assert.equal(result.ok, false, 'no matching run must never fabricate ok:true');
+  assert.equal(typeof result.reason, 'string', 'must carry a reason string');
+});
+
+test('github.rerunWorkflowRun (contract): a list-runs API failure returns { ok: false, reason }, never throws', async () => {
+  setSpawn(failSpawn('fixture: simulated failure'));
+  const result = await github.rerunWorkflowRun({ project: 'x/y', ref: 'fix/issue-328-x' });
+  assert.equal(result.ok, false, 'a transport failure must never fabricate ok:true');
+  assert.equal(typeof result.reason, 'string', 'must carry a reason string');
+});
+
 // ── REQ-266-3 (lock 2): no code path can emit an APPROVE review, on any provider ──
 
 test('REQ-266-3 lock 2: github.prReviewComment sends event:\'COMMENT\' to the API regardless of input — no argument selects a different event', async () => {
@@ -471,4 +1433,211 @@ test('REQ-266-3 lock 2: no exported verb on either provider references an approv
       `${modName} must not contain any review "event:" literal other than 'COMMENT' — no code path may reach an approval event`,
     );
   }
+});
+
+// ── branchProtect requiredReviews no-op (M10 Phase 2, design D1/D3) —
+// FUNCTION-SCOPED source-scan lock. gitlab.mjs's branchProtect accepts a
+// `requiredReviews` param but never enforces it (GitLab's approval-count
+// enforcement needs the Premium approval-rules API, not called here — see
+// the JSDoc above the function). This scan is deliberately scoped to the
+// branchProtect function body's OWN source slice, never file-wide: a
+// file-wide scan for /approvals/ would false-positive on gitlab.mjs:271
+// (prReviews), which legitimately calls `.../approvals` for an unrelated,
+// correct reason. The lock is intentionally BIDIRECTIONAL — if a future
+// change adds an approval-rules call inside branchProtect, this test FAILS
+// and forces that decision into the open (design D1), rather than drifting
+// silently either way.
+test('branchProtect (M10 Phase 2): GitLab requiredReviews is accepted but never enforced — scoped source-scan lock', () => {
+  const src = readFileSync(fileURLToPath(new URL('./gitlab.mjs', import.meta.url)), 'utf8');
+  const start = src.indexOf('export async function branchProtect');
+  assert.ok(start !== -1, 'gitlab.mjs must still export branchProtect');
+  const end = src.indexOf('\n}\n', start);
+  assert.ok(end !== -1, 'branchProtect function body must have a closing brace at column 0');
+  const body = src.slice(start, end);
+
+  // Function-scoped: no approval/approval-rules endpoint call inside branchProtect's own body.
+  assert.doesNotMatch(
+    body,
+    /approvals|approval[_-]?rules/i,
+    'gitlab.branchProtect must not call any approvals/approval-rules endpoint — requiredReviews is accepted but not enforced (pinned, not fixed, per design D1)',
+  );
+
+  // requiredReviews must be declared (the destructured parameter) but never referenced again in the body.
+  const occurrences = (body.match(/requiredReviews/g) || []).length;
+  assert.equal(occurrences, 1, 'requiredReviews must occur exactly once in the function body — the parameter signature — proving it is declared but never read/enforced');
+
+  // Proves the narrow scope above is load-bearing, not incidentally passing:
+  // the SAME pattern DOES match file-wide, via prReviews' legitimate
+  // .../approvals call (~gitlab.mjs:271). A file-wide doesNotMatch on `src`
+  // would fail here — this is the false positive the scoped scan avoids.
+  assert.match(
+    src,
+    /approvals|approval[_-]?rules/i,
+    'the full gitlab.mjs file DOES contain an approvals reference (prReviews) — proving the branchProtect-scoped scan above is a genuine narrowing, not a no-op',
+  );
+});
+
+// ── prReviews provider-specific divergences (issue #317) ────────────────────
+//
+// The parameterized block above pins what BOTH providers must promise. These
+// pin the two places they legitimately differ, plus the security boundary
+// that difference creates.
+
+test('github.prReviews (contract): a review with no comment normalizes body to \'\' (never null — null means uncomputable)', async () => {
+  // GitHub returns `body: null` for a review submitted with no comment (the
+  // common case for a bare APPROVED). The key is present in the payload but
+  // null, so `''` can only come from the normalizer's `?? ''` guard — the
+  // same empty-vs-uncomputable rule prView.body follows (A3 task 3.7).
+  setSpawn(jsonSpawn([{ state: 'APPROVED', user: { login: 'bob' }, body: null }]));
+  const result = await github.prReviews({ project: 'o/r', number: 144 });
+  assert.deepEqual(result, [{ state: 'APPROVED', author: 'bob', body: '' }]);
+});
+
+test('github.prReviews (contract): body passes through VERBATIM — no trimming, no re-encoding of the fenced verdict block', async () => {
+  // parseVerdict matches on the fence and on line-anchored `key: value`
+  // scalars, so any normalization of whitespace or fences would break the
+  // recovery while leaving a plausible-looking string in place.
+  const body = '```yaml\nprotocol: brain-review/1\nverdict: STOP\nhead_sha: abc123\nrev: 4\n```';
+  setSpawn(jsonSpawn([{ state: 'COMMENTED', user: { login: 'brain-reviewer' }, body }]));
+  const [entry] = await github.prReviews({ project: 'o/r', number: 144 });
+  assert.equal(entry.body, body, 'body must be byte-identical to the API payload');
+  assert.deepEqual(parseVerdict(entry), { head_sha: 'abc123', rev: 4, verdict: 'STOP', author: 'brain-reviewer' });
+});
+
+// SECURITY BOUNDARY. GitLab's verdict thread lives in MR notes, but the L6
+// brain-writes-reviewed gate counts ONLY `state === 'APPROVED'`. If notes
+// normalized to APPROVED, anyone could clear the self-approval gate by typing
+// a comment. The happy fixture's approver ('bob') is a different identity from
+// every note author, so this cannot pass by coincidence.
+test('gitlab.prReviews (contract): MR notes normalize to COMMENTED and NEVER to APPROVED — only the approvals endpoint may produce an approver', async () => {
+  const fixture = loadFixture('gitlab-prReviews-happy.json');
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    ...gitlabPrReviewsCallArgs(fixture),
+  });
+
+  const approvers = result.filter(r => r.state === 'APPROVED').map(r => r.author);
+  assert.deepEqual(
+    approvers,
+    ['bob'],
+    'the ONLY APPROVED entry must be the approvals endpoint\'s approver — a note author appearing here would let a plain MR comment clear the L6 self-approval gate',
+  );
+
+  const noteAuthors = new Set(result.filter(r => r.state === 'COMMENTED').map(r => r.author));
+  assert.ok(noteAuthors.has('brain-reviewer'), 'the reviewer\'s verdict note must be present, as COMMENTED');
+  assert.ok(noteAuthors.has('alice'), 'a plain human note must be present, as COMMENTED');
+  assert.ok(!noteAuthors.has('bob'), 'sanity: the approver is not also a note author, so the assertion above is load-bearing');
+});
+
+test('gitlab.prReviews (contract): GitLab system notes are dropped — activity records are not reviewer speech', async () => {
+  const fixture = loadFixture('gitlab-prReviews-happy.json');
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    ...gitlabPrReviewsCallArgs(fixture),
+  });
+  assert.ok(
+    fixture.data.notes.some(n => n.system === true),
+    'sanity: the fixture must actually contain a system note, or this assertion is vacuous',
+  );
+  assert.ok(
+    !result.some(r => r.author === 'gitlab-bot'),
+    'the system note\'s author must not appear — system notes ("changed target branch from ...") are GitLab\'s own activity records',
+  );
+});
+
+test('gitlab.prReviews (contract): requests notes oldest-first — poster.mjs/board.mjs take the LAST parsed verdict as current', async () => {
+  // GitLab's notes endpoint defaults to NEWEST-first, which would invert
+  // "latest verdict wins" and make the anti-loop compare against the oldest
+  // verdict on the thread. The sort must be requested explicitly.
+  const urls = [];
+  await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async (url) => {
+      urls.push(url);
+      return { ok: true, json: async () => (url.includes('/approvals') ? { approved_by: [] } : []) };
+    },
+  });
+  const notesUrl = urls.find(u => u.includes('/notes'));
+  assert.ok(notesUrl, 'sanity: a notes request must have been made');
+  assert.match(notesUrl, /sort=asc/, 'notes must be requested ascending — GitLab defaults to newest-first');
+  assert.match(notesUrl, /order_by=created_at/, 'notes must be ordered by created_at, not the default id ordering');
+});
+
+test('gitlab.prReviews (contract): paginates the notes thread — with sort=asc an unpaginated fetch drops the LATEST verdict', async () => {
+  // This is sharper than GitHub's --paginate guard: page 1 holds the OLDEST
+  // notes, so truncation loses exactly the verdict the anti-loop needs.
+  const perPage = 100;
+  const page1 = Array.from({ length: perPage }, (_, i) => ({
+    id: i,
+    body: 'noise',
+    author: { username: 'alice' },
+    created_at: '2026-07-10T10:00:00.000Z',
+    system: false,
+  }));
+  const page2 = [{
+    id: 999,
+    body: '```yaml\nprotocol: brain-review/1\nverdict: REVISE\nhead_sha: deadbeef\nrev: 2\n```',
+    author: { username: 'brain-reviewer' },
+    created_at: '2026-07-10T12:00:00.000Z',
+    system: false,
+  }];
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async (url) => {
+      if (url.includes('/approvals')) return { ok: true, json: async () => ({ approved_by: [] }) };
+      const page = Number(new URL(url).searchParams.get('page'));
+      return { ok: true, json: async () => (page === 1 ? page1 : page === 2 ? page2 : []) };
+    },
+  });
+
+  assert.equal(result.length, perPage + 1, 'both pages of notes must be present');
+  const verdicts = result.map(r => parseVerdict(r)).filter(Boolean);
+  assert.equal(verdicts.length, 1, 'the page-2 verdict must survive');
+  assert.equal(verdicts[0].head_sha, 'deadbeef', 'the LATEST verdict lives on page 2 — an unpaginated fetch would silently lose it');
+});
+
+test('gitlab.prReviews (contract): an approvals failure yields null even when notes succeed — a notes-only result would fail-OPEN on the L6 gate', async () => {
+  // The dangerous shape: returning the notes half alone hands
+  // evaluateBrainWritesReviewed an empty approver set that is
+  // indistinguishable from a genuine "nobody approved".
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async (url) =>
+      url.includes('/approvals')
+        ? { ok: false, status: 403 }
+        : { ok: true, json: async () => [{ id: 1, body: 'hi', author: { username: 'alice' }, system: false }] },
+  });
+  assert.equal(result, null, 'a partial fetch must degrade to null (uncomputable), never to a half-populated array');
+});
+
+test('gitlab.prReviews (contract): a notes failure yields null even when approvals succeed — a half result would silently empty the verdict thread', async () => {
+  const result = await gitlab.prReviews({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async (url) =>
+      url.includes('/approvals')
+        ? { ok: true, json: async () => ({ approved_by: [{ user: { username: 'bob' } }] }) }
+        : { ok: false, status: 500 },
+  });
+  assert.equal(result, null, 'losing the notes half must be uncomputable, not a verdict-free approvals list');
+});
+
+test('gitlab.prReviews (contract): source reads BOTH the notes and approvals endpoints — neither half may be dropped', () => {
+  // Structural companion to the behavioral tests above: a regression that
+  // reverts to approvals-only (the #317 defect) or drops approvals in favor
+  // of notes-only (the fail-open) is caught here even if a future fixture
+  // stops exercising one half.
+  const src = readFileSync(fileURLToPath(new URL('./gitlab.mjs', import.meta.url)), 'utf8');
+  const start = src.indexOf('export async function prReviews');
+  assert.notEqual(start, -1, 'gitlab.mjs must still export prReviews');
+  const end = src.indexOf('\nexport ', start + 1);
+  const body = src.slice(start, end === -1 ? undefined : end);
+
+  assert.match(body, /merge_requests\/\$\{number\}\/notes/, 'prReviews must fetch MR notes — the verdict thread lives there, and approvals alone carries no body (the #317 defect)');
+  assert.match(body, /merge_requests\/\$\{number\}\/approvals/, 'prReviews must still fetch approvals — the L6 brain-writes-reviewed gate reads only APPROVED entries');
 });
