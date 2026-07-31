@@ -1,5 +1,5 @@
 ---
-status: draft
+status: archived
 issue: 385
 epic: 335
 artifact_store: hybrid

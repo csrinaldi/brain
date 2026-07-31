@@ -178,17 +178,6 @@ query-key mismatch. Each amended row MUST also gain an inline cross-reference to
 (Previously: rows 26/35-38 stated only the normalized return shapes with no divergence detail and
 no cross-reference to a covering issue.)
 
-**Open question flagged for `sdd-design`/`sdd-tasks` (do not resolve silently at apply time):**
-this spec deliberately does NOT assert a specific "rank-N" number in the cross-reference text,
-unlike the `authCheck`/`authLogin` precedent (`issue #365, M10 Phase 2 rank-6` / `issue #364, M10
-Phase 2 rank-5`). The change folder is named `issue-385-m10-phase2-rank6-batch`, but rank-6 is
-already claimed by `authCheck` (#365) in the current `vcs-contract.md`. Gap-A's documented
-sequence is branchProtect(1) → prReviews(2, #317) → mrList(3, #355) → issueList(4, #362) →
-authLogin(5, #364) → authCheck(6, #365), which would make this five-verb batch rank-7, not
-rank-6. Resolve the folder-name-vs-sequence mismatch before the doc update ships; until resolved,
-the cross-reference should read "issue #385, M10 Phase 2 Gap-A closing batch" without a rank
-number.
-
 #### Scenario: Documentation reflects the commitStatus two-field read, selection mechanism, and null-collapse
 
 - GIVEN a reader consults the `vcs-contract.md` `commitStatus` row
