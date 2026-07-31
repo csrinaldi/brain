@@ -821,3 +821,75 @@ test('PR5 memory-gate: an EMPTY readRecords stays a real VIOLATION → 1 (never 
   assert.equal(r.pass, false);
   assert.equal(resultToExit(r), 1);
 });
+
+// ── memory-gate — issue-scoped (T2.1, REQ-L3-4): runMemoryGateCheck wiring ──
+//
+// memoryPresence() alone is a GLOBAL existence check, decoupled from which
+// issue the current PR is about. T2.1 wires a new runMemoryGateCheck(ctx,
+// records) wrapper in front of it: when ctx.body carries a detectable issue
+// reference, the gate scopes records to that issue via memoryRetrieval();
+// otherwise (no ctx.body, or ctx.body present but no extractable issue
+// number) it falls back to the pre-existing global memoryPresence() check —
+// preserving every fixture/test above (none of which pass a ctx.body) byte
+// for byte.
+
+test('runCheck: memory-gate — no ctx at all (ctx.body undefined) → falls back to the global memoryPresence() check (regression, must still pass with existing fixtures)', async () => {
+  const result = await runCheck('memory-gate', {
+    readRecords: () => [{ type: 'session_summary' }],
+  });
+  assert.deepEqual(result, { pass: true }, 'ctx-less call must behave exactly like memoryPresence()');
+});
+
+test('runCheck: memory-gate — ctx.body has a closing reference + a scoped session_summary → pass clean', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'fix: thing\n\nCloses #379', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => [{ type: 'session_summary', issue: 379 }],
+  });
+  assert.equal(result.pass, true);
+  assert.match(result.reason, /379/);
+});
+
+test('runCheck: memory-gate — ctx.body has a reference but NO record scoped to that issue → fail', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'feat: slice\n\nPart of #379', targetBranch: 'feature/tracker', defaultBranch: 'main' },
+    readRecords: () => [{ type: 'session_summary', issue: 12 }],
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /379/);
+});
+
+test('runCheck: memory-gate — ctx.body has scoped records but none is session_summary → pass:true with a warn/partial reason (non-blocking)', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'Closes #379', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => [{ type: 'decision', issue: 379 }],
+  });
+  assert.equal(result.pass, true);
+  assert.match(result.reason, /warn|partial/i);
+});
+
+test('runCheck: memory-gate — ctx.body present but no extractable issue number → falls back to the global memoryPresence() check', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'chore: tidy up, no link here', targetBranch: 'feature/tracker', defaultBranch: 'main' },
+    readRecords: () => [{ type: 'session_summary', issue: 12 }],
+  });
+  // Falls back to global memoryPresence(): ANY session_summary anywhere passes,
+  // regardless of its .issue — proves the fallback path, not the scoped path.
+  assert.deepEqual(result, { pass: true });
+});
+
+test('runCheck: memory-gate — ctx.body present but no extractable issue number, and no session_summary anywhere → fallback fails too', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'chore: tidy up, no link here', targetBranch: 'feature/tracker', defaultBranch: 'main' },
+    readRecords: () => [{ type: 'decision', issue: 12 }],
+  });
+  assert.equal(result.pass, false);
+});
+
+test('runCheck: memory-gate — readRecords throwing still returns uncomputable:true even with a ctx.body present (regression)', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'Closes #379', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => { throw new Error('EACCES'); },
+  });
+  assert.equal(result.uncomputable, true);
+  assert.equal(resultToExit(result), 2);
+});

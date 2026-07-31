@@ -61,6 +61,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import { memoryPresence } from './checks/memory-presence.mjs';
+import { memoryRetrieval } from './checks/memory-retrieval.mjs';
 import { adrPresence } from './checks/adr-presence.mjs';
 import { issueLink } from './checks/issue-link.mjs';
 import { diffSize } from './checks/diff-size.mjs';
@@ -239,6 +240,34 @@ function requiresClosingKeyword(ctx) {
 }
 
 /**
+ * memory-gate case (T2.1, REQ-L3-4): degrades to the pre-existing GLOBAL
+ * memoryPresence() check whenever an issue number cannot be resolved from
+ * `ctx` (no ctx.body at all, e.g. every pre-T2.1 caller/fixture; or ctx.body
+ * present but carrying no detectable issue reference) — this is a deliberate
+ * choice NOT to fail-closed on "no issue detectable" (that would introduce a
+ * new blocking surface beyond this issue's scope; see design.md). Reuses THIS
+ * file's own extractIssueNumber/requiresClosingKeyword (never a third
+ * extraction implementation — issue-link and actor-check.mjs already cover
+ * that ground) with requiresClosingKeyword(ctx) coerced to a boolean via
+ * `=== true` (null → false) to stay PERMISSIVE here — memory-gate does not
+ * need issue-link's default-branch-conditional strictness, it only needs to
+ * know the issue number if one is detectable.
+ *
+ * @param {{ body?: string|null, targetBranch?: string|null, defaultBranch?: string|null }} ctx
+ * @param {Array<{type?: string, issue?: number|string, [key: string]: unknown}>} records
+ * @returns {{ pass: boolean, reason?: string }}
+ */
+function runMemoryGateCheck(ctx, records) {
+  if (typeof ctx?.body !== 'string') return memoryPresence(records);
+
+  const closingRequired = requiresClosingKeyword(ctx) === true;
+  const issueNumber = extractIssueNumber(ctx.body, closingRequired);
+  if (issueNumber == null) return memoryPresence(records);
+
+  return memoryRetrieval(records, issueNumber);
+}
+
+/**
  * issue-link case (REQUIRED, THE GOTCHA — design.md Decision 2, extended by
  * the A2 phase 2 ADDENDUM): calls the pure issueLink(ctx.body) for the
  * reference pattern, applies the default-branch-conditional closing-keyword
@@ -388,7 +417,7 @@ export async function runCheck(checkName, deps = {}) {
         reason: `memory-gate: cannot read records — failing closed (uncomputable): ${err.message}`,
       };
     }
-    return memoryPresence(records);
+    return runMemoryGateCheck(ctx, records);
   }
   if (checkName === 'decision-gate') {
     let changedFiles;
