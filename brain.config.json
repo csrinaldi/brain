@@ -24,10 +24,13 @@
       "package-lock.json",
       "pnpm-lock.yaml",
       "yarn.lock"
+    ],
+    "reviewActors": [
+      "csrinaldibot"
     ]
   },
   "reviewer": {
-    "handle": "",
+    "handle": "csrinaldibot",
     "tokenEnv": "BRAIN_REVIEWER_TOKEN"
   },
   "schemaVersion": "0.3.0"

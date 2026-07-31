@@ -477,6 +477,52 @@ export async function labelList({ project } = {}) {
   return arr.map(l => l.name);
 }
 
+/**
+ * rerunWorkflowRun — GitHub-only capability (issue #328, closing the
+ * stale-GREEN re-evaluation bug). Not a base contract verb (no GitLab
+ * equivalent implemented, deliberately out of scope) — callers reach it via
+ * `getVcs({ provider: 'github' }).rerunWorkflowRun(...)`, module-namespace
+ * access outside cli.mjs's `VERBS` dispatch (adding a GitHub-only entry there
+ * would trip verb-contract-drift-guard.test.mjs's "both providers implement
+ * it" check for the wrong reason).
+ *
+ * Finds the most recent run of `workflow` for `ref` (`gh api
+ * repos/{project}/actions/runs?branch={ref}`, API-ordered newest-first;
+ * client-side filtered to the target workflow's `path`) and forces a FULL
+ * rerun (`POST .../actions/runs/{run_id}/rerun`) — deliberately NEVER
+ * `rerun-failed-jobs`, which only reruns jobs that already failed and would
+ * silently skip an already-green job stuck on stale evidence (actor-check's
+ * REQ-L5-2 warn-pass on missing approval history) — the exact bug this verb
+ * exists to fix (a PR merged on a verdict computed before the fact it
+ * depends on existed).
+ *
+ * Never throws: a list-runs failure, no matching run, or a rerun-POST
+ * failure all degrade to `{ ok: false, reason }`.
+ *
+ * @param {{ project: string, ref: string, workflow?: string }} opts
+ * @returns {Promise<{ ok: true, runId: number } | { ok: false, reason: string }>}
+ */
+export async function rerunWorkflowRun({ project, ref, workflow = 'governance.yml' } = {}) {
+  let runsResp;
+  try {
+    runsResp = runJson('gh', ['api', `repos/${project}/actions/runs?branch=${encodeURIComponent(ref)}&per_page=100`]);
+  } catch (err) {
+    return { ok: false, reason: `could not list workflow runs: ${err.message}` };
+  }
+
+  const targetPath = `.github/workflows/${workflow}`;
+  const match = (runsResp.workflow_runs ?? []).find(r => r.path === targetPath);
+  if (!match) {
+    return { ok: false, reason: `no run of ${workflow} found for ref '${ref}'` };
+  }
+
+  const r = run('gh', ['api', '-X', 'POST', `repos/${project}/actions/runs/${match.id}/rerun`]);
+  if (!r.ok) {
+    return { ok: false, reason: r.stderr.trim() || `gh api failed (status ${r.status})` };
+  }
+  return { ok: true, runId: match.id };
+}
+
 export async function repoCloneUrl({ host, project, token }) {
   return `https://x-access-token:${token}@${host || 'github.com'}/${project}.git`;
 }
