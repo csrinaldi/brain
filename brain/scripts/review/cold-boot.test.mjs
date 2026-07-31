@@ -7,10 +7,17 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, existsSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { evaluateSelfReview, gatherColdBoot, defaultCloneDetached } from './cold-boot.mjs';
+// Imported for the #317 end-to-end guards at the bottom of this file, which
+// exercise the REAL provider normalizer and the REAL downstream locks rather
+// than an injected review shape — see the block comment there.
+import { setSpawn } from '../vcs/lib/exec.mjs';
+import * as github from '../vcs/providers/github.mjs';
+import { postVerdict } from './poster.mjs';
+import { buildVerdict } from './verdict.mjs';
 
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 
@@ -316,4 +323,144 @@ test('COLDBOOT-SHALLOW (real default): shallow op with both tips already grafted
     'export const x = 1;\n',
     'the §10.4 base checkout must revert to base content from a shallow clone too',
   );
+});
+
+// ── #317 end-to-end guard: the REAL adapter, not an injected review shape ────
+//
+// Every other test in this file injects `deps.fetchReviews` and hands
+// `gatherColdBoot` a hand-written review object that already carries a
+// `body`. That injection is precisely what let issue #317 sit undetected:
+// the real `prReviews` normalizer dropped `body` (GitHub) and read the
+// body-less approvals endpoint (GitLab), so `doctrine.priorVerdicts` was
+// ALWAYS `[]` in production while these tests stayed green on a shape no
+// adapter ever emitted — cold-boot.mjs even carried a comment saying so.
+//
+// This test mocks ONE LAYER LOWER (the same discipline
+// brain-writes-reviewed.test.mjs uses for its GitLab default-path test):
+// `deps.getVcs` returns the REAL github provider module, and the `gh` CLI
+// itself is stubbed via `setSpawn` with the RECORDED API response
+// (fixtures/github-prReviews-happy.json — real traffic from PR #360,
+// carrying real `brain-review/1` blocks). So the chain under test is the
+// production one end to end: gh response -> real prReviews normalizer ->
+// real defaultFetchReviews -> real parseVerdict -> priorVerdicts -> the
+// real anti-loop lock. Nothing between the API payload and the guarantee is
+// faked.
+
+const PR_REVIEWS_FIXTURE = JSON.parse(
+  readFileSync(fileURLToPath(new URL('../vcs/fixtures/github-prReviews-happy.json', import.meta.url)), 'utf8'),
+);
+// The recorded thread's LAST review — the one the anti-loop compares against.
+const LAST_RECORDED = PR_REVIEWS_FIXTURE.data[PR_REVIEWS_FIXTURE.data.length - 1];
+const LAST_RECORDED_AUTHOR = LAST_RECORDED.user.login;
+const LAST_RECORDED_HEAD = LAST_RECORDED.body.match(/^head_sha:[ \t]*(.+)$/m)[1].trim();
+
+function withRecordedReviews(fn) {
+  setSpawn(() => ({ status: 0, stdout: JSON.stringify(PR_REVIEWS_FIXTURE.data), stderr: '' }));
+  return fn().finally(() => setSpawn(spawnSync));
+}
+
+test('#317 end-to-end: gatherColdBoot builds a NON-EMPTY priorVerdicts through the REAL prReviews normalizer (no injected fetchReviews, no injected body)', async () => {
+  const result = await withRecordedReviews(() =>
+    gatherColdBoot({
+      ...PR,
+      reviewerHandle: 'nobody-in-particular',
+      deps: {
+        fetchPr: async () => ({ number: 42, author: 'alice', labels: [], body: '', headRefOid: LAST_RECORDED_HEAD }),
+        cloneDetached: async () => ({ detached: true }),
+        readRecords: () => [],
+        // fetchReviews is DELIBERATELY NOT injected — the real
+        // defaultFetchReviews wrapper runs, dispatching through getVcs.
+        getVcs: async () => github,
+      },
+    }),
+  );
+
+  assert.equal(result.abstain, false);
+  assert.equal(
+    result.doctrine.priorVerdicts.length,
+    PR_REVIEWS_FIXTURE.data.length,
+    'every recorded review carrying a brain-review block must survive into priorVerdicts — `[]` here is the #317 production defect',
+  );
+  const latest = result.doctrine.priorVerdicts[result.doctrine.priorVerdicts.length - 1];
+  assert.equal(latest.head_sha, LAST_RECORDED_HEAD);
+  assert.equal(latest.author, LAST_RECORDED_AUTHOR, 'author must be carried through so the anti-loop can compare it against the reviewer handle');
+});
+
+test('#317 end-to-end: the anti-loop lock FIRES on a rerun of the same head, driven by priorVerdicts from the REAL normalizer', async () => {
+  const boot = await withRecordedReviews(() =>
+    gatherColdBoot({
+      ...PR,
+      reviewerHandle: LAST_RECORDED_AUTHOR,
+      deps: {
+        fetchPr: async () => ({ number: 42, author: 'alice', labels: [], body: '', headRefOid: LAST_RECORDED_HEAD }),
+        cloneDetached: async () => ({ detached: true }),
+        readRecords: () => [],
+        getVcs: async () => github,
+      },
+    }),
+  );
+
+  // Same reviewer, same head as the last recorded verdict → protocol §10's
+  // "comment loop" must be suppressed. Pre-#317 priorVerdicts was `[]`, so
+  // `lastVerdict` was null, so this posted a DUPLICATE verdict on every rerun.
+  const rerun = await postVerdict({
+    headSha: LAST_RECORDED_HEAD,
+    ...PR,
+    mode: 'tranche',
+    renderedBody: 'would be a duplicate',
+    reviewerHandle: LAST_RECORDED_AUTHOR,
+    priorVerdicts: boot.doctrine.priorVerdicts,
+    deps: {
+      getVcs: async () => { throw new Error('anti-loop must short-circuit BEFORE any vcs call'); },
+    },
+  });
+  assert.deepEqual(rerun, { posted: false, skipped: 'anti-loop' });
+
+  // Control: a DIFFERENT head is a new tranche, so the lock must NOT fire —
+  // proving the assertion above is the lock working, not a blanket refusal.
+  let posted = false;
+  const advanced = await postVerdict({
+    headSha: 'ffffffffffffffffffffffffffffffffffffffff',
+    ...PR,
+    mode: 'tranche',
+    renderedBody: 'a genuinely new verdict',
+    reviewerHandle: LAST_RECORDED_AUTHOR,
+    priorVerdicts: boot.doctrine.priorVerdicts,
+    deps: {
+      getVcs: async () => ({
+        prReviewComment: async () => { posted = true; return { url: 'https://example.test/r/1' }; },
+      }),
+      reResolveHead: async () => 'ffffffffffffffffffffffffffffffffffffffff',
+    },
+  });
+  assert.equal(advanced.posted, true);
+  assert.equal(posted, true, 'a new head must still post — the anti-loop is head-bound, not a mute switch');
+});
+
+test('#317 end-to-end: the rev-bound sees a real priorRevCount — rev >= 3 REVISE escalates to STOP', async () => {
+  const boot = await withRecordedReviews(() =>
+    gatherColdBoot({
+      ...PR,
+      reviewerHandle: 'nobody-in-particular',
+      deps: {
+        fetchPr: async () => ({ number: 42, author: 'alice', labels: [], body: '', headRefOid: LAST_RECORDED_HEAD }),
+        cloneDetached: async () => ({ detached: true }),
+        readRecords: () => [],
+        getVcs: async () => github,
+      },
+    }),
+  );
+
+  // cli.mjs:207 computes priorRevCount exactly this way.
+  const priorRevCount = boot.doctrine.priorVerdicts.length;
+  assert.ok(priorRevCount >= 3, 'the recorded thread must supply a real count — pre-#317 this was permanently 0, defeating the §7 infinite-REVISE guard');
+
+  const bounded = buildVerdict({ headSha: LAST_RECORDED_HEAD, conclusion: 'REVISE', priorRevCount });
+  assert.equal(bounded.verdict, 'STOP', 'a REVISE at rev >= 3 must escalate to STOP — unreachable while priorRevCount was stuck at 0');
+  assert.equal(bounded.escalate, 'human', 'the bound must also escalate to a human (protocol §7, REQ-H1-6)');
+
+  // Control: the same conclusion below the bound stays REVISE, proving the
+  // assertion above is the bound firing rather than an unconditional STOP.
+  const unbounded = buildVerdict({ headSha: LAST_RECORDED_HEAD, conclusion: 'REVISE', priorRevCount: 0 });
+  assert.equal(unbounded.verdict, 'REVISE');
 });
