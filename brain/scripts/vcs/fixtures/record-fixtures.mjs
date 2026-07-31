@@ -12,6 +12,7 @@
 //   node brain/scripts/vcs/fixtures/record-fixtures.mjs github issueView <project> <issueNumber>
 //   node brain/scripts/vcs/fixtures/record-fixtures.mjs github mrList <project>
 //   node brain/scripts/vcs/fixtures/record-fixtures.mjs github issueList <project>
+//   node brain/scripts/vcs/fixtures/record-fixtures.mjs github prReviews <project> <prNumber>
 //
 // Endpoints hit (documented per REQ-A3-6 — "documents which real endpoints it
 // hits"):
@@ -20,6 +21,7 @@
 //   - github issueView   → `gh api repos/<project>/issues/<n>` (issue #334, M10 Gap-A)
 //   - github mrList      → `gh api repos/<project>/pulls?state=open&per_page=100` (issue #355, M10 Phase 2 rank-3)
 //   - github issueList   → `gh api repos/<project>/issues?state=open&per_page=100` (issue #362, M10 Phase 2 rank-4)
+//   - github prReviews   → `gh api --paginate repos/<project>/pulls/<n>/reviews` (issue #317)
 //
 // Deliberately NOT auto-recorded by this script, ever:
 //   - github mrCreate  → `gh pr create` is a MUTATING write (creates a real PR
@@ -200,19 +202,59 @@ async function recordGithubIssueList(project) {
   );
 }
 
+/**
+ * Records `github-prReviews-happy.json` from the exact call
+ * `github.mjs#prReviews` makes — `gh api --paginate repos/<project>/pulls/<n>/reviews`
+ * (issue #317).
+ *
+ * The recorded PR MUST have at least one review whose body carries a real
+ * `brain-review/N` fenced block. That is the entire point of this fixture:
+ * the contract suite runs the REAL normalizer output through `parseVerdict`
+ * and asserts a verdict is recovered. Before #317 the normalizer dropped
+ * `body`, so `cold-boot`'s `priorVerdicts` was always `[]` in production
+ * while its tests stayed green on injected bodies no adapter ever emitted —
+ * a fixture recorded from live traffic is what makes that masking
+ * impossible to reintroduce.
+ *
+ * `body` is kept VERBATIM and untruncated, unlike the field-trimming the
+ * other recorders apply: a truncated body would lose the closing fence and
+ * `parseVerdict` would return `null`, turning the suite's central assertion
+ * into a false negative.
+ */
+async function recordGithubPrReviews(project, number) {
+  const endpoint = `GET repos/${project}/pulls/${number}/reviews`;
+  const arr = runJson('gh', ['api', '--paginate', `repos/${project}/pulls/${number}/reviews`]);
+  writeFixture(
+    'github-prReviews-happy.json',
+    {
+      endpoint,
+      date: today(),
+      recorded: true,
+      note:
+        'Trimmed to the fields github.mjs#prReviews actually consumes (state, user.login, ' +
+        'body) via a jq-equivalent projection of the real response — values are unmodified ' +
+        'from the live API. body is kept VERBATIM and untruncated: it carries the real ' +
+        'brain-review/1 fenced block the contract suite feeds through parseVerdict, and ' +
+        'truncating it would drop the closing fence and silently defeat that assertion.',
+    },
+    arr.map(r => ({ state: r.state, user: { login: r.user?.login ?? null }, body: r.body })),
+  );
+}
+
 const CASES = {
   labelEvents: recordGithubLabelEvents,
   prView: recordGithubPrView,
   issueView: recordGithubIssueView,
   mrList: recordGithubMrList,
   issueList: recordGithubIssueList,
+  prReviews: recordGithubPrReviews,
 };
 
 async function main() {
   const [provider, verb, project, number] = process.argv.slice(2);
   if (provider !== 'github' || !CASES[verb]) {
     console.error(
-      'usage: node record-fixtures.mjs github <labelEvents|prView|issueView> <project> <number>\n' +
+      'usage: node record-fixtures.mjs github <labelEvents|prView|issueView|prReviews> <project> <number>\n' +
       '       node record-fixtures.mjs github <mrList|issueList> <project>\n' +
       '  (mrCreate and every gitlab-* fixture are deliberately NOT recordable by this script — see header comment)',
     );
