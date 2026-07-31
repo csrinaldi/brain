@@ -816,6 +816,119 @@ for (const providerName of Object.keys(PROVIDERS)) {
   });
 }
 
+// ── commitStatus/repoCloneUrl/patSetupUrl divergence locks (issue #385, M10
+// Phase 2 final Gap-A batch) ─────────────────────────────────────────────────
+//
+// Standalone, no loop, same precedent as the authCheck/authLogin divergence
+// block below (:819-856) and the github.issueList pull_request-filter test
+// (:~890). Three latent production defects are LOCKED as current behavior
+// here, never fixed — each assertion message says PINNED NOT FIXED and names
+// the follow-up issue filed in Phase 6.
+
+// GitHub-only commitStatus mechanics (design D2) — no fixture-driven parity
+// test can see these; the payload SHAPE is the assertion.
+
+test('github.commitStatus (contract): an unfinished check reads status, not conclusion — in_progress normalizes to "running"', async () => {
+  setSpawn(jsonSpawn({ check_runs: [{ name: 'ci/build', status: 'in_progress', conclusion: null }] }));
+  const result = await github.commitStatus({ project: 'x/y', sha: 'cafef00d' });
+  assert.equal(
+    result,
+    'running',
+    'github.mjs:225 reads `status` (not `conclusion`) while status !== "completed" — proven here because conclusion is null and only status carries "in_progress"',
+  );
+});
+
+test('github.commitStatus (contract): a completed check with conclusion neutral or skipped collapses to null — indistinguishable from "no checks ran"', async () => {
+  for (const conclusion of ['neutral', 'skipped']) {
+    setSpawn(jsonSpawn({ check_runs: [{ name: 'ci/build', status: 'completed', conclusion }] }));
+    const result = await github.commitStatus({ project: 'x/y', sha: 'cafef00d' });
+    assert.equal(
+      result,
+      null,
+      `a COMPLETED check with conclusion:'${conclusion}' must normalize to null (normalize.mjs:24-25's GITHUB_STATUS_MAP) — the previously-undocumented collapse this batch adds to vcs-contract.md, indistinguishable at the contract boundary from "no checks ran"`,
+    );
+  }
+});
+
+test('commitStatus (contract): selection asymmetry — GitHub takes check_runs[0] client-side, GitLab requests per_page=1 server-side', async () => {
+  setSpawn(jsonSpawn({
+    check_runs: [
+      { name: 'ci/build', status: 'completed', conclusion: 'success' },
+      { name: 'ci/lint', status: 'completed', conclusion: 'failure' },
+    ],
+  }));
+  const ghResult = await github.commitStatus({ project: 'x/y', sha: 'cafef00d' });
+  assert.equal(
+    ghResult,
+    'success',
+    'github.mjs:221 takes check_runs[0] CLIENT-side — with two entries in the fixture, the FIRST one\'s mapped status must win, never the second',
+  );
+
+  let gitlabArgs;
+  setSpawn((_cmd, args) => { gitlabArgs = args; return { status: 0, stdout: JSON.stringify([{ status: 'success' }]), stderr: '' }; });
+  await gitlab.commitStatus({ project: 'x/y', sha: 'cafef00d' });
+  assert.ok(
+    gitlabArgs.some(a => String(a).includes('per_page=1')),
+    'gitlab.mjs:372 selects a single status SERVER-side via `per_page=1` in the request, not by slicing a larger array client-side',
+  );
+});
+
+// repoCloneUrl host-default divergence (design D4) — following the shape of
+// the authLogin host-default divergence test at :819-856.
+
+test('repoCloneUrl (contract): host-default divergence — GitHub falls back to github.com, GitLab emits a literal "undefined" host', async () => {
+  const gh = new URL(await github.repoCloneUrl({ project: 'x/y', token: PLACEHOLDER_CREDENTIAL }));
+  assert.equal(gh.host, 'github.com', "github.mjs:481 substitutes the literal default (host || 'github.com') when host is omitted");
+  assert.equal(gh.username, 'x-access-token', 'the GitHub user literal is x-access-token');
+
+  const gl = new URL(await gitlab.repoCloneUrl({ project: 'x/y', token: PLACEHOLDER_CREDENTIAL }));
+  assert.equal(
+    gl.host,
+    'undefined',
+    'LATENT DEFECT, PINNED NOT FIXED (follow-up filed) — gitlab.mjs:531 interpolates ${host} with no fallback, so an omitted host produces the literally broken https://oauth2:***@undefined/x/y.git; locked as current behavior — fixing it is a production change, out of scope for this test-only slice',
+  );
+  assert.equal(gl.username, 'oauth2', 'the GitLab user literal is oauth2');
+});
+
+// patSetupUrl divergence locks (design D5) — GitHub ignores `host` entirely
+// (GHES-breaking), GitLab is correctly host-driven; and the shared
+// no-URL-encoding gap that affects both providers.
+
+test('github.patSetupUrl (contract): the host parameter is IGNORED — the URL is hardcoded to github.com', async () => {
+  const parsed = new URL(await github.patSetupUrl({ host: 'ghes.example.test', name: 'brain', scopes: ['repo'] }));
+  assert.equal(
+    parsed.host,
+    'github.com',
+    'LATENT DEFECT, PINNED NOT FIXED (follow-up filed) — github.mjs:485 hardcodes github.com and never reads `host`, so a GitHub Enterprise Server operator is silently sent to the public github.com PAT page',
+  );
+  assert.equal(parsed.pathname, '/settings/tokens/new');
+  assert.equal(parsed.searchParams.get('description'), 'brain', 'GitHub keys the token name as `description`');
+});
+
+test('gitlab.patSetupUrl (contract): the URL is host-driven — the supplied host appears verbatim', async () => {
+  const parsed = new URL(await gitlab.patSetupUrl({ host: 'gitlab.example.test', name: 'brain', scopes: ['api'] }));
+  assert.equal(
+    parsed.host,
+    'gitlab.example.test',
+    'gitlab.mjs:535 interpolates the supplied host — the divergence from GitHub above, and the reason self-hosted GitLab works while GHES does not',
+  );
+  assert.equal(parsed.pathname, '/-/user_settings/personal_access_tokens');
+  assert.equal(parsed.searchParams.get('name'), 'brain', 'GitLab keys the token name as `name`');
+});
+
+test('patSetupUrl (contract): neither provider URL-encodes the token name — a name containing & injects a spurious query parameter', async () => {
+  for (const [label, url] of [
+    ['github', await github.patSetupUrl({ host: 'h.example.test', name: 'brain & co', scopes: ['repo'] })],
+    ['gitlab', await gitlab.patSetupUrl({ host: 'h.example.test', name: 'brain & co', scopes: ['api'] })],
+  ]) {
+    const parsed = new URL(url);
+    assert.ok(
+      parsed.searchParams.has(' co'),
+      `${label}: LATENT DEFECT, PINNED NOT FIXED (follow-up filed) — the raw & splits the name into a second, spurious query parameter; neither provider calls encodeURIComponent on name/scopes`,
+    );
+  }
+});
+
 // ── authCheck/authLogin argument-building divergence + token security ──────
 // (issues #364/#365, M10 Phase 2 ranks 5-6). Both verbs' fixture-driven
 // happy/failure tests live in the main parity loop above (they only vary
