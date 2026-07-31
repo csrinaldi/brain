@@ -129,6 +129,12 @@ function rawStatusCallArgs(fixture) {
   return {};
 }
 
+// repoCloneUrl (issue #385, M10 Phase 2 final Gap-A batch) — an obviously
+// synthetic placeholder, never a realistic secret shape (no ghp_/glpat-/gho_
+// prefix, no base62 entropy run), matching the existing 'sample-cred-9x7'
+// precedent (:739).
+const PLACEHOLDER_CREDENTIAL = 'placeholder-not-a-real-token';
+
 const PROVIDERS = {
   github: {
     module: github,
@@ -658,6 +664,118 @@ for (const providerName of Object.keys(PROVIDERS)) {
       );
     });
   }
+
+  // ── whoami (issue #385, M10 Phase 2 final Gap-A batch) ──────────────────
+  // `() -> { username }` (vcs-contract.md row 26). Transport is `runJson` on
+  // both providers (design D1) — the same seam mrList/issueList use, so a
+  // transport failure REJECTS rather than yielding a null-shape. `whoami()`
+  // is declared with no parameter list on either provider (github.mjs:30,
+  // gitlab.mjs:31) — `whoamiArgs(fixture)` is called purely for its
+  // `setSpawn` side effect (design D1 gotcha).
+  test(`${providerName}.whoami (contract): happy fixture normalizes to exactly { username }`, async () => {
+    const fixtureName = `${providerName}-whoami-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.whoami({ ...whoamiArgs(fixture) });
+    // Hardcoded expected value — never re-derived from fixture.data.login/
+    // .username, which would let a mirrored normalizer bug pass (design D3,
+    // matching the mrList/issueList precedent at :354-360/:442-447).
+    assert.deepEqual(
+      result,
+      providerName === 'github' ? { username: 'csrinaldi' } : { username: 'brain-bot' },
+      'whoami must normalize to EXACTLY { username } — no login/id/avatar_url or other raw field name may leak through the contract',
+    );
+  });
+
+  test(`${providerName}.whoami (contract): a transport failure REJECTS — no null-shape fallback exists for this verb`, async () => {
+    const fixtureName = `${providerName}-whoami-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.rejects(
+      () => vcs.whoami({ ...whoamiArgs(fixture) }),
+      'whoami must REJECT on a transport failure — runJson throws (exec.mjs:31-32) and neither provider wraps it; a failed lookup must never fabricate { username: undefined }',
+    );
+  });
+
+  // ── commitStatus (issue #385, M10 Phase 2 final Gap-A batch) ────────────
+  // `({ project, sha }) -> Status|null` (vcs-contract.md row 35). Transport is
+  // `runJson` on both providers (design D1) — a transport failure REJECTS,
+  // the mrList flavor (pinned out-of-scope, design D2), not the issueList
+  // flavor (caller-absorbed).
+  test(`${providerName}.commitStatus (contract): a completed check normalizes to the canonical enum value`, async () => {
+    const fixtureName = `${providerName}-commitStatus-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.commitStatus({ project: 'x/y', sha: 'cafef00d', ...commitStatusArgs(fixture) });
+    assert.equal(result, 'success', 'a completed, successful check must normalize to the canonical "success" enum value on both providers');
+  });
+
+  test(`${providerName}.commitStatus (contract): no computable status normalizes to null — a SUCCESSFUL call with nothing to report`, async () => {
+    const fixtureName = `${providerName}-commitStatus-empty.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.commitStatus({ project: 'x/y', sha: 'cafef00d', ...commitStatusArgs(fixture) });
+    assert.equal(result, null, 'an empty check set is a SUCCESSFUL call with nothing to report — null, not a rejection; the failure case below is what rejects');
+  });
+
+  test(`${providerName}.commitStatus (contract): a transport failure REJECTS — pinned out-of-scope, not because a caller depends on the throw`, async () => {
+    const fixtureName = `${providerName}-commitStatus-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    await assert.rejects(
+      () => vcs.commitStatus({ project: 'x/y', sha: 'cafef00d', ...commitStatusArgs(fixture) }),
+      'commitStatus must REJECT on a transport failure — runJson throws (exec.mjs:31-32) and neither provider wraps it; PINNED as out-of-scope (the mrList rationale, design D2 there), NOT because a caller depends on the throw',
+    );
+  });
+
+  // ── projectResolve (issue #385, M10 Phase 2 final Gap-A batch) ──────────
+  // `({ project }) -> string` (vcs-contract.md row 38). Both implementations
+  // are `return project` — no transport, no failure mode, no empty case
+  // (design D6). No fixture, no PROVIDERS key: there is nothing to inject.
+  test(`${providerName}.projectResolve (contract): returns the slug unchanged — identity on both providers, the documented extension point`, async () => {
+    assert.equal(await vcs.projectResolve({ project: 'x/y' }), 'x/y');
+    // Nested GitLab group path: proves projectResolve does NOT url-encode —
+    // each verb encodes locally at its own call site (gitlab.mjs:371), so
+    // encoding here would double-encode every downstream request.
+    assert.equal(await vcs.projectResolve({ project: 'group/sub/repo' }), 'group/sub/repo');
+  });
+
+  // ── repoCloneUrl (issue #385, M10 Phase 2 final Gap-A batch) ────────────
+  // `({ host, project, token }) -> string` (vcs-contract.md row 36). No
+  // transport (design D1) — no fixture, no PROVIDERS key. `new URL()` parses
+  // the result rather than grepping it, so the credential is proven to sit in
+  // a specific structural position, not merely "somewhere in the string"
+  // (design D4) — the string-construction analogue of the authLogin
+  // stdin-vs-argv guard (:738-752).
+  test(`${providerName}.repoCloneUrl (contract): the credential sits in the userinfo segment, and the provider's user literal is not a caller concern`, async () => {
+    const url = await vcs.repoCloneUrl({ host: 'vcs.example.test', project: 'x/y', token: PLACEHOLDER_CREDENTIAL });
+    const parsed = new URL(url);
+
+    assert.equal(parsed.protocol, 'https:', 'the clone URL must be https — a git-protocol or http URL would carry the credential in clear');
+    assert.equal(parsed.password, PLACEHOLDER_CREDENTIAL, 'the credential must sit in the userinfo PASSWORD position — the only place git consumes it');
+    assert.equal(parsed.host, 'vcs.example.test', 'the supplied host must be honored verbatim when present');
+    assert.equal(parsed.pathname, '/x/y.git', 'the project slug must reach the path unencoded and .git-suffixed');
+    assert.equal(parsed.search, '', 'the credential must NEVER ride in the query string — proxies and servers log query strings, they do not log userinfo');
+    assert.ok(parsed.username.length > 0, "a user literal must be present; WHICH literal is provider-specific (x-access-token vs oauth2) and is never compared across providers here");
+  });
+
+  // ── patSetupUrl (issue #385, M10 Phase 2 final Gap-A batch) ─────────────
+  // `({ host, name, scopes }) -> string` (vcs-contract.md row 37). No
+  // transport (design D1) — no fixture, no PROVIDERS key. This verb is mostly
+  // NOT parity (divergence locks below, design D5) — this is the thin floor
+  // genuinely common to both providers: comparing VALUES, not query KEYS,
+  // since the key itself diverges (GH `description=`, GL `name=`).
+  test(`${providerName}.patSetupUrl (contract): returns an absolute https URL carrying the requested name and comma-joined scopes`, async () => {
+    const parsed = new URL(await vcs.patSetupUrl({ host: 'vcs.example.test', name: 'brain', scopes: ['api', 'read_user'] }));
+    assert.equal(parsed.protocol, 'https:');
+    assert.equal(parsed.searchParams.get('scopes'), 'api,read_user', 'scopes must be comma-joined on both providers');
+    assert.ok([...parsed.searchParams.values()].includes('brain'), 'the requested token name must reach the URL — the query KEY differs per provider (GH description=, GL name=), so only the VALUE is compared in the parity loop');
+  });
 
   // ── mrCreate ───────────────────────────────────────────────────────────
   test(`${providerName}.mrCreate (contract): happy fixture returns { url }`, async () => {
