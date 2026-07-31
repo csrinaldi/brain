@@ -78,6 +78,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0021](brain/project/decisions/adr-0021-reviewer-port-head-and-rollup.md) — Widen the VCS port for the cold reviewer: headRefOid on prView + a prStatusRollup read verb; retire the H1-1 cold-boot seam
 - [ADR-0022](brain/project/decisions/adr-0022-reviewer-port-base.md) — Widen the VCS port for the cold reviewer: baseRefOid on prView (closes H1-2C-BASE)
 - [ADR-0024](brain/project/decisions/adr-0024-three-axis-decoupling.md) — Three-axis decoupling: AGENT_PLATFORM · SDD_ENGINE · MEMORY_BACKEND (extends ADR-0005/0019; trims the phantom platform allow-list)
+- [ADR-0026](brain/project/decisions/adr-0026-governance-doctrine-tiers.md) — Governance doctrine tiers: a declared lite/standard/regulated axis orthogonal to the detected substrate ladder (amends ADR-0015 REQ-L4-2/L5-1/L6-1; resolves #329)
 
 ### Project-specific rules
 
