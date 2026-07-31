@@ -240,16 +240,52 @@ export async function labelEvents({ project, number, apiBase, token, proxyUrl, f
 
 /**
  * prReviews — the provider-agnostic `prReviews` CONTRACT verb (issue #239
- * A3 TASK2/4th-violation fix) over GitLab's approvals API (`GET
- * /projects/:id/merge_requests/:iid/approvals`), via the shared
- * `gitlabApiFetch` transport. GitLab has no per-reviewer review-STATE
- * history like GitHub's Reviews API (COMMENTED/CHANGES_REQUESTED/APPROVED)
- * — approvals is the closest analog, so each entry in `approved_by`
- * normalizes to one `{ state: 'APPROVED', author }` entry, matching exactly
- * what `evaluateBrainWritesReviewed` consumes (only `state === 'APPROVED'`
- * counts toward approvers; a genuinely empty `approved_by` list still warns
- * via the pure evaluator's existing "no reviews at all" branch — the same
- * DETECTION outcome, not a fabricated distinction).
+ * A3 TASK2/4th-violation fix; verdict-thread half added by issue #317) over
+ * TWO GitLab endpoints, both via the shared `gitlabApiFetch` transport:
+ *
+ *   1. `GET /projects/:id/merge_requests/:iid/notes` — the MR discussion
+ *      thread. This is where the reviewer's `brain-review/N` verdict blocks
+ *      actually LIVE (poster.mjs posts them as MR notes), so it is the only
+ *      endpoint that can carry a parseable `body`. Each non-system note
+ *      normalizes to `{ state: 'COMMENTED', author, body }`.
+ *   2. `GET /projects/:id/merge_requests/:iid/approvals` — the approval
+ *      roster. GitLab has no per-reviewer review-STATE history like GitHub's
+ *      Reviews API, so each entry in `approved_by` normalizes to one
+ *      `{ state: 'APPROVED', author, body: '' }` entry.
+ *
+ * WHY BOTH (issue #317): this one verb feeds two unrelated consumers with
+ * disjoint needs, and before #317 it served only the second.
+ *   - The L6 `brain-writes-reviewed` gate reads ONLY `state === 'APPROVED'`
+ *     + `author`. Approvals is its source; notes must never satisfy it.
+ *   - The reviewer's verdict thread (`cold-boot`'s `doctrine.priorVerdicts`,
+ *     `board`'s reconciliation) reads ONLY `body`, through `parseVerdict`.
+ *     Approvals carries no body at all, so on GitLab the verdict thread was
+ *     STRUCTURALLY INVISIBLE — `priorVerdicts` was always `[]`, and with it
+ *     the anti-loop lock, the `rev >= 3 -> STOP` bound, the §8 doctrine load
+ *     and board reconciliation were all inert in production.
+ *
+ * SECURITY BOUNDARY (do not "simplify" this): notes normalize to
+ * `'COMMENTED'`, NEVER `'APPROVED'`. Mapping a mere MR comment to APPROVED
+ * would let anyone clear the L6 self-approval gate by typing a comment.
+ *
+ * ORDERING is load-bearing: `sort=asc&order_by=created_at` makes notes
+ * oldest-first, matching GitHub's Reviews API, because `poster.mjs` and
+ * `board.mjs` both take the LAST parsed verdict as the current one. GitLab's
+ * notes endpoint defaults to newest-first, which would invert that.
+ *
+ * PAGINATION is load-bearing for the same reason `--paginate` is on the
+ * GitHub side, and more sharply: with `sort=asc`, page 1 holds the OLDEST
+ * notes, so an unpaginated fetch drops the LATEST verdict — precisely the
+ * fail-open the anti-loop lock exists to prevent. Fetched page-by-page
+ * (`per_page=100`, stop on a short page), the same termination condition
+ * `labelList` uses, because `gitlabApiFetch` returns only the parsed body
+ * and cannot follow a `Link` header.
+ *
+ * FAILURE IS ALL-OR-NOTHING: if EITHER fetch fails the whole result is
+ * `null` (uncomputable). Returning notes-only on an approvals failure would
+ * hand L6 an empty approver set that looks like a genuine "nobody approved"
+ * — a fail-OPEN on the security gate. `null` is what its callers already
+ * treat as "couldn't compute".
  *
  * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS from the
  * caller (`gitlabApiConfig()`), exactly like `issueView`/`labelEvents` —
@@ -258,15 +294,33 @@ export async function labelEvents({ project, number, apiBase, token, proxyUrl, f
  * — never a fabricated `[]`.
  *
  * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
- * @returns {Promise<Array<{ state: 'APPROVED', author: string }>|null>}
+ * @returns {Promise<Array<{ state: 'COMMENTED'|'APPROVED', author: string|null, body: string }>|null>}
  */
 export async function prReviews({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
-  let data;
+  const base = apiBase ?? 'https://gitlab.com/api/v4';
+  const tok = token ?? vcsToken(PROVIDER);
+  const perPage = 100;
+
+  let notes;
+  let approvals;
   try {
-    data = await gitlabApiFetch({
-      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
-      token: token ?? vcsToken(PROVIDER),
+    notes = [];
+    for (let page = 1; ; page += 1) {
+      const arr = await gitlabApiFetch({
+        apiBase: base,
+        token: tok,
+        proxyUrl: proxyUrl ?? null,
+        path: `projects/${encoded}/merge_requests/${number}/notes?order_by=created_at&sort=asc&per_page=${perPage}&page=${page}`,
+        fetchImpl,
+      });
+      if (!Array.isArray(arr)) break;
+      notes.push(...arr);
+      if (arr.length < perPage) break;
+    }
+    approvals = await gitlabApiFetch({
+      apiBase: base,
+      token: tok,
       proxyUrl: proxyUrl ?? null,
       path: `projects/${encoded}/merge_requests/${number}/approvals`,
       fetchImpl,
@@ -274,7 +328,26 @@ export async function prReviews({ project, number, apiBase, token, proxyUrl, fet
   } catch {
     return null;
   }
-  return (data.approved_by ?? []).map(a => ({ state: 'APPROVED', author: a.user?.username ?? null }));
+
+  // System notes ("changed title from ...", "assigned to @x") are GitLab's own
+  // activity records, never reviewer speech — they can never carry a verdict
+  // block, so they are dropped rather than passed through as noise.
+  const commented = notes
+    .filter(n => n?.system !== true)
+    .map(n => ({ state: 'COMMENTED', author: n?.author?.username ?? null, body: n?.body ?? '' }));
+
+  const approved = (approvals?.approved_by ?? []).map(a => ({
+    state: 'APPROVED',
+    author: a.user?.username ?? null,
+    body: '',
+  }));
+
+  // Approvals are appended AFTER the chronological notes rather than
+  // interleaved: the approvals endpoint exposes no per-approver timestamp, so
+  // any interleaving would be fabricated. Safe for the "last verdict wins"
+  // readers because an approval's `body` is `''`, which `parseVerdict`
+  // rejects — an approval can never displace the latest real verdict.
+  return [...commented, ...approved];
 }
 
 export async function issueList({ project, state = 'open', assignee } = {}) {

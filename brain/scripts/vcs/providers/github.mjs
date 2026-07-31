@@ -267,19 +267,35 @@ export async function prStatusRollup({ project, number } = {}) {
  * prReviews — the provider-agnostic `prReviews` CONTRACT verb (issue #239
  * A3 TASK2/4th-violation fix, closing the L6 brain-writes-reviewed gate's
  * gh-CLI-hardcoded `defaultFetchReviews`). Wraps GitHub's Reviews API
- * (`pulls/N/reviews`), normalizing `state`/`user.login` to `{ state, author
- * }`. EXTRACTED from brain-writes-reviewed.mjs's inline
+ * (`pulls/N/reviews`), normalizing `state`/`user.login`/`body` to `{ state,
+ * author, body }`. EXTRACTED from brain-writes-reviewed.mjs's inline
  * `defaultFetchReviews`, preserving the load-bearing `--paginate` VERBATIM:
  * `gh api` does not auto-paginate, and a long-lived PR with many re-review
  * cycles can exceed one page — an unpaginated fetch can silently drop the
  * one human APPROVED review that would flip a self-approval verdict.
+ *
+ * `body` (issue #317) is LOAD-BEARING, not cosmetic: the reviewer's
+ * `brain-review/N` verdict block lives in the review body, and
+ * `parse-verdict.mjs` requires a string body to recover it. Without `body`
+ * on this shape, `cold-boot`'s `doctrine.priorVerdicts` is ALWAYS `[]` in
+ * production — which silently kills the anti-loop lock (poster.mjs's
+ * `lastVerdict` never fires, so a duplicate verdict is re-posted on every
+ * rerun of the same head), the `rev >= 3 -> STOP` bound (verdict.mjs's
+ * `priorRevCount` never leaves 0), the §8 prior-verdict doctrine load, and
+ * board reconciliation. This is the field whose absence made all four
+ * guarantees inert while their tests stayed green on injected fixtures.
+ *
+ * `body` follows the same uncomputable-vs-empty discipline as `prView.body`
+ * (issue #239 A3 task 3.7): a review with no comment normalizes to `''`,
+ * never `null`/`undefined` — `null` is reserved for "couldn't fetch", which
+ * on this verb is signalled by the WHOLE result being `null`.
  *
  * Never throws: a fetch failure is caught and normalized to `null`
  * (uncomputable) — never a fabricated `[]`, so callers (the DETECTION gate)
  * can distinguish "zero reviews" from "couldn't fetch".
  *
  * @param {{ project: string, number: number }} params
- * @returns {Promise<Array<{ state: string, author: string|null }>|null>}
+ * @returns {Promise<Array<{ state: string, author: string|null, body: string }>|null>}
  */
 export async function prReviews({ project, number } = {}) {
   let reviews;
@@ -288,7 +304,7 @@ export async function prReviews({ project, number } = {}) {
   } catch {
     return null;
   }
-  return reviews.map(r => ({ state: r.state, author: r.user?.login ?? null }));
+  return reviews.map(r => ({ state: r.state, author: r.user?.login ?? null, body: r.body ?? '' }));
 }
 
 /**
