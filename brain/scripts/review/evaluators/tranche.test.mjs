@@ -198,3 +198,66 @@ test('gatherTrancheInputs: ignoreList from readIgnoreList excludes matched paths
   });
   assert.equal(inputs.budget.lines, 5);
 });
+
+// ── gatherTrancheInputs: tier-scoped job sets (issue #358 Q5 Phase 5 review finding 2) ──
+//
+// REQUIRED_JOBS/DETECTION_JOBS (governance-checks.mjs) are a 'standard'-tier
+// snapshot — stale for any repo declaring a different tier. gatherTrancheInputs
+// must resolve requiredJobs/detectionJobs from the repo's OWN declared tier,
+// never fall back to the stale snapshot silently.
+
+test('gatherTrancheInputs: deps.tier="lite" resolves requiredJobs/detectionJobs from the tier matrix — actor-check/brain-writes-reviewed stay required, memory-gate/phase-order demote to detection', async () => {
+  const inputs = await gatherTrancheInputs({
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    headSha: 'HEAD',
+    baseSha: 'BASE',
+    changedFiles: [],
+    deps: {
+      fetchRollup: async () => greenRollup(),
+      diffNumstat: () => '',
+      readIgnoreList: () => [],
+      tier: 'lite',
+    },
+  });
+  assert.equal(inputs.tier, 'lite');
+  assert.deepEqual(inputs.detectionJobs, ['memory-gate', 'phase-order']);
+  assert.ok(inputs.requiredJobs.includes('actor-check'));
+  assert.ok(inputs.requiredJobs.includes('brain-writes-reviewed'));
+  assert.ok(!inputs.requiredJobs.includes('phase-order'));
+});
+
+test('gatherTrancheInputs: deps.readConfig overrides the tier source (no deps.tier) — resolves through resolveTier', async () => {
+  const inputs = await gatherTrancheInputs({
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    headSha: 'HEAD',
+    baseSha: 'BASE',
+    changedFiles: [],
+    deps: {
+      fetchRollup: async () => greenRollup(),
+      diffNumstat: () => '',
+      readIgnoreList: () => [],
+      readConfig: () => ({ governance: { tier: 'regulated' } }),
+    },
+  });
+  assert.equal(inputs.tier, 'regulated');
+  assert.deepEqual(inputs.detectionJobs, []);
+});
+
+test('evaluateTranche: fed lite-tier job sets, a red memory-gate is editorial (detection), never a blocker', () => {
+  const rollup = greenRollup().map(g => (g.name === 'memory-gate' ? { ...g, conclusion: 'FAILURE' } : g));
+  const result = evaluateTranche({
+    requiredGates: rollup,
+    changedFiles: [],
+    budget: { lines: 0, uncomputable: false },
+    requiredJobs: ['issue-link', 'diff-size', 'local-checks', 'decision-gate', 'actor-check', 'brain-writes-reviewed'],
+    detectionJobs: ['memory-gate', 'phase-order'],
+  });
+  const finding = result.findings.find(f => f.id === 'detection:memory-gate');
+  assert.ok(finding, 'expected an editorial finding for memory-gate at the lite-tier detection policy');
+  assert.equal(finding.severity, 'editorial');
+  assert.equal(result.findings.some(f => f.id === 'gate:memory-gate'), false, 'memory-gate must not ALSO be counted as a blocker');
+});

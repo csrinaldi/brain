@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 
 import { evaluateMerge } from './merge-walk.mjs';
 import {
-  PER_PERIOD_GATES, foldMerge, finalizeRows, emptyRows,
+  PER_PERIOD_GATES, DETECTION_JOB_NAMES, detectionJobNames, foldMerge, finalizeRows, emptyRows,
 } from './metrics-aggregate.mjs';
 
 // A minimal fake `resolutionGit` — evaluateMerge only calls it when a
@@ -263,6 +263,46 @@ test('bypass usage by author is per-period, distinct from the overall sizeExcept
   assert.deepEqual(augRow.bypassByAuthor, { alice: 1 });
   assert.equal(julyRow.bypass.sizeException, 1);
   assert.equal(augRow.bypass.sizeException, 1);
+});
+
+// ── detectionJobNames(tier) — issue #358 Q5 Phase 5 review finding 2 ────────
+//
+// DETECTION_JOB_NAMES (the legacy 3-name literal) is tier-blind and STALE at
+// brain's own "lite" tier: actor-check/brain-writes-reviewed are required at
+// EVERY tier (REQ-TIER-2's never-tiered core), never detection.
+// detectionJobNames(tier) is the tier-aware replacement.
+
+test('DETECTION_JOB_NAMES (legacy alias) stays the tier-blind 3-name literal — unchanged for existing importers', () => {
+  assert.deepEqual(DETECTION_JOB_NAMES, ['phase-order', 'actor-check', 'brain-writes-reviewed']);
+});
+
+test('detectionJobNames("standard"): every DETECTION_CANDIDATES gate is required at standard (Phase 5) → []', () => {
+  assert.deepEqual(detectionJobNames('standard'), []);
+});
+
+test('detectionJobNames("lite"): only phase-order demotes to detection — actor-check/brain-writes-reviewed stay required', () => {
+  assert.deepEqual(detectionJobNames('lite'), ['phase-order']);
+});
+
+test('detectionJobNames("regulated"): every DETECTION_CANDIDATES gate is required → []', () => {
+  assert.deepEqual(detectionJobNames('regulated'), []);
+});
+
+test('foldMerge: an explicit tier-scoped detectionJobs list is honored — actor-check is NOT folded as a detection signal at "lite"', () => {
+  let rows = emptyRows();
+  rows = foldMerge(
+    rows,
+    {
+      sha: 'p1', mergedAt: '2026-07-05T00:00:00Z', prLabels: [], leadTimeDays: null,
+      kind: 'evaluated', evalRec: evalPass(),
+      detection: { 'phase-order': 'pass', 'actor-check': 'fail' },
+      period: 'month',
+    },
+    detectionJobNames('lite'),
+  );
+  const out = finalizeRows(rows);
+  assert.deepEqual(out[0].detection, { 'phase-order': { pass: 1, fail: 0 } });
+  assert.equal(out[0].detection['actor-check'], undefined, 'actor-check is required at "lite" — must not appear as a detection column');
 });
 
 test('detection jobs render as a single pass/fail count column, no raw/enforced split (D6)', () => {

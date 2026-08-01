@@ -19,6 +19,7 @@ import {
   DETECTION_JOBS,
   checkContexts,
   diffArmedChecks,
+  resolveJobSets,
 } from './governance-checks.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -99,6 +100,32 @@ test('drift-guard regression: governance.yml job order matches REQUIRED_JOBS the
     `Order drift: GOVERNANCE_JOBS=${JSON.stringify(GOVERNANCE_JOBS)} ` +
     `but governance.yml job order=${JSON.stringify(yamlJobNames)}`
   );
+});
+
+// ── resolveJobSets (issue #358 Q5 Phase 5 review finding) ──────────────────────
+//
+// REQUIRED_JOBS/DETECTION_JOBS are a 'standard'-only snapshot (stale for any
+// other tier) — resolveJobSets(tier) is the tier-aware replacement callers
+// should migrate to.
+
+test('resolveJobSets("standard") matches the REQUIRED_JOBS/DETECTION_JOBS snapshot exactly', () => {
+  assert.deepEqual(resolveJobSets('standard'), { required: REQUIRED_JOBS, detection: DETECTION_JOBS });
+});
+
+test('resolveJobSets("lite") differs from the standard-tier snapshot: memory-gate/phase-order are detection, actor-check/brain-writes-reviewed stay required', () => {
+  const { required, detection } = resolveJobSets('lite');
+  assert.deepEqual(detection, ['memory-gate', 'phase-order']);
+  assert.ok(required.includes('actor-check'), '"lite" must still require actor-check (never-tiered core)');
+  assert.ok(required.includes('brain-writes-reviewed'), '"lite" must still require brain-writes-reviewed (never-tiered core)');
+  assert.ok(!required.includes('phase-order'), '"lite" demotes phase-order to detection (proportionality)');
+  assert.ok(!required.includes('memory-gate'), '"lite" demotes memory-gate to detection (proportionality)');
+});
+
+test('resolveJobSets(tier).required ∪ .detection reproduces GOVERNANCE_JOBS at every tier', () => {
+  for (const tier of ['lite', 'standard', 'regulated']) {
+    const { required, detection } = resolveJobSets(tier);
+    assert.deepEqual([...required, ...detection].sort(), [...GOVERNANCE_JOBS].sort());
+  }
 });
 
 // ── L1 local-checks job (REQ-L1-1) ──────────────────────────────────────────────

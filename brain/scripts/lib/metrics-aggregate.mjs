@@ -17,6 +17,7 @@
 // PR carries the `decision` label contribute to its raw/enforced counts.
 
 import { bucketOf } from './period-bucket.mjs';
+import { resolveGatePolicy } from '../vcs/governance-tiers.mjs';
 
 /** camelCase check name → kebab-case gate name (matches vcs/governance-checks.mjs REQUIRED_JOBS). */
 export const GATE_NAMES = Object.freeze({
@@ -27,12 +28,55 @@ export const GATE_NAMES = Object.freeze({
 
 /**
  * The gates rendered as per-period raw/enforced columns. `memory-gate`
- * (memoryPresence) is deliberately absent — design D3.
+ * (memoryPresence) is deliberately absent — design D3. Unaffected by tiering:
+ * `diff-size`/`issue-link`/`decision-gate` are `required` at EVERY tier
+ * (GATE_MATRIX, governance-tiers.mjs), so this list needs no tier parameter.
  */
 export const PER_PERIOD_GATES = Object.freeze(['diff-size', 'issue-link', 'decision-gate']);
 
-/** DETECTION_JOBS names (mirrors vcs/governance-checks.mjs — never blocking, no raw/enforced split, D6). */
-export const DETECTION_JOB_NAMES = Object.freeze(['phase-order', 'actor-check', 'brain-writes-reviewed']);
+/**
+ * The CANDIDATE gates metrics tracks as a current-state (never per-period
+ * raw/enforced) pass/fail column, D6-style. A hand-maintained literal, not
+ * derived from GOVERNANCE_JOBS/GATE_MATRIX — it predates tiering and was
+ * never meant to track EVERY gate, only the three the design originally
+ * scoped as "detection-only, worth reporting but never blocking".
+ *
+ * @type {string[]}
+ */
+const DETECTION_CANDIDATES = Object.freeze(['phase-order', 'actor-check', 'brain-writes-reviewed']);
+
+/**
+ * Deprecated backward-compatible alias — `DETECTION_CANDIDATES` unfiltered,
+ * for importers/tests that have not yet threaded a `tier` through.
+ *
+ * STALE CONTRACT WARNING (issue #358 Q5 Phase 5 review finding 2): this
+ * constant is tier-BLIND. At brain's own declared `lite` tier, `actor-check`
+ * and `brain-writes-reviewed` are `required` at EVERY tier (REQ-TIER-2's
+ * never-tiered core) — NOT detection — so folding a merge's `detection` map
+ * against this literal double-counts them as "current-state, never
+ * blocking" when they in fact block merge today. Prefer `detectionJobNames(tier)`
+ * (below) in new code — `brain-metrics.mjs` resolves brain's own tier once and
+ * passes the tier-scoped list through `foldMerge(rows, m, detectionJobs)`
+ * explicitly rather than relying on this default.
+ *
+ * @type {string[]}
+ */
+export const DETECTION_JOB_NAMES = DETECTION_CANDIDATES;
+
+/**
+ * Tier-scoped detection job names (issue #358 Q5 Phase 5 review finding 2) —
+ * the `DETECTION_CANDIDATES` gates whose GATE_MATRIX POSITION actually
+ * resolves to `detection` at `tier`. At `lite`: `['phase-order']` (`memory-gate`
+ * is also `detection` at `lite` but is intentionally excluded — design D3,
+ * it is a repo-level signal, not a per-period one). At `standard`/`regulated`:
+ * `[]` (every candidate promoted to `required` in Phase 5).
+ *
+ * @param {'lite'|'standard'|'regulated'} tier
+ * @returns {string[]}
+ */
+export function detectionJobNames(tier) {
+  return DETECTION_CANDIDATES.filter((gate) => resolveGatePolicy(gate, tier) === 'detection');
+}
 
 function median(numbers) {
   if (numbers.length === 0) return null;
@@ -46,7 +90,7 @@ export function emptyRows() {
   return new Map();
 }
 
-function newRow(period) {
+function newRow(period, detectionJobs = DETECTION_JOB_NAMES) {
   return {
     period,
     changesMerged: 0,
@@ -60,7 +104,7 @@ function newRow(period) {
     // unavailable, or no matching add event) is bucketed under "unknown" —
     // NEVER dropped, mirroring D2's "count visibly, never hide" discipline.
     bypassByAuthor: {},
-    detection: Object.fromEntries(DETECTION_JOB_NAMES.map((j) => [j, { pass: 0, fail: 0 }])),
+    detection: Object.fromEntries(detectionJobs.map((j) => [j, { pass: 0, fail: 0 }])),
   };
 }
 
@@ -84,11 +128,14 @@ function newRow(period) {
  * @param {object|null} m.evalRec    lib/merge-walk.mjs `evaluateMerge()` output, iff kind==='evaluated'.
  * @param {Record<string,'pass'|'fail'|null>|null} m.detection  DETECTION_JOBS conclusions (D6, current-state).
  * @param {'month'|'week'} m.period
+ * @param {string[]} [detectionJobs]  Tier-scoped detection job names (default:
+ *   the legacy DETECTION_JOB_NAMES literal — issue #358 Q5 Phase 5 review
+ *   finding 2; `brain-metrics.mjs` passes `detectionJobNames(tier)` explicitly).
  * @returns {Map<string, object>}
  */
-export function foldMerge(rows, m) {
+export function foldMerge(rows, m, detectionJobs = DETECTION_JOB_NAMES) {
   const bucket = bucketOf(m.mergedAt, m.period);
-  if (!rows.has(bucket)) rows.set(bucket, newRow(bucket));
+  if (!rows.has(bucket)) rows.set(bucket, newRow(bucket, detectionJobs));
   const row = rows.get(bucket);
 
   row.changesMerged += 1;
@@ -108,7 +155,7 @@ export function foldMerge(rows, m) {
   if (prLabels.includes('skip:memory-gate')) row.bypass.skipMemoryGate += 1;
 
   if (m.detection) {
-    for (const job of DETECTION_JOB_NAMES) {
+    for (const job of detectionJobs) {
       const conclusion = m.detection[job];
       if (conclusion === 'pass') row.detection[job].pass += 1;
       else if (conclusion === 'fail') row.detection[job].fail += 1;

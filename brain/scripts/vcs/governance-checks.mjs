@@ -13,13 +13,16 @@
 // list from the SAME resolution — neither surface may carry an independent copy of
 // the matrix (REQ-TIER-9).
 //
-// REQUIRED_JOBS/DETECTION_JOBS stay exported as backward-compatible aliases,
-// computed from requiredJobs('standard') (the default, pre-tier-equivalent tier —
-// REQ-TIER-10) so every existing importer (review/evaluators/*, their tests, the
-// drift-guard tests below) keeps seeing exactly today's shipped split. New code
-// should call requiredJobs(tier)/checkContexts(tier) directly; migrating the
-// remaining literal-array importers to the tier-aware call is a tracked follow-up,
-// out of scope for #358 phases 1-3.
+// REQUIRED_JOBS/DETECTION_JOBS stay exported as backward-compatible aliases, a
+// SNAPSHOT of requiredJobs('standard')/its complement taken at import time —
+// see each constant's own STALE CONTRACT WARNING below. Phase 5 (issue #358 Q5)
+// emptied PENDING_PROMOTION, so `requiredJobs('standard')` grew from 5 jobs to
+// all 8 and DETECTION_JOBS collapsed to `[]`: these constants no longer
+// reproduce "today's shipped split" for every tier — they are a 'standard'-only
+// snapshot. New code should call requiredJobs(tier)/resolveJobSets(tier)/
+// checkContexts(tier) directly (tier-scoped); migrating the remaining
+// literal-array importers (review/evaluators/tranche.mjs, lib/metrics-aggregate.mjs)
+// to the tier-aware call is tracked per-caller below.
 //
 // When adding a job: add a GATE_MATRIX row (governance-tiers.mjs) AND add the job to
 // governance.yml in the same commit, or the drift-guard test turns red.
@@ -47,10 +50,26 @@ export const GOVERNANCE_JOBS = [
 ];
 
 /**
- * Deprecated backward-compatible alias for `requiredJobs('standard')`
- * (governance-tiers.mjs). 'standard' is the default, pre-tier-equivalent
- * doctrine (REQ-TIER-10), so this reproduces exactly what REQUIRED_JOBS was
- * before tiering landed. Prefer `requiredJobs(tier)` in new code.
+ * Deprecated backward-compatible alias — a SNAPSHOT of `requiredJobs('standard')`
+ * (governance-tiers.mjs) taken at import time, for importers that have not yet
+ * migrated to tier-aware resolution.
+ *
+ * STALE CONTRACT WARNING (issue #358 Q5 Phase 5 review finding): this constant
+ * used to "reproduce exactly what REQUIRED_JOBS was before tiering landed"
+ * (REQ-TIER-10's no-op-migration guarantee) — that was true for Phases 1-4
+ * ONLY, while `phase-order`/`actor-check`/`brain-writes-reviewed` sat on
+ * `PENDING_PROMOTION` (governance-tiers.mjs). Phase 5 emptied
+ * `PENDING_PROMOTION`: `requiredJobs('standard')` GREW from 5 jobs to all 8
+ * (design.md §4.1, a ratified departure from REQ-TIER-10). This constant
+ * still equals `requiredJobs('standard')` — it is simply no longer a no-op
+ * with pre-tiering history. It is ALSO tier-blind: a repo declaring `lite` or
+ * `regulated` gets the WRONG split from this constant (e.g. `lite`'s
+ * `phase-order` is `detection`, not `required` — this constant reports it as
+ * required anyway, because it was captured at `'standard'`).
+ *
+ * Prefer `requiredJobs(tier)` (or `resolveJobSets(tier)` below) in new code —
+ * anything that needs to be correct for a repo's OWN declared tier (e.g.
+ * brain's own `lite`) must not read this constant.
  *
  * @type {string[]}
  */
@@ -58,12 +77,31 @@ export const REQUIRED_JOBS = requiredJobs('standard');
 
 /**
  * Deprecated backward-compatible alias — the GOVERNANCE_JOBS not in
- * REQUIRED_JOBS at the default 'standard' tier. Prefer resolving policy via
- * `resolveGatePolicy(gate, tier)` (governance-tiers.mjs) in new code.
+ * REQUIRED_JOBS at the default 'standard' tier. Same STALE CONTRACT WARNING as
+ * REQUIRED_JOBS above applies: this is now `[]` (every gate promoted to
+ * `required` at `standard` in Phase 5) and is tier-blind (wrong at `lite`,
+ * where `phase-order` is genuinely `detection`). Prefer resolving policy via
+ * `resolveGatePolicy(gate, tier)` or `resolveJobSets(tier)` in new code.
  *
  * @type {string[]}
  */
 export const DETECTION_JOBS = GOVERNANCE_JOBS.filter(job => !REQUIRED_JOBS.includes(job));
+
+/**
+ * Resolves BOTH job sets for a tier in one call (issue #358 Q5 Phase 5 review
+ * finding) — the tier-aware replacement for reading REQUIRED_JOBS/
+ * DETECTION_JOBS directly. `required` is `requiredJobs(tier)` (already
+ * PENDING_PROMOTION-filtered); `detection` is simply GOVERNANCE_JOBS minus
+ * that set, computed fresh per call (never a stale snapshot).
+ *
+ * @param {'lite'|'standard'|'regulated'} [tier='standard']
+ * @returns {{ required: string[], detection: string[] }}
+ */
+export function resolveJobSets(tier = 'standard') {
+  const required = requiredJobs(tier);
+  const detection = GOVERNANCE_JOBS.filter(job => !required.includes(job));
+  return { required, detection };
+}
 
 /**
  * Returns the required GitHub check-run names for branch protection at a tier

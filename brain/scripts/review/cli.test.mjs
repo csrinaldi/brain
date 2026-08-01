@@ -47,6 +47,15 @@ function readyDeps({ vcs, labels = [] } = {}) {
       fetchRollup: async () => greenRollup(),
       diffNumstat: () => '10\t5\tfoo.mjs\n',
       readIgnoreList: () => [],
+      // Pinned to 'standard' (issue #358 Q5 Phase 5 review finding 2):
+      // gatherTrancheInputs now resolves requiredJobs/detectionJobs from the
+      // repo's OWN declared tier (brain.config.json) rather than the stale
+      // REQUIRED_JOBS/DETECTION_JOBS snapshot these fixtures import — pin the
+      // tier explicitly so these tests stay deterministic and decoupled from
+      // brain's own real declared tier ('lite'), which demotes memory-gate/
+      // phase-order to detection and would otherwise change which findings
+      // are blockers here.
+      tier: 'standard',
     },
     writeVerbs: vcs,
   };
