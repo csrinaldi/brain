@@ -37,9 +37,10 @@ before Phase 0 closes.
 - [x] Confirm the ADR number: `0026` is the human's claimed number, already used —
       no renumbering needed (confirmed via `brain/project/decisions/adr-0026-*.md`)
 - [x] Post the resolution summary on #358 and the recommendation on #329
-- [ ] Close #358 — still NOT closed in this batch: Phase 4 (evidence tiering) is
-      blocked on #328, and #329's acceptance asks for a promoted ADR (done) + shipped
-      REQ-L5-1′ (Phase 4, not yet done)
+- [ ] Close #358 — still NOT closed in this batch: Phase 4 (evidence tiering) is now
+      shipped (REQ-L5-1′/REQ-L6-1′ implemented, unblocked by #328/PR #370), but
+      Phase 5 (gate promotion to `required`, precondition-gated) and Phase 6
+      (docs) remain open
 
 ## Phase 1 — The tier module (no behaviour change)
 
@@ -115,17 +116,46 @@ Committed: `6169909` — feat(governance): tier-scoped diff budget and artefacts
       400-line fallback) and `brain-check.test.mjs` (budget=1000 passes 900
       lines; no-budget-supplied legacy 400-line fallback).
 
-## Phase 4 — Evidence tiering (blocked)
+## Phase 4 — Evidence tiering
 
-- [ ] **BLOCKED on #328** — do not start. The lite distinct-act evidence is a
-      timestamp comparison against an event #328 proves is not yet observable.
-- [ ] `actor-check.mjs`: REQ-L5-1′ evidence forms; fail closed when the label-add
-      event is unreadable
-- [ ] `brain-writes-reviewed.mjs`: REQ-L6-1′ evidence forms; agent identities from the
-      existing `governance.reviewActors` key — no new list
-- [ ] Tests: solo maintainer passes at `lite` **with no `override:*` label**, same PR
+- [x] **UNBLOCKED on #328** — #328 (gate re-evaluation after approval) merged to
+      main (PR #370); `labelEvents()`'s `at` field is real, observable evidence.
+- [x] `actor-check.mjs`: REQ-L5-1′ evidence forms; fail closed when the label-add
+      event is unreadable. Added `compareTimestamps()`, `evaluateDistinctAct()`
+      (`lite`), `evaluateNoCommitOnBranch()` (`regulated`). `standard` is
+      UNCHANGED from pre-tiering behavior (REQ-TIER-10 no-op-migration
+      guarantee) — `lite` does not evaluate self-approval at all;
+      `standard`/`regulated` keep the existing distinct-actor check. Added the
+      `prCommits` VCS contract verb (`github.mjs`/`gitlab.mjs`/`cli.mjs`,
+      documented in `vcs-contract.md`) to source the head-commit timestamp
+      (`lite`) and the branch's commit-author list (`regulated`); GitLab's
+      `login` normalizes to `null` for every entry (no account-linked commit
+      author on that provider) — regulated's no-commit-on-branch evidence is a
+      documented `warn` (uncomputable), never a false fail, when all logins are
+      null.
+- [x] `brain-writes-reviewed.mjs`: REQ-L6-1′ evidence forms; agent identities from
+      the existing `governance.reviewActors` key — no new list. Added an
+      unconditional, override-immune agent-author hard-fail ("agent containment
+      does not tier") that closes the pre-Phase-4 "undocumented n=1
+      contradiction" (design.md §0): the old evaluator only ever asked "is the
+      sole APPROVED reviewer human?", never "is the AUTHOR itself an agent?".
+      `lite`'s whole evidence form is agent-authorship exclusion (never fetches
+      reviews). `standard`/`regulated` are UNCHANGED (REQ-TIER-10). `regulated`
+      adds an informational `codeownersArmed` note (injectable dep, defaults
+      `false`/safe direction — REQ-TIER-5); wiring it to `detectSubstrate()`'s
+      real `rungs[1].gates.brainWritesReviewed.active` probe is a follow-up
+      (flagged as a residual, not done here — it needs network branch-protection
+      probes this per-PR gate does not otherwise make).
+- [x] Tests: solo maintainer passes at `lite` **with no `override:*` label**, same PR
       fails at `standard`, approval predating the head commit fails at every tier,
-      agent-authored `brain/**` change fails at every tier
+      agent-authored `brain/**` change fails at every tier — all added to
+      `actor-check.test.mjs`/`brain-writes-reviewed.test.mjs`, plus new
+      `prCommits` provider-unit tests (`providers.test.mjs`) and the shared
+      contract-verb registration (`cli.test.mjs`'s existing "every provider
+      exposes every contract verb" loop covers it automatically). Full repo
+      suite green (2250/2253 — the 3 remaining failures are pre-existing,
+      unrelated to this change: `antigravity.drift.test.mjs` and
+      `cli.backfill-issue.test.mjs` x2).
 
 ## Phase 5 — Promotions (each precondition-gated, separate PRs)
 
