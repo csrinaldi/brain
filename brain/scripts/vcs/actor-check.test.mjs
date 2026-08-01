@@ -552,18 +552,26 @@ test('FIX2 end-to-end: Bob files the issue, Alice opens the PR, Bob self-labels 
   assert.match(result.reason, /self/i);
 });
 
-// ── runActorCheck / main — never throws, gh failure degrades to warn + pass ────
+// ── runActorCheck / main — never throws; a gh failure fails closed when the ──
+// gate is required (issue #358 Q5 Phase 5 review finding 1) ───────────────────
 //
 // runActorCheck/gatherActorCheckInputs/main are async as of A3 (they await the
 // labelEvents CONTRACT verb dispatched via getVcs — a Promise-returning call);
 // tests here await them directly instead of asserting a synchronous throw.
+//
+// `actor-check` is `required` at EVERY tier (GATE_MATRIX, REQ-TIER-2's
+// never-tiered core) — so an API failure now fails closed regardless of
+// tier, matching evaluateDistinctAct's existing fail-closed handling of an
+// unreadable `prCommits`. This CHANGES prior behavior (was: unconditional
+// warn) — the asymmetry finding this fixes.
 
-test('runActorCheck: gh api failure inside the wrapper → warn + pass, never throws', async () => {
+test('runActorCheck: gh api failure inside the wrapper → fail closed, never throws (actor-check is required at every tier)', async () => {
   const deps = {
     author: 'alice',
     prBody: 'Closes #144',
     baseBranch: 'main',
     repo: 'org/repo',
+    tier: 'standard',
     fetchLabeledEvents: () => {
       throw new Error('gh api failed: rate limited');
     },
@@ -571,7 +579,47 @@ test('runActorCheck: gh api failure inside the wrapper → warn + pass, never th
     readBotAllowlist: () => [],
   };
   const result = await runActorCheck(deps);
-  assert.equal(result.level, 'warn');
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /rate limited/);
+  assert.match(result.reason, /failing closed/i);
+});
+
+test('runActorCheck: gh api failure at "lite" tier ALSO fails closed (actor-check never demotes)', async () => {
+  const deps = {
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    tier: 'lite',
+    prNumber: 7,
+    fetchCommits: () => {
+      throw new Error('gh api failed: rate limited');
+    },
+    fetchLabeledEvents: () => [],
+    fetchIssue: () => ({ labels: [], author: 'bob' }),
+    readBotAllowlist: () => [],
+  };
+  const result = await runActorCheck(deps);
+  assert.equal(result.level, 'fail');
+});
+
+test('runActorCheck: gh api failure resolves the tier from readConfig when deps.tier is absent, defaulting to "standard" (fail-closed-safe) on a broken config', async () => {
+  const deps = {
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    readConfig: () => {
+      throw new Error('ENOENT: no such file');
+    },
+    fetchLabeledEvents: () => {
+      throw new Error('gh api failed: rate limited');
+    },
+    fetchIssue: () => ({ labels: ['status:approved'], author: 'bob' }),
+    readBotAllowlist: () => [],
+  };
+  const result = await runActorCheck(deps);
+  assert.equal(result.level, 'fail');
 });
 
 test('runActorCheck: missing PR_AUTHOR/repo context → warn + pass, never throws', async () => {

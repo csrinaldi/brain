@@ -23,7 +23,7 @@ import { loadContext, resolveDetectionBody, gitlabApiConfig } from './ci-context
 import { getVcs } from './cli.mjs';
 import { resolveApprovedLabel } from '../governance/approved-label.mjs';
 import { CLOSING_RE, CHAIN_RE } from '../governance/checks/issue-ref-patterns.mjs';
-import { resolveTier, tierParams } from './governance-tiers.mjs';
+import { resolveTier, tierParams, resolveGatePolicy } from './governance-tiers.mjs';
 
 // ── Pure evaluator (design §5 step 5) ───────────────────────────────────────
 
@@ -430,6 +430,30 @@ function defaultReadConfig(cwd) {
 }
 
 /**
+ * Resolves the tier to attribute an API-failure verdict to (issue #358 Q5
+ * Phase 5 review finding 1), WITHOUT ever throwing itself — this runs from
+ * inside `runActorCheck`'s catch block, after `gatherActorCheckInputs` has
+ * already failed, so a second failure here (a corrupt config, an unknown
+ * `governance.tier`) must degrade rather than escape. Defaults to
+ * `'standard'` on any resolution failure — `'standard'` also resolves
+ * `actor-check` to `required` (REQ-TIER-2's never-tiered core), so this
+ * default is fail-closed-safe regardless of the repo's real tier.
+ *
+ * @param {string} cwd
+ * @param {{ tier?: string, readConfig?: () => object }} deps
+ * @returns {'lite'|'standard'|'regulated'}
+ */
+function resolveTierForFailure(cwd, deps) {
+  try {
+    if (deps.tier) return deps.tier;
+    const readConfig = deps.readConfig ?? defaultReadConfig(cwd);
+    return resolveTier(readConfig());
+  } catch {
+    return 'standard';
+  }
+}
+
+/**
  * Gathers evaluateActor()'s inputs from the PR body + gh API (or from injected
  * `deps` in tests). `adminOverride` is resolved here — an override:* label is
  * only honored when it is BOTH present on the issue AND listed in
@@ -494,9 +518,27 @@ export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo,
 
 /**
  * Runs the full L5 actor check: gathers inputs (gh API + PR body), evaluates the
- * pure rule. Never throws — a gh API failure, or missing PR author/repo context,
- * degrades to `warn` rather than `fail`, keeping REQ-L5-2's zero-false-positive
- * goal intact while this job is detection-only (DETECTION_JOBS).
+ * pure rule. Never throws — but a gh API failure inside `gatherActorCheckInputs`
+ * no longer unconditionally degrades to `warn` (issue #358 Q5 Phase 5 review
+ * finding 1). `actor-check` is `required` at EVERY tier (REQ-TIER-2's
+ * never-tiered core, `GATE_MATRIX['actor-check']` — promoted out of
+ * `PENDING_PROMOTION` in Phase 5): when the gate is required, an API failure
+ * means the approval CANNOT BE VERIFIED, which is not the same thing as "no
+ * approval yet" (REQ-L5-2's warn+pass branch, still handled inside
+ * `evaluateActor` for the genuinely-computed "no labeled event" case). Failing
+ * open on an unverifiable required gate would let a flaky `gh`/API outage
+ * silently pass a check the doctrine says must block merge — the EXACT
+ * asymmetry this fix closes against `evaluateDistinctAct`'s existing
+ * fail-closed `prCommits: null` handling (same file, above): both paths now
+ * agree that "cannot verify, required gate" fails, never warns. Only when the
+ * resolved tier demotes this gate's POSITION to `detection` (not currently
+ * true for `actor-check` — reserved for a future matrix change) does an API
+ * failure still degrade to `warn`, mirroring `run-check.mjs`'s
+ * `mapDetectionToWarning` discipline for detection-tier gates.
+ *
+ * Missing PR author/repo CONTEXT (the branch below, before any gh call is even
+ * attempted) is a distinct case — this is not an API failure, it is "this run
+ * has no PR to check" (e.g. a local/non-CI invocation) — and stays `warn`.
  *
  * `author`/`baseBranch`/`repo` source from the normalized ci-context (`ctx.*`,
  * ADR-0016) — never from process.env directly (a drift-guard test enforces
@@ -534,9 +576,20 @@ export async function runActorCheck(deps = {}) {
   try {
     inputs = await gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, prNumber, cwd, deps });
   } catch (err) {
+    const tier = resolveTierForFailure(cwd, deps);
+    if (resolveGatePolicy('actor-check', tier) === 'required') {
+      return {
+        level: 'fail',
+        reason:
+          `actor-check: could not gather inputs (gh api failure?) — ${err.message} — failing closed: ` +
+          `actor-check is required at the "${tier}" tier (REQ-TIER-2's never-tiered core) and an ` +
+          'unverifiable API failure cannot be treated as a pass (matches evaluateDistinctAct\'s existing ' +
+          'fail-closed handling of an unreadable prCommits — issue #358 Q5 Phase 5 review finding 1).',
+      };
+    }
     return {
       level: 'warn',
-      reason: `actor-check: could not gather inputs (gh api failure?) — ${err.message}`,
+      reason: `actor-check: could not gather inputs (gh api failure?) — ${err.message} (detection-tier at "${tier}").`,
     };
   }
 
