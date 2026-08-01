@@ -150,9 +150,21 @@ human writes it.
 
 ---
 
-## 6. The verdict schema `brain-review/1`
+## 6. The verdict schema — `brain-review/1` and `brain-review/2`
 
-Every verdict is a fenced YAML block in the review body:
+Every verdict is a fenced YAML block in the review body. Two schema versions exist,
+`brain-review/1` and `brain-review/2`; both are defined in this section because a reviewer
+parsing a verdict thread must handle either one interchangeably (`parse-verdict.mjs` accepts
+both in the same guarded union — see "Compatibility" below). **Current activation status:**
+`brain-review/1` is what every real run emits today — `cli.mjs`'s call to `buildVerdict(...)`
+never sets `protocol`, so `verdict.mjs`'s default (`protocol = 'brain-review/1'`) is what
+ships. `brain-review/2` is fully implemented and unit-tested but is dead code in production
+until something sets `protocol: 'brain-review/2'` at that call site. The activation condition
+— tying `/2` to `governance.tier` (Q5, issue #358) — is specified in
+`openspec/changes/issue-391-t23-review-package-spec/design.md`; that document states the
+condition only, and does not itself flip the default.
+
+### 6.1 `brain-review/1` — the base schema
 
 ```yaml
 protocol: brain-review/1
@@ -180,6 +192,62 @@ escalate: human | null
   the reviewer is inventing doctrine, which §5 forbids.
 - **`head_sha` is mandatory.** It binds the verdict to the exact tree the reviewer read (§8) and
   expires with it.
+
+### 6.2 `brain-review/2` — causal admission
+
+`brain-review/2` (`brain/scripts/review/lib/schema-v2.mjs`, `verdict.mjs`) is `/1` plus two
+per-finding fields and one thread-level field, all optional in the sense that a `/1` verdict
+simply omits them:
+
+```yaml
+findings:
+  - id: <id>
+    severity: blocker | correction | editorial
+    evidence: "<a command the reviewer actually ran cold>"
+    cites: "<ADR / REQ / record id / gate>"
+    evidence_class: deterministic | inferential | insufficient
+    causal_disposition: introduced | behavior-activated | worsened | pre-existing | base-only | unknown
+follow_ups:                # present only when non-empty
+  - id: <id>
+    severity: blocker | correction | editorial
+    evidence: "<a command the reviewer actually ran cold>"
+    evidence_class: deterministic | inferential | insufficient
+    causal_disposition: pre-existing | base-only
+```
+
+- **`evidence_class`** states how directly the finding was established: `deterministic` (a
+  command's output proves it), `inferential` (reasoned from evidence, not directly observed),
+  or `insufficient` (the reviewer could not establish it cleanly).
+- **`causal_disposition`** states whether the finding is this change's doing:
+  `introduced` (new in this diff), `behavior-activated` (pre-existing code, newly reachable/
+  triggered by this diff), `worsened` (pre-existing, made worse), `pre-existing` (unrelated to
+  this diff), `base-only` (exists only on the base, not touched by this diff), or `unknown`.
+- **The admission rule.** A finding with `causal_disposition: pre-existing` or `base-only` is
+  **not** a blocker against this change — it is routed to `follow_ups[]` instead
+  (`verdict.mjs:46-56`). Only `introduced`/`behavior-activated`/`worsened`/`unknown` findings
+  remain in `findings[]` and can block.
+- **`causal_disposition: unknown` forces escalation.** Any finding whose causality could not be
+  determined forces `verdict: STOP` and `escalate: human` regardless of the evaluator's
+  conclusion (`verdict.mjs:48-49,63-64`) — uncertainty about causality is never silently
+  admitted (treated as blocking without being sure) or silently dropped (routed to
+  `follow_ups[]` without being sure it's safe to defer).
+- **REVISE-to-APPROVE softening.** If every finding that exists was routed out of the
+  blocking set (all `pre-existing`/`base-only`) and the evaluator's conclusion was `REVISE`,
+  the verdict becomes `APPROVE` (`verdict.mjs:65-66`) — findings existed, but nothing causal to
+  this change blocks it.
+- **Rendering.** `evidence_class` and `causal_disposition` are rendered per-finding when
+  present, and a `follow_ups:` block is rendered when non-empty (`verdict.mjs:108-123`); a `/1`
+  verdict simply never has these keys.
+
+### Compatibility — both protocols coexist by construction
+
+`parse-verdict.mjs` accepts either protocol string in the same guard
+(`proto !== 'brain-review/1' && proto !== 'brain-review/2' → return null`) and only attaches
+`protocol`/`findings`-with-causal-fields when they parse — a `/1` block never populates those
+keys. `cold-boot.mjs`'s `priorVerdicts` load, the anti-loop lock, and the `rev >= 3` bound all
+read `head_sha`/`rev`/`verdict` unconditionally, before any protocol-specific branch — so a
+verdict thread mixing `/1` and `/2` posts (e.g. a repo whose tier changed mid-PR) loads
+correctly on both sides. No parser change is required to support either protocol.
 
 ---
 
@@ -301,7 +369,7 @@ npm run brain:review -- --issue <id> --mode ruling
 
 ### Why this is load-bearing:
 1. **Zero Prompt Drift**: Guarantees that the subagent invokes `cli.mjs`, wiring `identity` → `cold-boot` → `mode` → `evaluators` → `verdict` → `poster` deterministically.
-2. **Standardized Protocol Compliance**: Enforces that all review output strictly produces `brain-review/2` fenced blocks with full causal admission and evidence validation.
+2. **Standardized Protocol Compliance**: Enforces that all review output strictly produces a fenced `brain-review/N` block (`brain-review/1` today by default; `brain-review/2`, with full causal admission, where the tier tie-in activates it — see §6.2) with evidence validation, rather than free-form prose.
 3. **Token Minimization**: Leverages the $0-token deterministic pre-checks in `cli.mjs` before executing any LLM evaluation.
 
 ---
