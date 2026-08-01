@@ -23,7 +23,8 @@ import { execFileSync } from 'node:child_process';
 import { getVcs } from '../../vcs/cli.mjs';
 import { loadBrainConfig } from '../../lib/brain-config.mjs';
 import { parseDiffNumstat } from '../../vcs/diff-size-count.mjs';
-import { REQUIRED_JOBS, DETECTION_JOBS } from '../../vcs/governance-checks.mjs';
+import { REQUIRED_JOBS, DETECTION_JOBS, resolveJobSets } from '../../vcs/governance-checks.mjs';
+import { resolveTier } from '../../vcs/governance-tiers.mjs';
 
 // governance.yml's diff-size gate threshold (`.github/workflows/governance.yml`,
 // "Invariant 2"). Mirrored here, not imported — governance.yml is YAML, not a
@@ -52,15 +53,31 @@ function quoteGate(name, gate) {
  * + already-re-derived budget and produces `{ conclusion, gates, findings,
  * conditions }`, the shape `buildVerdict` (verdict.mjs) consumes directly.
  *
+ * `requiredJobs`/`detectionJobs` (issue #358 Q5 Phase 5 review finding 2)
+ * default to the STALE, tier-blind `REQUIRED_JOBS`/`DETECTION_JOBS` snapshot
+ * (governance-checks.mjs, captured at the `'standard'` tier) for backward
+ * compatibility with callers that don't resolve a tier — `gatherTrancheInputs`
+ * below now resolves brain's OWN declared tier and passes the correct,
+ * tier-scoped pair through instead of relying on this default.
+ *
  * @param {object} input
  * @param {Array<{name:string,status:string|null,conclusion:string|null}>|null} input.requiredGates
  *   The full `prStatusRollup` — `null` means uncomputable (fail-closed).
  * @param {string[]} [input.changedFiles]
  * @param {{lines?:number, uncomputable?:boolean, baseSha?:string, headSha?:string}} [input.budget]
  * @param {string} [input.prBody]
+ * @param {string[]} [input.requiredJobs]  Tier-scoped required job names (default: REQUIRED_JOBS, the 'standard'-tier snapshot).
+ * @param {string[]} [input.detectionJobs]  Tier-scoped detection job names (default: DETECTION_JOBS, the 'standard'-tier snapshot).
  * @returns {{ conclusion: 'APPROVE'|'REVISE', gates: {required:string[],detection:string[]}, findings: object[], conditions: string[] }}
  */
-export function evaluateTranche({ requiredGates = null, changedFiles = [], budget = null, prBody = '' } = {}) {
+export function evaluateTranche({
+  requiredGates = null,
+  changedFiles = [],
+  budget = null,
+  prBody = '',
+  requiredJobs = REQUIRED_JOBS,
+  detectionJobs = DETECTION_JOBS,
+} = {}) {
   if (!Array.isArray(requiredGates)) {
     // Uncomputable evidence (`gh` down, or the rollup fetch failed) — never
     // APPROVE on it (protocol §10, REQ-H1-8 scenario "uncomputable evidence
@@ -76,19 +93,19 @@ export function evaluateTranche({ requiredGates = null, changedFiles = [], budge
   const findings = [];
   const rollupByName = new Map(requiredGates.map(g => [g.name, g]));
 
-  for (const name of REQUIRED_JOBS) {
+  for (const name of requiredJobs) {
     const gate = rollupByName.get(name);
     if (!gate || !isGateGreen(gate)) {
       findings.push({
         id: `gate:${name}`,
         severity: 'blocker',
         evidence: quoteGate(name, gate),
-        cites: 'governance-checks.mjs REQUIRED_JOBS',
+        cites: 'governance-tiers.mjs requiredJobs(tier)',
       });
     }
   }
 
-  for (const name of DETECTION_JOBS) {
+  for (const name of detectionJobs) {
     const gate = rollupByName.get(name);
     if (gate && !isGateGreen(gate)) {
       // A detection-level warn is not a blocker — it is surfaced verbatim
@@ -103,7 +120,7 @@ export function evaluateTranche({ requiredGates = null, changedFiles = [], budge
     // evaluator does not guess a number.
     return {
       conclusion: 'REVISE',
-      gates: { required: [...REQUIRED_JOBS], detection: [...DETECTION_JOBS] },
+      gates: { required: [...requiredJobs], detection: [...detectionJobs] },
       findings,
       conditions: ['evidence uncomputable: budget diff (base sha unresolvable outside CI)'],
     };
@@ -139,7 +156,7 @@ export function evaluateTranche({ requiredGates = null, changedFiles = [], budge
 
   const conclusion = findings.some(f => f.severity === 'blocker') ? 'REVISE' : 'APPROVE';
 
-  return { conclusion, gates: { required: [...REQUIRED_JOBS], detection: [...DETECTION_JOBS] }, findings, conditions: [] };
+  return { conclusion, gates: { required: [...requiredJobs], detection: [...detectionJobs] }, findings, conditions: [] };
 }
 
 function defaultDiffNumstat({ cwd = process.cwd() } = {}) {
@@ -152,6 +169,21 @@ function defaultDiffNumstat({ cwd = process.cwd() } = {}) {
  * caller-supplied (cli.mjs resolves them once and shares them with
  * `mode.mjs`'s derivation) — this function's own seams are the READ verb
  * (`fetchRollup`) and the local git budget re-derivation (`diffNumstat`).
+ *
+ * `requiredJobs`/`detectionJobs` (issue #358 Q5 Phase 5 review finding 2):
+ * resolved from THIS repo's own declared `governance.tier`
+ * (`brain.config.json`, via `resolveTier`/`resolveJobSets` —
+ * governance-tiers.mjs/governance-checks.mjs), never the stale
+ * `REQUIRED_JOBS`/`DETECTION_JOBS` snapshot `evaluateTranche` still defaults
+ * to for callers that skip this seam. For brain's own declared `lite` tier
+ * this yields `detectionJobs: ['memory-gate', 'phase-order']` (both
+ * position-tiered by proportionality) instead of the stale
+ * `['phase-order', 'actor-check', 'brain-writes-reviewed']` — `actor-check`/
+ * `brain-writes-reviewed` are `required` at EVERY tier (REQ-TIER-2's
+ * never-tiered core) and must never be classified as detection-only.
+ * `deps.tier` (a direct override) and `deps.readConfig` (a config-loader
+ * override) are both injectable for tests; production defaults to the real
+ * `brain.config.json` via `loadBrainConfig`.
  *
  * @param {{ project, number, provider, headSha, baseSha, changedFiles, prBody, deps }} args
  */
@@ -180,5 +212,9 @@ export async function gatherTrancheInputs({
     budget = { lines: parseDiffNumstat(raw, readIgnoreList()), baseSha, headSha, uncomputable: false };
   }
 
-  return { requiredGates, changedFiles, budget, prBody };
+  const readConfig = deps.readConfig ?? loadBrainConfig;
+  const tier = deps.tier ?? resolveTier(readConfig());
+  const { required: requiredJobs, detection: detectionJobs } = resolveJobSets(tier);
+
+  return { requiredGates, changedFiles, budget, prBody, requiredJobs, detectionJobs, tier };
 }

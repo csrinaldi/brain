@@ -15,6 +15,11 @@ import { fileURLToPath } from 'node:url';
 
 import { loadContext } from './ci-context.mjs';
 import { archivePath, CHANGES_ROOT, LEGACY_GRANDFATHERED } from '../lib/sdd-layout.mjs';
+import { loadBrainConfig } from '../lib/brain-config.mjs';
+import { resolveTier, tierParams } from './governance-tiers.mjs';
+import { mapDetectionToWarning } from '../governance/run-check.mjs';
+
+const GATE_NAME = 'phase-order';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -76,21 +81,58 @@ function evaluateRuleC(impl, touchedDirs) {
 }
 
 // ── Rule A — artifact completeness, gated on Rule C seeing impl ────────────────
+//
+// The required artefact SET is tier-scoped (issue #358 Q5, REQ-L4-2′):
+// `lite` demands `spec.md` only; `standard` (the default) keeps today's full
+// four; `regulated` additionally demands a recorded verification artefact.
+// `tierParams(tier).artefacts` (governance-tiers.mjs) is the single source —
+// this checker never hardcodes a second copy of the set.
 
-function evaluateRuleA(impl, touchedDirs) {
+/** Maps a design §2.C artefact name to its changeDirs boolean flag. */
+const ARTEFACT_FIELD = Object.freeze({
+  proposal: 'hasProposal',
+  spec: 'hasSpec',
+  design: 'hasDesign',
+  tasks: 'hasTasks',
+  verification: 'hasVerification',
+});
+
+// today's shipped Rule A set (standard tier — REQ-TIER-10 no-op-migration
+// default) — used both as evaluateRuleA's default `artefacts` param
+// (preserving every pre-tiering call site/test unchanged) and to detect the
+// legacy literal message below.
+const STANDARD_ARTEFACTS = Object.freeze(['proposal', 'spec', 'design', 'tasks']);
+
+/**
+ * Builds the "implementation without ..." message. Preserves the EXACT
+ * pre-tiering literal text ("spec.md/design.md") when the artefact set is the
+ * historical standard-tier four — regression-guarded by this file's own
+ * tests, which assert that literal substring regardless of which of the four
+ * flags actually failed. For any other artefact set (lite/regulated, or a
+ * future custom set), names the artefacts ACTUALLY missing on this dir.
+ */
+function messageForArtefacts(artefacts, dir) {
+  if (artefacts.length === STANDARD_ARTEFACTS.length && artefacts.every((a, i) => a === STANDARD_ARTEFACTS[i])) {
+    return 'spec.md/design.md';
+  }
+  const missing = artefacts.filter(name => !dir[ARTEFACT_FIELD[name]]);
+  return missing.map(name => `${name}.md`).join('/');
+}
+
+function evaluateRuleA(impl, touchedDirs, artefacts = STANDARD_ARTEFACTS) {
   const findings = [];
   // Planning-only PRs (no impl code) are never subjected to Rule A — they may
   // legitimately be mid-phase (design §10-A).
   if (impl.length === 0) return findings;
 
   for (const dir of touchedDirs) {
-    const complete = dir.hasProposal && dir.hasSpec && dir.hasDesign && dir.hasTasks;
+    const complete = artefacts.every(name => dir[ARTEFACT_FIELD[name]]);
     if (!complete) {
       findings.push({
         rule: 'A',
         level: 'fail',
         change: dir.name,
-        message: `openspec/changes/${dir.name}: implementation without spec.md/design.md`,
+        message: `openspec/changes/${dir.name}: implementation without ${messageForArtefacts(artefacts, dir)}`,
       });
     }
   }
@@ -157,9 +199,13 @@ function evaluateRuleB(touchedDirs) {
  *   about. `hasSpec` MUST be true if EITHER `spec.md` OR `specs/*\/spec.md` exists
  *   (Gap G1 — the wrapper is responsible for probing both conventions; this pure
  *   function only consumes the resulting boolean).
+ * @param {string[]} [input.artefacts]  Tier-scoped required artefact names
+ *   (issue #358 Q5, `tierParams(tier).artefacts`) — defaults to the historical
+ *   standard-tier four (`proposal`/`spec`/`design`/`tasks`), preserving every
+ *   pre-tiering call site unchanged.
  * @returns {{ level: 'pass'|'warn'|'fail', findings: Array<{rule: string, level: string, change?: string, message: string}> }}
  */
-export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [] } = {}) {
+export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [], artefacts = STANDARD_ARTEFACTS } = {}) {
   const impl = changedFiles.filter(f => !f.startsWith(CHANGE_DIR_PREFIX) && !isAllowlisted(f));
 
   const touchedDirs = changeDirs.filter(
@@ -170,7 +216,7 @@ export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [] } = {}) 
 
   const findings = [
     ...evaluateRuleC(impl, touchedDirs),
-    ...evaluateRuleA(impl, touchedDirs),
+    ...evaluateRuleA(impl, touchedDirs, artefacts),
     ...evaluateRuleB(touchedDirs),
   ];
 
@@ -326,7 +372,9 @@ function touchedDirNames(changedFiles) {
  * state. `hasSpec` folds BOTH conventions (Gap G1): a root `spec.md` OR any
  * `specs/*\/spec.md` nested file. `statusBefore`/`statusAfter` are sourced from
  * `tasks.md`'s frontmatter (design §2 — the file this checker also reads
- * `checkedTasks` from), before vs. after this diff.
+ * `checkedTasks` from), before vs. after this diff. `hasVerification` checks
+ * for `verify-report.md` (the sdd-verify artefact convention) — consumed only
+ * by `regulated`'s tier-scoped Rule A artefact set (issue #358 Q5, REQ-L4-2′).
  */
 function buildChangeDir(name, { exists, listDir, readFile, showAtRef, baseSha }) {
   const relDir = `${CHANGE_DIR_PREFIX}${name}`;
@@ -337,13 +385,14 @@ function buildChangeDir(name, { exists, listDir, readFile, showAtRef, baseSha })
   const hasTasks = exists(tasksPath);
   const hasSpecRoot = exists(`${relDir}/spec.md`);
   const hasSpec = hasSpecRoot || hasNestedSpec(relDir, { exists, listDir });
+  const hasVerification = exists(`${relDir}/verify-report.md`);
 
   const tasksTextAfter = readFile(tasksPath);
   const checkedTasks = countCheckedTasks(tasksTextAfter);
   const statusAfter = parseStatus(tasksTextAfter);
   const statusBefore = parseStatus(showAtRef(baseSha, tasksPath));
 
-  return { name, hasProposal, hasSpec, hasDesign, hasTasks, checkedTasks, statusBefore, statusAfter };
+  return { name, hasProposal, hasSpec, hasDesign, hasTasks, hasVerification, checkedTasks, statusBefore, statusAfter };
 }
 
 /**
@@ -368,14 +417,71 @@ export function gatherPhaseOrderInputs({ baseSha, headSha, cwd = process.cwd(), 
   return { changedFiles, changeDirs };
 }
 
+/** Default `readConfig` dep: reads brain.config.json via the shared loader.
+ * Never throws — an unreadable/missing config degrades to `{}`, which
+ * resolveTier() treats as the 'standard' default (REQ-TIER-10). */
+function defaultReadConfig() {
+  try {
+    return loadBrainConfig();
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Builds the uncomputable-diff verdict, tier-scoped per REQ-TIER-3 (issue
+ * #358 Q5, finding A): `phase-order`'s policy is `required` at
+ * `standard`/`regulated` and `detection` at `lite` (governance-tiers.mjs
+ * `GATE_MATRIX['phase-order']`). At a `required` tier the uncomputable diff
+ * still FAILS CLOSED (`level: 'fail'`, exit 1) — ADR-0015's recorded
+ * precondition for this gate's standard/regulated promotion (Phase 5): a PR
+ * whose diff this checker cannot compute must be fixed before merge, never
+ * silently waved through. At `lite` (`detection`), REQ-TIER-3 requires this
+ * job to still run and still surface the problem, but it MUST exit 0 with a
+ * `::warning::`-annotated reason naming the tier — never a hard block at a
+ * tier whose policy for this gate is not `required` ("every job whose lite
+ * policy is detection exits 0 with a warning annotation stating the tier as
+ * the reason"). `mapDetectionToWarning` (run-check.mjs, design §8) is the one
+ * shared helper every tier-aware check routes an uncomputable-diff result
+ * through, rather than duplicating the tier branch here.
+ *
+ * @param {string} message
+ * @param {'lite'|'standard'|'regulated'} tier
+ * @returns {{ level: 'warn'|'fail', findings: Array }}
+ */
+function uncomputableVerdict(message, tier) {
+  const mapped = mapDetectionToWarning({ pass: false, reason: message }, tier, GATE_NAME);
+  const level = mapped.pass ? 'warn' : 'fail';
+  return {
+    level,
+    findings: [
+      {
+        rule: 'wrapper',
+        level,
+        message: mapped.reason,
+      },
+    ],
+  };
+}
+
 /**
  * Runs the full L4 phase-order check: gathers inputs (git I/O), evaluates the
  * pure rules, and applies the baseline/grandfather exemption. Never throws —
  * an uncomputable diff (missing BASE_SHA/HEAD_SHA, or a failing git command)
- * degrades to `warn` rather than `fail`, keeping REQ-L4-5's zero-false-positive
- * goal intact while this job is detection-only (DETECTION_JOBS).
+ * is tier-scoped via `uncomputableVerdict()`: it fails closed at
+ * `standard`/`regulated` (`resolveGatePolicy('phase-order', tier) ===
+ * 'required'`) and degrades to a `::warning::`-annotated `warn` (exit 0) at
+ * `lite` (`'detection'`) — REQ-TIER-3, issue #358 Q5 finding A.
  *
- * @param {{ cwd?: string, baseSha?: string, headSha?: string, ctx?: object, deps?: object }} [deps]
+ * Rule A's artefact set is tier-scoped (issue #358 Q5, REQ-L4-2′):
+ * `deps.tier` overrides tier resolution directly (tests); otherwise the tier
+ * is resolved from `deps.readConfig()` (defaults to the real
+ * brain.config.json reader) via `resolveTier()` — which itself defaults to
+ * `'standard'` when `governance.tier` is absent, so every pre-tiering caller
+ * of this function keeps evaluating the historical four-artefact Rule A
+ * unchanged.
+ *
+ * @param {{ cwd?: string, baseSha?: string, headSha?: string, ctx?: object, tier?: string, readConfig?: () => object, deps?: object }} [deps]
  * @returns {{ level: 'pass'|'warn'|'fail', findings: Array }}
  */
 export function runPhaseOrderCheck(deps = {}) {
@@ -384,36 +490,28 @@ export function runPhaseOrderCheck(deps = {}) {
   const baseSha = deps.baseSha ?? ctx.baseSha;
   const headSha = deps.headSha ?? ctx.headSha;
 
+  const readConfig = deps.readConfig ?? defaultReadConfig;
+  const tier = deps.tier ?? resolveTier(readConfig());
+  const artefacts = tierParams(tier).artefacts;
+
   if (!baseSha || !headSha) {
-    return {
-      level: 'warn',
-      findings: [
-        {
-          rule: 'wrapper',
-          level: 'warn',
-          message: 'BASE_SHA/HEAD_SHA not set — cannot compute diff; skipping phase-order check.',
-        },
-      ],
-    };
+    return uncomputableVerdict(
+      'diff uncomputable (cannot verify artefact presence): BASE_SHA/HEAD_SHA not set.',
+      tier
+    );
   }
 
   let inputs;
   try {
     inputs = gatherPhaseOrderInputs({ baseSha, headSha, cwd, deps });
   } catch (err) {
-    return {
-      level: 'warn',
-      findings: [
-        {
-          rule: 'wrapper',
-          level: 'warn',
-          message: `phase-order-check: could not gather inputs — ${err.message}`,
-        },
-      ],
-    };
+    return uncomputableVerdict(
+      `diff uncomputable (cannot verify artefact presence): ${err.message}`,
+      tier
+    );
   }
 
-  return applyBaselineExemption(evaluatePhaseOrder(inputs));
+  return applyBaselineExemption(evaluatePhaseOrder({ ...inputs, artefacts }));
 }
 
 function formatFinding(f) {

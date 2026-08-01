@@ -25,13 +25,17 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 // REQ-266-3).
 // prStatusRollup (ADR-0021 Decision 2): READ-only status-check rollup — no
 // write path, no APPROVE path, no label mutation.
+// prCommits (issue #358 Q5 Phase 4): READ-only PR/MR commit list, added to
+// resolve REQ-L5-1's tiered evidence (lite's distinct-act head-commit
+// timestamp; regulated's approver-authored-no-commit check) — see
+// providers/github.mjs#prCommits / providers/gitlab.mjs#prCommits.
 export const VERBS = [
   'authCheck', 'authLogin', 'whoami',
   'issueView', 'issueList', 'mrList', 'prView', 'mrCreate', 'labelEvents', 'prReviews',
   'commitStatus', 'repoCloneUrl', 'patSetupUrl', 'projectResolve',
   'branchProtect', 'capabilities',
   'prReviewComment', 'issueComment', 'labelAdd', 'labelRemove',
-  'prStatusRollup', 'labelList',
+  'prStatusRollup', 'labelList', 'prCommits',
 ];
 
 /**

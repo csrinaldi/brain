@@ -280,6 +280,22 @@ export async function resolveVcs(config) {
  * @param {{orThrow: Function}} ctx.resolutionGit
  * @param {string} ctx.windowFrom
  * @param {string} ctx.windowTo
+ * @param {number} [ctx.diffBudget=400]  Tier-resolved diff-size budget (issue
+ *   #358 Q5, REQ-TIER-9) — replaces the old module-level `DEFAULT_BUDGET`
+ *   this function used to fall back to silently. This layer stays pure and
+ *   tier-agnostic: it takes the budget as data. Callers (brain-audit.mjs,
+ *   brain-metrics.mjs) MUST resolve `tierParams(resolveTier(config)).diffBudget`
+ *   and pass it through explicitly. The `400` default here exists only so a
+ *   caller that has not yet been migrated degrades to the pre-tier behaviour
+ *   instead of silently changing it.
+ * @param {boolean} [ctx.honorSizeException=true]  Whether the resolved tier
+ *   honors `size:exception` (REQ-TIER-6) —
+ *   `tierParams(resolveTier(config)).honorSizeException`. `regulated` MUST
+ *   pass `false` here so the audit path refuses the waiver exactly like the
+ *   CI/hook path (`run-check.mjs`'s `runDiffSizeCheck`) already does.
+ * @param {string} [ctx.tier]  Declared tier name, used ONLY to name the tier
+ *   in the refusal message when a size:exception label is present but not
+ *   honored — never consulted for policy (that is `honorSizeException`'s job).
  * @returns {{
  *   kind: 'pass'|'reverter-skip'|'fail',
  *   results: object,
@@ -296,26 +312,38 @@ export function evaluateMerge(sha, ctx) {
   const {
     numstat, changedFiles, issueLinkBody, prLabels, ignoreList,
     allObservations, resolutionGit, windowFrom, windowTo,
+    diffBudget = 400, honorSizeException = true, tier,
   } = ctx;
 
-  const sizeSkipped = shouldSkipSize(prLabels);
+  const exceptionLabelPresent = shouldSkipSize(prLabels);
+  // REQ-TIER-6: the waiver is resolved through the tier, never honored
+  // unconditionally. `regulated` (honorSizeException: false) must NOT force-pass
+  // diffSize even when the label is present.
+  const sizeSkipped = exceptionLabelPresent && honorSizeException;
 
   // `realResults` is the UNCONDITIONAL check — always run, regardless of the
   // size:exception label. brain-audit's own `results` (below) is the
   // label-adjusted view it emits from; brain-metrics' raw/enforced split
   // (design D5) needs BOTH views simultaneously.
   const realResults = {
-    diffSize: diffSize(numstat, ignoreList),
+    diffSize: diffSize(numstat, ignoreList, diffBudget),
     issueLink: issueLink(issueLinkBody),
     adrPresence: adrPresence(changedFiles),
     memoryPresence: memoryPresence(allObservations),
   };
 
+  const tierRefusedDiffSize = exceptionLabelPresent && !honorSizeException && !realResults.diffSize.pass;
+
   const results = {
     ...realResults,
     diffSize: sizeSkipped
       ? { pass: true, note: 'size:exception label present — diffSize skipped' }
-      : realResults.diffSize,
+      : tierRefusedDiffSize
+        ? {
+            ...realResults.diffSize,
+            reason: `${realResults.diffSize.reason} — size:exception is not honored${tier ? ` at the "${tier}" tier` : ' at this tier'}; the change must be sliced.`,
+          }
+        : realResults.diffSize,
   };
 
   const failures = Object.entries(results).filter(([, r]) => !r.pass);

@@ -379,6 +379,45 @@ export async function labelEvents({ project, number } = {}) {
 }
 
 /**
+ * prCommits — the provider-agnostic `prCommits` CONTRACT verb (issue #358
+ * Q5 Phase 4, REQ-L5-1' regulated evidence: "the approver authored no
+ * commit on the branch"). Wraps GitHub's PR-commits API
+ * (`pulls/{n}/commits`), normalizing to `{ sha, login, at }`. The API
+ * itself returns commits oldest-first (unlike `labelEvents`/`prReviews`,
+ * which need an explicit sort) — the LAST entry is the branch's head
+ * commit, which `actor-check.mjs`'s `lite` distinct-act evidence compares
+ * the approval timestamp against (REQ-L5-1' lite evidence).
+ *
+ * `login` is GitHub's account-linked commit author
+ * (`commit-object.author.login`) — nullable when the commit's author email
+ * is not linked to any GitHub account. This is the identity
+ * `regulated`'s no-commit-on-branch evidence compares the approving actor
+ * against; a commit with `login: null` can never match an actor login (a
+ * safe direction — it simply cannot prove that specific commit was
+ * authored by the approver).
+ *
+ * Never throws: a fetch failure is caught and normalized to `null`
+ * (uncomputable) — never a fabricated `[]` (same discipline as
+ * `labelEvents`/`prReviews`).
+ *
+ * @param {{ project: string, number: number }} params
+ * @returns {Promise<Array<{ sha: string, login: string|null, at: string|undefined }>|null>}
+ */
+export async function prCommits({ project, number } = {}) {
+  let commits;
+  try {
+    commits = runJson('gh', ['api', '--paginate', `repos/${project}/pulls/${number}/commits`]);
+  } catch {
+    return null;
+  }
+  return commits.map(c => ({
+    sha: c.sha,
+    login: c.author?.login ?? null,
+    at: c.commit?.author?.date,
+  }));
+}
+
+/**
  * Posts a COMMENT-state pull request review (issue #266, REQ-266-2). `event`
  * is HARDCODED to `'COMMENT'` — no parameter, flag, or branch selects a
  * different review event (lock 2, REQ-266-3). Never throws.

@@ -52,13 +52,19 @@ node "$repo_root/brain/scripts/memory/cli.mjs" feature-checkpoint 2>/dev/null ||
 node "$repo_root/brain/scripts/check-refs.mjs" || exit 1
 
 # ── diff-size WARNING (informational only — never blocks) ────────────────────
+# Budget is tiered (issue #358 Q5, REQ-TIER-9) — resolved by
+# governance-tiers.mjs from the repo's declared governance.tier, never a
+# second hardcoded literal here. If the budget can't be resolved (config
+# unreadable, unknown tier), the warning is skipped rather than falling back
+# to a stale literal.
 base=$(git merge-base HEAD origin/main 2>/dev/null) || base=""
 if [ -n "$base" ]; then
+  budget=$(node "$repo_root/brain/scripts/vcs/governance-tiers.mjs" diff-budget 2>/dev/null) || budget=""
   diff_lines=$(git diff --numstat "$base" HEAD \
     | node "$repo_root/brain/scripts/vcs/diff-size-count.mjs" 2>/dev/null) || diff_lines=""
-  if [ -n "$diff_lines" ] && [ "$diff_lines" -gt 400 ] 2>/dev/null; then
+  if [ -n "$diff_lines" ] && [ -n "$budget" ] && [ "$diff_lines" -gt "$budget" ] 2>/dev/null; then
     echo ""
-    echo "⚠ pre-push: ~${diff_lines} changed lines (budget: 400)."
+    echo "⚠ pre-push: ~${diff_lines} changed lines (budget: ${budget})."
     echo "  Consider splitting before opening a review (this push continues)."
     echo ""
   fi

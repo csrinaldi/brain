@@ -372,11 +372,23 @@ test('lead-time (C1): an injected vcs.labelEvents resolves the ISSUE\'s status:a
   );
 });
 
-test('detection rollup (C1): an injected vcs.prStatusRollup populates DETECTION_JOBS pass/fail counts', async (t) => {
+// issue #358 Q5 Phase 5 review finding 2: this fixture used to assert BOTH
+// `phase-order` AND `actor-check` render as "detection, never blocking"
+// columns — that was only ever true because DETECTION_JOB_NAMES was a
+// hardcoded, tier-blind literal. `actor-check` is `required` at EVERY tier
+// (REQ-TIER-2's never-tiered core, GATE_MATRIX) — it should never have been
+// classified as a detection-only signal, at any tier. The fixture now declares
+// `governance.tier: 'lite'` (brain's own real declared tier) explicitly, so
+// the resolved detectionJobs list is `['phase-order']` only — `actor-check`
+// must NOT appear in the rendered `detection` map at all.
+test('detection rollup (C1): an injected vcs.prStatusRollup populates tier-scoped detection pass/fail counts — actor-check is excluded (required at every tier)', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-vcs-detection-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const git = makeRepo(dir);
-  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  commit(git, dir, {
+    'README.md': 'init',
+    'brain.config.json': JSON.stringify({ governance: { tier: 'lite' } }),
+  }, 'chore: initial (#0)');
   const base = headShaOf(git);
   mergeAddingPayload(
     git, dir, { 'src/a.mjs': 'export const a = 1;\n' }, 'A',
@@ -407,7 +419,10 @@ test('detection rollup (C1): an injected vcs.prStatusRollup populates DETECTION_
   assert.equal(parsed.length, 1);
   assert.equal(queriedNumber, 7, 'detection rollup must query the PR number (#7)');
   assert.deepEqual(parsed[0].detection['phase-order'], { pass: 1, fail: 0 });
-  assert.deepEqual(parsed[0].detection['actor-check'], { pass: 0, fail: 1 });
+  assert.equal(
+    parsed[0].detection['actor-check'], undefined,
+    'actor-check is required at every tier (REQ-TIER-2) — it must never render as a detection-only column',
+  );
 });
 
 test('by-author (C1): an injected vcs.labelEvents resolves the size:exception label-adding actor', async (t) => {

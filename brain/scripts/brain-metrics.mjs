@@ -40,6 +40,10 @@ import {
   listMerges, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge, resolvedSkipLine,
   resolveBaseline, makeGitIsAncestor,
 } from './lib/merge-walk.mjs';
+// Tier resolution (issue #358 Q5, REQ-TIER-9): metrics re-derives the SAME
+// verdict brain-audit computes (design D1) — it MUST resolve the same
+// tier-scoped diff budget and size:exception policy, never its own default.
+import { resolveTier, tierParams } from './vcs/governance-tiers.mjs';
 import { isAfterBaseline } from './lib/audit-helpers.mjs';
 import { selectIssueLinkBody, parsePrNumber } from './lib/audit-helpers.mjs';
 import { readRecordObservations } from './memory/lib/store.mjs';
@@ -49,7 +53,7 @@ import { memoryPresence } from './governance/checks/memory-presence.mjs';
 import { CLOSING_RE, CHAIN_RE } from './governance/checks/issue-ref-patterns.mjs';
 import { resolveApprovedLabel } from './governance/approved-label.mjs';
 import {
-  emptyRows, foldMerge, finalizeRows, PER_PERIOD_GATES, DETECTION_JOB_NAMES,
+  emptyRows, foldMerge, finalizeRows, PER_PERIOD_GATES, detectionJobNames,
 } from './lib/metrics-aggregate.mjs';
 import { leadTimeDays, selectApprovalEvent } from './lib/lead-time.mjs';
 import { computeMemoryCoverage } from './lib/memory-coverage.mjs';
@@ -220,11 +224,18 @@ export function renderMarkdown({
   if (rows.length === 0) {
     lines.push('No data for this period.');
   } else {
+    // Detection column names come from the ROWS themselves (issue #358 Q5
+    // Phase 5 review finding 2) — `foldMerge` already built each row's
+    // `detection` map keyed by the tier-scoped `detectionJobNames(tier)` list
+    // (`runMetrics` resolves it once from THIS repo's own declared tier), so
+    // reading it back here is a single source of truth: it can never drift
+    // from the stale, tier-blind DETECTION_JOB_NAMES literal.
+    const detectionJobs = Object.keys(rows[0].detection);
     const header = [
       'Period', 'Changes Merged', 'Median Lead Time',
       'diff-size (raw/enf)', 'issue-link (raw/enf)', 'decision-gate (raw/enf)',
       'size:exception', 'skip:memory-gate',
-      ...DETECTION_JOB_NAMES,
+      ...detectionJobs,
       'Uncomputable',
     ];
     lines.push(`| ${header.join(' | ')} |`);
@@ -237,7 +248,7 @@ export function renderMarkdown({
         ...PER_PERIOD_GATES.map((g) => fmtGate(row.gates[g])),
         String(row.bypass.sizeException),
         String(row.bypass.skipMemoryGate),
-        ...DETECTION_JOB_NAMES.map((j) => `${row.detection[j].pass}/${row.detection[j].fail}`),
+        ...detectionJobs.map((j) => `${row.detection[j].pass}/${row.detection[j].fail}`),
         String(row.uncomputable),
       ];
       lines.push(`| ${cells.join(' | ')} |`);
@@ -334,7 +345,7 @@ export function renderJson({ rows, memGate, memCoverage }) {
 async function evaluateOneMerge(sha, subject, ctx) {
   const {
     cwd, resolutionGit, windowFrom, windowTo, allObservations, ignoreList, vcs, config, approvedLabel, period,
-    leadTimeCache, bypassAuthorCache, baseline, gitIsAncestor,
+    leadTimeCache, bypassAuthorCache, baseline, gitIsAncestor, detectionJobs,
   } = ctx;
 
   // Same net-parity resolved-skip brain-audit applies — a merge brain-audit
@@ -385,9 +396,12 @@ async function evaluateOneMerge(sha, subject, ctx) {
     const { prLabels, prBody } = await fetchPrMeta(subject, vcs, config);
     const issueLinkBody = selectIssueLinkBody(prBody, body);
 
+    const tier = resolveTier(config);
+    const { diffBudget, honorSizeException } = tierParams(tier);
     const evalRec = evaluateMerge(sha, {
       numstat, changedFiles, issueLinkBody, prLabels, ignoreList, allObservations,
       resolutionGit, windowFrom, windowTo,
+      diffBudget, honorSizeException, tier,
     });
 
     // Lead time: the ISSUE this merge references (not the PR) — best-effort,
@@ -406,13 +420,17 @@ async function evaluateOneMerge(sha, subject, ctx) {
       leadTime = leadTimeDays(events, approvedLabel, mergedAt);
     }
 
-    // DETECTION_JOBS current-state (D6 — never historical): best-effort.
+    // Tier-scoped detection-job current-state (D6 — never historical; issue
+    // #358 Q5 Phase 5 review finding 2): `detectionJobs` is `ctx.detectionJobs`,
+    // resolved ONCE at the top of `runMetrics` from THIS repo's own declared
+    // tier (`detectionJobNames(tier)`) — never the stale, tier-blind
+    // DETECTION_JOB_NAMES literal. Best-effort.
     let detection = null;
     const prNumForRollup = parsePrNumber(subject);
     if (prNumForRollup !== null && vcs && typeof vcs.prStatusRollup === 'function') {
       try {
         const rollup = await vcs.prStatusRollup({ project: config?.project?.slug, number: prNumForRollup });
-        detection = Object.fromEntries(DETECTION_JOB_NAMES.map((j) => [j, detectionConclusion(rollup, j)]));
+        detection = Object.fromEntries(detectionJobs.map((j) => [j, detectionConclusion(rollup, j)]));
       } catch {
         detection = null;
       }
@@ -502,6 +520,13 @@ export async function runMetrics({ argv, cwd = process.cwd(), vcs: injectedVcs }
   const config = loadConfig(cwd);
   const ignoreList = Array.isArray(config?.governance?.ignoreList) ? config.governance.ignoreList : [];
   const approvedLabel = resolveApprovedLabel(config, config?.vcs?.provider);
+  // Tier-scoped detection-job names (issue #358 Q5 Phase 5 review finding 2):
+  // resolved ONCE from THIS repo's own declared `governance.tier` — never the
+  // stale, tier-blind DETECTION_JOB_NAMES literal (metrics-aggregate.mjs). At
+  // brain's own declared "lite" tier this correctly excludes actor-check/
+  // brain-writes-reviewed (required at every tier, REQ-TIER-2's never-tiered
+  // core) from the "current-state, never blocking" detection column.
+  const detectionJobs = detectionJobNames(resolveTier(config));
   const resolutionGit = makeGit(cwd);
   const vcs = injectedVcs !== undefined ? injectedVcs : await resolveVcs(config);
   const allObservations = readRecordObservations({ recordsDir: join(cwd, '.memory', 'records') });
@@ -547,7 +572,7 @@ export async function runMetrics({ argv, cwd = process.cwd(), vcs: injectedVcs }
     try {
       m = await evaluateOneMerge(sha, subject, {
         cwd, resolutionGit, windowFrom, windowTo, allObservations, ignoreList, vcs, config, approvedLabel, period,
-        leadTimeCache, bypassAuthorCache, baseline, gitIsAncestor,
+        leadTimeCache, bypassAuthorCache, baseline, gitIsAncestor, detectionJobs,
       });
     } catch (err) {
       // Could not even date the merge (a `git log -1 --format=%cI` failure on
@@ -556,7 +581,7 @@ export async function runMetrics({ argv, cwd = process.cwd(), vcs: injectedVcs }
       // silently dropping the merge from every bucket.
       return { output: `brain-metrics: ${err.message}`, exitCode: 1 };
     }
-    rows = foldMerge(rows, m);
+    rows = foldMerge(rows, m, detectionJobs);
   }
   const finalRows = finalizeRows(rows);
 

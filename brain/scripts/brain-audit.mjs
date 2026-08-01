@@ -55,6 +55,12 @@ import {
   resolvedSkipLine, listMerges, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge,
   resolveBaseline, makeGitIsAncestor,
 } from './lib/merge-walk.mjs';
+// Tier resolution (issue #358 Q5, REQ-TIER-9): the audit path is the rung-2/
+// rung-3 enforcement surface (release.yml's pre-tag gate, governance-postmerge.yml's
+// auto-revert) — it MUST resolve the SAME tier-scoped diff budget and
+// size:exception policy as the CI/hook path (run-check.mjs), never its own
+// silent 400-line default.
+import { resolveTier, tierParams } from './vcs/governance-tiers.mjs';
 
 /**
  * REQ-D2-6(b) / design §15.5 — the fail-closed exit contract, with `failCount`
@@ -160,6 +166,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const ignoreList = Array.isArray(config?.governance?.ignoreList)
       ? config.governance.ignoreList
       : [];
+    // REQ-TIER-9: one source for the diff-size budget and the size:exception
+    // waiver policy. `resolveTier` defaults to `standard` (REQ-TIER-10) when
+    // `governance.tier` is absent, so an un-migrated config keeps auditing at
+    // the exact pre-tier 400-line/honored-waiver behaviour.
+    const tier = resolveTier(config);
+    const { diffBudget, honorSizeException } = tierParams(tier);
 
     // ── Audit baseline (optional) ────────────────────────────────────────────
     // When governance.auditBaseline is set, only merges that are "after" that
@@ -259,6 +271,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const rec = evaluateMerge(sha, {
         numstat, changedFiles, issueLinkBody, prLabels, ignoreList, allObservations,
         resolutionGit, windowFrom, windowTo,
+        diffBudget, honorSizeException, tier,
       });
 
       if (rec.kind === 'pass') {

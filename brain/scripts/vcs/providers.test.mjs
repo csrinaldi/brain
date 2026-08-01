@@ -1165,3 +1165,88 @@ test('gitlab.prReviews returns null (never []) when the underlying fetch throws'
   });
   assert.equal(result, null);
 });
+
+// ── prCommits (issue #358 Q5 Phase 4 — REQ-L5-1' evidence tiering) ──────────
+//
+// Resolves the "distinct act" (lite, head-commit timestamp) and "no commit
+// on the branch" (regulated, approver-authored-commit check) evidence
+// actor-check.mjs's tiered evaluator needs. GitHub normalizes the
+// account-linked `author.login`; GitLab has no equivalent without a second
+// per-commit user lookup this verb does not make, so `login` normalizes to
+// `null` on every GitLab entry — a documented residual, not a bug.
+
+test('github.prCommits normalizes gh commits to { sha, login, at }', async () => {
+  setSpawn(fakeSpawn([
+    { sha: 'aaa111', author: { login: 'alice' }, commit: { author: { date: '2024-01-01T00:00:00Z' } } },
+    { sha: 'bbb222', author: { login: 'bob' }, commit: { author: { date: '2024-01-01T00:10:00Z' } } },
+  ]));
+  const result = await github.prCommits({ project: 'o/r', number: 144 });
+  assert.deepEqual(result, [
+    { sha: 'aaa111', login: 'alice', at: '2024-01-01T00:00:00Z' },
+    { sha: 'bbb222', login: 'bob', at: '2024-01-01T00:10:00Z' },
+  ]);
+});
+
+test('github.prCommits normalizes a commit with no linked GitHub account to login: null', async () => {
+  setSpawn(fakeSpawn([
+    { sha: 'ccc333', author: null, commit: { author: { date: '2024-01-01T00:00:00Z' } } },
+  ]));
+  const result = await github.prCommits({ project: 'o/r', number: 144 });
+  assert.deepEqual(result, [{ sha: 'ccc333', login: null, at: '2024-01-01T00:00:00Z' }]);
+});
+
+test('github.prCommits returns null (never []) when the underlying gh api call throws', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 500: Internal Server Error' }));
+  const result = await github.prCommits({ project: 'o/r', number: 144 });
+  assert.equal(result, null);
+});
+
+test('github.prCommits source includes --paginate on the gh api commits call', () => {
+  const srcPath = fileURLToPath(new URL('./providers/github.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  const fnStart = src.indexOf('export async function prCommits');
+  assert.notEqual(fnStart, -1, 'prCommits not found in github.mjs');
+  const fnEnd = src.indexOf('\nexport async function ', fnStart + 1);
+  const fnBody = src.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
+  assert.match(fnBody, /pulls\/\$\{number\}\/commits/, 'sanity: PR commits endpoint present');
+  assert.match(fnBody, /--paginate/, 'commits fetch must use --paginate — a truncated page 1 could hide a later commit');
+});
+
+test('gitlab.prCommits normalizes MR commits to { sha, login: null, at }, over the shared gitlabApiFetch transport', async () => {
+  let seenUrl;
+  const result = await gitlab.prCommits({
+    project: 'g/r',
+    number: 7,
+    apiBase: 'https://gitlab.example.com/api/v4',
+    token: 'tok-abc',
+    fetchImpl: async (url) => {
+      seenUrl = url;
+      return {
+        ok: true,
+        json: async () => [
+          { id: 'sha1', author_name: 'Alice', author_email: 'alice@example.com', committed_date: '2024-01-01T00:00:00Z' },
+        ],
+      };
+    },
+  });
+  assert.equal(seenUrl, 'https://gitlab.example.com/api/v4/projects/g%2Fr/merge_requests/7/commits');
+  assert.deepEqual(result, [{ sha: 'sha1', login: null, at: '2024-01-01T00:00:00Z' }]);
+});
+
+test('gitlab.prCommits returns null (never []) when the underlying fetch throws', async () => {
+  const result = await gitlab.prCommits({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) }),
+  });
+  assert.equal(result, null);
+});
+
+test('gitlab.prCommits returns null when the response body is not an array (malformed, not a fabricated [])', async () => {
+  const result = await gitlab.prCommits({
+    project: 'g/r',
+    number: 7,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ message: 'not found' }) }),
+  });
+  assert.equal(result, null);
+});

@@ -72,6 +72,7 @@ import { resultToExit } from './postmerge/exit-codes.mjs';
 import { loadContext, gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { getVcs } from '../vcs/cli.mjs';
+import { resolveTier, tierParams, resolveGatePolicy } from '../vcs/governance-tiers.mjs';
 
 /**
  * Default `readRecords` dep for the memory-gate (issue #222 cutover fix):
@@ -354,19 +355,34 @@ async function runIssueLinkCheck(ctx, deps) {
 }
 
 /**
- * diff-size case (REQUIRED): reads `size:exception` from FRESH `ctx.labels`
- * (never CI_MERGE_REQUEST_LABELS — design.md Decision 2) and skips the
- * budget check when present; otherwise computes `git diff --numstat` (via an
- * injectable `diffNumstat` dep) and delegates to the pure diffSize().
+ * diff-size case (REQUIRED, never-tiered by position — REQ-TIER-2): reads
+ * `size:exception` from FRESH `ctx.labels` (never CI_MERGE_REQUEST_LABELS —
+ * design.md Decision 2) and, per REQ-TIER-6, honors it ONLY when the
+ * resolved tier's `honorSizeException` allows it (`lite`/`standard` — never
+ * `regulated`, which refuses the waiver and states so in the verdict rather
+ * than failing silently as if the label were absent). Otherwise computes
+ * `git diff --numstat` (via an injectable `diffNumstat` dep) and delegates to
+ * the pure diffSize() with the tier-resolved budget (issue #358 Q5,
+ * `tierParams(tier).diffBudget` — REQ-TIER-9, replacing the old hardcoded
+ * 400-line default at every call site).
  *
  * @param {{ labels?: string[]|null, baseSha?: string|null, headSha?: string|null }} ctx
  * @param {{ diffNumstat?: Function, readConfig?: () => object }} deps
  * @returns {Promise<{ pass: boolean, reason?: string }>}
  */
 async function runDiffSizeCheck(ctx, deps) {
+  const readConfig = deps.readConfig ?? defaultReadConfig;
+  const config = readConfig();
+  const tier = resolveTier(config);
+  const params = tierParams(tier);
+
   const labels = ctx.labels ?? [];
-  if (labels.includes('size:exception')) {
-    return { pass: true, reason: 'size:exception label present — skipping diff-size gate.' };
+  const exceptionLabelPresent = labels.includes('size:exception');
+  if (exceptionLabelPresent && params.honorSizeException) {
+    return {
+      pass: true,
+      reason: `size:exception label present — skipping diff-size gate (honored at the "${tier}" tier).`,
+    };
   }
 
   const diffNumstat = deps.diffNumstat ?? (() => defaultDiffNumstat(ctx));
@@ -381,10 +397,63 @@ async function runDiffSizeCheck(ctx, deps) {
     };
   }
 
-  const readConfig = deps.readConfig ?? defaultReadConfig;
-  const config = readConfig();
   const ignoreList = Array.isArray(config?.governance?.ignoreList) ? config.governance.ignoreList : [];
-  return diffSize(numstat, ignoreList);
+  const result = diffSize(numstat, ignoreList, params.diffBudget);
+
+  if (!result.pass && exceptionLabelPresent && !params.honorSizeException) {
+    // REQ-TIER-6: a tier-refused waiver must be reported, never treated as
+    // absent — the label WAS present; the tier is what refused it.
+    return {
+      ...result,
+      reason: `${result.reason} — size:exception is not honored at the "${tier}" tier; the change must be sliced.`,
+    };
+  }
+
+  return result;
+}
+
+/**
+ * Maps a check result to its tier-appropriate exit shape (issue #358 Q5,
+ * design §8, REQ-TIER-3): when a gate's policy at the resolved tier is
+ * `detection` (position-tiered, e.g. `memory-gate` at `lite`), a genuine
+ * VIOLATION (`pass:false`, NOT `uncomputable`) is downgraded to `pass:true`
+ * with a `::warning::`-annotated reason naming the tier — never a bare,
+ * unexplained pass (REQ-TIER-3: "never absent, never silent"). An
+ * `uncomputable` result is NEVER downgraded — an infra failure is infra
+ * failure regardless of tier position. A `required`-policy gate at this tier
+ * passes through unchanged.
+ *
+ * ONE shared helper, not per-job logic (design §8) — every run-check.mjs case
+ * is meant to route its result through this before returning.
+ *
+ * NOT YET WIRED into any of this file's four checks (issue #358 Q5 phases
+ * 1-3, deliberately): `issue-link`/`decision-gate`/`diff-size` are
+ * never-tiered (REQ-TIER-2 — `resolveGatePolicy` is `'required'` at every
+ * tier for all three, so wiring today would be a permanent no-op).
+ * `memory-gate` DOES vary by tier in GATE_MATRIX (`detection` at `lite`), but
+ * design.md §6 explicitly scopes that wiring to **T2.1** ("T2.1 ships the
+ * per-change check as detection-capable with a tier parameter... do not
+ * couple T2.1's merge to that flip") — memory-gate's *precision* (matching a
+ * specific issue's record, not just global presence) is T2.1's own
+ * deliverable, and flipping its run-check.mjs exit behavior ahead of that
+ * would both jump a separate issue's scope and break run-check.test.mjs's
+ * existing hard-required memory-gate fixtures, which assume today's
+ * pre-tiering global behavior. This function is the reusable primitive T2.1
+ * (and any future position-tiered promotion) wires in; exported for that.
+ *
+ * @param {{ pass: boolean, reason?: string, uncomputable?: boolean }} result
+ * @param {'lite'|'standard'|'regulated'} tier
+ * @param {string} gate
+ * @returns {{ pass: boolean, reason?: string, uncomputable?: boolean }}
+ */
+export function mapDetectionToWarning(result, tier, gate) {
+  if (!result || result.pass !== false || result.uncomputable) return result;
+  if (resolveGatePolicy(gate, tier) !== 'detection') return result;
+  return {
+    ...result,
+    pass: true,
+    reason: `::warning::${gate}: ${result.reason} (tier: ${tier})`,
+  };
 }
 
 /**

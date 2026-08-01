@@ -167,6 +167,11 @@ test('gatherBrainWritesReviewedInputs: resolves changedFiles via diffNameOnly, r
     repo: 'org/repo',
     author: 'alice',
     prLabels: [],
+    // Pinned to 'standard' (issue #358 Q5 Phase 4): this repo's own
+    // brain.config.json declares "tier": "lite" (design.md §5), under which
+    // `reviews` is never fetched at all — an unpinned tier would silently
+    // exercise a different evidence form than this test means to check.
+    tier: 'standard',
     deps,
   });
   assert.deepEqual(inputs.changedFiles, ['brain/core/foo.mjs']);
@@ -222,6 +227,232 @@ test('gatherBrainWritesReviewedInputs: an override:* label present but NOT allow
   assert.equal(inputs.adminOverride, false);
 });
 
+// ── tier-scoped override:* (issue #358 Q5, REQ-TIER-6) ─────────────────────
+
+test('gatherBrainWritesReviewedInputs: regulated tier refuses an allow-listed override:* label — adminOverride false, overrideRefused true', async () => {
+  const deps = makeFakeDeps({ overrideActors: ['override:incident-response'] });
+  const inputs = await gatherBrainWritesReviewedInputs({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: ['override:incident-response'],
+    tier: 'regulated',
+    deps,
+  });
+  assert.equal(inputs.adminOverride, false, 'regulated must never honor override:*');
+  assert.equal(inputs.overrideRefused, true, 'the refusal must be surfaced, never silent');
+});
+
+test('evaluateBrainWritesReviewed: regulated + an allow-listed override:* still fails self-approval, naming the tier refusal (REQ-TIER-6)', () => {
+  const result = evaluateBrainWritesReviewed({
+    changedFiles: ['brain/core/foo.mjs'],
+    reviews: [{ state: 'APPROVED', author: 'alice' }],
+    author: 'alice',
+    botAllowlist: [],
+    adminOverride: false,
+    overrideRefused: true,
+    tier: 'regulated',
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /self-approved/);
+  assert.match(result.reason, /not honored at the "regulated" tier/);
+});
+
+test('evaluateBrainWritesReviewed: lite tier with NO override label present passes on agent-authorship-style evidence, verdict never mentions override', () => {
+  const result = evaluateBrainWritesReviewed({
+    changedFiles: ['brain/core/foo.mjs'],
+    reviews: [{ state: 'APPROVED', author: 'carol' }],
+    author: 'alice',
+    botAllowlist: [],
+    adminOverride: false,
+    overrideRefused: false,
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass');
+  assert.doesNotMatch(result.reason, /override/i);
+});
+
+// ── REQ-L6-1′: evidence tiering (issue #358 Q5 Phase 4) ────────────────────
+//
+// `lite`'s WHOLE evidence form is agent-authorship exclusion — it never
+// touches `reviews`. `standard`/`regulated` keep the pre-tiering
+// distinct-human-approver check UNCHANGED (REQ-TIER-10's no-op-migration
+// guarantee — see the tests above, which never supply `codeownersArmed` and
+// still exercise `standard` via the default tier). The agent-author hard
+// fail applies at EVERY tier, unconditionally — "agent containment does not
+// tier" — and is NOT bypassable by `adminOverride`.
+
+test('evaluateBrainWritesReviewed: agent-authored brain/core change fails at every tier, even with adminOverride true (agent containment does not tier)', () => {
+  for (const tier of ['lite', 'standard', 'regulated']) {
+    const result = evaluateBrainWritesReviewed({
+      changedFiles: ['brain/core/foo.mjs'],
+      reviews: [{ state: 'APPROVED', author: 'bob' }],
+      author: 'csrinaldi-bot',
+      botAllowlist: ['csrinaldi-bot'],
+      adminOverride: true,
+      tier,
+    });
+    assert.equal(result.level, 'fail', `tier "${tier}" must fail on agent authorship`);
+    assert.match(result.reason, /agent containment does not tier/i);
+  }
+});
+
+test('evaluateBrainWritesReviewed: lite — solo human maintainer authors a brain/core change with NO reviews at all → pass (agent-authorship exclusion is the whole evidence form)', () => {
+  const result = evaluateBrainWritesReviewed({
+    changedFiles: ['brain/core/foo.mjs'],
+    reviews: [],
+    author: 'alice',
+    botAllowlist: [],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass');
+  assert.match(result.reason, /agent-authorship exclusion/i);
+});
+
+test('evaluateBrainWritesReviewed: standard — unchanged, self-approval fails with no codeownersArmed evidence supplied at all (REQ-TIER-10 no-op-migration guarantee)', () => {
+  const result = evaluateBrainWritesReviewed({
+    changedFiles: ['brain/core/foo.mjs'],
+    reviews: [{ state: 'APPROVED', author: 'alice' }],
+    author: 'alice',
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /self-approved/i);
+});
+
+test('evaluateBrainWritesReviewed: regulated — standard evidence (distinct human approver) satisfied, CODEOWNERS armed at rung 1 → pass, noting the enhancement', () => {
+  const result = evaluateBrainWritesReviewed({
+    changedFiles: ['brain/core/foo.mjs'],
+    reviews: [{ state: 'APPROVED', author: 'bob' }],
+    author: 'alice',
+    tier: 'regulated',
+    codeownersArmed: true,
+  });
+  assert.equal(result.level, 'pass');
+  assert.match(result.reason, /codeowners.*armed at rung 1/i);
+});
+
+test('evaluateBrainWritesReviewed: regulated — standard evidence satisfied, CODEOWNERS NOT armed at this substrate → still pass (REQ-TIER-5: unavailable enhancement never demotes a satisfied evidence pass)', () => {
+  const result = evaluateBrainWritesReviewed({
+    changedFiles: ['brain/core/foo.mjs'],
+    reviews: [{ state: 'APPROVED', author: 'bob' }],
+    author: 'alice',
+    tier: 'regulated',
+    codeownersArmed: false,
+  });
+  assert.equal(result.level, 'pass');
+  assert.match(result.reason, /not armed at this substrate/i);
+});
+
+// ── gatherBrainWritesReviewedInputs: reviews are fetched only when the tier needs them ─
+
+test('gatherBrainWritesReviewedInputs: lite tier never calls fetchReviews (REQ-TIER-10 no-op-migration guarantee — lite\'s evidence never touches reviews)', async () => {
+  let fetchReviewsCalled = false;
+  const deps = {
+    ...makeFakeDeps({ changedFiles: ['brain/core/foo.mjs'] }),
+    fetchReviews: () => { fetchReviewsCalled = true; return []; },
+  };
+  const inputs = await gatherBrainWritesReviewedInputs({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: [],
+    tier: 'lite',
+    deps,
+  });
+  assert.equal(fetchReviewsCalled, false, 'lite must never fetch reviews — they are not part of its evidence form');
+  assert.deepEqual(inputs.reviews, []);
+});
+
+test('gatherBrainWritesReviewedInputs: standard tier still fetches reviews (REQ-TIER-10 no-op-migration guarantee)', async () => {
+  const deps = makeFakeDeps({
+    changedFiles: ['brain/core/foo.mjs'],
+    reviews: [{ state: 'APPROVED', author: 'bob' }],
+  });
+  const inputs = await gatherBrainWritesReviewedInputs({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: [],
+    tier: 'standard',
+    deps,
+  });
+  assert.deepEqual(inputs.reviews, [{ state: 'APPROVED', author: 'bob' }]);
+});
+
+test('gatherBrainWritesReviewedInputs: codeownersArmed defaults to false when not injected (safe direction — REQ-TIER-5)', async () => {
+  const deps = makeFakeDeps({ changedFiles: [] });
+  const inputs = await gatherBrainWritesReviewedInputs({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: [],
+    tier: 'regulated',
+    deps,
+  });
+  assert.equal(inputs.codeownersArmed, false);
+});
+
+test('gatherBrainWritesReviewedInputs: an injected deps.codeownersArmed is threaded through', async () => {
+  const deps = { ...makeFakeDeps({ changedFiles: [] }), codeownersArmed: true };
+  const inputs = await gatherBrainWritesReviewedInputs({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: [],
+    tier: 'regulated',
+    deps,
+  });
+  assert.equal(inputs.codeownersArmed, true);
+});
+
+// ── runBrainWritesReviewedCheck: lite end-to-end (agent-authored fails, human passes) ─
+
+test('runBrainWritesReviewedCheck: lite end-to-end — agent-authored brain/core change fails, never reaching fetchReviews', async () => {
+  let fetchReviewsCalled = false;
+  const deps = {
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'csrinaldi-bot',
+    prLabels: [],
+    tier: 'lite',
+    diffNameOnly: () => ['brain/core/foo.mjs'],
+    fetchReviews: () => { fetchReviewsCalled = true; return []; },
+    readBotAllowlist: () => ['csrinaldi-bot'],
+  };
+  const result = await runBrainWritesReviewedCheck(deps);
+  assert.equal(result.level, 'fail');
+  assert.equal(fetchReviewsCalled, false);
+});
+
+test('runBrainWritesReviewedCheck: lite end-to-end — human-authored brain/core change passes with zero reviews', async () => {
+  const deps = {
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: [],
+    tier: 'lite',
+    diffNameOnly: () => ['brain/core/foo.mjs'],
+    fetchReviews: () => { throw new Error('must not be called at lite'); },
+    readBotAllowlist: () => [],
+  };
+  const result = await runBrainWritesReviewedCheck(deps);
+  assert.equal(result.level, 'pass');
+});
+
 // FIX1-style fail-open guard (unpaginated gh api list fetch truncates to page
 // 1) now lives with the code it guards: EXTRACTED into
 // github.mjs#prReviews (issue #239 A3 TASK2/4th-violation fix) — see
@@ -239,6 +470,11 @@ test('runBrainWritesReviewedCheck: gh api failure inside the wrapper → warn + 
     repo: 'org/repo',
     author: 'alice',
     prLabels: [],
+    // Pinned to 'standard' (issue #358 Q5 Phase 4): this repo's own
+    // brain.config.json declares "tier": "lite" (design.md §5), under which
+    // `fetchReviews` is never even called (lite's evidence never touches
+    // reviews) — an unpinned tier would make this test vacuous.
+    tier: 'standard',
     diffNameOnly: () => ['brain/core/foo.mjs'],
     fetchReviews: () => {
       throw new Error('gh api failed: rate limited');
@@ -262,6 +498,12 @@ test('runBrainWritesReviewedCheck: happy path end-to-end through the wrapper —
     repo: 'org/repo',
     author: 'alice',
     prLabels: [],
+    // Pinned to 'standard' (issue #358 Q5 Phase 4) — this test is about the
+    // human-APPROVED-review evidence path specifically; without the pin it
+    // would coincidentally still pass under this repo's real 'lite' tier,
+    // but for the wrong reason (agent-authorship exclusion, never even
+    // reaching fetchReviews).
+    tier: 'standard',
     diffNameOnly: () => ['brain/core/foo.mjs'],
     fetchReviews: () => [{ state: 'APPROVED', author: 'bob' }],
     readBotAllowlist: () => [],
@@ -292,6 +534,10 @@ test('main: fail verdict → exit code 1', async () => {
     repo: 'org/repo',
     author: 'alice',
     prLabels: [],
+    // Pinned to 'standard' — see the runBrainWritesReviewedCheck comment
+    // above (issue #358 Q5 Phase 4): this test is about self-approval, which
+    // 'lite' does not evaluate at all.
+    tier: 'standard',
     diffNameOnly: () => ['brain/core/foo.mjs'],
     fetchReviews: () => [{ state: 'APPROVED', author: 'alice' }],
     readBotAllowlist: () => [],
@@ -312,6 +558,10 @@ test('main: warn verdict → exit code 0', async () => {
     repo: 'org/repo',
     author: 'alice',
     prLabels: [],
+    // Pinned to 'standard' — see the runBrainWritesReviewedCheck comment
+    // above (issue #358 Q5 Phase 4): this test is about the no-reviews-yet
+    // warn branch, which 'lite' never reaches.
+    tier: 'standard',
     diffNameOnly: () => ['brain/core/foo.mjs'],
     fetchReviews: () => [],
     readBotAllowlist: () => [],
@@ -375,6 +625,11 @@ test('ci-context seam: ctx.labels (array) feeds adminOverride resolution directl
       baseSha: 'base', headSha: 'head', prNumber: 144, repo: 'org/repo',
       author: 'alice', labels: ['override:incident-response'],
     },
+    // Pinned to 'standard' — see the runBrainWritesReviewedCheck comment
+    // above (issue #358 Q5 Phase 4): this test is about the override:*
+    // bypass, which 'lite' never reaches (it passes on agent-authorship
+    // exclusion alone, before the override branch).
+    tier: 'standard',
     diffNameOnly: () => ['brain/core/foo.mjs'],
     fetchReviews: () => [{ state: 'APPROVED', author: 'alice' }], // self-approval — would fail without override
     readOverrideActors: () => ['override:incident-response'],
@@ -430,6 +685,13 @@ test('A3 TASK2: GitLab self-approval on a brain/core change via the REAL default
       author: 'alice',
       prLabels: [],
       provider: 'gitlab',
+      // Pinned to 'standard' (issue #358 Q5 Phase 4): this repo's own
+      // brain.config.json declares "tier": "lite" (design.md §5), under
+      // which the default fetchReviews wrapper is never even called (lite's
+      // evidence never touches reviews) — this test is specifically about
+      // that wrapper's real getVcs dispatch, so it must not silently run
+      // under a tier that skips it.
+      tier: 'standard',
       diffNameOnly: () => ['brain/core/foo.mjs'],
       getVcs: async (opts) => { receivedProvider = opts.provider; return fakeVcs; },
       readBotAllowlist: () => [],

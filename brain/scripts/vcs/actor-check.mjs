@@ -23,26 +23,144 @@ import { loadContext, resolveDetectionBody, gitlabApiConfig } from './ci-context
 import { getVcs } from './cli.mjs';
 import { resolveApprovedLabel } from '../governance/approved-label.mjs';
 import { CLOSING_RE, CHAIN_RE } from '../governance/checks/issue-ref-patterns.mjs';
+import { resolveTier, tierParams, resolveGatePolicy } from './governance-tiers.mjs';
 
 // ── Pure evaluator (design §5 step 5) ───────────────────────────────────────
 
 /**
- * Evaluates whether the approved-label actor is distinct from the PR/issue
- * author. Pure — no gh, no filesystem access (fully testable with fixtures).
+ * Compares the approved-label event's timestamp against the PR's head-commit
+ * timestamp (issue #358 Q5 Phase 4, REQ-L5-1' `lite` evidence: "distinct
+ * act"). Pure — a plain millisecond comparison, no I/O.
  *
- * Decision order (design §5 step 5):
+ * @param {string|null|undefined} labelCreatedAt  The approved-label add
+ *   event's timestamp (ISO 8601).
+ * @param {string|null|undefined} headCommitAt  The PR's head commit's
+ *   timestamp (ISO 8601, `prCommits()`'s last entry's `at`).
+ * @returns {boolean|null}  `true` when the label strictly postdates the head
+ *   commit (a satisfiable "distinct act"), `false` when it does not (the
+ *   approval predates the code it approves), `null` when either timestamp is
+ *   missing — uncomputable, never assumed either way.
+ */
+export function compareTimestamps(labelCreatedAt, headCommitAt) {
+  if (!labelCreatedAt || !headCommitAt) return null;
+  return new Date(labelCreatedAt).getTime() > new Date(headCommitAt).getTime();
+}
+
+/**
+ * `lite`'s REQ-L5-1' evidence: distinct act — the approved-label event must
+ * be strictly later than the PR's head-commit push. Self-approval is NOT
+ * checked here by design (design.md §2.A/§4): a solo maintainer applying
+ * their own approval after their own push satisfies `lite` on its own,
+ * evidence-tiered terms.
+ *
+ * Fails CLOSED (never warn) once a labeled event exists but the timing
+ * cannot be established — spec.md REQ-L5-1': "an unreadable approval is not
+ * an approval." (The "no labeled event AT ALL yet" case is handled earlier,
+ * by the shared warn+pass branch in `evaluateActor` — REQ-L5-2 — before this
+ * function ever runs.)
+ *
+ * @param {{ actor: string|undefined, labelCreatedAt: string|undefined, commits: Array<{ at?: string }>|null }} input
+ * @returns {{ level: 'pass'|'fail', reason: string }}
+ */
+function evaluateDistinctAct({ actor, labelCreatedAt, commits }) {
+  const headCommit = Array.isArray(commits) && commits.length > 0 ? commits[commits.length - 1] : null;
+  const headCommitAt = headCommit?.at;
+
+  if (!headCommitAt) {
+    return {
+      level: 'fail',
+      reason:
+        'the PR\'s head-commit timestamp is unreadable — cannot verify the "lite" tier\'s distinct-act ' +
+        'evidence (REQ-L5-1′); an unreadable approval is not an approval.',
+    };
+  }
+
+  const distinctAct = compareTimestamps(labelCreatedAt, headCommitAt);
+  if (distinctAct !== true) {
+    return {
+      level: 'fail',
+      reason:
+        `the approved label was applied at ${labelCreatedAt ?? 'an unreadable time'}, not strictly after ` +
+        `the head commit's push at ${headCommitAt} — approval before the code is not an approval ` +
+        '(REQ-L5-1′ "lite" evidence: distinct act).',
+    };
+  }
+
+  return {
+    level: 'pass',
+    reason:
+      `the approved label was applied by "${actor ?? 'unknown'}" at ${labelCreatedAt}, strictly after the ` +
+      `head commit's push at ${headCommitAt} — distinct-act evidence satisfied at the "lite" tier (REQ-L5-1′).`,
+  };
+}
+
+/**
+ * `regulated`'s additional REQ-L5-1' evidence beyond `standard`'s distinct
+ * actor: the approver must have authored NO commit on the branch. Returns
+ * `null` when the evidence is satisfied (no additional verdict — the caller
+ * falls through to its own pass), or a verdict object when it is not.
+ *
+ * Never fails on genuinely uncomputable commit-authorship data (e.g. a
+ * provider — today, GitLab — that cannot resolve commit authors to an
+ * account, `prCommits()`'s documented `login: null` residual) — warns
+ * instead, the same zero-false-positive discipline REQ-L5-2 established for
+ * missing labeled-event evidence.
+ *
+ * @param {{ actor: string|undefined, commits: Array<{ login: string|null }>|null }} input
+ * @returns {{ level: 'warn'|'fail', reason: string }|null}
+ */
+function evaluateNoCommitOnBranch({ actor, commits }) {
+  const resolvable = Array.isArray(commits) && commits.some(c => c.login != null);
+  if (!resolvable) {
+    return {
+      level: 'warn',
+      reason:
+        `cannot verify whether "${actor ?? 'the approver'}" authored a commit on this branch — commit ` +
+        'authorship is unreadable at the "regulated" tier (e.g. the provider cannot resolve commit authors ' +
+        'to an account); never failing on missing evidence.',
+    };
+  }
+
+  const authoredByApprover = commits.some(c => c.login === actor);
+  if (authoredByApprover) {
+    return {
+      level: 'fail',
+      reason:
+        `"${actor}" authored at least one commit on this branch — the "regulated" tier requires the ` +
+        'approver to have authored NO commit on the branch (REQ-L5-1′).',
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Evaluates whether the approved-label actor satisfies REQ-L5-1's
+ * tier-scoped evidence form (issue #358 Q5 Phase 4, REQ-L5-1'). Pure — no
+ * gh, no filesystem access (fully testable with fixtures).
+ *
+ * Decision order (design §5 step 5, extended by design.md §2.A/REQ-L5-1'):
  *   1. No `labeled` event found → warn + pass (cannot prove self-approval on
- *      missing evidence — REQ-L5-2, keeps false positives ~0).
- *   2. `adminOverride` (an allow-listed `override:*` label is present) → pass,
- *      logged.
+ *      missing evidence — REQ-L5-2, keeps false positives ~0). This is the
+ *      "no approval yet" case, distinct from `lite`'s own fail-closed rule
+ *      below, which only applies once a labeled event exists.
+ *   2. `adminOverride` (an allow-listed `override:*` label is present, and
+ *      honored at this tier) → pass, logged.
  *   3. Actor in `botAllowlist` (e.g. automation acting on a human's explicit
  *      instruction) → pass.
- *   4. Actor === author OR actor === issueAuthor → fail (self-approval) —
- *      REQ-L5-1 requires comparing against BOTH the PR author and the issue
- *      author (spec.md:398-400): the PR author and the issue author can be
- *      two different people (e.g. Bob files the issue, Alice opens the PR),
- *      and either one self-labeling their own issue counts as self-approval.
- *   5. Otherwise → pass (human-applied approval, actor differs from both).
+ *   4. `lite`: distinct-act ONLY (`evaluateDistinctAct`) — self-approval is
+ *      not evaluated; a solo maintainer's own late approval passes.
+ *   5. `standard`/`regulated`: distinct actor — actor === author OR actor ===
+ *      issueAuthor → fail (self-approval). REQ-L5-1 requires comparing
+ *      against BOTH the PR author and the issue author (spec.md:398-400):
+ *      the PR author and the issue author can be two different people (e.g.
+ *      Bob files the issue, Alice opens the PR), and either one self-labeling
+ *      their own issue counts as self-approval. This is UNCHANGED from the
+ *      pre-tiering behavior (REQ-TIER-10's no-op-migration guarantee for the
+ *      default `standard` tier).
+ *   6. `regulated` only: additionally requires the approver authored no
+ *      commit on the branch (`evaluateNoCommitOnBranch`) — REQ-L5-1'.
+ *   7. Otherwise → pass (human-applied approval, actor differs from both).
  *
  * The "most recent" labeled event wins (handles re-labeling: remove → re-add
  * uses the latest add) — `labeledEvents` is assumed to be in the same
@@ -53,13 +171,26 @@ import { CLOSING_RE, CHAIN_RE } from '../governance/checks/issue-ref-patterns.mj
  * @param {string} input.author  PR author login (design §5 step 1).
  * @param {string} [input.issueAuthor]  Issue author login (the issue the PR
  *   closes/references) — REQ-L5-1 requires failing on either author matching.
- * @param {Array<{ actor: { login: string } }>} input.labeledEvents  `labeled`
- *   events for the resolved approved label, chronologically ordered.
+ * @param {Array<{ actor: { login: string }, at?: string }>} input.labeledEvents
+ *   `labeled` events for the resolved approved label, chronologically
+ *   ordered. `at` (the label-add timestamp) is required for `lite`'s
+ *   distinct-act evidence.
  * @param {string[]} [input.botAllowlist]  Allow-listed actor logins / override
  *   label strings (`config.governance.approvalActors`).
  * @param {boolean} [input.adminOverride]  Whether an allow-listed `override:*`
- *   label is present on the issue (resolved by the wrapper against
- *   `botAllowlist` — never a blanket bypass, REQ-L5-2).
+ *   label is present on the issue AND honored at this tier (resolved by the
+ *   wrapper against `botAllowlist` — never a blanket bypass, REQ-L5-2).
+ * @param {boolean} [input.overrideRefused]  Whether an allow-listed
+ *   `override:*` label was present but NOT honored at this tier (issue #358
+ *   Q5, REQ-TIER-6 — `regulated` refuses the label). When true, the verdict
+ *   NAMES the refusal rather than silently proceeding as if the label were
+ *   absent.
+ * @param {'lite'|'standard'|'regulated'} [input.tier]  Selects the evidence
+ *   form (REQ-L5-1') AND the `overrideRefused` message text.
+ * @param {Array<{ sha: string, login: string|null, at?: string }>|null} [input.commits]
+ *   The PR's commits, ascending (`prCommits()`'s normalized shape), or `null`
+ *   when uncomputable. Consumed by `lite` (head-commit timestamp) and
+ *   `regulated` (approver-authored-commit check) only.
  * @returns {{ level: 'pass'|'warn'|'fail', reason: string }}
  */
 export function evaluateActor({
@@ -68,7 +199,18 @@ export function evaluateActor({
   labeledEvents = [],
   botAllowlist = [],
   adminOverride = false,
+  overrideRefused = false,
+  tier = 'standard',
+  commits = null,
 } = {}) {
+  const withRefusalNote = result => {
+    if (!overrideRefused || result.level === 'warn') return result;
+    return {
+      ...result,
+      reason: `${result.reason} (an override:* label was present but is not honored at the "${tier}" tier — refusing the bypass, REQ-TIER-6.)`,
+    };
+  };
+
   if (labeledEvents.length === 0) {
     return {
       level: 'warn',
@@ -78,7 +220,9 @@ export function evaluateActor({
     };
   }
 
-  const actor = labeledEvents[labeledEvents.length - 1]?.actor?.login;
+  const lastEvent = labeledEvents[labeledEvents.length - 1];
+  const actor = lastEvent?.actor?.login;
+  const labelCreatedAt = lastEvent?.at;
 
   if (adminOverride) {
     return {
@@ -88,24 +232,33 @@ export function evaluateActor({
   }
 
   if (actor && botAllowlist.includes(actor)) {
-    return {
+    return withRefusalNote({
       level: 'pass',
       reason: `the approved label was applied by allow-listed automation identity "${actor}".`,
-    };
+    });
+  }
+
+  if (tier === 'lite') {
+    return withRefusalNote(evaluateDistinctAct({ actor, labelCreatedAt, commits }));
   }
 
   if (actor === author || (issueAuthor && actor === issueAuthor)) {
     const matched = actor === author ? 'PR author' : 'issue author';
-    return {
+    return withRefusalNote({
       level: 'fail',
       reason: `the approved label was self-applied by "${actor}" (matches the ${matched}) — self-approval is not allowed.`,
-    };
+    });
   }
 
-  return {
+  if (tier === 'regulated') {
+    const commitVerdict = evaluateNoCommitOnBranch({ actor, commits });
+    if (commitVerdict) return withRefusalNote(commitVerdict);
+  }
+
+  return withRefusalNote({
     level: 'pass',
     reason: `the approved label was applied by "${actor}", distinct from the PR author "${author}" and the issue author "${issueAuthor ?? 'n/a'}".`,
-  };
+  });
 }
 
 // ── Issue-number extraction (reused rules from governance.yml's issue-link job) ─
@@ -220,6 +373,41 @@ function defaultFetchIssue(repo, provider, { getVcs: getVcsFn = getVcs } = {}) {
   };
 }
 
+/**
+ * Whether a tier's REQ-L5-1' evidence form needs the PR's commit list
+ * (issue #358 Q5 Phase 4): `lite` needs the head commit's timestamp
+ * (distinct-act); `regulated` needs the full commit-author list (no-commit
+ * -on-branch). `standard` needs neither — REQ-TIER-10's no-op-migration
+ * guarantee means `standard` makes no additional API call it did not make
+ * before tiering.
+ *
+ * @param {string} tier
+ * @returns {boolean}
+ */
+function needsCommitEvidence(tier) {
+  return tier === 'lite' || tier === 'regulated';
+}
+
+/**
+ * Default `fetchCommits` dep: dispatches the `prCommits` CONTRACT verb
+ * (issue #358 Q5 Phase 4) via `getVcs({ provider })` on the
+ * RUNTIME-detected `ctx.provider` — the same finding-#14 pattern
+ * `defaultFetchLabeledEvents`/`defaultFetchIssue` use. `getVcs` is
+ * injectable via `{ getVcs }` for tests, mirroring their shape.
+ *
+ * @param {string} repo
+ * @param {string|undefined} provider
+ * @param {{ getVcs?: Function }} [deps]
+ * @returns {(prNumber: number) => Promise<Array<{ sha: string, login: string|null, at?: string }>|null>}
+ */
+function defaultFetchCommits(repo, provider, { getVcs: getVcsFn = getVcs } = {}) {
+  return async prNumber => {
+    const vcs = await getVcsFn({ provider });
+    const { apiBase, token, proxyUrl } = gitlabApiConfig();
+    return vcs.prCommits({ project: repo, number: prNumber, apiBase, token, proxyUrl });
+  };
+}
+
 function defaultReadBotAllowlist(cwd) {
   return () => {
     try {
@@ -242,6 +430,30 @@ function defaultReadConfig(cwd) {
 }
 
 /**
+ * Resolves the tier to attribute an API-failure verdict to (issue #358 Q5
+ * Phase 5 review finding 1), WITHOUT ever throwing itself — this runs from
+ * inside `runActorCheck`'s catch block, after `gatherActorCheckInputs` has
+ * already failed, so a second failure here (a corrupt config, an unknown
+ * `governance.tier`) must degrade rather than escape. Defaults to
+ * `'standard'` on any resolution failure — `'standard'` also resolves
+ * `actor-check` to `required` (REQ-TIER-2's never-tiered core), so this
+ * default is fail-closed-safe regardless of the repo's real tier.
+ *
+ * @param {string} cwd
+ * @param {{ tier?: string, readConfig?: () => object }} deps
+ * @returns {'lite'|'standard'|'regulated'}
+ */
+function resolveTierForFailure(cwd, deps) {
+  try {
+    if (deps.tier) return deps.tier;
+    const readConfig = deps.readConfig ?? defaultReadConfig(cwd);
+    return resolveTier(readConfig());
+  } catch {
+    return 'standard';
+  }
+}
+
+/**
  * Gathers evaluateActor()'s inputs from the PR body + gh API (or from injected
  * `deps` in tests). `adminOverride` is resolved here — an override:* label is
  * only honored when it is BOTH present on the issue AND listed in
@@ -261,36 +473,72 @@ function defaultReadConfig(cwd) {
  * `deps.fetchLabeledEvents` still works unchanged (`await` on a
  * non-Promise resolves immediately to that same value).
  *
- * @param {{ author: string, prBody: string, baseBranch: string, repo: string, provider?: string, cwd?: string, deps?: object }} args
- * @returns {Promise<{ author: string, issueAuthor: string|null, labeledEvents: Array, botAllowlist: string[], adminOverride: boolean }>}
+ * `adminOverride` is tier-scoped (issue #358 Q5, REQ-TIER-6): honored at
+ * `lite`/`standard`, refused at `regulated` (`tierParams(tier).honorOverride`).
+ * A present-but-refused override sets `overrideRefused: true` instead of
+ * silently vanishing — evaluateActor() names the refusal in its verdict.
+ *
+ * `commits` (issue #358 Q5 Phase 4, REQ-L5-1') is fetched via `prCommits`
+ * ONLY when the resolved tier's evidence form needs it (`lite`/`regulated`,
+ * `needsCommitEvidence`) and a PR number is available — `standard` makes no
+ * additional API call (REQ-TIER-10's no-op-migration guarantee).
+ *
+ * @param {{ author: string, prBody: string, baseBranch: string, repo: string, provider?: string, prNumber?: number, cwd?: string, tier?: string, deps?: object }} args
+ * @returns {Promise<{ author: string, issueAuthor: string|null, labeledEvents: Array, botAllowlist: string[], adminOverride: boolean, overrideRefused: boolean, tier: string, commits: Array|null }>}
  */
-export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, cwd = process.cwd(), deps = {} } = {}) {
+export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, prNumber, cwd = process.cwd(), tier: tierOverride, deps = {} } = {}) {
   const readConfig = deps.readConfig ?? defaultReadConfig(cwd);
-  const approvedLabel = resolveApprovedLabel(readConfig(), provider);
+  const config = readConfig();
+  const approvedLabel = resolveApprovedLabel(config, provider);
+  const tier = tierOverride ?? deps.tier ?? resolveTier(config);
+  const { honorOverride } = tierParams(tier);
 
   const fetchLabeledEvents = deps.fetchLabeledEvents ?? defaultFetchLabeledEvents(repo, provider, approvedLabel, deps);
   const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(repo, provider, deps);
   const readBotAllowlist = deps.readBotAllowlist ?? defaultReadBotAllowlist(cwd);
+  const fetchCommits = deps.fetchCommits ?? defaultFetchCommits(repo, provider, deps);
 
   const botAllowlist = readBotAllowlist();
   const issueNumber = extractIssueNumber(prBody, baseBranch);
 
+  const commits = needsCommitEvidence(tier) && prNumber != null ? await fetchCommits(prNumber) : null;
+
   if (issueNumber == null) {
-    return { author, issueAuthor: null, labeledEvents: [], botAllowlist, adminOverride: false };
+    return { author, issueAuthor: null, labeledEvents: [], botAllowlist, adminOverride: false, overrideRefused: false, tier, commits };
   }
 
   const labeledEvents = await fetchLabeledEvents(issueNumber);
   const { labels: issueLabels, author: issueAuthor } = await fetchIssue(issueNumber);
-  const adminOverride = issueLabels.some(l => l.startsWith('override:') && botAllowlist.includes(l));
+  const overrideLabelPresent = issueLabels.some(l => l.startsWith('override:') && botAllowlist.includes(l));
+  const adminOverride = honorOverride && overrideLabelPresent;
+  const overrideRefused = overrideLabelPresent && !honorOverride;
 
-  return { author, issueAuthor, labeledEvents, botAllowlist, adminOverride };
+  return { author, issueAuthor, labeledEvents, botAllowlist, adminOverride, overrideRefused, tier, commits };
 }
 
 /**
  * Runs the full L5 actor check: gathers inputs (gh API + PR body), evaluates the
- * pure rule. Never throws — a gh API failure, or missing PR author/repo context,
- * degrades to `warn` rather than `fail`, keeping REQ-L5-2's zero-false-positive
- * goal intact while this job is detection-only (DETECTION_JOBS).
+ * pure rule. Never throws — but a gh API failure inside `gatherActorCheckInputs`
+ * no longer unconditionally degrades to `warn` (issue #358 Q5 Phase 5 review
+ * finding 1). `actor-check` is `required` at EVERY tier (REQ-TIER-2's
+ * never-tiered core, `GATE_MATRIX['actor-check']` — promoted out of
+ * `PENDING_PROMOTION` in Phase 5): when the gate is required, an API failure
+ * means the approval CANNOT BE VERIFIED, which is not the same thing as "no
+ * approval yet" (REQ-L5-2's warn+pass branch, still handled inside
+ * `evaluateActor` for the genuinely-computed "no labeled event" case). Failing
+ * open on an unverifiable required gate would let a flaky `gh`/API outage
+ * silently pass a check the doctrine says must block merge — the EXACT
+ * asymmetry this fix closes against `evaluateDistinctAct`'s existing
+ * fail-closed `prCommits: null` handling (same file, above): both paths now
+ * agree that "cannot verify, required gate" fails, never warns. Only when the
+ * resolved tier demotes this gate's POSITION to `detection` (not currently
+ * true for `actor-check` — reserved for a future matrix change) does an API
+ * failure still degrade to `warn`, mirroring `run-check.mjs`'s
+ * `mapDetectionToWarning` discipline for detection-tier gates.
+ *
+ * Missing PR author/repo CONTEXT (the branch below, before any gh call is even
+ * attempted) is a distinct case — this is not an API failure, it is "this run
+ * has no PR to check" (e.g. a local/non-CI invocation) — and stays `warn`.
  *
  * `author`/`baseBranch`/`repo` source from the normalized ci-context (`ctx.*`,
  * ADR-0016) — never from process.env directly (a drift-guard test enforces
@@ -314,6 +562,7 @@ export async function runActorCheck(deps = {}) {
   const baseBranch = deps.baseBranch ?? ctx.targetBranch ?? undefined;
   const repo = deps.repo ?? ctx.repo ?? undefined;
   const provider = deps.provider ?? ctx.provider ?? undefined;
+  const prNumber = deps.prNumber ?? ctx.prNumber ?? undefined;
   const cwd = deps.cwd ?? process.cwd();
 
   if (!author || !repo) {
@@ -325,11 +574,22 @@ export async function runActorCheck(deps = {}) {
 
   let inputs;
   try {
-    inputs = await gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, cwd, deps });
+    inputs = await gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, prNumber, cwd, deps });
   } catch (err) {
+    const tier = resolveTierForFailure(cwd, deps);
+    if (resolveGatePolicy('actor-check', tier) === 'required') {
+      return {
+        level: 'fail',
+        reason:
+          `actor-check: could not gather inputs (gh api failure?) — ${err.message} — failing closed: ` +
+          `actor-check is required at the "${tier}" tier (REQ-TIER-2's never-tiered core) and an ` +
+          'unverifiable API failure cannot be treated as a pass (matches evaluateDistinctAct\'s existing ' +
+          'fail-closed handling of an unreadable prCommits — issue #358 Q5 Phase 5 review finding 1).',
+      };
+    }
     return {
       level: 'warn',
-      reason: `actor-check: could not gather inputs (gh api failure?) — ${err.message}`,
+      reason: `actor-check: could not gather inputs (gh api failure?) — ${err.message} (detection-tier at "${tier}").`,
     };
   }
 

@@ -16,10 +16,10 @@
 
 ## Phase 3: Merge to main
 
-- [ ] Remove stale note from PR #392 (issue #391 label status)
-- [ ] Document M10 branch spec.md collision risk
-- [ ] Obtain one human APPROVE review (non-author, brain-writes-reviewed gate)
-- [ ] Merge PR #392 to main
+- [x] Remove stale note from PR #392 (issue #391 label status) — PR #392 description edited via `gh api` PATCH (2026-08-01); removed the "label not yet applied" bullet and updated the contributor checklist line now that issue #391 carries `status:approved`.
+- [x] Document M10 branch spec.md collision risk — documented in `specs/vcs-pr-reviews-contract/spec.md`'s Evidence section (both the change-folder copy and the merged `openspec/specs/` copy) and restated in the PR #392 description's "Hard dependencies / known gaps" section.
+- [ ] Obtain one human APPROVE review (non-author, brain-writes-reviewed gate) — **not satisfied**: `gh api repos/csrinaldi/brain/pulls/392/reviews` returns zero reviews. PR #392 merged (commit `d948df3`) without a human APPROVE. Not a hard block under current governance: `brain-writes-reviewed` is a **detection-only** job (`workflow-governance.md:179` — "DETECTION_JOBS never block merge"), so the merge itself did not violate an enforced gate. Flagged here as a process gap for maintainer awareness, not fabricated as complete.
+- [x] Merge PR #392 to main — already merged; `HEAD` (`aae7625`) is an ancestor of `origin/main` via merge commit `d948df3` ("Merge pull request #392 from csrinaldi/docs/issue-391-t23-review-package-spec").
 
 ## Phase 4: Follow-up Implementation (Out of scope for T2.3)
 
