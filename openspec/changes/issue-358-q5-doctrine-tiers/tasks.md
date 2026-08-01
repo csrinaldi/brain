@@ -43,6 +43,8 @@ before Phase 0 closes.
 
 ## Phase 1 — The tier module (no behaviour change)
 
+Committed: `db674bb` — feat(governance): implement tier module (phase 1)
+
 - [x] `brain/scripts/vcs/governance-tiers.mjs`: `TIERS`, `NEVER_TIERED`, `GATE_MATRIX`,
       `resolveTier`, `resolveGatePolicy`, `resolveGateEvidence`, `tierParams`,
       `requiredJobs` — pure, no I/O at import
@@ -56,6 +58,8 @@ before Phase 0 closes.
       asserting `buildDefaultConfig()` produces it
 
 ## Phase 2 — Derive the two consumer surfaces (REQ-TIER-9)
+
+Committed: `90156e9` — feat(governance): derive consumer surfaces from tier matrix (phase 2)
 
 - [x] `governance-checks.mjs`: `checkContexts(tier)` / `requiredJobs(tier)` derived
       from the matrix; keep `GOVERNANCE_JOBS` tier-independent. `REQUIRED_JOBS`/
@@ -77,6 +81,8 @@ before Phase 0 closes.
 
 ## Phase 3 — Tiered parameters
 
+Committed: `6169909` — feat(governance): tier-scoped diff budget and artefacts (phase 3)
+
 - [x] `diff-size.mjs`/`run-check.mjs`: budget from `tierParams(tier).diffBudget`; honor
       `size:exception` per tier (REQ-TIER-6)
 - [x] **Delete** the duplicate budget literals: `.github/workflows/governance.yml:126`
@@ -91,6 +97,23 @@ before Phase 0 closes.
       the deeper REQ-L5-1′/REQ-L6-1′ evidence-form rewrite stays Phase 4, blocked)
 - [x] Test: `regulated` + `size:exception` at 260 lines fails with the tier named
 - [x] Test: `regulated` + an allow-listed `override:*` still fails L5/L6
+- [x] **CRITICAL fix** (post-verify, commit `ac1d058` — fix(governance): make
+      rung-2/3 audit path tier-aware): `lib/merge-walk.mjs`'s `evaluateMerge()`
+      called `diffSize(numstat, ignoreList)` with no budget, silently falling
+      back to `diff-size.mjs`'s own 400-line default, and honored
+      `size:exception` unconditionally — the rung-2 (`brain-audit.mjs`,
+      `release.yml`) and rung-3 (`brain-metrics.mjs`,
+      `governance-postmerge.yml`) audit path had zero tier awareness,
+      violating REQ-TIER-9/REQ-TIER-6. Now accepts explicit `diffBudget` /
+      `honorSizeException` / `tier` ctx params (defaulting to the pre-tier
+      400/honored behaviour for any un-migrated caller); `brain-audit.mjs`
+      and `brain-metrics.mjs` resolve `tierParams(resolveTier(config))` once
+      per run and thread it through; `brain-check.mjs` resolves the same
+      source for its own local `diffSize()` budget. Tests added:
+      `merge-walk.test.mjs` (lite 900-line diff passes; regulated + 260-line
+      `size:exception` fails naming the tier; no-budget-supplied legacy
+      400-line fallback) and `brain-check.test.mjs` (budget=1000 passes 900
+      lines; no-budget-supplied legacy 400-line fallback).
 
 ## Phase 4 — Evidence tiering (blocked)
 
