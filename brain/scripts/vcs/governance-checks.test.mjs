@@ -126,12 +126,18 @@ test('local-checks is present in the parsed governance.yml job names', () => {
 // PR #202's false block).
 
 test('checkContexts returns bare job names (no workflow-name prefix)', () => {
+  // issue #358 Q5 Phase 5: phase-order/actor-check/brain-writes-reviewed
+  // promoted out of PENDING_PROMOTION — checkContexts('standard') (the
+  // default tier) now includes all eight GOVERNANCE_JOBS.
   assert.deepEqual(checkContexts(), [
     'issue-link',
     'diff-size',
     'local-checks',
     'memory-gate',
     'decision-gate',
+    'phase-order',
+    'actor-check',
+    'brain-writes-reviewed',
   ]);
 });
 

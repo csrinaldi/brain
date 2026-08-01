@@ -24,32 +24,37 @@
 // design.md §2 verbatim — including `actor-check` and `brain-writes-reviewed`
 // resolving to `required` at every tier (REQ-TIER-2's never-tiered core) and
 // `phase-order` resolving to `required` at standard/regulated (design §2.B).
-// That end state is NOT yet safe to WIRE into branch protection:
-//   - `actor-check`/`brain-writes-reviewed`'s CHECKER CODE still runs the
-//     pre-tier "distinct actor" / "APPROVED human review" evidence
-//     unconditionally — their REQ-L5-1'/REQ-L6-1' tiered evidence forms are
-//     Phase 4 work, explicitly BLOCKED on #328 (design §4).
-//   - `phase-order`'s promotion carries its OWN precondition (fail-closing its
-//     uncomputable-diff branch first, ADR-0015) — Phase 5, not yet done.
-// Wiring `resolveGatePolicy`'s raw 'required' straight into a consumer's
-// required-check list TODAY would flip these into branch-protection-required
-// contexts before any repo without a second distinct human approver could
-// satisfy them — reproducing #329 the moment this ships (including brain's
-// own repo, until Phase 4/5 land). `requiredJobs()` therefore filters the
-// matrix's raw policy through `PENDING_PROMOTION`: gates named there resolve
-// to `detection` in the DERIVED, CONSUMER-FACING surface regardless of what
-// GATE_MATRIX declares, until a follow-up change (Phase 5, tasks.md) removes
-// them from this list. `resolveGatePolicy`/`resolveGateEvidence` still report
-// the matrix's raw (target) values unfiltered — a caller that needs "is this
-// gate ACTUALLY enforced today" must go through `requiredJobs()`, never
-// `resolveGatePolicy()` directly.
 //
-// This split is what keeps REQ-TIER-2's unit test ("never-tiered core always
+// Phase 5 (tasks.md) PROMOTED all three gates: their preconditions are now
+// met —
+//   - `actor-check`/`brain-writes-reviewed`'s REQ-L5-1'/REQ-L6-1' tiered
+//     evidence forms shipped in Phase 4 (commits `21cc250`, `732b243`),
+//     unblocked by #328 (PR #370).
+//   - `phase-order`'s uncomputable-diff branch now fails closed
+//     (`phase-order-check.mjs`'s `runPhaseOrderCheck`) instead of degrading to
+//     warn/exit 0 — ADR-0015's recorded precondition.
+// `PENDING_PROMOTION` is therefore empty: `requiredJobs()` no longer filters
+// any gate out of the matrix's raw policy. Before Phase 5, wiring
+// `resolveGatePolicy`'s raw 'required' straight into a consumer's
+// required-check list would have flipped these into branch-protection-required
+// contexts before any repo without a second distinct human approver (or a
+// fail-closed phase-order evaluator) could satisfy them — reproducing #329.
+// `resolveGatePolicy`/`resolveGateEvidence` always reported the matrix's raw
+// (target) values, unfiltered; `requiredJobs()` is the one surface that used
+// to differ from them during the staged rollout — a caller that needs "is
+// this gate ACTUALLY enforced today" should still prefer `requiredJobs()`
+// over `resolveGatePolicy()` directly, since a FUTURE promotion may re-use
+// this same list.
+//
+// This split is what kept REQ-TIER-2's unit test ("never-tiered core always
 // resolves to `required`") true — a doctrine fact — while REQ-TIER-10's
 // no-op-migration guarantee ("standard reproduces today's exact behaviour")
-// also holds — an operational safety fact. Both are ratified requirements;
-// this module satisfies both by keeping "what the doctrine says" and "what is
-// safe to enforce today" as two distinct, separately-testable functions.
+// also held — an operational safety fact, during the staged rollout. Both are
+// ratified requirements; this module satisfied both by keeping "what the
+// doctrine says" and "what is safe to enforce today" as two distinct,
+// separately-testable functions. Adding a gate to `PENDING_PROMOTION` again in
+// the future (a new gate, not yet evidence-ready) remains the sanctioned
+// pattern for staging a promotion.
 
 import { fileURLToPath } from 'node:url';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
@@ -80,9 +85,13 @@ export const NEVER_TIERED = Object.freeze([
  * from this list is the Phase 5 "promote" action (tasks.md); it is a
  * deliberate, reviewed data change, never automatic.
  *
+ * Empty as of Q5 Phase 5: `actor-check` and `brain-writes-reviewed` promoted
+ * (REQ-L5-1'/REQ-L6-1' evidence forms shipped, Phase 4) and `phase-order`
+ * promoted (uncomputable-diff branch fail-closed, ADR-0015 precondition met).
+ *
  * @type {string[]}
  */
-const PENDING_PROMOTION = Object.freeze(['actor-check', 'brain-writes-reviewed', 'phase-order']);
+const PENDING_PROMOTION = Object.freeze([]);
 
 /**
  * §2 — the gate distribution matrix (design.md §2, verbatim). One row per
@@ -137,24 +146,30 @@ export const GATE_MATRIX = Object.freeze({
     }),
   }),
   'phase-order': Object.freeze({
-    // Position-tiered by proportionality (design §2.B), BUT promotion at
-    // standard/regulated is Phase 5 work gated on a separate precondition
-    // (fail-closing the uncomputable-diff branch, ADR-0015) — see
-    // PENDING_PROMOTION. The raw policy below is the ratified target.
+    // Position-tiered by proportionality (design §2.B). Promoted to `required`
+    // at standard/regulated in Phase 5, gated on fail-closing the
+    // uncomputable-diff branch first (ADR-0015 precondition, met —
+    // phase-order-check.mjs's runPhaseOrderCheck now returns `fail` instead of
+    // `warn` when the diff is uncomputable). `lite` stays `detection` by
+    // design (proportionality), not by PENDING_PROMOTION.
     lite: Object.freeze({ policy: 'detection', evidence: 'artefact-presence' }),
     standard: Object.freeze({ policy: 'required', evidence: 'artefact-presence' }),
     regulated: Object.freeze({ policy: 'required', evidence: 'artefact-presence' }),
   }),
   'actor-check': Object.freeze({
     // Never-tiered by position (REQ-TIER-2); evidence tiers (REQ-TIER-5,
-    // REQ-L5-1'). Actual promotion is PENDING_PROMOTION-gated on #328 (Phase 4).
+    // REQ-L5-1'). Promoted to `required` at every tier in Phase 5 — the
+    // tiered evidence forms shipped in Phase 4 (commit `21cc250`), unblocked
+    // by #328 (PR #370).
     lite: Object.freeze({ policy: 'required', evidence: 'distinct-act' }),
     standard: Object.freeze({ policy: 'required', evidence: 'distinct-act+distinct-actor' }),
     regulated: Object.freeze({ policy: 'required', evidence: 'distinct-act+distinct-actor+no-commit-on-branch' }),
   }),
   'brain-writes-reviewed': Object.freeze({
     // Never-tiered by position (REQ-TIER-2); evidence tiers (REQ-TIER-5,
-    // REQ-L6-1'). Actual promotion is PENDING_PROMOTION-gated on #328 (Phase 4).
+    // REQ-L6-1'). Promoted to `required` at every tier in Phase 5 — the
+    // tiered evidence forms shipped in Phase 4 (commit `732b243`), unblocked
+    // by #328 (PR #370).
     lite: Object.freeze({ policy: 'required', evidence: 'agent-authorship-exclusion' }),
     standard: Object.freeze({ policy: 'required', evidence: 'human-approved-review' }),
     regulated: Object.freeze({ policy: 'required', evidence: 'human-approved-review+codeowners-rung1' }),
@@ -289,13 +304,17 @@ export function tierParams(tier) {
  * old `REQUIRED_JOBS` constant (design §8, REQ-TIER-9). This is
  * `resolveGatePolicy`'s raw matrix value MINUS `PENDING_PROMOTION` (see the
  * STAGED ROLLOUT note at the top of this file): a gate whose evidence form
- * hasn't landed yet (Phase 4/5) never becomes an actually-required
- * branch-protection context through this function, no matter what the
- * ratified matrix says its target policy is.
+ * hasn't landed yet never becomes an actually-required branch-protection
+ * context through this function, no matter what the ratified matrix says its
+ * target policy is. As of Q5 Phase 5, `PENDING_PROMOTION` is empty — every
+ * gate's raw matrix policy is now also its enforced policy.
  *
- * At `standard` this MUST equal (and today does equal) the pre-tiering
+ * Pre-Phase-5, `requiredJobs('standard')` equalled the pre-tiering
  * `REQUIRED_JOBS` literal exactly, in the same order — REQ-TIER-10's
- * no-op-migration guarantee.
+ * no-op-migration guarantee, which held for the duration of the staged
+ * rollout (Phases 1-4). Phase 5's promotions are a deliberate, ratified
+ * departure from that guarantee (design §4.1) — `standard` now also requires
+ * `phase-order`, `actor-check`, and `brain-writes-reviewed`.
  *
  * @param {'lite'|'standard'|'regulated'} tier
  * @returns {string[]}

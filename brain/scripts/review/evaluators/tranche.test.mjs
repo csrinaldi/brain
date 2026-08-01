@@ -77,16 +77,28 @@ test('evaluateTranche: budget re-derived over 400 lines → blocker finding quot
   assert.match(finding.evidence, /610/);
 });
 
-test('evaluateTranche: a detection-job warn is surfaced verbatim as an editorial finding, never a blocker', () => {
+test('evaluateTranche: actor-check (promoted to required in issue #358 Q5 Phase 5) failing is a BLOCKER, never editorial', () => {
   const rollup = greenRollup().map(g => (g.name === 'actor-check' ? { ...g, status: 'COMPLETED', conclusion: 'FAILURE' } : g));
   const result = evaluateTranche({ requiredGates: rollup, changedFiles: [], budget: { lines: 0, uncomputable: false } });
-  const finding = result.findings.find(f => f.id === 'detection:actor-check');
-  assert.ok(finding, 'expected the detection-job warn to be surfaced');
-  assert.equal(finding.severity, 'editorial');
+  const finding = result.findings.find(f => f.id === 'gate:actor-check');
+  assert.ok(finding, 'expected a blocker finding for the now-required actor-check gate');
+  assert.equal(finding.severity, 'blocker');
   assert.match(finding.evidence, /actor-check/);
   assert.match(finding.evidence, /FAILURE/);
-  // still allowed to APPROVE overall — a detection warn is not a blocker.
-  assert.equal(result.conclusion, 'APPROVE');
+  assert.equal(result.conclusion, 'REVISE');
+});
+
+// NOTE (issue #358 Q5 Phase 5): DETECTION_JOBS (governance-checks.mjs, derived
+// from requiredJobs('standard')) is currently EMPTY — Phase 5 promoted
+// phase-order/actor-check/brain-writes-reviewed, so every GOVERNANCE_JOBS
+// gate is now required at the default 'standard' tier. The editorial-finding
+// branch below (`detection:${name}`) is therefore presently unreachable via
+// real gate data; it stays correct dead code for the day a future gate is
+// staged through PENDING_PROMOTION again (governance-tiers.mjs).
+test("evaluateTranche: DETECTION_JOBS is currently empty (Q5 Phase 5 promoted every gate to required at 'standard') — no editorial findings are produced", () => {
+  assert.deepEqual(DETECTION_JOBS, []);
+  const result = evaluateTranche({ requiredGates: greenRollup(), changedFiles: [], budget: { lines: 0, uncomputable: false } });
+  assert.deepEqual(result.gates.detection, []);
 });
 
 test('evaluateTranche: an agent-authored write to the Tier-2 frontier is flagged', () => {

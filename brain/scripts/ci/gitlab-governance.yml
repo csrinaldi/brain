@@ -45,14 +45,19 @@
 # evaluateBrainWritesReviewed) stay UNCHANGED (ADR-0016 boundary).
 #
 # EXIT-CODE MAPPING (Decision 3, Amendment 3 — never flatten):
-#   REQUIRED jobs  (issue-link, diff-size, local-checks, memory-gate,
-#                   decision-gate) are NORMAL jobs — a non-zero exit BLOCKS
-#                   the MR.
-#   DETECTION jobs (phase-order, actor-check, brain-writes-reviewed) carry
-#                   `allow_failure: true` — a non-zero exit is VISIBLE
-#                   (red) but does NOT block the MR. This mirrors GitHub's
-#                   two-tier REQUIRED_JOBS/DETECTION_JOBS registry
-#                   (governance-checks.mjs) — see also REQ-A2-4.
+#   REQUIRED jobs (issue-link, diff-size, local-checks, memory-gate,
+#                  decision-gate, phase-order, actor-check,
+#                  brain-writes-reviewed) are NORMAL jobs — a non-zero exit
+#                  BLOCKS the MR. issue #358 Q5 Phase 5 promoted phase-order,
+#                  actor-check, and brain-writes-reviewed out of
+#                  DETECTION_JOBS (their `allow_failure: true` removed below)
+#                  — see governance-tiers.mjs's PENDING_PROMOTION history.
+#   DETECTION jobs are the empty remainder of GOVERNANCE_JOBS not in
+#                  REQUIRED_JOBS at the default 'standard' tier — currently
+#                  none — and would carry `allow_failure: true`: a non-zero
+#                  exit is VISIBLE (red) but does NOT block the MR. This
+#                  mirrors GitHub's two-tier REQUIRED_JOBS/DETECTION_JOBS
+#                  registry (governance-checks.mjs) — see also REQ-A2-4.
 #
 # Job names below are load-bearing: they MUST equal GOVERNANCE_JOBS
 # (governance-checks.mjs) exactly. A drift-guard test
@@ -118,26 +123,23 @@ decision-gate:
   script:
     - node brain/scripts/governance/run-check.mjs decision-gate
 
-# ── Invariant 6 (L4, detection-only) — SDD phase order ──────────────────────
+# ── Invariant 6 (L4) — SDD phase order (REQUIRED at standard/regulated) ────
 phase-order:
   extends: .governance_mr_rules
   stage: test
-  allow_failure: true
   script:
     - node brain/scripts/vcs/phase-order-check.mjs
 
-# ── Invariant 7 (L5, detection-only) — human-approval actor ────────────────
+# ── Invariant 7 (L5) — human-approval actor (REQUIRED) ─────────────────────
 actor-check:
   extends: .governance_mr_rules
   stage: test
-  allow_failure: true
   script:
     - node brain/scripts/vcs/actor-check.mjs
 
-# ── Invariant 8 (L6, detection-only) — brain-writes reviewed ───────────────
+# ── Invariant 8 (L6) — brain-writes reviewed (REQUIRED) ────────────────────
 brain-writes-reviewed:
   extends: .governance_mr_rules
   stage: test
-  allow_failure: true
   script:
     - node brain/scripts/vcs/brain-writes-reviewed.mjs

@@ -196,13 +196,15 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node brain/scripts/governance/run-check.mjs decision-gate
 
-  # ── Invariant 6 (L4, governance v3, detection-only) — SDD phase order ──────
+  # ── Invariant 6 (L4, governance v3) — SDD phase order ───────────────────────
   #
   # Wraps evaluatePhaseOrder() over the PR's diff + touched openspec/changes/**
-  # artifact state. Detection-only (DETECTION_JOBS, governance-checks.mjs):
-  # runs and reports on every PR but is NOT yet required at merge — promotion
-  # to REQUIRED_JOBS is a one-line move, gated on REQ-L4-5's zero-false-positive
-  # acceptance run (design §7).
+  # artifact state. Tier-scoped (issue #358 Q5 Phase 5, governance-tiers.mjs
+  # GATE_MATRIX['phase-order']): `required` at standard/regulated (promoted
+  # once phase-order-check.mjs's uncomputable-diff branch fail-closed, ADR-0015's
+  # precondition), stays `detection` at `lite` by proportionality (design §2.B).
+  # Runs and reports on every PR at every tier regardless (REQ-TIER-3);
+  # branch-protection membership is what varies (checkContexts(tier)).
   phase-order:
     name: phase-order
     runs-on: ubuntu-latest
@@ -211,7 +213,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: phase-order (SDD phase-order + artifact completeness, detection-only)
+      - name: phase-order (SDD phase-order + artifact completeness, tier-scoped)
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -219,20 +221,21 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node brain/scripts/vcs/phase-order-check.mjs
 
-  # ── Invariant 7 (L5, governance v3, detection-only) — human-approval actor ──
+  # ── Invariant 7 (L5, governance v3) — human-approval actor ──────────────────
   #
   # Wraps evaluateActor() over the status:approved labeling history of the
   # issue referenced by the PR body. Reuses the existing `permissions: issues:
   # read` (governance.yml:19) and the same issue-number extraction rules as the
-  # issue-link job. Detection-only (DETECTION_JOBS, governance-checks.mjs):
-  # runs and reports on every PR but is NOT yet required at merge.
+  # issue-link job. Never-tiered by position (REQ-TIER-2, governance-tiers.mjs
+  # GATE_MATRIX['actor-check']): `required` at every tier — promoted in issue
+  # #358 Q5 Phase 5, once REQ-L5-1's tiered evidence forms shipped (Phase 4).
   actor-check:
     name: actor-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: actor-check (status:approved actor differs from the author, detection-only)
+      - name: actor-check (status:approved actor differs from the author, tiered evidence)
         env:
           GH_TOKEN: ${{ github.token }}
           # PR_NUMBER lets ci-context.mjs source the author from the prView API
@@ -245,14 +248,15 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node brain/scripts/vcs/actor-check.mjs
 
-  # ── Invariant 8 (L6, governance v3, detection-only) — brain-writes reviewed ─
+  # ── Invariant 8 (L6, governance v3) — brain-writes reviewed ─────────────────
   #
   # Wraps evaluateBrainWritesReviewed() over the PR's changed files + its
   # review history. Reuses the existing `permissions: pull-requests: read`
-  # (governance.yml:18). Detection-only (DETECTION_JOBS, governance-checks.mjs):
-  # runs and reports on every PR but is NOT yet required at merge — REQ-L6-1
-  # evidence path (design §6.1); CODEOWNERS is a separate, optional rung-1
-  # enhancement (PR6b, design §6.2).
+  # (governance.yml:18). Never-tiered by position (REQ-TIER-2,
+  # governance-tiers.mjs GATE_MATRIX['brain-writes-reviewed']): `required` at
+  # every tier — promoted in issue #358 Q5 Phase 5, once REQ-L6-1' tiered
+  # evidence forms shipped (Phase 4). CODEOWNERS remains a separate, optional
+  # rung-1 enhancement (PR6b, design §6.2).
   brain-writes-reviewed:
     name: brain-writes-reviewed
     runs-on: ubuntu-latest
@@ -261,7 +265,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: brain-writes-reviewed (brain/core or brain/project changes carry a human review, detection-only)
+      - name: brain-writes-reviewed (brain/core or brain/project changes carry a human review, tiered evidence)
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}

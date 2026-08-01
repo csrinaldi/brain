@@ -141,23 +141,41 @@ test('REQ-TIER-8 (regression): GOVERNANCE_JOBS and GATE_MATRIX keys are the SAME
   assert.deepEqual([...GOVERNANCE_JOBS].sort(), Object.keys(GATE_MATRIX).sort());
 });
 
-// ── REQ-TIER-9 — requiredJobs(tier) reproduces today's shipped split at standard ──
+// ── REQ-TIER-9 — requiredJobs(tier), post Q5 Phase 5 promotions ─────────────
+//
+// Phase 5 (tasks.md) promoted actor-check, brain-writes-reviewed (all tiers)
+// and phase-order (standard/regulated) out of PENDING_PROMOTION — see
+// governance-tiers.mjs's STAGED ROLLOUT note. Pre-Phase-5,
+// requiredJobs('standard') equalled the pre-tiering REQUIRED_JOBS literal
+// exactly (REQ-TIER-10's no-op-migration guarantee); Phase 5 is a deliberate,
+// ratified departure from that guarantee (design §4.1), so `standard` now
+// also requires the three promoted gates.
 
-test("REQ-TIER-9/REQ-TIER-10: requiredJobs('standard') equals the pre-tiering REQUIRED_JOBS exactly, same order", () => {
+test("REQ-TIER-9: requiredJobs('standard') includes the Q5 Phase 5 promotions (phase-order, actor-check, brain-writes-reviewed), preserving GATE_MATRIX order", () => {
   assert.deepEqual(requiredJobs('standard'), [
     'issue-link',
     'diff-size',
     'local-checks',
     'memory-gate',
     'decision-gate',
+    'phase-order',
+    'actor-check',
+    'brain-writes-reviewed',
   ]);
 });
 
-test("requiredJobs('lite') demotes memory-gate only (design §5's measured cost)", () => {
-  assert.deepEqual(requiredJobs('lite'), ['issue-link', 'diff-size', 'local-checks', 'decision-gate']);
+test("requiredJobs('lite') demotes memory-gate and phase-order by position (proportionality, design §2.B); promotes actor-check/brain-writes-reviewed by evidence tiering (REQ-TIER-2, Phase 5)", () => {
+  assert.deepEqual(requiredJobs('lite'), [
+    'issue-link',
+    'diff-size',
+    'local-checks',
+    'decision-gate',
+    'actor-check',
+    'brain-writes-reviewed',
+  ]);
 });
 
-test("requiredJobs('regulated') is a superset of requiredJobs('standard') today (memory-gate stays required)", () => {
+test("requiredJobs('regulated') is a superset of requiredJobs('standard') (memory-gate, phase-order, actor-check, brain-writes-reviewed all stay required)", () => {
   const standard = requiredJobs('standard');
   const regulated = requiredJobs('regulated');
   for (const gate of standard) {
@@ -165,13 +183,19 @@ test("requiredJobs('regulated') is a superset of requiredJobs('standard') today 
   }
 });
 
-test('requiredJobs never includes a PENDING_PROMOTION gate at any tier, even though GATE_MATRIX declares it required (staged rollout safety)', () => {
+test('Q5 Phase 5: PENDING_PROMOTION is empty — requiredJobs() no longer filters actor-check/brain-writes-reviewed/phase-order out of the matrix-declared policy', () => {
   for (const tier of TIERS) {
     const required = requiredJobs(tier);
-    assert.ok(!required.includes('actor-check'), `actor-check must not be required at ${tier} yet (Phase 4 blocked on #328)`);
-    assert.ok(!required.includes('brain-writes-reviewed'), `brain-writes-reviewed must not be required at ${tier} yet (Phase 4 blocked on #328)`);
-    assert.ok(!required.includes('phase-order'), `phase-order must not be required at ${tier} yet (Phase 5 precondition unmet)`);
+    for (const gate of ['actor-check', 'brain-writes-reviewed']) {
+      assert.ok(
+        required.includes(gate),
+        `${gate} must be required at ${tier} post-Phase-5 (matrix declares it required at every tier)`
+      );
+    }
   }
+  assert.ok(!requiredJobs('lite').includes('phase-order'), 'phase-order stays detection at lite by design (proportionality), not PENDING_PROMOTION');
+  assert.ok(requiredJobs('standard').includes('phase-order'), 'phase-order is required at standard post-Phase-5');
+  assert.ok(requiredJobs('regulated').includes('phase-order'), 'phase-order is required at regulated post-Phase-5');
 });
 
 // ── REQ-TIER-10 — governance.tier defaults to standard ──────────────────────
