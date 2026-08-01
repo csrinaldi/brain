@@ -428,9 +428,17 @@ function defaultReadConfig() {
 /**
  * Runs the full L4 phase-order check: gathers inputs (git I/O), evaluates the
  * pure rules, and applies the baseline/grandfather exemption. Never throws —
- * an uncomputable diff (missing BASE_SHA/HEAD_SHA, or a failing git command)
- * degrades to `warn` rather than `fail`, keeping REQ-L4-5's zero-false-positive
- * goal intact while this job is detection-only (DETECTION_JOBS).
+ * but an uncomputable diff (missing BASE_SHA/HEAD_SHA, or a failing git
+ * command) now FAILS CLOSED (`level: 'fail'`) rather than degrading to `warn`
+ * (issue #358 Q5 Phase 5, ADR-0015's recorded precondition for promoting this
+ * gate to `required` at standard/regulated). A `warn` here used to be
+ * harmless while this job was detection-only everywhere: exit 0 either way.
+ * Once `standard`/`regulated` require this gate (governance-tiers.mjs
+ * `GATE_MATRIX['phase-order']`), an uncomputable diff degrading to `warn`
+ * would silently PASS artefact-presence verification it structurally cannot
+ * perform — a false positive masquerading as a hard guarantee. Failing closed
+ * means a PR whose diff this checker cannot compute must be fixed (or its CI
+ * environment fixed) before merge, never silently waved through.
  *
  * Rule A's artefact set is tier-scoped (issue #358 Q5, REQ-L4-2′):
  * `deps.tier` overrides tier resolution directly (tests); otherwise the tier
@@ -455,12 +463,13 @@ export function runPhaseOrderCheck(deps = {}) {
 
   if (!baseSha || !headSha) {
     return {
-      level: 'warn',
+      level: 'fail',
       findings: [
         {
           rule: 'wrapper',
-          level: 'warn',
-          message: 'BASE_SHA/HEAD_SHA not set — cannot compute diff; skipping phase-order check.',
+          level: 'fail',
+          message:
+            'diff uncomputable (cannot verify artefact presence): BASE_SHA/HEAD_SHA not set.',
         },
       ],
     };
@@ -471,12 +480,12 @@ export function runPhaseOrderCheck(deps = {}) {
     inputs = gatherPhaseOrderInputs({ baseSha, headSha, cwd, deps });
   } catch (err) {
     return {
-      level: 'warn',
+      level: 'fail',
       findings: [
         {
           rule: 'wrapper',
-          level: 'warn',
-          message: `phase-order-check: could not gather inputs — ${err.message}`,
+          level: 'fail',
+          message: `diff uncomputable (cannot verify artefact presence): ${err.message}`,
         },
       ],
     };
