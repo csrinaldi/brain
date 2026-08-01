@@ -213,8 +213,8 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assert.equal(result.body, '', 'a successfully-fetched-but-empty body must normalize to "", not null/undefined');
   });
 
-  // ── prReviews (issue #317 M10 Phase 2) ──────────────────────────────────
-  test(`${providerName}.prReviews (contract): happy fixture normalizes to entries of EXACTLY { state, author } — no body leak`, async () => {
+  // ── prReviews (issue #317 M10 Phase 2, fixed PR #383) ──────────────────────
+  test(`${providerName}.prReviews (contract): happy fixture normalizes to entries of EXACTLY { state, author, body }`, async () => {
     const fixtureName = `${providerName}-prReviews-happy.json`;
     const fixture = loadFixture(fixtureName);
     assertProvenance(fixture, fixtureName);
@@ -226,8 +226,8 @@ for (const providerName of Object.keys(PROVIDERS)) {
     for (const entry of result) {
       assert.deepEqual(
         Object.keys(entry).sort(),
-        ['author', 'state'],
-        'each prReviews entry must contain EXACTLY { author, state } — a body key (or any other future widening) must fail this lock',
+        ['author', 'body', 'state'],
+        'each prReviews entry must contain EXACTLY { author, body, state } — body is load-bearing for cold-boot verdict recovery (fixed PR #383)',
       );
     }
   });
