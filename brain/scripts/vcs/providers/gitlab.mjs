@@ -350,6 +350,49 @@ export async function prReviews({ project, number, apiBase, token, proxyUrl, fet
   return [...commented, ...approved];
 }
 
+/**
+ * prCommits — the provider-agnostic `prCommits` CONTRACT verb (issue #358
+ * Q5 Phase 4) over GitLab's MR-commits endpoint
+ * (`merge_requests/:iid/commits`). GitLab's commit entries carry only
+ * free-text git identity (`author_name`/`author_email`) — there is no
+ * account-linked commit author like GitHub's `author.login`, and resolving
+ * one would need a SECOND per-commit user lookup this verb does not make.
+ * `login` therefore normalizes to `null` for every entry — a documented
+ * residual (issue #358 Phase 6 KNOWN-LIMITATIONS): REQ-L5-1'-regulated's
+ * "approver authored no commit on the branch" evidence is uncomputable on
+ * GitLab today, and callers (`actor-check.mjs`) must treat an all-null
+ * login set as "cannot verify", never as "the approver authored zero
+ * commits". `at` (`committed_date`) still normalizes for `lite`'s
+ * distinct-act evidence, which needs only the head commit's timestamp, not
+ * authorship.
+ *
+ * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS from the
+ * caller (`gitlabApiConfig()`), exactly like `issueView`/`labelEvents` —
+ * this file is a GATE_FILE and never reads pipeline env directly. Never
+ * throws: a fetch failure (or a malformed, non-array response) is
+ * normalized to `null` (uncomputable) — never a fabricated `[]`.
+ *
+ * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<Array<{ sha: string, login: null, at: string|undefined }>|null>}
+ */
+export async function prCommits({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  let commits;
+  try {
+    commits = await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: token ?? vcsToken(PROVIDER),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/merge_requests/${number}/commits`,
+      fetchImpl,
+    });
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(commits)) return null;
+  return commits.map(c => ({ sha: c.id, login: null, at: c.committed_date }));
+}
+
 export async function issueList({ project, state = 'open', assignee } = {}) {
   let currentUser;
   if (assignee === 'me') currentUser = (await whoami()).username;

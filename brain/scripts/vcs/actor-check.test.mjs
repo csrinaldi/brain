@@ -20,6 +20,7 @@ import {
   filterLabeledEvents,
   gatherActorCheckInputs,
   runActorCheck,
+  compareTimestamps,
   main,
 } from './actor-check.mjs';
 
@@ -281,7 +282,8 @@ test('evaluateActor: lite tier with NO override label present passes on evidence
   const result = evaluateActor({
     author: 'alice',
     issueAuthor: 'bob',
-    labeledEvents: [{ actor: { login: 'carol' } }],
+    labeledEvents: [{ actor: { login: 'carol' }, at: '2024-01-01T00:10:00Z' }],
+    commits: [{ sha: 'abc', login: 'alice', at: '2024-01-01T00:00:00Z' }],
     botAllowlist: [],
     adminOverride: false,
     overrideRefused: false,
@@ -289,6 +291,203 @@ test('evaluateActor: lite tier with NO override label present passes on evidence
   });
   assert.equal(result.level, 'pass');
   assert.doesNotMatch(result.reason, /override/i);
+});
+
+// ── REQ-L5-1′: evidence tiering (issue #358 Q5 Phase 4) ────────────────────
+//
+// `lite` evaluates ONLY the distinct-act evidence (evaluateDistinctAct):
+// self-approval is not checked — a solo maintainer applying their own
+// approval strictly after their own push passes. `standard`/`regulated` keep
+// the pre-tiering distinct-actor (self-approval) check UNCHANGED
+// (REQ-TIER-10's no-op-migration guarantee — see the tests above, which
+// never supply `commits` and still exercise `standard`'s behavior via the
+// default tier). `regulated` additionally requires the approver to have
+// authored no commit on the branch.
+
+test('compareTimestamps: label strictly after the head commit → true', () => {
+  assert.equal(compareTimestamps('2024-01-01T00:10:00Z', '2024-01-01T00:00:00Z'), true);
+});
+
+test('compareTimestamps: label at or before the head commit → false', () => {
+  assert.equal(compareTimestamps('2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z'), false);
+  assert.equal(compareTimestamps('2023-12-31T23:00:00Z', '2024-01-01T00:00:00Z'), false);
+});
+
+test('compareTimestamps: either timestamp missing → null (uncomputable, never assumed)', () => {
+  assert.equal(compareTimestamps(undefined, '2024-01-01T00:00:00Z'), null);
+  assert.equal(compareTimestamps('2024-01-01T00:00:00Z', undefined), null);
+  assert.equal(compareTimestamps(null, null), null);
+});
+
+test('evaluateActor: lite — solo maintainer self-applies the approved label strictly after their own head-commit push → pass on distinct-act (design §4/REQ-L5-1′, #329)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:10:00Z' }],
+    commits: [{ sha: 'abc', login: 'alice', at: '2024-01-01T00:00:00Z' }],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass');
+  assert.match(result.reason, /distinct-act/i);
+});
+
+test('evaluateActor: lite — approval applied BEFORE the head commit was pushed → fail (approval before the code is not an approval)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: 'abc', login: 'alice', at: '2024-01-01T00:10:00Z' }],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /before the code/i);
+});
+
+test('evaluateActor: lite — commits uncomputable (null) → fail closed (an unreadable approval is not an approval)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:10:00Z' }],
+    commits: null,
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /unreadable/i);
+});
+
+test('evaluateActor: lite — label event carries no timestamp → fail closed', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' } }], // no `at`
+    commits: [{ sha: 'abc', login: 'alice', at: '2024-01-01T00:00:00Z' }],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail');
+});
+
+test('evaluateActor: regulated — distinct actor passes self-approval, but the approver also authored a commit on the branch → fail (REQ-L5-1′)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'bob' }, at: '2024-01-01T00:10:00Z' }],
+    commits: [
+      { sha: 'a1', login: 'alice', at: '2023-12-31T00:00:00Z' },
+      { sha: 'b2', login: 'bob', at: '2024-01-01T00:00:00Z' }, // bob (the approver) pushed a commit earlier
+    ],
+    tier: 'regulated',
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /authored at least one commit/i);
+});
+
+test('evaluateActor: regulated — distinct actor AND no commit authored by the approver → pass', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'bob' }, at: '2024-01-01T00:10:00Z' }],
+    commits: [{ sha: 'a1', login: 'alice', at: '2023-12-31T00:00:00Z' }],
+    tier: 'regulated',
+  });
+  assert.equal(result.level, 'pass');
+});
+
+test('evaluateActor: regulated — commit authorship uncomputable (e.g. GitLab\'s all-null logins) → warn, never a false fail', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'bob' }, at: '2024-01-01T00:10:00Z' }],
+    commits: [{ sha: 'a1', login: null, at: '2023-12-31T00:00:00Z' }],
+    tier: 'regulated',
+  });
+  assert.equal(result.level, 'warn');
+});
+
+test('evaluateActor: standard — unchanged, self-approval fails with no commits/timestamp evidence supplied at all (REQ-TIER-10 no-op-migration guarantee)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' } }], // no `at`, no `commits` — must not matter at standard
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /self/i);
+});
+
+// ── gatherActorCheckInputs: commits are fetched only when the tier needs them ──
+
+test('gatherActorCheckInputs: standard tier never calls fetchCommits (REQ-TIER-10 no-op-migration guarantee)', async () => {
+  let fetchCommitsCalled = false;
+  const deps = {
+    ...makeFakeDeps({ labeledEvents: [{ actor: { login: 'bob' } }] }),
+    fetchCommits: () => { fetchCommitsCalled = true; return []; },
+  };
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    prNumber: 7,
+    tier: 'standard',
+    deps,
+  });
+  assert.equal(fetchCommitsCalled, false, 'standard must never fetch commits — it is not part of its evidence form');
+  assert.equal(inputs.commits, null);
+});
+
+test('gatherActorCheckInputs: lite tier fetches commits via the injected fetchCommits when a prNumber is available', async () => {
+  const fakeCommits = [{ sha: 'abc', login: 'alice', at: '2024-01-01T00:00:00Z' }];
+  const deps = {
+    ...makeFakeDeps({ labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:10:00Z' }] }),
+    fetchCommits: prNumber => { assert.equal(prNumber, 7); return fakeCommits; },
+  };
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    prNumber: 7,
+    tier: 'lite',
+    deps,
+  });
+  assert.deepEqual(inputs.commits, fakeCommits);
+});
+
+test('gatherActorCheckInputs: regulated tier fetches commits via the injected fetchCommits', async () => {
+  const fakeCommits = [{ sha: 'abc', login: 'bob', at: '2024-01-01T00:00:00Z' }];
+  const deps = {
+    ...makeFakeDeps({ labeledEvents: [{ actor: { login: 'carol' } }] }),
+    fetchCommits: () => fakeCommits,
+  };
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    prNumber: 7,
+    tier: 'regulated',
+    deps,
+  });
+  assert.deepEqual(inputs.commits, fakeCommits);
+});
+
+test('gatherActorCheckInputs: lite tier with no resolvable prNumber → commits stays null (never throws)', async () => {
+  const deps = makeFakeDeps({ labeledEvents: [{ actor: { login: 'alice' } }] });
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    tier: 'lite',
+    deps,
+  });
+  assert.equal(inputs.commits, null);
+});
+
+// ── runActorCheck: lite end-to-end through the wrapper (ctx.prNumber wiring) ──
+
+test('runActorCheck: lite end-to-end — ctx.prNumber feeds gatherActorCheckInputs, distinct-act evidence passes', async () => {
+  const deps = {
+    ctx: { author: 'alice', repo: 'org/repo', targetBranch: 'main', body: 'Closes #144', prNumber: 7 },
+    tier: 'lite',
+    fetchLabeledEvents: () => [{ actor: { login: 'alice' }, at: '2024-01-01T00:10:00Z' }],
+    fetchIssue: () => ({ labels: ['status:approved'], author: 'alice' }),
+    fetchCommits: () => [{ sha: 'abc', login: 'alice', at: '2024-01-01T00:00:00Z' }],
+    readBotAllowlist: () => [],
+  };
+  const result = await runActorCheck(deps);
+  assert.equal(result.level, 'pass');
 });
 
 test('gatherActorCheckInputs: no resolvable issue number → empty labeledEvents + null issueAuthor (feeds the warn+pass branch)', async () => {
@@ -337,6 +536,13 @@ test('FIX2 end-to-end: Bob files the issue, Alice opens the PR, Bob self-labels 
     prBody: 'Closes #144',
     baseBranch: 'main',
     repo: 'org/repo',
+    // Pinned to 'standard' — see the "main: pass verdict" comment above
+    // (issue #358 Q5 Phase 4): this test is about the distinct-actor
+    // self-approval check, not tier-scoped evidence ('lite' does not
+    // evaluate self-approval at all — this repo's own brain.config.json
+    // declares 'lite', so an unpinned tier would silently exercise a
+    // different evidence form here).
+    tier: 'standard',
     fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
     fetchIssue: () => ({ labels: ['status:approved'], author: 'bob' }),
     readBotAllowlist: () => [],
@@ -379,6 +585,9 @@ test('runActorCheck: happy path end-to-end through the wrapper — human approva
     prBody: 'Closes #144',
     baseBranch: 'main',
     repo: 'org/repo',
+    // Pinned to 'standard' — see the "main: pass verdict" comment above
+    // (issue #358 Q5 Phase 4).
+    tier: 'standard',
     fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
     fetchIssue: () => ({ labels: ['status:approved'], author: 'alice' }),
     readBotAllowlist: () => [],
@@ -443,6 +652,13 @@ test('main: pass verdict → exit code 0', async () => {
     prBody: 'Closes #144',
     baseBranch: 'main',
     repo: 'org/repo',
+    // Pinned to 'standard' (issue #358 Q5 Phase 4): this repo's own
+    // brain.config.json declares "tier": "lite" (design.md §5), and this test
+    // is about the wrapper's exit-code mapping, not tier-scoped evidence — an
+    // unpinned tier would silently pick up the real repo's 'lite' evidence
+    // form (distinct-act) instead of the distinct-actor check this test means
+    // to exercise.
+    tier: 'standard',
     fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
     fetchIssue: () => ({ labels: ['status:approved'], author: 'alice' }),
     readBotAllowlist: () => [],
@@ -467,6 +683,10 @@ test('main: pass verdict → exit code 0', async () => {
 test('ci-context seam: ctx.author/ctx.repo/ctx.targetBranch feed the wrapper when deps.author/repo/baseBranch are absent', async () => {
   const deps = {
     ctx: { author: 'alice', repo: 'org/repo', targetBranch: 'main', body: 'Closes #144' },
+    // Pinned to 'standard' — see the "main: pass verdict" comment above
+    // (issue #358 Q5 Phase 4): this test is about ctx-seam wiring, not
+    // tier-scoped evidence.
+    tier: 'standard',
     fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
     fetchIssue: () => ({ labels: ['status:approved'], author: 'alice' }),
     readBotAllowlist: () => [],
@@ -484,6 +704,10 @@ test('ci-context seam: DETECTION consumer — ctx.body null (API failure) falls 
   const deps = {
     ctx: { author: 'alice', repo: 'org/repo', targetBranch: 'main', body: null },
     env: { PR_BODY: 'Closes #144' },
+    // Pinned to 'standard' — see the "main: pass verdict" comment above
+    // (issue #358 Q5 Phase 4): this test is about the PR_BODY fallback, not
+    // tier-scoped evidence.
+    tier: 'standard',
     fetchLabeledEvents: () => [{ actor: { login: 'bob' } }],
     fetchIssue: () => ({ labels: ['status:approved'], author: 'carol' }),
     readBotAllowlist: () => [],
