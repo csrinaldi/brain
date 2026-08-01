@@ -30,9 +30,12 @@
 //   - `actor-check`/`brain-writes-reviewed`'s REQ-L5-1'/REQ-L6-1' tiered
 //     evidence forms shipped in Phase 4 (commits `21cc250`, `732b243`),
 //     unblocked by #328 (PR #370).
-//   - `phase-order`'s uncomputable-diff branch now fails closed
-//     (`phase-order-check.mjs`'s `runPhaseOrderCheck`) instead of degrading to
-//     warn/exit 0 — ADR-0015's recorded precondition.
+//   - `phase-order`'s uncomputable-diff branch now fails closed at this gate's
+//     `required` tiers (standard/regulated) — ADR-0015's recorded
+//     precondition. At `lite` (this gate's `detection` tier) it still exits 0
+//     with a `::warning::` naming the tier, per REQ-TIER-3 (`phase-order-check.mjs`'s
+//     `runPhaseOrderCheck`, wired through `run-check.mjs`'s
+//     `mapDetectionToWarning` — issue #358 Q5 finding A).
 // `PENDING_PROMOTION` is therefore empty: `requiredJobs()` no longer filters
 // any gate out of the matrix's raw policy. Before Phase 5, wiring
 // `resolveGatePolicy`'s raw 'required' straight into a consumer's

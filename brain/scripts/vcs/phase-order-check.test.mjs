@@ -481,23 +481,90 @@ test('wrapper: fail path — impl change + zero checked tasks → main exits 1, 
   );
 });
 
-test('wrapper: missing BASE_SHA/HEAD_SHA fails closed (issue #358 Q5 Phase 5, ADR-0015 precondition), never throws', () => {
+// ── wrapper — uncomputable diff is tier-scoped (issue #358 Q5 finding A, REQ-TIER-3) ──
+//
+// `phase-order`'s policy is `required` at standard/regulated and `detection`
+// at `lite` (governance-tiers.mjs GATE_MATRIX). REQ-TIER-3 requires every
+// `detection`-policy job to still run and still exit 0 with a `::warning::`
+// naming the tier — never a hard block at a tier this gate does not block at.
+
+test('wrapper: standard tier — missing BASE_SHA/HEAD_SHA fails closed (issue #358 Q5 Phase 5, ADR-0015 precondition), never throws', () => {
   const deps = makeFakeDeps({ changedFiles: [] });
-  const result = runPhaseOrderCheck({ ...deps, baseSha: undefined, headSha: undefined });
+  const result = runPhaseOrderCheck({ ...deps, tier: 'standard', baseSha: undefined, headSha: undefined });
   assert.equal(result.level, 'fail');
   assert.match(result.findings[0].message, /diff uncomputable \(cannot verify artefact presence\)/);
 });
 
-test('wrapper: a failing/throwing git command (uncomputable diff) fails closed, never degrades to warn', () => {
+test('wrapper: regulated tier — missing BASE_SHA/HEAD_SHA fails closed', () => {
+  const deps = makeFakeDeps({ changedFiles: [] });
+  const result = runPhaseOrderCheck({ ...deps, tier: 'regulated', baseSha: undefined, headSha: undefined });
+  assert.equal(result.level, 'fail');
+  assert.match(result.findings[0].message, /diff uncomputable \(cannot verify artefact presence\)/);
+});
+
+test('wrapper: lite tier — missing BASE_SHA/HEAD_SHA degrades to a tier-named warning, exit 0 (REQ-TIER-3, issue #358 Q5 finding A)', () => {
+  const deps = makeFakeDeps({ changedFiles: [] });
+  const result = runPhaseOrderCheck({ ...deps, tier: 'lite', baseSha: undefined, headSha: undefined });
+  assert.equal(result.level, 'warn');
+  assert.match(result.findings[0].message, /^::warning::phase-order:/);
+  assert.match(result.findings[0].message, /\(tier: lite\)/);
+  assert.match(result.findings[0].message, /diff uncomputable \(cannot verify artefact presence\)/);
+
+  const lines = [];
+  const orig = console.log;
+  console.log = msg => lines.push(msg);
+  let exitCode;
+  try {
+    exitCode = main({ ...deps, tier: 'lite', baseSha: undefined, headSha: undefined });
+  } finally {
+    console.log = orig;
+  }
+  assert.equal(exitCode, 0, 'a detection-policy gate must exit 0, never block');
+});
+
+test('wrapper: standard tier — a failing/throwing git command (uncomputable diff) fails closed, never degrades to warn', () => {
   const deps = makeFakeDeps({ baseSha: 'BASE', headSha: 'HEAD', changedFiles: [] });
   const throwingDeps = {
     ...deps,
+    tier: 'standard',
     diffNameOnly: () => {
       throw new Error('git: fatal: bad revision');
     },
   };
   const result = runPhaseOrderCheck(throwingDeps);
   assert.equal(result.level, 'fail');
+  assert.match(result.findings[0].message, /diff uncomputable \(cannot verify artefact presence\)/);
+  assert.match(result.findings[0].message, /bad revision/);
+});
+
+test('wrapper: regulated tier — a failing/throwing git command (uncomputable diff) fails closed', () => {
+  const deps = makeFakeDeps({ baseSha: 'BASE', headSha: 'HEAD', changedFiles: [] });
+  const throwingDeps = {
+    ...deps,
+    tier: 'regulated',
+    diffNameOnly: () => {
+      throw new Error('git: fatal: bad revision');
+    },
+  };
+  const result = runPhaseOrderCheck(throwingDeps);
+  assert.equal(result.level, 'fail');
+  assert.match(result.findings[0].message, /diff uncomputable \(cannot verify artefact presence\)/);
+  assert.match(result.findings[0].message, /bad revision/);
+});
+
+test('wrapper: lite tier — a failing/throwing git command (uncomputable diff) degrades to a tier-named warning, exit 0', () => {
+  const deps = makeFakeDeps({ baseSha: 'BASE', headSha: 'HEAD', changedFiles: [] });
+  const throwingDeps = {
+    ...deps,
+    tier: 'lite',
+    diffNameOnly: () => {
+      throw new Error('git: fatal: bad revision');
+    },
+  };
+  const result = runPhaseOrderCheck(throwingDeps);
+  assert.equal(result.level, 'warn');
+  assert.match(result.findings[0].message, /^::warning::phase-order:/);
+  assert.match(result.findings[0].message, /\(tier: lite\)/);
   assert.match(result.findings[0].message, /diff uncomputable \(cannot verify artefact presence\)/);
   assert.match(result.findings[0].message, /bad revision/);
 });
@@ -593,11 +660,11 @@ test('ci-context seam: deps.ctx.baseSha/headSha are used when deps.baseSha/headS
   assert.notEqual(result.findings[0]?.message, 'BASE_SHA/HEAD_SHA not set — cannot compute diff; skipping phase-order check.');
 });
 
-test('ci-context seam: missing both deps.baseSha/headSha AND ctx → fails closed (never reads process.env directly, never degrades to warn)', () => {
+test('ci-context seam: missing both deps.baseSha/headSha AND ctx → fails closed at standard (never reads process.env directly, never silently degrades)', () => {
   const deps = makeFakeDeps({ changedFiles: [] });
   delete deps.baseSha;
   delete deps.headSha;
-  const result = runPhaseOrderCheck({ ...deps, ctx: { baseSha: null, headSha: null } });
+  const result = runPhaseOrderCheck({ ...deps, tier: 'standard', ctx: { baseSha: null, headSha: null } });
   assert.equal(result.level, 'fail');
 });
 

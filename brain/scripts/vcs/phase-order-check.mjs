@@ -17,6 +17,9 @@ import { loadContext } from './ci-context.mjs';
 import { archivePath, CHANGES_ROOT, LEGACY_GRANDFATHERED } from '../lib/sdd-layout.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { resolveTier, tierParams } from './governance-tiers.mjs';
+import { mapDetectionToWarning } from '../governance/run-check.mjs';
+
+const GATE_NAME = 'phase-order';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -426,19 +429,49 @@ function defaultReadConfig() {
 }
 
 /**
+ * Builds the uncomputable-diff verdict, tier-scoped per REQ-TIER-3 (issue
+ * #358 Q5, finding A): `phase-order`'s policy is `required` at
+ * `standard`/`regulated` and `detection` at `lite` (governance-tiers.mjs
+ * `GATE_MATRIX['phase-order']`). At a `required` tier the uncomputable diff
+ * still FAILS CLOSED (`level: 'fail'`, exit 1) — ADR-0015's recorded
+ * precondition for this gate's standard/regulated promotion (Phase 5): a PR
+ * whose diff this checker cannot compute must be fixed before merge, never
+ * silently waved through. At `lite` (`detection`), REQ-TIER-3 requires this
+ * job to still run and still surface the problem, but it MUST exit 0 with a
+ * `::warning::`-annotated reason naming the tier — never a hard block at a
+ * tier whose policy for this gate is not `required` ("every job whose lite
+ * policy is detection exits 0 with a warning annotation stating the tier as
+ * the reason"). `mapDetectionToWarning` (run-check.mjs, design §8) is the one
+ * shared helper every tier-aware check routes an uncomputable-diff result
+ * through, rather than duplicating the tier branch here.
+ *
+ * @param {string} message
+ * @param {'lite'|'standard'|'regulated'} tier
+ * @returns {{ level: 'warn'|'fail', findings: Array }}
+ */
+function uncomputableVerdict(message, tier) {
+  const mapped = mapDetectionToWarning({ pass: false, reason: message }, tier, GATE_NAME);
+  const level = mapped.pass ? 'warn' : 'fail';
+  return {
+    level,
+    findings: [
+      {
+        rule: 'wrapper',
+        level,
+        message: mapped.reason,
+      },
+    ],
+  };
+}
+
+/**
  * Runs the full L4 phase-order check: gathers inputs (git I/O), evaluates the
  * pure rules, and applies the baseline/grandfather exemption. Never throws —
- * but an uncomputable diff (missing BASE_SHA/HEAD_SHA, or a failing git
- * command) now FAILS CLOSED (`level: 'fail'`) rather than degrading to `warn`
- * (issue #358 Q5 Phase 5, ADR-0015's recorded precondition for promoting this
- * gate to `required` at standard/regulated). A `warn` here used to be
- * harmless while this job was detection-only everywhere: exit 0 either way.
- * Once `standard`/`regulated` require this gate (governance-tiers.mjs
- * `GATE_MATRIX['phase-order']`), an uncomputable diff degrading to `warn`
- * would silently PASS artefact-presence verification it structurally cannot
- * perform — a false positive masquerading as a hard guarantee. Failing closed
- * means a PR whose diff this checker cannot compute must be fixed (or its CI
- * environment fixed) before merge, never silently waved through.
+ * an uncomputable diff (missing BASE_SHA/HEAD_SHA, or a failing git command)
+ * is tier-scoped via `uncomputableVerdict()`: it fails closed at
+ * `standard`/`regulated` (`resolveGatePolicy('phase-order', tier) ===
+ * 'required'`) and degrades to a `::warning::`-annotated `warn` (exit 0) at
+ * `lite` (`'detection'`) — REQ-TIER-3, issue #358 Q5 finding A.
  *
  * Rule A's artefact set is tier-scoped (issue #358 Q5, REQ-L4-2′):
  * `deps.tier` overrides tier resolution directly (tests); otherwise the tier
@@ -462,33 +495,20 @@ export function runPhaseOrderCheck(deps = {}) {
   const artefacts = tierParams(tier).artefacts;
 
   if (!baseSha || !headSha) {
-    return {
-      level: 'fail',
-      findings: [
-        {
-          rule: 'wrapper',
-          level: 'fail',
-          message:
-            'diff uncomputable (cannot verify artefact presence): BASE_SHA/HEAD_SHA not set.',
-        },
-      ],
-    };
+    return uncomputableVerdict(
+      'diff uncomputable (cannot verify artefact presence): BASE_SHA/HEAD_SHA not set.',
+      tier
+    );
   }
 
   let inputs;
   try {
     inputs = gatherPhaseOrderInputs({ baseSha, headSha, cwd, deps });
   } catch (err) {
-    return {
-      level: 'fail',
-      findings: [
-        {
-          rule: 'wrapper',
-          level: 'fail',
-          message: `diff uncomputable (cannot verify artefact presence): ${err.message}`,
-        },
-      ],
-    };
+    return uncomputableVerdict(
+      `diff uncomputable (cannot verify artefact presence): ${err.message}`,
+      tier
+    );
   }
 
   return applyBaselineExemption(evaluatePhaseOrder({ ...inputs, artefacts }));

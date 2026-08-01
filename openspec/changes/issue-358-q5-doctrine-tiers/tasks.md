@@ -194,6 +194,23 @@ Committed: `732b243` — feat(governance): REQ-L6-1' evidence tiering for brain-
       commit `7e2d8f1`, merged via PR #390); now checked because this batch
       lands the actor-check/brain-writes-reviewed/phase-order promotion it was
       waiting to pair with.
+- [x] **Fix Q5 finding (A)** — the Phase 5 fail-close above was unconditional
+      (`level: 'fail'` on every uncomputable-diff path, ignoring tier),
+      violating REQ-TIER-3 at `lite`: `phase-order` is `detection` at `lite`,
+      and REQ-TIER-3 requires every `detection`-policy job to exit 0 with a
+      `::warning::` naming the tier, never a hard block. `runPhaseOrderCheck`
+      (`phase-order-check.mjs`) now routes both uncomputable-diff paths
+      through the shared `mapDetectionToWarning` helper (`run-check.mjs`,
+      previously exported but unwired): `standard`/`regulated`
+      (`resolveGatePolicy('phase-order', tier) === 'required'`) still fail
+      closed exactly as before; `lite` (`'detection'`) degrades to
+      `level: 'warn'`, exit 0, with a `::warning::phase-order: ... (tier:
+      lite)` reason. Tests: `phase-order-check.test.mjs` split the two
+      previously tier-implicit uncomputable-diff tests into explicit
+      `standard`/`regulated` (fail) and `lite` (warn, exit 0 via `main()`)
+      cases, plus the ci-context-seam test made its tier explicit
+      (`standard`) instead of relying on the real `brain.config.json`'s
+      `lite` declaration by accident.
 
   Follow-up test fixes required by this promotion (pre-existing tests written
   against the pre-Phase-5 "standard reproduces exactly today's REQUIRED_JOBS"
