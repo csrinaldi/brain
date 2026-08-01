@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { resolveBaseline, makeGitIsAncestor } from './merge-walk.mjs';
+import { resolveBaseline, makeGitIsAncestor, evaluateMerge } from './merge-walk.mjs';
 
 function makeRepo(dir) {
   const git = (...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
@@ -88,4 +88,89 @@ test('makeGitIsAncestor: false when baseline is NOT an ancestor of sha', (t) => 
   const isAncestor = makeGitIsAncestor(dir);
   // `side` is NOT an ancestor of mainTip (diverged branch) — baseline is NOT before sha.
   assert.equal(isAncestor(side, mainTip), false);
+});
+
+// ── evaluateMerge: tier-scoped diff budget (issue #358 Q5, REQ-TIER-9/REQ-TIER-6) ──
+//
+// CRITICAL fix: evaluateMerge used to call diffSize(numstat, ignoreList) with NO
+// budget argument, silently falling back to diff-size.mjs's own module-level
+// DEFAULT_BUDGET (400) — and honored size:exception unconditionally, with zero
+// tier awareness. Both are now explicit ctx params (`diffBudget`,
+// `honorSizeException`) resolved by the CALLER (brain-audit.mjs / brain-metrics.mjs)
+// from `tierParams(resolveTier(config))` — this layer stays pure and tier-agnostic.
+
+/** A resolutionGit stub that reports the tree-keyed failure as LIVE (not a
+ * cleanup revert) — `addedPathsAbsentAt` returns false because the added path
+ * is present both in the merge's own diff AND at the tip, so `evaluateMerge`
+ * never reaches (or needs) `netAddFull`. */
+function makeLiveTreeGitStub() {
+  return {
+    orThrow(argv) {
+      if (argv.includes('ls-tree')) return 'src/big.mjs\0';
+      if (argv.includes('--diff-filter=AM')) return 'src/big.mjs\0';
+      // `revertResurrectsAt` (nominable computation) — no removed lines to report;
+      // its result is irrelevant to these budget/waiver assertions.
+      if (argv.includes('--diff-filter=AMD')) return '';
+      throw new Error(`unexpected git call in test stub: ${argv.join(' ')}`);
+    },
+  };
+}
+
+test('evaluateMerge: lite tier (diffBudget 1000) passes a 900-line diff that would fail at the old hardcoded 400 default', () => {
+  const rec = evaluateMerge('deadbee', {
+    numstat: '900\t0\tsrc/big.mjs\n',
+    changedFiles: ['src/big.mjs'],
+    issueLinkBody: 'Closes #358',
+    prLabels: [],
+    ignoreList: [],
+    allObservations: [{ type: 'session_summary' }],
+    resolutionGit: makeLiveTreeGitStub(),
+    windowFrom: 'deadbee',
+    windowTo: 'deadbee',
+    diffBudget: 1000,
+    honorSizeException: true,
+    tier: 'lite',
+  });
+
+  assert.equal(rec.kind, 'pass', `expected pass at lite (900 <= 1000): ${JSON.stringify(rec)}`);
+  assert.equal(rec.realResults.diffSize.pass, true);
+});
+
+test('evaluateMerge: regulated tier (diffBudget 200, honorSizeException false) FAILS a 260-line diff even WITH size:exception present', () => {
+  const rec = evaluateMerge('deadbee', {
+    numstat: '260\t0\tsrc/big.mjs\n',
+    changedFiles: ['src/big.mjs'],
+    issueLinkBody: 'Closes #358',
+    prLabels: ['size:exception'],
+    ignoreList: [],
+    allObservations: [{ type: 'session_summary' }],
+    resolutionGit: makeLiveTreeGitStub(),
+    windowFrom: 'deadbee',
+    windowTo: 'deadbee',
+    diffBudget: 200,
+    honorSizeException: false,
+    tier: 'regulated',
+  });
+
+  assert.equal(rec.kind, 'fail', `expected fail at regulated (260 > 200, waiver refused): ${JSON.stringify(rec)}`);
+  assert.equal(rec.sizeSkipped, false, 'regulated must NOT honor size:exception');
+  const [, diffSizeResult] = rec.failures.find(([name]) => name === 'diffSize');
+  assert.match(diffSizeResult.reason, /size:exception is not honored/);
+  assert.match(diffSizeResult.reason, /"regulated" tier/);
+});
+
+test('evaluateMerge: with no diffBudget/honorSizeException supplied, falls back to the pre-tier 400/honored default (backward compatibility)', () => {
+  const rec = evaluateMerge('deadbee', {
+    numstat: '401\t0\tsrc/big.mjs\n',
+    changedFiles: ['src/big.mjs'],
+    issueLinkBody: 'Closes #358',
+    prLabels: [],
+    ignoreList: [],
+    allObservations: [{ type: 'session_summary' }],
+    resolutionGit: makeLiveTreeGitStub(),
+    windowFrom: 'deadbee',
+    windowTo: 'deadbee',
+  });
+
+  assert.equal(rec.kind, 'fail', `expected the legacy 400-line default to still apply when no budget is passed: ${JSON.stringify(rec)}`);
 });

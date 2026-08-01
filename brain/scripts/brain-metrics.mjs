@@ -40,6 +40,10 @@ import {
   listMerges, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge, resolvedSkipLine,
   resolveBaseline, makeGitIsAncestor,
 } from './lib/merge-walk.mjs';
+// Tier resolution (issue #358 Q5, REQ-TIER-9): metrics re-derives the SAME
+// verdict brain-audit computes (design D1) — it MUST resolve the same
+// tier-scoped diff budget and size:exception policy, never its own default.
+import { resolveTier, tierParams } from './vcs/governance-tiers.mjs';
 import { isAfterBaseline } from './lib/audit-helpers.mjs';
 import { selectIssueLinkBody, parsePrNumber } from './lib/audit-helpers.mjs';
 import { readRecordObservations } from './memory/lib/store.mjs';
@@ -385,9 +389,12 @@ async function evaluateOneMerge(sha, subject, ctx) {
     const { prLabels, prBody } = await fetchPrMeta(subject, vcs, config);
     const issueLinkBody = selectIssueLinkBody(prBody, body);
 
+    const tier = resolveTier(config);
+    const { diffBudget, honorSizeException } = tierParams(tier);
     const evalRec = evaluateMerge(sha, {
       numstat, changedFiles, issueLinkBody, prLabels, ignoreList, allObservations,
       resolutionGit, windowFrom, windowTo,
+      diffBudget, honorSizeException, tier,
     });
 
     // Lead time: the ISSUE this merge references (not the PR) — best-effort,

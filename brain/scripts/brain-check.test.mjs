@@ -84,3 +84,28 @@ test('brain-check: repo:check fails → exitCode 1', async () => {
   assert.ok(result.failures.some(f => f.check === 'repoCheck'),
     `expected repoCheck in failures: ${JSON.stringify(result.failures)}`);
 });
+
+// ── Tier-scoped diff-size budget (issue #358 Q5, REQ-TIER-9) ─────────────────
+//
+// CRITICAL fix: runCheck used to call diffSize(numstat, ignoreList) with no
+// budget, silently using diff-size.mjs's own hardcoded 400 default — the CLI
+// entry-point now resolves `tierParams(resolveTier(config)).diffBudget` and
+// passes it as `ctx.budget`.
+
+test('brain-check: budget=1000 (lite tier) passes a 900-line diff that would fail at the default 400', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const result = await runCheck(makeCtx({
+    numstat: '900\t0\tsrc/huge.mjs\n',
+    changedFiles: ['src/huge.mjs'],
+    budget: 1000,
+  }));
+  assert.equal(result.exitCode, 0,
+    `expected exit 0 at lite's 1000-line budget. Failures: ${JSON.stringify(result.failures)}`);
+});
+
+test('brain-check: no budget supplied falls back to the pre-tier 400-line default (backward compatibility)', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const result = await runCheck(makeCtx({ numstat: '401\t0\tsrc/huge.mjs\n' }));
+  assert.equal(result.exitCode, 1, 'expected the legacy 400-line default to still apply when no budget is passed');
+  assert.ok(result.failures.some(f => f.check === 'diffSize'));
+});

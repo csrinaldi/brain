@@ -20,6 +20,11 @@ import { issueLink } from './governance/checks/issue-link.mjs';
 import { adrPresence } from './governance/checks/adr-presence.mjs';
 import { memoryPresence } from './governance/checks/memory-presence.mjs';
 import { readRecordObservations } from './memory/lib/store.mjs';
+// Tier resolution (issue #358 Q5, REQ-TIER-9): brain:check is a local
+// golden-path verb, not a labeled-PR gate — it has no size:exception surface —
+// but its diff-size BUDGET must still come from the single tiered source, not
+// a second hardcoded 400 default (diffSize()'s own module-level fallback).
+import { resolveTier, tierParams } from './vcs/governance-tiers.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -34,11 +39,16 @@ function git(args, cwd = process.cwd()) {
 }
 
 function loadIgnoreList(cwd) {
+  const cfg = loadFullConfig(cwd);
+  return Array.isArray(cfg?.governance?.ignoreList) ? cfg.governance.ignoreList : [];
+}
+
+/** Load the full brain.config.json; returns {} on any error (never throws — resolveTier defaults to 'standard' on {}). */
+function loadFullConfig(cwd) {
   try {
-    const cfg = JSON.parse(readFileSync(resolve(cwd, 'brain.config.json'), 'utf8'));
-    return Array.isArray(cfg?.governance?.ignoreList) ? cfg.governance.ignoreList : [];
+    return JSON.parse(readFileSync(resolve(cwd, 'brain.config.json'), 'utf8'));
   } catch {
-    return [];
+    return {};
   }
 }
 
@@ -68,6 +78,10 @@ function spawnCommand(cmd, args, cwd) {
  * @param {string[]} ctx.ignoreList    brain.config.json governance.ignoreList.
  * @param {Array}    ctx.observations  Parsed engram observations for memoryPresence.
  *   Injected by tests or read from .memory/chunks/ in the CLI entry-point.
+ * @param {number}   [ctx.budget]      Tier-resolved diff-size budget (issue #358
+ *   Q5, REQ-TIER-9). Undefined falls through to diffSize()'s own 400-line
+ *   default (standard tier) — real callers resolve
+ *   `tierParams(resolveTier(config)).diffBudget` and pass it explicitly.
  * @param {Function} ctx.npmTestFn     Async fn() → {ok,output}. Injected for tests.
  * @param {Function} ctx.repoCheckFn   Async fn() → {ok,output}. Injected for tests.
  * @returns {Promise<{exitCode:number, failures:Array, summary:string}>}
@@ -78,11 +92,12 @@ export async function runCheck({
   prBody,
   ignoreList,
   observations = [],
+  budget,
   npmTestFn,
   repoCheckFn,
 }) {
   const checks = [
-    { check: 'diffSize',        result: diffSize(numstat, ignoreList) },
+    { check: 'diffSize',        result: diffSize(numstat, ignoreList, budget) },
     { check: 'issueLink',       result: issueLink(prBody) },
     { check: 'adrPresence',     result: adrPresence(changedFiles) },
     { check: 'memoryPresence',  result: memoryPresence(observations) },
@@ -118,6 +133,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // Use the last commit body as the PR body proxy for issueLink check.
   const prBody = git('log -1 --format=%B HEAD', cwd);
   const ignoreList = loadIgnoreList(cwd);
+  const config = loadFullConfig(cwd);
+  const budget = tierParams(resolveTier(config)).diffBudget;
 
   const observations = readRecordObservations({ recordsDir: join(cwd, '.memory', 'records') });
 
@@ -127,6 +144,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     prBody,
     ignoreList,
     observations,
+    budget,
     npmTestFn: () => spawnCommand('npm', ['test'], cwd),
     repoCheckFn: () => spawnCommand('node', ['brain/scripts/check-refs.mjs'], cwd),
   });
