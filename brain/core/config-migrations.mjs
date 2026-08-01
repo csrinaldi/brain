@@ -105,6 +105,22 @@ export const migrations = [
       reviewer: { handle: '', tokenEnv: 'BRAIN_REVIEWER_TOKEN' },
     },
   },
+  {
+    version: '0.9.0',
+    description:
+      'Add governance.tier: the declared doctrine axis (issue #358 Q5), orthogonal ' +
+      "to the detected substrate rung (ADR-0015). Default is 'standard' — REQ-TIER-10 " +
+      "requires 'standard' to be behaviourally equivalent to brain's pre-tier doctrine, " +
+      'so this migration is a no-op for every existing consumer (governance-tiers.mjs ' +
+      "resolves the SAME REQUIRED_JOBS/DETECTION_JOBS split at 'standard' as before " +
+      "tiering existed). A default of 'lite' is forbidden — it would silently weaken " +
+      'governance on upgrade. See ADR-0026.',
+    defaults: {
+      governance: {
+        tier: 'standard',
+      },
+    },
+  },
 ];
 
 // NOTE (issue #231 A2, human ruling in tasks.md/design.md): this entry is versioned
