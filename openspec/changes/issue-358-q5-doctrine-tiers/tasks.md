@@ -118,6 +118,9 @@ Committed: `6169909` — feat(governance): tier-scoped diff budget and artefacts
 
 ## Phase 4 — Evidence tiering
 
+Committed: `21cc250` — feat(governance): REQ-L5-1' evidence tiering for actor-check (Q5 Phase 4)
+Committed: `732b243` — feat(governance): REQ-L6-1' evidence tiering for brain-writes-reviewed (Q5 Phase 4)
+
 - [x] **UNBLOCKED on #328** — #328 (gate re-evaluation after approval) merged to
       main (PR #370); `labelEvents()`'s `at` field is real, observable evidence.
 - [x] `actor-check.mjs`: REQ-L5-1′ evidence forms; fail closed when the label-add
