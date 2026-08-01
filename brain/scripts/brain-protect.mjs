@@ -20,6 +20,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { checkContexts, diffArmedChecks } from './vcs/governance-checks.mjs';
+import { resolveTier } from './vcs/governance-tiers.mjs';
 import { t } from './i18n/t.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -118,7 +119,11 @@ export async function activateProtection() {
     process.exit(1);
   }
 
-  const checks = checkContexts();
+  // Tier-aware (issue #358 Q5, REQ-TIER-9): checkContexts() derives its
+  // required-context list from the SAME governance-tiers.mjs resolution
+  // run-check.mjs's exit-policy mapping uses — arming a stricter/looser set
+  // never drifts from what actually blocks merge at this repo's declared tier.
+  const checks = checkContexts(resolveTier(config));
   // Single-sourced (issue #203 review fix F5): branchProtect and verifyAfterArm
   // must agree on the armed branch by construction, not by coincidence — both
   // are passed this same variable explicitly rather than each hardcoding 'main'

@@ -23,6 +23,8 @@ import { fileURLToPath } from 'node:url';
 
 import { run } from './vcs/lib/exec.mjs';
 import { detectSubstrate } from './vcs/substrate.mjs';
+import { GOVERNANCE_JOBS } from './vcs/governance-checks.mjs';
+import { resolveTier, requiredJobs } from './vcs/governance-tiers.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..');
@@ -156,6 +158,46 @@ const RUNG_GUARANTEE = {
   2: 'the release/tag path fails closed on brain:audit violations before publish',
   3: 'post-merge CI auto-corrects violations after merge (auto-revert)',
 };
+
+/**
+ * Prints the tier × rung cross-product (issue #358 Q5, REQ-TIER-11). The tier
+ * is DECLARED (`governance.tier`); the rung is DETECTED (`detectSubstrate`) —
+ * printed as separate, labelled facts, never merged into one verdict that
+ * hides which axis produced it (REQ-TIER-4). Per gate, a doctrine-required
+ * gate on a substrate that cannot block (rung !== 1) is rendered as
+ * "required by doctrine, detection-only in substrate" — never as armed, and
+ * never silently omitted. Pure w.r.t. I/O — only writes to console.log, so
+ * it is trivially covered by the caller's tests (injected tier + substrate).
+ *
+ * @param {'lite'|'standard'|'regulated'} tier
+ * @param {Awaited<ReturnType<typeof detectSubstrate>>} substrate
+ */
+function printDoctrineReport(tier, substrate) {
+  console.log('  --- governance doctrine (tier x rung) ---');
+  console.log(`  tier ${tier} (declared)  ·  rung ${substrate.rung} (detected)`);
+
+  // The ACTUALLY-ENFORCED required set at this tier (governance-tiers.mjs's
+  // requiredJobs(), which additionally filters PENDING_PROMOTION gates whose
+  // evidence forms haven't landed yet — see governance-tiers.mjs's STAGED
+  // ROLLOUT note). Using this, rather than the raw matrix policy, keeps this
+  // report consistent with what checkContexts(tier) actually arms — the two
+  // consumer surfaces derive from the same source (REQ-TIER-9) and must never
+  // disagree here either.
+  const required = requiredJobs(tier);
+
+  for (const gate of GOVERNANCE_JOBS) {
+    if (required.includes(gate)) {
+      const composition = substrate.rung === 1
+        ? 'required by doctrine, enforced in substrate (rung 1)'
+        : `required by doctrine, detection-only in substrate (rung ${substrate.rung})`;
+      console.log(`  ${gate}: ${composition}`);
+    } else {
+      console.log(`  ${gate}: detection by doctrine (tier ${tier})`);
+    }
+  }
+
+  console.log('');
+}
 
 /**
  * Prints the governance substrate ladder report (REQ-HONESTY-1, REQ-HONESTY-2).
@@ -330,6 +372,13 @@ export async function reportGovernanceStatus({
 
   const substrate = await detectSubstrate({ config, vcs: providerModule, env, probes });
   printSubstrateReport(substrate);
+
+  // Tier x rung cross-product (issue #358 Q5, REQ-TIER-11). resolveTier()
+  // fails closed on an unrecognized governance.tier (REQ-TIER-1) — an invalid
+  // config MUST surface as an actionable error, never a silently-assumed
+  // default, so this is intentionally NOT wrapped in a try/catch.
+  const tier = resolveTier(config);
+  printDoctrineReport(tier, substrate);
 }
 
 // CLI guard — the report runs ONLY when this file is invoked directly

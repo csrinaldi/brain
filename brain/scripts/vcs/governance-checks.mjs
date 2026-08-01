@@ -1,48 +1,74 @@
 // governance-checks.mjs — Single source of truth for governance check contexts (S3).
 //
-// REQUIRED_JOBS and DETECTION_JOBS are the canonical names that must stay in sync
-// with the job name: fields in .github/workflows/governance.yml. GOVERNANCE_JOBS
-// is their union — the full set of jobs the YAML must define. A drift-guard unit test
-// parses the YAML and asserts the union matches — fail-closed.
+// GOVERNANCE_JOBS is the tier-independent full job set that must stay in sync with
+// the job name: fields in .github/workflows/governance.yml — every job runs and
+// reports at every tier (REQ-TIER-3); only its EXIT POLICY and branch-protection
+// membership vary by tier. A drift-guard unit test parses the YAML and asserts the
+// set matches — fail-closed.
 //
-// Two-tier registry (governance v3, design §7): a job can run and report
-// (DETECTION_JOBS) before it is required at merge (REQUIRED_JOBS). Branch protection
-// (via brain:protect / checkContexts()) requires REQUIRED_JOBS only. The
-// detection→prevention flip is a one-line move from DETECTION_JOBS to REQUIRED_JOBS —
-// no job code changes.
+// Two-tier registry (governance v3, design §7), now DERIVED from the tier matrix
+// (issue #358 Q5, REQ-TIER-9) instead of two hand-maintained literals:
+// `requiredJobs(tier)` (governance-tiers.mjs) replaces the old REQUIRED_JOBS
+// constant, and `checkContexts(tier)` derives branch-protection's required-context
+// list from the SAME resolution — neither surface may carry an independent copy of
+// the matrix (REQ-TIER-9).
 //
-// When adding a job: update REQUIRED_JOBS or DETECTION_JOBS here AND add the job to
+// REQUIRED_JOBS/DETECTION_JOBS stay exported as backward-compatible aliases,
+// computed from requiredJobs('standard') (the default, pre-tier-equivalent tier —
+// REQ-TIER-10) so every existing importer (review/evaluators/*, their tests, the
+// drift-guard tests below) keeps seeing exactly today's shipped split. New code
+// should call requiredJobs(tier)/checkContexts(tier) directly; migrating the
+// remaining literal-array importers to the tier-aware call is a tracked follow-up,
+// out of scope for #358 phases 1-3.
+//
+// When adding a job: add a GATE_MATRIX row (governance-tiers.mjs) AND add the job to
 // governance.yml in the same commit, or the drift-guard test turns red.
 
+import { requiredJobs } from './governance-tiers.mjs';
+
 /**
- * Load-bearing job names. These become the GitHub check context strings that branch
- * protection requires via checkContexts(). Never edit without also updating
- * governance.yml in the same commit.
+ * The full set of job names governance.yml must define — tier-independent
+ * (REQ-TIER-3: every job runs at every tier; only its exit policy varies). The
+ * drift-guard test asserts the YAML job name: fields equal this set, in this
+ * exact order (REQUIRED-today jobs first, then DETECTION-today jobs — mirrors
+ * governance.yml's job ordering).
  *
  * @type {string[]}
  */
-export const REQUIRED_JOBS = ['issue-link', 'diff-size', 'local-checks', 'memory-gate', 'decision-gate'];
+export const GOVERNANCE_JOBS = [
+  'issue-link',
+  'diff-size',
+  'local-checks',
+  'memory-gate',
+  'decision-gate',
+  'phase-order',
+  'actor-check',
+  'brain-writes-reviewed',
+];
 
 /**
- * Detection-only job names. These run and report in governance.yml but are NOT
- * required at merge — they exist to harden a check against false positives before
- * promotion. Promote a job by moving its name from DETECTION_JOBS to REQUIRED_JOBS.
+ * Deprecated backward-compatible alias for `requiredJobs('standard')`
+ * (governance-tiers.mjs). 'standard' is the default, pre-tier-equivalent
+ * doctrine (REQ-TIER-10), so this reproduces exactly what REQUIRED_JOBS was
+ * before tiering landed. Prefer `requiredJobs(tier)` in new code.
  *
  * @type {string[]}
  */
-export const DETECTION_JOBS = ['phase-order', 'actor-check', 'brain-writes-reviewed'];
+export const REQUIRED_JOBS = requiredJobs('standard');
 
 /**
- * The full set of job names governance.yml must define — the union of REQUIRED_JOBS
- * and DETECTION_JOBS. The drift-guard test asserts the YAML job name: fields equal
- * this set.
+ * Deprecated backward-compatible alias — the GOVERNANCE_JOBS not in
+ * REQUIRED_JOBS at the default 'standard' tier. Prefer resolving policy via
+ * `resolveGatePolicy(gate, tier)` (governance-tiers.mjs) in new code.
  *
  * @type {string[]}
  */
-export const GOVERNANCE_JOBS = [...REQUIRED_JOBS, ...DETECTION_JOBS];
+export const DETECTION_JOBS = GOVERNANCE_JOBS.filter(job => !REQUIRED_JOBS.includes(job));
 
 /**
- * Returns the required GitHub check-run names for branch protection.
+ * Returns the required GitHub check-run names for branch protection at a tier
+ * (REQ-TIER-9 — the SAME resolution `run-check.mjs`'s exit-policy mapping
+ * uses, via `governance-tiers.mjs#requiredJobs`).
  *
  * GitHub Actions names a check-run after the job's OWN `name:` field ONLY — the
  * workflow name is a UI grouping label shown next to the check, never part of the
@@ -50,12 +76,14 @@ export const GOVERNANCE_JOBS = [...REQUIRED_JOBS, ...DETECTION_JOBS];
  * {job.name}" prefix here would produce a required context that no check-run can
  * ever satisfy, silently hard-blocking every PR (issue #203; caught on PR #202
  * despite all REQUIRED_JOBS reporting green). This function derives contexts from
- * REQUIRED_JOBS only — DETECTION_JOBS run and report but never block merge.
+ * requiredJobs(tier) only — the rest of GOVERNANCE_JOBS run and report but never
+ * block merge at this tier.
  *
+ * @param {'lite'|'standard'|'regulated'} [tier='standard']
  * @returns {string[]}  e.g. ['issue-link', 'diff-size', 'local-checks']
  */
-export function checkContexts() {
-  return [...REQUIRED_JOBS];
+export function checkContexts(tier = 'standard') {
+  return [...requiredJobs(tier)];
 }
 
 /**

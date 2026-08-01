@@ -530,6 +530,103 @@ test('governance-status GitLab fixture: preReceive-declared-only — RUNG 1, pre
   assert.doesNotMatch(output, /pre-receive[^\n]*verified/i);
 });
 
+// ── Tier x rung cross-product (issue #358 Q5, REQ-TIER-11) ─────────────────
+
+test('reportGovernanceStatus: prints the declared tier and the detected rung as separate, labelled facts', async () => {
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: { ...baseConfig, governance: { tier: 'standard' } },
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => false,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /tier standard \(declared\)/);
+  assert.match(output, /rung 4 \(detected\)/);
+});
+
+test('reportGovernanceStatus: a required-by-doctrine gate on a non-rung-1 substrate renders "detection-only in substrate", never armed', async () => {
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: { ...baseConfig, governance: { tier: 'standard' } },
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => false,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /issue-link: required by doctrine, detection-only in substrate \(rung 4\)/);
+  assert.doesNotMatch(output, /issue-link: required by doctrine, enforced/);
+});
+
+test('reportGovernanceStatus: a required-by-doctrine gate on a rung-1 substrate renders as enforced, not detection-only', async () => {
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: { ...baseConfig, governance: { tier: 'standard' } },
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 200, contexts: OUR_CONTEXTS }),
+        releaseGate: async () => true,
+        postMergeCi: async () => true,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: true, codeownersPresent: true }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /issue-link: required by doctrine, enforced in substrate \(rung 1\)/);
+});
+
+test('reportGovernanceStatus: a lite-tier gate not required at this tier renders "detection by doctrine", never omitted', async () => {
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: { ...baseConfig, governance: { tier: 'lite' } },
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => false,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /tier lite \(declared\)/);
+  assert.match(output, /memory-gate: detection by doctrine \(tier lite\)/);
+});
+
+test('reportGovernanceStatus: an unrecognized governance.tier fails closed (rejects), never silently defaults', async () => {
+  await assert.rejects(() =>
+    reportGovernanceStatus({
+      config: { ...baseConfig, governance: { tier: 'enterprise' } },
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => false,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+});
+
 test('governance-status GitLab fixture: none armed — rung falls below 1, no false arming', async () => {
   const logs = await captureLog(() =>
     reportGovernanceStatus({

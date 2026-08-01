@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { runCheck, main } from './run-check.mjs';
+import { runCheck, main, mapDetectionToWarning } from './run-check.mjs';
 
 async function captureLog(fn) {
   const logs = [];
@@ -494,6 +494,73 @@ test('runCheck: diff-size — diffNumstat throws (git uncomputable) → fail clo
   });
   assert.equal(result.pass, false);
   assert.match(result.reason, /cannot compute diff — failing closed/i);
+});
+
+// ── mapDetectionToWarning (issue #358 Q5, design §8) — the shared helper ────
+
+test('mapDetectionToWarning: a required-policy gate at this tier passes the result through unchanged', () => {
+  const result = { pass: false, reason: 'boom' };
+  assert.deepEqual(mapDetectionToWarning(result, 'standard', 'diff-size'), result);
+});
+
+test('mapDetectionToWarning: a detection-policy gate downgrades a violation to pass:true with a ::warning:: reason naming the tier', () => {
+  const result = mapDetectionToWarning({ pass: false, reason: 'no session_summary found' }, 'lite', 'memory-gate');
+  assert.equal(result.pass, true);
+  assert.match(result.reason, /^::warning::memory-gate:/);
+  assert.match(result.reason, /\(tier: lite\)/);
+  assert.match(result.reason, /no session_summary found/);
+});
+
+test('mapDetectionToWarning: an uncomputable result is never downgraded, even at a detection-policy tier', () => {
+  const result = { pass: false, uncomputable: true, reason: 'cannot compute' };
+  assert.deepEqual(mapDetectionToWarning(result, 'lite', 'memory-gate'), result);
+});
+
+test('mapDetectionToWarning: a passing result is returned unchanged', () => {
+  const result = { pass: true };
+  assert.deepEqual(mapDetectionToWarning(result, 'lite', 'memory-gate'), result);
+});
+
+// ── diff-size — tiered budget + tiered size:exception (issue #358 Q5, REQ-TIER-6/9) ──
+
+test('runCheck: diff-size — regulated tier at 260 lines fails, naming the tier and refusing size:exception', async () => {
+  const result = await runCheck('diff-size', {
+    ctx: { labels: ['size:exception'], baseSha: 'BASE', headSha: 'HEAD' },
+    diffNumstat: () => '200\t60\tsrc/big.mjs', // 260 changed lines
+    readConfig: () => ({ governance: { tier: 'regulated' } }),
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /260/);
+  assert.match(result.reason, /regulated/);
+  assert.match(result.reason, /size:exception is not honored/i);
+});
+
+test('runCheck: diff-size — lite tier honors the 1000-line budget (400-line-legacy diff passes without exception)', async () => {
+  const result = await runCheck('diff-size', {
+    ctx: { labels: [], baseSha: 'BASE', headSha: 'HEAD' },
+    diffNumstat: () => '500\t200\tsrc/big.mjs', // 700 changed lines — over 400, under 1000
+    readConfig: () => ({ governance: { tier: 'lite' } }),
+  });
+  assert.equal(result.pass, true);
+});
+
+test('runCheck: diff-size — standard tier (default) still fails over 400 lines without size:exception', async () => {
+  const result = await runCheck('diff-size', {
+    ctx: { labels: [], baseSha: 'BASE', headSha: 'HEAD' },
+    diffNumstat: () => '300\t101\tsrc/big.mjs', // 401 changed lines
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /401/);
+});
+
+test('runCheck: diff-size — regulated tier under its 200-line budget still passes (no waiver needed)', async () => {
+  const result = await runCheck('diff-size', {
+    ctx: { labels: [], baseSha: 'BASE', headSha: 'HEAD' },
+    diffNumstat: () => '100\t50\tsrc/small.mjs', // 150 changed lines
+    readConfig: () => ({ governance: { tier: 'regulated' } }),
+  });
+  assert.deepEqual(result, { pass: true });
 });
 
 // ── behavior parity (task 2.6, CP-A2a ruling) ───────────────────────────────
