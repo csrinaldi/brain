@@ -162,16 +162,48 @@ Committed: `732b243` — feat(governance): REQ-L6-1' evidence tiering for brain-
 
 ## Phase 5 — Promotions (each precondition-gated, separate PRs)
 
-- [ ] Promote `actor-check` to `required` at all tiers — after Phase 4
-- [ ] Promote `brain-writes-reviewed` to `required` at all tiers — after Phase 4
-- [ ] Fail-close `phase-order`'s uncomputable-diff branch (ADR-0015's recorded
-      precondition), THEN promote at `standard`/`regulated`
-- [ ] `brain.config.json`: set `"tier": "lite"` — after the human gate. NOTE: this
-      is factually already true (`brain.config.json` has carried `"tier": "lite"`
-      since commit `7e2d8f1`, merged via PR #390) — left unchecked here because
-      the actor-check/brain-writes-reviewed promotion this Phase 5 task exists to
-      pair with has NOT landed yet (still blocked on Phase 4/#328); checking this
-      box in isolation would misstate the phase as done.
+- [x] Promote `actor-check` to `required` at all tiers — after Phase 4.
+      Removed from `PENDING_PROMOTION` (`governance-tiers.mjs`); `GATE_MATRIX`
+      already declared `required` at every tier from Phase 1-3. Tests: solo
+      maintainer at `lite` passes (distinct-act evidence), 2-person at
+      `standard` passes (distinct-actor evidence) — both already covered by
+      Phase 4's `actor-check.test.mjs`; `governance-tiers.test.mjs` and
+      `governance-checks.test.mjs` updated for the new `requiredJobs()`/
+      `checkContexts()` output. `.github/workflows/governance.yml` and
+      `brain/scripts/ci/gitlab-governance.yml` comments updated (GitLab's
+      `allow_failure: true` removed — drift-guard
+      `ci-context-drift-guard.test.mjs` enforces this).
+- [x] Promote `brain-writes-reviewed` to `required` at all tiers — after Phase 4.
+      Same mechanism as `actor-check` above. Tests: agent-authored `brain/**`
+      fails at all tiers (hard fail, Phase 4's unconditional agent-authorship
+      exclusion), human-approved at `standard` passes — both already covered
+      by Phase 4's `brain-writes-reviewed.test.mjs`.
+- [x] Fail-close `phase-order`'s uncomputable-diff branch (ADR-0015's recorded
+      precondition), THEN promote at `standard`/`regulated`. `runPhaseOrderCheck`
+      (`phase-order-check.mjs`) now returns `level: 'fail'` (message: "diff
+      uncomputable (cannot verify artefact presence)") for both uncomputable
+      paths — missing `BASE_SHA`/`HEAD_SHA` and a throwing git command —
+      instead of degrading to `warn`/exit 0. Removed `'phase-order'` from
+      `PENDING_PROMOTION`; `lite` stays `detection` (unaffected, since its raw
+      `GATE_MATRIX` policy at `lite` is `detection` by design, not by the
+      promotion list). Tests added: `phase-order-check.test.mjs` covers both
+      uncomputable paths failing closed; `governance-tiers.test.mjs` asserts
+      `phase-order` is required at `standard`/`regulated` and stays detection
+      at `lite`.
+- [x] `brain.config.json`: set `"tier": "lite"` — already true (carried since
+      commit `7e2d8f1`, merged via PR #390); now checked because this batch
+      lands the actor-check/brain-writes-reviewed/phase-order promotion it was
+      waiting to pair with.
+
+  Follow-up test fixes required by this promotion (pre-existing tests written
+  against the pre-Phase-5 "standard reproduces exactly today's REQUIRED_JOBS"
+  no-op-migration guarantee, now a deliberate, ratified departure per design
+  §4.1): `tranche.test.mjs`'s "detection-job warn" scenario rewritten as a
+  "promoted gate is now a blocker" scenario (real `DETECTION_JOBS` is now `[]`
+  at `standard`, so the editorial-finding branch is presently unreachable via
+  real gate data — documented, not silently dropped). Full repo suite green
+  except the 3 pre-existing, unrelated failures already noted in Phase 4
+  (`antigravity.drift.test.mjs`, `cli.backfill-issue.test.mjs` x2).
 
 ## Phase 6 — Documentation
 
