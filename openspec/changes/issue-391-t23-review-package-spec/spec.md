@@ -21,10 +21,10 @@ T2.3 delivers two formal specifications that close gaps left open by prior work:
 
 ## Acceptance Criteria
 
-- [ ] Both spec files are present and cross-referenced
-- [ ] All REQs in both specs are testable and cited against source
-- [ ] No behavioral change from this slice (spec-only)
-- [ ] design.md's activation condition is clear on the condition, not implementation
+- [x] Both spec files are present and cross-referenced — `specs/vcs-pr-reviews-contract/spec.md` and `specs/brain-review-protocol/spec.md` both exist; the latter cites `design.md` for `/2` activation ("Activation is design.md's responsibility").
+- [x] All REQs in both specs are testable and cited against source — 10 REQ-PRREV-* requirements (vcs-pr-reviews-contract) each carry a Unit/Integration/Design-citation verification method and source line citations; brain-review-protocol's REQs cite `schema-v2.mjs`/`verdict.mjs`.
+- [x] No behavioral change from this slice (spec-only) — confirmed: PR #392 merged with zero runtime code changes (`brain/scripts/**/*.mjs` untouched by this PR's diff).
+- [x] design.md's activation condition is clear on the condition, not implementation — design.md §3 states the condition (`governance.tier` alone) and explicitly defers wiring to a follow-up (§8, §9).
 
 ## Notes
 
