@@ -242,6 +242,55 @@ test('gatherActorCheckInputs: an override:* label present but NOT allow-listed d
   assert.equal(inputs.adminOverride, false);
 });
 
+// ── tier-scoped override:* (issue #358 Q5, REQ-TIER-6) ─────────────────────
+
+test('gatherActorCheckInputs: regulated tier refuses an allow-listed override:* label — adminOverride false, overrideRefused true', async () => {
+  const deps = makeFakeDeps({
+    labeledEvents: [{ actor: { login: 'alice' } }],
+    issueLabels: ['status:approved', 'override:incident-response'],
+    botAllowlist: ['override:incident-response'],
+  });
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    tier: 'regulated',
+    deps,
+  });
+  assert.equal(inputs.adminOverride, false, 'regulated must never honor override:*');
+  assert.equal(inputs.overrideRefused, true, 'the refusal must be surfaced, never silent');
+});
+
+test('evaluateActor: regulated + an allow-listed override:* still fails self-approval, naming the tier refusal (REQ-TIER-6)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    issueAuthor: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' } }],
+    botAllowlist: [],
+    adminOverride: false,
+    overrideRefused: true,
+    tier: 'regulated',
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /self-approval/);
+  assert.match(result.reason, /not honored at the "regulated" tier/);
+});
+
+test('evaluateActor: lite tier with NO override label present passes on evidence, verdict never mentions override (design §4, "lite passes on its own evidence")', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    issueAuthor: 'bob',
+    labeledEvents: [{ actor: { login: 'carol' } }],
+    botAllowlist: [],
+    adminOverride: false,
+    overrideRefused: false,
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass');
+  assert.doesNotMatch(result.reason, /override/i);
+});
+
 test('gatherActorCheckInputs: no resolvable issue number → empty labeledEvents + null issueAuthor (feeds the warn+pass branch)', async () => {
   const deps = makeFakeDeps({ labeledEvents: [{ actor: { login: 'bob' } }] });
   const inputs = await gatherActorCheckInputs({

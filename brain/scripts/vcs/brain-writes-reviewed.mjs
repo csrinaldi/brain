@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 import { loadContext, gitlabApiConfig } from './ci-context.mjs';
 import { getVcs } from './cli.mjs';
+import { resolveTier, tierParams } from './governance-tiers.mjs';
 
 // ── Pure evaluator (design §6.1) ────────────────────────────────────────────
 
@@ -59,8 +60,15 @@ const BRAIN_MANAGED_PREFIXES = ['brain/core/', 'brain/project/'];
  *   list; issue #266 two-key split, R2). Override:* label strings are NOT here;
  *   they resolve separately against `config.governance.approvalActors`.
  * @param {boolean} [input.adminOverride]  Whether an allow-listed `override:*`
- *   label is present on the PR (resolved by the wrapper against
- *   `botAllowlist` — never a blanket bypass).
+ *   label is present on the PR AND honored at this tier (resolved by the
+ *   wrapper against `botAllowlist` — never a blanket bypass).
+ * @param {boolean} [input.overrideRefused]  Whether an allow-listed
+ *   `override:*` label was present but NOT honored at this tier (issue #358
+ *   Q5, REQ-TIER-6 — `regulated` refuses the label). When true, the verdict
+ *   NAMES the refusal rather than silently proceeding as if the label were
+ *   absent.
+ * @param {'lite'|'standard'|'regulated'} [input.tier]  Only used for the
+ *   `overrideRefused` message text — never changes evaluation logic here.
  * @returns {{ level: 'pass'|'warn'|'fail', reason: string }}
  */
 export function evaluateBrainWritesReviewed({
@@ -69,7 +77,17 @@ export function evaluateBrainWritesReviewed({
   author,
   botAllowlist = [],
   adminOverride = false,
+  overrideRefused = false,
+  tier = 'standard',
 } = {}) {
+  const withRefusalNote = result => {
+    if (!overrideRefused || result.level === 'warn') return result;
+    return {
+      ...result,
+      reason: `${result.reason} (an override:* label was present but is not honored at the "${tier}" tier — refusing the bypass, REQ-TIER-6.)`,
+    };
+  };
+
   const touchesBrain = changedFiles.some(f =>
     BRAIN_MANAGED_PREFIXES.some(prefix => f.startsWith(prefix))
   );
@@ -113,18 +131,18 @@ export function evaluateBrainWritesReviewed({
   const humanApprover = approvers.find(a => a !== author && !botAllowlist.includes(a));
 
   if (humanApprover) {
-    return {
+    return withRefusalNote({
       level: 'pass',
       reason: `brain/core or brain/project changes approved by "${humanApprover}", distinct from the PR author "${author}".`,
-    };
+    });
   }
 
-  return {
+  return withRefusalNote({
     level: 'fail',
     reason:
       `brain/core or brain/project changes were only self-approved by "${author}" (or approved solely by ` +
       'allow-listed automation) — Tier-2 requires human review distinct from the author (agent-authorities.md).',
-  };
+  });
 }
 
 // ── gh/git I/O wrapper ───────────────────────────────────────────────────────
@@ -208,6 +226,22 @@ function defaultReadApprovalActors(cwd) {
 }
 
 /**
+ * Default `readConfig` dep: reads the raw brain.config.json object, used to
+ * resolve the tier (issue #358 Q5, REQ-TIER-6) for tier-scoping `override:*`.
+ * Never throws — an unreadable/missing config degrades to `{}`, which
+ * `resolveTier()` treats as the 'standard' default (REQ-TIER-10).
+ */
+function defaultReadConfig(cwd) {
+  return () => {
+    try {
+      return JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
+    } catch {
+      return {};
+    }
+  };
+}
+
+/**
  * Gathers evaluateBrainWritesReviewed()'s inputs from git + the gh API (or
  * from injected `deps` in tests). `adminOverride` is resolved here — an
  * override:* label is only honored when it is BOTH present on the PR AND listed
@@ -224,8 +258,13 @@ function defaultReadApprovalActors(cwd) {
  * Promise-returning dispatch); an injected sync `deps.fetchReviews` still
  * works unchanged (`await` on a non-Promise resolves immediately).
  *
- * @param {{ baseSha: string, headSha: string, prNumber: number|string, repo: string, author: string, provider?: string, prLabels?: string[], cwd?: string, deps?: object }} args
- * @returns {Promise<{ changedFiles: string[], reviews: Array, author: string, botAllowlist: string[], adminOverride: boolean }>}
+ * `adminOverride` is tier-scoped (issue #358 Q5, REQ-TIER-6): honored at
+ * `lite`/`standard`, refused at `regulated` (`tierParams(tier).honorOverride`).
+ * A present-but-refused override sets `overrideRefused: true` instead of
+ * silently vanishing — evaluateBrainWritesReviewed() names the refusal.
+ *
+ * @param {{ baseSha: string, headSha: string, prNumber: number|string, repo: string, author: string, provider?: string, prLabels?: string[], cwd?: string, tier?: string, deps?: object }} args
+ * @returns {Promise<{ changedFiles: string[], reviews: Array, author: string, botAllowlist: string[], adminOverride: boolean, overrideRefused: boolean, tier: string }>}
  */
 export async function gatherBrainWritesReviewedInputs({
   baseSha,
@@ -236,20 +275,26 @@ export async function gatherBrainWritesReviewedInputs({
   provider,
   prLabels = [],
   cwd = process.cwd(),
+  tier: tierOverride,
   deps = {},
 } = {}) {
   const diffNameOnly = deps.diffNameOnly ?? defaultDiffNameOnly(cwd);
   const fetchReviews = deps.fetchReviews ?? defaultFetchReviews(repo, provider, deps);
   const readBotAllowlist = deps.readBotAllowlist ?? defaultReadBotAllowlist(cwd);
   const readOverrideActors = deps.readOverrideActors ?? defaultReadApprovalActors(cwd);
+  const readConfig = deps.readConfig ?? defaultReadConfig(cwd);
+  const tier = tierOverride ?? deps.tier ?? resolveTier(readConfig());
+  const { honorOverride } = tierParams(tier);
 
   const botAllowlist = readBotAllowlist();
   const overrideActors = readOverrideActors();
   const changedFiles = diffNameOnly(baseSha, headSha);
   const reviews = await fetchReviews(prNumber);
-  const adminOverride = prLabels.some(l => l.startsWith('override:') && overrideActors.includes(l));
+  const overrideLabelPresent = prLabels.some(l => l.startsWith('override:') && overrideActors.includes(l));
+  const adminOverride = honorOverride && overrideLabelPresent;
+  const overrideRefused = overrideLabelPresent && !honorOverride;
 
-  return { changedFiles, reviews, author, botAllowlist, adminOverride };
+  return { changedFiles, reviews, author, botAllowlist, adminOverride, overrideRefused, tier };
 }
 
 /**

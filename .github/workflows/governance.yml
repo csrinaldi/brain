@@ -96,7 +96,14 @@ jobs:
             exit 1
           fi
 
-  # ── Invariant 2 — PR diff fits within the 400-line review budget ────────────
+  # ── Invariant 2 — PR diff fits within the tiered review budget ──────────────
+  #
+  # Tiered (issue #358 Q5, REQ-TIER-9): the budget (400 at the default
+  # 'standard' tier) and the size:exception waiver are BOTH resolved by
+  # run-check.mjs's diff-size case (governance-tiers.mjs#tierParams), the same
+  # path brain:protect/checkContexts() use — never a second bash-level literal
+  # or a second size:exception grep. PR_NUMBER/GH_TOKEN let ci-context.mjs
+  # fetch FRESH labels (never CI-frozen ones — design.md Decision 2).
   diff-size:
     name: diff-size
     runs-on: ubuntu-latest
@@ -105,28 +112,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Enforce diff size budget
+      - name: Enforce diff size budget (tiered)
         env:
-          # join() flattens the label array to a space-separated string because
-          # GitHub Actions has no array env — grep -qw then tests word membership.
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          if printf '%s' "$LABELS" | grep -qw 'size:exception'; then
-            echo "size:exception present — skipping diff-size gate."
-            exit 0
-          fi
-          # Pipe numstat to the helper script, which reads governance.ignoreList
-          # from brain.config.json in the repo root and applies glob exclusions.
-          changed=$(git diff --numstat "$BASE_SHA"..."$HEAD_SHA" \
-            | node brain/scripts/vcs/diff-size-count.mjs)
-          echo "Changed lines (ex-ignore-list): $changed"
-          if [ "$changed" -gt 400 ]; then
-            echo "::error::PR changes $changed lines (>400) without size:exception."
-            exit 1
-          fi
+        run: node brain/scripts/governance/run-check.mjs diff-size
 
   # ── Invariant 3 (L1, governance v3) — local-only checks run in CI too ───────
   #

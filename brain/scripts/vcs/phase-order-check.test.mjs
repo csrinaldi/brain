@@ -150,6 +150,62 @@ test('Rule A: touched change lacking a spec artifact (either convention, via has
   assert.match(ruleAFinding.message, /implementation without spec\.md\/design\.md/);
 });
 
+// ── Rule A — tier-scoped artefact set (issue #358 Q5, REQ-L4-2′) ──────────────
+
+test('Rule A (REQ-L4-2′): lite tier lands implementation with spec.md only — proposal/design/tasks missing still passes', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    changeDirs: [makeDir({ checkedTasks: 1, hasProposal: false, hasDesign: false, hasTasks: false })],
+    artefacts: ['spec'],
+  });
+  const ruleAFinding = result.findings.find(f => f.rule === 'A');
+  assert.equal(ruleAFinding, undefined, 'lite tier must not fail Rule A when only spec.md is required');
+});
+
+test('Rule A (REQ-L4-2′): lite tier still fails when spec.md itself is missing', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    changeDirs: [makeDir({ checkedTasks: 1, hasSpec: false })],
+    artefacts: ['spec'],
+  });
+  const ruleAFinding = result.findings.find(f => f.rule === 'A');
+  assert.ok(ruleAFinding, 'lite tier must still fail Rule A when spec.md is missing');
+  assert.match(ruleAFinding.message, /spec\.md/);
+});
+
+test('Rule A (REQ-L4-2′): standard tier (default artefacts) still demands design.md — same PR without design.md fails, naming it', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    changeDirs: [makeDir({ checkedTasks: 1, hasDesign: false })],
+    // artefacts omitted — defaults to the standard-tier four, exactly as
+    // every pre-tiering call site already exercises.
+  });
+  const ruleAFinding = result.findings.find(f => f.rule === 'A');
+  assert.ok(ruleAFinding, 'standard tier must fail Rule A when design.md is missing');
+  assert.match(ruleAFinding.message, /design\.md/);
+});
+
+test('Rule A (REQ-L4-2′): regulated artefact set additionally requires a recorded verification artefact', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    changeDirs: [makeDir({ checkedTasks: 1, hasVerification: false })],
+    artefacts: ['proposal', 'spec', 'design', 'tasks', 'verification'],
+  });
+  const ruleAFinding = result.findings.find(f => f.rule === 'A');
+  assert.ok(ruleAFinding, 'regulated tier must fail Rule A when the verification artefact is missing');
+  assert.match(ruleAFinding.message, /verification\.md/);
+});
+
+test('Rule A (REQ-L4-2′): regulated artefact set passes when all five artefacts (incl. verification) are present', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    changeDirs: [makeDir({ checkedTasks: 1, hasVerification: true })],
+    artefacts: ['proposal', 'spec', 'design', 'tasks', 'verification'],
+  });
+  const ruleAFinding = result.findings.find(f => f.rule === 'A');
+  assert.equal(ruleAFinding, undefined);
+});
+
 test('Rule A: planning-only PR (impl empty) is never subjected to Rule A, even with incomplete artifacts', () => {
   const result = evaluatePhaseOrder({
     changedFiles: ['openspec/changes/issue-999-foo/tasks.md'],
@@ -429,6 +485,63 @@ test('wrapper: missing BASE_SHA/HEAD_SHA degrades to warn, never throws or fails
   const deps = makeFakeDeps({ changedFiles: [] });
   const result = runPhaseOrderCheck({ ...deps, baseSha: undefined, headSha: undefined });
   assert.equal(result.level, 'warn');
+});
+
+// ── wrapper — tier-scoped artefact set (issue #358 Q5, REQ-L4-2′) ────────────
+
+test('wrapper: deps.tier="lite" passes Rule A with spec.md only, even though proposal/design/tasks are missing', () => {
+  const deps = makeFakeDeps({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    filesAfter: {
+      'openspec/changes/issue-999-foo/spec.md': '',
+      'openspec/changes/issue-999-foo/tasks.md': '---\nstatus: tasked\n---\n- [x] done\n',
+    },
+  });
+
+  const result = runPhaseOrderCheck({ ...deps, tier: 'lite' });
+  const ruleAFinding = result.findings.find(f => f.rule === 'A');
+  assert.equal(ruleAFinding, undefined, 'lite tier must not fail Rule A on the reduced artefact set');
+});
+
+test('wrapper: deps.tier="standard" (or omitted) still fails Rule A without design.md', () => {
+  const deps = makeFakeDeps({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    filesAfter: {
+      'openspec/changes/issue-999-foo/proposal.md': '',
+      'openspec/changes/issue-999-foo/spec.md': '',
+      'openspec/changes/issue-999-foo/tasks.md': '---\nstatus: tasked\n---\n- [x] done\n',
+    },
+  });
+
+  const result = runPhaseOrderCheck({ ...deps, tier: 'standard' });
+  const ruleAFinding = result.findings.find(f => f.rule === 'A');
+  assert.ok(ruleAFinding, 'standard tier must still require design.md');
+});
+
+test('wrapper: hasVerification is gathered from verify-report.md presence (regulated artefact set)', () => {
+  const deps = makeFakeDeps({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    filesAfter: {
+      ...COMPLETE_DIR_FILES,
+      'openspec/changes/issue-999-foo/verify-report.md': '',
+    },
+  });
+
+  const result = runPhaseOrderCheck({ ...deps, tier: 'regulated' });
+  const ruleAFinding = result.findings.find(f => f.rule === 'A');
+  assert.equal(ruleAFinding, undefined, 'regulated tier must pass Rule A when verify-report.md is present');
+});
+
+test('wrapper: regulated artefact set fails Rule A naming the missing verification artefact when verify-report.md is absent', () => {
+  const deps = makeFakeDeps({
+    changedFiles: ['brain/scripts/vcs/foo.mjs', 'openspec/changes/issue-999-foo/tasks.md'],
+    filesAfter: COMPLETE_DIR_FILES, // no verify-report.md
+  });
+
+  const result = runPhaseOrderCheck({ ...deps, tier: 'regulated' });
+  const ruleAFinding = result.findings.find(f => f.rule === 'A');
+  assert.ok(ruleAFinding, 'regulated tier must fail Rule A when verify-report.md is absent');
+  assert.match(ruleAFinding.message, /verification\.md/);
 });
 
 test('neutrality (REQ-NEUTRALITY-1): identical verdict with vs. without SKILL.md/.claude/** files present', () => {

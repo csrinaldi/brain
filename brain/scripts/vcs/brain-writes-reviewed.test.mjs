@@ -222,6 +222,53 @@ test('gatherBrainWritesReviewedInputs: an override:* label present but NOT allow
   assert.equal(inputs.adminOverride, false);
 });
 
+// ── tier-scoped override:* (issue #358 Q5, REQ-TIER-6) ─────────────────────
+
+test('gatherBrainWritesReviewedInputs: regulated tier refuses an allow-listed override:* label — adminOverride false, overrideRefused true', async () => {
+  const deps = makeFakeDeps({ overrideActors: ['override:incident-response'] });
+  const inputs = await gatherBrainWritesReviewedInputs({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    prLabels: ['override:incident-response'],
+    tier: 'regulated',
+    deps,
+  });
+  assert.equal(inputs.adminOverride, false, 'regulated must never honor override:*');
+  assert.equal(inputs.overrideRefused, true, 'the refusal must be surfaced, never silent');
+});
+
+test('evaluateBrainWritesReviewed: regulated + an allow-listed override:* still fails self-approval, naming the tier refusal (REQ-TIER-6)', () => {
+  const result = evaluateBrainWritesReviewed({
+    changedFiles: ['brain/core/foo.mjs'],
+    reviews: [{ state: 'APPROVED', author: 'alice' }],
+    author: 'alice',
+    botAllowlist: [],
+    adminOverride: false,
+    overrideRefused: true,
+    tier: 'regulated',
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /self-approved/);
+  assert.match(result.reason, /not honored at the "regulated" tier/);
+});
+
+test('evaluateBrainWritesReviewed: lite tier with NO override label present passes on agent-authorship-style evidence, verdict never mentions override', () => {
+  const result = evaluateBrainWritesReviewed({
+    changedFiles: ['brain/core/foo.mjs'],
+    reviews: [{ state: 'APPROVED', author: 'carol' }],
+    author: 'alice',
+    botAllowlist: [],
+    adminOverride: false,
+    overrideRefused: false,
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass');
+  assert.doesNotMatch(result.reason, /override/i);
+});
+
 // FIX1-style fail-open guard (unpaginated gh api list fetch truncates to page
 // 1) now lives with the code it guards: EXTRACTED into
 // github.mjs#prReviews (issue #239 A3 TASK2/4th-violation fix) — see

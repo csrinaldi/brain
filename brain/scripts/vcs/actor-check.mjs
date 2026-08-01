@@ -23,6 +23,7 @@ import { loadContext, resolveDetectionBody, gitlabApiConfig } from './ci-context
 import { getVcs } from './cli.mjs';
 import { resolveApprovedLabel } from '../governance/approved-label.mjs';
 import { CLOSING_RE, CHAIN_RE } from '../governance/checks/issue-ref-patterns.mjs';
+import { resolveTier, tierParams } from './governance-tiers.mjs';
 
 // ── Pure evaluator (design §5 step 5) ───────────────────────────────────────
 
@@ -58,8 +59,16 @@ import { CLOSING_RE, CHAIN_RE } from '../governance/checks/issue-ref-patterns.mj
  * @param {string[]} [input.botAllowlist]  Allow-listed actor logins / override
  *   label strings (`config.governance.approvalActors`).
  * @param {boolean} [input.adminOverride]  Whether an allow-listed `override:*`
- *   label is present on the issue (resolved by the wrapper against
- *   `botAllowlist` — never a blanket bypass, REQ-L5-2).
+ *   label is present on the issue AND honored at this tier (resolved by the
+ *   wrapper against `botAllowlist` — never a blanket bypass, REQ-L5-2).
+ * @param {boolean} [input.overrideRefused]  Whether an allow-listed
+ *   `override:*` label was present but NOT honored at this tier (issue #358
+ *   Q5, REQ-TIER-6 — `regulated` refuses the label). When true, the verdict
+ *   NAMES the refusal rather than silently proceeding as if the label were
+ *   absent.
+ * @param {'lite'|'standard'|'regulated'} [input.tier]  Only used for the
+ *   `overrideRefused` message text — never changes evaluation logic here
+ *   (the wrapper already resolved honoring via `tierParams(tier)`).
  * @returns {{ level: 'pass'|'warn'|'fail', reason: string }}
  */
 export function evaluateActor({
@@ -68,7 +77,17 @@ export function evaluateActor({
   labeledEvents = [],
   botAllowlist = [],
   adminOverride = false,
+  overrideRefused = false,
+  tier = 'standard',
 } = {}) {
+  const withRefusalNote = result => {
+    if (!overrideRefused || result.level === 'warn') return result;
+    return {
+      ...result,
+      reason: `${result.reason} (an override:* label was present but is not honored at the "${tier}" tier — refusing the bypass, REQ-TIER-6.)`,
+    };
+  };
+
   if (labeledEvents.length === 0) {
     return {
       level: 'warn',
@@ -88,24 +107,24 @@ export function evaluateActor({
   }
 
   if (actor && botAllowlist.includes(actor)) {
-    return {
+    return withRefusalNote({
       level: 'pass',
       reason: `the approved label was applied by allow-listed automation identity "${actor}".`,
-    };
+    });
   }
 
   if (actor === author || (issueAuthor && actor === issueAuthor)) {
     const matched = actor === author ? 'PR author' : 'issue author';
-    return {
+    return withRefusalNote({
       level: 'fail',
       reason: `the approved label was self-applied by "${actor}" (matches the ${matched}) — self-approval is not allowed.`,
-    };
+    });
   }
 
-  return {
+  return withRefusalNote({
     level: 'pass',
     reason: `the approved label was applied by "${actor}", distinct from the PR author "${author}" and the issue author "${issueAuthor ?? 'n/a'}".`,
-  };
+  });
 }
 
 // ── Issue-number extraction (reused rules from governance.yml's issue-link job) ─
@@ -261,12 +280,20 @@ function defaultReadConfig(cwd) {
  * `deps.fetchLabeledEvents` still works unchanged (`await` on a
  * non-Promise resolves immediately to that same value).
  *
- * @param {{ author: string, prBody: string, baseBranch: string, repo: string, provider?: string, cwd?: string, deps?: object }} args
- * @returns {Promise<{ author: string, issueAuthor: string|null, labeledEvents: Array, botAllowlist: string[], adminOverride: boolean }>}
+ * `adminOverride` is tier-scoped (issue #358 Q5, REQ-TIER-6): honored at
+ * `lite`/`standard`, refused at `regulated` (`tierParams(tier).honorOverride`).
+ * A present-but-refused override sets `overrideRefused: true` instead of
+ * silently vanishing — evaluateActor() names the refusal in its verdict.
+ *
+ * @param {{ author: string, prBody: string, baseBranch: string, repo: string, provider?: string, cwd?: string, tier?: string, deps?: object }} args
+ * @returns {Promise<{ author: string, issueAuthor: string|null, labeledEvents: Array, botAllowlist: string[], adminOverride: boolean, overrideRefused: boolean, tier: string }>}
  */
-export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, cwd = process.cwd(), deps = {} } = {}) {
+export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, cwd = process.cwd(), tier: tierOverride, deps = {} } = {}) {
   const readConfig = deps.readConfig ?? defaultReadConfig(cwd);
-  const approvedLabel = resolveApprovedLabel(readConfig(), provider);
+  const config = readConfig();
+  const approvedLabel = resolveApprovedLabel(config, provider);
+  const tier = tierOverride ?? deps.tier ?? resolveTier(config);
+  const { honorOverride } = tierParams(tier);
 
   const fetchLabeledEvents = deps.fetchLabeledEvents ?? defaultFetchLabeledEvents(repo, provider, approvedLabel, deps);
   const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(repo, provider, deps);
@@ -276,14 +303,16 @@ export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo,
   const issueNumber = extractIssueNumber(prBody, baseBranch);
 
   if (issueNumber == null) {
-    return { author, issueAuthor: null, labeledEvents: [], botAllowlist, adminOverride: false };
+    return { author, issueAuthor: null, labeledEvents: [], botAllowlist, adminOverride: false, overrideRefused: false, tier };
   }
 
   const labeledEvents = await fetchLabeledEvents(issueNumber);
   const { labels: issueLabels, author: issueAuthor } = await fetchIssue(issueNumber);
-  const adminOverride = issueLabels.some(l => l.startsWith('override:') && botAllowlist.includes(l));
+  const overrideLabelPresent = issueLabels.some(l => l.startsWith('override:') && botAllowlist.includes(l));
+  const adminOverride = honorOverride && overrideLabelPresent;
+  const overrideRefused = overrideLabelPresent && !honorOverride;
 
-  return { author, issueAuthor, labeledEvents, botAllowlist, adminOverride };
+  return { author, issueAuthor, labeledEvents, botAllowlist, adminOverride, overrideRefused, tier };
 }
 
 /**
