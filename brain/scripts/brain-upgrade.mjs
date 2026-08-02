@@ -95,10 +95,12 @@ console.log(`\n${C.bold}brain:upgrade${C.reset} ${tag ? `→ ${C.cyan}${tag}${C.
 // action kills the process instantly, which is the one thing that CAN leave a
 // half-applied tree. With one, the 23ms batch finishes and the tree is whole.
 //
-// The window that actually matters is the npm install above (seconds, not
-// milliseconds). A signal during it is delivered at the first await afterwards —
-// checked below, before a single managed path is touched, so it exits with zero
-// writes. That is the real Ctrl-C path, and it is now safe.
+// What these handlers do NOT cover — and an earlier revision of this comment got
+// wrong: a signal during the package install above kills the CHILD, and spawnSync
+// returns synchronously with `{ status: null, signal }`. That path never reaches
+// the flag check below; it is handled at the install step itself, which reports
+// the interrupt and exits 128+signal. The flag below covers only a signal
+// delivered at an await AFTER the install returned normally.
 let interrupted = null;
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { interrupted ??= sig; });
@@ -117,6 +119,15 @@ if (!noInstall) {
   } else {
     info(`Installing ${spec} ...`);
     const r = spawnSync(pm.installArgs[0], [...pm.installArgs.slice(1), spec], { stdio: 'inherit', cwd: ROOT });
+    // Signal BEFORE status, and this order is load-bearing. A child killed by a
+    // signal reports `status: null`, so testing status first reports a plain
+    // Ctrl-C as "install failed — check repo access", and collapses the
+    // conventional 128+signal exit code into a bare 1. Nothing has been copied at
+    // this point on either path.
+    if (r.signal) {
+      console.error(`\n  ${C.red}✗${C.reset} Install interrupted by ${r.signal} — no managed path was written.`);
+      process.exit(r.signal === 'SIGTERM' ? 143 : 130);
+    }
     if (r.status !== 0) die(`${pm.name} install failed — check repo access and that the tag exists.`);
     ok('Package installed.');
   }
@@ -152,13 +163,19 @@ try {
   // restores those bytes before re-throwing (#396), so there is normally nothing
   // half-applied to repair by hand. Say which of the two it was — a rollback that
   // only partly worked must never be reported as a clean one.
-  console.error(`  ${C.red}✗${C.reset} Upgrade failed while writing managed paths: ${err.message}`);
-  if (err.rollbackIncomplete?.length) {
+  console.error(`  ${C.red}✗${C.reset} Upgrade failed while writing managed paths: ${err?.message ?? err}`);
+  if (err?.rollbackIncomplete?.length) {
     warn(`Rollback could NOT restore ${err.rollbackIncomplete.length} path(s) — still modified:`);
     for (const f of err.rollbackIncomplete) console.log(`      ${C.dim}${f}${C.reset}`);
+    if (err.rollbackSnapshotDir) {
+      info(`Their pre-copy bytes were KEPT at ${err.rollbackSnapshotDir} — restore from there, then delete it.`);
+    }
     die('The tree is NOT fully restored. Inspect the paths above before retrying.');
   }
-  die('Every managed path was rolled back to its pre-upgrade state — the tree is unchanged.');
+  // Scoped deliberately. Step 1 already ran the package install, which rewrote
+  // package.json, the lockfile and node_modules BEFORE any snapshot was taken —
+  // so "the tree is unchanged" would be a false statement to print here.
+  die('Every managed path was rolled back to the bytes it had before the copy. The dependency install was NOT reverted.');
 }
 
 // ── Collision report ────────────────────────────────────────────────────────────
@@ -228,10 +245,14 @@ if (!existsSync(configPath)) {
 console.log(`\n${C.green}Done.${C.reset} Review the diff and commit. ${C.dim}core is read-only — improvements go upstream.${C.reset}`);
 console.log(`${C.dim}Tip:${C.reset} run ${C.cyan}npm run env:init${C.reset} to (re)configure git hooks (${C.dim}core.hooksPath${C.reset} is per-clone, not committed) and the environment. ${C.dim}day:start also self-heals it.${C.reset}\n`);
 
-// An interrupt that arrived after the write began could not stop it (see the
-// note above the handlers). Report the completed upgrade honestly, then honour
-// the signal in the exit code — the tree is whole, so there is nothing to undo.
+// A deferred interrupt. Exactly WHEN it landed is not knowable here — it may have
+// arrived during the write, the config migration, or this summary — so the report
+// states only what is certain, then honours the signal in the exit code.
 if (interrupted) {
-  warn(`${interrupted} arrived after the managed-path write had started. That write is not interruptible, so it completed: the tree is fully upgraded, NOT half-applied. Nothing to clean up.`);
-  process.exit(130);
+  if (dryRun) {
+    warn(`${interrupted} received during a dry run — nothing was written.`);
+  } else {
+    warn(`${interrupted} was received and deferred. The managed-path write is a single synchronous batch that a signal cannot interrupt, so it ran to completion: the upgrade is applied, not half-applied. Nothing to clean up.`);
+  }
+  process.exit(interrupted === 'SIGTERM' ? 143 : 130);
 }

@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, lstatSync, statSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -1241,6 +1241,163 @@ test('copyManaged: rollback prunes directories the write had to create (REQ-S6-7
 
     assert.ok(!existsSync(join(dest, 'brain', 'core', 'newdir')),
       'rollback must leave no empty scaffolding from directories it created');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// The dominant shape: 364 of the 366 real managed files are plain copies, only 2
+// are merges. Write order is sorted (see copyManaged), so `a-first` is copied
+// before `z-sub/boom` deterministically — without that sort this test would
+// depend on readdirSync's order and could pass vacuously.
+test('copyManaged: a copy-phase throw rolls back an EARLIER copy in the same phase (REQ-S6-10)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-10-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core', 'z-sub'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'a-first.md'), 'NEW');
+    writeFileSync(join(src, 'brain', 'core', 'z-sub', 'boom.md'), 'NEW');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'a-first.md'), 'OLD');
+    writeFileSync(join(dest, 'brain', 'core', 'z-sub'), 'NOT A DIRECTORY');
+
+    assert.throws(() => copyManaged({
+      srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [],
+    }));
+
+    assert.equal(readFileSync(join(dest, 'brain', 'core', 'a-first.md'), 'utf8'), 'OLD',
+      'a plain copy that already succeeded must be rolled back when a later copy throws');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: an incomplete rollback KEEPS the snapshot (REQ-S6-11)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-11-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'x.md'), 'NEW');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'x.md'), 'PRECIOUS');
+
+    let caught;
+    try {
+      copyManaged({
+        srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [],
+        specialMerge: {
+          'brain/core/x.md': (destPath) => {
+            // Make the path unrestorable: a directory now stands where the file was,
+            // so restore()'s copyFileSync will throw EISDIR.
+            rmSync(destPath);
+            mkdirSync(destPath);
+            throw new Error('merge exploded');
+          },
+        },
+      });
+    } catch (err) { caught = err; }
+
+    assert.ok(caught?.rollbackIncomplete?.includes('brain/core/x.md'),
+      'the unrestorable path must be reported on the error');
+    assert.equal(
+      readFileSync(join(dest, RESTORE_POINT_DIR, 'brain', 'core', 'x.md'), 'utf8'),
+      'PRECIOUS',
+      'the snapshot is the only surviving copy of those bytes — it must NOT be discarded',
+    );
+    assert.equal(caught.rollbackSnapshotDir, join(dest, RESTORE_POINT_DIR),
+      'the caller must be told where the surviving snapshot is');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: a non-Error throw still carries the rollback state (REQ-S6-12)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-12-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'x.md'), 'NEW');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'x.md'), 'PRECIOUS');
+
+    let caught;
+    try {
+      copyManaged({
+        srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [],
+        specialMerge: {
+          'brain/core/x.md': (destPath) => {
+            rmSync(destPath);
+            mkdirSync(destPath);
+            throw 'a bare string, not an Error';  // modules are strict mode
+          },
+        },
+      });
+    } catch (err) { caught = err; }
+
+    // The naive `err.rollbackIncomplete = failed` threw a TypeError here, which
+    // replaced the real failure AND dropped the dirty-tree signal — so the CLI
+    // reported a clean rollback over a dirty tree.
+    assert.ok(caught?.rollbackIncomplete?.length,
+      'the dirty-tree signal must survive a non-object throw');
+    assert.equal(caught.cause, 'a bare string, not an Error',
+      'the original thrown value must be preserved as the cause');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: a symlinked managed path is refused before any write (REQ-S6-13)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-13-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'linked.md'), 'NEW');
+    writeFileSync(join(src, 'brain', 'core', 'plain.md'), 'NEW');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'plain.md'), 'OLD');
+    // Dangling on purpose: existsSync() reports it absent, which is exactly how a
+    // rollback came to DELETE a path that existed before the call.
+    symlinkSync(join(tmp, 'target-outside-the-repo.md'), join(dest, 'brain', 'core', 'linked.md'));
+
+    assert.throws(
+      () => copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [] }),
+      /symlink/i,
+      'a symlinked managed path must be refused, naming the path',
+    );
+
+    assert.ok(lstatSync(join(dest, 'brain', 'core', 'linked.md')).isSymbolicLink(),
+      'the symlink itself must survive the refusal');
+    assert.ok(!existsSync(join(tmp, 'target-outside-the-repo.md')),
+      'no write may escape destRoot through the link');
+    assert.equal(readFileSync(join(dest, 'brain', 'core', 'plain.md'), 'utf8'), 'OLD',
+      'the refusal must happen before ANY managed path is written');
+    assert.ok(!existsSync(join(dest, RESTORE_POINT_DIR)),
+      'a refusal must leave no partial snapshot behind');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: dryRun and abortOnCollision take no snapshot at all (REQ-S6-14)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-14-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'x.md'), 'NEW');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'x.md'), 'OLD');
+
+    copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [], dryRun: true });
+    assert.ok(!existsSync(join(dest, RESTORE_POINT_DIR)), 'a dry run must not snapshot');
+
+    copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [], abortOnCollision: true });
+    assert.ok(!existsSync(join(dest, RESTORE_POINT_DIR)), 'an aborted run writes nothing, so it must not snapshot');
+    assert.equal(readFileSync(join(dest, 'brain', 'core', 'x.md'), 'utf8'), 'OLD');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
