@@ -298,3 +298,66 @@ test('journal: --recover works through a stale lock, and honours --dry-run (REQ-
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── REQ-J-9: the CLI must actually TAKE the lock ──────────────────────────────
+// Every other lock test calls acquireLock directly or stages a lock file by hand.
+// None of them noticed when the CLI's `acquireLock(ROOT)` call site was deleted
+// outright: 2293 tests stayed green while `live-run` became unreachable in
+// production and two concurrent upgrades could shred each other's restore point.
+//
+// Blocking is deterministic, not timing-based: the consumer's `package.json` is a
+// FIFO with no writer, so the snapshot's copyFileSync blocks on it forever. If the
+// lock is taken at all, it is held at that moment.
+function buildConsumer(tmp) {
+  const consumer = join(tmp, 'consumer');
+  const pkg = join(consumer, 'node_modules', 'brain');
+  mkdirSync(join(pkg, 'brain', 'core'), { recursive: true });
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'brain', version: '9.9.9' }));
+  writeFileSync(join(pkg, 'brain', 'core', 'managed-paths.mjs'),
+    'export const managed = ["brain/core/**"];\nexport const local = [];\nexport const MANAGED_SCRIPT_KEYS = [];\n');
+  writeFileSync(join(pkg, 'brain', 'core', 'config-migrations.mjs'), 'export const migrations = [];\n');
+  writeFileSync(join(pkg, 'brain', 'core', 'a.md'), 'NEW');
+  mkdirSync(join(consumer, 'brain', 'core'), { recursive: true });
+  // A real package.json: `detectPM` reads it at module load, long before the lock, so
+  // blocking THERE would prove nothing about the lock.
+  writeFileSync(join(consumer, 'package.json'), JSON.stringify({ name: 'c', version: '1.0.0' }));
+  return consumer;
+}
+
+test('journal: a real brain:upgrade HOLDS the lock while it works, and a second one is refused (REQ-J-9)', async (t) => {
+  if (spawnSync('mkfifo', ['--version'], { encoding: 'utf8' }).status !== 0) {
+    t.skip('mkfifo unavailable — cannot block the write deterministically here');
+    return;
+  }
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-j9-'));
+  let blocked;
+  try {
+    const consumer = buildConsumer(tmp);
+    // A FIFO with no writer at a MANAGED path: the snapshot's copyFileSync blocks
+    // reading it, which happens after the lock is taken. (Note this also makes the
+    // child unkillable by SIGTERM — the handlers are queued behind a synchronous
+    // syscall — so the cleanup below must use SIGKILL.)
+    spawnSync('mkfifo', [join(consumer, 'brain', 'core', 'a.md')]);
+
+    blocked = spawn(process.execPath, [CLI, 'v1', '--no-install'], { cwd: consumer });
+
+    const lockPath = join(consumer, RESTORE_POINT_DIR + '.lock');
+    const deadline = Date.now() + 15000;
+    while (!existsSync(lockPath) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    assert.ok(existsSync(lockPath),
+      'a running brain:upgrade must hold the lock — without this the live-run verdict can never fire in production');
+    assert.equal(readFileSync(lockPath, 'utf8').trim(), String(blocked.pid),
+      'the lock must record the pid of the run that holds it, so liveness is checkable');
+
+    const second = spawnSync(process.execPath, [CLI, 'v1', '--no-install'], { cwd: consumer, encoding: 'utf8' });
+    assert.notEqual(second.status, 0, 'a second concurrent upgrade must be refused');
+    assert.match(second.stderr + second.stdout, /is running in this repo/,
+      'and it must say why, naming the live owner');
+  } finally {
+    if (blocked) { blocked.kill('SIGKILL'); await new Promise((r) => blocked.on('exit', r)); }
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

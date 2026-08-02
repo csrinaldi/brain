@@ -93,6 +93,28 @@ if (rp.state === 'corrupt') {
 }
 if (rp.state === 'live-run') die(rp.reason + '.');
 
+// ── Lock ───────────────────────────────────────────────────────────────────────
+// Taken here and nowhere else: after --recover (which must work precisely when a
+// dead run's lock is still lying around) and after the verdict-derived refusals.
+//
+// This call site was once deleted by a careless refactor, and the whole suite
+// stayed green because every lock test called acquireLock directly or staged a lock
+// file by hand — so `live-run` quietly became unreachable in production while three
+// documents claimed concurrency was handled. REQ-J-9 now drives the real CLI and
+// asserts the lock is HELD while it works; deleting these lines fails it.
+//
+// A dry run writes nothing, so it takes no lock — and a SIGKILL during one would
+// otherwise strand a lock with no journal to explain it.
+let lock;
+if (!dryRun) {
+  try {
+    lock = acquireLock(ROOT);
+  } catch (err) {
+    die(`${err.message} If no upgrade is running, that lock is stale — delete it and re-run.`);
+  }
+  process.on('exit', () => lock.release());
+}
+
 if (!tag && !noInstall) {
   die(`missing <tag>. Usage: ${PM} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force] [--recover]`);
 }

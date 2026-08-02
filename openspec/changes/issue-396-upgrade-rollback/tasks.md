@@ -114,11 +114,40 @@ tracker `feature/issue-396-rollback`). Slice 2 is a separate PR on the same chai
 - [ ] 7.1 `.brain-upgrade-backup` cannot be gitignored — `.gitignore` is not a managed path; adding it is **Tier 2, human-promoted**
 - [ ] 7.2 `restore()` rewrites all saved files, moving mtimes even when one write happened (cosmetic)
 - [ ] 7.3 Extend protection across the whole verb (install + config migration), or record that it stays out of scope
-- [x] 7.4 **F12** — fixed in slice 2: `acquireLock()` takes an exclusive `wx` lock, sibling to the snapshot dir so clearing that dir never releases it (REQ-J-5)
+- [x] 7.4 **F12** — `acquireLock()` is `wx`-first with a liveness-checked reclaim, taken by the real CLI (REQ-J-9) and verified under 40-way concurrency: 1 of 40 wins. Sibling of the snapshot dir, so clearing that dir never releases it.
 - [ ] 7.5 **F5** — a package manager that TRAPS SIGINT and exits non-zero still lands on
       "install failed — check repo access". Only a signal-killed child is covered.
 - [ ] 7.6 **F10** — a directory/FIFO/socket at a managed path yields an opaque EISDIR/ENXIO
       instead of the actionable message the refusal branches were given.
+
+## Phase 8d — Fifth review: the verdict was right, the wiring was cut
+
+The round-4 refactor added the right classifier and, in the same commit, deleted the code
+that produces the state it classifies. A scripted multi-line replacement removed the
+`acquireLock(ROOT)` call site as collateral, and the follow-up `str.replace` that was meant
+to restore it silently matched nothing. **2293 tests stayed green**, because every lock test
+called the library directly or staged a lock file by hand.
+
+- [x] 8d.1 **REQ-J-9 first** — drives the real CLI, blocks it deterministically on a FIFO at a
+      managed path, and asserts the lock is HELD while it works and that a second run is
+      refused. Proven RED against the deleted call site before the fix was written.
+- [x] 8d.2 CRITICAL — restored `acquireLock(ROOT)` + `release()` in the CLI
+- [x] 8d.3 CRITICAL — `copyManaged`'s catch used a deny-list (`!interruptedRun`) and therefore
+      cleared on `live-run`, deleting a live run's snapshot AND journal. Now an ALLOW-list: any
+      refusal carrying `restorePointState` is re-thrown untouched, because none of them owns
+      what is on disk.
+- [x] 8d.4 HIGH — `acquireLock` was read→delete→create, three syscalls with no atomicity;
+      measured 7 of 40 concurrent processes holding it at once. Now `wx`-first with
+      compare-and-delete reclaim and a read-back ownership check. Measured 1 of 40.
+- [x] 8d.5 MEDIUM — the journal is written to a temp file and RENAMED into place. A torn
+      journal was the most likely `corrupt` producer, and its diagnosis would have been exactly
+      backwards — it is written before the first managed write, so nothing had been written.
+- [x] 8d.6 Docs corrected: the Concurrency bullet is now earned, the residual count was wrong,
+      and pid reuse is named.
+- [ ] 8d.7 **OPEN** — pid reuse. A recycled pid reads as a live owner and strands the repo until
+      the lock is deleted by hand. Fails safe; a pid+start-time token would close it.
+- [ ] 8d.8 **OPEN** — recovery's fsync barrier is a no-op for `created` paths (they are deleted,
+      and making an unlink durable needs a parent-directory fsync).
 
 ## Phase 8c — Second slice-2 review: one owner for the lifecycle
 

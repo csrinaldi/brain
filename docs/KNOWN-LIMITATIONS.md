@@ -35,11 +35,15 @@ control**:
     no longer cause the snapshot to be auto-deleted. **One residual remains and is NOT covered:**
     the journal records no size or checksum, so a snapshot *file* torn by a power cut would be
     restored as-is and reported as a clean recovery. `fsync` is also best-effort — a filesystem
-    that refuses it does not abort the upgrade. Integrity validation is the next step, not a
-    shipped one.
+    that refuses it does not abort the upgrade. And an unlink made during recovery is not
+    barriered (that needs a parent-directory fsync, which is not done). Integrity validation is
+    the next step, not a shipped one.
   - **Concurrency** — a second `brain:upgrade` is refused while the first is alive, decided by
     reading the owner's pid, not by the lock file merely existing. A lock whose owner is provably
-    gone is reclaimed rather than stranding the repo.
+    gone is reclaimed rather than stranding the repo. Residual: **pid reuse**. If a killed run's
+    pid has been recycled by an unrelated live process, the lock reads as held and every command
+    refuses until the file is deleted by hand — the refusal says so. It fails safe (it strands,
+    it never permits), and a pid+start-time token would close it.
   - **The dependency install (step 1)** — it rewrites `package.json`, the lockfile and
     `node_modules/` *before* any snapshot exists, and is never reverted.
   - **The config migration (step 3)** — `brain.config.json` is a `local` path and is outside the

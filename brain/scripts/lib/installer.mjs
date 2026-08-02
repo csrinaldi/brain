@@ -20,6 +20,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -318,18 +319,38 @@ export function inspectRestorePoint(destRoot) {
  */
 export function acquireLock(destRoot) {
   const path = join(destRoot, RESTORE_POINT_DIR + LOCK_PATH_SUFFIX);
-  const lock = readLock(destRoot);
-  if (lock.present) {
-    if (lock.alive) {
-      throw new Error(`another brain:upgrade is running in this repo (pid ${lock.pid}, lock at ${path}).`);
+
+  // `wx` FIRST. The previous form read, then deleted, then created — three syscalls
+  // with no atomicity, so two processes that both saw the same dead owner could both
+  // delete and both create. Measured: 7 of 40 concurrent processes held it at once.
+  // Here the atomic create is the only way in, and reclaiming a dead owner's lock is
+  // the exceptional branch rather than the path everyone takes.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(path, `${process.pid}\n`, { flag: 'wx' });
+      // Read back: if someone reclaimed and recreated between our create and now, the
+      // lock is theirs, not ours, and silently proceeding would be the same violation.
+      const mine = readLock(destRoot);
+      if (mine.pid !== process.pid) {
+        throw new Error(`another brain:upgrade took the lock at ${path} at the same moment.`);
+      }
+      break;
+    } catch (err) {
+      if (err?.code !== 'EEXIST') throw err;
+      const cur = readLock(destRoot);
+      if (cur.alive) {
+        throw new Error(`another brain:upgrade is running in this repo (pid ${cur.pid}, lock at ${path}).`);
+      }
+      if (attempt === 1) {
+        throw new Error(`could not take the lock at ${path} — it is being contended. Re-run.`);
+      }
+      // Compare-and-delete: remove ONLY the exact dead lock just inspected, never
+      // whatever happens to be at the path by the time we get here.
+      const stillSame = readLock(destRoot);
+      if (stillSame.present && stillSame.pid === cur.pid && !stillSame.alive) {
+        rmSync(path, { force: true });
+      }
     }
-    rmSync(path, { force: true }); // owner is provably gone
-  }
-  try {
-    writeFileSync(path, `${process.pid}\n`, { flag: 'wx' });
-  } catch (err) {
-    if (err?.code === 'EEXIST') throw new Error(`another brain:upgrade just took the lock at ${path}.`);
-    throw err;
   }
   return {
     path,
@@ -352,7 +373,17 @@ function writeJournal({ dir, saved, created, createdDirs, destRoot }) {
   };
   mkdirSync(dir, { recursive: true });
   const path = join(dir, JOURNAL_FILE);
-  writeFileSync(path, JSON.stringify(journal, null, 2) + '\n');
+
+  // Written to a temp file and RENAMED into place. A plain write leaves a window in
+  // which the journal is truncated, and the most likely moment for a power cut to hit
+  // it is the one instant when nothing has been written yet — producing a `corrupt`
+  // verdict whose message ("something WAS written and we no longer know what") would
+  // be the exact opposite of the truth, and a permanent refusal with no way out.
+  // rename(2) is atomic for one path, which is precisely the case here.
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, JSON.stringify(journal, null, 2) + '\n');
+  fsyncPath(tmp);
+  renameSync(tmp, path);
   // The journal is the last thing written before the first managed write, so this is
   // the barrier that makes "journal present" mean "the snapshot below it is durable".
   fsyncPath(path);
@@ -796,7 +827,17 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
       // destroy the evidence in the very act of telling the operator to recover from
       // it — the same "destroy what we promised to protect" shape as the `finally`
       // discard and the retry-clears-the-preserved-snapshot bug before it.
-      if (err?.interruptedRun) throw err;
+      // ALLOW-LIST, not a deny-list. Only a snapshot CONSTRUCTION failure — one that
+      // built partial debris of its own — may clear anything here. Every refusal that
+      // came from the verdict carries `restorePointState`, and none of them owns what
+      // is on disk: `interrupted` and `corrupt` describe a dead run's only evidence,
+      // and `live-run` describes a running one's working state.
+      //
+      // The previous form asked "is this NOT interruptedRun?" and therefore cleared on
+      // `live-run` — deleting a live run's snapshot AND journal. That is the same shape
+      // this file has now produced five times: a cleanup deciding locally that what it
+      // sees is its own debris.
+      if (err?.restorePointState) throw err;
 
       // A genuinely failed snapshot: nothing was written, but it may have built part
       // of a backup first. Clear it — a refusal must not leave debris behind.
