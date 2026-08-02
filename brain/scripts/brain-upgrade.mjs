@@ -18,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { copyManaged, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, recoverFromJournal, readJournal, acquireLock, breakStaleLock, RESTORE_POINT_DIR } from './lib/installer.mjs';
+import { copyManaged, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, recoverFromJournal, acquireLock, inspectRestorePoint } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
 
 const ROOT = process.cwd();
@@ -43,34 +43,32 @@ const force = flags.has('--force');
 const abortOnCollision = flags.has('--abort-on-collision');
 const recover = flags.has('--recover');
 
+// ── The restore point, read ONCE ───────────────────────────────────────────────
+// Read before any branch — including --dry-run, which previously skipped the whole
+// gate because it lived inside copyManaged's `if (!dryRun)`. "Dry-run first" is the
+// habit we document, so it must be the path that TELLS you an upgrade was interrupted,
+// not the one that hides it.
+const rp = inspectRestorePoint(ROOT);
+
 // ── --recover ──────────────────────────────────────────────────────────────────
-// Replays the restore point a KILLED run left behind. Deliberately explicit and
-// deliberately terminal: between that crash and now the consumer may have repaired
-// things by hand, so this never runs by itself and never chains into an upgrade.
-//
-// Runs BEFORE the lock is taken, and this ordering is not incidental. A SIGKILL runs
-// no exit handler, so the lock it held ALWAYS survives the crash — meaning the one
-// command that repairs a killed run would otherwise be the one command guaranteed to
-// be blocked by it. Recovery breaks a stale lock instead of yielding to it: the run
-// that owned it is by definition dead.
+// Replays the restore point a KILLED run left behind. Explicit and terminal: between
+// that crash and now the consumer may have repaired things by hand, so this never
+// runs by itself and never chains into an upgrade.
 if (recover) {
-  breakStaleLock(ROOT);
-  if (dryRun) {
-    const pending = readJournal(ROOT);
-    if (!pending) {
-      info('--dry-run: nothing to recover — no interrupted upgrade was recorded here.');
-    } else {
-      info(`--dry-run: would restore ${pending.saved.length + pending.created.length} managed path(s) from ${join(ROOT, RESTORE_POINT_DIR)}:`);
-      for (const f of [...pending.saved, ...pending.created]) console.log(`      ${C.dim}${f}${C.reset}`);
-      info('Re-run without --dry-run to actually restore.');
-    }
-    process.exit(0);
-  }
-  const result = recoverFromJournal({ destRoot: ROOT });
-  if (!result) {
+  if (rp.state === 'live-run') die(`${rp.reason} — recovery would revert a tree it is still writing. Wait for it to finish.`);
+  if (rp.state === 'corrupt') die(rp.reason + '. Inspect it by hand; nothing was changed.');
+  if (!rp.journal) {
     info('Nothing to recover — no interrupted upgrade was recorded here.');
     process.exit(0);
   }
+  const covered = [...rp.journal.saved, ...rp.journal.created];
+  if (dryRun) {
+    info(`--dry-run: would restore ${covered.length} managed path(s) from ${rp.snapshotPresent ? join(ROOT, '.brain-upgrade-backup') : 'the recorded snapshot'}:`);
+    for (const f of covered) console.log(`      ${C.dim}${f}${C.reset}`);
+    info('Re-run without --dry-run to actually restore.');
+    process.exit(0);
+  }
+  const result = recoverFromJournal({ destRoot: ROOT });
   ok(`Restored ${result.recovered.length} managed path(s) to their pre-upgrade bytes.`);
   for (const f of result.recovered) console.log(`      ${C.dim}${f}${C.reset}`);
   if (result.failed.length > 0) {
@@ -83,28 +81,17 @@ if (recover) {
   process.exit(0);
 }
 
-// ── Lock ───────────────────────────────────────────────────────────────────────
-// Two concurrent runs would each clear and rebuild the other's restore point, so
-// neither could roll back. Taken only for a real upgrade — never for --recover,
-// which must work precisely when a dead run's lock is still lying around.
-let lock;
-try {
-  lock = acquireLock(ROOT);
-} catch (err) {
-  // A held lock plus a journal is ambiguous BY CONSTRUCTION — a live run writes its
-  // journal before its first write, so this looks identical to a run that was killed
-  // holding both. Yielding is the safe read (never race a run that might be alive),
-  // but the killed case is far more likely and the bare lock message sends the
-  // operator to delete a file rather than to the remedy. Name both.
-  const pending = readJournal(ROOT);
-  if (pending) {
-    console.error(`  ${C.red}✗${C.reset} ${err.message}`);
-    warn(`A previous run also left an interrupted upgrade here, covering ${pending.saved.length + pending.created.length} managed path(s).`);
-    die(`If no upgrade is running, run '${PM} run brain:upgrade -- --recover' — it clears that lock and puts those paths back.`);
-  }
-  die(err.message);
+// ── Refuse early, on the same verdict ──────────────────────────────────────────
+// Before the lock, before the install, and regardless of --dry-run.
+if (rp.state === 'interrupted') {
+  console.error(`  ${C.red}✗${C.reset} ${rp.reason}.`);
+  die(`Run '${PM} run brain:upgrade -- --recover' to put those paths back, or delete that directory to discard the record.`);
 }
-process.on('exit', () => lock.release());
+if (rp.state === 'corrupt') {
+  console.error(`  ${C.red}✗${C.reset} ${rp.reason}.`);
+  die('Deleting it would destroy the only copy of the previous state, so this is not auto-cleared. Inspect it by hand.');
+}
+if (rp.state === 'live-run') die(rp.reason + '.');
 
 if (!tag && !noInstall) {
   die(`missing <tag>. Usage: ${PM} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force] [--recover]`);

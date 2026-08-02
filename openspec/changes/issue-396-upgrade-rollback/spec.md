@@ -310,16 +310,45 @@ WHEN it is read
 THEN it reads as ABSENT
 ```
 
-### Scenario 4 — concurrent runs are refused
+### Scenario 4 — concurrency is decided by LIVENESS, not by a file existing
 
 ```
-GIVEN one brain:upgrade holding the lock
+GIVEN one brain:upgrade whose process is alive and holding the lock
 WHEN a second starts in the same repo
-THEN it is refused
+THEN it is refused, naming the owning pid
+  AND --recover is refused too, because reverting under a live writer is the damage
+
+GIVEN a lock whose owner is provably gone (SIGKILL leaves one every time)
+WHEN a run starts
+THEN the lock is reclaimed, not obeyed
 ```
 
-Two concurrent runs would each clear and rebuild the other's restore point, leaving neither
-able to roll back.
+A mutex that trusts file existence strands the repo after every hard kill; one that deletes
+any lock it finds is not a mutex. The owner's pid — already written and previously never read
+— is what separates the two.
+
+### Scenario 5 — an unreadable journal is refused, never auto-cleared
+
+```
+GIVEN a journal that cannot be parsed or carries an unknown version
+WHEN a run starts
+THEN it refuses and the snapshot is left untouched
+```
+
+Absent and unreadable are OPPOSITE evidence. Absent proves nothing was written; unreadable
+means something was and we no longer know what. Treating them alike is what turned a torn
+journal into deleted bytes.
+
+### Scenario 6 — --dry-run reports the interruption instead of hiding it
+
+```
+GIVEN an interrupted upgrade on disk
+WHEN brain:upgrade runs with --dry-run
+THEN it refuses and names --recover
+```
+
+"Dry-run first" is the habit the docs recommend, so it must not be the one path that stays
+silent about a pending interrupted run.
 
 ## Out of scope
 

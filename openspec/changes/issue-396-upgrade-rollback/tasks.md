@@ -120,6 +120,35 @@ tracker `feature/issue-396-rollback`). Slice 2 is a separate PR on the same chai
 - [ ] 7.6 **F10** — a directory/FIFO/socket at a managed path yields an opaque EISDIR/ENXIO
       instead of the actionable message the refusal branches were given.
 
+## Phase 8c — Second slice-2 review: one owner for the lifecycle
+
+Four consecutive rounds each produced a NEW defect of one shape: a cleanup that deleted
+something another site owned. Round 4's was introduced by round 3's fix. The response was
+structural rather than another patch.
+
+- [x] 8c.1 `inspectRestorePoint()` — ONE reader, ONE verdict (`clean` / `debris` /
+      `interrupted` / `corrupt` / `live-run`). Every transition obeys it; no site judges locally.
+- [x] 8c.2 CRITICAL — `breakStaleLock()` ran unconditionally, so `--recover` broke a LIVE run's
+      lock, defeating the mutex and letting recovery revert a tree mid-write while that run
+      reported success. Liveness is now read from the pid the lock always stored and nobody read.
+- [x] 8c.3 HIGH — a plain `--dry-run` never reached the gate (it lived inside `if (!dryRun)`),
+      so the habit the docs recommend was the one path that hid a pending interrupted upgrade.
+- [x] 8c.4 HIGH — a torn journal read as ABSENT, and absent means "delete the snapshot". Absent
+      and unreadable are opposite evidence; `corrupt` now refuses and never auto-clears.
+- [x] 8c.5 MEDIUM — `--recover --dry-run` deleted the lock file. Dry runs now take no lock at all.
+- [x] 8c.6 MEDIUM — `lock.release()` deleted whatever was at the path; it now releases only a
+      lock this process still owns.
+- [x] 8c.7 MEDIUM — `fsync` extended to every intermediate snapshot directory (only the root was
+      covered; almost every managed path is nested) and to recovery, which did none at all.
+- [x] 8c.8 REQ-J-5 rewritten for the liveness contract; REQ-J-8 added for the live-owner refusal.
+      Both proven RED against a build that reads every owner as dead.
+- [x] 8c.9 Dead `renameSync` import removed (left by deleting `preserve()`).
+- [ ] 8c.10 **OPEN** — `REQ-J-6` was credited with covering the round-3 CRITICAL and does not:
+      its fixture writes a lock, so the CLI stops in the lock branch and never reaches
+      `copyManaged`. The real coverage is `REQ-S6-11`. Left honest rather than re-credited.
+- [ ] 8c.11 **OPEN** — the journal records no checksum, so a snapshot FILE torn by a power cut
+      is still restored as-is and reported clean. Named in KNOWN-LIMITATIONS.
+
 ## Phase 8b — Slice 2 review remediation
 
 - [x] 8b.1 CRITICAL — `copyManaged`'s snapshot-failure catch deleted the snapshot on the

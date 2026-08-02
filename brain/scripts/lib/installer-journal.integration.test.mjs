@@ -171,22 +171,55 @@ test('journal: it exists from before the first write, so a kill can never miss i
 });
 
 // ── REQ-J-5: concurrent runs cannot shred each other's restore point ──────────
-test('journal: the lock is exclusive, and survives clearing the snapshot dir (REQ-J-5)', () => {
+test("journal: a LIVE owner blocks; a DEAD owner lock is reclaimed, not obeyed forever (REQ-J-5)", () => {
   const tmp = mkdtempSync(join(tmpdir(), 'brain-j5-'));
   try {
     const first = acquireLock(tmp);
-    assert.throws(() => acquireLock(tmp), /another brain:upgrade appears to be running/,
-      'a second concurrent run must be refused, not allowed to shred the first restore point');
+    assert.throws(() => acquireLock(tmp), /is running in this repo \(pid \d+/,
+      'a live owner must block, and the message must name the pid that holds it');
 
-    // The lock is a SIBLING of the snapshot dir, so a run clearing that dir on entry
-    // must not release a lock it does not hold.
+    // Sibling of the snapshot dir, so a run clearing that dir cannot release a lock
+    // it does not hold.
     rmSync(join(tmp, RESTORE_POINT_DIR), { recursive: true, force: true });
-    assert.throws(() => acquireLock(tmp), /another brain:upgrade appears to be running/);
+    assert.throws(() => acquireLock(tmp), /is running in this repo/);
 
     first.release();
     const second = acquireLock(tmp);
     assert.ok(second.path, 'the lock must be retakeable once released');
     second.release();
+
+    // A SIGKILLed run leaves its lock forever. Obeying a dead owner would strand the
+    // repo, so liveness — not mere file existence — decides.
+    writeFileSync(join(tmp, RESTORE_POINT_DIR + '.lock'), '999999999\n');
+    const third = acquireLock(tmp);
+    assert.ok(third.path, "a dead owner's lock must be reclaimed, not obeyed");
+    third.release();
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('journal: --recover REFUSES while the owner is alive, instead of reverting under it (REQ-J-8)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-j8-'));
+  try {
+    const { dest } = seed(tmp);
+    // A live run that is PART-WAY THROUGH its write loop: the new bytes are already
+    // down. Reverting here is precisely the damage — the run would then finish and
+    // report success over a tree recovery had silently rolled back underneath it.
+    writeFileSync(join(dest, 'brain', 'core', 'a.md'), 'NEW BYTES');
+    // Exactly what that run looks like from outside: its lock, plus the journal it
+    // wrote before its first write.
+    mkdirSync(join(dest, RESTORE_POINT_DIR, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, RESTORE_POINT_DIR, 'brain', 'core', 'a.md'), 'CONSUMER ORIGINAL');
+    writeFileSync(join(dest, RESTORE_POINT_DIR, JOURNAL_FILE), JSON.stringify(
+      { version: JOURNAL_VERSION, saved: ['brain/core/a.md'], created: [], createdDirs: [] }));
+    writeFileSync(join(dest, RESTORE_POINT_DIR + '.lock'), `${process.pid}\n`); // alive
+
+    assert.throws(() => recoverFromJournal({ destRoot: dest }), (err) => err.liveRun === true,
+      'recovery must never revert a tree a live run is still writing');
+    assert.equal(readFileSync(join(dest, 'brain', 'core', 'a.md'), 'utf8'), 'NEW BYTES',
+      'the live run\'s work must be untouched');
+    assert.ok(existsSync(join(dest, RESTORE_POINT_DIR)), 'and its restore point must survive');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

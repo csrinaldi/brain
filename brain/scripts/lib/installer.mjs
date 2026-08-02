@@ -20,7 +20,6 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -238,15 +237,110 @@ function fsyncPath(p) {
 }
 
 /**
- * Removes a lock left by a run that died.
+ * Is `pid` a process that currently exists?
  *
- * Only `--recover` may call this, and the reasoning is narrow: a SIGKILL runs no exit
- * handler, so the lock ALWAYS survives the crash. Without this, the one command that
- * repairs a killed run is the one command that killed run is guaranteed to block.
- * The run that held it is dead by definition — there is nothing to yield to.
+ * Signal 0 performs the permission and existence checks without delivering
+ * anything. ESRCH means gone; EPERM means it exists and belongs to someone else —
+ * which is still ALIVE, and reading it as dead is how a mutex gets broken.
  */
-export function breakStaleLock(destRoot) {
-  try { rmSync(join(destRoot, RESTORE_POINT_DIR + LOCK_PATH_SUFFIX), { force: true }); } catch { /* cosmetic */ }
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (err) { return err?.code === 'EPERM'; }
+}
+
+function readLock(destRoot) {
+  const path = join(destRoot, RESTORE_POINT_DIR + LOCK_PATH_SUFFIX);
+  let pid = null;
+  try { pid = Number.parseInt(readFileSync(path, 'utf8').trim(), 10); } catch { return { path, present: false, pid: null, alive: false }; }
+  return { path, present: true, pid, alive: pidAlive(pid) };
+}
+
+/**
+ * The ONE question every transition must ask before touching anything:
+ * what is here, who owns it, and are they still alive?
+ *
+ * This exists because the alternative was tried and failed four times. The
+ * snapshot, the journal and the lock are a single lifecycle, and while each
+ * cleanup site judged locally whether what it saw was garbage, every round of
+ * fixes produced a new site that deleted something another site owned — the
+ * rollback's own snapshot, then the preserved copy, then the evidence a refusal
+ * pointed at, then a live run's mutex. Local judgement is the defect. One reader,
+ * one verdict, every caller obeys it.
+ *
+ * @param {string} destRoot
+ * @returns {{state: 'clean'|'live-run'|'interrupted'|'corrupt'|'debris',
+ *            lock: {path: string, present: boolean, pid: number|null, alive: boolean},
+ *            journal: object|null, snapshotPresent: boolean, reason: string}}
+ */
+export function inspectRestorePoint(destRoot) {
+  const dir = join(destRoot, RESTORE_POINT_DIR);
+  const lock = readLock(destRoot);
+  const snapshotPresent = pathPresent(dir);
+  const journalPath = join(dir, JOURNAL_FILE);
+  const journalOnDisk = pathPresent(journalPath);
+  const journal = readJournal(destRoot);
+
+  // A live owner outranks everything: whatever else is on disk belongs to a run
+  // that is still using it.
+  if (lock.present && lock.alive) {
+    return { state: 'live-run', lock, journal, snapshotPresent,
+      reason: `another brain:upgrade is running in this repo (pid ${lock.pid}, lock at ${lock.path})` };
+  }
+
+  // A journal we cannot read is NOT the same as no journal. Absent means nothing was
+  // written; unreadable means something was, and we no longer know what. Deleting on
+  // that evidence is how a torn journal turns into lost bytes.
+  if (journalOnDisk && !journal) {
+    return { state: 'corrupt', lock, journal: null, snapshotPresent,
+      reason: `the restore point at ${dir} carries a journal this version cannot read, so what a previous run wrote is unknown` };
+  }
+
+  if (journal) {
+    const n = journal.saved.length + journal.created.length;
+    return { state: 'interrupted', lock, journal, snapshotPresent,
+      reason: `a previous brain:upgrade was interrupted after it began writing (restore point at ${dir}, covering ${n} managed path(s))` };
+  }
+
+  if (snapshotPresent) {
+    return { state: 'debris', lock, journal: null, snapshotPresent,
+      reason: 'a previous run died before its first write; what it left protects nothing' };
+  }
+
+  return { state: 'clean', lock, journal: null, snapshotPresent: false, reason: '' };
+}
+
+/**
+ * Takes the lock for a real upgrade, refusing when anything on disk says no.
+ *
+ * `wx` makes the create atomic. A lock whose owner is GONE is reclaimed here rather
+ * than left to strand the repo forever — but only after `inspectRestorePoint` has
+ * confirmed the owner is dead, never on a bare "the file exists".
+ */
+export function acquireLock(destRoot) {
+  const path = join(destRoot, RESTORE_POINT_DIR + LOCK_PATH_SUFFIX);
+  const lock = readLock(destRoot);
+  if (lock.present) {
+    if (lock.alive) {
+      throw new Error(`another brain:upgrade is running in this repo (pid ${lock.pid}, lock at ${path}).`);
+    }
+    rmSync(path, { force: true }); // owner is provably gone
+  }
+  try {
+    writeFileSync(path, `${process.pid}\n`, { flag: 'wx' });
+  } catch (err) {
+    if (err?.code === 'EEXIST') throw new Error(`another brain:upgrade just took the lock at ${path}.`);
+    throw err;
+  }
+  return {
+    path,
+    /** Releases ONLY a lock this process still owns — never one someone else took. */
+    release() {
+      try {
+        const cur = readLock(destRoot);
+        if (cur.present && cur.pid === process.pid) rmSync(path, { force: true });
+      } catch { /* cosmetic */ }
+    },
+  };
 }
 
 function writeJournal({ dir, saved, created, createdDirs, destRoot }) {
@@ -300,7 +394,14 @@ export function readJournal(destRoot) {
  *   null when there is nothing to recover.
  */
 export function recoverFromJournal({ destRoot }) {
-  const journal = readJournal(destRoot);
+  // Recovery replays a DEAD run's snapshot. If the owner is alive, this would revert
+  // a tree mid-write while that run reports success — the exact disaster this issue
+  // exists to prevent, reachable through its own remedy. Refuse.
+  const state = inspectRestorePoint(destRoot);
+  if (state.state === 'live-run') throw Object.assign(new Error(state.reason), { liveRun: true });
+  if (state.state === 'corrupt') throw Object.assign(new Error(state.reason), { corruptJournal: true });
+
+  const journal = state.journal;
   if (!journal) return null;
 
   const dir = join(destRoot, RESTORE_POINT_DIR);
@@ -314,6 +415,9 @@ export function recoverFromJournal({ destRoot }) {
 
   const { failed } = handle.restore();
   const recovered = [...journal.saved, ...journal.created].filter((p) => !failed.includes(p));
+  // Barrier before the evidence is dropped: otherwise a power cut just after
+  // "Recovered." can commit the journal's removal while the restored bytes are lost.
+  for (const rel of recovered) fsyncPath(join(destRoot, rel));
 
   if (failed.length === 0) {
     safeDiscard(handle);
@@ -324,34 +428,6 @@ export function recoverFromJournal({ destRoot }) {
   return { recovered, failed, snapshotDir: dir };
 }
 
-/**
- * Takes an exclusive lock for the whole upgrade, or refuses.
- *
- * Two concurrent runs in one repo would each clear and rebuild the other's restore
- * point, so neither could roll back. `wx` makes the create atomic — there is no
- * check-then-create window to lose.
- *
- * @param {string} destRoot
- * @returns {{path: string, release: () => void}}
- */
-export function acquireLock(destRoot) {
-  const path = join(destRoot, RESTORE_POINT_DIR + LOCK_PATH_SUFFIX);
-  try {
-    writeFileSync(path, `${process.pid}\n`, { flag: 'wx' });
-  } catch (err) {
-    if (err?.code === 'EEXIST') {
-      throw new Error(
-        `another brain:upgrade appears to be running in this repo (lock at ${path}). ` +
-        'If none is, delete that file and re-run.',
-      );
-    }
-    throw err;
-  }
-  return {
-    path,
-    release() { try { rmSync(path, { force: true }); } catch { /* cosmetic */ } },
-  };
-}
 
 /**
  * `lstat` without throwing — returns null when the path is absent.
@@ -507,22 +583,25 @@ export function createRestorePoint({ destRoot, relPaths }) {
   // The journal is what tells the two cases apart (see JOURNAL_FILE): written after
   // the snapshot and before the first write, so its ABSENCE proves the previous run
   // never wrote anything.
-  const interrupted = readJournal(destRoot);
-  if (interrupted) {
-    const n = interrupted.saved.length + interrupted.created.length;
+  // ONE reader, ONE verdict. Every transition obeys it — see inspectRestorePoint for
+  // why local per-site judgement was abandoned.
+  const state = inspectRestorePoint(destRoot);
+  if (state.state !== 'clean' && state.state !== 'debris') {
+    const covered = state.journal ? state.journal.saved.length + state.journal.created.length : null;
     throw Object.assign(
       new Error(
-        `a previous brain:upgrade was interrupted after it began writing, and its restore point ` +
-        `is still here (${dir}). It covers ${n} managed path(s). Nothing will be written until ` +
-        'it is dealt with: re-run with --recover to put those paths back, or delete that ' +
-        'directory to discard the record and lose the ability to undo that run.',
+        `${state.reason}. Nothing will be written until it is dealt with` +
+        (state.state === 'interrupted'
+          ? ': re-run with --recover to put those paths back, or delete that directory to discard the record and lose the ability to undo that run.'
+          : state.state === 'corrupt'
+            ? '. This is deliberately NOT auto-cleared: an unreadable journal means something WAS written and we no longer know what, so deleting it would destroy the only copy of the previous state. Inspect it by hand.'
+            : '.'),
       ),
-      { interruptedRun: true, snapshotDir: dir, coveredPaths: n },
+      { interruptedRun: state.state !== 'live-run', restorePointState: state.state, snapshotDir: dir, coveredPaths: covered },
     );
   }
-  // No journal: the previous run died BEFORE its first write, so what it left behind
-  // protects nothing.
-  rmSync(dir, { recursive: true, force: true });
+  // 'debris' only: a run that died BEFORE its first write. What it left protects nothing.
+  if (state.snapshotPresent) rmSync(dir, { recursive: true, force: true });
 
   for (const rel of relPaths) {
     const dest = join(destRoot, rel);
@@ -553,6 +632,10 @@ export function createRestorePoint({ destRoot, relPaths }) {
       mkdirSync(dirname(backup), { recursive: true });
       copyFileSync(dest, backup);
       fsyncPath(backup);
+      // …and every directory link on the way to it. Syncing only the snapshot root
+      // persists the entries directly in it; almost every managed path is nested, so
+      // without this the journal can be durable while the file it names is not.
+      for (let d = dirname(backup); d.startsWith(dir); d = dirname(d)) fsyncPath(d);
       saved.push(rel);
       continue;
     }

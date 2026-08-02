@@ -29,12 +29,17 @@ control**:
     Recovery is explicit by design — between the crash and the next run the consumer may have
     repaired things by hand, and replaying stale bytes over that would destroy work while
     reporting success.
-  - **Power loss — narrowed, not closed.** The snapshot files and the journal are `fsync`ed
-    before the first write, so the ordering the recovery invariant depends on is enforced rather
-    than assumed. Two residuals remain and are NOT covered: `fsync` is best-effort (a
-    filesystem that refuses it does not abort the upgrade), and the journal records no size or
-    checksum, so a snapshot file torn by a power cut would be restored as-is and reported as a
-    clean recovery. Integrity validation is the next step, not a shipped one.
+  - **Power loss — narrowed, not closed.** The snapshot files, every intermediate directory on
+    the way to them, the journal, and the restored files during recovery are all `fsync`ed. A
+    journal that cannot be read is REFUSED rather than treated as absent, so a torn journal can
+    no longer cause the snapshot to be auto-deleted. **One residual remains and is NOT covered:**
+    the journal records no size or checksum, so a snapshot *file* torn by a power cut would be
+    restored as-is and reported as a clean recovery. `fsync` is also best-effort — a filesystem
+    that refuses it does not abort the upgrade. Integrity validation is the next step, not a
+    shipped one.
+  - **Concurrency** — a second `brain:upgrade` is refused while the first is alive, decided by
+    reading the owner's pid, not by the lock file merely existing. A lock whose owner is provably
+    gone is reclaimed rather than stranding the repo.
   - **The dependency install (step 1)** — it rewrites `package.json`, the lockfile and
     `node_modules/` *before* any snapshot exists, and is never reverted.
   - **The config migration (step 3)** — `brain.config.json` is a `local` path and is outside the
