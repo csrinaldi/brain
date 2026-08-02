@@ -84,6 +84,26 @@ if (existsSync(ownPkgPath) && !existsSync(sourceMarkerPath)) {
 
 console.log(`\n${C.bold}brain:upgrade${C.reset} ${tag ? `→ ${C.cyan}${tag}${C.reset}` : ''}${dryRun ? `  ${C.dim}(dry run)${C.reset}` : ''}\n`);
 
+// ── Interrupt handling ─────────────────────────────────────────────────────────
+// Measured on this repo (366 managed files): the managed-path write is a single
+// synchronous batch that finishes in ~23ms, and Node delivers signals through the
+// event loop — so a SIGINT arriving mid-batch is QUEUED, never delivered, and the
+// batch always runs to completion before any handler executes.
+//
+// Registering these handlers is therefore NOT a way to abort a half-finished
+// write. It is what changes the outcome of Ctrl-C: without a handler the default
+// action kills the process instantly, which is the one thing that CAN leave a
+// half-applied tree. With one, the 23ms batch finishes and the tree is whole.
+//
+// The window that actually matters is the npm install above (seconds, not
+// milliseconds). A signal during it is delivered at the first await afterwards —
+// checked below, before a single managed path is touched, so it exits with zero
+// writes. That is the real Ctrl-C path, and it is now safe.
+let interrupted = null;
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => { interrupted ??= sig; });
+}
+
 // ── 1. Install the tag ─────────────────────────────────────────────────────────
 // Derive the install specifier from the currently installed brain's package.json
 // repository.url (always normalized to git+https://…) so HTTPS-only consumers
@@ -109,15 +129,37 @@ if (!existsSync(pkgRoot)) {
 }
 
 const { managed, local } = await import(join(pkgRoot, 'brain', 'core', 'managed-paths.mjs'));
-const { copied, skipped, merged, collisions } = copyManaged({
-  srcRoot: pkgRoot,
-  destRoot: ROOT,
-  managed,
-  local,
-  dryRun,
-  specialMerge: { '.claude/settings.json': mergeClaudeSettings, 'package.json': mergePackageJson },
-  abortOnCollision,
-});
+
+// A signal raised during the install above is delivered here, at the first await
+// after it — before any managed path has been written.
+if (interrupted) {
+  die(`${interrupted} received before the managed-path write began — nothing was written.`);
+}
+
+let copied, skipped, merged, collisions;
+try {
+  ({ copied, skipped, merged, collisions } = copyManaged({
+    srcRoot: pkgRoot,
+    destRoot: ROOT,
+    managed,
+    local,
+    dryRun,
+    specialMerge: { '.claude/settings.json': mergeClaudeSettings, 'package.json': mergePackageJson },
+    abortOnCollision,
+  }));
+} catch (err) {
+  // copyManaged snapshots every path it may write BEFORE its first write and
+  // restores those bytes before re-throwing (#396), so there is normally nothing
+  // half-applied to repair by hand. Say which of the two it was — a rollback that
+  // only partly worked must never be reported as a clean one.
+  console.error(`  ${C.red}✗${C.reset} Upgrade failed while writing managed paths: ${err.message}`);
+  if (err.rollbackIncomplete?.length) {
+    warn(`Rollback could NOT restore ${err.rollbackIncomplete.length} path(s) — still modified:`);
+    for (const f of err.rollbackIncomplete) console.log(`      ${C.dim}${f}${C.reset}`);
+    die('The tree is NOT fully restored. Inspect the paths above before retrying.');
+  }
+  die('Every managed path was rolled back to its pre-upgrade state — the tree is unchanged.');
+}
 
 // ── Collision report ────────────────────────────────────────────────────────────
 // Emitted before the summary so the operator sees it immediately. The non-zero
@@ -185,3 +227,11 @@ if (!existsSync(configPath)) {
 
 console.log(`\n${C.green}Done.${C.reset} Review the diff and commit. ${C.dim}core is read-only — improvements go upstream.${C.reset}`);
 console.log(`${C.dim}Tip:${C.reset} run ${C.cyan}npm run env:init${C.reset} to (re)configure git hooks (${C.dim}core.hooksPath${C.reset} is per-clone, not committed) and the environment. ${C.dim}day:start also self-heals it.${C.reset}\n`);
+
+// An interrupt that arrived after the write began could not stop it (see the
+// note above the handlers). Report the completed upgrade honestly, then honour
+// the signal in the exit code — the tree is whole, so there is nothing to undo.
+if (interrupted) {
+  warn(`${interrupted} arrived after the managed-path write had started. That write is not interruptible, so it completed: the tree is fully upgraded, NOT half-applied. Nothing to clean up.`);
+  process.exit(130);
+}

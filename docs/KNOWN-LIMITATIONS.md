@@ -14,8 +14,15 @@
 managed/local boundary is enforced in code — **but it is not yet safe for repos you do not
 control**:
 
-- **No rollback / atomic write.** A mid-upgrade failure leaves a half-applied tree, recoverable
-  only through the consumer's own git. (M4 · #396 → 1.1)
+- **Rollback is partial — a hard kill still leaves a half-applied tree.** `copyManaged` now
+  snapshots every path it may write before its first write and restores those bytes if any write
+  throws, so a failure *the process survives* (ENOSPC, EACCES, an unreadable source, a merge
+  rejecting malformed consumer JSON) leaves the tree unchanged and says so. Ctrl-C is safe too,
+  though not by rolling back: the managed-path write is one synchronous batch (~23ms for 366
+  files) that a signal cannot interrupt, so with a handler registered it completes instead of
+  dying midway. **Not covered: SIGKILL and power loss**, which run no in-process handler at all —
+  surviving those needs an on-disk journal replayed by the next invocation. (M4 · #396 → 1.1;
+  first half landed, journal outstanding)
 - **Plain-copy clobber asymmetry.** `.gemini/settings.json`, `.github/CODEOWNERS`,
   `.github/PULL_REQUEST_TEMPLATE.md`, `AGENTS.md`, and the workflows are overwritten on upgrade
   (only `.claude/settings.json` and `package.json` are merged). A consumer who edits one of those
