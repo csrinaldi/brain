@@ -1,0 +1,217 @@
+---
+status: spec
+issue: 396
+epic: 313
+artifact_store: openspec
+topic_key: sdd/issue-396-upgrade-rollback/spec
+---
+
+# Spec — Rollback / atomic apply for `brain:upgrade` (issue 396)
+
+Requirements are tagged `REQ-396-N` and map to the `REQ-S6-*` test identifiers in
+`brain/scripts/lib/installer.test.mjs`. Slice 1 covers REQ-396-1 … REQ-396-8;
+REQ-396-9 is slice 2.
+
+## REQ-396-1 — a failed write leaves every managed path at its pre-copy bytes
+
+`copyManaged` MUST capture the on-disk state of every path it may write BEFORE the first
+write, and MUST restore those bytes if any write throws. The restoration MUST be complete
+regardless of where in the loop the failure landed.
+
+### Scenario 1 — a copy-phase throw rolls back a merge-phase write
+
+```
+GIVEN a managed path routed through specialMerge whose dest holds consumer bytes
+  AND a second managed path whose parent exists as a FILE (so mkdirSync throws)
+WHEN copyManaged runs and reaches the copy phase
+THEN it throws
+  AND the merge-phase dest holds its original consumer bytes
+```
+
+Merges run before copies by construction, so the merge write is always on disk before
+the copy throws — the scenario cannot pass vacuously.
+
+### Scenario 2 — a copy-phase throw rolls back an EARLIER copy in the same phase
+
+```
+GIVEN two plain-copy managed paths, sorted so "a-first" precedes "z-sub/boom"
+  AND "a-first" exists in dest with OLD bytes
+  AND dest "z-sub" exists as a FILE
+WHEN copyManaged runs
+THEN it throws
+  AND "a-first" holds OLD
+```
+
+This is the dominant shape: 364 of the 366 real managed files are plain copies. Write
+order is sorted (REQ-396-8), so this cannot depend on `readdirSync` order.
+
+### Scenario 3 — negative control: the success path writes and keeps nothing
+
+```
+GIVEN a managed path that copies cleanly
+WHEN copyManaged runs
+THEN the file is copied
+  AND no snapshot directory remains
+```
+
+A rollback that fired on every run would satisfy Scenarios 1-2 and still be wrong.
+
+## REQ-396-2 — a path that did not exist rolls back to ABSENT, not to empty
+
+Paths with no prior on-disk state MUST be deleted on rollback, and any directory the
+write had to create MUST be pruned with them.
+
+### Scenario 1 — created file removed, created directory pruned
+
+```
+GIVEN a managed path "brain/core/newdir/a.json" absent from dest
+  AND dest has no "newdir"
+WHEN the write creates both and a later write throws
+THEN "a.json" does not exist
+  AND "newdir" does not exist
+```
+
+## REQ-396-3 — an incomplete rollback is reported, and its snapshot is PRESERVED
+
+`restore()` MUST be best-effort per path: one unrecoverable entry MUST NOT strand the
+rollback of the others. Paths still on disk afterwards MUST be returned to the caller.
+When any path could not be restored, the snapshot MUST NOT be discarded, and its location
+MUST be reported.
+
+### Scenario 1 — the snapshot survives an incomplete rollback
+
+```
+GIVEN a managed path whose dest holds PRECIOUS consumer bytes
+  AND a merge fn that replaces that path with a directory and then throws
+WHEN copyManaged runs
+THEN the error carries rollbackIncomplete containing that path
+  AND the snapshot still holds PRECIOUS
+  AND the error names the snapshot directory
+```
+
+This is the only branch where the snapshot is the sole surviving copy of those bytes, and
+it is precisely the branch the CLI tells the operator to go and inspect. Discarding it
+here would delete what the message points at.
+
+### Scenario 2 — negative control: a complete rollback discards its snapshot
+
+```
+GIVEN a rollback in which every path is restored
+WHEN copyManaged throws
+THEN no snapshot directory remains
+```
+
+## REQ-396-4 — the original failure is never replaced
+
+The error surfaced to the caller MUST be the one the write loop threw. Annotating it with
+rollback state MUST NOT be able to throw, whatever value was thrown.
+
+### Scenario 1 — an Error is re-thrown by identity
+
+```
+GIVEN a merge fn that throws a specific Error instance
+WHEN copyManaged runs
+THEN the caught value is that same instance
+```
+
+### Scenario 2 — a non-Error throw still carries the rollback state
+
+```
+GIVEN a merge fn that dirties its dest and then throws a bare string
+WHEN copyManaged runs and the rollback is incomplete
+THEN the caught value carries rollbackIncomplete
+  AND the original string is preserved as its cause
+```
+
+Modules are strict mode, so a naive `err.rollbackIncomplete = …` throws a TypeError on a
+string, a frozen Error or null — replacing the real failure AND dropping the dirty-tree
+signal, which makes the CLI report a clean rollback over a dirty tree. `specialMerge` is
+caller-supplied on an exported API, so this is reachable without a brain-side bug.
+
+## REQ-396-5 — a path that cannot be protected is refused before any write
+
+A managed path that is a symlink MUST cause `copyManaged` to refuse, before writing
+anything. The message MUST name the paths and the remedy.
+
+### Scenario 1 — symlinked managed path refused, nothing written
+
+```
+GIVEN a dangling symlink at a managed path in dest
+  AND a second, ordinary managed path present with OLD bytes
+WHEN copyManaged runs
+THEN it throws naming the symlink
+  AND the symlink still exists
+  AND no file was created at the link's target
+  AND the ordinary path still holds OLD
+  AND no snapshot directory remains
+```
+
+`existsSync` follows symlinks, so a dangling link reads as absent — it would be recorded
+as created-by-this-run and DELETED on rollback, while `copyFileSync` wrote through it to a
+target outside the repository. Presence MUST therefore be judged with `lstat`.
+
+## REQ-396-6 — runs that write nothing take no snapshot
+
+`--dry-run` and an `abortOnCollision` abort MUST NOT create a snapshot directory.
+
+### Scenario 1 — neither mode leaves a snapshot
+
+```
+GIVEN a managed path that would collide
+WHEN copyManaged runs with dryRun, then with abortOnCollision
+THEN no snapshot directory exists after either
+  AND dest still holds OLD
+```
+
+## REQ-396-7 — the snapshot directory is never itself managed
+
+`RESTORE_POINT_DIR` MUST match no `managed` glob, so an upgrade can never copy its own
+snapshot into the consumer tree. A snapshot left by an earlier run MUST NOT be trusted as
+a source of restore bytes.
+
+### Scenario 1 — drift-guard over the real manifest
+
+```
+GIVEN the real managed globs from brain/core/managed-paths.mjs
+WHEN each of RESTORE_POINT_DIR and paths beneath it are matched
+THEN none matches
+```
+
+### Scenario 2 — a stale snapshot is not reused
+
+```
+GIVEN a snapshot directory left behind holding STALE bytes
+  AND the live file holding CURRENT
+WHEN a restore point is taken and then restored
+THEN the file holds CURRENT
+```
+
+## REQ-396-8 — the write order is deterministic
+
+The write loop MUST iterate in sorted order, so a partial failure lands at a reproducible
+point and the journal slice has a defined replay order.
+
+### Scenario 1 — reported order matches written order
+
+```
+GIVEN several managed paths
+WHEN copyManaged runs
+THEN the paths are written in the same sorted order it reports
+```
+
+## REQ-396-9 — SIGKILL and power loss are recoverable (SLICE 2, NOT IMPLEMENTED)
+
+A hard kill during the write MUST leave a journal that a later invocation detects and
+replays, restoring every managed path to its pre-copy bytes.
+
+> **Not implemented in slice 1.** `docs/KNOWN-LIMITATIONS.md` names this gap explicitly
+> rather than implying coverage. Slice 2 MUST invert `createRestorePoint`'s entry-time
+> clearing of a pre-existing snapshot: once recovery exists, a leftover snapshot is
+> evidence to replay, not debris to clear.
+
+## Out of scope
+
+- Reverting the dependency install (step 1) or the config migration (step 3) — both sit
+  outside the restore point and are named in `KNOWN-LIMITATIONS.md`.
+- Supporting symlinked managed paths rather than refusing them.
+- The merge-vs-copy classification (#397).
