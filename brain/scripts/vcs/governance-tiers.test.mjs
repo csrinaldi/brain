@@ -240,6 +240,14 @@ test('tierParams: unknown tier throws', () => {
   assert.throws(() => tierParams('enterprise'), /unknown tier/);
 });
 
+// ── reviewProtocol — issue #391 T2.3 §3/§5, issue #394 M3 ──────────────────
+
+test('tierParams: reviewProtocol defaults lite/standard to brain-review/1, regulated to brain-review/2', () => {
+  assert.equal(tierParams('lite').reviewProtocol, 'brain-review/1');
+  assert.equal(tierParams('standard').reviewProtocol, 'brain-review/1');
+  assert.equal(tierParams('regulated').reviewProtocol, 'brain-review/2');
+});
+
 // ── resolveGatePolicy / resolveGateEvidence — unknown tier fails closed ─────
 
 test('resolveGatePolicy/resolveGateEvidence throw on an unknown tier for a known gate', () => {

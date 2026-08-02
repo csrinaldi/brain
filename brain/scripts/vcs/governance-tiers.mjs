@@ -182,6 +182,14 @@ export const GATE_MATRIX = Object.freeze({
 /**
  * §2.C — doctrine parameters (not CI jobs; design.md §2.C verbatim).
  *
+ * `reviewProtocol` (issue #391 T2.3 §3/§5, issue #394 M3): the tiered default
+ * `brain-review` verdict protocol version — `cli.mjs`'s ONE seam for the
+ * `buildVerdict({...protocol})` call. `lite`/`standard` default to `/1`
+ * (single-engine deterministic checks, T2.3 design §5); `regulated` defaults
+ * to `/2` (panel-consensus's enabling causal-admission vocabulary, Q5 §7).
+ * Never forbids the other version at any tier (T2.3 design §3.4) — this is
+ * only the DEFAULT `resolveReviewProtocol` would return, not a ceiling.
+ *
  * @type {Record<'lite'|'standard'|'regulated', {
  *   diffBudget: number,
  *   artefacts: string[],
@@ -189,6 +197,7 @@ export const GATE_MATRIX = Object.freeze({
  *   honorOverride: boolean,
  *   honorSkipMemoryGate: boolean,
  *   memoryAssertion: string,
+ *   reviewProtocol: 'brain-review/1'|'brain-review/2',
  * }>}
  */
 const TIER_PARAMS = Object.freeze({
@@ -200,6 +209,7 @@ const TIER_PARAMS = Object.freeze({
     // memory-gate is `detection` at lite — skip:memory-gate has nothing to skip.
     honorSkipMemoryGate: false,
     memoryAssertion: 'coverage-report',
+    reviewProtocol: 'brain-review/1',
   }),
   standard: Object.freeze({
     diffBudget: 400,
@@ -211,6 +221,7 @@ const TIER_PARAMS = Object.freeze({
     // flag is honest metadata, not yet load-bearing anywhere.
     honorSkipMemoryGate: true,
     memoryAssertion: 'issue-linked-record',
+    reviewProtocol: 'brain-review/1',
   }),
   regulated: Object.freeze({
     diffBudget: 200,
@@ -219,6 +230,7 @@ const TIER_PARAMS = Object.freeze({
     honorOverride: false,
     honorSkipMemoryGate: false,
     memoryAssertion: 'issue-linked-session-summary',
+    reviewProtocol: 'brain-review/2',
   }),
 });
 
@@ -292,7 +304,7 @@ export function resolveGateEvidence(gate, tier) {
  * Resolves the doctrine parameters for a tier (§2.C).
  *
  * @param {'lite'|'standard'|'regulated'} tier
- * @returns {{ diffBudget: number, artefacts: string[], honorSizeException: boolean, honorOverride: boolean, honorSkipMemoryGate: boolean, memoryAssertion: string }}
+ * @returns {{ diffBudget: number, artefacts: string[], honorSizeException: boolean, honorOverride: boolean, honorSkipMemoryGate: boolean, memoryAssertion: string, reviewProtocol: 'brain-review/1'|'brain-review/2' }}
  */
 export function tierParams(tier) {
   const params = TIER_PARAMS[tier];

@@ -155,14 +155,21 @@ human writes it.
 Every verdict is a fenced YAML block in the review body. Two schema versions exist,
 `brain-review/1` and `brain-review/2`; both are defined in this section because a reviewer
 parsing a verdict thread must handle either one interchangeably (`parse-verdict.mjs` accepts
-both in the same guarded union — see "Compatibility" below). **Current activation status:**
-`brain-review/1` is what every real run emits today — `cli.mjs`'s call to `buildVerdict(...)`
-never sets `protocol`, so `verdict.mjs`'s default (`protocol = 'brain-review/1'`) is what
-ships. `brain-review/2` is fully implemented and unit-tested but is dead code in production
-until something sets `protocol: 'brain-review/2'` at that call site. The activation condition
-— tying `/2` to `governance.tier` (Q5, issue #358) — is specified in
-`openspec/changes/issue-391-t23-review-package-spec/design.md`; that document states the
-condition only, and does not itself flip the default.
+both in the same guarded union — see "Compatibility" below). **Current activation status
+(issue #394 M3 — wired):** the protocol is resolved once per run from `governance.tier`
+(`resolveTier`/`tierParams`, `governance-tiers.mjs`) at `cli.mjs`'s `buildVerdict(...)` call —
+`lite`/`standard` default to `tierParams(tier).reviewProtocol === 'brain-review/1'`; `regulated`
+defaults to `'brain-review/2'`. The activation condition itself — tying `/2` to
+`governance.tier` — was specified (not yet wired) in
+`openspec/changes/issue-391-t23-review-package-spec/design.md` (Q5, issue #358); issue #394 M3
+implemented the wiring that document deferred. At `regulated`, findings are additionally routed
+through `brain/scripts/review/lib/causal-admission.mjs` before `buildVerdict`: every finding from
+the deterministic evaluators (tranche/checkpoint/ruling — none of which perform LLM inference) is
+annotated `evidence_class: deterministic` / `causal_disposition: introduced` unless it already
+carries its own classification, and the lazy refuter (`evaluators/refuter.mjs`, issue #284,
+REQ-H2-1) runs over any `evidence_class: inferential` blocker before the verdict is built — a
+no-op today since no evaluator yet produces an inferential finding, but a real, wired call, not
+dead code.
 
 ### 6.1 `brain-review/1` — the base schema
 
@@ -369,7 +376,7 @@ npm run brain:review -- --issue <id> --mode ruling
 
 ### Why this is load-bearing:
 1. **Zero Prompt Drift**: Guarantees that the subagent invokes `cli.mjs`, wiring `identity` → `cold-boot` → `mode` → `evaluators` → `verdict` → `poster` deterministically.
-2. **Standardized Protocol Compliance**: Enforces that all review output strictly produces a fenced `brain-review/N` block (`brain-review/1` today by default; `brain-review/2`, with full causal admission, where the tier tie-in activates it — see §6.2) with evidence validation, rather than free-form prose.
+2. **Standardized Protocol Compliance**: Enforces that all review output strictly produces a fenced `brain-review/N` block (`brain-review/1` at `lite`/`standard`; `brain-review/2`, with full causal admission, at `regulated` — the tier-resolved default, see §6.2) with evidence validation, rather than free-form prose.
 3. **Token Minimization**: Leverages the $0-token deterministic pre-checks in `cli.mjs` before executing any LLM evaluation.
 
 ---
