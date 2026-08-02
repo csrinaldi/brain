@@ -1492,6 +1492,7 @@
 {"id":"rec-f13d52eed03330a4","ts":"2026-07-25T21:50:56Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f164ee3614b3e0da","ts":"2026-07-17T01:52:31Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f1c389c0f99ce092","ts":"2026-07-22T00:38:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-f1fb2fe139854d32","ts":"2026-08-02T12:11:34Z","actor":"claude/brain-architecture-review-qe5bo2","type":"session_summary","project":"brain","file":"2026-08.jsonl"}
 {"id":"rec-f2148a7a63abf15e","ts":"2026-07-13T00:21:43Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f218021964de11ed","ts":"2026-06-27T18:51:16Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-f221a7dde1702960","ts":"2026-07-10T00:10:49Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
