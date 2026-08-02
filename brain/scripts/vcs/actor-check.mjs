@@ -139,18 +139,25 @@ function evaluateNoCommitOnBranch({ actor, commits }) {
  * tier-scoped evidence form (issue #358 Q5 Phase 4, REQ-L5-1'). Pure — no
  * gh, no filesystem access (fully testable with fixtures).
  *
- * Decision order (design §5 step 5, extended by design.md §2.A/REQ-L5-1'):
+ * Decision order (design §5 step 5, extended by design.md §2.A/REQ-L5-1' and
+ * issue #375's deny-set):
  *   1. No `labeled` event found → warn + pass (cannot prove self-approval on
  *      missing evidence — REQ-L5-2, keeps false positives ~0). This is the
  *      "no approval yet" case, distinct from `lite`'s own fail-closed rule
  *      below, which only applies once a labeled event exists.
  *   2. `adminOverride` (an allow-listed `override:*` label is present, and
  *      honored at this tier) → pass, logged.
- *   3. Actor in `botAllowlist` (e.g. automation acting on a human's explicit
+ *   3. Actor in `denyActors` (`config.governance.reviewActors`) → fail — a
+ *      review identity may never apply the approved label (issue #375;
+ *      reviewer-protocol.md §9), at ANY tier. Evaluated BEFORE the allow-list
+ *      so a contradictory config resolves fail-closed, and BEFORE the tier
+ *      branch below so `lite`'s narrower distinct-act evidence can never
+ *      admit a denied identity either.
+ *   4. Actor in `botAllowlist` (e.g. automation acting on a human's explicit
  *      instruction) → pass.
- *   4. `lite`: distinct-act ONLY (`evaluateDistinctAct`) — self-approval is
+ *   5. `lite`: distinct-act ONLY (`evaluateDistinctAct`) — self-approval is
  *      not evaluated; a solo maintainer's own late approval passes.
- *   5. `standard`/`regulated`: distinct actor — actor === author OR actor ===
+ *   6. `standard`/`regulated`: distinct actor — actor === author OR actor ===
  *      issueAuthor → fail (self-approval). REQ-L5-1 requires comparing
  *      against BOTH the PR author and the issue author (spec.md:398-400):
  *      the PR author and the issue author can be two different people (e.g.
@@ -158,9 +165,12 @@ function evaluateNoCommitOnBranch({ actor, commits }) {
  *      their own issue counts as self-approval. This is UNCHANGED from the
  *      pre-tiering behavior (REQ-TIER-10's no-op-migration guarantee for the
  *      default `standard` tier).
- *   6. `regulated` only: additionally requires the approver authored no
+ *   7. `regulated` only: additionally requires the approver authored no
  *      commit on the branch (`evaluateNoCommitOnBranch`) — REQ-L5-1'.
- *   7. Otherwise → pass (human-applied approval, actor differs from both).
+ *   8. Otherwise → pass (approval by an identity that is neither an author nor
+ *      deny-listed). NOTE: this branch cannot verify that the actor is human —
+ *      it verifies only that it is not one this repo has named. Step 3 is what
+ *      keeps a known non-human out of it (issue #375).
  *
  * The "most recent" labeled event wins (handles re-labeling: remove → re-add
  * uses the latest add) — `labeledEvents` is assumed to be in the same
@@ -177,6 +187,10 @@ function evaluateNoCommitOnBranch({ actor, commits }) {
  *   distinct-act evidence.
  * @param {string[]} [input.botAllowlist]  Allow-listed actor logins / override
  *   label strings (`config.governance.approvalActors`).
+ * @param {string[]} [input.denyActors]  DENY-listed actor logins
+ *   (`config.governance.reviewActors`, issue #375) — a review identity may
+ *   never apply the approved label, at any tier. Checked before
+ *   `botAllowlist` and before the tier branch.
  * @param {boolean} [input.adminOverride]  Whether an allow-listed `override:*`
  *   label is present on the issue AND honored at this tier (resolved by the
  *   wrapper against `botAllowlist` — never a blanket bypass, REQ-L5-2).
@@ -198,6 +212,7 @@ export function evaluateActor({
   issueAuthor,
   labeledEvents = [],
   botAllowlist = [],
+  denyActors = [],
   adminOverride = false,
   overrideRefused = false,
   tier = 'standard',
@@ -229,6 +244,34 @@ export function evaluateActor({
       level: 'pass',
       reason: `admin override present (allow-listed override:* label) — approval actor check bypassed (actor: ${actor ?? 'unknown'}).`,
     };
+  }
+
+  // DENY before ALLOW (issue #375). `denyActors` comes from
+  // `governance.reviewActors` — the same key L6 reads to exclude an identity
+  // from the human-approver count. Both readings are restrictive and say the
+  // same thing: this identity is not a human authority. See the ADR for why
+  // ruling R2 ("no key feeds two gates") is knowingly excepted here.
+  //
+  // Placed ABOVE the allow-list on purpose: `reviewer-identity-config.test.mjs`
+  // already asserts the two lists never overlap in the shipped config, so this
+  // ordering only decides a contradictory config — and it must resolve
+  // fail-CLOSED. A misregistration must not hand the reviewer the merge
+  // keystroke.
+  //
+  // Deliberately BELOW `adminOverride`: that is the documented, logged human
+  // recovery path (workflow-governance.md), and #375 scopes rule 2 out.
+  //
+  // Deliberately ABOVE the tier branch (issue #358 Q5): a denied identity must
+  // never slip through `lite`'s narrower distinct-act evidence either — the
+  // deny-set is a tier-agnostic identity gate, not part of REQ-L5-1's
+  // evidence form.
+  if (actor && denyActors.includes(actor)) {
+    return withRefusalNote({
+      level: 'fail',
+      reason:
+        `the approved label was applied by "${actor}", which is registered in governance.reviewActors ` +
+        '— a review identity may never apply the approved label (reviewer-protocol.md §9; that label is human-only).',
+    });
   }
 
   if (actor && botAllowlist.includes(actor)) {
@@ -419,6 +462,24 @@ function defaultReadBotAllowlist(cwd) {
   };
 }
 
+/**
+ * L5's DENY list (issue #375): `governance.reviewActors` — the SAME key L6
+ * reads to exclude an identity from the human-approver count. Both readings are
+ * restrictive and co-directional ("not a human authority"), which is why ruling
+ * R2 is excepted here; see the ADR. Kept as a separate reader from
+ * `defaultReadBotAllowlist` so the two keys never merge at the source.
+ */
+function defaultReadDenyActors(cwd) {
+  return () => {
+    try {
+      const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
+      return Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
+    } catch {
+      return [];
+    }
+  };
+}
+
 function defaultReadConfig(cwd) {
   return () => {
     try {
@@ -483,8 +544,13 @@ function resolveTierForFailure(cwd, deps) {
  * `needsCommitEvidence`) and a PR number is available — `standard` makes no
  * additional API call (REQ-TIER-10's no-op-migration guarantee).
  *
+ * `denyActors` (issue #375) is sourced from `governance.reviewActors` via a
+ * reader kept separate from `readBotAllowlist` (`config.governance.
+ * approvalActors`) — the two keys must never merge at the source (design §3
+ * two-key split). Threaded through unconditionally, at every tier.
+ *
  * @param {{ author: string, prBody: string, baseBranch: string, repo: string, provider?: string, prNumber?: number, cwd?: string, tier?: string, deps?: object }} args
- * @returns {Promise<{ author: string, issueAuthor: string|null, labeledEvents: Array, botAllowlist: string[], adminOverride: boolean, overrideRefused: boolean, tier: string, commits: Array|null }>}
+ * @returns {Promise<{ author: string, issueAuthor: string|null, labeledEvents: Array, botAllowlist: string[], denyActors: string[], adminOverride: boolean, overrideRefused: boolean, tier: string, commits: Array|null }>}
  */
 export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo, provider, prNumber, cwd = process.cwd(), tier: tierOverride, deps = {} } = {}) {
   const readConfig = deps.readConfig ?? defaultReadConfig(cwd);
@@ -496,15 +562,17 @@ export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo,
   const fetchLabeledEvents = deps.fetchLabeledEvents ?? defaultFetchLabeledEvents(repo, provider, approvedLabel, deps);
   const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(repo, provider, deps);
   const readBotAllowlist = deps.readBotAllowlist ?? defaultReadBotAllowlist(cwd);
+  const readDenyActors = deps.readDenyActors ?? defaultReadDenyActors(cwd);
   const fetchCommits = deps.fetchCommits ?? defaultFetchCommits(repo, provider, deps);
 
   const botAllowlist = readBotAllowlist();
+  const denyActors = readDenyActors();
   const issueNumber = extractIssueNumber(prBody, baseBranch);
 
   const commits = needsCommitEvidence(tier) && prNumber != null ? await fetchCommits(prNumber) : null;
 
   if (issueNumber == null) {
-    return { author, issueAuthor: null, labeledEvents: [], botAllowlist, adminOverride: false, overrideRefused: false, tier, commits };
+    return { author, issueAuthor: null, labeledEvents: [], botAllowlist, denyActors, adminOverride: false, overrideRefused: false, tier, commits };
   }
 
   const labeledEvents = await fetchLabeledEvents(issueNumber);
@@ -513,7 +581,7 @@ export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo,
   const adminOverride = honorOverride && overrideLabelPresent;
   const overrideRefused = overrideLabelPresent && !honorOverride;
 
-  return { author, issueAuthor, labeledEvents, botAllowlist, adminOverride, overrideRefused, tier, commits };
+  return { author, issueAuthor, labeledEvents, botAllowlist, denyActors, adminOverride, overrideRefused, tier, commits };
 }
 
 /**

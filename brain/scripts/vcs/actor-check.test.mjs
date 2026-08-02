@@ -976,9 +976,13 @@ test('A3 TASK1 source-scan: defaultFetchIssue no longer contains execFileSync(\'
 //
 // The reviewer identity registers ONLY in governance.reviewActors, never in
 // governance.approvalActors (design §3 two-key split). L5 (actor-check.mjs) is
-// NOT touched by H0-b — it keeps reading governance.approvalActors only. This
-// test uses a test-fixture reviewer identity, not a real registered handle
-// (task 7.3 is deferred — no reviewer bot handle exists yet).
+// NOT touched by H0-b — at the time this test was written it kept reading
+// governance.approvalActors only. Issue #375 later gave L5 a SECOND, DENY-only
+// read of governance.reviewActors (see the `#375:` tests below) — this test
+// still passes (now via the deny check, which fires before the self-approval
+// check this test originally exercised) since #375 only narrows what passes,
+// never widens it. This test uses a test-fixture reviewer identity, not a real
+// registered handle (task 7.3 is deferred — no reviewer bot handle exists yet).
 
 test('REQ-266-6 t1 (lock-3, issue #266): reviewer identity in governance.reviewActors (NOT governance.approvalActors) does not pass L5 via the allow-listed-automation branch when self-applying status:approved', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'brain-config-'));
@@ -1003,7 +1007,105 @@ test('REQ-266-6 t1 (lock-3, issue #266): reviewer identity in governance.reviewA
   assert.equal(
     result.level,
     'fail',
-    'the reviewer must not be admitted by the allow-listed-automation branch — self-approval is caught instead',
+    'the reviewer must not be admitted by the allow-listed-automation branch',
   );
-  assert.match(result.reason, /self/i);
+  // REASON UPDATED BY ISSUE #375 — the level assertion above, which is this
+  // test's load-bearing claim, is unchanged.
+  //
+  // Originally this asserted /self/i, because the ONLY thing that caught the
+  // reviewer here was rule 5 (self-approval): the fixture makes the reviewer
+  // the PR author, the issue author AND the label actor at once. That is
+  // precisely why this test could not detect the gap #375 fixes — it asserted
+  // the reviewer does not pass via the ALLOW-listed branch, a strictly weaker
+  // claim than "it fails", and it would have passed identically with no
+  // deny-set at all.
+  //
+  // #375 added a deny check ahead of the allow-list, so the reviewer is now
+  // caught earlier and for the stronger reason. Both outcomes satisfy this
+  // test's intent, so accept either rather than pinning the weaker one.
+  assert.match(result.reason, /self|governance\.reviewActors/i);
+});
+
+// ── issue #375 — L5 deny-set (Option A: reviewActors read as a DENY list) ─────
+//
+// Why these tests exist even though #266's t1 above already touches lock 3:
+// t1 sets the PR author, the issue author AND the label actor all to the same
+// reviewer identity, so rule 4 (self-approval) fires and returns 'fail'. Its own
+// assertion message says so — "self-approval is caught instead". t1 would pass
+// identically if `reviewActors` did not exist, which is exactly why the gap
+// survived undetected: it asserts the reviewer does not pass via the
+// ALLOW-listed branch (rule 3), a strictly weaker claim than "it fails".
+//
+// These tests make the reviewer a DIFFERENT actor from both authors, so nothing
+// but the deny-set can catch it.
+
+test('#375: an actor in denyActors FAILS even when it is neither the PR author nor the issue author', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    issueAuthor: 'bob',
+    labeledEvents: [{ actor: { login: 'brain-reviewer[bot]' } }],
+    denyActors: ['brain-reviewer[bot]'],
+  });
+
+  // Without the deny-set this falls through to rule 5 and PASSES as
+  // "human-applied approval, actor differs from both" — a property rule 5
+  // asserts in prose but never verifies.
+  assert.equal(result.level, 'fail', 'a denied identity must never unlock status:approved');
+  assert.match(result.reason, /brain-reviewer\[bot\]/);
+});
+
+test('#375: deny beats allow — an actor in BOTH denyActors and botAllowlist FAILS (fail-closed)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    issueAuthor: 'bob',
+    labeledEvents: [{ actor: { login: 'brain-reviewer[bot]' } }],
+    botAllowlist: ['brain-reviewer[bot]'],
+    denyActors: ['brain-reviewer[bot]'],
+  });
+
+  // `reviewer-identity-config.test.mjs` already asserts the two lists never
+  // overlap in the shipped config, so this is defense in depth. It pins the
+  // resolution of a contradictory config as fail-CLOSED: a misregistration must
+  // not hand the reviewer the merge keystroke.
+  assert.equal(result.level, 'fail', 'a contradictory config must resolve against the approval, not for it');
+});
+
+test('#375: an actor in neither list still passes — the deny-set does not widen rule 4', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    issueAuthor: 'bob',
+    labeledEvents: [{ actor: { login: 'carol' } }],
+    denyActors: ['brain-reviewer[bot]'],
+  });
+
+  // Negative control. Without it, a deny rule that failed everything would
+  // satisfy the two tests above and still be wrong.
+  assert.equal(result.level, 'pass');
+});
+
+test('#375: gatherActorCheckInputs sources denyActors from governance.reviewActors', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-config-'));
+  writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({
+    governance: {
+      approvalActors: ['release-bot'],
+      reviewActors: ['brain-reviewer[bot]'],
+    },
+  }));
+
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    cwd: dir,
+    deps: {
+      fetchLabeledEvents: () => [{ actor: { login: 'brain-reviewer[bot]' } }],
+      fetchIssue: () => ({ labels: ['status:approved'], author: 'bob' }),
+    },
+  });
+
+  // The two keys must stay separate on the way in: reviewActors → denyActors
+  // (L5 denial, new), approvalActors → botAllowlist (L5 allow, existing).
+  assert.deepEqual(inputs.denyActors, ['brain-reviewer[bot]']);
+  assert.deepEqual(inputs.botAllowlist, ['release-bot']);
 });
