@@ -1,7 +1,16 @@
 # ADR-0027 — `brain:upgrade` Rollback Is Restorable, Not Atomic
 
-**Status**: Accepted
+**Status**: Accepted  
 **Date**: 02/08/2026 - Cristian Rinaldi
+
+> ⚠️ **AMENDED AFTER SIGNATURE — Decision #3 needs re-confirmation.** A second review
+> measured the original Decision #3's premise to be false: a symlink resolving *inside* the
+> repository round-trips cleanly, so refusing every symlink was wrong, while a symlinked
+> *ancestor* directory — which does escape — was passing unnoticed. Decision #3 and its cost
+> paragraph now state the real boundary. Two factual corrections came with it ("four disjoint
+> locations" was five; the consumer's-own-VCS alternative was unnamed). The signature above
+> covers the decision's substance, which is unchanged; **the amended Decision #3 has not been
+> separately confirmed.**
 
 ## Context
 
@@ -12,10 +21,10 @@ criterion as:
 > leaves the consumer tree byte-identical to the pre-upgrade state.
 
 **That criterion cannot be met as written, and no implementation effort would change
-that.** `rename(2)` is atomic for exactly one path. The managed payload spans four
-disjoint locations — `brain/**`, `.github/**`, `.gemini/**`, and loose files at the repo
-root — so there is no single directory whose swap could commit the upgrade in one
-operation. A genuinely atomic multi-file commit requires an on-disk journal; no portable
+that.** `rename(2)` is atomic for exactly one path. The managed payload spans five
+disjoint locations — `brain/**`, `.github/**`, `.gemini/**`, `.claude/settings.json`, and
+loose files at the repo root — so there is no single directory whose swap could commit the
+upgrade in one operation. A genuinely atomic multi-file commit requires an on-disk journal; no portable
 Node `fs` API provides one.
 
 Two further observations were made while measuring the real surface:
@@ -50,8 +59,12 @@ residual gaps rather than implying they are closed.
    half-restored tree reported as clean is worse than an unprotected one, because it
    removes the operator's reason to look.
 3. **Conditions that cannot be rolled back are refused up front, not handled optimistically.**
-   A symlink at a managed path is the first such case: `copyFileSync` follows it, so the
-   write lands outside the repository where no rollback can reach.
+   The boundary is a write that lands **outside `destRoot`**, since the snapshot lives inside
+   it — not "the path is a symlink". Two classes are refused: a path that resolves outside the
+   repository once every symlink on its *whole* path is followed (so a symlinked **ancestor
+   directory** counts, which a leaf-only test misses), and a **dangling** symlink, which
+   cannot be snapshotted at all. A symlink resolving *inside* the repository is protected like
+   any other path.
 4. **The residual gaps are enumerated in `docs/KNOWN-LIMITATIONS.md`**, individually:
    SIGKILL/power loss, the dependency install, the config migration, and symlinked paths.
 5. Surviving SIGKILL and power loss requires an on-disk journal replayed by the *next*
@@ -80,10 +93,16 @@ residual gaps rather than implying they are closed.
   honest state, and M4's hard gate stays closed until it is fixed.
 - The snapshot doubles write I/O for the copy phase (~23 ms → ~46 ms, 2.75 MiB for 366
   files). Measured and accepted.
-- A consumer who legitimately symlinks a managed path (a shared `AGENTS.md`, say) must
-  now make it a real file. This is a deliberate fail-closed choice; the message names the
-  path and the remedy, so it is not the silent lockout class recorded in
-  `brain/core/anti-patterns/`.
+- A consumer whose managed path resolves **outside** the repository, or is a dangling link,
+  must fix it before upgrading. Deliberate fail-closed; the message names the path and the
+  remedy, so it is not the silent lockout class recorded in `brain/core/anti-patterns/`.
+  A symlink pointing *inside* the repository costs nothing — an earlier revision of this ADR
+  refused those too, on the premise that the write escapes the repo. **That premise was
+  measured false**: the snapshot, the write and the restore all follow the link, so the target
+  returns to its original bytes with the link untouched. Since `AGENTS.md` is a managed path
+  and `AGENTS.md -> CLAUDE.md` is the canonical agent-interop symlink, the broader rule would
+  have soft-locked a common, legitimate setup — and only *after* step 1 had already rewritten
+  the consumer's `package.json`, lockfile and `node_modules/`.
 
 **Follow-ups this decision creates**
 
@@ -104,6 +123,14 @@ renames — the same exposure, in a shorter window.
 It covers all four modes with one mechanism, but leaves the tree visibly dirty after a
 Ctrl-C until someone re-runs the command. It remains the right shape for slice 2, layered
 on the snapshot rather than replacing it.
+
+**Delegate the restore point to the consumer's own VCS.** This is the pre-existing
+mechanism — `docs/KNOWN-LIMITATIONS.md` said recovery was "through the consumer's own git
+hygiene" — and it is the first alternative any reviewer raises, so it is named here rather
+than passed over. Rejected: ADR-0007/0008 make brain VCS-agnostic, so it cannot be assumed;
+a consumer with a dirty working tree makes `git stash` unreliable; and it requires the
+consumer to notice the failure and know the remedy, which is exactly the burden this ADR
+exists to remove.
 
 **Leave the criterion as written and claim it is met.** Rejected explicitly. It is the
 failure mode M10 (#335) exists to close — green in test, inert in production — and #396
