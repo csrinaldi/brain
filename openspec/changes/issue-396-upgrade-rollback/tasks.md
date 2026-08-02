@@ -120,6 +120,30 @@ tracker `feature/issue-396-rollback`). Slice 2 is a separate PR on the same chai
 - [ ] 7.6 **F10** — a directory/FIFO/socket at a managed path yields an opaque EISDIR/ENXIO
       instead of the actionable message the refusal branches were given.
 
+## Phase 8b — Slice 2 review remediation
+
+- [x] 8b.1 CRITICAL — `copyManaged`'s snapshot-failure catch deleted the snapshot on the
+      `interruptedRun` refusal too, destroying the evidence in the act of pointing at it.
+      Third occurrence of the destroy-what-we-protect shape in this issue.
+- [x] 8b.2 CRITICAL — the lock was taken before the `--recover` branch, and a SIGKILL always
+      leaves it, so the one command that repairs a killed run was always blocked by it.
+      Recovery now breaks a stale lock; a real upgrade still yields to it.
+- [x] 8b.3 HIGH — no durability barrier: `fsync` on every snapshot file and on the journal
+- [x] 8b.4 HIGH — REQ-J-1's timeout path left a busy-spinning child alive, hanging the CI
+      runner at 100% CPU. Killed in `finally` on every path.
+- [x] 8b.5 MEDIUM — `--recover` ignored `--dry-run` and wrote anyway
+- [x] 8b.6 MEDIUM — an incomplete recovery renamed the snapshot, moving the journal out of
+      `readJournal`'s sight and disarming the gate over a still-dirty tree. `preserve()` is
+      removed entirely: slice 2's refusal supersedes the reason slice 1 needed it.
+- [x] 8b.7 MEDIUM — `discard()` removes the journal FIRST, so an interrupted cleanup fails safe
+- [x] 8b.8 LOW — `restore()` recreates a missing parent directory (recovery runs long after)
+- [x] 8b.9 LOW — drift-guard widened to the lock, `.preserved-N`, and the journal
+- [x] 8b.10 REQ-J-6/J-7 drive the REAL CLI over the exact state a kill leaves. Three of the
+      defects above were invisible to tests that called the library directly.
+- [ ] 8b.11 **OPEN** — the lock is still taken before the `.brain-source` self-host guard, so a
+      run that will refuse anyway briefly creates a file in the consumer tree. Released on every
+      path; transient residue, not a leak.
+
 ## Phase 8 — Slice 2: on-disk journal
 
 - [x] 8.1 Write the journal AFTER the snapshot and BEFORE the first write — its absence is what proves nothing was written
@@ -127,7 +151,8 @@ tracker `feature/issue-396-rollback`). Slice 2 is a separate PR on the same chai
 - [x] 8.3 **Inverted** `createRestorePoint`'s entry-time clearing — a leftover snapshot with a journal is evidence, not debris
 - [x] 8.4 `recoverFromJournal()` + `brain:upgrade -- --recover`; reports recovered and failed separately
 - [x] 8.5 REQ-J-1..5, including a REAL SIGKILL of a child mid-write
-- [x] 8.6 `KNOWN-LIMITATIONS.md`: SIGKILL / power-loss gap CLOSED
+- [x] 8.6 `KNOWN-LIMITATIONS.md`: SIGKILL gap CLOSED; power loss NARROWED (fsync ordering) with
+      integrity validation named as an outstanding residual — not claimed closed
 - [ ] 8.7 Tracker PR carries `Closes #396`
 
 ## Gates (slice 1, re-run per push)

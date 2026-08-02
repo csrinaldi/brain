@@ -10,8 +10,11 @@
 // Config migrations are additive: existing consumer values always win.
 
 import {
+  closeSync,
   existsSync,
+  fsyncSync,
   lstatSync,
+  openSync,
   mkdirSync,
   copyFileSync,
   readFileSync,
@@ -131,7 +134,14 @@ function restoreHandle({ destRoot, dir, saved, created, createdDirs }) {
       const failed = [];
 
       for (const rel of saved) {
-        try { copyFileSync(join(dir, rel), join(destRoot, rel)); } catch { failed.push(rel); }
+        const target = join(destRoot, rel);
+        try {
+          // Recovery can run long after the crash, and the consumer may have deleted
+          // the half-written directory in the meantime. A live rollback never needed
+          // this — the write loop had just created the parent.
+          mkdirSync(dirname(target), { recursive: true });
+          copyFileSync(join(dir, rel), target);
+        } catch { failed.push(rel); }
       }
 
       // Judged by outcome, not by whether the call threw: a path that is gone was
@@ -156,32 +166,18 @@ function restoreHandle({ destRoot, dir, saved, created, createdDirs }) {
 
       return { failed };
     },
-    /** Drops the snapshot. Safe to call after restore(). */
-    discard() {
-      rmSync(dir, { recursive: true, force: true });
-    },
     /**
-     * Moves the snapshot to a name no later run auto-clears, and returns that path.
+     * Drops the snapshot. Safe to call after restore().
      *
-     * Used when the rollback could NOT finish: those bytes are then the only
-     * surviving copy of the consumer's pre-copy state. Leaving them at the default
-     * location would be a trap — `createRestorePoint` clears that path on entry, so
-     * the operator's most natural next action, re-running `brain:upgrade`, would
-     * silently destroy exactly what they were just told to restore from.
-     *
-     * Numbered rather than timestamped so it is deterministic and never clobbers an
-     * older preserved snapshot.
-     *
-     * @returns {string} where the snapshot now lives.
+     * The JOURNAL goes first, deliberately. `rmSync` gives no ordering guarantee, so a
+     * crash midway through a recursive delete could otherwise leave a journal
+     * describing a snapshot that is already half-gone — and the next run would trust
+     * it. Removing the journal first makes an interrupted discard fail SAFE: what
+     * survives is an unreferenced directory, which the next run treats as debris.
      */
-    preserve() {
-      for (let n = 1; n <= 999; n++) {
-        const target = `${dir}.preserved-${n}`;
-        if (!pathPresent(target)) {
-          try { renameSync(dir, target); return target; } catch { return dir; }
-        }
-      }
-      return dir;
+    discard() {
+      try { rmSync(join(dir, JOURNAL_FILE), { force: true }); } catch { /* fall through */ }
+      rmSync(dir, { recursive: true, force: true });
     },
   };
 }
@@ -220,6 +216,39 @@ export const JOURNAL_VERSION = 1;
 /** Lock path, deliberately a SIBLING of the snapshot dir so clearing that dir never releases it. */
 export const LOCK_PATH_SUFFIX = '.lock';
 
+/**
+ * Forces a path's bytes (or a directory's entries) to stable storage.
+ *
+ * Recovery code cannot rely on the page cache. On a power cut, ext4's default
+ * ordering commits metadata without guaranteeing data, and gives NO ordering at all
+ * between two independent files — so a journal could land while the snapshot bytes
+ * it describes did not. Recovery would then restore a zero-length file over the
+ * consumer's real content AND report success, which is the worst outcome this code
+ * can produce. Best-effort: a filesystem that refuses fsync is not a reason to abort
+ * an upgrade, but it IS a reason not to have claimed durability without trying.
+ */
+function fsyncPath(p) {
+  let fd;
+  try {
+    fd = openSync(p, 'r');
+    fsyncSync(fd);
+  } catch { /* best effort */ } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* ignore */ } }
+  }
+}
+
+/**
+ * Removes a lock left by a run that died.
+ *
+ * Only `--recover` may call this, and the reasoning is narrow: a SIGKILL runs no exit
+ * handler, so the lock ALWAYS survives the crash. Without this, the one command that
+ * repairs a killed run is the one command that killed run is guaranteed to block.
+ * The run that held it is dead by definition — there is nothing to yield to.
+ */
+export function breakStaleLock(destRoot) {
+  try { rmSync(join(destRoot, RESTORE_POINT_DIR + LOCK_PATH_SUFFIX), { force: true }); } catch { /* cosmetic */ }
+}
+
 function writeJournal({ dir, saved, created, createdDirs, destRoot }) {
   const journal = {
     version: JOURNAL_VERSION,
@@ -228,7 +257,12 @@ function writeJournal({ dir, saved, created, createdDirs, destRoot }) {
     createdDirs: [...createdDirs].map((d) => relative(destRoot, d)),
   };
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, JOURNAL_FILE), JSON.stringify(journal, null, 2) + '\n');
+  const path = join(dir, JOURNAL_FILE);
+  writeFileSync(path, JSON.stringify(journal, null, 2) + '\n');
+  // The journal is the last thing written before the first managed write, so this is
+  // the barrier that makes "journal present" mean "the snapshot below it is durable".
+  fsyncPath(path);
+  fsyncPath(dir);
 }
 
 /**
@@ -285,8 +319,9 @@ export function recoverFromJournal({ destRoot }) {
     safeDiscard(handle);
     return { recovered, failed, snapshotDir: null };
   }
-  // Same rule as a live rollback: what could not be put back keeps its evidence.
-  return { recovered, failed, snapshotDir: handle.preserve() };
+  // Same rule as a live rollback: what could not be put back keeps its evidence AND
+  // keeps the gate armed, so the next run still refuses over the still-dirty tree.
+  return { recovered, failed, snapshotDir: dir };
 }
 
 /**
@@ -517,6 +552,7 @@ export function createRestorePoint({ destRoot, relPaths }) {
       const backup = join(dir, rel);
       mkdirSync(dirname(backup), { recursive: true });
       copyFileSync(dest, backup);
+      fsyncPath(backup);
       saved.push(rel);
       continue;
     }
@@ -671,9 +707,16 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
     try {
       restorePoint = createRestorePoint({ destRoot, relPaths: [...toMerge, ...toCopy] });
     } catch (err) {
-      // The snapshot failed before any managed path was written, so there is
-      // nothing to roll back — but it may have built part of a backup first.
-      // Clear it: a refusal must not leave debris in the consumer tree.
+      // An interrupted-run refusal is NOT a failed snapshot. It fires because a
+      // journal is already on disk, and that journal plus its snapshot are the only
+      // record of a tree some killed run left half-applied. Clearing here would
+      // destroy the evidence in the very act of telling the operator to recover from
+      // it — the same "destroy what we promised to protect" shape as the `finally`
+      // discard and the retry-clears-the-preserved-snapshot bug before it.
+      if (err?.interruptedRun) throw err;
+
+      // A genuinely failed snapshot: nothing was written, but it may have built part
+      // of a backup first. Clear it — a refusal must not leave debris behind.
       rmSync(join(destRoot, RESTORE_POINT_DIR), { recursive: true, force: true });
       // Tag it so the caller can say "refused, nothing was touched" instead of the
       // write-phase wording, which would be false here in both halves.
@@ -705,7 +748,11 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
       // surviving copy of those bytes. Move it somewhere no later run auto-clears —
       // only a COMPLETE rollback earns the cleanup, which is why this is not a
       // `finally` — and tell the caller where it went.
-      throw annotateRollback(err, failed, restorePoint.preserve());
+      // Left at the DEFAULT path on purpose. Slice 1 renamed it here, because back
+      // then a retry cleared that path — but slice 2's journal makes a retry REFUSE
+      // instead, and renaming would move the journal out of readJournal's sight and
+      // silently disarm the gate over a tree that is still dirty.
+      throw annotateRollback(err, failed, restorePoint.dir);
     }
 
     safeDiscard(restorePoint);

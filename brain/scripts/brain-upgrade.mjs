@@ -18,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { copyManaged, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, recoverFromJournal, acquireLock } from './lib/installer.mjs';
+import { copyManaged, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, recoverFromJournal, readJournal, acquireLock, breakStaleLock, RESTORE_POINT_DIR } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
 
 const ROOT = process.cwd();
@@ -43,18 +43,29 @@ const force = flags.has('--force');
 const abortOnCollision = flags.has('--abort-on-collision');
 const recover = flags.has('--recover');
 
-// ── Lock ───────────────────────────────────────────────────────────────────────
-// Two concurrent runs would each clear and rebuild the other's restore point, so
-// neither could roll back. Released on every exit path this process controls; a
-// SIGKILL leaves it behind, and the refusal message says how to clear it.
-const lock = acquireLock(ROOT);
-process.on('exit', () => lock.release());
-
 // ── --recover ──────────────────────────────────────────────────────────────────
 // Replays the restore point a KILLED run left behind. Deliberately explicit and
 // deliberately terminal: between that crash and now the consumer may have repaired
 // things by hand, so this never runs by itself and never chains into an upgrade.
+//
+// Runs BEFORE the lock is taken, and this ordering is not incidental. A SIGKILL runs
+// no exit handler, so the lock it held ALWAYS survives the crash — meaning the one
+// command that repairs a killed run would otherwise be the one command guaranteed to
+// be blocked by it. Recovery breaks a stale lock instead of yielding to it: the run
+// that owned it is by definition dead.
 if (recover) {
+  breakStaleLock(ROOT);
+  if (dryRun) {
+    const pending = readJournal(ROOT);
+    if (!pending) {
+      info('--dry-run: nothing to recover — no interrupted upgrade was recorded here.');
+    } else {
+      info(`--dry-run: would restore ${pending.saved.length + pending.created.length} managed path(s) from ${join(ROOT, RESTORE_POINT_DIR)}:`);
+      for (const f of [...pending.saved, ...pending.created]) console.log(`      ${C.dim}${f}${C.reset}`);
+      info('Re-run without --dry-run to actually restore.');
+    }
+    process.exit(0);
+  }
   const result = recoverFromJournal({ destRoot: ROOT });
   if (!result) {
     info('Nothing to recover — no interrupted upgrade was recorded here.');
@@ -71,6 +82,29 @@ if (recover) {
   console.log(`\n${C.green}Recovered.${C.reset} Re-run the upgrade when ready.\n`);
   process.exit(0);
 }
+
+// ── Lock ───────────────────────────────────────────────────────────────────────
+// Two concurrent runs would each clear and rebuild the other's restore point, so
+// neither could roll back. Taken only for a real upgrade — never for --recover,
+// which must work precisely when a dead run's lock is still lying around.
+let lock;
+try {
+  lock = acquireLock(ROOT);
+} catch (err) {
+  // A held lock plus a journal is ambiguous BY CONSTRUCTION — a live run writes its
+  // journal before its first write, so this looks identical to a run that was killed
+  // holding both. Yielding is the safe read (never race a run that might be alive),
+  // but the killed case is far more likely and the bare lock message sends the
+  // operator to delete a file rather than to the remedy. Name both.
+  const pending = readJournal(ROOT);
+  if (pending) {
+    console.error(`  ${C.red}✗${C.reset} ${err.message}`);
+    warn(`A previous run also left an interrupted upgrade here, covering ${pending.saved.length + pending.created.length} managed path(s).`);
+    die(`If no upgrade is running, run '${PM} run brain:upgrade -- --recover' — it clears that lock and puts those paths back.`);
+  }
+  die(err.message);
+}
+process.on('exit', () => lock.release());
 
 if (!tag && !noInstall) {
   die(`missing <tag>. Usage: ${PM} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force] [--recover]`);

@@ -1212,6 +1212,10 @@ test('copyManaged: the restore-point dir matches no real managed glob (REQ-S6-6)
   // an upgrade would copy its own backup into the consumer tree.
   for (const candidate of [
     RESTORE_POINT_DIR,
+    `${RESTORE_POINT_DIR}.lock`,
+    `${RESTORE_POINT_DIR}.preserved-1`,
+    `${RESTORE_POINT_DIR}.preserved-1/package.json`,
+    `${RESTORE_POINT_DIR}/journal.json`,
     `${RESTORE_POINT_DIR}/package.json`,
     `${RESTORE_POINT_DIR}/brain/core/managed-paths.mjs`,
     `${RESTORE_POINT_DIR}/.github/workflows/governance.yml`,
@@ -1310,19 +1314,23 @@ test('copyManaged: an incomplete rollback KEEPS the snapshot (REQ-S6-11)', () =>
     );
 
     // The trap this closes: the operator is told to restore from that directory, and
-    // their most natural next action is to re-run the upgrade. A snapshot left at the
-    // default location would be cleared on entry by that very run.
+    // their most natural next action is to re-run the upgrade. Slice 1 protected the
+    // snapshot by MOVING it out of the path a retry cleared. Slice 2 protects it
+    // better — the journal makes that retry REFUSE instead of clearing — so the
+    // snapshot now stays put and the refusal gate stays armed over the dirty tree.
     rmSync(join(dest, 'brain', 'core', 'x.md'), { recursive: true, force: true });
     writeFileSync(join(dest, 'brain', 'core', 'x.md'), 'whatever');
-    copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [] });
 
+    assert.throws(
+      () => copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [] }),
+      (err) => err.interruptedRun === true,
+      'a retry must REFUSE over a dirty tree, not write through it',
+    );
     assert.equal(
       readFileSync(join(caught.rollbackSnapshotDir, 'brain', 'core', 'x.md'), 'utf8'),
       'PRECIOUS',
-      'a later brain:upgrade run must NOT destroy the preserved snapshot',
+      'and the retry must not have destroyed the snapshot it just refused over',
     );
-    assert.notEqual(caught.rollbackSnapshotDir, join(dest, RESTORE_POINT_DIR),
-      'the preserved snapshot must not sit at the path every run clears on entry');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

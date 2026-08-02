@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync,
 } from 'node:fs';
@@ -63,13 +63,21 @@ test('journal: a SIGKILL mid-write leaves a journal, the next run refuses, and -
       });
     `;
     const proc = spawn(process.execPath, ['--input-type=module', '-e', child]);
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('child never reached the write')), 20000);
-      proc.stdout.on('data', (d) => {
-        if (d.toString().includes('WROTE')) { clearTimeout(timer); resolve(); }
+    try {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('child never reached the write')), 20000);
+        proc.on('error', (e) => { clearTimeout(timer); reject(e); });
+        proc.stdout.on('data', (d) => {
+          if (d.toString().includes('WROTE')) { clearTimeout(timer); resolve(); }
+        });
       });
-    });
-    proc.kill('SIGKILL');
+    } finally {
+      // The child busy-spins by design, so it MUST be killed on every path. Without
+      // this the timeout branch leaves it spinning, its handle keeps the test
+      // runner's event loop referenced, and the CI job hangs at 100% CPU until its
+      // wall clock kills it — a hang is worse than the failure it was reporting.
+      proc.kill('SIGKILL');
+    }
     await new Promise((resolve) => proc.on('exit', resolve));
 
     // The tree is half-applied and nothing in-process could have prevented it.
@@ -179,6 +187,80 @@ test('journal: the lock is exclusive, and survives clearing the snapshot dir (RE
     const second = acquireLock(tmp);
     assert.ok(second.path, 'the lock must be retakeable once released');
     second.release();
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── REQ-J-6: the real CLI, over the exact state a kill leaves behind ──────────
+// REQ-J-1 proves a SIGKILL leaves {journal, snapshot, stale lock}. This stages that
+// state and drives the REAL brain-upgrade.mjs over it, which is where the wiring
+// lives: three defects (the refusal deleting its own evidence, the stale lock
+// blocking the only remedy, and --recover ignoring --dry-run) were all invisible to
+// tests that called the library directly.
+function stageKilledRun(tmp) {
+  const consumer = join(tmp, 'consumer');
+  const pkg = join(consumer, 'node_modules', 'brain');
+  mkdirSync(join(pkg, 'brain', 'core'), { recursive: true });
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'brain', version: '9.9.9' }));
+  writeFileSync(join(pkg, 'brain', 'core', 'managed-paths.mjs'),
+    'export const managed = ["brain/core/**"];\nexport const local = [];\nexport const MANAGED_SCRIPT_KEYS = [];\n');
+  writeFileSync(join(pkg, 'brain', 'core', 'config-migrations.mjs'), 'export const migrations = [];\n');
+  writeFileSync(join(pkg, 'brain', 'core', 'a.md'), 'NEW UPSTREAM BYTES');
+
+  // The consumer tree as the kill left it: half-applied.
+  mkdirSync(join(consumer, 'brain', 'core'), { recursive: true });
+  writeFileSync(join(consumer, 'brain', 'core', 'a.md'), 'NEW UPSTREAM BYTES');
+
+  // …plus exactly what the dead run left: snapshot + journal + a lock it never released.
+  const snap = join(consumer, RESTORE_POINT_DIR);
+  mkdirSync(join(snap, 'brain', 'core'), { recursive: true });
+  writeFileSync(join(snap, 'brain', 'core', 'a.md'), 'CONSUMER ORIGINAL');
+  writeFileSync(join(snap, JOURNAL_FILE), JSON.stringify(
+    { version: JOURNAL_VERSION, saved: ['brain/core/a.md'], created: [], createdDirs: [] }));
+  writeFileSync(join(consumer, RESTORE_POINT_DIR + '.lock'), '424242\n');
+  return consumer;
+}
+
+const CLI = fileURLToPath(new URL('../brain-upgrade.mjs', import.meta.url));
+const runCli = (cwd, args) => spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8' });
+
+test('journal: the real CLI refuses over a killed run WITHOUT destroying its evidence (REQ-J-6)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-j6-'));
+  try {
+    const consumer = stageKilledRun(tmp);
+    const snapshotFile = join(consumer, RESTORE_POINT_DIR, 'brain', 'core', 'a.md');
+
+    const r = runCli(consumer, ['v1.2.3', '--no-install']);
+    assert.notEqual(r.status, 0, 'a run over an interrupted predecessor must not succeed');
+    assert.match(r.stderr + r.stdout, /--recover/, 'it must name the remedy');
+    assert.ok(existsSync(snapshotFile),
+      'the refusal must NOT delete the snapshot it just told the operator to recover from');
+    assert.equal(readFileSync(snapshotFile, 'utf8'), 'CONSUMER ORIGINAL');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('journal: --recover works through a stale lock, and honours --dry-run (REQ-J-7)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-j7-'));
+  try {
+    const consumer = stageKilledRun(tmp);
+    const target = join(consumer, 'brain', 'core', 'a.md');
+
+    // A SIGKILL runs no exit handler, so the lock ALWAYS survives — recovery must not
+    // be the one command that lock blocks.
+    const dry = runCli(consumer, ['--recover', '--dry-run']);
+    assert.equal(dry.status, 0, '--dry-run recovery must not fail on the stale lock');
+    assert.equal(readFileSync(target, 'utf8'), 'NEW UPSTREAM BYTES',
+      '--dry-run must not write, even on the recovery path');
+
+    const real = runCli(consumer, ['--recover']);
+    assert.equal(real.status, 0, `recovery must succeed through a stale lock — got: ${real.stderr}`);
+    assert.equal(readFileSync(target, 'utf8'), 'CONSUMER ORIGINAL',
+      'recovery must return the tree to its pre-upgrade bytes');
+    assert.ok(!existsSync(join(consumer, RESTORE_POINT_DIR)),
+      'a complete recovery consumes its own evidence');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

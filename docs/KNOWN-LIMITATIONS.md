@@ -22,12 +22,19 @@ control**:
   location printed. Ctrl-C is safe too, though not by rolling back: the copy is one synchronous
   batch (~23ms for 366 files) that a signal cannot interrupt, so it completes rather than dying
   midway. Precisely what is **not** covered:
-  - ~~**SIGKILL and power loss**~~ — **CLOSED.** A journal is written after the snapshot and
-    before the first write, so a killed run leaves replayable evidence. The next run refuses
-    rather than writing over it, and `brain:upgrade -- --recover` puts the covered paths back.
-    Recovery is explicit by design: between the crash and the next run the consumer may have
+  - ~~**SIGKILL**~~ — **CLOSED.** A journal is written after the snapshot and before the first
+    write, so a killed run leaves replayable evidence: the next run refuses rather than writing
+    over it, and `brain:upgrade -- --recover` puts the covered paths back. The kernel keeps the
+    page cache when a process is killed, so the snapshot bytes are intact by construction.
+    Recovery is explicit by design — between the crash and the next run the consumer may have
     repaired things by hand, and replaying stale bytes over that would destroy work while
     reporting success.
+  - **Power loss — narrowed, not closed.** The snapshot files and the journal are `fsync`ed
+    before the first write, so the ordering the recovery invariant depends on is enforced rather
+    than assumed. Two residuals remain and are NOT covered: `fsync` is best-effort (a
+    filesystem that refuses it does not abort the upgrade), and the journal records no size or
+    checksum, so a snapshot file torn by a power cut would be restored as-is and reported as a
+    clean recovery. Integrity validation is the next step, not a shipped one.
   - **The dependency install (step 1)** — it rewrites `package.json`, the lockfile and
     `node_modules/` *before* any snapshot exists, and is never reverted.
   - **The config migration (step 3)** — `brain.config.json` is a `local` path and is outside the
@@ -41,7 +48,7 @@ control**:
     directory is left behind rather than reported as an upgrade failure. Cosmetic residue is
     preferable to telling an operator a completed upgrade failed.
 
-  (M4 · #396 → 1.1; both slices landed)
+  (M4 · #396 → 1.1; both slices landed — SIGKILL closed, power-loss integrity outstanding)
 - **Plain-copy clobber asymmetry.** `.gemini/settings.json`, `.github/CODEOWNERS`,
   `.github/PULL_REQUEST_TEMPLATE.md`, `AGENTS.md`, and the workflows are overwritten on upgrade
   (only `.claude/settings.json` and `package.json` are merged). A consumer who edits one of those
