@@ -115,6 +115,43 @@ test('main: a failing required gate produces a REVISE verdict that still posts (
   assert.equal(vcs.calls.prReviewComment, 1);
 });
 
+// ── brain-review/2 protocol activation (issue #391 T2.3 §3/§5, issue #394 M3) ──
+// Tier resolves the protocol: lite/standard default to `/1` (unchanged,
+// findings never carry evidence_class/causal_disposition); regulated
+// defaults to `/2` and runs findings through lib/causal-admission.mjs before
+// buildVerdict, so every finding is annotated (never left `unknown` —
+// no escalation-storm).
+
+test('main: lite tier (brain\'s own declared tier, no override) → brain-review/1, findings carry no evidence_class/causal_disposition', async () => {
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.tier = 'lite';
+  deps.trancheDeps.fetchRollup = async () =>
+    greenRollup().map(g => (g.name === 'memory-gate' ? { ...g, conclusion: 'FAILURE' } : g));
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42'], log: (s) => lines.push(s), ...deps });
+  assert.equal(code, 0);
+  assert.ok(lines.some(l => /protocol: brain-review\/1/.test(l)));
+  assert.ok(!lines.some(l => /evidence_class:/.test(l)), '/1 must never render evidence_class');
+  assert.ok(!lines.some(l => /causal_disposition:/.test(l)), '/1 must never render causal_disposition');
+});
+
+test('main: regulated tier → brain-review/2, a blocker finding is annotated evidence_class:deterministic + causal_disposition:introduced, and does NOT escalate (no escalation-storm)', async () => {
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.tier = 'regulated';
+  deps.trancheDeps.fetchRollup = async () =>
+    greenRollup().map(g => (g.name === 'memory-gate' ? { ...g, conclusion: 'FAILURE' } : g));
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42'], log: (s) => lines.push(s), ...deps });
+  assert.equal(code, 0);
+  assert.ok(lines.some(l => /protocol: brain-review\/2/.test(l)));
+  assert.ok(lines.some(l => /verdict: REVISE/.test(l)));
+  assert.ok(lines.some(l => /evidence_class: deterministic/.test(l)));
+  assert.ok(lines.some(l => /causal_disposition: introduced/.test(l)));
+  assert.ok(!lines.some(l => /escalate: human/.test(l)), 'a deterministic, causally-introduced blocker must never force an escalation storm');
+});
+
 // ── mode ruling: wired (H1-4, REQ-H1-11) — Option (B), never auto-rules ─────
 
 function validForkBody() {

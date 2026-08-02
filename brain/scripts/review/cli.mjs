@@ -4,13 +4,20 @@
 // the tranche/checkpoint/ruling evaluator → verdict → the poster. `ruling`
 // (H1-4, Option B — issue #266 comment 5009584044) NEVER auto-rules; a
 // well-formed `## FORK` always escalates. `queue`/`board` dispatch land in
-// H1-5 (design.md §9).
+// H1-5 (design.md §9). Reviewer protocol version (`brain-review/1` vs `/2`)
+// is resolved from `governance.tier` (`resolveTier`/`tierParams`,
+// governance-tiers.mjs) once per run, per issue #391 T2.3 §3/§5 and issue
+// #394 M3 — `regulated` defaults to `/2` and runs its findings through
+// `lib/causal-admission.mjs` (evidence_class/causal_disposition annotation +
+// the lazy refuter, issue #284) before `buildVerdict`; `lite`/`standard`
+// default to `/1`, unchanged from pre-#394 behavior.
 
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { loadContext } from '../vcs/ci-context.mjs';
+import { resolveTier, tierParams } from '../vcs/governance-tiers.mjs';
 import { gatherIdentity } from './identity.mjs';
 import { gatherColdBoot } from './cold-boot.mjs';
 import { buildVerdict, renderVerdict } from './verdict.mjs';
@@ -18,6 +25,7 @@ import { deriveMode } from './mode.mjs';
 import { evaluateTranche, gatherTrancheInputs } from './evaluators/tranche.mjs';
 import { evaluateCheckpoint, gatherCheckpointInputs } from './evaluators/checkpoint.mjs';
 import { evaluateRuling, gatherRulingInputs } from './evaluators/ruling.mjs';
+import { applyCausalAdmission } from './lib/causal-admission.mjs';
 import { postVerdict } from './poster.mjs';
 import { gatherQueue } from './queue.mjs';
 import { runBoard } from './board.mjs';
@@ -82,7 +90,11 @@ function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
  * `getChangedFiles`, `trancheDeps` (→ evaluators/tranche.mjs), `checkpointDeps`
  * (→ evaluators/checkpoint.mjs — fed cli's one resolved `baseSha`; a
  * `checkpointDeps.baseSha` is a test-side override only, see checkpoint.mjs's
- * docstring), `rulingDeps` (→ evaluators/ruling.mjs), `posterDeps` (→
+ * docstring), `rulingDeps` (→ evaluators/ruling.mjs), `tier` (test-side
+ * override of `resolveTier(config)` — selects the `brain-review/1` vs `/2`
+ * protocol via `tierParams(tier).reviewProtocol`, issue #391 T2.3/#394 M3),
+ * `refuterRunner` (→ lib/causal-admission.mjs's `applyCausalAdmission`, only
+ * consulted at `protocol === 'brain-review/2'`), `posterDeps` (→
  * poster.mjs), `writeVerbs` (a spy/real VCS used as the poster's default
  * `getVcs` when `posterDeps.getVcs` is not separately injected), `queueDeps`
  * (→ queue.mjs, `queue` subcommand only), `boardDeps` (→ board.mjs, `board`
@@ -101,7 +113,16 @@ export async function main(deps = {}) {
   if (rawArgv[0] === 'board') return runBoardCommand(deps, log);
 
   const args = parseArgs(rawArgv);
-  const project = deps.project ?? loadBrainConfig().project?.slug;
+  const config = loadBrainConfig();
+  const project = deps.project ?? config.project?.slug;
+  // Reviewer protocol version (issue #391 T2.3 §3, issue #394 M3): tiered,
+  // never operator-declared per run — `deps.tier` is a test-only override
+  // (mirrors trancheDeps.tier's own convention), never a production seam.
+  // `resolveTier`/`tierParams` are pure (governance-tiers.mjs) — this is the
+  // ONE call site (design.md §2.2) that turns `governance.tier` into the
+  // `protocol` `buildVerdict` receives below.
+  const tier = deps.tier ?? resolveTier(config);
+  const protocol = tierParams(tier).reviewProtocol;
 
   const identity = await gatherIdentity({ deps: deps.identityDeps ?? {} });
   if (!identity.ok) {
@@ -201,18 +222,39 @@ export async function main(deps = {}) {
     return 1;
   }
 
+  // brain-review/2 causal admission (issue #394 M3, completing #284): ONLY at
+  // `protocol === 'brain-review/2'` (regulated tier's default, see above) do
+  // findings get evidence_class/causal_disposition annotated and the refuter
+  // run over them — a `brain-review/1` verdict (lite/standard's default)
+  // renders neither field, exactly as before this wiring landed (renderVerdict
+  // only emits `evidence_class`/`causal_disposition` `if (f.evidence_class)` /
+  // `if (f.causal_disposition)` — never gated on protocol itself, so leaving
+  // `/1` findings unannotated is what keeps `/1` output byte-for-byte
+  // unchanged). See lib/causal-admission.mjs for why 'deterministic' /
+  // 'introduced' are the safe defaults for tranche/checkpoint/ruling's
+  // mechanically-derived findings.
+  let { findings, escalate } = evalResult;
+  if (protocol === 'brain-review/2') {
+    ({ findings, escalate } = await applyCausalAdmission({
+      findings: evalResult.findings,
+      escalate: evalResult.escalate,
+      runner: deps.refuterRunner ?? null,
+    }));
+  }
+
   const verdict = buildVerdict({
     headSha: boot.headSha,
     conclusion: evalResult.conclusion,
+    protocol,
     priorRevCount: boot.doctrine.priorVerdicts.length,
     gates: evalResult.gates,
-    findings: evalResult.findings,
+    findings,
     conditions: evalResult.conditions,
     // undefined for tranche/checkpoint (they never set these) — buildVerdict's
     // own defaults (`pin` undefined, `escalate` null) apply unchanged, so this
     // is a no-op for those two modes.
     pin: evalResult.pin,
-    escalate: evalResult.escalate,
+    escalate,
   });
 
   const rendered = renderVerdict(verdict);
