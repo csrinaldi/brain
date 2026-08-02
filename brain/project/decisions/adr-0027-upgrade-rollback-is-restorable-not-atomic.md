@@ -1,19 +1,7 @@
 # ADR-0027 — `brain:upgrade` Rollback Is Restorable, Not Atomic
 
-**Status**: Draft — agent-prepared, **awaiting human signature** (Tier-2 / ADR-0013)
-**Date**: 02/08/2026 — drafted for #396
-
-> **UNSIGNED.** This file is in place so the promotion can be reviewed as a whole, but it
-> carries no force while `Status` reads `Draft`. **The signing act is a human flipping
-> `Status` to `Accepted` and merging** — exactly as ADR-0026 was promoted. An agent must not
-> make that edit.
->
-> Number 0027 was the first free slot when this was written (0026 was the highest present in
-> `brain/project/decisions/`). Re-verify before merging if other ADRs landed meanwhile.
->
-> The originating draft stays at
-> `openspec/changes/issue-396-upgrade-rollback/brain-drafts/` as the record of where the
-> decision came from — the same shape ADR-0026 has.
+**Status**: Accepted
+**Date**: 02/08/2026 - Cristian Rinaldi
 
 ## Context
 
