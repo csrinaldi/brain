@@ -11,14 +11,18 @@
 
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   copyFileSync,
   readFileSync,
   readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { join, dirname, relative, sep } from 'node:path';
+import { basename, join, dirname, relative, sep } from 'node:path';
 import { MANAGED_SCRIPT_KEYS } from '../../core/managed-paths.mjs';
 
 // ── Glob matching ────────────────────────────────────────────────────────────
@@ -95,6 +99,311 @@ export function listFiles(root) {
   return out;
 }
 
+// ── Restore point (rollback) ──────────────────────────────────────────────────
+
+/**
+ * Directory the pre-write snapshot is staged in, relative to the consumer root.
+ * Kept inside the repo so the snapshot lands on the same filesystem as the files
+ * it protects. It matches no `managed` glob, so an upgrade never copies over its
+ * own restore point (pinned by test — REQ-S6-6).
+ */
+export const RESTORE_POINT_DIR = '.brain-upgrade-backup';
+
+/**
+ * `lstat` without throwing — returns null when the path is absent.
+ *
+ * Deliberately NOT `existsSync`, which follows symlinks and therefore reports a
+ * DANGLING link as absent. That misclassification is load-bearing here: a path
+ * wrongly judged absent is recorded as "created by this run" and is DELETED on
+ * rollback, destroying an entry that existed before the call.
+ *
+ * @param {string} p
+ * @returns {import('node:fs').Stats|null}
+ */
+function lstatOrNull(p) {
+  try { return lstatSync(p); } catch { return null; }
+}
+
+/** True when something occupies `p` — including a symlink with no target. */
+function pathPresent(p) {
+  return lstatOrNull(p) !== null;
+}
+
+/**
+ * True when `p`, after every symlink ON ITS WHOLE PATH is resolved, lands outside
+ * `destRoot`.
+ *
+ * This is the real, measured boundary — not "is it a symlink". A symlink pointing
+ * INSIDE the repo round-trips perfectly: `copyFileSync` follows it when the
+ * snapshot is taken, follows it again on the write, and follows it a third time on
+ * restore, so the target ends at its original bytes and the link itself is never
+ * touched. Refusing those would soft-lock a consumer for no gain — and
+ * `AGENTS.md -> CLAUDE.md`, a managed path, is the canonical agent-interop symlink.
+ *
+ * What genuinely cannot be covered is a write that lands outside `destRoot`, since
+ * the snapshot lives inside it. Resolving the whole path (not just the leaf) is
+ * what catches a symlinked ANCESTOR directory, which a leaf-only check misses.
+ *
+ * @param {string} destRoot
+ * @param {string} p
+ * @returns {boolean}
+ */
+function escapesRoot(destRoot, p) {
+  let rootReal;
+  try { rootReal = realpathSync(destRoot); } catch { return false; }
+
+  // Resolve the deepest ancestor that exists, then re-attach the tail that does
+  // not — so a path scheduled to be CREATED under a symlinked parent is judged on
+  // where it would actually land.
+  const tail = [];
+  for (let cur = p; ;) {
+    try {
+      const base = realpathSync(cur);
+      const resolved = tail.length ? join(base, ...tail) : base;
+      return resolved !== rootReal && !resolved.startsWith(rootReal + sep);
+    } catch {
+      const parent = dirname(cur);
+      if (parent === cur) return false; // nothing on the path resolves at all
+      tail.unshift(basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+/**
+ * Drops a restore point without ever letting cleanup failure masquerade as the
+ * action failing.
+ *
+ * `rmSync(..., { force: true })` suppresses ENOENT but NOT EACCES/EPERM/EBUSY, so
+ * an unguarded discard can turn a fully-applied upgrade into a reported failure —
+ * and inside a `catch`, its throw would replace the very error being reported. A
+ * leftover snapshot directory is cosmetic; a false failure report is not.
+ */
+function safeDiscard(restorePoint) {
+  try { restorePoint.discard(); } catch { /* cosmetic — never surface as failure */ }
+}
+
+/**
+ * Attaches rollback state to a failure without ever losing the original.
+ *
+ * A bare `err.rollbackIncomplete = …` is not safe: modules are strict mode, so
+ * assigning to a string, a frozen Error or null throws a TypeError that REPLACES
+ * the failure being reported and drops the dirty-tree signal with it — leaving
+ * the caller to print a clean-rollback message over a dirty tree. `specialMerge`
+ * is caller-supplied on an exported API, so a non-Error throw is reachable
+ * without touching this file.
+ *
+ * @param {unknown} err     Whatever the write loop threw.
+ * @param {string[]} failed Paths `restore()` could not put back.
+ * @param {string} snapshotDir Where the surviving snapshot was left.
+ * @returns {unknown} `err` itself when it can carry the annotation, else a
+ *   wrapper carrying `err` as `cause`.
+ */
+function annotateRollback(err, failed, snapshotDir) {
+  if (failed.length === 0) return err;
+  if (err !== null && typeof err === 'object') {
+    try {
+      err.rollbackIncomplete = failed;
+      err.rollbackSnapshotDir = snapshotDir;
+      return err;
+    } catch { /* frozen or sealed — fall through to the wrapper */ }
+  }
+  const wrapped = new Error(
+    `upgrade failed and the rollback was incomplete — ${failed.length} path(s) still modified`,
+    { cause: err },
+  );
+  wrapped.rollbackIncomplete = failed;
+  wrapped.rollbackSnapshotDir = snapshotDir;
+  return wrapped;
+}
+
+/**
+ * Captures the current on-disk state of `relPaths` so a failed write can be undone.
+ *
+ * Why this exists (#396): `copyManaged` writes the managed payload with a
+ * sequential loop of copy/merge calls. A throw partway through — ENOSPC, EACCES,
+ * an unreadable source file, a merge function rejecting malformed consumer JSON —
+ * used to leave the consumer tree half old and half new, recoverable only through
+ * the consumer's own git hygiene.
+ *
+ * The snapshot is taken BEFORE the first write, so restoring every captured path
+ * returns the tree to its pre-write bytes no matter where in the loop the failure
+ * landed. Paths that did not exist beforehand are recorded under `created` and are
+ * DELETED on restore rather than restored — a fresh install rolls back to absent,
+ * not to empty. Directories the write would have had to create are pruned too, so
+ * a rollback leaves no empty scaffolding behind.
+ *
+ * Taking the snapshot can itself fail — it writes to the same disk that is about
+ * to be written. That is the safe ordering, not a gap: it throws before any
+ * managed path has been touched, so the caller observes zero writes.
+ *
+ * NOT covered here: SIGKILL and power loss, which run no in-process handler at
+ * all. Surviving those needs an on-disk journal replayed by the NEXT invocation;
+ * this snapshot directory is the substrate that work builds on. Tracked as the
+ * second half of #396.
+ *
+ * @param {object} opts
+ * @param {string} opts.destRoot  Consumer repo root.
+ * @param {string[]} opts.relPaths  Every dest-relative path the caller may write.
+ * @returns {{ dir: string, saved: string[], created: string[], restore: () => void, discard: () => void }}
+ */
+export function createRestorePoint({ destRoot, relPaths }) {
+  const dir = join(destRoot, RESTORE_POINT_DIR);
+  const saved = [];
+  const created = [];
+  const createdDirs = new Set();
+  const escaping = [];
+  const dangling = [];
+
+  // A snapshot left by an earlier hard kill is not ours to trust or reuse: no
+  // recovery path reads it yet, so carrying it forward could only restore stale
+  // bytes. NOTE for the journal half of #396 — this line must be INVERTED there:
+  // once a recovery path exists, a leftover snapshot is evidence to replay, not
+  // debris to clear, and clearing it here would destroy exactly what recovery needs.
+  rmSync(dir, { recursive: true, force: true });
+
+  for (const rel of relPaths) {
+    const dest = join(destRoot, rel);
+
+    // Refused case 1: the write would land outside the repository, so no snapshot
+    // inside it can cover the change. Catches a symlinked path AND a symlinked
+    // ancestor directory — a leaf-only test misses the latter entirely.
+    if (escapesRoot(destRoot, dest)) {
+      escaping.push(rel);
+      continue;
+    }
+
+    const st = lstatOrNull(dest);
+
+    // Refused case 2: a DANGLING symlink. There is nothing to copy, so no snapshot
+    // of it can be taken — and this is the exact shape that used to be misread as
+    // "absent, created by this run" and DELETED on rollback.
+    if (st?.isSymbolicLink() && !existsSync(dest)) {
+      dangling.push(rel);
+      continue;
+    }
+
+    if (st) {
+      // Includes a VALID symlink resolving inside the repo. copyFileSync follows it
+      // in every direction, so backup -> write -> restore returns the target to its
+      // original bytes with the link intact. Measured, not assumed.
+      const backup = join(dir, rel);
+      mkdirSync(dirname(backup), { recursive: true });
+      copyFileSync(dest, backup);
+      saved.push(rel);
+      continue;
+    }
+
+    created.push(rel);
+    // Record the ancestor directories the write loop would have to create, so a
+    // rollback can prune them back out instead of leaving empty dirs behind.
+    for (let d = dirname(dest); d.startsWith(destRoot) && d !== destRoot && !pathPresent(d); d = dirname(d)) {
+      createdDirs.add(d);
+    }
+  }
+
+  // Fail closed, before a single byte is written, and ONLY for what genuinely
+  // cannot be rolled back. The message names the paths and the remedy, so this is
+  // an actionable refusal rather than the silent-lockout class recorded in
+  // brain/core/anti-patterns/.
+  if (escaping.length > 0 || dangling.length > 0) {
+    rmSync(dir, { recursive: true, force: true });
+    const reasons = [];
+    if (escaping.length > 0) {
+      reasons.push(
+        `${escaping.length} path(s) resolve outside the repository, so a write there could not ` +
+        `be rolled back — ${escaping.join(', ')}`,
+      );
+    }
+    if (dangling.length > 0) {
+      reasons.push(
+        `${dangling.length} path(s) are symlinks with no target, so no snapshot of them can be ` +
+        `taken — ${dangling.join(', ')}`,
+      );
+    }
+    throw new Error(
+      `cannot protect this upgrade: ${reasons.join('; ')}. Point them inside the repository, ` +
+      'replace them with real files, or remove them, then re-run. ' +
+      'A symlink resolving INSIDE the repository is fine and needs no change.',
+    );
+  }
+
+  return {
+    dir,
+    saved,
+    created,
+    /**
+     * Returns every captured path to its pre-write state.
+     *
+     * Best-effort per path, deliberately: one unrecoverable entry must not strand
+     * the rollback of all the others. (`rmSync(..., { force: true })` suppresses
+     * ENOENT but NOT ENOTDIR, so a managed path whose parent exists as a file
+     * would otherwise abort the whole restore — and its throw would replace the
+     * original failure the caller is trying to report.)
+     *
+     * @returns {{ failed: string[] }} Paths that could not be returned to their
+     *   prior state. Non-empty means the tree is still dirty and the caller must
+     *   say so rather than report a clean rollback.
+     */
+    restore() {
+      const failed = [];
+
+      for (const rel of saved) {
+        try { copyFileSync(join(dir, rel), join(destRoot, rel)); } catch { failed.push(rel); }
+      }
+
+      // Judged by outcome, not by whether the call threw: a path that is gone was
+      // rolled back either way, and a path the write never reached was never dirty.
+      // Only a path still on disk afterwards is a real failure.
+      for (const rel of created) {
+        const path = join(destRoot, rel);
+        try { rmSync(path, { force: true }); } catch { /* verified on the next line */ }
+        if (pathPresent(path)) failed.push(rel);
+      }
+
+      // Deepest first, so a nested chain empties from the leaf up. A directory that
+      // is no longer empty was repopulated by something outside this call — leaving
+      // it in place is correct, not a failure.
+      for (const d of [...createdDirs].sort((a, b) => b.length - a.length)) {
+        try {
+          if (pathPresent(d) && readdirSync(d).length === 0) rmSync(d, { recursive: true, force: true });
+        // Reported repo-relative like every other entry: the caller prints them as
+        // one list, and mixing absolute with relative paths reads as two bugs.
+        } catch { failed.push(relative(destRoot, d)); }
+      }
+
+      return { failed };
+    },
+    /** Drops the snapshot. Safe to call after restore(). */
+    discard() {
+      rmSync(dir, { recursive: true, force: true });
+    },
+    /**
+     * Moves the snapshot to a name no later run auto-clears, and returns that path.
+     *
+     * Used when the rollback could NOT finish: those bytes are then the only
+     * surviving copy of the consumer's pre-copy state. Leaving them at the default
+     * location would be a trap — `createRestorePoint` clears that path on entry, so
+     * the operator's most natural next action, re-running `brain:upgrade`, would
+     * silently destroy exactly what they were just told to restore from.
+     *
+     * Numbered rather than timestamped so it is deterministic and never clobbers an
+     * older preserved snapshot.
+     *
+     * @returns {string} where the snapshot now lives.
+     */
+    preserve() {
+      for (let n = 1; n <= 999; n++) {
+        const target = `${dir}.preserved-${n}`;
+        if (!pathPresent(target)) {
+          try { renameSync(dir, target); return target; } catch { return dir; }
+        }
+      }
+      return dir;
+    },
+  };
+}
+
 // ── Copy managed paths ─────────────────────────────────────────────────────────
 
 /**
@@ -120,6 +429,12 @@ export function listFiles(root) {
  * responsible for writing the merged result to disk. Those paths are reported
  * under `merged` (not `copied`). Under `--dry-run` the merge function is NOT
  * called but the path still appears in `merged` so callers can plan output.
+ *
+ * The write loop is guarded by a restore point (#396): if any write throws, every
+ * path the loop could have touched is returned to its pre-call bytes and the
+ * original error is re-thrown. A caller that catches therefore sees an unchanged
+ * tree, not a half-applied one. See `createRestorePoint` for what this does and
+ * does not survive.
  *
  * @param {object}  opts
  * @param {string}  opts.srcRoot          Installed brain package root.
@@ -167,6 +482,14 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
     }
   }
 
+  // Write in a stable order rather than in whatever order the filesystem handed
+  // back. Two reasons: an upgrade that fails partway does so at a reproducible
+  // point (so a bug report is reproducible), and it matches the sorted arrays
+  // this function already returns. The journal half of #396 needs a defined
+  // replay order too.
+  toMerge.sort();
+  toCopy.sort();
+
   // ── Abort gate ──────────────────────────────────────────────────────────────
   // When the caller requests abort-on-collision and collisions were found, return
   // before the write loop so the caller observes zero writes. Skipped under
@@ -182,17 +505,54 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
   }
 
   // ── Write loop ──────────────────────────────────────────────────────────────
+  // Guarded by a restore point (#396): the loop is not atomic — it is a sequence
+  // of independent writes — so a throw anywhere inside it would otherwise leave
+  // the tree half old and half new. The snapshot is taken before the first write
+  // and covers every path either loop can touch, so the rollback is complete
+  // regardless of where the failure lands.
   if (!dryRun) {
-    for (const rel of toMerge) {
-      const dest = join(destRoot, rel);
-      mkdirSync(dirname(dest), { recursive: true });
-      specialMerge[rel](dest, join(srcRoot, rel));
+    let restorePoint;
+    try {
+      restorePoint = createRestorePoint({ destRoot, relPaths: [...toMerge, ...toCopy] });
+    } catch (err) {
+      // The snapshot failed before any managed path was written, so there is
+      // nothing to roll back — but it may have built part of a backup first.
+      // Clear it: a refusal must not leave debris in the consumer tree.
+      rmSync(join(destRoot, RESTORE_POINT_DIR), { recursive: true, force: true });
+      // Tag it so the caller can say "refused, nothing was touched" instead of the
+      // write-phase wording, which would be false here in both halves.
+      if (err !== null && typeof err === 'object') {
+        try { err.beforeAnyWrite = true; } catch { /* frozen — wording stays generic */ }
+      }
+      throw err;
     }
-    for (const rel of toCopy) {
-      const dest = join(destRoot, rel);
-      mkdirSync(dirname(dest), { recursive: true });
-      copyFileSync(join(srcRoot, rel), dest);
+
+    try {
+      for (const rel of toMerge) {
+        const dest = join(destRoot, rel);
+        mkdirSync(dirname(dest), { recursive: true });
+        specialMerge[rel](dest, join(srcRoot, rel));
+      }
+      for (const rel of toCopy) {
+        const dest = join(destRoot, rel);
+        mkdirSync(dirname(dest), { recursive: true });
+        copyFileSync(join(srcRoot, rel), dest);
+      }
+    } catch (err) {
+      const { failed } = restorePoint.restore();
+      if (failed.length === 0) {
+        // Everything went back. The snapshot has served its purpose.
+        safeDiscard(restorePoint);
+        throw err;
+      }
+      // The rollback could NOT put everything back, so the snapshot is now the only
+      // surviving copy of those bytes. Move it somewhere no later run auto-clears —
+      // only a COMPLETE rollback earns the cleanup, which is why this is not a
+      // `finally` — and tell the caller where it went.
+      throw annotateRollback(err, failed, restorePoint.preserve());
     }
+
+    safeDiscard(restorePoint);
   }
 
   return {

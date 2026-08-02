@@ -84,6 +84,28 @@ if (existsSync(ownPkgPath) && !existsSync(sourceMarkerPath)) {
 
 console.log(`\n${C.bold}brain:upgrade${C.reset} ${tag ? `→ ${C.cyan}${tag}${C.reset}` : ''}${dryRun ? `  ${C.dim}(dry run)${C.reset}` : ''}\n`);
 
+// ── Interrupt handling ─────────────────────────────────────────────────────────
+// Measured on this repo (366 managed files): the managed-path write is a single
+// synchronous batch that finishes in ~23ms, and Node delivers signals through the
+// event loop — so a SIGINT arriving mid-batch is QUEUED, never delivered, and the
+// batch always runs to completion before any handler executes.
+//
+// Registering these handlers is therefore NOT a way to abort a half-finished
+// write. It is what changes the outcome of Ctrl-C: without a handler the default
+// action kills the process instantly, which is the one thing that CAN leave a
+// half-applied tree. With one, the 23ms batch finishes and the tree is whole.
+//
+// What these handlers do NOT cover — and an earlier revision of this comment got
+// wrong: a signal during the package install above kills the CHILD, and spawnSync
+// returns synchronously with `{ status: null, signal }`. That path never reaches
+// the flag check below; it is handled at the install step itself, which reports
+// the interrupt and exits 128+signal. The flag below covers only a signal
+// delivered at an await AFTER the install returned normally.
+let interrupted = null;
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => { interrupted ??= sig; });
+}
+
 // ── 1. Install the tag ─────────────────────────────────────────────────────────
 // Derive the install specifier from the currently installed brain's package.json
 // repository.url (always normalized to git+https://…) so HTTPS-only consumers
@@ -97,6 +119,15 @@ if (!noInstall) {
   } else {
     info(`Installing ${spec} ...`);
     const r = spawnSync(pm.installArgs[0], [...pm.installArgs.slice(1), spec], { stdio: 'inherit', cwd: ROOT });
+    // Signal BEFORE status, and this order is load-bearing. A child killed by a
+    // signal reports `status: null`, so testing status first reports a plain
+    // Ctrl-C as "install failed — check repo access", and collapses the
+    // conventional 128+signal exit code into a bare 1. Nothing has been copied at
+    // this point on either path.
+    if (r.signal) {
+      console.error(`\n  ${C.red}✗${C.reset} Install interrupted by ${r.signal} — no managed path was written.`);
+      process.exit(r.signal === 'SIGTERM' ? 143 : 130);
+    }
     if (r.status !== 0) die(`${pm.name} install failed — check repo access and that the tag exists.`);
     ok('Package installed.');
   }
@@ -109,15 +140,61 @@ if (!existsSync(pkgRoot)) {
 }
 
 const { managed, local } = await import(join(pkgRoot, 'brain', 'core', 'managed-paths.mjs'));
-const { copied, skipped, merged, collisions } = copyManaged({
-  srcRoot: pkgRoot,
-  destRoot: ROOT,
-  managed,
-  local,
-  dryRun,
-  specialMerge: { '.claude/settings.json': mergeClaudeSettings, 'package.json': mergePackageJson },
-  abortOnCollision,
-});
+
+// A signal raised during the install above is delivered here, at the first await
+// after it — before any managed path has been written.
+if (interrupted) {
+  // Same signal, same exit code as the install step and the final summary — `die()`
+  // would exit 1 here and make one interrupt look like three different outcomes
+  // depending on when it landed. Note it says "no managed path", not "nothing":
+  // step 1 already rewrote package.json, the lockfile and node_modules.
+  console.error(`  ${C.red}✗${C.reset} ${interrupted} received before the copy began — no managed path was written.`);
+  process.exit(interrupted === 'SIGTERM' ? 143 : 130);
+}
+
+let copied, skipped, merged, collisions;
+try {
+  ({ copied, skipped, merged, collisions } = copyManaged({
+    srcRoot: pkgRoot,
+    destRoot: ROOT,
+    managed,
+    local,
+    dryRun,
+    specialMerge: { '.claude/settings.json': mergeClaudeSettings, 'package.json': mergePackageJson },
+    abortOnCollision,
+  }));
+} catch (err) {
+  // copyManaged snapshots every path it may write BEFORE its first write and
+  // restores those bytes before re-throwing (#396), so there is normally nothing
+  // half-applied to repair by hand. Say which of the two it was — a rollback that
+  // only partly worked must never be reported as a clean one.
+  // A refusal happens before the first write, so the write-phase wording would be
+  // false in both halves — say what actually happened instead.
+  if (err?.beforeAnyWrite) {
+    console.error(`  ${C.red}✗${C.reset} Upgrade refused before any managed path was written: ${err?.message ?? err}`);
+    die('Nothing was changed. Resolve the paths named above and re-run.');
+  }
+
+  console.error(`  ${C.red}✗${C.reset} Upgrade failed while writing managed paths: ${err?.message ?? err}`);
+  // The root cause lives in `cause` whenever the rollback state had to be carried on
+  // a wrapper (a frozen or non-object throw), and it is the only line that says WHY.
+  if (err?.cause !== undefined) {
+    console.error(`      ${C.dim}caused by: ${err.cause?.message ?? err.cause}${C.reset}`);
+  }
+  if (err?.rollbackIncomplete?.length) {
+    warn(`Rollback could NOT restore ${err.rollbackIncomplete.length} path(s) — still modified:`);
+    for (const f of err.rollbackIncomplete) console.log(`      ${C.dim}${f}${C.reset}`);
+    if (err.rollbackSnapshotDir) {
+      info(`Their pre-copy bytes were KEPT at ${err.rollbackSnapshotDir}`);
+      info('That directory is never cleared automatically — restore from it, then delete it yourself.');
+    }
+    die('The tree is NOT fully restored. Inspect the paths above before retrying.');
+  }
+  // Scoped deliberately. Step 1 already ran the package install, which rewrote
+  // package.json, the lockfile and node_modules BEFORE any snapshot was taken —
+  // so "the tree is unchanged" would be a false statement to print here.
+  die('Every managed path was rolled back to the bytes it had before the copy. The dependency install was NOT reverted.');
+}
 
 // ── Collision report ────────────────────────────────────────────────────────────
 // Emitted before the summary so the operator sees it immediately. The non-zero
@@ -185,3 +262,15 @@ if (!existsSync(configPath)) {
 
 console.log(`\n${C.green}Done.${C.reset} Review the diff and commit. ${C.dim}core is read-only — improvements go upstream.${C.reset}`);
 console.log(`${C.dim}Tip:${C.reset} run ${C.cyan}npm run env:init${C.reset} to (re)configure git hooks (${C.dim}core.hooksPath${C.reset} is per-clone, not committed) and the environment. ${C.dim}day:start also self-heals it.${C.reset}\n`);
+
+// A deferred interrupt. Exactly WHEN it landed is not knowable here — it may have
+// arrived during the write, the config migration, or this summary — so the report
+// states only what is certain, then honours the signal in the exit code.
+if (interrupted) {
+  if (dryRun) {
+    warn(`${interrupted} received during a dry run — nothing was written.`);
+  } else {
+    warn(`${interrupted} was received and deferred. The managed-path write is a single synchronous batch that a signal cannot interrupt, so it ran to completion: the upgrade is applied, not half-applied. Nothing to clean up.`);
+  }
+  process.exit(interrupted === 'SIGTERM' ? 143 : 130);
+}
