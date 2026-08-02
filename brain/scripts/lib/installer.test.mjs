@@ -15,6 +15,8 @@ import {
   globToRegExp,
   matchesAny,
   copyManaged,
+  createRestorePoint,
+  RESTORE_POINT_DIR,
   mergeDefaults,
   mergeClaudeSettings,
   mergePackageJsonScripts,
@@ -30,6 +32,7 @@ import {
 } from './installer.mjs';
 
 import { migrations } from '../../core/config-migrations.mjs';
+import { managed as realManagedGlobs } from '../../core/managed-paths.mjs';
 
 // ── Glob matching ────────────────────────────────────────────────────────────
 test('globToRegExp: ** matches across separators, * does not', () => {
@@ -1043,6 +1046,250 @@ test('mergePackageJson: write-if-changed — second call is a mtime no-op (S5-io
     // Consumer's build ('tsc') must be intact; brain's differing build ('webpack') must not appear.
     assert.strictEqual(final.scripts.build, 'tsc',
       'non-managed "build" script from brain ("webpack") must not be injected into consumer');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── copyManaged: restore point / rollback (#396 — REQ-S6-*) ───────────────────
+// The write loop is a sequence of independent writes, not an atomic commit, so a
+// throw partway through used to leave the tree half old and half new. These pin
+// the contract that any throw leaves it byte-identical to its pre-call state.
+//
+// Failures are injected two ways, both deterministic and neither depending on
+// listFiles' directory order or on file permissions (CI may run as root):
+//   - a specialMerge fn that writes and THEN throws — the real "merge failed
+//     halfway" shape, and the exact mechanism behind #399's corrupt consumer JSON
+//   - a dest path whose parent already exists as a FILE, so the copy phase's
+//     mkdirSync throws EEXIST
+// Cross-phase ordering (all merges, then all copies) is guaranteed by copyManaged
+// itself, so a merge-phase write is always on disk before a copy-phase throw.
+
+/** Builds a src/dest pair where the copy phase is guaranteed to throw. */
+function seedFailingCopy(tmp) {
+  const src = join(tmp, 'src');
+  const dest = join(tmp, 'dest');
+  mkdirSync(join(src, 'brain', 'core', 'sub'), { recursive: true });
+  writeFileSync(join(src, 'brain', 'core', 'sub', 'copied.md'), 'NEW');
+  mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+  // `sub` exists as a FILE, so mkdirSync(dirname(dest)) throws in the copy phase.
+  writeFileSync(join(dest, 'brain', 'core', 'sub'), 'NOT A DIRECTORY');
+  return { src, dest };
+}
+
+test('copyManaged: a copy-phase throw rolls back a write already made in the merge phase (REQ-S6-1)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-1-'));
+  try {
+    const { src, dest } = seedFailingCopy(tmp);
+    writeFileSync(join(src, 'brain', 'core', 'merged.json'), '{"from":"src"}');
+    writeFileSync(join(dest, 'brain', 'core', 'merged.json'), '{"from":"consumer"}');
+
+    assert.throws(() => copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['brain/core/**'],
+      local: [],
+      specialMerge: {
+        'brain/core/merged.json': (destPath) => writeFileSync(destPath, '{"from":"MERGED"}'),
+      },
+    }));
+
+    assert.equal(
+      readFileSync(join(dest, 'brain', 'core', 'merged.json'), 'utf8'),
+      '{"from":"consumer"}',
+      'the merge-phase write must be rolled back when a later copy throws',
+    );
+    assert.ok(!existsSync(join(dest, RESTORE_POINT_DIR)),
+      'the snapshot must be discarded even on the failure path');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: rollback DELETES files that did not exist before the call (REQ-S6-2)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-2-'));
+  try {
+    const { src, dest } = seedFailingCopy(tmp);
+    writeFileSync(join(src, 'brain', 'core', 'fresh.json'), '{"from":"src"}');
+    // dest deliberately has no fresh.json — rolling back must restore "absent".
+
+    assert.throws(() => copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['brain/core/**'],
+      local: [],
+      specialMerge: {
+        'brain/core/fresh.json': (destPath) => writeFileSync(destPath, '{"from":"MERGED"}'),
+      },
+    }));
+
+    assert.ok(!existsSync(join(dest, 'brain', 'core', 'fresh.json')),
+      'a file the call created must be deleted on rollback, not left behind empty');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: a merge that writes and then throws has its own partial write rolled back (REQ-S6-3)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-3-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'half.json'), '{"from":"src"}');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'half.json'), 'ORIGINAL');
+
+    assert.throws(() => copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['brain/core/**'],
+      local: [],
+      specialMerge: {
+        'brain/core/half.json': (destPath) => {
+          writeFileSync(destPath, 'PARTIAL');       // a real, observable write…
+          throw new Error('merge failed after writing');  // …then failure
+        },
+      },
+    }));
+
+    assert.equal(readFileSync(join(dest, 'brain', 'core', 'half.json'), 'utf8'), 'ORIGINAL',
+      'a merge that half-wrote its target must be rolled back to the consumer bytes');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: the original error is re-thrown unchanged after rollback (REQ-S6-4)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-4-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'x.json'), '{}');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'x.json'), 'OLD');
+
+    const boom = new Error('ENOSPC: no space left on device');
+    let caught;
+    try {
+      copyManaged({
+        srcRoot: src,
+        destRoot: dest,
+        managed: ['brain/core/**'],
+        local: [],
+        specialMerge: { 'brain/core/x.json': () => { throw boom; } },
+      });
+    } catch (err) { caught = err; }
+
+    assert.equal(caught, boom,
+      'rollback must not swallow, wrap or replace the failure that caused it');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: the restore point is discarded on the success path (REQ-S6-5)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-5-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'a.md'), 'NEW');
+
+    const result = copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [] });
+
+    assert.ok(result.copied.includes('brain/core/a.md'), 'the happy path must still copy');
+    assert.ok(!existsSync(join(dest, RESTORE_POINT_DIR)),
+      'a successful upgrade must leave no snapshot directory behind');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: the restore-point dir matches no real managed glob (REQ-S6-6)', () => {
+  // Drift-guard: if a future managed glob ever swallowed the snapshot directory,
+  // an upgrade would copy its own backup into the consumer tree.
+  for (const candidate of [
+    RESTORE_POINT_DIR,
+    `${RESTORE_POINT_DIR}/package.json`,
+    `${RESTORE_POINT_DIR}/brain/core/managed-paths.mjs`,
+    `${RESTORE_POINT_DIR}/.github/workflows/governance.yml`,
+  ]) {
+    assert.ok(!matchesAny(candidate, realManagedGlobs),
+      `${candidate} must not match any managed glob`);
+  }
+});
+
+test('copyManaged: rollback prunes directories the write had to create (REQ-S6-7)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-7-'));
+  try {
+    const { src, dest } = seedFailingCopy(tmp);
+    mkdirSync(join(src, 'brain', 'core', 'newdir'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'newdir', 'a.json'), '{"from":"src"}');
+    // dest has no `newdir` — the merge phase must create it, rollback must remove it.
+
+    assert.throws(() => copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['brain/core/**'],
+      local: [],
+      specialMerge: {
+        'brain/core/newdir/a.json': (destPath) => writeFileSync(destPath, '{"from":"MERGED"}'),
+      },
+    }));
+
+    assert.ok(!existsSync(join(dest, 'brain', 'core', 'newdir')),
+      'rollback must leave no empty scaffolding from directories it created');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('createRestorePoint: an unrestorable path is reported, and does not strand the rest (REQ-S6-9)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-9-'));
+  try {
+    mkdirSync(join(tmp, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(tmp, 'brain', 'core', 'blocked.md'), 'ORIGINAL');
+    writeFileSync(join(tmp, 'brain', 'core', 'ok.md'), 'ORIGINAL');
+
+    const rp = createRestorePoint({
+      destRoot: tmp,
+      relPaths: ['brain/core/blocked.md', 'brain/core/ok.md'],
+    });
+
+    // Both get clobbered, then one becomes impossible to restore: a directory
+    // now stands where the file was, so copyFileSync will throw EISDIR.
+    writeFileSync(join(tmp, 'brain', 'core', 'ok.md'), 'CLOBBERED');
+    rmSync(join(tmp, 'brain', 'core', 'blocked.md'));
+    mkdirSync(join(tmp, 'brain', 'core', 'blocked.md'));
+
+    const { failed } = rp.restore();
+
+    assert.deepEqual(failed, ['brain/core/blocked.md'],
+      'the unrestorable path must be reported, so a dirty tree is never called clean');
+    assert.equal(readFileSync(join(tmp, 'brain', 'core', 'ok.md'), 'utf8'), 'ORIGINAL',
+      'one unrestorable path must not abort the rollback of the others');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('createRestorePoint: a stale snapshot from an earlier crash is not reused (REQ-S6-8)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-8-'));
+  try {
+    mkdirSync(join(tmp, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(tmp, 'brain', 'core', 'a.md'), 'CURRENT');
+    // A snapshot left behind by a hard kill, carrying stale bytes.
+    mkdirSync(join(tmp, RESTORE_POINT_DIR, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(tmp, RESTORE_POINT_DIR, 'brain', 'core', 'a.md'), 'STALE');
+
+    const rp = createRestorePoint({ destRoot: tmp, relPaths: ['brain/core/a.md'] });
+    writeFileSync(join(tmp, 'brain', 'core', 'a.md'), 'OVERWRITTEN');
+    rp.restore();
+
+    assert.equal(readFileSync(join(tmp, 'brain', 'core', 'a.md'), 'utf8'), 'CURRENT',
+      'restore must use bytes captured this run, never a stale snapshot on disk');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

@@ -15,6 +15,7 @@ import {
   copyFileSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -95,6 +96,127 @@ export function listFiles(root) {
   return out;
 }
 
+// ── Restore point (rollback) ──────────────────────────────────────────────────
+
+/**
+ * Directory the pre-write snapshot is staged in, relative to the consumer root.
+ * Kept inside the repo so the snapshot lands on the same filesystem as the files
+ * it protects. It matches no `managed` glob, so an upgrade never copies over its
+ * own restore point (pinned by test — REQ-S6-6).
+ */
+export const RESTORE_POINT_DIR = '.brain-upgrade-backup';
+
+/**
+ * Captures the current on-disk state of `relPaths` so a failed write can be undone.
+ *
+ * Why this exists (#396): `copyManaged` writes the managed payload with a
+ * sequential loop of copy/merge calls. A throw partway through — ENOSPC, EACCES,
+ * an unreadable source file, a merge function rejecting malformed consumer JSON —
+ * used to leave the consumer tree half old and half new, recoverable only through
+ * the consumer's own git hygiene.
+ *
+ * The snapshot is taken BEFORE the first write, so restoring every captured path
+ * returns the tree to its pre-write bytes no matter where in the loop the failure
+ * landed. Paths that did not exist beforehand are recorded under `created` and are
+ * DELETED on restore rather than restored — a fresh install rolls back to absent,
+ * not to empty. Directories the write would have had to create are pruned too, so
+ * a rollback leaves no empty scaffolding behind.
+ *
+ * Taking the snapshot can itself fail — it writes to the same disk that is about
+ * to be written. That is the safe ordering, not a gap: it throws before any
+ * managed path has been touched, so the caller observes zero writes.
+ *
+ * NOT covered here: SIGKILL and power loss, which run no in-process handler at
+ * all. Surviving those needs an on-disk journal replayed by the NEXT invocation;
+ * this snapshot directory is the substrate that work builds on. Tracked as the
+ * second half of #396.
+ *
+ * @param {object} opts
+ * @param {string} opts.destRoot  Consumer repo root.
+ * @param {string[]} opts.relPaths  Every dest-relative path the caller may write.
+ * @returns {{ dir: string, saved: string[], created: string[], restore: () => void, discard: () => void }}
+ */
+export function createRestorePoint({ destRoot, relPaths }) {
+  const dir = join(destRoot, RESTORE_POINT_DIR);
+  const saved = [];
+  const created = [];
+  const createdDirs = new Set();
+
+  // A snapshot left by an earlier hard kill is not ours to trust or reuse: no
+  // recovery path reads it yet, so carrying it forward could only restore stale
+  // bytes. NOTE for the journal half of #396 — this line must be INVERTED there:
+  // once a recovery path exists, a leftover snapshot is evidence to replay, not
+  // debris to clear, and clearing it here would destroy exactly what recovery needs.
+  rmSync(dir, { recursive: true, force: true });
+
+  for (const rel of relPaths) {
+    const dest = join(destRoot, rel);
+    if (existsSync(dest)) {
+      const backup = join(dir, rel);
+      mkdirSync(dirname(backup), { recursive: true });
+      copyFileSync(dest, backup);
+      saved.push(rel);
+      continue;
+    }
+    created.push(rel);
+    // Record the ancestor directories the write loop would have to create, so a
+    // rollback can prune them back out instead of leaving empty dirs behind.
+    for (let d = dirname(dest); d.startsWith(destRoot) && d !== destRoot && !existsSync(d); d = dirname(d)) {
+      createdDirs.add(d);
+    }
+  }
+
+  return {
+    dir,
+    saved,
+    created,
+    /**
+     * Returns every captured path to its pre-write state.
+     *
+     * Best-effort per path, deliberately: one unrecoverable entry must not strand
+     * the rollback of all the others. (`rmSync(..., { force: true })` suppresses
+     * ENOENT but NOT ENOTDIR, so a managed path whose parent exists as a file
+     * would otherwise abort the whole restore — and its throw would replace the
+     * original failure the caller is trying to report.)
+     *
+     * @returns {{ failed: string[] }} Paths that could not be returned to their
+     *   prior state. Non-empty means the tree is still dirty and the caller must
+     *   say so rather than report a clean rollback.
+     */
+    restore() {
+      const failed = [];
+
+      for (const rel of saved) {
+        try { copyFileSync(join(dir, rel), join(destRoot, rel)); } catch { failed.push(rel); }
+      }
+
+      // Judged by outcome, not by whether the call threw: a path that is gone was
+      // rolled back either way, and a path the write never reached was never dirty.
+      // Only a path still on disk afterwards is a real failure.
+      for (const rel of created) {
+        const path = join(destRoot, rel);
+        try { rmSync(path, { force: true }); } catch { /* verified on the next line */ }
+        if (existsSync(path)) failed.push(rel);
+      }
+
+      // Deepest first, so a nested chain empties from the leaf up. A directory that
+      // is no longer empty was repopulated by something outside this call — leaving
+      // it in place is correct, not a failure.
+      for (const d of [...createdDirs].sort((a, b) => b.length - a.length)) {
+        try {
+          if (existsSync(d) && readdirSync(d).length === 0) rmSync(d, { recursive: true, force: true });
+        } catch { failed.push(d); }
+      }
+
+      return { failed };
+    },
+    /** Drops the snapshot. Safe to call after restore(). */
+    discard() {
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
 // ── Copy managed paths ─────────────────────────────────────────────────────────
 
 /**
@@ -120,6 +242,12 @@ export function listFiles(root) {
  * responsible for writing the merged result to disk. Those paths are reported
  * under `merged` (not `copied`). Under `--dry-run` the merge function is NOT
  * called but the path still appears in `merged` so callers can plan output.
+ *
+ * The write loop is guarded by a restore point (#396): if any write throws, every
+ * path the loop could have touched is returned to its pre-call bytes and the
+ * original error is re-thrown. A caller that catches therefore sees an unchanged
+ * tree, not a half-applied one. See `createRestorePoint` for what this does and
+ * does not survive.
  *
  * @param {object}  opts
  * @param {string}  opts.srcRoot          Installed brain package root.
@@ -182,16 +310,34 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
   }
 
   // ── Write loop ──────────────────────────────────────────────────────────────
+  // Guarded by a restore point (#396): the loop is not atomic — it is a sequence
+  // of independent writes — so a throw anywhere inside it would otherwise leave
+  // the tree half old and half new. The snapshot is taken before the first write
+  // and covers every path either loop can touch, so the rollback is complete
+  // regardless of where the failure lands.
   if (!dryRun) {
-    for (const rel of toMerge) {
-      const dest = join(destRoot, rel);
-      mkdirSync(dirname(dest), { recursive: true });
-      specialMerge[rel](dest, join(srcRoot, rel));
-    }
-    for (const rel of toCopy) {
-      const dest = join(destRoot, rel);
-      mkdirSync(dirname(dest), { recursive: true });
-      copyFileSync(join(srcRoot, rel), dest);
+    const restorePoint = createRestorePoint({ destRoot, relPaths: [...toMerge, ...toCopy] });
+    try {
+      for (const rel of toMerge) {
+        const dest = join(destRoot, rel);
+        mkdirSync(dirname(dest), { recursive: true });
+        specialMerge[rel](dest, join(srcRoot, rel));
+      }
+      for (const rel of toCopy) {
+        const dest = join(destRoot, rel);
+        mkdirSync(dirname(dest), { recursive: true });
+        copyFileSync(join(srcRoot, rel), dest);
+      }
+    } catch (err) {
+      // Roll back, then re-throw the ORIGINAL error unchanged: the caller decides
+      // how to report the real cause, and replacing it here would hide it.
+      // A rollback that could not fully undo itself is recorded on the error
+      // rather than swallowed — a half-restored tree must never look clean.
+      const { failed } = restorePoint.restore();
+      if (failed.length > 0) err.rollbackIncomplete = failed;
+      throw err;
+    } finally {
+      restorePoint.discard();
     }
   }
 
