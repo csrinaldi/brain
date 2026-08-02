@@ -132,14 +132,25 @@ export async function main(deps = {}) {
     return 1;
   }
 
-  // P290-ABSTAIN-FAIL-OPEN (§10 Self-review): the self-review guard is fail-open
-  // on an unset handle (evaluateSelfReview returns false when reviewerHandle is
-  // empty), so pre-task-7.3 — when the reviewer runs under the operator's own
-  // identity — author == operator and the §10 lock is silently inactive. Make
-  // the inactivity LOUD, not closed (a strict guard would abstain from
-  // everything). Non-fatal warning; binds before any H2-era unattended run.
+  // §10 Self-review — FAIL CLOSED on an unset handle (issue #382).
+  //
+  // This was deliberately fail-open (a loud warning) while `reviewer.handle`
+  // still shipped empty: pre-task-7.3 the reviewer ran under the operator's
+  // own identity, so a strict guard would have abstained from everything.
+  // Task 7.3 landed (#367 registered the reviewer identity; the config now
+  // carries a handle), which retires that premise — an empty handle is now a
+  // misconfiguration, not the expected state.
+  //
+  // Fail closed rather than abstain-silently: without a handle BOTH §10
+  // self-review abstention and the anti-loop lock (poster.mjs compares
+  // `lastVerdict.author` to the reviewer handle) are inert, so proceeding
+  // would post an unbounded verdict under an unverifiable identity. Refusing
+  // at boot mirrors the missing-token refusal above — same shape, same exit.
   if (!identity.handle) {
-    error('brain:review: self-review guard inactive — populate reviewer.handle (task 7.3).');
+    error('brain:review: refusing to run — reviewer.handle is not configured.');
+    error('  Without it the §10 self-review abstention and the anti-loop lock are both inert.');
+    error('  Set reviewer.handle in brain.config.json to the reviewer identity (see ADR-0020).');
+    return 1;
   }
 
   const boot = await gatherColdBoot({
