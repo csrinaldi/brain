@@ -18,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { copyManaged, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec } from './lib/installer.mjs';
+import { copyManaged, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, recoverFromJournal, acquireLock } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
 
 const ROOT = process.cwd();
@@ -41,9 +41,39 @@ const dryRun = flags.has('--dry-run');
 const noInstall = flags.has('--no-install');
 const force = flags.has('--force');
 const abortOnCollision = flags.has('--abort-on-collision');
+const recover = flags.has('--recover');
+
+// ── Lock ───────────────────────────────────────────────────────────────────────
+// Two concurrent runs would each clear and rebuild the other's restore point, so
+// neither could roll back. Released on every exit path this process controls; a
+// SIGKILL leaves it behind, and the refusal message says how to clear it.
+const lock = acquireLock(ROOT);
+process.on('exit', () => lock.release());
+
+// ── --recover ──────────────────────────────────────────────────────────────────
+// Replays the restore point a KILLED run left behind. Deliberately explicit and
+// deliberately terminal: between that crash and now the consumer may have repaired
+// things by hand, so this never runs by itself and never chains into an upgrade.
+if (recover) {
+  const result = recoverFromJournal({ destRoot: ROOT });
+  if (!result) {
+    info('Nothing to recover — no interrupted upgrade was recorded here.');
+    process.exit(0);
+  }
+  ok(`Restored ${result.recovered.length} managed path(s) to their pre-upgrade bytes.`);
+  for (const f of result.recovered) console.log(`      ${C.dim}${f}${C.reset}`);
+  if (result.failed.length > 0) {
+    warn(`Could NOT restore ${result.failed.length} path(s):`);
+    for (const f of result.failed) console.log(`      ${C.dim}${f}${C.reset}`);
+    info(`Their pre-upgrade bytes were KEPT at ${result.snapshotDir} — restore from there, then delete it.`);
+    die('Recovery is INCOMPLETE. Inspect the paths above.');
+  }
+  console.log(`\n${C.green}Recovered.${C.reset} Re-run the upgrade when ready.\n`);
+  process.exit(0);
+}
 
 if (!tag && !noInstall) {
-  die(`missing <tag>. Usage: ${PM} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force]`);
+  die(`missing <tag>. Usage: ${PM} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force] [--recover]`);
 }
 
 // ── Self-host guard ──────────────────────────────────────────────────────────
@@ -168,6 +198,13 @@ try {
   // restores those bytes before re-throwing (#396), so there is normally nothing
   // half-applied to repair by hand. Say which of the two it was — a rollback that
   // only partly worked must never be reported as a clean one.
+  // An interrupted previous run is not this run's failure — it is a decision the
+  // operator has to make, so it gets its own wording and its own remedy.
+  if (err?.interruptedRun) {
+    console.error(`  ${C.red}✗${C.reset} ${err.message}`);
+    die(`Run '${PM} run brain:upgrade -- --recover' to put those paths back.`);
+  }
+
   // A refusal happens before the first write, so the write-phase wording would be
   // false in both halves — say what actually happened instead.
   if (err?.beforeAnyWrite) {

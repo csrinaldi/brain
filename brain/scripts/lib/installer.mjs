@@ -99,6 +99,93 @@ export function listFiles(root) {
   return out;
 }
 
+/**
+ * Builds the restore/discard/preserve handle over a captured snapshot.
+ *
+ * Extracted so the journal-recovery path (`recoverFromJournal`) replays a snapshot
+ * left by a run that DIED, using exactly the same restore logic a live run uses —
+ * two implementations of "put the tree back" is precisely the class of bug this
+ * repo batches under #315/#316/#340.
+ *
+ * @param {{destRoot: string, dir: string, saved: string[], created: string[], createdDirs: Set<string>}} snap
+ */
+function restoreHandle({ destRoot, dir, saved, created, createdDirs }) {
+  return {
+    dir,
+    saved,
+    created,
+    /**
+     * Returns every captured path to its pre-write state.
+     *
+     * Best-effort per path, deliberately: one unrecoverable entry must not strand
+     * the rollback of all the others. (`rmSync(..., { force: true })` suppresses
+     * ENOENT but NOT ENOTDIR, so a managed path whose parent exists as a file
+     * would otherwise abort the whole restore — and its throw would replace the
+     * original failure the caller is trying to report.)
+     *
+     * @returns {{ failed: string[] }} Paths that could not be returned to their
+     *   prior state. Non-empty means the tree is still dirty and the caller must
+     *   say so rather than report a clean rollback.
+     */
+    restore() {
+      const failed = [];
+
+      for (const rel of saved) {
+        try { copyFileSync(join(dir, rel), join(destRoot, rel)); } catch { failed.push(rel); }
+      }
+
+      // Judged by outcome, not by whether the call threw: a path that is gone was
+      // rolled back either way, and a path the write never reached was never dirty.
+      // Only a path still on disk afterwards is a real failure.
+      for (const rel of created) {
+        const path = join(destRoot, rel);
+        try { rmSync(path, { force: true }); } catch { /* verified on the next line */ }
+        if (pathPresent(path)) failed.push(rel);
+      }
+
+      // Deepest first, so a nested chain empties from the leaf up. A directory that
+      // is no longer empty was repopulated by something outside this call — leaving
+      // it in place is correct, not a failure.
+      for (const d of [...createdDirs].sort((a, b) => b.length - a.length)) {
+        try {
+          if (pathPresent(d) && readdirSync(d).length === 0) rmSync(d, { recursive: true, force: true });
+        // Reported repo-relative like every other entry: the caller prints them as
+        // one list, and mixing absolute with relative paths reads as two bugs.
+        } catch { failed.push(relative(destRoot, d)); }
+      }
+
+      return { failed };
+    },
+    /** Drops the snapshot. Safe to call after restore(). */
+    discard() {
+      rmSync(dir, { recursive: true, force: true });
+    },
+    /**
+     * Moves the snapshot to a name no later run auto-clears, and returns that path.
+     *
+     * Used when the rollback could NOT finish: those bytes are then the only
+     * surviving copy of the consumer's pre-copy state. Leaving them at the default
+     * location would be a trap — `createRestorePoint` clears that path on entry, so
+     * the operator's most natural next action, re-running `brain:upgrade`, would
+     * silently destroy exactly what they were just told to restore from.
+     *
+     * Numbered rather than timestamped so it is deterministic and never clobbers an
+     * older preserved snapshot.
+     *
+     * @returns {string} where the snapshot now lives.
+     */
+    preserve() {
+      for (let n = 1; n <= 999; n++) {
+        const target = `${dir}.preserved-${n}`;
+        if (!pathPresent(target)) {
+          try { renameSync(dir, target); return target; } catch { return dir; }
+        }
+      }
+      return dir;
+    },
+  };
+}
+
 // ── Restore point (rollback) ──────────────────────────────────────────────────
 
 /**
@@ -108,6 +195,128 @@ export function listFiles(root) {
  * own restore point (pinned by test — REQ-S6-6).
  */
 export const RESTORE_POINT_DIR = '.brain-upgrade-backup';
+
+/**
+ * The journal, written INSIDE the snapshot directory.
+ *
+ * Its presence is the whole signal, and the moment it is written is what makes that
+ * signal trustworthy: it lands AFTER the snapshot is complete and BEFORE the first
+ * write. So on a later run, a leftover snapshot directory means one of exactly two
+ * things, and they are told apart by this file alone:
+ *
+ *   no journal  → the previous run died while snapshotting. Nothing was written, so
+ *                 the leftover protects nothing and is safe to clear.
+ *   journal     → the previous run died between its first and last write. Those bytes
+ *                 are the only surviving record of the pre-upgrade tree.
+ *
+ * Without that distinction, replaying a leftover snapshot could restore bytes over a
+ * tree the previous run never touched.
+ */
+export const JOURNAL_FILE = 'journal.json';
+
+/** Bumped when the journal's shape changes; an unrecognised version is ignored, never guessed at. */
+export const JOURNAL_VERSION = 1;
+
+/** Lock path, deliberately a SIBLING of the snapshot dir so clearing that dir never releases it. */
+export const LOCK_PATH_SUFFIX = '.lock';
+
+function writeJournal({ dir, saved, created, createdDirs, destRoot }) {
+  const journal = {
+    version: JOURNAL_VERSION,
+    saved,
+    created,
+    createdDirs: [...createdDirs].map((d) => relative(destRoot, d)),
+  };
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, JOURNAL_FILE), JSON.stringify(journal, null, 2) + '\n');
+}
+
+/**
+ * Reads a journal left by an interrupted run, or null when there is none to trust.
+ *
+ * Fails closed on anything malformed: a journal that cannot be parsed, carries an
+ * unknown version, or lacks its path arrays is treated as ABSENT rather than
+ * guessed at — replaying a half-understood journal is worse than not replaying.
+ *
+ * @param {string} destRoot
+ * @returns {{version: number, saved: string[], created: string[], createdDirs: string[]}|null}
+ */
+export function readJournal(destRoot) {
+  try {
+    const j = JSON.parse(readFileSync(join(destRoot, RESTORE_POINT_DIR, JOURNAL_FILE), 'utf8'));
+    if (j?.version !== JOURNAL_VERSION) return null;
+    if (!Array.isArray(j.saved) || !Array.isArray(j.created) || !Array.isArray(j.createdDirs)) return null;
+    return j;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Replays a journal left by a run that DIED — the SIGKILL / power-loss path slice 1
+ * could not cover, because no in-process handler runs for those.
+ *
+ * Deliberately NOT automatic. Between the crash and this call the consumer may have
+ * repaired things by hand, and replaying stale snapshot bytes over that repair would
+ * destroy work while reporting success. The caller reaches this only on an explicit
+ * request; `createRestorePoint` refuses until it happens.
+ *
+ * @param {{destRoot: string}} opts
+ * @returns {{recovered: string[], failed: string[], snapshotDir: string|null}|null}
+ *   null when there is nothing to recover.
+ */
+export function recoverFromJournal({ destRoot }) {
+  const journal = readJournal(destRoot);
+  if (!journal) return null;
+
+  const dir = join(destRoot, RESTORE_POINT_DIR);
+  const handle = restoreHandle({
+    destRoot,
+    dir,
+    saved: journal.saved,
+    created: journal.created,
+    createdDirs: new Set(journal.createdDirs.map((d) => join(destRoot, d))),
+  });
+
+  const { failed } = handle.restore();
+  const recovered = [...journal.saved, ...journal.created].filter((p) => !failed.includes(p));
+
+  if (failed.length === 0) {
+    safeDiscard(handle);
+    return { recovered, failed, snapshotDir: null };
+  }
+  // Same rule as a live rollback: what could not be put back keeps its evidence.
+  return { recovered, failed, snapshotDir: handle.preserve() };
+}
+
+/**
+ * Takes an exclusive lock for the whole upgrade, or refuses.
+ *
+ * Two concurrent runs in one repo would each clear and rebuild the other's restore
+ * point, so neither could roll back. `wx` makes the create atomic — there is no
+ * check-then-create window to lose.
+ *
+ * @param {string} destRoot
+ * @returns {{path: string, release: () => void}}
+ */
+export function acquireLock(destRoot) {
+  const path = join(destRoot, RESTORE_POINT_DIR + LOCK_PATH_SUFFIX);
+  try {
+    writeFileSync(path, `${process.pid}\n`, { flag: 'wx' });
+  } catch (err) {
+    if (err?.code === 'EEXIST') {
+      throw new Error(
+        `another brain:upgrade appears to be running in this repo (lock at ${path}). ` +
+        'If none is, delete that file and re-run.',
+      );
+    }
+    throw err;
+  }
+  return {
+    path,
+    release() { try { rmSync(path, { force: true }); } catch { /* cosmetic */ } },
+  };
+}
 
 /**
  * `lstat` without throwing — returns null when the path is absent.
@@ -255,11 +464,29 @@ export function createRestorePoint({ destRoot, relPaths }) {
   const escaping = [];
   const dangling = [];
 
-  // A snapshot left by an earlier hard kill is not ours to trust or reuse: no
-  // recovery path reads it yet, so carrying it forward could only restore stale
-  // bytes. NOTE for the journal half of #396 — this line must be INVERTED there:
-  // once a recovery path exists, a leftover snapshot is evidence to replay, not
-  // debris to clear, and clearing it here would destroy exactly what recovery needs.
+  // INVERTED from slice 1, as that slice's own comment said it must be. A leftover
+  // snapshot is no longer debris to clear — with a recovery path in place it may be
+  // the only surviving record of a tree a killed run left half-applied, and clearing
+  // it here would destroy exactly what recovery replays.
+  //
+  // The journal is what tells the two cases apart (see JOURNAL_FILE): written after
+  // the snapshot and before the first write, so its ABSENCE proves the previous run
+  // never wrote anything.
+  const interrupted = readJournal(destRoot);
+  if (interrupted) {
+    const n = interrupted.saved.length + interrupted.created.length;
+    throw Object.assign(
+      new Error(
+        `a previous brain:upgrade was interrupted after it began writing, and its restore point ` +
+        `is still here (${dir}). It covers ${n} managed path(s). Nothing will be written until ` +
+        'it is dealt with: re-run with --recover to put those paths back, or delete that ' +
+        'directory to discard the record and lose the ability to undo that run.',
+      ),
+      { interruptedRun: true, snapshotDir: dir, coveredPaths: n },
+    );
+  }
+  // No journal: the previous run died BEFORE its first write, so what it left behind
+  // protects nothing.
   rmSync(dir, { recursive: true, force: true });
 
   for (const rel of relPaths) {
@@ -328,80 +555,9 @@ export function createRestorePoint({ destRoot, relPaths }) {
     );
   }
 
-  return {
-    dir,
-    saved,
-    created,
-    /**
-     * Returns every captured path to its pre-write state.
-     *
-     * Best-effort per path, deliberately: one unrecoverable entry must not strand
-     * the rollback of all the others. (`rmSync(..., { force: true })` suppresses
-     * ENOENT but NOT ENOTDIR, so a managed path whose parent exists as a file
-     * would otherwise abort the whole restore — and its throw would replace the
-     * original failure the caller is trying to report.)
-     *
-     * @returns {{ failed: string[] }} Paths that could not be returned to their
-     *   prior state. Non-empty means the tree is still dirty and the caller must
-     *   say so rather than report a clean rollback.
-     */
-    restore() {
-      const failed = [];
+  writeJournal({ dir, saved, created, createdDirs, destRoot });
 
-      for (const rel of saved) {
-        try { copyFileSync(join(dir, rel), join(destRoot, rel)); } catch { failed.push(rel); }
-      }
-
-      // Judged by outcome, not by whether the call threw: a path that is gone was
-      // rolled back either way, and a path the write never reached was never dirty.
-      // Only a path still on disk afterwards is a real failure.
-      for (const rel of created) {
-        const path = join(destRoot, rel);
-        try { rmSync(path, { force: true }); } catch { /* verified on the next line */ }
-        if (pathPresent(path)) failed.push(rel);
-      }
-
-      // Deepest first, so a nested chain empties from the leaf up. A directory that
-      // is no longer empty was repopulated by something outside this call — leaving
-      // it in place is correct, not a failure.
-      for (const d of [...createdDirs].sort((a, b) => b.length - a.length)) {
-        try {
-          if (pathPresent(d) && readdirSync(d).length === 0) rmSync(d, { recursive: true, force: true });
-        // Reported repo-relative like every other entry: the caller prints them as
-        // one list, and mixing absolute with relative paths reads as two bugs.
-        } catch { failed.push(relative(destRoot, d)); }
-      }
-
-      return { failed };
-    },
-    /** Drops the snapshot. Safe to call after restore(). */
-    discard() {
-      rmSync(dir, { recursive: true, force: true });
-    },
-    /**
-     * Moves the snapshot to a name no later run auto-clears, and returns that path.
-     *
-     * Used when the rollback could NOT finish: those bytes are then the only
-     * surviving copy of the consumer's pre-copy state. Leaving them at the default
-     * location would be a trap — `createRestorePoint` clears that path on entry, so
-     * the operator's most natural next action, re-running `brain:upgrade`, would
-     * silently destroy exactly what they were just told to restore from.
-     *
-     * Numbered rather than timestamped so it is deterministic and never clobbers an
-     * older preserved snapshot.
-     *
-     * @returns {string} where the snapshot now lives.
-     */
-    preserve() {
-      for (let n = 1; n <= 999; n++) {
-        const target = `${dir}.preserved-${n}`;
-        if (!pathPresent(target)) {
-          try { renameSync(dir, target); return target; } catch { return dir; }
-        }
-      }
-      return dir;
-    },
-  };
+  return restoreHandle({ destRoot, dir, saved, created, createdDirs });
 }
 
 // ── Copy managed paths ─────────────────────────────────────────────────────────

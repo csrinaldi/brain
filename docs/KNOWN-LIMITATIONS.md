@@ -22,8 +22,12 @@ control**:
   location printed. Ctrl-C is safe too, though not by rolling back: the copy is one synchronous
   batch (~23ms for 366 files) that a signal cannot interrupt, so it completes rather than dying
   midway. Precisely what is **not** covered:
-  - **SIGKILL and power loss** — no in-process handler runs at all; surviving these needs an
-    on-disk journal replayed by the next invocation.
+  - ~~**SIGKILL and power loss**~~ — **CLOSED.** A journal is written after the snapshot and
+    before the first write, so a killed run leaves replayable evidence. The next run refuses
+    rather than writing over it, and `brain:upgrade -- --recover` puts the covered paths back.
+    Recovery is explicit by design: between the crash and the next run the consumer may have
+    repaired things by hand, and replaying stale bytes over that would destroy work while
+    reporting success.
   - **The dependency install (step 1)** — it rewrites `package.json`, the lockfile and
     `node_modules/` *before* any snapshot exists, and is never reverted.
   - **The config migration (step 3)** — `brain.config.json` is a `local` path and is outside the
@@ -37,7 +41,7 @@ control**:
     directory is left behind rather than reported as an upgrade failure. Cosmetic residue is
     preferable to telling an operator a completed upgrade failed.
 
-  (M4 · #396 → 1.1; first half landed, journal outstanding)
+  (M4 · #396 → 1.1; both slices landed)
 - **Plain-copy clobber asymmetry.** `.gemini/settings.json`, `.github/CODEOWNERS`,
   `.github/PULL_REQUEST_TEMPLATE.md`, `AGENTS.md`, and the workflows are overwritten on upgrade
   (only `.claude/settings.json` and `package.json` are merged). A consumer who edits one of those

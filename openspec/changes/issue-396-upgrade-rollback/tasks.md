@@ -114,21 +114,20 @@ tracker `feature/issue-396-rollback`). Slice 2 is a separate PR on the same chai
 - [ ] 7.1 `.brain-upgrade-backup` cannot be gitignored — `.gitignore` is not a managed path; adding it is **Tier 2, human-promoted**
 - [ ] 7.2 `restore()` rewrites all saved files, moving mtimes even when one write happened (cosmetic)
 - [ ] 7.3 Extend protection across the whole verb (install + config migration), or record that it stays out of scope
-- [ ] 7.4 **F12** — two concurrent `brain:upgrade` runs in one repo destroy each other's restore
-      point. Harmless today (nothing reads a leftover snapshot); the journal slice needs a lock.
+- [x] 7.4 **F12** — fixed in slice 2: `acquireLock()` takes an exclusive `wx` lock, sibling to the snapshot dir so clearing that dir never releases it (REQ-J-5)
 - [ ] 7.5 **F5** — a package manager that TRAPS SIGINT and exits non-zero still lands on
       "install failed — check repo access". Only a signal-killed child is covered.
 - [ ] 7.6 **F10** — a directory/FIFO/socket at a managed path yields an opaque EISDIR/ENXIO
       instead of the actionable message the refusal branches were given.
 
-## Phase 8 — Slice 2: on-disk journal (NOT STARTED)
+## Phase 8 — Slice 2: on-disk journal
 
-- [ ] 8.1 Write a journal before the write loop
-- [ ] 8.2 Detect an incomplete journal on a later invocation
-- [ ] 8.3 **Invert** `createRestorePoint`'s entry-time clearing — a leftover snapshot is evidence, not debris
-- [ ] 8.4 Replay the restore; report what was recovered
-- [ ] 8.5 Tests for crash-then-recover
-- [ ] 8.6 `KNOWN-LIMITATIONS.md`: close the SIGKILL / power-loss gap
+- [x] 8.1 Write the journal AFTER the snapshot and BEFORE the first write — its absence is what proves nothing was written
+- [x] 8.2 Detect an incomplete journal on a later invocation and REFUSE (explicit recovery, never automatic)
+- [x] 8.3 **Inverted** `createRestorePoint`'s entry-time clearing — a leftover snapshot with a journal is evidence, not debris
+- [x] 8.4 `recoverFromJournal()` + `brain:upgrade -- --recover`; reports recovered and failed separately
+- [x] 8.5 REQ-J-1..5, including a REAL SIGKILL of a child mid-write
+- [x] 8.6 `KNOWN-LIMITATIONS.md`: SIGKILL / power-loss gap CLOSED
 - [ ] 8.7 Tracker PR carries `Closes #396`
 
 ## Gates (slice 1, re-run per push)
