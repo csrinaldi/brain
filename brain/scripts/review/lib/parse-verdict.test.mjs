@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { parseVerdict } from './parse-verdict.mjs';
+import { buildVerdict, renderVerdict } from '../verdict.mjs';
 
 test('parseVerdict: extracts head_sha, rev, verdict, and the passed-through author', () => {
   const body = [
@@ -131,4 +132,72 @@ test('parseVerdict: extracts findings with evidence_class and causal_disposition
   assert.deepEqual(result.findings, [
     { id: 'R3-001', evidence_class: 'inferential', causal_disposition: 'introduced' },
   ]);
+});
+
+// ── #381: the REAL render -> parse round-trip ───────────────────────────────
+// Every findings test above this line hand-writes its input. That is exactly
+// how the defect survived: `renderVerdict` emits findings as a YAML LIST,
+// `parseVerdict` only read a same-line JSON scalar, and no test ever fed one
+// to the other. The tests below drive parseVerdict from ACTUAL buildVerdict +
+// renderVerdict output — if the two encodings ever diverge again, these fail.
+
+test('#381 round-trip: non-empty findings survive renderVerdict -> parseVerdict', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [
+      { id: 'F-1', severity: 'blocker', evidence: 'src/a.mjs:42', cites: 'ADR-0020' },
+      { id: 'F-2', severity: 'correction', evidence: 'a quoted: value, with punctuation' },
+    ],
+  });
+  const parsed = parseVerdict({ body: renderVerdict(built), author: 'rev' });
+
+  assert.equal(parsed.findings.length, 2, 'both findings must survive the round-trip');
+  assert.deepEqual(parsed.findings[0], {
+    id: 'F-1',
+    severity: 'blocker',
+    evidence: 'src/a.mjs:42',
+    cites: 'ADR-0020',
+  });
+  // The second finding's evidence needed quoting on the way out; it must come
+  // back un-quoted and byte-identical, not as the raw `"..."` literal.
+  assert.equal(parsed.findings[1].evidence, 'a quoted: value, with punctuation');
+  assert.equal(parsed.findings[1].severity, 'correction');
+});
+
+test('#381 round-trip: an empty findings array still round-trips (the case that always worked)', () => {
+  const built = buildVerdict({ headSha: 'abc123', conclusion: 'APPROVE', findings: [] });
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual(parsed.findings, [], 'findings: [] must parse to an empty array, not null');
+});
+
+test('#381 round-trip: follow_ups survive too — they were rendered but never parsed', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    protocol: 'brain-review/2',
+    findings: [
+      { id: 'K-1', severity: 'blocker', evidence: 'live.mjs:7', causal_disposition: 'introduced' },
+      { id: 'K-2', severity: 'blocker', evidence: 'old.mjs:9', causal_disposition: 'pre-existing' },
+    ],
+  });
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+
+  assert.deepEqual(parsed.findings.map(f => f.id), ['K-1'], 'introduced findings stay in findings');
+  assert.deepEqual(parsed.follow_ups.map(f => f.id), ['K-2'], 'pre-existing findings move to follow_ups');
+  assert.equal(parsed.follow_ups[0].causal_disposition, 'pre-existing');
+});
+
+test('#381 round-trip: the list parser stops at the next top-level key', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [{ id: 'F-1', severity: 'blocker', evidence: 'x.mjs:1' }],
+    conditions: ['some-condition'],
+  });
+  const rendered = renderVerdict(built);
+  const parsed = parseVerdict({ body: rendered });
+
+  assert.equal(parsed.findings.length, 1, 'exactly one finding — conditions must not be absorbed');
+  assert.equal('conditions' in parsed.findings[0], false, 'the next key must not leak into the entry');
 });

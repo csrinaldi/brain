@@ -354,12 +354,14 @@ test('main: absent BRAIN_REVIEWER_TOKEN exits non-zero with the fail-closed mess
   assert.ok(errors.some(l => /BRAIN_REVIEWER_TOKEN/.test(l)));
 });
 
-// ── P290-ABSTAIN-FAIL-OPEN: an unset reviewer.handle makes the self-review ────
-// guard fail-open (Boolean('') → never fires). The token gate still passes, so
-// the run proceeds — but it MUST say so loudly, not silently review under an
-// inactive §10 lock. One warning, printed, non-fatal (binds before H2's
-// unattended runs; tracked against task 7.3).
-test('main: an unset reviewer.handle prints the loud fail-open self-review warning (P290-ABSTAIN-FAIL-OPEN)', async () => {
+// ── §10 self-review FAILS CLOSED on an unset reviewer.handle (issue #382) ────
+// This inverts P290-ABSTAIN-FAIL-OPEN, whose fail-open was scoped to the
+// window before task 7.3 shipped a reviewer identity (#367). With a handle now
+// expected, an empty one leaves BOTH the §10 abstention and the anti-loop lock
+// (poster.mjs matches `lastVerdict.author` against the handle) inert — so the
+// run must refuse at boot rather than post an unbounded verdict under an
+// unverifiable identity. Exit 1, and no port write is attempted.
+test('main: an unset reviewer.handle refuses at boot — §10 and the anti-loop lock fail closed (#382)', async () => {
   const errors = [];
   const vcs = spyVcs();
   const deps = readyDeps({ vcs });
@@ -368,11 +370,17 @@ test('main: an unset reviewer.handle prints the loud fail-open self-review warni
     readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'shh' }),
   };
   const code = await main({ argv: ['--pr', '42', '--dry-run'], log: () => {}, error: (s) => errors.push(s), ...deps });
-  assert.equal(code, 0);
+  assert.equal(code, 1, 'an unset reviewer.handle must refuse the run, not proceed');
   assert.ok(
-    errors.some(l => /self-review guard inactive/.test(l) && /reviewer\.handle/.test(l) && /7\.3/.test(l)),
-    'an unset handle must print the loud fail-open warning naming reviewer.handle and task 7.3',
+    errors.some(l => /refusing to run/.test(l) && /reviewer\.handle/.test(l)),
+    'the refusal must name reviewer.handle as the missing configuration',
   );
+  assert.ok(
+    errors.some(l => /anti-loop/.test(l)),
+    'the refusal must state that the anti-loop lock is inert too — not only §10',
+  );
+  assert.equal(vcs.calls.prReviewComment, 0, 'refusing at boot must post no verdict');
+  assert.equal(vcs.calls.issueComment, 0, 'refusing at boot must post no ruling');
 });
 
 // ── H1-2C-BASE closure: local runs resolve baseSha from the port ────────────
