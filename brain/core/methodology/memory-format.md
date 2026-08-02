@@ -141,7 +141,10 @@ comparison.
   MAY be a helper or a post-merge hook, but MUST NOT require a **custom merge driver for
   `index.jsonl`** (a per-clone `.git/config` registration — the engram-driver friction this format
   eliminates); `records/*.jsonl` keeps the built-in `merge=union`, which needs no per-clone
-  registration.
+  registration. That helper is **`npm run memory:resolve-index`** (issue #330), and it is layered
+  in exactly that order: the command is the unit of truth and works in every clone with **zero
+  installation**, while the `post-merge` hook is a thin, non-blocking caller of the same command
+  and holds no resolution logic of its own.
 - **Excluded from the union driver.** The `merge=union` policy is scoped to `records/*.jsonl`
   ONLY; the `.gitattributes` glob deliberately EXCLUDES `index.jsonl`. **Corrected rationale
   (C1b, issue #214 — the original "single JSON object" framing (now removed) was stale the
@@ -150,7 +153,16 @@ comparison.
   regenerated indexes would concatenate both sides' now-superseded snapshots — producing
   duplicate and stale entries, not a clean merge. The index is fully regenerable from
   `records/`, so a git merge conflict on `index.jsonl` is resolved by **discarding both sides and
-  running `memory:reindex`** — it is NEVER hand-merged and NEVER union-merged.
+  regenerating from `records/`** — it is NEVER hand-merged and NEVER union-merged.
+  `npm run memory:resolve-index` is that resolution as one command: it discards the conflicted
+  working-tree file, regenerates the index (the same `rebuildIndex()` that `memory:reindex` runs),
+  and `git add`s the path **only if** git still reports it unmerged — so the operator finishes the
+  merge with `git commit` and no judgment call, and a hook-triggered call on an already-clean tree
+  normalizes the file while staging nothing.
+
+  It fails **closed**: if any `records/*.jsonl` carries conflict markers it refuses and leaves the
+  index untouched, because the index is derived from that log and regenerating over a conflicted
+  one would bake the markers in and report success.
 - **Low-churn** — `memory:reindex` / `memory:share` **MUST NOT rewrite the whole index every
   run**. Entries are stable-ordered by `id`; a reindex adds/updates only entries for newly
   appended records and leaves every other entry byte-identical, so `git diff index.jsonl` is
