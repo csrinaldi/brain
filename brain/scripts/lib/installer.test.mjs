@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, lstatSync, statSync, symlinkSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, lstatSync, statSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -1301,13 +1301,28 @@ test('copyManaged: an incomplete rollback KEEPS the snapshot (REQ-S6-11)', () =>
 
     assert.ok(caught?.rollbackIncomplete?.includes('brain/core/x.md'),
       'the unrestorable path must be reported on the error');
+    assert.ok(caught.rollbackSnapshotDir,
+      'the caller must be told where the surviving snapshot is');
     assert.equal(
-      readFileSync(join(dest, RESTORE_POINT_DIR, 'brain', 'core', 'x.md'), 'utf8'),
+      readFileSync(join(caught.rollbackSnapshotDir, 'brain', 'core', 'x.md'), 'utf8'),
       'PRECIOUS',
       'the snapshot is the only surviving copy of those bytes — it must NOT be discarded',
     );
-    assert.equal(caught.rollbackSnapshotDir, join(dest, RESTORE_POINT_DIR),
-      'the caller must be told where the surviving snapshot is');
+
+    // The trap this closes: the operator is told to restore from that directory, and
+    // their most natural next action is to re-run the upgrade. A snapshot left at the
+    // default location would be cleared on entry by that very run.
+    rmSync(join(dest, 'brain', 'core', 'x.md'), { recursive: true, force: true });
+    writeFileSync(join(dest, 'brain', 'core', 'x.md'), 'whatever');
+    copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [] });
+
+    assert.equal(
+      readFileSync(join(caught.rollbackSnapshotDir, 'brain', 'core', 'x.md'), 'utf8'),
+      'PRECIOUS',
+      'a later brain:upgrade run must NOT destroy the preserved snapshot',
+    );
+    assert.notEqual(caught.rollbackSnapshotDir, join(dest, RESTORE_POINT_DIR),
+      'the preserved snapshot must not sit at the path every run clears on entry');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -1377,6 +1392,93 @@ test('copyManaged: a symlinked managed path is refused before any write (REQ-S6-
       'the refusal must happen before ANY managed path is written');
     assert.ok(!existsSync(join(dest, RESTORE_POINT_DIR)),
       'a refusal must leave no partial snapshot behind');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// A symlink is not the boundary — escaping destRoot is. Measured: a link resolving
+// INSIDE the repo round-trips cleanly, because copyFileSync follows it on the
+// snapshot, on the write and on the restore. Refusing those would soft-lock any
+// consumer using `AGENTS.md -> CLAUDE.md`, the canonical agent-interop symlink, and
+// AGENTS.md is a managed path.
+test('copyManaged: a VALID symlink resolving inside the repo is allowed and rolls back (REQ-S6-15)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-15-'));
+  try {
+    const { src, dest } = seedFailingCopy(tmp);
+    writeFileSync(join(src, 'brain', 'core', 'linked.md'), 'NEW');
+    const target = join(dest, 'REAL-TARGET.md');
+    writeFileSync(target, 'CONSUMER ORIGINAL');
+    symlinkSync(target, join(dest, 'brain', 'core', 'linked.md'));
+
+    assert.throws(() => copyManaged({
+      srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [],
+    }), (err) => !/cannot protect this upgrade/.test(err.message),
+    'a link inside the repo must NOT be refused — it must be protected like any other path');
+
+    assert.equal(readFileSync(target, 'utf8'), 'CONSUMER ORIGINAL',
+      'the link target must be rolled back to its original bytes');
+    assert.ok(lstatSync(join(dest, 'brain', 'core', 'linked.md')).isSymbolicLink(),
+      'the link itself must never be replaced by a regular file');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: a symlinked ANCESTOR directory that escapes the repo is refused (REQ-S6-16)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-16-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    const outside = join(tmp, 'OUTSIDE');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'y.md'), 'NEW');
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, 'y.md'), 'OUTSIDE ORIGINAL');
+    mkdirSync(join(dest, 'brain'), { recursive: true });
+    // The ANCESTOR is the link — lstat on the leaf would never see this.
+    symlinkSync(outside, join(dest, 'brain', 'core'));
+
+    assert.throws(
+      () => copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [] }),
+      /resolve outside the repository/,
+      'a write reaching outside destRoot cannot be rolled back and must be refused',
+    );
+    assert.equal(readFileSync(join(outside, 'y.md'), 'utf8'), 'OUTSIDE ORIGINAL',
+      'nothing may be written through the escaping link');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: a failure to clean up the snapshot never reports a good upgrade as failed (REQ-S6-17)', (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip('root ignores mode bits, so cleanup cannot be made to fail here');
+    return;
+  }
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-17-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'x.md'), 'NEW');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'x.md'), 'OLD');
+
+    const result = copyManaged({
+      srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [],
+      specialMerge: {
+        'brain/core/x.md': (destPath, srcPath) => {
+          copyFileSync(srcPath, destPath);                       // the write SUCCEEDS
+          chmodSync(join(dest, RESTORE_POINT_DIR, 'brain'), 0o500); // now block cleanup
+        },
+      },
+    });
+
+    assert.ok(result.merged.includes('brain/core/x.md'), 'the upgrade itself must be reported as done');
+    assert.equal(readFileSync(join(dest, 'brain', 'core', 'x.md'), 'utf8'), 'NEW',
+      'the write really did land — a cleanup error must not be dressed up as a failed upgrade');
+    chmodSync(join(dest, RESTORE_POINT_DIR, 'brain'), 0o700);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

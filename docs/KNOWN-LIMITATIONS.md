@@ -28,8 +28,14 @@ control**:
     `node_modules/` *before* any snapshot exists, and is never reverted.
   - **The config migration (step 3)** — `brain.config.json` is a `local` path and is outside the
     restore point, so a failure there leaves new managed files beside an un-migrated config.
-  - **Symlinked managed paths** — refused up front (a write would follow the link out of the
-    repo, beyond any rollback's reach) rather than silently mishandled.
+  - **Managed paths that resolve OUTSIDE the repo, and dangling symlinks** — refused up front.
+    A write landing outside `destRoot` is beyond any rollback's reach, and a link with no target
+    cannot be snapshotted at all. A symlink resolving *inside* the repo is fine and is protected
+    like any other path — measured: the snapshot, the write and the restore all follow the link,
+    so the target ends at its original bytes with the link untouched.
+  - **The rollback's own cleanup** — if removing the snapshot fails (EACCES/EPERM/EBUSY), the
+    directory is left behind rather than reported as an upgrade failure. Cosmetic residue is
+    preferable to telling an operator a completed upgrade failed.
 
   (M4 · #396 → 1.1; first half landed, journal outstanding)
 - **Plain-copy clobber asymmetry.** `.gemini/settings.json`, `.github/CODEOWNERS`,

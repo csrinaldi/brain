@@ -144,7 +144,12 @@ const { managed, local } = await import(join(pkgRoot, 'brain', 'core', 'managed-
 // A signal raised during the install above is delivered here, at the first await
 // after it — before any managed path has been written.
 if (interrupted) {
-  die(`${interrupted} received before the managed-path write began — nothing was written.`);
+  // Same signal, same exit code as the install step and the final summary — `die()`
+  // would exit 1 here and make one interrupt look like three different outcomes
+  // depending on when it landed. Note it says "no managed path", not "nothing":
+  // step 1 already rewrote package.json, the lockfile and node_modules.
+  console.error(`  ${C.red}✗${C.reset} ${interrupted} received before the copy began — no managed path was written.`);
+  process.exit(interrupted === 'SIGTERM' ? 143 : 130);
 }
 
 let copied, skipped, merged, collisions;
@@ -163,12 +168,25 @@ try {
   // restores those bytes before re-throwing (#396), so there is normally nothing
   // half-applied to repair by hand. Say which of the two it was — a rollback that
   // only partly worked must never be reported as a clean one.
+  // A refusal happens before the first write, so the write-phase wording would be
+  // false in both halves — say what actually happened instead.
+  if (err?.beforeAnyWrite) {
+    console.error(`  ${C.red}✗${C.reset} Upgrade refused before any managed path was written: ${err?.message ?? err}`);
+    die('Nothing was changed. Resolve the paths named above and re-run.');
+  }
+
   console.error(`  ${C.red}✗${C.reset} Upgrade failed while writing managed paths: ${err?.message ?? err}`);
+  // The root cause lives in `cause` whenever the rollback state had to be carried on
+  // a wrapper (a frozen or non-object throw), and it is the only line that says WHY.
+  if (err?.cause !== undefined) {
+    console.error(`      ${C.dim}caused by: ${err.cause?.message ?? err.cause}${C.reset}`);
+  }
   if (err?.rollbackIncomplete?.length) {
     warn(`Rollback could NOT restore ${err.rollbackIncomplete.length} path(s) — still modified:`);
     for (const f of err.rollbackIncomplete) console.log(`      ${C.dim}${f}${C.reset}`);
     if (err.rollbackSnapshotDir) {
-      info(`Their pre-copy bytes were KEPT at ${err.rollbackSnapshotDir} — restore from there, then delete it.`);
+      info(`Their pre-copy bytes were KEPT at ${err.rollbackSnapshotDir}`);
+      info('That directory is never cleared automatically — restore from it, then delete it yourself.');
     }
     die('The tree is NOT fully restored. Inspect the paths above before retrying.');
   }

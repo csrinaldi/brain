@@ -58,19 +58,26 @@ Three categories, decided at snapshot time:
 
 | Dest state | Recorded as | Rollback action |
 |---|---|---|
-| present (regular file) | `saved` — bytes copied to the snapshot dir | copy back |
+| present — regular file, **or a symlink resolving inside `destRoot`** | `saved` — bytes copied to the snapshot dir | copy back |
 | absent | `created` | delete; prune directories the write had to create |
-| symlink | `symlinked` | **refuse the whole run** |
+| resolves **outside** `destRoot` (leaf or any ancestor) | `escaping` | **refuse the whole run** |
+| **dangling** symlink | `dangling` | **refuse the whole run** |
 
 **Presence is judged with `lstat`, never `existsSync`.** `existsSync` follows links, so a
-dangling symlink reads as absent → recorded as `created` → **deleted** on rollback, while
-`copyFileSync` writes through the link to a target outside the repo. That is the feature
-corrupting the very thing it exists to protect, so the distinction is load-bearing.
+dangling symlink reads as absent → recorded as `created` → **deleted** on rollback. That is
+the feature corrupting the very thing it exists to protect, so the distinction is
+load-bearing.
 
-Symlinks are **refused** rather than handled. Handling them means either writing through
-(escapes the repo, unrollable) or silently converting a consumer's link into a regular
-file. Refusal is fail-closed and, unlike the lockout class in
-`brain/core/anti-patterns/`, names the path and the remedy.
+**The boundary is escaping the repo, not being a symlink.** An earlier revision refused every
+symlink, on the premise that "the write lands outside `destRoot` where no rollback can reach".
+That premise is false for a link pointing inside the repo, and it was measured: `copyFileSync`
+follows the link on the snapshot, on the write and on the restore, so the target returns to
+its original bytes with the link itself untouched. Refusing those would soft-lock any consumer
+using `AGENTS.md -> CLAUDE.md` — a managed path, and the canonical agent-interop symlink.
+
+What genuinely cannot be covered is a write landing outside `destRoot`, since the snapshot
+lives inside it. `escapesRoot()` resolves the **whole path**, so a symlinked ancestor
+directory is caught too; a leaf-only test never sees that case.
 
 ## §5 — Failure judged by outcome, not by whether a call threw
 

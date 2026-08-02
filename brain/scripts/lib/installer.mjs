@@ -16,11 +16,13 @@ import {
   copyFileSync,
   readFileSync,
   readdirSync,
+  realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { join, dirname, relative, sep } from 'node:path';
+import { basename, join, dirname, relative, sep } from 'node:path';
 import { MANAGED_SCRIPT_KEYS } from '../../core/managed-paths.mjs';
 
 // ── Glob matching ────────────────────────────────────────────────────────────
@@ -128,6 +130,60 @@ function pathPresent(p) {
 }
 
 /**
+ * True when `p`, after every symlink ON ITS WHOLE PATH is resolved, lands outside
+ * `destRoot`.
+ *
+ * This is the real, measured boundary — not "is it a symlink". A symlink pointing
+ * INSIDE the repo round-trips perfectly: `copyFileSync` follows it when the
+ * snapshot is taken, follows it again on the write, and follows it a third time on
+ * restore, so the target ends at its original bytes and the link itself is never
+ * touched. Refusing those would soft-lock a consumer for no gain — and
+ * `AGENTS.md -> CLAUDE.md`, a managed path, is the canonical agent-interop symlink.
+ *
+ * What genuinely cannot be covered is a write that lands outside `destRoot`, since
+ * the snapshot lives inside it. Resolving the whole path (not just the leaf) is
+ * what catches a symlinked ANCESTOR directory, which a leaf-only check misses.
+ *
+ * @param {string} destRoot
+ * @param {string} p
+ * @returns {boolean}
+ */
+function escapesRoot(destRoot, p) {
+  let rootReal;
+  try { rootReal = realpathSync(destRoot); } catch { return false; }
+
+  // Resolve the deepest ancestor that exists, then re-attach the tail that does
+  // not — so a path scheduled to be CREATED under a symlinked parent is judged on
+  // where it would actually land.
+  const tail = [];
+  for (let cur = p; ;) {
+    try {
+      const base = realpathSync(cur);
+      const resolved = tail.length ? join(base, ...tail) : base;
+      return resolved !== rootReal && !resolved.startsWith(rootReal + sep);
+    } catch {
+      const parent = dirname(cur);
+      if (parent === cur) return false; // nothing on the path resolves at all
+      tail.unshift(basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+/**
+ * Drops a restore point without ever letting cleanup failure masquerade as the
+ * action failing.
+ *
+ * `rmSync(..., { force: true })` suppresses ENOENT but NOT EACCES/EPERM/EBUSY, so
+ * an unguarded discard can turn a fully-applied upgrade into a reported failure —
+ * and inside a `catch`, its throw would replace the very error being reported. A
+ * leftover snapshot directory is cosmetic; a false failure report is not.
+ */
+function safeDiscard(restorePoint) {
+  try { restorePoint.discard(); } catch { /* cosmetic — never surface as failure */ }
+}
+
+/**
  * Attaches rollback state to a failure without ever losing the original.
  *
  * A bare `err.rollbackIncomplete = …` is not safe: modules are strict mode, so
@@ -196,7 +252,8 @@ export function createRestorePoint({ destRoot, relPaths }) {
   const saved = [];
   const created = [];
   const createdDirs = new Set();
-  const symlinked = [];
+  const escaping = [];
+  const dangling = [];
 
   // A snapshot left by an earlier hard kill is not ours to trust or reuse: no
   // recovery path reads it yet, so carrying it forward could only restore stale
@@ -207,18 +264,29 @@ export function createRestorePoint({ destRoot, relPaths }) {
 
   for (const rel of relPaths) {
     const dest = join(destRoot, rel);
+
+    // Refused case 1: the write would land outside the repository, so no snapshot
+    // inside it can cover the change. Catches a symlinked path AND a symlinked
+    // ancestor directory — a leaf-only test misses the latter entirely.
+    if (escapesRoot(destRoot, dest)) {
+      escaping.push(rel);
+      continue;
+    }
+
     const st = lstatOrNull(dest);
 
-    if (st?.isSymbolicLink()) {
-      // A symlink at a managed path cannot be protected: copyFileSync follows it,
-      // so the write lands OUTSIDE destRoot where no rollback can reach, and the
-      // link itself would be removed as though this run had created it. Collected
-      // and refused below rather than silently mishandled.
-      symlinked.push(rel);
+    // Refused case 2: a DANGLING symlink. There is nothing to copy, so no snapshot
+    // of it can be taken — and this is the exact shape that used to be misread as
+    // "absent, created by this run" and DELETED on rollback.
+    if (st?.isSymbolicLink() && !existsSync(dest)) {
+      dangling.push(rel);
       continue;
     }
 
     if (st) {
+      // Includes a VALID symlink resolving inside the repo. copyFileSync follows it
+      // in every direction, so backup -> write -> restore returns the target to its
+      // original bytes with the link intact. Measured, not assumed.
       const backup = join(dir, rel);
       mkdirSync(dirname(backup), { recursive: true });
       copyFileSync(dest, backup);
@@ -234,15 +302,29 @@ export function createRestorePoint({ destRoot, relPaths }) {
     }
   }
 
-  // Fail closed, before a single byte is written. The message names the paths and
-  // the remedy, so this is an actionable refusal rather than the kind of silent
-  // lockout brain/core/anti-patterns records.
-  if (symlinked.length > 0) {
+  // Fail closed, before a single byte is written, and ONLY for what genuinely
+  // cannot be rolled back. The message names the paths and the remedy, so this is
+  // an actionable refusal rather than the silent-lockout class recorded in
+  // brain/core/anti-patterns/.
+  if (escaping.length > 0 || dangling.length > 0) {
     rmSync(dir, { recursive: true, force: true });
+    const reasons = [];
+    if (escaping.length > 0) {
+      reasons.push(
+        `${escaping.length} path(s) resolve outside the repository, so a write there could not ` +
+        `be rolled back — ${escaping.join(', ')}`,
+      );
+    }
+    if (dangling.length > 0) {
+      reasons.push(
+        `${dangling.length} path(s) are symlinks with no target, so no snapshot of them can be ` +
+        `taken — ${dangling.join(', ')}`,
+      );
+    }
     throw new Error(
-      `cannot protect this upgrade: ${symlinked.length} managed path(s) are symlinks, so a write ` +
-      `would escape the repo and could not be rolled back — ${symlinked.join(', ')}. ` +
-      'Replace them with real files (or remove them) and re-run.',
+      `cannot protect this upgrade: ${reasons.join('; ')}. Point them inside the repository, ` +
+      'replace them with real files, or remove them, then re-run. ' +
+      'A symlink resolving INSIDE the repository is fine and needs no change.',
     );
   }
 
@@ -285,7 +367,9 @@ export function createRestorePoint({ destRoot, relPaths }) {
       for (const d of [...createdDirs].sort((a, b) => b.length - a.length)) {
         try {
           if (pathPresent(d) && readdirSync(d).length === 0) rmSync(d, { recursive: true, force: true });
-        } catch { failed.push(d); }
+        // Reported repo-relative like every other entry: the caller prints them as
+        // one list, and mixing absolute with relative paths reads as two bugs.
+        } catch { failed.push(relative(destRoot, d)); }
       }
 
       return { failed };
@@ -293,6 +377,29 @@ export function createRestorePoint({ destRoot, relPaths }) {
     /** Drops the snapshot. Safe to call after restore(). */
     discard() {
       rmSync(dir, { recursive: true, force: true });
+    },
+    /**
+     * Moves the snapshot to a name no later run auto-clears, and returns that path.
+     *
+     * Used when the rollback could NOT finish: those bytes are then the only
+     * surviving copy of the consumer's pre-copy state. Leaving them at the default
+     * location would be a trap — `createRestorePoint` clears that path on entry, so
+     * the operator's most natural next action, re-running `brain:upgrade`, would
+     * silently destroy exactly what they were just told to restore from.
+     *
+     * Numbered rather than timestamped so it is deterministic and never clobbers an
+     * older preserved snapshot.
+     *
+     * @returns {string} where the snapshot now lives.
+     */
+    preserve() {
+      for (let n = 1; n <= 999; n++) {
+        const target = `${dir}.preserved-${n}`;
+        if (!pathPresent(target)) {
+          try { renameSync(dir, target); return target; } catch { return dir; }
+        }
+      }
+      return dir;
     },
   };
 }
@@ -412,6 +519,11 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
       // nothing to roll back — but it may have built part of a backup first.
       // Clear it: a refusal must not leave debris in the consumer tree.
       rmSync(join(destRoot, RESTORE_POINT_DIR), { recursive: true, force: true });
+      // Tag it so the caller can say "refused, nothing was touched" instead of the
+      // write-phase wording, which would be false here in both halves.
+      if (err !== null && typeof err === 'object') {
+        try { err.beforeAnyWrite = true; } catch { /* frozen — wording stays generic */ }
+      }
       throw err;
     }
 
@@ -428,16 +540,19 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
       }
     } catch (err) {
       const { failed } = restorePoint.restore();
-      // Keep the snapshot when the rollback could NOT put everything back. It is
-      // then the only surviving copy of the bytes the operator has to restore by
-      // hand, and deleting it here would destroy exactly what they are about to be
-      // told to go and inspect. Only a COMPLETE rollback earns the cleanup — which
-      // is why this is not a `finally`.
-      if (failed.length === 0) restorePoint.discard();
-      throw annotateRollback(err, failed, restorePoint.dir);
+      if (failed.length === 0) {
+        // Everything went back. The snapshot has served its purpose.
+        safeDiscard(restorePoint);
+        throw err;
+      }
+      // The rollback could NOT put everything back, so the snapshot is now the only
+      // surviving copy of those bytes. Move it somewhere no later run auto-clears —
+      // only a COMPLETE rollback earns the cleanup, which is why this is not a
+      // `finally` — and tell the caller where it went.
+      throw annotateRollback(err, failed, restorePoint.preserve());
     }
 
-    restorePoint.discard();
+    safeDiscard(restorePoint);
   }
 
   return {

@@ -93,7 +93,19 @@ This is the only branch where the snapshot is the sole surviving copy of those b
 it is precisely the branch the CLI tells the operator to go and inspect. Discarding it
 here would delete what the message points at.
 
-### Scenario 2 — negative control: a complete rollback discards its snapshot
+### Scenario 2 — the preserved snapshot survives a later run
+
+```
+GIVEN a preserved snapshot from an incomplete rollback
+WHEN brain:upgrade is run again over the same repo
+THEN the preserved snapshot still holds the original bytes
+  AND it is NOT at the path createRestorePoint clears on entry
+```
+
+Without this the promise is a trap: the operator is told to restore from that directory, and
+their most natural next action — re-running the upgrade — would clear it on entry.
+
+### Scenario 3 — negative control: a complete rollback discards its snapshot
 
 ```
 GIVEN a rollback in which every path is restored
@@ -101,10 +113,29 @@ WHEN copyManaged throws
 THEN no snapshot directory remains
 ```
 
-## REQ-396-4 — the original failure is never replaced
+### Scenario 4 — a failed cleanup never becomes a failed upgrade
 
-The error surfaced to the caller MUST be the one the write loop threw. Annotating it with
+```
+GIVEN a write that succeeds
+  AND removing the snapshot afterwards fails (EACCES/EPERM/EBUSY)
+WHEN copyManaged runs
+THEN it returns normally, reporting the write as done
+```
+
+`rmSync`'s `force` suppresses ENOENT but not permission errors, so an unguarded cleanup
+would report a fully-applied upgrade as a failure — and inside the catch it would replace
+the very error being reported.
+
+## REQ-396-4 — the original failure is never lost
+
+The failure the write loop threw MUST always reach the caller, and annotating it with
 rollback state MUST NOT be able to throw, whatever value was thrown.
+
+Precisely: when the rollback was complete, or when the thrown value can carry the
+annotation, the caller receives **that same value by identity**. When it cannot — a frozen
+`Error`, or a primitive — and the rollback was incomplete, the caller receives a wrapper
+carrying the original as `cause`. Identity is preserved wherever it can be; the original is
+preserved always. The caller MUST surface `cause`, or the root reason is never seen.
 
 ### Scenario 1 — an Error is re-thrown by identity
 
@@ -130,25 +161,62 @@ caller-supplied on an exported API, so this is reachable without a brain-side bu
 
 ## REQ-396-5 — a path that cannot be protected is refused before any write
 
-A managed path that is a symlink MUST cause `copyManaged` to refuse, before writing
-anything. The message MUST name the paths and the remedy.
+`copyManaged` MUST refuse, before writing anything, exactly two classes of path:
 
-### Scenario 1 — symlinked managed path refused, nothing written
+1. one that **resolves outside `destRoot`** after every symlink on its path is followed —
+   the snapshot lives inside the repo, so a write landing outside it is beyond any
+   rollback's reach. The whole path MUST be resolved, not just the leaf, or a symlinked
+   ancestor directory passes unnoticed;
+2. a **dangling symlink** — there is nothing to copy, so no snapshot of it can be taken.
+
+A symlink that resolves **inside** `destRoot` MUST NOT be refused. It is protected like any
+other path. This is measured, not assumed: `copyFileSync` follows the link when the snapshot
+is taken, on the write, and on the restore, so the target returns to its original bytes and
+the link itself is never replaced. Refusing these would soft-lock any consumer using
+`AGENTS.md -> CLAUDE.md`, which is both a managed path and the canonical agent-interop symlink.
+
+The message MUST name the paths and the remedy.
+
+### Scenario 1 — a dangling symlink is refused, nothing written
 
 ```
 GIVEN a dangling symlink at a managed path in dest
   AND a second, ordinary managed path present with OLD bytes
 WHEN copyManaged runs
-THEN it throws naming the symlink
+THEN it throws naming the path
   AND the symlink still exists
   AND no file was created at the link's target
   AND the ordinary path still holds OLD
   AND no snapshot directory remains
 ```
 
-`existsSync` follows symlinks, so a dangling link reads as absent — it would be recorded
-as created-by-this-run and DELETED on rollback, while `copyFileSync` wrote through it to a
-target outside the repository. Presence MUST therefore be judged with `lstat`.
+`existsSync` follows symlinks, so a dangling link reads as absent — it would be recorded as
+created-by-this-run and DELETED on rollback. Presence MUST therefore be judged with `lstat`.
+
+### Scenario 2 — a symlinked ANCESTOR that escapes is refused
+
+```
+GIVEN dest "brain/core" is a symlink to a directory outside the repo
+WHEN copyManaged runs over "brain/core/**"
+THEN it throws, naming the path as resolving outside the repository
+  AND nothing is written through the link
+```
+
+A leaf-only symlink test never sees this: `lstat` does not follow the final component but
+does resolve every ancestor.
+
+### Scenario 3 — negative control: a VALID internal symlink is allowed and rolls back
+
+```
+GIVEN a managed path that is a symlink to a file inside dest, target holding CONSUMER bytes
+WHEN copyManaged runs and a later write throws
+THEN the refusal message is NOT raised
+  AND the target holds CONSUMER bytes again
+  AND the path is still a symlink
+```
+
+Without this control, a blanket "refuse every symlink" rule would satisfy Scenarios 1-2 and
+still be wrong.
 
 ## REQ-396-6 — runs that write nothing take no snapshot
 

@@ -27,7 +27,7 @@ tracker `feature/issue-396-rollback`). Slice 2 is a separate PR on the same chai
 - [x] 1.4 Record ancestor directories the write must create, for pruning (REQ-396-2)
 - [x] 1.5 `restore()` — best-effort per path, judged by outcome (REQ-396-3)
 - [x] 1.6 `discard()` — drop the snapshot
-- [x] 1.7 Refuse symlinked managed paths before any write (REQ-396-5)
+- [x] 1.7 Refuse ONLY what cannot be rolled back — escaping paths and dangling links; a link resolving inside the repo is protected, not refused (REQ-396-5)
 - [x] 1.8 Do not reuse a stale snapshot from an earlier crash (REQ-396-7)
 
 ## Phase 2 — Wire it into `copyManaged` (slice 1)
@@ -62,16 +62,19 @@ tracker `feature/issue-396-rollback`). Slice 2 is a separate PR on the same chai
 - [x] 4.10 REQ-S6-10 an EARLIER plain copy is rolled back (the dominant shape)
 - [x] 4.11 REQ-S6-11 an incomplete rollback KEEPS its snapshot
 - [x] 4.12 REQ-S6-12 a non-`Error` throw still carries rollback state
-- [x] 4.13 REQ-S6-13 symlinked managed path refused, nothing written
+- [x] 4.13 REQ-S6-13 dangling symlink refused, nothing written
 - [x] 4.14 REQ-S6-14 `dryRun` and `abortOnCollision` take no snapshot
-- [x] 4.15 Prove each new test RED against the pre-fix code, and record which pass both ways and why
+- [x] 4.15 REQ-S6-15 a VALID internal symlink is allowed and rolls back (negative control)
+- [x] 4.16 REQ-S6-16 a symlinked ANCESTOR that escapes the repo is refused
+- [x] 4.17 REQ-S6-17 a failed cleanup never reports a good upgrade as failed
+- [x] 4.18 Prove each new test RED against the pre-fix code, and record which pass both ways and why
 
 ## Phase 5 — Documentation & record (slice 1)
 
 - [x] 5.1 Rewrite `KNOWN-LIMITATIONS.md` from "no rollback" to partial, enumerating **all four** residual gaps
 - [x] 5.2 Draft ADR-0027 (exit criterion is restorability, not atomicity) into `brain-drafts/`
 - [x] 5.3 Write this SDD change dir
-- [ ] 5.4 Materialize the session memory record into PR #412 (`buildRecord` + `validateRecord` + `memory:reindex`; omit `issue` until #404)
+- [x] 5.4 Materialize the session memory record into PR #412 (`buildRecord` + `validateRecord` + `memory:reindex`; omit `issue` until #404)
 - [ ] 5.5 Human ratification of ADR-0027 (Tier-2 / ADR-0013 — agent drafts, human signs)
 
 ## Phase 6 — Review remediation (slice 1)
@@ -84,11 +87,39 @@ tracker `feature/issue-396-rollback`). Slice 2 is a separate PR on the same chai
 - [x] 6.6 MEDIUM — partial snapshot leak, dry-run interrupt claim, SIGTERM exit code
 - [x] 6.7 Correct the false claim in the PR body and in the follow-up commit message
 
+## Phase 6b — Second adversarial review round (2026-08-02, late)
+
+- [x] 6b.1 Re-review of the remediation: 3 of 5 prior fixes COMPLETE, 1 overbroad, 1 partial
+- [x] 6b.2 F1 — unguarded `discard()` reported a fully-applied upgrade as failed, and inside
+      the catch replaced the original error. Both call sites guarded.
+- [x] 6b.3 C2 — a retry destroyed the snapshot the CLI had just told the operator to restore
+      from. Preserved to a name no run auto-clears.
+- [x] 6b.4 F2 + C3 — the symlink refusal rested on a premise measured FALSE (a link inside the
+      repo round-trips cleanly) and simultaneously missed symlinked ancestors. Narrowed to
+      escaping-paths + dangling links.
+- [x] 6b.5 F3 — `err.cause` is now surfaced; it was the only line saying WHY
+- [x] 6b.6 F4 — deferred SIGTERM exits 143, not 1, at every one of the three sites
+- [x] 6b.7 F9 — `failed` entries are all repo-relative
+- [x] 6b.8 F11 — a refusal no longer reports "failed while writing" / "was rolled back"
+- [x] 6b.9 Tests REQ-S6-15/16/17 + a rewritten REQ-S6-11, each proven RED against the pre-fix code
+- [ ] 6b.10 **F6 — `brain-upgrade.mjs` still has ZERO test coverage** for its ~90 new lines
+      (signal handling, exit codes, rollback reporting). Phases 3.1-3.6 are verified by reading,
+      not by a test. Honest gap, not a checked box.
+- [ ] 6b.11 **F7 — REQ-396-8 (deterministic write order) has a scenario and no test**, yet
+      REQ-S6-10 depends on the sort to avoid passing vacuously. A sort regression silently
+      reopens the hole REQ-S6-10 exists to close.
+
 ## Phase 7 — Follow-ups this slice creates (tickets, not code here)
 
 - [ ] 7.1 `.brain-upgrade-backup` cannot be gitignored — `.gitignore` is not a managed path; adding it is **Tier 2, human-promoted**
 - [ ] 7.2 `restore()` rewrites all saved files, moving mtimes even when one write happened (cosmetic)
 - [ ] 7.3 Extend protection across the whole verb (install + config migration), or record that it stays out of scope
+- [ ] 7.4 **F12** — two concurrent `brain:upgrade` runs in one repo destroy each other's restore
+      point. Harmless today (nothing reads a leftover snapshot); the journal slice needs a lock.
+- [ ] 7.5 **F5** — a package manager that TRAPS SIGINT and exits non-zero still lands on
+      "install failed — check repo access". Only a signal-killed child is covered.
+- [ ] 7.6 **F10** — a directory/FIFO/socket at a managed path yields an opaque EISDIR/ENXIO
+      instead of the actionable message the refusal branches were given.
 
 ## Phase 8 — Slice 2: on-disk journal (NOT STARTED)
 
@@ -102,7 +133,7 @@ tracker `feature/issue-396-rollback`). Slice 2 is a separate PR on the same chai
 
 ## Gates (slice 1, re-run per push)
 
-- [x] `npm test` — 2282/2282 (2268 baseline on `217b8ab` + 14)
+- [x] `npm test` — 2285/2285 (2268 baseline on `217b8ab` + 17)
 - [x] `npm run brain:repo:check`
 - [x] `npm run brain:nav`
 - [x] Diff budget — 370/400 (real gate; `governance.ignoreList` excludes `**/*.test.mjs`)
