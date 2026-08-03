@@ -78,7 +78,11 @@ control**:
   untouched rather than clobbering it. **Residual:** an unparseable `package.json` still stops
   `npm run` itself, so no flag can get past it — the refusal says repair is the only route.
   throws before the managed core copies. (M4 · #399 → 1.1)
-- **Downgrade silently ratchets `schemaVersion` up**, with no guard/warning/test. (M4 · #398 → 1.1)
+- ~~**Downgrade silently ratchets `schemaVersion` up**~~ **Closed (#398).** Installing an older
+  tag than the config schema is refused before anything is installed or written, naming both
+  versions and the config keys that would be left ahead of the target. `--allow-downgrade`
+  proceeds and prints the same list as a warning. A tag that is not semver (`latest`, a branch,
+  a sha) is never read as a downgrade.
 
 **Gate:** the self-update safety subset MUST land before 1.0 is opened to any repo the maintainer
 does not control. The gate is now checkable: the danger-path e2e suite (#401) must be green.

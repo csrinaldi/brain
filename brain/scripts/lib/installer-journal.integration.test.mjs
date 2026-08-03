@@ -615,3 +615,93 @@ test('upgrade: a corrupt package.json is caught by the pre-flight too, not only 
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── REQ-D-*: a downgrade must not silently ratchet the config schema ─────────
+// `migrateConfig` only ever moves schemaVersion UP, so installing an older tag leaves
+// the consumer with OLD code and a NEW config schema — a combination no tag ever
+// shipped. Measured before the fix: schemaVersion 0.9.0 survived an install of 0.3.0,
+// the managed files went backwards, and the run printed "Done." with exit 0.
+function downgradeConsumer(tmp, { pkgVersion = '0.3.0', schemaVersion = '0.9.0' } = {}) {
+  const consumer = join(tmp, 'consumer');
+  const pkg = join(consumer, 'node_modules', 'brain');
+  mkdirSync(join(pkg, 'brain', 'core'), { recursive: true });
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'brain', version: pkgVersion }));
+  writeFileSync(join(pkg, 'brain', 'core', 'managed-paths.mjs'),
+    'export const managed = ["brain/core/**"];\nexport const local = [];\nexport const MANAGED_SCRIPT_KEYS = [];\n');
+  writeFileSync(join(pkg, 'brain', 'core', 'config-migrations.mjs'),
+    "export const migrations = [\n"
+    + "  { version: '0.1.0', description: 'base', defaults: { project: { slug: '' } } },\n"
+    + "  { version: '0.9.0', description: 'later', defaults: { governance: { reviewActors: [] } } },\n"
+    + "];\n");
+  writeFileSync(join(pkg, 'brain', 'core', 'a.md'), 'OLD UPSTREAM');
+  mkdirSync(join(consumer, 'brain', 'core'), { recursive: true });
+  writeFileSync(join(consumer, 'package.json'), JSON.stringify({ name: 'c', version: '1.0.0' }));
+  writeFileSync(join(consumer, 'brain', 'core', 'a.md'), 'CONSUMER');
+  writeFileSync(join(consumer, 'brain.config.json'), JSON.stringify(
+    { project: { slug: 'c' }, governance: { tier: 'lite' }, schemaVersion }, null, 2) + '\n');
+  return consumer;
+}
+
+test('upgrade: a downgrade is refused by default, naming both versions (REQ-D-1)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-d1-'));
+  try {
+    const consumer = downgradeConsumer(tmp);
+    const r = spawnSync(process.execPath, [CLI, 'v0.3.0', '--no-install'], { cwd: consumer, encoding: 'utf8' });
+    const out = r.stdout + r.stderr;
+
+    assert.notEqual(r.status, 0, 'a downgrade must not silently succeed');
+    assert.match(out, /0\.9\.0/, 'it must name the schema the consumer is on');
+    assert.match(out, /0\.3\.0/, 'and the version being installed');
+    assert.match(out, /--allow-downgrade/, 'and the flag that proceeds anyway');
+    assert.equal(readFileSync(join(consumer, 'brain', 'core', 'a.md'), 'utf8'), 'CONSUMER',
+      'and nothing may be written');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('upgrade: --allow-downgrade proceeds and names the config keys left ahead (REQ-D-2)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-d2-'));
+  try {
+    const consumer = downgradeConsumer(tmp);
+    const r = spawnSync(process.execPath, [CLI, 'v0.3.0', '--no-install', '--allow-downgrade'],
+      { cwd: consumer, encoding: 'utf8' });
+    const out = r.stdout + r.stderr;
+
+    assert.equal(r.status, 0, `it must proceed when asked explicitly: ${r.stderr}`);
+    assert.equal(readFileSync(join(consumer, 'brain', 'core', 'a.md'), 'utf8'), 'OLD UPSTREAM',
+      'the downgrade happens');
+    // The whole point: say WHICH keys the consumer is left carrying that this tag's
+    // migrations never introduced. "Downgraded, good luck" is not a warning.
+    assert.match(out, /governance\.reviewActors/,
+      'it must name the config keys that are ahead of the target tag schema');
+    assert.match(out, /0\.9\.0/, 'and that the config schema stays at the newer version');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('upgrade: a non-semver tag is not mistaken for a downgrade (REQ-D-3)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-d3-'));
+  try {
+    const consumer = downgradeConsumer(tmp, { pkgVersion: '0.9.0' });
+    // `parseSemver` yields [0,0,0] for anything unparseable, which would compare as
+    // older than everything — a refusal for a tag that is not a downgrade at all.
+    const r = spawnSync(process.execPath, [CLI, 'latest', '--no-install'], { cwd: consumer, encoding: 'utf8' });
+    assert.equal(r.status, 0, `an unparseable tag must not be read as a downgrade: ${r.stderr}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('upgrade: an ordinary upgrade is untouched by the guard (REQ-D-4)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-d4-'));
+  try {
+    const consumer = downgradeConsumer(tmp, { pkgVersion: '1.2.0', schemaVersion: '0.9.0' });
+    const r = spawnSync(process.execPath, [CLI, 'v1.2.0', '--no-install'], { cwd: consumer, encoding: 'utf8' });
+    assert.equal(r.status, 0, `a normal upgrade must be unaffected: ${r.stderr}`);
+    assert.equal(readFileSync(join(consumer, 'brain', 'core', 'a.md'), 'utf8'), 'OLD UPSTREAM');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

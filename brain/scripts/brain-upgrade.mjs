@@ -18,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { copyManaged, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets } from './lib/installer.mjs';
+import { copyManaged, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, compareSemver, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets, semverOrNull, keysAheadOfTarget } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
 
 const ROOT = process.cwd();
@@ -46,6 +46,7 @@ const abortOnCollision = flags.has('--abort-on-collision');
 const recover = flags.has('--recover');
 // Repeatable: `--skip-merge <path> --skip-merge <other>`. Each value is the argument
 // that FOLLOWS the flag, so they are read positionally rather than from the flag set.
+const allowDowngrade = flags.has('--allow-downgrade');
 const skipMerge = args.reduce((acc, a, i) => (a === '--skip-merge' && args[i + 1] ? [...acc, args[i + 1]] : acc), []);
 
 // ── The restore point, read ONCE ───────────────────────────────────────────────
@@ -224,6 +225,16 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 // placed after the install never runs for one of the two merge targets — the escape
 // hatch would not exist for the more dangerous of the two. This depends only on ROOT
 // and the merge map, so it costs nothing to run first.
+// The target tag's migration list, imported the same way step 3 imports it rather than
+// scraped — a regex over someone else's source is a guess, and this one has to be right
+// to name the keys correctly.
+async function migrationsForGuard() {
+  try {
+    const mod = await import(join(ROOT, 'node_modules', 'brain', 'brain', 'core', 'config-migrations.mjs'));
+    return Array.isArray(mod?.migrations) ? mod.migrations : [];
+  } catch { return []; }  // not installed yet, or unreadable — the guard still compares versions
+}
+
 const ALL_MERGES = { '.claude/settings.json': mergeClaudeSettings, 'package.json': mergePackageJson };
 const mergeMap = Object.fromEntries(Object.entries(ALL_MERGES).filter(([rel]) => !skipMerge.includes(rel)));
 
@@ -234,6 +245,35 @@ const badSkip = skipMerge.filter((rel) => !Object.hasOwn(ALL_MERGES, rel));
 if (badSkip.length > 0) {
   console.error(`  ${C.red}✗${C.reset} --skip-merge only accepts a merged path: ${Object.keys(ALL_MERGES).join(', ')}`);
   die(`Not skippable: ${badSkip.join(', ')}`);
+}
+
+// ── Downgrade guard ────────────────────────────────────────────────────────────
+// Also before step 1. `migrateConfig` only ever moves schemaVersion UP, so installing
+// an older tag leaves OLD code beside a NEW config schema — a combination no tag ever
+// shipped, reached silently and reported as "Done." Refusing AFTER the install would
+// be worse than useless: the old package would already be in node_modules.
+const targetSemver = semverOrNull(tag);
+const currentSchema = (() => {
+  try { return semverOrNull(JSON.parse(readFileSync(join(ROOT, 'brain.config.json'), 'utf8')).schemaVersion); }
+  catch { return null; }  // no config yet, or unreadable — nothing to compare against
+})();
+
+if (targetSemver && currentSchema && compareSemver(targetSemver, currentSchema) < 0) {
+  const ahead = keysAheadOfTarget(await migrationsForGuard(), targetSemver);
+  if (!allowDowngrade) {
+    console.error(`  ${C.red}✗${C.reset} ${tag} is OLDER than the config schema this repo is on (${currentSchema}).`);
+    warn('Config migrations only run forward, so this would leave you with older code and a newer config schema — a combination no release ever shipped.');
+    if (ahead.length > 0) {
+      info(`These config keys would be left ahead of ${targetSemver}:`);
+      for (const k of ahead) console.log(`      ${C.dim}${k}${C.reset}`);
+    }
+    die(`Nothing was written. Re-run with --allow-downgrade if you mean it.`);
+  }
+  warn(`Downgrading to ${targetSemver} while brain.config.json stays at schemaVersion ${currentSchema} — migrations do not run backwards.`);
+  if (ahead.length > 0) {
+    warn(`These config keys are ahead of ${targetSemver} and this code has never heard of them:`);
+    for (const k of ahead) console.log(`      ${C.dim}${k}${C.reset}`);
+  }
 }
 
 const { unparseable } = preflightMergeTargets({ destRoot: ROOT, mergePaths: Object.keys(mergeMap) });
