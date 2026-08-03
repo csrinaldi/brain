@@ -30,6 +30,14 @@ Controls: filter by who executes a step (human / agent / CI), switch the source 
 between local file paths and GitHub URLs, toggle light/dark. Selecting a node updates the
 URL hash, so a specific step is shareable (`…/index.html#l5`).
 
+## Redesigning it
+
+[`DESIGN-BRIEF.md`](DESIGN-BRIEF.md) is a self-contained prompt for a design agent covering
+both this page and a landing page that does not exist yet. It carries the product context,
+the audience, the technical constraints, the voice, an anti-pattern list, and — the part
+that matters most for this project — an explicit list of the only claims the design is
+allowed to make. Paste it whole; it assumes no prior knowledge of brain.
+
 ## Extending it
 
 Everything is data. Two arrays near the top of the `<script>` block:
