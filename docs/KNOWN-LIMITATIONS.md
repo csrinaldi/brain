@@ -30,7 +30,7 @@ control**:
     repaired things by hand, and replaying stale bytes over that would destroy work while
     reporting success.
   - **Power loss — narrowed, not closed.** The snapshot files, every intermediate directory on
-    the way to them, the journal, and the restored files during recovery are all `fsync`ed. A
+    the way to them, the snapshot directory's own entry in the repo root, the journal, and the restored files during recovery are all `fsync`ed. A
     journal that cannot be read is REFUSED rather than treated as absent, so a torn journal can
     no longer cause the snapshot to be auto-deleted. **One residual remains and is NOT covered:**
     the journal records no size or checksum, so a snapshot *file* torn by a power cut would be

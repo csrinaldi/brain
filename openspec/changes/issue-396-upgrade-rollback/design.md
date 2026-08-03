@@ -22,7 +22,8 @@ None of the three guards protects a failure *during* the loop. That is the whole
 ## §2 — Why atomicity was rejected
 
 `rename(2)` is atomic for one path. The managed payload spans `brain/**`, `.github/**`,
-`.gemini/**` and loose root files — four disjoint locations, no common parent to swap.
+`.gemini/**`, `.claude/settings.json` and loose root files — five disjoint locations, no
+common parent to swap.
 Stage-and-swap therefore decomposes into N non-atomic renames: the same exposure in a
 shorter window, at the cost of a full second copy of the payload.
 

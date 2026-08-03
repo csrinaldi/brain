@@ -155,6 +155,47 @@ passed 2294 tests.
 - [x] 8e.9 A run wedged on a hung managed path dies only to SIGKILL — measured, and now in
       KNOWN-LIMITATIONS.
 
+## Phase 8g — Eighth review: the whole feature, judged as a product
+
+Reviewed with no knowledge of what had changed recently. Verdict on the mechanism:
+**sound** — 16 SIGKILL points, real races, real hand-edits, all five ADR-0027 symlink
+shapes, and "no interruption I could construct is neither detectable, nor reversible,
+nor named". Both blocking findings were in how RECOVERY REPORTS itself, not in what it
+does.
+
+- [x] 8g.1 HIGH — `recoverFromJournal` returned `saved` and `created` as one `recovered`
+      list, printed as "Restored N to their pre-upgrade bytes". But `created` paths are
+      DELETED, and on a first adoption they are ~99.9% of the total. An operator who
+      hand-repaired a file after a crash, then ran the command the tool recommends, lost
+      that repair with no warning. Now reported as two lists, with an explicit warning
+      that removals take later edits with them. `--dry-run` previews the same way.
+      REQ-J-13 covers it, proven RED.
+- [x] 8g.2 HIGH — a SIGKILLed run's lock survived forever: `--recover` never cleared it,
+      and the interrupted refusal fires before `acquireLock`, so the one message naming
+      the remedy was unreachable. Under pid reuse every surface refused and `--recover`
+      said "wait for it to finish" — an instruction that can never come true. Recovery
+      now clears a provably-dead lock, and every live-run refusal names the file and the
+      escape. KNOWN-LIMITATIONS corrected: it claimed the refusal already said so.
+- [x] 8g.3 MEDIUM — the `corrupt` refusal was terminal with no stated exit; it now says
+      to salvage what is needed and then delete the directory to unblock upgrades.
+- [x] 8g.4 MEDIUM — `fsync` never reached `destRoot`, which holds the snapshot
+      directory's own entry, so a power cut could lose the whole restore point while its
+      contents were durable. KNOWN-LIMITATIONS had claimed the chain was complete.
+- [x] 8g.5 LOW — `proposal.md` and `design.md` still said "four disjoint locations" (five)
+      and that ADR-0027 awaited signature (promoted in 32bc8e7).
+- [ ] 8g.6 **OPEN, needs the maintainer** — ADR-0027 ships `Status: Accepted` above a
+      banner saying the amended Decision #3 has not been separately confirmed. The ADR
+      itself rejects "claim it is met" as the M10 failure mode, and no gate catches the
+      contradiction. Either confirm the amendment and drop the banner, or return Status
+      to Draft. **Not an agent's call.**
+- [ ] 8g.7 **OPEN** — `restore()` judges `saved` by whether the copy threw rather than by
+      outcome, so a read-only managed path that was never modified is reported as "still
+      modified". Errs safe; turns a permission nit into a scary refusal loop.
+- [ ] 8g.8 **OPEN (test coverage)** — 5 of 16 mutations survived: `acquireLock`'s `wx`
+      → read-then-create, its read-back check, `writeJournal`'s tmp+rename, `discard()`'s
+      journal-first ordering, and every `fsyncPath` no-op'd. All are durability/race
+      properties no test currently pins.
+
 ## Phase 8f — Seventh review: reclaim widened too far
 
 The reviewer judged the defect set "decisively smaller" and the collateral audit came back

@@ -444,6 +444,10 @@ function writeJournal({ dir, saved, created, createdDirs, destRoot }) {
   // the barrier that makes "journal present" mean "the snapshot below it is durable".
   fsyncPath(path);
   fsyncPath(dir);
+  // …and destRoot, which holds the snapshot directory's own entry. Without it a power
+  // cut can lose the whole restore point while its contents were durable, and the next
+  // run reads `clean` and proceeds with nothing to undo.
+  fsyncPath(destRoot);
 }
 
 /**
@@ -501,18 +505,25 @@ export function recoverFromJournal({ destRoot }) {
   });
 
   const { failed } = handle.restore();
-  const recovered = [...journal.saved, ...journal.created].filter((p) => !failed.includes(p));
+  // Kept SEPARATE, because they are opposite actions on the operator's disk. A path in
+  // `saved` is rewritten with earlier bytes; a path in `created` is DELETED, since it did
+  // not exist before the interrupted run. Reporting them as one "restored" count told an
+  // operator their files had been put back while most of them had just been removed — and
+  // anything they hand-wrote at one of those paths after the crash went with it, silently.
+  const restored = journal.saved.filter((p) => !failed.includes(p));
+  const removed = journal.created.filter((p) => !failed.includes(p));
+  const recovered = [...restored, ...removed];
   // Barrier before the evidence is dropped: otherwise a power cut just after
   // "Recovered." can commit the journal's removal while the restored bytes are lost.
   for (const rel of recovered) fsyncPath(join(destRoot, rel));
 
   if (failed.length === 0) {
     safeDiscard(handle);
-    return { recovered, failed, snapshotDir: null };
+    return { recovered, restored, removed, failed, snapshotDir: null };
   }
   // Same rule as a live rollback: what could not be put back keeps its evidence AND
   // keeps the gate armed, so the next run still refuses over the still-dirty tree.
-  return { recovered, failed, snapshotDir: dir };
+  return { recovered, restored, removed, failed, snapshotDir: dir };
 }
 
 

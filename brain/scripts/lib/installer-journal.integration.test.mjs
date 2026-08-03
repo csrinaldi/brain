@@ -461,3 +461,40 @@ test('journal: an UNREADABLE lock fails closed; only structurally unowned ones a
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── REQ-J-13: recovery reports removals as removals ──────────────────────────
+// On a first adoption almost every covered path is one the interrupted run CREATED,
+// so recovery DELETES it. Reporting that as "restored to its pre-upgrade bytes" told
+// operators their files were put back while they were being removed — and anything
+// hand-written at those paths after the crash went with them, unmentioned.
+test('journal: recovery separates restorations from removals, and warns about the latter (REQ-J-13)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-j13-'));
+  try {
+    const consumer = buildConsumer(tmp);
+    writeFileSync(join(consumer, 'brain', 'core', 'kept.md'), 'CONSUMER ORIGINAL');
+    const snap = join(consumer, RESTORE_POINT_DIR);
+    mkdirSync(join(snap, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(snap, 'brain', 'core', 'kept.md'), 'CONSUMER ORIGINAL');
+    writeFileSync(join(snap, JOURNAL_FILE), JSON.stringify({
+      version: JOURNAL_VERSION,
+      saved: ['brain/core/kept.md'],
+      created: ['brain/core/added.md'],   // did not exist before → must be REMOVED
+      createdDirs: [],
+    }));
+    writeFileSync(join(consumer, 'brain', 'core', 'added.md'), 'HAND REPAIR AFTER THE CRASH');
+    writeFileSync(join(consumer, RESTORE_POINT_DIR + '.lock'), '999999999\n'); // dead owner
+
+    const r = spawnSync(process.execPath, [CLI, '--recover'], { cwd: consumer, encoding: 'utf8' });
+    const out = r.stdout + r.stderr;
+
+    assert.equal(r.status, 0, `recovery must succeed: ${r.stderr}`);
+    assert.match(out, /Restored 1 managed path/, 'a genuine restoration is reported as one');
+    assert.match(out, /Removed 1 managed path/, 'a deletion must NOT be reported as a restoration');
+    assert.match(out, /repairs made by hand/, 'and the operator must be warned that removals take their edits with them');
+    assert.ok(!existsSync(join(consumer, 'brain', 'core', 'added.md')), 'the created path is removed');
+    assert.ok(!existsSync(join(consumer, RESTORE_POINT_DIR + '.lock')),
+      "recovery must clear the dead run's lock — a SIGKILL never released it, and leaving it strands the next upgrade");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

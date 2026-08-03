@@ -93,6 +93,4 @@ directory is the substrate this builds on.
 
 ## Decision requiring ratification
 
-The exit-criterion restatement is architectural. Drafted as
-`brain-drafts/adr-0027-upgrade-rollback-is-restorable-not-atomic.md` — agent-prepared,
-awaiting human signature per the Tier-2 / ADR-0013 pattern.
+The exit-criterion restatement is architectural. Recorded as ADR-0027, promoted and signed in `32bc8e7` (PR #416).
