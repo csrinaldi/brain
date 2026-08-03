@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import {
-  mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync,
+  mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -213,10 +213,18 @@ test('journal: --recover REFUSES while the owner is alive, instead of reverting 
     writeFileSync(join(dest, RESTORE_POINT_DIR, 'brain', 'core', 'a.md'), 'CONSUMER ORIGINAL');
     writeFileSync(join(dest, RESTORE_POINT_DIR, JOURNAL_FILE), JSON.stringify(
       { version: JOURNAL_VERSION, saved: ['brain/core/a.md'], created: [], createdDirs: [] }));
-    writeFileSync(join(dest, RESTORE_POINT_DIR + '.lock'), `${process.pid}\n`); // alive
+    // A genuinely FOREIGN live owner. Using our own pid would not do: a process must
+    // never read its own lock as a competitor, so `mine` would (correctly) suppress the
+    // live-run verdict and this test would prove nothing.
+    const owner = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)']);
+    try {
+      writeFileSync(join(dest, RESTORE_POINT_DIR + '.lock'), `${owner.pid}\n`);
 
-    assert.throws(() => recoverFromJournal({ destRoot: dest }), (err) => err.liveRun === true,
-      'recovery must never revert a tree a live run is still writing');
+      assert.throws(() => recoverFromJournal({ destRoot: dest }), (err) => err.liveRun === true,
+        'recovery must never revert a tree a live run is still writing');
+    } finally {
+      owner.kill('SIGKILL');
+    }
     assert.equal(readFileSync(join(dest, 'brain', 'core', 'a.md'), 'utf8'), 'NEW BYTES',
       'the live run\'s work must be untouched');
     assert.ok(existsSync(join(dest, RESTORE_POINT_DIR)), 'and its restore point must survive');
@@ -359,5 +367,60 @@ test('journal: a real brain:upgrade HOLDS the lock while it works, and a second 
   } finally {
     if (blocked) { blocked.kill('SIGKILL'); await new Promise((r) => blocked.on('exit', r)); }
     rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── REQ-J-10: the product actually works ─────────────────────────────────────
+// Six review rounds, 2294 passing tests, and NOTHING asserted that a plain
+// `brain:upgrade` succeeds. Every CLI test asserted a refusal or a recovery, so
+// two consecutive "fixes" shipped green: one was a no-op (the lock call site was
+// deleted), the next was a brick (the run refused its own lock).
+//
+// Note this test alone would NOT have caught the deleted call site — the upgrade
+// worked fine without a lock. REQ-J-9 catches that. Neither is sufficient alone:
+// J-9 proves the lock is taken, J-10 proves the upgrade still completes. The pair
+// is the invariant.
+test('journal: a plain brain:upgrade SUCCEEDS end to end and leaves no residue (REQ-J-10)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-j10-'));
+  try {
+    const consumer = buildConsumer(tmp);
+    writeFileSync(join(consumer, 'brain', 'core', 'a.md'), 'CONSUMER ORIGINAL');
+
+    const r = spawnSync(process.execPath, [CLI, 'v1', '--no-install'], { cwd: consumer, encoding: 'utf8' });
+
+    assert.equal(r.status, 0, `a normal upgrade must succeed — got ${r.status}: ${r.stderr}`);
+    assert.equal(readFileSync(join(consumer, 'brain', 'core', 'a.md'), 'utf8').trim(), 'NEW',
+      'and it must actually write the new bytes — an exit code alone proves nothing');
+    assert.ok(!existsSync(join(consumer, RESTORE_POINT_DIR)),
+      'a clean run consumes its own restore point');
+    assert.ok(!existsSync(join(consumer, RESTORE_POINT_DIR + '.lock')),
+      'and releases its lock, or the next run is stranded');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── REQ-J-11: an unowned lock is reclaimed, never obeyed ─────────────────────
+// A zero-length lock is the canonical post-power-cut residue — create and write are
+// not one atomic step and the lock is not fsynced — and power loss is this feature's
+// whole threat model. Treating "occupied but naming no owner" as "held" manufactured
+// a permanent lockout on precisely the event the feature exists to survive.
+test('journal: a lock naming no live owner is reclaimed in every shape (REQ-J-11)', () => {
+  const shapes = {
+    empty: (p) => writeFileSync(p, ''),
+    garbage: (p) => writeFileSync(p, 'not-a-pid\n'),
+    directory: (p) => mkdirSync(p),
+    danglingLink: (p) => symlinkSync(join(tmpdir(), 'no-such-target-ever'), p),
+  };
+  for (const [name, make] of Object.entries(shapes)) {
+    const tmp = mkdtempSync(join(tmpdir(), 'brain-j11-'));
+    try {
+      make(join(tmp, RESTORE_POINT_DIR + '.lock'));
+      const l = acquireLock(tmp);
+      assert.ok(l.path, `an unowned lock (${name}) must be reclaimed, not obeyed forever`);
+      l.release();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   }
 });

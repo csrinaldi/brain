@@ -249,11 +249,35 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (err) { return err?.code === 'EPERM'; }
 }
 
+/**
+ * @returns {{path: string, present: boolean, pid: number|null, readable: boolean,
+ *            alive: boolean, mine: boolean}}
+ *   `readable` false means something occupies the path but names no usable owner — an
+ *   empty or garbage file, a directory, a dangling link. That is UNOWNED, not held:
+ *   a zero-length file is the canonical post-power-cut residue, and power loss is this
+ *   feature's whole threat model, so treating it as a live owner would strand the repo
+ *   on exactly the event it exists to survive.
+ *   `mine` exists because a process must never refuse its own lock.
+ */
 function readLock(destRoot) {
   const path = join(destRoot, RESTORE_POINT_DIR + LOCK_PATH_SUFFIX);
-  let pid = null;
-  try { pid = Number.parseInt(readFileSync(path, 'utf8').trim(), 10); } catch { return { path, present: false, pid: null, alive: false }; }
-  return { path, present: true, pid, alive: pidAlive(pid) };
+  // Presence is decided by `lstat`, NOT by whether the content could be read. A
+  // directory or a dangling link at this path makes readFileSync throw, and reporting
+  // that as "nothing here" left the reclaim branches unreachable — the path stayed
+  // occupied and every run refused forever.
+  if (!pathPresent(path)) return { path, present: false, pid: null, readable: false, alive: false, mine: false };
+  let raw = '';
+  try { raw = readFileSync(path, 'utf8'); } catch { /* occupied but unreadable — handled below */ }
+  const pid = Number.parseInt(String(raw).trim(), 10);
+  const readable = Number.isInteger(pid) && pid > 0;
+  return {
+    path,
+    present: true,
+    pid: readable ? pid : null,
+    readable,
+    alive: readable && pidAlive(pid),
+    mine: readable && pid === process.pid,
+  };
 }
 
 /**
@@ -283,7 +307,11 @@ export function inspectRestorePoint(destRoot) {
 
   // A live owner outranks everything: whatever else is on disk belongs to a run
   // that is still using it.
-  if (lock.present && lock.alive) {
+  // `!lock.mine` is load-bearing, not defensive. The CLI takes the lock and THEN calls
+  // copyManaged, so without this the run reads its own live lock as a competitor and
+  // refuses itself — which shipped, bricked every upgrade, and passed 2294 tests
+  // because not one of them asserted that a plain upgrade succeeds.
+  if (lock.present && lock.alive && !lock.mine) {
     return { state: 'live-run', lock, journal, snapshotPresent,
       reason: `another brain:upgrade is running in this repo (pid ${lock.pid}, lock at ${lock.path})` };
   }
@@ -313,9 +341,9 @@ export function inspectRestorePoint(destRoot) {
 /**
  * Takes the lock for a real upgrade, refusing when anything on disk says no.
  *
- * `wx` makes the create atomic. A lock whose owner is GONE is reclaimed here rather
- * than left to strand the repo forever — but only after `inspectRestorePoint` has
- * confirmed the owner is dead, never on a bare "the file exists".
+ * `wx` makes the create atomic. A lock whose owner is GONE — or that names no owner at
+ * all — is reclaimed here rather than left to strand the repo forever, but never on a
+ * bare "the file exists": liveness is checked against the recorded pid first.
  */
 export function acquireLock(destRoot) {
   const path = join(destRoot, RESTORE_POINT_DIR + LOCK_PATH_SUFFIX);
@@ -346,8 +374,17 @@ export function acquireLock(destRoot) {
       }
       // Compare-and-delete: remove ONLY the exact dead lock just inspected, never
       // whatever happens to be at the path by the time we get here.
+      //
+      // An UNREADABLE lock is reclaimed outright. It names no owner, so there is no
+      // identity to compare — and comparing anyway strands the repo forever, because
+      // the previous form compared two NaNs and `NaN === NaN` is false. A zero-length
+      // lock is what a power cut leaves (create and write are not atomic together and
+      // the lock is not fsynced), so this manufactured its own permanent lockout on
+      // precisely the failure this feature exists to survive.
       const stillSame = readLock(destRoot);
-      if (stillSame.present && stillSame.pid === cur.pid && !stillSame.alive) {
+      if (stillSame.present && !stillSame.readable) {
+        rmSync(path, { recursive: true, force: true });
+      } else if (stillSame.present && stillSame.pid === cur.pid && !stillSame.alive) {
         rmSync(path, { force: true });
       }
     }

@@ -120,6 +120,42 @@ tracker `feature/issue-396-rollback`). Slice 2 is a separate PR on the same chai
 - [ ] 7.6 **F10** — a directory/FIFO/socket at a managed path yields an opaque EISDIR/ENXIO
       instead of the actionable message the refusal branches were given.
 
+## Phase 8e — Sixth review: the upgrader could not upgrade
+
+Round 5's fix was a no-op; round 6's was a brick. Both shipped green. The invariant
+across six rounds was never the bug — it was that **no test asserted a successful
+`brain:upgrade`**. Every CLI test asserted a refusal or a recovery, so a total outage
+passed 2294 tests.
+
+- [x] 8e.1 **REQ-J-10 first** — spawns the real CLI, lets it FINISH, asserts exit 0, that
+      the bytes on disk actually changed, and that neither lock nor snapshot survives.
+      Proven RED against the outage before the fix was written. Note it would NOT have
+      caught round 5 (the upgrade worked fine without a lock) — REQ-J-9 catches that.
+      **Neither is sufficient alone; the pair is the invariant.**
+- [x] 8e.2 BLOCKER — the CLI took the lock and then `inspectRestorePoint` read that same
+      live lock as a competitor, so every run refused ITSELF. `brain:upgrade` was dead
+      100% of the time; `--dry-run` still passed, so an adopter could not self-diagnose.
+      Fixed with `lock.mine`.
+- [x] 8e.3 MEDIUM — an unreadable lock (empty, garbage, a directory, a dangling link)
+      stranded the repo permanently: `Number.parseInt('')` is `NaN` and `NaN === NaN` is
+      false, so compare-and-delete never fired. A zero-length lock is the canonical
+      post-power-cut residue, so this manufactured a lockout on the exact event the
+      feature exists to survive. Presence is now decided by `lstat`, and a lock naming
+      no owner is reclaimed. REQ-J-11 covers all four shapes.
+- [x] 8e.4 REQ-J-8's fixture used the test's OWN pid to fake a live owner, which
+      `lock.mine` correctly suppresses — it now spawns a genuinely foreign process.
+- [x] 8e.5 Removed debug fixtures (`lk/c/**`) committed by accident in 837cb0f — third
+      instance of collateral from careless file handling on this branch.
+- [x] 8e.6 `acquireLock`'s docstring claimed it consults `inspectRestorePoint`; it never did.
+- [ ] 8e.7 **OPEN** — REQ-J-9 passes for the right reason but not the stated one: the FIFO
+      blocks in the pre-flight collision read, not in the snapshot as its comment says.
+      The assertion is still valid (the lock IS held); the comment is wrong.
+- [ ] 8e.8 **OPEN** — `--recover` takes no lock, so a TOCTOU window remains between its
+      verdict and a concurrent run's `acquireLock`. Narrowed to milliseconds, not closed.
+- [ ] 8e.9 **OPEN** — with the signal handlers registered, a run blocked in a synchronous
+      fs call (FIFO, stalled NFS, dead device at a managed path) ignores SIGINT/SIGTERM and
+      dies only to SIGKILL. Measured. Not yet in KNOWN-LIMITATIONS.
+
 ## Phase 8d — Fifth review: the verdict was right, the wiring was cut
 
 The round-4 refactor added the right classifier and, in the same commit, deleted the code

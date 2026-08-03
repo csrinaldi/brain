@@ -44,6 +44,10 @@ control**:
     pid has been recycled by an unrelated live process, the lock reads as held and every command
     refuses until the file is deleted by hand — the refusal says so. It fails safe (it strands,
     it never permits), and a pid+start-time token would close it.
+  - **A wedged run needs SIGKILL.** The deferred SIGINT/SIGTERM handlers are queued behind
+    synchronous work, so a run blocked on a hung managed path (a FIFO, a stalled network
+    mount, a dead device) ignores both signals and can only be ended with SIGKILL —
+    which the journal is built to survive. Measured, not theorised.
   - **The dependency install (step 1)** — it rewrites `package.json`, the lockfile and
     `node_modules/` *before* any snapshot exists, and is never reverted.
   - **The config migration (step 3)** — `brain.config.json` is a `local` path and is outside the
