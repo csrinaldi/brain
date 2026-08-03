@@ -152,9 +152,30 @@ passed 2294 tests.
       The assertion is still valid (the lock IS held); the comment is wrong.
 - [ ] 8e.8 **OPEN** — `--recover` takes no lock, so a TOCTOU window remains between its
       verdict and a concurrent run's `acquireLock`. Narrowed to milliseconds, not closed.
-- [ ] 8e.9 **OPEN** — with the signal handlers registered, a run blocked in a synchronous
-      fs call (FIFO, stalled NFS, dead device at a managed path) ignores SIGINT/SIGTERM and
-      dies only to SIGKILL. Measured. Not yet in KNOWN-LIMITATIONS.
+- [x] 8e.9 A run wedged on a hung managed path dies only to SIGKILL — measured, and now in
+      KNOWN-LIMITATIONS.
+
+## Phase 8f — Seventh review: reclaim widened too far
+
+The reviewer judged the defect set "decisively smaller" and the collateral audit came back
+CLEAN for the first time on this branch. One real regression, introduced by 8e.3's widening:
+
+- [x] 8f.1 HIGH — `readable: false` meant "we did not obtain a pid", including because the
+      READ FAILED. So a live owner's lock that merely could not be read (EACCES from another
+      uid's lock, EIO from the failing disk this feature exists for, EMFILE, NFS ESTALE) was
+      classified unowned and reclaimed out from under it — inverting this branch's own stated
+      property from "it strands, it never permits" to permitting. Only EISDIR/ELOOP/ENXIO/
+      ENOENT now mean unowned; every other errno is unknown and fails closed. REQ-J-12 covers
+      it and is proven RED against the regression. The same fix closes the `--recover`-reverts-
+      a-live-tree variant for free.
+- [x] 8f.2 LOW — REQ-J-6/J-7 used pid `424242`, which is below this machine's `pid_max` and
+      could be a live process; now `999999999` like REQ-J-5.
+- [x] 8f.3 The reclaim race is now named in KNOWN-LIMITATIONS rather than implied away.
+- [ ] 8f.4 **OPEN** — `acquireLock` checks `cur.alive` without `cur.mine`, so it is the last
+      site reading the lock directly instead of the verdict. Fails safe and self-heals on
+      re-run, but it contradicts the one-reader doctrine.
+- [ ] 8f.5 **OPEN** — REQ-J-10's fixture has a single managed file, so "copied some, exited 0"
+      is unobservable; only "copied nothing" is caught.
 
 ## Phase 8d — Fifth review: the verdict was right, the wiring was cut
 

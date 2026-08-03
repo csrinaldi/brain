@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import {
-  mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync,
+  mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync, chmodSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -24,6 +24,7 @@ import {
   readJournal,
   recoverFromJournal,
   acquireLock,
+  inspectRestorePoint,
   RESTORE_POINT_DIR,
   JOURNAL_FILE,
   JOURNAL_VERSION,
@@ -259,7 +260,7 @@ function stageKilledRun(tmp) {
   writeFileSync(join(snap, 'brain', 'core', 'a.md'), 'CONSUMER ORIGINAL');
   writeFileSync(join(snap, JOURNAL_FILE), JSON.stringify(
     { version: JOURNAL_VERSION, saved: ['brain/core/a.md'], created: [], createdDirs: [] }));
-  writeFileSync(join(consumer, RESTORE_POINT_DIR + '.lock'), '424242\n');
+  writeFileSync(join(consumer, RESTORE_POINT_DIR + '.lock'), '999999999\n'); // > pid_max: always dead, never a live CI process
   return consumer;
 }
 
@@ -422,5 +423,41 @@ test('journal: a lock naming no live owner is reclaimed in every shape (REQ-J-11
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  }
+});
+
+// ── REQ-J-12: "could not read it" is not "nobody owns it" ────────────────────
+// Widening the reclaim to unowned locks accidentally widened it to UNREADABLE ones,
+// inverting this feature's stated safety property from "it strands, it never permits"
+// to permitting: a live owner's lock that merely could not be read — EACCES from a
+// lock written under another uid, EIO from the failing disk this exists for, EMFILE
+// under CI fd pressure, ESTALE on NFS — was reclaimed out from under it.
+test('journal: an UNREADABLE lock fails closed; only structurally unowned ones are reclaimed (REQ-J-12)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-j12-'));
+  const owner = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)']);
+  try {
+    const lockPath = join(tmp, RESTORE_POINT_DIR + '.lock');
+    writeFileSync(lockPath, `${owner.pid}\n`);
+    chmodSync(lockPath, 0o000);
+
+    if (process.getuid?.() === 0) return; // root reads anything; nothing to prove here
+
+    const state = inspectRestorePoint(tmp);
+    assert.equal(state.state, 'live-run',
+      'an unreadable lock must fail CLOSED — refusing costs a re-run, permitting costs the consumer their work');
+    assert.match(state.reason, /cannot be read/, 'and it must say it is unsure, not invent an owner');
+    assert.throws(() => acquireLock(tmp), /cannot be read|is running/,
+      'acquireLock must not reclaim a lock it could not read');
+
+    // A structurally unowned lock is still reclaimed — the fix must not re-strand those.
+    chmodSync(lockPath, 0o644);
+    writeFileSync(lockPath, '');
+    const l = acquireLock(tmp);
+    assert.ok(l.path, 'an empty lock names no owner and must still be reclaimable');
+    l.release();
+  } finally {
+    owner.kill('SIGKILL');
+    try { chmodSync(join(tmp, RESTORE_POINT_DIR + '.lock'), 0o644); } catch { /* gone */ }
+    rmSync(tmp, { recursive: true, force: true });
   }
 });

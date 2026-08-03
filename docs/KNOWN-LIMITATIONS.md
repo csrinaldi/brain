@@ -42,8 +42,14 @@ control**:
     reading the owner's pid, not by the lock file merely existing. A lock whose owner is provably
     gone is reclaimed rather than stranding the repo. Residual: **pid reuse**. If a killed run's
     pid has been recycled by an unrelated live process, the lock reads as held and every command
-    refuses until the file is deleted by hand — the refusal says so. It fails safe (it strands,
-    it never permits), and a pid+start-time token would close it.
+    refuses until the file is deleted by hand — the refusal says so. It fails safe — it strands rather than
+    permits — and a pid+start-time token would close it. A lock that cannot be READ (wrong
+    owner's permissions, EIO, fd exhaustion) also fails closed, refusing rather than guessing.
+    **Residual:** reclaiming a lock whose owner is provably gone is a read-then-delete, not an
+    atomic operation, so two runs racing that exact path can both proceed. Measured: never from
+    a clean start, ~1.2-1.9 winners per 40 when a reclaim is required. The downstream verdict
+    re-check and the journal gate caught every case (20 concurrent real upgrades x 10 rounds:
+    0 bad final states), so this is a defect in the primitive, not an observed data loss.
   - **A wedged run needs SIGKILL.** The deferred SIGINT/SIGTERM handlers are queued behind
     synchronous work, so a run blocked on a hung managed path (a FIFO, a stalled network
     mount, a dead device) ignores both signals and can only be ended with SIGKILL —

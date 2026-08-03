@@ -265,11 +265,28 @@ function readLock(destRoot) {
   // directory or a dangling link at this path makes readFileSync throw, and reporting
   // that as "nothing here" left the reclaim branches unreachable — the path stayed
   // occupied and every run refused forever.
-  if (!pathPresent(path)) return { path, present: false, pid: null, readable: false, alive: false, mine: false };
+  if (!pathPresent(path)) return { path, present: false, pid: null, readable: false, unknown: false, alive: false, mine: false };
+
+  // "Could not read it" and "it names no owner" are DIFFERENT, and conflating them
+  // inverted this feature's safety property: a live owner's lock that merely could not
+  // be read (EACCES from a lock written under another uid, EIO from the failing disk
+  // this exists for, EMFILE under CI fd pressure, ESTALE on NFS) was classified as
+  // unowned and RECLAIMED out from under it.
+  //
+  // Only errnos that prove the path CANNOT name an owner mean unowned. Anything else is
+  // unknown, and unknown fails closed — refusing costs a re-run, permitting costs the
+  // consumer's work.
+  const STRUCTURALLY_UNOWNED = new Set(['EISDIR', 'ELOOP', 'ENXIO', 'ENOENT']);
   let raw = '';
-  try { raw = readFileSync(path, 'utf8'); } catch { /* occupied but unreadable — handled below */ }
+  let unknown = false;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (err) {
+    if (!STRUCTURALLY_UNOWNED.has(err?.code)) unknown = true;
+  }
   const pid = Number.parseInt(String(raw).trim(), 10);
   const readable = Number.isInteger(pid) && pid > 0;
+  if (unknown) return { path, present: true, pid: null, readable: false, unknown: true, alive: true, mine: false };
   return {
     path,
     present: true,
@@ -313,7 +330,9 @@ export function inspectRestorePoint(destRoot) {
   // because not one of them asserted that a plain upgrade succeeds.
   if (lock.present && lock.alive && !lock.mine) {
     return { state: 'live-run', lock, journal, snapshotPresent,
-      reason: `another brain:upgrade is running in this repo (pid ${lock.pid}, lock at ${lock.path})` };
+      reason: lock.unknown
+        ? `a lock is present at ${lock.path} but cannot be read, so whether an upgrade is running here is unknown — refusing rather than guessing. Fix its permissions or delete it if you are certain none is`
+        : `another brain:upgrade is running in this repo (pid ${lock.pid}, lock at ${lock.path})` };
   }
 
   // A journal we cannot read is NOT the same as no journal. Absent means nothing was
