@@ -359,8 +359,9 @@ Every one of these is verifiable in the repository.
 - Every change to the main branch must reference an issue carrying an approval label applied
   by a human — and by someone other than the author.
 - Every change produces four artifacts on disk: proposal, spec, design, tasks.
-- A default budget of 400 changed lines per pull request, with an explicit, labelled
-  exception path.
+- A budget on how large a single change may be, set by the declared tier — 1000 changed
+  lines at `lite`, 400 at `standard`, 200 at `regulated` — with an explicit, labelled
+  exception path that the strictest tier refuses to honor.
 - A "golden path" of five commands — start, check, save, ship, next — where `next` derives
   the current state and prints the single next command.
 
