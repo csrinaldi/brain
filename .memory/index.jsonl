@@ -176,6 +176,7 @@
 {"id":"rec-1c3ad6c2581e82f9","ts":"2026-07-13T00:21:57Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-1c84809dc96239fe","ts":"2026-07-25T21:51:32Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-1cb85997bbbf99f6","ts":"2026-07-13T00:21:27Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-1ccebc390604596a","ts":"2026-08-02T19:34:34Z","actor":"claude/issue-396-upgrade-rollback","type":"session_summary","project":"brain","file":"2026-08.jsonl"}
 {"id":"rec-1cefb030dab1fe8a","ts":"2026-07-25T00:48:27Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-1cf01e30b358a7eb","ts":"2026-07-25T21:50:31Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-1d645166fd6d5e0d","ts":"2026-07-13T20:32:24Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}

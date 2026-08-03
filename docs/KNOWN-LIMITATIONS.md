@@ -14,8 +14,60 @@
 managed/local boundary is enforced in code — **but it is not yet safe for repos you do not
 control**:
 
-- **No rollback / atomic write.** A mid-upgrade failure leaves a half-applied tree, recoverable
-  only through the consumer's own git. (M4 · #396 → 1.1)
+- **Rollback covers the managed-path copy only — the steps around it are still not atomic.**
+  `copyManaged` now snapshots every path it may write before its first write and restores those
+  bytes if any write throws, so a failure *the process survives* (ENOSPC, EACCES, an unreadable
+  source, a merge rejecting malformed consumer JSON) leaves the managed paths at their pre-copy
+  bytes and says so. When the rollback itself cannot finish, the snapshot is **kept** and its
+  location printed. Ctrl-C is safe too, though not by rolling back: the copy is one synchronous
+  batch (~23ms for 366 files) that a signal cannot interrupt, so it completes rather than dying
+  midway. Precisely what is **not** covered:
+  - ~~**SIGKILL**~~ — **CLOSED.** A journal is written after the snapshot and before the first
+    write, so a killed run leaves replayable evidence: the next run refuses rather than writing
+    over it, and `brain:upgrade -- --recover` puts the covered paths back. The kernel keeps the
+    page cache when a process is killed, so the snapshot bytes are intact by construction.
+    Recovery is explicit by design — between the crash and the next run the consumer may have
+    repaired things by hand, and replaying stale bytes over that would destroy work while
+    reporting success.
+  - **Power loss — narrowed, not closed.** The snapshot files, every intermediate directory on
+    the way to them, the snapshot directory's own entry in the repo root, the journal, and the restored files during recovery are all `fsync`ed. A
+    journal that cannot be read is REFUSED rather than treated as absent, so a torn journal can
+    no longer cause the snapshot to be auto-deleted. **One residual remains and is NOT covered:**
+    the journal records no size or checksum, so a snapshot *file* torn by a power cut would be
+    restored as-is and reported as a clean recovery. `fsync` is also best-effort — a filesystem
+    that refuses it does not abort the upgrade. And an unlink made during recovery is not
+    barriered (that needs a parent-directory fsync, which is not done). Integrity validation is
+    the next step, not a shipped one.
+  - **Concurrency** — a second `brain:upgrade` is refused while the first is alive, decided by
+    reading the owner's pid, not by the lock file merely existing. A lock whose owner is provably
+    gone is reclaimed rather than stranding the repo. Residual: **pid reuse**. If a killed run's
+    pid has been recycled by an unrelated live process, the lock reads as held and every command
+    refuses until the file is deleted by hand — the refusal says so. It fails safe — it strands rather than
+    permits — and a pid+start-time token would close it. A lock that cannot be READ (wrong
+    owner's permissions, EIO, fd exhaustion) also fails closed, refusing rather than guessing.
+    **Residual:** reclaiming a lock whose owner is provably gone is a read-then-delete, not an
+    atomic operation, so two runs racing that exact path can both proceed. Measured: never from
+    a clean start, ~1.2-1.9 winners per 40 when a reclaim is required. The downstream verdict
+    re-check and the journal gate caught every case (20 concurrent real upgrades x 10 rounds:
+    0 bad final states), so this is a defect in the primitive, not an observed data loss.
+  - **A wedged run needs SIGKILL.** The deferred SIGINT/SIGTERM handlers are queued behind
+    synchronous work, so a run blocked on a hung managed path (a FIFO, a stalled network
+    mount, a dead device) ignores both signals and can only be ended with SIGKILL —
+    which the journal is built to survive. Measured, not theorised.
+  - **The dependency install (step 1)** — it rewrites `package.json`, the lockfile and
+    `node_modules/` *before* any snapshot exists, and is never reverted.
+  - **The config migration (step 3)** — `brain.config.json` is a `local` path and is outside the
+    restore point, so a failure there leaves new managed files beside an un-migrated config.
+  - **Managed paths that resolve OUTSIDE the repo, and dangling symlinks** — refused up front.
+    A write landing outside `destRoot` is beyond any rollback's reach, and a link with no target
+    cannot be snapshotted at all. A symlink resolving *inside* the repo is fine and is protected
+    like any other path — measured: the snapshot, the write and the restore all follow the link,
+    so the target ends at its original bytes with the link untouched.
+  - **The rollback's own cleanup** — if removing the snapshot fails (EACCES/EPERM/EBUSY), the
+    directory is left behind rather than reported as an upgrade failure. Cosmetic residue is
+    preferable to telling an operator a completed upgrade failed.
+
+  (M4 · #396 → 1.1; both slices landed — SIGKILL closed, power-loss integrity outstanding)
 - **Plain-copy clobber asymmetry.** `.gemini/settings.json`, `.github/CODEOWNERS`,
   `.github/PULL_REQUEST_TEMPLATE.md`, `AGENTS.md`, and the workflows are overwritten on upgrade
   (only `.claude/settings.json` and `package.json` are merged). A consumer who edits one of those
