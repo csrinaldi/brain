@@ -498,3 +498,120 @@ test('journal: recovery separates restorations from removals, and warns about th
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── REQ-M-1: a corrupt consumer file must not lock the consumer out ──────────
+// #396 already made this failure SAFE — the tree rolls back and the error names the
+// file, the line and the column. What it did not do is make it ESCAPABLE: a single
+// unparseable file blocks all 366 managed paths, 364 of which have nothing to do with
+// it, and it fails only after step 1 has already installed the new package.
+function corruptConsumer(tmp, { corrupt = '.claude/settings.json' } = {}) {
+  const consumer = join(tmp, 'consumer');
+  const pkg = join(consumer, 'node_modules', 'brain');
+  mkdirSync(join(pkg, 'brain', 'core'), { recursive: true });
+  mkdirSync(join(pkg, '.claude'), { recursive: true });
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'brain', version: '9.9.9' }));
+  writeFileSync(join(pkg, 'brain', 'core', 'managed-paths.mjs'),
+    'export const managed = ["brain/core/**", ".claude/settings.json"];\nexport const local = [];\nexport const MANAGED_SCRIPT_KEYS = [];\n');
+  writeFileSync(join(pkg, 'brain', 'core', 'config-migrations.mjs'), 'export const migrations = [];\n');
+  writeFileSync(join(pkg, 'brain', 'core', 'a.md'), 'NEW');
+  writeFileSync(join(pkg, '.claude', 'settings.json'), JSON.stringify({ hooks: {} }));
+  mkdirSync(join(consumer, 'brain', 'core'), { recursive: true });
+  mkdirSync(join(consumer, '.claude'), { recursive: true });
+  writeFileSync(join(consumer, 'package.json'), JSON.stringify({ name: 'c', version: '1.0.0' }));
+  writeFileSync(join(consumer, 'brain', 'core', 'a.md'), 'OLD');
+  writeFileSync(join(consumer, corrupt), '{ "permissions": { broken json here');
+  return consumer;
+}
+
+test('upgrade: a corrupt consumer file is caught BEFORE any work, naming the file and the escape (REQ-M-1)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-m1-'));
+  try {
+    const consumer = corruptConsumer(tmp);
+    const r = spawnSync(process.execPath, [CLI, 'v1', '--no-install'], { cwd: consumer, encoding: 'utf8' });
+    const out = r.stdout + r.stderr;
+
+    assert.notEqual(r.status, 0, 'it must refuse');
+    assert.match(out, /\.claude\/settings\.json/, 'it must name the file that cannot be parsed');
+    assert.match(out, /--skip-merge/, 'and it must name the way out, or the consumer is locked out');
+    assert.ok(!existsSync(join(consumer, RESTORE_POINT_DIR)),
+      'a pre-flight refusal must not have built a snapshot it never needed');
+    assert.equal(readFileSync(join(consumer, 'brain', 'core', 'a.md'), 'utf8'), 'OLD',
+      'and nothing may be written');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('upgrade: --skip-merge upgrades everything else and leaves the corrupt file untouched (REQ-M-2)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-m2-'));
+  try {
+    const consumer = corruptConsumer(tmp);
+    const before = readFileSync(join(consumer, '.claude', 'settings.json'), 'utf8');
+
+    const r = spawnSync(process.execPath,
+      [CLI, 'v1', '--no-install', '--skip-merge', '.claude/settings.json'],
+      { cwd: consumer, encoding: 'utf8' });
+    const out = r.stdout + r.stderr;
+
+    assert.equal(r.status, 0, `the rest of the upgrade must proceed: ${r.stderr}`);
+    assert.equal(readFileSync(join(consumer, 'brain', 'core', 'a.md'), 'utf8'), 'NEW',
+      'the 364 paths that have nothing to do with the corrupt file must upgrade');
+    assert.equal(readFileSync(join(consumer, '.claude', 'settings.json'), 'utf8'), before,
+      'the skipped file must be left exactly as it was — never clobbered as a consolation');
+    assert.match(out, /skipped/i, 'and the run must say loudly what it skipped');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── REQ-M-3: the #180 invariant, asserted on BEHAVIOUR ───────────────────────
+// The pre-existing guard is a source-TEXT regex, and #399 moved it from the call site
+// to the declaration — which is not the invariant. The wiring is. With that regex,
+// `specialMerge: mergeMap` → `specialMerge: {}` reproduced issue #180 verbatim (the
+// consumer's project identity replaced by brain's) with all 2300 tests green.
+//
+// A text assertion can only pin the shape someone thought to write down. This drives
+// the real CLI and asserts what #180 is actually about: the consumer's package.json
+// survives an upgrade.
+test('upgrade: the consumer package.json identity survives an upgrade (issue #180, REQ-M-3)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-m3-'));
+  try {
+    const consumer = corruptConsumer(tmp);
+    // A VALID consumer package.json this time, with identity worth losing.
+    writeFileSync(join(consumer, 'package.json'), JSON.stringify(
+      { name: 'my-consumer', version: '2.3.4', scripts: { test: 'echo mine' } }, null, 2));
+    writeFileSync(join(consumer, '.claude', 'settings.json'), JSON.stringify({ permissions: { allow: ['Bash'] } }));
+
+    const r = spawnSync(process.execPath, [CLI, 'v1', '--no-install'], { cwd: consumer, encoding: 'utf8' });
+    assert.equal(r.status, 0, `the upgrade must succeed: ${r.stderr}`);
+
+    const pkg = JSON.parse(readFileSync(join(consumer, 'package.json'), 'utf8'));
+    assert.equal(pkg.name, 'my-consumer', "the consumer's project name must survive — this IS issue #180");
+    assert.equal(pkg.version, '2.3.4', 'and its version');
+    assert.equal(pkg.scripts.test, 'echo mine', 'and its own scripts');
+
+    const settings = JSON.parse(readFileSync(join(consumer, '.claude', 'settings.json'), 'utf8'));
+    assert.deepEqual(settings.permissions.allow, ['Bash'], 'consumer settings content must survive the merge too');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('upgrade: a corrupt package.json is caught by the pre-flight too, not only .claude (REQ-M-4)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-m4-'));
+  try {
+    // The `corrupt` parameter existed and no caller ever used it — so the more
+    // dangerous of the two merge targets went untested.
+    const consumer = corruptConsumer(tmp, { corrupt: 'package.json' });
+    writeFileSync(join(consumer, '.claude', 'settings.json'), JSON.stringify({ permissions: {} }));
+
+    const r = spawnSync(process.execPath, [CLI, 'v1', '--no-install'], { cwd: consumer, encoding: 'utf8' });
+    const out = r.stdout + r.stderr;
+
+    assert.notEqual(r.status, 0, 'it must refuse');
+    assert.match(out, /package\.json/, 'naming package.json');
+    assert.match(out, /repair/i, 'and for package.json the only real remedy is to repair it — npm cannot run a script without it');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

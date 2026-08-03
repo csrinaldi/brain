@@ -182,6 +182,48 @@ function restoreHandle({ destRoot, dir, saved, created, createdDirs }) {
   };
 }
 
+/**
+ * Parses every consumer file a merge will read, BEFORE anything is snapshotted or
+ * written, and reports all of them at once.
+ *
+ * A merge function throws on unparseable consumer JSON. #396 made that safe — the tree
+ * rolls back and the error names the file — but not ESCAPABLE: one broken file blocks
+ * every managed path, including the hundreds that have nothing to do with it, and it
+ * fails only after the package install has already replaced `node_modules/brain`.
+ *
+ * Checking up front changes three things. The consumer learns about ALL the broken
+ * files in one run rather than one per attempt; no snapshot is built for work that was
+ * never going to happen; and the refusal can name `--skip-merge`, which is the
+ * difference between a diagnosis and a lockout. That distinction is the whole reason
+ * `brain/core/anti-patterns/pre-v0-8-0-upgrade-clobber-lockout.md` exists.
+ *
+ * @param {{destRoot: string, mergePaths: string[]}} opts
+ * @returns {{ unparseable: Array<{rel: string, reason: string}> }}
+ */
+export function preflightMergeTargets({ destRoot, mergePaths }) {
+  const unparseable = [];
+  for (const rel of mergePaths) {
+    const path = join(destRoot, rel);
+    if (!pathPresent(path)) continue; // absent is fine — the merge writes it fresh
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf8'));
+      // Parseable is not the same as mergeable. `null` and arrays parse fine and then
+      // blow up inside the merge on `.hooks` / `.scripts` — naming no file and offering
+      // no escape, which is the pre-#399 experience surviving the fix. Two definitions
+      // of "mergeable" in two places is a gap by construction; this one matches what
+      // mergeClaudeSettings and mergePackageJsonScripts actually require.
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        unparseable.push({ rel, reason: `expected a JSON object, got ${Array.isArray(parsed) ? 'an array' : String(parsed)}` });
+      }
+    } catch (err) {
+      // "cannot be read" and "cannot be parsed" are different; say which.
+      const why = err?.code && err.code !== 'ENOENT' ? `cannot be read — ${err.message}` : err?.message ?? String(err);
+      unparseable.push({ rel, reason: why });
+    }
+  }
+  return { unparseable };
+}
+
 // ── Restore point (rollback) ──────────────────────────────────────────────────
 
 /**
