@@ -58,14 +58,35 @@
   body.panel-open { padding-right: min(460px, 42vw); }
   a { color: var(--accent); }
 
+  /* opening — deliberately quiet: prose, one rule, no hero */
+  #intro { padding: 72px 24px 56px; background: var(--surface); border-bottom: 1px solid var(--line); }
+  #intro h1 {
+    margin: 0 0 20px; font-size: 30px; font-weight: 600; letter-spacing: -0.02em;
+    font-family: var(--mono);
+  }
+  .lead { margin: 0 0 14px; max-width: 62ch; font-size: 17px; line-height: 1.6; color: var(--ink); }
+  .lead.sub { color: var(--ink-2); font-size: 15.5px; }
+  .pillars {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 26px 34px; margin: 38px 0 34px; padding-top: 30px; border-top: 1px solid var(--line);
+  }
+  .pillars h2 { margin: 0 0 5px; font-size: 14px; font-weight: 600; color: var(--ink); }
+  .pillars p { margin: 0; font-size: 14px; color: var(--ink-2); }
+  .status { margin: 0; max-width: 68ch; font-size: 13.5px; color: var(--ink-3); }
+  .status strong { color: var(--ink-2); font-weight: 600; }
+
   header {
-    padding: 28px 24px 18px; border-bottom: 1px solid var(--line);
+    padding: 30px 24px 18px; border-bottom: 1px solid var(--line);
     background: var(--surface);
   }
+  .eyebrow {
+    margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--ink-3); font-weight: 600;
+  }
   .wrap { max-width: 1180px; margin: 0 auto; }
-  h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -0.01em; }
-  h1 small { font-weight: 400; color: var(--ink-3); font-size: 14px; letter-spacing: 0; }
-  .tagline { margin: 0; color: var(--ink-2); max-width: 70ch; }
+  .tagline { margin: 0; color: var(--ink-2); max-width: 70ch; font-size: 14px; }
+  .tagline em { font-style: normal; color: var(--ink-3); }
+  .tagline b { font-weight: 600; color: var(--ink-2); }
 
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; }
   .controls .sep { flex: 1 1 auto; }
@@ -210,19 +231,64 @@
     .row.flow { flex-direction: column; gap: 22px 8px; }
     #panel { width: 100%; }
     body.panel-open { padding-right: 0; }
+    #intro { padding: 44px 24px 36px; }
+    #intro h1 { font-size: 26px; }
+    .lead { font-size: 16px; }
+    .pillars { gap: 22px; margin: 30px 0 28px; }
   }
 </style>
 </head>
 <body>
 
+<section id="intro">
+  <div class="wrap">
+    <h1>brain</h1>
+    <p class="lead">
+      A working method for building software with AI agents, and the tooling that keeps the method
+      honest. It installs into your own repository from a pinned git tag: a knowledge base that
+      outlives the session, a spec-driven change flow, git-native team memory, and gates that read
+      the evidence a change leaves behind.
+    </p>
+    <p class="lead sub">
+      An agent writes code faster than a team can agree on what it should do, or verify what it did.
+      brain closes that gap at both ends — work starts from an approved issue and a written spec,
+      and lands only after checks that read what actually happened rather than what anyone reported.
+    </p>
+
+    <div class="pillars">
+      <div>
+        <h2>Knowledge outlives the session</h2>
+        <p>Decisions live in the repository as ADRs; team memory is content-addressed and committed to
+           git. The next session — human or agent — starts with what the last one learned.</p>
+      </div>
+      <div>
+        <h2>One shape for every change</h2>
+        <p>Issue, proposal, spec, design, tasks, code, review, merge — with the artifacts on disk at
+           each step. The same shape whether a person or an agent drives it.</p>
+      </div>
+      <div>
+        <h2>Machines prepare decisions, humans take them</h2>
+        <p>The gates enforce that the process happened, never that the work is good. Approving and
+           merging stays a human keystroke, and the reviewer has no code path that reaches it.</p>
+      </div>
+    </div>
+
+    <p class="status">
+      <strong>v1.0.0 — controlled pilot.</strong> Intended for repositories its maintainer controls,
+      not yet open adoption. This repository runs on brain itself, which is how the method gets tested
+      before it ships. Everything below is drawn from that tree.
+    </p>
+  </div>
+</section>
+
 <header>
   <div class="wrap">
-    <h1>brain — Methodology Map <small>self-hosted working method, drawn from the tree</small></h1>
+    <p class="eyebrow">The method, in detail</p>
     <p class="tagline">
       Every box is a real verb, artifact, or gate that exists in this repository. Click one to see what it
-      does, who is allowed to run it, what evidence it produces, and where it is defined. This page is the
-      base for tracking how the method evolves — each node carries the version or ADR that introduced it,
-      and says plainly what about it is still open.
+      does, who is allowed to run it, what evidence it produces, and where it is defined. Each node carries
+      the version or ADR that introduced it, and says plainly what about it is still open.
+      <em>New here? Start with <b>A day in it</b>.</em>
     </p>
     <div class="controls">
       <span class="tabs">
