@@ -1,0 +1,1486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>brain — Methodology Map</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f5;
+    --surface: #fff;
+    --surface-2: #f0efec;
+    --ink: #1c1b19;
+    --ink-2: #57534e;
+    --ink-3: #8b857c;
+    --line: #dcd9d3;
+    --accent: #b8562f;
+    --accent-soft: #f4e3da;
+    --human: #7c5cbf;
+    --agent: #2f7d76;
+    --ci: #b8562f;
+    --either: #6b7280;
+    --reviewer: #2f5d9e;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #191817; --surface: #211f1e; --surface-2: #2a2725;
+      --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #837c73; --line: #383431;
+      --accent: #e07a4d; --accent-soft: #3a2a20;
+      --human: #a98fe0; --agent: #56b3a9; --ci: #e07a4d; --either: #9ca3af; --reviewer: #7fa6e8;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f7f5; --surface: #fff; --surface-2: #f0efec;
+    --ink: #1c1b19; --ink-2: #57534e; --ink-3: #8b857c; --line: #dcd9d3;
+    --accent: #b8562f; --accent-soft: #f4e3da;
+    --human: #7c5cbf; --agent: #2f7d76; --ci: #b8562f; --either: #6b7280; --reviewer: #2f5d9e;
+  }
+  :root[data-theme="dark"] {
+    --bg: #191817; --surface: #211f1e; --surface-2: #2a2725;
+    --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #837c73; --line: #383431;
+    --accent: #e07a4d; --accent-soft: #3a2a20;
+    --human: #a98fe0; --agent: #56b3a9; --ci: #e07a4d; --either: #9ca3af; --reviewer: #7fa6e8;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); font-size: 15px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    transition: padding-right .18s ease;
+  }
+  /* The panel is fixed to the right edge — shrink the page instead of letting it
+     cover the header controls, which is exactly what happened the first time. */
+  body.panel-open { padding-right: min(460px, 42vw); }
+  a { color: var(--accent); }
+
+  /* opening — deliberately quiet: prose, one rule, no hero */
+  #intro { padding: 72px 24px 56px; background: var(--surface); border-bottom: 1px solid var(--line); }
+  #intro h1 {
+    margin: 0 0 20px; font-size: 30px; font-weight: 600; letter-spacing: -0.02em;
+    font-family: var(--mono);
+  }
+  .lead { margin: 0 0 14px; max-width: 62ch; font-size: 17px; line-height: 1.6; color: var(--ink); }
+  .lead.sub { color: var(--ink-2); font-size: 15.5px; }
+  .pillars {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 26px 34px; margin: 38px 0 34px; padding-top: 30px; border-top: 1px solid var(--line);
+  }
+  .pillars h2 { margin: 0 0 5px; font-size: 14px; font-weight: 600; color: var(--ink); }
+  .pillars p { margin: 0; font-size: 14px; color: var(--ink-2); }
+  .status { margin: 0; max-width: 68ch; font-size: 13.5px; color: var(--ink-3); }
+  .status strong { color: var(--ink-2); font-weight: 600; }
+
+  header {
+    padding: 30px 24px 18px; border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .eyebrow {
+    margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--ink-3); font-weight: 600;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  .tagline { margin: 0; color: var(--ink-2); max-width: 70ch; font-size: 14px; }
+  .tagline em { font-style: normal; color: var(--ink-3); }
+  .tagline b { font-weight: 600; color: var(--ink-2); }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; }
+  .controls .sep { flex: 1 1 auto; }
+  button {
+    font: inherit; font-size: 13px; color: var(--ink-2); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--ink-3); color: var(--ink); }
+  button[aria-pressed="true"], button.on {
+    background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+  }
+  .tabs button { border-radius: var(--radius); }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 24px 96px; }
+
+  .lane { margin: 0 0 30px; }
+  .lane > h2 {
+    margin: 0 0 2px; font-size: 13px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--ink-3); font-weight: 600;
+  }
+  .lane > p { margin: 0 0 12px; color: var(--ink-2); font-size: 13.5px; max-width: 78ch; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+  .row.flow > .node:not(:first-child)::before {
+    content: "→"; position: absolute; left: -14px; top: 50%; transform: translateY(-50%);
+    color: var(--ink-3); font-size: 13px;
+  }
+  .row.flow { gap: 8px 22px; }
+  .group-title {
+    margin: 14px 0 6px; font-size: 12px; font-weight: 600; color: var(--ink-2);
+  }
+  .group-title span { font-weight: 400; color: var(--ink-3); }
+  /* The redo loop is the only edge in the map that goes backwards, so it is drawn
+     rather than implied by node order. */
+  .loopback {
+    display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; padding: 7px 12px;
+    border: 1px dashed var(--reviewer); border-radius: var(--radius);
+    color: var(--reviewer); font-size: 13px; background: transparent;
+  }
+  .loopback code { font-family: var(--mono); font-size: 12px; }
+
+  .node {
+    position: relative; text-align: left; padding: 9px 12px; min-width: 132px;
+    background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--c);
+    border-radius: var(--radius); cursor: pointer; transition: transform .08s, border-color .12s;
+  }
+  .node:hover { transform: translateY(-1px); border-color: var(--ink-3); border-left-color: var(--c); }
+  .node[aria-current="true"] { border-color: var(--accent); border-left-color: var(--accent); background: var(--accent-soft); }
+  .node .n-label { display: block; font-size: 14px; font-weight: 600; color: var(--ink); padding-right: 12px; }
+  .node .n-verb { display: block; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+  .node.dim { opacity: 0.28; }
+  .node .dot {
+    position: absolute; top: 8px; right: 8px; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--c);
+  }
+  .node.st-proposed .dot { background: transparent; border: 1px solid var(--c); }
+  .node.st-inflight .dot { background: repeating-linear-gradient(45deg, var(--c) 0 2px, transparent 2px 4px); }
+
+  .c-human { --c: var(--human); }
+  .c-agent { --c: var(--agent); }
+  .c-ci { --c: var(--ci); }
+  .c-either { --c: var(--either); }
+  .c-reviewer { --c: var(--reviewer); }
+
+  /* detail panel */
+  #panel {
+    position: fixed; top: 0; right: 0; width: min(460px, 100%); height: 100%;
+    background: var(--surface); border-left: 1px solid var(--line);
+    padding: 22px 24px 60px; overflow-y: auto; transform: translateX(102%);
+    transition: transform .18s ease; box-shadow: -12px 0 40px rgba(0,0,0,.10); z-index: 20;
+  }
+  #panel.open { transform: none; }
+  #panel h3 { margin: 0 0 2px; font-size: 18px; }
+  #panel .p-verb { font-family: var(--mono); font-size: 12.5px; color: var(--accent); word-break: break-word; }
+  #panel .p-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 16px; }
+  #panel h4 {
+    margin: 18px 0 6px; font-size: 11.5px; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--ink-3);
+  }
+  #panel p, #panel li { color: var(--ink-2); font-size: 14px; }
+  #panel ul { margin: 0; padding-left: 18px; }
+  #panel li { margin-bottom: 5px; }
+  #panel .close { position: absolute; top: 14px; right: 16px; }
+  .tag {
+    display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2);
+  }
+  .tag.actor { border-color: var(--c); color: var(--c); background: transparent; }
+  #panel ul.caveats li { color: var(--ink-3); }
+  .docs a { display: block; font-size: 13.5px; margin-bottom: 5px; word-break: break-word; }
+  .docs a code { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+
+  /* the worked example */
+  .journey { list-style: none; margin: 8px 0 0; padding: 0 0 0 20px; border-left: 2px solid var(--line); }
+  .journey > li { position: relative; margin-bottom: 30px; max-width: 82ch; }
+  .journey > li::before {
+    content: ""; position: absolute; left: -26px; top: 7px; width: 10px; height: 10px;
+    border-radius: 50%; background: var(--accent); border: 2px solid var(--bg);
+  }
+  .j-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .j-phase { font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: 0.01em; }
+  .j-title { margin: 3px 0 8px; font-size: 16px; }
+  .term {
+    margin: 0 0 10px; padding: 12px 14px; border-radius: var(--radius);
+    background: var(--surface-2); border: 1px solid var(--line);
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.55; color: var(--ink-2);
+    overflow-x: auto; white-space: pre;
+  }
+  .j-why { margin: 0 0 8px; color: var(--ink-2); font-size: 14px; }
+  .j-map { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+  .j-map-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3);
+    margin-right: 2px;
+  }
+  .chip {
+    font-size: 12px; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--c); color: var(--c); background: transparent; cursor: pointer;
+  }
+  .chip:hover { background: var(--c); color: var(--bg); border-color: var(--c); }
+
+  /* evolution */
+  .tl { border-left: 2px solid var(--line); margin: 8px 0 0; padding: 0 0 0 20px; list-style: none; }
+  .tl li { position: relative; margin-bottom: 22px; }
+  .tl li::before {
+    content: ""; position: absolute; left: -26px; top: 6px; width: 10px; height: 10px;
+    border-radius: 50%; background: var(--accent); border: 2px solid var(--bg);
+  }
+  .tl li.future::before { background: var(--bg); border: 2px solid var(--accent); }
+  .tl .v { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+  .tl .t { font-weight: 600; }
+  .tl p { margin: 3px 0 0; color: var(--ink-2); font-size: 14px; max-width: 80ch; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--ink-2); margin-top: 6px; }
+  .legend span::before {
+    content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--c); margin-right: 6px; vertical-align: 1px;
+  }
+  footer { border-top: 1px solid var(--line); color: var(--ink-3); font-size: 13px; padding: 18px 24px 40px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 720px) {
+    .row.flow > .node:not(:first-child)::before { content: "↓"; left: 50%; top: -16px; transform: translateX(-50%); }
+    .row.flow { flex-direction: column; gap: 22px 8px; }
+    #panel { width: 100%; }
+    body.panel-open { padding-right: 0; }
+    #intro { padding: 44px 24px 36px; }
+    #intro h1 { font-size: 26px; }
+    .lead { font-size: 16px; }
+    .pillars { gap: 22px; margin: 30px 0 28px; }
+  }
+</style>
+</head>
+<body>
+
+<section id="intro">
+  <div class="wrap">
+    <h1>brain</h1>
+    <p class="lead">
+      A working method for building software with AI agents, and the tooling that keeps the method
+      honest. It installs into your own repository from a pinned git tag: a knowledge base that
+      outlives the session, a spec-driven change flow, git-native team memory, and gates that read
+      the evidence a change leaves behind.
+    </p>
+    <p class="lead sub">
+      An agent writes code faster than a team can agree on what it should do, or verify what it did.
+      brain closes that gap at both ends — work starts from an approved issue and a written spec,
+      and lands only after checks that read what actually happened rather than what anyone reported.
+    </p>
+
+    <div class="pillars">
+      <div>
+        <h2>Knowledge outlives the session</h2>
+        <p>Decisions live in the repository as ADRs; team memory is content-addressed and committed to
+           git. The next session — human or agent — starts with what the last one learned.</p>
+      </div>
+      <div>
+        <h2>One shape for every change</h2>
+        <p>Issue, proposal, spec, design, tasks, code, review, merge — with the artifacts on disk at
+           each step. The same shape whether a person or an agent drives it.</p>
+      </div>
+      <div>
+        <h2>Machines prepare decisions, humans take them</h2>
+        <p>The gates enforce that the process happened, never that the work is good. Approving and
+           merging stays a human keystroke, and the reviewer has no code path that reaches it.</p>
+      </div>
+    </div>
+
+    <p class="status">
+      <strong>v1.0.0 — controlled pilot.</strong> Intended for repositories its maintainer controls,
+      not yet open adoption. This repository runs on brain itself, which is how the method gets tested
+      before it ships. Everything below is drawn from that tree.
+    </p>
+  </div>
+</section>
+
+<header>
+  <div class="wrap">
+    <p class="eyebrow">The method, in detail</p>
+    <p class="tagline">
+      Every box is a real verb, artifact, or gate that exists in this repository. Click one to see what it
+      does, who is allowed to run it, what evidence it produces, and where it is defined. Each node carries
+      the version or ADR that introduced it, and says plainly what about it is still open.
+      <em>New here? Start with <b>A day in it</b>.</em>
+    </p>
+    <div class="controls">
+      <span class="tabs">
+        <button id="tab-map" aria-pressed="true">Flow map</button>
+        <button id="tab-path" aria-pressed="false">A day in it</button>
+        <button id="tab-evo" aria-pressed="false">Evolution</button>
+      </span>
+      <span class="sep"></span>
+      <span id="filters"></span>
+      <button id="linkbase" title="Switch where the source links point">Links: local files</button>
+      <button id="theme" title="Toggle light / dark">Theme</button>
+    </div>
+    <div class="legend">
+      <span class="c-human">human keystroke</span>
+      <span class="c-agent">agent (Tier 1)</span>
+      <span class="c-reviewer">cold reviewer</span>
+      <span class="c-ci">CI / automation</span>
+      <span class="c-either">human or agent</span>
+      <span style="--c: var(--ink-3)">hollow dot = proposed · dashed = in flight</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="map"></div>
+  <div id="path" hidden></div>
+  <div id="evo" hidden></div>
+</main>
+
+<footer class="wrap">
+  Generated by hand from <code>main</code>. To extend it, edit <code>NODES</code> / <code>MILESTONES</code>
+  in this file — no build step, no dependencies.
+</footer>
+
+<aside id="panel" aria-live="polite"></aside>
+
+<script>
+const REPO = "https://github.com/csrinaldi/brain/blob/main/";
+const HERE = "../../"; // this file lives at docs/methodology-map/
+
+const LANES = [
+  { id: "adopt", title: "1 · Adoption & substrate", flow: false,
+    blurb: "One-time, per repository. brain arrives as a pinned git tag and installs only its managed paths; everything else in the consumer tree stays untouched." },
+  { id: "rhythm", title: "2 · Rhythm", flow: false,
+    blurb: "Recurring context loading. Both verbs are idempotent and safe to re-run; neither ever auto-updates brain." },
+  { id: "sdd", title: "3 · The feature cycle (SDD spine)", flow: true,
+    blurb: "issue → branch → proposal → spec → design → tasks → apply → verify → archive → PR → merge. The same spine whether an agent or a human drives it — the artifacts and the evidence are identical." },
+  { id: "review", title: "4 · The review cycle — review → redo → review → approve",
+    groups: [
+      { id: "pipeline", flow: true, title: "The run", note: "one invocation, always through the canonical entrypoint" },
+      { id: "outcomes", flow: false, title: "The three verdicts", note: "and the two runs that post nothing at all",
+        loopback: "REVISE sends it back: the implementer pushes, head moves, and the next run cold-boots at the new sha as <code>rev + 1</code> — bounded at three, then it must STOP." },
+      { id: "keystroke", flow: false, title: "What only a human closes", note: "plus the board that rebuilds itself from the verdicts" },
+    ],
+    blurb: "The reviewer is a cold agent: its own clone, detached at the sha the API reported, doctrine loaded from durable records and prior verdicts — never from the implementer's report or working memory. It can verify, rule and sequence. It cannot approve, and that is structural: there is no APPROVE verb in the port to call." },
+  { id: "ruling", title: "5 · Issue rulings — the same protocol, pointed at a fork",
+    groups: [
+      { id: "fork", flow: true, title: "The fork path", note: "a design decision that needs settling, not code that needs fixing" },
+    ],
+    blurb: "When the question is \"which of these options\" rather than \"is this code right\", the same run posts through issueComment instead of a PR review. The deterministic evaluator never rules: a well-formed fork always escalates to a human, because a machine that could rule could rule itself into authorizing a merge." },
+  { id: "golden", title: "6 · Golden path (the self-gating shortcut)", flow: true,
+    blurb: "Five verbs that wrap the spine for a developer who does not want to remember it. brain:next is a state machine over (branch, open PR, memory status, checks) and always names the single next command." },
+  { id: "memory", title: "7 · Memory — two layers", flow: false,
+    blurb: "Working memory travels with the branch and is disposable. Durable memory is content-addressed, committed, and owned by brain's own record format — not by the memory backend." },
+  { id: "gov", title: "8 · Governance — six levels over observable evidence", flow: false,
+    blurb: "Each gate reads evidence (files, git history, PR/issue metadata) and never the producing tool, which is what keeps the whole set harness-agnostic. Levels enforce that the process happened — never that the work is correct." },
+  { id: "authority", title: "9 · Authority & the upstream loop", flow: false,
+    blurb: "What is structurally impossible for an agent to do, and how a local improvement becomes part of the product." },
+];
+
+const NODES = [
+  // ── 1 · adoption ──────────────────────────────────────────────────────────
+  { id: "install", lane: "adopt", actor: "human", label: "Install a tag",
+    verb: "npm i -D git+https://…#v1.0.0", since: "v0.1.0 · ADR-0006", status: "shipped",
+    summary: "brain is distributed as a pinned git tag — no registry, works on private repos.",
+    detail: [
+      "There is no npm package and no auto-update. The consumer picks a tag on purpose; the anti-pattern file below records why a self-updating installer was rejected.",
+      "The install specifier is derived from the installed package's repository.url and normalised to git+https, so HTTPS-only consumers (CI, containers without an SSH key) work without extra setup."
+    ],
+    produces: ["node_modules/brain at the pinned tag"],
+    docs: [["ADR-0006 — versioned installer", "brain/project/decisions/adr-0006-distribucion-installer-versionado.md"],
+           ["Anti-pattern — self-updating installers", "brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md"],
+           ["Adoption guide", "docs/adoption.md"]] },
+
+  { id: "upgrade", lane: "adopt", actor: "human", label: "Copy managed paths",
+    verb: "npm run brain:upgrade -- <tag>", since: "v0.1.0 · ADR-0003/0006", status: "shipped",
+    summary: "The only command that overwrites files — and only brain's own managed paths.",
+    detail: [
+      "Managed (overwritten): brain/core/**, brain/scripts/**, .gitattributes. Local (never touched): brain/project/**, brain.config.json (migrated additively), .env, openspec/changes/**, .memory/**.",
+      "brain/core/** is read-only in a consumer. That single rule is what makes the upstream loop work: improvements to core go upstream first, then the consumer bumps the tag.",
+      "A restore point now guards the write loop so a mid-upgrade failure rolls back instead of leaving a half-applied tree (#396). Journal-based recovery from SIGKILL is the second slice, still in flight."
+    ],
+    produces: ["the managed tree at <tag>", ".brain-upgrade-backup/ during the write"],
+    docs: [["Path manifest", "brain/core/managed-paths.mjs"],
+           ["Config migrations", "brain/core/config-migrations.mjs"],
+           ["Known limitations", "docs/KNOWN-LIMITATIONS.md"],
+           ["installer.mjs", "brain/scripts/lib/installer.mjs"]] },
+
+  { id: "envinit", lane: "adopt", actor: "human", label: "Bootstrap the environment",
+    verb: "npm run brain:env:init", since: "v0.4.0 · ADR-0012", status: "shipped",
+    summary: "Idempotent first-time setup: config, credentials, hooks, harness, memory backend.",
+    detail: [
+      "Creates brain.config.json if missing and derives vcs.provider, gitHost and slug from the git origin. Prompts for VCS_TOKEN and configures the HTTPS credential helper.",
+      "Selects and initialises the SDD harness and the memory backend through their adapters, and refreshes the skill registry.",
+      "Configures git hooks via core.hooksPath — a per-clone local setting, which is why every teammate runs it once (or lets brain:day:start self-heal it)."
+    ],
+    produces: ["brain.config.json", ".env", "core.hooksPath", "skill registry"],
+    docs: [["ADR-0012 — harness-init adapter", "brain/project/decisions/adr-0012-harness-init-adapter.md"],
+           ["bootstrap.sh", "brain/scripts/bootstrap.sh"],
+           ["Adoption guide", "docs/adoption.md"]] },
+
+  { id: "adoptverb", lane: "adopt", actor: "agent", label: "Inventory an existing repo",
+    verb: "npm run brain:adopt", since: "post-1.0", status: "shipped",
+    summary: "Read-only inventory and classification for a repo that already has history.",
+    detail: ["Greenfield adoption is four commands. An existing repo needs reconciliation first — this verb inventories and classifies what is already there before anything is written."],
+    docs: [["adopt.mjs", "brain/scripts/adopt.mjs"], ["Adoption — path B", "docs/adoption.md"]] },
+
+  { id: "bootstrapadrs", lane: "adopt", actor: "agent", label: "Draft the starter ADRs",
+    verb: "/project:bootstrap-adrs", since: "v0.5.0 · ADR-0013", status: "shipped",
+    summary: "The agent drafts descriptive Stack / Testing / Build ADRs; the human signs each one.",
+    detail: [
+      "Drafts land in openspec/changes/auto-adrs/brain-drafts/ — never in brain/. Accepting each one into brain/ is a Tier-2 human action.",
+      "The agent never invents rationale: Context and Consequences stay <TODO> stubs for the human to fill."
+    ],
+    produces: ["openspec/changes/auto-adrs/brain-drafts/*.md"],
+    docs: [["ADR-0013 — auto-ADR onboarding", "brain/project/decisions/adr-0013-auto-adr-onboarding.md"],
+           ["Anti-pattern — AI promotes its own artifacts", "brain/core/anti-patterns/ia-promueve-sus-propios-artefactos.md"]] },
+
+  { id: "adapters", lane: "adopt", actor: "either", label: "Adapters (all swappable)",
+    verb: "AGENT_PLATFORM · SDD_ENGINE · MEMORY_BACKEND · vcs.provider", since: "v1.0.0 · ADR-0024", status: "shipped",
+    summary: "Three orthogonal axes plus the VCS port. Nothing in the method depends on a specific tool.",
+    detail: [
+      "The SDD harness (default gentle-ai), the memory backend (default engram), the agent platform, and the VCS provider (GitHub / GitLab) are each selected by config and reached through a verb contract.",
+      "This is why every governance gate reads evidence rather than the producing tool — swapping a harness must not change what the gates see."
+    ],
+    docs: [["ADR-0024 — three-axis decoupling", "brain/project/decisions/adr-0024-three-axis-decoupling.md"],
+           ["ADR-0001 — 3-layer architecture", "brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md"],
+           ["Harness contract", "brain/core/methodology/harness-contract.md"],
+           ["VCS contract", "brain/core/methodology/vcs-contract.md"]] },
+
+  // ── 2 · rhythm ────────────────────────────────────────────────────────────
+  { id: "daystart", lane: "rhythm", actor: "either", label: "Start the workday",
+    verb: "npm run brain:day:start", since: "v0.1.0", status: "shipped",
+    summary: "VCS auth → ecosystem updates → team memory round-trip → ticket board → new-tag notice.",
+    detail: [
+      "The memory round-trip is import → index → export: pull .memory/ into the local engram, reproject brain/ into it, then publish it back.",
+      "It notifies about a newer brain tag and never applies it. It also self-heals core.hooksPath, so a fresh clone gets its hooks without re-running env:init."
+    ],
+    docs: [["day-start.mjs", "brain/scripts/day-start.mjs"],
+           ["Consolidation protocol §5", "brain/core/methodology/consolidation-protocol.md"]] },
+
+  { id: "sessionstart", lane: "rhythm", actor: "either", label: "Load session context",
+    verb: "npm run brain:session:start", since: "v0.8.1", status: "shipped",
+    summary: "Read-only, local-only, no network: restores manifest, engram, active change and ticket memory.",
+    detail: ["Deliberately cheaper than day:start — an agent resuming mid-day needs context, not the whole daily sequence. It performs no writes outside the local memory hydration and touches no network."],
+    docs: [["session-start.mjs", "brain/scripts/session-start.mjs"],
+           ["Workflow guide", "docs/workflow-guide.md"]] },
+
+  // ── 3 · SDD spine ─────────────────────────────────────────────────────────
+  { id: "issue", lane: "sdd", actor: "human", label: "Approved issue",
+    verb: "label: status:approved", since: "v0.6.0 · ADR-0014", status: "shipped",
+    summary: "The work starts with a human keystroke — the approval label — not with a prompt.",
+    detail: [
+      "Every PR to main must reference an issue with Closes/Fixes/Resolves, and that issue must carry status:approved. This is invariant #1 and it is not skippable.",
+      "L5 (actor-check) then verifies that whoever applied the label is not the PR author or the issue author. Under the lite doctrine tier the rule relaxes to a distinct act: the label must be applied after the head commit was pushed."
+    ],
+    gates: ["issue-link (required)", "actor-check (detection)"],
+    docs: [["Workflow governance", "brain/core/methodology/workflow-governance.md"],
+           ["actor-check.mjs", "brain/scripts/vcs/actor-check.mjs"],
+           ["ADR-0026 — doctrine tiers", "brain/project/decisions/adr-0026-governance-doctrine-tiers.md"]] },
+
+  { id: "ticketstart", lane: "sdd", actor: "either", label: "Take the ticket",
+    verb: "brain:ticket:start -- <id> --worktree --base <tracker>", since: "v0.1.0", status: "shipped",
+    summary: "Creates {type}/issue-{n}-{slug} in an isolated worktree off the integration base.",
+    detail: [
+      "The isolated worktree is load-bearing whenever parallel work is possible: one branch per worktree over a shared object store, single fetch, no extra clone. A branch in the main checkout is only acceptable for strictly serial solo work.",
+      "The base is the tracker branch (e.g. feature/v2.0.0) while an epic is in flight — not main."
+    ],
+    produces: ["the working branch / worktree"],
+    docs: [["Harness contract — worktree convention", "brain/core/methodology/harness-contract.md"],
+           ["ticket-start.mjs", "brain/scripts/ticket-start.mjs"]] },
+
+  { id: "sddnew", lane: "sdd", actor: "either", label: "Scaffold the change",
+    verb: "brain:project:feature -- --issue <id>", since: "v0.1.0 · ADR-0019", status: "shipped",
+    summary: "Creates openspec/changes/issue-<n>-<slug>/ with the four canonical artifacts.",
+    detail: [
+      "The slug is mandatory. The four files sit flat at the change root — a nested specs/<capability>/spec.md variant exists in older dirs and is legacy-accepted for readers, but the scaffold must never produce it.",
+      "brain/scripts/lib/sdd-layout.mjs is the single source for the layout; a drift-guard test fails if a second definition of the required-artifact set appears anywhere in brain/scripts/**."
+    ],
+    produces: ["proposal.md", "spec.md", "design.md", "tasks.md"],
+    docs: [["SDD canonical layout", "brain/core/methodology/sdd-layout.md"],
+           ["sdd-layout.mjs", "brain/scripts/lib/sdd-layout.mjs"],
+           ["new-change.mjs", "brain/scripts/new-change.mjs"]] },
+
+  { id: "proposal", lane: "sdd", actor: "either", label: "proposal.md",
+    verb: "human-approved PRD", since: "v0.1.0", status: "shipped",
+    summary: "What is being changed and why — the artifact the human owns.",
+    detail: ["An agent may draft it, but the approval it encodes is the human's. It is the first of four required artifacts and the phase-order gate expects the sequence to be monotonic."],
+    gates: ["phase-order (detection)"],
+    docs: [["SDD canonical layout", "brain/core/methodology/sdd-layout.md"],
+           ["Workflow guide", "docs/workflow-guide.md"]] },
+
+  { id: "spec", lane: "sdd", actor: "either", label: "spec.md",
+    verb: "delta requirements (REQ-*)", since: "v0.1.0", status: "shipped",
+    summary: "The delta requirements, written as testable REQ ids with scenarios.",
+    detail: [
+      "Requirements carry stable ids (REQ-…) that tests reference by name, so a test file reads as evidence for a specific requirement rather than as an untraceable assertion.",
+      "L4 requires spec.md and design.md to exist before code lands outside openspec/changes/**."
+    ],
+    gates: ["phase-order (detection)"],
+    docs: [["phase-order-check.mjs", "brain/scripts/vcs/phase-order-check.mjs"],
+           ["SDD canonical layout", "brain/core/methodology/sdd-layout.md"]] },
+
+  { id: "design", lane: "sdd", actor: "either", label: "design.md",
+    verb: "technical decisions", since: "v0.1.0", status: "shipped",
+    summary: "The approach and the trade-offs — where a decision is argued before it is coded.",
+    detail: ["A decision here that turns out to be durable is promoted later as an ADR — but only by a human, through the consolidation protocol."],
+    gates: ["phase-order (detection)", "decision-gate (required, label-conditional)"],
+    docs: [["Consolidation protocol", "brain/core/methodology/consolidation-protocol.md"]] },
+
+  { id: "tasks", lane: "sdd", actor: "either", label: "tasks.md",
+    verb: "- [ ] / - [x] checklist", since: "v0.1.0", status: "shipped",
+    summary: "The implementation checklist — and the hot-capture surface for micro-decisions.",
+    detail: [
+      "Checked items are counted by tooling: L4 refuses code outside openspec/changes/** until tasks.md has at least one checked item.",
+      "Micro-decisions agreed in chat are dumped into the change's hot-capture section rather than left in the transcript. With parallel agents, each writes only openspec/changes/{iid}/scratch/{agent-id}.md and the orchestrator is the sole writer of tasks.md."
+    ],
+    gates: ["phase-order (detection)"],
+    docs: [["Consolidation protocol §1", "brain/core/methodology/consolidation-protocol.md"],
+           ["SDD canonical layout — checked-task pattern", "brain/core/methodology/sdd-layout.md"]] },
+
+  { id: "apply", lane: "sdd", actor: "agent", label: "Implement",
+    verb: "/sdd-apply", since: "v0.1.0", status: "shipped",
+    summary: "Code the tasks, strict-TDD where the project supports it, ticking items as they land.",
+    detail: ["This is the only phase where an agent writes production code, and it is bounded on both sides: the spec above it and the gates below it."],
+    docs: [["Workflow guide", "docs/workflow-guide.md"],
+           ["Agent authorities", "brain/core/methodology/agent-authorities.md"]] },
+
+  { id: "localgates", lane: "sdd", actor: "either", label: "Local gates",
+    verb: "brain:repo:check · npm test · brain:nav", since: "v0.1.0 · v0.7.2", status: "shipped",
+    summary: "Prohibited references, the unit suite, and knowledge-base navigation integrity.",
+    detail: [
+      "repo:check runs project-defined rules (hardcoded secrets, TODO without a ticket, --no-verify usage) from brain/project/check-refs-rules.mjs — the engine is generic, the rules are yours.",
+      "brain:nav enforces that the knowledge base is absorbable: no broken links and no orphans — every brain/**/*.md must be reachable transitively from brain/HOME.md.",
+      "The same three run in CI as L1 (local-checks), author-agnostically, which is what closes the --no-verify hole in the client hooks."
+    ],
+    gates: ["local-checks (required)"],
+    docs: [["check-refs.mjs", "brain/scripts/check-refs.mjs"],
+           ["project rules", "brain/project/check-refs-rules.mjs"],
+           ["check-brain-nav.mjs", "brain/scripts/check-brain-nav.mjs"]] },
+
+  { id: "verify", lane: "sdd", actor: "either", label: "Verify the change",
+    verb: "npm run brain:change:verify", since: "v0.1.0", status: "shipped",
+    summary: "Classifies the diff by scope and runs only the verifications that scope demands.",
+    detail: ["Scope-aware by design: a docs-only change should not pay for a full polyglot build, and a code change should never skip one."],
+    docs: [["verify-change.mjs", "brain/scripts/verify-change.mjs"]] },
+
+  { id: "archive", lane: "sdd", actor: "either", label: "Archive the change",
+    verb: "npm run brain:change:archive", since: "post-1.0 (#260)", status: "shipped",
+    summary: "Closes the change and moves it to the archive path owned by sdd-layout.mjs.",
+    detail: ["The archive destination is read from archivePath(iid) rather than hardcoded, so the layout doc can never drift from the accessor."],
+    docs: [["archive.mjs", "brain/scripts/archive.mjs"],
+           ["sdd-layout.mjs", "brain/scripts/lib/sdd-layout.mjs"]] },
+
+  { id: "pr", lane: "sdd", actor: "either", label: "Open the PR",
+    verb: "/mr-create  ·  Closes #<id>", since: "v0.1.0", status: "shipped",
+    summary: "The delivery unit. The issue reference is what makes the whole evidence chain resolvable.",
+    detail: ["From here the gates run over evidence only: the diff, the git history, the PR and issue metadata. No gate branches on whether a human or an agent produced the commit."],
+    gates: ["all REQUIRED_JOBS + DETECTION_JOBS"],
+    docs: [["Workflow governance", "brain/core/methodology/workflow-governance.md"],
+           ["governance.yml", ".github/workflows/governance.yml"]] },
+
+  { id: "merge", lane: "sdd", actor: "human", label: "Merge",
+    verb: "the keystroke that stays human", since: "v0.6.0", status: "shipped",
+    summary: "The one act the method refuses to mechanise — structurally, not by convention.",
+    detail: [
+      "The cold reviewer can verify, rule and sequence, but has no code path to an APPROVE review: verdicts hardcode event: 'COMMENT', and the L6 approver set is built only from APPROVED reviews.",
+      "Post-merge, rung 3 re-audits the merged commit and opens an auto-revert PR if an invariant broke."
+    ],
+    docs: [["Reviewer protocol", "brain/core/methodology/reviewer-protocol.md"],
+           ["governance-postmerge.yml", ".github/workflows/governance-postmerge.yml"]] },
+
+  // ── 4 · review cycle ──────────────────────────────────────────────────────
+  { id: "rv-queue", lane: "review", group: "pipeline", actor: "either", label: "Queued for review",
+    verb: "label: needs-review · brain:review:queue", since: "Track H (#266)", status: "shipped",
+    summary: "The queue is a label read, oldest first — and it lists pending escalations beside it.",
+    detail: [
+      "brain:review:queue partitions the open PRs into the review queue (needs-review / needs-ruling) and the escalation inbox (needs-decision), each sorted by number ascending.",
+      "Ascending number IS oldest-first with zero approximation: PR and issue numbers are monotonic counters assigned at creation by both GitHub and GitLab. It is read-only — it applies no labels and posts nothing."
+    ],
+    docs: [["queue.mjs", "brain/scripts/review/queue.mjs"],
+           ["Reviewer protocol §9", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-invoke", lane: "review", group: "pipeline", actor: "either", label: "Invoke the reviewer",
+    verb: "npm run brain:review -- --pr <n>", since: "Track H (#266)", status: "shipped",
+    summary: "Always through the canonical entrypoint — never an ad-hoc prompt to read the diff.",
+    detail: [
+      "When a platform launches a subagent in the reviewer role, the subagent is strictly a command executor of this verb. It must not be handed manual instructions to read diffs or post comments.",
+      "Three reasons this is load-bearing: zero prompt drift (the run is wired identity → cold-boot → mode → evaluator → verdict → poster, deterministically); protocol compliance (output is always a fenced brain-review/N block with validated evidence, never free prose); and cost (the $0-token deterministic pre-checks run before any inference)."
+    ],
+    docs: [["Reviewer protocol §13", "brain/core/methodology/reviewer-protocol.md"],
+           ["cli.mjs", "brain/scripts/review/cli.mjs"]] },
+
+  { id: "rv-identity", lane: "review", group: "pipeline", actor: "reviewer", label: "Abstain if it is mine",
+    verb: "identity.mjs — self-review check", since: "Track H · hardened #407", status: "shipped",
+    summary: "A reviewer whose handle equals the PR author must abstain — the same rule L5 enforces.",
+    detail: [
+      "This is the reviewer-side mirror of actor-check: nobody reviews their own work, including a machine.",
+      "It used to be fail-OPEN — an unset reviewer.handle warned and reviewed anyway. That was deliberate while the handle could not be resolved, and the premise expired; it now fails closed (#407)."
+    ],
+    docs: [["identity.mjs", "brain/scripts/review/identity.mjs"],
+           ["Reviewer protocol §10", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-coldboot", lane: "review", group: "pipeline", actor: "reviewer", label: "Cold boot",
+    verb: "own clone, detached at headRefOid", since: "Track H · ADR-0021/0022", status: "shipped",
+    summary: "Verify against the server, from a clean tree. The report under review is never an input.",
+    detail: [
+      "The anchor is the headRefOid the API returned, checked out detached — never a branch name (a moving pointer the implementer controls) and never a sha quoted in a report (the report is the thing being reviewed).",
+      "Doctrine loads from two server-side sources neither of which was written to persuade a reviewer: .memory/records/*.jsonl filtered to type decision|architecture, and every prior brain-review block on the thread.",
+      "resume.md is explicitly REJECTED as a boot input: it is the implementer's working memory, and reading it would import their assumptions and documented compromises — the exact contamination coldness exists to avoid."
+    ],
+    produces: ["a detached worktree at head", "doctrine records + prior verdicts"],
+    docs: [["cold-boot.mjs", "brain/scripts/review/cold-boot.mjs"],
+           ["Reviewer protocol §8", "brain/core/methodology/reviewer-protocol.md"],
+           ["ADR-0021 — headRefOid + rollup", "brain/project/decisions/adr-0021-reviewer-port-head-and-rollup.md"]] },
+
+  { id: "rv-mode", lane: "review", group: "pipeline", actor: "reviewer", label: "Derive the mode",
+    verb: "tranche | checkpoint | ruling", since: "Track H (REQ-H1-7)", status: "shipped",
+    summary: "Derived from repo state, never declared by the implementer.",
+    detail: [
+      "A pure function over exactly two inputs: the labels and the changed files. needs-ruling → ruling; a checkpoint-report.md in the diff → checkpoint; otherwise tranche.",
+      "There is no in-tree marker by which the implementer can announce which mode the reviewer should use — that would be the reviewed party choosing the review."
+    ],
+    docs: [["mode.mjs", "brain/scripts/review/mode.mjs"]] },
+
+  { id: "rv-eval", lane: "review", group: "pipeline", actor: "reviewer", label: "Evaluate",
+    verb: "evidence: mandatory · cites: mandatory on blockers", since: "Track H", status: "shipped",
+    summary: "Every finding carries a command the reviewer ran cold. No evidence, no finding.",
+    detail: [
+      "A finding without evidence: is inadmissible — budget, tests and diffstat are re-derived, never read from the implementer's report, and report-vs-tree drift is itself a blocker.",
+      "cites: is mandatory on severity: blocker. An uncited blocker is downgraded to correction, because a blocker asserts that doctrine forbids something — without the citation the reviewer would be inventing doctrine.",
+      "On uncomputable evidence (the provider is down), the rule is never APPROVE: emit REVISE with conditions: [evidence uncomputable]. Fail closed, mirroring run-check.mjs."
+    ],
+    docs: [["tranche.mjs", "brain/scripts/review/evaluators/tranche.mjs"],
+           ["checkpoint.mjs", "brain/scripts/review/evaluators/checkpoint.mjs"],
+           ["Reviewer protocol §6", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-admission", lane: "review", group: "pipeline", actor: "reviewer", label: "Causal admission",
+    verb: "brain-review/2 — regulated tier only", since: "#284 → wired #394 M3", status: "shipped",
+    summary: "Is this finding this change's doing? Pre-existing problems stop blocking the PR that found them.",
+    detail: [
+      "Two fields per finding. evidence_class says how directly it was established (deterministic · inferential · insufficient); causal_disposition says whose fault it is (introduced · behavior-activated · worsened · pre-existing · base-only · unknown).",
+      "The admission rule: pre-existing and base-only findings are routed out of findings[] into follow_ups[] — real, recorded, but not blocking this change. And if every finding was routed out, a REVISE softens to APPROVE.",
+      "unknown never resolves silently in either direction: it forces STOP + escalate: human, rather than blocking without certainty or deferring without certainty.",
+      "The lazy refuter runs over any inferential blocker before the verdict is built — a real wired call that is a no-op today because no evaluator yet emits an inferential finding."
+    ],
+    caveats: [
+      "Tier-gated: lite and standard resolve to brain-review/1, so this whole path is inert here — brain declares tier lite, which means /2 runs only in tests until a regulated fixture exists.",
+      "follow_ups[] is wired but unreachable: no evaluator emits pre-existing or base-only yet."
+    ],
+    docs: [["causal-admission.mjs", "brain/scripts/review/lib/causal-admission.mjs"],
+           ["schema-v2.mjs", "brain/scripts/review/lib/schema-v2.mjs"],
+           ["Reviewer protocol §6.2", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-verdict", lane: "review", group: "pipeline", actor: "reviewer", label: "Build the verdict",
+    verb: "fenced brain-review/1|2 · head_sha · rev", since: "Track H", status: "shipped",
+    summary: "A machine-readable YAML block, bound to the exact tree it read.",
+    detail: [
+      "head_sha is mandatory: it binds the verdict to the tree the reviewer actually read, and expires with it. rev counts the prior verdicts already on the thread.",
+      "rev ≥ 3 forbids a fourth REVISE — the verdict becomes STOP + escalate: human. Three rounds that fail to converge is evidence the fork needs a human decision, not a fourth machine opinion. No infinite loop is reachable by construction.",
+      "Both schema versions coexist: the parser accepts either protocol string in the same guard, so a thread that mixes /1 and /2 posts (a repo whose tier changed mid-PR) still loads on both sides."
+    ],
+    produces: ["a brain-review/N block: verdict · gates · findings · conditions · pin · escalate"],
+    docs: [["verdict.mjs", "brain/scripts/review/verdict.mjs"],
+           ["parse-verdict.mjs", "brain/scripts/review/lib/parse-verdict.mjs"],
+           ["Reviewer protocol §7", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-post", lane: "review", group: "pipeline", actor: "reviewer", label: "Post it — COMMENT only",
+    verb: "prReviewComment (event: 'COMMENT' hardcoded)", since: "ADR-0020", status: "shipped",
+    summary: "The security boundary. There is no APPROVE verb in the port for this module to call.",
+    detail: [
+      "Lock 1 — verdicts post in COMMENT state, and L6's approver set is built only from reviews whose state is APPROVED. A verdict cannot be miscounted as approval by construction of the counter, not by a rule the reviewer follows.",
+      "Lock 2 — the verb hardcodes event: 'COMMENT'. No APPROVE sibling, no APPROVE argument, no branch that selects a different event. A fully compromised reviewer process still has no code path to an approving review.",
+      "Every label the reviewer applies passes through the same hardcoded deny-set chokepoint — never a bare provider call."
+    ],
+    caveats: ["No inline per-line comments yet: the verdict is a single fenced block on the thread. (M3 residual → 1.1)"],
+    docs: [["poster.mjs", "brain/scripts/review/poster.mjs"],
+           ["deny-set.mjs", "brain/scripts/review/deny-set.mjs"],
+           ["ADR-0020 — port verbs + two-key split", "brain/project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md"]] },
+
+  { id: "rv-approve", lane: "review", group: "outcomes", actor: "reviewer", label: "APPROVE",
+    verb: "no blocking finding survived", since: "Track H", status: "shipped",
+    summary: "A verdict, not an approval. It unlocks nothing on its own.",
+    detail: [
+      "An APPROVE verdict says the reviewer found nothing that doctrine forbids. It does not produce an APPROVED review, does not satisfy L6's human-reviewer requirement, does not satisfy branch protection, and does not apply status:approved.",
+      "That gap is the entire design. The human reads the verdict and decides — the reviewer's work is the evidence for that decision, never the decision."
+    ],
+    docs: [["Reviewer protocol §1", "brain/core/methodology/reviewer-protocol.md"],
+           ["brain-writes-reviewed.mjs", "brain/scripts/vcs/brain-writes-reviewed.mjs"]] },
+
+  { id: "rv-revise", lane: "review", group: "outcomes", actor: "reviewer", label: "REVISE → redo",
+    verb: "implementer fixes → new head → rev + 1", since: "Track H", status: "shipped",
+    summary: "The loop: findings go back to the implementer, who pushes, and the next run is a new revision.",
+    detail: [
+      "Each finding names what is wrong, the command that proves it, and — for a blocker — the authority that forbids it. The implementer fixes, pushes, and the head sha changes.",
+      "The next run cold-boots at the new head, reads its own prior verdicts off the thread, and increments rev. Doctrine established in round 1 survives into round 2 through those verdicts plus any pinned record — not through conversational memory, which a cold agent does not have.",
+      "The loop is bounded at three: a fourth REVISE is forbidden."
+    ],
+    docs: [["verdict.mjs", "brain/scripts/review/verdict.mjs"],
+           ["Reviewer protocol §7", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-stop", lane: "review", group: "outcomes", actor: "reviewer", label: "STOP + escalate",
+    verb: "label: needs-decision", since: "Track H (H1-5b)", status: "shipped",
+    summary: "The reviewer hands the question to a human and marks it visible.",
+    detail: [
+      "STOP fires when two or more options survive doctrine (that is a new decision, not a ruling), when causality is unknown, or when rev ≥ 3.",
+      "When the verdict escalates AND the post actually landed, needs-decision is applied — which is what makes it appear in brain:review:queue's pending-escalations section. An unposted verdict never touched this head, so there is nothing to escalate.",
+      "Removing needs-decision once the human decides is deliberately manual."
+    ],
+    docs: [["poster.mjs", "brain/scripts/review/poster.mjs"],
+           ["Reviewer protocol §5", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-stale", lane: "review", group: "outcomes", actor: "reviewer", label: "Nothing posted — stale",
+    verb: "label: reviewed:stale", since: "Track H", status: "shipped",
+    summary: "Head moved while the reviewer was working: the verdict describes a tree that no longer exists.",
+    detail: ["The run re-resolves head before posting. If it moved, the verdict is discarded rather than posted against the wrong tree — a stale verdict that looks current is worse than no verdict."],
+    docs: [["poster.mjs", "brain/scripts/review/poster.mjs"],
+           ["Reviewer protocol §10", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-antiloop", lane: "review", group: "outcomes", actor: "reviewer", label: "Nothing posted — anti-loop",
+    verb: "same author AND same head_sha → skip", since: "Track H", status: "shipped",
+    summary: "The reviewer's own comment must not retrigger the reviewer.",
+    detail: ["Two locks, both required: the last verdict on the thread is this reviewer's, AND its head_sha equals the current head. Either alone would be wrong — a new push deserves a new run even from the same reviewer."],
+    docs: [["poster.mjs", "brain/scripts/review/poster.mjs"]] },
+
+  { id: "rv-human", lane: "review", group: "keystroke", actor: "human", label: "status:approved",
+    verb: "the keystroke the reviewer cannot reach", since: "ADR-0020 · §9", status: "shipped",
+    summary: "Labels may only tighten. The ones that loosen or unlock are human-only, and denied in code.",
+    detail: [
+      "The reviewer may apply labels that make a gate stricter (decision, seq:*, reviewed:*, needs-ruling). It must never apply ones that loosen (size:exception, skip:memory-gate) or unlock (status:approved). The deny-set is hardcoded in the caller, not left to the model to remember.",
+      "Lock 3 — key separation: the reviewer handle registers in governance.reviewActors, read only by L6 (\"you do not count as the human reviewer\"), and never in governance.approvalActors, read only by L5 (\"you may apply status:approved\"). One key feeding both gates would de-authorize the reviewer at L6 and authorize it to self-approve at L5 — with a single registration.",
+      "Defense in depth: even a deny-set bug is caught at L5, because actor-check independently rejects status:approved from any identity outside approvalActors."
+    ],
+    caveats: ["No dedicated reviewer identity has been minted yet — interim provenance is the human token that invokes the run, and reviewActors may be empty. The split is real in code regardless."],
+    docs: [["Reviewer protocol §3 · §9 · §11", "brain/core/methodology/reviewer-protocol.md"],
+           ["deny-set.mjs", "brain/scripts/review/deny-set.mjs"],
+           ["actor-check.mjs", "brain/scripts/vcs/actor-check.mjs"]] },
+
+  { id: "rv-board", lane: "review", group: "keystroke", actor: "either", label: "Rebuild the board",
+    verb: "npm run brain:review:board", since: "Track H (H1-5c)", status: "shipped",
+    summary: "Verdicts are truth; the seq:* / reviewed:* labels are a derived index.",
+    detail: [
+      "The board reconciles the label namespaces across every open PR from the verdict comments themselves. A label desync is a rebuildable no-op, not lost state.",
+      "The same inversion the memory format teaches: records are truth, the index is regenerable. status:* is excluded — it is human-only and never reconstructed."
+    ],
+    docs: [["board.mjs", "brain/scripts/review/board.mjs"],
+           ["Memory record format", "brain/core/methodology/memory-format.md"]] },
+
+  // ── 5 · issue rulings ─────────────────────────────────────────────────────
+  { id: "rl-label", lane: "ruling", group: "fork", actor: "either", label: "needs-ruling",
+    verb: "the label that derives ruling mode", since: "Track H (H1-4)", status: "shipped",
+    summary: "The question stops being \"is this code right\" and becomes \"which of these options\".",
+    detail: ["Same entrypoint, same cold boot, same verdict schema. Only the mode differs — and with it, the evaluator and the surface the verdict is posted to."],
+    caveats: ["Protocol §13 documents `brain:review -- --issue <id> --mode ruling`, but the CLI's argument parser accepts only --pr, --mode and --dry-run: a ruling run is anchored on a PR number today, and reads the fork from the PR body."],
+    docs: [["mode.mjs", "brain/scripts/review/mode.mjs"],
+           ["Reviewer protocol §13", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rl-fork", lane: "ruling", group: "fork", actor: "either", label: "The ## FORK contract",
+    verb: "≥2 options · cost + consequence each · 1 recommendation", since: "Track H (REQ-H1-11)", status: "shipped",
+    summary: "A fork must be stated in a shape a machine can check before anyone rules on it.",
+    detail: [
+      "The minimal contract: a ## FORK heading, at least two Option blocks each carrying cost: and consequence:, and exactly one Recommendation: line.",
+      "A malformed fork gets REVISE naming the specific malformation — not a ruling on an ill-posed question. Forcing the author to state the cost and the consequence of each option is most of the value: half the forks resolve themselves in the writing."
+    ],
+    docs: [["ruling.mjs", "brain/scripts/review/evaluators/ruling.mjs"]] },
+
+  { id: "rl-neverrule", lane: "ruling", group: "fork", actor: "reviewer", label: "It never rules",
+    verb: "valid fork → STOP + escalate, always", since: "Owner ruling, Option B", status: "shipped",
+    summary: "A well-formed fork ALWAYS escalates — regardless of how many options doctrine would eliminate.",
+    detail: [
+      "The protocol describes an elimination path (enumerate the constraining authorities, eliminate each option citing the authority that excludes it, rule only if exactly one survives). That path is deliberately NOT implemented in the deterministic evaluator.",
+      "The reason is named in the code: auto-ruling on unrefuted inferential eliminations is authority laundering. A reviewer that could invent a rule could invent the rule that authorizes a merge — so new doctrine is reachable only through STOP + escalate, where a human writes it.",
+      "The cost of escalating is ~0 while a human is at the keyboard. The cost of a machine quietly minting doctrine is unbounded."
+    ],
+    caveats: ["The elimination-annotation format and any citation resolver that would let a future evaluator actually rule are explicitly out of scope, gated on #266 / #284."],
+    docs: [["ruling.mjs", "brain/scripts/review/evaluators/ruling.mjs"],
+           ["Reviewer protocol §5", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rl-post", lane: "ruling", group: "fork", actor: "reviewer", label: "Posted on the issue",
+    verb: "issueComment (not prReviewComment)", since: "ADR-0020", status: "shipped",
+    summary: "Ruling mode selects the issue surface — the one place the protocol leaves the PR review thread.",
+    detail: ["The poster picks the write verb from the mode: issueComment when mode is ruling, prReviewComment otherwise. Both are COMMENT-only by construction; neither can approve anything."],
+    docs: [["poster.mjs", "brain/scripts/review/poster.mjs"],
+           ["VCS contract", "brain/core/methodology/vcs-contract.md"]] },
+
+  { id: "rl-human", lane: "ruling", group: "fork", actor: "human", label: "The human rules",
+    verb: "and if it is new doctrine → ADR", since: "ADR-0014 · §5", status: "shipped",
+    summary: "The escalation lands in the inbox; the answer, if durable, becomes an ADR.",
+    detail: [
+      "A ruling that only settles this change can live in the thread. A ruling that changes a working rule is a decision — which means the decision label, an ADR, and a brain/HOME.md entry, all enforced by decision-gate.",
+      "This is the same human gate as everywhere else in brain: the machine prepares the decision completely and does not take it."
+    ],
+    docs: [["Consolidation protocol", "brain/core/methodology/consolidation-protocol.md"],
+           ["ADR-0014", "brain/project/decisions/adr-0014-workflow-governance.md"]] },
+
+  { id: "rl-pin", lane: "ruling", group: "fork", actor: "either", label: "pin: → durable record",
+    verb: ".memory/records/ (type: decision)", since: "Track H §8", status: "shipped",
+    summary: "How a cold reviewer remembers a ruling it will not be around to recall.",
+    detail: [
+      "This is the paid cost of coldness. A cold agent has none of a human reviewer's accumulated context — it does not remember the ruling made three checkpoints ago.",
+      "The trade: every REVISE or ruling that establishes doctrine emits a pin: payload, and the IMPLEMENTER commits it as a durable record. The reviewer never writes to the repo — the asymmetry holds — but its memory does, and the next cold boot reads it back as doctrine.",
+      "What is not recoverable, and the protocol says so plainly: the human's taste, knowing when a rule should bend. The agent never bends. A reviewer that cannot bend is exactly the reviewer you can automate."
+    ],
+    docs: [["Reviewer protocol §8 · §12", "brain/core/methodology/reviewer-protocol.md"],
+           ["Memory record format", "brain/core/methodology/memory-format.md"]] },
+
+  // ── 6 · golden path ───────────────────────────────────────────────────────
+  { id: "gstart", lane: "golden", actor: "either", label: "start",
+    verb: "npm run brain:start <issue>", since: "v0.6.0", status: "shipped",
+    summary: "Reads the issue through the VCS port, refuses without the approved label, creates the branch.",
+    detail: ["The approved label name is resolved from config (governance.approvedLabel), not hardcoded — a consumer may call it something else."],
+    docs: [["brain-start.mjs", "brain/scripts/brain-start.mjs"]] },
+
+  { id: "gcheck", lane: "golden", actor: "either", label: "check",
+    verb: "npm run brain:check", since: "v0.6.0", status: "shipped",
+    summary: "Runs the four generic checks against the branch diff, then the test suite and repo:check.",
+    detail: ["The same pure check functions CI runs — diffSize, issueLink, adrPresence, memoryPresence — so a local pass means the same thing as a green gate."],
+    docs: [["brain-check.mjs", "brain/scripts/brain-check.mjs"],
+           ["checks/", "brain/scripts/governance/checks/"]] },
+
+  { id: "gsave", lane: "golden", actor: "either", label: "save",
+    verb: "npm run brain:save", since: "v0.6.0", status: "shipped",
+    summary: "Materialises session memory into .memory/ and commits it — or refuses and tells you to capture one.",
+    detail: ["If memory:share produces no new changes, it exits non-zero: an empty memory commit would satisfy the gate's proxy while capturing nothing."],
+    docs: [["brain-save.mjs", "brain/scripts/brain-save.mjs"]] },
+
+  { id: "gship", lane: "golden", actor: "either", label: "ship",
+    verb: "npm run brain:ship", since: "v0.6.0", status: "shipped",
+    summary: "Re-runs check, reads the issue's type:* label, and opens the PR.",
+    detail: ["The PR type comes from the issue's own type label rather than a hardcoded default — the label vocabulary is the consumer's."],
+    docs: [["brain-ship.mjs", "brain/scripts/brain-ship.mjs"]] },
+
+  { id: "gnext", lane: "golden", actor: "either", label: "next",
+    verb: "npm run brain:next", since: "v0.6.0", status: "shipped",
+    summary: "A state machine that answers one question: what is my next step?",
+    detail: ["States, in order: no-branch → open-pr → no-memory → checks-failing → ready. Each maps to exactly one command, which is what gives a human the agent-like experience without an agent."],
+    docs: [["brain-next.mjs", "brain/scripts/brain-next.mjs"]] },
+
+  // ── 5 · memory ────────────────────────────────────────────────────────────
+  { id: "resume", lane: "memory", actor: "either", label: "Working memory",
+    verb: "resume.md · feature:checkpoint / feature:resume", since: "v0.4.0 · ADR-0011", status: "shipped",
+    summary: "Feature-scoped, branch-local, disposable — and never a gate condition.",
+    detail: [
+      "resume.md lives inside the change dir, travels with the branch, and is explicitly outside the required-artifact set: staleness is expected and it is freely discardable.",
+      "It carries a zero-tooling read guarantee — a human with no harness can open it and know where the work stands."
+    ],
+    docs: [["Feature-working-memory contract", "brain/core/methodology/feature-working-memory-contract.md"],
+           ["ADR-0011", "brain/project/decisions/adr-0011-feature-scoped-working-memory.md"]] },
+
+  { id: "durable", lane: "memory", actor: "either", label: "Durable memory",
+    verb: ".memory/records/** (content-addressed)", since: "ADR-0002 · ADR-0017", status: "shipped",
+    summary: "The record format is owned by brain, not by the memory backend.",
+    detail: [
+      "Records are content-addressed and merge by union, so two machines appending concurrently never conflict destructively. index.jsonl is derived and regenerable — low churn by construction.",
+      "Owning the format is what makes the backend swappable: engram is the live layer, .memory/ is the committed truth."
+    ],
+    docs: [["Memory record format", "brain/core/methodology/memory-format.md"],
+           ["ADR-0017", "brain/project/decisions/adr-0017-memory-format-owned-by-brain.md"],
+           ["ADR-0002", "brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md"]] },
+
+  { id: "sharepull", lane: "memory", actor: "either", label: "Share / pull",
+    verb: "memory:share · memory:pull", since: "v0.5.0", status: "shipped",
+    summary: "Export before pushing; churn-resilient pull when syncing across machines.",
+    detail: [
+      "A pre-push hook runs the export and warns when .memory/ was left uncommitted. It is a warning, not a block — the hook itself churns the manifest, so a hard block self-blocked the push.",
+      "memory:pull restores the regenerable manifest, pulls, then imports — raw git pull aborts with \"local changes would be overwritten\" once share has run."
+    ],
+    docs: [["memory/cli.mjs", "brain/scripts/memory/cli.mjs"],
+           ["pre-push hook", "brain/scripts/hooks/pre-push"]] },
+
+  { id: "consolidation", lane: "memory", actor: "human", label: "Consolidate upward",
+    verb: "brain-drafts/ → brain/ (human moves it)", since: "v0.1.0", status: "shipped",
+    summary: "How a branch-local insight becomes durable knowledge — with the human gate in the middle.",
+    detail: [
+      "The agent drafts an ADR, anti-pattern or glossary entry under openspec/changes/{iid}/brain-drafts/. The human reviews it in the PR and moves it into brain/ in a commit they author.",
+      "Every new ADR or methodology file must also update brain/HOME.md — otherwise brain:nav reports an orphan and the PR is not complete."
+    ],
+    docs: [["Consolidation protocol", "brain/core/methodology/consolidation-protocol.md"],
+           ["Anti-pattern — AI writes brain without a gate", "brain/core/anti-patterns/ia-escribe-brain-sin-gate.md"],
+           ["brain/HOME.md", "brain/HOME.md"]] },
+
+  // ── 6 · governance ────────────────────────────────────────────────────────
+  { id: "l1", lane: "gov", actor: "ci", label: "L1 · local-checks",
+    verb: "repo:check + brain:nav + npm test, in CI", since: "v0.9.0 · ADR-0015", status: "shipped",
+    summary: "Runs the local gates author-agnostically, closing the --no-verify-bypassable hook gap.",
+    detail: ["Client hooks are a floor, not a guarantee: git push --no-verify skips them. L1 re-runs the same checks on the server where nobody can pass a flag."],
+    docs: [["ADR-0015", "brain/project/decisions/adr-0015-governance-v3-substrate-ladder.md"],
+           ["governance.yml", ".github/workflows/governance.yml"]] },
+
+  { id: "l2", lane: "gov", actor: "ci", label: "L2 · release & post-merge audit",
+    verb: "brain:audit on tag / auto-revert after merge", since: "v0.9.0 · ADR-0025", status: "shipped",
+    summary: "Fail-closed on the release path, and an auto-revert PR when a merged commit broke an invariant.",
+    detail: [
+      "brain:audit re-verifies the four invariants over first-parent merges and exits 2 on anything it cannot compute — never a silent pass.",
+      "This is the primary enforcing guarantee for repos that can never reach rung 1 (including brain's own, which is on a free-tier private repo)."
+    ],
+    docs: [["brain-audit.mjs", "brain/scripts/brain-audit.mjs"],
+           ["release.yml", ".github/workflows/release.yml"],
+           ["governance-postmerge.yml", ".github/workflows/governance-postmerge.yml"],
+           ["ADR-0025", "brain/project/decisions/adr-0025-release-audit-gate-ordering.md"]] },
+
+  { id: "l3", lane: "gov", actor: "ci", label: "L3 · memory-gate + decision-gate",
+    verb: "session summary present · ADR ships with a labeled decision", since: "v0.6.0 → issue-scoped (#379)", status: "shipped",
+    summary: "Two required jobs: memory was captured, and a labeled decision ships its ADR.",
+    detail: [
+      "memory-gate is now issue-scoped: it looks for a session_summary tied to the current change's issue, falling back to the global existence check when no issue number is detectable.",
+      "decision-gate is two-step: hard when the decision label is present (ADR + HOME.md must be in the diff), heuristic otherwise — it warns on architectural surfaces and always exits 0, because \"is this a decision?\" is judgment."
+    ],
+    docs: [["run-check.mjs", "brain/scripts/governance/run-check.mjs"],
+           ["memory-retrieval.mjs", "brain/scripts/governance/checks/memory-retrieval.mjs"],
+           ["adr-presence.mjs", "brain/scripts/governance/checks/adr-presence.mjs"]] },
+
+  { id: "l4", lane: "gov", actor: "ci", label: "L4 · phase-order",
+    verb: "spec + design exist · monotonic status · no code before a checked task", since: "v0.9.0", status: "shipped",
+    summary: "The SDD phases happened in order — checked as in-repo evidence, not as a prompt.",
+    detail: ["Detection-only today. Promotion to required is deliberately not a one-line flip: its wrapper currently degrades an uncomputable diff to a warning, and that must become fail-closed first or a required gate would pass without ever evaluating."],
+    docs: [["phase-order-check.mjs", "brain/scripts/vcs/phase-order-check.mjs"],
+           ["ADR-0015 — the detection→prevention flip", "brain/project/decisions/adr-0015-governance-v3-substrate-ladder.md"]] },
+
+  { id: "l5", lane: "gov", actor: "ci", label: "L5 · actor-check",
+    verb: "approver ≠ PR author ≠ issue author", since: "v0.9.0 · tiered in ADR-0026", status: "shipped",
+    summary: "No self-approval. At one maintainer the strict form is unsatisfiable — hence the doctrine tiers.",
+    detail: [
+      "This gate is where the two axes met: the rung ladder says where fail-closed can live; the tier says which invariants a team declares itself bound by.",
+      "Under lite, the distinctness rule becomes a distinct-act rule: the approval must be applied after the head commit was pushed, so approval-before-the-code still fails."
+    ],
+    docs: [["actor-check.mjs", "brain/scripts/vcs/actor-check.mjs"],
+           ["ADR-0026 — doctrine tiers", "brain/project/decisions/adr-0026-governance-doctrine-tiers.md"]] },
+
+  { id: "l6", lane: "gov", actor: "ci", label: "L6 · brain-writes-reviewed",
+    verb: "a write to brain/** needs a non-author human review", since: "v0.9.0", status: "shipped",
+    summary: "The evidence form of Tier-2 \"no agent writes to brain/\". CODEOWNERS is an optional enhancement, not the enforcement.",
+    detail: ["The approver set is built only from reviews whose state is APPROVED and whose author is not in governance.reviewActors — which is exactly what makes a cold reviewer's COMMENT verdict structurally uncountable as approval."],
+    docs: [["brain-writes-reviewed.mjs", "brain/scripts/vcs/brain-writes-reviewed.mjs"],
+           ["Reviewer protocol §2", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rungs", lane: "gov", actor: "ci", label: "Substrate rungs 1–4",
+    verb: "merge · release · auto-correct · floor", since: "v0.9.0 · ADR-0015", status: "shipped",
+    summary: "Where fail-closed can live, detected — never declared.",
+    detail: [
+      "Rung 1 (branch protection) needs a paid or public repo; rung 2 (release) is always available because a project controls its own release; rung 3 (post-merge auto-revert) needs only CI; rung 4 is detection with a loud signal.",
+      "No gate depends on a single rung, and a gate never lies about which one is active — brain:governance-status reports the active rung and the remedy to climb higher."
+    ],
+    docs: [["substrate.mjs", "brain/scripts/vcs/substrate.mjs"],
+           ["brain-governance-status.mjs", "brain/scripts/brain-governance-status.mjs"]] },
+
+  { id: "tiers", lane: "gov", actor: "human", label: "Doctrine tiers",
+    verb: "governance.tier: lite | standard | regulated", since: "post-1.0 · ADR-0026", status: "shipped",
+    summary: "A declared axis, orthogonal to the detected rung: which invariants a team is bound by.",
+    detail: [
+      "The rung answers where fail-closed CAN live. The tier answers which invariants a team CHOOSES to be bound by, and on what evidence. Neither may mask the other — status renders the cross-product per gate.",
+      "This repository declares lite (solo maintainer). standard is the default for any consumer and is behaviourally identical to the pre-tier doctrine."
+    ],
+    docs: [["ADR-0026", "brain/project/decisions/adr-0026-governance-doctrine-tiers.md"],
+           ["brain.config.json", "brain.config.json"]] },
+
+  { id: "boundary", lane: "gov", actor: "ci", label: "The enforce/guide boundary",
+    verb: "outputs are enforced · judgment is not", since: "v0.6.0 · ADR-0014", status: "shipped",
+    summary: "The gates prove the process happened. They never claim the work is correct.",
+    detail: [
+      "A ticket link exists — not that the ticket describes the right work. A diff is ≤400 lines — not that it is sliced coherently. Memory changed — not that the capture was good. An ADR exists — not that a decision was actually made.",
+      "This line is not a gap to be closed. It is the boundary between what a machine can verify and what needs a human mind."
+    ],
+    docs: [["Workflow governance", "brain/core/methodology/workflow-governance.md"],
+           ["ADR-0014", "brain/project/decisions/adr-0014-workflow-governance.md"]] },
+
+  { id: "metrics", lane: "gov", actor: "either", label: "Measure, don't re-derive",
+    verb: "brain:metrics · brain:audit · brain:governance-status", since: "post-1.0 (#324)", status: "shipped",
+    summary: "Reporting runs the same pure check functions enforcement runs — measurement cannot drift.",
+    detail: [
+      "brain:metrics walks the same first-parent merges through the same shared code, splitting raw from enforced results and counting exception labels by author.",
+      "It is read-only and never fails a merge; an uncomputable merge is counted visibly rather than silently passed."
+    ],
+    docs: [["brain-metrics.mjs", "brain/scripts/brain-metrics.mjs"],
+           ["Workflow governance — metrics reference", "brain/core/methodology/workflow-governance.md"]] },
+
+  // ── 7 · authority ─────────────────────────────────────────────────────────
+  { id: "tier1", lane: "authority", actor: "agent", label: "Tier 1 — autonomous",
+    verb: "read anything · write openspec/changes/** · run checks", since: "v0.1.0", status: "shipped",
+    summary: "What an agent may do without asking.",
+    detail: ["Read any file; create and modify in-flight SDD artifacts; write to its own scratch file; run repo:check, change:verify and builds; save observations to memory; propose commits."],
+    docs: [["Agent authorities", "brain/core/methodology/agent-authorities.md"]] },
+
+  { id: "tier2", lane: "authority", actor: "human", label: "Tier 2 — confirm first",
+    verb: "push · open/merge a PR · write brain/ · touch CI config", since: "v0.1.0", status: "shipped",
+    summary: "The agent proposes and waits for an explicit human yes.",
+    detail: ["Pushing, opening or merging a PR, modifying anything under brain/, changing CI or CODEOWNERS, deleting branches or committed files, resolving architecture/decision conflicts in memory."],
+    docs: [["Agent authorities", "brain/core/methodology/agent-authorities.md"]] },
+
+  { id: "tier3", lane: "authority", actor: "human", label: "Tier 3 — prohibited",
+    verb: "self-approve · rewrite history · commit into brain/", since: "v0.1.0", status: "shipped",
+    summary: "Never, even when asked directly.",
+    detail: ["Committing straight into brain/decisions, anti-patterns, domain or methodology; approving or merging its own PR; rewriting published history; escalating decisions to other agents behind the human's back.",
+             "When the tier is unclear, the rule is to stop and ask — doubt about the tier is itself grounds to escalate."],
+    docs: [["Agent authorities", "brain/core/methodology/agent-authorities.md"]] },
+
+  { id: "reviewer", lane: "authority", actor: "agent", label: "The cold reviewer",
+    verb: "COMMENT-only verdicts · brain-review/1|2", since: "ADR-0020/0021/0022", status: "proposed",
+    summary: "A reviewer that can verify, rule and sequence — and structurally cannot approve.",
+    detail: [
+      "Three independent locks, any one of which holds if the other two fail: verdicts post as COMMENT state; the port verb hardcodes event: 'COMMENT' with no APPROVE sibling; and the reviewer handle registers in governance.reviewActors, read only by L6, never in approvalActors, read only by L5.",
+      "It applies doctrine, it never creates it — and rev ≥ 3 forces a STOP rather than another round.",
+      "Status: doctrine proposed, pending human signature."
+    ],
+    docs: [["Reviewer protocol", "brain/core/methodology/reviewer-protocol.md"],
+           ["ADR-0020 — two-key split", "brain/project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md"]] },
+
+  { id: "upstream", lane: "authority", actor: "human", label: "Upstream-first loop",
+    verb: "improve core → PR to brain → bump the tag", since: "v0.1.0 · ADR-0003", status: "shipped",
+    summary: "Consumers never patch core in place; the product absorbs the improvement and ships it as a tag.",
+    detail: [
+      "brain/core/** is read-only in a consumer precisely so that this loop is the only path. A local hack would be silently overwritten on the next upgrade — the rule makes that impossible to forget.",
+      "brain itself is the first consumer of this loop: the repo is self-hosting, so every methodology change is dogfooded before it ships."
+    ],
+    docs: [["ADR-0003 — core/project split & self-hosting", "brain/project/decisions/adr-0003-split-core-project-self-hosting.md"],
+           ["README — the golden rule", "README.md"]] },
+];
+
+const MILESTONES = [
+  { v: "v0.1.0", t: "The three layers exist", future: false,
+    body: "Knowledge base (brain/), SDD scaffolding (openspec/), git-based memory (.memory/). Versioned installer with managed paths and additive migrations, VCS provider adapter, memory backend adapter, the check-refs engine. The method is written down; nothing enforces it yet." },
+  { v: "v0.4.0", t: "Adapters harden, memory gets a second layer", future: false,
+    body: "Generic VCS_TOKEN replaces provider-specific tokens (breaking). Feature-scoped working memory arrives (ADR-0011): resume.md travels with the branch and never reaches main. Harness-init becomes an adapter (ADR-0012), and env:init learns to bootstrap brain.config.json from the git origin." },
+  { v: "v0.5.0", t: "Onboarding stops being manual", future: false,
+    body: "Auto-ADR onboarding (ADR-0013): the agent drafts starter ADRs into brain-drafts/ and the human signs each one — the human gate is designed in from the first ADR a repo ever gets. memory:pull becomes churn-resilient across machines." },
+  { v: "v0.6.0", t: "Governance v1 — the invariants get teeth", future: false,
+    body: "ADR-0014 lands four load-bearing invariants with a floor that works everywhere (client hooks + brain:audit over merged history) and a hard gate where the platform allows it (brain:protect). The golden path (start/check/save/ship/next) unifies the human and agent surfaces, and the --no-verify policy is enforced as a prohibited reference." },
+  { v: "v0.7.0 – v0.8.1", t: "Naming becomes a contract", future: false,
+    body: "scripts/ moves to brain/scripts/ and every verb takes the brain: prefix, with automated consumer migration and deprecated aliases kept alive. Boring on the surface, load-bearing underneath: the verb names are what the harness contract can now promise." },
+  { v: "v0.9.0", t: "Governance v3 — the ladder", future: false,
+    body: "ADR-0015 replaces one enforcement point with six levels over observable evidence (L1–L6), a four-rung substrate ladder, and the REQUIRED/DETECTION split that makes promoting a gate a list move rather than a rewrite. Crucially: every gate reads evidence, never the producing tool." },
+  { v: "v1.0.0", t: "First stable — controlled pilot", future: false,
+    body: "Three-axis decoupling (AGENT_PLATFORM · SDD_ENGINE · MEMORY_BACKEND, ADR-0024), git-native durable memory, VCS-agnostic PR-time governance on GitHub and GitLab, and the cold reviewer's security boundary. Explicitly not open adoption: the hard gate before external adopters is upgrade safety." },
+  { v: "Track H · M3", t: "The reviewer becomes invocable", future: false,
+    body: "The external reviewer stops being a human relaying a report and becomes a command: cold boot at the server's head sha, derived mode, evidence-bearing findings, a machine-readable verdict, and a poster that has no APPROVE path to call (ADR-0020/0021/0022). Then the causal-admission schema (brain-review/2) lands tier-activated, so a pre-existing defect stops blocking the change that happened to find it. Its flow guarantees went live once prReviews carried comment bodies on both providers: prior verdicts, the anti-loop, the rev≥3 bound and board reconciliation all read that field." },
+  { v: "1.1 line", t: "Doctrine tiers, upgrade safety, the reviewer in production", future: true,
+    body: "ADR-0026 adds the declared tier axis (lite / standard / regulated) beside the detected rung, resolving gates that were unsatisfiable at one maintainer. In flight: rollback and journal-based recovery for brain:upgrade (#396), and making the reviewer's flow guarantees real in production (#317)." },
+];
+
+// ── the worked example ──────────────────────────────────────────────────────
+// One feature, start to merge, in a consumer repo (acme/ledger) that adopted brain.
+// Commands and output are the real shapes the scripts emit — see the linked source.
+const JOURNEY = [
+  { phase: "08:55 · Morning", actor: "either", title: "Open the day",
+    cmd: "npm run brain:day:start",
+    out: `── VCS authentication ──────────────────────
+  ✓ Authenticated (github).
+── Main branch sync ────────────────────────
+  ✓ main updated (fast-forward applied).
+── brain version (core) ────────────────────
+  ℹ New brain version available: v1.0.0 → v1.1.0
+    Upgrade consciously: npm run brain:upgrade -- v1.1.0
+    (not auto-applied — review the tag changelog first)
+── Team memory ─────────────────────────────
+  ✓ Pre-push hook active — materializes memory before push.
+── Ticket board ────────────────────────────
+  #142  Export the invoice list to CSV   [status:approved] [type:feature]`,
+    why: [
+      "Five sections, one command: auth, main sync, ecosystem tools, the brain version, memory, and the board.",
+      "Read the version notice carefully — it tells you a newer brain exists and stops there. Nothing auto-updates; upgrading is a keystroke you own. It also self-heals the git hooks, which is why a fresh clone never silently loses them."
+    ],
+    map: ["daystart", "upgrade"] },
+
+  { phase: "09:00 · The precondition", actor: "human", title: "Someone else approved the issue",
+    cmd: "npm run brain:start 142   # if the label is missing:",
+    out: `brain:start: issue #142 ("Export the invoice list to CSV") is not approved.
+  Labels found: [type:feature]
+  Add "status:approved" before starting work.`,
+    why: [
+      "The work does not begin with a prompt. It begins with a human applying status:approved to the issue — and the golden path refuses to start without it.",
+      "It must be someone other than you: L5 checks that the approver is neither the PR author nor the issue author. At the lite tier the rule becomes a distinct act — the label must land after the head commit was pushed — so approving your own work ahead of time still fails."
+    ],
+    map: ["issue", "l5", "gstart"] },
+
+  { phase: "09:05 · Take it", actor: "either", title: "Branch from the approved issue",
+    cmd: "npm run brain:start 142",
+    out: `brain:start: branch "feature/142-export-the-invoice-list-to-csv" created. Start working on issue #142.`,
+    why: [
+      "The branch name is derived from the issue, not invented — which is what lets every later gate resolve the evidence chain back to it.",
+      "When several people (or agents) work in parallel, the harness contract asks for the worktree form instead: brain:ticket:start -- 142 --worktree --base <tracker>. One branch per worktree over a shared object store — no second clone, no shared working tree to collide on."
+    ],
+    map: ["gstart", "ticketstart"] },
+
+  { phase: "09:07 · Context", actor: "either", title: "Load the session",
+    cmd: "npm run brain:session:start",
+    out: `brain · session context
+========================
+branch:   feature/142-export-the-invoice-list-to-csv
+change:   (no change folder for branch)
+memory:   engram hydrated
+------------------------------------------
+ticket:
+(no active ticket memory)
+========================`,
+    why: [
+      "Read-only, local-only, no network. It restores what you or an agent need to resume: manifest churn, the local memory, the active change, the ticket's memory.",
+      "\"No change folder for branch\" is the honest answer right now — there is no SDD change yet. That line changes in the next step."
+    ],
+    map: ["sessionstart", "resume"] },
+
+  { phase: "09:10 · Plan", actor: "either", title: "Scaffold the SDD change",
+    cmd: "npm run brain:project:feature -- --issue 142 --title export-invoices-csv",
+    out: `openspec/changes/issue-142-export-invoices-csv/
+  proposal.md   ← human-approved PRD
+  spec.md       ← delta requirements (REQ-142-*)
+  design.md     ← technical decisions
+  tasks.md      ← implementation checklist`,
+    why: [
+      "Four files, flat, at the change root. The slug is mandatory — a bare issue-142/ directory is a naming violation even though it parses.",
+      "You fill them in that order, by hand or through the agent's /sdd-continue. The order is not ceremony: L4 later reads the tree and checks that spec and design existed before code landed outside openspec/changes/**."
+    ],
+    map: ["sddnew", "proposal", "spec", "design", "tasks"] },
+
+  { phase: "10:20 · Build", actor: "agent", title: "Implement, ticking tasks as they land",
+    cmd: "/sdd-apply        # or just write the code and tick the boxes",
+    out: `tasks.md
+  - [x] 1. CSV serializer for the invoice row shape  (REQ-142-1)
+  - [x] 2. Streamed export endpoint                  (REQ-142-2)
+  - [ ] 3. Column order matches the on-screen table  (REQ-142-3)`,
+    why: [
+      "This is the only phase where an agent writes production code, and it is bounded on both sides: the spec above it, the gates below it.",
+      "Agreements reached while coding go into the change's hot-capture section, not into the chat transcript. With several agents in parallel, each writes only its own scratch file and the orchestrator is the sole writer of tasks.md — concurrent writes to one mutable file lose context silently."
+    ],
+    map: ["apply", "tasks", "consolidation"] },
+
+  { phase: "11:40 · Check", actor: "either", title: "Run the gates locally",
+    cmd: "npm run brain:check",
+    out: `brain:check results:
+
+  [PASS] diffSize
+  [PASS] issueLink
+  [PASS] adrPresence
+  [PASS] memoryPresence
+  [PASS] npmTest
+  [PASS] repoCheck
+
+All checks passed. Ready to brain:ship.`,
+    why: [
+      "These are the same pure functions CI runs — not a local approximation of them. A green run here means the same thing a green gate means there.",
+      "Not sure what to do next at any point? brain:next derives the state from the branch, the open PRs, the memory status and the checks, and prints exactly one command."
+    ],
+    map: ["gcheck", "gnext", "l1", "localgates"] },
+
+  { phase: "11:45 · Save", actor: "either", title: "Commit the session memory",
+    cmd: "npm run brain:save",
+    out: `brain:save: .memory/ committed — "chore(memory): sync .memory [brain:save]"`,
+    why: [
+      "Memory is materialised from the live layer into .memory/ and committed. Tomorrow's brain:day:start on someone else's machine imports it.",
+      "If nothing new was captured, this exits non-zero and tells you to capture a session summary instead of committing an empty change — an empty memory commit would satisfy the gate's proxy while recording nothing, which is worse than a red gate."
+    ],
+    map: ["gsave", "durable", "sharepull", "l3"] },
+
+  { phase: "11:50 · Ship", actor: "either", title: "Open the PR",
+    cmd: "npm run brain:ship",
+    out: `brain:ship: PR opened → https://github.com/acme/ledger/pull/318`,
+    why: [
+      "It re-runs every check first: a red tree makes zero remote calls, so a failing branch never leaves a half-opened PR behind.",
+      "The PR type comes from the issue's own type:* label — and the label is preflighted against the remote before any write, because GitHub hard-errors on an unknown label while GitLab silently creates it. Same verb, same outcome, two very different provider behaviours absorbed by the port."
+    ],
+    map: ["gship", "pr"] },
+
+  { phase: "11:52 · CI", actor: "ci", title: "The gates run over the evidence",
+    cmd: "governance / *   (GitHub Actions)",
+    out: `✓ issue-link       PR closes #142, and #142 carries status:approved
+✓ diff-size        212 / 400 changed lines
+✓ local-checks     repo:check + brain:nav + npm test, author-agnostic
+✓ memory-gate      a session_summary exists for this change
+✓ decision-gate    no "decision" label → heuristic warns, exits 0
+· phase-order      spec + design preceded the code
+· actor-check      approver ≠ PR author ≠ issue author
+· brain-writes-reviewed   no brain/** writes in this diff`,
+    why: [
+      "Every one of these reads evidence — files, git history, PR and issue metadata — and none of them reads which tool produced it. That is what keeps the whole set harness-agnostic and agent-agnostic.",
+      "The five required ones block the merge; the three detection ones report. What they enforce is that the process happened, never that the code is correct — that line is deliberate, and it is where the reviewer starts."
+    ],
+    map: ["l1", "l3", "l4", "l5", "l6", "boundary"] },
+
+  { phase: "12:10 · Review, round 1", actor: "reviewer", title: "REVISE — two findings, both with evidence",
+    cmd: "npm run brain:review -- --pr 318",
+    out: `\`\`\`yaml
+protocol: brain-review/1
+verdict: REVISE
+head_sha: 9f2c1abf3d4e5b6a7c8d9e0f1a2b3c4d5e6f7a8b
+rev: 1
+gates:
+  required: [issue-link, diff-size, local-checks, memory-gate, decision-gate]
+  detection: [phase-order, actor-check, brain-writes-reviewed]
+findings:
+  - id: F1
+    severity: blocker
+    evidence: "npm test -- csv-export.test.mjs → 1 failing (column order)"
+    cites: "REQ-142-3"
+  - id: F2
+    severity: correction
+    evidence: "rg 'toLocaleString' src/export/ → 3 hits, locale not pinned"
+conditions: []
+escalate: null
+\`\`\``,
+    why: [
+      "The reviewer ran in its own clone, checked out detached at the sha the API reported — never your branch name, never a sha quoted in your report. Your report is the thing under review, so it is not an input.",
+      "Every finding carries a command the reviewer ran itself. F1 is a blocker, so it must cite the authority it is enforcing — an uncited blocker gets downgraded to a correction, because a blocker without a citation is a machine inventing doctrine.",
+      "Note what did not happen: no approval, no label that loosens anything, no merge. The verdict posted as a COMMENT-state review, which the L6 counter cannot count as a human review."
+    ],
+    map: ["rv-invoke", "rv-coldboot", "rv-eval", "rv-verdict", "rv-revise"] },
+
+  { phase: "12:30 · Redo", actor: "either", title: "Fix, push — head moves, rev increments",
+    cmd: "git commit -am 'fix(export): pin column order to the on-screen table' && git push",
+    out: `tasks.md
+  - [x] 3. Column order matches the on-screen table  (REQ-142-3)`,
+    why: [
+      "The next run cold-boots at the new sha and reads its own prior verdicts off the thread, so the doctrine established in round 1 survives into round 2 — a cold agent has no conversational memory to carry it.",
+      "The loop is bounded at three. A fourth REVISE is forbidden: at rev ≥ 3 the reviewer must STOP and escalate, because three rounds that fail to converge is evidence the question needs a human, not a fourth machine opinion."
+    ],
+    map: ["rv-revise", "rv-verdict", "rl-pin"] },
+
+  { phase: "12:35 · Review, round 2", actor: "reviewer", title: "APPROVE — which unlocks nothing",
+    cmd: "npm run brain:review -- --pr 318",
+    out: `\`\`\`yaml
+protocol: brain-review/1
+verdict: APPROVE
+head_sha: 4b7e0d92c1a3f5687b0c2d4e6f8a1b3c5d7e9f0a
+rev: 2
+gates:
+  required: [issue-link, diff-size, local-checks, memory-gate, decision-gate]
+  detection: [phase-order, actor-check, brain-writes-reviewed]
+findings: []
+conditions: []
+escalate: null
+\`\`\``,
+    why: [
+      "This is a verdict, not an approval. It creates no APPROVED review, satisfies neither L6 nor branch protection, and applies no label. There is no code path from this module to an approving review — the port defines no such verb.",
+      "That gap is the whole design. The reviewer produced the evidence for a decision it is structurally incapable of taking."
+    ],
+    map: ["rv-approve", "rv-post", "rv-human"] },
+
+  { phase: "12:40 · Merge", actor: "human", title: "The keystroke",
+    cmd: "# a human reviews, approves, and merges",
+    out: `✓ 5 required checks green
+✓ 1 approving review from a non-author human
+→ merged into main`,
+    why: [
+      "A human reads the verdict, approves the PR — that APPROVED review is what L6 counts and what branch protection requires — and merges.",
+      "Post-merge, the audit re-verifies the invariants over the merged commit and would open an auto-revert PR if one broke. This is the rung that works on every repo, including the ones where branch protection is unavailable."
+    ],
+    map: ["merge", "l2", "rungs"] },
+
+  { phase: "12:45 · Close it out", actor: "either", title: "Archive, and promote what lasts",
+    cmd: "npm run brain:change:archive",
+    out: `openspec/changes/issue-142-export-invoices-csv/  →  archived
+brain-drafts/anti-pattern-locale-in-exports.md   →  awaiting a human`,
+    why: [
+      "The change directory is archived to the path sdd-layout.mjs owns — never a hardcoded location.",
+      "If the work produced something durable — an ADR, an anti-pattern, a glossary entry — the agent leaves it as a draft and a human moves it into brain/ in a commit they author, updating brain/HOME.md in the same PR. That signature is human, and L6 checks for it.",
+      "Tomorrow, someone else's brain:day:start pulls the memory this session captured, and the loop closes."
+    ],
+    map: ["archive", "consolidation", "l6", "upstream"] },
+];
+
+// ── render ──────────────────────────────────────────────────────────────────
+const ACTORS = { human: "human", agent: "agent", reviewer: "cold reviewer", ci: "CI", either: "human or agent" };
+const STATUS = { shipped: "", proposed: "st-proposed", inflight: "st-inflight" };
+const byId = Object.fromEntries(NODES.map(n => [n.id, n]));
+let base = "local", active = null, filter = null;
+
+const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
+// Placeholders in the data are written the way the docs write them — <id>, <tag>,
+// <n>, issue-<n>-<slug>. Interpolated raw they parse as unknown elements and vanish,
+// which silently truncated half the verbs on the first render. Everything
+// data-driven goes through esc(); only wrapper markup below is authored as HTML.
+const esc = (v) => String(v).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const href = p => (base === "local" ? HERE + p : REPO + p);
+
+function nodeButton(n) {
+  const b = el("button", `node c-${n.actor} ${STATUS[n.status] || ""}`);
+  b.id = "n-" + n.id;
+  b.appendChild(el("span", "dot"));
+  b.appendChild(el("span", "n-label", esc(n.label)));
+  b.appendChild(el("span", "n-verb", esc(n.verb)));
+  b.addEventListener("click", () => select(n.id, true));
+  return b;
+}
+
+function renderRow(nodes, flow) {
+  const row = el("div", "row" + (flow ? " flow" : ""));
+  for (const n of nodes) row.appendChild(nodeButton(n));
+  return row;
+}
+
+function renderMap() {
+  const root = document.getElementById("map");
+  root.textContent = "";
+  for (const lane of LANES) {
+    const sec = el("section", "lane");
+    sec.appendChild(el("h2", null, lane.title));
+    sec.appendChild(el("p", null, lane.blurb));
+    const mine = NODES.filter(n => n.lane === lane.id);
+    if (lane.groups) {
+      // A lane with groups renders one captioned row per group — the review cycle
+      // needs a pipeline, its outcomes, and the human step read as three things.
+      for (const g of lane.groups) {
+        sec.appendChild(el("div", "group-title", `${esc(g.title)}${g.note ? ` <span>— ${esc(g.note)}</span>` : ""}`));
+        sec.appendChild(renderRow(mine.filter(n => n.group === g.id), g.flow));
+        if (g.loopback) sec.appendChild(el("div", "loopback", `↺&nbsp; ${g.loopback}`));
+      }
+    } else {
+      sec.appendChild(renderRow(mine, lane.flow));
+    }
+    root.appendChild(sec);
+  }
+  applyFilter();
+}
+
+function renderJourney() {
+  const root = document.getElementById("path");
+  root.textContent = "";
+  const sec = el("section", "lane");
+  sec.appendChild(el("h2", null, "One feature, start to merge"));
+  sec.appendChild(el("p", null,
+    "A worked example in a consumer repo that adopted brain: issue #142, \"Export the invoice list to CSV\". " +
+    "The commands are real and the output is the shape the scripts actually emit — follow any step into the map " +
+    "to read what it is doing and why. It includes one REVISE round, because that is the normal case, not a failure."));
+
+  const ol = el("ol", "journey");
+  for (const s of JOURNEY) {
+    const li = el("li");
+    const head = el("div", "j-head");
+    head.appendChild(el("span", "j-phase", esc(s.phase)));
+    head.appendChild(el("span", `tag actor c-${s.actor}`, esc(ACTORS[s.actor])));
+    li.appendChild(head);
+    li.appendChild(el("h3", "j-title", esc(s.title)));
+
+    const term = el("pre", "term");
+    // textContent, not innerHTML: the blocks carry ←, backticks and YAML, and one
+    // of them is literally a rendered verdict.
+    term.textContent = `$ ${s.cmd}\n\n${s.out}`;
+    li.appendChild(term);
+
+    for (const w of s.why) li.appendChild(el("p", "j-why", esc(w)));
+
+    const chips = el("div", "j-map");
+    chips.appendChild(el("span", "j-map-label", "on the map"));
+    for (const id of s.map) {
+      const n = byId[id];
+      if (!n) continue;
+      const c = el("button", `chip c-${n.actor}`, esc(n.label));
+      c.addEventListener("click", () => showNode(id));
+      chips.appendChild(c);
+    }
+    li.appendChild(chips);
+    ol.appendChild(li);
+  }
+  sec.appendChild(ol);
+  root.appendChild(sec);
+}
+
+/** Jump from a journey step to the node that explains it. */
+function showNode(id) {
+  view("map");
+  select(id, true);
+  document.getElementById("n-" + id)?.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function renderEvo() {
+  const root = document.getElementById("evo");
+  root.textContent = "";
+  const sec = el("section", "lane");
+  sec.appendChild(el("h2", null, "How the method got here"));
+  sec.appendChild(el("p", null,
+    "Each release moved the method one step from written-down to enforced. Read it as the shape of the " +
+    "argument: describe the rule, then make it observable, then make it fail closed where the substrate allows."));
+  const ul = el("ul", "tl");
+  for (const m of MILESTONES) {
+    const li = el("li", m.future ? "future" : null);
+    li.appendChild(el("div", null, `<span class="v">${esc(m.v)}</span> · <span class="t">${esc(m.t)}</span>`));
+    li.appendChild(el("p", null, esc(m.body)));
+    ul.appendChild(li);
+  }
+  sec.appendChild(ul);
+  root.appendChild(sec);
+}
+
+function select(id, push) {
+  const n = byId[id];
+  if (!n) return;
+  document.querySelectorAll(".node").forEach(b => b.setAttribute("aria-current", b.id === "n-" + id));
+  const p = document.getElementById("panel");
+  p.textContent = "";
+  const close = el("button", "close", "Close");
+  close.addEventListener("click", deselect);
+  p.appendChild(close);
+  p.appendChild(el("h3", null, esc(n.label)));
+  p.appendChild(el("div", "p-verb", esc(n.verb)));
+
+  const meta = el("div", "p-meta");
+  meta.appendChild(el("span", `tag actor c-${n.actor}`, ACTORS[n.actor]));
+  meta.appendChild(el("span", "tag", esc(n.since)));
+  if (n.status !== "shipped") meta.appendChild(el("span", "tag", n.status === "proposed" ? "proposed" : "in flight"));
+  p.appendChild(meta);
+
+  p.appendChild(el("p", null, `<strong>${esc(n.summary)}</strong>`));
+  for (const d of n.detail || []) p.appendChild(el("p", null, esc(d)));
+
+  if (n.produces?.length) {
+    p.appendChild(el("h4", null, "Produces"));
+    p.appendChild(el("ul", null, n.produces.map(x => `<li><code>${esc(x)}</code></li>`).join("")));
+  }
+  if (n.gates?.length) {
+    p.appendChild(el("h4", null, "Gates that read it"));
+    p.appendChild(el("ul", null, n.gates.map(x => `<li>${esc(x)}</li>`).join("")));
+  }
+  if (n.caveats?.length) {
+    p.appendChild(el("h4", null, "Not closed yet"));
+    p.appendChild(el("ul", "caveats", n.caveats.map(x => `<li>${esc(x)}</li>`).join("")));
+  }
+  p.appendChild(el("h4", null, "Where it is defined"));
+  const docs = el("div", "docs");
+  for (const [label, path] of n.docs) {
+    const a = el("a", null, `${esc(label)} <code>${esc(path)}</code>`);
+    a.href = href(path);
+    docs.appendChild(a);
+  }
+  p.appendChild(docs);
+  p.classList.add("open");
+  document.body.classList.add("panel-open");
+  active = id;
+  if (push) history.replaceState(null, "", "#" + id);
+}
+
+function deselect() {
+  document.getElementById("panel").classList.remove("open");
+  document.body.classList.remove("panel-open");
+  document.querySelectorAll(".node").forEach(b => b.setAttribute("aria-current", "false"));
+  active = null;
+  history.replaceState(null, "", location.pathname);
+}
+
+function applyFilter() {
+  document.querySelectorAll(".node").forEach(b => {
+    const n = byId[b.id.slice(2)];
+    b.classList.toggle("dim", !!filter && n.actor !== filter && !(filter === "human" && n.actor === "either"));
+  });
+}
+
+// controls
+const fbox = document.getElementById("filters");
+for (const [k, label] of Object.entries(ACTORS)) {
+  if (k === "either") continue;
+  const b = el("button", null, label);
+  b.addEventListener("click", () => {
+    filter = filter === k ? null : k;
+    [...fbox.children].forEach(c => c.classList.toggle("on", c === b && filter === k));
+    applyFilter();
+  });
+  fbox.appendChild(b);
+}
+document.getElementById("linkbase").addEventListener("click", e => {
+  base = base === "local" ? "github" : "local";
+  e.target.textContent = base === "local" ? "Links: local files" : "Links: GitHub";
+  if (active) select(active, false);
+});
+document.getElementById("theme").addEventListener("click", () => {
+  const cur = document.documentElement.dataset.theme
+    || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.dataset.theme = cur === "dark" ? "light" : "dark";
+});
+const VIEWS = { map: "tab-map", path: "tab-path", evo: "tab-evo" };
+function view(which) {
+  for (const [id, tab] of Object.entries(VIEWS)) {
+    document.getElementById(id).hidden = id !== which;
+    document.getElementById(tab).setAttribute("aria-pressed", String(id === which));
+  }
+  if (which !== "map") deselect();
+}
+for (const [id, tab] of Object.entries(VIEWS)) {
+  document.getElementById(tab).addEventListener("click", () => view(id));
+}
+addEventListener("keydown", e => { if (e.key === "Escape") deselect(); });
+
+renderMap();
+renderJourney();
+renderEvo();
+if (location.hash && byId[location.hash.slice(1)]) select(location.hash.slice(1), false);
+</script>
+</body>
+</html>
