@@ -75,7 +75,7 @@ tracker `feature/issue-396-rollback`). Slice 2 is a separate PR on the same chai
 - [x] 5.2 Draft ADR-0027 (exit criterion is restorability, not atomicity) into `brain-drafts/`
 - [x] 5.3 Write this SDD change dir
 - [x] 5.4 Materialize the session memory record into PR #412 (`buildRecord` + `validateRecord` + `memory:reindex`; omit `issue` until #404)
-- [ ] 5.5 Human ratification of ADR-0027 (Tier-2 / ADR-0013 — agent drafts, human signs)
+- [x] 5.5 ADR-0027 ratified (PR #416, `32bc8e7`); Decision #3's amendment re-confirmed 03/08/2026
 
 ## Phase 6 — Review remediation (slice 1)
 
@@ -183,11 +183,9 @@ does.
       contents were durable. KNOWN-LIMITATIONS had claimed the chain was complete.
 - [x] 8g.5 LOW — `proposal.md` and `design.md` still said "four disjoint locations" (five)
       and that ADR-0027 awaited signature (promoted in 32bc8e7).
-- [ ] 8g.6 **OPEN, needs the maintainer** — ADR-0027 ships `Status: Accepted` above a
-      banner saying the amended Decision #3 has not been separately confirmed. The ADR
-      itself rejects "claim it is met" as the M10 failure mode, and no gate catches the
-      contradiction. Either confirm the amendment and drop the banner, or return Status
-      to Draft. **Not an agent's call.**
+- [x] 8g.6 ADR-0027's amended Decision #3 **re-confirmed by the maintainer 03/08/2026**.
+      The banner is replaced by an amendment-history note, so the record still says what
+      changed and why rather than presenting the current text as the original.
 - [ ] 8g.7 **OPEN** — `restore()` judges `saved` by whether the copy threw rather than by
       outcome, so a read-only managed path that was never modified is reported as "still
       modified". Errs safe; turns a permission nit into a scary refusal loop.

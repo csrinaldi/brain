@@ -1,16 +1,18 @@
 # ADR-0027 — `brain:upgrade` Rollback Is Restorable, Not Atomic
 
 **Status**: Accepted  
-**Date**: 02/08/2026 - Cristian Rinaldi
+**Date**: 02/08/2026 - Cristian Rinaldi  
+**Decision #3 amended and re-confirmed**: 03/08/2026 - Cristian Rinaldi
 
-> ⚠️ **AMENDED AFTER SIGNATURE — Decision #3 needs re-confirmation.** A second review
-> measured the original Decision #3's premise to be false: a symlink resolving *inside* the
-> repository round-trips cleanly, so refusing every symlink was wrong, while a symlinked
-> *ancestor* directory — which does escape — was passing unnoticed. Decision #3 and its cost
-> paragraph now state the real boundary. Two factual corrections came with it ("four disjoint
-> locations" was five; the consumer's-own-VCS alternative was unnamed). The signature above
-> covers the decision's substance, which is unchanged; **the amended Decision #3 has not been
-> separately confirmed.**
+> **Amendment history.** Decision #3 originally refused every symlink at a managed path, on
+> the premise that the write would escape the repository. A review measured that premise
+> false — a symlink resolving *inside* the repository round-trips cleanly, since the
+> snapshot, the write and the restore all follow it — while a symlinked *ancestor* directory,
+> which genuinely does escape, was passing unnoticed. The rule was wrong in both directions
+> and is now stated in terms of the real boundary: escaping `destRoot`, not being a symlink.
+> Two factual corrections came with it ("four disjoint locations" was five; the
+> consumer's-own-VCS alternative was unnamed and is now recorded under Alternatives).
+> The signature above covers the amended text.
 
 ## Context
 
