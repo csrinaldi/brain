@@ -120,6 +120,14 @@ test('brain:upgrade: registers package.json under specialMerge → mergePackageJ
   // when --skip-merge landed (#399), so this asserts the binding rather than its old
   // inline position — the invariant is that package.json is MERGED, not where it is
   // declared.
+  // The CALL SITE, not just the declaration. #399 moved this assertion to the
+  // ALL_MERGES literal alone, and that is not the invariant — the wiring is. With only
+  // the declaration pinned, `specialMerge: mergeMap` -> `specialMerge: {}` reproduced
+  // issue #180 verbatim while the whole suite stayed green.
+  assert.match(source, /specialMerge:\s*mergeMap\b/,
+    'brain-upgrade.mjs must pass the merge map to copyManaged — a declaration nothing ' +
+    'passes protects nothing (issue #180)');
+
   assert.match(source, /ALL_MERGES\s*=\s*\{[^}]*'package\.json':\s*mergePackageJson/,
     'brain-upgrade.mjs must register \'package.json\': mergePackageJson as a merge target — ' +
     'a plain copy would clobber the consumer\'s package.json identity again (issue #180)');

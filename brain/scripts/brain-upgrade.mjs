@@ -36,7 +36,9 @@ const die = (m) => { console.error(`  ${C.red}✗${C.reset} ${m}`); process.exit
 // ── Parse args ─────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
 const flags = new Set(args.filter((a) => a.startsWith('--')));
-const tag = args.find((a) => !a.startsWith('--'));
+// A --skip-merge VALUE is positional too, so it would otherwise be picked up as the
+// tag when it precedes one — silently upgrading to ".claude/settings.json".
+const tag = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--skip-merge');
 const dryRun = flags.has('--dry-run');
 const noInstall = flags.has('--no-install');
 const force = flags.has('--force');
@@ -216,6 +218,48 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { interrupted ??= sig; });
 }
 
+// ── Pre-flight the merges ──────────────────────────────────────────────────────
+// BEFORE step 1, and that placement is the whole point. A corrupt consumer
+// `package.json` makes `npm install` itself die with EJSONPARSE, so a pre-flight
+// placed after the install never runs for one of the two merge targets — the escape
+// hatch would not exist for the more dangerous of the two. This depends only on ROOT
+// and the merge map, so it costs nothing to run first.
+const ALL_MERGES = { '.claude/settings.json': mergeClaudeSettings, 'package.json': mergePackageJson };
+const mergeMap = Object.fromEntries(Object.entries(ALL_MERGES).filter(([rel]) => !skipMerge.includes(rel)));
+
+// `--skip-merge` feeds `local`, which is a GLOB matcher — an unvalidated value there is
+// really `--skip-anything`, and `--skip-merge '**'` would make the upgrade copy nothing
+// and report success. Only a real merge target may be skipped.
+const badSkip = skipMerge.filter((rel) => !Object.hasOwn(ALL_MERGES, rel));
+if (badSkip.length > 0) {
+  console.error(`  ${C.red}✗${C.reset} --skip-merge only accepts a merged path: ${Object.keys(ALL_MERGES).join(', ')}`);
+  die(`Not skippable: ${badSkip.join(', ')}`);
+}
+
+const { unparseable } = preflightMergeTargets({ destRoot: ROOT, mergePaths: Object.keys(mergeMap) });
+if (unparseable.length > 0) {
+  const label = dryRun ? 'would block this upgrade' : 'cannot be parsed';
+  console.error(`  ${C.red}✗${C.reset} ${unparseable.length} file(s) this upgrade must merge ${label}:`);
+  for (const { rel, reason } of unparseable) console.log(`      ${C.dim}${rel} — ${reason}${C.reset}`);
+
+  // A dry run writes nothing, so there is no lockout to prevent — but staying SILENT
+  // would make "dry-run first", the habit this file's own comments recommend, the one
+  // path that hides the problem. Report and stop; do not pretend the plan is clean.
+  if (dryRun) {
+    warn('--dry-run: reported, not written. Repair them before the real run.');
+    process.exit(1);
+  }
+
+  // package.json is different: npm cannot run a script without it, so `--skip-merge`
+  // cannot be reached through `npm run`. Repair is the only honest advice.
+  const skippable = unparseable.filter((u) => u.rel !== 'package.json');
+  warn('Nothing was written.');
+  if (unparseable.some((u) => u.rel === 'package.json')) {
+    die('Repair package.json — npm cannot run any script while it is unparseable, so no flag can get past it.');
+  }
+  die(`Repair them, or skip them and upgrade everything else:\n      ${PM} run brain:upgrade -- ${tag ?? '<tag>'} ${skippable.map((u) => `--skip-merge ${u.rel}`).join(' ')}`);
+}
+
 // ── 1. Install the tag ─────────────────────────────────────────────────────────
 // Derive the install specifier from the currently installed brain's package.json
 // repository.url (always normalized to git+https://…) so HTTPS-only consumers
@@ -260,22 +304,6 @@ if (interrupted) {
   // step 1 already rewrote package.json, the lockfile and node_modules.
   console.error(`  ${C.red}✗${C.reset} ${interrupted} received before the copy began — no managed path was written.`);
   process.exit(interrupted === 'SIGTERM' ? 143 : 130);
-}
-
-// ── Pre-flight the merges ──────────────────────────────────────────────────────
-// Before the snapshot, before the first write: a consumer file that cannot be parsed
-// would otherwise fail the whole upgrade after all that work, and block every future
-// one until it is repaired. Catching it here lets the refusal name every broken file
-// at once AND name the escape.
-const ALL_MERGES = { '.claude/settings.json': mergeClaudeSettings, 'package.json': mergePackageJson };
-const mergeMap = Object.fromEntries(Object.entries(ALL_MERGES).filter(([rel]) => !skipMerge.includes(rel)));
-
-const { unparseable } = preflightMergeTargets({ destRoot: ROOT, mergePaths: Object.keys(mergeMap) });
-if (unparseable.length > 0 && !dryRun) {
-  console.error(`  ${C.red}✗${C.reset} ${unparseable.length} file(s) this upgrade must merge cannot be parsed:`);
-  for (const { rel, reason } of unparseable) console.log(`      ${C.dim}${rel} — ${reason}${C.reset}`);
-  warn('Nothing was written. Repair them, or skip them and upgrade everything else:');
-  die(`  ${PM} run brain:upgrade -- ${tag ?? '<tag>'} ${unparseable.map((u) => `--skip-merge ${u.rel}`).join(' ')}`);
 }
 
 let copied, skipped, merged, collisions;

@@ -72,7 +72,11 @@ control**:
   `.github/PULL_REQUEST_TEMPLATE.md`, `AGENTS.md`, and the workflows are overwritten on upgrade
   (only `.claude/settings.json` and `package.json` are merged). A consumer who edits one of those
   loses it with only a warning. (M4 · #397 → 1.1)
-- **Corrupt consumer JSON blocks all upgrades.** A broken `.claude/settings.json` or `package.json`
+- ~~**Corrupt consumer JSON blocks all upgrades.**~~ **Closed (#399).** Both merge targets are
+  parsed before anything is installed, snapshotted or written; the refusal names every broken
+  file at once and `--skip-merge <path>` upgrades everything else, leaving the named file
+  untouched rather than clobbering it. **Residual:** an unparseable `package.json` still stops
+  `npm run` itself, so no flag can get past it — the refusal says repair is the only route.
   throws before the managed core copies. (M4 · #399 → 1.1)
 - **Downgrade silently ratchets `schemaVersion` up**, with no guard/warning/test. (M4 · #398 → 1.1)
 

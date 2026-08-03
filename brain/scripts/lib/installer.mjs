@@ -206,9 +206,19 @@ export function preflightMergeTargets({ destRoot, mergePaths }) {
     const path = join(destRoot, rel);
     if (!pathPresent(path)) continue; // absent is fine — the merge writes it fresh
     try {
-      JSON.parse(readFileSync(path, 'utf8'));
+      const parsed = JSON.parse(readFileSync(path, 'utf8'));
+      // Parseable is not the same as mergeable. `null` and arrays parse fine and then
+      // blow up inside the merge on `.hooks` / `.scripts` — naming no file and offering
+      // no escape, which is the pre-#399 experience surviving the fix. Two definitions
+      // of "mergeable" in two places is a gap by construction; this one matches what
+      // mergeClaudeSettings and mergePackageJsonScripts actually require.
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        unparseable.push({ rel, reason: `expected a JSON object, got ${Array.isArray(parsed) ? 'an array' : String(parsed)}` });
+      }
     } catch (err) {
-      unparseable.push({ rel, reason: err?.message ?? String(err) });
+      // "cannot be read" and "cannot be parsed" are different; say which.
+      const why = err?.code && err.code !== 'ENOENT' ? `cannot be read — ${err.message}` : err?.message ?? String(err);
+      unparseable.push({ rel, reason: why });
     }
   }
   return { unparseable };
