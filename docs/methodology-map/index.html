@@ -158,6 +158,34 @@
   .docs a { display: block; font-size: 13.5px; margin-bottom: 5px; word-break: break-word; }
   .docs a code { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
 
+  /* the worked example */
+  .journey { list-style: none; margin: 8px 0 0; padding: 0 0 0 20px; border-left: 2px solid var(--line); }
+  .journey > li { position: relative; margin-bottom: 30px; max-width: 82ch; }
+  .journey > li::before {
+    content: ""; position: absolute; left: -26px; top: 7px; width: 10px; height: 10px;
+    border-radius: 50%; background: var(--accent); border: 2px solid var(--bg);
+  }
+  .j-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .j-phase { font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: 0.01em; }
+  .j-title { margin: 3px 0 8px; font-size: 16px; }
+  .term {
+    margin: 0 0 10px; padding: 12px 14px; border-radius: var(--radius);
+    background: var(--surface-2); border: 1px solid var(--line);
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.55; color: var(--ink-2);
+    overflow-x: auto; white-space: pre;
+  }
+  .j-why { margin: 0 0 8px; color: var(--ink-2); font-size: 14px; }
+  .j-map { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+  .j-map-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3);
+    margin-right: 2px;
+  }
+  .chip {
+    font-size: 12px; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--c); color: var(--c); background: transparent; cursor: pointer;
+  }
+  .chip:hover { background: var(--c); color: var(--bg); border-color: var(--c); }
+
   /* evolution */
   .tl { border-left: 2px solid var(--line); margin: 8px 0 0; padding: 0 0 0 20px; list-style: none; }
   .tl li { position: relative; margin-bottom: 22px; }
@@ -199,6 +227,7 @@
     <div class="controls">
       <span class="tabs">
         <button id="tab-map" aria-pressed="true">Flow map</button>
+        <button id="tab-path" aria-pressed="false">A day in it</button>
         <button id="tab-evo" aria-pressed="false">Evolution</button>
       </span>
       <span class="sep"></span>
@@ -219,6 +248,7 @@
 
 <main>
   <div id="map"></div>
+  <div id="path" hidden></div>
   <div id="evo" hidden></div>
 </main>
 
@@ -942,6 +972,225 @@ const MILESTONES = [
     body: "ADR-0026 adds the declared tier axis (lite / standard / regulated) beside the detected rung, resolving gates that were unsatisfiable at one maintainer. In flight: rollback and journal-based recovery for brain:upgrade (#396), and making the reviewer's flow guarantees real in production (#317)." },
 ];
 
+// ── the worked example ──────────────────────────────────────────────────────
+// One feature, start to merge, in a consumer repo (acme/ledger) that adopted brain.
+// Commands and output are the real shapes the scripts emit — see the linked source.
+const JOURNEY = [
+  { phase: "08:55 · Morning", actor: "either", title: "Open the day",
+    cmd: "npm run brain:day:start",
+    out: `── VCS authentication ──────────────────────
+  ✓ Authenticated (github).
+── Main branch sync ────────────────────────
+  ✓ main updated (fast-forward applied).
+── brain version (core) ────────────────────
+  ℹ New brain version available: v1.0.0 → v1.1.0
+    Upgrade consciously: npm run brain:upgrade -- v1.1.0
+    (not auto-applied — review the tag changelog first)
+── Team memory ─────────────────────────────
+  ✓ Pre-push hook active — materializes memory before push.
+── Ticket board ────────────────────────────
+  #142  Export the invoice list to CSV   [status:approved] [type:feature]`,
+    why: [
+      "Five sections, one command: auth, main sync, ecosystem tools, the brain version, memory, and the board.",
+      "Read the version notice carefully — it tells you a newer brain exists and stops there. Nothing auto-updates; upgrading is a keystroke you own. It also self-heals the git hooks, which is why a fresh clone never silently loses them."
+    ],
+    map: ["daystart", "upgrade"] },
+
+  { phase: "09:00 · The precondition", actor: "human", title: "Someone else approved the issue",
+    cmd: "npm run brain:start 142   # if the label is missing:",
+    out: `brain:start: issue #142 ("Export the invoice list to CSV") is not approved.
+  Labels found: [type:feature]
+  Add "status:approved" before starting work.`,
+    why: [
+      "The work does not begin with a prompt. It begins with a human applying status:approved to the issue — and the golden path refuses to start without it.",
+      "It must be someone other than you: L5 checks that the approver is neither the PR author nor the issue author. At the lite tier the rule becomes a distinct act — the label must land after the head commit was pushed — so approving your own work ahead of time still fails."
+    ],
+    map: ["issue", "l5", "gstart"] },
+
+  { phase: "09:05 · Take it", actor: "either", title: "Branch from the approved issue",
+    cmd: "npm run brain:start 142",
+    out: `brain:start: branch "feature/142-export-the-invoice-list-to-csv" created. Start working on issue #142.`,
+    why: [
+      "The branch name is derived from the issue, not invented — which is what lets every later gate resolve the evidence chain back to it.",
+      "When several people (or agents) work in parallel, the harness contract asks for the worktree form instead: brain:ticket:start -- 142 --worktree --base <tracker>. One branch per worktree over a shared object store — no second clone, no shared working tree to collide on."
+    ],
+    map: ["gstart", "ticketstart"] },
+
+  { phase: "09:07 · Context", actor: "either", title: "Load the session",
+    cmd: "npm run brain:session:start",
+    out: `brain · session context
+========================
+branch:   feature/142-export-the-invoice-list-to-csv
+change:   (no change folder for branch)
+memory:   engram hydrated
+------------------------------------------
+ticket:
+(no active ticket memory)
+========================`,
+    why: [
+      "Read-only, local-only, no network. It restores what you or an agent need to resume: manifest churn, the local memory, the active change, the ticket's memory.",
+      "\"No change folder for branch\" is the honest answer right now — there is no SDD change yet. That line changes in the next step."
+    ],
+    map: ["sessionstart", "resume"] },
+
+  { phase: "09:10 · Plan", actor: "either", title: "Scaffold the SDD change",
+    cmd: "npm run brain:project:feature -- --issue 142 --title export-invoices-csv",
+    out: `openspec/changes/issue-142-export-invoices-csv/
+  proposal.md   ← human-approved PRD
+  spec.md       ← delta requirements (REQ-142-*)
+  design.md     ← technical decisions
+  tasks.md      ← implementation checklist`,
+    why: [
+      "Four files, flat, at the change root. The slug is mandatory — a bare issue-142/ directory is a naming violation even though it parses.",
+      "You fill them in that order, by hand or through the agent's /sdd-continue. The order is not ceremony: L4 later reads the tree and checks that spec and design existed before code landed outside openspec/changes/**."
+    ],
+    map: ["sddnew", "proposal", "spec", "design", "tasks"] },
+
+  { phase: "10:20 · Build", actor: "agent", title: "Implement, ticking tasks as they land",
+    cmd: "/sdd-apply        # or just write the code and tick the boxes",
+    out: `tasks.md
+  - [x] 1. CSV serializer for the invoice row shape  (REQ-142-1)
+  - [x] 2. Streamed export endpoint                  (REQ-142-2)
+  - [ ] 3. Column order matches the on-screen table  (REQ-142-3)`,
+    why: [
+      "This is the only phase where an agent writes production code, and it is bounded on both sides: the spec above it, the gates below it.",
+      "Agreements reached while coding go into the change's hot-capture section, not into the chat transcript. With several agents in parallel, each writes only its own scratch file and the orchestrator is the sole writer of tasks.md — concurrent writes to one mutable file lose context silently."
+    ],
+    map: ["apply", "tasks", "consolidation"] },
+
+  { phase: "11:40 · Check", actor: "either", title: "Run the gates locally",
+    cmd: "npm run brain:check",
+    out: `brain:check results:
+
+  [PASS] diffSize
+  [PASS] issueLink
+  [PASS] adrPresence
+  [PASS] memoryPresence
+  [PASS] npmTest
+  [PASS] repoCheck
+
+All checks passed. Ready to brain:ship.`,
+    why: [
+      "These are the same pure functions CI runs — not a local approximation of them. A green run here means the same thing a green gate means there.",
+      "Not sure what to do next at any point? brain:next derives the state from the branch, the open PRs, the memory status and the checks, and prints exactly one command."
+    ],
+    map: ["gcheck", "gnext", "l1", "localgates"] },
+
+  { phase: "11:45 · Save", actor: "either", title: "Commit the session memory",
+    cmd: "npm run brain:save",
+    out: `brain:save: .memory/ committed — "chore(memory): sync .memory [brain:save]"`,
+    why: [
+      "Memory is materialised from the live layer into .memory/ and committed. Tomorrow's brain:day:start on someone else's machine imports it.",
+      "If nothing new was captured, this exits non-zero and tells you to capture a session summary instead of committing an empty change — an empty memory commit would satisfy the gate's proxy while recording nothing, which is worse than a red gate."
+    ],
+    map: ["gsave", "durable", "sharepull", "l3"] },
+
+  { phase: "11:50 · Ship", actor: "either", title: "Open the PR",
+    cmd: "npm run brain:ship",
+    out: `brain:ship: PR opened → https://github.com/acme/ledger/pull/318`,
+    why: [
+      "It re-runs every check first: a red tree makes zero remote calls, so a failing branch never leaves a half-opened PR behind.",
+      "The PR type comes from the issue's own type:* label — and the label is preflighted against the remote before any write, because GitHub hard-errors on an unknown label while GitLab silently creates it. Same verb, same outcome, two very different provider behaviours absorbed by the port."
+    ],
+    map: ["gship", "pr"] },
+
+  { phase: "11:52 · CI", actor: "ci", title: "The gates run over the evidence",
+    cmd: "governance / *   (GitHub Actions)",
+    out: `✓ issue-link       PR closes #142, and #142 carries status:approved
+✓ diff-size        212 / 400 changed lines
+✓ local-checks     repo:check + brain:nav + npm test, author-agnostic
+✓ memory-gate      a session_summary exists for this change
+✓ decision-gate    no "decision" label → heuristic warns, exits 0
+· phase-order      spec + design preceded the code
+· actor-check      approver ≠ PR author ≠ issue author
+· brain-writes-reviewed   no brain/** writes in this diff`,
+    why: [
+      "Every one of these reads evidence — files, git history, PR and issue metadata — and none of them reads which tool produced it. That is what keeps the whole set harness-agnostic and agent-agnostic.",
+      "The five required ones block the merge; the three detection ones report. What they enforce is that the process happened, never that the code is correct — that line is deliberate, and it is where the reviewer starts."
+    ],
+    map: ["l1", "l3", "l4", "l5", "l6", "boundary"] },
+
+  { phase: "12:10 · Review, round 1", actor: "reviewer", title: "REVISE — two findings, both with evidence",
+    cmd: "npm run brain:review -- --pr 318",
+    out: `\`\`\`yaml
+protocol: brain-review/1
+verdict: REVISE
+head_sha: 9f2c1abf3d4e5b6a7c8d9e0f1a2b3c4d5e6f7a8b
+rev: 1
+gates:
+  required: [issue-link, diff-size, local-checks, memory-gate, decision-gate]
+  detection: [phase-order, actor-check, brain-writes-reviewed]
+findings:
+  - id: F1
+    severity: blocker
+    evidence: "npm test -- csv-export.test.mjs → 1 failing (column order)"
+    cites: "REQ-142-3"
+  - id: F2
+    severity: correction
+    evidence: "rg 'toLocaleString' src/export/ → 3 hits, locale not pinned"
+conditions: []
+escalate: null
+\`\`\``,
+    why: [
+      "The reviewer ran in its own clone, checked out detached at the sha the API reported — never your branch name, never a sha quoted in your report. Your report is the thing under review, so it is not an input.",
+      "Every finding carries a command the reviewer ran itself. F1 is a blocker, so it must cite the authority it is enforcing — an uncited blocker gets downgraded to a correction, because a blocker without a citation is a machine inventing doctrine.",
+      "Note what did not happen: no approval, no label that loosens anything, no merge. The verdict posted as a COMMENT-state review, which the L6 counter cannot count as a human review."
+    ],
+    map: ["rv-invoke", "rv-coldboot", "rv-eval", "rv-verdict", "rv-revise"] },
+
+  { phase: "12:30 · Redo", actor: "either", title: "Fix, push — head moves, rev increments",
+    cmd: "git commit -am 'fix(export): pin column order to the on-screen table' && git push",
+    out: `tasks.md
+  - [x] 3. Column order matches the on-screen table  (REQ-142-3)`,
+    why: [
+      "The next run cold-boots at the new sha and reads its own prior verdicts off the thread, so the doctrine established in round 1 survives into round 2 — a cold agent has no conversational memory to carry it.",
+      "The loop is bounded at three. A fourth REVISE is forbidden: at rev ≥ 3 the reviewer must STOP and escalate, because three rounds that fail to converge is evidence the question needs a human, not a fourth machine opinion."
+    ],
+    map: ["rv-revise", "rv-verdict", "rl-pin"] },
+
+  { phase: "12:35 · Review, round 2", actor: "reviewer", title: "APPROVE — which unlocks nothing",
+    cmd: "npm run brain:review -- --pr 318",
+    out: `\`\`\`yaml
+protocol: brain-review/1
+verdict: APPROVE
+head_sha: 4b7e0d92c1a3f5687b0c2d4e6f8a1b3c5d7e9f0a
+rev: 2
+gates:
+  required: [issue-link, diff-size, local-checks, memory-gate, decision-gate]
+  detection: [phase-order, actor-check, brain-writes-reviewed]
+findings: []
+conditions: []
+escalate: null
+\`\`\``,
+    why: [
+      "This is a verdict, not an approval. It creates no APPROVED review, satisfies neither L6 nor branch protection, and applies no label. There is no code path from this module to an approving review — the port defines no such verb.",
+      "That gap is the whole design. The reviewer produced the evidence for a decision it is structurally incapable of taking."
+    ],
+    map: ["rv-approve", "rv-post", "rv-human"] },
+
+  { phase: "12:40 · Merge", actor: "human", title: "The keystroke",
+    cmd: "# a human reviews, approves, and merges",
+    out: `✓ 5 required checks green
+✓ 1 approving review from a non-author human
+→ merged into main`,
+    why: [
+      "A human reads the verdict, approves the PR — that APPROVED review is what L6 counts and what branch protection requires — and merges.",
+      "Post-merge, the audit re-verifies the invariants over the merged commit and would open an auto-revert PR if one broke. This is the rung that works on every repo, including the ones where branch protection is unavailable."
+    ],
+    map: ["merge", "l2", "rungs"] },
+
+  { phase: "12:45 · Close it out", actor: "either", title: "Archive, and promote what lasts",
+    cmd: "npm run brain:change:archive",
+    out: `openspec/changes/issue-142-export-invoices-csv/  →  archived
+brain-drafts/anti-pattern-locale-in-exports.md   →  awaiting a human`,
+    why: [
+      "The change directory is archived to the path sdd-layout.mjs owns — never a hardcoded location.",
+      "If the work produced something durable — an ADR, an anti-pattern, a glossary entry — the agent leaves it as a draft and a human moves it into brain/ in a commit they author, updating brain/HOME.md in the same PR. That signature is human, and L6 checks for it.",
+      "Tomorrow, someone else's brain:day:start pulls the memory this session captured, and the loop closes."
+    ],
+    map: ["archive", "consolidation", "l6", "upstream"] },
+];
+
 // ── render ──────────────────────────────────────────────────────────────────
 const ACTORS = { human: "human", agent: "agent", reviewer: "cold reviewer", ci: "CI", either: "human or agent" };
 const STATUS = { shipped: "", proposed: "st-proposed", inflight: "st-inflight" };
@@ -994,6 +1243,56 @@ function renderMap() {
     root.appendChild(sec);
   }
   applyFilter();
+}
+
+function renderJourney() {
+  const root = document.getElementById("path");
+  root.textContent = "";
+  const sec = el("section", "lane");
+  sec.appendChild(el("h2", null, "One feature, start to merge"));
+  sec.appendChild(el("p", null,
+    "A worked example in a consumer repo that adopted brain: issue #142, \"Export the invoice list to CSV\". " +
+    "The commands are real and the output is the shape the scripts actually emit — follow any step into the map " +
+    "to read what it is doing and why. It includes one REVISE round, because that is the normal case, not a failure."));
+
+  const ol = el("ol", "journey");
+  for (const s of JOURNEY) {
+    const li = el("li");
+    const head = el("div", "j-head");
+    head.appendChild(el("span", "j-phase", esc(s.phase)));
+    head.appendChild(el("span", `tag actor c-${s.actor}`, esc(ACTORS[s.actor])));
+    li.appendChild(head);
+    li.appendChild(el("h3", "j-title", esc(s.title)));
+
+    const term = el("pre", "term");
+    // textContent, not innerHTML: the blocks carry ←, backticks and YAML, and one
+    // of them is literally a rendered verdict.
+    term.textContent = `$ ${s.cmd}\n\n${s.out}`;
+    li.appendChild(term);
+
+    for (const w of s.why) li.appendChild(el("p", "j-why", esc(w)));
+
+    const chips = el("div", "j-map");
+    chips.appendChild(el("span", "j-map-label", "on the map"));
+    for (const id of s.map) {
+      const n = byId[id];
+      if (!n) continue;
+      const c = el("button", `chip c-${n.actor}`, esc(n.label));
+      c.addEventListener("click", () => showNode(id));
+      chips.appendChild(c);
+    }
+    li.appendChild(chips);
+    ol.appendChild(li);
+  }
+  sec.appendChild(ol);
+  root.appendChild(sec);
+}
+
+/** Jump from a journey step to the node that explains it. */
+function showNode(id) {
+  view("map");
+  select(id, true);
+  document.getElementById("n-" + id)?.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 function renderEvo() {
@@ -1099,20 +1398,21 @@ document.getElementById("theme").addEventListener("click", () => {
     || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   document.documentElement.dataset.theme = cur === "dark" ? "light" : "dark";
 });
-const tabMap = document.getElementById("tab-map"), tabEvo = document.getElementById("tab-evo");
+const VIEWS = { map: "tab-map", path: "tab-path", evo: "tab-evo" };
 function view(which) {
-  const isMap = which === "map";
-  document.getElementById("map").hidden = !isMap;
-  document.getElementById("evo").hidden = isMap;
-  tabMap.setAttribute("aria-pressed", String(isMap));
-  tabEvo.setAttribute("aria-pressed", String(!isMap));
-  if (!isMap) deselect();
+  for (const [id, tab] of Object.entries(VIEWS)) {
+    document.getElementById(id).hidden = id !== which;
+    document.getElementById(tab).setAttribute("aria-pressed", String(id === which));
+  }
+  if (which !== "map") deselect();
 }
-tabMap.addEventListener("click", () => view("map"));
-tabEvo.addEventListener("click", () => view("evo"));
+for (const [id, tab] of Object.entries(VIEWS)) {
+  document.getElementById(tab).addEventListener("click", () => view(id));
+}
 addEventListener("keydown", e => { if (e.key === "Escape") deselect(); });
 
 renderMap();
+renderJourney();
 renderEvo();
 if (location.hash && byId[location.hash.slice(1)]) select(location.hash.slice(1), false);
 </script>

@@ -14,10 +14,14 @@ No build step, no dependencies, no network calls — one file, opened straight f
 
 ## What it is for
 
-The map is the base for showing how the method **evolves**. Two views:
+The map is the base for showing how the method **evolves**. Three views:
 
 - **Flow map** — the current shape of the method. Each node carries the version or ADR
   that introduced it and a status (shipped · proposed · in flight).
+- **A day in it** — one feature walked end to end in a consumer repo, from
+  `brain:day:start` to the merge, with the real commands and the shape of the output the
+  scripts actually emit. Each step links back into the map. It includes one REVISE round
+  on purpose: a review that finds something is the normal case, not a failure.
 - **Evolution** — the same method as a timeline, release by release, so the argument is
   visible: describe the rule, make it observable, then make it fail closed where the
   substrate allows.
@@ -31,8 +35,11 @@ URL hash, so a specific step is shareable (`…/index.html#l5`).
 Everything is data. Two arrays near the top of the `<script>` block:
 
 ```js
-NODES      // one entry per box: { id, lane, actor, label, verb, since, status,
-           //                      summary, detail[], produces[], gates[], docs[[label, path]] }
+NODES      // one entry per box: { id, lane, group, actor, label, verb, since, status,
+           //                      summary, detail[], produces[], gates[], caveats[],
+           //                      docs[[label, path]] }
+JOURNEY    // one entry per step of the worked example: { phase, actor, title, cmd, out,
+           //                      why[], map[nodeId] }
 MILESTONES // one entry per release on the Evolution timeline
 ```
 
@@ -55,8 +62,18 @@ the docs write them (`<id>`, `<tag>`, `issue-<n>-<slug>`) without vanishing into
 
 Adding a step to the method means adding one object. Nothing else changes.
 
+A `JOURNEY` step's `map` array holds node ids: each renders as a chip that switches to
+the flow map, opens that node, and scrolls to it. An id with no matching node is skipped
+rather than rendered dead.
+
 ## Accuracy
 
 The content is written from `main` by hand. It is documentation, not a generated
 artifact — if a verb, gate, or ADR changes, this page does not update itself. Treat a
 mismatch between a node and the file it links to as a bug in the node.
+
+The worked example's terminal blocks follow the same rule. The commands are real and the
+output follows the format the scripts emit (`brain:check`'s `[PASS] <check>` lines,
+`brain:save`'s commit message, `renderVerdict`'s fenced YAML, `day:start`'s section
+headings from the i18n catalog). The scenario around them — the repo, the issue, the
+findings — is invented, and the shas are not real shas.
