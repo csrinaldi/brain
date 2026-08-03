@@ -42,6 +42,54 @@ test('gitlab.whoami returns normalized username', async () => {
   assert.deepEqual(result, { username: 'gluser' });
 });
 
+// #413: with `token`, whoami resolves the identity OF THAT TOKEN, not the
+// ambient CLI session — GH via GH_TOKEN env precedence, GL via the shared
+// gitlabApiFetch transport (PRIVATE-TOKEN header), no spawn at all.
+
+test('github.whoami({ token }) scopes the call to the token via GH_TOKEN (#413)', async () => {
+  let seenOpts = null;
+  setSpawn((cmd, args, opts) => {
+    seenOpts = opts;
+    return { status: 0, stdout: JSON.stringify({ login: 'the-bot' }), stderr: '' };
+  });
+  const result = await github.whoami({ token: 'tok-bot' });
+  assert.deepEqual(result, { username: 'the-bot' });
+  assert.equal(seenOpts.env.GH_TOKEN, 'tok-bot', 'the token must reach gh as GH_TOKEN — precedence over keyring auth');
+});
+
+test('github.whoami() without token passes NO env override — ambient behavior unchanged (#413)', async () => {
+  let seenOpts = null;
+  setSpawn((cmd, args, opts) => {
+    seenOpts = opts;
+    return { status: 0, stdout: JSON.stringify({ login: 'cli-user' }), stderr: '' };
+  });
+  await github.whoami();
+  assert.equal(seenOpts.env, undefined, 'no token → spawn env untouched, gh keeps its own auth');
+});
+
+test('gitlab.whoami({ token }) uses gitlabApiFetch with PRIVATE-TOKEN, no spawn (#413)', async () => {
+  setSpawn(() => { throw new Error('token path must not spawn glab'); });
+  let seenUrl = null;
+  let seenHeaders = null;
+  const fetchImpl = async (url, options) => {
+    seenUrl = url;
+    seenHeaders = options.headers;
+    return { ok: true, json: async () => ({ username: 'the-bot' }) };
+  };
+  const result = await gitlab.whoami({ token: 'tok-bot', apiBase: 'https://gl.example/api/v4', fetchImpl });
+  assert.deepEqual(result, { username: 'the-bot' });
+  assert.equal(seenUrl, 'https://gl.example/api/v4/user');
+  assert.equal(seenHeaders['PRIVATE-TOKEN'], 'tok-bot');
+});
+
+test('gitlab.whoami({ token }) rejects on a transport failure — the contract discipline holds (#413)', async () => {
+  const fetchImpl = async () => ({ ok: false, status: 401 });
+  await assert.rejects(
+    () => gitlab.whoami({ token: 'bad', apiBase: 'https://gl.example/api/v4', fetchImpl }),
+    /GitLab API failed: 401/,
+  );
+});
+
 // ── issueView ────────────────────────────────────────────────────────────────────
 
 test('github.issueView returns normalized shape', async () => {

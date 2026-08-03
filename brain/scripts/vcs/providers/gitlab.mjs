@@ -28,8 +28,25 @@ export async function authLogin({ host, token } = {}) {
   return run('glab', ['auth', 'login', '--hostname', host, '--git-protocol', 'https', '--stdin'], { input: tok }).ok;
 }
 
-export async function whoami() {
-  const resp = runJson('glab', ['api', '/user']);
+// `token` (optional, issue #413): resolves the identity OF THAT TOKEN via the
+// shared `gitlabApiFetch` transport (PRIVATE-TOKEN header) rather than glab's
+// ambient session, so an identity verification cannot be satisfied by the
+// operator's own login. Rejects on transport failure on BOTH paths (runJson
+// throws / gitlabApiFetch throws) — the contract's discipline for this verb.
+// Without `token` the pre-#413 behavior (current CLI user) is unchanged.
+export async function whoami({ token, apiBase, proxyUrl, fetchImpl } = {}) {
+  if (!token) {
+    const resp = runJson('glab', ['api', '/user']);
+    return { username: resp.username };
+  }
+  const base = apiBase ?? 'https://gitlab.com/api/v4';
+  const resp = await gitlabApiFetch({
+    apiBase: base,
+    token,
+    proxyUrl: proxyUrl ?? null,
+    path: 'user',
+    fetchImpl,
+  });
   return { username: resp.username };
 }
 

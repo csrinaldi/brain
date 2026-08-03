@@ -27,8 +27,14 @@ export async function authLogin({ host, token } = {}) {
   return run('gh', ['auth', 'login', '--hostname', host || 'github.com', '--with-token'], { input: tok }).ok;
 }
 
-export async function whoami() {
-  const resp = runJson('gh', ['api', '/user']);
+// `token` (optional, issue #413): resolves the identity OF THAT TOKEN rather
+// than of whatever `gh` happens to be logged in as — `GH_TOKEN` takes
+// precedence over gh's keyring auth, so an identity verification cannot be
+// satisfied by the operator's ambient login. Without `token` the pre-#413
+// behavior (current CLI user) is unchanged.
+export async function whoami({ token } = {}) {
+  const opts = token ? { env: { ...process.env, GH_TOKEN: token } } : {};
+  const resp = runJson('gh', ['api', '/user'], opts);
   return { username: resp.login };
 }
 
