@@ -20,6 +20,7 @@
     --agent: #2f7d76;
     --ci: #b8562f;
     --either: #6b7280;
+    --reviewer: #2f5d9e;
     --radius: 10px;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -29,20 +30,20 @@
       --bg: #191817; --surface: #211f1e; --surface-2: #2a2725;
       --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #837c73; --line: #383431;
       --accent: #e07a4d; --accent-soft: #3a2a20;
-      --human: #a98fe0; --agent: #56b3a9; --ci: #e07a4d; --either: #9ca3af;
+      --human: #a98fe0; --agent: #56b3a9; --ci: #e07a4d; --either: #9ca3af; --reviewer: #7fa6e8;
     }
   }
   :root[data-theme="light"] {
     --bg: #f7f7f5; --surface: #fff; --surface-2: #f0efec;
     --ink: #1c1b19; --ink-2: #57534e; --ink-3: #8b857c; --line: #dcd9d3;
     --accent: #b8562f; --accent-soft: #f4e3da;
-    --human: #7c5cbf; --agent: #2f7d76; --ci: #b8562f; --either: #6b7280;
+    --human: #7c5cbf; --agent: #2f7d76; --ci: #b8562f; --either: #6b7280; --reviewer: #2f5d9e;
   }
   :root[data-theme="dark"] {
     --bg: #191817; --surface: #211f1e; --surface-2: #2a2725;
     --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #837c73; --line: #383431;
     --accent: #e07a4d; --accent-soft: #3a2a20;
-    --human: #a98fe0; --agent: #56b3a9; --ci: #e07a4d; --either: #9ca3af;
+    --human: #a98fe0; --agent: #56b3a9; --ci: #e07a4d; --either: #9ca3af; --reviewer: #7fa6e8;
   }
 
   * { box-sizing: border-box; }
@@ -93,6 +94,18 @@
     color: var(--ink-3); font-size: 13px;
   }
   .row.flow { gap: 8px 22px; }
+  .group-title {
+    margin: 14px 0 6px; font-size: 12px; font-weight: 600; color: var(--ink-2);
+  }
+  .group-title span { font-weight: 400; color: var(--ink-3); }
+  /* The redo loop is the only edge in the map that goes backwards, so it is drawn
+     rather than implied by node order. */
+  .loopback {
+    display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; padding: 7px 12px;
+    border: 1px dashed var(--reviewer); border-radius: var(--radius);
+    color: var(--reviewer); font-size: 13px; background: transparent;
+  }
+  .loopback code { font-family: var(--mono); font-size: 12px; }
 
   .node {
     position: relative; text-align: left; padding: 9px 12px; min-width: 132px;
@@ -115,6 +128,7 @@
   .c-agent { --c: var(--agent); }
   .c-ci { --c: var(--ci); }
   .c-either { --c: var(--either); }
+  .c-reviewer { --c: var(--reviewer); }
 
   /* detail panel */
   #panel {
@@ -140,6 +154,7 @@
     border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2);
   }
   .tag.actor { border-color: var(--c); color: var(--c); background: transparent; }
+  #panel ul.caveats li { color: var(--ink-3); }
   .docs a { display: block; font-size: 13.5px; margin-bottom: 5px; word-break: break-word; }
   .docs a code { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
 
@@ -178,7 +193,8 @@
     <p class="tagline">
       Every box is a real verb, artifact, or gate that exists in this repository. Click one to see what it
       does, who is allowed to run it, what evidence it produces, and where it is defined. This page is the
-      base for tracking how the method evolves — each node carries the version or ADR that introduced it.
+      base for tracking how the method evolves — each node carries the version or ADR that introduced it,
+      and says plainly what about it is still open.
     </p>
     <div class="controls">
       <span class="tabs">
@@ -193,6 +209,7 @@
     <div class="legend">
       <span class="c-human">human keystroke</span>
       <span class="c-agent">agent (Tier 1)</span>
+      <span class="c-reviewer">cold reviewer</span>
       <span class="c-ci">CI / automation</span>
       <span class="c-either">human or agent</span>
       <span style="--c: var(--ink-3)">hollow dot = proposed · dashed = in flight</span>
@@ -223,13 +240,26 @@ const LANES = [
     blurb: "Recurring context loading. Both verbs are idempotent and safe to re-run; neither ever auto-updates brain." },
   { id: "sdd", title: "3 · The feature cycle (SDD spine)", flow: true,
     blurb: "issue → branch → proposal → spec → design → tasks → apply → verify → archive → PR → merge. The same spine whether an agent or a human drives it — the artifacts and the evidence are identical." },
-  { id: "golden", title: "4 · Golden path (the self-gating shortcut)", flow: true,
+  { id: "review", title: "4 · The review cycle — review → redo → review → approve",
+    groups: [
+      { id: "pipeline", flow: true, title: "The run", note: "one invocation, always through the canonical entrypoint" },
+      { id: "outcomes", flow: false, title: "The three verdicts", note: "and the two runs that post nothing at all",
+        loopback: "REVISE sends it back: the implementer pushes, head moves, and the next run cold-boots at the new sha as <code>rev + 1</code> — bounded at three, then it must STOP." },
+      { id: "keystroke", flow: false, title: "What only a human closes", note: "plus the board that rebuilds itself from the verdicts" },
+    ],
+    blurb: "The reviewer is a cold agent: its own clone, detached at the sha the API reported, doctrine loaded from durable records and prior verdicts — never from the implementer's report or working memory. It can verify, rule and sequence. It cannot approve, and that is structural: there is no APPROVE verb in the port to call." },
+  { id: "ruling", title: "5 · Issue rulings — the same protocol, pointed at a fork",
+    groups: [
+      { id: "fork", flow: true, title: "The fork path", note: "a design decision that needs settling, not code that needs fixing" },
+    ],
+    blurb: "When the question is \"which of these options\" rather than \"is this code right\", the same run posts through issueComment instead of a PR review. The deterministic evaluator never rules: a well-formed fork always escalates to a human, because a machine that could rule could rule itself into authorizing a merge." },
+  { id: "golden", title: "6 · Golden path (the self-gating shortcut)", flow: true,
     blurb: "Five verbs that wrap the spine for a developer who does not want to remember it. brain:next is a state machine over (branch, open PR, memory status, checks) and always names the single next command." },
-  { id: "memory", title: "5 · Memory — two layers", flow: false,
+  { id: "memory", title: "7 · Memory — two layers", flow: false,
     blurb: "Working memory travels with the branch and is disposable. Durable memory is content-addressed, committed, and owned by brain's own record format — not by the memory backend." },
-  { id: "gov", title: "6 · Governance — six levels over observable evidence", flow: false,
+  { id: "gov", title: "8 · Governance — six levels over observable evidence", flow: false,
     blurb: "Each gate reads evidence (files, git history, PR/issue metadata) and never the producing tool, which is what keeps the whole set harness-agnostic. Levels enforce that the process happened — never that the work is correct." },
-  { id: "authority", title: "7 · Authority & the upstream loop", flow: false,
+  { id: "authority", title: "9 · Authority & the upstream loop", flow: false,
     blurb: "What is structurally impossible for an agent to do, and how a local improvement becomes part of the product." },
 ];
 
@@ -445,7 +475,241 @@ const NODES = [
     docs: [["Reviewer protocol", "brain/core/methodology/reviewer-protocol.md"],
            ["governance-postmerge.yml", ".github/workflows/governance-postmerge.yml"]] },
 
-  // ── 4 · golden path ───────────────────────────────────────────────────────
+  // ── 4 · review cycle ──────────────────────────────────────────────────────
+  { id: "rv-queue", lane: "review", group: "pipeline", actor: "either", label: "Queued for review",
+    verb: "label: needs-review · brain:review:queue", since: "Track H (#266)", status: "shipped",
+    summary: "The queue is a label read, oldest first — and it lists pending escalations beside it.",
+    detail: [
+      "brain:review:queue partitions the open PRs into the review queue (needs-review / needs-ruling) and the escalation inbox (needs-decision), each sorted by number ascending.",
+      "Ascending number IS oldest-first with zero approximation: PR and issue numbers are monotonic counters assigned at creation by both GitHub and GitLab. It is read-only — it applies no labels and posts nothing."
+    ],
+    docs: [["queue.mjs", "brain/scripts/review/queue.mjs"],
+           ["Reviewer protocol §9", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-invoke", lane: "review", group: "pipeline", actor: "either", label: "Invoke the reviewer",
+    verb: "npm run brain:review -- --pr <n>", since: "Track H (#266)", status: "shipped",
+    summary: "Always through the canonical entrypoint — never an ad-hoc prompt to read the diff.",
+    detail: [
+      "When a platform launches a subagent in the reviewer role, the subagent is strictly a command executor of this verb. It must not be handed manual instructions to read diffs or post comments.",
+      "Three reasons this is load-bearing: zero prompt drift (the run is wired identity → cold-boot → mode → evaluator → verdict → poster, deterministically); protocol compliance (output is always a fenced brain-review/N block with validated evidence, never free prose); and cost (the $0-token deterministic pre-checks run before any inference)."
+    ],
+    docs: [["Reviewer protocol §13", "brain/core/methodology/reviewer-protocol.md"],
+           ["cli.mjs", "brain/scripts/review/cli.mjs"]] },
+
+  { id: "rv-identity", lane: "review", group: "pipeline", actor: "reviewer", label: "Abstain if it is mine",
+    verb: "identity.mjs — self-review check", since: "Track H · hardened #407", status: "shipped",
+    summary: "A reviewer whose handle equals the PR author must abstain — the same rule L5 enforces.",
+    detail: [
+      "This is the reviewer-side mirror of actor-check: nobody reviews their own work, including a machine.",
+      "It used to be fail-OPEN — an unset reviewer.handle warned and reviewed anyway. That was deliberate while the handle could not be resolved, and the premise expired; it now fails closed (#407)."
+    ],
+    docs: [["identity.mjs", "brain/scripts/review/identity.mjs"],
+           ["Reviewer protocol §10", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-coldboot", lane: "review", group: "pipeline", actor: "reviewer", label: "Cold boot",
+    verb: "own clone, detached at headRefOid", since: "Track H · ADR-0021/0022", status: "shipped",
+    summary: "Verify against the server, from a clean tree. The report under review is never an input.",
+    detail: [
+      "The anchor is the headRefOid the API returned, checked out detached — never a branch name (a moving pointer the implementer controls) and never a sha quoted in a report (the report is the thing being reviewed).",
+      "Doctrine loads from two server-side sources neither of which was written to persuade a reviewer: .memory/records/*.jsonl filtered to type decision|architecture, and every prior brain-review block on the thread.",
+      "resume.md is explicitly REJECTED as a boot input: it is the implementer's working memory, and reading it would import their assumptions and documented compromises — the exact contamination coldness exists to avoid."
+    ],
+    produces: ["a detached worktree at head", "doctrine records + prior verdicts"],
+    docs: [["cold-boot.mjs", "brain/scripts/review/cold-boot.mjs"],
+           ["Reviewer protocol §8", "brain/core/methodology/reviewer-protocol.md"],
+           ["ADR-0021 — headRefOid + rollup", "brain/project/decisions/adr-0021-reviewer-port-head-and-rollup.md"]] },
+
+  { id: "rv-mode", lane: "review", group: "pipeline", actor: "reviewer", label: "Derive the mode",
+    verb: "tranche | checkpoint | ruling", since: "Track H (REQ-H1-7)", status: "shipped",
+    summary: "Derived from repo state, never declared by the implementer.",
+    detail: [
+      "A pure function over exactly two inputs: the labels and the changed files. needs-ruling → ruling; a checkpoint-report.md in the diff → checkpoint; otherwise tranche.",
+      "There is no in-tree marker by which the implementer can announce which mode the reviewer should use — that would be the reviewed party choosing the review."
+    ],
+    docs: [["mode.mjs", "brain/scripts/review/mode.mjs"]] },
+
+  { id: "rv-eval", lane: "review", group: "pipeline", actor: "reviewer", label: "Evaluate",
+    verb: "evidence: mandatory · cites: mandatory on blockers", since: "Track H", status: "shipped",
+    summary: "Every finding carries a command the reviewer ran cold. No evidence, no finding.",
+    detail: [
+      "A finding without evidence: is inadmissible — budget, tests and diffstat are re-derived, never read from the implementer's report, and report-vs-tree drift is itself a blocker.",
+      "cites: is mandatory on severity: blocker. An uncited blocker is downgraded to correction, because a blocker asserts that doctrine forbids something — without the citation the reviewer would be inventing doctrine.",
+      "On uncomputable evidence (the provider is down), the rule is never APPROVE: emit REVISE with conditions: [evidence uncomputable]. Fail closed, mirroring run-check.mjs."
+    ],
+    docs: [["tranche.mjs", "brain/scripts/review/evaluators/tranche.mjs"],
+           ["checkpoint.mjs", "brain/scripts/review/evaluators/checkpoint.mjs"],
+           ["Reviewer protocol §6", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-admission", lane: "review", group: "pipeline", actor: "reviewer", label: "Causal admission",
+    verb: "brain-review/2 — regulated tier only", since: "#284 → wired #394 M3", status: "shipped",
+    summary: "Is this finding this change's doing? Pre-existing problems stop blocking the PR that found them.",
+    detail: [
+      "Two fields per finding. evidence_class says how directly it was established (deterministic · inferential · insufficient); causal_disposition says whose fault it is (introduced · behavior-activated · worsened · pre-existing · base-only · unknown).",
+      "The admission rule: pre-existing and base-only findings are routed out of findings[] into follow_ups[] — real, recorded, but not blocking this change. And if every finding was routed out, a REVISE softens to APPROVE.",
+      "unknown never resolves silently in either direction: it forces STOP + escalate: human, rather than blocking without certainty or deferring without certainty.",
+      "The lazy refuter runs over any inferential blocker before the verdict is built — a real wired call that is a no-op today because no evaluator yet emits an inferential finding."
+    ],
+    caveats: [
+      "Tier-gated: lite and standard resolve to brain-review/1, so this whole path is inert here — brain declares tier lite, which means /2 runs only in tests until a regulated fixture exists.",
+      "follow_ups[] is wired but unreachable: no evaluator emits pre-existing or base-only yet."
+    ],
+    docs: [["causal-admission.mjs", "brain/scripts/review/lib/causal-admission.mjs"],
+           ["schema-v2.mjs", "brain/scripts/review/lib/schema-v2.mjs"],
+           ["Reviewer protocol §6.2", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-verdict", lane: "review", group: "pipeline", actor: "reviewer", label: "Build the verdict",
+    verb: "fenced brain-review/1|2 · head_sha · rev", since: "Track H", status: "shipped",
+    summary: "A machine-readable YAML block, bound to the exact tree it read.",
+    detail: [
+      "head_sha is mandatory: it binds the verdict to the tree the reviewer actually read, and expires with it. rev counts the prior verdicts already on the thread.",
+      "rev ≥ 3 forbids a fourth REVISE — the verdict becomes STOP + escalate: human. Three rounds that fail to converge is evidence the fork needs a human decision, not a fourth machine opinion. No infinite loop is reachable by construction.",
+      "Both schema versions coexist: the parser accepts either protocol string in the same guard, so a thread that mixes /1 and /2 posts (a repo whose tier changed mid-PR) still loads on both sides."
+    ],
+    produces: ["a brain-review/N block: verdict · gates · findings · conditions · pin · escalate"],
+    docs: [["verdict.mjs", "brain/scripts/review/verdict.mjs"],
+           ["parse-verdict.mjs", "brain/scripts/review/lib/parse-verdict.mjs"],
+           ["Reviewer protocol §7", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-post", lane: "review", group: "pipeline", actor: "reviewer", label: "Post it — COMMENT only",
+    verb: "prReviewComment (event: 'COMMENT' hardcoded)", since: "ADR-0020", status: "shipped",
+    summary: "The security boundary. There is no APPROVE verb in the port for this module to call.",
+    detail: [
+      "Lock 1 — verdicts post in COMMENT state, and L6's approver set is built only from reviews whose state is APPROVED. A verdict cannot be miscounted as approval by construction of the counter, not by a rule the reviewer follows.",
+      "Lock 2 — the verb hardcodes event: 'COMMENT'. No APPROVE sibling, no APPROVE argument, no branch that selects a different event. A fully compromised reviewer process still has no code path to an approving review.",
+      "Every label the reviewer applies passes through the same hardcoded deny-set chokepoint — never a bare provider call."
+    ],
+    caveats: ["No inline per-line comments yet: the verdict is a single fenced block on the thread. (M3 residual → 1.1)"],
+    docs: [["poster.mjs", "brain/scripts/review/poster.mjs"],
+           ["deny-set.mjs", "brain/scripts/review/deny-set.mjs"],
+           ["ADR-0020 — port verbs + two-key split", "brain/project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md"]] },
+
+  { id: "rv-approve", lane: "review", group: "outcomes", actor: "reviewer", label: "APPROVE",
+    verb: "no blocking finding survived", since: "Track H", status: "shipped",
+    summary: "A verdict, not an approval. It unlocks nothing on its own.",
+    detail: [
+      "An APPROVE verdict says the reviewer found nothing that doctrine forbids. It does not produce an APPROVED review, does not satisfy L6's human-reviewer requirement, does not satisfy branch protection, and does not apply status:approved.",
+      "That gap is the entire design. The human reads the verdict and decides — the reviewer's work is the evidence for that decision, never the decision."
+    ],
+    docs: [["Reviewer protocol §1", "brain/core/methodology/reviewer-protocol.md"],
+           ["brain-writes-reviewed.mjs", "brain/scripts/vcs/brain-writes-reviewed.mjs"]] },
+
+  { id: "rv-revise", lane: "review", group: "outcomes", actor: "reviewer", label: "REVISE → redo",
+    verb: "implementer fixes → new head → rev + 1", since: "Track H", status: "shipped",
+    summary: "The loop: findings go back to the implementer, who pushes, and the next run is a new revision.",
+    detail: [
+      "Each finding names what is wrong, the command that proves it, and — for a blocker — the authority that forbids it. The implementer fixes, pushes, and the head sha changes.",
+      "The next run cold-boots at the new head, reads its own prior verdicts off the thread, and increments rev. Doctrine established in round 1 survives into round 2 through those verdicts plus any pinned record — not through conversational memory, which a cold agent does not have.",
+      "The loop is bounded at three: a fourth REVISE is forbidden."
+    ],
+    docs: [["verdict.mjs", "brain/scripts/review/verdict.mjs"],
+           ["Reviewer protocol §7", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-stop", lane: "review", group: "outcomes", actor: "reviewer", label: "STOP + escalate",
+    verb: "label: needs-decision", since: "Track H (H1-5b)", status: "shipped",
+    summary: "The reviewer hands the question to a human and marks it visible.",
+    detail: [
+      "STOP fires when two or more options survive doctrine (that is a new decision, not a ruling), when causality is unknown, or when rev ≥ 3.",
+      "When the verdict escalates AND the post actually landed, needs-decision is applied — which is what makes it appear in brain:review:queue's pending-escalations section. An unposted verdict never touched this head, so there is nothing to escalate.",
+      "Removing needs-decision once the human decides is deliberately manual."
+    ],
+    docs: [["poster.mjs", "brain/scripts/review/poster.mjs"],
+           ["Reviewer protocol §5", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-stale", lane: "review", group: "outcomes", actor: "reviewer", label: "Nothing posted — stale",
+    verb: "label: reviewed:stale", since: "Track H", status: "shipped",
+    summary: "Head moved while the reviewer was working: the verdict describes a tree that no longer exists.",
+    detail: ["The run re-resolves head before posting. If it moved, the verdict is discarded rather than posted against the wrong tree — a stale verdict that looks current is worse than no verdict."],
+    docs: [["poster.mjs", "brain/scripts/review/poster.mjs"],
+           ["Reviewer protocol §10", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rv-antiloop", lane: "review", group: "outcomes", actor: "reviewer", label: "Nothing posted — anti-loop",
+    verb: "same author AND same head_sha → skip", since: "Track H", status: "shipped",
+    summary: "The reviewer's own comment must not retrigger the reviewer.",
+    detail: ["Two locks, both required: the last verdict on the thread is this reviewer's, AND its head_sha equals the current head. Either alone would be wrong — a new push deserves a new run even from the same reviewer."],
+    docs: [["poster.mjs", "brain/scripts/review/poster.mjs"]] },
+
+  { id: "rv-human", lane: "review", group: "keystroke", actor: "human", label: "status:approved",
+    verb: "the keystroke the reviewer cannot reach", since: "ADR-0020 · §9", status: "shipped",
+    summary: "Labels may only tighten. The ones that loosen or unlock are human-only, and denied in code.",
+    detail: [
+      "The reviewer may apply labels that make a gate stricter (decision, seq:*, reviewed:*, needs-ruling). It must never apply ones that loosen (size:exception, skip:memory-gate) or unlock (status:approved). The deny-set is hardcoded in the caller, not left to the model to remember.",
+      "Lock 3 — key separation: the reviewer handle registers in governance.reviewActors, read only by L6 (\"you do not count as the human reviewer\"), and never in governance.approvalActors, read only by L5 (\"you may apply status:approved\"). One key feeding both gates would de-authorize the reviewer at L6 and authorize it to self-approve at L5 — with a single registration.",
+      "Defense in depth: even a deny-set bug is caught at L5, because actor-check independently rejects status:approved from any identity outside approvalActors."
+    ],
+    caveats: ["No dedicated reviewer identity has been minted yet — interim provenance is the human token that invokes the run, and reviewActors may be empty. The split is real in code regardless."],
+    docs: [["Reviewer protocol §3 · §9 · §11", "brain/core/methodology/reviewer-protocol.md"],
+           ["deny-set.mjs", "brain/scripts/review/deny-set.mjs"],
+           ["actor-check.mjs", "brain/scripts/vcs/actor-check.mjs"]] },
+
+  { id: "rv-board", lane: "review", group: "keystroke", actor: "either", label: "Rebuild the board",
+    verb: "npm run brain:review:board", since: "Track H (H1-5c)", status: "shipped",
+    summary: "Verdicts are truth; the seq:* / reviewed:* labels are a derived index.",
+    detail: [
+      "The board reconciles the label namespaces across every open PR from the verdict comments themselves. A label desync is a rebuildable no-op, not lost state.",
+      "The same inversion the memory format teaches: records are truth, the index is regenerable. status:* is excluded — it is human-only and never reconstructed."
+    ],
+    docs: [["board.mjs", "brain/scripts/review/board.mjs"],
+           ["Memory record format", "brain/core/methodology/memory-format.md"]] },
+
+  // ── 5 · issue rulings ─────────────────────────────────────────────────────
+  { id: "rl-label", lane: "ruling", group: "fork", actor: "either", label: "needs-ruling",
+    verb: "the label that derives ruling mode", since: "Track H (H1-4)", status: "shipped",
+    summary: "The question stops being \"is this code right\" and becomes \"which of these options\".",
+    detail: ["Same entrypoint, same cold boot, same verdict schema. Only the mode differs — and with it, the evaluator and the surface the verdict is posted to."],
+    caveats: ["Protocol §13 documents `brain:review -- --issue <id> --mode ruling`, but the CLI's argument parser accepts only --pr, --mode and --dry-run: a ruling run is anchored on a PR number today, and reads the fork from the PR body."],
+    docs: [["mode.mjs", "brain/scripts/review/mode.mjs"],
+           ["Reviewer protocol §13", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rl-fork", lane: "ruling", group: "fork", actor: "either", label: "The ## FORK contract",
+    verb: "≥2 options · cost + consequence each · 1 recommendation", since: "Track H (REQ-H1-11)", status: "shipped",
+    summary: "A fork must be stated in a shape a machine can check before anyone rules on it.",
+    detail: [
+      "The minimal contract: a ## FORK heading, at least two Option blocks each carrying cost: and consequence:, and exactly one Recommendation: line.",
+      "A malformed fork gets REVISE naming the specific malformation — not a ruling on an ill-posed question. Forcing the author to state the cost and the consequence of each option is most of the value: half the forks resolve themselves in the writing."
+    ],
+    docs: [["ruling.mjs", "brain/scripts/review/evaluators/ruling.mjs"]] },
+
+  { id: "rl-neverrule", lane: "ruling", group: "fork", actor: "reviewer", label: "It never rules",
+    verb: "valid fork → STOP + escalate, always", since: "Owner ruling, Option B", status: "shipped",
+    summary: "A well-formed fork ALWAYS escalates — regardless of how many options doctrine would eliminate.",
+    detail: [
+      "The protocol describes an elimination path (enumerate the constraining authorities, eliminate each option citing the authority that excludes it, rule only if exactly one survives). That path is deliberately NOT implemented in the deterministic evaluator.",
+      "The reason is named in the code: auto-ruling on unrefuted inferential eliminations is authority laundering. A reviewer that could invent a rule could invent the rule that authorizes a merge — so new doctrine is reachable only through STOP + escalate, where a human writes it.",
+      "The cost of escalating is ~0 while a human is at the keyboard. The cost of a machine quietly minting doctrine is unbounded."
+    ],
+    caveats: ["The elimination-annotation format and any citation resolver that would let a future evaluator actually rule are explicitly out of scope, gated on #266 / #284."],
+    docs: [["ruling.mjs", "brain/scripts/review/evaluators/ruling.mjs"],
+           ["Reviewer protocol §5", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rl-post", lane: "ruling", group: "fork", actor: "reviewer", label: "Posted on the issue",
+    verb: "issueComment (not prReviewComment)", since: "ADR-0020", status: "shipped",
+    summary: "Ruling mode selects the issue surface — the one place the protocol leaves the PR review thread.",
+    detail: ["The poster picks the write verb from the mode: issueComment when mode is ruling, prReviewComment otherwise. Both are COMMENT-only by construction; neither can approve anything."],
+    docs: [["poster.mjs", "brain/scripts/review/poster.mjs"],
+           ["VCS contract", "brain/core/methodology/vcs-contract.md"]] },
+
+  { id: "rl-human", lane: "ruling", group: "fork", actor: "human", label: "The human rules",
+    verb: "and if it is new doctrine → ADR", since: "ADR-0014 · §5", status: "shipped",
+    summary: "The escalation lands in the inbox; the answer, if durable, becomes an ADR.",
+    detail: [
+      "A ruling that only settles this change can live in the thread. A ruling that changes a working rule is a decision — which means the decision label, an ADR, and a brain/HOME.md entry, all enforced by decision-gate.",
+      "This is the same human gate as everywhere else in brain: the machine prepares the decision completely and does not take it."
+    ],
+    docs: [["Consolidation protocol", "brain/core/methodology/consolidation-protocol.md"],
+           ["ADR-0014", "brain/project/decisions/adr-0014-workflow-governance.md"]] },
+
+  { id: "rl-pin", lane: "ruling", group: "fork", actor: "either", label: "pin: → durable record",
+    verb: ".memory/records/ (type: decision)", since: "Track H §8", status: "shipped",
+    summary: "How a cold reviewer remembers a ruling it will not be around to recall.",
+    detail: [
+      "This is the paid cost of coldness. A cold agent has none of a human reviewer's accumulated context — it does not remember the ruling made three checkpoints ago.",
+      "The trade: every REVISE or ruling that establishes doctrine emits a pin: payload, and the IMPLEMENTER commits it as a durable record. The reviewer never writes to the repo — the asymmetry holds — but its memory does, and the next cold boot reads it back as doctrine.",
+      "What is not recoverable, and the protocol says so plainly: the human's taste, knowing when a rule should bend. The agent never bends. A reviewer that cannot bend is exactly the reviewer you can automate."
+    ],
+    docs: [["Reviewer protocol §8 · §12", "brain/core/methodology/reviewer-protocol.md"],
+           ["Memory record format", "brain/core/methodology/memory-format.md"]] },
+
+  // ── 6 · golden path ───────────────────────────────────────────────────────
   { id: "gstart", lane: "golden", actor: "either", label: "start",
     verb: "npm run brain:start <issue>", since: "v0.6.0", status: "shipped",
     summary: "Reads the issue through the VCS port, refuses without the approved label, creates the branch.",
@@ -672,18 +936,41 @@ const MILESTONES = [
     body: "ADR-0015 replaces one enforcement point with six levels over observable evidence (L1–L6), a four-rung substrate ladder, and the REQUIRED/DETECTION split that makes promoting a gate a list move rather than a rewrite. Crucially: every gate reads evidence, never the producing tool." },
   { v: "v1.0.0", t: "First stable — controlled pilot", future: false,
     body: "Three-axis decoupling (AGENT_PLATFORM · SDD_ENGINE · MEMORY_BACKEND, ADR-0024), git-native durable memory, VCS-agnostic PR-time governance on GitHub and GitLab, and the cold reviewer's security boundary. Explicitly not open adoption: the hard gate before external adopters is upgrade safety." },
+  { v: "Track H · M3", t: "The reviewer becomes invocable", future: false,
+    body: "The external reviewer stops being a human relaying a report and becomes a command: cold boot at the server's head sha, derived mode, evidence-bearing findings, a machine-readable verdict, and a poster that has no APPROVE path to call (ADR-0020/0021/0022). Then the causal-admission schema (brain-review/2) lands tier-activated, so a pre-existing defect stops blocking the change that happened to find it. Its flow guarantees went live once prReviews carried comment bodies on both providers: prior verdicts, the anti-loop, the rev≥3 bound and board reconciliation all read that field." },
   { v: "1.1 line", t: "Doctrine tiers, upgrade safety, the reviewer in production", future: true,
     body: "ADR-0026 adds the declared tier axis (lite / standard / regulated) beside the detected rung, resolving gates that were unsatisfiable at one maintainer. In flight: rollback and journal-based recovery for brain:upgrade (#396), and making the reviewer's flow guarantees real in production (#317)." },
 ];
 
 // ── render ──────────────────────────────────────────────────────────────────
-const ACTORS = { human: "human", agent: "agent", ci: "CI", either: "human or agent" };
+const ACTORS = { human: "human", agent: "agent", reviewer: "cold reviewer", ci: "CI", either: "human or agent" };
 const STATUS = { shipped: "", proposed: "st-proposed", inflight: "st-inflight" };
 const byId = Object.fromEntries(NODES.map(n => [n.id, n]));
 let base = "local", active = null, filter = null;
 
 const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
+// Placeholders in the data are written the way the docs write them — <id>, <tag>,
+// <n>, issue-<n>-<slug>. Interpolated raw they parse as unknown elements and vanish,
+// which silently truncated half the verbs on the first render. Everything
+// data-driven goes through esc(); only wrapper markup below is authored as HTML.
+const esc = (v) => String(v).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 const href = p => (base === "local" ? HERE + p : REPO + p);
+
+function nodeButton(n) {
+  const b = el("button", `node c-${n.actor} ${STATUS[n.status] || ""}`);
+  b.id = "n-" + n.id;
+  b.appendChild(el("span", "dot"));
+  b.appendChild(el("span", "n-label", esc(n.label)));
+  b.appendChild(el("span", "n-verb", esc(n.verb)));
+  b.addEventListener("click", () => select(n.id, true));
+  return b;
+}
+
+function renderRow(nodes, flow) {
+  const row = el("div", "row" + (flow ? " flow" : ""));
+  for (const n of nodes) row.appendChild(nodeButton(n));
+  return row;
+}
 
 function renderMap() {
   const root = document.getElementById("map");
@@ -692,17 +979,18 @@ function renderMap() {
     const sec = el("section", "lane");
     sec.appendChild(el("h2", null, lane.title));
     sec.appendChild(el("p", null, lane.blurb));
-    const row = el("div", "row" + (lane.flow ? " flow" : ""));
-    for (const n of NODES.filter(n => n.lane === lane.id)) {
-      const b = el("button", `node c-${n.actor} ${STATUS[n.status] || ""}`);
-      b.id = "n-" + n.id;
-      b.appendChild(el("span", "dot"));
-      b.appendChild(el("span", "n-label", n.label));
-      b.appendChild(el("span", "n-verb", n.verb));
-      b.addEventListener("click", () => select(n.id, true));
-      row.appendChild(b);
+    const mine = NODES.filter(n => n.lane === lane.id);
+    if (lane.groups) {
+      // A lane with groups renders one captioned row per group — the review cycle
+      // needs a pipeline, its outcomes, and the human step read as three things.
+      for (const g of lane.groups) {
+        sec.appendChild(el("div", "group-title", `${esc(g.title)}${g.note ? ` <span>— ${esc(g.note)}</span>` : ""}`));
+        sec.appendChild(renderRow(mine.filter(n => n.group === g.id), g.flow));
+        if (g.loopback) sec.appendChild(el("div", "loopback", `↺&nbsp; ${g.loopback}`));
+      }
+    } else {
+      sec.appendChild(renderRow(mine, lane.flow));
     }
-    sec.appendChild(row);
     root.appendChild(sec);
   }
   applyFilter();
@@ -719,8 +1007,8 @@ function renderEvo() {
   const ul = el("ul", "tl");
   for (const m of MILESTONES) {
     const li = el("li", m.future ? "future" : null);
-    li.appendChild(el("div", null, `<span class="v">${m.v}</span> · <span class="t">${m.t}</span>`));
-    li.appendChild(el("p", null, m.body));
+    li.appendChild(el("div", null, `<span class="v">${esc(m.v)}</span> · <span class="t">${esc(m.t)}</span>`));
+    li.appendChild(el("p", null, esc(m.body)));
     ul.appendChild(li);
   }
   sec.appendChild(ul);
@@ -736,30 +1024,34 @@ function select(id, push) {
   const close = el("button", "close", "Close");
   close.addEventListener("click", deselect);
   p.appendChild(close);
-  p.appendChild(el("h3", null, n.label));
-  p.appendChild(el("div", "p-verb", n.verb));
+  p.appendChild(el("h3", null, esc(n.label)));
+  p.appendChild(el("div", "p-verb", esc(n.verb)));
 
   const meta = el("div", "p-meta");
   meta.appendChild(el("span", `tag actor c-${n.actor}`, ACTORS[n.actor]));
-  meta.appendChild(el("span", "tag", n.since));
+  meta.appendChild(el("span", "tag", esc(n.since)));
   if (n.status !== "shipped") meta.appendChild(el("span", "tag", n.status === "proposed" ? "proposed" : "in flight"));
   p.appendChild(meta);
 
-  p.appendChild(el("p", null, `<strong>${n.summary}</strong>`));
-  for (const d of n.detail || []) p.appendChild(el("p", null, d));
+  p.appendChild(el("p", null, `<strong>${esc(n.summary)}</strong>`));
+  for (const d of n.detail || []) p.appendChild(el("p", null, esc(d)));
 
   if (n.produces?.length) {
     p.appendChild(el("h4", null, "Produces"));
-    p.appendChild(el("ul", null, n.produces.map(x => `<li><code>${x}</code></li>`).join("")));
+    p.appendChild(el("ul", null, n.produces.map(x => `<li><code>${esc(x)}</code></li>`).join("")));
   }
   if (n.gates?.length) {
     p.appendChild(el("h4", null, "Gates that read it"));
-    p.appendChild(el("ul", null, n.gates.map(x => `<li>${x}</li>`).join("")));
+    p.appendChild(el("ul", null, n.gates.map(x => `<li>${esc(x)}</li>`).join("")));
+  }
+  if (n.caveats?.length) {
+    p.appendChild(el("h4", null, "Not closed yet"));
+    p.appendChild(el("ul", "caveats", n.caveats.map(x => `<li>${esc(x)}</li>`).join("")));
   }
   p.appendChild(el("h4", null, "Where it is defined"));
   const docs = el("div", "docs");
   for (const [label, path] of n.docs) {
-    const a = el("a", null, `${label} <code>${path}</code>`);
+    const a = el("a", null, `${esc(label)} <code>${esc(path)}</code>`);
     a.href = href(path);
     docs.appendChild(a);
   }

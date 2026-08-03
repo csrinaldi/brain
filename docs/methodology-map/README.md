@@ -37,10 +37,19 @@ MILESTONES // one entry per release on the Evolution timeline
 ```
 
 - `lane` must match an id in `LANES`; a lane with `flow: true` renders its nodes as a
-  chain with arrows.
-- `actor` is one of `human` · `agent` · `ci` · `either`, and drives the colour and the
-  filter.
+  chain with arrows. A lane may instead declare `groups: [{ id, title, note, flow,
+  loopback }]`, and each node then carries a `group` — that is how the review cycle
+  renders its pipeline, its verdicts, and the human step as three separate rows, with
+  the REVISE loop drawn as a return edge.
+- `actor` is one of `human` · `agent` · `reviewer` · `ci` · `either`, and drives the
+  colour and the filter. `reviewer` is deliberately its own colour: the cold reviewer is
+  an agent with strictly narrower authority than a Tier-1 one.
 - `status` is `shipped` · `proposed` · `in-flight`, drawn as the dot in the node's corner.
+- `caveats` renders as a "Not closed yet" list. Use it — a map that only shows what works
+  is the kind of document nobody trusts twice.
+
+Everything data-driven is HTML-escaped on render, so placeholders can be written the way
+the docs write them (`<id>`, `<tag>`, `issue-<n>-<slug>`) without vanishing into the DOM.
 - `docs` paths are **repo-relative** — the page resolves them against either the local
   checkout or the GitHub blob URL, depending on the link-base toggle.
 
