@@ -9,6 +9,11 @@ brain combines three things:
 
 It is **self-hosting**: this repo uses brain itself to document and evolve brain.
 
+> **New here?** Open [`docs/methodology-map/index.html`](docs/methodology-map/index.html) —
+> an interactive map of the whole working method (adoption → feature cycle → memory →
+> governance), where every box links to the file that defines it, plus a timeline of how
+> the method got here.
+
 ---
 
 ## The 3 layers

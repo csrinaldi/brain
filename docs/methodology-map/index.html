@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>brain — Methodology Map</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f5;
+    --surface: #fff;
+    --surface-2: #f0efec;
+    --ink: #1c1b19;
+    --ink-2: #57534e;
+    --ink-3: #8b857c;
+    --line: #dcd9d3;
+    --accent: #b8562f;
+    --accent-soft: #f4e3da;
+    --human: #7c5cbf;
+    --agent: #2f7d76;
+    --ci: #b8562f;
+    --either: #6b7280;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #191817; --surface: #211f1e; --surface-2: #2a2725;
+      --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #837c73; --line: #383431;
+      --accent: #e07a4d; --accent-soft: #3a2a20;
+      --human: #a98fe0; --agent: #56b3a9; --ci: #e07a4d; --either: #9ca3af;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f7f5; --surface: #fff; --surface-2: #f0efec;
+    --ink: #1c1b19; --ink-2: #57534e; --ink-3: #8b857c; --line: #dcd9d3;
+    --accent: #b8562f; --accent-soft: #f4e3da;
+    --human: #7c5cbf; --agent: #2f7d76; --ci: #b8562f; --either: #6b7280;
+  }
+  :root[data-theme="dark"] {
+    --bg: #191817; --surface: #211f1e; --surface-2: #2a2725;
+    --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #837c73; --line: #383431;
+    --accent: #e07a4d; --accent-soft: #3a2a20;
+    --human: #a98fe0; --agent: #56b3a9; --ci: #e07a4d; --either: #9ca3af;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); font-size: 15px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    transition: padding-right .18s ease;
+  }
+  /* The panel is fixed to the right edge — shrink the page instead of letting it
+     cover the header controls, which is exactly what happened the first time. */
+  body.panel-open { padding-right: min(460px, 42vw); }
+  a { color: var(--accent); }
+
+  header {
+    padding: 28px 24px 18px; border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -0.01em; }
+  h1 small { font-weight: 400; color: var(--ink-3); font-size: 14px; letter-spacing: 0; }
+  .tagline { margin: 0; color: var(--ink-2); max-width: 70ch; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; }
+  .controls .sep { flex: 1 1 auto; }
+  button {
+    font: inherit; font-size: 13px; color: var(--ink-2); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--ink-3); color: var(--ink); }
+  button[aria-pressed="true"], button.on {
+    background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+  }
+  .tabs button { border-radius: var(--radius); }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 24px 96px; }
+
+  .lane { margin: 0 0 30px; }
+  .lane > h2 {
+    margin: 0 0 2px; font-size: 13px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--ink-3); font-weight: 600;
+  }
+  .lane > p { margin: 0 0 12px; color: var(--ink-2); font-size: 13.5px; max-width: 78ch; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+  .row.flow > .node:not(:first-child)::before {
+    content: "→"; position: absolute; left: -14px; top: 50%; transform: translateY(-50%);
+    color: var(--ink-3); font-size: 13px;
+  }
+  .row.flow { gap: 8px 22px; }
+
+  .node {
+    position: relative; text-align: left; padding: 9px 12px; min-width: 132px;
+    background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--c);
+    border-radius: var(--radius); cursor: pointer; transition: transform .08s, border-color .12s;
+  }
+  .node:hover { transform: translateY(-1px); border-color: var(--ink-3); border-left-color: var(--c); }
+  .node[aria-current="true"] { border-color: var(--accent); border-left-color: var(--accent); background: var(--accent-soft); }
+  .node .n-label { display: block; font-size: 14px; font-weight: 600; color: var(--ink); padding-right: 12px; }
+  .node .n-verb { display: block; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+  .node.dim { opacity: 0.28; }
+  .node .dot {
+    position: absolute; top: 8px; right: 8px; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--c);
+  }
+  .node.st-proposed .dot { background: transparent; border: 1px solid var(--c); }
+  .node.st-inflight .dot { background: repeating-linear-gradient(45deg, var(--c) 0 2px, transparent 2px 4px); }
+
+  .c-human { --c: var(--human); }
+  .c-agent { --c: var(--agent); }
+  .c-ci { --c: var(--ci); }
+  .c-either { --c: var(--either); }
+
+  /* detail panel */
+  #panel {
+    position: fixed; top: 0; right: 0; width: min(460px, 100%); height: 100%;
+    background: var(--surface); border-left: 1px solid var(--line);
+    padding: 22px 24px 60px; overflow-y: auto; transform: translateX(102%);
+    transition: transform .18s ease; box-shadow: -12px 0 40px rgba(0,0,0,.10); z-index: 20;
+  }
+  #panel.open { transform: none; }
+  #panel h3 { margin: 0 0 2px; font-size: 18px; }
+  #panel .p-verb { font-family: var(--mono); font-size: 12.5px; color: var(--accent); word-break: break-word; }
+  #panel .p-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 16px; }
+  #panel h4 {
+    margin: 18px 0 6px; font-size: 11.5px; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--ink-3);
+  }
+  #panel p, #panel li { color: var(--ink-2); font-size: 14px; }
+  #panel ul { margin: 0; padding-left: 18px; }
+  #panel li { margin-bottom: 5px; }
+  #panel .close { position: absolute; top: 14px; right: 16px; }
+  .tag {
+    display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2);
+  }
+  .tag.actor { border-color: var(--c); color: var(--c); background: transparent; }
+  .docs a { display: block; font-size: 13.5px; margin-bottom: 5px; word-break: break-word; }
+  .docs a code { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+
+  /* evolution */
+  .tl { border-left: 2px solid var(--line); margin: 8px 0 0; padding: 0 0 0 20px; list-style: none; }
+  .tl li { position: relative; margin-bottom: 22px; }
+  .tl li::before {
+    content: ""; position: absolute; left: -26px; top: 6px; width: 10px; height: 10px;
+    border-radius: 50%; background: var(--accent); border: 2px solid var(--bg);
+  }
+  .tl li.future::before { background: var(--bg); border: 2px solid var(--accent); }
+  .tl .v { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+  .tl .t { font-weight: 600; }
+  .tl p { margin: 3px 0 0; color: var(--ink-2); font-size: 14px; max-width: 80ch; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--ink-2); margin-top: 6px; }
+  .legend span::before {
+    content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--c); margin-right: 6px; vertical-align: 1px;
+  }
+  footer { border-top: 1px solid var(--line); color: var(--ink-3); font-size: 13px; padding: 18px 24px 40px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 720px) {
+    .row.flow > .node:not(:first-child)::before { content: "↓"; left: 50%; top: -16px; transform: translateX(-50%); }
+    .row.flow { flex-direction: column; gap: 22px 8px; }
+    #panel { width: 100%; }
+    body.panel-open { padding-right: 0; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>brain — Methodology Map <small>self-hosted working method, drawn from the tree</small></h1>
+    <p class="tagline">
+      Every box is a real verb, artifact, or gate that exists in this repository. Click one to see what it
+      does, who is allowed to run it, what evidence it produces, and where it is defined. This page is the
+      base for tracking how the method evolves — each node carries the version or ADR that introduced it.
+    </p>
+    <div class="controls">
+      <span class="tabs">
+        <button id="tab-map" aria-pressed="true">Flow map</button>
+        <button id="tab-evo" aria-pressed="false">Evolution</button>
+      </span>
+      <span class="sep"></span>
+      <span id="filters"></span>
+      <button id="linkbase" title="Switch where the source links point">Links: local files</button>
+      <button id="theme" title="Toggle light / dark">Theme</button>
+    </div>
+    <div class="legend">
+      <span class="c-human">human keystroke</span>
+      <span class="c-agent">agent (Tier 1)</span>
+      <span class="c-ci">CI / automation</span>
+      <span class="c-either">human or agent</span>
+      <span style="--c: var(--ink-3)">hollow dot = proposed · dashed = in flight</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="map"></div>
+  <div id="evo" hidden></div>
+</main>
+
+<footer class="wrap">
+  Generated by hand from <code>main</code>. To extend it, edit <code>NODES</code> / <code>MILESTONES</code>
+  in this file — no build step, no dependencies.
+</footer>
+
+<aside id="panel" aria-live="polite"></aside>
+
+<script>
+const REPO = "https://github.com/csrinaldi/brain/blob/main/";
+const HERE = "../../"; // this file lives at docs/methodology-map/
+
+const LANES = [
+  { id: "adopt", title: "1 · Adoption & substrate", flow: false,
+    blurb: "One-time, per repository. brain arrives as a pinned git tag and installs only its managed paths; everything else in the consumer tree stays untouched." },
+  { id: "rhythm", title: "2 · Rhythm", flow: false,
+    blurb: "Recurring context loading. Both verbs are idempotent and safe to re-run; neither ever auto-updates brain." },
+  { id: "sdd", title: "3 · The feature cycle (SDD spine)", flow: true,
+    blurb: "issue → branch → proposal → spec → design → tasks → apply → verify → archive → PR → merge. The same spine whether an agent or a human drives it — the artifacts and the evidence are identical." },
+  { id: "golden", title: "4 · Golden path (the self-gating shortcut)", flow: true,
+    blurb: "Five verbs that wrap the spine for a developer who does not want to remember it. brain:next is a state machine over (branch, open PR, memory status, checks) and always names the single next command." },
+  { id: "memory", title: "5 · Memory — two layers", flow: false,
+    blurb: "Working memory travels with the branch and is disposable. Durable memory is content-addressed, committed, and owned by brain's own record format — not by the memory backend." },
+  { id: "gov", title: "6 · Governance — six levels over observable evidence", flow: false,
+    blurb: "Each gate reads evidence (files, git history, PR/issue metadata) and never the producing tool, which is what keeps the whole set harness-agnostic. Levels enforce that the process happened — never that the work is correct." },
+  { id: "authority", title: "7 · Authority & the upstream loop", flow: false,
+    blurb: "What is structurally impossible for an agent to do, and how a local improvement becomes part of the product." },
+];
+
+const NODES = [
+  // ── 1 · adoption ──────────────────────────────────────────────────────────
+  { id: "install", lane: "adopt", actor: "human", label: "Install a tag",
+    verb: "npm i -D git+https://…#v1.0.0", since: "v0.1.0 · ADR-0006", status: "shipped",
+    summary: "brain is distributed as a pinned git tag — no registry, works on private repos.",
+    detail: [
+      "There is no npm package and no auto-update. The consumer picks a tag on purpose; the anti-pattern file below records why a self-updating installer was rejected.",
+      "The install specifier is derived from the installed package's repository.url and normalised to git+https, so HTTPS-only consumers (CI, containers without an SSH key) work without extra setup."
+    ],
+    produces: ["node_modules/brain at the pinned tag"],
+    docs: [["ADR-0006 — versioned installer", "brain/project/decisions/adr-0006-distribucion-installer-versionado.md"],
+           ["Anti-pattern — self-updating installers", "brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md"],
+           ["Adoption guide", "docs/adoption.md"]] },
+
+  { id: "upgrade", lane: "adopt", actor: "human", label: "Copy managed paths",
+    verb: "npm run brain:upgrade -- <tag>", since: "v0.1.0 · ADR-0003/0006", status: "shipped",
+    summary: "The only command that overwrites files — and only brain's own managed paths.",
+    detail: [
+      "Managed (overwritten): brain/core/**, brain/scripts/**, .gitattributes. Local (never touched): brain/project/**, brain.config.json (migrated additively), .env, openspec/changes/**, .memory/**.",
+      "brain/core/** is read-only in a consumer. That single rule is what makes the upstream loop work: improvements to core go upstream first, then the consumer bumps the tag.",
+      "A restore point now guards the write loop so a mid-upgrade failure rolls back instead of leaving a half-applied tree (#396). Journal-based recovery from SIGKILL is the second slice, still in flight."
+    ],
+    produces: ["the managed tree at <tag>", ".brain-upgrade-backup/ during the write"],
+    docs: [["Path manifest", "brain/core/managed-paths.mjs"],
+           ["Config migrations", "brain/core/config-migrations.mjs"],
+           ["Known limitations", "docs/KNOWN-LIMITATIONS.md"],
+           ["installer.mjs", "brain/scripts/lib/installer.mjs"]] },
+
+  { id: "envinit", lane: "adopt", actor: "human", label: "Bootstrap the environment",
+    verb: "npm run brain:env:init", since: "v0.4.0 · ADR-0012", status: "shipped",
+    summary: "Idempotent first-time setup: config, credentials, hooks, harness, memory backend.",
+    detail: [
+      "Creates brain.config.json if missing and derives vcs.provider, gitHost and slug from the git origin. Prompts for VCS_TOKEN and configures the HTTPS credential helper.",
+      "Selects and initialises the SDD harness and the memory backend through their adapters, and refreshes the skill registry.",
+      "Configures git hooks via core.hooksPath — a per-clone local setting, which is why every teammate runs it once (or lets brain:day:start self-heal it)."
+    ],
+    produces: ["brain.config.json", ".env", "core.hooksPath", "skill registry"],
+    docs: [["ADR-0012 — harness-init adapter", "brain/project/decisions/adr-0012-harness-init-adapter.md"],
+           ["bootstrap.sh", "brain/scripts/bootstrap.sh"],
+           ["Adoption guide", "docs/adoption.md"]] },
+
+  { id: "adoptverb", lane: "adopt", actor: "agent", label: "Inventory an existing repo",
+    verb: "npm run brain:adopt", since: "post-1.0", status: "shipped",
+    summary: "Read-only inventory and classification for a repo that already has history.",
+    detail: ["Greenfield adoption is four commands. An existing repo needs reconciliation first — this verb inventories and classifies what is already there before anything is written."],
+    docs: [["adopt.mjs", "brain/scripts/adopt.mjs"], ["Adoption — path B", "docs/adoption.md"]] },
+
+  { id: "bootstrapadrs", lane: "adopt", actor: "agent", label: "Draft the starter ADRs",
+    verb: "/project:bootstrap-adrs", since: "v0.5.0 · ADR-0013", status: "shipped",
+    summary: "The agent drafts descriptive Stack / Testing / Build ADRs; the human signs each one.",
+    detail: [
+      "Drafts land in openspec/changes/auto-adrs/brain-drafts/ — never in brain/. Accepting each one into brain/ is a Tier-2 human action.",
+      "The agent never invents rationale: Context and Consequences stay <TODO> stubs for the human to fill."
+    ],
+    produces: ["openspec/changes/auto-adrs/brain-drafts/*.md"],
+    docs: [["ADR-0013 — auto-ADR onboarding", "brain/project/decisions/adr-0013-auto-adr-onboarding.md"],
+           ["Anti-pattern — AI promotes its own artifacts", "brain/core/anti-patterns/ia-promueve-sus-propios-artefactos.md"]] },
+
+  { id: "adapters", lane: "adopt", actor: "either", label: "Adapters (all swappable)",
+    verb: "AGENT_PLATFORM · SDD_ENGINE · MEMORY_BACKEND · vcs.provider", since: "v1.0.0 · ADR-0024", status: "shipped",
+    summary: "Three orthogonal axes plus the VCS port. Nothing in the method depends on a specific tool.",
+    detail: [
+      "The SDD harness (default gentle-ai), the memory backend (default engram), the agent platform, and the VCS provider (GitHub / GitLab) are each selected by config and reached through a verb contract.",
+      "This is why every governance gate reads evidence rather than the producing tool — swapping a harness must not change what the gates see."
+    ],
+    docs: [["ADR-0024 — three-axis decoupling", "brain/project/decisions/adr-0024-three-axis-decoupling.md"],
+           ["ADR-0001 — 3-layer architecture", "brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md"],
+           ["Harness contract", "brain/core/methodology/harness-contract.md"],
+           ["VCS contract", "brain/core/methodology/vcs-contract.md"]] },
+
+  // ── 2 · rhythm ────────────────────────────────────────────────────────────
+  { id: "daystart", lane: "rhythm", actor: "either", label: "Start the workday",
+    verb: "npm run brain:day:start", since: "v0.1.0", status: "shipped",
+    summary: "VCS auth → ecosystem updates → team memory round-trip → ticket board → new-tag notice.",
+    detail: [
+      "The memory round-trip is import → index → export: pull .memory/ into the local engram, reproject brain/ into it, then publish it back.",
+      "It notifies about a newer brain tag and never applies it. It also self-heals core.hooksPath, so a fresh clone gets its hooks without re-running env:init."
+    ],
+    docs: [["day-start.mjs", "brain/scripts/day-start.mjs"],
+           ["Consolidation protocol §5", "brain/core/methodology/consolidation-protocol.md"]] },
+
+  { id: "sessionstart", lane: "rhythm", actor: "either", label: "Load session context",
+    verb: "npm run brain:session:start", since: "v0.8.1", status: "shipped",
+    summary: "Read-only, local-only, no network: restores manifest, engram, active change and ticket memory.",
+    detail: ["Deliberately cheaper than day:start — an agent resuming mid-day needs context, not the whole daily sequence. It performs no writes outside the local memory hydration and touches no network."],
+    docs: [["session-start.mjs", "brain/scripts/session-start.mjs"],
+           ["Workflow guide", "docs/workflow-guide.md"]] },
+
+  // ── 3 · SDD spine ─────────────────────────────────────────────────────────
+  { id: "issue", lane: "sdd", actor: "human", label: "Approved issue",
+    verb: "label: status:approved", since: "v0.6.0 · ADR-0014", status: "shipped",
+    summary: "The work starts with a human keystroke — the approval label — not with a prompt.",
+    detail: [
+      "Every PR to main must reference an issue with Closes/Fixes/Resolves, and that issue must carry status:approved. This is invariant #1 and it is not skippable.",
+      "L5 (actor-check) then verifies that whoever applied the label is not the PR author or the issue author. Under the lite doctrine tier the rule relaxes to a distinct act: the label must be applied after the head commit was pushed."
+    ],
+    gates: ["issue-link (required)", "actor-check (detection)"],
+    docs: [["Workflow governance", "brain/core/methodology/workflow-governance.md"],
+           ["actor-check.mjs", "brain/scripts/vcs/actor-check.mjs"],
+           ["ADR-0026 — doctrine tiers", "brain/project/decisions/adr-0026-governance-doctrine-tiers.md"]] },
+
+  { id: "ticketstart", lane: "sdd", actor: "either", label: "Take the ticket",
+    verb: "brain:ticket:start -- <id> --worktree --base <tracker>", since: "v0.1.0", status: "shipped",
+    summary: "Creates {type}/issue-{n}-{slug} in an isolated worktree off the integration base.",
+    detail: [
+      "The isolated worktree is load-bearing whenever parallel work is possible: one branch per worktree over a shared object store, single fetch, no extra clone. A branch in the main checkout is only acceptable for strictly serial solo work.",
+      "The base is the tracker branch (e.g. feature/v2.0.0) while an epic is in flight — not main."
+    ],
+    produces: ["the working branch / worktree"],
+    docs: [["Harness contract — worktree convention", "brain/core/methodology/harness-contract.md"],
+           ["ticket-start.mjs", "brain/scripts/ticket-start.mjs"]] },
+
+  { id: "sddnew", lane: "sdd", actor: "either", label: "Scaffold the change",
+    verb: "brain:project:feature -- --issue <id>", since: "v0.1.0 · ADR-0019", status: "shipped",
+    summary: "Creates openspec/changes/issue-<n>-<slug>/ with the four canonical artifacts.",
+    detail: [
+      "The slug is mandatory. The four files sit flat at the change root — a nested specs/<capability>/spec.md variant exists in older dirs and is legacy-accepted for readers, but the scaffold must never produce it.",
+      "brain/scripts/lib/sdd-layout.mjs is the single source for the layout; a drift-guard test fails if a second definition of the required-artifact set appears anywhere in brain/scripts/**."
+    ],
+    produces: ["proposal.md", "spec.md", "design.md", "tasks.md"],
+    docs: [["SDD canonical layout", "brain/core/methodology/sdd-layout.md"],
+           ["sdd-layout.mjs", "brain/scripts/lib/sdd-layout.mjs"],
+           ["new-change.mjs", "brain/scripts/new-change.mjs"]] },
+
+  { id: "proposal", lane: "sdd", actor: "either", label: "proposal.md",
+    verb: "human-approved PRD", since: "v0.1.0", status: "shipped",
+    summary: "What is being changed and why — the artifact the human owns.",
+    detail: ["An agent may draft it, but the approval it encodes is the human's. It is the first of four required artifacts and the phase-order gate expects the sequence to be monotonic."],
+    gates: ["phase-order (detection)"],
+    docs: [["SDD canonical layout", "brain/core/methodology/sdd-layout.md"],
+           ["Workflow guide", "docs/workflow-guide.md"]] },
+
+  { id: "spec", lane: "sdd", actor: "either", label: "spec.md",
+    verb: "delta requirements (REQ-*)", since: "v0.1.0", status: "shipped",
+    summary: "The delta requirements, written as testable REQ ids with scenarios.",
+    detail: [
+      "Requirements carry stable ids (REQ-…) that tests reference by name, so a test file reads as evidence for a specific requirement rather than as an untraceable assertion.",
+      "L4 requires spec.md and design.md to exist before code lands outside openspec/changes/**."
+    ],
+    gates: ["phase-order (detection)"],
+    docs: [["phase-order-check.mjs", "brain/scripts/vcs/phase-order-check.mjs"],
+           ["SDD canonical layout", "brain/core/methodology/sdd-layout.md"]] },
+
+  { id: "design", lane: "sdd", actor: "either", label: "design.md",
+    verb: "technical decisions", since: "v0.1.0", status: "shipped",
+    summary: "The approach and the trade-offs — where a decision is argued before it is coded.",
+    detail: ["A decision here that turns out to be durable is promoted later as an ADR — but only by a human, through the consolidation protocol."],
+    gates: ["phase-order (detection)", "decision-gate (required, label-conditional)"],
+    docs: [["Consolidation protocol", "brain/core/methodology/consolidation-protocol.md"]] },
+
+  { id: "tasks", lane: "sdd", actor: "either", label: "tasks.md",
+    verb: "- [ ] / - [x] checklist", since: "v0.1.0", status: "shipped",
+    summary: "The implementation checklist — and the hot-capture surface for micro-decisions.",
+    detail: [
+      "Checked items are counted by tooling: L4 refuses code outside openspec/changes/** until tasks.md has at least one checked item.",
+      "Micro-decisions agreed in chat are dumped into the change's hot-capture section rather than left in the transcript. With parallel agents, each writes only openspec/changes/{iid}/scratch/{agent-id}.md and the orchestrator is the sole writer of tasks.md."
+    ],
+    gates: ["phase-order (detection)"],
+    docs: [["Consolidation protocol §1", "brain/core/methodology/consolidation-protocol.md"],
+           ["SDD canonical layout — checked-task pattern", "brain/core/methodology/sdd-layout.md"]] },
+
+  { id: "apply", lane: "sdd", actor: "agent", label: "Implement",
+    verb: "/sdd-apply", since: "v0.1.0", status: "shipped",
+    summary: "Code the tasks, strict-TDD where the project supports it, ticking items as they land.",
+    detail: ["This is the only phase where an agent writes production code, and it is bounded on both sides: the spec above it and the gates below it."],
+    docs: [["Workflow guide", "docs/workflow-guide.md"],
+           ["Agent authorities", "brain/core/methodology/agent-authorities.md"]] },
+
+  { id: "localgates", lane: "sdd", actor: "either", label: "Local gates",
+    verb: "brain:repo:check · npm test · brain:nav", since: "v0.1.0 · v0.7.2", status: "shipped",
+    summary: "Prohibited references, the unit suite, and knowledge-base navigation integrity.",
+    detail: [
+      "repo:check runs project-defined rules (hardcoded secrets, TODO without a ticket, --no-verify usage) from brain/project/check-refs-rules.mjs — the engine is generic, the rules are yours.",
+      "brain:nav enforces that the knowledge base is absorbable: no broken links and no orphans — every brain/**/*.md must be reachable transitively from brain/HOME.md.",
+      "The same three run in CI as L1 (local-checks), author-agnostically, which is what closes the --no-verify hole in the client hooks."
+    ],
+    gates: ["local-checks (required)"],
+    docs: [["check-refs.mjs", "brain/scripts/check-refs.mjs"],
+           ["project rules", "brain/project/check-refs-rules.mjs"],
+           ["check-brain-nav.mjs", "brain/scripts/check-brain-nav.mjs"]] },
+
+  { id: "verify", lane: "sdd", actor: "either", label: "Verify the change",
+    verb: "npm run brain:change:verify", since: "v0.1.0", status: "shipped",
+    summary: "Classifies the diff by scope and runs only the verifications that scope demands.",
+    detail: ["Scope-aware by design: a docs-only change should not pay for a full polyglot build, and a code change should never skip one."],
+    docs: [["verify-change.mjs", "brain/scripts/verify-change.mjs"]] },
+
+  { id: "archive", lane: "sdd", actor: "either", label: "Archive the change",
+    verb: "npm run brain:change:archive", since: "post-1.0 (#260)", status: "shipped",
+    summary: "Closes the change and moves it to the archive path owned by sdd-layout.mjs.",
+    detail: ["The archive destination is read from archivePath(iid) rather than hardcoded, so the layout doc can never drift from the accessor."],
+    docs: [["archive.mjs", "brain/scripts/archive.mjs"],
+           ["sdd-layout.mjs", "brain/scripts/lib/sdd-layout.mjs"]] },
+
+  { id: "pr", lane: "sdd", actor: "either", label: "Open the PR",
+    verb: "/mr-create  ·  Closes #<id>", since: "v0.1.0", status: "shipped",
+    summary: "The delivery unit. The issue reference is what makes the whole evidence chain resolvable.",
+    detail: ["From here the gates run over evidence only: the diff, the git history, the PR and issue metadata. No gate branches on whether a human or an agent produced the commit."],
+    gates: ["all REQUIRED_JOBS + DETECTION_JOBS"],
+    docs: [["Workflow governance", "brain/core/methodology/workflow-governance.md"],
+           ["governance.yml", ".github/workflows/governance.yml"]] },
+
+  { id: "merge", lane: "sdd", actor: "human", label: "Merge",
+    verb: "the keystroke that stays human", since: "v0.6.0", status: "shipped",
+    summary: "The one act the method refuses to mechanise — structurally, not by convention.",
+    detail: [
+      "The cold reviewer can verify, rule and sequence, but has no code path to an APPROVE review: verdicts hardcode event: 'COMMENT', and the L6 approver set is built only from APPROVED reviews.",
+      "Post-merge, rung 3 re-audits the merged commit and opens an auto-revert PR if an invariant broke."
+    ],
+    docs: [["Reviewer protocol", "brain/core/methodology/reviewer-protocol.md"],
+           ["governance-postmerge.yml", ".github/workflows/governance-postmerge.yml"]] },
+
+  // ── 4 · golden path ───────────────────────────────────────────────────────
+  { id: "gstart", lane: "golden", actor: "either", label: "start",
+    verb: "npm run brain:start <issue>", since: "v0.6.0", status: "shipped",
+    summary: "Reads the issue through the VCS port, refuses without the approved label, creates the branch.",
+    detail: ["The approved label name is resolved from config (governance.approvedLabel), not hardcoded — a consumer may call it something else."],
+    docs: [["brain-start.mjs", "brain/scripts/brain-start.mjs"]] },
+
+  { id: "gcheck", lane: "golden", actor: "either", label: "check",
+    verb: "npm run brain:check", since: "v0.6.0", status: "shipped",
+    summary: "Runs the four generic checks against the branch diff, then the test suite and repo:check.",
+    detail: ["The same pure check functions CI runs — diffSize, issueLink, adrPresence, memoryPresence — so a local pass means the same thing as a green gate."],
+    docs: [["brain-check.mjs", "brain/scripts/brain-check.mjs"],
+           ["checks/", "brain/scripts/governance/checks/"]] },
+
+  { id: "gsave", lane: "golden", actor: "either", label: "save",
+    verb: "npm run brain:save", since: "v0.6.0", status: "shipped",
+    summary: "Materialises session memory into .memory/ and commits it — or refuses and tells you to capture one.",
+    detail: ["If memory:share produces no new changes, it exits non-zero: an empty memory commit would satisfy the gate's proxy while capturing nothing."],
+    docs: [["brain-save.mjs", "brain/scripts/brain-save.mjs"]] },
+
+  { id: "gship", lane: "golden", actor: "either", label: "ship",
+    verb: "npm run brain:ship", since: "v0.6.0", status: "shipped",
+    summary: "Re-runs check, reads the issue's type:* label, and opens the PR.",
+    detail: ["The PR type comes from the issue's own type label rather than a hardcoded default — the label vocabulary is the consumer's."],
+    docs: [["brain-ship.mjs", "brain/scripts/brain-ship.mjs"]] },
+
+  { id: "gnext", lane: "golden", actor: "either", label: "next",
+    verb: "npm run brain:next", since: "v0.6.0", status: "shipped",
+    summary: "A state machine that answers one question: what is my next step?",
+    detail: ["States, in order: no-branch → open-pr → no-memory → checks-failing → ready. Each maps to exactly one command, which is what gives a human the agent-like experience without an agent."],
+    docs: [["brain-next.mjs", "brain/scripts/brain-next.mjs"]] },
+
+  // ── 5 · memory ────────────────────────────────────────────────────────────
+  { id: "resume", lane: "memory", actor: "either", label: "Working memory",
+    verb: "resume.md · feature:checkpoint / feature:resume", since: "v0.4.0 · ADR-0011", status: "shipped",
+    summary: "Feature-scoped, branch-local, disposable — and never a gate condition.",
+    detail: [
+      "resume.md lives inside the change dir, travels with the branch, and is explicitly outside the required-artifact set: staleness is expected and it is freely discardable.",
+      "It carries a zero-tooling read guarantee — a human with no harness can open it and know where the work stands."
+    ],
+    docs: [["Feature-working-memory contract", "brain/core/methodology/feature-working-memory-contract.md"],
+           ["ADR-0011", "brain/project/decisions/adr-0011-feature-scoped-working-memory.md"]] },
+
+  { id: "durable", lane: "memory", actor: "either", label: "Durable memory",
+    verb: ".memory/records/** (content-addressed)", since: "ADR-0002 · ADR-0017", status: "shipped",
+    summary: "The record format is owned by brain, not by the memory backend.",
+    detail: [
+      "Records are content-addressed and merge by union, so two machines appending concurrently never conflict destructively. index.jsonl is derived and regenerable — low churn by construction.",
+      "Owning the format is what makes the backend swappable: engram is the live layer, .memory/ is the committed truth."
+    ],
+    docs: [["Memory record format", "brain/core/methodology/memory-format.md"],
+           ["ADR-0017", "brain/project/decisions/adr-0017-memory-format-owned-by-brain.md"],
+           ["ADR-0002", "brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md"]] },
+
+  { id: "sharepull", lane: "memory", actor: "either", label: "Share / pull",
+    verb: "memory:share · memory:pull", since: "v0.5.0", status: "shipped",
+    summary: "Export before pushing; churn-resilient pull when syncing across machines.",
+    detail: [
+      "A pre-push hook runs the export and warns when .memory/ was left uncommitted. It is a warning, not a block — the hook itself churns the manifest, so a hard block self-blocked the push.",
+      "memory:pull restores the regenerable manifest, pulls, then imports — raw git pull aborts with \"local changes would be overwritten\" once share has run."
+    ],
+    docs: [["memory/cli.mjs", "brain/scripts/memory/cli.mjs"],
+           ["pre-push hook", "brain/scripts/hooks/pre-push"]] },
+
+  { id: "consolidation", lane: "memory", actor: "human", label: "Consolidate upward",
+    verb: "brain-drafts/ → brain/ (human moves it)", since: "v0.1.0", status: "shipped",
+    summary: "How a branch-local insight becomes durable knowledge — with the human gate in the middle.",
+    detail: [
+      "The agent drafts an ADR, anti-pattern or glossary entry under openspec/changes/{iid}/brain-drafts/. The human reviews it in the PR and moves it into brain/ in a commit they author.",
+      "Every new ADR or methodology file must also update brain/HOME.md — otherwise brain:nav reports an orphan and the PR is not complete."
+    ],
+    docs: [["Consolidation protocol", "brain/core/methodology/consolidation-protocol.md"],
+           ["Anti-pattern — AI writes brain without a gate", "brain/core/anti-patterns/ia-escribe-brain-sin-gate.md"],
+           ["brain/HOME.md", "brain/HOME.md"]] },
+
+  // ── 6 · governance ────────────────────────────────────────────────────────
+  { id: "l1", lane: "gov", actor: "ci", label: "L1 · local-checks",
+    verb: "repo:check + brain:nav + npm test, in CI", since: "v0.9.0 · ADR-0015", status: "shipped",
+    summary: "Runs the local gates author-agnostically, closing the --no-verify-bypassable hook gap.",
+    detail: ["Client hooks are a floor, not a guarantee: git push --no-verify skips them. L1 re-runs the same checks on the server where nobody can pass a flag."],
+    docs: [["ADR-0015", "brain/project/decisions/adr-0015-governance-v3-substrate-ladder.md"],
+           ["governance.yml", ".github/workflows/governance.yml"]] },
+
+  { id: "l2", lane: "gov", actor: "ci", label: "L2 · release & post-merge audit",
+    verb: "brain:audit on tag / auto-revert after merge", since: "v0.9.0 · ADR-0025", status: "shipped",
+    summary: "Fail-closed on the release path, and an auto-revert PR when a merged commit broke an invariant.",
+    detail: [
+      "brain:audit re-verifies the four invariants over first-parent merges and exits 2 on anything it cannot compute — never a silent pass.",
+      "This is the primary enforcing guarantee for repos that can never reach rung 1 (including brain's own, which is on a free-tier private repo)."
+    ],
+    docs: [["brain-audit.mjs", "brain/scripts/brain-audit.mjs"],
+           ["release.yml", ".github/workflows/release.yml"],
+           ["governance-postmerge.yml", ".github/workflows/governance-postmerge.yml"],
+           ["ADR-0025", "brain/project/decisions/adr-0025-release-audit-gate-ordering.md"]] },
+
+  { id: "l3", lane: "gov", actor: "ci", label: "L3 · memory-gate + decision-gate",
+    verb: "session summary present · ADR ships with a labeled decision", since: "v0.6.0 → issue-scoped (#379)", status: "shipped",
+    summary: "Two required jobs: memory was captured, and a labeled decision ships its ADR.",
+    detail: [
+      "memory-gate is now issue-scoped: it looks for a session_summary tied to the current change's issue, falling back to the global existence check when no issue number is detectable.",
+      "decision-gate is two-step: hard when the decision label is present (ADR + HOME.md must be in the diff), heuristic otherwise — it warns on architectural surfaces and always exits 0, because \"is this a decision?\" is judgment."
+    ],
+    docs: [["run-check.mjs", "brain/scripts/governance/run-check.mjs"],
+           ["memory-retrieval.mjs", "brain/scripts/governance/checks/memory-retrieval.mjs"],
+           ["adr-presence.mjs", "brain/scripts/governance/checks/adr-presence.mjs"]] },
+
+  { id: "l4", lane: "gov", actor: "ci", label: "L4 · phase-order",
+    verb: "spec + design exist · monotonic status · no code before a checked task", since: "v0.9.0", status: "shipped",
+    summary: "The SDD phases happened in order — checked as in-repo evidence, not as a prompt.",
+    detail: ["Detection-only today. Promotion to required is deliberately not a one-line flip: its wrapper currently degrades an uncomputable diff to a warning, and that must become fail-closed first or a required gate would pass without ever evaluating."],
+    docs: [["phase-order-check.mjs", "brain/scripts/vcs/phase-order-check.mjs"],
+           ["ADR-0015 — the detection→prevention flip", "brain/project/decisions/adr-0015-governance-v3-substrate-ladder.md"]] },
+
+  { id: "l5", lane: "gov", actor: "ci", label: "L5 · actor-check",
+    verb: "approver ≠ PR author ≠ issue author", since: "v0.9.0 · tiered in ADR-0026", status: "shipped",
+    summary: "No self-approval. At one maintainer the strict form is unsatisfiable — hence the doctrine tiers.",
+    detail: [
+      "This gate is where the two axes met: the rung ladder says where fail-closed can live; the tier says which invariants a team declares itself bound by.",
+      "Under lite, the distinctness rule becomes a distinct-act rule: the approval must be applied after the head commit was pushed, so approval-before-the-code still fails."
+    ],
+    docs: [["actor-check.mjs", "brain/scripts/vcs/actor-check.mjs"],
+           ["ADR-0026 — doctrine tiers", "brain/project/decisions/adr-0026-governance-doctrine-tiers.md"]] },
+
+  { id: "l6", lane: "gov", actor: "ci", label: "L6 · brain-writes-reviewed",
+    verb: "a write to brain/** needs a non-author human review", since: "v0.9.0", status: "shipped",
+    summary: "The evidence form of Tier-2 \"no agent writes to brain/\". CODEOWNERS is an optional enhancement, not the enforcement.",
+    detail: ["The approver set is built only from reviews whose state is APPROVED and whose author is not in governance.reviewActors — which is exactly what makes a cold reviewer's COMMENT verdict structurally uncountable as approval."],
+    docs: [["brain-writes-reviewed.mjs", "brain/scripts/vcs/brain-writes-reviewed.mjs"],
+           ["Reviewer protocol §2", "brain/core/methodology/reviewer-protocol.md"]] },
+
+  { id: "rungs", lane: "gov", actor: "ci", label: "Substrate rungs 1–4",
+    verb: "merge · release · auto-correct · floor", since: "v0.9.0 · ADR-0015", status: "shipped",
+    summary: "Where fail-closed can live, detected — never declared.",
+    detail: [
+      "Rung 1 (branch protection) needs a paid or public repo; rung 2 (release) is always available because a project controls its own release; rung 3 (post-merge auto-revert) needs only CI; rung 4 is detection with a loud signal.",
+      "No gate depends on a single rung, and a gate never lies about which one is active — brain:governance-status reports the active rung and the remedy to climb higher."
+    ],
+    docs: [["substrate.mjs", "brain/scripts/vcs/substrate.mjs"],
+           ["brain-governance-status.mjs", "brain/scripts/brain-governance-status.mjs"]] },
+
+  { id: "tiers", lane: "gov", actor: "human", label: "Doctrine tiers",
+    verb: "governance.tier: lite | standard | regulated", since: "post-1.0 · ADR-0026", status: "shipped",
+    summary: "A declared axis, orthogonal to the detected rung: which invariants a team is bound by.",
+    detail: [
+      "The rung answers where fail-closed CAN live. The tier answers which invariants a team CHOOSES to be bound by, and on what evidence. Neither may mask the other — status renders the cross-product per gate.",
+      "This repository declares lite (solo maintainer). standard is the default for any consumer and is behaviourally identical to the pre-tier doctrine."
+    ],
+    docs: [["ADR-0026", "brain/project/decisions/adr-0026-governance-doctrine-tiers.md"],
+           ["brain.config.json", "brain.config.json"]] },
+
+  { id: "boundary", lane: "gov", actor: "ci", label: "The enforce/guide boundary",
+    verb: "outputs are enforced · judgment is not", since: "v0.6.0 · ADR-0014", status: "shipped",
+    summary: "The gates prove the process happened. They never claim the work is correct.",
+    detail: [
+      "A ticket link exists — not that the ticket describes the right work. A diff is ≤400 lines — not that it is sliced coherently. Memory changed — not that the capture was good. An ADR exists — not that a decision was actually made.",
+      "This line is not a gap to be closed. It is the boundary between what a machine can verify and what needs a human mind."
+    ],
+    docs: [["Workflow governance", "brain/core/methodology/workflow-governance.md"],
+           ["ADR-0014", "brain/project/decisions/adr-0014-workflow-governance.md"]] },
+
+  { id: "metrics", lane: "gov", actor: "either", label: "Measure, don't re-derive",
+    verb: "brain:metrics · brain:audit · brain:governance-status", since: "post-1.0 (#324)", status: "shipped",
+    summary: "Reporting runs the same pure check functions enforcement runs — measurement cannot drift.",
+    detail: [
+      "brain:metrics walks the same first-parent merges through the same shared code, splitting raw from enforced results and counting exception labels by author.",
+      "It is read-only and never fails a merge; an uncomputable merge is counted visibly rather than silently passed."
+    ],
+    docs: [["brain-metrics.mjs", "brain/scripts/brain-metrics.mjs"],
+           ["Workflow governance — metrics reference", "brain/core/methodology/workflow-governance.md"]] },
+
+  // ── 7 · authority ─────────────────────────────────────────────────────────
+  { id: "tier1", lane: "authority", actor: "agent", label: "Tier 1 — autonomous",
+    verb: "read anything · write openspec/changes/** · run checks", since: "v0.1.0", status: "shipped",
+    summary: "What an agent may do without asking.",
+    detail: ["Read any file; create and modify in-flight SDD artifacts; write to its own scratch file; run repo:check, change:verify and builds; save observations to memory; propose commits."],
+    docs: [["Agent authorities", "brain/core/methodology/agent-authorities.md"]] },
+
+  { id: "tier2", lane: "authority", actor: "human", label: "Tier 2 — confirm first",
+    verb: "push · open/merge a PR · write brain/ · touch CI config", since: "v0.1.0", status: "shipped",
+    summary: "The agent proposes and waits for an explicit human yes.",
+    detail: ["Pushing, opening or merging a PR, modifying anything under brain/, changing CI or CODEOWNERS, deleting branches or committed files, resolving architecture/decision conflicts in memory."],
+    docs: [["Agent authorities", "brain/core/methodology/agent-authorities.md"]] },
+
+  { id: "tier3", lane: "authority", actor: "human", label: "Tier 3 — prohibited",
+    verb: "self-approve · rewrite history · commit into brain/", since: "v0.1.0", status: "shipped",
+    summary: "Never, even when asked directly.",
+    detail: ["Committing straight into brain/decisions, anti-patterns, domain or methodology; approving or merging its own PR; rewriting published history; escalating decisions to other agents behind the human's back.",
+             "When the tier is unclear, the rule is to stop and ask — doubt about the tier is itself grounds to escalate."],
+    docs: [["Agent authorities", "brain/core/methodology/agent-authorities.md"]] },
+
+  { id: "reviewer", lane: "authority", actor: "agent", label: "The cold reviewer",
+    verb: "COMMENT-only verdicts · brain-review/1|2", since: "ADR-0020/0021/0022", status: "proposed",
+    summary: "A reviewer that can verify, rule and sequence — and structurally cannot approve.",
+    detail: [
+      "Three independent locks, any one of which holds if the other two fail: verdicts post as COMMENT state; the port verb hardcodes event: 'COMMENT' with no APPROVE sibling; and the reviewer handle registers in governance.reviewActors, read only by L6, never in approvalActors, read only by L5.",
+      "It applies doctrine, it never creates it — and rev ≥ 3 forces a STOP rather than another round.",
+      "Status: doctrine proposed, pending human signature."
+    ],
+    docs: [["Reviewer protocol", "brain/core/methodology/reviewer-protocol.md"],
+           ["ADR-0020 — two-key split", "brain/project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md"]] },
+
+  { id: "upstream", lane: "authority", actor: "human", label: "Upstream-first loop",
+    verb: "improve core → PR to brain → bump the tag", since: "v0.1.0 · ADR-0003", status: "shipped",
+    summary: "Consumers never patch core in place; the product absorbs the improvement and ships it as a tag.",
+    detail: [
+      "brain/core/** is read-only in a consumer precisely so that this loop is the only path. A local hack would be silently overwritten on the next upgrade — the rule makes that impossible to forget.",
+      "brain itself is the first consumer of this loop: the repo is self-hosting, so every methodology change is dogfooded before it ships."
+    ],
+    docs: [["ADR-0003 — core/project split & self-hosting", "brain/project/decisions/adr-0003-split-core-project-self-hosting.md"],
+           ["README — the golden rule", "README.md"]] },
+];
+
+const MILESTONES = [
+  { v: "v0.1.0", t: "The three layers exist", future: false,
+    body: "Knowledge base (brain/), SDD scaffolding (openspec/), git-based memory (.memory/). Versioned installer with managed paths and additive migrations, VCS provider adapter, memory backend adapter, the check-refs engine. The method is written down; nothing enforces it yet." },
+  { v: "v0.4.0", t: "Adapters harden, memory gets a second layer", future: false,
+    body: "Generic VCS_TOKEN replaces provider-specific tokens (breaking). Feature-scoped working memory arrives (ADR-0011): resume.md travels with the branch and never reaches main. Harness-init becomes an adapter (ADR-0012), and env:init learns to bootstrap brain.config.json from the git origin." },
+  { v: "v0.5.0", t: "Onboarding stops being manual", future: false,
+    body: "Auto-ADR onboarding (ADR-0013): the agent drafts starter ADRs into brain-drafts/ and the human signs each one — the human gate is designed in from the first ADR a repo ever gets. memory:pull becomes churn-resilient across machines." },
+  { v: "v0.6.0", t: "Governance v1 — the invariants get teeth", future: false,
+    body: "ADR-0014 lands four load-bearing invariants with a floor that works everywhere (client hooks + brain:audit over merged history) and a hard gate where the platform allows it (brain:protect). The golden path (start/check/save/ship/next) unifies the human and agent surfaces, and the --no-verify policy is enforced as a prohibited reference." },
+  { v: "v0.7.0 – v0.8.1", t: "Naming becomes a contract", future: false,
+    body: "scripts/ moves to brain/scripts/ and every verb takes the brain: prefix, with automated consumer migration and deprecated aliases kept alive. Boring on the surface, load-bearing underneath: the verb names are what the harness contract can now promise." },
+  { v: "v0.9.0", t: "Governance v3 — the ladder", future: false,
+    body: "ADR-0015 replaces one enforcement point with six levels over observable evidence (L1–L6), a four-rung substrate ladder, and the REQUIRED/DETECTION split that makes promoting a gate a list move rather than a rewrite. Crucially: every gate reads evidence, never the producing tool." },
+  { v: "v1.0.0", t: "First stable — controlled pilot", future: false,
+    body: "Three-axis decoupling (AGENT_PLATFORM · SDD_ENGINE · MEMORY_BACKEND, ADR-0024), git-native durable memory, VCS-agnostic PR-time governance on GitHub and GitLab, and the cold reviewer's security boundary. Explicitly not open adoption: the hard gate before external adopters is upgrade safety." },
+  { v: "1.1 line", t: "Doctrine tiers, upgrade safety, the reviewer in production", future: true,
+    body: "ADR-0026 adds the declared tier axis (lite / standard / regulated) beside the detected rung, resolving gates that were unsatisfiable at one maintainer. In flight: rollback and journal-based recovery for brain:upgrade (#396), and making the reviewer's flow guarantees real in production (#317)." },
+];
+
+// ── render ──────────────────────────────────────────────────────────────────
+const ACTORS = { human: "human", agent: "agent", ci: "CI", either: "human or agent" };
+const STATUS = { shipped: "", proposed: "st-proposed", inflight: "st-inflight" };
+const byId = Object.fromEntries(NODES.map(n => [n.id, n]));
+let base = "local", active = null, filter = null;
+
+const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
+const href = p => (base === "local" ? HERE + p : REPO + p);
+
+function renderMap() {
+  const root = document.getElementById("map");
+  root.textContent = "";
+  for (const lane of LANES) {
+    const sec = el("section", "lane");
+    sec.appendChild(el("h2", null, lane.title));
+    sec.appendChild(el("p", null, lane.blurb));
+    const row = el("div", "row" + (lane.flow ? " flow" : ""));
+    for (const n of NODES.filter(n => n.lane === lane.id)) {
+      const b = el("button", `node c-${n.actor} ${STATUS[n.status] || ""}`);
+      b.id = "n-" + n.id;
+      b.appendChild(el("span", "dot"));
+      b.appendChild(el("span", "n-label", n.label));
+      b.appendChild(el("span", "n-verb", n.verb));
+      b.addEventListener("click", () => select(n.id, true));
+      row.appendChild(b);
+    }
+    sec.appendChild(row);
+    root.appendChild(sec);
+  }
+  applyFilter();
+}
+
+function renderEvo() {
+  const root = document.getElementById("evo");
+  root.textContent = "";
+  const sec = el("section", "lane");
+  sec.appendChild(el("h2", null, "How the method got here"));
+  sec.appendChild(el("p", null,
+    "Each release moved the method one step from written-down to enforced. Read it as the shape of the " +
+    "argument: describe the rule, then make it observable, then make it fail closed where the substrate allows."));
+  const ul = el("ul", "tl");
+  for (const m of MILESTONES) {
+    const li = el("li", m.future ? "future" : null);
+    li.appendChild(el("div", null, `<span class="v">${m.v}</span> · <span class="t">${m.t}</span>`));
+    li.appendChild(el("p", null, m.body));
+    ul.appendChild(li);
+  }
+  sec.appendChild(ul);
+  root.appendChild(sec);
+}
+
+function select(id, push) {
+  const n = byId[id];
+  if (!n) return;
+  document.querySelectorAll(".node").forEach(b => b.setAttribute("aria-current", b.id === "n-" + id));
+  const p = document.getElementById("panel");
+  p.textContent = "";
+  const close = el("button", "close", "Close");
+  close.addEventListener("click", deselect);
+  p.appendChild(close);
+  p.appendChild(el("h3", null, n.label));
+  p.appendChild(el("div", "p-verb", n.verb));
+
+  const meta = el("div", "p-meta");
+  meta.appendChild(el("span", `tag actor c-${n.actor}`, ACTORS[n.actor]));
+  meta.appendChild(el("span", "tag", n.since));
+  if (n.status !== "shipped") meta.appendChild(el("span", "tag", n.status === "proposed" ? "proposed" : "in flight"));
+  p.appendChild(meta);
+
+  p.appendChild(el("p", null, `<strong>${n.summary}</strong>`));
+  for (const d of n.detail || []) p.appendChild(el("p", null, d));
+
+  if (n.produces?.length) {
+    p.appendChild(el("h4", null, "Produces"));
+    p.appendChild(el("ul", null, n.produces.map(x => `<li><code>${x}</code></li>`).join("")));
+  }
+  if (n.gates?.length) {
+    p.appendChild(el("h4", null, "Gates that read it"));
+    p.appendChild(el("ul", null, n.gates.map(x => `<li>${x}</li>`).join("")));
+  }
+  p.appendChild(el("h4", null, "Where it is defined"));
+  const docs = el("div", "docs");
+  for (const [label, path] of n.docs) {
+    const a = el("a", null, `${label} <code>${path}</code>`);
+    a.href = href(path);
+    docs.appendChild(a);
+  }
+  p.appendChild(docs);
+  p.classList.add("open");
+  document.body.classList.add("panel-open");
+  active = id;
+  if (push) history.replaceState(null, "", "#" + id);
+}
+
+function deselect() {
+  document.getElementById("panel").classList.remove("open");
+  document.body.classList.remove("panel-open");
+  document.querySelectorAll(".node").forEach(b => b.setAttribute("aria-current", "false"));
+  active = null;
+  history.replaceState(null, "", location.pathname);
+}
+
+function applyFilter() {
+  document.querySelectorAll(".node").forEach(b => {
+    const n = byId[b.id.slice(2)];
+    b.classList.toggle("dim", !!filter && n.actor !== filter && !(filter === "human" && n.actor === "either"));
+  });
+}
+
+// controls
+const fbox = document.getElementById("filters");
+for (const [k, label] of Object.entries(ACTORS)) {
+  if (k === "either") continue;
+  const b = el("button", null, label);
+  b.addEventListener("click", () => {
+    filter = filter === k ? null : k;
+    [...fbox.children].forEach(c => c.classList.toggle("on", c === b && filter === k));
+    applyFilter();
+  });
+  fbox.appendChild(b);
+}
+document.getElementById("linkbase").addEventListener("click", e => {
+  base = base === "local" ? "github" : "local";
+  e.target.textContent = base === "local" ? "Links: local files" : "Links: GitHub";
+  if (active) select(active, false);
+});
+document.getElementById("theme").addEventListener("click", () => {
+  const cur = document.documentElement.dataset.theme
+    || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.dataset.theme = cur === "dark" ? "light" : "dark";
+});
+const tabMap = document.getElementById("tab-map"), tabEvo = document.getElementById("tab-evo");
+function view(which) {
+  const isMap = which === "map";
+  document.getElementById("map").hidden = !isMap;
+  document.getElementById("evo").hidden = isMap;
+  tabMap.setAttribute("aria-pressed", String(isMap));
+  tabEvo.setAttribute("aria-pressed", String(!isMap));
+  if (!isMap) deselect();
+}
+tabMap.addEventListener("click", () => view("map"));
+tabEvo.addEventListener("click", () => view("evo"));
+addEventListener("keydown", e => { if (e.key === "Escape") deselect(); });
+
+renderMap();
+renderEvo();
+if (location.hash && byId[location.hash.slice(1)]) select(location.hash.slice(1), false);
+</script>
+</body>
+</html>
