@@ -267,15 +267,88 @@ WHEN copyManaged runs
 THEN the paths are written in the same sorted order it reports
 ```
 
-## REQ-396-9 — SIGKILL and power loss are recoverable (SLICE 2, NOT IMPLEMENTED)
+## REQ-396-9 — SIGKILL and power loss are recoverable
 
 A hard kill during the write MUST leave a journal that a later invocation detects and
 replays, restoring every managed path to its pre-copy bytes.
 
-> **Not implemented in slice 1.** `docs/KNOWN-LIMITATIONS.md` names this gap explicitly
-> rather than implying coverage. Slice 2 MUST invert `createRestorePoint`'s entry-time
-> clearing of a pre-existing snapshot: once recovery exists, a leftover snapshot is
-> evidence to replay, not debris to clear.
+Recovery MUST be explicit, never automatic: between the crash and the next invocation the
+consumer may have repaired the tree by hand, and replaying stale snapshot bytes over that
+repair would destroy work while reporting success. A later run therefore REFUSES until the
+operator asks.
+
+The journal MUST be written after the snapshot completes and before the first write. Its
+ABSENCE is then proof that the previous run never wrote anything, which is what makes
+clearing a journal-less leftover safe.
+
+### Scenario 1 — a real kill is replayable
+
+```
+GIVEN a run killed with SIGKILL after its first managed write
+WHEN a later run starts
+THEN it refuses, naming how many paths the interrupted run covered
+  AND --recover returns every covered path to its pre-upgrade bytes
+  AND a complete recovery consumes its own snapshot
+```
+
+### Scenario 2 — negative control: no journal means nothing to replay
+
+```
+GIVEN a leftover snapshot directory with NO journal
+WHEN a run starts
+THEN it proceeds normally
+  AND the stale snapshot bytes are never restored
+```
+
+A rule that replayed any leftover directory would satisfy Scenario 1 and corrupt this one.
+
+### Scenario 3 — an untrustworthy journal is not guessed at
+
+```
+GIVEN a journal that is unparseable, of an unknown version, or malformed
+WHEN it is read
+THEN it reads as ABSENT
+```
+
+### Scenario 4 — concurrency is decided by LIVENESS, not by a file existing
+
+```
+GIVEN one brain:upgrade whose process is alive and holding the lock
+WHEN a second starts in the same repo
+THEN it is refused, naming the owning pid
+  AND --recover is refused too, because reverting under a live writer is the damage
+
+GIVEN a lock whose owner is provably gone (SIGKILL leaves one every time)
+WHEN a run starts
+THEN the lock is reclaimed, not obeyed
+```
+
+A mutex that trusts file existence strands the repo after every hard kill; one that deletes
+any lock it finds is not a mutex. The owner's pid — already written and previously never read
+— is what separates the two.
+
+### Scenario 5 — an unreadable journal is refused, never auto-cleared
+
+```
+GIVEN a journal that cannot be parsed or carries an unknown version
+WHEN a run starts
+THEN it refuses and the snapshot is left untouched
+```
+
+Absent and unreadable are OPPOSITE evidence. Absent proves nothing was written; unreadable
+means something was and we no longer know what. Treating them alike is what turned a torn
+journal into deleted bytes.
+
+### Scenario 6 — --dry-run reports the interruption instead of hiding it
+
+```
+GIVEN an interrupted upgrade on disk
+WHEN brain:upgrade runs with --dry-run
+THEN it refuses and names --recover
+```
+
+"Dry-run first" is the habit the docs recommend, so it must not be the one path that stays
+silent about a pending interrupted run.
 
 ## Out of scope
 
