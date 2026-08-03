@@ -18,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { copyManaged, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, recoverFromJournal, acquireLock, inspectRestorePoint } from './lib/installer.mjs';
+import { copyManaged, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
 
 const ROOT = process.cwd();
@@ -42,6 +42,9 @@ const noInstall = flags.has('--no-install');
 const force = flags.has('--force');
 const abortOnCollision = flags.has('--abort-on-collision');
 const recover = flags.has('--recover');
+// Repeatable: `--skip-merge <path> --skip-merge <other>`. Each value is the argument
+// that FOLLOWS the flag, so they are read positionally rather than from the flag set.
+const skipMerge = args.reduce((acc, a, i) => (a === '--skip-merge' && args[i + 1] ? [...acc, args[i + 1]] : acc), []);
 
 // ── The restore point, read ONCE ───────────────────────────────────────────────
 // Read before any branch — including --dry-run, which previously skipped the whole
@@ -150,7 +153,7 @@ if (!dryRun) {
 }
 
 if (!tag && !noInstall) {
-  die(`missing <tag>. Usage: ${PM} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force] [--recover]`);
+  die(`missing <tag>. Usage: ${PM} run brain:upgrade -- v0.1.0 [--dry-run] [--no-install] [--force] [--recover] [--skip-merge <path>]`);
 }
 
 // ── Self-host guard ──────────────────────────────────────────────────────────
@@ -259,15 +262,36 @@ if (interrupted) {
   process.exit(interrupted === 'SIGTERM' ? 143 : 130);
 }
 
+// ── Pre-flight the merges ──────────────────────────────────────────────────────
+// Before the snapshot, before the first write: a consumer file that cannot be parsed
+// would otherwise fail the whole upgrade after all that work, and block every future
+// one until it is repaired. Catching it here lets the refusal name every broken file
+// at once AND name the escape.
+const ALL_MERGES = { '.claude/settings.json': mergeClaudeSettings, 'package.json': mergePackageJson };
+const mergeMap = Object.fromEntries(Object.entries(ALL_MERGES).filter(([rel]) => !skipMerge.includes(rel)));
+
+const { unparseable } = preflightMergeTargets({ destRoot: ROOT, mergePaths: Object.keys(mergeMap) });
+if (unparseable.length > 0 && !dryRun) {
+  console.error(`  ${C.red}✗${C.reset} ${unparseable.length} file(s) this upgrade must merge cannot be parsed:`);
+  for (const { rel, reason } of unparseable) console.log(`      ${C.dim}${rel} — ${reason}${C.reset}`);
+  warn('Nothing was written. Repair them, or skip them and upgrade everything else:');
+  die(`  ${PM} run brain:upgrade -- ${tag ?? '<tag>'} ${unparseable.map((u) => `--skip-merge ${u.rel}`).join(' ')}`);
+}
+
 let copied, skipped, merged, collisions;
 try {
   ({ copied, skipped, merged, collisions } = copyManaged({
     srcRoot: pkgRoot,
     destRoot: ROOT,
     managed,
-    local,
+    // A skipped merge joins `local`, not merely `specialMerge`'s complement. Dropping
+    // it from the merge map alone would send it to the PLAIN COPY set — so "skip the
+    // merge" would silently mean "clobber it instead", which is worse than the lockout
+    // it was meant to escape. `local` is this repo's existing "the consumer owns this,
+    // never touch it" channel, and it reports the path under `skipped` for free.
+    local: [...local, ...skipMerge],
     dryRun,
-    specialMerge: { '.claude/settings.json': mergeClaudeSettings, 'package.json': mergePackageJson },
+    specialMerge: mergeMap,
     abortOnCollision,
   }));
 } catch (err) {
@@ -338,6 +362,11 @@ if (dryRun) {
     ok(`Merged ${merged.length} settings file(s) additively (consumer content preserved):`);
     for (const f of merged) console.log(`      ${C.dim}${f}${C.reset}`);
   }
+}
+if (skipMerge.length) {
+  warn(`Skipped ${skipMerge.length} merge(s) at your request — these files were NOT updated and NOT overwritten:`);
+  for (const f of skipMerge) console.log(`      ${C.dim}${f}${C.reset}`);
+  info('Repair them and re-run without --skip-merge to pick up brain\'s changes to those files.');
 }
 if (skipped.length) {
   warn(`Skipped ${skipped.length} path(s) that overlap local ownership (local wins):`);

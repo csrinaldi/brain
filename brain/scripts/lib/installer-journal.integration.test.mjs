@@ -498,3 +498,68 @@ test('journal: recovery separates restorations from removals, and warns about th
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── REQ-M-1: a corrupt consumer file must not lock the consumer out ──────────
+// #396 already made this failure SAFE — the tree rolls back and the error names the
+// file, the line and the column. What it did not do is make it ESCAPABLE: a single
+// unparseable file blocks all 366 managed paths, 364 of which have nothing to do with
+// it, and it fails only after step 1 has already installed the new package.
+function corruptConsumer(tmp, { corrupt = '.claude/settings.json' } = {}) {
+  const consumer = join(tmp, 'consumer');
+  const pkg = join(consumer, 'node_modules', 'brain');
+  mkdirSync(join(pkg, 'brain', 'core'), { recursive: true });
+  mkdirSync(join(pkg, '.claude'), { recursive: true });
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'brain', version: '9.9.9' }));
+  writeFileSync(join(pkg, 'brain', 'core', 'managed-paths.mjs'),
+    'export const managed = ["brain/core/**", ".claude/settings.json"];\nexport const local = [];\nexport const MANAGED_SCRIPT_KEYS = [];\n');
+  writeFileSync(join(pkg, 'brain', 'core', 'config-migrations.mjs'), 'export const migrations = [];\n');
+  writeFileSync(join(pkg, 'brain', 'core', 'a.md'), 'NEW');
+  writeFileSync(join(pkg, '.claude', 'settings.json'), JSON.stringify({ hooks: {} }));
+  mkdirSync(join(consumer, 'brain', 'core'), { recursive: true });
+  mkdirSync(join(consumer, '.claude'), { recursive: true });
+  writeFileSync(join(consumer, 'package.json'), JSON.stringify({ name: 'c', version: '1.0.0' }));
+  writeFileSync(join(consumer, 'brain', 'core', 'a.md'), 'OLD');
+  writeFileSync(join(consumer, corrupt), '{ "permissions": { broken json here');
+  return consumer;
+}
+
+test('upgrade: a corrupt consumer file is caught BEFORE any work, naming the file and the escape (REQ-M-1)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-m1-'));
+  try {
+    const consumer = corruptConsumer(tmp);
+    const r = spawnSync(process.execPath, [CLI, 'v1', '--no-install'], { cwd: consumer, encoding: 'utf8' });
+    const out = r.stdout + r.stderr;
+
+    assert.notEqual(r.status, 0, 'it must refuse');
+    assert.match(out, /\.claude\/settings\.json/, 'it must name the file that cannot be parsed');
+    assert.match(out, /--skip-merge/, 'and it must name the way out, or the consumer is locked out');
+    assert.ok(!existsSync(join(consumer, RESTORE_POINT_DIR)),
+      'a pre-flight refusal must not have built a snapshot it never needed');
+    assert.equal(readFileSync(join(consumer, 'brain', 'core', 'a.md'), 'utf8'), 'OLD',
+      'and nothing may be written');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('upgrade: --skip-merge upgrades everything else and leaves the corrupt file untouched (REQ-M-2)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-m2-'));
+  try {
+    const consumer = corruptConsumer(tmp);
+    const before = readFileSync(join(consumer, '.claude', 'settings.json'), 'utf8');
+
+    const r = spawnSync(process.execPath,
+      [CLI, 'v1', '--no-install', '--skip-merge', '.claude/settings.json'],
+      { cwd: consumer, encoding: 'utf8' });
+    const out = r.stdout + r.stderr;
+
+    assert.equal(r.status, 0, `the rest of the upgrade must proceed: ${r.stderr}`);
+    assert.equal(readFileSync(join(consumer, 'brain', 'core', 'a.md'), 'utf8'), 'NEW',
+      'the 364 paths that have nothing to do with the corrupt file must upgrade');
+    assert.equal(readFileSync(join(consumer, '.claude', 'settings.json'), 'utf8'), before,
+      'the skipped file must be left exactly as it was — never clobbered as a consolation');
+    assert.match(out, /skipped/i, 'and the run must say loudly what it skipped');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

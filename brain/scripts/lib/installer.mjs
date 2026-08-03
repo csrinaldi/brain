@@ -182,6 +182,38 @@ function restoreHandle({ destRoot, dir, saved, created, createdDirs }) {
   };
 }
 
+/**
+ * Parses every consumer file a merge will read, BEFORE anything is snapshotted or
+ * written, and reports all of them at once.
+ *
+ * A merge function throws on unparseable consumer JSON. #396 made that safe — the tree
+ * rolls back and the error names the file — but not ESCAPABLE: one broken file blocks
+ * every managed path, including the hundreds that have nothing to do with it, and it
+ * fails only after the package install has already replaced `node_modules/brain`.
+ *
+ * Checking up front changes three things. The consumer learns about ALL the broken
+ * files in one run rather than one per attempt; no snapshot is built for work that was
+ * never going to happen; and the refusal can name `--skip-merge`, which is the
+ * difference between a diagnosis and a lockout. That distinction is the whole reason
+ * `brain/core/anti-patterns/pre-v0-8-0-upgrade-clobber-lockout.md` exists.
+ *
+ * @param {{destRoot: string, mergePaths: string[]}} opts
+ * @returns {{ unparseable: Array<{rel: string, reason: string}> }}
+ */
+export function preflightMergeTargets({ destRoot, mergePaths }) {
+  const unparseable = [];
+  for (const rel of mergePaths) {
+    const path = join(destRoot, rel);
+    if (!pathPresent(path)) continue; // absent is fine — the merge writes it fresh
+    try {
+      JSON.parse(readFileSync(path, 'utf8'));
+    } catch (err) {
+      unparseable.push({ rel, reason: err?.message ?? String(err) });
+    }
+  }
+  return { unparseable };
+}
+
 // ── Restore point (rollback) ──────────────────────────────────────────────────
 
 /**

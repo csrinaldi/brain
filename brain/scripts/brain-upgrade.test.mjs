@@ -116,7 +116,17 @@ test('brain:upgrade: no warning printed when package.json name is not "brain"', 
 test('brain:upgrade: registers package.json under specialMerge → mergePackageJson (lock-in guard, issue #180)', () => {
   const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
 
-  assert.match(source, /specialMerge:\s*\{[^}]*'package\.json':\s*mergePackageJson/,
-    'brain-upgrade.mjs must register \'package.json\': mergePackageJson under specialMerge — ' +
+  // The merge map moved out of the copyManaged call into a named ALL_MERGES constant
+  // when --skip-merge landed (#399), so this asserts the binding rather than its old
+  // inline position — the invariant is that package.json is MERGED, not where it is
+  // declared.
+  assert.match(source, /ALL_MERGES\s*=\s*\{[^}]*'package\.json':\s*mergePackageJson/,
+    'brain-upgrade.mjs must register \'package.json\': mergePackageJson as a merge target — ' +
     'a plain copy would clobber the consumer\'s package.json identity again (issue #180)');
+
+  // …and #399 opened a way to REMOVE a path from that map at runtime. Skipping a merge
+  // must send the path to `local` (untouched), never to the plain-copy set, or the
+  // escape hatch reintroduces exactly the clobber this guard exists to prevent.
+  assert.match(source, /local:\s*\[\.\.\.local,\s*\.\.\.skipMerge\]/,
+    'a --skip-merge path must join `local` so it is left alone, never plain-copied (issue #180 + #399)');
 });
