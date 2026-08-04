@@ -1,6 +1,9 @@
 {
   "name": "brain",
   "version": "1.0.0",
+  "bin": {
+    "brain": "brain/scripts/cli-entry.mjs"
+  },
   "private": true,
   "description": "Generic AI-assisted development harness — knowledge base, SDD scaffolding, and team memory.",
   "repository": {

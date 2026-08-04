@@ -114,14 +114,24 @@ echo "// Consumer modification - should survive brain upgrade" >> src/index.js
 ok "Consumer code modified (src/index.js)"
 ORIGINAL_SRC=$(md5sum src/index.js 2>/dev/null | awk '{print $1}')
 
-line "[2] brain:upgrade -- ${TAG} (FULL, no --no-install)"
-node -e "const p=require('./package.json');p.scripts={...p.scripts,'brain:upgrade':'node node_modules/brain/brain/scripts/brain-upgrade.mjs','brain:env:init':'bash ./brain/scripts/bootstrap.sh'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
-# Plant a custom brain:day:start BEFORE upgrade to prove consumer-wins on specialMerge.
-node -e "const p=require('./package.json');p.scripts['brain:day:start']='consumer-custom-day-start';require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
+line "[2] npx brain init (issue #400 — no hand-edited package.json)"
+# Plant a custom brain:day:start BEFORE init to prove consumer-wins on specialMerge.
+node -e "const p=require('./package.json');p.scripts={...p.scripts,'brain:day:start':'consumer-custom-day-start'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
 info "planted brain:day:start='consumer-custom-day-start' (must survive specialMerge)"
-# brain:upgrade is invoked via the consumer's own PM (brain already wired to detect it)
-$CPM run brain:upgrade -- "${TAG}" >/dev/null 2>&1
+# THE point of #400: no alias is hand-written here. `npx brain init` is reachable with
+# an empty scripts block because it is a `bin` entry, and it writes the one alias the
+# upgrade cannot inject into a consumer (brain:upgrade) before delegating to it.
+npx brain init "${TAG}" >/dev/null 2>&1
+INIT_STATUS=$?
+if [ "$INIT_STATUS" -eq 0 ]; then ok "npx brain init exited 0"; else fail "npx brain init exited ${INIT_STATUS}"; fi
+BOOTSTRAP_ALIAS=$(node -e "const p=require('./package.json');console.log(p.scripts['brain:upgrade']||'')" 2>/dev/null)
+if [ -n "$BOOTSTRAP_ALIAS" ]; then ok "init wrote the brain:upgrade alias"; else fail "brain:upgrade alias NOT written by init"; fi
 if [ -d brain/scripts ] && [ -d brain/core ]; then ok "managed paths copied (brain/scripts + brain/core)"; else fail "managed paths NOT copied"; fi
+# Idempotence (REQ-400-2): a second init must not fail and must not churn the file.
+PKG_BEFORE=$(md5sum package.json | awk '{print $1}')
+npx brain init "${TAG}" >/dev/null 2>&1
+PKG_AFTER=$(md5sum package.json | awk '{print $1}')
+if [ "$PKG_BEFORE" = "$PKG_AFTER" ]; then ok "re-running init is a no-op on package.json"; else fail "init is not idempotent"; fi
 
 line "[3] env:init creates brain.config.json with the derived provider"
 $CPM run brain:env:init >/dev/null 2>&1
