@@ -330,15 +330,131 @@ test('evaluateActor: lite — solo maintainer self-applies the approved label st
   assert.match(result.reason, /distinct-act/i);
 });
 
-test('evaluateActor: lite — approval applied BEFORE the head commit was pushed → fail (approval before the code is not an approval)', () => {
+// AMENDED by ADR-0026 Amendment 1 (#418): this pinned the pre-amendment rule
+// with the approver's OWN commit, which no longer re-arms. The intent —
+// "approval before the code is not an approval" — is unchanged and still
+// enforced, but only over FOREIGN commits, so the case is restated with a
+// third-party author. The approver-authored variant is now REQ-418-2 below.
+test('evaluateActor: lite — approval applied BEFORE a FOREIGN commit was pushed → fail (approval before the code is not an approval)', () => {
   const result = evaluateActor({
     author: 'alice',
     labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
-    commits: [{ sha: 'abc', login: 'alice', at: '2024-01-01T00:10:00Z' }],
+    commits: [{ sha: 'abc', login: 'mallory', at: '2024-01-01T00:10:00Z' }],
     tier: 'lite',
   });
   assert.equal(result.level, 'fail');
-  assert.match(result.reason, /before the code/i);
+  assert.match(result.reason, /not strictly after/i);
+});
+
+// ── ADR-0026 Amendment 1 / issue #418 — re-arm only on foreign commits ──────
+//
+// At `lite` the approver is ALLOWED to be the author, so comparing against
+// the head commit asked "did you keep working on your own branch" — linear
+// cost, near-zero value at n=1, and a structural blocker for the automated
+// review loop (#409). The comparison target moves to the latest FOREIGN
+// commit: authored by neither the approver nor a registered
+// `governance.reviewActors` identity. The `reviewActors` exemption is only
+// safe because #413 made the reviewer identity verifiable against its token.
+
+test('evaluateActor: lite — the approver\'s OWN later pushes do not re-arm the approval (REQ-418-2, #418)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [
+      { sha: 'abc', login: 'alice', at: '2024-01-01T00:10:00Z' },
+      { sha: 'def', login: 'alice', at: '2024-01-01T00:20:00Z' },
+    ],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass', 'the approver signing their own later commits certifies nothing new');
+  assert.match(result.reason, /no push re-arms/i);
+});
+
+test('evaluateActor: lite — a registered reviewActors identity\'s pushes do not re-arm (REQ-418-3, #418)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: 'abc', login: 'csrinaldibot', at: '2024-01-01T00:10:00Z' }],
+    denyActors: ['csrinaldibot'], // governance.reviewActors
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass', 'a verified reviewer identity\'s fix-push must not demand a fresh signature');
+});
+
+test('evaluateActor: lite — a THIRD-PARTY push still re-arms; the stale-green property survives (REQ-418-1, #418)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [
+      { sha: 'abc', login: 'alice', at: '2024-01-01T00:05:00Z' },
+      { sha: 'def', login: 'mallory', at: '2024-01-01T00:10:00Z' },
+    ],
+    denyActors: ['csrinaldibot'],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail', 'work the approver has not seen must still invalidate the approval');
+});
+
+// Negative control: green on BOTH the pre- and post-amendment code by design.
+// It pins that the exemption never reaches an identity the platform cannot
+// vouch for — the guard against an over-permissive relaxation, the same class
+// as #413's case-insensitivity control.
+test('evaluateActor: lite — unresolvable commit authorship counts as FOREIGN and re-arms (REQ-418-4, #418)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: 'abc', login: null, at: '2024-01-01T00:10:00Z' }], // GitLab / unattributed author
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail', 'relief must never extend to an identity the provider cannot resolve');
+});
+
+test('evaluateActor: lite — no foreign commit at all → any approval event satisfies the evidence (REQ-418-5, #418)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    // Label predates every commit — under the pre-amendment rule this failed.
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2023-12-31T00:00:00Z' }],
+    commits: [{ sha: 'abc', login: 'alice', at: '2024-01-01T00:10:00Z' }],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass');
+});
+
+test('evaluateActor: lite — logins fold case; a case-different approver login is the same account (REQ-418-4, #418)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'Alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: 'abc', login: 'alice', at: '2024-01-01T00:10:00Z' }],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass', 'refusing on case alone would be a false positive');
+});
+
+test('evaluateActor: lite — the refusal names the foreign author and its timestamp (REQ-418-7, #418)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: 'def', login: 'mallory', at: '2024-01-01T00:10:00Z' }],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /mallory/, 'the operator must be able to tell WHICH commit to review');
+  assert.match(result.reason, /2024-01-01T00:10:00Z/);
+  assert.match(result.reason, /re-apply the approved label/i, 'the next action must be derivable from the message');
+});
+
+test('evaluateActor: standard — a reviewActors identity\'s push does NOT exempt anything (REQ-418-6, #418)', () => {
+  // The amendment is lite-only. At standard the approver is never the author,
+  // so the distinct-actor rule and its message must be untouched.
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:10:00Z' }],
+    commits: [{ sha: 'abc', login: 'csrinaldibot', at: '2024-01-01T00:00:00Z' }],
+    denyActors: [],
+    tier: 'standard',
+  });
+  assert.equal(result.level, 'fail', 'standard still refuses self-approval regardless of who pushed');
+  assert.match(result.reason, /self-applied/i);
 });
 
 test('evaluateActor: lite — commits uncomputable (null) → fail closed (an unreadable approval is not an approval)', () => {
