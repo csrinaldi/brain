@@ -843,6 +843,7 @@
 {"id":"rec-6c1b9277191c760c","ts":"2026-07-12T15:56:50Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-6c1feb436589dfc6","ts":"2026-07-29T14:26:06Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-6c2821a6ccf5afc1","ts":"2026-07-13T00:21:29Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-6c297253b3e65742","ts":"2026-08-04T14:24:59Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08.jsonl"}
 {"id":"rec-6c7931ab8762ec58","ts":"2026-07-29T14:28:37Z","actor":"feat/issue-266-h1-1-review-core-cold-boot","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-6c7fdc6b77a9a975","ts":"2026-07-25T21:51:39Z","actor":"feat/issue-266-h1-5b-queue-board","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-6c8fcbf72c305229","ts":"2026-07-25T21:50:47Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
