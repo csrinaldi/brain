@@ -188,21 +188,94 @@ test('importMemory: empty records/ → zero writes, no import spawned, no throw'
   assert.equal(imports.length, 0);
 });
 
-// Reading what engram already holds is the delta's only input. It runs before
-// anything is written, over a store that may be empty, locked, or from another
-// engram version — so a failure there must degrade to "import everything"
-// rather than abort the hydration a `git pull` is waiting on.
-test('importMemory: an unreadable engram state degrades to a full import, never a throw', async () => {
+// ── The unreadable-state path — fail closed, never "import everything" ───────
+//
+// Reading what engram already holds is the delta's only input, and it runs over
+// a store that may be empty, locked, or from another engram version. The obvious
+// degradation — "import everything, correct merely slower" — is WRONG, measured
+// against the real binary: `engram import` INSERTS, so re-sending known records
+// doubles them, and it never self-heals because the next run reads the duplicate
+// keys back and skips them.
+//
+// So these tests use a store with INSERT semantics (an array, not a Set). A fake
+// that dedupes cannot see this defect — that is exactly how it was pinned as
+// intended behaviour in the first place.
+
+function insertStore() {
+  const rows = [];
+  return {
+    rows,
+    keys: () => new Set(rows),
+    insert: (payload) => { for (const o of payload.observations) rows.push(o.topic_key); },
+  };
+}
+
+test('importMemory: an unreadable state SKIPS the import — a full re-import would DUPLICATE the store', async () => {
+  const store = insertStore();
+  const records = [rec('rec-aaa'), rec('rec-bbb')];
+  const imports = [];
+  const logs = [];
+
+  // First run populates the store normally.
+  await importMemory({
+    root: '/tmp/nonexistent',
+    _requireEngram: () => 'engram',
+    _readRecords: () => records,
+    _engramExistingTopicKeys: () => store.keys(),
+    _engramImport: (p) => { imports.push(p); store.insert(p); },
+    _log: () => {},
+  });
+  assert.deepEqual(store.rows, ['rec-aaa', 'rec-bbb']);
+
+  // Second run: the read fails, exactly as a locked DB on the `git pull` path would.
+  const res = await importMemory({
+    root: '/tmp/nonexistent',
+    _requireEngram: () => 'engram',
+    _readRecords: () => records,
+    _engramExistingTopicKeys: () => { throw new Error('database is locked'); },
+    _engramImport: (p) => { imports.push(p); store.insert(p); },
+    _log: (line) => logs.push(line),
+  });
+
+  // The damage assertion first, so a regression reports what actually broke.
+  assert.deepEqual(store.rows, ['rec-aaa', 'rec-bbb'],
+    'the store must be untouched — degrading to a full import is what DOUBLES it, permanently');
+  assert.equal(imports.length, 1, 'the failed run must not spawn an import at all');
+  assert.equal(res.written, 0);
+  assert.equal(res.deferred, true, 'the caller must be able to tell "nothing new" from "did not run"');
+  assert.match(logs.join('\n'), /database is locked/, 'the reason must be surfaced — this path runs with output suppressed');
+});
+
+test('importMemory: a reader that returns a non-Set is uncomputable too, not an empty store', async () => {
   const imports = [];
   const res = await importMemory({
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
     _readRecords: () => [rec('rec-aaa')],
-    _engramExistingTopicKeys: () => { throw new Error('engram export blew up'); },
+    _engramExistingTopicKeys: () => null,
+    _engramImport: (p) => imports.push(p),
+    _log: () => {},
+  });
+
+  assert.equal(imports.length, 0);
+  assert.equal(res.deferred, true);
+});
+
+// The other half of the distinction: a store that is genuinely empty is NOT a
+// failure, and must still import everything. Failing closed on both would make
+// first-ever hydration impossible.
+test('importMemory: a genuinely EMPTY store still imports everything', async () => {
+  const imports = [];
+  const res = await importMemory({
+    root: '/tmp/nonexistent',
+    _requireEngram: () => 'engram',
+    _readRecords: () => [rec('rec-aaa')],
+    _engramExistingTopicKeys: () => new Set(),
     _engramImport: (p) => imports.push(p),
     _log: () => {},
   });
 
   assert.equal(res.written, 1);
   assert.equal(imports.length, 1);
+  assert.notEqual(res.deferred, true);
 });

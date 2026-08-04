@@ -610,14 +610,43 @@ export async function importMemory({
 
   // Reading what engram already holds is the delta's only input, and it runs
   // before anything is written. The store may be empty, locked, or written by a
-  // different engram version — and this call sits in the path a `git pull` is
-  // blocking on. So a failure degrades to "import everything" (correct, merely
-  // slower) instead of aborting the hydration.
-  let existingTopicKeys;
+  // different engram version.
+  //
+  // This FAILS CLOSED, and the reason is measured rather than assumed. Degrading
+  // to "import everything" is not "correct, merely slower" — `engram import`
+  // INSERTS, so re-sending known records DUPLICATES them:
+  //
+  //   import p1 (rec-a, rec-b) → obs=2
+  //   import p2 (rec-c)        → obs=3
+  //   import p1 again          → obs=5   keys=[rec-a, rec-a, rec-b, rec-b, rec-c]
+  //
+  // And it is permanent: the next run reads those keys back and skips them, so
+  // nothing self-heals. One transient lock on the `git pull` path — where this
+  // runs with output suppressed — would silently double the store.
+  //
+  // A hydration that did not happen is recoverable by running again. Duplicates
+  // are not. So: skip the import, SAY why, let the next run retry.
+  //
+  // The distinction the reader must preserve is "the store is genuinely empty"
+  // (an empty Set — import everything, correctly) versus "the store could not be
+  // read" (a throw, or anything that is not a Set). Conflating those two is the
+  // `evidence-reader-empty-on-failure` class; this is the consumer end of it,
+  // where the policy on empty is the destructive one.
+  let existingTopicKeys = null;
+  let unreadable = null;
   try {
     existingTopicKeys = _engramExistingTopicKeys();
-  } catch {
-    existingTopicKeys = new Set();
+  } catch (err) {
+    // execFileSync captures engram's stderr on `pipe`; surfacing it is the whole
+    // point — #433 survived as long as it did because this path runs quiet.
+    unreadable = String(err?.stderr ?? "").trim() || err?.message || String(err);
+  }
+  if (!unreadable && !(existingTopicKeys instanceof Set)) {
+    unreadable = "the reader returned no key set";
+  }
+  if (unreadable) {
+    _log(await t("memory.import.state-unreadable", { reason: unreadable }));
+    return { written: 0, skipped: 0, deferred: true };
   }
 
   const { payload, written, skipped } = buildImportPayload({
