@@ -1,8 +1,10 @@
 # Tier-2 draft — per-path upgrade strategy for the managed manifest
 
-**Status**: Draft — agent-prepared, awaiting human signature (Tier-2 / ADR-0013)
+**Status**: **RATIFIED 04/08/2026 — Cristian Rinaldi.** Agent-drafted, human-signed (Tier-2 / ADR-0013).
+The table below and the three answers under "Signed decisions" are the binding contract for
+implementation. An implementer may not change a row without a new signature.
 **For**: issue #397 · milestone M4
-**Touches**: `brain/core/managed-paths.mjs` — **Tier 2, human-promoted.** No code ships until this is signed.
+**Touches**: `brain/core/managed-paths.mjs` — **Tier 2, human-promoted.** Signed below; implementation may proceed against this table and no further.
 
 ---
 
@@ -62,7 +64,7 @@ This is the same "read the outgoing package before the install" move #398 alread
 
 ---
 
-## Proposed classification — THE DECISION THIS DRAFT ASKS FOR
+## The classification — SIGNED, binding
 
 | path | strategy | why |
 |---|---|---|
@@ -74,7 +76,7 @@ This is the same "read the outgoing package before the install" move #398 alread
 | `.github/workflows/governance-postmerge.yml` | **REFUSE if modified** | idem |
 | `brain/scripts/ci/gitlab-governance.yml` | **REFUSE if modified** | idem — the GitLab sibling |
 | `AGENTS.md` | **NEVER COPY — regenerate** | See above. Copying is not a lossy merge; it is wrong. Remove it from `managed` and regenerate post-upgrade from the consumer's own `HOME.md`, reporting that it did. |
-| `.gitattributes` | **plain copy (unchanged)** | Not named in #397. It is brain's own line-ending/diff policy for managed paths, not something a consumer curates. Flagged so the decision is explicit rather than an omission. |
+| `.gitattributes` | **plain copy (unchanged)** | **Signed decision 1:** brain-owned. It is brain's line-ending/diff policy for managed paths, not something a consumer curates. Not named in #397; decided explicitly rather than left as an omission. |
 | `brain/core/**`, `brain/scripts/**` | **plain copy (unchanged)** | ADR-0003: core is read-only in the consumer. Editing them is out of contract; the collision warning is already the right response. |
 | `.claude/settings.json`, `package.json` | **MERGE (unchanged)** | Already correct. |
 
@@ -92,11 +94,19 @@ This is the same "read the outgoing package before the install" move #398 alread
 - Removing `AGENTS.md` from `managed` means an existing consumer keeps whatever copy they already have until they regenerate. The upgrade should say so rather than leave it implicit.
 - Three-way comparison needs the outgoing package read before the install. Under `--no-install` the outgoing and incoming are the same tree, so modification detection degrades to today's behaviour — which must be **stated**, not discovered.
 
-## Open questions for the signer
+## Signed decisions (04/08/2026)
 
-1. **`.gitattributes`** — brain-owned as classified here, or consumer-editable like CODEOWNERS?
-2. **Existing consumers already clobbered.** Some repos already have brain's `AGENTS.md` and brain's `CODEOWNERS` from earlier upgrades. Should the first run after this lands detect and report that, or stay silent and only protect from here on?
-3. **`--force-managed` granularity** — per path (as drafted), or a single `--force-managed` that accepts all pending? Per path is more typing and much harder to do by accident.
+1. **`.gitattributes` is brain-owned.** Plain copy, unchanged. It is brain's line-ending and
+   diff policy for managed paths, not something a consumer curates. The classification table
+   above stands as written.
+2. **Already-clobbered consumers MUST be detected.** Repos that took brain's `AGENTS.md` or
+   `CODEOWNERS` in an earlier upgrade are carrying a silent loss right now. The first run
+   after this lands must say so — protecting only from here on would leave the existing
+   damage invisible forever, and those are exactly the adopters M4 exists for. **This is a
+   new requirement, not a nuance: see REQ-397-6.**
+3. **`--force-managed` is per path.** More typing, and much harder to do by accident. A single
+   flag that forces everything pending would recreate the clobber this issue is about, one
+   keystroke away.
 
 ## References
 

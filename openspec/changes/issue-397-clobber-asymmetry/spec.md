@@ -76,3 +76,40 @@ THEN AGENTS.md reflects THEIR HOME.md, not brain's
 The per-path strategy MUST be data in `brain/core/managed-paths.mjs`, not a literal
 spread across the CLI. A strategy readable in one place is auditable; one inferred from
 three call sites is not.
+
+## REQ-397-6 — a consumer already clobbered by an earlier upgrade is told
+
+Signed decision 2. Repos that took brain's `AGENTS.md` or `CODEOWNERS` before this landed
+are carrying a silent loss today. The first run after this ships MUST detect that state and
+report it. Protecting only from here on would leave the existing damage permanently
+invisible — and those repos are exactly the adopters this milestone exists for.
+
+Detection is the same three-way read as REQ-397-1, applied to history rather than to the
+pending write: a managed path whose destination is byte-identical to a copy brain shipped,
+where the consumer's own history shows they once had something else, was clobbered.
+
+### Scenario 1 — a clobbered path is named, once
+
+```
+GIVEN a consumer whose AGENTS.md is byte-identical to brain's shipped copy
+  AND whose git history shows a different AGENTS.md before an earlier upgrade
+WHEN the upgrade runs
+THEN it reports that this path was overwritten by a previous upgrade
+  AND names how to recover it from their own history
+```
+
+### Scenario 2 — negative control: a consumer who never edited it is not nagged
+
+```
+GIVEN a consumer whose AGENTS.md has only ever been brain's
+WHEN the upgrade runs
+THEN nothing is reported for that path
+```
+
+A detector that fired for every consumer would be noise, and noise is how a real warning
+gets ignored.
+
+> **Implementer's note.** The detection mechanism is deliberately NOT specified here. Reading
+> the consumer's git history is one option; a shipped manifest of past hashes is another.
+> Scenario 2 is the constraint that matters — whatever mechanism is chosen must not fire for
+> a consumer who never had anything of their own to lose.

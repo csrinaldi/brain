@@ -19,12 +19,13 @@ topic_key: sdd/issue-397-clobber-asymmetry/tasks
 ## Phase 1 — Decision (BLOCKED — human)
 
 - [x] 1.1 Draft the per-path classification into `brain-drafts/managed-path-strategy.md`
-- [ ] 1.2 **Maintainer signs or amends the classification.** Tier-2: it lands in
-      `brain/core/managed-paths.mjs`. **No implementation task below may start first.**
-- [ ] 1.3 Answer the three open questions: `.gitattributes` ownership · whether already-clobbered
-      consumers are detected · `--force-managed` granularity
+- [x] 1.2 **Classification RATIFIED 04/08/2026 by Cristian Rinaldi.** The table in
+      `brain-drafts/managed-path-strategy.md` is the binding contract; a row may not change
+      without a new signature. Phase 2 is unblocked.
+- [x] 1.3 Three questions answered: `.gitattributes` is **brain-owned** · already-clobbered
+      consumers **MUST be detected** (new REQ-397-6) · `--force-managed` is **per path**
 
-## Phase 2 — Implementation (blocked on 1.2)
+## Phase 2 — Implementation (UNBLOCKED)
 
 - [ ] 2.1 Three-way modification detection reading the outgoing package pre-install (REQ-397-1)
 - [ ] 2.2 State the degraded mode under `--no-install` rather than implying a check happened
@@ -33,8 +34,9 @@ topic_key: sdd/issue-397-clobber-asymmetry/tasks
 - [ ] 2.5 REFUSE + per-path `--force-managed`, validated against the classification (REQ-397-2)
 - [ ] 2.6 `AGENTS.md` off the copy set; regenerate post-upgrade and report it (REQ-397-4)
 - [ ] 2.7 Add `.gemini/settings.json` to #399's merge pre-flight
+- [ ] 2.8 Detect and report paths clobbered by an EARLIER upgrade (REQ-397-6, signed decision 2)
 
-## Phase 3 — Tests (blocked on 1.2)
+## Phase 3 — Tests (UNBLOCKED)
 
 - [ ] 3.1 Consumer-modified REFUSE path aborts, names it, writes nothing
 - [ ] 3.2 **Negative control:** brain-changed-but-consumer-untouched writes without prompting
@@ -44,9 +46,11 @@ topic_key: sdd/issue-397-clobber-asymmetry/tasks
 - [ ] 3.6 `AGENTS.md` after an upgrade reflects the CONSUMER's `brain/HOME.md`
 - [ ] 3.7 Every test drives the real CLI — the #396 lesson: a suite that never runs the
       command a consumer runs carries no information about it
-- [ ] 3.8 Prove each test RED before its fix
+- [ ] 3.8 Already-clobbered path is detected and named
+- [ ] 3.9 **Negative control:** a consumer who never had their own copy is NOT nagged
+- [ ] 3.10 Prove each test RED before its fix
 
-## Phase 4 — Docs (blocked on 1.2)
+## Phase 4 — Docs (UNBLOCKED)
 
 - [ ] 4.1 `docs/KNOWN-LIMITATIONS.md`: close or narrow the clobber-asymmetry entry honestly
 - [ ] 4.2 Record the degraded `--no-install` mode as a named residual
