@@ -14,7 +14,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -113,6 +113,328 @@ test('brain:upgrade: no warning printed when package.json name is not "brain"', 
 // but nothing asserted it STAYS that way. This is a regression guard: if a
 // future edit ever drops 'package.json' from the specialMerge map passed to
 // copyManaged, this test must fail.
+// ── Three-way detection wiring (issue #397, REQ-397-1) ───────────────────────
+
+// Builds the smallest consumer repo brain:upgrade will walk all the way to the
+// copy step with --no-install: its own package.json, and a node_modules/brain
+// holding the two core modules the script imports from the package.
+function makeConsumerRepo(prefix, { pkgVersion = '1.0.0' } = {}) {
+  const dir = makeTmpDir(prefix);
+  const pkg = join(dir, 'node_modules', 'brain');
+  mkdirSync(join(pkg, 'brain', 'core'), { recursive: true });
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'my-consumer', version: '1.0.0' }));
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'brain', version: pkgVersion }));
+  writeFileSync(join(pkg, 'brain', 'core', 'managed-paths.mjs'),
+    'export const managed = [];\nexport const local = [];\n');
+  writeFileSync(join(pkg, 'brain', 'core', 'config-migrations.mjs'), 'export const migrations = [];\n');
+  return dir;
+}
+
+// REQ-397-1 Scenario 3, and tasks.md 2.2. Under --no-install the outgoing and
+// incoming package are one tree, so the check cannot run. The requirement is not
+// that it degrade — it is that it SAY SO. A run that degrades silently is
+// indistinguishable from a clean three-way pass, and the operator reads the
+// stronger of the two.
+test('brain:upgrade: --no-install states that modification detection degraded (REQ-397-1 S3)', (t) => {
+  const dir = makeConsumerRepo('brain-397-degraded-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.match(out, /--no-install/,
+    `the degraded-mode notice must name the flag that caused it:\n${out}`);
+  assert.match(out, /same tree|CANNOT tell|cannot tell/i,
+    `the run must say it could not distinguish a consumer edit from a brain change:\n${out}`);
+});
+
+// ── .gemini merge + AGENTS.md regeneration, driven through the REAL CLI ───────
+//
+// The #396 lesson (tasks.md 3.7): a suite that never runs the command a consumer
+// runs carries no information about it. Both of these ARE reachable end-to-end,
+// unlike the REFUSE gate — they do not depend on outgoing !== incoming.
+
+// Extends the minimal consumer with a real managed manifest and a package that
+// actually ships the files under test.
+function makeUpgradableConsumer(prefix, { geminiSettings, homeMd }) {
+  const dir = makeTmpDir(prefix);
+  const pkg = join(dir, 'node_modules', 'brain');
+  mkdirSync(join(pkg, 'brain', 'core'), { recursive: true });
+  mkdirSync(join(pkg, '.gemini'), { recursive: true });
+  mkdirSync(join(dir, 'brain', 'core', 'methodology'), { recursive: true });
+  mkdirSync(join(dir, '.gemini'), { recursive: true });
+
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'my-consumer', version: '1.0.0' }));
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'brain', version: '1.0.0' }));
+  writeFileSync(join(pkg, 'brain', 'core', 'managed-paths.mjs'),
+    "export const managed = ['.gemini/settings.json'];\nexport const local = [];\n");
+  writeFileSync(join(pkg, 'brain', 'core', 'config-migrations.mjs'), 'export const migrations = [];\n');
+
+  // What brain ships…
+  writeFileSync(join(pkg, '.gemini', 'settings.json'), JSON.stringify({
+    hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'npm run brain:session:start' }] }] },
+  }, null, 2) + '\n');
+  // …and what the consumer already has.
+  writeFileSync(join(dir, '.gemini', 'settings.json'), JSON.stringify(geminiSettings, null, 2) + '\n');
+
+  // The consumer's OWN HOME.md — the input that makes AGENTS.md theirs.
+  writeFileSync(join(dir, 'brain', 'HOME.md'), homeMd);
+  for (const d of ['agent-authorities', 'harness-contract', 'sdd-layout', 'workflow-governance']) {
+    writeFileSync(join(dir, 'brain', 'core', 'methodology', `${d}.md`), `# ${d}\n`);
+  }
+  return dir;
+}
+
+// REQ-397-3 / tasks.md 3.5 — the consumer's own hooks must survive the upgrade.
+test('brain:upgrade: .gemini/settings.json merge preserves the consumer\'s keys (REQ-397-3)', (t) => {
+  const dir = makeUpgradableConsumer('brain-397-gemini-', {
+    geminiSettings: { myOwnKey: 'keep me', hooks: { PreToolUse: [{ matcher: 'MyTool', hooks: [] }] } },
+    homeMd: '# consumer home\n',
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const after = JSON.parse(readFileSync(join(dir, '.gemini', 'settings.json'), 'utf8'));
+
+  assert.equal(after.myOwnKey, 'keep me',
+    `a consumer top-level key must survive:\n${r.stdout}${r.stderr}`);
+  assert.ok(after.hooks.PreToolUse?.some((e) => e.matcher === 'MyTool'),
+    'the consumer\'s own hook entry must survive');
+  assert.ok(after.hooks.SessionStart?.length > 0,
+    'brain\'s block must be applied underneath, not instead');
+});
+
+// REQ-397-4 Scenario 1 / tasks.md 3.6 — the headline of this slice. Before #397
+// the consumer's AGENTS.md was replaced by brain's, compiled from BRAIN's HOME.md.
+test('brain:upgrade: AGENTS.md after the upgrade reflects the CONSUMER\'s brain/HOME.md (REQ-397-4)', (t) => {
+  const dir = makeUpgradableConsumer('brain-397-agents-', {
+    geminiSettings: { hooks: {} },
+    homeMd: '# MY OWN HOME\n\nThis text belongs to the consumer, not to brain.\n',
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8');
+
+  assert.match(agents, /MY OWN HOME/,
+    `AGENTS.md must be compiled from the CONSUMER's HOME.md:\n${r.stdout}${r.stderr}`);
+  assert.match(`${r.stdout}${r.stderr}`, /AGENTS\.md/,
+    'the run must SAY it regenerated the file — REQ-397-4 requires reporting it, ' +
+    'because a silent regeneration is indistinguishable from the copy it replaced');
+});
+
+// The trap, proven by behaviour rather than by reading the source: init() writes
+// .gemini/settings.json too, so a plain call would undo the merge in the SAME run.
+test('brain:upgrade: regenerating AGENTS.md does not undo the .gemini merge (REQ-397-3 + REQ-397-4)', (t) => {
+  const dir = makeUpgradableConsumer('brain-397-noclobber-', {
+    geminiSettings: { myOwnKey: 'keep me', hooks: {} },
+    homeMd: '# consumer home\n',
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  runBrainUpgrade(dir, ['--no-install']);
+  const after = JSON.parse(readFileSync(join(dir, '.gemini', 'settings.json'), 'utf8'));
+
+  assert.equal(after.myOwnKey, 'keep me',
+    'the AGENTS.md regeneration must not rewrite .gemini/settings.json — that would clobber ' +
+    'the merge performed moments earlier, in the same run');
+});
+
+// ── Already-clobbered detection (issue #397, REQ-397-6) ──────────────────────
+//
+// Signed decision 2. Repos that took brain's AGENTS.md in an earlier upgrade are
+// carrying a silent loss right now; the first run after this ships must say so.
+// Driven through the REAL CLI, because the report is the deliverable.
+
+function makeClobberConsumer(prefix, { consumerHome, agentsOnDisk }) {
+  const dir = makeUpgradableConsumer(prefix, { geminiSettings: { hooks: {} }, homeMd: consumerHome });
+  const pkg = join(dir, 'node_modules', 'brain');
+  // What brain's own tree carries: its HOME.md and its compiled AGENTS.md.
+  mkdirSync(join(pkg, 'brain'), { recursive: true });
+  writeFileSync(join(pkg, 'brain', 'HOME.md'), '# brain HOME\n');
+  writeFileSync(join(pkg, 'AGENTS.md'), 'BRAIN AGENTS ARTIFACT\n');
+  writeFileSync(join(dir, 'AGENTS.md'), agentsOnDisk);
+  return dir;
+}
+
+// REQ-397-6 Scenario 1.
+test('brain:upgrade: a previously clobbered AGENTS.md is detected and named (REQ-397-6)', (t) => {
+  const dir = makeClobberConsumer('brain-397-clobbered-', {
+    consumerHome: '# MY OWN HOME\n',        // they customised…
+    agentsOnDisk: 'BRAIN AGENTS ARTIFACT\n', // …yet their AGENTS.md is brain's
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const out = (({ stdout, stderr }) => `${stdout}${stderr}`)(runBrainUpgrade(dir, ['--no-install']));
+
+  assert.match(out, /EARLIER upgrade replaced it/i,
+    `the run must report that a previous upgrade overwrote it:\n${out}`);
+  assert.match(out, /git log --follow -- AGENTS\.md/,
+    `REQ-397-6 requires naming how to recover it from their own history:\n${out}`);
+});
+
+// REQ-397-6 Scenario 2 — the constraint that actually shapes the mechanism.
+// Note the trap: this consumer's AGENTS.md IS byte-identical to brain's. Only
+// the fact that they never customised HOME.md separates them from the case
+// above, and byte-identity alone must never be treated as evidence of loss.
+test('brain:upgrade: a consumer who never customised HOME.md is NOT nagged (REQ-397-6 S2)', (t) => {
+  const dir = makeClobberConsumer('brain-397-notclobbered-', {
+    consumerHome: '# brain HOME\n',          // identical to brain's
+    agentsOnDisk: 'BRAIN AGENTS ARTIFACT\n', // identical to brain's, and fine
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const out = (({ stdout, stderr }) => `${stdout}${stderr}`)(runBrainUpgrade(dir, ['--no-install']));
+
+  assert.doesNotMatch(out, /EARLIER upgrade replaced it/i,
+    `nothing of their own was ever lost — a detector that fires here fires for everyone:\n${out}`);
+});
+
+// The detection must read BEFORE the regeneration, or it inspects the file it
+// just rebuilt and can never fire. An ordering bug here is invisible: the suite
+// stays green and the warning simply never appears for anyone.
+test('brain:upgrade: clobber detection reads AGENTS.md BEFORE regenerating it (REQ-397-6)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  const detectAt = source.indexOf('detectAgentsClobber({');
+  const regenAt = source.indexOf('antigravityInit({');
+  assert.ok(detectAt > 0 && regenAt > 0);
+  assert.ok(detectAt < regenAt,
+    'the detector must read the on-disk AGENTS.md before regeneration overwrites it — ' +
+    'the file about to be rebuilt is the only evidence that an earlier upgrade replaced it');
+});
+
+// ── .gemini merge + AGENTS.md regeneration (issue #397, REQ-397-3 / REQ-397-4) ─
+
+// REQ-397-3. `.gemini/settings.json` is the same shape as `.claude/settings.json`
+// — a `hooks` object of event → entries — and #103 already built a deterministic
+// merge for exactly that shape. Two sibling agent-config files being treated
+// differently was an accident of which one existed first, not a decision.
+test('brain:upgrade: .gemini/settings.json is a MERGE target, like its .claude sibling (REQ-397-3)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  assert.match(source, /ALL_MERGES\s*=\s*\{[\s\S]*?'\.gemini\/settings\.json':\s*merge/,
+    '.gemini/settings.json must be registered in ALL_MERGES — a plain copy destroys the ' +
+    'consumer\'s own hooks, which is #397 as filed');
+});
+
+// tasks.md 2.7 — #399's merge pre-flight parses every merge target up front so a
+// corrupt one is reported before anything is written, rather than throwing
+// mid-copy. A new merge target that skipped the pre-flight would reintroduce the
+// lockout #399 exists to prevent.
+test('brain:upgrade: the merge pre-flight covers every merge target, including .gemini (2.7)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  assert.match(source, /preflightMergeTargets\(\{[^}]*mergePaths:\s*Object\.keys\(mergeMap\)/,
+    'the pre-flight must be derived from the merge map itself — a hand-written second list ' +
+    'is a second place to forget');
+});
+
+// REQ-397-4. The regeneration must run from the CONSUMER's tree, and it must not
+// take brain's own AGENTS.md with it.
+test('brain:upgrade: AGENTS.md is regenerated after the copy, not copied (REQ-397-4)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  assert.match(source, /antigravity/i,
+    'the upgrade must invoke the AGENTS.md generator rather than shipping the artifact');
+  const copyAt = source.indexOf('copyManaged({');
+  const regenAt = source.search(/regenerateAgentsMd|antigravityInit|harness\/backends\/antigravity/);
+  assert.ok(regenAt > copyAt,
+    'regeneration must run AFTER the managed copy — it reads the methodology docs the copy ' +
+    'just updated, so running it first would compile the previous release');
+});
+
+// The trap this whole slice walks past. `antigravity.mjs#init()` writes BOTH
+// AGENTS.md AND .gemini/settings.json. Calling it plainly to satisfy REQ-397-4
+// would overwrite the .gemini merge REQ-397-3 just performed, in the same run —
+// a wired, correct, and quietly destructive path, which is the exact defect class
+// #397 exists to remove.
+test('brain:upgrade: regenerating AGENTS.md must NOT rewrite the merged .gemini/settings.json (REQ-397-3 + REQ-397-4)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  assert.match(source, /_writeGeminiSettings/,
+    'init() emits .gemini/settings.json too — the regeneration MUST neutralise that seam, or ' +
+    'it undoes the merge performed moments earlier in the same run');
+});
+
+// ── --force-managed validation (issue #397, REQ-397-2) ───────────────────────
+//
+// design.md §4: both escape hatches must be validated against the REAL
+// classification, not accepted as free-form globs. `--skip-merge` learned this
+// the hard way — it feeds `local`, which is a glob matcher, so an unvalidated
+// value was really `--skip-anything` and `--skip-merge '**'` made the upgrade
+// copy nothing and report success. `--force-managed` has the opposite polarity
+// and therefore the worse failure: a wildcard that forced every pending path
+// would be the clobber this whole issue is about, spelled as a flag.
+
+test('brain:upgrade: --force-managed refuses a wildcard (REQ-397-2)', (t) => {
+  const dir = makeConsumerRepo('brain-397-force-glob-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = runBrainUpgrade(dir, ['--no-install', '--force-managed', '**']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.notEqual(r.status, 0, `a wildcard force must not be accepted:\n${out}`);
+  assert.match(out, /--force-managed/, `the error must name the flag:\n${out}`);
+});
+
+// A MERGE path is not forceable: there is nothing to force, because merging
+// already preserves the consumer's content. Accepting it would imply the flag
+// does something it does not.
+test('brain:upgrade: --force-managed refuses a path that is not REFUSE-classified (REQ-397-2)', (t) => {
+  const dir = makeConsumerRepo('brain-397-force-merge-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = runBrainUpgrade(dir, ['--no-install', '--force-managed', '.claude/settings.json']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.notEqual(r.status, 0, `only a REFUSE-classified path may be forced:\n${out}`);
+  assert.match(out, /\.claude\/settings\.json/, `the error must name the rejected path:\n${out}`);
+});
+
+// The tag is parsed as "the first argument that is not a flag". Every repeatable
+// flag that takes a VALUE therefore has to be excluded by hand, or the value
+// becomes the tag and the upgrade installs a ref named ".github/CODEOWNERS".
+// --skip-merge already carries this exclusion; --force-managed needs its own.
+test('brain:upgrade: a --force-managed VALUE is not mistaken for the tag (REQ-397-2)', (t) => {
+  const dir = makeConsumerRepo('brain-397-force-tag-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  // No tag given. If the flag's value leaked into the positional parse, the run
+  // would proceed with tag === '.github/CODEOWNERS' and try to install a git ref
+  // by that name. The missing-tag guard firing is the proof it did not.
+  const r = runBrainUpgrade(dir, ['--force-managed', '.github/CODEOWNERS']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.notEqual(r.status, 0);
+  assert.match(out, /missing <tag>/,
+    `the forced PATH must not be consumed as the tag — it would be installed as a git ref:\n${out}`);
+});
+
+// The whole mechanism rests on WHEN the snapshot is taken. node_modules/brain
+// holds the previous release only until the install overwrites it, so a snapshot
+// moved below step 1 would read the incoming package, compare it to itself, and
+// report "nothing was modified" for every consumer — green suite, dead check.
+// Pinned in source because the failure is an ordering one that no unit test on
+// copyManaged can see.
+test('brain:upgrade: the outgoing snapshot is read BEFORE the install (REQ-397-1)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  const snapshotAt = source.indexOf('readOutgoing({');
+  const installAt = source.indexOf('── 1. Install the tag');
+  const copyAt = source.indexOf('copyManaged({');
+
+  assert.ok(snapshotAt > 0, 'brain-upgrade.mjs must call readOutgoing to get the outgoing package');
+  assert.ok(installAt > 0, 'the install step marker must still be findable');
+  assert.ok(snapshotAt < installAt,
+    'readOutgoing must run BEFORE step 1 — after the install, node_modules/brain is the ' +
+    'INCOMING package and the comparison silently becomes a file against itself');
+  assert.ok(copyAt > snapshotAt, 'the snapshot must precede the copy that consumes it');
+
+  assert.match(source, /outgoing,/,
+    'the snapshot must be PASSED to copyManaged — a snapshot nothing consumes protects nothing');
+});
+
 test('brain:upgrade: registers package.json under specialMerge → mergePackageJson (lock-in guard, issue #180)', () => {
   const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
 

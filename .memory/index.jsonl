@@ -885,6 +885,7 @@
 {"id":"rec-891f961cc2fa9cc8","ts":"2026-07-25T21:51:33Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-899e4007e3f069eb","ts":"2026-07-13T00:21:53Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-89a102a4d485eee4","ts":"2026-07-13T20:19:30Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-89a522b5330c0ea4","ts":"2026-08-04T09:43:23Z","actor":"claude/m4-upgrade-safety","type":"session_summary","project":"brain","file":"2026-08.jsonl"}
 {"id":"rec-89ff4aba8c595f1a","ts":"2026-07-25T00:48:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-8a243921dd90c3e8","ts":"2026-07-25T21:50:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-8a81a8076665b464","ts":"2026-07-13T00:21:53Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
