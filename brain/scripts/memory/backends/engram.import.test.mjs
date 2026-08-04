@@ -78,12 +78,20 @@ test('importMemory: no chunk path is read — never spawns `engram sync --import
     root: '/fake/root',
     _requireEngram: () => 'engram',
     _readRecords: () => records,
-    _engramSave: () => {},
+    _engramExistingTopicKeys: () => new Set(),
+    _engramImport: () => {},
     _log: () => {},
     // If importMemory still tried the old chunk path it would need a real
     // execFileSync/spawn call — none is injected here, so any attempt to
     // reach outside the injected seams would throw (no real engram binary
     // resolution happens beyond the injected _requireEngram stub).
+    //
+    // #433 note: that comment is not decorative — it fired. The batch import
+    // replaced the `_engramSave` stub above with `_engramImport`, and leaving
+    // the old one here made this test shell out to a real `engram import`.
+    // It stayed green locally (the binary is installed) and failed in CI with
+    // `spawnSync engram ENOENT`. A hermetic test only stays hermetic if every
+    // seam it relies on is named explicitly.
   });
 
   assert.equal(chunkPathTouched, false, 'no chunk-path seam was ever invoked');
