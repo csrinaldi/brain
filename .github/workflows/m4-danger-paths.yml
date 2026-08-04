@@ -7,8 +7,13 @@
 #   4. corrupt consumer JSON is named up front; --skip-merge completes   (#399)
 #
 # Epic #313 states the M4 hard gate as a condition on this suite: external
-# adoption opens when it is green. This workflow is what makes that checkable
-# rather than asserted.
+# adoption opens when it is green. This workflow produces that evidence.
+#
+# It does NOT enforce it. `m4-danger-paths` is not among main's required status
+# contexts and cannot be added through `brain:protect` (which derives contexts
+# from GOVERNANCE_JOBS, a set this suite deliberately does not belong to). A red
+# run here does not block a merge — it blocks the human decision to open
+# adoption, which is how the epic words it. See test/upgrade/README.md.
 #
 # ── Why its OWN workflow, and not a job inside governance.yml ────────────────
 #

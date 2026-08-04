@@ -1037,6 +1037,7 @@
 {"id":"rec-80c060a34003fad5","ts":"2026-07-25T21:51:37Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-80d91a3d5a74e66f","ts":"2026-07-25T21:51:50Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-80e488ecd275bce1","ts":"2026-07-09T13:48:29Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-8117244299f58fe2","ts":"2026-08-04T15:09:52Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08.jsonl"}
 {"id":"rec-8124585dbeb8bd8a","ts":"2026-07-01T00:57:38Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-8128ae03cd5768db","ts":"2026-07-02T20:35:55Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-81934e923f225163","ts":"2026-07-25T21:51:04Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07.jsonl"}
@@ -1668,6 +1669,7 @@
 {"id":"rec-d318e80950148971","ts":"2026-07-25T21:50:46Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-d33090369390d447","ts":"2026-07-25T21:51:38Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-d3339554e610886a","ts":"2026-07-29T14:28:24Z","actor":"feat/issue-266-h0a-reviewer-protocol-doctrine","type":"discovery","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-d33d6d43843dbbfe","ts":"2026-08-04T15:35:08Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08.jsonl"}
 {"id":"rec-d3ad5185c0866965","ts":"2026-07-25T00:46:56Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-d3fe490fa4d59eba","ts":"2026-07-25T00:47:02Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-d403def033246ecf","ts":"2026-07-13T20:42:49Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}

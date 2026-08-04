@@ -126,3 +126,36 @@ Runtime and blast radius point the same way: minutes rather than the seconds
 `local-checks` takes, and it is the only workflow needing Docker — so a Docker
 failure reads as "the e2e suite broke", not "repo:check is red". Still gated on
 `.brain-source` as belt and braces.
+
+## What this gate does and does NOT block
+
+**A red suite does not stop a merge to `main`.** Verified, not assumed:
+
+```bash
+gh api repos/csrinaldi/brain/branches/main/protection \
+  --jq '.required_status_checks.contexts'
+# ["issue-link","diff-size","local-checks","memory-gate","decision-gate"]
+```
+
+`m4-danger-paths` is absent, and **cannot be added through `brain:protect`**:
+that verb derives its contexts from `checkContexts(tier)` → `requiredJobs(tier)`
+over `GOVERNANCE_JOBS`, and this suite deliberately does not belong to that
+ratified set (see the section above).
+
+Registering the context by hand is worse than leaving it out. `branchProtect`
+issues `PUT …/branches/main/protection`, and that endpoint **replaces the whole
+protection object** — so an out-of-band context survives only until the next
+`brain:protect` run, then vanishes silently. A gate that disappears on its own
+is more dangerous than one that was never armed, because in between it looks
+enforced.
+
+**So M4 is a human-read gate, and that is faithful to how epic #313 states it:**
+*"external adoption opens when this suite is green."* Opening adoption is a
+decision a person makes, not a merge a bot allows. This suite is the evidence
+that decision rests on — run it, read it, then decide.
+
+What that costs, stated plainly: **this suite can go red and nothing stops the
+merge.** Whoever opens external adoption has to run it on purpose. If that ever
+needs to be fail-closed, it needs a durable mechanism (a config-driven extra
+context that `brain:protect` arms), which is a governance change with its own
+decision to make — not something to bolt on here.
