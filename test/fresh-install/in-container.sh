@@ -148,6 +148,25 @@ if [ -f brain/HOME.md ]; then
 else
   fail "brain/HOME.md NOT created by env:init"
 fi
+# Register the ADR planted in [1.5] under the empty "Architecture decisions"
+# heading the scaffold leaves for exactly this purpose. Without this the test
+# contradicts itself: [1.5] plants an unlinked brain/project/**.md, and
+# check-brain-nav.mjs (correctly) rejects orphans — every brain/**/*.md must be
+# reachable from brain/HOME.md. Linking it is what a real consumer does, and
+# what the check's own error message instructs. Asserting nav integrity over a
+# scaffold the test itself orphaned would assert a contradiction.
+node -e "
+const fs = require('fs');
+const home = 'brain/HOME.md';
+const heading = '### Architecture decisions';
+const link = '- [ADR-0001 Consumer](project/decisions/adr-0001-consumer.md) — planted by the fresh-install test';
+let src = fs.readFileSync(home, 'utf8');
+if (!src.includes('adr-0001-consumer.md')) {
+  if (!src.includes(heading)) { console.error('scaffold is missing: ' + heading); process.exit(1); }
+  src = src.replace(heading, heading + '\n\n' + link);
+  fs.writeFileSync(home, src);
+}
+" || fail "could not register the consumer ADR in the scaffolded HOME.md"
 # brain:nav is not one of the injected MANAGED_SCRIPT_KEYS, so invoke the
 # managed script directly rather than via a package.json verb that may not exist.
 if node brain/scripts/check-brain-nav.mjs >/dev/null 2>&1; then
