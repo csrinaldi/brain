@@ -32,12 +32,20 @@ real branch whose head sha the stub's `pr view` response reports. No git behavio
 faked; the sha the stub advertises must exist in origin or the run fails exactly as it
 would in production — that is a feature, and a fixture-integrity assertion pins it.
 
-## D3 — tier via the fixture's OWN config
+## D3 — tier via the fixture's OWN config — through the VENDORED shape (amended)
 
-The spawned CLI reads `brain.config.json` from its cwd (the fixture repo), which
-declares `governance.tier: "regulated"`. No override seam is added to production code
-— `resolveTier` stays untouched; the fixture IS a regulated consumer. The `lite`
-control (REQ-409-4) is the same fixture with one config line changed.
+Surveying before coding corrected this design: `loadBrainConfig` resolves
+`brain.config.json` relative to the SCRIPT's own location (`lib/brain-config.mjs`:
+`REPO_ROOT = dirname(script)/../../..`), **not** from `process.cwd()`. Spawning
+brain's own `cli.mjs` from a fixture cwd would read brain's config (`lite`), silently.
+
+The production shape resolves this: a real consumer runs the reviewer from the copy
+`brain:upgrade` VENDORED into their tree. So the fixture vendors `brain/` (core +
+scripts) into the consumer repo and spawns `<fixture>/brain/scripts/review/cli.mjs` —
+which makes the e2e MORE faithful, not less: it exercises the exact script-location
+config resolution every consumer depends on. No override seam is added to production
+code; the fixture IS a regulated consumer. The `lite` control (REQ-409-4) is the same
+fixture with one config line changed.
 
 ## D4 — what makes findings exist at all
 
