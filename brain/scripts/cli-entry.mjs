@@ -11,7 +11,7 @@
 // on git deps (#86), which is why the ticket specifies an explicit verb.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -107,6 +107,22 @@ export function main(argv = process.argv.slice(2), deps = {}) {
   return 1;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Entry guard — MUST resolve symlinks. A package manager installs a `bin` as a
+// symlink (`node_modules/.bin/brain` -> the real file), so `process.argv[1]` is the
+// LINK while `import.meta.url` is the RESOLVED path. Comparing them unresolved is
+// always false, which made the command exit 0 printing nothing — the only way it is
+// ever invoked in production. Every unit test imports `main` directly and so cannot
+// see this; it was caught by installing brain into a scratch consumer repo.
+function isDirectInvocation() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectInvocation()) {
   process.exit(main());
 }

@@ -3,6 +3,13 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+
+const ENTRY = fileURLToPath(new URL('../cli-entry.mjs', import.meta.url));
 
 import {
   BOOTSTRAP_SCRIPT_KEY,
@@ -203,4 +210,33 @@ test('runInit: on success it reports brain:env:init but never runs it (REQ-400-6
   assert.equal(code, 0);
   assert.equal(spawnCount, 1, 'exactly one spawn — the upgrade; the interactive step is only reported');
   assert.match(lines.join('\n'), /brain:env:init/);
+});
+
+// ── The spawned entry path (REQ-400-1) ──────────────────────────────────────
+//
+// Every test above imports `main` directly, so NONE of them can see whether the
+// file actually runs when executed. It did not: the entry guard compared
+// `import.meta.url` against an UNRESOLVED `process.argv[1]`, and a package manager
+// installs a `bin` as a symlink — so the command exited 0 printing nothing, in the
+// only way it is ever invoked in production. Caught by installing brain into a
+// scratch consumer repo, not by the suite. These two cases close that gap cheaply;
+// test/fresh-install still proves the four-package-manager story.
+
+test('cli-entry: executing the file runs main and prints help (not a silent exit 0)', () => {
+  const r = spawnSync(process.execPath, [ENTRY, '--help'], { encoding: 'utf8' });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /Usage:/, 'a silent exit 0 means the entry guard never fired');
+});
+
+test('cli-entry: executing it through a SYMLINK still runs main (the bin install shape)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-bin-'));
+  const link = join(dir, 'brain');
+  try {
+    symlinkSync(ENTRY, link);
+    const r = spawnSync(process.execPath, [link, '--help'], { encoding: 'utf8' });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /Usage:/, 'argv[1] is the LINK; the guard must resolve it');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
