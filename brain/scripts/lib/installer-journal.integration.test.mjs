@@ -705,3 +705,45 @@ test('upgrade: an ordinary upgrade is untouched by the guard (REQ-D-4)', () => {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── REQ-D-5: the population the gate actually exists for ─────────────────────
+// `brain.config.json`'s schemaVersion has TWO writers with DIFFERENT meanings:
+// `ensureBrainConfig` (env:init) writes the newest MIGRATION version, `migrateConfig`
+// (brain:upgrade) writes the installed PACKAGE version. Migrations top out below the
+// package, so a freshly-adopted consumer sits at the migration number while running
+// newer code — and a guard that trusted that field alone left every tag above the
+// newest migration unguarded. On the real repo that was the six most recent of sixteen.
+test('upgrade: a fresh adopter whose config lags the installed package is still guarded (REQ-D-5)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-d5-'));
+  try {
+    // env:init wrote the newest migration version (0.9.0) …
+    // … while the package they actually installed is 1.0.0.
+    const consumer = downgradeConsumer(tmp, { pkgVersion: '1.0.0', schemaVersion: '0.9.0' });
+
+    const r = spawnSync(process.execPath, [CLI, 'v0.9.1', '--no-install'], { cwd: consumer, encoding: 'utf8' });
+    const out = r.stdout + r.stderr;
+
+    assert.notEqual(r.status, 0,
+      'v0.9.1 is below the installed 1.0.0 — trusting schemaVersion (0.9.0) alone would have let it through');
+    assert.match(out, /1\.0\.0/, 'the floor must be what is really installed, not only what the config recorded');
+    assert.equal(readFileSync(join(consumer, 'brain', 'core', 'a.md'), 'utf8'), 'CONSUMER',
+      'and nothing may be written');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('upgrade: --no-install with no tag is guarded too (REQ-D-6)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-d6-'));
+  try {
+    // No tag: the installed package IS what gets applied, so the config is the floor.
+    const consumer = downgradeConsumer(tmp, { pkgVersion: '0.9.1', schemaVersion: '1.0.0' });
+
+    const r = spawnSync(process.execPath, [CLI, '--no-install'], { cwd: consumer, encoding: 'utf8' });
+    assert.notEqual(r.status, 0,
+      'applying an older installed package with no tag is still a downgrade — the guard must not depend on a tag being passed');
+    assert.equal(readFileSync(join(consumer, 'brain', 'core', 'a.md'), 'utf8'), 'CONSUMER');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

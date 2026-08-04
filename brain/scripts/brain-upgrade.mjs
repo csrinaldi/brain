@@ -225,9 +225,13 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 // placed after the install never runs for one of the two merge targets — the escape
 // hatch would not exist for the more dangerous of the two. This depends only on ROOT
 // and the merge map, so it costs nothing to run first.
-// The target tag's migration list, imported the same way step 3 imports it rather than
-// scraped — a regex over someone else's source is a guess, and this one has to be right
-// to name the keys correctly.
+// The OUTGOING package's migration list — deliberately, and this is not a compromise.
+// A target tag's own list can never contain a migration ABOVE that target, so reading it
+// would make the key report permanently empty. What strands a consumer is exactly what
+// the package they are leaving knew and the one they are going to does not.
+//
+// Imported the way step 3 imports it rather than scraped: a regex over someone else's
+// source is a guess, and this has to be right to name the keys correctly.
 async function migrationsForGuard() {
   try {
     const mod = await import(join(ROOT, 'node_modules', 'brain', 'brain', 'core', 'config-migrations.mjs'));
@@ -252,16 +256,34 @@ if (badSkip.length > 0) {
 // an older tag leaves OLD code beside a NEW config schema — a combination no tag ever
 // shipped, reached silently and reported as "Done." Refusing AFTER the install would
 // be worse than useless: the old package would already be in node_modules.
-const targetSemver = semverOrNull(tag);
+// `brain.config.json`'s schemaVersion has TWO writers that mean DIFFERENT things:
+// `ensureBrainConfig` (env:init) writes the newest MIGRATION version, while
+// `migrateConfig` (this command) writes the installed PACKAGE version. Migrations top
+// out below the current package, so a freshly-adopted consumer sits at the migration
+// number while running newer code — and comparing against that field alone left every
+// tag above the newest migration unguarded. That was the six most recent releases: the
+// exact population this gate exists for.
+//
+// So compare against the highest thing that is actually true about this repo.
 const currentSchema = (() => {
   try { return semverOrNull(JSON.parse(readFileSync(join(ROOT, 'brain.config.json'), 'utf8')).schemaVersion); }
-  catch { return null; }  // no config yet, or unreadable — nothing to compare against
+  catch { return null; }  // no config yet, or unreadable — nothing recorded to compare
 })();
+const installedSemver = (() => {
+  try { return semverOrNull(JSON.parse(readFileSync(join(ROOT, 'node_modules', 'brain', 'package.json'), 'utf8')).version); }
+  catch { return null; }
+})();
+const taggedSemver = semverOrNull(tag);
+// With no tag (`--no-install`), the installed package IS what gets applied.
+const targetSemver = taggedSemver ?? installedSemver;
+// …and in that case it cannot also count as the floor, or nothing is ever a downgrade.
+const floorCandidates = (taggedSemver ? [currentSchema, installedSemver] : [currentSchema]).filter(Boolean);
+const floor = floorCandidates.sort(compareSemver).at(-1) ?? null;
 
-if (targetSemver && currentSchema && compareSemver(targetSemver, currentSchema) < 0) {
+if (targetSemver && floor && compareSemver(targetSemver, floor) < 0) {
   const ahead = keysAheadOfTarget(await migrationsForGuard(), targetSemver);
   if (!allowDowngrade) {
-    console.error(`  ${C.red}✗${C.reset} ${tag} is OLDER than the config schema this repo is on (${currentSchema}).`);
+    console.error(`  ${C.red}✗${C.reset} ${tag ?? targetSemver} is OLDER than what this repo is on (${floor}).`);
     warn('Config migrations only run forward, so this would leave you with older code and a newer config schema — a combination no release ever shipped.');
     if (ahead.length > 0) {
       info(`These config keys would be left ahead of ${targetSemver}:`);
@@ -269,7 +291,7 @@ if (targetSemver && currentSchema && compareSemver(targetSemver, currentSchema) 
     }
     die(`Nothing was written. Re-run with --allow-downgrade if you mean it.`);
   }
-  warn(`Downgrading to ${targetSemver} while brain.config.json stays at schemaVersion ${currentSchema} — migrations do not run backwards.`);
+  warn(`Downgrading to ${targetSemver} from ${floor}; brain.config.json's schemaVersion does not move back — migrations only run forward.`);
   if (ahead.length > 0) {
     warn(`These config keys are ahead of ${targetSemver} and this code has never heard of them:`);
     for (const k of ahead) console.log(`      ${C.dim}${k}${C.reset}`);
