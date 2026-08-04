@@ -1,6 +1,6 @@
 # ADR-0026 — Governance Doctrine Tiers: A Declared Axis Orthogonal to the Detected Substrate Ladder
 
-**Status**: Accepted  
+**Status**: Accepted · **amended 04/08/2026** (Amendment 1 — see below)  
 **Date**: 31/07/2026 — Cristian Rinaldi
 
 ## Context
@@ -83,7 +83,7 @@ permanently red — it blocks, on evidence a solo maintainer can actually produc
 | `local-checks` | `repo:check` + `brain:nav` + `npm test` | same | same |
 | `decision-gate` | ADR ⇔ `brain/HOME.md` co-occurrence | + the `decision`-label step hard | + the ADR carries a recorded human signature |
 | `diff-size` | ≤ 1000, `size:exception` honored | ≤ 400, honored | ≤ 200, **not honored** |
-| `actor-check` | **distinct act** — the approval event is strictly later than the head-commit push | distinct act **+ distinct actor** | + the approver authored no commit on the branch |
+| `actor-check` | **distinct act over foreign commits** (Amendment 1, #418) — the approval event is strictly later than the latest *foreign* commit: one authored by anyone other than the approver or a registered `governance.reviewActors` identity. Commits by the approver or a verified reviewer identity never re-arm an existing approval. An author that cannot be resolved to an account counts as **foreign** (fail closed). With no foreign commit on the branch, any approval event satisfies the evidence. | distinct act **+ distinct actor** — unchanged: the approval postdates the head-commit push | + the approver authored no commit on the branch — unchanged |
 | `brain-writes-reviewed` | **agent-authorship exclusion** — no `governance.reviewActors` identity authored the `brain/**` change | non-author, non-bot **human** APPROVED review | + CODEOWNERS armed at rung 1 where the substrate allows |
 
 The reviewer's `event: COMMENT` constraint (ADR-0020) is likewise never-tiered: **no
@@ -178,6 +178,9 @@ compromise position, if preferred, is `standard = proposal + spec + design`.
   and therefore **blocked on #328** (gate verdicts computed before the approval exists).
   Conversely, it is the cleanest available fix for #328's stale-green class: the check
   can no longer pass without observing an event that postdates the code.
+  **[Amended by Amendment 1 (#418) — the comparison target moved from the head commit
+  to the latest *foreign* commit at `lite`. The stale-green property is retained against
+  every actor whose work the approver has not seen.]**
 - **Negative (precondition, easy to skip)**: `phase-order`'s promotion still carries
   ADR-0015's recorded precondition — fail-close its uncomputable-diff branch first, or
   a false positive becomes a hard block.
@@ -195,6 +198,71 @@ compromise position, if preferred, is `standard = proposal + spec + design`.
   test axis on every tiered gate. Accepted as the cost of not shipping one doctrine that
   fits nobody.
 
+## Amendment 1 — `lite` distinct-act re-arms only on foreign commits (issue #418)
+
+**Signed**: 04/08/2026 — Cristian Rinaldi
+
+The original `lite` evidence compared the approval event against the head-commit push.
+Measured cost (#418, during #396): five pushes required five re-applications of
+`status:approved`, and each fresh signature certified nothing the approver did not
+already know — at `lite` the approver is *allowed* to be the author, so the check
+degrades from "did someone slip work past the reviewer" to "did you keep working on
+your own branch". The cost scales linearly with iteration count; the security value at
+n=1 is near zero. It also structurally blocks the automated review loop (#409): every
+agent fix-push would demand a fresh human signature, defeating the automation it gates.
+
+Amended rule at `lite`: a push **re-arms** the approval requirement only when its author
+is *foreign* — neither the approver nor a registered `governance.reviewActors` identity.
+Uncomputable authorship is foreign (fail closed). The stale-green property #328 fixed is
+retained against every actor whose work the approver has not seen: any third-party push
+still invalidates the approval.
+
+`standard` and `regulated` are untouched. There the approver is never the author, so
+"did the code change after approval?" genuinely asks *did someone slip work past the
+reviewer* — a property worth its cost.
+
+**Precondition, satisfied:** #413 (PR #424) — the reviewer identity is now verified
+against the token. The `reviewActors` exemption is only safe with a verifiable
+identity; before #413 anyone holding any token could *declare* themselves the bot.
+
+### Accepted losses, recorded rather than implied
+
+1. **The n=1 "final state" look is gone.** A solo maintainer can approve once and keep
+   pushing. This is the point of the amendment, and it is a real loss — the old rule did
+   force a glance at the final state. Judged near-zero value against linear cost.
+2. **A `reviewActors` identity can push after approval without re-arming.** Bounded
+   three ways: the identity is verifiable (#413), it is registered by the owner in
+   config (an L6-only key that never grants approval, per the L5/L6 separation), and
+   `brain-writes-reviewed` still fails any `brain/**` change authored by a reviewer
+   identity at every tier. Residual: for non-`brain/**` paths the bot could land
+   post-approval content that no human re-signed. The recorded retreat position, if that
+   residual proves unacceptable, is to drop the `reviewActors` exemption and keep only
+   the approver exemption.
+
+### Honest residuals
+
+- **GitLab gets no relief.** `prCommits()` on GitLab cannot resolve commit authors to
+  accounts (`login: null`, the documented residual) — every author is uncomputable ⇒
+  foreign ⇒ the behaviour on GitLab is exactly the pre-amendment one. Honest and safe,
+  but unequal across providers until the GL authorship residual is solved.
+- **Unattributed authors get no relief either.** Commits authored as
+  `Claude <noreply@anthropic.com>` (this repo's own agent-session convention) do not
+  resolve to the approver's account ⇒ foreign ⇒ re-arm. The amendment relieves exactly
+  the commits attributed to the approver's account or to a registered reviewer identity.
+  The operator-side remedy is to attribute session commits to an account in one of the
+  two exempt sets; the fail-closed default is correct without it.
+- **The exemption set is config.** Whoever can edit `governance.reviewActors` can mint a
+  non-re-arming identity. The trust model is unchanged — that key already gates L6 — but
+  this amendment raises what the key buys.
+
+### Alternatives rejected
+
+- **Approval scoped to PR creation rather than head** — stable, but drops the "you
+  approved the final state" property at *every* tier.
+- **Content-scoped re-arming** (docs/test-only commits do not re-arm) — fragile, gameable.
+- **Document the cost and accept it** — viable only while every push is human; #409's
+  automated reviewer loop ends that.
+
 ## References
 
 - `openspec/changes/issue-358-q5-doctrine-tiers/proposal.md` — the two-axis framing.
@@ -204,6 +272,8 @@ compromise position, if preferred, is `standard = proposal + spec + design`.
   §2 the full matrix, §3 the divergence, §4 the #329 resolution and promotion verdicts,
   §5 the measured cost of brain declaring `lite`, §6 T2.1 scoping, §7 M3 impact,
   §8 the implementation seam.
+- `openspec/changes/issue-418-lite-distinct-act-rearm/` — Amendment 1's proposal, spec
+  (REQ-418-1..7), design, and the signed draft in `brain-drafts/`.
 - [ADR-0015](adr-0015-governance-v3-substrate-ladder.md) — the six levels and the
   four-rung ladder this ADR adds a second, orthogonal axis to. **Amended**: REQ-L4-2
   (artefact set tier-scoped), REQ-L5-1 (evidence tiered), REQ-L6-1 (evidence tiered),
@@ -214,9 +284,11 @@ compromise position, if preferred, is `standard = proposal + spec + design`.
   boundary. Preserved: `regulated` enforces the review *artefact*, never the tool.
 - [ADR-0020](adr-0020-reviewer-port-verbs-and-two-key-split.md) — `event: COMMENT` and
   the `reviewActors`/`approvalActors` split. Both preserved; `event: COMMENT` is added
-  to the never-tiered core, and `reviewActors` is reused as `lite`'s L6 identity set.
+  to the never-tiered core, and `reviewActors` is reused as `lite`'s L6 identity set —
+  and, under Amendment 1, as `lite`'s non-re-arming push identity set.
 - [ADR-0013](adr-0013-auto-adr-onboarding.md) — the Tier-2 draft → human-review →
   promotion flow this ADR itself follows.
 - Issues: #358 (Q5), #329 (the blocker resolved), #94 (decoupled), #328 (precondition),
   #124 (preserved), #130 (regulated's GitLab gap), #284 (regulated's enabling work),
-  #317 (tier-independent, lands first), #313 (epic).
+  #317 (tier-independent, lands first), #313 (epic), **#418 (Amendment 1)**,
+  **#413 (Amendment 1's precondition)**.
