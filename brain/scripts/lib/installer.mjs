@@ -224,6 +224,52 @@ export function preflightMergeTargets({ destRoot, mergePaths }) {
   return { unparseable };
 }
 
+/**
+ * A version string only when it really parses as one.
+ *
+ * `parseSemver` yields `[0,0,0]` for anything it cannot read, which would make every
+ * non-semver tag — `latest`, a branch name, a commit sha — compare as older than
+ * everything and read as a downgrade. Refusing an ordinary install because its tag was
+ * not numeric is worse than the bug being guarded.
+ *
+ * @param {string|null|undefined} v
+ * @returns {string|null}
+ */
+export function semverOrNull(v) {
+  const core = String(v ?? '').trim().replace(/^v/, '').split('-')[0];
+  return /^\d+\.\d+\.\d+$/.test(core) ? core : null;
+}
+
+/**
+ * The config keys a downgrade would leave stranded: those introduced by migrations
+ * ABOVE the version being installed.
+ *
+ * `migrateConfig` only ever moves forward, so a downgrade leaves the consumer carrying
+ * keys the target tag's code has never heard of, at a `schemaVersion` it never shipped.
+ * Naming them is the difference between a warning and a shrug — the operator can only
+ * judge the risk if they know what they are left holding.
+ *
+ * @param {Array<{version: string, defaults?: object}>} migrations
+ * @param {string} targetVersion
+ * @returns {string[]} dotted key paths, sorted
+ */
+export function keysAheadOfTarget(migrations, targetVersion) {
+  const target = semverOrNull(targetVersion);
+  if (!target) return [];
+  const keys = new Set();
+  const walk = (obj, prefix) => {
+    for (const [k, v] of Object.entries(obj ?? {})) {
+      const path = prefix ? `${prefix}.${k}` : k;
+      if (v && typeof v === 'object' && !Array.isArray(v)) walk(v, path);
+      else keys.add(path);
+    }
+  };
+  for (const m of Array.isArray(migrations) ? migrations : []) {
+    if (semverOrNull(m?.version) && compareSemver(m.version, target) > 0) walk(m.defaults, '');
+  }
+  return [...keys].sort();
+}
+
 // ── Restore point (rollback) ──────────────────────────────────────────────────
 
 /**
