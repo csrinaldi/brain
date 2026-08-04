@@ -246,7 +246,17 @@ async function migrationsForGuard() {
   } catch { return []; }  // not installed yet, or unreadable — the guard still compares versions
 }
 
-const ALL_MERGES = { '.claude/settings.json': mergeClaudeSettings, 'package.json': mergePackageJson };
+// `.gemini/settings.json` reuses mergeClaudeSettings deliberately (#397, REQ-397-3).
+// The name says "claude" for historical reasons — the function itself is generic
+// over the shape BOTH files share: a `hooks` object of event → entries, merged
+// additively with consumer keys preserved (#103). Two sibling agent-config files
+// were treated differently only because one existed first, and a plain copy of the
+// gemini one destroyed the consumer's hooks on every upgrade.
+const ALL_MERGES = {
+  '.claude/settings.json': mergeClaudeSettings,
+  '.gemini/settings.json': mergeClaudeSettings,
+  'package.json': mergePackageJson,
+};
 const mergeMap = Object.fromEntries(Object.entries(ALL_MERGES).filter(([rel]) => !skipMerge.includes(rel)));
 
 // `--skip-merge` feeds `local`, which is a GLOB matcher — an unvalidated value there is
@@ -589,6 +599,37 @@ if (!existsSync(configPath)) {
       writeFileSync(configPath, JSON.stringify(migrated, null, 2) + '\n');
     }
     ok('Config already up to date — no migrations pending.');
+  }
+}
+
+// ── 4. Regenerate AGENTS.md (issue #397, REQ-397-4) ─────────────────────────────
+// AGENTS.md is NOT copied — it is a build output whose inputs straddle the
+// ownership line. Four of its five sources are brain's managed methodology docs;
+// the fifth, `brain/HOME.md`, belongs to the consumer. Copying the artifact
+// substitutes brain's inputs for theirs.
+//
+// Runs AFTER the copy on purpose: the four methodology docs it reads were just
+// updated by it, so regenerating earlier would compile the PREVIOUS release.
+//
+// The two roots are different, and the split is the whole point:
+//   CODE  ← this script's own sibling (brain's generator, freshly updated)
+//   DATA  ← ROOT (the consumer's HOME.md and their methodology docs)
+if (!dryRun) {
+  try {
+    const { init: antigravityInit } = await import(new URL('./harness/backends/antigravity.mjs', import.meta.url));
+    // `init()` emits .gemini/settings.json TOO. Left alive, it would overwrite the
+    // merge performed moments ago in this same run — a wired, correct, quietly
+    // destructive path, which is the exact defect class this issue exists to
+    // remove. The seam is neutralised rather than the call avoided, so AGENTS.md
+    // still goes through the one generator brain's drift-guard checks against.
+    await antigravityInit({ _repoRoot: ROOT, _writeGeminiSettings: () => {} });
+    ok('Regenerated AGENTS.md from YOUR brain/HOME.md (it is compiled, not shipped — see #397).');
+  } catch (err) {
+    // Never fatal. The upgrade itself succeeded; a stale AGENTS.md is a
+    // regenerable inconvenience, and failing the run here would turn it into a
+    // reason to distrust the upgrade.
+    warn(`Could not regenerate AGENTS.md — ${err?.message ?? err}`);
+    info('Run `AGENT_PLATFORM=antigravity npm run brain:env:init` to rebuild it.');
   }
 }
 

@@ -148,6 +148,151 @@ test('brain:upgrade: --no-install states that modification detection degraded (R
     `the run must say it could not distinguish a consumer edit from a brain change:\n${out}`);
 });
 
+// ── .gemini merge + AGENTS.md regeneration, driven through the REAL CLI ───────
+//
+// The #396 lesson (tasks.md 3.7): a suite that never runs the command a consumer
+// runs carries no information about it. Both of these ARE reachable end-to-end,
+// unlike the REFUSE gate — they do not depend on outgoing !== incoming.
+
+// Extends the minimal consumer with a real managed manifest and a package that
+// actually ships the files under test.
+function makeUpgradableConsumer(prefix, { geminiSettings, homeMd }) {
+  const dir = makeTmpDir(prefix);
+  const pkg = join(dir, 'node_modules', 'brain');
+  mkdirSync(join(pkg, 'brain', 'core'), { recursive: true });
+  mkdirSync(join(pkg, '.gemini'), { recursive: true });
+  mkdirSync(join(dir, 'brain', 'core', 'methodology'), { recursive: true });
+  mkdirSync(join(dir, '.gemini'), { recursive: true });
+
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'my-consumer', version: '1.0.0' }));
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'brain', version: '1.0.0' }));
+  writeFileSync(join(pkg, 'brain', 'core', 'managed-paths.mjs'),
+    "export const managed = ['.gemini/settings.json'];\nexport const local = [];\n");
+  writeFileSync(join(pkg, 'brain', 'core', 'config-migrations.mjs'), 'export const migrations = [];\n');
+
+  // What brain ships…
+  writeFileSync(join(pkg, '.gemini', 'settings.json'), JSON.stringify({
+    hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'npm run brain:session:start' }] }] },
+  }, null, 2) + '\n');
+  // …and what the consumer already has.
+  writeFileSync(join(dir, '.gemini', 'settings.json'), JSON.stringify(geminiSettings, null, 2) + '\n');
+
+  // The consumer's OWN HOME.md — the input that makes AGENTS.md theirs.
+  writeFileSync(join(dir, 'brain', 'HOME.md'), homeMd);
+  for (const d of ['agent-authorities', 'harness-contract', 'sdd-layout', 'workflow-governance']) {
+    writeFileSync(join(dir, 'brain', 'core', 'methodology', `${d}.md`), `# ${d}\n`);
+  }
+  return dir;
+}
+
+// REQ-397-3 / tasks.md 3.5 — the consumer's own hooks must survive the upgrade.
+test('brain:upgrade: .gemini/settings.json merge preserves the consumer\'s keys (REQ-397-3)', (t) => {
+  const dir = makeUpgradableConsumer('brain-397-gemini-', {
+    geminiSettings: { myOwnKey: 'keep me', hooks: { PreToolUse: [{ matcher: 'MyTool', hooks: [] }] } },
+    homeMd: '# consumer home\n',
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const after = JSON.parse(readFileSync(join(dir, '.gemini', 'settings.json'), 'utf8'));
+
+  assert.equal(after.myOwnKey, 'keep me',
+    `a consumer top-level key must survive:\n${r.stdout}${r.stderr}`);
+  assert.ok(after.hooks.PreToolUse?.some((e) => e.matcher === 'MyTool'),
+    'the consumer\'s own hook entry must survive');
+  assert.ok(after.hooks.SessionStart?.length > 0,
+    'brain\'s block must be applied underneath, not instead');
+});
+
+// REQ-397-4 Scenario 1 / tasks.md 3.6 — the headline of this slice. Before #397
+// the consumer's AGENTS.md was replaced by brain's, compiled from BRAIN's HOME.md.
+test('brain:upgrade: AGENTS.md after the upgrade reflects the CONSUMER\'s brain/HOME.md (REQ-397-4)', (t) => {
+  const dir = makeUpgradableConsumer('brain-397-agents-', {
+    geminiSettings: { hooks: {} },
+    homeMd: '# MY OWN HOME\n\nThis text belongs to the consumer, not to brain.\n',
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8');
+
+  assert.match(agents, /MY OWN HOME/,
+    `AGENTS.md must be compiled from the CONSUMER's HOME.md:\n${r.stdout}${r.stderr}`);
+  assert.match(`${r.stdout}${r.stderr}`, /AGENTS\.md/,
+    'the run must SAY it regenerated the file — REQ-397-4 requires reporting it, ' +
+    'because a silent regeneration is indistinguishable from the copy it replaced');
+});
+
+// The trap, proven by behaviour rather than by reading the source: init() writes
+// .gemini/settings.json too, so a plain call would undo the merge in the SAME run.
+test('brain:upgrade: regenerating AGENTS.md does not undo the .gemini merge (REQ-397-3 + REQ-397-4)', (t) => {
+  const dir = makeUpgradableConsumer('brain-397-noclobber-', {
+    geminiSettings: { myOwnKey: 'keep me', hooks: {} },
+    homeMd: '# consumer home\n',
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  runBrainUpgrade(dir, ['--no-install']);
+  const after = JSON.parse(readFileSync(join(dir, '.gemini', 'settings.json'), 'utf8'));
+
+  assert.equal(after.myOwnKey, 'keep me',
+    'the AGENTS.md regeneration must not rewrite .gemini/settings.json — that would clobber ' +
+    'the merge performed moments earlier, in the same run');
+});
+
+// ── .gemini merge + AGENTS.md regeneration (issue #397, REQ-397-3 / REQ-397-4) ─
+
+// REQ-397-3. `.gemini/settings.json` is the same shape as `.claude/settings.json`
+// — a `hooks` object of event → entries — and #103 already built a deterministic
+// merge for exactly that shape. Two sibling agent-config files being treated
+// differently was an accident of which one existed first, not a decision.
+test('brain:upgrade: .gemini/settings.json is a MERGE target, like its .claude sibling (REQ-397-3)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  assert.match(source, /ALL_MERGES\s*=\s*\{[\s\S]*?'\.gemini\/settings\.json':\s*merge/,
+    '.gemini/settings.json must be registered in ALL_MERGES — a plain copy destroys the ' +
+    'consumer\'s own hooks, which is #397 as filed');
+});
+
+// tasks.md 2.7 — #399's merge pre-flight parses every merge target up front so a
+// corrupt one is reported before anything is written, rather than throwing
+// mid-copy. A new merge target that skipped the pre-flight would reintroduce the
+// lockout #399 exists to prevent.
+test('brain:upgrade: the merge pre-flight covers every merge target, including .gemini (2.7)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  assert.match(source, /preflightMergeTargets\(\{[^}]*mergePaths:\s*Object\.keys\(mergeMap\)/,
+    'the pre-flight must be derived from the merge map itself — a hand-written second list ' +
+    'is a second place to forget');
+});
+
+// REQ-397-4. The regeneration must run from the CONSUMER's tree, and it must not
+// take brain's own AGENTS.md with it.
+test('brain:upgrade: AGENTS.md is regenerated after the copy, not copied (REQ-397-4)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  assert.match(source, /antigravity/i,
+    'the upgrade must invoke the AGENTS.md generator rather than shipping the artifact');
+  const copyAt = source.indexOf('copyManaged({');
+  const regenAt = source.search(/regenerateAgentsMd|antigravityInit|harness\/backends\/antigravity/);
+  assert.ok(regenAt > copyAt,
+    'regeneration must run AFTER the managed copy — it reads the methodology docs the copy ' +
+    'just updated, so running it first would compile the previous release');
+});
+
+// The trap this whole slice walks past. `antigravity.mjs#init()` writes BOTH
+// AGENTS.md AND .gemini/settings.json. Calling it plainly to satisfy REQ-397-4
+// would overwrite the .gemini merge REQ-397-3 just performed, in the same run —
+// a wired, correct, and quietly destructive path, which is the exact defect class
+// #397 exists to remove.
+test('brain:upgrade: regenerating AGENTS.md must NOT rewrite the merged .gemini/settings.json (REQ-397-3 + REQ-397-4)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  assert.match(source, /_writeGeminiSettings/,
+    'init() emits .gemini/settings.json too — the regeneration MUST neutralise that seam, or ' +
+    'it undoes the merge performed moments earlier in the same run');
+});
+
 // ── --force-managed validation (issue #397, REQ-397-2) ───────────────────────
 //
 // design.md §4: both escape hatches must be validated against the REAL
