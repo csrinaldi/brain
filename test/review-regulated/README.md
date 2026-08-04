@@ -35,10 +35,19 @@ found the tranche budget hardcode (#443) **on its first run**.
 - Canned responses are plain files in `stubDir` — a test may overwrite any of them
   after building (see the REQ-409-5b identity-mismatch case).
 
+**Cleanup is mandatory.** Each fixture is ~8 MB (vendored `brain/`, plus a clone and a
+bare origin) and this suite runs on every `npm test`. Build through `withFixture(t, …)`,
+never `buildFixture` directly — it registers `t.after` removal. Before that helper
+existed the development tree had accumulated 47 orphaned trees / 383 MB.
+
 Expected flips when the residuals land, by design:
 
 - **#408** (producers for `pre-existing`/`base-only` + `inferential`): the REQ-409-6
-  assertions go red — MOVE them into #408's cases; do not delete them.
+  assertions go red — MOVE them into #408's cases; do not delete them. Note the
+  `follow_ups` pin asserts **absence**, in both the parsed verdict and the posted body:
+  `renderVerdict` omits the key when the list is empty, so "present and empty" is not a
+  state this protocol can currently be in. If #408 makes it emittable, the pin moves to
+  presence — but that is a protocol change and belongs to #408.
 - **#405** (inline `comments[]`): assert on the captured POST payload's `comments`
   array in `posted/reviews.jsonl` — the stub already captures the full body verbatim.
 

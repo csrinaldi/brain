@@ -28,7 +28,11 @@ const git = (cwd, ...args) =>
 
 /**
  * @param {{ tier?: string, diffLines?: number, handle?: string, author?: string, prNumber?: number }} opts
- * @returns {{ repoDir: string, stubDir: string, headSha: string, baseSha: string, prNumber: number }}
+ * `base` is the temp root the caller MUST remove — see `withFixture` in the test
+ * file. Each fixture vendors brain/core + brain/scripts, measured at ~8 MB with the
+ * clone and the bare origin, so seven un-cleaned runs leak ~57 MB per suite pass.
+ *
+ * @returns {{ base: string, repoDir: string, stubDir: string, headSha: string, baseSha: string, prNumber: number }}
  */
 export function buildFixture({
   tier = 'regulated',
@@ -116,5 +120,5 @@ export function buildFixture({
   }]);
   j('labels.json', []);
 
-  return { repoDir, stubDir, headSha, baseSha, prNumber };
+  return { base, repoDir, stubDir, headSha, baseSha, prNumber };
 }

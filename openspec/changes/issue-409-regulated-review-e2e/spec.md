@@ -46,12 +46,37 @@ verification EXECUTED — assert the stub's /user endpoint was hit, from its cal
 boot refusal, nothing posted. (b) and (c) pin that the e2e passes THROUGH the gates,
 not around them.
 
-## REQ-409-6 — `/2` plumbing honesty (the #408 boundary)
+## REQ-409-6 — `/2` plumbing honesty (the #408 boundary) — AMENDED after review
 
-`follow_ups` is asserted **present and empty**, with a comment naming #408 as the
-missing producer. The refuter is asserted **silent** (no `inferential` findings exist
-to trigger it). If either assertion ever flips, that is #408 landing — the test tells
-the implementer to move it, not delete it.
+`follow_ups` is asserted **ABSENT**, not "present and empty". The review of PR #444
+found the original wording was not what the tree does, and that the assertion could
+not tell the two apart: `renderVerdict` omits the key when the list is empty, and
+`parseVerdict` only assigns the field when the key was found, so `verdict.follow_ups
+?? []` deepEqual `[]` compared `[]` to `[]` having observed nothing —
+`evidence-reader-empty-on-failure` in the assertion layer, on the one field with a
+documented render/parse asymmetry (#381).
+
+The pin is therefore two-layered: `!('follow_ups' in verdict)` AND the posted body
+carries no `^follow_ups:` block. The refuter stays asserted **silent** (no
+`inferential` finding exists to trigger it). A flip in either layer means #408 landed
+or the render/parse contract changed — the message tells the implementer to check
+WHICH before moving the assertion, never to delete it.
+
+## REQ-409-3 addendum — the annotation loop must not pass over an empty array
+
+A zero-length `findings` iterates zero times and would turn the causal-annotation
+check green over nothing. REQ-409-1's length assertion is a different test over a
+different fixture instance and cannot cover it, so REQ-409-3 carries its own guard.
+This is load-bearing rather than defensive: when #443 lands and the fixture swaps its
+finding source back to the diff-budget breach, a breach producing no finding would
+turn REQ-409-1 red and leave REQ-409-3 green.
+
+## REQ-409-8 — the harness leaves no fixtures behind
+
+Each fixture vendors `brain/core` + `brain/scripts` plus a clone and a bare origin
+(~8 MB measured). Since this suite now runs on every `npm test`, an un-cleaned run
+leaks ~57 MB per pass — measured on the development tree before the fix: 47 orphaned
+trees, 383 MB. Every case registers removal via `t.after`.
 
 ## REQ-409-7 — the harness is reusable, and documented as such
 

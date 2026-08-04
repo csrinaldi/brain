@@ -33,8 +33,20 @@ topic_key: sdd/issue-409-regulated-review-e2e/tasks
       mutation took effect before trusting the red); bogus headRefOid → run exits
       non-zero (production git integrity, D2). REQ-409-4 proven both directions by
       the lite control.
-- [ ] T9 — full suite + `repo:check` + `brain:nav`; diff budget (tests are ignoreList'd
-      — the counted surface is the harness scripts + docs).
-- [ ] T10 — PR to `main`, `Closes #409`.
+- [x] T9 — full suite + `repo:check` + `brain:nav`; diff budget.
+- [x] T10 — PR #444 to `main`, `Closes #409`.
+- [x] T12 — **review round (PR #444, verdict REVISE)** — all three findings verified
+      independently before acting, then fixed:
+      **F1** `follow_ups ?? []` conflated ABSENT with EMPTY, and absent is what the
+      tree does — reproduced: the posted body carries no `follow_ups:` key and
+      `'follow_ups' in verdict` is `false`, so the assertion compared `[]` to `[]`
+      having observed nothing. Re-pinned in both layers; proven load-bearing by
+      mutating `renderVerdict` to emit the empty key (test goes red).
+      **F2** the annotation loop had no length guard — added, with the #443 swap
+      scenario recorded as why it is load-bearing rather than defensive.
+      **F3** no cleanup: measured **47 orphaned trees / 383 MB** on this working
+      tree (worse than the review's estimate — the clone plus the bare origin make
+      each ~8 MB, not ~3.9). `withFixture(t, …)` registers `t.after` removal;
+      verified a full run now ends at zero.
 - [ ] T11 — **HUMAN (not this change):** decide whether brain itself declares
       `regulated` (design D5; epic HUMAN row) — this harness is the evidence base.

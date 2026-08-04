@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -19,6 +19,19 @@ import { parseVerdict } from '../../brain/scripts/review/lib/parse-verdict.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STUB_BIN = join(HERE, 'gh-stub');
+
+/**
+ * Builds a fixture and registers its removal (review finding F3). Each one vendors
+ * brain/core + brain/scripts and adds a clone and a bare origin — ~8 MB measured —
+ * and since this file now runs on every `npm test`, the un-cleaned version leaked
+ * ~57 MB per suite pass. Measured on this working tree before the fix: 47 orphaned
+ * trees, 383 MB.
+ */
+function withFixture(t, opts) {
+  const fx = buildFixture(opts);
+  t.after(() => rmSync(fx.base, { recursive: true, force: true }));
+  return fx;
+}
 
 /** Spawns the fixture's own vendored brain:review against its PR. */
 function runReview(fx, { token = 'tok-e2e', extraArgs = [] } = {}) {
@@ -53,8 +66,8 @@ function stubCalls(fx) {
 
 // ── REQ-409-1/2/3: a regulated run posts a parseable, causally-annotated /2 ──
 
-test('e2e: a regulated consumer posts a brain-review/2 verdict, parseable by the real parser (REQ-409-1/2)', () => {
-  const fx = buildFixture({ tier: 'regulated' });
+test('e2e: a regulated consumer posts a brain-review/2 verdict, parseable by the real parser (REQ-409-1/2)', (t) => {
+  const fx = withFixture(t, { tier: 'regulated' });
   const r = runReview(fx);
   assert.equal(r.status, 0, `brain:review must exit 0 — stderr:\n${r.stderr}\nstdout:\n${r.stdout}`);
 
@@ -70,11 +83,20 @@ test('e2e: a regulated consumer posts a brain-review/2 verdict, parseable by the
     'the fixture diff breaches regulated\'s 200-line budget — at least one finding must survive to the posted body (design D4)');
 });
 
-test('e2e: /2 findings carry the causal-admission annotations (REQ-409-3)', () => {
-  const fx = buildFixture({ tier: 'regulated' });
+test('e2e: /2 findings carry the causal-admission annotations (REQ-409-3)', (t) => {
+  const fx = withFixture(t, { tier: 'regulated' });
   const r = runReview(fx);
   assert.equal(r.status, 0, r.stderr);
   const verdict = parseVerdict({ body: postedBodies(fx)[0].body });
+  // Guard first (review finding F2): a zero-length findings array iterates zero
+  // times and this test — whose whole job is proving /2 is not /1 in name only —
+  // would go GREEN over nothing. REQ-409-1's length check is a different test over
+  // a different fixture instance, so it cannot cover this one. That matters
+  // concretely: when #443 lands and the fixture swaps its finding source back to
+  // the diff-budget breach, a breach that produces no finding turns REQ-409-1 red
+  // and would have left this one green.
+  assert.ok(verdict.findings.length >= 1,
+    'no findings to annotate — without this guard the loop below would pass over nothing');
   for (const f of verdict.findings) {
     assert.ok(f.evidence_class, `finding lacks evidence_class — /2 in name only: ${JSON.stringify(f)}`);
     assert.ok(f.causal_disposition, `finding lacks causal_disposition: ${JSON.stringify(f)}`);
@@ -83,8 +105,8 @@ test('e2e: /2 findings carry the causal-admission annotations (REQ-409-3)', () =
 
 // ── REQ-409-4: the tier really selects the protocol, both directions ─────────
 
-test('e2e: the same fixture at lite posts /1 — the harness detects the tier, and regulated must NOT degrade to it (REQ-409-4)', () => {
-  const fx = buildFixture({ tier: 'lite' });
+test('e2e: the same fixture at lite posts /1 — the harness detects the tier, and regulated must NOT degrade to it (REQ-409-4)', (t) => {
+  const fx = withFixture(t, { tier: 'lite' });
   const r = runReview(fx);
   assert.equal(r.status, 0, r.stderr);
   const body = postedBodies(fx)[0].body;
@@ -94,8 +116,8 @@ test('e2e: the same fixture at lite posts /1 — the harness detects the tier, a
 
 // ── REQ-409-5: the identity gates EXECUTE — through them, never around ───────
 
-test('e2e: the identity endpoint is actually hit, token-scoped (REQ-409-5a — #413 executes)', () => {
-  const fx = buildFixture({ tier: 'regulated' });
+test('e2e: the identity endpoint is actually hit, token-scoped (REQ-409-5a — #413 executes)', (t) => {
+  const fx = withFixture(t, { tier: 'regulated' });
   const r = runReview(fx);
   assert.equal(r.status, 0, r.stderr);
   const userCalls = stubCalls(fx).filter(c => c.argv.join(' ') === 'api /user');
@@ -104,8 +126,8 @@ test('e2e: the identity endpoint is actually hit, token-scoped (REQ-409-5a — #
     'whoami must be scoped to the reviewer token (GH_TOKEN present in the stub call)');
 });
 
-test('e2e: a token whose real login differs from the handle refuses at boot — nothing posted (REQ-409-5b)', () => {
-  const fx = buildFixture({ tier: 'regulated', handle: 'the-bot' });
+test('e2e: a token whose real login differs from the handle refuses at boot — nothing posted (REQ-409-5b)', (t) => {
+  const fx = withFixture(t, { tier: 'regulated', handle: 'the-bot' });
   // The stub's /user returns the configured handle; override the canned response
   // to impersonate a different account holding the token.
   const userJson = join(fx.stubDir, 'user.json');
@@ -116,8 +138,8 @@ test('e2e: a token whose real login differs from the handle refuses at boot — 
   assert.equal(postedBodies(fx).length, 0, 'nothing may be posted under an unverified identity');
 });
 
-test('e2e: a missing token refuses at boot — nothing posted (REQ-409-5c)', () => {
-  const fx = buildFixture({ tier: 'regulated' });
+test('e2e: a missing token refuses at boot — nothing posted (REQ-409-5c)', (t) => {
+  const fx = withFixture(t, { tier: 'regulated' });
   const r = runReview(fx, { token: null });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /BRAIN_REVIEWER_TOKEN/);
@@ -126,14 +148,28 @@ test('e2e: a missing token refuses at boot — nothing posted (REQ-409-5c)', () 
 
 // ── REQ-409-6: /2 plumbing honesty — the #408 boundary ───────────────────────
 
-test('e2e: follow_ups is present and EMPTY, the refuter silent — flip means #408 landed, move these, do not delete them (REQ-409-6)', () => {
-  const fx = buildFixture({ tier: 'regulated' });
+test('e2e: follow_ups is ABSENT by construction, the refuter silent — flip means #408 landed, move these, do not delete them (REQ-409-6)', (t) => {
+  const fx = withFixture(t, { tier: 'regulated' });
   const r = runReview(fx);
   assert.equal(r.status, 0, r.stderr);
-  const verdict = parseVerdict({ body: postedBodies(fx)[0].body });
-  // No evaluator emits pre-existing/base-only (#408): follow_ups must parse and be [].
-  assert.deepEqual(verdict.follow_ups ?? [], [],
-    'follow_ups populated?! that is #408 landing — move this assertion to its harness, do not delete it');
+  const body = postedBodies(fx)[0].body;
+  const verdict = parseVerdict({ body });
+  // Review finding F1: the previous form was `verdict.follow_ups ?? []` deepEqual
+  // `[]`, which made ABSENT and EMPTY the same assertion — and absent is what
+  // happens today at two independent sites: renderVerdict omits the key when the
+  // list is empty (verdict.mjs), and parseVerdict only assigns the field when the
+  // key was found (parse-verdict.mjs). So it compared [] to [] having observed
+  // NOTHING. That is `evidence-reader-empty-on-failure` in the assertion layer,
+  // and this exact field in this exact pair of functions already shipped a
+  // render/parse asymmetry once (#381, c881a04) — the pin advertised as the #408
+  // tripwire was blind to the one regression class it has a history of.
+  //
+  // Pin the true state instead, in BOTH layers, so a flip is detectable either way.
+  assert.ok(!('follow_ups' in verdict),
+    'follow_ups is absent by construction today (renderVerdict omits the key when empty). ' +
+    'If present: either #408 landed, or the render/parse contract changed — check WHICH before moving this.');
+  assert.doesNotMatch(body, /^follow_ups:/m,
+    'and the posted body carries no follow_ups block — the wire-level half of the same pin');
   // No evaluator emits evidence_class: inferential (#408): the refuter must not have run.
   assert.ok(verdict.findings.every(f => f.evidence_class !== 'inferential'),
     'an inferential finding appeared — the refuter fork is live; #408 has landed and this pin must move with it');
