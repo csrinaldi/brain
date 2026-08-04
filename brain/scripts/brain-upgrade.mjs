@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { copyManaged, readOutgoing, strategyFor, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, compareSemver, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets, semverOrNull, keysAheadOfTarget } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
-import { managedStrategy } from '../core/managed-paths.mjs';
+import { managedStrategy, STRATEGY } from '../core/managed-paths.mjs';
 
 const ROOT = process.cwd();
 const PM = detectPM(ROOT).name;
@@ -39,7 +39,10 @@ const args = process.argv.slice(2);
 const flags = new Set(args.filter((a) => a.startsWith('--')));
 // A --skip-merge VALUE is positional too, so it would otherwise be picked up as the
 // tag when it precedes one — silently upgrading to ".claude/settings.json".
-const tag = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--skip-merge');
+// Same for --force-managed (#397): every repeatable flag that takes a value has to
+// be excluded here by hand, or its value is installed as if it were a git ref.
+const VALUE_FLAGS = ['--skip-merge', '--force-managed'];
+const tag = args.find((a, i) => !a.startsWith('--') && !VALUE_FLAGS.includes(args[i - 1]));
 const dryRun = flags.has('--dry-run');
 const noInstall = flags.has('--no-install');
 const force = flags.has('--force');
@@ -49,6 +52,9 @@ const recover = flags.has('--recover');
 // that FOLLOWS the flag, so they are read positionally rather than from the flag set.
 const allowDowngrade = flags.has('--allow-downgrade');
 const skipMerge = args.reduce((acc, a, i) => (a === '--skip-merge' && args[i + 1] ? [...acc, args[i + 1]] : acc), []);
+// Repeatable and PER PATH by design (#397, signed decision 3): more typing, and
+// much harder to do by accident than a single flag that forces everything pending.
+const forceManaged = args.reduce((acc, a, i) => (a === '--force-managed' && args[i + 1] ? [...acc, args[i + 1]] : acc), []);
 
 // ── The restore point, read ONCE ───────────────────────────────────────────────
 // Read before any branch — including --dry-run, which previously skipped the whole
@@ -252,6 +258,26 @@ if (badSkip.length > 0) {
   die(`Not skippable: ${badSkip.join(', ')}`);
 }
 
+// The REFUSE rows of the signed classification (#397). Read from the table rather
+// than restated here — a second list would be a second place to forget.
+const REFUSE_PATHS = Object.entries(managedStrategy)
+  .filter(([, s]) => s === STRATEGY.REFUSE)
+  .map(([rel]) => rel);
+
+// `--force-managed` gets the SAME validation as --skip-merge, for a worse reason.
+// --skip-merge feeds a glob matcher, so an unvalidated value was really
+// `--skip-anything`. This flag has the opposite polarity: its failure mode is not
+// "nothing was copied" but "everything was overwritten", which is the clobber
+// this issue exists to remove, spelled as a flag. Only a REFUSE-classified path
+// may be forced — a MERGE path has nothing to force (merging already preserves
+// consumer content) and a COPY path is brain-owned by contract.
+const badForce = forceManaged.filter((rel) => !REFUSE_PATHS.includes(rel));
+if (badForce.length > 0) {
+  console.error(`  ${C.red}✗${C.reset} --force-managed only accepts a REFUSE-classified path, one at a time:`);
+  for (const rel of REFUSE_PATHS) console.log(`      ${C.dim}${rel}${C.reset}`);
+  die(`Not forceable: ${badForce.join(', ')}`);
+}
+
 // ── Downgrade guard ────────────────────────────────────────────────────────────
 // Also before step 1. `migrateConfig` only ever moves schemaVersion UP, so installing
 // an older tag leaves OLD code beside a NEW config schema — a combination no tag ever
@@ -395,9 +421,9 @@ if (interrupted) {
   process.exit(interrupted === 'SIGTERM' ? 143 : 130);
 }
 
-let copied, skipped, merged, collisions, consumerModified, brainChanged, modificationDetection;
+let copied, skipped, merged, collisions, consumerModified, brainChanged, modificationDetection, refused, forced;
 try {
-  ({ copied, skipped, merged, collisions, consumerModified, brainChanged, modificationDetection } = copyManaged({
+  ({ copied, skipped, merged, collisions, consumerModified, brainChanged, modificationDetection, refused, forced } = copyManaged({
     srcRoot: pkgRoot,
     destRoot: ROOT,
     managed,
@@ -411,6 +437,8 @@ try {
     specialMerge: mergeMap,
     abortOnCollision,
     outgoing,
+    refusePaths: REFUSE_PATHS,
+    forceManaged,
   }));
 } catch (err) {
   // copyManaged snapshots every path it may write BEFORE its first write and
@@ -466,12 +494,33 @@ if (modificationDetection === 'degraded') {
   // weakens is worse than one that is absent: the run looks identical to a clean
   // three-way pass, so the operator draws a conclusion the run never reached.
   warn('--no-install: the outgoing and incoming package are the same tree, so this run CANNOT tell "you edited it" from "brain changed it".');
-  info('Re-run without --no-install to get the real check. Nothing below distinguishes the two cases.');
+  info('The REFUSE guard therefore cannot fire — a file you edited may be overwritten below.');
+  info('Re-run without --no-install to get the real check.');
 } else if (consumerModified.length > 0) {
   warn(`${consumerModified.length} managed file(s) differ from what brain shipped last time — YOU changed these:`);
   for (const f of consumerModified) {
     console.log(`      ${C.dim}${f} ${C.reset}${C.dim}(${strategyFor(f, managedStrategy)})${C.reset}`);
   }
+}
+
+// ── Refusal (issue #397, REQ-397-2) ─────────────────────────────────────────────
+// Placed BEFORE the copy summary below, which would otherwise report "Copied 0
+// managed file(s)" as though the upgrade had simply found nothing to do.
+if (refused?.length > 0) {
+  const effect = dryRun ? 'a live upgrade would write zero files' : 'nothing was written';
+  console.error(`  ${C.red}✗${C.reset} Refusing to overwrite ${refused.length} file(s) YOU changed (${effect}):`);
+  for (const f of refused) console.log(`      ${C.dim}${f}${C.reset}`);
+  warn('These have no meaningful merge — they are policy and prose a team rewrites wholesale, so brain will not guess.');
+  info('Revert them to pick up brain\'s version, or overwrite them deliberately, one at a time:');
+  console.log(`      ${C.cyan}${PM} run brain:upgrade -- ${tag ?? '<tag>'} ${refused.map((f) => `--force-managed ${f}`).join(' ')}${C.reset}`);
+  if (forced?.length > 0) {
+    // Named but NOT written. Saying so matters: the operator asked for an
+    // overwrite and did not get one, and silence here would leave them believing
+    // a forced path had been applied while its sibling blocked the run.
+    warn(`${forced.length} path(s) you DID force were left untouched too — the run aborts as a whole:`);
+    for (const f of forced) console.log(`      ${C.dim}${f}${C.reset}`);
+  }
+  if (!dryRun) process.exit(1);
 }
 
 // ── Collision report ────────────────────────────────────────────────────────────

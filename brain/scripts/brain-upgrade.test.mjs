@@ -148,6 +148,60 @@ test('brain:upgrade: --no-install states that modification detection degraded (R
     `the run must say it could not distinguish a consumer edit from a brain change:\n${out}`);
 });
 
+// ── --force-managed validation (issue #397, REQ-397-2) ───────────────────────
+//
+// design.md §4: both escape hatches must be validated against the REAL
+// classification, not accepted as free-form globs. `--skip-merge` learned this
+// the hard way — it feeds `local`, which is a glob matcher, so an unvalidated
+// value was really `--skip-anything` and `--skip-merge '**'` made the upgrade
+// copy nothing and report success. `--force-managed` has the opposite polarity
+// and therefore the worse failure: a wildcard that forced every pending path
+// would be the clobber this whole issue is about, spelled as a flag.
+
+test('brain:upgrade: --force-managed refuses a wildcard (REQ-397-2)', (t) => {
+  const dir = makeConsumerRepo('brain-397-force-glob-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = runBrainUpgrade(dir, ['--no-install', '--force-managed', '**']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.notEqual(r.status, 0, `a wildcard force must not be accepted:\n${out}`);
+  assert.match(out, /--force-managed/, `the error must name the flag:\n${out}`);
+});
+
+// A MERGE path is not forceable: there is nothing to force, because merging
+// already preserves the consumer's content. Accepting it would imply the flag
+// does something it does not.
+test('brain:upgrade: --force-managed refuses a path that is not REFUSE-classified (REQ-397-2)', (t) => {
+  const dir = makeConsumerRepo('brain-397-force-merge-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = runBrainUpgrade(dir, ['--no-install', '--force-managed', '.claude/settings.json']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.notEqual(r.status, 0, `only a REFUSE-classified path may be forced:\n${out}`);
+  assert.match(out, /\.claude\/settings\.json/, `the error must name the rejected path:\n${out}`);
+});
+
+// The tag is parsed as "the first argument that is not a flag". Every repeatable
+// flag that takes a VALUE therefore has to be excluded by hand, or the value
+// becomes the tag and the upgrade installs a ref named ".github/CODEOWNERS".
+// --skip-merge already carries this exclusion; --force-managed needs its own.
+test('brain:upgrade: a --force-managed VALUE is not mistaken for the tag (REQ-397-2)', (t) => {
+  const dir = makeConsumerRepo('brain-397-force-tag-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  // No tag given. If the flag's value leaked into the positional parse, the run
+  // would proceed with tag === '.github/CODEOWNERS' and try to install a git ref
+  // by that name. The missing-tag guard firing is the proof it did not.
+  const r = runBrainUpgrade(dir, ['--force-managed', '.github/CODEOWNERS']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.notEqual(r.status, 0);
+  assert.match(out, /missing <tag>/,
+    `the forced PATH must not be consumed as the tag — it would be installed as a git ref:\n${out}`);
+});
+
 // The whole mechanism rests on WHEN the snapshot is taken. node_modules/brain
 // holds the previous release only until the install overwrites it, so a snapshot
 // moved below step 1 would read the incoming package, compare it to itself, and

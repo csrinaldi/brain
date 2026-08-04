@@ -978,11 +978,16 @@ export function createRestorePoint({ destRoot, relPaths }) {
  * @param {Map<string, Buffer>|null} [opts.outgoing]  What brain shipped LAST time,
  *   from `readOutgoing` before the install (#397). Null means the outgoing tree
  *   was unavailable (e.g. `--no-install`) and detection degrades to two-way.
+ * @param {string[]} [opts.refusePaths]   REFUSE-classified paths (#397). One that
+ *   the consumer also modified aborts the run before any write.
+ * @param {string[]} [opts.forceManaged]  Paths the operator named explicitly to
+ *   overwrite anyway. Per path, never a wildcard (signed decision 3).
  * @returns {{ copied: string[], skipped: string[], merged: string[], collisions: string[],
  *   consumerModified: string[], brainChanged: string[],
- *   modificationDetection: 'three-way'|'degraded' }}
+ *   modificationDetection: 'three-way'|'degraded',
+ *   refused: string[], forced: string[] }}
  */
-export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false, specialMerge = {}, abortOnCollision = false, outgoing = null }) {
+export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false, specialMerge = {}, abortOnCollision = false, outgoing = null, refusePaths = [], forceManaged = [] }) {
   const skipped = [];
   const collisions = [];
   const toCopy = [];  // rel paths for plain copyFileSync
@@ -1042,6 +1047,22 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
     }
   }
 
+  // ── REFUSE gate (#397, REQ-397-2) ───────────────────────────────────────────
+  // Only a path that is BOTH consumer-modified AND REFUSE-classified reaches
+  // here. A REFUSE classification is not "always ask": untouched, these paths
+  // copy like anything else. Asking on every release is how a real warning
+  // becomes the thing everyone clicks through.
+  //
+  // Forcing is per path (signed decision 3). A single flag that forced
+  // everything pending would recreate the clobber this issue is about, one
+  // keystroke away — so a force names exactly one path and covers exactly it.
+  const refused = [];
+  const forced = [];
+  for (const rel of consumerModified) {
+    if (!matchesAny(rel, refusePaths)) continue;
+    (forceManaged.includes(rel) ? forced : refused).push(rel);
+  }
+
   // Write in a stable order rather than in whatever order the filesystem handed
   // back. Two reasons: an upgrade that fails partway does so at a reproducible
   // point (so a bug report is reproducible), and it matches the sorted arrays
@@ -1055,7 +1076,16 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
   // before the write loop so the caller observes zero writes. Skipped under
   // dryRun: a dry run never writes anyway, so we fall through and return the full
   // plan (toCopy/toMerge) — the caller can report it AND the collisions.
-  if (abortOnCollision && !dryRun && collisions.length > 0) {
+  // A refusal aborts the WHOLE run, not just the refused paths (REQ-397-2).
+  // Partially applying would leave the tree in a state no release ever shipped,
+  // and the operator has to make one decision per named path anyway. Like the
+  // collision gate, it returns BEFORE createRestorePoint (design §6): nothing is
+  // written, so there is nothing to roll back.
+  //
+  // Note the ordering against a FORCED path — forcing does not write here
+  // either. If any sibling still refuses, the forced path stays untouched too,
+  // because the run as a whole did not happen.
+  if ((refused.length > 0 || (abortOnCollision && collisions.length > 0)) && !dryRun) {
     return {
       copied: [],
       skipped: skipped.sort(),
@@ -1064,6 +1094,8 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
       consumerModified: consumerModified.sort(),
       brainChanged: brainChanged.sort(),
       modificationDetection,
+      refused: refused.sort(),
+      forced: forced.sort(),
     };
   }
 
@@ -1147,6 +1179,8 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
     consumerModified: consumerModified.sort(),
     brainChanged: brainChanged.sort(),
     modificationDetection,
+    refused: refused.sort(),
+    forced: forced.sort(),
   };
 }
 

@@ -996,6 +996,168 @@ test('copyManaged: an outgoing package makes detection three-way (REQ-397-1)', (
   }
 });
 
+// ── REFUSE + --force-managed (issue #397, REQ-397-2) ─────────────────────────
+//
+// A REFUSE-classified path has no meaningful merge — ownership lines and CI
+// workflows are policies a team rewrites wholesale, not sets to union. So when
+// the CONSUMER modified one, the only honest options are abort or a deliberate,
+// per-path overwrite. #399's lesson runs through all of this INVERTED: there,
+// dropping a path from the merge map silently sent it to the plain-copy set, so
+// "skip" nearly became "clobber". Here the danger is the mirror image — a
+// refused path must never quietly end up written.
+
+// Two REFUSE-classified paths, each independently settable to "the consumer
+// edited it" or not, so a test can say exactly which one it is talking about.
+function refuseFixture(prefix, { ownersEdited, templateEdited }) {
+  const tmp = mkdtempSync(join(tmpdir(), prefix));
+  const src = join(tmp, 'src');
+  const dest = join(tmp, 'dest');
+  mkdirSync(join(src, '.github'), { recursive: true });
+  mkdirSync(join(dest, '.github'), { recursive: true });
+
+  const SHIPPED_OWNERS = '* @brain-team\n';
+  const SHIPPED_TEMPLATE = 'brain PR template\n';
+
+  writeFileSync(join(src, '.github', 'CODEOWNERS'), '* @brain-team\n# brain added a line\n');
+  writeFileSync(join(src, '.github', 'PULL_REQUEST_TEMPLATE.md'), 'brain PR template v2\n');
+  writeFileSync(join(dest, '.github', 'CODEOWNERS'), ownersEdited ? '* @my-team\n' : SHIPPED_OWNERS);
+  writeFileSync(join(dest, '.github', 'PULL_REQUEST_TEMPLATE.md'), templateEdited ? 'my PR template\n' : SHIPPED_TEMPLATE);
+
+  const outgoing = new Map([
+    ['.github/CODEOWNERS', Buffer.from(SHIPPED_OWNERS)],
+    ['.github/PULL_REQUEST_TEMPLATE.md', Buffer.from(SHIPPED_TEMPLATE)],
+  ]);
+  const call = (extra = {}) => copyManaged({
+    srcRoot: src,
+    destRoot: dest,
+    managed: ['.github/CODEOWNERS', '.github/PULL_REQUEST_TEMPLATE.md'],
+    local: [],
+    outgoing,
+    refusePaths: ['.github/CODEOWNERS', '.github/PULL_REQUEST_TEMPLATE.md'],
+    ...extra,
+  });
+  const owners = () => readFileSync(join(dest, '.github', 'CODEOWNERS'), 'utf8');
+  const template = () => readFileSync(join(dest, '.github', 'PULL_REQUEST_TEMPLATE.md'), 'utf8');
+  return { tmp, owners, template, call };
+}
+
+// tasks.md 3.1 — the headline requirement.
+test('copyManaged: a consumer-modified REFUSE path aborts and writes NOTHING (REQ-397-2)', () => {
+  const { tmp, owners, template, call } = refuseFixture('brain-397-refuse-', { ownersEdited: true, templateEdited: false });
+  try {
+    const result = call();
+
+    assert.deepEqual(result.refused, ['.github/CODEOWNERS'],
+      'the modified REFUSE path must be named');
+    assert.deepEqual(result.copied, [],
+      'an abort must write nothing at all — not "everything except the refused path"');
+    assert.equal(owners(), '* @my-team\n',
+      'the consumer edit that caused the refusal must survive it');
+    assert.equal(template(), 'brain PR template\n',
+      'the OTHER path must be untouched too: the run aborted, it did not partially apply');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// tasks.md 3.4 — #399's lesson, inverted. The failure this guards against is not
+// "the refusal did not fire" but "the refusal fired AND the file was written
+// anyway", which is exactly the shape --skip-merge had before it was corrected.
+test('copyManaged: a refused path is LEFT ALONE, never quietly written (REQ-397-2)', () => {
+  const { tmp, owners, call } = refuseFixture('brain-397-leftalone-', { ownersEdited: true, templateEdited: true });
+  try {
+    const before = owners();
+    const result = call();
+
+    assert.equal(result.refused.length, 2);
+    assert.equal(owners(), before,
+      'a refused path must be byte-identical after the call — "refused" and "overwritten" must never swap');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// tasks.md 3.3 — forcing is per path. A flag that forced everything pending
+// would recreate the clobber this issue is about, one keystroke away (signed
+// decision 3).
+test('copyManaged: forcing one path does NOT force another modified REFUSE path (REQ-397-2)', () => {
+  const { tmp, owners, template, call } = refuseFixture('brain-397-force1-', { ownersEdited: true, templateEdited: true });
+  try {
+    const result = call({ forceManaged: ['.github/CODEOWNERS'] });
+
+    assert.deepEqual(result.refused, ['.github/PULL_REQUEST_TEMPLATE.md'],
+      'the unforced path must still refuse');
+    assert.equal(owners(), '* @my-team\n',
+      'the run aborted on the other path, so even the FORCED one must not be written');
+    assert.equal(template(), 'my PR template\n');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: forcing every modified REFUSE path lets the run proceed and overwrites them (REQ-397-2)', () => {
+  const { tmp, owners, template, call } = refuseFixture('brain-397-forceall-', { ownersEdited: true, templateEdited: true });
+  try {
+    const result = call({ forceManaged: ['.github/CODEOWNERS', '.github/PULL_REQUEST_TEMPLATE.md'] });
+
+    assert.deepEqual(result.refused, []);
+    assert.deepEqual(result.forced.sort(), ['.github/CODEOWNERS', '.github/PULL_REQUEST_TEMPLATE.md']);
+    assert.equal(owners(), '* @brain-team\n# brain added a line\n',
+      'a FORCED path is OVERWRITTEN — that is the whole point of asking for it by name');
+    assert.equal(template(), 'brain PR template v2\n');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// The negative control that keeps the gate from becoming noise. A REFUSE
+// classification is not "always ask" — it is "ask when the CONSUMER has
+// something to lose". Untouched, it copies like anything else.
+test('copyManaged: an UNMODIFIED REFUSE path is copied without refusing (REQ-397-2)', () => {
+  const { tmp, owners, call } = refuseFixture('brain-397-refuse-clean-', { ownersEdited: false, templateEdited: false });
+  try {
+    const result = call();
+
+    assert.deepEqual(result.refused, []);
+    assert.equal(owners(), '* @brain-team\n# brain added a line\n',
+      'brain changed it and the consumer never touched it — this is what an upgrade is FOR');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// A dry run writes nothing anyway, so blanking the plan would make "preview
+// first" — the habit this file's own comments recommend — the one path that
+// hides what would happen. Same shape as the abortOnCollision dry-run rule.
+test('copyManaged: dryRun reports the refusal AND still returns the full plan (REQ-397-2)', () => {
+  const { tmp, call } = refuseFixture('brain-397-refuse-dry-', { ownersEdited: true, templateEdited: false });
+  try {
+    const result = call({ dryRun: true });
+
+    assert.deepEqual(result.refused, ['.github/CODEOWNERS']);
+    assert.ok(result.copied.length > 0,
+      'a dry run must still show what a live run would copy');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// Degraded detection cannot establish consumer modification, so it cannot
+// establish a refusal either. It must not invent one — and equally must not
+// silently pass a modified file through as if it had checked.
+test('copyManaged: with no outgoing package the REFUSE gate cannot fire (REQ-397-1 S3 + REQ-397-2)', () => {
+  const { tmp, call } = refuseFixture('brain-397-refuse-degraded-', { ownersEdited: true, templateEdited: true });
+  try {
+    const result = call({ outgoing: null });
+
+    assert.equal(result.modificationDetection, 'degraded');
+    assert.deepEqual(result.refused, [],
+      'a degraded check must not manufacture a verdict it could not reach');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── readOutgoing (issue #397, REQ-397-1) ─────────────────────────────────────
 
 test('readOutgoing: returns the bytes brain shipped last time, keyed by rel path', () => {

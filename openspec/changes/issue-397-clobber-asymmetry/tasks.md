@@ -35,21 +35,30 @@ topic_key: sdd/issue-397-clobber-asymmetry/tasks
       — `STRATEGY` + `managedStrategy`, transcribed from the signed table; `strategyFor()`
       resolves it with exact-literal-over-glob priority
 - [ ] 2.4 `.gemini/settings.json` routed through the `.claude/settings.json` merge (REQ-397-3)
-- [ ] 2.5 REFUSE + per-path `--force-managed`, validated against the classification (REQ-397-2)
+- [x] 2.5 REFUSE + per-path `--force-managed`, validated against the classification (REQ-397-2)
+      — the gate returns before `createRestorePoint`, so a refusal writes nothing and
+      needs no rollback; `--force-managed` is validated against the REFUSE rows only
 - [ ] 2.6 `AGENTS.md` off the copy set; regenerate post-upgrade and report it (REQ-397-4)
 - [ ] 2.7 Add `.gemini/settings.json` to #399's merge pre-flight
 - [ ] 2.8 Detect and report paths clobbered by an EARLIER upgrade (REQ-397-6, signed decision 2)
 
 ## Phase 3 — Tests (UNBLOCKED)
 
-- [ ] 3.1 Consumer-modified REFUSE path aborts, names it, writes nothing
+- [x] 3.1 Consumer-modified REFUSE path aborts, names it, writes nothing
 - [x] 3.2 **Negative control:** brain-changed-but-consumer-untouched writes without prompting
-- [ ] 3.3 `--force-managed` overwrites only the named path
-- [ ] 3.4 **Negative control:** a refused path is LEFT ALONE, never quietly written (#399's lesson, inverted)
+- [x] 3.3 `--force-managed` overwrites only the named path
+- [x] 3.4 **Negative control:** a refused path is LEFT ALONE, never quietly written (#399's lesson, inverted)
 - [ ] 3.5 `.gemini/settings.json` merge preserves consumer keys
 - [ ] 3.6 `AGENTS.md` after an upgrade reflects the CONSUMER's `brain/HOME.md`
 - [ ] 3.7 Every test drives the real CLI — the #396 lesson: a suite that never runs the
       command a consumer runs carries no information about it
+      **PARTIAL, and the gap is structural.** The real CLI is driven for flag validation,
+      the tag-parse trap, and the degraded-mode notice. It CANNOT be driven for the
+      refusal itself: the gate needs `outgoing !== incoming`, which needs a real install,
+      and under `--no-install` the two are the same tree by definition. So the refusal is
+      proven at `copyManaged` level only. Closing this honestly needs the container
+      harness — which is exactly **#401** (M4 e2e over the four danger paths). Tracked
+      there, not silently claimed here.
 - [ ] 3.8 Already-clobbered path is detected and named
 - [ ] 3.9 **Negative control:** a consumer who never had their own copy is NOT nagged
 - [ ] 3.10 Prove each test RED before its fix
