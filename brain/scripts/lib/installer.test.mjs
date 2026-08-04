@@ -1877,6 +1877,85 @@ test('copyManaged: dryRun and abortOnCollision take no snapshot at all (REQ-S6-1
   }
 });
 
+// ── beforeAnyWrite: the flag the CLI's rollback claim rests on (#447) ────────
+//
+// brain-upgrade.mjs branches on `err.beforeAnyWrite`: without it, it prints
+// "Upgrade failed while writing managed paths" AND then "Every managed path was
+// rolled back to the bytes it had before the copy."
+//
+// That second sentence is a statement of fact about the consumer's tree. It must
+// never be printed for a failure that happened before a restore point existed —
+// there was nothing to roll back, and an operator who reads it will not go look.
+//
+// The flag used to be set at exactly ONE site (the catch around
+// createRestorePoint), while the whole read-only pre-flight pass of copyManaged
+// sits outside it. Every throw from there fell through to the catch-all.
+
+test('copyManaged: a throw from the READ-ONLY pre-flight is tagged beforeAnyWrite (#447)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-447-preflight-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'x.md'), 'NEW');
+
+    // The consumer has a DIRECTORY where a managed file belongs. The collision
+    // probe's unguarded `readFileSync(destFile)` throws EISDIR — a real, live
+    // path, not a synthetic one.
+    mkdirSync(join(dest, 'brain', 'core', 'x.md'), { recursive: true });
+
+    assert.throws(
+      () => copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [] }),
+      (err) => {
+        assert.equal(
+          err.beforeAnyWrite,
+          true,
+          'a pre-flight throw must be tagged, or the CLI claims a rollback that never happened',
+        );
+        return true;
+      },
+    );
+
+    // And the claim the tag protects: nothing was written, nothing to restore.
+    assert.ok(!existsSync(join(dest, RESTORE_POINT_DIR)), 'the pre-flight must not have snapshotted');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: a throw from the WRITE loop is NOT tagged beforeAnyWrite (#447)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-447-writeloop-'));
+  try {
+    const src = join(tmp, 'src');
+    const dest = join(tmp, 'dest');
+    mkdirSync(join(src, 'brain', 'core', 'sub'), { recursive: true });
+    writeFileSync(join(src, 'brain', 'core', 'a.md'), 'NEW');
+    writeFileSync(join(src, 'brain', 'core', 'sub', 'b.md'), 'NEW');
+    mkdirSync(join(dest, 'brain', 'core'), { recursive: true });
+    writeFileSync(join(dest, 'brain', 'core', 'a.md'), 'OLD');
+    // A FILE where the write loop needs a directory: mkdirSync throws ENOTDIR
+    // mid-loop, after `a.md` has already been written. The restore point exists,
+    // so the rollback claim is meaningful here — and must stay untagged.
+    writeFileSync(join(dest, 'brain', 'core', 'sub'), 'not a directory');
+
+    assert.throws(
+      () => copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/core/**'], local: [] }),
+      (err) => {
+        assert.notEqual(
+          err.beforeAnyWrite,
+          true,
+          'a write-loop failure DID reach the restore point — tagging it would suppress a true rollback report',
+        );
+        return true;
+      },
+    );
+
+    assert.equal(readFileSync(join(dest, 'brain', 'core', 'a.md'), 'utf8'), 'OLD', 'the rollback must have happened');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('createRestorePoint: an unrestorable path is reported, and does not strand the rest (REQ-S6-9)', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'brain-s6-9-'));
   try {
