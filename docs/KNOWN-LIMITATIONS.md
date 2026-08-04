@@ -68,10 +68,39 @@ control**:
     preferable to telling an operator a completed upgrade failed.
 
   (M4 · #396 → 1.1; both slices landed — SIGKILL closed, power-loss integrity outstanding)
-- **Plain-copy clobber asymmetry.** `.gemini/settings.json`, `.github/CODEOWNERS`,
-  `.github/PULL_REQUEST_TEMPLATE.md`, `AGENTS.md`, and the workflows are overwritten on upgrade
-  (only `.claude/settings.json` and `package.json` are merged). A consumer who edits one of those
-  loses it with only a warning. (M4 · #397 → 1.1)
+- ~~**Plain-copy clobber asymmetry.**~~ **Closed (#397).** Every managed path now carries an
+  explicit, signed strategy in `brain/core/managed-paths.mjs` instead of one inferred from three
+  call sites. `.gemini/settings.json` is MERGED like its `.claude` sibling; `CODEOWNERS`, the PR
+  template and the four workflow files REFUSE when the consumer changed them, aborting the run
+  and requiring `--force-managed <path>` per path; `AGENTS.md` is REGENERATED from the consumer's
+  own `brain/HOME.md` and never copied at all.
+
+  Modification detection is three-way — destination against the OUTGOING package, not just
+  against the incoming one — so "the consumer edited it" and "brain changed it" stop being the
+  same observation. A file brain updated and the consumer never touched is still written without
+  prompting.
+
+  **Residual 1 — degraded detection under `--no-install`.** The outgoing and incoming package are
+  then the same tree, so consumer modification cannot be established and the REFUSE guard cannot
+  fire. The run says so explicitly rather than looking like a clean three-way pass, but a file you
+  edited *can* be overwritten on that path. Drop `--no-install` to get the real check.
+
+  **Residual 2 — already-clobbered detection covers `AGENTS.md` only, and only against the
+  current release.** A consumer who customised `brain/HOME.md` and whose `AGENTS.md` is
+  byte-identical to the incoming package's is told, and pointed at `git log --follow`. Two gaps:
+  a consumer clobbered by an *older* release carries an artifact that matches nothing
+  reconstructible, and the non-generated paths (`CODEOWNERS`, the workflows) have no detector at
+  all. Both need a manifest of every hash brain has historically shipped — a new Tier-2 artifact
+  and its own decision, so it is tracked separately rather than assumed here.
+
+  Git history was measured and rejected as the mechanism: brain's own `AGENTS.md` changed 16
+  times across 17 tags, so "this file once differed and now matches brain's" is true for almost
+  every consumer who upgraded more than once. A detector that fires for everyone is noise, and
+  noise is how a real warning gets ignored.
+
+  **Residual 3 — the REFUSE gate is not covered end-to-end.** It needs `outgoing !== incoming`,
+  which needs a real install, so it is proven at `copyManaged` level and via the container harness
+  in #401 rather than by the unit suite. (M4 · #397 → 1.1)
 - ~~**Corrupt consumer JSON blocks all upgrades.**~~ **Closed (#399).** Both merge targets are
   parsed before anything is installed, snapshotted or written; the refusal names every broken
   file at once and `--skip-merge <path>` upgrades everything else, leaving the named file

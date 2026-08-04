@@ -240,6 +240,70 @@ test('brain:upgrade: regenerating AGENTS.md does not undo the .gemini merge (REQ
     'the merge performed moments earlier, in the same run');
 });
 
+// ── Already-clobbered detection (issue #397, REQ-397-6) ──────────────────────
+//
+// Signed decision 2. Repos that took brain's AGENTS.md in an earlier upgrade are
+// carrying a silent loss right now; the first run after this ships must say so.
+// Driven through the REAL CLI, because the report is the deliverable.
+
+function makeClobberConsumer(prefix, { consumerHome, agentsOnDisk }) {
+  const dir = makeUpgradableConsumer(prefix, { geminiSettings: { hooks: {} }, homeMd: consumerHome });
+  const pkg = join(dir, 'node_modules', 'brain');
+  // What brain's own tree carries: its HOME.md and its compiled AGENTS.md.
+  mkdirSync(join(pkg, 'brain'), { recursive: true });
+  writeFileSync(join(pkg, 'brain', 'HOME.md'), '# brain HOME\n');
+  writeFileSync(join(pkg, 'AGENTS.md'), 'BRAIN AGENTS ARTIFACT\n');
+  writeFileSync(join(dir, 'AGENTS.md'), agentsOnDisk);
+  return dir;
+}
+
+// REQ-397-6 Scenario 1.
+test('brain:upgrade: a previously clobbered AGENTS.md is detected and named (REQ-397-6)', (t) => {
+  const dir = makeClobberConsumer('brain-397-clobbered-', {
+    consumerHome: '# MY OWN HOME\n',        // they customised…
+    agentsOnDisk: 'BRAIN AGENTS ARTIFACT\n', // …yet their AGENTS.md is brain's
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const out = (({ stdout, stderr }) => `${stdout}${stderr}`)(runBrainUpgrade(dir, ['--no-install']));
+
+  assert.match(out, /EARLIER upgrade replaced it/i,
+    `the run must report that a previous upgrade overwrote it:\n${out}`);
+  assert.match(out, /git log --follow -- AGENTS\.md/,
+    `REQ-397-6 requires naming how to recover it from their own history:\n${out}`);
+});
+
+// REQ-397-6 Scenario 2 — the constraint that actually shapes the mechanism.
+// Note the trap: this consumer's AGENTS.md IS byte-identical to brain's. Only
+// the fact that they never customised HOME.md separates them from the case
+// above, and byte-identity alone must never be treated as evidence of loss.
+test('brain:upgrade: a consumer who never customised HOME.md is NOT nagged (REQ-397-6 S2)', (t) => {
+  const dir = makeClobberConsumer('brain-397-notclobbered-', {
+    consumerHome: '# brain HOME\n',          // identical to brain's
+    agentsOnDisk: 'BRAIN AGENTS ARTIFACT\n', // identical to brain's, and fine
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const out = (({ stdout, stderr }) => `${stdout}${stderr}`)(runBrainUpgrade(dir, ['--no-install']));
+
+  assert.doesNotMatch(out, /EARLIER upgrade replaced it/i,
+    `nothing of their own was ever lost — a detector that fires here fires for everyone:\n${out}`);
+});
+
+// The detection must read BEFORE the regeneration, or it inspects the file it
+// just rebuilt and can never fire. An ordering bug here is invisible: the suite
+// stays green and the warning simply never appears for anyone.
+test('brain:upgrade: clobber detection reads AGENTS.md BEFORE regenerating it (REQ-397-6)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  const detectAt = source.indexOf('detectAgentsClobber({');
+  const regenAt = source.indexOf('antigravityInit({');
+  assert.ok(detectAt > 0 && regenAt > 0);
+  assert.ok(detectAt < regenAt,
+    'the detector must read the on-disk AGENTS.md before regeneration overwrites it — ' +
+    'the file about to be rebuilt is the only evidence that an earlier upgrade replaced it');
+});
+
 // ── .gemini merge + AGENTS.md regeneration (issue #397, REQ-397-3 / REQ-397-4) ─
 
 // REQ-397-3. `.gemini/settings.json` is the same shape as `.claude/settings.json`

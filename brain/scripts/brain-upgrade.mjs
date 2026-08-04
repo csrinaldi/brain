@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { copyManaged, readOutgoing, strategyFor, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, compareSemver, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets, semverOrNull, keysAheadOfTarget } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
 import { managedStrategy, STRATEGY } from '../core/managed-paths.mjs';
+import { detectAgentsClobber } from './lib/agents-clobber.mjs';
 
 const ROOT = process.cwd();
 const PM = detectPM(ROOT).name;
@@ -615,6 +616,23 @@ if (!existsSync(configPath)) {
 //   CODE  ← this script's own sibling (brain's generator, freshly updated)
 //   DATA  ← ROOT (the consumer's HOME.md and their methodology docs)
 if (!dryRun) {
+  // REQ-397-6 — read BEFORE the regeneration overwrites the evidence. The file
+  // about to be rebuilt is the only record that an earlier upgrade replaced it.
+  const readOrNull = (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } };
+  const clobber = detectAgentsClobber({
+    onDisk: readOrNull(join(ROOT, 'AGENTS.md')),
+    consumerHome: readOrNull(join(ROOT, 'brain', 'HOME.md')),
+    brainHome: readOrNull(join(pkgRoot, 'brain', 'HOME.md')),
+    brainAgents: readOrNull(join(pkgRoot, 'AGENTS.md')),
+  });
+  if (clobber.clobbered) {
+    warn('Your AGENTS.md is brain\'s, not yours — an EARLIER upgrade replaced it (issue #397).');
+    info('You customised brain/HOME.md, but the AGENTS.md on disk was compiled from brain\'s.');
+    info('Recover your previous version from your own history:');
+    console.log(`      ${C.cyan}git log --follow -- AGENTS.md${C.reset}`);
+    info('Regenerating it now from YOUR brain/HOME.md — this will not happen again.');
+  }
+
   try {
     const { init: antigravityInit } = await import(new URL('./harness/backends/antigravity.mjs', import.meta.url));
     // `init()` emits .gemini/settings.json TOO. Left alive, it would overwrite the
