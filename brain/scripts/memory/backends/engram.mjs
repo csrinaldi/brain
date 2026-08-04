@@ -20,12 +20,14 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { hostname as osHostname } from "node:os";
+import { hostname as osHostname, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -520,13 +522,81 @@ export function _defaultReadRecordObservations(root) {
  *   Progress/summary sink — defaults to console.log.
  * @returns {Promise<{written: number}>}
  */
+export function buildImportPayload({
+  records,
+  existingTopicKeys,
+  startedAt,
+  _importRecord = importRecord,
+}) {
+  // The delta. A record already in engram is SKIPPED rather than re-sent,
+  // because `engram import` INSERTS — it does not upsert by topic_key, measured
+  // directly: importing one file twice turned 2 observations into 4. All
+  // deduplication therefore has to happen here, before the payload is built.
+  //
+  // Equivalent to the upsert this replaces ONLY because brain records are
+  // immutable: an id is content-derived, so an edit yields a NEW record instead
+  // of mutating one already imported. `engram.batch-import.test.mjs` pins that
+  // premise separately — it is the test that fails first if it ever breaks.
+  const fresh = records.filter((r) => !existingTopicKeys.has(r.id));
+  const skipped = records.length - fresh.length;
+
+  // Nothing new: return no payload at all rather than an empty one. An empty
+  // payload would still cost a process spawn, on the steady-state path that
+  // every `git pull` runs.
+  if (fresh.length === 0) return { payload: null, written: 0, skipped };
+
+  // One synthetic session per project. Measured against the real binary: an
+  // observation whose session row is missing fails with `FOREIGN KEY constraint
+  // failed`, and `session_id: null` fails identically — the session row is what
+  // establishes the project. Per project, not one global row, so a records file
+  // spanning several projects cannot hang observations off the wrong one.
+  const sessions = [];
+  const sessionFor = new Map();
+  for (const r of fresh) {
+    const project = _importRecord(r).project;
+    if (sessionFor.has(project)) continue;
+    const id = `brain-batch-import-${project}`;
+    sessionFor.set(project, id);
+    sessions.push({ id, project, started_at: startedAt, ended_at: null, summary: null });
+  }
+
+  const observations = fresh.map((r) => {
+    const o = _importRecord(r);
+    return {
+      title: o.title,
+      content: o.content,
+      type: o.type,
+      project: o.project,
+      scope: o.scope,
+      // The record id IS the topic key: the anchor the NEXT run reads back to
+      // recognise this record as already present. Without it the delta has
+      // nothing to match on and every run re-imports everything.
+      topic_key: r.id,
+      session_id: sessionFor.get(o.project),
+      created_at: o.created_at,
+      updated_at: o.created_at,
+      last_seen_at: o.created_at,
+      duplicate_count: 0,
+      revision_count: 0,
+    };
+  });
+
+  return {
+    payload: { version: "0.1.0", exported_at: startedAt, sessions, prompts: [], observations },
+    written: fresh.length,
+    skipped,
+  };
+}
+
 export async function importMemory({
   root = repoRoot,
   _requireEngram = requireEngram,
   _readRecords = _defaultReadRecordObservations,
   _importRecord = importRecord,
-  _engramSave = _defaultEngramSave,
+  _engramExistingTopicKeys = _defaultExistingTopicKeys,
+  _engramImport = _defaultEngramImport,
   _log = console.log,
+  _now = () => new Date().toISOString().replace("T", " ").slice(0, 19),
 } = {}) {
   _requireEngram();
 
@@ -538,21 +608,29 @@ export async function importMemory({
     return { written: 0 };
   }
 
-  let written = 0;
-  for (const record of records) {
-    const observation = _importRecord(record);
-    _engramSave(observation.title, observation.content, {
-      type: observation.type,
-      project: observation.project,
-      scope: observation.scope,
-      topic: record.id,
-    });
-    written += 1;
-    _log(await t("memory.import.progress", { written, total }));
+  // Reading what engram already holds is the delta's only input, and it runs
+  // before anything is written. The store may be empty, locked, or written by a
+  // different engram version — and this call sits in the path a `git pull` is
+  // blocking on. So a failure degrades to "import everything" (correct, merely
+  // slower) instead of aborting the hydration.
+  let existingTopicKeys;
+  try {
+    existingTopicKeys = _engramExistingTopicKeys();
+  } catch {
+    existingTopicKeys = new Set();
   }
 
+  const { payload, written, skipped } = buildImportPayload({
+    records,
+    existingTopicKeys,
+    startedAt: _now(),
+    _importRecord,
+  });
+
+  if (payload) _engramImport(payload);
+
   _log(await t("memory.import.done", { written, total }));
-  return { written };
+  return { written, skipped };
 }
 
 /**
@@ -1014,6 +1092,51 @@ function _defaultCheckEngram() {
 // committed `records/` keeps the correct `ts` (source of truth); only engram's
 // rebuildable local cache loses original recency ordering on pull. Preserving
 // created_at would need an engram-side ingestion verb (tracked as a follow-up).
+/**
+ * Reads back the topic keys engram already holds, via ONE `engram export`.
+ *
+ * Measured at 0.67s for 2248 observations — cheap enough to run every time,
+ * which is what makes the delta possible without brain keeping a watermark of
+ * its own (a second source of truth that could drift from the store).
+ *
+ * @returns {Set<string>}
+ */
+function _defaultExistingTopicKeys() {
+  const dir = mkdtempSync(join(tmpdir(), "brain-engram-state-"));
+  const file = join(dir, "state.json");
+  try {
+    execFileSync("engram", ["export", file], { stdio: ["ignore", "ignore", "pipe"] });
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    const keys = new Set();
+    for (const o of parsed?.observations ?? []) {
+      if (o?.topic_key) keys.add(o.topic_key);
+    }
+    return keys;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Writes every pending observation with ONE `engram import`.
+ *
+ * Replaces the per-record `engram save` loop that made #433: 1722 records ×
+ * one execFileSync each measured at 1053 seconds, paid synchronously by
+ * session:start AND by the post-merge hook on every `git pull`.
+ *
+ * @param {object} payload  As built by buildImportPayload.
+ */
+function _defaultEngramImport(payload) {
+  const dir = mkdtempSync(join(tmpdir(), "brain-engram-import-"));
+  const file = join(dir, "payload.json");
+  try {
+    writeFileSync(file, JSON.stringify(payload));
+    execFileSync("engram", ["import", file], { stdio: ["ignore", "ignore", "pipe"] });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 function _defaultEngramSave(title, content, { type, project, scope, topic }) {
   execFileSync(
     "engram",
