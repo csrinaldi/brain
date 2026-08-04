@@ -37,3 +37,92 @@ The FROM managed state is seeded via a managed-paths copy: a pre-v0.4.1
 **TO** upgrade uses the real `brain:upgrade` (git+https, #44). Existing
 pre-v0.4.1 consumers need a one-time `npm i -D "git+https://…#v0.4.1"` to cross
 that boundary; after v0.4.1, HTTPS upgrades work directly.
+
+---
+
+# M4 danger-path suite (#401)
+
+The test above proves the **happy** path against real releases. This one proves
+the four **danger** paths epic #313's M4 hard gate names — and is the checkable
+form of that gate: external adoption opens when it is green.
+
+```bash
+npm run test:danger-paths
+```
+
+Requires **Docker**. Needs **no github token and no network access to GitHub**.
+
+| # | path | ticket |
+|---|------|--------|
+| 1 | a mid-upgrade write failure rolls the tree back byte-identical | #396 |
+| 2 | a consumer-edited managed file is refused, never silently clobbered | #397 |
+| 3 | a downgrade is refused without `--allow-downgrade` | #398 |
+| 4 | corrupt consumer JSON is named up front; `--skip-merge` completes | #399 |
+
+## Why it builds a local git remote instead of using tags
+
+The behaviour under test exists only in code **newer than every published tag** —
+`v1.0.0` predates all four safety tickets. A tag→tag run cannot exercise any of
+it and would go green while testing nothing.
+
+Worse, the three-way modification detection (#397) reads the **outgoing** package
+*before* the install. `run.sh` pre-installs TO and then invokes `brain:upgrade`,
+so `outgoing == incoming` there and detection degrades — the REFUSE gate could
+never fire in that harness even with the right code.
+
+So this suite packs the **working tree** into a bare git repo inside the
+container, tags two versions, and lets `brain:upgrade` run its own real `npm i`
+against `git+file:///…`. That keeps the genuine install path (npm cloning a git
+remote, `outgoing != incoming`) while making the suite track the **branch** —
+which is what #401 requires: red today, green as each ticket lands.
+
+`resolveInstallUrl` passes a `git+file://` URL through unchanged (its
+"unknown form, already prefixed" branch), which is what makes this work.
+
+## The suite is proven live, not merely green
+
+A passing e2e suite is worth nothing until you have watched it fail. Each
+protection was disabled in turn and the suite re-run:
+
+| mutation | result |
+|---|---|
+| REFUSE early-return removed (`copyManaged`) | path 2 red — *"THE CLOBBER #397 EXISTS TO PREVENT JUST HAPPENED"* |
+| downgrade guard disabled | path 3 red (3 assertions) |
+| corrupt-JSON pre-flight disabled | path 4 red (`--skip-merge` no longer completes) |
+
+Two of those mutations are worth understanding, because they are the reason the
+assertions are written against **bytes and exit codes** rather than messages:
+
+- With the REFUSE gate removed, the run **still printed "refused" and still
+  exited 1** — it simply wrote the files first. Every message-based assertion
+  passed. Only the byte-level check caught it.
+- With the pre-flight removed, the corrupt file **still stopped the run and was
+  still named** — from a later failure inside the merge. The pre-flight's value
+  is not the message; it is failing *early* so `--skip-merge` can work. Only the
+  behavioural assertions caught that.
+
+That is the "green in test, inert in production" class M10 taught, reproduced
+deliberately so the suite is known to be load-bearing.
+
+## Why its own workflow, not a job in governance.yml
+
+`.github/workflows/m4-danger-paths.yml` — a dedicated workflow, which is the
+choice #401 asked to be made and documented.
+
+The first attempt added a job to `governance.yml` and **governance.yml's own
+drift-guards rejected it**, which is the machinery working. Two reasons it does
+not belong there:
+
+1. That file's job set is a **ratified contract** (ADR-0015). Every job in it is
+   a governance gate with a tier-resolved exit policy in `GATE_MATRIX`, and the
+   drift-guards assert the YAML job names equal `GOVERNANCE_JOBS` exactly. This
+   suite is a maintainer e2e test, not a governance gate — registering it there
+   would mean declaring a tier policy for something tiering has no opinion about.
+2. `governance.yml` is a **managed path, vendored into every consumer**. A job
+   that only ever runs in the brain source repo does not belong in a file every
+   consumer carries. `m4-danger-paths.yml` is not a managed path, so it stays here.
+
+Runtime and blast radius point the same way: minutes rather than the seconds
+`local-checks` takes, and it is the only workflow needing Docker — so a Docker
+failure reads as "the e2e suite broke", not "repo:check is red". Still gated on
+`.brain-source` as belt and braces.
