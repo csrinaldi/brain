@@ -126,9 +126,24 @@ export async function main(deps = {}) {
 
   const identity = await gatherIdentity({ deps: deps.identityDeps ?? {} });
   if (!identity.ok) {
-    error(`brain:review: refusing to run — env var "${identity.missingVar}" is not set.`);
-    error(`  Get a token: ${identity.patSetupUrl}`);
-    error(`  Setup doc: ${identity.setupDocPath}`);
+    if (identity.missingVar) {
+      error(`brain:review: refusing to run — env var "${identity.missingVar}" is not set.`);
+      error(`  Get a token: ${identity.patSetupUrl}`);
+      error(`  Setup doc: ${identity.setupDocPath}`);
+    } else if (identity.mismatch) {
+      // #413: the token's REAL login disagrees with the configured handle —
+      // proceeding would run the §10 abstention and the anti-loop lock
+      // against a claimed identity, which is exactly the forgery the ticket
+      // reproduces (author token + bot handle → self-review passes).
+      error(`brain:review: refusing to run — the reviewer token belongs to "${identity.mismatch.actual}", but reviewer.handle claims "${identity.mismatch.claimed}".`);
+      error('  §10 abstention and the anti-loop lock would compare a claimed identity, not a real one (issue #413).');
+      error(`  Point ${identity.tokenEnv} at the reviewer identity's token, or fix reviewer.handle.`);
+    } else {
+      // #413: whoami rejected — identity uncomputable. Same discipline as
+      // §10's "uncomputable evidence": never proceed unverified.
+      error(`brain:review: refusing to run — could not verify the reviewer identity against the token: ${identity.verifyError}`);
+      error('  Never proceed on an unverified identity (§10 fail-closed, issue #413).');
+    }
     return 1;
   }
 

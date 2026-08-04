@@ -36,6 +36,8 @@ function readyDeps({ vcs, labels = [] } = {}) {
     identityDeps: {
       readConfig: () => ({ handle: 'brain-reviewer', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
       readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'shh' }),
+      // #413: the token resolves to the configured handle — verification passes.
+      whoami: async () => ({ username: 'brain-reviewer' }),
     },
     coldBootDeps: {
       fetchPr: async () => ({ number: 42, author: 'alice', labels, body: '', headRefOid: HEAD }),
@@ -381,6 +383,52 @@ test('main: an unset reviewer.handle refuses at boot — §10 and the anti-loop 
   );
   assert.equal(vcs.calls.prReviewComment, 0, 'refusing at boot must post no verdict');
   assert.equal(vcs.calls.issueComment, 0, 'refusing at boot must post no ruling');
+});
+
+// ── #413: the handle is VERIFIED against the token, not taken on faith ──────
+// Sibling of #382 — there the handle was EMPTY; here it is UNVERIFIED. The
+// ticket's reproduction: config claims a bot handle, the token belongs to the
+// PR author, and §10 abstention compares bot-vs-author → no abstention. The
+// fix resolves the token's real login via whoami({ token }) at boot and
+// refuses on disagreement, so the forged run never reaches cold-boot.
+
+test('main: a token whose real login disagrees with reviewer.handle refuses at boot (#413)', async () => {
+  const errors = [];
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  // The #413 reproduction: config claims the bot, the token is the author's.
+  deps.identityDeps.whoami = async () => ({ username: 'csrinaldi' });
+  const code = await main({ argv: ['--pr', '42', '--dry-run'], log: () => {}, error: (s) => errors.push(s), ...deps });
+  assert.equal(code, 1, 'a mismatched token identity must refuse the run, not proceed');
+  assert.ok(
+    errors.some(l => /csrinaldi/.test(l) && /brain-reviewer/.test(l)),
+    'the refusal must name BOTH identities — the claimed handle and the token\'s real login',
+  );
+  assert.equal(vcs.calls.prReviewComment, 0, 'refusing at boot must post no verdict');
+});
+
+test('main: whoami rejection refuses at boot — never proceed on an unverified identity (#413)', async () => {
+  const errors = [];
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.identityDeps.whoami = async () => { throw new Error('api unreachable'); };
+  const code = await main({ argv: ['--pr', '42', '--dry-run'], log: () => {}, error: (s) => errors.push(s), ...deps });
+  assert.equal(code, 1, 'an unverifiable identity must refuse, mirroring §10 uncomputable-evidence');
+  assert.ok(
+    errors.some(l => /could not verify/.test(l) && /api unreachable/.test(l)),
+    'the refusal must surface the underlying verification error',
+  );
+  assert.equal(vcs.calls.prReviewComment, 0, 'refusing at boot must post no verdict');
+});
+
+test('main: whoami matching the handle case-insensitively proceeds — logins are case-insensitive (#413)', async () => {
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.identityDeps.whoami = async () => ({ username: 'Brain-Reviewer' });
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), ...deps });
+  assert.equal(code, 0, 'a case-different login for the SAME account must not be refused as a forgery');
+  assert.ok(lines.some(l => /verdict:/.test(l)), 'the run must reach a verdict');
 });
 
 // ── H1-2C-BASE closure: local runs resolve baseSha from the port ────────────
