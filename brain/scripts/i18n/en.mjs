@@ -310,7 +310,7 @@ export default {
   'memory.import.empty':    'ℹ no records found in .memory/records/ — nothing to import.',
   'memory.import.progress': '  ✓ {written}/{total} records imported',
   'memory.import.done':     '✓ import complete — {written}/{total} records imported into engram (records-only, D2/C4).',
-  'memory.import.state-unreadable': '⚠ engram\'s current state could not be read — import SKIPPED so records are not duplicated. Reason: {reason}. Nothing was written; run the import again once engram responds.',
+  'memory.import.stateUnreadable': '⚠ engram\'s current state could not be read — import SKIPPED so records are not duplicated. Reason: {reason}. Nothing was written; run the import again once engram responds.',
 
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──
   'memory.migrateV1.realRunSummary':        '✓ migration complete — written: {written} | rejected: {rejected} | skipped (personal): {skipped} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations} | index: {indexCount} record(s). records/ is now the sole write path (memory.dualWrite retired, D3/C4).',
