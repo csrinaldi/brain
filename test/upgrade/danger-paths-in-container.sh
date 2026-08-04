@@ -162,9 +162,30 @@ new_consumer /srv/c1 "$FROM" && {
 
   [ "$RC" -ne 0 ] && ok "upgrade failed (exit ${RC}) instead of reporting success" \
                   || fail "a failed write must not exit 0"
-  echo "$OUT" | grep -qiE "rolled back|restore" \
-    && ok "the run says the tree was rolled back" \
-    || fail "a rollback must be reported, not silent — output had no rollback line"
+  # These two assertions replace a single `grep -qiE "rolled back|restore"`, which
+  # was measured to pass when NO rollback happened at all: a mutation that threw
+  # BEFORE `createRestorePoint` left all three of this block's assertions green.
+  # A loose grep matches text from anywhere in the output, including lines that
+  # say nothing about the claim — the same untrustworthy-assertion class this
+  # suite argues against elsewhere, committed here.
+  #
+  # `brain-upgrade.mjs` uses two DISTINCT wordings, and the difference is the
+  # whole discriminator:
+  #   reached the write loop → "Upgrade failed while writing managed paths"
+  #   refused before it      → "Upgrade refused before any managed path was written"
+  # So assert the first is present AND the second is absent. Either alone can be
+  # satisfied by the wrong path.
+  echo "$OUT" | grep -q "while writing managed paths" \
+    && ok "the failure happened INSIDE the write loop — the restore point was reached" \
+    || fail "no write-phase failure reported: the run never got past pre-flight, so nothing was rolled back"
+  echo "$OUT" | grep -q "before any managed path was written" \
+    && fail "the run refused BEFORE writing — this scenario must exercise the rollback, not a pre-flight refusal" \
+    || ok "and it was not a pre-flight refusal masquerading as one"
+  # Finally: that it was OUR induced failure, not an unrelated one that happens
+  # to land in the same phase.
+  echo "$OUT" | grep -qiE "ENOTDIR|brain/core/danger" \
+    && ok "the reported cause is the induced ENOTDIR on brain/core/danger" \
+    || fail "the write failed for some OTHER reason — this scenario is no longer testing what it claims"
   # Guarded: with no evidence there is nothing to compare, and printing a green
   # equality line over two empty sets is precisely the failure this whole block
   # was hardened against. Skip it rather than emit a tick nobody can trust.
