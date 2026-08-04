@@ -131,7 +131,6 @@ test('records are immutable: a content change yields a DIFFERENT record id', () 
 test('importMemory: ONE import call, not one save per record (#433)', async () => {
   const records = Array.from({ length: 50 }, (_, i) => rec(`rec-${i}`));
   const imports = [];
-  let saves = 0;
 
   const res = await importMemory({
     root: '/tmp/nonexistent',
@@ -139,13 +138,21 @@ test('importMemory: ONE import call, not one save per record (#433)', async () =
     _readRecords: () => records,
     _engramExistingTopicKeys: () => new Set(),
     _engramImport: (payload) => { imports.push(payload); },
-    _engramSave: () => { saves += 1; },
     _log: () => {},
   });
 
   assert.equal(res.written, 50);
   assert.equal(imports.length, 1, `50 records must cost ONE import; got ${imports.length}`);
-  assert.equal(saves, 0, 'the per-record save path must be gone entirely — it is the whole defect');
+
+  // This used to also pass `_engramSave` and assert `saves === 0`. importMemory
+  // has no such parameter, so the counter could never move and the assertion
+  // could never fail — a green tick over nothing, which is the same species as
+  // the fake that could not see the duplication. The real guarantee is that the
+  // signature carries no per-record write seam at all:
+  assert.ok(
+    !/_engramSave/.test(importMemory.toString()),
+    'the per-record save path must be gone from importMemory entirely — it is the whole defect',
+  );
 });
 
 test('importMemory: a second run over the same records sends NOTHING (#433 + idempotency)', async () => {
@@ -234,7 +241,8 @@ test('importMemory: an unreadable state SKIPS the import — a full re-import wo
     _readRecords: () => records,
     _engramExistingTopicKeys: () => { throw new Error('database is locked'); },
     _engramImport: (p) => { imports.push(p); store.insert(p); },
-    _log: (line) => logs.push(line),
+    _warn: (line) => logs.push(line),
+    _log: () => {},
   });
 
   // The damage assertion first, so a regression reports what actually broke.
@@ -243,7 +251,31 @@ test('importMemory: an unreadable state SKIPS the import — a full re-import wo
   assert.equal(imports.length, 1, 'the failed run must not spawn an import at all');
   assert.equal(res.written, 0);
   assert.equal(res.deferred, true, 'the caller must be able to tell "nothing new" from "did not run"');
-  assert.match(logs.join('\n'), /database is locked/, 'the reason must be surfaced — this path runs with output suppressed');
+  assert.match(logs.join('\n'), /database is locked/, 'the reason must be surfaced on stderr — the hook discards stdout');
+});
+
+// The deferred warning has to reach a stream the deployment does not discard.
+// post-merge redirects stdout to /dev/null, so stdout would be as silent as the
+// duplication this replaced.
+test('importMemory: the deferred warning goes to STDERR, not stdout (#448)', async () => {
+  const out = [];
+  const errs = [];
+  await importMemory({
+    root: '/tmp/nonexistent',
+    _requireEngram: () => 'engram',
+    _readRecords: () => [rec('rec-aaa')],
+    _engramExistingTopicKeys: () => { throw new Error('database is locked'); },
+    _engramImport: () => {},
+    _log: (l) => out.push(l),
+    _warn: (l) => errs.push(l),
+  });
+
+  assert.match(errs.join('\n'), /database is locked/, 'the skip must report on stderr');
+  assert.equal(
+    out.join('\n').includes('database is locked'),
+    false,
+    'stdout is discarded by the post-merge hook — reporting there is reporting nowhere',
+  );
 });
 
 test('importMemory: a reader that returns a non-Set is uncomputable too, not an empty store', async () => {
