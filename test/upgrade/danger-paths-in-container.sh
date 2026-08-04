@@ -85,12 +85,57 @@ new_consumer() {
   cp "$pkg/brain/HOME.md" brain/ 2>/dev/null || true
   cp "$pkg/brain.config.json" . 2>/dev/null || true
   cp "$pkg/AGENTS.md" . 2>/dev/null || true
+
+  # Every cp above is `|| true` so an optional path missing from an older
+  # package does not abort the seed. That tolerance is also how a BROKEN seed
+  # used to reach the assertions as a silently-empty tree — `new_consumer`
+  # returned the status of its last guarded cp, i.e. always success.
+  #
+  # So the seed now has to prove it produced something. This is the reachability
+  # half of the same defect `assert_has_evidence` catches at the other end: fix
+  # the cause, and keep the detector for the causes not yet imagined.
+  local seeded
+  seeded=$(find brain/core brain/scripts -type f 2>/dev/null | wc -l)
+  if [ "$seeded" -eq 0 ]; then
+    fail "seed produced ZERO managed files in ${dir} — every assertion below would compare two empty trees"
+    return 1
+  fi
+  return 0
 }
 
-# Byte-level fingerprint of every managed path, for the rollback assertion.
+# Byte-level fingerprint of every managed path, for the byte-identity assertions.
+#
+# Emits `<count>:<hash>`, and the count is not decoration. A bare hash of an
+# EMPTY file list is the constant d41d8cd98f00b204e9800998ecf8427e, so an earlier
+# form of this function returned the same value for "nothing changed" and
+# "nothing could be read" — and every `BEFORE == AFTER` assertion then passed by
+# comparing two empty sets. Demonstrated, not theorised: deleting every managed
+# path before the fingerprint left the byte-identity assertion green.
+#
+# That is `brain/core/anti-patterns/evidence-reader-empty-on-failure.md` exactly
+# — "the reader conflates two states that gates must distinguish… the reader's
+# error becomes the gate's approval" — reached inside the harness built to
+# prevent that class. Carrying the count makes the two states different values,
+# and `assert_has_evidence` below refuses the empty one.
 managed_fingerprint() {
-  find brain/core brain/scripts .github .claude .gemini .gitattributes -type f 2>/dev/null \
-    | LC_ALL=C sort | xargs md5sum 2>/dev/null | md5sum | cut -d' ' -f1
+  local files count hash
+  files=$(find brain/core brain/scripts .github .claude .gemini .gitattributes -type f 2>/dev/null | LC_ALL=C sort)
+  count=$(printf '%s' "$files" | grep -c . || true)
+  hash=$(printf '%s\n' "$files" | xargs md5sum 2>/dev/null | md5sum | cut -d' ' -f1)
+  printf '%s:%s' "$count" "$hash"
+}
+
+# Refuses a fingerprint that covers zero files. Call this on the BEFORE value:
+# an equality check between two nothings is not evidence of stability, it is
+# evidence that the measurement failed.
+assert_has_evidence() {
+  local fp="$1" label="$2" count="${1%%:*}"
+  case "$count" in
+    ''|*[!0-9]*) fail "${label}: fingerprint is unreadable ('${fp}')"; return 1 ;;
+  esac
+  [ "$count" -gt 0 ] && return 0
+  fail "${label}: the fingerprint covers ZERO managed files — the comparison would pass on no evidence at all"
+  return 1
 }
 
 echo "▶ building local brain remote (${FROM} → ${TO}) …"
@@ -110,6 +155,7 @@ new_consumer /srv/c1 "$FROM" && {
   rm -rf brain/core/danger
   echo "i am a file, not a directory" > brain/core/danger
   BEFORE=$(managed_fingerprint)
+  HAVE_EVIDENCE=0; assert_has_evidence "$BEFORE" "path 1" && HAVE_EVIDENCE=1
 
   OUT=$(npm run brain:upgrade -- "$TO" 2>&1); RC=$?
   AFTER=$(managed_fingerprint)
@@ -119,9 +165,14 @@ new_consumer /srv/c1 "$FROM" && {
   echo "$OUT" | grep -qiE "rolled back|restore" \
     && ok "the run says the tree was rolled back" \
     || fail "a rollback must be reported, not silent — output had no rollback line"
-  [ "$BEFORE" = "$AFTER" ] \
-    && ok "every managed path is byte-identical to before the attempt" \
-    || fail "the tree changed across a failed upgrade (rollback incomplete)"
+  # Guarded: with no evidence there is nothing to compare, and printing a green
+  # equality line over two empty sets is precisely the failure this whole block
+  # was hardened against. Skip it rather than emit a tick nobody can trust.
+  if [ "$HAVE_EVIDENCE" -eq 1 ]; then
+    [ "$BEFORE" = "$AFTER" ] \
+      && ok "every managed path is byte-identical to before the attempt" \
+      || fail "the tree changed across a failed upgrade (rollback incomplete)"
+  fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -175,11 +226,12 @@ line "DANGER PATH 3 — a downgrade is refused without --allow-downgrade (#398)"
 # ═══════════════════════════════════════════════════════════════════════════
 new_consumer /srv/c3 "$TO" && {
   BEFORE=$(managed_fingerprint)
+  HAVE_EVIDENCE=0; assert_has_evidence "$BEFORE" "path 3" && HAVE_EVIDENCE=1
   OUT=$(npm run brain:upgrade -- "$FROM" 2>&1); RC=$?
 
   [ "$RC" -ne 0 ] && ok "downgrade refused (exit ${RC})" || fail "installing an OLDER tag must be refused"
   echo "$OUT" | grep -qiE "older" && ok "the refusal explains it is older" || fail "the refusal must say why"
-  [ "$BEFORE" = "$(managed_fingerprint)" ] && ok "nothing was written" || fail "a refused downgrade wrote to the tree"
+  [ "$HAVE_EVIDENCE" -eq 1 ] && { [ "$BEFORE" = "$(managed_fingerprint)" ] && ok "nothing was written" || fail "a refused downgrade wrote to the tree"; }
 
   OUT=$(npm run brain:upgrade -- "$FROM" --allow-downgrade 2>&1); RC=$?
   [ "$RC" -eq 0 ] && ok "--allow-downgrade proceeds when the operator means it" \
@@ -192,11 +244,12 @@ line "DANGER PATH 4 — corrupt consumer JSON is named up front, --skip-merge co
 new_consumer /srv/c4 "$FROM" && {
   echo '{ this is not valid json' > .claude/settings.json
   BEFORE=$(managed_fingerprint)
+  HAVE_EVIDENCE=0; assert_has_evidence "$BEFORE" "path 4" && HAVE_EVIDENCE=1
 
   OUT=$(npm run brain:upgrade -- "$TO" 2>&1); RC=$?
   [ "$RC" -ne 0 ] && ok "corrupt merge target refused (exit ${RC})" || fail "a corrupt merge target must stop the run"
   echo "$OUT" | grep -q "settings.json" && ok "the refusal names the broken file" || fail "the refusal must name the file"
-  [ "$BEFORE" = "$(managed_fingerprint)" ] && ok "nothing was written" || fail "the run wrote despite refusing"
+  [ "$HAVE_EVIDENCE" -eq 1 ] && { [ "$BEFORE" = "$(managed_fingerprint)" ] && ok "nothing was written" || fail "the run wrote despite refusing"; }
 
   OUT=$(npm run brain:upgrade -- "$TO" --skip-merge .claude/settings.json 2>&1); RC=$?
   [ "$RC" -eq 0 ] && ok "--skip-merge completes the managed upgrade" || fail "--skip-merge did not complete (exit ${RC})"
