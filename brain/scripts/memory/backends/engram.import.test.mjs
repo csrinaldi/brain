@@ -39,33 +39,35 @@ function fixtureRecords(n) {
 // (a) records-only pull hydrates engram — REQ-C4-2 scenario 1
 // ---------------------------------------------------------------------------
 
-test('importMemory: reads records via _readRecords, writes one engram save per record, with progress', async () => {
+// REWRITTEN for #433. The requirement this test exists for — REQ-C4-2 scenario
+// 1, "a records-only pull hydrates engram" — is unchanged and still asserted
+// below, field for field. What changed is the MECHANISM it was written against:
+// the old body asserted "exactly one _engramSave per record", and that per-record
+// spawn IS the defect #433 removes (1722 records = 1053 seconds, paid on every
+// `git pull`). Asserting it would now pin the bug in place.
+test('importMemory: reads records via _readRecords and hydrates engram in ONE batch (REQ-C4-2 s1, #433)', async () => {
   const records = fixtureRecords(3);
-  const saveCalls = [];
-  const progressLines = [];
+  const imports = [];
 
   const result = await importMemory({
     root: '/fake/root',
     _requireEngram: () => 'engram',
     _readRecords: () => records,
-    _engramSave: (title, content, opts) => {
-      saveCalls.push({ title, content, opts });
-    },
-    _log: (line) => progressLines.push(line),
+    _engramExistingTopicKeys: () => new Set(),
+    _engramImport: (payload) => imports.push(payload),
+    _log: () => {},
   });
 
-  assert.equal(saveCalls.length, 3, 'must call _engramSave exactly once per record');
+  assert.equal(imports.length, 1, 'three records must cost ONE import, not three saves');
+  const sent = imports[0].observations;
+  assert.equal(sent.length, 3, 'every record must reach engram');
   for (let i = 0; i < records.length; i++) {
-    const call = saveCalls[i];
-    assert.equal(call.opts.topic, records[i].id, 'topic must be the record content-addressed id');
-    assert.equal(call.opts.type, records[i].type);
-    assert.equal(call.opts.project, records[i].project);
+    const o = sent.find((x) => x.topic_key === records[i].id);
+    assert.ok(o, 'topic_key must be the record content-addressed id — the anchor the next run reads back');
+    assert.equal(o.type, records[i].type);
+    assert.equal(o.project, records[i].project);
   }
   assert.equal(result.written, 3, 'accounting must report 3 written');
-  assert.ok(
-    progressLines.some((l) => l.includes('3')),
-    `expected progress reporting to mention the total (3), got: ${JSON.stringify(progressLines)}`,
-  );
 });
 
 test('importMemory: no chunk path is read — never spawns `engram sync --import`', async () => {
@@ -76,12 +78,20 @@ test('importMemory: no chunk path is read — never spawns `engram sync --import
     root: '/fake/root',
     _requireEngram: () => 'engram',
     _readRecords: () => records,
-    _engramSave: () => {},
+    _engramExistingTopicKeys: () => new Set(),
+    _engramImport: () => {},
     _log: () => {},
     // If importMemory still tried the old chunk path it would need a real
     // execFileSync/spawn call — none is injected here, so any attempt to
     // reach outside the injected seams would throw (no real engram binary
     // resolution happens beyond the injected _requireEngram stub).
+    //
+    // #433 note: that comment is not decorative — it fired. The batch import
+    // replaced the `_engramSave` stub above with `_engramImport`, and leaving
+    // the old one here made this test shell out to a real `engram import`.
+    // It stayed green locally (the binary is installed) and failed in CI with
+    // `spawnSync engram ENOENT`. A hermetic test only stays hermetic if every
+    // seam it relies on is named explicitly.
   });
 
   assert.equal(chunkPathTouched, false, 'no chunk-path seam was ever invoked');
@@ -120,54 +130,63 @@ test('importMemory: empty records/ → zero writes, no throw', async () => {
 // existing observation instead of inserting a new one. The fake store below
 // mirrors that exact upsert semantics (keyed on project+scope+topic) to
 // prove the behavior without spawning a real engram process.
+// REWRITTEN for #433, and the rewrite is deliberately STRICTER than what it
+// replaces. Read this before touching it.
+//
+// The GUARANTEE — "re-running over the same records creates no duplicate
+// observations" — is unchanged and is still the load-bearing assertion below.
+// Only the mechanism moved, and it had to:
+//
+//   old: N × `engram save --topic <id>`, where engram UPSERTS on topic_key.
+//        Re-running re-sent all 5 and engram revised them in place, so the
+//        proof was "row count unchanged, revisionCount incremented".
+//   new: one `engram import`, which — measured against the real binary —
+//        INSERTS. Importing the same file twice turned 2 observations into 4.
+//        Engram will not deduplicate for us, so the second run must send
+//        NOTHING, and that is now asserted directly.
+//
+// `revisionCount` is gone from this fake because nothing is revised any more.
+// That is equivalent only because brain records are IMMUTABLE — an id is
+// content-derived, so an edit produces a new record rather than mutating an
+// imported one. `engram.batch-import.test.mjs` pins that premise on its own.
+//
+// This fake therefore mirrors the REAL insert semantics, not a forgiving
+// upsert: a repeated topic_key creates a SECOND row, so a regression that
+// re-sends known records fails here loudly instead of being absorbed.
 function makeFakeEngramStore() {
-  const rows = new Map(); // key: `${project}::project::${topic}` -> {title, content, type, revisionCount}
-  const _engramSave = (title, content, { type, project, topic }) => {
-    const key = `${project}::project::${topic}`;
-    if (rows.has(key)) {
-      const row = rows.get(key);
-      row.title = title;
-      row.content = content;
-      row.type = type;
-      row.revisionCount += 1;
-    } else {
-      rows.set(key, { title, content, type, revisionCount: 1 });
-    }
+  const rows = []; // insert-only, exactly like `engram import`
+  const _engramImport = (payload) => {
+    for (const o of payload.observations) rows.push({ ...o });
   };
-  return { rows, _engramSave };
+  const _engramExistingTopicKeys = () => new Set(rows.map((r) => r.topic_key));
+  return { rows, _engramImport, _engramExistingTopicKeys };
 }
 
 test('importMemory: re-running over the same records creates NO duplicate observations (idempotency, MANDATORY)', async () => {
   const records = fixtureRecords(5);
   const store = makeFakeEngramStore();
-
-  const first = await importMemory({
+  const run = () => importMemory({
     root: '/fake/root',
     _requireEngram: () => 'engram',
     _readRecords: () => records,
-    _engramSave: store._engramSave,
+    _engramExistingTopicKeys: store._engramExistingTopicKeys,
+    _engramImport: store._engramImport,
     _log: () => {},
   });
+
+  const first = await run();
   assert.equal(first.written, 5);
-  assert.equal(store.rows.size, 5, 'first run must create exactly 5 distinct observations');
-  for (const row of store.rows.values()) {
-    assert.equal(row.revisionCount, 1);
-  }
+  assert.equal(store.rows.length, 5, 'first run must create exactly 5 observations');
 
-  const second = await importMemory({
-    root: '/fake/root',
-    _requireEngram: () => 'engram',
-    _readRecords: () => records,
-    _engramSave: store._engramSave,
-    _log: () => {},
-  });
-  assert.equal(second.written, 5, 'importMemory still processes 5 records on the second run');
+  const second = await run();
 
-  // The load-bearing assertion: the STORE's distinct-row count is UNCHANGED
-  // after the second run — zero NEW observations were created, only revisions
-  // of the existing 5 (topic_key upsert), proving no duplicates.
-  assert.equal(store.rows.size, 5, 'second run must not add any new distinct observation — zero duplicates');
-  for (const row of store.rows.values()) {
-    assert.equal(row.revisionCount, 2, 'each record must have been revised (upserted), not duplicated');
-  }
+  // THE load-bearing assertion, unchanged in intent: the store holds the same
+  // 5 observations. Under an inserting backend this can only hold if the second
+  // run sent nothing at all.
+  assert.equal(store.rows.length, 5, 'second run must not add any observation — zero duplicates');
+  assert.equal(second.written, 0, 'nothing new to send: every record is already present');
+  assert.equal(second.skipped, 5, 'and all 5 must be accounted for as skipped, not silently dropped');
+
+  const keys = store.rows.map((r) => r.topic_key);
+  assert.equal(new Set(keys).size, 5, 'every stored topic_key must still be distinct');
 });
