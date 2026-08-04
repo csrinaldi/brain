@@ -29,6 +29,17 @@ topic_key: sdd/issue-400-npx-brain-init/tasks
 - [x] T7 — README rewritten to the tested flow; the manual path kept, labelled as
       fallback (REQ-400-10).
 - [x] T8 — full suite + `repo:check` + `brain:nav`; diff budget.
-- [ ] T9 — PR to `main` closing #400.
-- [ ] T10 — **HUMAN:** answer D6 (registry / mirror / public repo) and record it on #400
-      before it closes, per the ticket's own instruction.
+- [x] T9 — PR #432 to `main`, closing #400. Fresh-install e2e run on all four package
+      managers by a second agent (comment on #432); one PRE-EXISTING harness defect found
+      and fixed there (`fe449fa`) — `[1.5]` planted an unlinked `brain/**` ADR and `[3.5]`
+      then asserted no orphans. Verified independently: harness-only, `brain/**` untouched.
+- [x] T10 — **D6 ANSWERED** and recorded on #400: ADR-0006 ratified as an INTERIM
+      decision; the owner's stated direction is distribution under a published package
+      name, which will SUPERSEDE ADR-0006 rather than amend it. Three findings shape that
+      follow-up: the npm name `brain` is taken by a package deprecated since 2023 (so a
+      scope is mandatory); `npx brain` in a repo that has NOT installed brain would fetch
+      that package (a confusing error, not a hazard — worth documenting); and
+      `private: true` plus a missing `files` allowlist mean a publish would ship
+      `.memory/`, `openspec/` and the test tree.
+- [ ] T11 — follow-up ticket for the superseding distribution ADR (scoped name, `files`
+      allowlist, registry choice) — NOT part of #400.
