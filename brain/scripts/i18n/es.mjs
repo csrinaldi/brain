@@ -280,7 +280,7 @@ export default {
   'memory.import.empty':    'ℹ no se encontraron registros en .memory/records/ — nada para importar.',
   'memory.import.progress': '  ✓ {written}/{total} registros importados',
   'memory.import.done':     '✓ importación completa — {written}/{total} registros importados a engram (solo records, D2/C4).',
-  'memory.import.state-unreadable': '⚠ no se pudo leer el estado actual de engram — importación OMITIDA para no duplicar registros. Motivo: {reason}. No se escribió nada; volvé a correr la importación cuando engram responda.',
+  'memory.import.stateUnreadable': '⚠ no se pudo leer el estado actual de engram — importación OMITIDA para no duplicar registros. Motivo: {reason}. No se escribió nada; volvé a correr la importación cuando engram responda.',
 
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──
   'memory.migrateV1.realRunSummary':        '✓ migración completa — escritos: {written} | rechazados: {rejected} | omitidos (personal): {skipped} | chunks no parseables: {unparseable} | chunks sin observaciones: {emptyObservations} | índice: {indexCount} registro(s). records/ es ahora la única vía de escritura (memory.dualWrite retirado, D3/C4).',

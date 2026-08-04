@@ -9,6 +9,7 @@
 //  4. translate() reproduces the prior Spanish output for a representative sample.
 //  5. sh.mjs emits well-formed I18N_* assignments for representative shell keys.
 
+import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -99,6 +100,47 @@ test('es catalog has an entry for every key in en (complete Spanish parity)', ()
     missingFromEs,
     [],
     `es.mjs is missing keys: ${missingFromEs.join(', ')}`,
+  );
+});
+
+// ── Every key must render a LEGAL shell identifier ────────────────────────────
+//
+// sh.mjs renders the WHOLE catalog into shell assignments, and keyToVar only
+// maps `.` → `_`. Any other character that is illegal in a shell variable name
+// therefore emits a COMMAND WORD instead of an assignment. bootstrap.sh and
+// install-tools.sh both `eval` that output under `set -euo pipefail`, so one bad
+// key aborts the script mid-run — after brain.config.json and HOME.md are
+// already written, leaving a partial bootstrap with `command not found` as the
+// only signal.
+//
+// That shipped once (`memory.import.state-unreadable`, #446): the hyphen made
+// `I18N_MEMORY_IMPORT_STATE-UNREADABLE=…` and `brain:env:init` died at exit 127
+// with the unit suite fully green. The parity test above could not see it — it
+// compares key SETS, and the key was present in both catalogs.
+//
+// Assert the property directly, over the real catalog, not over samples.
+test('every catalog key renders a legal shell identifier', () => {
+  const bad = Object.keys(en).filter((k) => !/^[A-Za-z0-9_.]+$/.test(k));
+  assert.deepEqual(
+    bad,
+    [],
+    `these keys break the sh.mjs catalog and abort bootstrap.sh: ${bad.join(', ')}`,
+  );
+});
+
+// The property that actually matters is one step further out: the rendered
+// catalog must EVAL. Assert that too, so a future escaping bug in renderCatalog
+// is caught even if every key is identifier-safe.
+test('the rendered shell catalog evaluates cleanly under set -e', () => {
+  const rendered = renderCatalog(es, en);
+  const result = spawnSync('bash', ['-euo', 'pipefail', '-c', `eval "$(cat)"`], {
+    input: rendered,
+    encoding: 'utf8',
+  });
+  assert.equal(
+    result.status,
+    0,
+    `the catalog does not eval: ${(result.stderr || '').split('\n').slice(0, 3).join(' | ')}`,
   );
 });
 
