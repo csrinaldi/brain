@@ -1,0 +1,70 @@
+# m4-danger-paths.yml — the M4 hard gate, made checkable (issue #401).
+#
+# Runs the four danger-path scenarios end to end in a container:
+#   1. a mid-upgrade write failure rolls the tree back byte-identical   (#396)
+#   2. a consumer-edited managed file is refused, never clobbered        (#397)
+#   3. a downgrade is refused without --allow-downgrade                  (#398)
+#   4. corrupt consumer JSON is named up front; --skip-merge completes   (#399)
+#
+# Epic #313 states the M4 hard gate as a condition on this suite: external
+# adoption opens when it is green. This workflow produces that evidence.
+#
+# It does NOT enforce it. `m4-danger-paths` is not among main's required status
+# contexts and cannot be added through `brain:protect` (which derives contexts
+# from GOVERNANCE_JOBS, a set this suite deliberately does not belong to). A red
+# run here does not block a merge — it blocks the human decision to open
+# adoption, which is how the epic words it. See test/upgrade/README.md.
+#
+# ── Why its OWN workflow, and not a job inside governance.yml ────────────────
+#
+# Two reasons, both discovered by governance.yml's own drift-guards rejecting
+# the first attempt — which is the machinery working:
+#
+#   1. `governance.yml`'s job set is a RATIFIED contract (ADR-0015). Every job
+#      there is a governance gate with a tier-resolved exit policy in
+#      GATE_MATRIX, and the drift-guards assert the YAML job names equal
+#      GOVERNANCE_JOBS exactly. This suite is a maintainer e2e test, not a
+#      governance gate; registering it there would mean declaring a tier policy
+#      for something tiering has no opinion about.
+#
+#   2. `governance.yml` is a MANAGED path, vendored into every consumer repo.
+#      A job that only ever runs in the brain source repo does not belong in a
+#      file every consumer carries. This workflow is NOT a managed path, so it
+#      stays here.
+#
+# Runtime and blast radius argue the same way: each scenario builds a git remote
+# and runs real `npm i`s, so this is minutes rather than the seconds
+# `local-checks` takes — and it is the only workflow needing Docker, so a
+# Docker-side failure reads as "the e2e suite broke", not "repo:check is red".
+
+name: m4-danger-paths
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  # Also on main. Nothing here is a required context (see the note above), so a
+  # PR run passing is not a guarantee the merge commit still passes — and since
+  # opening external adoption is a decision read off THIS suite, the state that
+  # matters is main's, not a branch's.
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  danger-paths:
+    name: m4-danger-paths
+    runs-on: ubuntu-latest
+    # Each scenario builds a git remote and runs a real `npm i`; the observed
+    # cost is ~1m30s. A hung docker pull or npm fetch would otherwise sit on the
+    # runner's 6-hour default.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Belt and braces with the file not being a managed path: if this workflow
+      # ever DOES reach a consumer, it must not try to build brain from a tree
+      # that is not brain. Same `.brain-source` gate `npm test` uses.
+      - name: danger paths (rollback · clobber · downgrade · corrupt-JSON)
+        if: ${{ hashFiles('.brain-source') != '' }}
+        run: npm run test:danger-paths

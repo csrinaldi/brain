@@ -85,17 +85,27 @@ test('REQ-C3-6: plainfiles → engram round-trips with record-level equality, no
       saved.push(result);
     }
 
+    // #433: the import is now ONE batch rather than one `engram save` per
+    // record. The round-trip guarantee this test exists for is unchanged —
+    // every saved record reaches engram, keyed by its content-addressed id —
+    // only the seam it is observed through moved.
+    //
+    // `_engramExistingTopicKeys` is stubbed deliberately: its default shells out
+    // to `engram export`, and this test's whole contract is "no live
+    // engram/git". Without the stub it would silently start needing a real
+    // binary, which is exactly the hermeticity the name promises.
     const captured = [];
     const importResult = await importMemory({
       root,
       _requireEngram: () => 'engram',
-      _engramSave: (title, content, opts) => { captured.push({ title, content, opts }); },
+      _engramExistingTopicKeys: () => new Set(),
+      _engramImport: (payload) => { captured.push(...payload.observations); },
     });
     assert.equal(importResult.written, saved.length, 'importMemory must import exactly what save() wrote');
 
     for (const s of saved) {
-      const call = captured.find((c) => c.opts.topic === s.id);
-      assert.ok(call, `expected a captured engram save call with topic === record id ${s.id} (the idempotent upsert key)`);
+      const o = captured.find((c) => c.topic_key === s.id);
+      assert.ok(o, `expected an imported observation with topic_key === record id ${s.id} (the idempotency anchor)`);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
