@@ -52,10 +52,13 @@ export const managed = [
   '.github/CODEOWNERS',                 // L6 rung-1 enhancement, optional (REQ-L6-1, design §6.2)
   '.claude/settings.json',              // Claude Code harness hook — no-verify policy (ADR-0014 §9)
   '.gemini/settings.json',              // Antigravity harness hook — SessionStart & PreToolUse (issue #305)
-  'AGENTS.md',                          // generated Antigravity/AGENTS-standard context (issue #256 B2).
-                                         // LITERAL — repo root, outside every existing glob. Regenerated
-                                         // by antigravity.mjs#init; brain:upgrade ships it because its
-                                         // sources (brain/core/**) are already managed.
+  // AGENTS.md was HERE (issue #256 B2, REQ-B2-4), shipped on the reasoning that
+  // its sources under brain/core/** are already managed. REMOVED by #397 /
+  // REQ-397-4: that reasoning missed the fifth source. `brain/HOME.md` is
+  // CONSUMER-owned, so copying the compiled artifact handed every consumer
+  // brain's own AGENTS.md — a file describing the wrong repository. It is
+  // regenerated post-upgrade from the consumer's inputs instead; see
+  // managedStrategy's REGENERATE row below.
   'package.json', // additive brain:* verb injection via specialMerge (S5, issue #137).
                   // MUST stay registered in brain-upgrade.mjs specialMerge — a plain copy would overwrite the consumer's package.json.
 ];

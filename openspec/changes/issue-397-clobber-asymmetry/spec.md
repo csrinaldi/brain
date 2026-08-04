@@ -113,3 +113,29 @@ gets ignored.
 > the consumer's git history is one option; a shipped manifest of past hashes is another.
 > Scenario 2 is the constraint that matters — whatever mechanism is chosen must not fire for
 > a consumer who never had anything of their own to lose.
+
+### Mechanism chosen, and the scope it narrows this REQ to
+
+**Git history was measured and rejected.** brain's own `AGENTS.md` changed **16 times across 17
+tags**. A history-based rule — "this file once differed and now matches brain's" — is therefore
+true for almost every consumer who upgraded more than once, because brain's own version changed
+underneath them. It fires for nearly everyone, which is precisely what Scenario 2 forbids.
+
+**Chosen: regenerate-and-compare, for `AGENTS.md` only.** It is the one path in the table that is
+GENERATED, so "was this built from the consumer's own inputs" is answerable exactly, with no new
+state and no history walk. Scenario 2 falls out by construction: a consumer whose `brain/HOME.md`
+equals brain's never had anything of their own, and is never told anything — even though their
+`AGENTS.md` *is* byte-identical to brain's, which is the trap byte-identity alone would fall into.
+
+**REQ-397-6 is therefore NARROWED, deliberately and on the record.** As written it named
+`CODEOWNERS` too. Two gaps remain open rather than silently claimed:
+
+1. A consumer clobbered by an **older release** carries an artifact matching nothing we can
+   reconstruct, so they are missed.
+2. The **non-generated** REFUSE paths (`CODEOWNERS`, the PR template, the four workflows) have no
+   detector at all.
+
+Both need a manifest of every hash brain has historically shipped. That is a new artifact under
+`brain/core/` — **Tier 2, requiring its own human signature** — so it is not smuggled in under a
+signature given for a different table. Tracked as a follow-up issue and recorded in
+`docs/KNOWN-LIMITATIONS.md`.
