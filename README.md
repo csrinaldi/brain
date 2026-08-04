@@ -50,29 +50,39 @@ npm init -y
 # 1. Install brain at a pinned tag (HTTPS):
 npm i -D "git+https://github.com/csrinaldi/brain.git#v1.0.0"
 
-# 2. Add the brain script aliases to your package.json "scripts":
-#      "brain:upgrade": "node node_modules/brain/brain/scripts/brain-upgrade.mjs",
-#      "brain:env:init": "bash ./brain/scripts/bootstrap.sh",
-#      "brain:day:start": "node ./brain/scripts/day-start.mjs"
+# 2. Write the bootstrap alias and copy the managed paths in one step:
+npx brain init
 
-# 3. Copy the managed paths (brain/core, brain/scripts) into your repo:
-npm run brain:upgrade -- v1.0.0
-
-# 4. Initialize the environment (interactive):
+# 3. Initialize the environment (interactive):
 npm run brain:env:init
 ```
+
+`npx brain init` needs no aliases to exist first — it is a `bin` entry, which is
+exactly what lets it write the one alias `brain:upgrade` cannot inject into a
+consumer. (The upgrade merges the other nine `brain:*` verbs itself; `brain:upgrade`
+is un-injectable because that merge only runs *during* an upgrade.) It reads the tag
+from the version you installed rather than guessing one, keeps any `brain:*` script
+you already defined, and is safe to re-run. `npx brain --help` lists the verb surface.
+
+> **Fallback (pre-1.1 flow).** If you cannot run `npx`, add the alias by hand and call
+> the upgrade directly — the outcome is identical:
+>
+> ```bash
+> #      "brain:upgrade": "node node_modules/brain/brain/scripts/brain-upgrade.mjs"
+> npm run brain:upgrade -- v1.0.0
+> ```
 
 > **Using pnpm / yarn / bun?** brain is **package-manager-agnostic** — it detects your
 > PM and runs through it. Use your PM's verbs throughout:
 >
 > ```bash
 > pnpm add -D "git+https://github.com/csrinaldi/brain.git#v1.0.0"
-> pnpm run brain:upgrade -- v1.0.0     # brain:upgrade installs via your detected PM
+> pnpm dlx brain init                  # or: npx brain init
 > pnpm run brain:env:init
 > pnpm run brain:day:start
 > ```
 >
-> (yarn: `yarn add … && yarn brain:upgrade -- v1.0.0`; bun: `bun add -d … && bun run brain:upgrade`.)
+> (yarn: `yarn add … && yarn dlx brain init`; bun: `bun add -d … && bunx brain init`.)
 > The fresh-install test covers npm / pnpm / yarn / bun fixtures.
 
 `brain:env:init` does the heavy lifting:
