@@ -14,7 +14,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -113,6 +113,65 @@ test('brain:upgrade: no warning printed when package.json name is not "brain"', 
 // but nothing asserted it STAYS that way. This is a regression guard: if a
 // future edit ever drops 'package.json' from the specialMerge map passed to
 // copyManaged, this test must fail.
+// ── Three-way detection wiring (issue #397, REQ-397-1) ───────────────────────
+
+// Builds the smallest consumer repo brain:upgrade will walk all the way to the
+// copy step with --no-install: its own package.json, and a node_modules/brain
+// holding the two core modules the script imports from the package.
+function makeConsumerRepo(prefix, { pkgVersion = '1.0.0' } = {}) {
+  const dir = makeTmpDir(prefix);
+  const pkg = join(dir, 'node_modules', 'brain');
+  mkdirSync(join(pkg, 'brain', 'core'), { recursive: true });
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'my-consumer', version: '1.0.0' }));
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'brain', version: pkgVersion }));
+  writeFileSync(join(pkg, 'brain', 'core', 'managed-paths.mjs'),
+    'export const managed = [];\nexport const local = [];\n');
+  writeFileSync(join(pkg, 'brain', 'core', 'config-migrations.mjs'), 'export const migrations = [];\n');
+  return dir;
+}
+
+// REQ-397-1 Scenario 3, and tasks.md 2.2. Under --no-install the outgoing and
+// incoming package are one tree, so the check cannot run. The requirement is not
+// that it degrade — it is that it SAY SO. A run that degrades silently is
+// indistinguishable from a clean three-way pass, and the operator reads the
+// stronger of the two.
+test('brain:upgrade: --no-install states that modification detection degraded (REQ-397-1 S3)', (t) => {
+  const dir = makeConsumerRepo('brain-397-degraded-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.match(out, /--no-install/,
+    `the degraded-mode notice must name the flag that caused it:\n${out}`);
+  assert.match(out, /same tree|CANNOT tell|cannot tell/i,
+    `the run must say it could not distinguish a consumer edit from a brain change:\n${out}`);
+});
+
+// The whole mechanism rests on WHEN the snapshot is taken. node_modules/brain
+// holds the previous release only until the install overwrites it, so a snapshot
+// moved below step 1 would read the incoming package, compare it to itself, and
+// report "nothing was modified" for every consumer — green suite, dead check.
+// Pinned in source because the failure is an ordering one that no unit test on
+// copyManaged can see.
+test('brain:upgrade: the outgoing snapshot is read BEFORE the install (REQ-397-1)', () => {
+  const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
+
+  const snapshotAt = source.indexOf('readOutgoing({');
+  const installAt = source.indexOf('── 1. Install the tag');
+  const copyAt = source.indexOf('copyManaged({');
+
+  assert.ok(snapshotAt > 0, 'brain-upgrade.mjs must call readOutgoing to get the outgoing package');
+  assert.ok(installAt > 0, 'the install step marker must still be findable');
+  assert.ok(snapshotAt < installAt,
+    'readOutgoing must run BEFORE step 1 — after the install, node_modules/brain is the ' +
+    'INCOMING package and the comparison silently becomes a file against itself');
+  assert.ok(copyAt > snapshotAt, 'the snapshot must precede the copy that consumes it');
+
+  assert.match(source, /outgoing,/,
+    'the snapshot must be PASSED to copyManaged — a snapshot nothing consumes protects nothing');
+});
+
 test('brain:upgrade: registers package.json under specialMerge → mergePackageJson (lock-in guard, issue #180)', () => {
   const source = readFileSync(BRAIN_UPGRADE_SOURCE, 'utf8');
 

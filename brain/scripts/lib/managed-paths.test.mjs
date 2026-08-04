@@ -18,8 +18,10 @@ import {
   local,
   MANAGED_SCRIPT_KEYS,
   RECORDS_UNION_MERGE_GITATTRIBUTES_LINE,
+  STRATEGY,
+  managedStrategy,
 } from '../../core/managed-paths.mjs';
-import { matchesAny } from './installer.mjs';
+import { matchesAny, strategyFor } from './installer.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -190,5 +192,86 @@ test('managed includes .gemini/settings.json (exact literal, issue #305)', () =>
     managed.includes('.gemini/settings.json'),
     'managed must contain the exact literal ".gemini/settings.json"',
   );
+});
+
+// ── Per-path upgrade strategy (issue #397, REQ-397-5) ─────────────────────────
+//
+// The table below is a TRANSCRIPTION of the classification ratified on
+// 04/08/2026 (openspec/changes/issue-397-clobber-asymmetry/brain-drafts/
+// managed-path-strategy.md). It is duplicated here ON PURPOSE: the point of a
+// signed table is that code cannot drift from it silently, and a test that
+// imported the same constant it checks would agree with any future edit.
+// Changing a row here without a new human signature is the failure this guards.
+const RATIFIED_STRATEGY = Object.freeze({
+  '.claude/settings.json': 'merge',
+  '.gemini/settings.json': 'merge',
+  'package.json': 'merge',
+  '.github/CODEOWNERS': 'refuse',
+  '.github/PULL_REQUEST_TEMPLATE.md': 'refuse',
+  '.github/workflows/governance.yml': 'refuse',
+  '.github/workflows/release.yml': 'refuse',
+  '.github/workflows/governance-postmerge.yml': 'refuse',
+  'brain/scripts/ci/gitlab-governance.yml': 'refuse',
+  'AGENTS.md': 'regenerate',
+  '.gitattributes': 'copy',
+  'brain/core/**': 'copy',
+  'brain/scripts/**': 'copy',
+});
+
+test('managedStrategy matches the RATIFIED classification row for row (REQ-397-5)', () => {
+  for (const [rel, expected] of Object.entries(RATIFIED_STRATEGY)) {
+    assert.equal(
+      managedStrategy[rel],
+      expected,
+      `"${rel}" must be classified "${expected}" — the table was signed 04/08/2026 and a row may not change without a new signature`,
+    );
+  }
+});
+
+test('managedStrategy has no row that is not in the ratified table (REQ-397-5)', () => {
+  for (const rel of Object.keys(managedStrategy)) {
+    assert.ok(
+      Object.hasOwn(RATIFIED_STRATEGY, rel),
+      `"${rel}" is classified but absent from the signed table — an unsigned row`,
+    );
+  }
+});
+
+test('STRATEGY enumerates exactly the four ratified strategies (REQ-397-5)', () => {
+  assert.deepEqual(
+    Object.values(STRATEGY).sort(),
+    ['copy', 'merge', 'refuse', 'regenerate'],
+  );
+});
+
+test('every managed glob carries a strategy — no managed path is unclassified (REQ-397-5)', () => {
+  for (const glob of managed) {
+    assert.ok(
+      Object.hasOwn(managedStrategy, glob),
+      `managed glob "${glob}" has no entry in managedStrategy — its upgrade behaviour would be inferred, not declared`,
+    );
+  }
+});
+
+test('every classified path is actually managed — no strategy for a path brain does not ship (REQ-397-5)', () => {
+  for (const rel of Object.keys(managedStrategy)) {
+    assert.ok(
+      managed.includes(rel),
+      `managedStrategy classifies "${rel}", which is not in managed — a rule with nothing to apply to`,
+    );
+  }
+});
+
+// The one row where a literal and a glob overlap. `brain/scripts/**` is COPY,
+// but `brain/scripts/ci/gitlab-governance.yml` sits under it and is REFUSE.
+// If the resolver let the glob win, the signed REFUSE row would be dead text.
+test('strategyFor: an exact literal beats a glob that also matches it (REQ-397-5)', () => {
+  assert.equal(strategyFor('brain/scripts/ci/gitlab-governance.yml', managedStrategy), 'refuse');
+  assert.equal(strategyFor('brain/scripts/lib/installer.mjs', managedStrategy), 'copy');
+  assert.equal(strategyFor('brain/core/managed-paths.mjs', managedStrategy), 'copy');
+});
+
+test('strategyFor: an unclassified path defaults to copy (REQ-397-5)', () => {
+  assert.equal(strategyFor('some/unknown/file.txt', managedStrategy), 'copy');
 });
 

@@ -70,6 +70,73 @@ export function matchesAny(relPath, globs) {
   return globs.some((g) => globToRegExp(g).test(relPath));
 }
 
+// ── Per-path strategy resolution (issue #397, REQ-397-5) ─────────────────────
+
+/**
+ * Resolves the ratified upgrade strategy for one path.
+ *
+ * An EXACT LITERAL always beats a glob that also matches. This is not a
+ * stylistic preference: `brain/scripts/ci/gitlab-governance.yml` is REFUSE and
+ * sits under the `brain/scripts/**` COPY glob, so letting the glob win would
+ * make a signed row silently unreachable — the same "wired but never fires"
+ * shape #397 exists to remove.
+ *
+ * Lives here rather than beside the table because resolution needs the glob
+ * matcher, and `managed-paths.mjs` must not import this file (it already
+ * exports MANAGED_SCRIPT_KEYS *to* it — the reverse edge would be a cycle).
+ * The DATA stays in managed-paths.mjs, which is what REQ-397-5 requires.
+ *
+ * @param {string} relPath                  POSIX-style, repo-relative.
+ * @param {Record<string, string>} strategyMap  Usually `managedStrategy`.
+ * @returns {string} One of STRATEGY's values; 'copy' when nothing matches.
+ */
+export function strategyFor(relPath, strategyMap) {
+  if (Object.hasOwn(strategyMap, relPath)) return strategyMap[relPath];
+  for (const [pattern, strategy] of Object.entries(strategyMap)) {
+    if (globToRegExp(pattern).test(relPath)) return strategy;
+  }
+  // Default COPY preserves the behaviour every path had before #397: a new
+  // managed glob that nobody classified keeps working, and the drift test in
+  // managed-paths.test.mjs is what makes the omission visible.
+  return 'copy';
+}
+
+// ── Outgoing package snapshot (issue #397, REQ-397-1) ────────────────────────
+
+/**
+ * Reads the bytes brain shipped LAST time, before the install overwrites them.
+ *
+ * This is the third point that makes modification detection three-way. Until
+ * step 1 of `brain:upgrade` runs, `node_modules/brain/<path>` still holds the
+ * previous release's copy, so the two facts a single dest-vs-incoming diff
+ * conflates — "the consumer edited it" and "brain changed it" — separate for
+ * free. Same "read the outgoing package before the install" move #398 already
+ * makes for its migration list.
+ *
+ * NEVER THROWS. It runs before the install, over a tree that may be absent,
+ * partial, or from a much older brain, and its only effect is to make the
+ * report better. Aborting an upgrade because this read failed would trade a
+ * working upgrade for a nicer warning.
+ *
+ * @param {object} opts
+ * @param {string} opts.pkgRoot      Installed brain package root (pre-install).
+ * @param {string[]} opts.relPaths   Paths to snapshot.
+ * @returns {Map<string, Buffer>}    Only paths that were readable.
+ */
+export function readOutgoing({ pkgRoot, relPaths }) {
+  const out = new Map();
+  for (const rel of relPaths) {
+    try {
+      out.set(rel, readFileSync(join(pkgRoot, rel)));
+    } catch {
+      // Absent or unreadable. Absence is NOT evidence of a consumer edit — a
+      // path brain ships for the first time has no outgoing copy either — so it
+      // is simply left out of the map and callers treat "unknown" as "unknown".
+    }
+  }
+  return out;
+}
+
 // ── File walking ─────────────────────────────────────────────────────────────
 
 /**
@@ -908,13 +975,26 @@ export function createRestorePoint({ destRoot, relPaths }) {
  * @param {Record<string, (destPath: string, srcPath: string) => void>} [opts.specialMerge]
  *   Map of relative path → merge function. Paths in this map bypass the collision
  *   guard and copyFileSync.
- * @returns {{ copied: string[], skipped: string[], merged: string[], collisions: string[] }}
+ * @param {Map<string, Buffer>|null} [opts.outgoing]  What brain shipped LAST time,
+ *   from `readOutgoing` before the install (#397). Null means the outgoing tree
+ *   was unavailable (e.g. `--no-install`) and detection degrades to two-way.
+ * @returns {{ copied: string[], skipped: string[], merged: string[], collisions: string[],
+ *   consumerModified: string[], brainChanged: string[],
+ *   modificationDetection: 'three-way'|'degraded' }}
  */
-export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false, specialMerge = {}, abortOnCollision = false }) {
+export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false, specialMerge = {}, abortOnCollision = false, outgoing = null }) {
   const skipped = [];
   const collisions = [];
   const toCopy = [];  // rel paths for plain copyFileSync
   const toMerge = []; // rel paths for specialMerge
+  // #397: the two facts the single dest-vs-incoming diff used to conflate.
+  const consumerModified = [];
+  const brainChanged = [];
+  // With no outgoing package there is only one tree, so consumer modification
+  // cannot be ESTABLISHED. Reported explicitly because an empty
+  // `consumerModified` under a degraded check reads exactly like a confident
+  // "nothing was modified" — REQ-397-1 Scenario 3 exists to stop that.
+  const modificationDetection = outgoing ? 'three-way' : 'degraded';
 
   // ── Pre-flight pass (read-only) ─────────────────────────────────────────────
   // Categorise every source file into skipped, toMerge, or toCopy.
@@ -926,6 +1006,25 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
       skipped.push(rel);
       continue;
     }
+
+    // Three-way classification (#397, REQ-397-1). Runs for every managed
+    // candidate, merged or copied, because it answers a question about the
+    // CONSUMER's tree that is independent of what we then do with the path.
+    // A path absent from `outgoing` is unknown, not unmodified: brain may be
+    // shipping it for the first time, in which case there was nothing to edit.
+    if (outgoing?.has(rel)) {
+      const outBytes = outgoing.get(rel);
+      const destFile = join(destRoot, rel);
+      if (existsSync(destFile)) {
+        let destBytes = null;
+        try { destBytes = readFileSync(destFile); } catch { /* unreadable — cannot claim it was edited */ }
+        if (destBytes && !destBytes.equals(outBytes)) consumerModified.push(rel);
+      }
+      try {
+        if (!readFileSync(join(srcRoot, rel)).equals(outBytes)) brainChanged.push(rel);
+      } catch { /* unreadable incoming — the copy below will report the real failure */ }
+    }
+
     if (Object.prototype.hasOwnProperty.call(specialMerge, rel)) {
       // Special merge path: excluded from the collision guard.
       toMerge.push(rel);
@@ -962,6 +1061,9 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
       skipped: skipped.sort(),
       merged: [],
       collisions: collisions.sort(),
+      consumerModified: consumerModified.sort(),
+      brainChanged: brainChanged.sort(),
+      modificationDetection,
     };
   }
 
@@ -1042,6 +1144,9 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
     skipped: skipped.sort(),
     merged: toMerge.sort(),
     collisions: collisions.sort(),
+    consumerModified: consumerModified.sort(),
+    brainChanged: brainChanged.sort(),
+    modificationDetection,
   };
 }
 

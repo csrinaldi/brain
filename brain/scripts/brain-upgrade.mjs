@@ -18,8 +18,9 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { copyManaged, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, compareSemver, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets, semverOrNull, keysAheadOfTarget } from './lib/installer.mjs';
+import { copyManaged, readOutgoing, strategyFor, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, compareSemver, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets, semverOrNull, keysAheadOfTarget } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
+import { managedStrategy } from '../core/managed-paths.mjs';
 
 const ROOT = process.cwd();
 const PM = detectPM(ROOT).name;
@@ -322,6 +323,32 @@ if (unparseable.length > 0) {
   die(`Repair them, or skip them and upgrade everything else:\n      ${PM} run brain:upgrade -- ${tag ?? '<tag>'} ${skippable.map((u) => `--skip-merge ${u.rel}`).join(' ')}`);
 }
 
+// ── 0. Snapshot the OUTGOING package (issue #397, REQ-397-1) ───────────────────
+// MUST run before step 1. Until the install lands, node_modules/brain still holds
+// what brain shipped LAST time — the third point that tells "the consumer edited
+// this" apart from "brain changed this". After step 1 that copy is gone, and with
+// it the only evidence of consumer intent.
+//
+// Scope: the LITERAL rows of the classification. The two globs (brain/core/**,
+// brain/scripts/**) are brain-owned by contract (ADR-0003) — editing them is out
+// of contract and the existing collision warning is already the right response —
+// so walking thousands of files to answer a question nobody acts on is cost
+// without a reader.
+//
+// Which classification? The one THIS script shipped with, read from its own
+// sibling. It describes the tree currently on disk, which is exactly the tree
+// being measured. Reading the incoming table would describe a tree that does not
+// exist yet.
+const outgoingSnapshotPaths = Object.keys(managedStrategy).filter((rel) => !rel.includes('*'));
+// Under --no-install there is only ONE tree: node_modules/brain is both the
+// outgoing and the incoming package, so every file compares equal to itself and
+// "no consumer modification" would be a fact about the method, not the repo.
+// Pass null so the degradation is carried in the result rather than disguised as
+// a clean bill of health.
+const outgoing = noInstall
+  ? null
+  : readOutgoing({ pkgRoot: join(ROOT, 'node_modules', 'brain'), relPaths: outgoingSnapshotPaths });
+
 // ── 1. Install the tag ─────────────────────────────────────────────────────────
 // Derive the install specifier from the currently installed brain's package.json
 // repository.url (always normalized to git+https://…) so HTTPS-only consumers
@@ -368,9 +395,9 @@ if (interrupted) {
   process.exit(interrupted === 'SIGTERM' ? 143 : 130);
 }
 
-let copied, skipped, merged, collisions;
+let copied, skipped, merged, collisions, consumerModified, brainChanged, modificationDetection;
 try {
-  ({ copied, skipped, merged, collisions } = copyManaged({
+  ({ copied, skipped, merged, collisions, consumerModified, brainChanged, modificationDetection } = copyManaged({
     srcRoot: pkgRoot,
     destRoot: ROOT,
     managed,
@@ -383,6 +410,7 @@ try {
     dryRun,
     specialMerge: mergeMap,
     abortOnCollision,
+    outgoing,
   }));
 } catch (err) {
   // copyManaged snapshots every path it may write BEFORE its first write and
@@ -422,6 +450,28 @@ try {
   // package.json, the lockfile and node_modules BEFORE any snapshot was taken —
   // so "the tree is unchanged" would be a false statement to print here.
   die('Every managed path was rolled back to the bytes it had before the copy. The dependency install was NOT reverted.');
+}
+
+// ── Modification report (issue #397, REQ-397-1) ─────────────────────────────────
+// Separate from the collision report below, and deliberately so: a collision says
+// "these bytes differ", which was never the question. This says which files the
+// CONSUMER changed — the only ones where an overwrite costs anybody anything.
+//
+// `brainChanged` is computed and NOT printed. A path brain updated and the
+// consumer never touched is the overwhelmingly common case, it is what an upgrade
+// is FOR, and listing it every release is how the one line that matters gets
+// scrolled past.
+if (modificationDetection === 'degraded') {
+  // Said out loud rather than left to be discovered. A check that silently
+  // weakens is worse than one that is absent: the run looks identical to a clean
+  // three-way pass, so the operator draws a conclusion the run never reached.
+  warn('--no-install: the outgoing and incoming package are the same tree, so this run CANNOT tell "you edited it" from "brain changed it".');
+  info('Re-run without --no-install to get the real check. Nothing below distinguishes the two cases.');
+} else if (consumerModified.length > 0) {
+  warn(`${consumerModified.length} managed file(s) differ from what brain shipped last time — YOU changed these:`);
+  for (const f of consumerModified) {
+    console.log(`      ${C.dim}${f} ${C.reset}${C.dim}(${strategyFor(f, managedStrategy)})${C.reset}`);
+  }
 }
 
 // ── Collision report ────────────────────────────────────────────────────────────

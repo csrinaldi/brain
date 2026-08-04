@@ -27,9 +27,13 @@ topic_key: sdd/issue-397-clobber-asymmetry/tasks
 
 ## Phase 2 — Implementation (UNBLOCKED)
 
-- [ ] 2.1 Three-way modification detection reading the outgoing package pre-install (REQ-397-1)
-- [ ] 2.2 State the degraded mode under `--no-install` rather than implying a check happened
-- [ ] 2.3 Strategy as DATA in `brain/core/managed-paths.mjs` (REQ-397-5) — **Tier 2**
+- [x] 2.1 Three-way modification detection reading the outgoing package pre-install (REQ-397-1)
+      — `readOutgoing()` + `copyManaged({ outgoing })` returning `consumerModified` /
+      `brainChanged` separately; snapshot taken at step 0, before the install
+- [x] 2.2 State the degraded mode under `--no-install` rather than implying a check happened
+- [x] 2.3 Strategy as DATA in `brain/core/managed-paths.mjs` (REQ-397-5) — **Tier 2**
+      — `STRATEGY` + `managedStrategy`, transcribed from the signed table; `strategyFor()`
+      resolves it with exact-literal-over-glob priority
 - [ ] 2.4 `.gemini/settings.json` routed through the `.claude/settings.json` merge (REQ-397-3)
 - [ ] 2.5 REFUSE + per-path `--force-managed`, validated against the classification (REQ-397-2)
 - [ ] 2.6 `AGENTS.md` off the copy set; regenerate post-upgrade and report it (REQ-397-4)
@@ -39,7 +43,7 @@ topic_key: sdd/issue-397-clobber-asymmetry/tasks
 ## Phase 3 — Tests (UNBLOCKED)
 
 - [ ] 3.1 Consumer-modified REFUSE path aborts, names it, writes nothing
-- [ ] 3.2 **Negative control:** brain-changed-but-consumer-untouched writes without prompting
+- [x] 3.2 **Negative control:** brain-changed-but-consumer-untouched writes without prompting
 - [ ] 3.3 `--force-managed` overwrites only the named path
 - [ ] 3.4 **Negative control:** a refused path is LEFT ALONE, never quietly written (#399's lesson, inverted)
 - [ ] 3.5 `.gemini/settings.json` merge preserves consumer keys

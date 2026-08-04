@@ -60,6 +60,71 @@ export const managed = [
                   // MUST stay registered in brain-upgrade.mjs specialMerge — a plain copy would overwrite the consumer's package.json.
 ];
 
+// ── Per-path upgrade strategy (issue #397, REQ-397-5) ────────────────────────
+//
+// `managed` says WHICH paths brain ships. It does not say WHAT the upgrade does
+// with each one, and before #397 that answer was inferred from three call sites:
+// a path was merged if it appeared in brain-upgrade.mjs's ALL_MERGES, and
+// plain-copied otherwise. A strategy readable in one place is auditable; one
+// inferred from three is not — which is how seven consumer-curated files came to
+// be silently overwritten on every upgrade.
+//
+// The table below is the classification RATIFIED 04/08/2026 by Cristian Rinaldi
+// (Tier-2 / ADR-0013), recorded in
+// `openspec/changes/issue-397-clobber-asymmetry/brain-drafts/managed-path-strategy.md`.
+// A row may not change without a NEW human signature. `managed-paths.test.mjs`
+// holds an independent transcription of the same table and fails on drift.
+
+export const STRATEGY = Object.freeze({
+  // Brain owns it; overwrite. Either brain-owned by contract (ADR-0003: core is
+  // read-only in the consumer) or brain's own policy for managed paths.
+  COPY: 'copy',
+  // Consumer content survives; brain's block is applied underneath.
+  MERGE: 'merge',
+  // No meaningful merge exists — these are policies and prose a team rewrites
+  // wholesale. If the CONSUMER modified it, abort and name it; overwriting takes
+  // a deliberate, per-path `--force-managed <path>`.
+  REFUSE: 'refuse',
+  // Not a file to copy at all: a build output whose inputs straddle the ownership
+  // line. Copying it hands every consumer brain's own artifact, describing the
+  // wrong repository. Rebuild it from the consumer's inputs instead.
+  REGENERATE: 'regenerate',
+});
+
+export const managedStrategy = Object.freeze({
+  // Sibling agent-config files with the same shape and the same deterministic
+  // merge (#103). No reason to treat two siblings differently.
+  '.claude/settings.json': STRATEGY.MERGE,
+  '.gemini/settings.json': STRATEGY.MERGE,
+  'package.json': STRATEGY.MERGE,
+
+  // Ownership lines are a policy, not a set to union.
+  '.github/CODEOWNERS': STRATEGY.REFUSE,
+  // Prose a team rewrites wholesale.
+  '.github/PULL_REQUEST_TEMPLATE.md': STRATEGY.REFUSE,
+  // A consumer who pinned a runner version or added a job loses it silently
+  // today. Merging YAML semantically is neither cheap nor safe.
+  '.github/workflows/governance.yml': STRATEGY.REFUSE,
+  '.github/workflows/release.yml': STRATEGY.REFUSE,
+  '.github/workflows/governance-postmerge.yml': STRATEGY.REFUSE,
+  // The GitLab sibling. NOTE the overlap: this literal sits under the
+  // `brain/scripts/**` COPY glob below, so the resolver MUST give an exact
+  // literal priority over a glob or this row is dead text.
+  'brain/scripts/ci/gitlab-governance.yml': STRATEGY.REFUSE,
+
+  // Generated from brain/HOME.md (CONSUMER-owned) plus four managed methodology
+  // docs (brain's). Copying substitutes brain's inputs for the consumer's.
+  'AGENTS.md': STRATEGY.REGENERATE,
+
+  // Signed decision 1: brain-owned. It is brain's line-ending and diff policy
+  // for managed paths, not something a consumer curates.
+  '.gitattributes': STRATEGY.COPY,
+  // ADR-0003: core is read-only in the consumer. Editing them is out of
+  // contract; the collision warning is already the right response.
+  'brain/core/**': STRATEGY.COPY,
+  'brain/scripts/**': STRATEGY.COPY,
+});
+
 // Paths the consumer owns. The upgrade NEVER touches these.
 // Listed explicitly so the installer can refuse to copy anything that
 // (accidentally) matches both sets — local always wins.

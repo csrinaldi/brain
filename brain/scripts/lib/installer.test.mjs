@@ -15,6 +15,7 @@ import {
   globToRegExp,
   matchesAny,
   copyManaged,
+  readOutgoing,
   createRestorePoint,
   RESTORE_POINT_DIR,
   mergeDefaults,
@@ -827,6 +828,207 @@ test('copyManaged: identical dest is not a collision (REQ-S2-3)', () => {
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── Three-way modification detection (issue #397, REQ-397-1) ─────────────────
+//
+// The collision check above answers "do these bytes differ", which conflates
+// two different facts: the consumer edited it, and brain changed it between
+// releases. The third point that separates them is the OUTGOING package — what
+// brain shipped LAST time — read before the install overwrites it.
+
+// Builds a src/dest pair plus an `outgoing` map, so each scenario below reads
+// as the three-way table in design.md §2 rather than as filesystem plumbing.
+function threeWayFixture(prefix, { outgoingBytes, destBytes, incomingBytes }) {
+  const tmp = mkdtempSync(join(tmpdir(), prefix));
+  const src = join(tmp, 'src');
+  const dest = join(tmp, 'dest');
+  mkdirSync(join(src, '.github'), { recursive: true });
+  mkdirSync(join(dest, '.github'), { recursive: true });
+  writeFileSync(join(src, '.github', 'CODEOWNERS'), incomingBytes);
+  if (destBytes !== null) writeFileSync(join(dest, '.github', 'CODEOWNERS'), destBytes);
+  const outgoing = outgoingBytes === null
+    ? null
+    : new Map([['.github/CODEOWNERS', Buffer.from(outgoingBytes)]]);
+  return { tmp, src, dest, outgoing };
+}
+
+// REQ-397-1 Scenario 1 — the NEGATIVE CONTROL (tasks.md 3.2). brain changed the
+// file, the consumer never touched it. This must stay silent: a detector that
+// fires here fires for every consumer on every release, and a warning that
+// always fires is one nobody reads.
+test('copyManaged: brain-changed but consumer-untouched is NOT consumer-modified (REQ-397-1 S1)', () => {
+  const { tmp, src, dest, outgoing } = threeWayFixture('brain-397-s1-', {
+    outgoingBytes: '* @brain-team\n',
+    destBytes: '* @brain-team\n',   // byte-identical to what brain shipped last time
+    incomingBytes: '* @brain-team\n# new line brain added\n',
+  });
+  try {
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['.github/CODEOWNERS'],
+      local: [],
+      outgoing,
+    });
+
+    assert.deepEqual(result.consumerModified, [],
+      'the consumer never edited this file — it must not be reported as modified');
+    assert.deepEqual(result.brainChanged, ['.github/CODEOWNERS'],
+      'brain changed it between releases, which is the other half of the answer');
+    assert.equal(readFileSync(join(dest, '.github', 'CODEOWNERS'), 'utf8'),
+      '* @brain-team\n# new line brain added\n',
+      'an unmodified path must be written without prompting');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-397-1 Scenario 2 — the consumer edited it. Same dest-vs-incoming
+// difference as Scenario 1; only the third point tells them apart.
+test('copyManaged: dest differing from the OUTGOING package is consumer-modified (REQ-397-1 S2)', () => {
+  const { tmp, src, dest, outgoing } = threeWayFixture('brain-397-s2-', {
+    outgoingBytes: '* @brain-team\n',
+    destBytes: '* @my-team\n',      // the consumer's own edit
+    incomingBytes: '* @brain-team\n# new line brain added\n',
+  });
+  try {
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['.github/CODEOWNERS'],
+      local: [],
+      outgoing,
+    });
+
+    assert.deepEqual(result.consumerModified, ['.github/CODEOWNERS']);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// Both facts are true at once, and they are reported separately rather than
+// collapsed. #397 exists because one comparison was made to answer two questions.
+test('copyManaged: consumer-modified and brain-changed are reported independently (REQ-397-1)', () => {
+  const { tmp, src, dest, outgoing } = threeWayFixture('brain-397-both-', {
+    outgoingBytes: '* @brain-team\n',
+    destBytes: '* @my-team\n',
+    incomingBytes: '* @brain-team\n# new line brain added\n',
+  });
+  try {
+    const result = copyManaged({
+      srcRoot: src, destRoot: dest, managed: ['.github/CODEOWNERS'], local: [], outgoing,
+    });
+
+    assert.deepEqual(result.consumerModified, ['.github/CODEOWNERS']);
+    assert.deepEqual(result.brainChanged, ['.github/CODEOWNERS']);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// A path brain ships for the first time has no outgoing copy. Absent from the
+// outgoing map is not evidence of a consumer edit — and a dest that does not
+// exist cannot have been edited either.
+test('copyManaged: a path absent from the outgoing package is not consumer-modified (REQ-397-1)', () => {
+  const { tmp, src, dest } = threeWayFixture('brain-397-new-', {
+    outgoingBytes: null,
+    destBytes: null,
+    incomingBytes: '* @brain-team\n',
+  });
+  try {
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['.github/CODEOWNERS'],
+      local: [],
+      outgoing: new Map(),   // brain did not ship this path last time
+    });
+
+    assert.deepEqual(result.consumerModified, []);
+    assert.deepEqual(result.brainChanged, []);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// REQ-397-1 Scenario 3 — degraded mode. Under --no-install the outgoing and the
+// incoming tree are the same directory, so consumer modification CANNOT be
+// established. The result must say the check degraded rather than return an
+// empty list that reads exactly like "nothing was modified".
+test('copyManaged: no outgoing package degrades detection, and says so (REQ-397-1 S3)', () => {
+  const { tmp, src, dest } = threeWayFixture('brain-397-s3-', {
+    outgoingBytes: null,
+    destBytes: '* @my-team\n',
+    incomingBytes: '* @brain-team\n',
+  });
+  try {
+    const result = copyManaged({
+      srcRoot: src,
+      destRoot: dest,
+      managed: ['.github/CODEOWNERS'],
+      local: [],
+      outgoing: null,
+    });
+
+    assert.equal(result.modificationDetection, 'degraded',
+      'with no outgoing package the run must report that it could not tell the two cases apart');
+    assert.deepEqual(result.consumerModified, [],
+      'a degraded check must not invent a verdict it could not reach');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('copyManaged: an outgoing package makes detection three-way (REQ-397-1)', () => {
+  const { tmp, src, dest, outgoing } = threeWayFixture('brain-397-mode-', {
+    outgoingBytes: '* @brain-team\n',
+    destBytes: '* @brain-team\n',
+    incomingBytes: '* @brain-team\n',
+  });
+  try {
+    const result = copyManaged({
+      srcRoot: src, destRoot: dest, managed: ['.github/CODEOWNERS'], local: [], outgoing,
+    });
+    assert.equal(result.modificationDetection, 'three-way');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── readOutgoing (issue #397, REQ-397-1) ─────────────────────────────────────
+
+test('readOutgoing: returns the bytes brain shipped last time, keyed by rel path', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-397-ro-'));
+  try {
+    mkdirSync(join(tmp, '.github'), { recursive: true });
+    writeFileSync(join(tmp, '.github', 'CODEOWNERS'), '* @brain-team\n');
+
+    const out = readOutgoing({ pkgRoot: tmp, relPaths: ['.github/CODEOWNERS'] });
+
+    assert.ok(out instanceof Map);
+    assert.equal(out.get('.github/CODEOWNERS').toString(), '* @brain-team\n');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('readOutgoing: a path the outgoing package does not ship is simply absent', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-397-ro-abs-'));
+  try {
+    const out = readOutgoing({ pkgRoot: tmp, relPaths: ['.github/CODEOWNERS'] });
+    assert.equal(out.has('.github/CODEOWNERS'), false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// This runs BEFORE the install, on a tree that may be missing, partial, or from
+// a much older brain. A throw here would abort an upgrade over a check that only
+// ever makes the report better — so it never throws.
+test('readOutgoing: an absent package root yields an empty map, never a throw', () => {
+  const out = readOutgoing({ pkgRoot: join(tmpdir(), 'brain-397-does-not-exist-at-all'), relPaths: ['x'] });
+  assert.equal(out.size, 0);
 });
 
 // specialMerge paths are EXCLUDED from the collision guard.
