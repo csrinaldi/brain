@@ -41,6 +41,12 @@ name: m4-danger-paths
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  # Also on main. Nothing here is a required context (see the note above), so a
+  # PR run passing is not a guarantee the merge commit still passes — and since
+  # opening external adoption is a decision read off THIS suite, the state that
+  # matters is main's, not a branch's.
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -49,6 +55,10 @@ jobs:
   danger-paths:
     name: m4-danger-paths
     runs-on: ubuntu-latest
+    # Each scenario builds a git remote and runs a real `npm i`; the observed
+    # cost is ~1m30s. A hung docker pull or npm fetch would otherwise sit on the
+    # runner's 6-hour default.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 

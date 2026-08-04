@@ -43,7 +43,13 @@ echo "▶ M4 danger paths | source=$(git -C "$ROOT" rev-parse --short HEAD 2>/de
 
 # The repo is mounted READ-ONLY. The container copies it out before mutating,
 # so a harness bug can never write into the maintainer's working tree.
-docker run --rm -i \
+#
+# The script is passed by PATH, not piped on stdin. `bash -s < script` makes the
+# test body the container's stdin, so any child process that reads stdin consumes
+# the remainder of the script — and `docker run -i` keeps it open for them to do
+# it. The repo is already mounted, so naming the file costs nothing and removes
+# the hazard entirely.
+docker run --rm \
   -v "${ROOT}:/brain-src:ro" \
   -e HOME=/root \
-  "$IMAGE" bash -s < "$HERE/danger-paths-in-container.sh"
+  "$IMAGE" bash /brain-src/test/upgrade/danger-paths-in-container.sh

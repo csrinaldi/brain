@@ -79,6 +79,16 @@ which is what #401 requires: red today, green as each ticket lands.
 `resolveInstallUrl` passes a `git+file://` URL through unchanged (its
 "unknown form, already prefixed" branch), which is what makes this work.
 
+**One place inside this suite still has `outgoing == incoming`, on purpose:**
+path 2's *second* invocation, the `--force-managed` one. `brain-upgrade.mjs`
+takes the outgoing snapshot, *then* installs, *then* calls `copyManaged` — so by
+the time the forced run happens, `node_modules/brain` is already at TO and the
+degradation `run.sh` suffers from is back. It is **not** a false pass today: the
+REFUSE gate keys on `consumerModified` alone and never reads `brainChanged`
+(`installer.mjs`), so the assertion means what it says. Recorded because if that
+gate is ever tightened to also require `brainChanged`, this assertion turns green
+and silent rather than red — and nobody would know to look here.
+
 ## The suite is proven live, not merely green
 
 A passing e2e suite is worth nothing until you have watched it fail. Each
@@ -86,12 +96,20 @@ protection was disabled in turn and the suite re-run:
 
 | mutation | result |
 |---|---|
+| failure thrown **before** `createRestorePoint` | path 1 red (3 assertions) |
 | REFUSE early-return removed (`copyManaged`) | path 2 red — *"THE CLOBBER #397 EXISTS TO PREVENT JUST HAPPENED"* |
 | downgrade guard disabled | path 3 red (3 assertions) |
 | corrupt-JSON pre-flight disabled | path 4 red (`--skip-merge` no longer completes) |
 
-Two of those mutations are worth understanding, because they are the reason the
+Three of those mutations are worth understanding, because they are the reason the
 assertions are written against **bytes and exit codes** rather than messages:
+
+- With the failure moved **before** the restore point, path 1's original pair of
+  assertions — non-zero exit, and byte-identity of every managed path — both
+  stayed **green**. Any failure earlier than the write loop satisfies them for
+  free, so the scenario passed while proving nothing about the rollback it exists
+  to prove. Path 1 now asserts the run reached the write loop, that it was not a
+  pre-flight refusal, and that the cause was the induced `ENOTDIR`.
 
 - With the REFUSE gate removed, the run **still printed "refused" and still
   exited 1** — it simply wrote the files first. Every message-based assertion
