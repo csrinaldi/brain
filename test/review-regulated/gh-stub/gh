@@ -1,0 +1,73 @@
+#!/usr/bin/env node
+// gh — the PATH stub (issue #409, design D1). NOT the real GitHub CLI.
+//
+// The reviewer e2e spawns the REAL `brain:review` process and fakes only this
+// binary: every layer above it (cli.mjs, identity verification, cold-boot,
+// evaluators, poster, the github.mjs adapter) runs production code. The stub
+// dispatches on argv, serves canned JSON from $GH_STUB_DIR, captures write
+// calls, and logs every invocation to calls.log so tests can assert WHICH
+// endpoints actually ran (REQ-409-5a: the identity endpoint was hit).
+//
+// Fail-closed by design: an argv shape this stub does not recognize exits 2
+// with the argv on stderr. A new port verb reaching the e2e surfaces as a
+// loud failure, never as a silently-served empty response.
+
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+const DIR = process.env.GH_STUB_DIR;
+if (!DIR) {
+  process.stderr.write('gh-stub: GH_STUB_DIR is not set — refusing to guess.\n');
+  process.exit(2);
+}
+
+const argv = process.argv.slice(2);
+appendFileSync(join(DIR, 'calls.log'), JSON.stringify({ argv, gh_token: process.env.GH_TOKEN ? 'present' : 'absent' }) + '\n');
+
+const serve = (name) => {
+  const p = join(DIR, name);
+  if (!existsSync(p)) {
+    process.stderr.write(`gh-stub: canned response missing: ${name}\n`);
+    process.exit(2);
+  }
+  process.stdout.write(readFileSync(p, 'utf8'));
+  process.exit(0);
+};
+
+const line = argv.join(' ');
+
+// ── identity (whoami — GH_TOKEN-scoped since #413) ──────────────────────────
+if (line === 'api /user') serve('user.json');
+
+// ── prView: the PR itself + base sha ────────────────────────────────────────
+if (argv[0] === 'pr' && argv[1] === 'view' && line.includes('number,labels,body,author,headRefOid')) serve('prview.json');
+if (argv[0] === 'api' && /repos\/.*\/pulls\/\d+$/.test(argv[1] ?? '') && argv.includes('--jq')) serve('basesha.txt');
+
+// ── rollup / reviews / events / commits (reads) ─────────────────────────────
+if (argv[0] === 'pr' && argv[1] === 'view' && line.includes('statusCheckRollup')) serve('rollup.json');
+if (line.startsWith('api --paginate') && line.includes('/reviews')) serve('reviews.json');
+if (line.startsWith('api --paginate') && line.includes('/events')) serve('events.json');
+if (line.startsWith('api --paginate') && line.includes('/commits')) serve('commits.json');
+if (line.startsWith('api') && line.includes('labels?per_page')) serve('labels.json');
+
+// ── writes: captured, never networked ───────────────────────────────────────
+if (argv.includes('-X') && argv.includes('POST') && line.includes('/pulls/') && line.includes('/reviews')) {
+  // prReviewComment sends the body via --input - (stdin). Capture it verbatim:
+  // this file IS the posted artifact the e2e's assertions read (design D1).
+  const body = readFileSync(0, 'utf8');
+  mkdirSync(join(DIR, 'posted'), { recursive: true });
+  appendFileSync(join(DIR, 'posted', 'reviews.jsonl'), body.trimEnd() + '\n');
+  process.stdout.write(JSON.stringify({ html_url: 'https://stub.local/review/1' }));
+  process.exit(0);
+}
+if (argv.includes('-X') && argv.includes('POST') && line.includes('/labels')) {
+  process.stdout.write('[]');
+  process.exit(0);
+}
+if (argv.includes('-X') && argv.includes('DELETE') && line.includes('/labels/')) {
+  process.stdout.write('{}');
+  process.exit(0);
+}
+
+process.stderr.write(`gh-stub: unrecognized argv — refusing to serve a guess:\n  gh ${line}\n`);
+process.exit(2);

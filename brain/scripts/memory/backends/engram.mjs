@@ -645,7 +645,7 @@ export async function importMemory({
     unreadable = "the reader returned no key set";
   }
   if (unreadable) {
-    _log(await t("memory.import.state-unreadable", { reason: unreadable }));
+    _log(await t("memory.import.stateUnreadable", { reason: unreadable }));
     return { written: 0, skipped: 0, deferred: true };
   }
 
