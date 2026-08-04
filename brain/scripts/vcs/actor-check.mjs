@@ -47,50 +47,140 @@ export function compareTimestamps(labelCreatedAt, headCommitAt) {
 }
 
 /**
- * `lite`'s REQ-L5-1' evidence: distinct act — the approved-label event must
- * be strictly later than the PR's head-commit push. Self-approval is NOT
- * checked here by design (design.md §2.A/§4): a solo maintainer applying
- * their own approval after their own push satisfies `lite` on its own,
+ * Is this commit FOREIGN to the approval? (ADR-0026 Amendment 1, issue #418.)
+ *
+ * Foreign = authored by neither the approver nor a registered
+ * `governance.reviewActors` identity. Only a foreign commit re-arms an
+ * existing approval at `lite`.
+ *
+ * The test keys off the login the PROVIDER attributes the commit to — never
+ * the commit header's name/email, which anyone can spell. An unresolvable
+ * login is therefore foreign, not exempt: the relief never extends to an
+ * identity the platform cannot vouch for. Two consequences are recorded in
+ * the amendment rather than discovered later: GitLab resolves no logins today
+ * (`login: null`, prCommits' documented residual) so it keeps the pre-
+ * amendment behavior wholesale, and commits attributed to no account at all
+ * (e.g. an agent session committing as a bare `noreply@` identity) keep
+ * re-arming too.
+ *
+ * Logins fold case — they are case-insensitive on both providers, and
+ * refusing on case alone would be a false positive.
+ *
+ * @param {{ login?: string|null }} commit
+ * @param {string[]} exempt  Approver + reviewActors, already collected.
+ * @returns {boolean}
+ */
+function isForeignCommit(commit, exempt) {
+  const login = commit?.login;
+  if (!login) return true; // unresolvable authorship — fail closed
+  return !exempt.some(e => e && String(e).toLowerCase() === String(login).toLowerCase());
+}
+
+/**
+ * `lite`'s REQ-L5-1' evidence: **distinct act over foreign commits**
+ * (ADR-0026 Amendment 1, issue #418) — the approved-label event must be
+ * strictly later than the latest FOREIGN commit, rather than than the head
+ * commit. Self-approval is NOT checked here by design (design.md §2.A/§4):
+ * a solo maintainer applying their own approval satisfies `lite` on its own,
  * evidence-tiered terms.
  *
- * Fails CLOSED (never warn) once a labeled event exists but the timing
- * cannot be established — spec.md REQ-L5-1': "an unreadable approval is not
- * an approval." (The "no labeled event AT ALL yet" case is handled earlier,
- * by the shared warn+pass branch in `evaluateActor` — REQ-L5-2 — before this
+ * Why the target moved: at `lite` the approver is *allowed* to be the author,
+ * so comparing against the head commit asked "did you keep working on your
+ * own branch" rather than "did someone slip work past the reviewer" — a
+ * question whose cost scales with iteration count and whose value at n=1 is
+ * near zero. It also made every automated fix-push demand a fresh human
+ * signature, which would defeat the reviewer loop #409 is building toward.
+ * The stale-green property #328 fixed is retained in full against every actor
+ * whose work the approver has not seen: any third-party push still re-arms.
+ *
+ * The `reviewActors` exemption is only safe because the reviewer identity is
+ * now VERIFIED against its token (#413) — before that, anyone holding any
+ * token could declare themselves the bot.
+ *
+ * Fails CLOSED (never warn) once a labeled event exists but the timing cannot
+ * be established — spec.md REQ-L5-1': "an unreadable approval is not an
+ * approval." (The "no labeled event AT ALL yet" case is handled earlier, by
+ * the shared warn+pass branch in `evaluateActor` — REQ-L5-2 — before this
  * function ever runs.)
  *
- * @param {{ actor: string|undefined, labelCreatedAt: string|undefined, commits: Array<{ at?: string }>|null }} input
+ * @param {{ actor: string|undefined, labelCreatedAt: string|undefined, commits: Array<{ at?: string, login?: string|null }>|null, reviewActors?: string[] }} input
  * @returns {{ level: 'pass'|'fail', reason: string }}
  */
-function evaluateDistinctAct({ actor, labelCreatedAt, commits }) {
-  const headCommit = Array.isArray(commits) && commits.length > 0 ? commits[commits.length - 1] : null;
-  const headCommitAt = headCommit?.at;
-
-  if (!headCommitAt) {
+function evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors = [] }) {
+  // An approval whose own timestamp is unreadable is not an approval —
+  // checked BEFORE the foreign-commit search, which would otherwise let a
+  // timestamp-less label through the no-foreign-commit branch below. Pre-
+  // Amendment-1 this was implicit (compareTimestamps returned null and the
+  // comparison failed); Amendment 1 adds a path that never reaches that
+  // comparison, so the invariant has to be stated outright.
+  if (!labelCreatedAt) {
     return {
       level: 'fail',
       reason:
-        'the PR\'s head-commit timestamp is unreadable — cannot verify the "lite" tier\'s distinct-act ' +
-        'evidence (REQ-L5-1′); an unreadable approval is not an approval.',
+        'the approved-label event carries no timestamp — cannot verify the "lite" tier\'s distinct-act ' +
+        'evidence (REQ-L5-1′, ADR-0026 Amendment 1); an unreadable approval is not an approval.',
     };
   }
 
-  const distinctAct = compareTimestamps(labelCreatedAt, headCommitAt);
+  // Uncomputable commit data is unreadable evidence, not "no foreign commit" —
+  // it must not fall through to the satisfied-by-default branch below.
+  if (!Array.isArray(commits) || commits.length === 0) {
+    return {
+      level: 'fail',
+      reason:
+        'the PR\'s commit list is unreadable — cannot verify the "lite" tier\'s distinct-act ' +
+        'evidence (REQ-L5-1′, ADR-0026 Amendment 1); an unreadable approval is not an approval.',
+    };
+  }
+
+  const exempt = [actor, ...reviewActors].filter(Boolean);
+  const foreign = commits.filter(c => isForeignCommit(c, exempt));
+
+  // No foreign commit: every commit on the branch is the approver's or a
+  // verified reviewer identity's, so there is nothing the approval has not
+  // already seen. Any approval event satisfies the evidence (REQ-418-5).
+  if (foreign.length === 0) {
+    return {
+      level: 'pass',
+      reason:
+        `the approved label was applied by "${actor ?? 'unknown'}" at ${labelCreatedAt ?? 'an unreadable time'}; ` +
+        'every commit on the branch is authored by the approver or a registered governance.reviewActors ' +
+        'identity, so no push re-arms the approval — distinct-act evidence satisfied at the "lite" tier ' +
+        '(REQ-L5-1′, ADR-0026 Amendment 1).',
+    };
+  }
+
+  const latestForeign = foreign[foreign.length - 1];
+  const foreignAt = latestForeign?.at;
+
+  if (!foreignAt) {
+    return {
+      level: 'fail',
+      reason:
+        `the latest foreign commit (authored by "${latestForeign?.login ?? 'an unresolvable identity'}") has an ` +
+        'unreadable timestamp — cannot verify the "lite" tier\'s distinct-act evidence (REQ-L5-1′, ' +
+        'ADR-0026 Amendment 1); an unreadable approval is not an approval.',
+    };
+  }
+
+  const distinctAct = compareTimestamps(labelCreatedAt, foreignAt);
   if (distinctAct !== true) {
     return {
       level: 'fail',
       reason:
-        `the approved label was applied at ${labelCreatedAt ?? 'an unreadable time'}, not strictly after ` +
-        `the head commit's push at ${headCommitAt} — approval before the code is not an approval ` +
-        '(REQ-L5-1′ "lite" evidence: distinct act).',
+        `the approved label was applied at ${labelCreatedAt ?? 'an unreadable time'}, not strictly after the ` +
+        `latest foreign commit — authored by "${latestForeign.login ?? 'an unresolvable identity'}" and pushed at ` +
+        `${foreignAt} — so the approval predates work the approver has not seen. Re-apply the approved label ` +
+        'after reviewing that commit (REQ-L5-1′ "lite" evidence, ADR-0026 Amendment 1).',
     };
   }
 
   return {
     level: 'pass',
     reason:
-      `the approved label was applied by "${actor ?? 'unknown'}" at ${labelCreatedAt}, strictly after the ` +
-      `head commit's push at ${headCommitAt} — distinct-act evidence satisfied at the "lite" tier (REQ-L5-1′).`,
+      `the approved label was applied by "${actor ?? 'unknown'}" at ${labelCreatedAt}, strictly after the latest ` +
+      `foreign commit — authored by "${latestForeign.login ?? 'an unresolvable identity'}" and pushed at ` +
+      `${foreignAt} — distinct-act evidence satisfied at the "lite" tier (REQ-L5-1′, ADR-0026 Amendment 1).`,
   };
 }
 
@@ -281,8 +371,13 @@ export function evaluateActor({
     });
   }
 
+  // `denyActors` IS `governance.reviewActors` (see the deny branch above).
+  // Amendment 1 reuses that same set as `lite`'s non-re-arming push identity
+  // set — no new config key. The two readings do not conflict: a review
+  // identity may never APPLY the approval (denied above), and its pushes do
+  // not INVALIDATE one (here).
   if (tier === 'lite') {
-    return withRefusalNote(evaluateDistinctAct({ actor, labelCreatedAt, commits }));
+    return withRefusalNote(evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors: denyActors }));
   }
 
   if (actor === author || (issueAuthor && actor === issueAuthor)) {
