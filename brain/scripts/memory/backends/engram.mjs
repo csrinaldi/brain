@@ -1212,6 +1212,63 @@ function explainEngramFailure(err) {
   );
 }
 
+/**
+ * The validation half of `_defaultExistingTopicKeys`, as a PURE function.
+ *
+ * Split out because the guard was unreachable from the suite: every test injects
+ * `_engramExistingTopicKeys`, so the default reader — the only place the
+ * cross-check lived — was never executed. Measured: neutralising the comparison
+ * to `if (false && …)` left the whole suite at **2416/2416 green**. The
+ * schema-drift proof existed, but as a MANUAL act, not a regression guard.
+ *
+ * That is the same defect this file's own history is about. #445 shipped a
+ * docstring promising "never an empty Set on failure" that the code could not
+ * keep; shipping the guard against that class with nothing pinning it would
+ * repeat the shape one layer up. An absent assertion and a vacuous one fail
+ * identically.
+ *
+ * @param {string} stdout        What `engram export` printed (carries `Observations: N`).
+ * @param {string} fileContents  The exported JSON.
+ * @returns {Set<string>}  Topic keys. THROWS if the export cannot be confirmed
+ *   complete — never an empty Set on failure.
+ */
+export function topicKeysFromExport(stdout, fileContents) {
+  const parsed = JSON.parse(fileContents);
+
+  const observations = parsed?.observations;
+  if (observations != null && !Array.isArray(observations)) {
+    throw new Error(
+      `engram export: 'observations' is ${typeof observations}, not an array — ` +
+      `this reader was not written against export schema ${parsed?.version ?? "(no version)"}`,
+    );
+  }
+  // `null` is the LEGITIMATELY EMPTY store — measured, engram v1.17.0 exports
+  // `"observations": null` when it holds nothing. It must yield an empty Set so
+  // first-ever hydration still imports everything.
+  const rows = observations ?? [];
+
+  // engram reports what it wrote. If that disagrees with what we parsed, the
+  // file is not what the binary thinks it exported, and an empty `rows` here
+  // would become "the store is empty" — the exact conflation being guarded.
+  const reported = /^\s*Observations:\s*(\d+)\s*$/m.exec(stdout);
+  if (!reported) {
+    throw new Error(
+      "engram export: no observation count on stdout — the export cannot be confirmed complete",
+    );
+  }
+  if (Number(reported[1]) !== rows.length) {
+    throw new Error(
+      `engram export: reported ${reported[1]} observations but the file carries ${rows.length} — the read is incomplete`,
+    );
+  }
+
+  const keys = new Set();
+  for (const o of rows) {
+    if (o?.topic_key) keys.add(o.topic_key);
+  }
+  return keys;
+}
+
 function _defaultExistingTopicKeys() {
   const dir = mkdtempSync(join(tmpdir(), "brain-engram-state-"));
   const file = join(dir, "state.json");
@@ -1220,37 +1277,7 @@ function _defaultExistingTopicKeys() {
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf8",
     });
-    const parsed = JSON.parse(readFileSync(file, "utf8"));
-
-    const observations = parsed?.observations;
-    if (observations != null && !Array.isArray(observations)) {
-      throw new Error(
-        `engram export: 'observations' is ${typeof observations}, not an array — ` +
-        `this reader was not written against export schema ${parsed?.version ?? "(no version)"}`,
-      );
-    }
-    const rows = observations ?? [];
-
-    // engram reports what it wrote. If that disagrees with what we parsed, the
-    // file is not what the binary thinks it exported, and an empty `rows` here
-    // would become "the store is empty" — the exact conflation being guarded.
-    const reported = /^\s*Observations:\s*(\d+)\s*$/m.exec(stdout);
-    if (!reported) {
-      throw new Error(
-        "engram export: no observation count on stdout — the export cannot be confirmed complete",
-      );
-    }
-    if (Number(reported[1]) !== rows.length) {
-      throw new Error(
-        `engram export: reported ${reported[1]} observations but the file carries ${rows.length} — the read is incomplete`,
-      );
-    }
-
-    const keys = new Set();
-    for (const o of rows) {
-      if (o?.topic_key) keys.add(o.topic_key);
-    }
-    return keys;
+    return topicKeysFromExport(stdout, readFileSync(file, "utf8"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

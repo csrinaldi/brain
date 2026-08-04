@@ -23,7 +23,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildImportPayload, importMemory } from './engram.mjs';
+import { buildImportPayload, importMemory, topicKeysFromExport } from './engram.mjs';
 import { buildRecord } from '../lib/format.mjs';
 
 function rec(id, extra = {}) {
@@ -310,4 +310,65 @@ test('importMemory: a genuinely EMPTY store still imports everything', async () 
   assert.equal(res.written, 1);
   assert.equal(imports.length, 1);
   assert.notEqual(res.deferred, true);
+});
+
+// ── topicKeysFromExport — the guard, now reachable from the suite (#448) ─────
+//
+// These exist because the guard was NOT reachable before: every test above
+// injects `_engramExistingTopicKeys`, so the default reader was never executed.
+// Measured — neutralising the cross-check to `if (false && …)` left the whole
+// suite at 2416/2416 green. The schema-drift proof was real but MANUAL, and a
+// manual proof does not survive the next edit.
+
+const OK_STDOUT = 'Exported to /tmp/x.json\n  Sessions:     3\n  Observations: 2\n  Prompts:      0\n';
+
+test('topicKeysFromExport: the reported count matching the file yields the keys', () => {
+  const file = JSON.stringify({
+    version: '0.1.0',
+    observations: [{ topic_key: 'rec-aaa' }, { topic_key: 'rec-bbb' }],
+  });
+  const keys = topicKeysFromExport(OK_STDOUT, file);
+  assert.deepEqual([...keys].sort(), ['rec-aaa', 'rec-bbb']);
+});
+
+// The legitimately-EMPTY store. Measured against engram v1.17.0: it exports
+// `"observations": null`, not `[]`. This case must yield an empty Set so a
+// first-ever hydration still imports everything — failing closed here would
+// make brain unable to populate an empty engram at all.
+//
+// It is also the case a version allowlist would have refused for no reason,
+// which is why the count was chosen over a version check. Pinned as the record
+// of that decision.
+test('topicKeysFromExport: a genuinely EMPTY store (observations: null, reported 0) is an empty Set, not a failure', () => {
+  const stdout = 'Exported to /tmp/x.json\n  Sessions:     0\n  Observations: 0\n  Prompts:      0\n';
+  const file = JSON.stringify({ version: '0.1.0', sessions: null, observations: null, prompts: null });
+  const keys = topicKeysFromExport(stdout, file);
+  assert.ok(keys instanceof Set);
+  assert.equal(keys.size, 0);
+});
+
+test('topicKeysFromExport: a count mismatch THROWS — it never degrades to an empty Set', () => {
+  // What a moved schema looks like from here: engram wrote 2, we parsed 0.
+  const file = JSON.stringify({ version: '0.2.0', observationsRenamed: [{ topic_key: 'rec-aaa' }] });
+  assert.throws(
+    () => topicKeysFromExport(OK_STDOUT, file),
+    /reported 2 observations but the file carries 0/,
+    'a disagreement between engram and the parse must fail closed — an empty Set here becomes a full re-import, which DUPLICATES the store',
+  );
+});
+
+test('topicKeysFromExport: no count on stdout THROWS — an unconfirmable export is not an empty store', () => {
+  const file = JSON.stringify({ version: '0.1.0', observations: [] });
+  assert.throws(
+    () => topicKeysFromExport('Exported to /tmp/x.json\n', file),
+    /no observation count on stdout/,
+  );
+});
+
+test('topicKeysFromExport: an observations field that is not an array THROWS, naming the schema', () => {
+  const file = JSON.stringify({ version: '9.9.9', observations: { rows: [] } });
+  assert.throws(
+    () => topicKeysFromExport(OK_STDOUT, file),
+    /not an array — this reader was not written against export schema 9\.9\.9/,
+  );
 });
