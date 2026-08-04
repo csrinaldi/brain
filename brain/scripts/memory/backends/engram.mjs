@@ -1128,7 +1128,24 @@ function _defaultCheckEngram() {
  * which is what makes the delta possible without brain keeping a watermark of
  * its own (a second source of truth that could drift from the store).
  *
- * @returns {Set<string>}
+ * ── Whose cost this is ──────────────────────────────────────────────────────
+ *
+ * `engram export` takes no project filter, so that 0.67s is a function of the
+ * WHOLE LOCAL STORE, not of brain's share of it. Measured: 1596 observations
+ * across 6 projects, of which brain is ~66% today. If the number ever needs
+ * revisiting, the thing that grew is the user's store — not this repo's memory,
+ * and not something brain can bound.
+ *
+ * Same reason the key set is a shared namespace: 466 of the 1448 topic keys in
+ * the live store are semantic keys written by `mem_save` (`skill-registry`,
+ * `sdd-init/…`), not record ids. Reading them is safe — brain ids are
+ * `rec-<16 hex>` with the project inside the hash (format.mjs), so no foreign
+ * key can collide with one — but the set being global is worth knowing.
+ *
+ * @returns {Set<string>}  The keys, or THROWS if the state could not be read.
+ *   Never an empty Set on failure: importMemory must be able to tell "the store
+ *   is empty" from "the store could not be read", because its policy on the
+ *   first is to import everything.
  */
 function _defaultExistingTopicKeys() {
   const dir = mkdtempSync(join(tmpdir(), "brain-engram-state-"));
@@ -1152,6 +1169,25 @@ function _defaultExistingTopicKeys() {
  * Replaces the per-record `engram save` loop that made #433: 1722 records ×
  * one execFileSync each measured at 1053 seconds, paid synchronously by
  * session:start AND by the post-merge hook on every `git pull`.
+ *
+ * ── An UNSTATED behaviour change, recorded because it is one ────────────────
+ *
+ * `engram import` is ALL-OR-NOTHING. Measured: a payload whose second
+ * observation has an unresolvable `session_id` fails the whole call —
+ *
+ *   engram: import observation 0: constraint failed: FOREIGN KEY constraint failed
+ *   exit=1        store unchanged — the VALID observation did not land either
+ *
+ * — while that same valid observation imports fine on its own.
+ *
+ * The old per-record loop imported records 1..k-1 and died at k, leaving a
+ * partial hydration. This one imports zero. That is arguably the better
+ * behaviour (no half-state to reason about, and the retry is a clean re-run),
+ * but it is a change and it was not declared.
+ *
+ * Note also that engram reports the failing row as `observation 0` when the
+ * offender was observation 1. That is engram's bug, not brain's; it is written
+ * down here so whoever debugs a failed import does not trust the index.
  *
  * @param {object} payload  As built by buildImportPayload.
  */
