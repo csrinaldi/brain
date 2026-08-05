@@ -19,7 +19,7 @@ import {
   buildIndexEntry,
   serializeIndex,
   serializeRecord,
-  validateRecord,
+  validateWritableRecord,
   computeRecordId,
 } from './format.mjs';
 
@@ -28,12 +28,19 @@ import {
  * JSONL line to `records/<yyyy-mm>.jsonl` (month derived from `record.ts`).
  * Fails closed: an invalid record throws and nothing is written.
  *
+ * Validates with `validateWritableRecord()`, not `validateRecord()`: this is
+ * the ONE chokepoint through which every in-tree producer creates a record
+ * (`plainfiles.mjs#save`, `engram.mjs#dualWriteRecords`, `migrate-v1.mjs`), so
+ * it is where shape rules can be enforced WITHOUT a read-path rejection
+ * bricking an already-populated consumer store (see format.mjs's read/write
+ * note, issue #404).
+ *
  * @param {object} record
  * @param {{recordsDir: string}} opts
  * @returns {{file: string, filename: string}}
  */
 export function appendRecord(record, { recordsDir }) {
-  const { valid, errors } = validateRecord(record);
+  const { valid, errors } = validateWritableRecord(record);
   if (!valid) throw new Error(`appendRecord: invalid record — ${errors.join('; ')}`);
   const filename = `${record.ts.slice(0, 7)}.jsonl`;
   const file = join(recordsDir, filename);

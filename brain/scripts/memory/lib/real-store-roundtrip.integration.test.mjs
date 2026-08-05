@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { readRecordObservations } from './store.mjs';
 import { importRecord } from './engram-import.mjs';
 import { exportObservation } from './engram-export.mjs';
-import { computeRecordId } from './format.mjs';
+import { buildRecord, computeRecordId, validateRecord, validateWritableRecord } from './format.mjs';
 
 // Same depth as engram.mjs's repoRoot (brain/scripts/memory/backends/engram.mjs):
 // this file lives at brain/scripts/memory/lib/, a sibling directory at the
@@ -79,12 +79,20 @@ test('REQ-C4-1: round-trip id-equality holds for every record in the REAL .memor
   );
 });
 
-test('REQ-C4-1: the @legacy shape (source set, no issue) — the dominant real-store case — round-trips by id', () => {
+test('REQ-C4-1: the @legacy shape (source set, no issue) — the dominant real-store case — round-trips by id', (t) => {
   const records = readRecordObservations({ recordsDir });
   const legacyRecords = records.filter((r) => r.actor === '@legacy' && r.source !== undefined && r.issue === undefined);
 
   if (legacyRecords.length === 0) {
-    console.warn('REQ-C4-1: no @legacy source-without-issue records found in the real store — skipping this sub-assertion.');
+    // Same reader, same rule as the sibling above: `console.warn` + `return` is
+    // reported ok/pass by node:test, and readRecordObservations() returns `[]`
+    // for an UNREADABLE store as well as an empty one. (Pre-existing instance
+    // of the evidence-reader-empty-on-failure class, found while fixing the two
+    // below — the same file, the same reader, the same mistake.)
+    t.skip(
+      'REQ-C4-1: no @legacy source-without-issue records found in the real store — ' +
+        '0 exercised. This is a coverage GAP, not a pass.',
+    );
     return;
   }
 
@@ -94,4 +102,116 @@ test('REQ-C4-1: the @legacy shape (source set, no issue) — the dominant real-s
   assert.equal(rejected, undefined, 'the @legacy sample must not be rejected on round-trip');
   assert.equal(skipped, undefined, 'the @legacy sample must not be skipped on round-trip');
   assert.equal(computeRecordId(exported), sample.id, '@legacy source-without-issue round-trips by id');
+});
+
+// ── issue #404 — the shape the real store cannot yet demonstrate ────────────
+// The store is 0/2157 on `issue` (measured), which is exactly WHY the defect
+// survived: the round-trip contract was green over a field no producer had
+// ever populated, and the first record to carry it turned REQ-C4-1 red.
+//
+// The test above can therefore never cover the field from committed data
+// alone, and waiting for a producer (#368) to appear would leave the contract
+// unexercised in the one direction that broke. So this derives issue-carrying
+// records FROM the real store's own records — real content bytes, real
+// `source` prose, real timestamps — rather than from a fixture. It is the
+// same deliberate real-tree read the header documents, not a second store.
+//
+// A future reader must NOT relax this to fixtures: a fixture cannot prove the
+// field survives the real store's actual `source` shapes (measured 2026-08-05:
+// 2125/2157 records carry a `source`, of which 2070 are the `@legacy`
+// migration prose, which cites no issue and so exercises exactly the render
+// path that used to drop `issue`).
+
+test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip by id', (t) => {
+  const records = readRecordObservations({ recordsDir });
+
+  if (records.length === 0) {
+    // Real skip, not a false pass. readRecordObservations() returns `[]` for an
+    // absent OR unreadable records/ (store.mjs: "NEVER throws"), so an early
+    // `return` here would report ok/pass and make "the store is clean" and "the
+    // store could not be read" indistinguishable — the
+    // evidence-reader-empty-on-failure anti-pattern. Matches the sibling above.
+    t.skip(
+      'REQ-C4-1/#404: .memory/records/ is empty or missing — 0 issue-carrying derivations ' +
+        'exercised. This is a coverage GAP, not a pass.',
+    );
+    return;
+  }
+
+  // Sampled in directory order: the first 25 with a `source` and the first 25
+  // without. NOT a spread of shapes — the store holds only 3 distinct `source`
+  // shapes in total and this slice sees 1 of them. What it does exercise is the
+  // render branch that used to drop `issue` (a `source` citing no issue), over
+  // real content bytes and real timestamps.
+  const withSource = records.filter((r) => r.source !== undefined).slice(0, 25);
+  const withoutSource = records.filter((r) => r.source === undefined).slice(0, 25);
+  const samples = [...withSource, ...withoutSource];
+  assert.ok(samples.length > 0, 'the real store must yield at least one sample record');
+
+  const failures = [];
+  for (const sample of samples) {
+    // Rebuild through buildRecord() so the id is the one this record WOULD
+    // have carried had its author populated `issue` — never a hand-computed
+    // hash, and never a second hasher.
+    const issued = buildRecord({
+      ts: sample.ts,
+      actor: sample.actor,
+      actorKind: sample.actorKind,
+      type: sample.type,
+      project: sample.project,
+      content: sample.content,
+      issue: 404,
+      ...(sample.source !== undefined ? { source: sample.source } : {}),
+    });
+    assert.equal(issued.issue, 404, 'precondition: the derived record carries the field');
+
+    const { valid, errors } = validateRecord(issued);
+    if (!valid) {
+      failures.push(`${sample.id}: derived record failed validation — ${errors.join('; ')}`);
+      continue;
+    }
+
+    const { record: exported, rejected, skipped } = exportObservation(importRecord(issued));
+    if (rejected || skipped) {
+      failures.push(`${sample.id}: round-trip was ${rejected ? 'REJECTED' : 'SKIPPED'}`);
+      continue;
+    }
+    if (exported.issue !== 404) {
+      failures.push(`${sample.id}: issue came back as ${JSON.stringify(exported.issue)}, not 404`);
+      continue;
+    }
+    const recomputedId = computeRecordId(exported);
+    if (recomputedId !== issued.id) {
+      failures.push(`${sample.id}: recomputed id '${recomputedId}' !== derived id '${issued.id}'`);
+    }
+  }
+
+  console.log(
+    `REQ-C4-1/#404: issue-carrying round-trip exercised over ${samples.length} records derived from the real store`,
+  );
+  assert.deepEqual(failures, [], `${failures.length}/${samples.length} issue-carrying records failed:\n${failures.join('\n')}`);
+});
+
+test('W1 (#404): every record in the REAL store already satisfies the write-path `source` rule', (t) => {
+  // The single-line/trimmed `source` rule (format.mjs W1) is enforced at WRITE
+  // time precisely so it can never make an existing store unreadable. This
+  // measures the claim on the one store we can measure: if brain's own history
+  // already violated it, the rule would be retroactively wrong.
+  //
+  // Honest about its reach: this is THIS repo. A consumer's `.memory/**` is
+  // consumer-owned (managed-paths.mjs's `local` array) and is not covered by
+  // any test here — which is the reason the rule is not on the read path.
+  const records = readRecordObservations({ recordsDir });
+  if (records.length === 0) {
+    t.skip(
+      'W1: .memory/records/ is empty or missing — 0 real records measured. ' +
+        'This is a coverage GAP, not a pass.',
+    );
+    return;
+  }
+  const offenders = records
+    .filter((r) => !validateWritableRecord(r).valid)
+    .map((r) => `${r.id}: ${validateWritableRecord(r).errors.join('; ')}`);
+  console.log(`W1/#404: write-path rules measured over ${records.length} real records`);
+  assert.deepEqual(offenders, [], `${offenders.length}/${records.length} real records violate a write-path rule:\n${offenders.join('\n')}`);
 });
