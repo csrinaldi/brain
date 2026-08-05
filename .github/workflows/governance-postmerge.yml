@@ -25,7 +25,20 @@ on:
   schedule:
     - cron: '0 6 * * *'
 
-permissions: { contents: write, pull-requests: write } # trusted: runs post-merge on main
+# trusted: runs post-merge on main.
+#   contents: write        — push auto-revert branches and CAS the governance cursor
+#   pull-requests: write   — open the auto-revert PR
+#   issues: write          — REQUIRED by every LOUD path, not a nicety (#462):
+#       • `gh label create` (governance:cursor-missing / :cursor-unknown /
+#         :audit-uncomputable / :revert-blocked) is the labels REST endpoint,
+#         which is scoped to issues
+#       • `gh issue create` / `gh issue comment` / `gh issue list` — the halt,
+#         uncomputable and revert-blocked alarms
+#       • `gh pr create --label size:exception` — labelling a PR goes through
+#         the ISSUES labels endpoint, so the revert path needs it too
+#     Without it the gate still fails closed but cannot TELL anyone, which is
+#     how a 12-day rung-3 outage stayed invisible.
+permissions: { contents: write, pull-requests: write, issues: write }
 
 # Defense-in-depth against overlapping runs (the CAS in cursor.mjs advanceCursor
 # is the actual guarantee; this only narrows the window). REQ-D2-12 / §5.3.
