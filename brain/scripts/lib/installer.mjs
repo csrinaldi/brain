@@ -987,7 +987,40 @@ export function createRestorePoint({ destRoot, relPaths }) {
  *   modificationDetection: 'three-way'|'degraded',
  *   refused: string[], forced: string[] }}
  */
-export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false, specialMerge = {}, abortOnCollision = false, outgoing = null, refusePaths = [], forceManaged = [] }) {
+export function copyManaged(opts) {
+  // ── The `beforeAnyWrite` invariant, owned in ONE place (#447) ───────────────
+  //
+  // `brain-upgrade.mjs` branches on this flag, and the branch it guards is not a
+  // wording preference — it is a statement of fact about the consumer's tree:
+  //
+  //     "Every managed path was rolled back to the bytes it had before the copy."
+  //
+  // That sentence must never print for a failure that happened before a restore
+  // point existed, because nothing was rolled back and an operator who reads it
+  // will not go look at their tree.
+  //
+  // The flag used to be set at exactly one site — the catch around
+  // `createRestorePoint` — while the ENTIRE read-only pre-flight pass, the REFUSE
+  // gate and the abort gate sit above it. Every throw from there fell through to
+  // the catch-all and printed the false claim. The `restorePointState` re-throw
+  // inside that same catch did too.
+  //
+  // So the invariant is inverted and hoisted: everything is "before any write"
+  // UNLESS the run is known to have reached the restore point. A new throw site
+  // added above the write loop is then covered by construction, which is the
+  // property the one-site version did not have.
+  const phase = { restorePointReached: false };
+  try {
+    return copyManagedImpl(opts, phase);
+  } catch (err) {
+    if (!phase.restorePointReached && err !== null && typeof err === 'object') {
+      try { err.beforeAnyWrite = true; } catch { /* frozen — wording stays generic */ }
+    }
+    throw err;
+  }
+}
+
+function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, specialMerge = {}, abortOnCollision = false, outgoing = null, refusePaths = [], forceManaged = [] }, phase) {
   const skipped = [];
   const collisions = [];
   const toCopy = [];  // rel paths for plain copyFileSync
@@ -1131,13 +1164,14 @@ export function copyManaged({ srcRoot, destRoot, managed, local, dryRun = false,
       // A genuinely failed snapshot: nothing was written, but it may have built part
       // of a backup first. Clear it — a refusal must not leave debris behind.
       rmSync(join(destRoot, RESTORE_POINT_DIR), { recursive: true, force: true });
-      // Tag it so the caller can say "refused, nothing was touched" instead of the
-      // write-phase wording, which would be false here in both halves.
-      if (err !== null && typeof err === 'object') {
-        try { err.beforeAnyWrite = true; } catch { /* frozen — wording stays generic */ }
-      }
+      // No `beforeAnyWrite` tag here any more: `phase.restorePointReached` is still
+      // false, so copyManaged's wrapper tags BOTH this throw and the
+      // `restorePointState` re-throw above it — which the one-site version missed.
       throw err;
     }
+    // From here on a restore point exists, so "everything was rolled back" is a
+    // claim the caller may legitimately make. Everything above this line is not.
+    phase.restorePointReached = true;
 
     try {
       for (const rel of toMerge) {

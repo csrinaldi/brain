@@ -97,9 +97,27 @@ protection was disabled in turn and the suite re-run:
 | mutation | result |
 |---|---|
 | failure thrown **before** `createRestorePoint` | path 1 red (3 assertions) |
+| a fail-fast check added to the read-only **pre-flight** | path 1 red (2 assertions) — see below |
+| the `.github/CODEOWNERS` **seed** made to fail | seed guard red in all 5 consumers |
 | REFUSE early-return removed (`copyManaged`) | path 2 red — *"THE CLOBBER #397 EXISTS TO PREVENT JUST HAPPENED"* |
 | downgrade guard disabled | path 3 red (3 assertions) |
 | corrupt-JSON pre-flight disabled | path 4 red (`--skip-merge` no longer completes) |
+
+The second and third rows were added by #447, and both were **green before it**:
+
+- The pre-flight mutation — a plausible "fail fast" regression raising the same
+  `ENOTDIR` the write loop would raise, inserted above `createRestorePoint` —
+  passed **24/24**, printing `✓ the failure happened INSIDE the write loop — the
+  restore point was reached` while no restore point was ever constructed. The
+  first row's mutation did go red, but only because making `createRestorePoint`
+  *itself* throw is the one case that set `beforeAnyWrite`. The class was named in
+  this table and not covered. #447 hoisted the flag so the whole read-only phase
+  is tagged by construction, and both rows are red now.
+- The seed mutation passed **24/24** too, including `✓ negative control: an
+  UNTOUCHED CODEOWNERS upgrades without prompting` — over a consumer that had no
+  CODEOWNERS at all. `copyManaged` skips the three-way check when the dest does
+  not exist, so nothing is `consumerModified`, so the gate cannot fire, so the run
+  exits 0 for the wrong reason.
 
 Three of those mutations are worth understanding, because they are the reason the
 assertions are written against **bytes and exit codes** rather than messages:

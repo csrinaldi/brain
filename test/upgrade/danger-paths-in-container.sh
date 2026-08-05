@@ -94,10 +94,33 @@ new_consumer() {
   # So the seed now has to prove it produced something. This is the reachability
   # half of the same defect `assert_has_evidence` catches at the other end: fix
   # the cause, and keep the detector for the causes not yet imagined.
+  #
+  # Counted over the SAME path set the fingerprint covers. An earlier form counted
+  # only brain/core + brain/scripts — which are copied with `cp -r`, the two seeds
+  # least likely to fail — while the scenarios key on `.github/CODEOWNERS` and
+  # `.claude/settings.json`, which are exactly the `|| true`-guarded single-file
+  # cps this guard exists to catch. Measured: with the CODEOWNERS cp made to fail,
+  # the whole suite stayed green at 24/24, INCLUDING the negative control that
+  # claims an untouched CODEOWNERS upgrades without prompting. It upgraded without
+  # prompting because the file was not there at all — copyManaged skips the
+  # three-way check when the dest does not exist, so nothing is consumerModified,
+  # so the REFUSE gate cannot fire, so the run exits 0 for the wrong reason.
   local seeded
-  seeded=$(find brain/core brain/scripts -type f 2>/dev/null | wc -l)
+  seeded=$(find brain/core brain/scripts .github .claude .gemini .gitattributes -type f 2>/dev/null | wc -l)
   if [ "$seeded" -eq 0 ]; then
     fail "seed produced ZERO managed files in ${dir} — every assertion below would compare two empty trees"
+    return 1
+  fi
+
+  # A count is necessary but not sufficient: the scenarios do not depend on "some
+  # files", they depend on THESE files. Naming them means a seed that silently
+  # drops one turns the run red here rather than green somewhere downstream.
+  local required missing=""
+  for required in .github/CODEOWNERS .claude/settings.json brain/core brain/scripts; do
+    [ -e "$required" ] || missing="${missing} ${required}"
+  done
+  if [ -n "$missing" ]; then
+    fail "seed in ${dir} is missing paths the scenarios assert on:${missing}"
     return 1
   fi
   return 0
@@ -117,11 +140,24 @@ new_consumer() {
 # error becomes the gate's approval" — reached inside the harness built to
 # prevent that class. Carrying the count makes the two states different values,
 # and `assert_has_evidence` below refuses the empty one.
+#
+# The count is derived from the SAME read as the hash, deliberately. Deriving it
+# from `find` while the bytes come from `xargs md5sum` means two independent
+# readers, and only one of them is guarded: if the md5sum half failed wholesale
+# the count would survive, the hash would collapse to empty, and `2:` would sail
+# through assert_has_evidence while the comparison measured zero bytes. That is
+# the same conflation one layer down.
+#
+# Counting the md5sum LINES also closes the partial case `find | wc -l` cannot
+# see: `xargs` word-splits, so a managed path containing whitespace silently
+# drops out of the hash. It would still be counted by find; it is not counted
+# here, so the count moves and the assertion notices.
 managed_fingerprint() {
-  local files count hash
+  local files lines count hash
   files=$(find brain/core brain/scripts .github .claude .gemini .gitattributes -type f 2>/dev/null | LC_ALL=C sort)
-  count=$(printf '%s' "$files" | grep -c . || true)
-  hash=$(printf '%s\n' "$files" | xargs md5sum 2>/dev/null | md5sum | cut -d' ' -f1)
+  lines=$(printf '%s\n' "$files" | xargs md5sum 2>/dev/null || true)
+  count=$(printf '%s' "$lines" | grep -c . || true)
+  hash=$(printf '%s\n' "$lines" | md5sum | cut -d' ' -f1)
   printf '%s:%s' "$count" "$hash"
 }
 
@@ -129,12 +165,20 @@ managed_fingerprint() {
 # an equality check between two nothings is not evidence of stability, it is
 # evidence that the measurement failed.
 assert_has_evidence() {
-  local fp="$1" label="$2" count="${1%%:*}"
+  local fp="$1" label="$2" count="${1%%:*}" hash="${1#*:}"
   case "$count" in
     ''|*[!0-9]*) fail "${label}: fingerprint is unreadable ('${fp}')"; return 1 ;;
   esac
-  [ "$count" -gt 0 ] && return 0
-  fail "${label}: the fingerprint covers ZERO managed files — the comparison would pass on no evidence at all"
+  if [ "$count" -le 0 ]; then
+    fail "${label}: the fingerprint covers ZERO managed files — the comparison would pass on no evidence at all"
+    return 1
+  fi
+  # The bytes half has to be checked on its own terms. A positive count with an
+  # empty or truncated hash is the state this guard exists for.
+  case "$hash" in
+    ????????????????????????????????) return 0 ;;
+  esac
+  fail "${label}: the fingerprint carries no usable hash ('${fp}') — the bytes could not be read"
   return 1
 }
 
