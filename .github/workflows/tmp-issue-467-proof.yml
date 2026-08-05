@@ -1,0 +1,124 @@
+# tmp-issue-467-proof.yml — TEMPORARY proof harness for #467. NEVER MERGED.
+#
+# Proves, by an actual run (reading the YAML is not proof), that the shipped
+# `id: audit` step of governance-postmerge.yml evaluates governance wrongly
+# when unauthenticated, and correctly when GH_TOKEN is present:
+#
+#   • Arm 1 (no token, the shipped configuration): 20/20 [FAIL], zero
+#     [FAIL-SHA], code=1 over the historical window d71a8a5..e834f1d —
+#     the exact window that walks into the #466 deadlock.
+#   • Arm 2 (GH_TOKEN present, the #467 fix): 19 [PASS] / 1 [FAIL]
+#     (d70093a, adrPresence, resurrection-suppressed), zero [FAIL-SHA],
+#     code=1 — the verdict the diagnosis on #462 measured.
+#
+# Method (the #464 pattern): the run block is EXTRACTED from the shipped
+# workflow at main (653e34e), hashed, and executed verbatim. The only delta is
+# the Actions template `${{ steps.window.outputs.range }}`, which cannot
+# expand outside a workflow render and is substituted with the fixed window.
+# The harness also asserts the fix branch's run block is byte-identical to
+# the shipped one, proving #467 touches step env only.
+
+name: tmp-issue-467-proof
+
+# Push-triggered on the harness branch itself (the #464 precedent): a workflow
+# that exists only on a topic branch is not dispatchable by filename, but a
+# push trigger both registers and fires it.
+on:
+  push:
+    branches: [tmp/issue-467-proof]
+
+# Read-only everywhere: the harness must be able to PROVE, never to mutate.
+permissions: { contents: read, pull-requests: read, issues: read }
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    env:
+      SHIPPED_SHA: 653e34e6533fc9e35ee54d102632dbd2f0892a7c
+      WINDOW: d71a8a5..e834f1d
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - id: extract
+        name: Extract the shipped audit run block (verbatim, hashed)
+        run: |
+          set -euo pipefail
+
+          extract() {
+            git show "$1:.github/workflows/governance-postmerge.yml" > "$RUNNER_TEMP/wf-$2.yml"
+            python3 - "$RUNNER_TEMP/wf-$2.yml" > "$RUNNER_TEMP/audit-$2.sh" <<'PY'
+          import sys, yaml
+          doc = yaml.safe_load(open(sys.argv[1]))
+          steps = doc["jobs"]["audit-and-revert"]["steps"]
+          [run] = [s["run"] for s in steps if s.get("id") == "audit"]
+          sys.stdout.write(run)
+          PY
+          }
+
+          extract "$SHIPPED_SHA" shipped
+          extract HEAD fixed
+
+          echo "shipped run block: $(sha256sum "$RUNNER_TEMP/audit-shipped.sh")"
+          echo "fix-branch run block: $(sha256sum "$RUNNER_TEMP/audit-fixed.sh")"
+          diff -u "$RUNNER_TEMP/audit-shipped.sh" "$RUNNER_TEMP/audit-fixed.sh" \
+            && echo "OK: the fix changes step env only — run blocks are byte-identical"
+
+          # The ONLY delta from the shipped text: substitute the Actions
+          # template for the window range with the fixed window under test.
+          python3 - "$RUNNER_TEMP/audit-shipped.sh" "$WINDOW" <<'PY'
+          import sys
+          path, window = sys.argv[1], sys.argv[2]
+          s = open(path).read()
+          # Built by concatenation: written literally, Actions would expand it
+          # at render time to the empty string (no `window` step exists here).
+          needle = "${" + "{ steps.window.outputs.range }" + "}"
+          assert s.count(needle) == 1, f"expected the range template exactly once, found {s.count(needle)}"
+          open(path, "w").write(s.replace(needle, window))
+          PY
+          echo "substituted run block: $(sha256sum "$RUNNER_TEMP/audit-shipped.sh")"
+
+      - id: unauth
+        name: Arm 1 — unauthenticated (reproduces the shipped defect)
+        run: |
+          set -euo pipefail
+          ghout="$RUNNER_TEMP/unauth.ghout"; : > "$ghout"
+          env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR=/nonexistent \
+            GITHUB_OUTPUT="$ghout" bash "$RUNNER_TEMP/audit-shipped.sh" \
+            | tee "$RUNNER_TEMP/unauth.out"
+
+          pass=$(grep -c '^\[PASS\] ' "$RUNNER_TEMP/unauth.out" || true)
+          fail=$(grep -c '^\[FAIL\] ' "$RUNNER_TEMP/unauth.out" || true)
+          sha=$(grep -c '^\[FAIL-SHA\] ' "$RUNNER_TEMP/unauth.out" || true)
+          code=$(grep '^code=' "$ghout" | cut -d= -f2)
+          echo "unauthenticated: code=$code pass=$pass fail=$fail fail-sha=$sha"
+
+          [ "$code" = "1" ] || { echo "ASSERT FAILED: expected code=1"; exit 1; }
+          [ "$fail" = "20" ] || { echo "ASSERT FAILED: expected 20 [FAIL]"; exit 1; }
+          [ "$pass" = "0" ] || { echo "ASSERT FAILED: expected 0 [PASS]"; exit 1; }
+          [ "$sha" = "0" ] || { echo "ASSERT FAILED: expected 0 [FAIL-SHA]"; exit 1; }
+          echo "REPRODUCED: unauthenticated audit reads as a governance verdict (20/20 FAIL, nothing revertible)"
+
+      - id: auth
+        name: Arm 2 — authenticated (the #467 fix)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ghout="$RUNNER_TEMP/auth.ghout"; : > "$ghout"
+          GITHUB_OUTPUT="$ghout" bash "$RUNNER_TEMP/audit-shipped.sh" \
+            | tee "$RUNNER_TEMP/auth.out"
+
+          pass=$(grep -c '^\[PASS\] ' "$RUNNER_TEMP/auth.out" || true)
+          fail=$(grep -c '^\[FAIL\] ' "$RUNNER_TEMP/auth.out" || true)
+          sha=$(grep -c '^\[FAIL-SHA\] ' "$RUNNER_TEMP/auth.out" || true)
+          code=$(grep '^code=' "$ghout" | cut -d= -f2)
+          echo "authenticated: code=$code pass=$pass fail=$fail fail-sha=$sha"
+
+          [ "$code" = "1" ] || { echo "ASSERT FAILED: expected code=1"; exit 1; }
+          [ "$pass" = "19" ] || { echo "ASSERT FAILED: expected 19 [PASS]"; exit 1; }
+          [ "$fail" = "1" ] || { echo "ASSERT FAILED: expected 1 [FAIL]"; exit 1; }
+          grep -q '^\[FAIL\] d70093a' "$RUNNER_TEMP/auth.out" \
+            || { echo "ASSERT FAILED: the single FAIL is not d70093a"; exit 1; }
+          [ "$sha" = "0" ] || { echo "ASSERT FAILED: expected 0 [FAIL-SHA]"; exit 1; }
+          echo "PROVEN: with GH_TOKEN the same step over the same window yields the measured verdict (19 PASS / 1 FAIL)"
