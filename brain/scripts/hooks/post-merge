@@ -27,7 +27,12 @@ repo_root=$(git rev-parse --show-toplevel)
 # Re-import .memory/ into local engram now that the working tree is up-to-date.
 # Uses "import" verb (engram sync --import only — no redundant git pull).
 # || true: a failed import is informational, not a merge blocker.
-node "$repo_root/brain/scripts/memory/cli.mjs" import >/dev/null 2>&1 || true
+#
+# stdout is discarded (the per-run progress line is noise on every pull), but
+# STDERR is not. A hydration that SKIPPED because engram's state was unreadable
+# reports there, and swallowing it would make the skip as invisible as the
+# duplication it replaced. `|| true` still guarantees it cannot block the merge.
+node "$repo_root/brain/scripts/memory/cli.mjs" import >/dev/null || true
 
 # Keep the derived index canonical after a merge git resolved on its own
 # (issue #330). This does NOT rescue a conflicted merge — git never fires

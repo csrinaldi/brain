@@ -596,6 +596,7 @@ export async function importMemory({
   _engramExistingTopicKeys = _defaultExistingTopicKeys,
   _engramImport = _defaultEngramImport,
   _log = console.log,
+  _warn = console.error,
   _now = () => new Date().toISOString().replace("T", " ").slice(0, 19),
 } = {}) {
   _requireEngram();
@@ -639,13 +640,17 @@ export async function importMemory({
   } catch (err) {
     // execFileSync captures engram's stderr on `pipe`; surfacing it is the whole
     // point — #433 survived as long as it did because this path runs quiet.
-    unreadable = String(err?.stderr ?? "").trim() || err?.message || String(err);
+    unreadable = explainEngramFailure(err);
   }
   if (!unreadable && !(existingTopicKeys instanceof Set)) {
     unreadable = "the reader returned no key set";
   }
   if (unreadable) {
-    _log(await t("memory.import.stateUnreadable", { reason: unreadable }));
+    // To STDERR, not stdout. The post-merge hook redirects stdout to /dev/null,
+    // so a skipped hydration on the `git pull` path would otherwise be as silent
+    // as the duplication it replaced — better, but still invisible. `|| true` in
+    // the hook keeps this from ever blocking a merge.
+    _warn(await t("memory.import.stateUnreadable", { reason: unreadable }));
     return { written: 0, skipped: 0, deferred: true };
   }
 
@@ -1130,34 +1135,149 @@ function _defaultCheckEngram() {
  *
  * ── Whose cost this is ──────────────────────────────────────────────────────
  *
- * `engram export` takes no project filter, so that 0.67s is a function of the
- * WHOLE LOCAL STORE, not of brain's share of it. Measured: 1596 observations
- * across 6 projects, of which brain is ~66% today. If the number ever needs
- * revisiting, the thing that grew is the user's store — not this repo's memory,
- * and not something brain can bound.
+ * `engram export` takes no project filter, so the read covers the WHOLE LOCAL
+ * STORE. That is a mechanical fact and it is why the cost is what it is.
  *
- * Same reason the key set is a shared namespace: 466 of the 1448 topic keys in
- * the live store are semantic keys written by `mem_save` (`skill-registry`,
+ * What is NOT true — an earlier version of this comment said it — is that the
+ * cost therefore belongs to somebody else. Re-measured against the live store:
+ * 2698 observations across 7 projects, of which brain is **2450, or 90.8%**. So
+ * this cost tracks brain's OWN record growth, near enough that treating it as
+ * external would be self-deception. (The earlier note also quoted "1596 across
+ * 6 projects" one paragraph below "2248 observations" — two figures that cannot
+ * both describe the same store. Both are gone.)
+ *
+ * The key set IS a shared namespace, and that part stands: 547 of the 2577
+ * distinct topic keys are semantic keys written by `mem_save` (`skill-registry`,
  * `sdd-init/…`), not record ids. Reading them is safe — brain ids are
  * `rec-<16 hex>` with the project inside the hash (format.mjs), so no foreign
  * key can collide with one — but the set being global is worth knowing.
+ *
+ * ── Why this validates instead of coercing ──────────────────────────────────
+ *
+ * `parsed?.observations ?? []` used to sit here, under a docstring promising the
+ * reader never returns an empty Set on failure. It could not honour that: any
+ * file that parses as JSON but carries no `observations` array yielded an empty
+ * Set, which importMemory reads as "the store is genuinely empty" and answers
+ * with a full re-import — the permanent duplication the fail-closed path exists
+ * to prevent.
+ *
+ * And the two states cannot be told apart by shape, because a genuinely empty
+ * store exports `"observations": null` (measured, engram v1.17.0):
+ *
+ *     { "version": "0.1.0", "sessions": null, "observations": null, … }
+ *
+ * So `null` is legitimately empty and must import everything. The dangerous case
+ * is a schema this reader was not written against.
+ *
+ * The cross-check is engram's own count, printed on STDOUT (`Observations: N`)
+ * and previously discarded by `stdio: [_, "ignore", _]`. Comparing it against
+ * what was parsed catches a moved schema without a version allowlist — which
+ * would go stale on the next engram release and fail closed for no reason.
  *
  * @returns {Set<string>}  The keys, or THROWS if the state could not be read.
  *   Never an empty Set on failure: importMemory must be able to tell "the store
  *   is empty" from "the store could not be read", because its policy on the
  *   first is to import everything.
  */
+/**
+ * Turns a failed `engram` invocation into ONE readable line.
+ *
+ * engram writes an update banner to stderr on every run —
+ *
+ *     Update available: 1.17.0 -> 1.20.0
+ *     To update:
+ *       brew update && brew upgrade engram
+ *       …
+ *     engram: pragma "PRAGMA journal_mode = WAL": unable to open database file
+ *
+ * — so the raw stderr is a five-line blob with the actual cause LAST, and it
+ * gets interpolated mid-sentence into a one-line template. Prefer the binary's
+ * own `engram:`-prefixed diagnostics; failing that, the last non-empty line;
+ * failing that, whatever the Error carries.
+ *
+ * @param {unknown} err
+ * @returns {string}
+ */
+function explainEngramFailure(err) {
+  const lines = String(err?.stderr ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const diagnostics = lines.filter((l) => l.startsWith("engram:"));
+  return (
+    diagnostics.join(" ") ||
+    lines[lines.length - 1] ||
+    err?.message ||
+    String(err)
+  );
+}
+
+/**
+ * The validation half of `_defaultExistingTopicKeys`, as a PURE function.
+ *
+ * Split out because the guard was unreachable from the suite: every test injects
+ * `_engramExistingTopicKeys`, so the default reader — the only place the
+ * cross-check lived — was never executed. Measured: neutralising the comparison
+ * to `if (false && …)` left the whole suite at **2416/2416 green**. The
+ * schema-drift proof existed, but as a MANUAL act, not a regression guard.
+ *
+ * That is the same defect this file's own history is about. #445 shipped a
+ * docstring promising "never an empty Set on failure" that the code could not
+ * keep; shipping the guard against that class with nothing pinning it would
+ * repeat the shape one layer up. An absent assertion and a vacuous one fail
+ * identically.
+ *
+ * @param {string} stdout        What `engram export` printed (carries `Observations: N`).
+ * @param {string} fileContents  The exported JSON.
+ * @returns {Set<string>}  Topic keys. THROWS if the export cannot be confirmed
+ *   complete — never an empty Set on failure.
+ */
+export function topicKeysFromExport(stdout, fileContents) {
+  const parsed = JSON.parse(fileContents);
+
+  const observations = parsed?.observations;
+  if (observations != null && !Array.isArray(observations)) {
+    throw new Error(
+      `engram export: 'observations' is ${typeof observations}, not an array — ` +
+      `this reader was not written against export schema ${parsed?.version ?? "(no version)"}`,
+    );
+  }
+  // `null` is the LEGITIMATELY EMPTY store — measured, engram v1.17.0 exports
+  // `"observations": null` when it holds nothing. It must yield an empty Set so
+  // first-ever hydration still imports everything.
+  const rows = observations ?? [];
+
+  // engram reports what it wrote. If that disagrees with what we parsed, the
+  // file is not what the binary thinks it exported, and an empty `rows` here
+  // would become "the store is empty" — the exact conflation being guarded.
+  const reported = /^\s*Observations:\s*(\d+)\s*$/m.exec(stdout);
+  if (!reported) {
+    throw new Error(
+      "engram export: no observation count on stdout — the export cannot be confirmed complete",
+    );
+  }
+  if (Number(reported[1]) !== rows.length) {
+    throw new Error(
+      `engram export: reported ${reported[1]} observations but the file carries ${rows.length} — the read is incomplete`,
+    );
+  }
+
+  const keys = new Set();
+  for (const o of rows) {
+    if (o?.topic_key) keys.add(o.topic_key);
+  }
+  return keys;
+}
+
 function _defaultExistingTopicKeys() {
   const dir = mkdtempSync(join(tmpdir(), "brain-engram-state-"));
   const file = join(dir, "state.json");
   try {
-    execFileSync("engram", ["export", file], { stdio: ["ignore", "ignore", "pipe"] });
-    const parsed = JSON.parse(readFileSync(file, "utf8"));
-    const keys = new Set();
-    for (const o of parsed?.observations ?? []) {
-      if (o?.topic_key) keys.add(o.topic_key);
-    }
-    return keys;
+    const stdout = execFileSync("engram", ["export", file], {
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    return topicKeysFromExport(stdout, readFileSync(file, "utf8"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
