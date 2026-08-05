@@ -79,12 +79,20 @@ test('REQ-C4-1: round-trip id-equality holds for every record in the REAL .memor
   );
 });
 
-test('REQ-C4-1: the @legacy shape (source set, no issue) — the dominant real-store case — round-trips by id', () => {
+test('REQ-C4-1: the @legacy shape (source set, no issue) — the dominant real-store case — round-trips by id', (t) => {
   const records = readRecordObservations({ recordsDir });
   const legacyRecords = records.filter((r) => r.actor === '@legacy' && r.source !== undefined && r.issue === undefined);
 
   if (legacyRecords.length === 0) {
-    console.warn('REQ-C4-1: no @legacy source-without-issue records found in the real store — skipping this sub-assertion.');
+    // Same reader, same rule as the sibling above: `console.warn` + `return` is
+    // reported ok/pass by node:test, and readRecordObservations() returns `[]`
+    // for an UNREADABLE store as well as an empty one. (Pre-existing instance
+    // of the evidence-reader-empty-on-failure class, found while fixing the two
+    // below — the same file, the same reader, the same mistake.)
+    t.skip(
+      'REQ-C4-1: no @legacy source-without-issue records found in the real store — ' +
+        '0 exercised. This is a coverage GAP, not a pass.',
+    );
     return;
   }
 
@@ -109,19 +117,32 @@ test('REQ-C4-1: the @legacy shape (source set, no issue) — the dominant real-s
 // same deliberate real-tree read the header documents, not a second store.
 //
 // A future reader must NOT relax this to fixtures: a fixture cannot prove the
-// field survives the real store's actual `source` shapes (2125/2157 carry the
-// `@legacy` migration prose, which cites no issue and so exercises exactly the
-// render path that used to drop `issue`).
+// field survives the real store's actual `source` shapes (measured 2026-08-05:
+// 2125/2157 records carry a `source`, of which 2070 are the `@legacy`
+// migration prose, which cites no issue and so exercises exactly the render
+// path that used to drop `issue`).
 
-test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip by id', () => {
+test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip by id', (t) => {
   const records = readRecordObservations({ recordsDir });
 
   if (records.length === 0) {
-    console.warn('REQ-C4-1/#404: .memory/records/ is empty — skipping the issue-carrying sub-assertion.');
+    // Real skip, not a false pass. readRecordObservations() returns `[]` for an
+    // absent OR unreadable records/ (store.mjs: "NEVER throws"), so an early
+    // `return` here would report ok/pass and make "the store is clean" and "the
+    // store could not be read" indistinguishable — the
+    // evidence-reader-empty-on-failure anti-pattern. Matches the sibling above.
+    t.skip(
+      'REQ-C4-1/#404: .memory/records/ is empty or missing — 0 issue-carrying derivations ' +
+        'exercised. This is a coverage GAP, not a pass.',
+    );
     return;
   }
 
-  // A spread of real shapes: with and without `source`, across both actors.
+  // Sampled in directory order: the first 25 with a `source` and the first 25
+  // without. NOT a spread of shapes — the store holds only 3 distinct `source`
+  // shapes in total and this slice sees 1 of them. What it does exercise is the
+  // render branch that used to drop `issue` (a `source` citing no issue), over
+  // real content bytes and real timestamps.
   const withSource = records.filter((r) => r.source !== undefined).slice(0, 25);
   const withoutSource = records.filter((r) => r.source === undefined).slice(0, 25);
   const samples = [...withSource, ...withoutSource];
@@ -171,14 +192,17 @@ test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip 
   assert.deepEqual(failures, [], `${failures.length}/${samples.length} issue-carrying records failed:\n${failures.join('\n')}`);
 });
 
-test('REQ-C4-1 / R4: no record in the REAL store smuggles an `issue #N` citation into `source` without the field', () => {
+test('REQ-C4-1 / R4: no record in the REAL store smuggles an `issue #N` citation into `source` without the field', (t) => {
   // The one shape the Fuente grammar cannot represent (format.mjs R4). Pinned
   // against the real store so the guard is proven vacuous TODAY and turns red
   // the moment a producer writes the shape — rather than being discovered as
   // another silent id drift.
   const records = readRecordObservations({ recordsDir });
   if (records.length === 0) {
-    console.warn('REQ-C4-1/R4: .memory/records/ is empty — skipping.');
+    t.skip(
+      'REQ-C4-1/R4: .memory/records/ is empty or missing — 0 real records measured. ' +
+        'This is a coverage GAP, not a pass.',
+    );
     return;
   }
   const offenders = records
