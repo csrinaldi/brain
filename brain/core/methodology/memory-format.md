@@ -1,7 +1,8 @@
 # Durable Memory Record Format (`.memory/records/`)
 
-> **status:** current | **last-reviewed:** 2026-07-07 (C1b, issue #214: `index.json` renamed to
-> `index.jsonl`; union-exclusion rationale corrected) | **owner:** @crinaldi
+> **status:** current | **last-reviewed:** 2026-08-05 (issue #404: the `**Fuente:**` line is
+> declared the shared wire slot for `issue` + `source`; `source` may not cite an undeclared
+> issue) | **owner:** @crinaldi
 > **governed by:** ADR-0017
 > (brain owns the durable format) · ADR-0002
 > (two-layer durable/live memory) · ADR-0004
@@ -94,6 +95,48 @@ hashInput = { type, actor, actorKind, ts, project, issue?, supersedes?, content 
   serialized as `null`. RFC 8785 canonicalizes `{}` and `{"issue":null}` to **different** bytes →
   a different `id` → a silent dedup break, so the validator MUST reject a record carrying a
   `null` optional field.
+- **`source` MUST NOT cite an `issue #N` the record does not declare** (issue #404). `issue` and
+  `source` share ONE `**Fuente:**` line on the wire (below), and the parse side recovers `issue`
+  from that line's text. A record with **no** `issue` whose `source` says `issue #201` therefore
+  emits a Fuente line byte-identical to the one a record with `issue: 201` emits, and comes back
+  carrying an `issue` it never had — and `issue` **is** hashed, so that is a silently different
+  `id`. The shape is not representable, so the validator MUST reject it. A record that **does**
+  declare `issue` is always representable and its `source` may cite anything, including a
+  different issue.
+
+## The `**Fuente:**` line — how `issue` and `source` share one wire slot
+
+`issue` is normative and hashed, but **no backend has a field for it**: engram observations are
+`id, sync_id, session_id, type, title, content, project, scope, topic_key, revision_count,
+duplicate_count, last_seen_at, created_at, updated_at` (ADR-0017)
+— no free-form metadata slot. So `issue` travels the same way `actor` and `supersedes` do: as
+[consolidation-protocol](consolidation-protocol.md) §4 prose inside `content`, on the single
+`**Fuente:**` line, which carries **both** `issue` and `source`.
+
+That shared slot is normative, and the rule that makes it safe is:
+
+> The rendered Fuente line MUST parse back to the record's own `issue`.
+
+Concretely (`provenance.mjs#renderFuente`):
+
+| Record | Fuente line | Recovered |
+|--------|-------------|-----------|
+| `issue: 404`, no `source` | `issue #404` | `issue: 404` |
+| `issue: 404`, `source: "PR #405"` | `issue #404 / PR #405` | `issue: 404` |
+| `issue: 201`, `source: "issue #201 / PR #204"` | `issue #201 / PR #204` (untouched — already cites it) | `issue: 201` |
+| no `issue`, `source: "migrated from chunk obs-…"` | `migrated from chunk obs-…` | no `issue` |
+
+`issue` round-trips **exactly** — it is hashed, so nothing else is acceptable. `source` may
+**widen** (it gains the citation prefix) because it is hash-excluded; that lossiness costs
+nothing the `id` contract measures, and re-rendering a widened `source` is a fixed point, so
+repeated share/import cycles never accumulate prefixes.
+
+> **Why this is written down.** The original design recorded the belief that "the source/issue
+> render asymmetry is inert, since `source` is excluded from the hash". That was true of
+> `source` and false of `issue`, and the renderer let `source` win the line outright — so every
+> record carrying both fields silently lost its `issue` and re-hashed to a different `id`. The
+> round-trip contract was green only because no producer had ever populated the field
+> (0/2157 records at the time of the fix).
 
 ## Concurrent-append merge policy
 
@@ -200,7 +243,8 @@ record is lossy in both directions. This enumeration is the migration contract f
 1. `actor` — no engram field; only the `**Actor:**` prose line. (`session_id` /
    chunk-level `created_by` are not the record author.)
 2. `actorKind` — only the `(humano)/(agente)` text; not a field.
-3. `issue` — no field; only the `**Fuente:** issue #N` prose.
+3. `issue` — no field; only the `**Fuente:** issue #N` prose (see "The `**Fuente:**` line"
+   above — that prose IS the transport, and it is lossless for `issue` by construction).
 4. `supersedes` — no field; only the `**Supersede:**` prose (harness `mem_judge` relations are
    not present in the exported chunk).
 5. `source` — same `**Fuente:**` prose.

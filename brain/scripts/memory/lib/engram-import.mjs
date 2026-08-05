@@ -7,8 +7,20 @@
 // shared renderProvenance(), and maps `ts` back to engram's naive timestamp
 // form. Acceptance is the id-equality round-trip (design.md Decision 2,
 // sdd/memory-format/c4-roundtrip-equality): exportObservation(importRecord(r))
-// must reproduce computeRecordId(r) — NOT byte equality (the source/issue
-// render asymmetry is inert, since `source` is excluded from the hash).
+// must reproduce computeRecordId(r) — NOT byte equality.
+//
+// CORRECTED (issue #404 — this header previously read "the source/issue render
+// asymmetry is inert, since `source` is excluded from the hash"). That was true
+// of `source` and false of `issue`, and the two are not independent: the
+// observation shape below has NO field for either (ADR-0017: engram observations
+// are `id, sync_id, session_id, type, title, content, project, scope, topic_key,
+// revision_count, duplicate_count, last_seen_at, created_at, updated_at` — no
+// free-form slot), so BOTH travel inside ONE `**Fuente:**` line in `content`.
+// `source` losing bytes there is indeed inert. `issue` being DROPPED there is
+// not: `issue` IS in the hashInput (format.mjs#computeRecordId), so the
+// round-tripped record hashed to a different id. renderFuente()
+// (provenance.mjs) now guarantees the emitted line always parses back to the
+// record's own `issue`; `source` may still widen, and that part stays inert.
 
 import { renderProvenance } from './provenance.mjs';
 

@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { readRecordObservations } from './store.mjs';
 import { importRecord } from './engram-import.mjs';
 import { exportObservation } from './engram-export.mjs';
-import { computeRecordId } from './format.mjs';
+import { buildRecord, computeRecordId, validateRecord } from './format.mjs';
 
 // Same depth as engram.mjs's repoRoot (brain/scripts/memory/backends/engram.mjs):
 // this file lives at brain/scripts/memory/lib/, a sibling directory at the
@@ -94,4 +94,95 @@ test('REQ-C4-1: the @legacy shape (source set, no issue) — the dominant real-s
   assert.equal(rejected, undefined, 'the @legacy sample must not be rejected on round-trip');
   assert.equal(skipped, undefined, 'the @legacy sample must not be skipped on round-trip');
   assert.equal(computeRecordId(exported), sample.id, '@legacy source-without-issue round-trips by id');
+});
+
+// ── issue #404 — the shape the real store cannot yet demonstrate ────────────
+// The store is 0/2157 on `issue` (measured), which is exactly WHY the defect
+// survived: the round-trip contract was green over a field no producer had
+// ever populated, and the first record to carry it turned REQ-C4-1 red.
+//
+// The test above can therefore never cover the field from committed data
+// alone, and waiting for a producer (#368) to appear would leave the contract
+// unexercised in the one direction that broke. So this derives issue-carrying
+// records FROM the real store's own records — real content bytes, real
+// `source` prose, real timestamps — rather than from a fixture. It is the
+// same deliberate real-tree read the header documents, not a second store.
+//
+// A future reader must NOT relax this to fixtures: a fixture cannot prove the
+// field survives the real store's actual `source` shapes (2125/2157 carry the
+// `@legacy` migration prose, which cites no issue and so exercises exactly the
+// render path that used to drop `issue`).
+
+test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip by id', () => {
+  const records = readRecordObservations({ recordsDir });
+
+  if (records.length === 0) {
+    console.warn('REQ-C4-1/#404: .memory/records/ is empty — skipping the issue-carrying sub-assertion.');
+    return;
+  }
+
+  // A spread of real shapes: with and without `source`, across both actors.
+  const withSource = records.filter((r) => r.source !== undefined).slice(0, 25);
+  const withoutSource = records.filter((r) => r.source === undefined).slice(0, 25);
+  const samples = [...withSource, ...withoutSource];
+  assert.ok(samples.length > 0, 'the real store must yield at least one sample record');
+
+  const failures = [];
+  for (const sample of samples) {
+    // Rebuild through buildRecord() so the id is the one this record WOULD
+    // have carried had its author populated `issue` — never a hand-computed
+    // hash, and never a second hasher.
+    const issued = buildRecord({
+      ts: sample.ts,
+      actor: sample.actor,
+      actorKind: sample.actorKind,
+      type: sample.type,
+      project: sample.project,
+      content: sample.content,
+      issue: 404,
+      ...(sample.source !== undefined ? { source: sample.source } : {}),
+    });
+    assert.equal(issued.issue, 404, 'precondition: the derived record carries the field');
+
+    const { valid, errors } = validateRecord(issued);
+    if (!valid) {
+      failures.push(`${sample.id}: derived record failed validation — ${errors.join('; ')}`);
+      continue;
+    }
+
+    const { record: exported, rejected, skipped } = exportObservation(importRecord(issued));
+    if (rejected || skipped) {
+      failures.push(`${sample.id}: round-trip was ${rejected ? 'REJECTED' : 'SKIPPED'}`);
+      continue;
+    }
+    if (exported.issue !== 404) {
+      failures.push(`${sample.id}: issue came back as ${JSON.stringify(exported.issue)}, not 404`);
+      continue;
+    }
+    const recomputedId = computeRecordId(exported);
+    if (recomputedId !== issued.id) {
+      failures.push(`${sample.id}: recomputed id '${recomputedId}' !== derived id '${issued.id}'`);
+    }
+  }
+
+  console.log(
+    `REQ-C4-1/#404: issue-carrying round-trip exercised over ${samples.length} records derived from the real store`,
+  );
+  assert.deepEqual(failures, [], `${failures.length}/${samples.length} issue-carrying records failed:\n${failures.join('\n')}`);
+});
+
+test('REQ-C4-1 / R4: no record in the REAL store smuggles an `issue #N` citation into `source` without the field', () => {
+  // The one shape the Fuente grammar cannot represent (format.mjs R4). Pinned
+  // against the real store so the guard is proven vacuous TODAY and turns red
+  // the moment a producer writes the shape — rather than being discovered as
+  // another silent id drift.
+  const records = readRecordObservations({ recordsDir });
+  if (records.length === 0) {
+    console.warn('REQ-C4-1/R4: .memory/records/ is empty — skipping.');
+    return;
+  }
+  const offenders = records
+    .filter((r) => !validateRecord(r).valid)
+    .map((r) => `${r.id}: ${validateRecord(r).errors.join('; ')}`);
+  assert.deepEqual(offenders, [], `${offenders.length}/${records.length} real records fail validateRecord:\n${offenders.join('\n')}`);
 });

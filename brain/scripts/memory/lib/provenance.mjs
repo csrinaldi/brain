@@ -34,6 +34,22 @@ const SUPERSEDE_LINE_RE = new RegExp(`^${escapeMarker(SUPERSEDE_MARKER)}\\s*(.+)
 const ISSUE_IN_FUENTE_RE = /issue #(\d+)/;
 
 /**
+ * issueFromFuente() — the SINGLE rule for "which `issue` does this Fuente text
+ * carry". Both halves of the pair use it: parseProvenance() to RECOVER the
+ * field, and renderProvenance() to CHECK that the line it is about to emit
+ * parses back to the record's own `issue`. Never two independently-typed
+ * notions of "this text mentions the issue" — the same one-grammar discipline
+ * this module's header declares for the markers themselves.
+ *
+ * @param {string|undefined} text  the Fuente line's text (marker already stripped)
+ * @returns {number|undefined} the cited issue number, or `undefined` if none
+ */
+export function issueFromFuente(text) {
+  const match = ISSUE_IN_FUENTE_RE.exec(text ?? '');
+  return match ? Number(match[1]) : undefined;
+}
+
+/**
  * parseProvenance() — recover `{actor, actorKind, issue?, supersedes?, source?}`
  * from §4 prose, plus the CLEANED content (the provenance block + its one
  * blank-line separator removed).
@@ -82,8 +98,8 @@ export function parseProvenance(content) {
   const fuenteMatch = FUENTE_LINE_RE.exec(lines[idx] ?? '');
   if (fuenteMatch) {
     result.source = fuenteMatch[1].trim();
-    const issueMatch = ISSUE_IN_FUENTE_RE.exec(result.source);
-    if (issueMatch) result.issue = Number(issueMatch[1]);
+    const issue = issueFromFuente(result.source);
+    if (issue !== undefined) result.issue = issue;
     idx += 1;
   }
 
@@ -103,6 +119,36 @@ export function parseProvenance(content) {
 }
 
 /**
+ * renderFuente() — compose the Fuente line's text from BOTH structured
+ * provenance fields it carries, `issue` and `source`.
+ *
+ * The asymmetry that governs this function: `issue` IS part of the record's
+ * id hashInput (format.mjs#computeRecordId), `source` is NOT. So the line
+ * this emits is only correct if `issueFromFuente()` maps it back to the
+ * record's own `issue` — anything else silently changes the id on re-import
+ * (issue #404). `source`, being hash-excluded, may round-trip lossily: a
+ * prepended citation widens it, which costs nothing the contract measures.
+ *
+ * The three shapes:
+ *   - no `issue`             → `source` verbatim (the whole real store today,
+ *                              incl. the `@legacy` migration prose)
+ *   - `issue`, no `source`   → `issue #N`
+ *   - both                   → `source` untouched WHEN it already cites
+ *                              exactly this issue (the canonical
+ *                              `"issue #201 / PR #204"` shape of ADR-0017);
+ *                              otherwise `issue #N / <source>`, which is that
+ *                              same canonical shape, built.
+ *
+ * @param {{issue?:number, source?:string}} fields
+ * @returns {string|undefined} the Fuente text, or `undefined` for no Fuente line
+ */
+function renderFuente({ issue, source }) {
+  if (issue === undefined) return source;
+  if (source === undefined) return `issue #${issue}`;
+  return issueFromFuente(source) === issue ? source : `issue #${issue} / ${source}`;
+}
+
+/**
  * renderProvenance() — the inverse of parseProvenance(): re-serialize a
  * record's structured provenance fields back into §4 prose, prepended to
  * `content`. Fields are rendered in Actor → Fuente → Supersede order,
@@ -111,10 +157,17 @@ export function parseProvenance(content) {
  * line).
  *
  * Round-trip note: `source` is the literal Fuente text; `issue` is a
- * structured extraction FROM that text on the parse side. Passing a `source`
- * whose embedded `issue #N` matches the `issue` field (the natural case,
- * since both come from one Fuente line in practice) round-trips exactly via
- * parseProvenance(renderProvenance(record)) — the mandatory property test.
+ * structured extraction FROM that text on the parse side. renderFuente()
+ * (above) guarantees the emitted line always yields this record's `issue`
+ * back, so `parseProvenance(renderProvenance(record)).issue === record.issue`
+ * for EVERY record the format admits — the property the id contract needs.
+ * `source` may widen; it is hash-excluded and free-form by design.
+ *
+ * NOT representable, and rejected at the schema instead (format.mjs
+ * #validateRecord): a record with NO `issue` whose `source` nonetheless cites
+ * `issue #N`. Its Fuente line is byte-identical to the one a record with
+ * `issue: N` emits, so no renderer could distinguish them — the domain is
+ * restricted rather than the grammar made ambiguous.
  *
  * @param {{actor?:string, actorKind?:string, issue?:number, supersedes?:string,
  *          source?:string, content:string}} record
@@ -127,10 +180,9 @@ export function renderProvenance({ actor, actorKind, issue, supersedes, source, 
     if (!label) throw new Error(`renderProvenance: unknown actorKind '${actorKind}'`);
     lines.push(`${ACTOR_MARKER} ${actor} (${label})`);
   }
-  if (source !== undefined) {
-    lines.push(`${FUENTE_MARKER} ${source}`);
-  } else if (issue !== undefined) {
-    lines.push(`${FUENTE_MARKER} issue #${issue}`);
+  const fuente = renderFuente({ issue, source });
+  if (fuente !== undefined) {
+    lines.push(`${FUENTE_MARKER} ${fuente}`);
   }
   if (supersedes !== undefined) {
     lines.push(`${SUPERSEDE_MARKER} ${supersedes}`);

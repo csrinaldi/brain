@@ -12,8 +12,13 @@
 //   R1 — index.jsonl: one entry per physical line, sorted by id, deterministic (serializeIndex).
 //   R2 — a non-empty `title` is folded into `content` as a bold prefix BEFORE hashing (buildRecord).
 //   R3 — absent optional fields (`issue`, `supersedes`, `source`) are OMITTED — never `null` (buildRecord, validateRecord).
+//   R4 — a `source` citing `issue #N` REQUIRES `issue: N` (validateRecord) — the
+//        transport encodes both into one `**Fuente:**` line, so the alternative is a
+//        record that comes back carrying an `issue` it never had (issue #404).
 
 import { createHash } from 'node:crypto';
+
+import { issueFromFuente } from './provenance.mjs';
 
 /** The seven-member `type` enum (REQ-MF-1). */
 export const RECORD_TYPES = [
@@ -136,6 +141,24 @@ export function validateRecord(record) {
   }
   if (typeof record.actor === 'string' && EMAIL_ACTOR_RE.test(record.actor)) {
     errors.push(`actor looks like an email address, not a stable handle: '${record.actor}'`);
+  }
+  // R4 — free-form `source` must not smuggle a structured `issue` the record
+  // does not declare. Both fields render into ONE `**Fuente:**` line, and the
+  // parse side recovers `issue` from that line's text; so a record whose
+  // `source` cites `issue #N` while `issue` is ABSENT emits a line
+  // byte-identical to the one `issue: N` emits, and comes back carrying an
+  // `issue` it never had. `issue` IS hashed, so that is a silently different
+  // `id` — the same class as R3's `null` optionals, rejected for the same
+  // reason (issue #404). A record whose `issue` is present is always
+  // representable: renderFuente() prepends the citation when `source` does not
+  // already carry it, so a DIFFERING mention in `source` is legal prose.
+  if (record.issue === undefined && typeof record.source === 'string') {
+    const cited = issueFromFuente(record.source);
+    if (cited !== undefined) {
+      errors.push(
+        `source cites 'issue #${cited}' but the 'issue' field is absent — set issue: ${cited} (R4)`,
+      );
+    }
   }
   return { valid: errors.length === 0, errors };
 }

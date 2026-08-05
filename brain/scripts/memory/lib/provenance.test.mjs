@@ -8,7 +8,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseProvenance, renderProvenance, ACTOR_MARKER, FUENTE_MARKER, SUPERSEDE_MARKER } from './provenance.mjs';
+import {
+  parseProvenance,
+  renderProvenance,
+  issueFromFuente,
+  ACTOR_MARKER,
+  FUENTE_MARKER,
+  SUPERSEDE_MARKER,
+} from './provenance.mjs';
 
 // ── Markers are shared constants (never duplicated string literals) ─────────
 
@@ -114,6 +121,72 @@ test('renderProvenance: renders all three lines in Actor/Fuente/Supersede order'
   );
 });
 
+// ── issue #404: the Fuente line carries BOTH `issue` and `source` ───────────
+// `issue` is in the id hashInput; `source` is not. `source` used to WIN the
+// single Fuente line outright, so any record carrying both — where `source`
+// did not happen to cite that same issue — re-imported WITHOUT its `issue`
+// and hashed to a different id, turning REQ-C4-1 red.
+
+test('renderProvenance: #404 — issue + a source that does NOT cite it renders BOTH (source no longer wins)', () => {
+  const rendered = renderProvenance({
+    actor: '@crinaldi',
+    actorKind: 'human',
+    issue: 404,
+    source: 'PR #405',
+    content: 'Body.',
+  });
+  assert.equal(rendered, '**Actor:** @crinaldi (humano)\n**Fuente:** issue #404 / PR #405\n\nBody.');
+  assert.equal(parseProvenance(rendered).issue, 404, 'the hashed field must survive the round trip');
+});
+
+test('renderProvenance: #404 — a source ALREADY citing exactly this issue is emitted untouched (no duplicated citation)', () => {
+  const rendered = renderProvenance({
+    actor: '@crinaldi',
+    actorKind: 'human',
+    issue: 201,
+    source: 'issue #201 / PR #204',
+    content: 'Body.',
+  });
+  assert.equal(rendered, '**Actor:** @crinaldi (humano)\n**Fuente:** issue #201 / PR #204\n\nBody.');
+  assert.equal(parseProvenance(rendered).issue, 201);
+});
+
+test('renderProvenance: #404 — a source citing a DIFFERENT issue is prepended, never trusted', () => {
+  // The old renderer emitted `**Fuente:** issue #999` here, so the parse side
+  // recovered 999: a silently CORRUPTED issue, worse than a dropped one.
+  // The Actor line is the block ANCHOR — without it parseProvenance() recovers
+  // nothing at all, so it must be present for this to assert anything.
+  const rendered = renderProvenance({
+    actor: '@crinaldi',
+    actorKind: 'human',
+    issue: 404,
+    source: 'issue #999',
+    content: 'Body.',
+  });
+  assert.equal(rendered, '**Actor:** @crinaldi (humano)\n**Fuente:** issue #404 / issue #999\n\nBody.');
+  assert.equal(parseProvenance(rendered).issue, 404);
+});
+
+test('renderProvenance: #404 — a record with NEITHER issue nor source emits no Fuente line (unchanged)', () => {
+  const rendered = renderProvenance({ actor: '@crinaldi', actorKind: 'human', content: 'Body.' });
+  assert.equal(rendered, '**Actor:** @crinaldi (humano)\n\nBody.');
+});
+
+test('renderProvenance: #404 — source without issue is emitted verbatim (the @legacy shape, the whole real store)', () => {
+  const source = 'provenance unknown — migrated from engram chunk obs-1034b42dcca30459';
+  const rendered = renderProvenance({ actor: '@legacy', actorKind: 'human', source, content: 'Body.' });
+  assert.equal(rendered, `**Actor:** @legacy (humano)\n**Fuente:** ${source}\n\nBody.`);
+});
+
+test('issueFromFuente: ONE extraction rule, shared by both halves of the pair', () => {
+  assert.equal(issueFromFuente('issue #78 / MR !72'), 78);
+  assert.equal(issueFromFuente('issue #404'), 404);
+  assert.equal(issueFromFuente('PR #405'), undefined, '# alone is not an issue citation');
+  assert.equal(issueFromFuente('provenance unknown — migrated from engram chunk obs-abc'), undefined);
+  assert.equal(issueFromFuente(''), undefined);
+  assert.equal(issueFromFuente(undefined), undefined);
+});
+
 // ── BLOCKER-1: provenance is ONLY the leading block — body content that ────
 // happens to contain marker-shaped lines must never be scraped, and the
 // round trip must be byte-lossless. Repro: a record whose BODY contains
@@ -165,6 +238,36 @@ const FIXTURES = [
     supersedes: 'observación anterior "Spring prohibido"',
     content: 'A record with actor + supersede declared — no Fuente.',
   },
+  {
+    // issue #404: `issue` alongside a `source` that does NOT cite it. The
+    // render side used to let `source` WIN and drop `issue` entirely.
+    actor: '@crinaldi',
+    actorKind: 'human',
+    issue: 404,
+    source: 'PR #405',
+    content: 'The shape that broke REQ-C4-1: issue + a source citing something else.',
+    // `source` is hash-excluded and widens by design — asserted separately below.
+    sourceRoundTripsTo: 'issue #404 / PR #405',
+  },
+  {
+    // issue #404: `issue` alongside a `source` citing a DIFFERENT issue. The
+    // old render emitted only `source`, so the parse side recovered 999 — a
+    // silently CORRUPTED `issue`, not merely a dropped one.
+    actor: 'claude-sonnet-4-6',
+    actorKind: 'agent',
+    issue: 404,
+    source: 'superseded by issue #999',
+    content: 'issue + a source citing a different issue.',
+    sourceRoundTripsTo: 'issue #404 / superseded by issue #999',
+  },
+  {
+    // issue #404: `issue` with no `source` at all.
+    actor: '@crinaldi',
+    actorKind: 'human',
+    issue: 368,
+    content: 'issue alone, no source text.',
+    sourceRoundTripsTo: 'issue #368',
+  },
 ];
 
 for (const [i, fixture] of FIXTURES.entries()) {
@@ -173,10 +276,21 @@ for (const [i, fixture] of FIXTURES.entries()) {
     const recovered = parseProvenance(rendered);
     assert.equal(recovered.actor, fixture.actor);
     assert.equal(recovered.actorKind, fixture.actorKind);
+    // `issue` is EXACT — it is in the id hashInput (format.mjs#computeRecordId),
+    // so a dropped or altered value is a different record id (issue #404).
     assert.equal(recovered.issue, fixture.issue);
     assert.equal(recovered.supersedes, fixture.supersedes);
-    assert.equal(recovered.source, fixture.source);
+    // `source` is hash-excluded, so it may widen to carry the issue citation.
+    assert.equal(recovered.source, fixture.sourceRoundTripsTo ?? fixture.source);
     assert.equal(recovered.content, fixture.content);
+  });
+
+  test(`property: render is idempotent from the second pass on — fixture ${i}`, () => {
+    // The widened `source` must be a FIXED POINT: re-rendering the recovered
+    // record may not keep prepending citations on every share/import cycle.
+    const once = renderProvenance(fixture);
+    const twice = renderProvenance(parseProvenance(once));
+    assert.equal(twice, once);
   });
 }
 

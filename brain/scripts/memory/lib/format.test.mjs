@@ -138,6 +138,38 @@ test('validateRecord: rejects a null optional field (R3)', () => {
   assert.ok(errors.some((e) => e.includes('issue')));
 });
 
+// ── R4 (issue #404): `source` may not smuggle an `issue` the record lacks ────
+// Both fields render into ONE `**Fuente:**` line, and the parse side recovers
+// `issue` from that line's text. A record with no `issue` whose `source` cites
+// `issue #N` emits a line byte-identical to the one `issue: N` emits, so it
+// comes back carrying an issue it never had — and `issue` IS hashed, so that
+// is a silently different id. Unrepresentable, therefore rejected.
+
+test('validateRecord: R4 rejects a source citing `issue #N` while the issue field is absent', () => {
+  const rec = buildRecord({ ...base, source: 'issue #201 / PR #204' });
+  assert.equal(rec.issue, undefined, 'precondition: buildRecord does not infer issue from source');
+  const { valid, errors } = validateRecord(rec);
+  assert.equal(valid, false);
+  assert.ok(errors.some((e) => e.includes('R4') && e.includes('201')), `errors were: ${errors.join('; ')}`);
+});
+
+test('validateRecord: R4 accepts the same source once the issue field declares it', () => {
+  const { valid } = validateRecord(buildRecord({ ...base, issue: 201, source: 'issue #201 / PR #204' }));
+  assert.equal(valid, true);
+});
+
+test('validateRecord: R4 accepts a source citing a DIFFERENT issue — that shape IS representable', () => {
+  // renderFuente() prepends the record's own citation, so the prose mention is
+  // legal and the hashed field still round-trips. Only ABSENCE is rejected.
+  const { valid } = validateRecord(buildRecord({ ...base, issue: 404, source: 'regression from issue #999' }));
+  assert.equal(valid, true);
+});
+
+test('validateRecord: R4 leaves the @legacy migration source alone (the whole real store)', () => {
+  const rec = buildRecord({ ...base, source: 'provenance unknown — migrated from engram chunk obs-1034b42dcca30459' });
+  assert.equal(validateRecord(rec).valid, true);
+});
+
 test('validateRecord: flags an email-shaped actor (REQ-MF-5 partial heuristic)', () => {
   const rec = { ...buildRecord({ ...base }), actor: 'someone@example.com' };
   const { valid, errors } = validateRecord(rec);

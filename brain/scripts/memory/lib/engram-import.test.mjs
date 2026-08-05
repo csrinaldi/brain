@@ -59,6 +59,52 @@ test('importRecord: round-trip preserves id — issue WITHOUT source (Fuente ren
   assert.equal(record.source, undefined);
 });
 
+// ── issue #404 — the shapes that used to DROP or CORRUPT `issue` ────────────
+// `issue` is in the hashInput and had no home in the engram observation shape
+// (ADR-0017), so it travels inside the one `**Fuente:**` line — which `source`
+// used to win outright.
+
+test('importRecord: #404 — round-trip preserves id — issue + a source that does NOT cite it (the REQ-C4-1 breaker)', () => {
+  const record = buildRecord({
+    ...base,
+    type: 'session_summary',
+    content: 'A session summary scoped to an issue, sourced from the PR that closed it.',
+    issue: 404,
+    source: 'PR #405',
+    title: 'Session summary',
+  });
+  assert.equal(record.issue, 404, 'precondition: the record carries the field');
+  assert.equal(roundTripId(record), record.id);
+
+  const reExported = exportObservation(importRecord(record)).record;
+  assert.equal(reExported.issue, 404, 'the hashed field is recovered, not dropped');
+  // `source` widens to carry the citation — inert, it is hash-excluded.
+  assert.equal(reExported.source, 'issue #404 / PR #405');
+});
+
+test('importRecord: #404 — round-trip preserves id — issue + a source citing a DIFFERENT issue', () => {
+  const record = buildRecord({
+    ...base,
+    type: 'bugfix',
+    content: 'A fix for one issue, whose provenance prose cites another.',
+    issue: 404,
+    source: 'regression from issue #999',
+  });
+  assert.equal(roundTripId(record), record.id);
+  const reExported = exportObservation(importRecord(record)).record;
+  assert.equal(reExported.issue, 404, 'the record its OWN issue wins over the prose citation');
+});
+
+test('importRecord: #404 — a record with NEITHER issue nor source is unchanged by the fix', () => {
+  const record = buildRecord({ ...base, type: 'discovery', content: 'No provenance optionals at all.' });
+  assert.equal(record.issue, undefined);
+  assert.equal(record.source, undefined);
+  assert.equal(roundTripId(record), record.id);
+  const reExported = exportObservation(importRecord(record)).record;
+  assert.equal(reExported.issue, undefined, 'no issue may be fabricated');
+  assert.equal(reExported.source, undefined, 'no source may be fabricated');
+});
+
 test('importRecord: round-trip preserves id — the @legacy fallback shape (arbitrary source prose, no issue/supersedes)', () => {
   const record = buildRecord({
     ...base,
