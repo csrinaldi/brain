@@ -211,3 +211,42 @@ test('parseProvenance: valid Actor + malformed Fuente → actor recovered, the m
   assert.equal(parsed.source, undefined, 'an empty Fuente line is not a source');
   assert.equal(parsed.content, `${FUENTE_MARKER}\nbody line`, 'the malformed optional line remains in body');
 });
+
+// ── #404: `issue` must survive the round trip REGARDLESS of what `source` says ──
+//
+// `issue` is a structured field and part of the record id's hashInput; `source`
+// is incidental prose excluded from it. The old render dropped `issue` entirely
+// whenever `source` was present, and the parse side extracts issue from the
+// FIRST `issue #N` in the Fuente text — so a source mentioning a DIFFERENT
+// issue did not just lose the field, it silently REWROTE it. Measured on the
+// real transport: issue 402 + source "issue #999 backfill" round-tripped as
+// issue 999.
+
+test('#404: issue + source WITHOUT issue text — issue survives the round trip', () => {
+  const record = { actor: '@t', actorKind: 'human', issue: 402, source: 'plainfiles save on vm', content: 'body' };
+  const back = parseProvenance(renderProvenance(record));
+  assert.equal(back.issue, 402, 'a source with no issue text must not DROP the structured field');
+  assert.equal(back.content, 'body');
+});
+
+test('#404: issue + source naming a DIFFERENT issue — ours wins, never silently rewritten', () => {
+  const record = { actor: '@t', actorKind: 'human', issue: 402, source: 'issue #999 backfill', content: 'body' };
+  const back = parseProvenance(renderProvenance(record));
+  assert.equal(back.issue, 402, 'the record field is authoritative — the prose must not rewrite 402 into 999');
+});
+
+test('#404: issue + source already naming the SAME issue — unchanged, no duplicate prefix', () => {
+  const record = { actor: '@t', actorKind: 'human', issue: 402, source: 'issue #402 / PR #403', content: 'body' };
+  const rendered = renderProvenance(record);
+  const back = parseProvenance(rendered);
+  assert.equal(back.issue, 402);
+  assert.equal(back.source, 'issue #402 / PR #403', 'a source that already carries the issue must render as-is');
+});
+
+test('#404: the repaired form is STABLE — a second round trip changes nothing', () => {
+  const record = { actor: '@t', actorKind: 'human', issue: 402, source: 'plainfiles save on vm', content: 'body' };
+  const once = parseProvenance(renderProvenance(record));
+  const twice = parseProvenance(renderProvenance({ ...once, actor: '@t', actorKind: 'human' }));
+  assert.equal(twice.issue, once.issue);
+  assert.equal(twice.source, once.source, 'the prefix must not accumulate across round trips');
+});

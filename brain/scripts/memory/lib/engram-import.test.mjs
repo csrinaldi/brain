@@ -125,3 +125,30 @@ test('importRecord: created_at is the engram-naive mapping of the record ts', ()
   const observation = importRecord(record);
   assert.equal(observation.created_at, '2026-07-01 01:19:12');
 });
+
+// ── #404: REQ-C4-1 at the transport level — `issue` survives with id equality ──
+//
+// `issue` is part of the id hashInput, and the transport's only carrier for it
+// is the Fuente prose. The defect: with a `source` present, the render let the
+// prose decide — a source with no `issue #N` dropped the field, and a source
+// naming a DIFFERENT issue rewrote it (402 in, 999 out). Either way the
+// round-tripped record recomputed to a DIFFERENT id, which is exactly what
+// REQ-C4-1's real-store test guards — and why #368 could not populate the
+// field without turning that suite red.
+test('#404: a record with issue round-trips the transport with id equality, whatever the source says', () => {
+  const shapes = [
+    { issue: 402 },
+    { issue: 402, source: 'plainfiles save on vm' },
+    { issue: 402, source: 'issue #402 / PR #403' },
+    { issue: 402, source: 'issue #999 backfill' },
+  ];
+  for (const extra of shapes) {
+    const record = buildRecord({ ...base, content: 'body text', ...extra });
+    const back = exportObservation({ ...importRecord(record), sync_id: 'obs-x', id: 1 });
+    assert.ok(back.record, `shape ${JSON.stringify(extra)} must export a record`);
+    assert.equal(back.record.issue, 402,
+      `shape ${JSON.stringify(extra)}: issue must survive — dropped or rewritten means #368 stays impossible`);
+    assert.equal(computeRecordId(back.record), record.id,
+      `shape ${JSON.stringify(extra)}: REQ-C4-1 id equality`);
+  }
+});

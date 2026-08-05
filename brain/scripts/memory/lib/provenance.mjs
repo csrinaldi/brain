@@ -111,10 +111,18 @@ export function parseProvenance(content) {
  * line).
  *
  * Round-trip note: `source` is the literal Fuente text; `issue` is a
- * structured extraction FROM that text on the parse side. Passing a `source`
- * whose embedded `issue #N` matches the `issue` field (the natural case,
- * since both come from one Fuente line in practice) round-trips exactly via
- * parseProvenance(renderProvenance(record)) — the mandatory property test.
+ * structured extraction FROM that text on the parse side — specifically the
+ * FIRST `issue #N` match. That asymmetry is what #404 was about: `issue` is a
+ * structured field inside the record id's hashInput, `source` is incidental
+ * prose excluded from it, and the old render let the prose decide. A source
+ * with no `issue #N` DROPPED the field; a source naming a different issue
+ * silently REWROTE it (402 in, 999 out — measured on the real transport).
+ *
+ * So when both are present and the source's first `issue #N` is not the
+ * record's, the issue is prepended to the Fuente line. The parse side needs
+ * no change — first match wins, so even an older parser reads the new form
+ * correctly — and the repaired form is stable: once prepended, the next
+ * render sees its own prefix as the first match and adds nothing.
  *
  * @param {{actor?:string, actorKind?:string, issue?:number, supersedes?:string,
  *          source?:string, content:string}} record
@@ -128,7 +136,11 @@ export function renderProvenance({ actor, actorKind, issue, supersedes, source, 
     lines.push(`${ACTOR_MARKER} ${actor} (${label})`);
   }
   if (source !== undefined) {
-    lines.push(`${FUENTE_MARKER} ${source}`);
+    const embedded = ISSUE_IN_FUENTE_RE.exec(source);
+    const carriesIssue = issue === undefined || (embedded !== null && Number(embedded[1]) === issue);
+    lines.push(carriesIssue
+      ? `${FUENTE_MARKER} ${source}`
+      : `${FUENTE_MARKER} issue #${issue} · ${source}`);
   } else if (issue !== undefined) {
     lines.push(`${FUENTE_MARKER} issue #${issue}`);
   }
