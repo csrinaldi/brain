@@ -54,6 +54,37 @@ test('appendRecord: rejects an invalid record (fails closed, does not write)', (
   assert.equal(existsSync(recordsDir), false);
 });
 
+// issue #404 — appendRecord is the ONE chokepoint every in-tree producer goes
+// through (plainfiles#save, engram#dualWriteRecords, migrate-v1), so it is
+// where the Fuente-line shape rules are enforced. They are NOT on the read
+// path: `.memory/**` is consumer-owned, so a read-path rejection would make a
+// pre-existing line brick a store brain cannot migrate. rebuildIndex() below
+// must therefore still read a record appendRecord would have refused.
+
+test('appendRecord: refuses a multi-line `source` (W1) — it would spill off the Fuente line', () => {
+  const { recordsDir } = tmpMemoryDir();
+  const bad = { ...buildRecord({ ...base, content: 'x' }), source: 'see the tracker\n(context: issue #999)' };
+  assert.throws(() => appendRecord(bad, { recordsDir }), /W1/);
+  assert.equal(existsSync(recordsDir), false);
+});
+
+test('appendRecord: refuses a non-number `issue` (W2) — it re-imports under a different id', () => {
+  const { recordsDir } = tmpMemoryDir();
+  const bad = { ...buildRecord({ ...base, content: 'x' }), issue: '404' };
+  assert.throws(() => appendRecord(bad, { recordsDir }), /W2/);
+  assert.equal(existsSync(recordsDir), false);
+});
+
+test('rebuildIndex: still READS a record appendRecord would have refused (no store-wide brick)', () => {
+  const { recordsDir, indexPath } = tmpMemoryDir();
+  // Hand-written line, as a consumer store predating the W1 rule would hold.
+  const legacy = { ...buildRecord({ ...base, content: 'x' }), source: 'see the tracker\n(context: issue #999)' };
+  mkdirSync(recordsDir, { recursive: true });
+  writeFileSync(join(recordsDir, '2026-07.jsonl'), JSON.stringify(legacy) + '\n', 'utf8');
+  const { count } = rebuildIndex({ recordsDir, indexPath });
+  assert.equal(count, 1, 'a pre-existing multi-line source must not make the store unreadable');
+});
+
 // ── rebuildIndex — degenerate states (2b) ────────────────────────────────────
 
 test('rebuildIndex: absent records/ → empty index, no throw (exit-0 contract)', () => {

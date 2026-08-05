@@ -11,16 +11,16 @@
 //
 // CORRECTED (issue #404 — this header previously read "the source/issue render
 // asymmetry is inert, since `source` is excluded from the hash"). That was true
-// of `source` and false of `issue`, and the two are not independent: the
-// observation shape below has NO field for either (ADR-0017: engram observations
-// are `id, sync_id, session_id, type, title, content, project, scope, topic_key,
-// revision_count, duplicate_count, last_seen_at, created_at, updated_at` — no
-// free-form slot), so BOTH travel inside ONE `**Fuente:**` line in `content`.
-// `source` losing bytes there is indeed inert. `issue` being DROPPED there is
-// not: `issue` IS in the hashInput (format.mjs#computeRecordId), so the
-// round-tripped record hashed to a different id. renderFuente()
-// (provenance.mjs) now guarantees the emitted line always parses back to the
-// record's own `issue`; `source` may still widen, and that part stays inert.
+// of `source` and false of `issue`, and the two are not independent: the engram
+// observation shape has NO field for either and no free-form metadata slot to
+// hold one (ADR-0017's 2026-07 finding; re-checked against engram v1.20.0's
+// `observations` schema on 2026-08-05), so BOTH travel inside ONE
+// `**Fuente:**` line in `content`. `source` losing bytes there is indeed inert.
+// `issue` being DROPPED there is not: `issue` IS in the hashInput
+// (format.mjs#computeRecordId), so the round-tripped record hashed to a
+// different id. renderFuente() (provenance.mjs) now emits a line that parses
+// back to the record's own `issue` for every record whose `issue` is a number;
+// `source` may widen or narrow, and that part stays inert.
 
 import { renderProvenance } from './provenance.mjs';
 

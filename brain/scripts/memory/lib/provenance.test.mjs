@@ -178,6 +178,51 @@ test('renderProvenance: #404 — source without issue is emitted verbatim (the @
   assert.equal(rendered, `**Actor:** @legacy (humano)\n**Fuente:** ${source}\n\nBody.`);
 });
 
+// ── issue #404: the Fuente slot holds exactly ONE physical line ─────────────
+// renderProvenance() composes physical lines, so a `source` carrying a newline
+// used to push its tail into the BODY — the issue citation fell off the Fuente
+// line AND the hashed `content` gained bytes. renderFuente() narrows `source`
+// to its first trimmed line so this cannot happen for ANY input, including a
+// record already sitting in a consumer's store.
+
+test('renderProvenance: #404 — a MULTI-LINE source is narrowed to its first line, and `issue` keeps the slot', () => {
+  const rendered = renderProvenance({
+    actor: '@crinaldi',
+    actorKind: 'human',
+    issue: 404,
+    source: '\n\nissue #404',
+    content: 'Body.',
+  });
+  assert.equal(rendered, '**Actor:** @crinaldi (humano)\n**Fuente:** issue #404\n\nBody.');
+  const recovered = parseProvenance(rendered);
+  assert.equal(recovered.issue, 404, 'the hashed field must not be displaced by the source tail');
+  assert.equal(recovered.content, 'Body.', 'the hashed content must not gain the source tail');
+});
+
+test('renderProvenance: #404 — a multi-line source WITHOUT an issue keeps `content` intact', () => {
+  const rendered = renderProvenance({
+    actor: '@crinaldi',
+    actorKind: 'human',
+    source: 'see the tracker\n(context: issue #999)',
+    content: 'Body.',
+  });
+  const recovered = parseProvenance(rendered);
+  assert.equal(recovered.content, 'Body.', 'the second source line must not become body text');
+  assert.equal(recovered.source, 'see the tracker');
+  assert.equal(recovered.issue, undefined, 'a citation on a dropped line is not recovered');
+});
+
+test('renderProvenance: #404 — an empty/whitespace source is treated as absent (byte fixed point on the FIRST pass)', () => {
+  // Previously `{issue: 404, source: ''}` rendered `**Fuente:** issue #404 / `,
+  // which reparsed to `issue #404 /` — a fixed point only from the second pass.
+  const once = renderProvenance({ actor: '@crinaldi', actorKind: 'human', issue: 404, source: '', content: 'Body.' });
+  assert.equal(once, '**Actor:** @crinaldi (humano)\n**Fuente:** issue #404\n\nBody.');
+  assert.equal(renderProvenance(parseProvenance(once)), once, 'first pass is already the fixed point');
+
+  const blank = renderProvenance({ actor: '@crinaldi', actorKind: 'human', source: '   ', content: 'Body.' });
+  assert.equal(blank, '**Actor:** @crinaldi (humano)\n\nBody.', 'no Fuente line for a source with no text');
+});
+
 test('issueFromFuente: ONE extraction rule, shared by both halves of the pair', () => {
   assert.equal(issueFromFuente('issue #78 / MR !72'), 78);
   assert.equal(issueFromFuente('issue #404'), 404);
@@ -267,6 +312,25 @@ const FIXTURES = [
     issue: 368,
     content: 'issue alone, no source text.',
     sourceRoundTripsTo: 'issue #368',
+  },
+  {
+    // issue #404: a MULTI-LINE `source` — the shape that used to displace the
+    // citation off the Fuente line and prepend its tail to the hashed content.
+    actor: '@crinaldi',
+    actorKind: 'human',
+    issue: 404,
+    source: '\n\nissue #404',
+    content: 'A multi-line source may not leak into the body.',
+    sourceRoundTripsTo: 'issue #404',
+  },
+  {
+    // issue #404: an EMPTY `source` — absent, not an empty Fuente slot.
+    actor: '@crinaldi',
+    actorKind: 'human',
+    issue: 404,
+    source: '',
+    content: 'An empty source is absent, and the first render is already the fixed point.',
+    sourceRoundTripsTo: 'issue #404',
   },
 ];
 

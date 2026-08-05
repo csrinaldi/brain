@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { readRecordObservations } from './store.mjs';
 import { importRecord } from './engram-import.mjs';
 import { exportObservation } from './engram-export.mjs';
-import { buildRecord, computeRecordId, validateRecord } from './format.mjs';
+import { buildRecord, computeRecordId, validateRecord, validateWritableRecord } from './format.mjs';
 
 // Same depth as engram.mjs's repoRoot (brain/scripts/memory/backends/engram.mjs):
 // this file lives at brain/scripts/memory/lib/, a sibling directory at the
@@ -192,21 +192,26 @@ test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip 
   assert.deepEqual(failures, [], `${failures.length}/${samples.length} issue-carrying records failed:\n${failures.join('\n')}`);
 });
 
-test('REQ-C4-1 / R4: no record in the REAL store smuggles an `issue #N` citation into `source` without the field', (t) => {
-  // The one shape the Fuente grammar cannot represent (format.mjs R4). Pinned
-  // against the real store so the guard is proven vacuous TODAY and turns red
-  // the moment a producer writes the shape — rather than being discovered as
-  // another silent id drift.
+test('W1 (#404): every record in the REAL store already satisfies the write-path `source` rule', (t) => {
+  // The single-line/trimmed `source` rule (format.mjs W1) is enforced at WRITE
+  // time precisely so it can never make an existing store unreadable. This
+  // measures the claim on the one store we can measure: if brain's own history
+  // already violated it, the rule would be retroactively wrong.
+  //
+  // Honest about its reach: this is THIS repo. A consumer's `.memory/**` is
+  // consumer-owned (managed-paths.mjs's `local` array) and is not covered by
+  // any test here — which is the reason the rule is not on the read path.
   const records = readRecordObservations({ recordsDir });
   if (records.length === 0) {
     t.skip(
-      'REQ-C4-1/R4: .memory/records/ is empty or missing — 0 real records measured. ' +
+      'W1: .memory/records/ is empty or missing — 0 real records measured. ' +
         'This is a coverage GAP, not a pass.',
     );
     return;
   }
   const offenders = records
-    .filter((r) => !validateRecord(r).valid)
-    .map((r) => `${r.id}: ${validateRecord(r).errors.join('; ')}`);
-  assert.deepEqual(offenders, [], `${offenders.length}/${records.length} real records fail validateRecord:\n${offenders.join('\n')}`);
+    .filter((r) => !validateWritableRecord(r).valid)
+    .map((r) => `${r.id}: ${validateWritableRecord(r).errors.join('; ')}`);
+  console.log(`W1/#404: write-path rules measured over ${records.length} real records`);
+  assert.deepEqual(offenders, [], `${offenders.length}/${records.length} real records violate a write-path rule:\n${offenders.join('\n')}`);
 });

@@ -119,6 +119,36 @@ export function parseProvenance(content) {
 }
 
 /**
+ * fuenteText() — narrow a `source` to the ONE physical line the Fuente slot
+ * can hold: its first line, trimmed; an empty result means "no text at all".
+ *
+ * This is a TOLERANT read, deliberately: `renderProvenance()` below composes
+ * physical lines, so a `source` carrying a newline would spill its tail into
+ * the BODY — displacing the issue citation off the Fuente line AND prepending
+ * bytes to `content`, which IS hashed. Both are silent id drift. Normalizing
+ * here makes the emitted block exactly the lines it intends for ANY input,
+ * so no stored record can produce a corrupted round-trip.
+ *
+ * It is a read-side narrowing rather than a validator rejection on purpose:
+ * `validateRecord()` is on the READ path (`parseRecordLine` throws on it), and
+ * `.memory/**` is consumer-owned (`managed-paths.mjs`'s `local` array), so a
+ * rejection there would make one bad line brick a whole consumer store that
+ * brain has no way to migrate. The matching WRITE-side rule — brain never
+ * *creates* a multi-line `source` — is `validateWritableRecord()` in
+ * format.mjs, enforced by `appendRecord()`.
+ *
+ * `source` is hash-excluded, so narrowing it costs nothing the id contract
+ * measures — the same reason widening it (below) is free.
+ *
+ * @param {string|undefined} source
+ * @returns {string|undefined}
+ */
+function fuenteText(source) {
+  if (source === undefined) return undefined;
+  return source.split('\n')[0].trim() || undefined;
+}
+
+/**
  * renderFuente() — compose the Fuente line's text from BOTH structured
  * provenance fields it carries, `issue` and `source`.
  *
@@ -127,9 +157,10 @@ export function parseProvenance(content) {
  * this emits is only correct if `issueFromFuente()` maps it back to the
  * record's own `issue` — anything else silently changes the id on re-import
  * (issue #404). `source`, being hash-excluded, may round-trip lossily: a
- * prepended citation widens it, which costs nothing the contract measures.
+ * prepended citation widens it and `fuenteText()` may narrow it, and neither
+ * costs anything the contract measures.
  *
- * The three shapes:
+ * The three shapes (`source` here means `fuenteText(source)`):
  *   - no `issue`             → `source` verbatim (the whole real store today,
  *                              incl. the `@legacy` migration prose)
  *   - `issue`, no `source`   → `issue #N`
@@ -143,9 +174,10 @@ export function parseProvenance(content) {
  * @returns {string|undefined} the Fuente text, or `undefined` for no Fuente line
  */
 function renderFuente({ issue, source }) {
-  if (issue === undefined) return source;
-  if (source === undefined) return `issue #${issue}`;
-  return issueFromFuente(source) === issue ? source : `issue #${issue} / ${source}`;
+  const text = fuenteText(source);
+  if (issue === undefined) return text;
+  if (text === undefined) return `issue #${issue}`;
+  return issueFromFuente(text) === issue ? text : `issue #${issue} / ${text}`;
 }
 
 /**
@@ -158,16 +190,26 @@ function renderFuente({ issue, source }) {
  *
  * Round-trip note: `source` is the literal Fuente text; `issue` is a
  * structured extraction FROM that text on the parse side. renderFuente()
- * (above) guarantees the emitted line always yields this record's `issue`
- * back, so `parseProvenance(renderProvenance(record)).issue === record.issue`
- * for EVERY record the format admits — the property the id contract needs.
- * `source` may widen; it is hash-excluded and free-form by design.
+ * (above) yields this record's `issue` back, so
+ * `parseProvenance(renderProvenance(record)).issue === record.issue` — for
+ * every record whose `issue` is a `number`, which is what the schema declares
+ * (memory-format.md). `source` may widen or narrow; it is hash-excluded and
+ * free-form by design.
  *
- * NOT representable, and rejected at the schema instead (format.mjs
- * #validateRecord): a record with NO `issue` whose `source` nonetheless cites
- * `issue #N`. Its Fuente line is byte-identical to the one a record with
- * `issue: N` emits, so no renderer could distinguish them — the domain is
- * restricted rather than the grammar made ambiguous.
+ * The bound is stated rather than dropped because it is REAL: `validateRecord`
+ * does not type-check `issue`, so `issue: "404"` (a string) is admitted on the
+ * read path and comes back as the number `404` — a different `id`. Brain never
+ * writes that shape (`validateWritableRecord`'s W2, enforced by
+ * `appendRecord`), but a hand-edited store line can carry it. Claiming the
+ * property for "every record the format admits" would be false, and a false
+ * absolute in a module header is the exact defect issue #404 exists to correct.
+ *
+ * KNOWN-AMBIGUOUS, and NOT resolved here: a record with NO `issue` whose
+ * `source` nonetheless cites `issue #N` emits a Fuente line byte-identical to
+ * the one a record with `issue: N` emits, so re-import fabricates an `issue`
+ * it never had. The shape is ambiguous ON THE WIRE — no renderer or parser
+ * change fixes it alone; it needs either a new §4 marker or a validation rule.
+ * Tracked as a decision, not patched here: issue #461.
  *
  * @param {{actor?:string, actorKind?:string, issue?:number, supersedes?:string,
  *          source?:string, content:string}} record

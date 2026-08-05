@@ -13,6 +13,7 @@ import {
   computeRecordId,
   buildRecord,
   validateRecord,
+  validateWritableRecord,
   serializeRecord,
   parseRecordLine,
   buildIndexEntry,
@@ -138,36 +139,72 @@ test('validateRecord: rejects a null optional field (R3)', () => {
   assert.ok(errors.some((e) => e.includes('issue')));
 });
 
-// ── R4 (issue #404): `source` may not smuggle an `issue` the record lacks ────
-// Both fields render into ONE `**Fuente:**` line, and the parse side recovers
-// `issue` from that line's text. A record with no `issue` whose `source` cites
-// `issue #N` emits a line byte-identical to the one `issue: N` emits, so it
-// comes back carrying an issue it never had — and `issue` IS hashed, so that
-// is a silently different id. Unrepresentable, therefore rejected.
+// ── W1/W2 (issue #404): the WRITE-path rules ────────────────────────────────
+// `issue` and `source` share ONE `**Fuente:**` line, so a `source` carrying a
+// newline pushes its tail into the body — the issue citation falls off the
+// line AND the hashed `content` gains bytes. A string `issue` re-imports as a
+// number, a different id.
+//
+// These live in validateWritableRecord(), NOT validateRecord(), and the split
+// is the point: validateRecord() runs on the READ path (parseRecordLine
+// throws), over `.memory/**`, which is consumer-owned and never touched by a
+// brain upgrade. A new read rule would turn one pre-existing line into a
+// store-wide failure brain has no way to migrate. The pair of tests below pins
+// exactly that asymmetry — delete either half and the protection is gone.
 
-test('validateRecord: R4 rejects a source citing `issue #N` while the issue field is absent', () => {
-  const rec = buildRecord({ ...base, source: 'issue #201 / PR #204' });
-  assert.equal(rec.issue, undefined, 'precondition: buildRecord does not infer issue from source');
-  const { valid, errors } = validateRecord(rec);
-  assert.equal(valid, false);
-  assert.ok(errors.some((e) => e.includes('R4') && e.includes('201')), `errors were: ${errors.join('; ')}`);
+test('validateRecord: the READ gate does NOT reject a multi-line source (a pre-existing store must stay readable)', () => {
+  const rec = { ...buildRecord({ ...base }), source: 'see the tracker\n(context: issue #999)' };
+  assert.equal(validateRecord(rec).valid, true, 'a read-path rejection would brick a consumer store');
 });
 
-test('validateRecord: R4 accepts the same source once the issue field declares it', () => {
-  const { valid } = validateRecord(buildRecord({ ...base, issue: 201, source: 'issue #201 / PR #204' }));
-  assert.equal(valid, true);
-});
-
-test('validateRecord: R4 accepts a source citing a DIFFERENT issue — that shape IS representable', () => {
-  // renderFuente() prepends the record's own citation, so the prose mention is
-  // legal and the hashed field still round-trips. Only ABSENCE is rejected.
-  const { valid } = validateRecord(buildRecord({ ...base, issue: 404, source: 'regression from issue #999' }));
-  assert.equal(valid, true);
-});
-
-test('validateRecord: R4 leaves the @legacy migration source alone (the whole real store)', () => {
-  const rec = buildRecord({ ...base, source: 'provenance unknown — migrated from engram chunk obs-1034b42dcca30459' });
+test('validateRecord: the READ gate does NOT reject a string issue (same reason)', () => {
+  const rec = { ...buildRecord({ ...base }), issue: '404' };
   assert.equal(validateRecord(rec).valid, true);
+});
+
+test('validateWritableRecord: W1 rejects a multi-line source', () => {
+  const rec = { ...buildRecord({ ...base }), source: 'see the tracker\n(context: issue #999)' };
+  const { valid, errors } = validateWritableRecord(rec);
+  assert.equal(valid, false);
+  assert.ok(errors.some((e) => e.includes('W1')), `errors were: ${errors.join('; ')}`);
+});
+
+test('validateWritableRecord: W1 rejects an untrimmed source', () => {
+  const rec = { ...buildRecord({ ...base }), source: '  PR #405 ' };
+  const { valid, errors } = validateWritableRecord(rec);
+  assert.equal(valid, false);
+  assert.ok(errors.some((e) => e.includes('W1')), `errors were: ${errors.join('; ')}`);
+});
+
+test('validateWritableRecord: W2 rejects a non-number issue', () => {
+  const rec = { ...buildRecord({ ...base }), issue: '404' };
+  const { valid, errors } = validateWritableRecord(rec);
+  assert.equal(valid, false);
+  assert.ok(errors.some((e) => e.includes('W2')), `errors were: ${errors.join('; ')}`);
+});
+
+test('validateWritableRecord: accepts the shapes brain actually writes', () => {
+  // The whole real store's three source shapes, plus the issue-carrying shapes
+  // #368 will produce, plus ADR-0017's canonical citation.
+  for (const fields of [
+    { source: 'provenance unknown — migrated from engram chunk obs-1034b42dcca30459' },
+    { source: 'plainfiles save on gandalf-ROG-Zephyrus-G15-GA503QR-GA503QR' },
+    { issue: 404, source: 'PR #405' },
+    { issue: 404 },
+    { issue: 0 },
+    { issue: 201, source: 'issue #201 / PR #204' },
+    {},
+  ]) {
+    const { valid, errors } = validateWritableRecord(buildRecord({ ...base, ...fields }));
+    assert.equal(valid, true, `${JSON.stringify(fields)} must be writable — ${errors.join('; ')}`);
+  }
+});
+
+test('validateWritableRecord: still reports every read-gate error (it is a superset, not a replacement)', () => {
+  const { valid, errors } = validateWritableRecord({ ...buildRecord({ ...base }), issue: null, type: 'nope' });
+  assert.equal(valid, false);
+  assert.ok(errors.some((e) => e.includes('R3')), `errors were: ${errors.join('; ')}`);
+  assert.ok(errors.some((e) => e.includes('invalid type')), `errors were: ${errors.join('; ')}`);
 });
 
 test('validateRecord: flags an email-shaped actor (REQ-MF-5 partial heuristic)', () => {

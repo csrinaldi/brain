@@ -12,13 +12,24 @@
 //   R1 — index.jsonl: one entry per physical line, sorted by id, deterministic (serializeIndex).
 //   R2 — a non-empty `title` is folded into `content` as a bold prefix BEFORE hashing (buildRecord).
 //   R3 — absent optional fields (`issue`, `supersedes`, `source`) are OMITTED — never `null` (buildRecord, validateRecord).
-//   R4 — a `source` citing `issue #N` REQUIRES `issue: N` (validateRecord) — the
-//        transport encodes both into one `**Fuente:**` line, so the alternative is a
-//        record that comes back carrying an `issue` it never had (issue #404).
+//
+// READ rules vs WRITE rules — a distinction this module keeps deliberate:
+//   validateRecord()          is the READ gate. parseRecordLine() THROWS on it, and
+//                             rebuildIndex() reads every physical line, so ONE rejected
+//                             line makes a whole store unreadable. `.memory/**` is
+//                             consumer-owned (managed-paths.mjs's `local` array), never
+//                             touched by a brain upgrade — so brain cannot migrate what a
+//                             new read rule would break. New rules do NOT go here.
+//   validateWritableRecord()  is the WRITE gate (store.mjs#appendRecord). Refusing a
+//                             record brain is about to CREATE breaks nothing that already
+//                             exists. New shape rules go here:
+//   W1 — `source` MUST be a single, already-trimmed physical line (issue #404): it shares
+//        one `**Fuente:**` line with `issue`, so a newline in it spills into the BODY,
+//        displacing the issue citation and prepending bytes to the hashed `content`.
+//   W2 — `issue`, when present, MUST be a finite integer `number` — the type the schema
+//        declares. `issue: "404"` re-imports as the number `404`, a different `id`.
 
 import { createHash } from 'node:crypto';
-
-import { issueFromFuente } from './provenance.mjs';
 
 /** The seven-member `type` enum (REQ-MF-1). */
 export const RECORD_TYPES = [
@@ -142,25 +153,52 @@ export function validateRecord(record) {
   if (typeof record.actor === 'string' && EMAIL_ACTOR_RE.test(record.actor)) {
     errors.push(`actor looks like an email address, not a stable handle: '${record.actor}'`);
   }
-  // R4 — free-form `source` must not smuggle a structured `issue` the record
-  // does not declare. Both fields render into ONE `**Fuente:**` line, and the
-  // parse side recovers `issue` from that line's text; so a record whose
-  // `source` cites `issue #N` while `issue` is ABSENT emits a line
-  // byte-identical to the one `issue: N` emits, and comes back carrying an
-  // `issue` it never had. `issue` IS hashed, so that is a silently different
-  // `id` — the same class as R3's `null` optionals, rejected for the same
-  // reason (issue #404). A record whose `issue` is present is always
-  // representable: renderFuente() prepends the citation when `source` does not
-  // already carry it, so a DIFFERING mention in `source` is legal prose.
-  if (record.issue === undefined && typeof record.source === 'string') {
-    const cited = issueFromFuente(record.source);
-    if (cited !== undefined) {
-      errors.push(
-        `source cites 'issue #${cited}' but the 'issue' field is absent — set issue: ${cited} (R4)`,
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * validateWritableRecord() — the WRITE gate (see the read/write note in this
+ * module's header). Everything validateRecord() checks, PLUS the shape rules
+ * that are safe to enforce only on records brain is about to create:
+ *
+ *   W1 — `source` MUST be one already-trimmed physical line (issue #404).
+ *        `issue` and `source` share the single `**Fuente:**` line, so a
+ *        newline in `source` pushes its tail into the BODY: the issue citation
+ *        falls off the Fuente line and the hashed `content` gains bytes.
+ *        `renderFuente()` narrows such a `source` on the read side so an
+ *        already-stored record still round-trips; this stops brain writing a
+ *        new one.
+ *   W2 — `issue`, when present, MUST be a finite integer `number`. The schema
+ *        declares `number`; `issue: "404"` is admitted by validateRecord() but
+ *        re-imports as the number `404`, which is a different `id`.
+ *
+ * These are NOT in validateRecord() on purpose: that runs on the read path via
+ * parseRecordLine(), where a rejection turns one bad line into a store-wide
+ * failure of `memory:share`, `memory:pull`, `plainfiles.save` and `setup` —
+ * in a directory brain does not manage and therefore cannot migrate.
+ *
+ * Measured vacuous over this repo's store at the time of writing (0/2157
+ * multi-line or untrimmed `source`, 0/2157 non-number `issue`) and over every
+ * in-tree producer. That is a statement about today, not a guarantee: a
+ * consumer store is not covered, which is exactly why these live at write time.
+ *
+ * @param {unknown} record
+ * @returns {{valid: boolean, errors: string[]}}
+ */
+export function validateWritableRecord(record) {
+  const { errors } = validateRecord(record);
+  const writeErrors = [...errors];
+  if (record !== null && typeof record === 'object') {
+    if (typeof record.source === 'string' && (/[\n\r]/.test(record.source) || record.source !== record.source.trim())) {
+      writeErrors.push(
+        `source must be a single, trimmed line — it shares the '**Fuente:**' line with issue (W1): ${JSON.stringify(record.source)}`,
       );
     }
+    if (record.issue !== undefined && record.issue !== null && !Number.isInteger(record.issue)) {
+      writeErrors.push(`issue must be an integer number, not ${typeof record.issue} ${JSON.stringify(record.issue)} (W2)`);
+    }
   }
-  return { valid: errors.length === 0, errors };
+  return { valid: writeErrors.length === 0, errors: writeErrors };
 }
 
 /**

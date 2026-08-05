@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 
 import { importRecord, toEngramNaive } from './engram-import.mjs';
 import { exportObservation } from './engram-export.mjs';
-import { buildRecord, computeRecordId } from './format.mjs';
+import { buildRecord, computeRecordId, validateRecord } from './format.mjs';
 
 function roundTripId(record) {
   const observation = importRecord(record);
@@ -93,6 +93,31 @@ test('importRecord: #404 — round-trip preserves id — issue + a source citing
   assert.equal(roundTripId(record), record.id);
   const reExported = exportObservation(importRecord(record)).record;
   assert.equal(reExported.issue, 404, 'the record its OWN issue wins over the prose citation');
+});
+
+test('importRecord: #404 — a MULTI-LINE source no longer drifts the id (the shape a consumer store may already hold)', () => {
+  // `validateRecord` admits this (deliberately — a read-path rejection would
+  // brick a consumer store), and `appendRecord` refuses to create it (W1). It
+  // must still round-trip: renderFuente() narrows `source` to its first line,
+  // so neither the citation nor the hashed `content` is displaced.
+  const record = { ...buildRecord({ ...base, content: 'Body.', issue: 404 }), source: '\n\nissue #404' };
+  assert.equal(validateRecord(record).valid, true, 'precondition: the read gate admits it');
+  const reExported = exportObservation(importRecord(record)).record;
+  assert.equal(reExported.issue, 404, 'the hashed field survives a multi-line source');
+  assert.equal(reExported.content, 'Body.', 'the hashed content does not gain the source tail');
+  assert.equal(computeRecordId(reExported), record.id, 'no id drift');
+});
+
+test('importRecord: #404 — an EMPTY source round-trips by id and reaches its fixed point in one pass', () => {
+  const record = { ...buildRecord({ ...base, content: 'Body.', issue: 404 }), source: '' };
+  const reExported = exportObservation(importRecord(record)).record;
+  // An empty source is treated as ABSENT, so the line is the bare citation —
+  // identical to the `issue`-only shape, and already the fixed point. It used
+  // to render `issue #404 / `, converging only on the second pass.
+  assert.equal(reExported.source, 'issue #404');
+  assert.equal(computeRecordId(reExported), record.id);
+  const again = exportObservation(importRecord({ ...reExported, id: record.id })).record;
+  assert.equal(computeRecordId(again), record.id);
 });
 
 test('importRecord: #404 — a record with NEITHER issue nor source is unchanged by the fix', () => {
