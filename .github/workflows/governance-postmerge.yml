@@ -129,6 +129,14 @@ jobs:
 
       - id: audit
         name: Run brain-audit over the cursor window
+        # GH_TOKEN is load-bearing, not a nicety (#467): issueLink reads PR
+        # bodies and diffSize reads labels through `gh`. Unauthenticated, both
+        # report "this gate failed" instead of "I could not evaluate" (the
+        # evidence-reader-empty-on-failure class) — measured 20/20 [FAIL] with
+        # zero [FAIL-SHA] over d71a8a5..e834f1d, which drives every non-empty
+        # window into the #466 deadlock.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           range="${{ steps.window.outputs.range }}"
