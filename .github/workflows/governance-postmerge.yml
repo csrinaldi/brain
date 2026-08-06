@@ -125,6 +125,9 @@ jobs:
             gh issue create --title "governance: postmerge halted — ${label#governance:}" \
               --label "$label" --body-file "$RUNNER_TEMP/body.md"
           fi
+          # REQ-TS-5: every alarm path RECORDS that it fired, so the always()
+          # terminal step can tell "red and already reported" from "red and silent".
+          echo "alarm=${label}" >> "$GITHUB_OUTPUT"
           exit 2
 
       - id: audit
@@ -195,9 +198,56 @@ jobs:
             [ -n "$line" ] && offenders+=("$line")
           done <<< "$parsed"
 
+          # ── The unrevertible halt (REQ-TS-4, #466) ────────────────────────
+          # This branch used to call the state "incoherent" and exit 2 — and it
+          # was WRONG. brain-audit.mjs's own contract (§15.5, its crossCheckExit
+          # docblock) says: "A [FAIL-SHA] count of 0 on exit 1 is LEGITIMATE".
+          # It happens whenever every surviving violation is a non-auto-revertible
+          # class (issueLink/memoryPresence), or a tree-keyed failure is suppressed
+          # from nomination because reverting it would RESURRECT a payload absent
+          # at HEAD. This branch encoded the pre-§15.5 invariant that the rewrite
+          # explicitly REPLACED, in a file the rewrite did not touch.
+          #
+          # Worse, exiting 2 HERE does not reach the alarm: that step is gated on
+          # `steps.audit.outputs.code == '2'` — the AUDIT step's output, which is
+          # '1'. Red, nothing reverted, no alarm, cursor frozen (#466, run
+          # 31094912872). So this state gets a real handler and a real alarm.
+          #
+          # It is a HALT, not an accept: the cursor stays pinned and a human
+          # decides. Advancing here would perform `cursor.mjs accept` — a gate
+          # the design deliberately made a human keystroke WITH a written reason
+          # (REQ-D2-10a) — with no reason and no human.
           if [ "${#offenders[@]}" -eq 0 ]; then
-            echo "code was 1 but the tested parser yielded no [FAIL-SHA] offenders — incoherent, failing closed."
-            exit 2
+            label="governance:audit-unrevertible"
+            {
+              echo "The post-merge audit FAILED (exit 1) but nothing is safely auto-revertible — NO revert and NO cursor advance was performed (REQ-TS-4)."
+              echo ""
+              echo "This is a legitimate audit state, not a malfunction: every surviving violation is either a"
+              echo "non-auto-revertible class (\`issueLink\` / \`memoryPresence\`) or a tree-keyed failure whose revert"
+              echo "would resurrect a payload absent at HEAD (design §15.5)."
+              echo ""
+              echo "**A human must resolve it.** For each merge below, either fix forward, revert it manually, or"
+              echo "accept it explicitly with a written reason:"
+              echo ""
+              echo '```'
+              echo "node brain/scripts/governance/postmerge/cursor.mjs accept <sha> --reason \"<why this is accepted>\""
+              echo '```'
+              echo ""
+              echo "The cursor stays PINNED until then, so this window is re-audited on every push and daily."
+              echo ""
+              echo "Audit output:"
+              echo '```'
+              printf '%s\n' "$AUDIT_STDOUT"
+              echo '```'
+              echo ""
+              echo "Part of #259."
+            } > "$RUNNER_TEMP/unrevertible.md"
+            node brain/scripts/governance/postmerge/alarm.mjs "$label" \
+              "governance: postmerge audit failed with nothing revertible" \
+              "$RUNNER_TEMP/unrevertible.md"
+            echo "alarm=${label}" >> "$GITHUB_OUTPUT"
+            echo "audit failed with no auto-revertible offender; alarm filed, cursor stays pinned."
+            exit 1
           fi
 
           failed=()
@@ -267,6 +317,7 @@ jobs:
               gh issue create --title "governance: auto-revert blocked" \
                 --label "$label" --body-file "$RUNNER_TEMP/revert-blocked.md"
             fi
+            echo "alarm=${label}" >> "$GITHUB_OUTPUT"   # REQ-TS-5
             echo "reverts blocked for ${#failed[@]} offender(s); cursor stays pinned."
             exit 1
           fi
@@ -300,18 +351,72 @@ jobs:
             gh issue create --title "governance: postmerge audit uncomputable" \
               --label "$label" --body-file "$RUNNER_TEMP/uncomputable.md"
           fi
+          echo "alarm=${label}" >> "$GITHUB_OUTPUT"   # REQ-TS-5
           exit 2
 
       - id: terminal
-        name: Terminal-state assertion (the audit code was exactly 0, 1, or 2)
+        name: Terminal-state assertion — no terminal state may be both red and silent
         if: always()
+        # REQ-TS-5 (#466) — THE BACKSTOP, and the load-bearing half of the fix.
+        #
+        # #466 was not "one missing branch". The alarm was gated on an
+        # ENUMERATION of audit exit codes, and a state INSIDE code 1 was missed,
+        # so the job went red in total silence. Adding a branch for that one
+        # state would leave the next unenumerated state exactly as silent.
+        #
+        # So the invariant is asserted over the JOB OUTCOME instead: if this job
+        # is failing and no step recorded an alarm, file one here. This holds for
+        # states that do not exist yet — including any added after this change.
+        #
+        # Values arrive via env:, never ${{ }}-spliced into run: (the security
+        # precedent this workflow already sets for AUDIT_STDOUT).
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_CODE: ${{ steps.audit.outputs.code }}
+          JOB_STATUS: ${{ job.status }}
+          ALARM_WINDOW: ${{ steps.window.outputs.alarm }}
+          ALARM_REVERT: ${{ steps.revert.outputs.alarm }}
+          ALARM_UNCOMPUTABLE: ${{ steps.uncomputable.outputs.alarm }}
         run: |
           set -euo pipefail
-          code="${{ steps.audit.outputs.code }}"
+          code="${AUDIT_CODE:-}"
+
           # If the audit step itself was killed and wrote no output, code is empty:
           # that is an uncomputable terminal state — fail the job loudly rather
           # than let a killed audit pass as a clean run.
+          mapped=1
           case "$code" in
             0|1|2) echo "terminal audit code: ${code}" ;;
-            *) echo "audit produced no mapped terminal code ('${code}') — uncomputable; failing the job."; exit 1 ;;
+            *) echo "audit produced no mapped terminal code ('${code}') — uncomputable."; mapped=0 ;;
           esac
+
+          filed="${ALARM_WINDOW:-}${ALARM_REVERT:-}${ALARM_UNCOMPUTABLE:-}"
+          if [ "$JOB_STATUS" = "success" ] && [ "$mapped" -eq 1 ]; then
+            echo "job is green and the audit code is mapped — nothing to report."
+            exit 0
+          fi
+
+          if [ -n "$filed" ]; then
+            echo "job is red and an alarm was already filed (${filed}) — the invariant holds."
+            [ "$mapped" -eq 1 ] || exit 1
+            exit 1
+          fi
+
+          # RED AND SILENT — the #466 signature. File the backstop alarm.
+          label="governance:postmerge-unreported"
+          {
+            echo "The post-merge governance job failed and **no step filed an alarm** — the state this backstop exists to catch (#466, REQ-TS-5)."
+            echo ""
+            echo "Job status: \`${JOB_STATUS}\`"
+            echo "Audit exit code: \`${code:-<none — the audit step produced no output>}\`"
+            echo ""
+            echo "This means the job reached a terminal state with no handler. The cursor has NOT advanced."
+            echo "Read the job log, then either fix the underlying failure or add an explicit handler for this state."
+            echo ""
+            echo "Part of #259."
+          } > "$RUNNER_TEMP/unreported.md"
+          node brain/scripts/governance/postmerge/alarm.mjs "$label" \
+            "governance: postmerge job failed with no alarm filed" \
+            "$RUNNER_TEMP/unreported.md"
+          echo "backstop alarm filed: ${label}"
+          exit 1
