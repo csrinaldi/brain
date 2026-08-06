@@ -213,7 +213,7 @@ proposal, made executable.
 
 ## Task 5 — Drift guard: cron ↔ `POSTMERGE_STALE_MS`
 
-- [ ] **REQ-R3-3**
+- [x] **REQ-R3-3**
 
 Depends on: Task 1 (needs `POSTMERGE_STALE_MS` exported from `substrate.mjs`).
 Independent of Task 2/3/4 — touches a different test file entirely.

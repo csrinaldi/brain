@@ -212,6 +212,23 @@ test('governance-postmerge.yml triggers on push to main and a daily schedule', (
   assert.match(text, /schedule:/, 'governance-postmerge.yml must also trigger on a schedule (daily cron)');
 });
 
+// Drift guard (issue #468, REQ-R3-3): substrate.mjs's POSTMERGE_STALE_MS
+// (rung 3's staleness window) is derived from "2 periods of the daily cron" —
+// a constant, not a live read of this file. If the cron cadence ever changes
+// without updating that constant, the two silently drift apart and rung 3's
+// staleness window stops matching reality. No cron parser (zero-dependency
+// doctrine, substrate.mjs:111-114) — a shape assertion plus a literal value
+// check is enough to catch drift.
+test('drift guard: governance-postmerge.yml cron stays daily-shaped, and POSTMERGE_STALE_MS stays 2 daily periods', async () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const match = text.match(/-\s*cron:\s*'([^']+)'/);
+  assert.ok(match, 'governance-postmerge.yml must declare a cron schedule string');
+  assert.match(match[1], /^\d+\s+\d+\s+\*\s+\*\s+\*$/, 'the cron must stay daily-shaped (minute hour * * *) — a cadence change requires re-deriving POSTMERGE_STALE_MS');
+
+  const { POSTMERGE_STALE_MS } = await import('./substrate.mjs');
+  assert.equal(POSTMERGE_STALE_MS, 2 * 24 * 60 * 60 * 1000, 'POSTMERGE_STALE_MS must stay 2 daily cron periods (48h) — update it if the cron cadence changes');
+});
+
 // ── D2 (#259): the cursor-windowed, exit-code-branched, [FAIL-SHA]-consuming
 // shape. These INVERT the pre-D2 assertions above: the window is no longer the
 // push payload's before..sha (which skips offenders and collapses on cron) — it
