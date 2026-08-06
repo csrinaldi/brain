@@ -209,22 +209,45 @@ export function readMergeDiff(parent1, sha, cwd) {
  *   • body    → issueLink check (PR description has Closes/Part of #N;
  *               merge commit body is typically "Merge pull request #N")
  *
- * Any failure (VCS unconfigured, adapter error, no PR number found) leaves
- * both null (uncomputable — REQ-CIC-2) and falls back to commit-body
- * behavior. NEVER crash, and NEVER collapse a fetched-but-null value back
- * into a fabricated [] / '' default — `shouldSkipSize()`/`selectIssueLinkBody()`
+ * NEVER crash, and NEVER collapse a fetched-but-null value back into a
+ * fabricated [] / '' default — `shouldSkipSize()`/`selectIssueLinkBody()`
  * already treat null as "no evidence" correctly; re-fabricating an empty
  * default here would re-introduce the exact fail-open the seam removes, just
  * on a parallel path (prView fix-at-source disposition).
  *
+ * `prMetaError` (issue #474, REQ-TS-1) is the fourth field, and it is the whole
+ * point of this function's error handling. The bare `catch {}` this replaces
+ * KNEW the fetch had failed and threw that knowledge away, so
+ * `selectIssueLinkBody(null, commitBody)` fell back to the auto-generated merge
+ * commit body — where `Closes #N` never lives — and `issueLink` rendered a
+ * CONFIDENT FAIL. "I could not reach the API" and "this gate failed" became the
+ * same verdict: `brain/core/anti-patterns/evidence-reader-empty-on-failure.md`
+ * in the authentication layer, and the reason #467 reported a governance
+ * verdict instead of an outage.
+ *
+ * Three states, deliberately distinguished (REQ-TS-1/-3 — see the change's
+ * design.md §4; #474 asked for exactly this to be stated):
+ *
+ *   • fetch attempted and FAILED  → `prMetaError` set. UNCOMPUTABLE: the caller
+ *     must refuse to render a verdict from evidence it could not read.
+ *   • `prNum === null`            → `prMetaError` null. The subject references
+ *     no PR (squash/direct merge); there is nothing to fetch. The ABSENCE of a
+ *     PR is real evidence, not missing evidence — audit from the commit body.
+ *   • `vcs === null`              → `prMetaError` null. No adapter configured: a
+ *     deliberate configuration, uniform across every merge and therefore
+ *     visible, not a selective per-PR outage. Callers surface it once as a
+ *     [WARN] rather than failing the window closed, so a consumer repo with no
+ *     VCS adapter keeps auditing.
+ *
  * @param {string} subject
  * @param {object|null} vcs
  * @param {object} config
- * @returns {Promise<{ prNum: number|null, prLabels: string[]|null, prBody: string|null }>}
+ * @returns {Promise<{ prNum: number|null, prLabels: string[]|null, prBody: string|null, prMetaError: string|null }>}
  */
 export async function fetchPrMeta(subject, vcs, config) {
   let prLabels = null;
   let prBody = null;
+  let prMetaError = null;
   const prNum = parsePrNumber(subject);
   if (prNum !== null && vcs) {
     try {
@@ -234,11 +257,36 @@ export async function fetchPrMeta(subject, vcs, config) {
       });
       prLabels = pr.labels;
       prBody = pr.body;
-    } catch {
-      // VCS call failed — proceed without PR metadata (audit normally)
+      // ── REQ-CIC-2's uncomputable sentinel — the path #467 ACTUALLY took ──
+      // `prView` NEVER THROWS (ci-context.mjs: "an internal failure yields
+      // `null` on the affected fields only, never an exception"). On a failed
+      // `gh` call it RETURNS `{ labels: null, body: null }`
+      // (providers/github.mjs:186 and :203; gitlab.mjs mirrors it). On SUCCESS
+      // it always returns an array and a string (`data.labels ?? []`,
+      // `data.body ?? ''`), so null/null is unambiguous and can only mean the
+      // fetch failed.
+      //
+      // This — not the `catch` below — is the seam the #467 outage came
+      // through, and reading #474's issue text alone would have missed it: the
+      // bare `catch {}` it names is real, but it only fires if `prView` itself
+      // throws (a module/adapter error), which the unauthenticated case does
+      // not do. REQ-CIC-2 says consumers MUST fail closed on `null`; until now
+      // the audit passed the nulls to the pure helpers and then let
+      // `selectIssueLinkBody(null, commitBody)` render a confident verdict from
+      // the merge commit body. Failing closed is what that requirement asks for.
+      if (prLabels === null && prBody === null) {
+        prMetaError = `PR metadata unreadable (prView returned the REQ-CIC-2 uncomputable sentinel for #${prNum}) `
+          + '— the API call failed; the evaluator has no evidence, not empty evidence';
+      }
+    } catch (err) {
+      // The fetch was attempted and threw. Surface it as DATA — never swallow,
+      // never re-fabricate an empty default, and never let the caller mistake
+      // this for "the PR has no body". Emission stays with each CLI (design D2):
+      // brain-audit fails the window closed, brain-metrics counts it visibly.
+      prMetaError = err?.message ? String(err.message) : String(err);
     }
   }
-  return { prNum, prLabels, prBody };
+  return { prNum, prLabels, prBody, prMetaError };
 }
 
 /**

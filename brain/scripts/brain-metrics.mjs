@@ -393,7 +393,23 @@ async function evaluateOneMerge(sha, subject, ctx) {
   try {
     const parent1 = readMergeParent(sha, subject, cwd);
     const { numstat, changedFiles, body } = readMergeDiff(parent1, sha, cwd);
-    const { prLabels, prBody } = await fetchPrMeta(subject, vcs, config);
+    const { prLabels, prBody, prMetaError } = await fetchPrMeta(subject, vcs, config);
+
+    // REQ-TS-1 (#474) — the PR fetch was attempted and FAILED. brain-audit
+    // refuses to render a verdict for this merge and fails the window closed;
+    // metrics must not re-derive one either, or it would REPORT a governance
+    // verdict for a merge enforcement never evaluated — precisely the
+    // measurement/enforcement divergence the shared-lib extraction exists to
+    // prevent (design D1). Metrics' own failure policy applies over that shared
+    // fail-closed core (design D2): count it visibly in the EXISTING
+    // `uncomputable` column and keep exiting 0 — never die on one bad merge,
+    // never silently hide it.
+    if (prMetaError !== null) {
+      return {
+        sha, mergedAt, prLabels: null, leadTimeDays: null, kind: 'uncomputable', evalRec: null, detection: null, period,
+      };
+    }
+
     const issueLinkBody = selectIssueLinkBody(prBody, body);
 
     const tier = resolveTier(config);
