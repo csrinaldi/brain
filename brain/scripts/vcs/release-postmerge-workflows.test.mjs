@@ -219,14 +219,50 @@ test('governance-postmerge.yml triggers on push to main and a daily schedule', (
 // staleness window stops matching reality. No cron parser (zero-dependency
 // doctrine, substrate.mjs:111-114) — a shape assertion plus a literal value
 // check is enough to catch drift.
+//
+// Uses `matchAll` (every `- cron:` entry), NOT a single non-global `.match()`
+// — a single match only inspects the FIRST cron entry, so ADDING a second
+// entry (e.g. an hourly cron alongside the daily one) would change the
+// effective cadence while the guard silently kept passing on entry #1 alone.
+// `assertCronDriftGuard` is shared by the real-file test below and the
+// synthetic-drift test, so both exercise the identical guard logic.
+function assertCronDriftGuard(text, staleMs) {
+  const matches = [...text.matchAll(/-\s*cron:\s*'([^']+)'/g)];
+  assert.ok(matches.length > 0, 'must declare at least one cron schedule string');
+  assert.equal(
+    matches.length,
+    1,
+    `expected exactly one cron entry, found ${matches.length} — multiple schedule entries change the effective cadence and require re-deriving POSTMERGE_STALE_MS`,
+  );
+  assert.match(
+    matches[0][1],
+    /^\d+\s+\d+\s+\*\s+\*\s+\*$/,
+    'the cron must stay daily-shaped (minute hour * * *) — a cadence change requires re-deriving POSTMERGE_STALE_MS',
+  );
+  assert.equal(staleMs, 2 * 24 * 60 * 60 * 1000, 'POSTMERGE_STALE_MS must stay 2 daily cron periods (48h) — update it if the cron cadence changes');
+}
+
 test('drift guard: governance-postmerge.yml cron stays daily-shaped, and POSTMERGE_STALE_MS stays 2 daily periods', async () => {
   const text = readFileSync(POSTMERGE_YML, 'utf8');
-  const match = text.match(/-\s*cron:\s*'([^']+)'/);
-  assert.ok(match, 'governance-postmerge.yml must declare a cron schedule string');
-  assert.match(match[1], /^\d+\s+\d+\s+\*\s+\*\s+\*$/, 'the cron must stay daily-shaped (minute hour * * *) — a cadence change requires re-deriving POSTMERGE_STALE_MS');
-
   const { POSTMERGE_STALE_MS } = await import('./substrate.mjs');
-  assert.equal(POSTMERGE_STALE_MS, 2 * 24 * 60 * 60 * 1000, 'POSTMERGE_STALE_MS must stay 2 daily cron periods (48h) — update it if the cron cadence changes');
+  assertCronDriftGuard(text, POSTMERGE_STALE_MS);
+});
+
+test('drift guard: adding a second cron entry (e.g. an hourly cron alongside the daily one) trips the guard', async () => {
+  const { POSTMERGE_STALE_MS } = await import('./substrate.mjs');
+  const textWithTwoCrons = `
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * *'
+    - cron: '0 * * * *'
+`;
+  assert.throws(
+    () => assertCronDriftGuard(textWithTwoCrons, POSTMERGE_STALE_MS),
+    /exactly one cron entry/,
+    'a second cron entry must trip the drift guard — the effective cadence changed even though entry #1 is still daily-shaped',
+  );
 });
 
 // ── D2 (#259): the cursor-windowed, exit-code-branched, [FAIL-SHA]-consuming

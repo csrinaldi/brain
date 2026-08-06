@@ -168,7 +168,15 @@ async function realPostMergeCiProbe({ config }) {
     return { workflowPresent, read: 'failed', lastRun: null, error: `malformed run-ledger response: ${e.message}`, observedAt };
   }
 
-  const runs = Array.isArray(parsed?.workflow_runs) ? parsed.workflow_runs : [];
+  // A parseable-but-wrong-shaped 200 body (proxy/gateway error page, API
+  // shape change) must be distinguished from a legitimate zero-runs page —
+  // conflating the two would report the honest, claimable postmerge-unproven
+  // state (E4) for what is actually an unreadable ledger. The 4-state `read`
+  // field exists precisely to keep this distinction (issue #468 hardening).
+  if (!Array.isArray(parsed?.workflow_runs)) {
+    return { workflowPresent, read: 'failed', lastRun: null, error: 'malformed run-ledger response: workflow_runs is missing or not an array', observedAt };
+  }
+  const runs = parsed.workflow_runs;
   const completed = runs.find((entry) => entry.status === 'completed');
   const lastRun = completed
     ? { id: completed.id, conclusion: completed.conclusion, completedAt: completed.updated_at, htmlUrl: completed.html_url }

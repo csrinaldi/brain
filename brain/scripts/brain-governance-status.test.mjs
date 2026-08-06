@@ -908,6 +908,33 @@ test('realPostMergeCiProbe: malformed JSON reports uncomputable, never crashes',
   });
 });
 
+test('realPostMergeCiProbe: a parseable but wrong-shaped 200 body (workflow_runs missing/not-an-array) reports uncomputable, NOT zero-runs unproven', async () => {
+  // A 200 body that parses as JSON but does not have a `workflow_runs` array
+  // (e.g. a proxy/gateway error page, or an API shape change) must be treated
+  // as a read failure — never conflated with "the endpoint legitimately
+  // returned zero runs" (which is the honest, claimable postmerge-unproven
+  // state the 4-state `read` field exists to distinguish).
+  setSpawn((cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/csrinaldi/brain/actions/workflows/governance-postmerge.yml/runs')) {
+      return { status: 0, stdout: JSON.stringify({ message: 'Not Found', documentation_url: 'https://x' }), stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: 'unexpected call: ' + cmd + ' ' + args.join(' ') };
+  });
+
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: postmergeInertOtherRungs,
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.doesNotMatch(output, /never had a terminal run/i, 'a wrong-shaped body must never render as the zero-runs unproven state');
+  assert.match(output, /remedy:.*verify gh auth\/connectivity/is, 'a wrong-shaped body must render as a read failure');
+});
+
 test('realPostMergeCiProbe: config.vcs.provider "gitlab" reports unsupported and spawns ZERO gh/glab processes', async () => {
   const calls = [];
   setSpawn((cmd, args) => {
