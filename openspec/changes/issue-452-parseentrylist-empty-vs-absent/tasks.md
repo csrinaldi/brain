@@ -173,3 +173,42 @@ topic_key: sdd/issue-452-parseentrylist-empty-vs-absent/tasks
 - [x] T23 — base brought current: merged `origin/main` (`d2fdf13`, PR #482) into the
       branch. No conflicts. Suite **2531 pass / 1 skip / 0 fail**, `repo:check` ✓,
       `brain:nav` ✓, REQ-409-6 pins green.
+- [x] T24 — **fifth cold review round (PR #478, verdict REVISE)** — the first round to
+      APPROVE the newest code and find the blockers elsewhere. It fuzzed
+      `decodeYamlEscapes` against `yamlScalar` over **60,000 random values** (backslashes,
+      quotes, literal U+2028/29, the TEXT `\u2028`, NEL, BOM, YAML metacharacters) through
+      the real chain: **0 failures**. The pair is exactly inverse.
+      **B1 (blocker, on MY OWN claim)** ten of the twelve `yamlScalar` call sites in
+      `renderVerdict` were pinned by nothing: the ENTIRE `follow_ups` branch could be
+      reverted to raw interpolation — all six fields, `evidence` included — with the suite
+      **50 pass / 0 fail**. Round 3's review record claimed "all six through `yamlScalar`,
+      fixed here" with a red-proof; that red-proof only ever mutated `evidence_class` on
+      the `findings` branch. Report-vs-tree drift on the protection itself (§10). And
+      `follow_ups` is where `buildVerdict` routes every `pre-existing`/`base-only` finding
+      — exactly where checkpoint.mjs's multi-line stdout lands. Fixed: the C2 case now
+      sweeps 6 fields × 2 branches, asserting both that the poisoned value does not swallow
+      the entry after it AND that it round-trips byte-identical. Red-proof: `follow_ups`
+      raw → 1 red (was 0); `findings` raw → 5 red.
+      My first version of the widened test was itself wrong — when the poisoned field IS
+      `id`, the expected id is the poisoned value; and I had skipped `causal_disposition`
+      rather than poisoning it in a way that preserves routing. Both corrected.
+      **B2 (blocker, on the CLAIM again)** the round-4 test asserted a UNIVERSAL property
+      — *"any value the encoder can produce must come back identical"* — that is false. A
+      markdown **code fence** in any value is unescaped, and `FENCE_RE` is non-greedy, so
+      the first fence ends the block. Traced through the real chain: findings truncate to
+      one mangled entry with `'findings' in parsed === true`, `sequencing` disappears, and
+      `board.mjs` puts **every real `seq:*` label into `toRemove`**. Fenced output is the
+      normal shape of review evidence, not a corner case. Verified **pre-existing on the
+      merge-base**; the claim is what this branch introduced. Claim bounded in the test and
+      in REQ-452-7; the fence defect itself awaits a disposition ruling.
+      **C1 (correction)** REQ-452-7 was stale twice: it named only `\n`/`\r` (round 3
+      added `\u2028`/`\u2029`) and still described a single decoder called
+      `unyamlScalar` — which the shipped code no longer has. `design.md` D6 said the same.
+      Round 4 had touched only impl + test + tasks. Both corrected.
+      **C2 (correction, THIRD recurrence)** every measurement in the PR body wrong again.
+      **E1 (editorial)** `board.mjs` throws on a parsed `sequencing` that is an object, and
+      spreads a string into per-character labels. Pre-existing, no emitter produces it —
+      routed to #477.
+- [x] T25 — post-round-5 verification: suite **2531 pass / 1 skip / 0 fail** ·
+      `repo:check` ✓ · `brain:nav` ✓ · regulated e2e **9/9** with REQ-409-6 pins green ·
+      diff **175** counted lines vs merge-base `d2fdf13`.

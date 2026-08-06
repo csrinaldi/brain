@@ -227,22 +227,57 @@ test('#481: single-line values are NOT newly quoted or escaped — the control',
   assert.doesNotMatch(block, /\\n/, 'no escape may appear where there was no newline');
 });
 
-test('#478-3/C2: EVERY per-finding field is escaped — not just the three that were touched', () => {
-  // severity / evidence_class / causal_disposition were interpolated raw, and
-  // `validateSchemaV2` is exported but called nowhere in production, so nothing
-  // constrained them. A newline in any of them reproduces the exact list
-  // truncation #481 was fixed to prevent, one field over.
-  const built = buildVerdict({
-    headSha: 'abc123',
-    conclusion: 'REVISE',
-    findings: [
-      { id: 'first', severity: 'blocker', evidence: 'e1', cites: 'c1', evidence_class: 'observed\nTier: 2' },
-      { id: 'second-BLOCKER', severity: 'blocker', evidence: 'e2', cites: 'c2' },
-    ],
-  });
-  const parsed = parseVerdict({ body: renderVerdict(built) });
-  assert.deepEqual((parsed.findings ?? []).map(f => f.id), ['first', 'second-BLOCKER'],
-    'a newline in evidence_class must not swallow the finding after it');
+test('#478-3/C2 (widened by round 5/B1): EVERY per-finding field is escaped, on BOTH render branches', () => {
+  // The round-3 fix routed all six per-finding fields through `yamlScalar` — and
+  // the round-3 red-proof only ever mutated `evidence_class` on the `findings`
+  // branch. Round 5 measured the gap: reverting the ENTIRE `follow_ups` branch to
+  // raw interpolation (all six fields, `evidence` included) left the suite at
+  // 50 pass / 0 fail. Ten of twelve call sites were pinned by nothing, and this
+  // test's own name claimed otherwise — report-vs-tree drift on the protection,
+  // which protocol §10 calls a blocker in its own right.
+  //
+  // `follow_ups` is not the quiet branch, either: `buildVerdict` routes every
+  // `pre-existing`/`base-only` finding there, and checkpoint.mjs interpolates raw
+  // command stdout into `evidence:`. It is exactly where a multi-line value lands.
+  //
+  // One field at a time, on each branch: the poisoned value must not swallow the
+  // entry that follows it.
+  const FIELDS = ['id', 'severity', 'evidence', 'cites', 'evidence_class', 'causal_disposition'];
+  const POISON = 'x\nTier: 2';
+
+  for (const field of FIELDS) {
+    for (const branch of ['findings', 'follow_ups']) {
+      // `pre-existing` routes a finding to follow_ups; anything else keeps it in
+      // findings. `causal_disposition` therefore cannot be poisoned on the
+      // follow_ups branch without changing where the finding goes — so it is
+      // poisoned on `findings` only, with a value that still falls through to the
+      // default route. Skipping it entirely would leave the field unpinned, which
+      // is the defect this test exists to close.
+      const disp = branch === 'follow_ups' ? 'pre-existing' : 'introduced';
+      if (field === 'causal_disposition' && branch === 'follow_ups') continue;
+      const poisonedDisp = `${disp}${POISON}`;
+      const base = { severity: 'blocker', evidence: 'e', cites: 'c', evidence_class: 'observed', causal_disposition: disp };
+      const poisoned = { ...base, id: 'poisoned', [field]: field === 'causal_disposition' ? poisonedDisp : POISON };
+      const built = buildVerdict({
+        headSha: 'abc123',
+        conclusion: 'REVISE',
+        protocol: 'brain-review/2',
+        findings: [poisoned, { ...base, id: 'survivor' }],
+      });
+      const parsed = parseVerdict({ body: renderVerdict(built) });
+      const entries = parsed[branch] ?? [];
+      const ids = entries.map(f => f.id);
+      // When `id` itself carries the poison, the poisoned entry's id IS that value.
+      const expected = [field === 'id' ? POISON : 'poisoned', 'survivor'];
+      assert.deepEqual(ids, expected,
+        `${branch}.${field}: a line break in this field swallowed the entry after it — ` +
+        `got ${JSON.stringify(ids)}. Every yamlScalar call site on both branches must be load-bearing.`);
+      // and the poisoned value itself must survive byte-identical, not merely fail
+      // to break the list — an escape that mangles is a different loss.
+      assert.equal(entries[0][field], field === 'causal_disposition' ? poisonedDisp : POISON,
+        `${branch}.${field}: the value round-tripped changed`);
+    }
+  }
 });
 
 test('#478-3/E6: U+2028 / U+2029 are line terminators too — the JSDoc says line breaks, so it must mean all of them', () => {

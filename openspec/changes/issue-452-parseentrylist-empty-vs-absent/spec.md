@@ -134,9 +134,22 @@ PARSED findings: 1  governance-status-output
 the BLOCKER "tier2-touch" survived the round trip: false
 ```
 
-`\n` and `\r` are now escaped on the way out and decoded back to the CHARACTERS on the
-way in. **The pair moves together**: `unyamlScalar`'s generic `\X → X` rule would have
-turned the new escape into a bare `n` and lost the newline a different way.
+`\n`, `\r`, `\u2028` and `\u2029` — every line terminator, not the two that were
+convenient — are escaped on the way out and decoded back to the CHARACTERS on the way in.
+
+**The pair moves together, and there is exactly ONE decoder.** A generic `\X → X` rule
+would have turned the new escape into a bare `n` and lost the newline a different way.
+Round 4 then found there were **two** decoders — `unyamlScalar` for entry fields,
+`parseJsonScalar` for `pin`/`sequencing`/the inline form — and only one had learned the
+new escape, so `\u2028` decoded to the literal text `u2028`. Both now delegate to
+`decodeYamlEscapes`, the single inverse.
+
+**Bound, measured rather than claimed** (round 5): the escape set is exhaustive for what
+`yamlScalar` escapes, and NOT total over all values. A markdown code fence in any value
+is unescaped, and `FENCE_RE` is non-greedy, so the first fence ends the block — the
+findings list truncates, `sequencing` vanishes, and `board.mjs` removes every `seq:*`
+label. Pre-existing on the merge-base `c724942`; the requirement is bounded here rather
+than left implying a completeness the encoder does not have.
 
 REQ-452-1's parser-side answer for an unreadable body (`null`, never a prefix) is what
 made this loss *honest*; it could not make it *not a loss*, because the posted artifact —

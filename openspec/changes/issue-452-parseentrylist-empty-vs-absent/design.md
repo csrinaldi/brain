@@ -155,7 +155,9 @@ into `evidence:`, so this fired on brain's own verdicts, not only foreign ones.
 says "line breaks are escaped", so it has to mean all of them rather than the two that
 were convenient.
 
-**Decode**: `unyamlScalar` maps `\n`/`\r`/`\u2028`/`\u2029` back to the CHARACTERS and
+**Decode**: `decodeYamlEscapes` — the SINGLE inverse, added in round 4 after that
+round found the emitter had acquired two decoders and only one had learned the new
+escape. Both readers delegate to it. It maps `\n`/`\r`/`\u2028`/`\u2029` back to the CHARACTERS and
 keeps the generic `\X → X` rule for everything else. **The halves move together** — the
 generic rule alone would have turned the new escape into a bare `n` and lost the newline a
 different way. That is why they are one design decision and one commit, not two.

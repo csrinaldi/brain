@@ -502,10 +502,20 @@ test('#478-4: `sequencing` round-trips through the REAL encoder when a value car
     'a decoder that does not mirror the encoder corrupts the label NAME — and board.mjs deletes labels by name');
 });
 
-test('#478-4: the same holds for every escape the encoder emits, on BOTH decoders', () => {
-  // The entry path (unyamlScalar) and the JSON path (parseJsonScalar) must agree,
-  // because one emitter feeds both. Any value the encoder can produce must come
-  // back identical on either route.
+test('#478-4: the same holds for every ESCAPED value, on BOTH decoders', () => {
+  // The entry path and the JSON path must agree, because one emitter feeds both.
+  //
+  // SCOPE, corrected by round 5/B2: this is NOT "any value the encoder can
+  // produce" — the earlier wording claimed a total property and was false. A
+  // value containing a markdown code fence escapes nothing (`yamlScalar` covers
+  // `\` `"` `\n` `\r` `\u2028` `\u2029`) and `FENCE_RE` is non-greedy, so the
+  // first fence inside any value ENDS the block: the findings list comes back
+  // truncated, `sequencing` disappears, and board.mjs puts every real `seq:*`
+  // label into `toRemove`. Measured, and pre-existing on the merge-base — the
+  // defect is the fence, not these escapes. See the round-5 review record.
+  //
+  // What this case pins is the escape set, exhaustively. It must not be read as
+  // a guarantee about every possible value.
   const nasty = ['a\nb', 'a\rb', 'a\u2028b', 'a\u2029b', 'a"b', 'a\\b', 'a\\nb'];
   for (const v of nasty) {
     const built = buildVerdict({
