@@ -96,7 +96,11 @@ Five tiers of red, in order:
 1. `regulated` + 250 lines, current code → APPROVE, no budget finding. This is the
    ticket's reproduction; it must be observed before the fix.
 2. `lite` + 500 lines, current code → budget finding present. The false positive.
-3. `standard` + 401 lines, before and after → identical finding object. The no-op.
+3. `standard` + 401 lines, before and after → identical **decision** (fires / `id` /
+   `severity` / `conclusion`). The `evidence` and `cites` strings DO change at
+   `standard` too, by REQ-443-4's design — an earlier draft of this step said
+   "identical finding object", which was false in two of four fields and was caught by
+   the cold review of PR #471. The no-op is about the verdict, not the prose.
 4. After the fix, mutate `tierParams(tier).diffBudget` back to a literal `400` in
    `gatherTrancheInputs` → cases 1 and 2 go red again. Verify the mutation took effect
    (the #409 lesson: a mutation that lands in a JSDoc comment is inert and proves

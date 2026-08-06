@@ -25,14 +25,27 @@ Each case must also be proven from the other side (a `regulated` diff under 200 
 silent; a `lite` diff over 1000 fires), so neither test can pass by a constant that
 happens to sit on the correct side of one threshold.
 
-## REQ-443-2 — `standard` is byte-identical (the no-op guarantee)
+## REQ-443-2 — `standard`'s VERDICT is unchanged; its evidence TEXT is not
 
-`standard`'s budget is 400, which is what the hardcode was. REQ-TIER-10's
-no-op-migration discipline applies: at `standard` the finding's presence, `id`,
-`severity` and `evidence` string are unchanged by this change. This is asserted
-explicitly rather than inferred from the suite staying green — the whole reason the
-defect survived is that `standard` was the only tier under test, so "standard still
-passes" is precisely the evidence that carries no information here.
+`standard`'s budget is 400, which is what the hardcode was, so REQ-TIER-10's
+no-op-migration discipline applies — but to the decision, not to the prose.
+
+**Unchanged at `standard`:** whether the finding fires (the 400/401 boundary), and its
+`id`, `severity` and resulting `conclusion`. A consumer who never declared
+`governance.tier` inherits `standard` and gets the same verdict on the same PR.
+
+**Changed at `standard`, deliberately:** `evidence` gains `> 400 (tier: standard)` and
+`cites` moves from `governance.yml diff-size gate (400-line budget)` to
+`governance-tiers.mjs tierParams(tier).diffBudget`. REQ-443-4 mandates this at every
+tier, `standard` included — the old citation named a file that no longer holds the
+number and a value only correct at one tier.
+
+An earlier draft of this requirement claimed the `evidence` string was unchanged,
+which contradicted REQ-443-4 in the same document and was false against the shipped
+code. The cold review of PR #471 caught it. Both halves are now asserted: the boundary
+AND the exact new `standard` strings — because "the suite still passes at `standard`"
+is precisely the evidence that carries no information here, `standard` having been the
+only tier under test when the defect shipped.
 
 ## REQ-443-3 — one budget literal in the repo
 

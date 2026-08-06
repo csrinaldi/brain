@@ -33,7 +33,35 @@ topic_key: sdd/issue-443-tranche-tier-budget/tasks
       the control. Restored; 56/56 green.
 - [x] T8 — full suite **2480 pass / 1 skip / 0 fail** (+10 from baseline) ·
       `repo:check` ✓ · `brain:nav` ✓ · diff 82 counted lines against `lite`'s 1000.
-- [x] T9 — PR to `main`, `Closes #443`.
+- [x] T9 — PR #471 to `main`, `Closes #443`.
+- [x] T10 — **cold review round (PR #471, verdict REVISE)** — an independent reviewer
+      with no context on this change; all three findings reproduced before acting.
+      **F1 (spec self-contradiction)** REQ-443-2 claimed the `evidence` string was
+      unchanged at `standard` while REQ-443-4 mandated changing it at every tier.
+      Measured: `main` emits `… = 401` / `cites: governance.yml diff-size gate
+      (400-line budget)`; the branch emits `… = 401 > 400 (tier: standard)` /
+      `cites: governance-tiers.mjs tierParams(tier).diffBudget`. `standard` is what
+      every consumer who never declared a tier inherits, so this is a real change to
+      what they see. Fixed on both sides: the requirement now separates the DECISION
+      (unchanged) from the PROSE (changed by design), and the exact `standard` strings
+      are pinned by a test. Proven load-bearing by mutating the suffix (verified to
+      have landed first — the first attempt's `perl` substitution silently did not
+      match, and the resulting 26/26 green said nothing).
+      **F2 (`evidence-reader-empty-on-failure`, in my own assertion layer)** the new
+      `lite` e2e case asserted only the ABSENCE of a budget finding — and was written
+      `verdict.findings ?? []`, the exact shape flagged against this author in #444.
+      Reproduced: mutating the gather to `if (true || !baseSha || !headSha)` (budget
+      NEVER computed) left the case GREEN. Fixed with positive evidence — APPROVE plus
+      empty `conditions`, since an uncomputable budget fails closed to REVISE — and a
+      `diffLines: 1001` companion so the case is falsifiable from inside its own
+      fixture. Both mutations now red.
+      **F3 (coverage regression)** flipping `redJob`'s default to `null` left the
+      parameter with zero call sites: the gate-shaped finding path stopped crossing
+      the process boundary at all, and deleting its honoring outright kept the file
+      green. The REQ-409-6 case now carries `redJob: 'phase-order'` and asserts the
+      gate finding reaches the posted body; deleting the honoring is now red.
+- [x] T11 — post-review verification: suite **2482 pass / 1 skip / 0 fail** ·
+      `repo:check` ✓ · `brain:nav` ✓.
 
 ## Found while here — NOT fixed here (scope)
 

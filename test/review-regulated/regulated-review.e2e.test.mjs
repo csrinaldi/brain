@@ -91,18 +91,48 @@ test('e2e: a regulated consumer posts a brain-review/2 verdict, parseable by the
   assert.match(budget.evidence, /regulated/, 'and the tier that produced that budget');
 });
 
-test('e2e: the SAME 250-line diff is silent at lite — the tiered budget crosses the process boundary in both directions (REQ-443-1)', (t) => {
+test('e2e: the SAME 250-line diff is silent at lite — and the silence is MEASURED, not vacuous (REQ-443-1)', (t) => {
   // The negative half of #443 at the e2e level. Before the fix this same fixture at
   // lite was judged against a hardcoded 400: a 500-line PR would have been flagged
-  // on the tier brain itself declares. 250 is far under lite's 1000, and the only
-  // way to tell "correctly silent" from "silent because nothing ran" is that the
-  // regulated case above, same diff, speaks.
+  // on the tier brain itself declares.
+  //
+  // Review finding (cold review of PR #471): the first version of this test asserted
+  // ONLY the absence of the budget finding, so it passed having observed nothing —
+  // `evidence-reader-empty-on-failure` in the assertion layer, in the test whose
+  // sibling forty lines below explicitly rejects "a different test over a different
+  // fixture instance covers it" as an argument. Reproduced: mutating
+  // `gatherTrancheInputs` to `if (true || !baseSha || !headSha)` (budget NEVER
+  // computed) left this case GREEN while two others went red.
+  //
+  // So the silence now has to be positive evidence. An uncomputable budget fails
+  // closed to REVISE + a condition (tranche.mjs's §10 rule), which is a state this
+  // assertion pair can see; and the companion case below proves this fixture's diff
+  // is measured against lite's budget at all.
   const fx = withFixture(t, { tier: 'lite' });
   const r = runReview(fx);
   assert.equal(r.status, 0, r.stderr);
   const verdict = parseVerdict({ body: postedBodies(fx)[0].body });
-  assert.equal((verdict.findings ?? []).find(f => f.id === 'budget'), undefined,
+  assert.ok(Array.isArray(verdict.findings), 'findings must be present — an absent list would make the check below vacuous');
+  assert.equal(verdict.findings.find(f => f.id === 'budget'), undefined,
     'a budget finding at lite/250 is the #443 false positive — governance allows 1000 here');
+  assert.equal(verdict.verdict, 'APPROVE',
+    'the budget was COMPUTED and cleared — an uncomputable budget fails closed to REVISE, which is how this case tells "silent" from "never measured"');
+  assert.deepEqual(verdict.conditions ?? [], [],
+    'and carries no uncomputable-evidence condition');
+});
+
+test('e2e: at lite, 1001 lines DOES trip the budget — the positive control for the case above (REQ-443-1)', (t) => {
+  // Without this, "silent at lite" is unfalsifiable from inside its own fixture: a
+  // fixture whose diff silently shrank to 1 line would still pass. This case is what
+  // makes lite's budget observably 1000 across the real process boundary, and it is
+  // the e2e twin of the unit-level `trancheAtTier('lite', 1001)`.
+  const fx = withFixture(t, { tier: 'lite', diffLines: 1001 });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, r.stderr);
+  const verdict = parseVerdict({ body: postedBodies(fx)[0].body });
+  const budget = verdict.findings.find(f => f.id === 'budget');
+  assert.ok(budget, `1001 lines must breach lite's 1000 budget — got: ${JSON.stringify(verdict.findings)}`);
+  assert.match(budget.evidence, /> 1000 \(tier: lite\)/, 'and must name lite\'s budget, not another tier\'s');
 });
 
 test('e2e: /2 findings carry the causal-admission annotations (REQ-409-3)', (t) => {
@@ -171,7 +201,16 @@ test('e2e: a missing token refuses at boot — nothing posted (REQ-409-5c)', (t)
 // ── REQ-409-6: /2 plumbing honesty — the #408 boundary ───────────────────────
 
 test('e2e: follow_ups is ABSENT by construction, the refuter silent — flip means #408 landed, move these, do not delete them (REQ-409-6)', (t) => {
-  const fx = withFixture(t, { tier: 'regulated' });
+  // `redJob` here is not incidental (review finding, cold review of PR #471): when
+  // #443 restored the diff-budget breach as the default finding source, `redJob`'s
+  // default went to null and NO case passed it — so the gate-shaped finding path,
+  // which every e2e case used to carry, stopped crossing the process boundary
+  // entirely and the parameter the README advertises for #405/#408 became
+  // untested. Proven: deleting the honoring of `redJob` from fixture.mjs left the
+  // whole file green. This case carries it, so both finding shapes stay exercised
+  // — and it is the right host, since a second finding of a DIFFERENT id is exactly
+  // the population these #408 pins have to survive.
+  const fx = withFixture(t, { tier: 'regulated', redJob: 'phase-order' });
   const r = runReview(fx);
   assert.equal(r.status, 0, r.stderr);
   const body = postedBodies(fx)[0].body;
@@ -195,4 +234,8 @@ test('e2e: follow_ups is ABSENT by construction, the refuter silent — flip mea
   // No evaluator emits evidence_class: inferential (#408): the refuter must not have run.
   assert.ok(verdict.findings.every(f => f.evidence_class !== 'inferential'),
     'an inferential finding appeared — the refuter fork is live; #408 has landed and this pin must move with it');
+  // And the gate-shaped source is genuinely live end to end (see the fixture note
+  // above) — without this, `redJob` could be silently broken and nothing would say so.
+  assert.ok(verdict.findings.find(f => f.id === 'gate:phase-order'),
+    `redJob's red required gate must reach the posted body — got: ${JSON.stringify(verdict.findings.map(f => f.id))}`);
 });

@@ -317,14 +317,30 @@ test('gatherTrancheInputs→evaluateTranche: at lite, 1001 lines IS flagged — 
   assert.equal(budgetFinding.severity, 'blocker');
 });
 
-test('gatherTrancheInputs: standard is byte-identical to the pre-#443 hardcode — the no-op guarantee (REQ-TIER-10)', async () => {
+test('gatherTrancheInputs: standard keeps the pre-#443 DECISION — the no-op guarantee (REQ-443-2, REQ-TIER-10)', async () => {
   // `standard` is where the hardcode was CORRECT, so "the suite still passes at
   // standard" carries no information about this change. Pin the value and the
   // boundary explicitly instead.
   const { inputs } = await trancheAtTier('standard', 401);
   assert.equal(inputs.diffBudget, 400, 'standard must still resolve to 400 — this change is a no-op at the default tier');
-  assert.ok((await trancheAtTier('standard', 401)).budgetFinding, '401 > 400 still flags');
+  const over = await trancheAtTier('standard', 401);
+  assert.ok(over.budgetFinding, '401 > 400 still flags');
+  assert.equal(over.budgetFinding.severity, 'blocker');
+  assert.equal(over.result.conclusion, 'REVISE');
   assert.equal((await trancheAtTier('standard', 400)).budgetFinding, undefined, '400 is within budget, as before');
+});
+
+test('gatherTrancheInputs: standard\'s evidence TEXT does change, and that is REQ-443-4 applying at every tier (REQ-443-2)', async () => {
+  // The cold review of PR #471 found REQ-443-2's first draft claiming the evidence
+  // string was unchanged at standard — contradicting REQ-443-4 in the same document
+  // and false against the code. `standard` is the tier every consumer who never
+  // declared `governance.tier` inherits, so the text they see on a posted verdict is
+  // a real (intended) change and belongs under assertion, not under a claim.
+  // On main this read: `… = 401` with cites `governance.yml diff-size gate (400-line budget)`.
+  const { budgetFinding } = await trancheAtTier('standard', 401);
+  assert.equal(budgetFinding.evidence,
+    'git diff --numstat BASE...HEAD | diff-size-count.mjs = 401 > 400 (tier: standard)');
+  assert.equal(budgetFinding.cites, 'governance-tiers.mjs tierParams(tier).diffBudget');
 });
 
 test('evaluateTranche: the budget finding cites the tiered resolver and shows the comparison — never a hardcoded "(400-line budget)" it did not apply (REQ-443-4)', async () => {
