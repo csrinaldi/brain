@@ -36,11 +36,22 @@ acts. The ticket's own body asks for a design pass first — this is it.
       regenerate `AGENTS.md`, since HOME.md is one of the five SOURCE_DOCS).
 - [ ] T4b — **HUMAN: sign and promote** the amendment. `brain/**` is Tier 2; the agent
       must never write the destination files.
-- [ ] T5 — BLOCKED ON #478: `file`/`line` on the `/2` finding schema, with the
+- [x] T5 — **UNBLOCKED** (#478 merged at `ba4921e`) and done: `file`/`line` on the `/2` finding schema, with the
       render/parse round trip over the REAL pair (REQ-405-2, -3). Starting before #478
       merges would conflict on the two files three review rounds have already rewritten.
-- [ ] T6 — widen `prReviewComment` on GitHub: `comments[]` into the existing payload,
-      `event: 'COMMENT'` untouched (REQ-405-1).
+- [x] T6 — GitHub widened: `comments[]` rides the EXISTING `/reviews` payload,
+      `event: 'COMMENT'` untouched. Baseline `main` @ `ba4921e`: **2531 / 2530 pass**.
+- [x] T8a — REQ-405-4 written BEFORE the success path, as this file instructed. The
+      `rejectInline` fixture makes the first attempt fail and every later one succeed, so
+      a verb that retries without anchors gets a url and one that gives up gets nothing.
+      `inlineDropped` is **absent** when nothing was dropped, never `0` — "none requested"
+      and "all dropped" must not be the same answer.
+      Red-proof, diff printed before each run: ignore `comments` → the payload case reds;
+      remove the fallback → REQ-405-4 reds; report `0` instead of omitting → two cases red.
+      Each mutation kills a DIFFERENT test, so each pins a distinct property.
+- [x] T6a — the parity case asserts the payload SENT, not the value returned. Its first
+      version passed against a verb that ignored `comments` entirely — decorative, and
+      caught here rather than by a reviewer (round 5 of PR #478 is why I looked).
 - [ ] T7 — GitLab: `notes` when `comments` is absent, `discussions` + `position` when
       present, `diff_refs` fetched inside the verb (D4).
 - [ ] T8 — REQ-405-4, the one that matters: the un-anchorable fallback. Stub rejects the

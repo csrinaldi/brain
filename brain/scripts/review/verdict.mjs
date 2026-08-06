@@ -129,6 +129,12 @@ export function renderVerdict(v) {
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
       if (f.evidence_class) lines.push(`    evidence_class: ${yamlScalar(f.evidence_class)}`);
       if (f.causal_disposition) lines.push(`    causal_disposition: ${yamlScalar(f.causal_disposition)}`);
+      // The inline-comment anchor (issue #405, REQ-405-2). BOTH optional and
+      // emitted only when present, so a finding without them renders exactly as
+      // it does today — that is what keeps the feature additive for every
+      // evaluator shipping now. Through yamlScalar like every other scalar.
+      if (f.file) lines.push(`    file: ${yamlScalar(f.file)}`);
+      if (f.line !== undefined && f.line !== null) lines.push(`    line: ${yamlScalar(f.line)}`);
     }
   }
 
@@ -141,6 +147,12 @@ export function renderVerdict(v) {
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
       if (f.evidence_class) lines.push(`    evidence_class: ${yamlScalar(f.evidence_class)}`);
       if (f.causal_disposition) lines.push(`    causal_disposition: ${yamlScalar(f.causal_disposition)}`);
+      // The inline-comment anchor (issue #405, REQ-405-2). BOTH optional and
+      // emitted only when present, so a finding without them renders exactly as
+      // it does today — that is what keeps the feature additive for every
+      // evaluator shipping now. Through yamlScalar like every other scalar.
+      if (f.file) lines.push(`    file: ${yamlScalar(f.file)}`);
+      if (f.line !== undefined && f.line !== null) lines.push(`    line: ${yamlScalar(f.line)}`);
     }
   }
 

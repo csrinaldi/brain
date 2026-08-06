@@ -431,18 +431,43 @@ export async function prCommits({ project, number } = {}) {
  * @param {{ project: string, number: number, body: string }} opts
  * @returns {Promise<{ url: string } | { url: null, error: string }>}
  */
-export async function prReviewComment({ project, number, body } = {}) {
-  const r = run(
-    'gh',
-    ['api', '-X', 'POST', `repos/${project}/pulls/${number}/reviews`, '--input', '-'],
-    { input: JSON.stringify({ body, event: 'COMMENT' }) },
-  );
-  if (!r.ok) return { url: null, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
-  try {
-    return { url: JSON.parse(r.stdout).html_url };
-  } catch (err) {
-    return { url: null, error: err.message };
+export async function prReviewComment({ project, number, body, comments } = {}) {
+  const args = ['api', '-X', 'POST', `repos/${project}/pulls/${number}/reviews`, '--input', '-'];
+  const post = (payload) => run('gh', args, { input: JSON.stringify(payload) });
+  const parse = (r, extra) => {
+    try {
+      return { url: JSON.parse(r.stdout).html_url, ...extra };
+    } catch (err) {
+      return { url: null, error: err.message };
+    }
+  };
+
+  const inline = Array.isArray(comments) && comments.length > 0 ? comments : null;
+
+  // `comments` rides the SAME payload as `body` and `event` — one call, so the
+  // review is atomic and no second postable artifact exists for the anti-loop
+  // lock to miss (ADR-0020 Amendment 1, #405 design D1/D5).
+  const first = post(inline ? { body, event: 'COMMENT', comments: inline } : { body, event: 'COMMENT' });
+  if (first.ok) return parse(first);
+
+  // REQ-405-4 — the verdict is never lost to an inline failure. GitHub 422s a
+  // comment targeting a line outside the diff; the summary alone would have been
+  // accepted. Retry WITHOUT the anchors and report how many were dropped.
+  //
+  // Only reachable when anchors were sent, so a plain post failure costs no extra
+  // call. The attribution is sound rather than assumed: the retry differs from
+  // the first attempt in exactly one way, so if dropping the comments makes it
+  // succeed, the comments were the cause.
+  //
+  // `inlineDropped` is ABSENT when nothing was dropped, never 0 — "none
+  // requested" and "all dropped" must not be the same answer to a reader
+  // (evidence-reader-empty-on-failure, applied to a poster).
+  if (inline) {
+    const retry = post({ body, event: 'COMMENT' });
+    if (retry.ok) return parse(retry, { inlineDropped: inline.length });
   }
+
+  return { url: null, error: first.stderr.trim() || `gh api failed (status ${first.status})` };
 }
 
 /**

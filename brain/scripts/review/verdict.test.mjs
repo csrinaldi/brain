@@ -242,7 +242,10 @@ test('#478-3/C2 (widened by round 5/B1): EVERY per-finding field is escaped, on 
   //
   // One field at a time, on each branch: the poisoned value must not swallow the
   // entry that follows it.
-  const FIELDS = ['id', 'severity', 'evidence', 'cites', 'evidence_class', 'causal_disposition'];
+  // `file`/`line` joined the set in #405. Round 5 of PR #478 found ten yamlScalar
+  // call sites pinned by nothing; new fields go into this sweep at birth rather
+  // than acquiring coverage later.
+  const FIELDS = ['id', 'severity', 'evidence', 'cites', 'evidence_class', 'causal_disposition', 'file', 'line'];
   const POISON = 'x\nTier: 2';
 
   for (const field of FIELDS) {
@@ -256,7 +259,7 @@ test('#478-3/C2 (widened by round 5/B1): EVERY per-finding field is escaped, on 
       const disp = branch === 'follow_ups' ? 'pre-existing' : 'introduced';
       if (field === 'causal_disposition' && branch === 'follow_ups') continue;
       const poisonedDisp = `${disp}${POISON}`;
-      const base = { severity: 'blocker', evidence: 'e', cites: 'c', evidence_class: 'observed', causal_disposition: disp };
+      const base = { severity: 'blocker', evidence: 'e', cites: 'c', evidence_class: 'observed', causal_disposition: disp, file: 'a.mjs', line: 1 };
       const poisoned = { ...base, id: 'poisoned', [field]: field === 'causal_disposition' ? poisonedDisp : POISON };
       const built = buildVerdict({
         headSha: 'abc123',
@@ -291,4 +294,64 @@ test('#478-3/E6: U+2028 / U+2029 are line terminators too — the JSDoc says lin
     assert.equal(parsed.findings?.[0]?.evidence, `a${sep}b`,
       `U+${sep.codePointAt(0).toString(16)} destroyed the round trip`);
   }
+});
+
+// ── #405 REQ-405-2/-3: an OPTIONAL anchor on a finding ─────────────────────
+//
+// M3's exit is "a developer sees inline code review in the PR". A finding that
+// reports `src/a.mjs:42` inside a YAML block is a report, not a review — the
+// developer still has to go find the line.
+//
+// `file` and `line` are the anchor. BOTH OPTIONAL, and absent ⇒ no inline
+// comment (REQ-405-2): that default is what keeps this additive, so every
+// evaluator shipping today keeps working unchanged and gains inline coverage
+// only when it starts emitting anchors.
+//
+// They are NOT derived from `evidence` (design D2): evidence is a quoted command
+// AND its output (protocol §10), so it is full of colons, paths and numbers that
+// are not anchors. A regex over it would silently mis-anchor.
+
+test('#405 REQ-405-3: file/line survive the REAL render → parse round trip', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    protocol: 'brain-review/2',
+    findings: [{ id: 'anchored', severity: 'blocker', evidence: 'e', cites: 'c', file: 'brain/scripts/a.mjs', line: 42 }],
+  });
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.equal(parsed.findings[0].file, 'brain/scripts/a.mjs');
+  assert.equal(parsed.findings[0].line, '42', 'line comes back as the scalar text the block carries');
+});
+
+test('#405 REQ-405-2: a finding WITHOUT an anchor is unchanged — the additive guarantee', () => {
+  // Every evaluator shipping today emits no file/line. Their output must render
+  // and parse exactly as it does now: no empty keys, no nulls, no new fields.
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [{ id: 'legacy', severity: 'blocker', evidence: 'src/a.mjs:42', cites: 'ADR-0020' }],
+  });
+  const block = renderVerdict(built).split('```')[1];
+  assert.doesNotMatch(block, /^\s*file:/m, 'no file key may appear for an anchorless finding');
+  assert.doesNotMatch(block, /^\s*line:/m, 'no line key may appear for an anchorless finding');
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual(parsed.findings[0], { id: 'legacy', severity: 'blocker', evidence: 'src/a.mjs:42', cites: 'ADR-0020' });
+});
+
+test('#405 REQ-405-3: the anchor is escaped like every other scalar — a path with a line break cannot truncate the list', () => {
+  // file/line are entry scalars, so they inherit the #481/#452 escaping pair.
+  // Inherit is a claim until it is exercised — round 5 of PR #478 found ten
+  // yamlScalar call sites pinned by nothing, so each NEW one gets its own case.
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    protocol: 'brain-review/2',
+    findings: [
+      { id: 'poisoned', severity: 'blocker', evidence: 'e', cites: 'c', file: 'a.mjs\nTier: 2', line: 1 },
+      { id: 'survivor', severity: 'blocker', evidence: 'e2', cites: 'c2', file: 'b.mjs', line: 2 },
+    ],
+  });
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual((parsed.findings ?? []).map(f => f.id), ['poisoned', 'survivor']);
+  assert.equal(parsed.findings[0].file, 'a.mjs\nTier: 2', 'and the value round-trips byte-identical');
 });

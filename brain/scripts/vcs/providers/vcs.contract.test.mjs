@@ -1155,21 +1155,64 @@ for (const providerName of Object.keys(ROLLUP_PROVIDERS)) {
 // test body applies to each provider. Inline mocks (no fixture files) — these
 // are simple write verbs and the normalized shapes are the whole contract.
 
+// `rejectInline` (issue #405, REQ-405-4) fakes the ONE failure that matters: the
+// provider refuses the inline payload but would accept the summary alone —
+// GitHub 422s a comment outside the diff, GitLab rejects a stale `position`.
+// The first attempt fails, every attempt after it succeeds, so a verb that
+// retries without the anchors gets a url and a verb that gives up gets nothing.
+// Captures what the verb actually SENT, so the parity case can assert the
+// payload rather than the return value. Without this the "rides the same call"
+// test passes against a verb that ignores `comments` entirely — it did, before
+// the implementation landed.
+const sent = [];
+function capturingSpawn(data) {
+  return (_cmd, _args, opts) => {
+    try { sent.push(JSON.parse(opts?.input ?? '{}')); } catch { sent.push({ unparseable: opts?.input }); }
+    return { status: 0, stdout: JSON.stringify(data), stderr: '' };
+  };
+}
+
+function rejectOnceThenSucceed(data) {
+  let first = true;
+  return () => {
+    if (first) { first = false; return { status: 1, stdout: '', stderr: 'HTTP 422: line must be part of the diff' }; }
+    return { status: 0, stdout: JSON.stringify(data), stderr: '' };
+  };
+}
+
 const WRITE_VERB_PROVIDERS = {
   github: {
     module: github,
     ok: (data) => { setSpawn(jsonSpawn(data)); return {}; },
     fail: () => { setSpawn(failSpawn('fixture: simulated failure')); return {}; },
+    rejectInline: (data) => { setSpawn(rejectOnceThenSucceed(data)); return {}; },
+    capture: (data) => { sent.length = 0; setSpawn(capturingSpawn(data)); return {}; },
+    sentPayloads: () => sent,
   },
   gitlab: {
     module: gitlab,
     ok: (data) => ({ fetchImpl: async () => ({ ok: true, json: async () => data }) }),
     fail: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
+    rejectInline: (data) => {
+      let first = true;
+      return { fetchImpl: async () => {
+        if (first) { first = false; return { ok: false, status: 400, json: async () => ({ message: 'position is invalid' }) }; }
+        return { ok: true, json: async () => data };
+      } };
+    },
+    capture: (data) => {
+      sent.length = 0;
+      return { fetchImpl: async (_url, opts) => {
+        try { sent.push(JSON.parse(opts?.body ?? '{}')); } catch { sent.push({ unparseable: opts?.body }); }
+        return { ok: true, json: async () => data };
+      } };
+    },
+    sentPayloads: () => sent,
   },
 };
 
 for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
-  const { module: vcs, ok, fail } = WRITE_VERB_PROVIDERS[providerName];
+  const { module: vcs, ok, fail, rejectInline, capture, sentPayloads } = WRITE_VERB_PROVIDERS[providerName];
 
   test(`${providerName}.prReviewComment (contract): posts event:'COMMENT' (hardcoded), returns { url } on success`, async () => {
     const result = await vcs.prReviewComment({
@@ -1184,6 +1227,80 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
     const result = await vcs.prReviewComment({ project: 'x/y', number: 1, body: 'verdict', ...fail() });
     assert.equal(result.url, null, 'a failed prReviewComment must never fabricate a url');
     assert.equal(typeof result.error, 'string', 'a failed prReviewComment must carry an error string');
+  });
+
+  // ── #405 REQ-405-1/-2/-4: the optional inline `comments[]` ────────────────
+  //
+  // ADR-0020 Amendment 1: `prReviewComment` gains an OPTIONAL `comments` array,
+  // carried in the SAME provider call as `body`. Verb count stays four, and
+  // `event: 'COMMENT'` stays hardcoded — lock 2 (REQ-266-3) preserved by
+  // construction on both providers.
+  //
+  // Parity is forced HERE (REQ-405-6): the implementations differ by design —
+  // GitHub widens one payload, GitLab switches from `notes` to `discussions` and
+  // must read `diff_refs` first — so the contract is what makes that asymmetry
+  // deliberate rather than accidental. A provider that silently no-ops on
+  // `comments` fails this block.
+
+  test(`${providerName}.prReviewComment (contract): comments[] is OPTIONAL — omitting it behaves exactly as before (REQ-405-2)`, async () => {
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      ...ok({ html_url: 'https://example.test/x/y/pull/1#review-1', id: 1 }),
+    });
+    assert.equal(typeof result.url, 'string');
+    assert.equal(result.inlineDropped, undefined,
+      'with no comments requested there is nothing to drop — the key must be ABSENT, not 0. ' +
+      '"none requested" and "all dropped" are different answers (evidence-reader-empty-on-failure).');
+  });
+
+  test(`${providerName}.prReviewComment (contract): an inline rejection NEVER costs the verdict (REQ-405-4)`, async () => {
+    // THE load-bearing case, and the reason it is written before the success
+    // path: GitHub 422s a comment targeting a line outside the diff, GitLab
+    // rejects a stale position. The summary MUST still post, and the verdict
+    // MUST report how many anchors were dropped — without that count, "no inline
+    // comments appeared" is indistinguishable from "the anchors would not
+    // attach", which is evidence-reader-empty-on-failure relocated into a poster.
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      comments: [{ path: 'a.mjs', line: 9999, body: 'out of diff' }],
+      ...rejectInline({ html_url: 'https://example.test/x/y/pull/1#review-2', id: 2 }),
+    });
+    assert.equal(typeof result.url, 'string',
+      'the summary must have posted anyway — losing the verdict to a cosmetic failure trades a working reviewer for a pretty one');
+    assert.equal(result.error, undefined, 'a fallback that succeeded is not an error');
+    assert.equal(result.inlineDropped, 1,
+      'the count is the reader\'s only way to tell "no anchors" from "the anchors would not attach"');
+  });
+
+  test(`${providerName}.prReviewComment (contract): comments[] rides the SAME call, event stays COMMENT (REQ-405-1/-5)`, async () => {
+    // Asserted on what was SENT, not on what came back. The return-value version
+    // of this test passed against a verb that ignored `comments` entirely — a
+    // provider must not be able to satisfy the contract by silently no-opping
+    // (REQ-405-6).
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      comments: [{ path: 'a.mjs', line: 42, body: 'here' }],
+      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-3', id: 3 }),
+    });
+    assert.equal(typeof result.url, 'string');
+    assert.equal(result.inlineDropped, undefined, 'nothing was dropped, so no count');
+
+    const payloads = sentPayloads();
+    assert.equal(payloads.length, 1, 'ONE call — a second would create an artifact the anti-loop lock does not count (design D5)');
+    const p = payloads[0];
+    assert.ok(Array.isArray(p.comments) && p.comments.length === 1,
+      `the anchor must be IN the payload, not dropped: ${JSON.stringify(p)}`);
+    assert.equal(p.comments[0].path, 'a.mjs');
+    assert.ok(p.body, 'the summary body rides the same payload');
+  });
+
+  test(`${providerName}.prReviewComment (contract): lock 2 — no APPROVE path exists in the source`, () => {
+    const src = readFileSync(fileURLToPath(new URL(`./${providerName}.mjs`, import.meta.url)), 'utf8');
+    const fn = src.slice(src.indexOf('export async function prReviewComment'));
+    const end = fn.indexOf('\nexport ', 1);
+    const scoped = end === -1 ? fn : fn.slice(0, end);
+    assert.doesNotMatch(scoped, /APPROVE|REQUEST_CHANGES/,
+      `${providerName}.prReviewComment must contain no approving event, even after the #405 widening (ADR-0020 lock 2)`);
   });
 
   test(`${providerName}.issueComment (contract): returns { url } on success`, async () => {
