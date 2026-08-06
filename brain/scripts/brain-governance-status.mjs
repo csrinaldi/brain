@@ -340,6 +340,26 @@ function printSubstrateReport(substrate) {
     console.log('  release gate   armed  [workflow triggers pre-tag, invokes brain:audit, holds contents:write]');
   }
 
+  // Rung-3 post-merge-CI breakdown (issue #468, REQ-R3-8/REQ-HONESTY-1/2).
+  // Driven SOLELY by rungs[3].available/active/verifiable/mechanism — never an
+  // independent hardcoded branch, same discipline as rung 1/rung 2 above.
+  // Order matters: `available === false` (uncomputable) is checked FIRST so
+  // it can never be swallowed by an inert render — the whole point of this
+  // change is that a broken/unreachable read must never masquerade as a
+  // confirmed "not armed".
+  const rung3 = substrate.rungs?.[3];
+  if (rung3?.available === false) {
+    console.log(`  post-merge CI  UNCOMPUTABLE — ${rung3.reason}`);
+    if (rung3.remedy) console.log(`                 remedy: ${rung3.remedy}`);
+  } else if (rung3?.active && rung3.verifiable === false) {
+    console.log('  post-merge CI  armed (declared) — unverified; no run-ledger evidence');
+  } else if (rung3?.active) {
+    console.log('  post-merge CI  armed  [last governance-postmerge run on main succeeded within 48h]');
+  } else if (rung3 && rung3.active === false) {
+    console.log(`  post-merge CI  not armed: ${rung3.reason}`);
+    if (rung3.remedy) console.log(`                 remedy: ${rung3.remedy}`);
+  }
+
   console.log('');
 }
 

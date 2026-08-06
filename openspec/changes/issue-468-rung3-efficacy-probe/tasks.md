@@ -146,7 +146,7 @@ Verification: `node --test brain/scripts/brain-governance-status.test.mjs`
 
 ## Task 3 — `printSubstrateReport` rung-3 breakdown block
 
-- [ ] **REQ-R3-8**
+- [x] **REQ-R3-8**
 
 Depends on: Task 1 (the block reads `rungs[3].available/active/verifiable/mechanism`,
 which only exists once Task 1 lands). Independent of Task 2 — the block is

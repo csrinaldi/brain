@@ -281,6 +281,132 @@ test('printSubstrateReport: present-but-inert post-tag workflow (brain\'s own re
   assert.match(output, /remedy:.*#210/is);
 });
 
+// ── Rung-3 post-merge-CI breakdown (issue #468, REQ-R3-8) ───────────────────
+//
+// Driven SOLELY by rungs[3].available/active/verifiable/mechanism, mirroring
+// the rung-1/rung-2 discipline above. Every scenario injects `probes.postMergeCi`
+// evidence objects directly (no real probe needed) — one case per branch of
+// the rung-3 print block, `available === false` checked first so it can never
+// be swallowed by an inert render.
+
+test('printSubstrateReport: rung-3 available:false renders UNCOMPUTABLE with reason + remedy, never a neutral inert render', async () => {
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => ({ workflowPresent: true, read: 'failed', lastRun: null, error: 'gh: authentication required', observedAt: null }),
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /post-merge CI\s+UNCOMPUTABLE — /i);
+  assert.match(output, /authentication required/i);
+  assert.doesNotMatch(output, /post-merge CI\s+not armed/i, 'uncomputable must never render as a neutral "not armed"');
+});
+
+test('printSubstrateReport: rung-3 active with verifiable:false renders the declared-but-unverified caveat (legacy bare-true probe)', async () => {
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => true,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /post-merge CI\s+armed \(declared\) — unverified; no run-ledger evidence/i);
+});
+
+test('printSubstrateReport: rung-3 active AND verifiable renders armed with the run-ledger mechanism, no caveat', async () => {
+  const observedAt = Date.parse('2026-08-05T12:00:00Z');
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => ({
+          workflowPresent: true,
+          read: 'ok',
+          lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T06:00:00Z', htmlUrl: 'https://github.com/o/r/actions/runs/1' },
+          error: null,
+          observedAt,
+        }),
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /RUNG 3\b/);
+  assert.match(output, /post-merge CI\s+armed\s+\[last governance-postmerge run on main succeeded within 48h\]/i);
+  assert.doesNotMatch(output, /post-merge CI[^\n]*declared/i, 'a run-ledger-verified arm must not carry the declared caveat');
+});
+
+test('printSubstrateReport: rung-3 inactive (stale run) renders "not armed" with reason + remedy, never swallowed silently', async () => {
+  const completedAt = Date.parse('2026-07-01T00:00:00Z');
+  const observedAt = completedAt + (49 * 60 * 60 * 1000);
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => ({
+          workflowPresent: true,
+          read: 'ok',
+          lastRun: { id: 2, conclusion: 'success', completedAt: '2026-07-01T00:00:00Z', htmlUrl: 'https://github.com/o/r/actions/runs/2' },
+          error: null,
+          observedAt,
+        }),
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /RUNG 4\b/, 'stale evidence does not arm any rung — falls to the floor');
+  assert.match(output, /post-merge CI\s+not armed: last successful governance-postmerge run is stale/i);
+  assert.match(output, /https:\/\/github\.com\/o\/r\/actions\/runs\/2/);
+});
+
+test('printSubstrateReport: rung-3 print does not regress existing rung-1/rung-2 blocks', async () => {
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 200, contexts: OUR_CONTEXTS }),
+        releaseGate: async () => true,
+        postMergeCi: async () => true,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: true, codeownersPresent: true }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /RUNG 1\b/);
+  assert.match(output, /merge gate\s+armed/i);
+  assert.match(output, /post-merge CI\s+armed \(declared\)/i, 'rung-3 evidence still renders even though rung 1 is selected');
+});
+
 // ── GitLab rung-1 ladder awareness (issue #244 A4) ──────────────────────────────
 //
 // realBranchProtectionProbe dispatches on config.vcs.provider, mirroring
