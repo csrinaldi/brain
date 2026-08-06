@@ -82,3 +82,6 @@ openspec/changes/*/scratch/
 # Los chunks .jsonl.gz son el formato de sync de engram — regenerables con `memory:share`.
 # Ver brain/core/methodology/memory-format.md y ADR-0002. Issue #247 / M0.
 .memory/chunks/
+
+# Cold-review agent worktree metadata — per-session, never shared.
+.claude/worktrees/
