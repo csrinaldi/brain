@@ -104,12 +104,22 @@ truthiness-checks `.findings`/`.follow_ups` — verified by inspection, and `ver
 `follow_ups: []` is newly truthy where the property was previously `undefined`, so this
 must be stated and checked rather than assumed: the suite is the evidence.
 
-## REQ-452-6 — the renderer half stays out, and says so
+## REQ-452-6 — the renderer's `follow_ups` EMISSION POLICY stays out, and says so
 
-`renderVerdict` is unchanged. #444's REQ-409-6 pins (`!('follow_ups' in verdict)` and the
-wire-level `doesNotMatch`) must both remain green — they describe the renderer's
-behaviour, which this change does not touch. If either flips, this change did something
-it was not supposed to do.
+Amended when #481 was ruled in scope (REQ-452-7). An earlier draft of this requirement
+said flatly *"`renderVerdict` is unchanged"*, which stopped being true the moment
+`yamlScalar` gained line-break escaping — precisely the kind of stale normative claim both
+cold-review rounds caught elsewhere in these artefacts.
+
+What this change does **not** touch is the renderer's **emission policy for
+`follow_ups`**: whether an empty list should be emitted as `follow_ups: []` the way
+`findings: []` already is. That is a protocol choice, and `follow_ups` is structurally
+unreachable until an evaluator emits `pre-existing`/`base-only` — it belongs to **#408**.
+
+The operational check is unchanged: #444's REQ-409-6 pins (`!('follow_ups' in verdict)`
+and the wire-level `doesNotMatch`) must both stay green. If either flips, this change
+crossed into the half it was supposed to leave alone. Verified green after #481 landed —
+escaping a scalar's line breaks does not change which keys are emitted.
 
 ## REQ-452-7 — the emitter escapes line breaks (issue #481, ruled IN SCOPE by the maintainer)
 
