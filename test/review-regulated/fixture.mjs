@@ -27,10 +27,15 @@ const git = (cwd, ...args) =>
   execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } }).trim();
 
 /**
- * @param {{ tier?: string, diffLines?: number, handle?: string, author?: string, prNumber?: number }} opts
+ * @param {{ tier?: string, diffLines?: number, handle?: string, author?: string, prNumber?: number, redJob?: string|null }} opts
  * `base` is the temp root the caller MUST remove — see `withFixture` in the test
  * file. Each fixture vendors brain/core + brain/scripts, measured at ~8 MB with the
  * clone and the bare origin, so seven un-cleaned runs leak ~57 MB per suite pass.
+ *
+ * `redJob` marks ONE required gate FAILURE in the canned rollup. It defaulted to
+ * `'phase-order'` for as long as the diff-budget path was broken (#443) — with the
+ * fix landed, the budget breach is the finding source again, as design D4 intended,
+ * and `redJob` stays available as a second, gate-shaped source for #405/#408.
  *
  * @returns {{ base: string, repoDir: string, stubDir: string, headSha: string, baseSha: string, prNumber: number }}
  */
@@ -40,7 +45,7 @@ export function buildFixture({
   handle = 'stub-reviewer',
   author = 'alice',
   prNumber = 1,
-  redJob = 'phase-order',
+  redJob = null,
 } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'brain-rev-e2e-'));
   const originDir = join(base, 'origin.git');
@@ -100,10 +105,12 @@ export function buildFixture({
     'issue-link', 'local-checks', 'decision-gate', 'diff-size',
     'actor-check', 'brain-writes-reviewed', 'memory-gate', 'phase-order',
   ];
-  // One required job red by default: the deterministic finding of design D4.
-  // The diff-budget breach was the original choice, but the e2e's FIRST RUN
-  // found tranche.mjs's LINE_BUDGET hardcoded at 400 (untiered — the defect is
-  // ticketed); a red gate is the finding path that works at every tier today.
+  // Every gate green by default (#443 landed): the deterministic finding of
+  // design D4 is the DIFF-BUDGET BREACH again — 250 lines against regulated's
+  // 200 — which is what this harness was designed around. The e2e's FIRST RUN
+  // had found tranche.mjs's LINE_BUDGET hardcoded at 400 (untiered), so until
+  // that was fixed a red required gate stood in as the finding path.
+  // `redJob` is still honored when a caller passes one.
   j('rollup.json', {
     statusCheckRollup: jobs.map(name => ({
       name,
