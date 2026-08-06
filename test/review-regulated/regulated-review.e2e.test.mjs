@@ -81,6 +81,28 @@ test('e2e: a regulated consumer posts a brain-review/2 verdict, parseable by the
   assert.equal(verdict.protocol, 'brain-review/2');
   assert.ok(Array.isArray(verdict.findings) && verdict.findings.length >= 1,
     'the fixture diff breaches regulated\'s 200-line budget — at least one finding must survive to the posted body (design D4)');
+  // #443: the finding source is the budget breach again, not the stand-in red gate.
+  // The unit tests prove the resolution; this proves the tiered budget survives the
+  // whole production chain — real CLI, real config load, real diff — to the body
+  // that gets posted.
+  const budget = verdict.findings.find(f => f.id === 'budget');
+  assert.ok(budget, `the 250-line diff must trip regulated's 200 budget end to end — got: ${JSON.stringify(verdict.findings)}`);
+  assert.match(budget.evidence, /250 > 200/, 'the posted evidence must carry the comparison the reviewer actually applied');
+  assert.match(budget.evidence, /regulated/, 'and the tier that produced that budget');
+});
+
+test('e2e: the SAME 250-line diff is silent at lite — the tiered budget crosses the process boundary in both directions (REQ-443-1)', (t) => {
+  // The negative half of #443 at the e2e level. Before the fix this same fixture at
+  // lite was judged against a hardcoded 400: a 500-line PR would have been flagged
+  // on the tier brain itself declares. 250 is far under lite's 1000, and the only
+  // way to tell "correctly silent" from "silent because nothing ran" is that the
+  // regulated case above, same diff, speaks.
+  const fx = withFixture(t, { tier: 'lite' });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, r.stderr);
+  const verdict = parseVerdict({ body: postedBodies(fx)[0].body });
+  assert.equal((verdict.findings ?? []).find(f => f.id === 'budget'), undefined,
+    'a budget finding at lite/250 is the #443 false positive — governance allows 1000 here');
 });
 
 test('e2e: /2 findings carry the causal-admission annotations (REQ-409-3)', (t) => {

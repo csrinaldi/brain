@@ -261,3 +261,103 @@ test('evaluateTranche: fed lite-tier job sets, a red memory-gate is editorial (d
   assert.equal(finding.severity, 'editorial');
   assert.equal(result.findings.some(f => f.id === 'gate:memory-gate'), false, 'memory-gate must not ALSO be counted as a blocker');
 });
+
+// ── issue #443: the diff budget is the TIER's budget ─────────────────────────
+//
+// ADR-0026 tiered the budget (lite 1000 · standard 400 · regulated 200) and every
+// other consumer reads it through governance-tiers.mjs. This evaluator carried its
+// own `const LINE_BUDGET = 400` — correct at `standard` BY COINCIDENCE, which is
+// exactly why 2470 tests never saw it: every tranche fixture above (and in
+// cli.test.mjs) sits at the one tier where the hardcode is right.
+//
+// These cases go through `gatherTrancheInputs`, not straight into the pure core,
+// because the defect IS the gather: it resolves the tier for the job sets and then
+// drops it before the budget. Injecting `diffBudget` by hand into `evaluateTranche`
+// would test a wiring that production never performs.
+
+/** Gathers + evaluates at a tier with a synthetic numstat of `lines` changed lines. */
+async function trancheAtTier(tier, lines) {
+  const inputs = await gatherTrancheInputs({
+    project: 'owner/repo',
+    number: 1,
+    headSha: 'HEAD',
+    baseSha: 'BASE',
+    deps: {
+      tier,
+      fetchRollup: async () => greenRollup(),
+      diffNumstat: () => `${lines}\t0\tbig.txt\n`,
+      readIgnoreList: () => [],
+    },
+  });
+  return { inputs, result: evaluateTranche(inputs), budgetFinding: evaluateTranche(inputs).findings.find(f => f.id === 'budget') };
+}
+
+test('gatherTrancheInputs→evaluateTranche: at regulated (budget 200) a 250-line diff is a BLOCKER — the reviewer must not approve what doctrine forbids (#443)', async () => {
+  const { result, budgetFinding } = await trancheAtTier('regulated', 250);
+  assert.ok(budgetFinding, 'no budget finding at regulated/250 — this is the #443 false negative, on the one tier that pays for /2');
+  assert.equal(budgetFinding.severity, 'blocker');
+  assert.equal(result.conclusion, 'REVISE');
+});
+
+test('gatherTrancheInputs→evaluateTranche: at regulated, 199 lines stays silent — the threshold is real, not a constant that happens to sit below every input (#443)', async () => {
+  const { result, budgetFinding } = await trancheAtTier('regulated', 199);
+  assert.equal(budgetFinding, undefined);
+  assert.equal(result.conclusion, 'APPROVE');
+});
+
+test('gatherTrancheInputs→evaluateTranche: at lite (budget 1000) a 500-line diff is NOT flagged — flagging what governance allows erodes the verdict (#443)', async () => {
+  const { result, budgetFinding } = await trancheAtTier('lite', 500);
+  assert.equal(budgetFinding, undefined, 'a budget finding at lite/500 is the #443 false positive: governance allows 1000 here');
+  assert.equal(result.conclusion, 'APPROVE');
+});
+
+test('gatherTrancheInputs→evaluateTranche: at lite, 1001 lines IS flagged — proven from both sides (#443)', async () => {
+  const { budgetFinding } = await trancheAtTier('lite', 1001);
+  assert.ok(budgetFinding, 'lite has a budget too — 1000, not infinity');
+  assert.equal(budgetFinding.severity, 'blocker');
+});
+
+test('gatherTrancheInputs: standard is byte-identical to the pre-#443 hardcode — the no-op guarantee (REQ-TIER-10)', async () => {
+  // `standard` is where the hardcode was CORRECT, so "the suite still passes at
+  // standard" carries no information about this change. Pin the value and the
+  // boundary explicitly instead.
+  const { inputs } = await trancheAtTier('standard', 401);
+  assert.equal(inputs.diffBudget, 400, 'standard must still resolve to 400 — this change is a no-op at the default tier');
+  assert.ok((await trancheAtTier('standard', 401)).budgetFinding, '401 > 400 still flags');
+  assert.equal((await trancheAtTier('standard', 400)).budgetFinding, undefined, '400 is within budget, as before');
+});
+
+test('evaluateTranche: the budget finding cites the tiered resolver and shows the comparison — never a hardcoded "(400-line budget)" it did not apply (REQ-443-4)', async () => {
+  const { budgetFinding } = await trancheAtTier('regulated', 250);
+  assert.match(budgetFinding.cites, /governance-tiers\.mjs tierParams\(tier\)\.diffBudget/,
+    'cites must name the resolver, mirroring the gate finding\'s `governance-tiers.mjs requiredJobs(tier)`');
+  assert.doesNotMatch(budgetFinding.cites, /400/,
+    'a citation naming 400 while the evaluator applied 200 is a review defect in its own right');
+  assert.match(budgetFinding.evidence, /git diff --numstat/, 'the command stays quoted (protocol §10)');
+  assert.match(budgetFinding.evidence, /250 > 200/, 'the reader must be able to check the arithmetic without knowing the tier table');
+  assert.match(budgetFinding.evidence, /regulated/, 'and must be able to see WHICH tier produced that budget');
+});
+
+test('gatherTrancheInputs: diffBudget rides the SAME tier resolution as the job sets — one config read, one tier, no drift (#443)', async () => {
+  const inputs = await gatherTrancheInputs({
+    project: 'owner/repo', number: 1, headSha: 'HEAD', baseSha: 'BASE',
+    deps: {
+      fetchRollup: async () => greenRollup(),
+      diffNumstat: () => '',
+      readIgnoreList: () => [],
+      readConfig: () => ({ governance: { tier: 'regulated' } }),
+    },
+  });
+  assert.equal(inputs.tier, 'regulated');
+  assert.equal(inputs.diffBudget, 200, 'resolved from readConfig, exactly like requiredJobs/detectionJobs above it');
+});
+
+test('evaluateTranche: a caller that skips the gather seam gets the standard-tier budget — the same tier its job-set defaults use (REQ-443-3)', () => {
+  const result = evaluateTranche({
+    requiredGates: greenRollup(),
+    changedFiles: [],
+    budget: { lines: 401, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+  });
+  assert.ok(result.findings.find(f => f.id === 'budget'),
+    'the default must stay standard/400 — a standard job set judged against a lite budget would be an incoherent doctrine');
+});
