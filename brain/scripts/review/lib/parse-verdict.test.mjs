@@ -370,22 +370,33 @@ test('#478-2/F1: a partially-readable list is uncomputable (null) — never a co
     'followed it behind a positive, complete-looking list');
 });
 
-test('#478-2/F1: the same, through the REAL renderer with multi-line evidence — no finding may vanish silently', () => {
+test('#478-2/F1 → #481: through the REAL renderer, multi-line evidence ROUND-TRIPS — no finding may vanish silently', () => {
+  // MOVED, not deleted. This case first asserted `'findings' in parsed === false`
+  // — the honest "uncomputable" answer for a block the parser could not fully
+  // read — because `yamlScalar` quoted but did not ESCAPE newlines, so brain's
+  // own renderer emitted a list that terminated at the first continuation line.
+  //
+  // The maintainer ruled #481 in scope for this change, so the emitter is fixed
+  // and that premise is gone: this renderer can no longer produce that block. The
+  // assertion moves to the stronger property it was standing in for — every
+  // finding survives — instead of being deleted along with the defect.
+  //
+  // The parser-side guarantee it used to carry is NOT lost: the hand-built case
+  // above still pins "partial read → null" for input this renderer cannot emit
+  // but a foreign, older, or hand-authored source can.
   const built = buildVerdict({
     headSha: 'abc123',
     conclusion: 'REVISE',
     findings: [
-      { id: 'multi', severity: 'editorial', evidence: 'line one\nline two' },
-      { id: 'tier2-touch', severity: 'blocker', evidence: 'brain/core/x.md' },
+      { id: 'multi', severity: 'blocker', evidence: 'line one\nline two', cites: 'x.md' },
+      { id: 'tier2-touch', severity: 'blocker', evidence: 'brain/core/x.md', cites: 'y.md' },
     ],
   });
   const parsed = parseVerdict({ body: renderVerdict(built) });
-  const got = parsed.findings ?? null;
-  assert.notEqual(got?.length, 1,
-    'the round trip must not yield a 1-entry list from a 2-finding verdict: that drops a blocker ' +
-    'AND asserts the remainder is the whole set');
-  assert.equal('findings' in parsed, false,
-    'the honest answer for a block this parser cannot fully read is "uncomputable", not a prefix');
+  assert.deepEqual((parsed.findings ?? []).map(f => f.id), ['multi', 'tier2-touch'],
+    'a 2-finding verdict must re-parse to 2 findings — before #481 this dropped the second, a BLOCKER');
+  assert.equal(parsed.findings[0].evidence, 'line one\nline two',
+    'and the multi-line evidence must decode back to its exact characters');
 });
 
 test('#478-2/F1: a FULLY readable multi-entry list is unaffected — the control', () => {

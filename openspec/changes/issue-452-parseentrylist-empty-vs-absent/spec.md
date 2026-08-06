@@ -110,3 +110,34 @@ must be stated and checked rather than assumed: the suite is the evidence.
 wire-level `doesNotMatch`) must both remain green — they describe the renderer's
 behaviour, which this change does not touch. If either flips, this change did something
 it was not supposed to do.
+
+## REQ-452-7 — the emitter escapes line breaks (issue #481, ruled IN SCOPE by the maintainer)
+
+`yamlScalar` quoted values but did not **escape** line breaks, so a multi-line `evidence:`
+— what `checkpoint.mjs` interpolates from `brain-governance-status`'s stdout — put its
+continuation lines at column 0 and terminated the findings list. Measured before the fix,
+through the real `buildVerdict → renderVerdict → parseVerdict` chain:
+
+```
+BUILT findings : 2  governance-status-output, tier2-touch
+PARSED findings: 1  governance-status-output
+the BLOCKER "tier2-touch" survived the round trip: false
+```
+
+`\n` and `\r` are now escaped on the way out and decoded back to the CHARACTERS on the
+way in. **The pair moves together**: `unyamlScalar`'s generic `\X → X` rule would have
+turned the new escape into a bare `n` and lost the newline a different way.
+
+REQ-452-1's parser-side answer for an unreadable body (`null`, never a prefix) is what
+made this loss *honest*; it could not make it *not a loss*, because the posted artifact —
+which a human also reads — had already shipped without the blocker. Reader and emitter are
+two halves of the same guarantee.
+
+### Expected flip, recorded
+
+The REQ-478-2/F1 case that asserted `'findings' in parsed === false` for renderer-produced
+multi-line evidence **moved** rather than being deleted: this renderer can no longer emit
+that block, so the case now asserts the stronger property it was standing in for — every
+finding survives, evidence byte-identical. The parser-side guarantee it used to carry is
+still pinned by the hand-built case, for input a foreign or hand-authored source can
+produce and this renderer cannot.

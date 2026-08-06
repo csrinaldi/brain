@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildVerdict, renderVerdict } from './verdict.mjs';
+import { parseVerdict } from './lib/parse-verdict.mjs';
 
 const HEAD_SHA = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
 
@@ -155,4 +156,73 @@ test('buildVerdict: causal_disposition "unknown" forces escalate: human and verd
 
   assert.equal(v.verdict, 'STOP');
   assert.equal(v.escalate, 'human');
+});
+
+// ── #481 (ruled IN SCOPE for #452 by the maintainer): newlines must be ESCAPED
+//
+// `yamlScalar` quoted but did not escape newlines, and checkpoint.mjs interpolates
+// multi-line command stdout into `evidence:`. The continuation lines land at column 0,
+// terminate the findings list, and everything after them — including blockers — is
+// dropped on re-parse. Measured before this fix, through the real chain:
+//
+//   BUILT findings: 2 (governance-status-output, tier2-touch)
+//   PARSED findings: 1        the BLOCKER did not survive the round trip
+//
+// The reader half (#452) makes that loss HONEST — the parser now answers `null`
+// (uncomputable) instead of a confident truncated list. It cannot make it not a loss:
+// the posted artifact, which a human also reads, already shipped without the blocker.
+// This is the emitter half.
+
+test('#481: a multi-line evidence value is escaped, so the block stays one-line-per-field', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [{ id: 'multi', severity: 'blocker', evidence: 'line one\nline two', cites: 'x.md' }],
+  });
+  const block = renderVerdict(built).split('```')[1];
+  const evidenceLines = block.split('\n').filter(l => l.includes('evidence:'));
+  assert.equal(evidenceLines.length, 1, 'exactly one evidence line');
+  assert.match(evidenceLines[0], /evidence: "line one\\nline two"/,
+    'the newline must be emitted as an escape, not as a raw line break that ends the list');
+});
+
+test('#481: every finding survives the round trip when one carries multi-line evidence', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [
+      { id: 'multi', severity: 'blocker', evidence: 'line one\nline two\nline three', cites: 'x.md' },
+      { id: 'tier2-touch', severity: 'blocker', evidence: 'brain/core/x.md', cites: 'y.md' },
+    ],
+  });
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual((parsed.findings ?? []).map(f => f.id), ['multi', 'tier2-touch'],
+    'a finding after a multi-line one must not be swallowed — this dropped a BLOCKER before the fix');
+  assert.equal(parsed.findings[0].evidence, 'line one\nline two\nline three',
+    'and the evidence must come back byte-identical: an escape that does not decode is a different loss');
+});
+
+test('#481: carriage returns are escaped too — CRLF evidence must not break the line structure', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [
+      { id: 'crlf', severity: 'blocker', evidence: 'a\r\nb', cites: 'x.md' },
+      { id: 'after', severity: 'blocker', evidence: 'still here', cites: 'y.md' },
+    ],
+  });
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual((parsed.findings ?? []).map(f => f.id), ['crlf', 'after']);
+  assert.equal(parsed.findings[0].evidence, 'a\r\nb');
+});
+
+test('#481: single-line values are NOT newly quoted or escaped — the control', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [{ id: 'plain', severity: 'blocker', evidence: 'brain/core/x.md:7', cites: 'y.md' }],
+  });
+  const block = renderVerdict(built).split('```')[1];
+  assert.match(block, /evidence: brain\/core\/x\.md:7$/m, 'an already-safe scalar must stay bare');
+  assert.doesNotMatch(block, /\\n/, 'no escape may appear where there was no newline');
 });

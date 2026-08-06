@@ -31,14 +31,21 @@ function parseJsonScalar(raw) {
   }
 }
 
-// Reverses verdict.mjs's `yamlScalar()`: a value it had to quote comes back
-// with its outer quotes stripped and `\X` -> `X` un-escaped (the only escapes
-// yamlScalar emits are `\\` and `\"`); an unquoted scalar is already literal.
+// Reverses verdict.mjs's `yamlScalar()`: a value it had to quote comes back with
+// its outer quotes stripped and its escapes decoded; an unquoted scalar is
+// already literal.
+//
+// `\n` and `\r` decode to the CHARACTERS, not to the letters (issue #481).
+// yamlScalar escapes line breaks so a multi-line value cannot terminate the
+// findings list mid-way; the generic `\X -> X` rule this used to apply would
+// have turned that escape into a bare "n" and lost the newline a different way.
+// Every other escape keeps the generic rule, which covers yamlScalar's `\\` and
+// `\"` — and, because backslashes are escaped on the way out, `\\n` still decodes
+// to a literal backslash followed by "n" rather than to a newline.
 function unyamlScalar(raw) {
   const s = raw.trim();
-  return s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"'
-    ? s.slice(1, -1).replace(/\\(.)/g, '$1')
-    : s;
+  if (!(s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"')) return s;
+  return s.slice(1, -1).replace(/\\(.)/g, (_, c) => (c === 'n' ? '\n' : c === 'r' ? '\r' : c));
 }
 
 // Matches the two line shapes renderVerdict emits inside a findings /

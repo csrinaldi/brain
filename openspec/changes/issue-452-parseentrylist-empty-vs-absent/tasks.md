@@ -94,3 +94,19 @@ topic_key: sdd/issue-452-parseentrylist-empty-vs-absent/tasks
       still missing from the posted artifact's machine-readable form.
 - [x] T15 — post-review verification: suite **2496 pass / 1 skip / 0 fail** ·
       `repo:check` ✓ · `brain:nav` ✓ · REQ-409-6 pins green.
+- [x] T16 — **#481 ruled IN SCOPE by the maintainer** (disposition ruling, not an agent
+      scope call — see #473's addendum). `yamlScalar` now escapes `\n`/`\r` and
+      `unyamlScalar` decodes them back to characters; the pair moves together, since the
+      generic `\X → X` rule would have turned the new escape into a bare `n`.
+      The original #481 measurement re-run: **2 findings built → 2 parsed, the blocker
+      survives, evidence byte-identical**. REQ-452-7 added.
+- [x] T17 — red-proof on BOTH halves of the pair, each verified to have landed by
+      printing the diff before running: dropping the encoder's newline escape → 4 red;
+      reverting the decoder to the generic `\X → X` → the same 4 red. **The first two
+      attempts at these mutations silently failed to match and produced meaningless
+      greens — the third occurrence of that trap in this lane, and the reason the diff is
+      now printed before every mutation run.** Recovering from it also cost the working
+      copy: `git checkout --` on an UNCOMMITTED fix reverted it entirely, and the fix had
+      to be re-applied from scratch. Commit before mutating.
+- [x] T18 — post-#481 verification: suite **2500 pass / 1 skip / 0 fail** · `repo:check` ✓
+      · `brain:nav` ✓ · REQ-409-6 pins green (9/9 e2e).
