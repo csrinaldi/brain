@@ -92,8 +92,8 @@ reuse contract REQ-409-7 predicted this exact case.
 
 - **The ADR-0020 amendment** recording D1–D5. Amending an ADR is a three-step cascade
   (ADR → `brain/HOME.md` → regenerate `AGENTS.md`).
-- **D6**: whether `validateSchemaV2` gets wired into `buildVerdict` (a change to what
-  brain refuses to post) or the deliverable is restated and the validator's inertness
-  ticketed separately. Measured: the validator is called nowhere in production, so
-  "add validator coverage" would ship green and inert. Recommendation recorded in
-  design D6; the ruling is the human's, per #473's addendum.
+- ~~**D6**~~ — **RULED (b), 2026-08-06.** The validator stays untouched here; its
+  inertness is **#483**. What replaces "validator coverage" as this change's schema
+  evidence: REQ-405-3's round trip over the REAL renderer/parser, and REQ-405-4's
+  poster-side anchor validation — both of which run in production, which the validator
+  does not.

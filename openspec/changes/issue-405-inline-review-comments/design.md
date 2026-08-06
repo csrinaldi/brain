@@ -125,8 +125,11 @@ Two honest options, and the choice is a scope decision:
 builder is a change to what brain refuses to post — that deserves a ticket where it is
 the subject, not a line item inside a feature.
 
-Per #473's addendum, this disposition is **not mine to settle**: it is recorded for the
-human ruling rather than filed as a separate issue on my own authority.
+> **RULED (b) by the maintainer, 2026-08-06.** The deliverable is restated: `file`/`line`
+> get renderer/parser round-trip coverage and the poster's own anchor validation
+> (REQ-405-2/-3/-4); `schema-v2.mjs` is untouched by this change and its inertness is
+> ticketed separately — **#483**, filed under this ruling rather than on agent authority
+> (#473's addendum).
 
 ## D7 — red-proof plan
 

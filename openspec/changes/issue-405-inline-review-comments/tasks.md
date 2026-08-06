@@ -24,12 +24,18 @@ acts. The ticket's own body asks for a design pass first — this is it.
         resizes deliverable 3 and became D6.
 - [x] T2 — SDD artefacts: proposal / spec (REQ-405-1..8) / design (D1-D7) / tasks.
       Baseline on `main` @ `d2fdf13`.
-- [ ] T3 — **HUMAN: rule D6** — wire `validateSchemaV2` into `buildVerdict` (a change to
-      what brain refuses to post, deserving its own ticket) or restate the deliverable
-      and ticket the validator's inertness separately. Recommendation: the latter.
-      Not filed as an issue on agent authority — #473's addendum.
-- [ ] T4 — **HUMAN: ratify the ADR-0020 amendment** recording D1-D5. Three-step cascade:
-      ADR → `brain/HOME.md` → regenerate `AGENTS.md`.
+- [x] T3 — **D6 RULED (b) by the maintainer, 2026-08-06**: the deliverable is restated,
+      `schema-v2.mjs` is untouched here, and the validator's inertness is **#483** — filed
+      under that ruling, not on agent authority. What replaces "validator coverage" as
+      schema evidence: the REAL render/parse round trip (REQ-405-3) and the poster's own
+      anchor validation (REQ-405-4), both of which actually run.
+- [x] T4a — ADR-0020 Amendment 1 **DRAFTED** for signature:
+      `brain-drafts/adr-0020-amendment-1.md`, recording D1-D5, plus
+      `brain-drafts/promotion-checklist.md` with the three-step cascade spelled out
+      (ADR → `brain/HOME.md` same commit — `decision-gate` enforces co-occurrence →
+      regenerate `AGENTS.md`, since HOME.md is one of the five SOURCE_DOCS).
+- [ ] T4b — **HUMAN: sign and promote** the amendment. `brain/**` is Tier 2; the agent
+      must never write the destination files.
 - [ ] T5 — BLOCKED ON #478: `file`/`line` on the `/2` finding schema, with the
       render/parse round trip over the REAL pair (REQ-405-2, -3). Starting before #478
       merges would conflict on the two files three review rounds have already rewritten.
