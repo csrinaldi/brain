@@ -71,12 +71,12 @@ test('detectSubstrate: rung 3 inactive when the postMergeCi probe returns false'
   assert.ok(typeof result.rungs[3].remedy === 'string' && result.rungs[3].remedy.length > 0);
 });
 
-// ── Rung 3 — 11-row decision table (issue #468, design "Decision table") ────────
+// ── Rung 3 — 13-row decision table (issue #468, design "Decision table") ────────
 //
 // evalRung3 is a pure total function over `RunLedgerEvidence`. Every row below
 // asserts the FULL six-field shape (REQ-R3-6): available, active, verifiable,
 // mechanism, reason, remedy. `observedAt` is always supplied BY the injected
-// evidence — never read ambiently — so staleness rows (E7/E8) are deterministic
+// evidence — never read ambiently — so the skew/staleness rows (E7/E8) are deterministic
 // without a clock freeze.
 
 const SIX_FIELDS = ['available', 'active', 'verifiable', 'mechanism', 'reason', 'remedy'];
@@ -340,7 +340,7 @@ test('rung 3 decision table (E6): last terminal run failed reports inert, reason
   assert.match(result.rungs[3].reason, /https:\/\/github\.com\/o\/r\/actions\/runs\/42/);
 });
 
-test('rung 3 decision table (E7): a successful run older than 48h reports inactive (stale), independent of outcome', async () => {
+test('rung 3 decision table (E8): a successful run older than POSTMERGE_STALE_MS reports inactive (stale), independent of outcome', async () => {
   const completedAt = Date.parse('2026-07-01T00:00:00Z');
   const observedAt = completedAt + (49 * 60 * 60 * 1000); // 49h later — just past the 48h window
   const result = await detectSubstrate({
@@ -363,7 +363,7 @@ test('rung 3 decision table (E7): a successful run older than 48h reports inacti
   assert.equal(result.rungs[3].mechanism, 'postmerge-stale');
 });
 
-test('rung 3 decision table (E8): a successful run within 48h arms rung 3, run-ledger mechanism', async () => {
+test('rung 3 decision table (E9): a successful run within POSTMERGE_STALE_MS arms rung 3, run-ledger mechanism', async () => {
   const completedAt = Date.parse('2026-08-05T00:00:00Z');
   const observedAt = completedAt + (10 * 60 * 60 * 1000); // 10h later — within the 48h window
   const result = await detectSubstrate({
@@ -399,7 +399,12 @@ test('rung 3 decision table: only L1 (legacy true) and E9 (fresh success) ever p
     ['E1-omitted', async () => ({ read: 'ok', lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T00:00:00Z', htmlUrl: 'u' }, error: null, observedAt: Date.parse('2026-08-05T00:00:00Z') + (10 * 60 * 60 * 1000) })],
     ['E2', async () => ({ workflowPresent: true, read: 'unsupported', lastRun: null, error: null, observedAt: null })],
     ['E3', async () => ({ workflowPresent: true, read: 'failed', lastRun: null, error: 'boom', observedAt: null })],
-    ['unrecognized-read', async () => ({ workflowPresent: true, read: 'weird', lastRun: null, error: null, observedAt: 5 })],
+    // Deliberately carries a FRESH SUCCESSFUL lastRun: with `lastRun: null` this
+    // row stayed active:false even with the read-state guard deleted (it merely
+    // fell through to E4, also inactive), so it passed for the wrong reason and
+    // the guard had no coverage at all. With this evidence, deleting the guard
+    // arms rung 3 on a read state outside the contract — and the row goes red.
+    ['unrecognized-read', async () => ({ workflowPresent: true, read: 'weird', lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T00:00:00Z', htmlUrl: 'u' }, error: null, observedAt: Date.parse('2026-08-05T00:00:00Z') + (60 * 60 * 1000) })],
     ['E4', async () => ({ workflowPresent: true, read: 'ok', lastRun: null, error: null, observedAt: 5 })],
     ['E5-malformed', async () => ({ workflowPresent: true, read: 'ok', lastRun: { id: 1, completedAt: 'bad' }, error: null, observedAt: 5 })],
     ['E5-NaN-observedAt', async () => ({ workflowPresent: true, read: 'ok', lastRun: { id: 1, conclusion: 'success', completedAt: '2026-07-01T00:00:00Z', htmlUrl: 'u' }, error: null, observedAt: NaN })],
@@ -430,6 +435,29 @@ test('rung 3 decision table: only L1 (legacy true) and E9 (fresh success) ever p
 
   const l1 = await detectSubstrate({ env: {}, probes: { postMergeCi: async () => true } });
   assert.equal(l1.rungs[3].active, true, 'L1 (legacy true) must produce active:true');
+});
+
+test('rung 3: an unrecognized read state is UNCOMPUTABLE, not merely inactive — the decision table stays total', async () => {
+  // The totality row above proves such evidence never arms. This proves it lands
+  // on the right ROW: a read state outside the four-value contract is a thing
+  // the reader could not interpret, which is uncomputable — not the honest,
+  // claimable "no terminal run yet" (E4) it would otherwise be confused with.
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        workflowPresent: true,
+        read: 'weird',
+        lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T00:00:00Z', htmlUrl: 'u' },
+        error: null,
+        observedAt: Date.parse('2026-08-05T00:00:00Z') + (60 * 60 * 1000),
+      }),
+    },
+  });
+
+  assert.equal(result.rungs[3].available, false, 'an uninterpretable read state is uncomputable, never a verdict');
+  assert.equal(result.rungs[3].active, false);
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-uncomputable');
 });
 
 // ── Rung 2 — release (release-gate presence) ────────────────────────────────────

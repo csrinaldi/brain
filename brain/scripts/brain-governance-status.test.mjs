@@ -1063,4 +1063,12 @@ test('replay lock: the real 2026-07-24→2026-08-05 outage window reports rung 3
   assert.doesNotMatch(output, /RUNG 3\b/, 'a continuously-failing post-merge CI ledger must never report RUNG 3 armed');
   assert.match(output, /post-merge CI\s+not armed:/i);
   assert.match(output, /https:\/\/github\.com\/csrinaldi\/brain\/actions\/runs\/31035091085/, 'the reason must name the failing run URL (the most recent completed run in the window)');
+  // Pins the CAUSE, not just the outcome. Without this the lock decays with the
+  // calendar: once the fixture is older than POSTMERGE_STALE_MS, evalRung3
+  // reaches E8 (stale) instead of E6 (failed), and E8's reason ALSO carries the
+  // run URL — so all three assertions above keep passing while the conclusion
+  // check they exist to guard can be deleted freely. Asserting the mechanism is
+  // what keeps "inactive because it FAILED" distinguishable from "inactive
+  // because the fixture aged", which is the whole of REQ-R3-9.
+  assert.match(output, /mechanism=postmerge-failing\s/, 'rung 3 must be inactive because the run FAILED (E6) — not because the fixture has aged into E8');
 });

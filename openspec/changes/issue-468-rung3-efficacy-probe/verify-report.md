@@ -26,13 +26,13 @@ the isolated worktree and is withdrawn. No rebase is required.
 
 | Req | Code | Test | Verdict |
 |---|---|---|---|
-| REQ-R3-1 | substrate.mjs:248-256 (E8) | substrate.test.mjs:286-309 | PASS |
-| REQ-R3-2 | substrate.mjs:240-250 (E6) | substrate.test.mjs:240-261 | PASS (corrected — see below) |
-| REQ-R3-3 | substrate.mjs:70 (POSTMERGE_STALE_MS), release-postmerge-workflows.test.mjs:222-230 | drift guard, empirically proven to fail on cadence change | PASS |
-| REQ-R3-4 | substrate.mjs:159-171 (E3), brain-governance-status.mjs:160-169 | substrate.test.mjs:158-170, brain-governance-status.test.mjs:866-909 | PASS |
-| REQ-R3-5 | substrate.mjs:187-198 (E4) | substrate.test.mjs:172-183 | PASS |
+| REQ-R3-1 | substrate.mjs:299-306 (E9 — the only real-probe row that arms) | substrate.test.mjs (E9 arming row + the totality test's E9 assertion) | PASS (anchor corrected — see below) |
+| REQ-R3-2 | substrate.mjs:253-262 (E6) | substrate.test.mjs (E6 row) + the outage replay lock's `mechanism=postmerge-failing` assertion | PASS (corrected — see below) |
+| REQ-R3-3 | substrate.mjs:71 (POSTMERGE_STALE_MS) + :78 (POSTMERGE_STALE_LABEL), release-postmerge-workflows.test.mjs (drift guard) | drift guard, empirically proven to fail on cadence change | PASS |
+| REQ-R3-4 | substrate.mjs:180-192 (E3), brain-governance-status.mjs:160-186 | substrate.test.mjs (E3 row), brain-governance-status.test.mjs (auth-failure + malformed-JSON + wrong-shape rows) | PASS (anchor corrected — see below) |
+| REQ-R3-5 | substrate.mjs:208-224 (E4) | substrate.test.mjs (E4 row) | PASS (anchor corrected — see below) |
 | REQ-R3-6 | every branch returns 6-field shape | substrate.test.mjs `assertShape` (behavioral, deepEqual on values, not implementation-mirroring) | PASS |
-| REQ-R3-7 | substrate.mjs:83-87 (three-way normalizer) | substrate.test.mjs L1/L2/L3 rows + zero legacy call sites edited | PASS |
+| REQ-R3-7 | substrate.mjs:100-104 (`normalizePostMergeEvidence`) | substrate.test.mjs L1/L2/L3 rows + zero legacy call sites edited | PASS (anchor corrected — see below) |
 | REQ-R3-8 | brain-governance-status.mjs:358-378 (branch chain + the `evidence:` line) | brain-governance-status.test.mjs — the 4 branch tests + the dedicated NAMES-verifiable-and-mechanism test | PASS (corrected — see below) |
 | REQ-R3-9 | fixture github-postmergeRuns-outage-window.json (`_provenance.recorded:true`) | brain-governance-status.test.mjs (outage replay lock) | PASS |
 
@@ -63,6 +63,46 @@ A third finding of the same review — the terminal-run filter
 but is now pinned by `github-postmergeRuns-inflight.json` and its test.
 Mutation-proven: `runs[0]` turns it red, and nothing else.
 
+### Round 2 — the acceptance criterion's own lock was decaying
+
+A second cold review found that criterion (a) — the 12-day outage replay — was
+about to stop testing what it exists to test, and that four of the anchors in
+the table above pointed at the wrong rows.
+
+- **REQ-R3-9 / criterion (a), blocking.** The replay lock asserted three things:
+  no `RUNG 3`, the string `not armed:`, and the failing run's URL. All three
+  survive the fixture ageing past `POSTMERGE_STALE_MS`, because at that point
+  `evalRung3` reaches E8 (stale) instead of E6 (failed) — and **E8's reason also
+  carries `htmlUrl`**. So from ~2026-08-07 the lock could no longer tell
+  "inactive because it FAILED" from "inactive because the fixture is old", and
+  the conclusion check it guards could have been deleted without turning it red.
+  Proven by transformation rather than assertion: with the E6 conclusion check
+  mutated, the suite is RED today and GREEN with every fixture timestamp shifted
+  back 60 days. The lock now asserts `mechanism=postmerge-failing` — the cause,
+  not just the outcome.
+- **Anchors, corrected.** REQ-R3-1 cited E8 while the row that actually *arms*
+  is E9; REQ-R3-4 cited E2's lines for E3; REQ-R3-5 cited the unrecognized-read
+  fallback for E4; REQ-R3-7 cited the normalizer's JSDoc rather than the
+  function. **The class, recorded:** line-number citations are re-derived from
+  the tree at the moment of writing and go stale on the next edit to the file
+  they cite — including edits made later in this same change. Where a stable
+  name existed (a row label, a function name, a test's subject) it is now cited
+  instead of a test-file line range.
+- **Fail-closed coverage gap.** The `read !== 'ok'` branch had none: its totality
+  row carried `lastRun: null`, so deleting the branch merely dropped it into E4,
+  also inactive — passing for the wrong reason. Confirmed: with the branch
+  removed the whole substrate suite stayed green while evidence carrying a fresh
+  successful run and an out-of-contract read state produced
+  `active: true, mechanism: 'postmerge-run-ledger'`. The row now carries evidence
+  that would arm, plus a dedicated test pinning the uncomputable mechanism.
+- **Claims the operator cannot rely on.** `48h` was hardcoded in two
+  operator-facing strings that the drift guard does not cover — so the guard's
+  own prescribed fix (update the constant) left both quoting the old threshold.
+  Both now derive from `POSTMERGE_STALE_LABEL`. `on main` was hardcoded while the
+  probe reads `project.defaultBranch`. E4 claimed a workflow had "never had a
+  terminal run" on the strength of one bounded page — `evidence-reader-empty-on-failure`
+  one level up, conflating "genuinely zero" with "none in the window I read".
+
 ## Critical trap (three-way normalizer) — PROVEN, no CRITICAL found
 `normalizePostMergeEvidence` (substrate.mjs:83-87): `raw===true`→L1,
 `raw===false`→L2, everything else (including `undefined` from a throwing probe
@@ -79,7 +119,7 @@ E8 (real proven-fresh-success) reach `active:true`, confirmed by both direct
 tracing and a totality test (substrate.test.mjs:314-330).
 
 ## Totality
-11-row decision table implemented exactly per design, plus one extra defensive
+13-row decision table implemented exactly per design, plus one extra defensive
 fallback row (unrecognized `ledger.read` value) that also fails closed to
 `available:false` — strictly safer than the documented table, not a gap.
 
@@ -131,7 +171,7 @@ required).
 `git show --stat 8f67496` shows the commit titled "docs(sdd): #468 — rung 3
 earns armed from the run ledger (proposal, spec, design)" but its diff
 includes `substrate.mjs | 209 +++...` and `substrate.test.mjs | 276 +++...`
-— the entire Task 1 normalizer + 11-row decision table + full test suite, not
+— the entire Task 1 normalizer + 13-row decision table + full test suite, not
 just planning docs. Materially reduces reviewability (a reviewer triaging by
 commit type would deprioritize the safety-critical commit). Non-blocking; code
 is correct and fully tested. Recommend calling this out explicitly in the PR

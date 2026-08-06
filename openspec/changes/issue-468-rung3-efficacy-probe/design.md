@@ -126,7 +126,7 @@ The failing/stale `reason` carries the run URL, so the operator gets the offendi
 |------|--------|-------------|
 | `brain/scripts/vcs/substrate.mjs` | Modify | `POSTMERGE_STALE_MS` export, `normalizePostMergeEvidence`, rewritten `evalRung3` (13-row table, `verifiable`+`mechanism` on every branch) |
 | `brain/scripts/brain-governance-status.mjs` | Modify | `realPostMergeCiProbe` → ledger reader (delete `GITHUB_ACTIONS` self-arming, `:116`); rung-3 block in `printSubstrateReport` |
-| `brain/scripts/vcs/fixtures/github-postmergeRuns-outage-window.json` | Create | Replay fixture — the 2026-07-24→2026-08-05 failure window, `_provenance.derived` |
+| `brain/scripts/vcs/fixtures/github-postmergeRuns-outage-window.json` | Create | Replay fixture — the 2026-07-24→2026-08-05 failure window, `_provenance.recorded` (replayed from the real run ledger) |
 | `brain/scripts/vcs/fixtures/github-postmergeRuns-{success,empty}.json` | Create | Terminal-success and zero-runs ledger pages, `_provenance.derived` |
 | `brain/scripts/vcs/substrate.test.mjs` | Modify | One case per decision-table row + legacy non-regression |
 | `brain/scripts/brain-governance-status.test.mjs` | Modify | Real-probe fixture cases (local `loadFixture`/`assertProvenance`, copied per `vcs.contract.test.mjs:44-61`), replay lock, rung-3 print cases |

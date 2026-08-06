@@ -22,7 +22,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { run } from './vcs/lib/exec.mjs';
-import { detectSubstrate } from './vcs/substrate.mjs';
+import { detectSubstrate, POSTMERGE_STALE_LABEL } from './vcs/substrate.mjs';
 import { GOVERNANCE_JOBS } from './vcs/governance-checks.mjs';
 import { resolveTier, requiredJobs } from './vcs/governance-tiers.mjs';
 
@@ -273,7 +273,7 @@ function printDoctrineReport(tier, substrate) {
  * writes to console.log, so it is trivially covered by the caller's tests.
  * @param {Awaited<ReturnType<typeof detectSubstrate>>} substrate
  */
-function printSubstrateReport(substrate) {
+function printSubstrateReport(substrate, { defaultBranch = 'main' } = {}) {
   console.log('  --- governance substrate ---');
 
   if (substrate.rung === 4) {
@@ -362,7 +362,7 @@ function printSubstrateReport(substrate) {
   } else if (rung3?.active && rung3.verifiable === false) {
     console.log('  post-merge CI  armed (declared) — unverified; no run-ledger evidence');
   } else if (rung3?.active) {
-    console.log('  post-merge CI  armed  [last governance-postmerge run on main succeeded within 48h]');
+    console.log(`  post-merge CI  armed  [last governance-postmerge run on ${defaultBranch} succeeded within ${POSTMERGE_STALE_LABEL}]`);
   } else if (rung3 && rung3.active === false) {
     console.log(`  post-merge CI  not armed: ${rung3.reason}`);
     if (rung3.remedy) console.log(`                 remedy: ${rung3.remedy}`);
@@ -468,7 +468,7 @@ export async function reportGovernanceStatus({
   };
 
   const substrate = await detectSubstrate({ config, vcs: providerModule, env, probes });
-  printSubstrateReport(substrate);
+  printSubstrateReport(substrate, { defaultBranch: config?.project?.defaultBranch ?? 'main' });
 
   // Tier x rung cross-product (issue #358 Q5, REQ-TIER-11). resolveTier()
   // fails closed on an unrecognized governance.tier (REQ-TIER-1) — an invalid

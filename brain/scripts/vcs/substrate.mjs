@@ -59,7 +59,8 @@ function evalRung4() {
 // report armed). Evidence: `probes.postMergeCi({ config, env })` — real wiring
 // (realPostMergeCiProbe, brain-governance-status.mjs) reads the GitHub Actions
 // workflow-run ledger for governance-postmerge.yml. ALL interpretation happens
-// here, in this pure module (design's 11-row decision table), so it stays
+// here, in this pure module (design's 13-row decision table: L1-L3 + E1-E9 +
+// the unrecognized-read fallback), so it stays
 // unit-testable with injected evidence fixtures — the probe itself is a dumb I/O
 // wrapper, never a classifier (same D1 split as evalRung2/classifyReleaseWorkflow).
 
@@ -68,6 +69,13 @@ function evalRung4() {
 // drift-guard test (release-postmerge-workflows.test.mjs) imports this to fail if
 // the workflow's cron cadence changes without this constant being updated.
 export const POSTMERGE_STALE_MS = 48 * 60 * 60 * 1000;
+
+// Every operator-facing string that states the staleness threshold derives it
+// from the constant. Hardcoding the number leaves the drift guard able to force
+// an update to POSTMERGE_STALE_MS while the messages keep quoting the old one —
+// and the guard's own failure text prescribes exactly that edit, so the drift it
+// catches is the drift it would otherwise introduce.
+export const POSTMERGE_STALE_LABEL = `${POSTMERGE_STALE_MS / (60 * 60 * 1000)}h`;
 
 // `observedAt` is the local wall clock, `completedAt` is GitHub's — a small
 // amount of skew is normal (VM resumed from suspend, container without NTP,
@@ -193,19 +201,24 @@ async function evalRung3({ config, env, probes }) {
       verifiable: true,
       mechanism: 'postmerge-run-ledger-uncomputable',
       reason: `post-merge CI run-ledger evidence has an unrecognized read state (${String(ledger.read)})`,
-      remedy: 'verify the postMergeCi probe returns a read state of skipped, unsupported, failed, or ok',
+      remedy: 'fix the postMergeCi probe to return one of the four contract read states: skipped, unsupported, failed, ok',
     };
   }
 
-  // E4 — the workflow file exists and the read succeeded, but zero terminal runs
-  // have ever been recorded.
+  // E4 — the workflow file exists and the read succeeded, but the page the
+  // reader saw contains no terminal run. Deliberately NOT phrased as "has never
+  // had a terminal run": the probe reads a bounded page, so an Actions backlog
+  // in which every recent entry is still queued/in_progress produces this state
+  // on a workflow with years of history. Claiming "never" from a windowed read
+  // is `evidence-reader-empty-on-failure` one level up — conflating "genuinely
+  // zero" with "none in the window I looked at".
   if (ledger.lastRun === null || ledger.lastRun === undefined) {
     return {
       available: true,
       active: false,
       verifiable: true,
       mechanism: 'postmerge-unproven',
-      reason: 'governance-postmerge.yml exists but has never had a terminal run',
+      reason: 'governance-postmerge.yml exists but no terminal run appears in the most recent run-ledger page',
       remedy: 'push to main, or wait for the next scheduled run, to record a terminal run',
     };
   }
@@ -278,7 +291,7 @@ async function evalRung3({ config, env, probes }) {
       active: false,
       verifiable: true,
       mechanism: 'postmerge-stale',
-      reason: `last successful governance-postmerge run is stale (older than 48h): ${lastRun.htmlUrl ?? 'no run URL available'}`,
+      reason: `last successful governance-postmerge run is stale (older than ${POSTMERGE_STALE_LABEL}): ${lastRun.htmlUrl ?? 'no run URL available'}`,
       remedy: 'trigger a fresh governance-postmerge run (push to main, or wait for the next scheduled run)',
     };
   }

@@ -31,7 +31,7 @@ replay fixture end-to-end).
 
 ---
 
-## Task 1 — Pure `evalRung3`: normalizer, staleness constant, 11-row decision table
+## Task 1 — Pure `evalRung3`: normalizer, staleness constant, 13-row decision table
 
 - [x] **REQ-R3-1, REQ-R3-2, REQ-R3-3, REQ-R3-4, REQ-R3-5, REQ-R3-6, REQ-R3-7**
 
@@ -51,7 +51,7 @@ Target files:
     `false` branch — that's what silently degrades a throwing probe into a
     confirmed-inert instead of uncomputable. `undefined` and `false` must
     take different code paths.
-  - Rewrite `evalRung3({ config, env, probes })` as the 11-row total table
+  - Rewrite `evalRung3({ config, env, probes })` as the 13-row total table
     (design "Decision table", rows L1/L2/L3/E1..E8), evaluated top to bottom,
     first match wins. Every branch returns all six fields:
     `{ available, active, verifiable, mechanism, reason, remedy }` (REQ-R3-6).
