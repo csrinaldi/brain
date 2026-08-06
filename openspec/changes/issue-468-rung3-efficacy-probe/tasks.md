@@ -183,7 +183,7 @@ risk).
 
 ## Task 4 — Outage-window replay fixture + E2E lock
 
-- [ ] **REQ-R3-9**
+- [x] **REQ-R3-9**
 
 Depends on: Task 2 (exercises the real probe + real `evalRung3` end to end).
 

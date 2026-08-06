@@ -934,3 +934,44 @@ test('realPostMergeCiProbe: config.vcs.provider "gitlab" reports unsupported and
   const spawnedGhOrGlab = calls.filter((c) => c.cmd === 'gh' || c.cmd === 'glab');
   assert.deepEqual(spawnedGhOrGlab, [], `expected zero gh/glab spawns for the postMergeCi probe under provider:gitlab — saw: ${JSON.stringify(spawnedGhOrGlab)}`);
 });
+
+// ── Outage-window replay lock (issue #468, REQ-R3-9) ─────────────────────────
+//
+// Replays the real 2026-07-24 → 2026-08-05 governance-postmerge.yml failure
+// window (recorded live via `gh api`, see fixture `_provenance`) through the
+// REAL probe (`postMergeCi` not overridden) and the real `evalRung3`. This is
+// acceptance criterion (a) from the proposal, made executable: the 12-day
+// outage must never report armed. Deterministic without a clock freeze — row
+// E6 (conclusion !== success) precedes row E7 (staleness) in the decision
+// table, so the outage window fails on conclusion, not on age.
+
+test('replay lock: the real 2026-07-24→2026-08-05 outage window reports rung 3 inactive, names the failing run URL, never claims RUNG 3', async () => {
+  const fixture = loadFixture('github-postmergeRuns-outage-window.json');
+  assertProvenance(fixture, 'github-postmergeRuns-outage-window.json');
+
+  setSpawn((cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/csrinaldi/brain/actions/workflows/governance-postmerge.yml/runs')) {
+      return { status: 0, stdout: JSON.stringify(fixture.data), stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: 'unexpected call: ' + cmd + ' ' + args.join(' ') };
+  });
+
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+        // postMergeCi intentionally NOT overridden — exercises the real probe + real evalRung3.
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.doesNotMatch(output, /RUNG 3\b/, 'a continuously-failing post-merge CI ledger must never report RUNG 3 armed');
+  assert.match(output, /post-merge CI\s+not armed:/i);
+  assert.match(output, /https:\/\/github\.com\/csrinaldi\/brain\/actions\/runs\/31035091085/, 'the reason must name the failing run URL (the most recent completed run in the window)');
+});
