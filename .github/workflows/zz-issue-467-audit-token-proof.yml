@@ -65,7 +65,7 @@ jobs:
           exit 0
 
   post-fix:
-    name: audit step with this PR's env: GH_TOKEN — the fix
+    name: "audit step with this PR's env: GH_TOKEN — the fix"
     needs: pre-fix
     if: always()
     runs-on: ubuntu-latest
