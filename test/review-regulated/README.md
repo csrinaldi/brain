@@ -27,11 +27,16 @@ found the tranche budget hardcode (#443) **on its first run**.
 `buildFixture({ tier, diffLines, handle, author, prNumber, redJob })`:
 
 - `tier` — any of the three; `lite` is the /1 control (REQ-409-4).
-- `redJob` — which required gate the canned rollup reports FAILURE for; the
-  deterministic finding of design D4. Set to `null`-ish only if you provide another
-  finding source. (The original plan — a diff-budget breach — is blocked on **#443**:
-  tranche's budget is hardcoded at 400, untiered. When #443 lands, restore
-  `diffLines`-driven breaches and retire this parameter's default.)
+- `diffLines` (default 250) — the PR's added lines, and **the deterministic finding of
+  design D4**: at `regulated` the budget is 200, so the default fixture trips exactly
+  one budget blocker; at `lite` (budget 1000) the same diff is correctly silent, which
+  is the pair that makes the tiering visible end to end.
+  Restored in **#443** — this harness's very first run found tranche's budget hardcoded
+  at 400 and untiered, so its designed finding source could not be used until that was
+  fixed.
+- `redJob` (default `null`) — which required gate the canned rollup reports FAILURE
+  for. A second, gate-shaped finding source, useful when a case needs a finding that
+  does not depend on the diff (it was the default for as long as #443 was open).
 - Canned responses are plain files in `stubDir` — a test may overwrite any of them
   after building (see the REQ-409-5b identity-mismatch case).
 

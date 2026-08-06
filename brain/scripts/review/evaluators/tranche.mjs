@@ -24,14 +24,20 @@ import { getVcs } from '../../vcs/cli.mjs';
 import { loadBrainConfig } from '../../lib/brain-config.mjs';
 import { parseDiffNumstat } from '../../vcs/diff-size-count.mjs';
 import { REQUIRED_JOBS, DETECTION_JOBS, resolveJobSets } from '../../vcs/governance-checks.mjs';
-import { resolveTier } from '../../vcs/governance-tiers.mjs';
+import { resolveTier, tierParams } from '../../vcs/governance-tiers.mjs';
 
-// governance.yml's diff-size gate threshold (`.github/workflows/governance.yml`,
-// "Invariant 2"). Mirrored here, not imported — governance.yml is YAML, not a
-// module; if it ever moves into `governance-checks.mjs`, update both sites in
-// the same commit (the drift-guard test for governance.yml's job names does
-// not cover this constant).
-const LINE_BUDGET = 400;
+// The diff budget is TIERED (ADR-0026 §2.C: lite 1000 · standard 400 ·
+// regulated 200) and lives in exactly one place — `tierParams(tier).diffBudget`
+// — which is also what governance.yml's diff-size gate reads, through
+// `governance-tiers.mjs diff-budget`'s CLI printer (REQ-TIER-9, "no second
+// budget literal").
+//
+// Until #443 this file declared `const LINE_BUDGET = 400` and mirrored the
+// pre-tiering constant. It was correct at `standard` BY COINCIDENCE, and every
+// tranche fixture in the suite sits at `standard` — so the reviewer approved
+// 350-line PRs at `regulated` (budget 200) and flagged 500-line PRs at `lite`
+// (budget 1000) with a full green suite. Resolve, never re-declare.
+const DEFAULT_TIER = 'standard';
 
 const TIER2_PREFIXES = ['brain/core/', 'brain/project/'];
 const AI_ATTRIBUTION_RE = /co-authored-by:\s*claude|generated with \[?claude|🤖/i;
@@ -68,6 +74,14 @@ function quoteGate(name, gate) {
  * @param {string} [input.prBody]
  * @param {string[]} [input.requiredJobs]  Tier-scoped required job names (default: REQUIRED_JOBS, the 'standard'-tier snapshot).
  * @param {string[]} [input.detectionJobs]  Tier-scoped detection job names (default: DETECTION_JOBS, the 'standard'-tier snapshot).
+ * @param {number} [input.diffBudget]  Tier-scoped line budget (issue #443). Defaults to
+ *   the SAME tier as the job-set defaults above (`standard`) — derived from
+ *   `tierParams`, never written as a literal, so a caller that skips the gather seam
+ *   still gets one coherent tier's doctrine rather than a `standard` job set judged
+ *   against some other tier's budget.
+ * @param {string} [input.tier]  The resolved tier NAME. Evidence-only (it makes the
+ *   budget finding readable without knowing the tier table); absent for the older
+ *   callers that never passed it, and the finding degrades to omitting the suffix.
  * @returns {{ conclusion: 'APPROVE'|'REVISE', gates: {required:string[],detection:string[]}, findings: object[], conditions: string[] }}
  */
 export function evaluateTranche({
@@ -77,6 +91,8 @@ export function evaluateTranche({
   prBody = '',
   requiredJobs = REQUIRED_JOBS,
   detectionJobs = DETECTION_JOBS,
+  diffBudget = tierParams(DEFAULT_TIER).diffBudget,
+  tier = null,
 } = {}) {
   if (!Array.isArray(requiredGates)) {
     // Uncomputable evidence (`gh` down, or the rollup fetch failed) — never
@@ -126,12 +142,18 @@ export function evaluateTranche({
     };
   }
 
-  if (budget && typeof budget.lines === 'number' && budget.lines > LINE_BUDGET) {
+  if (budget && typeof budget.lines === 'number' && budget.lines > diffBudget) {
     findings.push({
       id: 'budget',
       severity: 'blocker',
-      evidence: `git diff --numstat ${budget.baseSha}...${budget.headSha} | diff-size-count.mjs = ${budget.lines}`,
-      cites: 'governance.yml diff-size gate (400-line budget)',
+      // The comparison and the tier travel WITH the evidence (protocol §10:
+      // findings are self-evidencing). `cites` names the resolving function, not
+      // a number — the old `(400-line budget)` parenthetical was a citation to
+      // doctrine the evaluator had not actually applied at two of three tiers.
+      evidence:
+        `git diff --numstat ${budget.baseSha}...${budget.headSha} | diff-size-count.mjs = ` +
+        `${budget.lines} > ${diffBudget}${tier ? ` (tier: ${tier})` : ''}`,
+      cites: 'governance-tiers.mjs tierParams(tier).diffBudget',
     });
   }
 
@@ -215,6 +237,10 @@ export async function gatherTrancheInputs({
   const readConfig = deps.readConfig ?? loadBrainConfig;
   const tier = deps.tier ?? resolveTier(readConfig());
   const { required: requiredJobs, detection: detectionJobs } = resolveJobSets(tier);
+  // Issue #443: the budget rides the SAME resolution as the job sets. Before
+  // this, the tier was resolved here and then dropped before reaching the
+  // budget comparison, which used a file-local constant instead.
+  const { diffBudget } = tierParams(tier);
 
-  return { requiredGates, changedFiles, budget, prBody, requiredJobs, detectionJobs, tier };
+  return { requiredGates, changedFiles, budget, prBody, requiredJobs, detectionJobs, diffBudget, tier };
 }

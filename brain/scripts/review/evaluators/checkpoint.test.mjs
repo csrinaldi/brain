@@ -230,6 +230,42 @@ test('evaluateCheckpoint: everything green → APPROVE, gates carried through fr
   assert.deepEqual(result.gates.required, REQUIRED_JOBS);
 });
 
+test('evaluateCheckpoint: the tiered diff budget reaches the checkpoint verdict through the shared gather (#443, REQ-443-5)', async () => {
+  // #443 fixed `gatherTrancheInputs`, and checkpoint gathers through it — so this
+  // evaluator is fixed "for free". "For free" is a CLAIM: an unexercised protection
+  // carries no information, and the whole reason #443 existed is that the one tier
+  // under test was the one where the bug was invisible. Gather for real (not
+  // hand-wired trancheInputs) at regulated, where 250 lines is over the 200 budget
+  // and was silently APPROVED before the fix.
+  const inputs = await gatherCheckpointInputs({
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    headSha: 'HEAD',
+    changedFiles: ['a.mjs'],
+    deps: {
+      baseSha: 'BASE',
+      trancheDeps: {
+        tier: 'regulated',
+        fetchRollup: async () => greenRollup(),
+        diffNumstat: () => '250\t0\tbig.txt\n',
+        readIgnoreList: () => [],
+      },
+      runReversion: async () => ({ uncomputable: false, command: 'cmd', vacuousTests: [] }),
+      runAudit: () => '',
+      runGovernanceStatus: () => '',
+      exists: () => true,
+      listDir: () => [],
+      readFile: () => '',
+    },
+  });
+  assert.equal(inputs.trancheInputs.diffBudget, 200, 'the gather must carry regulated\'s budget, not the pre-#443 constant');
+  const result = evaluateCheckpoint(inputs);
+  const finding = result.findings.find(f => f.id === 'budget');
+  assert.ok(finding, 'the checkpoint verdict must carry the budget blocker — a 250-line diff at regulated is over doctrine');
+  assert.equal(result.conclusion, 'REVISE');
+});
+
 // ── resolveChangeId ──────────────────────────────────────────────────────────
 
 test('resolveChangeId: extracts the change id from a checkpoint-report.md path', () => {
