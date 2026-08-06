@@ -56,13 +56,33 @@ the poster. The count is the reader's only way to tell the two apart.
 Proven by making the provider stub reject the inline payload: the failure path IS the
 deliverable, not an edge case, so it is exercised at the same level as the success path.
 
-## REQ-405-5 — one call, so the anti-loop lock is untouched
+## REQ-405-5 — exactly ONE parseable verdict, so the anti-loop lock is untouched
 
-Inline comments post in the SAME provider call as the summary body they accompany. No
-second postable artifact, no second parseable verdict, no ordering dependency.
+**Corrected during implementation.** This requirement first read *"inline comments post
+in the SAME provider call as the summary body"* — true of GitHub, and **structurally
+impossible on GitLab**, where discussions are one-per-position, so N anchors mean N+1
+calls whatever the order. A requirement only one provider can satisfy is not a contract;
+it is GitHub's implementation promoted to doctrine.
 
-Asserted behaviourally: a run that posts inline comments must still skip with
-`anti-loop` on a second invocation at the same head, exactly as a summary-only run does.
+The invariant that is provider-agnostic, and the one the anti-loop lock actually needs:
+
+**Exactly one payload carries the verdict body.** The lock counts PARSEABLE VERDICTS,
+not posts — `cold-boot.mjs:123` runs every review body through `parseVerdict` and
+`.filter(Boolean)`s the nulls, so an inline annotation, which carries finding text and no
+`brain-review/N` block, is invisible to it.
+
+Per provider, then:
+
+- **GitHub** — `comments[]` rides the existing `/reviews` payload. One call, atomic:
+  either the whole review posts or none of it does.
+- **GitLab** — the summary note goes **first**, then one discussion per anchor. The order
+  is the opposite of GitHub's (which attempts anchored and retries bare) and follows from
+  the same rule: when the calls cannot be atomic, the verdict must be the one that is
+  already safe when anything after it fails.
+
+Asserted on the payloads actually SENT — that the anchor reaches the provider, and that
+exactly one payload carries the verdict body. Plus behaviourally: a run that posts inline
+comments must still skip with `anti-loop` on a second invocation at the same head.
 
 ## REQ-405-6 — parity is forced by the contract suite, not by inspection
 

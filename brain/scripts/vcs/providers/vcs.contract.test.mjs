@@ -1172,10 +1172,26 @@ function capturingSpawn(data) {
   };
 }
 
-function rejectOnceThenSucceed(data) {
-  let first = true;
-  return () => {
-    if (first) { first = false; return { status: 1, stdout: '', stderr: 'HTTP 422: line must be part of the diff' }; }
+// Rejects by SHAPE, not by ordering: any request carrying an anchor fails, any
+// request without one succeeds. The first version keyed off call order, which
+// silently encoded GitHub's sequence (inline first, retry bare) and would have
+// rejected GitLab's SUMMARY — the opposite of what it claims to model. Shape is
+// provider-agnostic and is what the real providers actually reject.
+// First call succeeds, every later one dies. Discriminates the ORDER: a verb
+// that posts the verdict first survives this; one that posts it last does not.
+function dieAfterFirstSpawn(data) {
+  let n = 0;
+  return () => (n++ === 0
+    ? { status: 0, stdout: JSON.stringify(data), stderr: '' }
+    : { status: 1, stdout: '', stderr: 'transport died' });
+}
+
+function rejectAnchoredRequests(data) {
+  return (_cmd, _args, opts) => {
+    const payload = opts?.input ?? '';
+    if (/"comments"|"position"/.test(payload)) {
+      return { status: 1, stdout: '', stderr: 'HTTP 422: line must be part of the diff' };
+    }
     return { status: 0, stdout: JSON.stringify(data), stderr: '' };
   };
 }
@@ -1185,24 +1201,35 @@ const WRITE_VERB_PROVIDERS = {
     module: github,
     ok: (data) => { setSpawn(jsonSpawn(data)); return {}; },
     fail: () => { setSpawn(failSpawn('fixture: simulated failure')); return {}; },
-    rejectInline: (data) => { setSpawn(rejectOnceThenSucceed(data)); return {}; },
+    rejectInline: (data) => { setSpawn(rejectAnchoredRequests(data)); return {}; },
     capture: (data) => { sent.length = 0; setSpawn(capturingSpawn(data)); return {}; },
+    dieAfterFirst: (data) => { setSpawn(dieAfterFirstSpawn(data)); return {}; },
     sentPayloads: () => sent,
   },
   gitlab: {
     module: gitlab,
     ok: (data) => ({ fetchImpl: async () => ({ ok: true, json: async () => data }) }),
     fail: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
-    rejectInline: (data) => {
-      let first = true;
-      return { fetchImpl: async () => {
-        if (first) { first = false; return { ok: false, status: 400, json: async () => ({ message: 'position is invalid' }) }; }
+    rejectInline: (data) => ({
+      fetchImpl: async (url, opts) => {
+        // Same shape rule. `diff_refs` reads must still succeed — refusing them
+        // would test "the MR is unreadable", a different failure.
+        if (/"position"/.test(opts?.body ?? '')) return { ok: false, status: 400, json: async () => ({ message: 'position is invalid' }) };
+        if (/merge_requests\/\d+$/.test(url)) return { ok: true, json: async () => ({ diff_refs: { base_sha: 'b', head_sha: 'h', start_sha: 's' } }) };
         return { ok: true, json: async () => data };
-      } };
+      },
+    }),
+    dieAfterFirst: (data) => {
+      let n = 0;
+      return { fetchImpl: async () => (n++ === 0
+        ? { ok: true, json: async () => data }
+        : { ok: false, status: 503 })
+      };
     },
     capture: (data) => {
       sent.length = 0;
-      return { fetchImpl: async (_url, opts) => {
+      return { fetchImpl: async (url, opts) => {
+        if (/merge_requests\/\d+$/.test(url)) return { ok: true, json: async () => ({ diff_refs: { base_sha: 'b', head_sha: 'h', start_sha: 's' } }) };
         try { sent.push(JSON.parse(opts?.body ?? '{}')); } catch { sent.push({ unparseable: opts?.body }); }
         return { ok: true, json: async () => data };
       } };
@@ -1212,7 +1239,7 @@ const WRITE_VERB_PROVIDERS = {
 };
 
 for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
-  const { module: vcs, ok, fail, rejectInline, capture, sentPayloads } = WRITE_VERB_PROVIDERS[providerName];
+  const { module: vcs, ok, fail, rejectInline, capture, sentPayloads, dieAfterFirst } = WRITE_VERB_PROVIDERS[providerName];
 
   test(`${providerName}.prReviewComment (contract): posts event:'COMMENT' (hardcoded), returns { url } on success`, async () => {
     const result = await vcs.prReviewComment({
@@ -1272,13 +1299,24 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
       'the count is the reader\'s only way to tell "no anchors" from "the anchors would not attach"');
   });
 
-  test(`${providerName}.prReviewComment (contract): comments[] rides the SAME call, event stays COMMENT (REQ-405-1/-5)`, async () => {
+  test(`${providerName}.prReviewComment (contract): the anchor REACHES the provider, and exactly one payload carries the verdict (REQ-405-1/-5)`, async () => {
     // Asserted on what was SENT, not on what came back. The return-value version
     // of this test passed against a verb that ignored `comments` entirely — a
     // provider must not be able to satisfy the contract by silently no-opping
     // (REQ-405-6).
+    //
+    // CORRECTED while implementing GitLab. This case first asserted ONE call, and
+    // spec REQ-405-5 said inline comments "post in the SAME provider call" —
+    // true of GitHub, and structurally impossible on GitLab, where discussions
+    // are one-per-position so N anchors mean N+1 calls whatever the order. A
+    // contract that only one provider can satisfy is not a contract.
+    //
+    // The invariant that IS provider-agnostic, and the one D5 actually needs:
+    // the anchor reaches the provider, and exactly ONE payload carries the
+    // verdict body — so the anti-loop lock, which counts parseable verdicts
+    // rather than posts, sees exactly what it sees today.
     const result = await vcs.prReviewComment({
-      project: 'x/y', number: 1, body: 'verdict',
+      project: 'x/y', number: 1, body: 'the verdict block',
       comments: [{ path: 'a.mjs', line: 42, body: 'here' }],
       ...capture({ html_url: 'https://example.test/x/y/pull/1#review-3', id: 3 }),
     });
@@ -1286,12 +1324,39 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
     assert.equal(result.inlineDropped, undefined, 'nothing was dropped, so no count');
 
     const payloads = sentPayloads();
-    assert.equal(payloads.length, 1, 'ONE call — a second would create an artifact the anti-loop lock does not count (design D5)');
-    const p = payloads[0];
-    assert.ok(Array.isArray(p.comments) && p.comments.length === 1,
-      `the anchor must be IN the payload, not dropped: ${JSON.stringify(p)}`);
-    assert.equal(p.comments[0].path, 'a.mjs');
-    assert.ok(p.body, 'the summary body rides the same payload');
+    const anchored = payloads.filter(p => p.comments || p.position);
+    assert.equal(anchored.length >= 1, true,
+      `the anchor must reach the provider, not be dropped: ${JSON.stringify(payloads)}`);
+    const anchorText = JSON.stringify(anchored);
+    assert.match(anchorText, /a\.mjs/, 'the anchored payload must name the path');
+    assert.match(anchorText, /42/, 'and the line');
+
+    const verdictCarrying = payloads.filter(p => p.body === 'the verdict block');
+    assert.equal(verdictCarrying.length, 1,
+      `exactly ONE payload may carry the verdict body — a second parseable verdict is what the ` +
+      `anti-loop lock cannot deduplicate (design D5). Got: ${JSON.stringify(payloads)}`);
+  });
+
+  test(`${providerName}.prReviewComment (contract): the verdict survives a transport that dies MID-SEQUENCE (REQ-405-4, ordering)`, async () => {
+    // The ordering half of REQ-405-4, and it was unpinned until this case: the
+    // shape-based rejection fixture cannot tell summary-first from
+    // summary-last, because in both orders the bare summary eventually posts.
+    //
+    // What discriminates is a transport that dies AFTER the first call. On a
+    // provider that posts the verdict first, it is already safe. On one that
+    // leaves it for last, the verdict is lost and only orphaned annotations
+    // remain — which is exactly the outcome REQ-405-4 forbids.
+    //
+    // (Found because a mutation meant to reverse the order turned out to be
+    // inert. The green it produced said nothing; the missing test was real.)
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'the verdict block',
+      comments: [{ path: 'a.mjs', line: 42, body: 'here' }],
+      ...dieAfterFirst({ html_url: 'https://example.test/x/y/pull/1#review-4', id: 4 }),
+    });
+    assert.equal(typeof result.url, 'string',
+      'the verdict must already be posted when the transport dies — anything else loses the deliverable ' +
+      'and keeps the decoration');
   });
 
   test(`${providerName}.prReviewComment (contract): lock 2 — no APPROVE path exists in the source`, () => {

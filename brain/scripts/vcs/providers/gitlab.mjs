@@ -444,23 +444,76 @@ export async function commitStatus({ project, sha }) {
  * @param {{ project: string, number: number, body: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
  * @returns {Promise<{ url: string } | { url: null, error: string }>}
  */
-export async function prReviewComment({ project, number, body, apiBase, token, proxyUrl, fetchImpl } = {}) {
+export async function prReviewComment({ project, number, body, comments, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const base = apiBase ?? 'https://gitlab.com/api/v4';
   const encoded = encodeURIComponent(project);
+  const tok = token ?? vcsToken(PROVIDER);
+  const call = (path, method, payload) =>
+    gitlabApiFetch({ apiBase: base, token: tok, proxyUrl: proxyUrl ?? null, path, method, body: payload, fetchImpl });
+
+  const inline = Array.isArray(comments) && comments.length > 0 ? comments : null;
+
+  // ── the summary note ALWAYS goes first (issue #405, REQ-405-4) ────────────
+  //
+  // GitHub carries `comments[]` in the same payload as `body`, so its review is
+  // atomic. GitLab cannot: discussions are ONE PER POSITION, so N anchors mean
+  // N+1 calls no matter the order. Given that, the verdict goes first — if
+  // anything after it fails, the deliverable is already posted. That is the
+  // opposite of GitHub's order (which attempts anchored, then retries bare) and
+  // it is the same rule underneath: the verdict is never lost to an inline
+  // failure.
+  //
+  // The anti-loop lock survives the extra calls because it counts PARSEABLE
+  // VERDICTS, not posts: only this summary note carries a `brain-review/N`
+  // block, and cold-boot.mjs filters out everything `parseVerdict` rejects.
+  // Pinned by a test rather than left as an argument.
+  let note;
   try {
-    const r = await gitlabApiFetch({
-      apiBase: base,
-      token: token ?? vcsToken(PROVIDER),
-      proxyUrl: proxyUrl ?? null,
-      path: `projects/${encoded}/merge_requests/${number}/notes`,
-      method: 'POST',
-      body: { body },
-      fetchImpl,
-    });
-    return { url: `${base.replace(/\/api\/v4\/?$/, '')}/${project}/-/merge_requests/${number}#note_${r.id}` };
+    note = await call(`projects/${encoded}/merge_requests/${number}/notes`, 'POST', { body });
   } catch (err) {
     return { url: null, error: err.message };
   }
+  const url = `${base.replace(/\/api\/v4\/?$/, '')}/${project}/-/merge_requests/${number}#note_${note.id}`;
+  if (!inline) return { url };
+
+  // ── the anchors, as discussions ───────────────────────────────────────────
+  //
+  // `position` needs the MR's own diff_refs. Read inside the verb rather than
+  // through a widened `prView` (design D4): prView's normalized shape is
+  // consumed by cold-boot, tranche, checkpoint and anti-stale, and a
+  // GitLab-only field for one caller does not belong there.
+  let refs;
+  try {
+    const mr = await call(`projects/${encoded}/merge_requests/${number}`, 'GET');
+    refs = mr?.diff_refs;
+  } catch {
+    refs = null;
+  }
+  // Unreadable refs mean every anchor is un-postable — reported as dropped, not
+  // silently skipped, and never as a failed verdict.
+  if (!refs) return { url, inlineDropped: inline.length };
+
+  let dropped = 0;
+  for (const c of inline) {
+    try {
+      await call(`projects/${encoded}/merge_requests/${number}/discussions`, 'POST', {
+        body: c.body,
+        position: {
+          position_type: 'text',
+          new_path: c.path,
+          new_line: c.line,
+          base_sha: refs.base_sha,
+          head_sha: refs.head_sha,
+          start_sha: refs.start_sha,
+        },
+      });
+    } catch {
+      dropped += 1;
+    }
+  }
+  // Absent when nothing was dropped, never 0 — "none requested" and "all
+  // dropped" must not be the same answer to a reader.
+  return dropped > 0 ? { url, inlineDropped: dropped } : { url };
 }
 
 /**

@@ -83,7 +83,21 @@ The verb fetches what its own transport needs. Cost: one extra GitLab request pe
 review with inline comments, and none on GitHub. Contract-visible either way, so the
 contract row records that `comments` support on GitLab implies an additional read.
 
-## D5 — the anti-loop lock is untouched, and D1 is why
+## D5 — the anti-loop lock is untouched — corrected: it counts VERDICTS, not calls
+
+> **Corrected during implementation (T7).** D5 originally rested on "one call", which is
+> a GitHub property. GitLab's discussions are one-per-position, so N anchors are N+1
+> calls and no ordering makes them atomic. The argument below still holds, but on the
+> right invariant: the lock counts **parseable verdicts**. An inline annotation carries
+> finding text and no `brain-review/N` block, so `parseVerdict` returns null on it and
+> `cold-boot.mjs`'s `.filter(Boolean)` drops it. Exactly one payload may carry the
+> verdict body — that is the contract, and it is satisfiable on both providers.
+>
+> GitLab therefore posts the **summary first**: when calls cannot be atomic, the verdict
+> is the one that must already be safe if anything after it fails. GitHub attempts
+> anchored and retries bare, which is the same rule from the other side.
+
+### The original argument (D1 is why) — the anti-loop lock is untouched, and D1 is why
 
 `poster.mjs` locks on `lastVerdict.author === reviewerHandle && lastVerdict.head_sha ===
 headSha`, computed from `priorVerdicts` before any vcs call. Inline comments are

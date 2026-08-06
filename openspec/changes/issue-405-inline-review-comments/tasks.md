@@ -52,8 +52,29 @@ acts. The ticket's own body asks for a design pass first — this is it.
 - [x] T6a — the parity case asserts the payload SENT, not the value returned. Its first
       version passed against a verb that ignored `comments` entirely — decorative, and
       caught here rather than by a reviewer (round 5 of PR #478 is why I looked).
-- [ ] T7 — GitLab: `notes` when `comments` is absent, `discussions` + `position` when
-      present, `diff_refs` fetched inside the verb (D4).
+- [x] T7 — GitLab: `notes` when `comments` is absent; **summary note FIRST**, then one
+      `discussions` POST per anchor with a `position` built from `diff_refs`, read inside
+      the verb (D4). Unreadable `diff_refs` reports every anchor as dropped rather than
+      skipping silently.
+      **The implementation falsified REQ-405-5.** It read *"inline comments post in the
+      SAME provider call"* — true of GitHub, structurally impossible on GitLab, where
+      discussions are one-per-position so N anchors are N+1 calls whatever the order. A
+      requirement only one provider can satisfy is GitHub's implementation promoted to
+      doctrine. Corrected to the provider-agnostic invariant the anti-loop lock actually
+      needs: **exactly one payload carries the verdict body**, because the lock counts
+      PARSEABLE VERDICTS, not posts. D5 corrected the same way.
+      Order follows from REQ-405-4: when calls cannot be atomic, the verdict is the one
+      that must already be safe if anything after it fails.
+- [x] T7a — the rejection fixture rejected by call ORDER, which silently encoded
+      GitHub's sequence and would have rejected GitLab's SUMMARY — the opposite of what
+      it claimed to model. Now rejects by SHAPE (any payload carrying an anchor), which
+      is provider-agnostic and is what the real providers do.
+- [x] T7b — red-proof: no-op on `comments` → red; drop the count → red; unreadable
+      `diff_refs` reported silently → red. A fourth mutation meant to reverse the post
+      order turned out **inert**, and its green said nothing — which exposed that the
+      ORDER was pinned by nothing. Added a case where the transport dies mid-sequence:
+      summary-first survives, summary-last loses the verdict. Proven by a real
+      order-reversal mutation (diff printed) → red.
 - [ ] T8 — REQ-405-4, the one that matters: the un-anchorable fallback. Stub rejects the
       inline payload → summary still posts, findings fold in, count reported. **Write
       this before the success path** — it is the deliverable, not an edge case.
