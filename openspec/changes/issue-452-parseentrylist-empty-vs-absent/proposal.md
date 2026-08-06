@@ -58,20 +58,29 @@ in `brain/core/anti-patterns/evidence-reader-empty-on-failure.md`.
 > empty for two very different reasons. Shipping it turned foreign verdicts carrying real
 > findings into a confident `findings: []`. See `design.md` D0.
 
-## Scope — the parser half only
+## Scope — the parser, plus ONE emitter fix ruled in by the maintainer
 
-The ticket and epic #313 both split this change:
+Amended 2026-08-06. This section said *"the parser half only"* until #481 was ruled in
+scope; leaving that heading standing would have been the third stale normative claim in
+these artefacts, and the first two were caught by review rather than by me.
 
-- **Parser half (here).** `parseEntryList` stops collapsing. Latent-but-real: brain's own
-  `renderVerdict` cannot emit a bare `follow_ups:`, but `parseVerdict` also reads verdicts
-  it did not write — `cold-boot.mjs:123` and `board.mjs:104` both parse verdicts posted by
-  another actor, an older or newer brain, or a hand-authored comment.
-- **Renderer half (NOT here — belongs with #408).** Whether `renderVerdict` should emit
-  `follow_ups: []` the way it already emits `findings: []` is a **protocol choice**, not a
-  bug fix, and `follow_ups` is structurally unreachable until an evaluator emits
-  `pre-existing`/`base-only`. PR #444's REQ-409-6 pins today's absence at both the parser
-  and the wire level, with a comment instructing whoever changes it to move the pin rather
-  than delete it. That instruction is addressed to #408.
+- **Parser (here).** `parseEntryList` stops collapsing empty into absent, and stops
+  answering `[]` for a body it could not read. Latent for brain's own output, live for
+  foreign input: `cold-boot.mjs:123` and `board.mjs:104` parse verdicts posted by another
+  actor, an older or newer brain, or a hand-authored comment.
+- **Emitter — the line-break escape (here, REQ-452-7, issue #481).** `yamlScalar` quoted
+  but did not escape newlines, so a multi-line `evidence:` terminated the findings list
+  and dropped every finding after it. **Not** a scope call I was entitled to make: I had
+  filed it as a separate issue, the maintainer ruled it back in, and that ruling is the
+  precedent — the disposition of a review finding belongs to the human, not the reviewer
+  (#473's addendum). The escape and its decoder move together as one contract.
+- **Emitter — `follow_ups` emission POLICY (NOT here — belongs with #408).** Whether
+  `renderVerdict` should emit `follow_ups: []` the way it already emits `findings: []` is
+  a **protocol choice**, not a bug fix, and `follow_ups` is structurally unreachable until
+  an evaluator emits `pre-existing`/`base-only`. PR #444's REQ-409-6 pins today's absence
+  at both the parser and the wire level, with a comment instructing whoever changes it to
+  move the pin rather than delete it. That instruction is addressed to #408, and those two
+  pins staying green is the operational check that this change respected the line.
 
 ## Found while measuring — NOT fixed here
 
