@@ -367,6 +367,15 @@ function printSubstrateReport(substrate) {
     console.log(`  post-merge CI  not armed: ${rung3.reason}`);
     if (rung3.remedy) console.log(`                 remedy: ${rung3.remedy}`);
   }
+  // REQ-R3-8 names `verifiable` and `mechanism` as the rendered signal, not
+  // merely as the render's input. Emitted from ONE site rather than per branch:
+  // a per-branch trailer drifts the moment a branch is added, and a rung-3
+  // signal that is computed but unrendered is the exact gap this requirement
+  // closes. `String(...)` keeps an uncomputed `verifiable` legible as
+  // "undefined" instead of asserting a `false` nobody derived.
+  if (rung3) {
+    console.log(`                 evidence: mechanism=${rung3.mechanism} verifiable=${String(rung3.verifiable)}`);
+  }
 
   console.log('');
 }

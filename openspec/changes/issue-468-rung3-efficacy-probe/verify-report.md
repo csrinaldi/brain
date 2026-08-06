@@ -27,14 +27,41 @@ the isolated worktree and is withdrawn. No rebase is required.
 | Req | Code | Test | Verdict |
 |---|---|---|---|
 | REQ-R3-1 | substrate.mjs:248-256 (E8) | substrate.test.mjs:286-309 | PASS |
-| REQ-R3-2 | substrate.mjs:223-233 (E6) | substrate.test.mjs:240-261 | PASS |
+| REQ-R3-2 | substrate.mjs:240-250 (E6) | substrate.test.mjs:240-261 | PASS (corrected — see below) |
 | REQ-R3-3 | substrate.mjs:70 (POSTMERGE_STALE_MS), release-postmerge-workflows.test.mjs:222-230 | drift guard, empirically proven to fail on cadence change | PASS |
 | REQ-R3-4 | substrate.mjs:159-171 (E3), brain-governance-status.mjs:160-169 | substrate.test.mjs:158-170, brain-governance-status.test.mjs:866-909 | PASS |
 | REQ-R3-5 | substrate.mjs:187-198 (E4) | substrate.test.mjs:172-183 | PASS |
 | REQ-R3-6 | every branch returns 6-field shape | substrate.test.mjs `assertShape` (behavioral, deepEqual on values, not implementation-mirroring) | PASS |
 | REQ-R3-7 | substrate.mjs:83-87 (three-way normalizer) | substrate.test.mjs L1/L2/L3 rows + zero legacy call sites edited | PASS |
-| REQ-R3-8 | brain-governance-status.mjs:350-361 | brain-governance-status.test.mjs:292-407 (4 branches) | PASS |
-| REQ-R3-9 | fixture github-postmergeRuns-outage-window.json (`_provenance.recorded:true`) | brain-governance-status.test.mjs:948-977 | PASS |
+| REQ-R3-8 | brain-governance-status.mjs:358-378 (branch chain + the `evidence:` line) | brain-governance-status.test.mjs — the 4 branch tests + the dedicated NAMES-verifiable-and-mechanism test | PASS (corrected — see below) |
+| REQ-R3-9 | fixture github-postmergeRuns-outage-window.json (`_provenance.recorded:true`) | brain-governance-status.test.mjs (outage replay lock) | PASS |
+
+### Corrections after the cold review — two of the PASS rows above were false
+
+Both were verified against BEHAVIOR and never against the requirement's own
+contract text. Recording the class, not just the fix: a verify pass that reads
+the code and the test but not the literal requirement cannot catch a spec that
+says something the code does not.
+
+- **REQ-R3-2** — the requirement and its scenario both mandated
+  `mechanism: 'postmerge-inert'`. No such string existed anywhere in the tree:
+  the evaluator emits `'postmerge-failing'` (substrate.mjs:246) and the test
+  asserts `'postmerge-failing'`. The spec, not the code, was wrong — it would
+  have been ratified into `openspec/specs/governance-v3/` on archive, where a
+  later consumer matching on `postmerge-inert` would silently never fire. Spec
+  corrected to the shipped mechanism.
+- **REQ-R3-8** — the requirement says the output MUST *report* `verifiable`
+  and `mechanism`; the scenario says it must *name* them. The render was
+  driven by both fields and printed neither, so the requirement was satisfied
+  only under a reading ("driven solely by") the text does not support. A
+  single `evidence: mechanism=… verifiable=…` line now renders them from ONE
+  site, with a dedicated test asserting it across two structurally different
+  rows. Mutation-proven: deleting the line turns that test red.
+
+A third finding of the same review — the terminal-run filter
+(`runs.find(status === 'completed')`) having zero coverage — is not a REQ row
+but is now pinned by `github-postmergeRuns-inflight.json` and its test.
+Mutation-proven: `runs[0]` turns it red, and nothing else.
 
 ## Critical trap (three-way normalizer) — PROVEN, no CRITICAL found
 `normalizePostMergeEvidence` (substrate.mjs:83-87): `raw===true`→L1,

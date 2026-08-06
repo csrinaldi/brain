@@ -19,14 +19,14 @@ name the run ledger as the evidence source — never a generic/file-presence lab
 
 ### Requirement: REQ-R3-2 — Terminal Failure Reports Inert With the Run URL
 
-Rung 3 MUST report `active: false, mechanism: 'postmerge-inert'` when the last terminal
+Rung 3 MUST report `active: false, mechanism: 'postmerge-failing'` when the last terminal
 run failed, and `reason` MUST carry that run's URL.
 
 #### Scenario: Failed last run reports inert with the run URL
 
 - GIVEN the last terminal run of `governance-postmerge.yml` completed, conclusion failure
 - WHEN rung 3 is evaluated
-- THEN it reports `active: false, mechanism: 'postmerge-inert'`, `reason` includes the run URL
+- THEN it reports `active: false, mechanism: 'postmerge-failing'`, `reason` includes the run URL
 
 ### Requirement: REQ-R3-3 — Staleness Reports Inert; Drift-Guard Required
 

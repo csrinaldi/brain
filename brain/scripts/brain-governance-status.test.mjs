@@ -310,6 +310,38 @@ test('printSubstrateReport: rung-3 available:false renders UNCOMPUTABLE with rea
   assert.doesNotMatch(output, /post-merge CI\s+not armed/i, 'uncomputable must never render as a neutral "not armed"');
 });
 
+test('printSubstrateReport: every rung-3 render NAMES verifiable and mechanism, not merely consumes them (REQ-R3-8)', async () => {
+  // REQ-R3-8 requires the two fields to be reported, not just to drive the
+  // branch choice — "no computed rung-3 signal may go unrendered". Asserted
+  // across two structurally different rows (uncomputable vs the legacy bare-
+  // boolean probe) so that a render which names them on one branch and drops
+  // them on another cannot pass.
+  const render = async (postMergeCi) => {
+    const logs = await captureLog(() =>
+      reportGovernanceStatus({
+        config: baseConfig,
+        env: {},
+        providerModule: fakeProviderModule,
+        probes: {
+          branchProtection: async () => ({ status: 404, contexts: [] }),
+          releaseGate: async () => false,
+          postMergeCi,
+          brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+        },
+      })
+    );
+    return logs.join('\n');
+  };
+
+  const uncomputable = await render(async () => ({ workflowPresent: true, read: 'failed', lastRun: null, error: 'gh: authentication required', observedAt: null }));
+  assert.match(uncomputable, /mechanism=postmerge-run-ledger-uncomputable\s/, 'the uncomputable row must name its mechanism');
+  assert.match(uncomputable, /verifiable=true\b/, 'the uncomputable row must name its verifiability');
+
+  const declared = await render(async () => true);
+  assert.match(declared, /mechanism=postmerge-ci-declared\s/, 'the bare-boolean row must name its mechanism');
+  assert.match(declared, /verifiable=false\b/, 'the bare-boolean row is precisely the unverifiable one — it must say so');
+});
+
 test('printSubstrateReport: rung-3 active with verifiable:false renders the declared-but-unverified caveat (legacy bare-true probe)', async () => {
   const logs = await captureLog(() =>
     reportGovernanceStatus({
@@ -799,9 +831,9 @@ test('governance-status GitLab fixture: none armed — rung falls below 1, no fa
 //
 // `postMergeCi` intentionally NOT overridden below — exercises the REAL probe
 // via the shared `setSpawn` seam, mirroring the realBranchProtectionProbe
-// pattern above (:271-294). Only the top-level RUNG/remedy signals are
-// asserted here (Task 3's rung-3 breakdown block does not exist yet at this
-// commit) — and only in ways that are TIME-INDEPENDENT (design's testing
+// pattern above (:271-294). The top-level RUNG/remedy signals and the rung-3
+// breakdown block's `mechanism=` field are asserted here — and only in ways
+// that are TIME-INDEPENDENT (design's testing
 // strategy: real-probe fixtures own evidence extraction, never freshness;
 // E7-vs-E8 staleness is asserted only at the pure substrate.test.mjs layer
 // with an injected `observedAt`).
@@ -836,6 +868,36 @@ test('realPostMergeCiProbe: a well-formed success-page run is neither uncomputab
   assert.doesNotMatch(output, /run-ledger evidence is unavailable/i, 'a well-formed lastRun must never render as uncomputable');
   assert.doesNotMatch(output, /never had a terminal run/i, 'a well-formed lastRun must never render as unproven (zero runs)');
   assert.doesNotMatch(output, /verify gh auth/i, 'a well-formed lastRun must never render the read-failure remedy');
+});
+
+test('realPostMergeCiProbe: a non-terminal newest run does not make a readable ledger uncomputable (the terminal-run filter is load-bearing)', async () => {
+  const fixture = loadFixture('github-postmergeRuns-inflight.json');
+  assertProvenance(fixture, 'github-postmergeRuns-inflight.json');
+
+  setSpawn((cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/csrinaldi/brain/actions/workflows/governance-postmerge.yml/runs')) {
+      return { status: 0, stdout: JSON.stringify(fixture.data), stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: 'unexpected call: ' + cmd + ' ' + args.join(' ') };
+  });
+
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: postmergeInertOtherRungs,
+    })
+  );
+
+  const output = logs.join('\n');
+  // Time-independent by construction: the completed run's age decides only
+  // between E9 (armed) and E8 (stale), and neither emits the strings asserted
+  // here — so this test keeps its mutation power after the fixture ages past
+  // the 48h window. What it pins is the filter, not freshness.
+  assert.doesNotMatch(output, /evidence is malformed/i, 'reading the non-terminal entry carries conclusion null into the evaluator (E5) — the completed entry is the one to read');
+  assert.doesNotMatch(output, /never had a terminal run/i, 'a completed run exists further down the page — this ledger is not zero-terminal-runs');
+  assert.match(output, /mechanism=postmerge-(?:run-ledger|stale)\s/, 'the completed run drives the verdict — armed when fresh, stale when not, never uncomputable');
 });
 
 test('realPostMergeCiProbe: an empty run-ledger page reports unproven (zero terminal runs), deterministic regardless of clock', async () => {
