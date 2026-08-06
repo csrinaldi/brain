@@ -111,10 +111,70 @@ async function realReleaseGateProbe({ config }) {
   return { declared, workflowPresent, workflowText };
 }
 
-/** Rung 3 — post-merge CI presence: governance-postmerge.yml or env.GITHUB_ACTIONS. */
-async function realPostMergeCiProbe({ config, env }) {
-  if (env?.GITHUB_ACTIONS === 'true') return true;
-  return repoFileExists('.github/workflows/governance-postmerge.yml');
+/**
+ * Rung 3 — post-merge CI run-ledger RAW EVIDENCE, never a verdict (issue #468,
+ * closing the gap that let a 12-day post-merge CI outage report armed). All
+ * interpretation (staleness, conclusion, unproven/uncomputable) lives in
+ * evalRung3 (substrate.mjs), where it stays unit-testable with injected
+ * evidence fixtures — this probe is a dumb I/O wrapper: fs presence + a
+ * WORKFLOW-SCOPED `gh api` read, never the self-referential
+ * `env.GITHUB_ACTIONS === 'true'` short-circuit this replaces (that route
+ * armed unconditionally from inside CI, including from inside the broken
+ * workflow's own run — the second lie identified in the proposal).
+ *
+ * `observedAt` is injected here, AT THE READ (`Date.now()`), because the
+ * clock is I/O — substrate.mjs's pure-orchestrator rule forbids evalRung3
+ * from calling it directly; this is the ONLY place `Date.now()` appears for
+ * this feature.
+ */
+async function realPostMergeCiProbe({ config }) {
+  const workflowPresent = repoFileExists('.github/workflows/governance-postmerge.yml');
+  const observedAt = Date.now();
+
+  if (!workflowPresent) {
+    return { workflowPresent, read: 'skipped', lastRun: null, error: null, observedAt };
+  }
+
+  if (config?.vcs?.provider !== 'github') {
+    // No ledger reader wired for this provider — keeps today's inert +
+    // remedy behavior for GitLab (design "Provider safety"), no `gh`/`glab`
+    // spawn either way.
+    return { workflowPresent, read: 'unsupported', lastRun: null, error: null, observedAt };
+  }
+
+  const project = config?.project?.slug;
+  if (!project) {
+    return { workflowPresent, read: 'failed', lastRun: null, error: 'no project.slug configured', observedAt };
+  }
+  const branch = config?.project?.defaultBranch ?? 'main';
+
+  // Workflow-scoped endpoint (design's "Endpoint" sub-ruling) — deliberately
+  // NOT rerunWorkflowRun's repo-wide `actions/runs?branch=...&per_page=100` +
+  // client-side `.path` filter: on a repo where governance.yml fires on every
+  // PR push, the post-merge run can fall off page 1 of that repo-wide read,
+  // producing a false "zero runs".
+  const r = run('gh', [
+    'api',
+    `repos/${project}/actions/workflows/governance-postmerge.yml/runs?branch=${encodeURIComponent(branch)}&per_page=20`,
+  ]);
+  if (!r.ok) {
+    return { workflowPresent, read: 'failed', lastRun: null, error: r.stderr.trim() || `gh api failed (status ${r.status})`, observedAt };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(r.stdout);
+  } catch (e) {
+    return { workflowPresent, read: 'failed', lastRun: null, error: `malformed run-ledger response: ${e.message}`, observedAt };
+  }
+
+  const runs = Array.isArray(parsed?.workflow_runs) ? parsed.workflow_runs : [];
+  const completed = runs.find((entry) => entry.status === 'completed');
+  const lastRun = completed
+    ? { id: completed.id, conclusion: completed.conclusion, completedAt: completed.updated_at, htmlUrl: completed.html_url }
+    : null;
+
+  return { workflowPresent, read: 'ok', lastRun, error: null, observedAt };
 }
 
 /** rungs[1].gates.brainWritesReviewed — per-provider L6 rung-1 sub-probe. */

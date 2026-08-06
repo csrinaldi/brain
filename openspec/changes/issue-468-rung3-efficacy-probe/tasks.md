@@ -83,7 +83,7 @@ in the ~36 legacy fixture call sites.
 
 ## Task 2 — Real probe: run-ledger reader (`realPostMergeCiProbe`)
 
-- [ ] **REQ-R3-1, REQ-R3-2, REQ-R3-4, REQ-R3-5**
+- [x] **REQ-R3-1, REQ-R3-2, REQ-R3-4, REQ-R3-5**
 
 Depends on: Task 1 (evidence shape must exist before the probe can be
 verified against it).
