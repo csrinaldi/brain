@@ -129,6 +129,22 @@ jobs:
 
       - id: audit
         name: Run brain-audit over the cursor window
+        env:
+          # BINDING (#467), not boilerplate. brain-audit's `issueLink` and
+          # `diffSize` checks read PR metadata through the github adapter, which
+          # shells out to `gh api` — and `gh` authenticates from GH_TOKEN. A step
+          # without it does not FAIL TO EVALUATE, it evaluates against a
+          # commit-body fallback and reports a governance VERDICT: every merge in
+          # the window "fails" issueLink because the `Closes #N` lives in the PR
+          # description the audit could not read (`evidence-reader-empty-on-failure`
+          # in the authentication layer). Observed live on run 31094912872: c724942,
+          # whose PR body opens with `Closes #443` and which passed the PR-time
+          # `issue-link` gate, was reported [FAIL] post-merge — code 1 with zero
+          # revertible [FAIL-SHA] offenders, so nothing reverted, no alarm (that is
+          # gated on code 2), and the cursor froze. The `window`, `revert` and
+          # `uncomputable` steps have always carried this; the step that actually
+          # renders the verdict was the one that did not.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           range="${{ steps.window.outputs.range }}"

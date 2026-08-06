@@ -309,6 +309,68 @@ test('governance-postmerge.yml routes audit stdout via env:, never ${{ }}-splice
   assert.match(text, /--body-file/, 'loud/PR bodies must be passed via --body-file, never argv-spliced');
 });
 
+// ── #467 — every API-reading step declares its own GH_TOKEN ────────────────
+//
+// The `audit` step shipped for months without `env: GH_TOKEN` while `window`,
+// `revert` and `uncomputable` all had one. `gh` authenticates from GH_TOKEN, and
+// brain-audit reaches the API through it (github.mjs shells out to `gh api` for
+// prView), so the unauthenticated step did not report "uncomputable" — it
+// reported a governance verdict, wrongly, over every merge in the window.
+//
+// Pinning `GH_TOKEN` on the audit step by name would fence exactly one step. The
+// guard is written as a PROPERTY over ALL steps instead — any step whose `run:`
+// block reaches the API (`gh …` or brain-audit) must carry GH_TOKEN in its OWN
+// `env:` — so the next step added with an API call and no token reddens too.
+// GitHub Actions does not inherit a token into a step; there is nothing above
+// the step to fall back on.
+function splitSteps(yamlText) {
+  const lines = yamlText.split('\n');
+  const startIdxs = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s{6}- (id|name|uses):\s*/.test(lines[i])) startIdxs.push(i);
+  }
+  return startIdxs.map((start, n) => {
+    const end = n + 1 < startIdxs.length ? startIdxs[n + 1] : lines.length;
+    const block = lines.slice(start, end).join('\n');
+    const idMatch = block.match(/^\s*- id:\s*(\S+)/m);
+    return { id: idMatch ? idMatch[1] : `(step@${start + 1})`, block };
+  });
+}
+
+test('governance-postmerge.yml: every step that reads the API declares its own env: GH_TOKEN (#467)', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const steps = splitSteps(text);
+  assert.ok(steps.length >= 6, `step split failed — found ${steps.length} steps, expected the full job`);
+
+  const apiReading = steps.filter(({ block }) => {
+    const runIdx = block.search(/^\s*run:\s*\|/m);
+    if (runIdx === -1) return false;
+    const body = block.slice(runIdx);
+    return /(^|[^-\w])gh\s+(api|issue|label|pr|auth)\b/.test(body) || /brain-audit\.mjs/.test(body);
+  });
+  assert.ok(apiReading.length >= 4,
+    `expected at least the window/audit/revert/uncomputable steps to read the API, found ${apiReading.length}`);
+
+  const unauthenticated = apiReading
+    .filter(({ block }) => !/^\s*env:\s*$[\s\S]*?^\s*GH_TOKEN:\s*\$\{\{\s*github\.token\s*\}\}/m.test(block))
+    .map(({ id }) => id);
+
+  assert.deepEqual(unauthenticated, [],
+    'these steps reach the GitHub API with no GH_TOKEN in their own env: — brain-audit will not report '
+    + '"uncomputable", it will report a WRONG VERDICT over every merge in the window (#467)');
+});
+
+// The specific step #467 was about — named, so a refactor that keeps the
+// property test green by removing the audit step's API read still reddens here.
+test('governance-postmerge.yml: the audit step itself carries env: GH_TOKEN (#467)', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const audit = splitSteps(text).find((s) => s.id === 'audit');
+  assert.ok(audit, 'the audit step must exist');
+  assert.match(audit.block, /brain-audit\.mjs/, 'the audit step must be the one running brain-audit');
+  assert.match(audit.block, /^\s*env:\s*$[\s\S]*?^\s*GH_TOKEN:\s*\$\{\{\s*github\.token\s*\}\}/m,
+    'the audit step must declare GH_TOKEN: ${{ github.token }} — the same form window/revert/uncomputable use');
+});
+
 // Loud paths carry no `|| true` (a swallowed failure is a silent halt), and the
 // workflow guards against overlapping runs.
 test('governance-postmerge.yml has a concurrency group and no swallowed loud paths', () => {
