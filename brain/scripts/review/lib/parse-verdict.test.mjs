@@ -472,3 +472,50 @@ test('#478-3/B1: the terminator set does not drift from what renderVerdict emits
       'a verdict carrying it after a list would parse as unreadable');
   }
 });
+
+// ── #478 round 4: ONE encoder must not have TWO decoders ────────────────────
+//
+// Found by the fourth cold review, which was tracing this to board.mjs's label
+// writes when it died mid-run; reproduced and confirmed from its probe.
+//
+// `yamlScalar` is the single emitter. Two functions decode it:
+//   unyamlScalar   — used for findings/follow_ups ENTRY fields
+//   parseJsonScalar — used for `pin`, `sequencing`, and the INLINE list form
+//
+// When #481 taught the encoder to escape line terminators, only `unyamlScalar`
+// learned to decode them. `parseJsonScalar` kept a generic `\X -> X` strip,
+// which turns the new `\u2028` escape into the literal text `u2028`:
+//
+//   in : seq:blocked-on<U+2028>411
+//   out: seq:blocked-onu2028411
+//
+// That is not cosmetic. `sequencing` is the ONE member of this family with a
+// destructive live consumer: board.mjs's reconcileBoardLabels compares the
+// parsed list against the PR's current labels, so a corrupted name puts the
+// REAL label in toRemove and a fabricated one in toAdd.
+
+test('#478-4: `sequencing` round-trips through the REAL encoder when a value carries a line separator', () => {
+  const built = buildVerdict({ headSha: 'abc123', conclusion: 'APPROVE', findings: [] });
+  built.sequencing = ['seq:after-411', 'seq:blocked-on\u2028411'];
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual(parsed.sequencing, built.sequencing,
+    'a decoder that does not mirror the encoder corrupts the label NAME — and board.mjs deletes labels by name');
+});
+
+test('#478-4: the same holds for every escape the encoder emits, on BOTH decoders', () => {
+  // The entry path (unyamlScalar) and the JSON path (parseJsonScalar) must agree,
+  // because one emitter feeds both. Any value the encoder can produce must come
+  // back identical on either route.
+  const nasty = ['a\nb', 'a\rb', 'a\u2028b', 'a\u2029b', 'a"b', 'a\\b', 'a\\nb'];
+  for (const v of nasty) {
+    const built = buildVerdict({
+      headSha: 'abc123',
+      conclusion: 'REVISE',
+      findings: [{ id: 'f', severity: 'blocker', evidence: v, cites: 'c' }],
+    });
+    built.sequencing = [v];
+    const parsed = parseVerdict({ body: renderVerdict(built) });
+    assert.equal(parsed.findings[0].evidence, v, `entry path corrupted ${JSON.stringify(v)}`);
+    assert.deepEqual(parsed.sequencing, [v], `JSON path corrupted ${JSON.stringify(v)}`);
+  }
+});

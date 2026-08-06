@@ -12,6 +12,27 @@ function scalar(block, key) {
   return m ? m[1].trim() : null;
 }
 
+// THE decoder for `verdict.mjs`'s `yamlScalar` — its exact inverse, and the
+// ONLY one. Both readers below delegate here.
+//
+// There used to be two (issue #452, found by the fourth cold review of PR #478
+// while it was tracing the consequence into board.mjs's label writes). When
+// #481 taught the encoder to escape line terminators, only the entry-field
+// reader learned to decode them; the JSON reader kept a generic `\X -> X`
+// strip, which turns the `\u2028` escape into the literal text `u2028`:
+//
+//   in : seq:blocked-on<U+2028>411
+//   out: seq:blocked-onu2028411
+//
+// `sequencing` is the one member of this family with a DESTRUCTIVE live
+// consumer — board.mjs reconciles labels by name, so a corrupted name puts the
+// real label in `toRemove` and a fabricated one in `toAdd`. One emitter must
+// have exactly one inverse; two decoders is the defect, not the escape.
+function decodeYamlEscapes(inner) {
+  return inner.replace(/\\(u2028|u2029|.)/g, (_, c) =>
+    (c === 'n' ? '\n' : c === 'r' ? '\r' : c === 'u2028' ? '\u2028' : c === 'u2029' ? '\u2029' : c));
+}
+
 // Reverses verdict.mjs's `yamlScalar(JSON.stringify(...))` encoding: strips
 // the outer quotes (if present) and un-escapes `\X` -> `X` (covers both
 // `\\` -> `\` and `\"` -> `"`, the only two escapes yamlScalar ever
@@ -23,7 +44,7 @@ function parseJsonScalar(raw) {
   try {
     const unquoted =
       raw.length >= 2 && raw[0] === '"' && raw[raw.length - 1] === '"'
-        ? raw.slice(1, -1).replace(/\\(.)/g, '$1')
+        ? decodeYamlEscapes(raw.slice(1, -1))
         : raw;
     return JSON.parse(unquoted);
   } catch {
@@ -45,8 +66,7 @@ function parseJsonScalar(raw) {
 function unyamlScalar(raw) {
   const s = raw.trim();
   if (!(s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"')) return s;
-  return s.slice(1, -1).replace(/\\(u2028|u2029|.)/g, (_, c) =>
-    (c === 'n' ? '\n' : c === 'r' ? '\r' : c === 'u2028' ? '\u2028' : c === 'u2029' ? '\u2029' : c));
+  return decodeYamlEscapes(s.slice(1, -1));
 }
 
 // Matches the two line shapes renderVerdict emits inside a findings /

@@ -153,3 +153,23 @@ topic_key: sdd/issue-452-parseentrylist-empty-vs-absent/tasks
 - [x] T21 — post-round-3 verification: suite **2505 pass / 1 skip / 0 fail** (+23 from
       baseline) · `repo:check` ✓ · `brain:nav` ✓ · diff **124** counted lines vs
       merge-base `c724942` against `lite`'s 1000.
+- [x] T22 — **fourth cold review round — DIED MID-RUN, but its lead was real.**
+      The agent never returned a verdict; the maintainer surfaced its log, which showed
+      it tracing *"U+2028 corruption to board.mjs label writes"* when it was interrupted.
+      Reproduced from its own probe: **ONE encoder had TWO decoders.** #481 taught
+      `yamlScalar` to escape line terminators, but only `unyamlScalar` learned to decode
+      them — `parseJsonScalar` kept a generic `\X → X` strip, which turns the new
+      `\u2028` escape into the literal text `u2028`:
+      `seq:blocked-on<U+2028>411` → `seq:blocked-onu2028411`.
+      **This one was mine, introduced two commits earlier**, and `sequencing` is the one
+      member of this family with a DESTRUCTIVE live consumer: `board.mjs` reconciles by
+      name, so the real label lands in `toRemove` and a fabricated one in `toAdd`.
+      Fixed by extracting `decodeYamlEscapes` — one emitter, one inverse. Both readers
+      delegate. Red-proof: restoring the generic strip reddens both new cases; diff
+      printed before the run.
+      Note on writing the test: my first version embedded LITERAL U+2028 in the test
+      source and broke the file's own JS parse (`SyntaxError: Unexpected identifier
+      'u2028'`) — the same class one level up. Swept to escapes.
+- [x] T23 — base brought current: merged `origin/main` (`d2fdf13`, PR #482) into the
+      branch. No conflicts. Suite **2531 pass / 1 skip / 0 fail**, `repo:check` ✓,
+      `brain:nav` ✓, REQ-409-6 pins green.
