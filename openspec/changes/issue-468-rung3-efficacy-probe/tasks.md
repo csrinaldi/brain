@@ -238,7 +238,7 @@ worth a throwaway local check before merge, not a permanent test).
 
 ## Task 6 — Full regression pass
 
-- [ ] **All REQ-R3-\*** (closing verification)
+- [x] **All REQ-R3-\*** (closing verification)
 
 Depends on: Tasks 1–5 complete.
 
