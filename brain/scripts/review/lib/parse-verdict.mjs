@@ -58,7 +58,23 @@ const ENTRY_CONT_RE = /^ {4}([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/;
  * array the renderer produced was silently dropped on re-parse — the empty
  * case (`findings: []`) round-tripped, which is why the defect stayed hidden.
  *
- * @returns {Array<object>|null} null when the key is absent or unparseable.
+ * THREE states, three answers on the list encoding (issue #452):
+ *
+ *   key absent                  → `null`
+ *   key present, no entries     → `[]`
+ *   key present, entries follow → the entries
+ *
+ * Until #452 the last line collapsed the middle state into `null`, so
+ * `parseVerdict`'s `!== null` guard dropped the field and a consumer could not
+ * tell "the block said nothing about this" from "the block said: nothing" —
+ * `evidence-reader-empty-on-failure` in the parser, and the third appearance
+ * of the #381 class in this pair of functions.
+ *
+ * @returns {Array<object>|null} `null` when the key is absent — or, on the
+ *   INLINE encoding, when `parseJsonScalar` could not read the value. That
+ *   second overload is a separate defect of the same class (a corrupt list
+ *   reads as no list); ticketed, not fixed here, because changing it is a
+ *   contract change against this parser's never-throws guarantee.
  */
 function parseEntryList(block, key) {
   const inline = scalar(block, key);
@@ -82,7 +98,11 @@ function parseEntryList(block, key) {
     }
     break; // first non-entry line ends the list — the next top-level key
   }
-  return entries.length > 0 ? entries : null;
+  // The `start === -1` early return above already established that the key's
+  // line WAS found, so an empty `entries` here is a real answer — "the list is
+  // empty" — not a failure to read one. Returning `null` for it would hand the
+  // caller the absent-key sentinel for a key that was present (issue #452).
+  return entries;
 }
 
 /** @returns {{ head_sha: string, rev: number|null, verdict: string, author: string|null, sequencing?: * } | null} */

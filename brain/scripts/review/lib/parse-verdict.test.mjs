@@ -201,3 +201,81 @@ test('#381 round-trip: the list parser stops at the next top-level key', () => {
   assert.equal(parsed.findings.length, 1, 'exactly one finding — conditions must not be absorbed');
   assert.equal('conditions' in parsed.findings[0], false, 'the next key must not leak into the entry');
 });
+
+// ── issue #452: three states, three answers ─────────────────────────────────
+//
+// `null` is the sentinel for "the key is absent". `parseEntryList`'s last line
+// made it ALSO the sentinel for "the key is present and its list is empty", so
+// `parseVerdict`'s `if (x !== null)` guard dropped the field in both cases and
+// a consumer could not tell them apart. That is `evidence-reader-empty-on-failure`
+// in the parser — and the THIRD appearance of the #381 class in this same pair
+// of functions, the second in `follow_ups`.
+//
+// `parseEntryList` is not exported, so these go through `parseVerdict`: the
+// distinction only matters if it survives to a consumer, and the consumers
+// (cold-boot.mjs:123, board.mjs:104) read exactly this shape.
+
+/** A minimal valid /2 block with `extra` spliced in before the fence closes. */
+function blockWith(extra) {
+  return ['```yaml',
+    'protocol: brain-review/2',
+    'head_sha: abc123',
+    'verdict: APPROVE',
+    ...extra,
+    '```'].join('\n');
+}
+
+test('#452: a key that is ABSENT leaves the property off the result', () => {
+  const parsed = parseVerdict({ body: blockWith([]) });
+  assert.equal('follow_ups' in parsed, false);
+  assert.equal('findings' in parsed, false);
+});
+
+test('#452: a key that is PRESENT with an empty list yields [] — not the same answer as absent', () => {
+  // Red before the fix: `parseEntryList` returned null here, so the property was
+  // dropped and this state was indistinguishable from the one above.
+  const parsed = parseVerdict({ body: blockWith(['follow_ups:']) });
+  assert.equal('follow_ups' in parsed, true,
+    'the key WAS in the block — a reader that reports it absent is answering a different question than the one asked');
+  assert.deepEqual(parsed.follow_ups, []);
+});
+
+test('#452: a key that is PRESENT with entries yields the entries (unchanged)', () => {
+  const parsed = parseVerdict({ body: blockWith(['follow_ups:', '  - id: "K-1"']) });
+  assert.deepEqual(parsed.follow_ups, [{ id: 'K-1' }]);
+});
+
+test('#452: the same three states hold for findings, on the block encoding', () => {
+  assert.equal('findings' in parseVerdict({ body: blockWith([]) }), false);
+  assert.deepEqual(parseVerdict({ body: blockWith(['findings:']) }).findings, []);
+  assert.deepEqual(parseVerdict({ body: blockWith(['findings:', '  - id: "F-1"']) }).findings, [{ id: 'F-1' }]);
+});
+
+test('#452: the INLINE empty encoding is untouched — `findings: []` still round-trips (REQ-452-3)', () => {
+  // This path is caught by `scalar()` before the block branch ever runs, and it
+  // is the one that ALREADY worked. #381's post-mortem records that this is
+  // precisely why that defect stayed hidden — the empty case round-tripped. The
+  // repair to the broken encoding must not move the working one.
+  const parsed = parseVerdict({ body: blockWith(['findings: []']) });
+  assert.equal('findings' in parsed, true);
+  assert.deepEqual(parsed.findings, []);
+});
+
+test('#452: renderVerdict → parseVerdict closes the round trip for an empty findings list (REQ-452-4)', () => {
+  const built = buildVerdict({ headSha: 'abc123', conclusion: 'APPROVE', findings: [] });
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual(parsed.findings, [],
+    'an empty findings list must survive the trip — the field is now pinnable at the PARSER level, ' +
+    'which is what PR #444 could not do (its REQ-409-6 had to assert at the wire level instead)');
+});
+
+test('#452: the renderer is UNCHANGED — follow_ups stays absent from what brain emits (REQ-452-6)', () => {
+  // The in-scope check. The renderer half (should renderVerdict emit `follow_ups: []`
+  // the way it emits `findings: []`?) is a PROTOCOL choice and belongs to #408, which
+  // is also what makes follow_ups reachable at all. If this goes red, this change
+  // touched something it was not supposed to.
+  const built = buildVerdict({ headSha: 'abc123', conclusion: 'APPROVE', findings: [] });
+  const rendered = renderVerdict(built);
+  assert.doesNotMatch(rendered, /^follow_ups:/m);
+  assert.equal('follow_ups' in parseVerdict({ body: rendered }), false);
+});
