@@ -405,3 +405,70 @@ test('#478-2/F1: a FULLY readable multi-entry list is unaffected — the control
   });
   assert.deepEqual(parsed.findings, [{ id: 'F-1' }, { id: 'F-2' }]);
 });
+
+// ── #478 THIRD cold review, blocker 1: which lines may END a list ───────────
+//
+// The round-2 correction established "unreadable → null at ANY entry count" as a
+// normative requirement in three places — and never interrogated the predicate
+// that decides "unreadable". `TOP_LEVEL_KEY_RE` accepted ANY `word:` at column 0
+// as the next top-level key, so unreadable content whose first line happens to
+// look like one was read as a CLEAN END and the truncated prefix came back as a
+// confident, complete list.
+//
+// The falsifying shape is the likeliest one in production, not a corner case:
+// `brain-governance-status`'s stdout — what checkpoint.mjs interpolates into
+// `evidence:` — contains lines like `Tier: 2`.
+//
+// The list can only be ended by a key this protocol actually emits.
+
+test('#478-3/B1: content that merely LOOKS like a key does not end the list — the prefix must not be returned as complete', () => {
+  const parsed = parseVerdict({
+    body: blockWith([
+      'findings:',
+      '  - id: "F-1"',
+      '    evidence: "line one',
+      'Tier: 2',                       // <- from real governance-status stdout
+      '  - id: "F-2-BLOCKER"',
+      'conditions: []',
+    ]),
+  });
+  assert.equal('findings' in parsed, false,
+    'the scan broke on unreadable content; "Tier:" is not a verdict key, so this block is uncomputable — ' +
+    'returning [F-1] would drop F-2-BLOCKER AND assert the remainder is the whole set');
+});
+
+test('#478-3/B1: a REAL next key still ends the list cleanly — the control', () => {
+  const parsed = parseVerdict({ body: blockWith(['findings:', '  - id: "F-1"', 'conditions: []']) });
+  assert.deepEqual(parsed.findings, [{ id: 'F-1' }]);
+  assert.deepEqual(parseVerdict({ body: blockWith(['findings:', 'conditions: []']) }).findings, []);
+});
+
+test('#478-3/B1: the terminator set does not drift from what renderVerdict emits', () => {
+  // The list-ending predicate names the protocol's own keys. If renderVerdict
+  // gains a top-level key and this set is not updated, a verdict carrying that
+  // key would parse as "unreadable" — failing safe, but wrongly. This test is
+  // the drift guard the loose regex made impossible.
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [{ id: 'F-1', severity: 'blocker', evidence: 'x', cites: 'y' }],
+    conditions: ['c'],
+    sequencing: ['seq:x'],
+    pin: { a: 1 },
+  });
+  const block = renderVerdict(built).split('```')[1];
+  const emitted = block.split('\n')
+    .map(l => l.match(/^([A-Za-z_][A-Za-z0-9_]*):/))
+    .filter(Boolean).map(m => m[1]);
+  assert.ok(emitted.length >= 6, `expected several top-level keys, got ${JSON.stringify(emitted)}`);
+  // `findings` is excluded as its own terminator: a second `findings:` line in the
+  // same block is matched by `scalar()`'s inline branch before the list branch
+  // ever runs, so the probe would measure that instead. A key cannot end its own
+  // list, and no renderer emits one twice.
+  for (const key of emitted.filter(k => k !== 'findings')) {
+    const probe = parseVerdict({ body: blockWith(['findings:', `${key}: whatever`]) });
+    assert.deepEqual(probe.findings, [],
+      `renderVerdict emits top-level "${key}" but the parser does not accept it as a list terminator — ` +
+      'a verdict carrying it after a list would parse as unreadable');
+  }
+});

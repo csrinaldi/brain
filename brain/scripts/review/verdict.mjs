@@ -28,7 +28,9 @@ function yamlScalar(val) {
       .replace(/\\/g, '\\\\')
       .replace(/"/g, '\\"')
       .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')}"`;
+      .replace(/\r/g, '\\r')
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029')}"`;
   }
   return s;
 }
@@ -122,11 +124,11 @@ export function renderVerdict(v) {
     lines.push('findings:');
     for (const f of v.findings) {
       lines.push(`  - id: ${yamlScalar(f.id)}`);
-      lines.push(`    severity: ${f.severity}`);
+      lines.push(`    severity: ${yamlScalar(f.severity)}`);
       lines.push(`    evidence: ${yamlScalar(f.evidence)}`);
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
-      if (f.evidence_class) lines.push(`    evidence_class: ${f.evidence_class}`);
-      if (f.causal_disposition) lines.push(`    causal_disposition: ${f.causal_disposition}`);
+      if (f.evidence_class) lines.push(`    evidence_class: ${yamlScalar(f.evidence_class)}`);
+      if (f.causal_disposition) lines.push(`    causal_disposition: ${yamlScalar(f.causal_disposition)}`);
     }
   }
 
@@ -134,11 +136,11 @@ export function renderVerdict(v) {
     lines.push('follow_ups:');
     for (const f of v.follow_ups) {
       lines.push(`  - id: ${yamlScalar(f.id)}`);
-      lines.push(`    severity: ${f.severity}`);
+      lines.push(`    severity: ${yamlScalar(f.severity)}`);
       lines.push(`    evidence: ${yamlScalar(f.evidence)}`);
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
-      if (f.evidence_class) lines.push(`    evidence_class: ${f.evidence_class}`);
-      if (f.causal_disposition) lines.push(`    causal_disposition: ${f.causal_disposition}`);
+      if (f.evidence_class) lines.push(`    evidence_class: ${yamlScalar(f.evidence_class)}`);
+      if (f.causal_disposition) lines.push(`    causal_disposition: ${yamlScalar(f.causal_disposition)}`);
     }
   }
 

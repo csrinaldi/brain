@@ -33,11 +33,24 @@ blockers, on exactly the foreign-verdict population this change's own justificat
 `evidence-reader-empty-on-failure` by opening another in the worse direction.
 
 The corrected rule follows the anti-pattern doc verbatim — `null` = uncomputable, `[]` =
-genuinely empty. After the loop, when nothing parsed, skip blank lines and ask whether
-the scan stopped at the **next top-level key or the end of the block** (`TOP_LEVEL_KEY_RE`,
-zero-indent `name:` — what `renderVerdict` emits after a list). If yes, the list really
-was empty → `[]`. If it stopped on anything else, there was a body here this parser could
-not read → `null`.
+genuinely empty. After the loop — **at any entry count**, not only when nothing parsed —
+skip blank lines and ask whether the scan stopped at the next top-level key or the end of
+the block. If yes, everything under the key was read → `[]` or the entries. If it stopped
+on anything else, there was a body here this parser could not read → `null`.
+
+Two corrections landed on that sentence, each from a review round, each inside the
+previous round's fix:
+
+- **"at any entry count"** (round 2). The first correction ran the test only when
+  `entries.length === 0`, so a list that read one entry and then hit unreadable content
+  returned the truncated prefix as a confident, complete list.
+- **which lines may END a list** (round 3). `TOP_LEVEL_KEY_RE` was a generic
+  `/^[A-Za-z_][A-Za-z0-9_]*:/`, so any `word:` at column 0 counted as a clean end — and
+  the likeliest unreadable content in production is `brain-governance-status` stdout,
+  which contains lines like `Tier: 2`. The predicate that decides "unreadable" had never
+  been interrogated, only the rule built on top of it. It now names **this protocol's own
+  top-level keys**, with a drift test that renders a fully-populated verdict and asserts
+  every column-0 key it emits is accepted.
 
 Blank lines are skipped rather than treated as a clean end, because `findings:` + blank +
 0-indent entries would otherwise report empty again — the same bug one line further out.
@@ -125,3 +138,56 @@ so the exposure is limited to foreign verdicts, which is exactly the population
    trusting the red** — the recurring lesson from #409 and #443, where a substitution
    silently failed to match and produced a meaningless green.
 4. REQ-409-6's two pins stay green throughout — the in-scope check (D3).
+
+
+## D6 — the encoder/decoder pair (issue #481, ruled in scope by the maintainer)
+
+The largest and most delicate decision on this branch, added to the design record after
+the third review noted it had none.
+
+`yamlScalar` quoted values but did not ESCAPE line breaks. A quoted scalar carrying a raw
+newline puts its continuation lines at column 0 — which terminates the findings list, so
+every finding after it is dropped. `checkpoint.mjs` interpolates multi-line command stdout
+into `evidence:`, so this fired on brain's own verdicts, not only foreign ones.
+
+**Encode**: `\` → `\\` first (so later escapes are not re-escaped), then `"`, then
+`\n`, `\r`, `\u2028`, `\u2029`. All four are line terminators to some reader; the JSDoc
+says "line breaks are escaped", so it has to mean all of them rather than the two that
+were convenient.
+
+**Decode**: `unyamlScalar` maps `\n`/`\r`/`\u2028`/`\u2029` back to the CHARACTERS and
+keeps the generic `\X → X` rule for everything else. **The halves move together** — the
+generic rule alone would have turned the new escape into a bare `n` and lost the newline a
+different way. That is why they are one design decision and one commit, not two.
+
+Rejected: a YAML block scalar (`|-` + indented continuation). It preserves readability in
+the posted comment, but it needs a third entry-line shape in a parser whose two existing
+shapes are already the brittleness this change exists to reduce. Measured instead of
+assumed: the escaped form is not less legible to a machine — `yaml.safe_load` reads the
+escaped block and keeps the newlines, where the old raw-newline form silently folded them
+into spaces.
+
+**Every per-finding field goes through the encoder**, not just the three originally
+touched. `severity`, `evidence_class` and `causal_disposition` were interpolated raw, and
+`validateSchemaV2` is exported but called nowhere in production — so nothing constrained
+them, and a newline in any one reproduced the same truncation one field over.
+
+## D7 — red-proof plan, as executed
+
+The D5 plan below was written for the first draft and is kept as the record. What the
+three rounds actually required:
+
+| mutation | expected red |
+|---|---|
+| `entries.length > 0 ? entries : null` (the round-1 draft) | the present-but-empty cases |
+| `endedCleanly = true` | the unreadable cases |
+| `endedCleanly = false` | the genuinely-empty AND with-entries cases — proves the branch DISCRIMINATES rather than merely fires |
+| `if (!endedCleanly && entries.length === 0)` (the round-2 draft) | the partial-read case |
+| `TOP_LEVEL_KEY_RE` loosened back to `/^\w+:/` | the `Tier: 2` case |
+| drop the encoder's `\n` escape | the render round-trip cases |
+| revert the decoder to generic `\X → X` | the same cases, separately |
+
+**Print the diff before every mutation run.** Three mutations on this branch silently
+failed to match and produced meaningless greens; recovering from one of them cost the
+working copy, because `git checkout --` on an uncommitted fix reverts it entirely. Commit
+before mutating.

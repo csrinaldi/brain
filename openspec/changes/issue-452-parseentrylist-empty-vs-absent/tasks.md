@@ -110,3 +110,46 @@ topic_key: sdd/issue-452-parseentrylist-empty-vs-absent/tasks
       to be re-applied from scratch. Commit before mutating.
 - [x] T18 — post-#481 verification: suite **2500 pass / 1 skip / 0 fail** · `repo:check` ✓
       · `brain:nav` ✓ · REQ-409-6 pins green (9/9 e2e).
+- [x] T19 — **third cold review round (PR #478, verdict REVISE)** — fresh zero-context
+      agent; found the blocker inside round 2's correction, again, and this time in the
+      PREDICATE rather than the rule.
+      **B1 (blocker)** `TOP_LEVEL_KEY_RE` accepted ANY `word:` at column 0 as "the next
+      top-level key", so unreadable content whose first line merely looked like a key was
+      read as a CLEAN END — and the truncated prefix returned as a confident, complete
+      list. The falsifying shape is the likeliest one in production: governance-status
+      stdout contains `Tier: 2`. Reproduced both hand-built and through the REAL renderer
+      (via a raw-interpolated `evidence_class`); the reviewer proved by mutation that
+      NOTHING pinned the loose regex (restricting it moved zero tests). Fixed: the
+      terminator set now NAMES this protocol's keys, plus a drift test rendering a
+      fully-populated verdict and asserting every column-0 key it emits is accepted.
+      My first version of that drift test probed `findings:` terminated by `findings:` —
+      a key cannot end its own list (the inline branch wins); documented and excluded.
+      **C2 (correction)** the "line breaks are ESCAPED" guarantee covered 3 of the 6
+      per-finding fields: `severity`/`evidence_class`/`causal_disposition` were
+      interpolated RAW, and `validateSchemaV2` is exported but called nowhere in
+      production, so nothing constrained them. All six now route through `yamlScalar`.
+      **C3 (correction)** `design.md` was the only artefact untouched by rounds 2 and
+      #481 — D0 still stated the round-1 rule and the encoder/decoder pair had no design
+      section. Brought forward: D0 corrected, D6 (the pair, with the rejected block-scalar
+      alternative and the legibility measurement), D7 (the red-proof plan as executed).
+      **E4 (editorial)** `e80dae0`'s message claims the decoder revert reddens 4 tests;
+      measured 3 (test 40 asserts only on renderer output and is CORRECTLY insensitive to
+      the decoder — the halves are separately pinned). The commit is pushed and immutable;
+      recorded here.
+      **E5 (editorial)** the PR body's "132 counted lines" was a two-dot diff against a
+      moved origin/main, counting 8 lines of main-only commits. Against the merge-base
+      (three-dot): **124**. Third round in a row with a stale number in the body — the
+      body now states the number is as-of a named commit.
+      **E6 (editorial)** U+2028/U+2029 destroyed the whole list (ENTRY_CONT_RE's `$`
+      treats them as terminators). The JSDoc said "line breaks are escaped" without
+      qualification, so it now means all four: `\n`, `\r`, `\u2028`, `\u2029` — both
+      halves, encoder and decoder.
+- [x] T20 — red-proof for every T19 fix, diffs printed before each run: loosening
+      `TOP_LEVEL_KEY_RE` back to generic → the `Tier: 2` case red; reverting
+      `evidence_class` to raw interpolation → the all-fields case red; dropping the
+      U+2028 escape → the separator case red. One mutation attempt in this pass ALSO
+      silently missed (a quoting mismatch) and was caught by the printed diff showing
+      nothing — the discipline is load-bearing, not ceremonial.
+- [x] T21 — post-round-3 verification: suite **2505 pass / 1 skip / 0 fail** (+23 from
+      baseline) · `repo:check` ✓ · `brain:nav` ✓ · diff **124** counted lines vs
+      merge-base `c724942` against `lite`'s 1000.

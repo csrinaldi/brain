@@ -226,3 +226,34 @@ test('#481: single-line values are NOT newly quoted or escaped — the control',
   assert.match(block, /evidence: brain\/core\/x\.md:7$/m, 'an already-safe scalar must stay bare');
   assert.doesNotMatch(block, /\\n/, 'no escape may appear where there was no newline');
 });
+
+test('#478-3/C2: EVERY per-finding field is escaped — not just the three that were touched', () => {
+  // severity / evidence_class / causal_disposition were interpolated raw, and
+  // `validateSchemaV2` is exported but called nowhere in production, so nothing
+  // constrained them. A newline in any of them reproduces the exact list
+  // truncation #481 was fixed to prevent, one field over.
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [
+      { id: 'first', severity: 'blocker', evidence: 'e1', cites: 'c1', evidence_class: 'observed\nTier: 2' },
+      { id: 'second-BLOCKER', severity: 'blocker', evidence: 'e2', cites: 'c2' },
+    ],
+  });
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual((parsed.findings ?? []).map(f => f.id), ['first', 'second-BLOCKER'],
+    'a newline in evidence_class must not swallow the finding after it');
+});
+
+test('#478-3/E6: U+2028 / U+2029 are line terminators too — the JSDoc says line breaks, so it must mean all of them', () => {
+  for (const sep of [' ', ' ']) {
+    const built = buildVerdict({
+      headSha: 'abc123',
+      conclusion: 'REVISE',
+      findings: [{ id: 'sep', severity: 'blocker', evidence: `a${sep}b`, cites: 'c' }],
+    });
+    const parsed = parseVerdict({ body: renderVerdict(built) });
+    assert.equal(parsed.findings?.[0]?.evidence, `a${sep}b`,
+      `U+${sep.codePointAt(0).toString(16)} destroyed the round trip`);
+  }
+});

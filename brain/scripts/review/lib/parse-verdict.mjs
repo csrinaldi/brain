@@ -45,7 +45,8 @@ function parseJsonScalar(raw) {
 function unyamlScalar(raw) {
   const s = raw.trim();
   if (!(s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"')) return s;
-  return s.slice(1, -1).replace(/\\(.)/g, (_, c) => (c === 'n' ? '\n' : c === 'r' ? '\r' : c));
+  return s.slice(1, -1).replace(/\\(u2028|u2029|.)/g, (_, c) =>
+    (c === 'n' ? '\n' : c === 'r' ? '\r' : c === 'u2028' ? '\u2028' : c === 'u2029' ? '\u2029' : c));
 }
 
 // Matches the two line shapes renderVerdict emits inside a findings /
@@ -54,11 +55,25 @@ function unyamlScalar(raw) {
 // this parser is the inverse of ONE fixed emitter, not a general YAML reader.
 const ENTRY_OPEN_RE = /^ {2}- ([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/;
 const ENTRY_CONT_RE = /^ {4}([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/;
-// The only line shape that legitimately ENDS a list: the next top-level key, at
-// zero indentation — what renderVerdict emits after a list. Used to tell "the
-// list was empty" from "the list had a body I could not read" (issue #452, and
-// the cold review of PR #478 which found the first version conflating them).
-const TOP_LEVEL_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*:/;
+// The only lines that legitimately END a list: THIS PROTOCOL's own top-level
+// keys, at zero indentation — what renderVerdict emits after a list.
+//
+// Naming them is load-bearing (third cold review of PR #478). A generic
+// `/^[A-Za-z_][A-Za-z0-9_]*:/` accepted ANY `word:` at column 0, so unreadable
+// content whose first line merely LOOKED like a key was read as a clean end and
+// the truncated prefix came back as a confident, complete list — the same
+// defect the "unreadable → null at any entry count" rule was written to close,
+// surviving in its own predicate. The falsifying shape is the likeliest one in
+// production, not a corner case: `brain-governance-status`'s stdout, which
+// checkpoint.mjs interpolates into `evidence:`, contains lines like `Tier: 2`.
+//
+// Kept in sync with verdict.mjs by a drift test that renders a fully-populated
+// verdict and asserts every column-0 key it emits is accepted here.
+const TOP_LEVEL_KEYS = [
+  'protocol', 'verdict', 'head_sha', 'rev', 'gates',
+  'findings', 'follow_ups', 'conditions', 'pin', 'sequencing', 'escalate',
+];
+const TOP_LEVEL_KEY_RE = new RegExp(`^(?:${TOP_LEVEL_KEYS.join('|')}):`);
 
 /**
  * Parses a findings-shaped key in EITHER encoding (issue #381):
