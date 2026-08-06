@@ -12,6 +12,27 @@ function scalar(block, key) {
   return m ? m[1].trim() : null;
 }
 
+// THE decoder for `verdict.mjs`'s `yamlScalar` — its exact inverse, and the
+// ONLY one. Both readers below delegate here.
+//
+// There used to be two (issue #452, found by the fourth cold review of PR #478
+// while it was tracing the consequence into board.mjs's label writes). When
+// #481 taught the encoder to escape line terminators, only the entry-field
+// reader learned to decode them; the JSON reader kept a generic `\X -> X`
+// strip, which turns the `\u2028` escape into the literal text `u2028`:
+//
+//   in : seq:blocked-on<U+2028>411
+//   out: seq:blocked-onu2028411
+//
+// `sequencing` is the one member of this family with a DESTRUCTIVE live
+// consumer — board.mjs reconciles labels by name, so a corrupted name puts the
+// real label in `toRemove` and a fabricated one in `toAdd`. One emitter must
+// have exactly one inverse; two decoders is the defect, not the escape.
+function decodeYamlEscapes(inner) {
+  return inner.replace(/\\(u2028|u2029|.)/g, (_, c) =>
+    (c === 'n' ? '\n' : c === 'r' ? '\r' : c === 'u2028' ? '\u2028' : c === 'u2029' ? '\u2029' : c));
+}
+
 // Reverses verdict.mjs's `yamlScalar(JSON.stringify(...))` encoding: strips
 // the outer quotes (if present) and un-escapes `\X` -> `X` (covers both
 // `\\` -> `\` and `\"` -> `"`, the only two escapes yamlScalar ever
@@ -23,7 +44,7 @@ function parseJsonScalar(raw) {
   try {
     const unquoted =
       raw.length >= 2 && raw[0] === '"' && raw[raw.length - 1] === '"'
-        ? raw.slice(1, -1).replace(/\\(.)/g, '$1')
+        ? decodeYamlEscapes(raw.slice(1, -1))
         : raw;
     return JSON.parse(unquoted);
   } catch {
@@ -31,14 +52,21 @@ function parseJsonScalar(raw) {
   }
 }
 
-// Reverses verdict.mjs's `yamlScalar()`: a value it had to quote comes back
-// with its outer quotes stripped and `\X` -> `X` un-escaped (the only escapes
-// yamlScalar emits are `\\` and `\"`); an unquoted scalar is already literal.
+// Reverses verdict.mjs's `yamlScalar()`: a value it had to quote comes back with
+// its outer quotes stripped and its escapes decoded; an unquoted scalar is
+// already literal.
+//
+// `\n` and `\r` decode to the CHARACTERS, not to the letters (issue #481).
+// yamlScalar escapes line breaks so a multi-line value cannot terminate the
+// findings list mid-way; the generic `\X -> X` rule this used to apply would
+// have turned that escape into a bare "n" and lost the newline a different way.
+// Every other escape keeps the generic rule, which covers yamlScalar's `\\` and
+// `\"` — and, because backslashes are escaped on the way out, `\\n` still decodes
+// to a literal backslash followed by "n" rather than to a newline.
 function unyamlScalar(raw) {
   const s = raw.trim();
-  return s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"'
-    ? s.slice(1, -1).replace(/\\(.)/g, '$1')
-    : s;
+  if (!(s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"')) return s;
+  return decodeYamlEscapes(s.slice(1, -1));
 }
 
 // Matches the two line shapes renderVerdict emits inside a findings /
@@ -47,6 +75,25 @@ function unyamlScalar(raw) {
 // this parser is the inverse of ONE fixed emitter, not a general YAML reader.
 const ENTRY_OPEN_RE = /^ {2}- ([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/;
 const ENTRY_CONT_RE = /^ {4}([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/;
+// The only lines that legitimately END a list: THIS PROTOCOL's own top-level
+// keys, at zero indentation — what renderVerdict emits after a list.
+//
+// Naming them is load-bearing (third cold review of PR #478). A generic
+// `/^[A-Za-z_][A-Za-z0-9_]*:/` accepted ANY `word:` at column 0, so unreadable
+// content whose first line merely LOOKED like a key was read as a clean end and
+// the truncated prefix came back as a confident, complete list — the same
+// defect the "unreadable → null at any entry count" rule was written to close,
+// surviving in its own predicate. The falsifying shape is the likeliest one in
+// production, not a corner case: `brain-governance-status`'s stdout, which
+// checkpoint.mjs interpolates into `evidence:`, contains lines like `Tier: 2`.
+//
+// Kept in sync with verdict.mjs by a drift test that renders a fully-populated
+// verdict and asserts every column-0 key it emits is accepted here.
+const TOP_LEVEL_KEYS = [
+  'protocol', 'verdict', 'head_sha', 'rev', 'gates',
+  'findings', 'follow_ups', 'conditions', 'pin', 'sequencing', 'escalate',
+];
+const TOP_LEVEL_KEY_RE = new RegExp(`^(?:${TOP_LEVEL_KEYS.join('|')}):`);
 
 /**
  * Parses a findings-shaped key in EITHER encoding (issue #381):
@@ -58,7 +105,49 @@ const ENTRY_CONT_RE = /^ {4}([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/;
  * array the renderer produced was silently dropped on re-parse — the empty
  * case (`findings: []`) round-tripped, which is why the defect stayed hidden.
  *
- * @returns {Array<object>|null} null when the key is absent or unparseable.
+ * States and answers on the LIST encoding (issue #452; the UNREADABLE row and
+ * then its "at any entry count" qualifier were each added by a cold-review
+ * round on PR #478 — the drafts conflated them with the rows above):
+ *
+ *   key absent                            → `null`
+ *   key present, scan ended cleanly:
+ *      nothing parsed                     → `[]`     genuinely empty
+ *      entries parsed                     → the entries
+ *   key present, scan stopped on content
+ *   it could not read — AT ANY ENTRY
+ *   COUNT                                 → `null`   uncomputable, never `[]`
+ *                                                    and never a truncated prefix
+ *
+ * "Unreadable" is real and common, and not only for foreign input:
+ *   - these entry regexes are anchored to the exact indentation ONE emitter
+ *     produces, so a verdict written in 0-indent YAML block sequence — what
+ *     `yaml.dump` emits by default — carries findings this parser cannot read;
+ *   - `renderVerdict` quotes but does not ESCAPE newlines, so brain's own
+ *     multi-line `evidence:` (checkpoint.mjs interpolates command stdout) emits
+ *     a block no parser can read. Measured: a two-finding verdict re-parsed to
+ *     ONE finding, silently dropping a blocker. The renderer defect is its own
+ *     ticket; what this function owes is to refuse the partial read rather than
+ *     present it as the whole set.
+ *
+ * NOT covered by the table above: a trailing space on the key line routes the
+ * key into the INLINE branch below (`scalar`'s `(.+)` captures the space), so it
+ * returns `null` even with entries under it. Pre-existing and pinned by test.
+ * Deferred to #477 on SCOPE — `scalar`'s contract for whitespace-only values
+ * belongs with the sentinel policy being settled there. Measured, not assumed:
+ * applying the candidate repair (`(.+)` → `(\S.*)`) fails exactly one test in
+ * the whole suite, the pin that documents this defect.
+ *
+ * Until #452 the last line collapsed the middle state into `null`, so
+ * `parseVerdict`'s `!== null` guard dropped the field and a consumer could not
+ * tell "the block said nothing about this" from "the block said: nothing" —
+ * `evidence-reader-empty-on-failure` in the parser, and the third appearance
+ * of the #381 class in this pair of functions.
+ *
+ * @returns {Array<object>|null} `null` when the key is absent — or, on the
+ *   INLINE encoding, when `parseJsonScalar` could not read the value. That
+ *   second overload is a separate defect of the same class (a corrupt list
+ *   reads as no list); ticketed, not fixed here, because changing it is a
+ *   contract change against this parser's never-throws guarantee.
  */
 function parseEntryList(block, key) {
   const inline = scalar(block, key);
@@ -69,7 +158,8 @@ function parseEntryList(block, key) {
   if (start === -1) return null;
 
   const entries = [];
-  for (let i = start + 1; i < lines.length; i++) {
+  let i = start + 1;
+  for (; i < lines.length; i++) {
     const open = lines[i].match(ENTRY_OPEN_RE);
     if (open) {
       entries.push({ [open[1]]: unyamlScalar(open[2]) });
@@ -80,9 +170,36 @@ function parseEntryList(block, key) {
       entries[entries.length - 1][cont[1]] = unyamlScalar(cont[2]);
       continue;
     }
-    break; // first non-entry line ends the list — the next top-level key
+    break; // a line this parser does not recognise as list content
   }
-  return entries.length > 0 ? entries : null;
+  // The `start === -1` early return established that the key's line WAS found,
+  // so how the scan ENDED is what separates the remaining answers, and the
+  // anti-pattern doctrine requires them to differ:
+  //
+  //   evidence-reader-empty-on-failure.md — "null = uncomputable (the fetch
+  //   failed), [] / '' = genuinely empty."
+  //
+  // The scan ended CLEANLY if only blank lines remain before the next top-level
+  // key or the end of the block. Otherwise there was a body here that these two
+  // indentation-anchored regexes could not read — a foreign 0-indent YAML
+  // sequence, a tab, a quoted entry key, or a multi-line scalar the renderer
+  // emitted unescaped.
+  //
+  // This test is applied REGARDLESS of how many entries parsed (second cold
+  // review of PR #478). A first correction ran it only when nothing parsed, so
+  // a list that read one entry and then hit unreadable content returned the
+  // truncated prefix as a confident, complete list — the same inversion one
+  // branch further up, and reachable from brain's OWN renderer: a two-finding
+  // verdict with multi-line `evidence:` re-parsed to ONE finding, silently
+  // dropping a blocker, with `'findings' in result === true`.
+  //
+  //   unreadable (any entry count) → `null`  — uncomputable, never a prefix
+  //   clean end, nothing parsed    → `[]`    — genuinely empty
+  //   clean end, entries parsed    → the entries
+  while (i < lines.length && lines[i].trim() === '') i++;
+  const endedCleanly = i >= lines.length || TOP_LEVEL_KEY_RE.test(lines[i]);
+  if (!endedCleanly) return null;
+  return entries;
 }
 
 /** @returns {{ head_sha: string, rev: number|null, verdict: string, author: string|null, sequencing?: * } | null} */

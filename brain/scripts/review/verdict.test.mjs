@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildVerdict, renderVerdict } from './verdict.mjs';
+import { parseVerdict } from './lib/parse-verdict.mjs';
 
 const HEAD_SHA = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
 
@@ -155,4 +156,139 @@ test('buildVerdict: causal_disposition "unknown" forces escalate: human and verd
 
   assert.equal(v.verdict, 'STOP');
   assert.equal(v.escalate, 'human');
+});
+
+// ── #481 (ruled IN SCOPE for #452 by the maintainer): newlines must be ESCAPED
+//
+// `yamlScalar` quoted but did not escape newlines, and checkpoint.mjs interpolates
+// multi-line command stdout into `evidence:`. The continuation lines land at column 0,
+// terminate the findings list, and everything after them — including blockers — is
+// dropped on re-parse. Measured before this fix, through the real chain:
+//
+//   BUILT findings: 2 (governance-status-output, tier2-touch)
+//   PARSED findings: 1        the BLOCKER did not survive the round trip
+//
+// The reader half (#452) makes that loss HONEST — the parser now answers `null`
+// (uncomputable) instead of a confident truncated list. It cannot make it not a loss:
+// the posted artifact, which a human also reads, already shipped without the blocker.
+// This is the emitter half.
+
+test('#481: a multi-line evidence value is escaped, so the block stays one-line-per-field', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [{ id: 'multi', severity: 'blocker', evidence: 'line one\nline two', cites: 'x.md' }],
+  });
+  const block = renderVerdict(built).split('```')[1];
+  const evidenceLines = block.split('\n').filter(l => l.includes('evidence:'));
+  assert.equal(evidenceLines.length, 1, 'exactly one evidence line');
+  assert.match(evidenceLines[0], /evidence: "line one\\nline two"/,
+    'the newline must be emitted as an escape, not as a raw line break that ends the list');
+});
+
+test('#481: every finding survives the round trip when one carries multi-line evidence', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [
+      { id: 'multi', severity: 'blocker', evidence: 'line one\nline two\nline three', cites: 'x.md' },
+      { id: 'tier2-touch', severity: 'blocker', evidence: 'brain/core/x.md', cites: 'y.md' },
+    ],
+  });
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual((parsed.findings ?? []).map(f => f.id), ['multi', 'tier2-touch'],
+    'a finding after a multi-line one must not be swallowed — this dropped a BLOCKER before the fix');
+  assert.equal(parsed.findings[0].evidence, 'line one\nline two\nline three',
+    'and the evidence must come back byte-identical: an escape that does not decode is a different loss');
+});
+
+test('#481: carriage returns are escaped too — CRLF evidence must not break the line structure', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [
+      { id: 'crlf', severity: 'blocker', evidence: 'a\r\nb', cites: 'x.md' },
+      { id: 'after', severity: 'blocker', evidence: 'still here', cites: 'y.md' },
+    ],
+  });
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual((parsed.findings ?? []).map(f => f.id), ['crlf', 'after']);
+  assert.equal(parsed.findings[0].evidence, 'a\r\nb');
+});
+
+test('#481: single-line values are NOT newly quoted or escaped — the control', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [{ id: 'plain', severity: 'blocker', evidence: 'brain/core/x.md:7', cites: 'y.md' }],
+  });
+  const block = renderVerdict(built).split('```')[1];
+  assert.match(block, /evidence: brain\/core\/x\.md:7$/m, 'an already-safe scalar must stay bare');
+  assert.doesNotMatch(block, /\\n/, 'no escape may appear where there was no newline');
+});
+
+test('#478-3/C2 (widened by round 5/B1): EVERY per-finding field is escaped, on BOTH render branches', () => {
+  // The round-3 fix routed all six per-finding fields through `yamlScalar` — and
+  // the round-3 red-proof only ever mutated `evidence_class` on the `findings`
+  // branch. Round 5 measured the gap: reverting the ENTIRE `follow_ups` branch to
+  // raw interpolation (all six fields, `evidence` included) left the suite at
+  // 50 pass / 0 fail. Ten of twelve call sites were pinned by nothing, and this
+  // test's own name claimed otherwise — report-vs-tree drift on the protection,
+  // which protocol §10 calls a blocker in its own right.
+  //
+  // `follow_ups` is not the quiet branch, either: `buildVerdict` routes every
+  // `pre-existing`/`base-only` finding there, and checkpoint.mjs interpolates raw
+  // command stdout into `evidence:`. It is exactly where a multi-line value lands.
+  //
+  // One field at a time, on each branch: the poisoned value must not swallow the
+  // entry that follows it.
+  const FIELDS = ['id', 'severity', 'evidence', 'cites', 'evidence_class', 'causal_disposition'];
+  const POISON = 'x\nTier: 2';
+
+  for (const field of FIELDS) {
+    for (const branch of ['findings', 'follow_ups']) {
+      // `pre-existing` routes a finding to follow_ups; anything else keeps it in
+      // findings. `causal_disposition` therefore cannot be poisoned on the
+      // follow_ups branch without changing where the finding goes — so it is
+      // poisoned on `findings` only, with a value that still falls through to the
+      // default route. Skipping it entirely would leave the field unpinned, which
+      // is the defect this test exists to close.
+      const disp = branch === 'follow_ups' ? 'pre-existing' : 'introduced';
+      if (field === 'causal_disposition' && branch === 'follow_ups') continue;
+      const poisonedDisp = `${disp}${POISON}`;
+      const base = { severity: 'blocker', evidence: 'e', cites: 'c', evidence_class: 'observed', causal_disposition: disp };
+      const poisoned = { ...base, id: 'poisoned', [field]: field === 'causal_disposition' ? poisonedDisp : POISON };
+      const built = buildVerdict({
+        headSha: 'abc123',
+        conclusion: 'REVISE',
+        protocol: 'brain-review/2',
+        findings: [poisoned, { ...base, id: 'survivor' }],
+      });
+      const parsed = parseVerdict({ body: renderVerdict(built) });
+      const entries = parsed[branch] ?? [];
+      const ids = entries.map(f => f.id);
+      // When `id` itself carries the poison, the poisoned entry's id IS that value.
+      const expected = [field === 'id' ? POISON : 'poisoned', 'survivor'];
+      assert.deepEqual(ids, expected,
+        `${branch}.${field}: a line break in this field swallowed the entry after it — ` +
+        `got ${JSON.stringify(ids)}. Every yamlScalar call site on both branches must be load-bearing.`);
+      // and the poisoned value itself must survive byte-identical, not merely fail
+      // to break the list — an escape that mangles is a different loss.
+      assert.equal(entries[0][field], field === 'causal_disposition' ? poisonedDisp : POISON,
+        `${branch}.${field}: the value round-tripped changed`);
+    }
+  }
+});
+
+test('#478-3/E6: U+2028 / U+2029 are line terminators too — the JSDoc says line breaks, so it must mean all of them', () => {
+  for (const sep of [' ', ' ']) {
+    const built = buildVerdict({
+      headSha: 'abc123',
+      conclusion: 'REVISE',
+      findings: [{ id: 'sep', severity: 'blocker', evidence: `a${sep}b`, cites: 'c' }],
+    });
+    const parsed = parseVerdict({ body: renderVerdict(built) });
+    assert.equal(parsed.findings?.[0]?.evidence, `a${sep}b`,
+      `U+${sep.codePointAt(0).toString(16)} destroyed the round trip`);
+  }
 });
