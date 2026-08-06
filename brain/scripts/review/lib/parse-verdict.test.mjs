@@ -279,3 +279,66 @@ test('#452: the renderer is UNCHANGED — follow_ups stays absent from what brai
   assert.doesNotMatch(rendered, /^follow_ups:/m);
   assert.equal('follow_ups' in parseVerdict({ body: rendered }), false);
 });
+
+// ── #452 review round: `[]` must mean EMPTY, never UNREADABLE ───────────────
+//
+// Cold review of PR #478, finding 1 (blocker). The first version of this change
+// returned `entries` unconditionally, which made `[]` the answer for BOTH "the
+// key's list is empty" and "the key had a body this parser could not read".
+// Reproduced: a foreign verdict carrying REAL findings in 0-indent YAML block
+// sequence — the shape `yaml.dump` emits by default — parsed as `findings: []`,
+// i.e. a positive, trusted assertion that the reviewer found nothing. On main it
+// was `undefined` (unknown). That inverts the failure direction on exactly the
+// population this fix exists for (cold-boot/board read FOREIGN verdicts), and it
+// is the anti-pattern's own rule read backwards:
+//
+//   brain/core/anti-patterns/evidence-reader-empty-on-failure.md —
+//   "null = uncomputable (the fetch failed), [] / '' = genuinely empty."
+//
+// So: `[]` only when the body under the key is genuinely absent; `null` when
+// there was content there and this parser could not read it.
+
+test('#452/#478-F1: a foreign 0-indent YAML list with REAL entries is UNREADABLE (null), never an empty finding list', () => {
+  const parsed = parseVerdict({ body: blockWith(['findings:', '- id: F-1', '  severity: blocker']) });
+  assert.equal('findings' in parsed, false,
+    'this block CARRIES two findings this parser cannot read — reporting findings: [] would tell the ' +
+    'consumer the reviewer found nothing, which is the inversion protocol §10 forbids');
+});
+
+test('#452/#478-F1: other unreadable indentations are also null, not empty', () => {
+  for (const shape of [
+    ['findings:', '    - id: F-1'],          // 4-space sequence
+    ['findings:', '\t- id: F-1'],            // tab-indented
+    ['findings:', '  - "id": F-1'],          // quoted key — ENTRY_OPEN_RE rejects it
+    ['findings:', '', '- id: F-1'],          // blank line then foreign content
+  ]) {
+    const parsed = parseVerdict({ body: blockWith(shape) });
+    assert.equal('findings' in parsed, false, `unreadable body reported as empty: ${JSON.stringify(shape)}`);
+  }
+});
+
+test('#452/#478-F1: a genuinely empty list is still [] — the fix must not swallow the case it exists for', () => {
+  // Both ways a list can legitimately be empty: followed by the next top-level
+  // key, and sitting at the end of the block. If either of these returned null
+  // the blocker fix would have undone #452 itself.
+  assert.deepEqual(parseVerdict({ body: blockWith(['findings:', 'conditions: []']) }).findings, [],
+    'key followed by the next top-level key — genuinely empty');
+  assert.deepEqual(parseVerdict({ body: blockWith(['findings:']) }).findings, [],
+    'key at the end of the block — genuinely empty');
+});
+
+test('#452/#478-F2: a trailing space on the key line routes to the INLINE branch — a known boundary, pinned not claimed', () => {
+  // Cold review finding 2: `scalar()`'s `^key:[ \t]*(.+)$` backtracks so `(.+)`
+  // captures the trailing space, `inline` becomes '' (non-null), the block branch
+  // is never reached, and parseJsonScalar('') throws -> null. So a key line with a
+  // trailing space returns null EVEN WITH ENTRIES under it.
+  //
+  // Pre-existing on main and NOT fixed here (the candidate repair is `(.+)` ->
+  // `(\S.*)` in `scalar`, which touches every scalar read in the block — its own
+  // change). Pinned so the state table in spec.md and the JSDoc cannot claim a
+  // completeness this parser does not have.
+  const withSpace = parseVerdict({ body: blockWith(['findings: ', '  - id: "F-1"']) });
+  assert.equal('findings' in withSpace, false, 'documents the boundary — see #477');
+  const clean = parseVerdict({ body: blockWith(['findings:', '  - id: "F-1"']) });
+  assert.deepEqual(clean.findings, [{ id: 'F-1' }], 'the control: without the trailing space the entries parse');
+});

@@ -10,18 +10,46 @@ topic_key: sdd/issue-452-parseentrylist-empty-vs-absent/spec
 
 Requirements tagged `REQ-452-N`.
 
-## REQ-452-1 — three states, three answers
+## REQ-452-1 — `[]` means EMPTY; `null` means ABSENT **or UNREADABLE**
 
-`parseEntryList(block, key)` returns:
+Corrected after the cold review of PR #478, whose blocker finding was that the first
+version of this requirement (and of the code) had only three rows and put unreadable
+content in the wrong one.
+
+`parseEntryList(block, key)`, list encoding:
 
 | block content | returns |
 |---|---|
 | the key's line is not present | `null` |
-| the key's line is present, no entries follow | `[]` |
-| the key's line is present with entries | the entries |
+| key present; only blank lines until the next top-level key or the end of the block | `[]` |
+| key present; a body these entry regexes cannot read | **`null`** — uncomputable |
+| key present with readable entries | the entries |
 
-Asserted as three cases, because the whole point is that there are three. A test that
-covers only the first and third is the test this defect already survived.
+Row 3 is the one that matters most and is easiest to get wrong. `ENTRY_OPEN_RE` /
+`ENTRY_CONT_RE` are anchored to the exact indentation of ONE emitter, so a foreign
+verdict written in 0-indent YAML block sequence — what `yaml.dump` emits by default —
+carries findings this parser cannot read. Answering `[]` there asserts *"the reviewer
+found nothing"* about a verdict that may carry blockers.
+
+The governing rule is `brain/core/anti-patterns/evidence-reader-empty-on-failure.md`:
+
+> `null` = uncomputable (the fetch failed), `[]` / `''` = genuinely empty.
+
+A fix that closes row 2 by breaking row 3 has moved the defect, not removed it — and in
+the more dangerous direction, since a false `[]` is a positive claim while the previous
+absence was merely unknown.
+
+## REQ-452-1a — the known boundary, pinned rather than claimed
+
+A **trailing space on the key line** routes the key into the INLINE branch (`scalar`'s
+`^key:[ \t]*(.+)$` backtracks, `(.+)` captures the space, `parseJsonScalar('')` throws),
+so it returns `null` **even with entries under it**.
+
+Pre-existing on `main` and NOT fixed here — the candidate repair (`(.+)` → `(\S.*)`)
+changes `scalar`, which every field in the block reads. It is pinned by a test so this
+spec cannot claim a completeness the parser does not have; the cold review's finding 2
+was precisely that an earlier draft promoted an incomplete table to a normative
+requirement.
 
 ## REQ-452-2 — `parseVerdict` propagates the distinction
 

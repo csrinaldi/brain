@@ -47,6 +47,11 @@ function unyamlScalar(raw) {
 // this parser is the inverse of ONE fixed emitter, not a general YAML reader.
 const ENTRY_OPEN_RE = /^ {2}- ([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/;
 const ENTRY_CONT_RE = /^ {4}([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/;
+// The only line shape that legitimately ENDS a list: the next top-level key, at
+// zero indentation — what renderVerdict emits after a list. Used to tell "the
+// list was empty" from "the list had a body I could not read" (issue #452, and
+// the cold review of PR #478 which found the first version conflating them).
+const TOP_LEVEL_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*:/;
 
 /**
  * Parses a findings-shaped key in EITHER encoding (issue #381):
@@ -58,11 +63,25 @@ const ENTRY_CONT_RE = /^ {4}([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/;
  * array the renderer produced was silently dropped on re-parse — the empty
  * case (`findings: []`) round-tripped, which is why the defect stayed hidden.
  *
- * THREE states, three answers on the list encoding (issue #452):
+ * States and answers on the LIST encoding (issue #452; row 3 added by the cold
+ * review of PR #478, which found the first version conflating it with row 2):
  *
- *   key absent                  → `null`
- *   key present, no entries     → `[]`
- *   key present, entries follow → the entries
+ *   key absent                        → `null`
+ *   key present, list genuinely empty → `[]`
+ *   key present, body UNREADABLE      → `null`   (uncomputable, never `[]`)
+ *   key present, entries follow       → the entries
+ *
+ * "Unreadable" is real and common: these entry regexes are anchored to the
+ * exact indentation ONE emitter produces, so a foreign verdict written in
+ * 0-indent YAML block sequence — what `yaml.dump` emits by default — carries
+ * findings this parser cannot read. `[]` there would assert "the reviewer found
+ * nothing" about a verdict that may carry blockers.
+ *
+ * NOT covered by the table above: a trailing space on the key line routes the
+ * key into the INLINE branch below (`scalar`'s `(.+)` captures the space), so it
+ * returns `null` even with entries under it. Pre-existing, pinned by test, and
+ * ticketed (#477) rather than fixed here — the repair touches `scalar`, which
+ * every field in the block reads.
  *
  * Until #452 the last line collapsed the middle state into `null`, so
  * `parseVerdict`'s `!== null` guard dropped the field and a consumer could not
@@ -85,7 +104,8 @@ function parseEntryList(block, key) {
   if (start === -1) return null;
 
   const entries = [];
-  for (let i = start + 1; i < lines.length; i++) {
+  let i = start + 1;
+  for (; i < lines.length; i++) {
     const open = lines[i].match(ENTRY_OPEN_RE);
     if (open) {
       entries.push({ [open[1]]: unyamlScalar(open[2]) });
@@ -96,13 +116,28 @@ function parseEntryList(block, key) {
       entries[entries.length - 1][cont[1]] = unyamlScalar(cont[2]);
       continue;
     }
-    break; // first non-entry line ends the list — the next top-level key
+    break; // a line this parser does not recognise as list content
   }
-  // The `start === -1` early return above already established that the key's
-  // line WAS found, so an empty `entries` here is a real answer — "the list is
-  // empty" — not a failure to read one. Returning `null` for it would hand the
-  // caller the absent-key sentinel for a key that was present (issue #452).
-  return entries;
+  if (entries.length > 0) return entries;
+
+  // Nothing parsed. The `start === -1` early return established that the key's
+  // line WAS found, so this is one of two very different situations, and the
+  // anti-pattern doctrine requires them to answer differently:
+  //
+  //   evidence-reader-empty-on-failure.md — "null = uncomputable (the fetch
+  //   failed), [] / '' = genuinely empty."
+  //
+  // GENUINELY EMPTY: nothing but blank lines between the key and the next
+  // top-level key (or the end of the block) — `[]`.
+  // UNREADABLE: there IS a body under this key that these two indentation-
+  // anchored regexes could not read (a foreign 0-indent YAML sequence, a tab,
+  // a quoted entry key) — `null`. Reporting `[]` there would tell a consumer
+  // "the reviewer found nothing" about a verdict that may carry blockers, which
+  // is the inversion protocol §10 forbids, landing on exactly the FOREIGN
+  // verdicts cold-boot.mjs/board.mjs read. Found by the cold review of PR #478.
+  while (i < lines.length && lines[i].trim() === '') i++;
+  const endedCleanly = i >= lines.length || TOP_LEVEL_KEY_RE.test(lines[i]);
+  return endedCleanly ? [] : null;
 }
 
 /** @returns {{ head_sha: string, rev: number|null, verdict: string, author: string|null, sequencing?: * } | null} */

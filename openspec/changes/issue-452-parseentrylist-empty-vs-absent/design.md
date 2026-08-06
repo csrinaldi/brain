@@ -8,7 +8,46 @@ topic_key: sdd/issue-452-parseentrylist-empty-vs-absent/design
 
 # Design — `parseEntryList` distinguishes empty from absent (issue #452)
 
+## D0 — CORRECTED after the cold review of PR #478 (read this before D1)
+
+D1 below argued that reaching the end of the entry loop with `entries` empty means "the
+list is empty", because the `start === -1` early return already established the key was
+found. **That argument is wrong, and the first version of this change shipped on it.**
+
+The loop also `break`s on the first line it does not recognise as list content — and it
+recognises exactly two shapes, both anchored to one emitter's indentation. So an empty
+`entries` has two causes, not one:
+
+```
+$ node scratchpad/foreign.mjs   # against the first version of the fix
+GENUINELY empty (key, then next top-level key)     | in: true  | value: []
+FOREIGN 0-indent seq (valid YAML, real findings)   | in: true  | value: []   ← WRONG
+FOREIGN 4-indent seq (real findings)               | in: true  | value: []   ← WRONG
+FOREIGN quoted key (real findings)                 | in: true  | value: []   ← WRONG
+```
+
+On `main` those three rows were `undefined` — *unknown*. The first fix turned them into
+a positive, trusted `[]`: **"the reviewer found nothing"**, about verdicts carrying real
+blockers, on exactly the foreign-verdict population this change's own justification cites
+(`cold-boot.mjs:123`, `board.mjs:104`). It closed one instance of
+`evidence-reader-empty-on-failure` by opening another in the worse direction.
+
+The corrected rule follows the anti-pattern doc verbatim — `null` = uncomputable, `[]` =
+genuinely empty. After the loop, when nothing parsed, skip blank lines and ask whether
+the scan stopped at the **next top-level key or the end of the block** (`TOP_LEVEL_KEY_RE`,
+zero-indent `name:` — what `renderVerdict` emits after a list). If yes, the list really
+was empty → `[]`. If it stopped on anything else, there was a body here this parser could
+not read → `null`.
+
+Blank lines are skipped rather than treated as a clean end, because `findings:` + blank +
+0-indent entries would otherwise report empty again — the same bug one line further out.
+
+D1's control-flow observation is still true; it simply does not support the conclusion
+that was drawn from it. Kept below, with that correction, because the reasoning error is
+more instructive than a clean narrative.
+
 ## D1 — the fix is `return entries`, and the reason is a control-flow fact
+### (superseded by D0 — this was the flawed step)
 
 The block-form branch is only reached after:
 
