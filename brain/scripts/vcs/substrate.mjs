@@ -53,21 +53,206 @@ function evalRung4() {
 }
 
 // ── Rung 3 — auto-correct ────────────────────────────────────────────────────────
-// Armed when post-merge CI runs brain:audit and can open an auto-revert PR.
-// Evidence: `probes.postMergeCi({ config, env })` — real wiring checks presence of
-// .github/workflows/governance-postmerge.yml or env.GITHUB_ACTIONS === 'true'
-// (design §1). The interpretation lives here so it stays unit-testable; the actual
-// fs/env read is the caller's concern (see module doc).
+// Armed when post-merge CI's run LEDGER proves a recent, successful terminal run —
+// never from mere file presence or a self-referential "am I currently running in
+// CI" check (issue #468, closing the gap that let a 12-day post-merge CI outage
+// report armed). Evidence: `probes.postMergeCi({ config, env })` — real wiring
+// (realPostMergeCiProbe, brain-governance-status.mjs) reads the GitHub Actions
+// workflow-run ledger for governance-postmerge.yml. ALL interpretation happens
+// here, in this pure module (design's 11-row decision table), so it stays
+// unit-testable with injected evidence fixtures — the probe itself is a dumb I/O
+// wrapper, never a classifier (same D1 split as evalRung2/classifyReleaseWorkflow).
+
+// Two periods of governance-postmerge.yml's daily cron (`0 6 * * *`) — a run
+// older than this can no longer be honestly called "recent". Named export: the
+// drift-guard test (release-postmerge-workflows.test.mjs) imports this to fail if
+// the workflow's cron cadence changes without this constant being updated.
+export const POSTMERGE_STALE_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * Bare-boolean-or-object evidence normalizer for rung 3 — mirrors
+ * `normalizeReleaseGateEvidence` but keeps THREE distinguishable legacy inputs
+ * instead of two: `raw === true` -> legacy declared-armed, `raw === false` ->
+ * legacy declared-absent, anything else (undefined, null, a throwing probe via
+ * `safeProbe`, or a real run-ledger evidence object) -> passed through as
+ * `ledger` for evalRung3 to classify further. Splitting `undefined` from `false`
+ * is what lets a throwing probe report uncomputable while
+ * `postMergeCi: async () => false` stays confirmed-inert — collapsing the two
+ * would silently degrade a broken probe into a confident "not armed" verdict.
+ */
+function normalizePostMergeEvidence(raw) {
+  if (raw === true) return { legacy: 'declared-armed' };
+  if (raw === false) return { legacy: 'declared-absent' };
+  return { legacy: null, ledger: raw && typeof raw === 'object' ? raw : null };
+}
+
+/**
+ * evalRung3 — pure, offline, total decision table (design "Decision table",
+ * rows L1/L2/L3/E1..E8, evaluated top to bottom, first match wins). Every
+ * branch returns the full six-field shape (REQ-R3-6). Never calls `Date.now()`
+ * — staleness (E7 vs E8) compares `evidence.observedAt` (injected via the
+ * probe's evidence object) against `lastRun.completedAt`, never read ambiently
+ * (module-doc pure-orchestrator rule).
+ */
 async function evalRung3({ config, env, probes }) {
-  const active = Boolean(await safeProbe(probes.postMergeCi, { config, env }));
-  if (active) {
-    return { available: true, active: true, reason: null, remedy: null };
+  const raw = await safeProbe(probes.postMergeCi, { config, env });
+  const evidence = normalizePostMergeEvidence(raw);
+
+  // L1 — legacy bare `true`: declared-armed, unverified (unreachable from the
+  // real probe, which always returns a structured object — locked by a fixture
+  // test — but kept so config-declared/manual overrides keep working).
+  if (evidence.legacy === 'declared-armed') {
+    return { available: true, active: true, verifiable: false, mechanism: 'postmerge-ci-declared', reason: null, remedy: null };
   }
+
+  // L2 — legacy bare `false`: declared-absent, unverified.
+  if (evidence.legacy === 'declared-absent') {
+    return {
+      available: true,
+      active: false,
+      verifiable: false,
+      mechanism: 'postmerge-ci-absent',
+      reason: 'no post-merge CI declared (postMergeCi probe returned false)',
+      remedy: 'add .github/workflows/governance-postmerge.yml running brain:audit with auto-revert on failure',
+    };
+  }
+
+  const ledger = evidence.ledger;
+
+  // L3 — probe missing, threw (safeProbe -> undefined), or returned a
+  // non-object: no run-ledger evidence exists to reason about at all.
+  if (!ledger) {
+    return {
+      available: false,
+      active: false,
+      verifiable: true,
+      mechanism: 'postmerge-run-ledger-uncomputable',
+      reason: 'post-merge CI run-ledger evidence is unavailable (no probe wired, or the probe failed)',
+      remedy: 'wire a postMergeCi probe that reads the governance-postmerge.yml run ledger',
+    };
+  }
+
+  // E1 — workflow file absent (probe short-circuited before any network read).
+  if (ledger.workflowPresent === false) {
+    return {
+      available: true, // CI is always something the project can wire — never a tier block
+      active: false,
+      verifiable: true,
+      mechanism: 'postmerge-ci-absent',
+      reason: 'no post-merge CI detected (no governance-postmerge.yml)',
+      remedy: 'add .github/workflows/governance-postmerge.yml running brain:audit with auto-revert on failure',
+    };
+  }
+
+  // E2 — non-GitHub provider: no ledger reader is wired for it.
+  if (ledger.read === 'unsupported') {
+    return {
+      available: false,
+      active: false,
+      verifiable: true,
+      mechanism: 'postmerge-run-ledger-unsupported',
+      reason: 'post-merge CI run-ledger read is not supported for this VCS provider',
+      remedy: 'declare governance-postmerge status via a config/postMergeCi override, or wait for a provider-specific run-ledger reader',
+    };
+  }
+
+  // E3 — the ledger read itself failed (auth, network, rate-limit, bad JSON).
+  if (ledger.read === 'failed') {
+    return {
+      available: false,
+      active: false,
+      verifiable: true,
+      mechanism: 'postmerge-run-ledger-uncomputable',
+      reason: ledger.error
+        ? `post-merge CI run-ledger read failed: ${ledger.error}`
+        : 'post-merge CI run-ledger read failed',
+      remedy: 'verify gh auth/connectivity and Actions API access, then retry',
+    };
+  }
+
+  // Any read state other than 'ok' at this point is unrecognized — fail closed
+  // to uncomputable rather than guessing (totality: no input class silently
+  // falls through unmapped).
+  if (ledger.read !== 'ok') {
+    return {
+      available: false,
+      active: false,
+      verifiable: true,
+      mechanism: 'postmerge-run-ledger-uncomputable',
+      reason: `post-merge CI run-ledger evidence has an unrecognized read state (${String(ledger.read)})`,
+      remedy: 'verify the postMergeCi probe returns a read state of skipped, unsupported, failed, or ok',
+    };
+  }
+
+  // E4 — the workflow file exists and the read succeeded, but zero terminal runs
+  // have ever been recorded.
+  if (ledger.lastRun === null || ledger.lastRun === undefined) {
+    return {
+      available: true,
+      active: false,
+      verifiable: true,
+      mechanism: 'postmerge-unproven',
+      reason: 'governance-postmerge.yml exists but has never had a terminal run',
+      remedy: 'push to main, or wait for the next scheduled run, to record a terminal run',
+    };
+  }
+
+  const lastRun = ledger.lastRun;
+  const completedAtMs = typeof lastRun.completedAt === 'string' ? Date.parse(lastRun.completedAt) : NaN;
+  const observedAt = ledger.observedAt;
+
+  // E5 — malformed lastRun: missing conclusion, unparseable completedAt, or a
+  // missing/null observedAt (staleness would be uncomputable). Never silently
+  // treated as a fresh success.
+  if (
+    typeof lastRun.conclusion !== 'string' ||
+    lastRun.conclusion === '' ||
+    Number.isNaN(completedAtMs) ||
+    typeof observedAt !== 'number'
+  ) {
+    return {
+      available: false,
+      active: false,
+      verifiable: true,
+      mechanism: 'postmerge-run-ledger-uncomputable',
+      reason: 'post-merge CI run-ledger evidence is malformed (missing conclusion, unparseable completedAt, or missing observedAt)',
+      remedy: 'verify the run-ledger read returns a well-formed lastRun object with conclusion, completedAt, and observedAt',
+    };
+  }
+
+  // E6 — the last terminal run did not succeed.
+  if (lastRun.conclusion !== 'success') {
+    return {
+      available: true,
+      active: false,
+      verifiable: true,
+      mechanism: 'postmerge-failing',
+      reason: `last governance-postmerge run did not succeed (${lastRun.conclusion}): ${lastRun.htmlUrl ?? 'no run URL available'}`,
+      remedy: 'investigate and fix the failing governance-postmerge.yml run',
+    };
+  }
+
+  // E7 — succeeded, but the run is older than the staleness window.
+  const age = observedAt - completedAtMs;
+  if (age > POSTMERGE_STALE_MS) {
+    return {
+      available: true,
+      active: false,
+      verifiable: true,
+      mechanism: 'postmerge-stale',
+      reason: `last successful governance-postmerge run is stale (older than 48h): ${lastRun.htmlUrl ?? 'no run URL available'}`,
+      remedy: 'trigger a fresh governance-postmerge run (push to main, or wait for the next scheduled run)',
+    };
+  }
+
+  // E8 — succeeded, within the staleness window: the only real-probe row that arms.
   return {
-    available: true, // CI is always something the project can wire — never a tier block
-    active: false,
-    reason: 'no post-merge CI detected (no governance-postmerge.yml, not running in CI)',
-    remedy: 'add .github/workflows/governance-postmerge.yml running brain:audit with auto-revert on failure',
+    available: true,
+    active: true,
+    verifiable: true,
+    mechanism: 'postmerge-run-ledger',
+    reason: null,
+    remedy: null,
   };
 }
 
