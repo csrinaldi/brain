@@ -63,25 +63,37 @@ const TOP_LEVEL_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*:/;
  * array the renderer produced was silently dropped on re-parse — the empty
  * case (`findings: []`) round-tripped, which is why the defect stayed hidden.
  *
- * States and answers on the LIST encoding (issue #452; row 3 added by the cold
- * review of PR #478, which found the first version conflating it with row 2):
+ * States and answers on the LIST encoding (issue #452; the UNREADABLE row and
+ * then its "at any entry count" qualifier were each added by a cold-review
+ * round on PR #478 — the drafts conflated them with the rows above):
  *
- *   key absent                        → `null`
- *   key present, list genuinely empty → `[]`
- *   key present, body UNREADABLE      → `null`   (uncomputable, never `[]`)
- *   key present, entries follow       → the entries
+ *   key absent                            → `null`
+ *   key present, scan ended cleanly:
+ *      nothing parsed                     → `[]`     genuinely empty
+ *      entries parsed                     → the entries
+ *   key present, scan stopped on content
+ *   it could not read — AT ANY ENTRY
+ *   COUNT                                 → `null`   uncomputable, never `[]`
+ *                                                    and never a truncated prefix
  *
- * "Unreadable" is real and common: these entry regexes are anchored to the
- * exact indentation ONE emitter produces, so a foreign verdict written in
- * 0-indent YAML block sequence — what `yaml.dump` emits by default — carries
- * findings this parser cannot read. `[]` there would assert "the reviewer found
- * nothing" about a verdict that may carry blockers.
+ * "Unreadable" is real and common, and not only for foreign input:
+ *   - these entry regexes are anchored to the exact indentation ONE emitter
+ *     produces, so a verdict written in 0-indent YAML block sequence — what
+ *     `yaml.dump` emits by default — carries findings this parser cannot read;
+ *   - `renderVerdict` quotes but does not ESCAPE newlines, so brain's own
+ *     multi-line `evidence:` (checkpoint.mjs interpolates command stdout) emits
+ *     a block no parser can read. Measured: a two-finding verdict re-parsed to
+ *     ONE finding, silently dropping a blocker. The renderer defect is its own
+ *     ticket; what this function owes is to refuse the partial read rather than
+ *     present it as the whole set.
  *
  * NOT covered by the table above: a trailing space on the key line routes the
  * key into the INLINE branch below (`scalar`'s `(.+)` captures the space), so it
- * returns `null` even with entries under it. Pre-existing, pinned by test, and
- * ticketed (#477) rather than fixed here — the repair touches `scalar`, which
- * every field in the block reads.
+ * returns `null` even with entries under it. Pre-existing and pinned by test.
+ * Deferred to #477 on SCOPE — `scalar`'s contract for whitespace-only values
+ * belongs with the sentinel policy being settled there. Measured, not assumed:
+ * applying the candidate repair (`(.+)` → `(\S.*)`) fails exactly one test in
+ * the whole suite, the pin that documents this defect.
  *
  * Until #452 the last line collapsed the middle state into `null`, so
  * `parseVerdict`'s `!== null` guard dropped the field and a consumer could not
@@ -118,26 +130,34 @@ function parseEntryList(block, key) {
     }
     break; // a line this parser does not recognise as list content
   }
-  if (entries.length > 0) return entries;
-
-  // Nothing parsed. The `start === -1` early return established that the key's
-  // line WAS found, so this is one of two very different situations, and the
-  // anti-pattern doctrine requires them to answer differently:
+  // The `start === -1` early return established that the key's line WAS found,
+  // so how the scan ENDED is what separates the remaining answers, and the
+  // anti-pattern doctrine requires them to differ:
   //
   //   evidence-reader-empty-on-failure.md — "null = uncomputable (the fetch
   //   failed), [] / '' = genuinely empty."
   //
-  // GENUINELY EMPTY: nothing but blank lines between the key and the next
-  // top-level key (or the end of the block) — `[]`.
-  // UNREADABLE: there IS a body under this key that these two indentation-
-  // anchored regexes could not read (a foreign 0-indent YAML sequence, a tab,
-  // a quoted entry key) — `null`. Reporting `[]` there would tell a consumer
-  // "the reviewer found nothing" about a verdict that may carry blockers, which
-  // is the inversion protocol §10 forbids, landing on exactly the FOREIGN
-  // verdicts cold-boot.mjs/board.mjs read. Found by the cold review of PR #478.
+  // The scan ended CLEANLY if only blank lines remain before the next top-level
+  // key or the end of the block. Otherwise there was a body here that these two
+  // indentation-anchored regexes could not read — a foreign 0-indent YAML
+  // sequence, a tab, a quoted entry key, or a multi-line scalar the renderer
+  // emitted unescaped.
+  //
+  // This test is applied REGARDLESS of how many entries parsed (second cold
+  // review of PR #478). A first correction ran it only when nothing parsed, so
+  // a list that read one entry and then hit unreadable content returned the
+  // truncated prefix as a confident, complete list — the same inversion one
+  // branch further up, and reachable from brain's OWN renderer: a two-finding
+  // verdict with multi-line `evidence:` re-parsed to ONE finding, silently
+  // dropping a blocker, with `'findings' in result === true`.
+  //
+  //   unreadable (any entry count) → `null`  — uncomputable, never a prefix
+  //   clean end, nothing parsed    → `[]`    — genuinely empty
+  //   clean end, entries parsed    → the entries
   while (i < lines.length && lines[i].trim() === '') i++;
   const endedCleanly = i >= lines.length || TOP_LEVEL_KEY_RE.test(lines[i]);
-  return endedCleanly ? [] : null;
+  if (!endedCleanly) return null;
+  return entries;
 }
 
 /** @returns {{ head_sha: string, rev: number|null, verdict: string, author: string|null, sequencing?: * } | null} */

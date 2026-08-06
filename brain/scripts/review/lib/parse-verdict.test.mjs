@@ -342,3 +342,55 @@ test('#452/#478-F2: a trailing space on the key line routes to the INLINE branch
   const clean = parseVerdict({ body: blockWith(['findings:', '  - id: "F-1"']) });
   assert.deepEqual(clean.findings, [{ id: 'F-1' }], 'the control: without the trailing space the entries parse');
 });
+
+// ── #478 second cold review, F1: a PARTIAL read is uncomputable too ─────────
+//
+// The first correction applied the unreadable check only in the
+// `entries.length === 0` branch. If even ONE entry parsed before the scan hit
+// content it could not read, the function returned the truncated prefix as a
+// confident, positive list — the same inversion one branch further up, and the
+// shipped state table asserted the opposite.
+//
+// This state is reachable from brain's OWN renderer: `yamlScalar` quotes but
+// does not escape newlines (verdict.mjs), and checkpoint.mjs interpolates the
+// full multi-line stdout of brain-governance-status into `evidence:`. Measured
+// before the fix: a two-finding verdict rendered and re-parsed yielded ONE
+// finding, silently dropping a blocker, with `'findings' in parsed === true`.
+//
+// (The renderer's newline handling is the root cause and is its own ticket —
+// no parser can read that block correctly. What this parser CAN do is refuse to
+// present a partial read as a complete one.)
+
+test('#478-2/F1: a partially-readable list is uncomputable (null) — never a confident truncated prefix', () => {
+  const parsed = parseVerdict({
+    body: blockWith(['findings:', '  - id: "F-1"', '    severity: "blocker"', 'line two of a multi-line scalar']),
+  });
+  assert.equal('findings' in parsed, false,
+    'one entry parsed and then the scan hit unreadable content — reporting [F-1] would hide whatever ' +
+    'followed it behind a positive, complete-looking list');
+});
+
+test('#478-2/F1: the same, through the REAL renderer with multi-line evidence — no finding may vanish silently', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [
+      { id: 'multi', severity: 'editorial', evidence: 'line one\nline two' },
+      { id: 'tier2-touch', severity: 'blocker', evidence: 'brain/core/x.md' },
+    ],
+  });
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  const got = parsed.findings ?? null;
+  assert.notEqual(got?.length, 1,
+    'the round trip must not yield a 1-entry list from a 2-finding verdict: that drops a blocker ' +
+    'AND asserts the remainder is the whole set');
+  assert.equal('findings' in parsed, false,
+    'the honest answer for a block this parser cannot fully read is "uncomputable", not a prefix');
+});
+
+test('#478-2/F1: a FULLY readable multi-entry list is unaffected — the control', () => {
+  const parsed = parseVerdict({
+    body: blockWith(['findings:', '  - id: "F-1"', '  - id: "F-2"', 'conditions: []']),
+  });
+  assert.deepEqual(parsed.findings, [{ id: 'F-1' }, { id: 'F-2' }]);
+});

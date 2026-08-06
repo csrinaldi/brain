@@ -38,14 +38,25 @@ parser — three states through one sentinel — and it is the **third appearanc
 
 ## Decision
 
-Stop overloading `null`. The block-form branch only runs when the key's line was
-actually found (`start !== -1`), so at that point an empty list is a real answer:
+Stop overloading `null` — but `null` keeps TWO legitimate meanings, and the distinction
+is what two cold-review rounds were spent getting right:
 
 ```js
-return entries;
+while (i < lines.length && lines[i].trim() === '') i++;
+const endedCleanly = i >= lines.length || TOP_LEVEL_KEY_RE.test(lines[i]);
+if (!endedCleanly) return null;   // there was a body here I could not read
+return entries;                    // [] when genuinely empty, entries otherwise
 ```
 
-`null` keeps exactly one meaning: the key was not there.
+`null` = **absent or uncomputable**; `[]` = **genuinely empty** — the rule stated verbatim
+in `brain/core/anti-patterns/evidence-reader-empty-on-failure.md`.
+
+> **Superseded draft, kept deliberately.** This section first read *"the block-form branch
+> only runs when the key's line was found, so an empty list is a real answer: `return
+> entries`."* That control-flow observation is true and the conclusion drawn from it is
+> wrong — the entry loop also breaks on the first line it cannot read, so `entries` is
+> empty for two very different reasons. Shipping it turned foreign verdicts carrying real
+> findings into a confident `findings: []`. See `design.md` D0.
 
 ## Scope — the parser half only
 

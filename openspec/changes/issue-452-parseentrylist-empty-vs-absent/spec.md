@@ -22,8 +22,14 @@ content in the wrong one.
 |---|---|
 | the key's line is not present | `null` |
 | key present; only blank lines until the next top-level key or the end of the block | `[]` |
-| key present; a body these entry regexes cannot read | **`null`** — uncomputable |
-| key present with readable entries | the entries |
+| key present; the scan stops on content these regexes cannot read — **at any entry count** | **`null`** — uncomputable |
+| key present; every line read, scan ended cleanly | the entries |
+
+Row 3's "**at any entry count**" is the correction from the SECOND cold review of PR #478.
+A first version applied the unreadable test only when zero entries had parsed, so a list
+that read one entry and then hit unreadable content returned the truncated prefix as a
+confident, complete list — the same inversion one branch further up, and this table
+asserted the opposite of what the code did.
 
 Row 3 is the one that matters most and is easiest to get wrong. `ENTRY_OPEN_RE` /
 `ENTRY_CONT_RE` are anchored to the exact indentation of ONE emitter, so a foreign
@@ -45,11 +51,25 @@ A **trailing space on the key line** routes the key into the INLINE branch (`sca
 `^key:[ \t]*(.+)$` backtracks, `(.+)` captures the space, `parseJsonScalar('')` throws),
 so it returns `null` **even with entries under it**.
 
-Pre-existing on `main` and NOT fixed here — the candidate repair (`(.+)` → `(\S.*)`)
-changes `scalar`, which every field in the block reads. It is pinned by a test so this
-spec cannot claim a completeness the parser does not have; the cold review's finding 2
-was precisely that an earlier draft promoted an incomplete table to a normative
-requirement.
+Pre-existing on `main` and NOT fixed here. **Measured**, rather than asserted: applying
+the candidate repair (`(.+)` → `(\S.*)` in `scalar`) and running the full suite fails
+exactly one test — the pin below that documents the defect.
+
+```
+$ npm test          # with scalar's (.+) -> (\S.*)
+not ok 1731 - #452/#478-F2: a trailing space on the key line routes to the INLINE branch
+# tests 2496  # pass 2494  # fail 1
+```
+
+So the deferral is a **scope** decision, not a risk assessment: `scalar` is read by every
+field in the block and its contract (what a whitespace-only value returns) belongs with
+the sentinel policy being settled in #477, not bolted onto this change. An earlier draft
+justified the deferral by implying breakage the tree does not show — flagged by the
+second cold review, and the measurement above replaces the implication.
+
+The behaviour is pinned by a test so this spec cannot claim a completeness the parser does
+not have; the first cold review's finding 2 was precisely that a draft promoted an
+incomplete table to a normative requirement.
 
 ## REQ-452-2 — `parseVerdict` propagates the distinction
 

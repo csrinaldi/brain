@@ -14,8 +14,10 @@ topic_key: sdd/issue-452-parseentrylist-empty-vs-absent/tasks
 - [x] T2 — RED first (design D5 steps 1-2): the three-state case at `parseEntryList`'s
       level and the `'follow_ups' in result` case at `parseVerdict`'s, both written
       against the SHIPPED code and observed failing on the present-but-empty state only.
-- [x] T3 — the fix: `return entries` — `null` recovers its single meaning. JSDoc updated
-      to name all three states (it currently documents two).
+- [x] T3 — the fix. **As shipped** (after two cold-review rounds, see T11/T13): `null`
+      for absent OR unreadable, `[]` only for a genuinely empty body, entries otherwise.
+      The `return entries` one-liner this task originally described was the draft that
+      both rounds rejected — kept in `proposal.md`/`design.md` D0/D1 as the record.
 - [x] T4 — REQ-452-3: pin the inline `findings: []` path unchanged, so the repair to the
       broken encoding cannot silently move the working one.
 - [x] T5 — REQ-452-4: the `renderVerdict` → `parseVerdict` round trip for the empty list.
@@ -60,3 +62,35 @@ topic_key: sdd/issue-452-parseentrylist-empty-vs-absent/tasks
       label). Out of scope here; added to #477 so the policy decision covers it.
 - [x] T12 — post-review verification: suite **2492 pass / 1 skip / 0 fail** ·
       `repo:check` ✓ · `brain:nav` ✓ · REQ-409-6 pins still green (9/9 e2e).
+- [x] T13 — **second cold review round (PR #478, verdict REVISE)** — a fresh zero-context
+      agent, given the branch's own commit history as evidence but none of round 1's
+      findings. All findings reproduced before acting.
+      **F1 (blocker, on the CLAIM)** the unreadable test ran only in the
+      `entries.length === 0` branch, so a list that read one entry and then hit unreadable
+      content returned the truncated prefix as a confident, complete list — while the
+      shipped state table asserted "body UNREADABLE → null" without qualification.
+      Reachable from brain's OWN renderer, not just foreign input: measured through the
+      real chain, a two-finding verdict with multi-line `evidence:` re-parsed to ONE
+      finding, **silently dropping a blocker**, with `'findings' in result === true`.
+      Fixed by applying the clean-end test at any entry count. The reviewer had already
+      shown no test noticed the difference — I added three.
+      **F2 (correction)** `proposal.md`'s `## Decision` still shipped the REVERTED
+      one-liner and its refuted justification; `tasks.md` T3 the same. The SDD folder is
+      the durable record — a future reader would have re-derived the bug round 1 caught.
+      Both corrected, with the superseded draft kept explicitly labelled.
+      **F3 (correction)** every measurement in the PR body was a commit stale, one by
+      2.6× (diff 24 → 63 counted lines; suite +7 → +11). Re-measured and the body rewritten.
+      **F4 (editorial)** my justification for deferring the trailing-space repair implied
+      breakage the tree does not show. Measured: the candidate repair fails exactly ONE
+      test in 2496 — the pin documenting the defect. The scope call stands; the reasoning
+      was replaced with the measurement.
+      **F5 (editorial)** `sequencing`'s conflation is the only member of this class with a
+      destructive live consumer (`board.mjs:61` strips every `seq:*` label). Severity
+      raised on #477.
+- [x] T14 — **#481 filed** (`priority:high`): `renderVerdict` quotes but does not ESCAPE
+      newlines, so brain's own multi-line `evidence:` emits a block no parser can read.
+      This is the ROOT CAUSE of F1's measurement — the reader fix makes the loss honest
+      (`null` instead of a false prefix); it cannot make it not a loss. The blocker is
+      still missing from the posted artifact's machine-readable form.
+- [x] T15 — post-review verification: suite **2496 pass / 1 skip / 0 fail** ·
+      `repo:check` ✓ · `brain:nav` ✓ · REQ-409-6 pins green.
