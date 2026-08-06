@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync,
+  mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, chmodSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -747,6 +747,136 @@ test('D2 fail-closed — an uncomputable git range exits 2 with the message on s
   assert.equal(r.status, 2, `expected exit 2 (uncomputable), got ${r.status}\n${r.stdout}\n${r.stderr}`);
   assert.ok(r.stdout.includes('uncomputable'),
     `the uncomputable message must be on stdout (captured), not stderr:\n${r.stdout}\n${r.stderr}`);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #474 (REQ-TS-1/-2) — THE c724942 SCENARIO, end-to-end through the real CLI.
+//
+// This is the run that was observed live on 2026-08-06 (run 31094912872):
+// `brain-audit` over a window containing a merge whose PR body carries the
+// closing keyword, evaluated with an unauthenticated `gh`. Before this change
+// it reported `[FAIL] … issueLink: no issue reference found` — a confident
+// GOVERNANCE VERDICT rendered from the auto-generated merge commit body,
+// because the evaluator could not read the PR it was judging. Exit 1 with zero
+// [FAIL-SHA] — which is #466's unhandled deadlock.
+//
+// The fixture drives the SHIPPED CLI with a `gh` stub that fails exactly the
+// way an unauthenticated one does (non-zero exit), so `prView` returns its
+// REQ-CIC-2 null/null sentinel through the real provider.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Put a `gh` on PATH that fails like an unauthenticated one. */
+function writeFailingGhStub(binDir) {
+  mkdirSync(binDir, { recursive: true });
+  const gh = join(binDir, 'gh');
+  writeFileSync(gh, '#!/usr/bin/env bash\necho "gh: not authenticated" >&2\nexit 1\n');
+  chmodSync(gh, 0o755);
+}
+
+/** Build the c724942 shape: a PR-shaped merge whose commit body has no closing keyword. */
+function c724942Fixture(dir) {
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+    'brain.config.json': JSON.stringify({
+      vcs: { provider: 'github' },
+      project: { slug: 'csrinaldi/brain' },
+    }),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  git('checkout', '-b', 'feature/x');
+  commit(git, dir, { 'src/x.mjs': 'export const x = 1;\n' }, 'fix: a change');
+  git('checkout', 'main');
+  // The auto-generated merge subject/body GitHub produces. `Closes #443` lives
+  // in the PR description — which is exactly what an unauthenticated run cannot read.
+  git('merge', '--no-ff', 'feature/x', '-m', 'Merge pull request #471 from csrinaldi/fix/issue-443');
+  return { git, base };
+}
+
+function runAuditUnauthenticated(dir, range) {
+  const binDir = join(dir, '.stubbin');
+  writeFailingGhStub(binDir);
+  return spawnSync('node', [AUDIT_SCRIPT, range], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH}`,
+      GH_TOKEN: '',
+      GITHUB_TOKEN: '',
+      GH_CONFIG_DIR: join(dir, 'nonexistent-gh-config'),
+    },
+  });
+}
+
+test('REQ-TS-2 (#474/c724942): an unreadable PR is UNCOMPUTABLE (exit 2), never an issueLink verdict', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-uncomputable-pr-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { base } = c724942Fixture(dir);
+
+  const r = runAuditUnauthenticated(dir, `${base}..HEAD`);
+
+  // The whole point: no governance verdict is rendered from evidence that could
+  // not be read. This assertion is what fails on the pre-fix code (it reported
+  // `[FAIL] … issueLink: no issue reference found` and exit 1).
+  assert.ok(!/\[FAIL\].*issueLink/.test(r.stdout),
+    `an unreadable PR must NEVER produce an issueLink verdict:\n${r.stdout}`);
+  assert.ok(r.stdout.includes('[UNCOMPUTABLE]'),
+    `expected an [UNCOMPUTABLE] line naming the merge:\n${r.stdout}`);
+  assert.equal(r.status, 2,
+    `uncomputable DOMINATES — expected exit 2, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+});
+
+test('REQ-TS-2 (#474): ONE unreadable PR poisons a window whose other merges PASS', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-uncomputable-mixed-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { git, base } = c724942Fixture(dir);
+
+  // A second merge that carries its issue link in the COMMIT body and references
+  // no PR — it is fully evaluable even unauthenticated, and it passes.
+  git('checkout', '-b', 'feature/y');
+  commit(git, dir, { 'src/y.mjs': 'export const y = 1;\n' }, 'fix: y Closes #2');
+  git('checkout', 'main');
+  git('merge', '--no-ff', 'feature/y', '-m', 'Merge branch feature/y Closes #2');
+
+  const r = runAuditUnauthenticated(dir, `${base}..HEAD`);
+
+  assert.ok(r.stdout.includes('[PASS]'),
+    `the evaluable merge must still be evaluated and pass:\n${r.stdout}`);
+  assert.ok(r.stdout.includes('[UNCOMPUTABLE]'), `expected the uncomputable line:\n${r.stdout}`);
+  // exit-codes.mjs: "an uncomputable check must never read as clean or as a mere
+  // violation". A window that advanced the cursor here would move the
+  // never-evaluated merge permanently behind it (ADR-0015 rung 3).
+  assert.equal(r.status, 2,
+    `one uncomputable merge must dominate a window of passes, got ${r.status}\n${r.stdout}`);
+});
+
+test('REQ-TS-3 (#474): a merge with NO PR reference stays evaluable unauthenticated', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-nopr-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+    'brain.config.json': JSON.stringify({
+      vcs: { provider: 'github' }, project: { slug: 'csrinaldi/brain' },
+    }),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  git('checkout', '-b', 'feature/z');
+  commit(git, dir, { 'src/z.mjs': 'export const z = 1;\n' }, 'fix: z Closes #7');
+  git('checkout', 'main');
+  git('merge', '--no-ff', 'feature/z', '-m', 'Merge branch feature/z Closes #7');
+
+  const r = runAuditUnauthenticated(dir, `${base}..HEAD`);
+
+  // There is no PR to fetch, so there is no missing evidence — the commit body
+  // IS the evidence. Turning this into a halt would break every squash/direct merge.
+  assert.ok(!r.stdout.includes('[UNCOMPUTABLE]'),
+    `a merge referencing no PR must not be uncomputable:\n${r.stdout}`);
+  assert.equal(r.status, 0, `expected a clean exit 0, got ${r.status}\n${r.stdout}\n${r.stderr}`);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

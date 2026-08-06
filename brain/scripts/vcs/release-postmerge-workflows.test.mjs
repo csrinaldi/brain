@@ -505,3 +505,126 @@ test('D2 isolation: an isolated step running git config leaves the real repo/use
   const isoName = spawnSync('git', ['config', 'user.name'], { cwd: r.repo, encoding: 'utf8', env: isolatedEnv(r.homeDir) }).stdout.trim();
   assert.equal(isoName, 'github-actions[bot]', 'the isolated repo must have received the bot identity');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #466 (REQ-TS-4/-5) — NO TERMINAL STATE MAY BE BOTH RED AND SILENT.
+//
+// These execute the SHIPPED steps out of the real YAML, per this repo's
+// standing bar (#464's harness pattern): reading the workflow is not evidence.
+//
+// The state under test is T5 — brain-audit exits 1 with ZERO [FAIL-SHA] lines,
+// which §15.5 documents as LEGITIMATE (every surviving violation is in a
+// non-auto-revertible class, or a tree-keyed failure was suppressed because its
+// revert would resurrect a payload). Before this change the revert step called
+// that "incoherent" and exited 2, while the alarm step — gated on the AUDIT
+// step's output of '1' — never ran. Red, nothing reverted, no alarm, cursor
+// frozen. Observed live on 2026-08-06, run 31094912872 over c724942.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** An exit-1 audit stdout with real [FAIL] lines and NO [FAIL-SHA] — the T5 shape. */
+const T5_AUDIT_STDOUT = [
+  '[FAIL] c724942 Merge pull request #471 from csrinaldi/fix — issueLink: no issue reference found',
+  '[FAIL] d70093a Merge pull request #468 from csrinaldi/adr — adrPresence: ADR added but brain/HOME.md not updated',
+].join('\n');
+
+/** Give the revert step a repo with a commit, so `git rev-parse HEAD` resolves. */
+const oneCommit = (g, repo) => { writeFileSync(join(repo, 'f'), 'x\n'); g('add', '.'); g('commit', '-m', 'c0'); };
+
+test('#466 REQ-TS-4: exit 1 with ZERO offenders FILES AN ALARM (never red-and-silent)', () => {
+  const r = runStepIsolated('revert', {
+    env: { AUDIT_STDOUT: T5_AUDIT_STDOUT },
+    repoSetup: oneCommit,
+  });
+
+  // The invariant: this state reaches an alarm. Before the fix the step printed
+  // "incoherent, failing closed" and exited 2 with no gh call whatsoever.
+  assert.match(r.ghLog(), /issue (create|comment)/,
+    `a failed-but-unrevertible audit MUST file an alarm — gh log was:\n${r.ghLog()}\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.ghLog(), /governance:audit-unrevertible/,
+    `the alarm must carry its own honest label, not 'uncomputable':\n${r.ghLog()}`);
+  assert.notEqual(r.status, 0, 'the job must still fail — this is a halt, not an accept');
+});
+
+test('#466 REQ-TS-4: the step no longer calls a documented §15.5 state "incoherent"', () => {
+  const r = runStepIsolated('revert', {
+    env: { AUDIT_STDOUT: T5_AUDIT_STDOUT },
+    repoSetup: oneCommit,
+  });
+  assert.doesNotMatch(`${r.stdout}${r.stderr}`, /incoherent/,
+    'brain-audit.mjs\'s own contract says a [FAIL-SHA] count of 0 on exit 1 is LEGITIMATE (§15.5)');
+});
+
+test('#466 REQ-TS-4: the cursor is NOT advanced by the unrevertible halt', () => {
+  const r = runStepIsolated('revert', {
+    env: { AUDIT_STDOUT: T5_AUDIT_STDOUT },
+    repoSetup: oneCommit,
+  });
+  // Auto-advancing here would perform `cursor.mjs accept` — a gate the design
+  // made a human keystroke WITH a written reason (REQ-D2-10a) — with neither.
+  assert.doesNotMatch(r.stdout, /cursor advanced/, 'an unrevertible failure must never advance the cursor');
+  assert.match(r.stdout, /cursor stays pinned/i, 'the halt must say the cursor is pinned');
+});
+
+// ── The BACKSTOP (REQ-TS-5) — the load-bearing half. #466 was an alarm gated on
+// an ENUMERATION of exit codes, and a state inside code 1 was missed. A branch
+// for that one state leaves the next unenumerated state just as silent, so the
+// invariant is asserted over the JOB OUTCOME instead. ────────────────────────
+
+function runTerminal(env, ghOpts = {}) {
+  return runStepIsolated('terminal', { env, ghOpts, repoSetup: oneCommit });
+}
+
+test('REQ-TS-5 backstop: a RED job with no alarm recorded files the backstop alarm', () => {
+  const r = runTerminal({ JOB_STATUS: 'failure', AUDIT_CODE: '1' });
+
+  assert.match(r.ghLog(), /governance:postmerge-unreported/,
+    `a red job that filed no alarm must be caught by the backstop:\n${r.ghLog()}\n${r.stdout}\n${r.stderr}`);
+  assert.notEqual(r.status, 0, 'the backstop must keep the job red');
+});
+
+test('REQ-TS-5 backstop: a red job with an UNMAPPED audit code (killed audit) is also caught', () => {
+  // The audit process was killed and wrote no output at all — `code` is empty.
+  const r = runTerminal({ JOB_STATUS: 'failure', AUDIT_CODE: '' });
+
+  assert.match(r.ghLog(), /governance:postmerge-unreported/,
+    `an empty audit code is a terminal state too, and must not be silent:\n${r.ghLog()}`);
+  assert.notEqual(r.status, 0);
+});
+
+test('REQ-TS-5 backstop: a red job that ALREADY alarmed does not double-file', () => {
+  const r = runTerminal({
+    JOB_STATUS: 'failure', AUDIT_CODE: '1', ALARM_REVERT: 'governance:audit-unrevertible',
+  });
+
+  assert.doesNotMatch(r.ghLog(), /postmerge-unreported/,
+    `the backstop must not duplicate an alarm a step already filed:\n${r.ghLog()}`);
+  assert.notEqual(r.status, 0, 'the job stays red either way');
+});
+
+test('REQ-TS-5 backstop: a GREEN job files nothing', () => {
+  const r = runTerminal({ JOB_STATUS: 'success', AUDIT_CODE: '0' });
+
+  assert.equal(r.ghLog(), '', `a clean run must file no alarm at all:\n${r.ghLog()}`);
+  assert.equal(r.status, 0, `a green job must stay green:\n${r.stdout}\n${r.stderr}`);
+});
+
+// ── The invariant itself, as a PROPERTY over every terminal code rather than a
+// per-code fixture. This is the assertion #466's acceptance asks for. ────────
+test('REQ-TS-5 PROPERTY: for every terminal audit code, red ⟹ an alarm exists', () => {
+  const unreported = [];
+  for (const code of ['0', '1', '2', '3', '']) {
+    for (const jobStatus of ['success', 'failure']) {
+      for (const prior of ['', 'governance:audit-uncomputable']) {
+        const r = runTerminal({ JOB_STATUS: jobStatus, AUDIT_CODE: code, ALARM_WINDOW: prior });
+        const mapped = ['0', '1', '2'].includes(code);
+        const red = jobStatus === 'failure' || !mapped;
+        const alarmed = prior !== '' || /issue (create|comment)/.test(r.ghLog());
+        if (red && !alarmed) unreported.push(`code='${code}' job='${jobStatus}' prior='${prior}'`);
+        // And a red terminal state must always keep the job red.
+        if (red) assert.notEqual(r.status, 0, `red state left the job green: code='${code}' job='${jobStatus}'`);
+      }
+    }
+  }
+  assert.deepEqual(unreported, [],
+    `these terminal states were RED AND SILENT — the #466 signature:\n${unreported.join('\n')}`);
+});

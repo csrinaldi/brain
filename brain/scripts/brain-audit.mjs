@@ -26,9 +26,23 @@
 //   [FAIL] <sha7> <subject> — <check>: <reason>; ...
 //   [FAIL-SHA] <full-sha>            (auto-revert signal — tree-keyed classes ONLY)
 //   [SKIP] <sha7> <subject> — resolved by revert | reverts offender (net-absent)
+//   [UNCOMPUTABLE] <sha7> <subject> — PR metadata unreachable (REQ-TS-1, #474)
 //
 // Exit (fail-closed, REQ-D2-6): 0 all pass/legitimately skipped · 1 ≥1 [FAIL]
 // (any class) · 2 uncomputable-infra (never a silent PASS).
+//
+// UNCOMPUTABLE DOMINATES (REQ-TS-2, issue #474). A merge whose PR-metadata
+// fetch FAILED is not evaluated at all — evaluating it is what manufactures a
+// false verdict — and ≥1 such merge drives the whole window to exit 2,
+// regardless of the other merges' verdicts. This is exit-codes.mjs's own rule
+// ("an uncomputable check must never read as clean or as a mere violation")
+// applied at window scope: advancing the cursor past a merge that was never
+// evaluated would make it permanently un-re-auditable (ADR-0015 rung 3). The
+// halt self-heals — the postmerge workflow retries on every push and daily.
+//
+// NOT uncomputable, deliberately: a subject with no PR reference (nothing to
+// fetch; the commit body IS the evidence) and an unconfigured VCS adapter (a
+// configuration, uniform and therefore visible — surfaced as one [WARN]).
 
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -190,6 +204,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // If the adapter is unavailable or misconfigured, audit runs without the
     // size:exception bypass — never crash on a missing VCS config.
     const vcs = await resolveVcs(config);
+    // REQ-TS-3 (#474): an unconfigured adapter is a deliberate CONFIGURATION,
+    // not an outage — it degrades issueLink to commit-body evidence uniformly
+    // across every merge, so it is visible rather than selective, and it must
+    // not fail the window closed (that would break every consumer repo running
+    // brain:audit without a VCS adapter). But it must not be SILENT either:
+    // one [WARN] for the run, never one per merge.
+    if (!vcs) {
+      console.log('[WARN] no VCS adapter configured — issueLink falls back to commit-body evidence '
+        + 'for every merge; PR descriptions are not read. This is a configuration state, not a fetch failure.');
+    }
 
     // Read the on-disk .memory/records/ ONCE (repo-level, not per-merge): the same
     // observations are passed to memoryPresence for every merge. Best-effort — a
@@ -222,6 +246,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     let failCount = 0;          // [FAIL] lines of ANY class — governs exit 1.
     let nominableTreeKeyedCount = 0; // tree-keyed survivors whose revert does NOT resurrect a payload (auto-revert-nominable, §15.5).
     let failShaCount = 0;       // [FAIL-SHA] lines actually emitted (deduped).
+    let uncomputableCount = 0;  // merges whose PR-metadata fetch FAILED (REQ-TS-1/-2) — dominates the exit code.
     const emittedSignatures = new Set(); // payload signatures already carried by a [FAIL-SHA].
 
     for (const { sha, subject } of merges) {
@@ -261,7 +286,26 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // evidence" correctly; re-fabricating an empty default here would
       // re-introduce the exact fail-open the seam removes, just on a
       // parallel path (prView fix-at-source disposition).
-      const { prLabels, prBody } = await fetchPrMeta(subject, vcs, config);
+      const { prNum, prLabels, prBody, prMetaError } = await fetchPrMeta(subject, vcs, config);
+
+      // ── Uncomputable merge (REQ-TS-1/-2, issue #474) ─────────────────────
+      // The PR fetch was ATTEMPTED and FAILED. Do NOT evaluate this merge:
+      // running the four checks over evidence the evaluator could not read is
+      // exactly what manufactures a false verdict — selectIssueLinkBody would
+      // fall back to the auto-generated merge commit body and issueLink would
+      // report a confident FAIL for a PR whose body it never saw (#467).
+      //
+      // This merge is counted, not skipped: `uncomputableCount` DOMINATES the
+      // exit code below, per governance/postmerge/exit-codes.mjs — "an
+      // uncomputable check must never read as clean or as a mere violation".
+      // Advancing the cursor past a merge that was never evaluated would make
+      // it permanently un-re-auditable (ADR-0015 rung 3), so the whole window
+      // fails closed rather than the merge being silently dropped.
+      if (prMetaError !== null) {
+        uncomputableCount += 1;
+        console.log(`[UNCOMPUTABLE] ${sha.slice(0, 7)} ${subject} — PR #${prNum} metadata unreachable: ${prMetaError}`);
+        continue;
+      }
 
       // Use the PR description for issueLink when available (it contains the
       // actual Closes/Part of #N reference).  Fall back to the raw commit body
@@ -318,6 +362,23 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
           failShaCount += 1;
         }
       }
+    }
+
+    // ── Uncomputable DOMINATES (REQ-TS-2, issue #474) ───────────────────────
+    // Decided HERE, deliberately OUTSIDE `crossCheckExit`: that function's
+    // contract is the NOMINABLE⟺[FAIL-SHA] emission-coherence invariant over a
+    // window that was fully evaluated, and folding a "could not evaluate" term
+    // into it would conflate an emission bug with an evidence outage — the two
+    // states this change exists to separate. `crossCheckExit`'s signature and
+    // semantics are unchanged (REQ-TS-6).
+    if (uncomputableCount > 0) {
+      console.log(`[FAIL] governance:audit-uncomputable — ${uncomputableCount} merge(s) could not be evaluated: `
+        + 'their PR metadata was unreachable, so no governance verdict was rendered for them. '
+        + 'NOT a violation — the evaluator could not read its evidence. '
+        + 'The cursor stays pinned; re-running once the API is reachable clears this '
+        + '(the postmerge workflow retries on every push and daily via cron). '
+        + 'If this is a local run, `gh auth login` is the usual fix.');
+      process.exit(2);
     }
 
     const exitCode = crossCheckExit(failCount, nominableTreeKeyedCount, failShaCount);

@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { resolveBaseline, makeGitIsAncestor, evaluateMerge } from './merge-walk.mjs';
+import { resolveBaseline, makeGitIsAncestor, evaluateMerge, fetchPrMeta } from './merge-walk.mjs';
 
 function makeRepo(dir) {
   const git = (...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
@@ -173,4 +173,86 @@ test('evaluateMerge: with no diffBudget/honorSizeException supplied, falls back 
   });
 
   assert.equal(rec.kind, 'fail', `expected the legacy 400-line default to still apply when no budget is passed: ${JSON.stringify(rec)}`);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #474 (REQ-TS-1/-3) — fetchPrMeta distinguishes "could not fetch" from
+// "genuinely empty". The bare `catch {}` this replaces KNEW the fetch had
+// failed and discarded it, so selectIssueLinkBody fell back to the
+// auto-generated merge commit body and issueLink rendered a CONFIDENT FAIL.
+// These pin the three states apart at the seam.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('REQ-TS-1: a FAILED prView fetch surfaces prMetaError (never swallowed)', async () => {
+  const vcs = { prView: async () => { throw new Error('HTTP 502: Bad Gateway'); } };
+  const r = await fetchPrMeta('Merge pull request #471 from x/y', vcs, { project: { slug: 'o/r' } });
+
+  assert.equal(r.prMetaError, 'HTTP 502: Bad Gateway',
+    'the failure reason must survive as data — discarding it is the #474 defect');
+  assert.equal(r.prLabels, null, 'a failed fetch must not fabricate labels');
+  assert.equal(r.prBody, null, 'a failed fetch must not fabricate a body');
+  assert.equal(r.prNum, 471);
+});
+
+test('REQ-TS-1: a SUCCESSFUL fetch of a genuinely empty PR sets no prMetaError', async () => {
+  // The distinction that matters: labels [] and body '' are REAL evidence of
+  // emptiness. They must never be confused with an unreachable API.
+  const vcs = { prView: async () => ({ labels: [], body: '' }) };
+  const r = await fetchPrMeta('Merge pull request #12 from x/y', vcs, {});
+
+  assert.equal(r.prMetaError, null, 'a successful fetch is never uncomputable');
+  assert.deepEqual(r.prLabels, []);
+  assert.equal(r.prBody, '');
+});
+
+test('REQ-TS-3: no PR number in the subject is NOT uncomputable (nothing to fetch)', async () => {
+  const vcs = { prView: async () => { throw new Error('must not be called'); } };
+  const r = await fetchPrMeta('fix: a squash merge with no PR reference', vcs, {});
+
+  assert.equal(r.prNum, null);
+  assert.equal(r.prMetaError, null,
+    'the ABSENCE of a PR is real evidence, not missing evidence — audit the commit body');
+});
+
+test('REQ-TS-3: an unconfigured VCS adapter is NOT uncomputable (a configuration)', async () => {
+  const r = await fetchPrMeta('Merge pull request #9 from x/y', null, {});
+
+  assert.equal(r.prMetaError, null,
+    'an unconfigured adapter degrades uniformly and is surfaced as a [WARN], never a window halt');
+  assert.equal(r.prLabels, null);
+});
+
+// This is the one that matters: it is the shape the REAL provider returns on an
+// unauthenticated `gh`, and therefore the path the #467 outage over c724942
+// actually took. `prView` never throws (REQ-CIC-2) — reading #474's issue text
+// alone, which names only the bare `catch {}`, would have shipped a fix that
+// never fired.
+test('REQ-TS-1: prView\'s null/null REQ-CIC-2 sentinel is uncomputable (the real #467 path)', async () => {
+  const vcs = {
+    prView: async ({ number }) => ({
+      number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null,
+    }),
+  };
+  const r = await fetchPrMeta('Merge pull request #471 from x/y', vcs, {});
+
+  assert.ok(r.prMetaError !== null,
+    'null labels AND null body is prView\'s uncomputable sentinel — consumers MUST fail closed on it (REQ-CIC-2)');
+  assert.ok(/#471/.test(r.prMetaError), `the message must name the PR: ${r.prMetaError}`);
+});
+
+test('REQ-TS-1: a PR with real labels but a null body is NOT the sentinel', async () => {
+  // Only null/null is unambiguous. A partial null must not poison the window.
+  const vcs = { prView: async ({ number }) => ({ number, labels: ['type:bug'], body: null }) };
+  const r = await fetchPrMeta('Merge pull request #5 from x/y', vcs, {});
+
+  assert.equal(r.prMetaError, null, 'a successful fetch carrying evidence is never uncomputable');
+  assert.deepEqual(r.prLabels, ['type:bug']);
+});
+
+test('REQ-TS-1: fetchPrMeta still never throws, whatever prView does', async () => {
+  const vcs = { prView: async () => { throw 'a bare string, not an Error'; } };
+  const r = await fetchPrMeta('Merge pull request #3 from x/y', vcs, {});
+
+  assert.equal(typeof r.prMetaError, 'string');
+  assert.ok(r.prMetaError.includes('bare string'), `expected the thrown value stringified, got ${r.prMetaError}`);
 });
