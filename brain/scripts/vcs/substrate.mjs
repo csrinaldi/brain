@@ -69,6 +69,15 @@ function evalRung4() {
 // the workflow's cron cadence changes without this constant being updated.
 export const POSTMERGE_STALE_MS = 48 * 60 * 60 * 1000;
 
+// `observedAt` is the local wall clock, `completedAt` is GitHub's — a small
+// amount of skew is normal (VM resumed from suspend, container without NTP,
+// WSL clock drift). Anything beyond this tolerance means the age computation
+// itself cannot be trusted: a future-dated `completedAt` or a local clock
+// running behind yields a negative age that would otherwise look "fresher
+// than fresh" and satisfy the staleness check below. Kept small and named
+// (minutes, not hours) — see design.md decision table for the reasoning.
+export const POSTMERGE_CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
+
 /**
  * Bare-boolean-or-object evidence normalizer for rung 3 — mirrors
  * `normalizeReleaseGateEvidence` but keeps THREE distinguishable legacy inputs
@@ -88,11 +97,11 @@ function normalizePostMergeEvidence(raw) {
 
 /**
  * evalRung3 — pure, offline, total decision table (design "Decision table",
- * rows L1/L2/L3/E1..E8, evaluated top to bottom, first match wins). Every
+ * rows L1/L2/L3/E1..E9, evaluated top to bottom, first match wins). Every
  * branch returns the full six-field shape (REQ-R3-6). Never calls `Date.now()`
- * — staleness (E7 vs E8) compares `evidence.observedAt` (injected via the
- * probe's evidence object) against `lastRun.completedAt`, never read ambiently
- * (module-doc pure-orchestrator rule).
+ * — staleness/skew (E7/E8 vs E9) compares `evidence.observedAt` (injected via
+ * the probe's evidence object) against `lastRun.completedAt`, never read
+ * ambiently (module-doc pure-orchestrator rule).
  */
 async function evalRung3({ config, env, probes }) {
   const raw = await safeProbe(probes.postMergeCi, { config, env });
@@ -133,7 +142,11 @@ async function evalRung3({ config, env, probes }) {
   }
 
   // E1 — workflow file absent (probe short-circuited before any network read).
-  if (ledger.workflowPresent === false) {
+  // Requires an EXPLICIT truthy `workflowPresent` to proceed past this row —
+  // evidence that omits the field entirely (malformed/partial probe output)
+  // must never be silently treated as "present" and fall through toward the
+  // read-state checks below.
+  if (ledger.workflowPresent !== true) {
     return {
       available: true, // CI is always something the project can wire — never a tier block
       active: false,
@@ -202,13 +215,17 @@ async function evalRung3({ config, env, probes }) {
   const observedAt = ledger.observedAt;
 
   // E5 — malformed lastRun: missing conclusion, unparseable completedAt, or a
-  // missing/null observedAt (staleness would be uncomputable). Never silently
-  // treated as a fresh success.
+  // non-finite observedAt (staleness would be uncomputable). Never silently
+  // treated as a fresh success. `Number.isFinite` — not `typeof === 'number'`
+  // — because `typeof NaN === 'number'` is true; an unguarded typeof check
+  // lets NaN (and +/-Infinity) sail past this row, then produce a NaN `age`
+  // below whose `age > POSTMERGE_STALE_MS` comparison is always false,
+  // falling through to a false "armed" verdict (issue #468 blocker).
   if (
     typeof lastRun.conclusion !== 'string' ||
     lastRun.conclusion === '' ||
     Number.isNaN(completedAtMs) ||
-    typeof observedAt !== 'number'
+    !Number.isFinite(observedAt)
   ) {
     return {
       available: false,
@@ -232,8 +249,29 @@ async function evalRung3({ config, env, probes }) {
     };
   }
 
-  // E7 — succeeded, but the run is older than the staleness window.
   const age = observedAt - completedAtMs;
+
+  // E7 — clock skew: `observedAt` (local clock) precedes `completedAt`
+  // (GitHub's clock) by more than a small named tolerance — a future-dated
+  // `completedAt`, or a local clock running behind (suspended VM, container
+  // without NTP, WSL drift). The age computation cannot be trusted here, so
+  // this is uncomputable, NOT "fresher than fresh" — without this guard, a
+  // negative age fails E8's `age > POSTMERGE_STALE_MS` check and falls
+  // through to arm at E9, on a run that is not provably recent at all.
+  // `brain:governance-status` runs on a local developer machine, so this is
+  // the most likely live path to skew.
+  if (age < -POSTMERGE_CLOCK_SKEW_TOLERANCE_MS) {
+    return {
+      available: false,
+      active: false,
+      verifiable: true,
+      mechanism: 'postmerge-run-ledger-uncomputable',
+      reason: `post-merge CI run-ledger age is negative beyond clock-skew tolerance (observedAt precedes completedAt) — cannot compute staleness: ${lastRun.htmlUrl ?? 'no run URL available'}`,
+      remedy: 'verify the local clock is synced (NTP) and retry',
+    };
+  }
+
+  // E8 — succeeded, but the run is older than the staleness window.
   if (age > POSTMERGE_STALE_MS) {
     return {
       available: true,
@@ -245,7 +283,7 @@ async function evalRung3({ config, env, probes }) {
     };
   }
 
-  // E8 — succeeded, within the staleness window: the only real-probe row that arms.
+  // E9 — succeeded, within the staleness window and within clock-skew tolerance: the only real-probe row that arms.
   return {
     available: true,
     active: true,
