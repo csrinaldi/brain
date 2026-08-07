@@ -428,8 +428,17 @@ export async function prCommits({ project, number } = {}) {
  * is HARDCODED to `'COMMENT'` — no parameter, flag, or branch selects a
  * different review event (lock 2, REQ-266-3). Never throws.
  *
- * @param {{ project: string, number: number, body: string }} opts
- * @returns {Promise<{ url: string } | { url: null, error: string }>}
+ * `comments` (issue #405) is an optional array of `{ path, line, body }` inline
+ * anchors riding the SAME `/reviews` payload as `body`, so the review stays
+ * atomic. Absent and empty are the SAME request — no inline is attempted. A
+ * refused anchored payload is retried ONCE bare, and `inlineDropped` then counts
+ * what was lost; it is ABSENT when nothing was, never 0. Widening this signature
+ * does not widen `event`: there is no parameter for it, and a contract test
+ * asserts the payload still carries `COMMENT` when a caller passes a hostile
+ * `event` argument.
+ *
+ * @param {{ project: string, number: number, body: string, comments?: Array<{path: string, line: number, body: string}> }} opts
+ * @returns {Promise<{ url: string } | { url: string, inlineDropped: number } | { url: null, error: string }>}
  */
 export async function prReviewComment({ project, number, body, comments } = {}) {
   const args = ['api', '-X', 'POST', `repos/${project}/pulls/${number}/reviews`, '--input', '-'];

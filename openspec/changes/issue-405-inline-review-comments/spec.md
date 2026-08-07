@@ -146,14 +146,34 @@ finding into a real `main()` run. It is scheduled for deletion the day one does.
 This change ships an inline path with **no producer**: it is reachable from production
 only once an evaluator starts anchoring. That is the same shape as `validateSchemaV2`'s
 inertness (#483), and it must not be left for a reviewer to discover by reading the code.
-Whether to ship it as plumbing for #408, to widen the anchor so `tier2-frontier` — which
-already knows the file — becomes the first producer, or to file a follow-up, is a **scope
-ruling for the maintainer**, not an agent decision (#473).
+
+**RULED by the maintainer: the producer belongs to #408.** This change ships as plumbing.
+#408 already owns the evaluator work that makes findings say more than a mechanical check
+can (`pre-existing`/`base-only`/`inferential`), which is the same seam that would emit
+`file`/`line` — so the first anchor arrives there, not by widening this change.
+
+Two things follow, and they are the operational form of the ruling:
+
+- The CLI tripwire in `test/review-regulated/` is the DETECTOR for that moment. When #408
+  makes an evaluator anchor, that case goes red; it moves into #408 and becomes a real
+  behavioural test of the CLI→poster link. It is not deleted.
+- The source-level drift guard on `cli.mjs` retires at the same moment, for the same
+  reason: it exists only because no seam can put an anchored finding into a real `main()`
+  run today.
+
+Also ruled: the anchor stays `file` **and** `line`. Widening it to file-level anchors so
+`tier2-frontier` could produce one was considered and not taken — it would have made this
+change the producer by enlarging its own contract.
 
 ## Pending human acts — NOT agent decisions
 
-- **The ADR-0020 amendment** recording D1–D5. Amending an ADR is a three-step cascade
-  (ADR → `brain/HOME.md` → regenerate `AGENTS.md`).
+- **ADR-0020 Amendment 2**, correcting Amendment 1. Amendment 1 was signed and promoted
+  06/08/2026 (`697bbf3`) — this section claimed it was still pending for the whole
+  implementation, which was false about the tree. What is genuinely pending is the
+  CORRECTION: Amendment 1 asserted inline comments post "in the same provider call" with
+  "no second postable artifact", and the GitLab implementation falsified both (4 calls,
+  3 artifacts). Draft: `brain-drafts/adr-0020-amendment-2.md`. Amending an ADR is a
+  three-step cascade (ADR → `brain/HOME.md`, same commit → regenerate `AGENTS.md`).
 - ~~**D6**~~ — **RULED (b), 2026-08-06.** The validator stays untouched here; its
   inertness is **#483**. What replaces "validator coverage" as this change's schema
   evidence: REQ-405-3's round trip over the REAL renderer/parser, and REQ-405-4's

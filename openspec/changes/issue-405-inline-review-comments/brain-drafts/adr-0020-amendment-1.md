@@ -26,6 +26,13 @@ themselves. The milestone does not hold.
 
 The verb **count stays four**. No new verb, no new event, no second postable artifact.
 
+> ⚠️ **SUPERSEDED — do not promote this file.** It was signed and merged on 06/08/2026
+> (`697bbf3`) and the two sentences above were falsified by the GitLab implementation:
+> discussions are one-per-position, so N anchors are N+1 calls and 3 postable artifacts.
+> The correction is `adr-0020-amendment-2.md` in this folder. This file is kept, unedited
+> above this line, as the record of what was signed — rewriting a signed decision in place
+> would erase the fact that it was ever believed.
+
 ### Why widening rather than a fifth verb
 
 Measured, not preferred. GitHub's `POST repos/{project}/pulls/{number}/reviews` — the

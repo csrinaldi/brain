@@ -441,8 +441,15 @@ export async function commitStatus({ project, sha }) {
  * provider). The API response carries no `web_url`, so the display url is
  * derived from `apiBase` (stripping the trailing `/api/v4`). Never throws.
  *
- * @param {{ project: string, number: number, body: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
- * @returns {Promise<{ url: string } | { url: null, error: string }>}
+ * `comments` (issue #405) is an optional array of `{ path, line, body }` inline
+ * anchors. Absent and empty are the SAME request — no discussion is attempted.
+ * The summary note goes first and exactly ONE payload carries the verdict body;
+ * each anchor is then its own `discussions` POST, because GitLab's discussions
+ * are one-per-position. `inlineDropped` counts anchors that did not attach and is
+ * ABSENT when none were, never 0.
+ *
+ * @param {{ project: string, number: number, body: string, comments?: Array<{path: string, line: number, body: string}>, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ url: string } | { url: string, inlineDropped: number } | { url: null, error: string }>}
  */
 export async function prReviewComment({ project, number, body, comments, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const base = apiBase ?? 'https://gitlab.com/api/v4';
@@ -467,13 +474,19 @@ export async function prReviewComment({ project, number, body, comments, apiBase
   // VERDICTS, not posts: only this summary note carries a `brain-review/N`
   // block, and cold-boot.mjs filters out everything `parseVerdict` rejects.
   // Pinned by a test rather than left as an argument.
-  let note;
+  // The url derivation stays INSIDE the try (cold review of PR #490, C4). An
+  // earlier version of this widening moved it out, so a 2xx whose JSON body was
+  // `null` threw a TypeError on `note.id` where the pre-#405 verb returned
+  // `{ url: null, error }` — silently breaking the "Never throws" discipline
+  // that this row of vcs-contract.md, ADR-0020 and the poster's error handling
+  // all depend on.
+  let url;
   try {
-    note = await call(`projects/${encoded}/merge_requests/${number}/notes`, 'POST', { body });
+    const note = await call(`projects/${encoded}/merge_requests/${number}/notes`, 'POST', { body });
+    url = `${base.replace(/\/api\/v4\/?$/, '')}/${project}/-/merge_requests/${number}#note_${note.id}`;
   } catch (err) {
     return { url: null, error: err.message };
   }
-  const url = `${base.replace(/\/api\/v4\/?$/, '')}/${project}/-/merge_requests/${number}#note_${note.id}`;
   if (!inline) return { url };
 
   // ── the anchors, as discussions ───────────────────────────────────────────
@@ -498,9 +511,19 @@ export async function prReviewComment({ project, number, body, comments, apiBase
     try {
       await call(`projects/${encoded}/merge_requests/${number}/discussions`, 'POST', {
         body: c.body,
+        // GitLab's Discussions API requires BOTH paths on a text position, not
+        // just the one being annotated (cold review of PR #490, B2 — the first
+        // version sent `new_path` alone). For an added or modified line the two
+        // are the same file; a rename would need the pre-rename path, which this
+        // anchor shape has no way to know and which `deriveInlineComments` never
+        // produces. The three shas come from the MR's own `diff_refs` — that read
+        // is the whole reason for the extra GET above, so the payload is pinned
+        // key-by-key rather than by a substring scan that `new_path` alone
+        // satisfied.
         position: {
           position_type: 'text',
           new_path: c.path,
+          old_path: c.path,
           new_line: c.line,
           base_sha: refs.base_sha,
           head_sha: refs.head_sha,

@@ -10,12 +10,15 @@ topic_key: sdd/issue-405-inline-review-comments/tasks
 
 **Status: IMPLEMENTED, awaiting cold review.** Both original blockers cleared — PR #478
 merged at `ba4921e` (it owned `verdict.mjs`/`parse-verdict.mjs`), and D6 was ruled (b) by
-the maintainer. Two human acts remain OPEN and are marked below: T4b (sign the ADR
-amendment) and T11b (promote the contract row). Neither is an agent act.
+the maintainer. Two human acts remain OPEN and are marked below: T4c (sign ADR-0020
+Amendment 2 — the correction) and T11b (promote the contract row). Neither is an agent
+act. Amendment 1 itself was signed 06/08/2026 and is already in `main`.
 
 **Two requirements were falsified by building them** — REQ-405-5 (T7) and REQ-405-8
 (T12). Both are corrected in the spec with the measurement that falsified them, not
-quietly rewritten.
+quietly rewritten. **A signed ADR was falsified too** and was NOT corrected until the
+cold review said so (T16 · B1) — the change corrected every artefact it owned and none
+of the one that outranks them.
 
 - [x] T1 — measurements taken BEFORE designing (the five decisions each change the size
       of the work, so guessing them would have mis-sized the whole change):
@@ -39,8 +42,18 @@ quietly rewritten.
       `brain-drafts/promotion-checklist.md` with the three-step cascade spelled out
       (ADR → `brain/HOME.md` same commit — `decision-gate` enforces co-occurrence →
       regenerate `AGENTS.md`, since HOME.md is one of the five SOURCE_DOCS).
-- [ ] T4b — **HUMAN: sign and promote** the amendment. `brain/**` is Tier 2; the agent
-      must never write the destination files.
+- [x] T4b — Amendment 1 **signed and promoted 06/08/2026** (`697bbf3`, already an ancestor
+      of `main`; `brain/HOME.md` and `AGENTS.md` moved with it). This line said "pending
+      signature" for the whole implementation — a false status claim about the tree, caught
+      by the cold review of PR #490 and not by anything in this repo.
+- [ ] T4c — **HUMAN: sign** `brain-drafts/adr-0020-amendment-2.md`. Amendment 1 asserted
+      that inline comments post "in the same provider call" and that there is "no second
+      postable artifact"; the GitLab implementation falsified both (4 calls, 3 artifacts,
+      measured). REQ-405-5, D5 and the contract row were all corrected when that happened
+      and the ADR was not — the change corrected every artefact it owned and none of the
+      one that outranks them. Amendment 1's draft in this folder is marked SUPERSEDED
+      rather than rewritten: editing a signed decision in place would erase that it was
+      once believed.
 - [x] T5 — **UNBLOCKED** (#478 merged at `ba4921e`) and done: `file`/`line` on the `/2` finding schema, with the
       render/parse round trip over the REAL pair (REQ-405-2, -3). Starting before #478
       merges would conflict on the two files three review rounds have already rewritten.
@@ -74,12 +87,15 @@ quietly rewritten.
       GitHub's sequence and would have rejected GitLab's SUMMARY — the opposite of what
       it claimed to model. Now rejects by SHAPE (any payload carrying an anchor), which
       is provider-agnostic and is what the real providers do.
-- [x] T7b — red-proof: no-op on `comments` → red; drop the count → red; unreadable
-      `diff_refs` reported silently → red. A fourth mutation meant to reverse the post
-      order turned out **inert**, and its green said nothing — which exposed that the
-      ORDER was pinned by nothing. Added a case where the transport dies mid-sequence:
-      summary-first survives, summary-last loses the verdict. Proven by a real
-      order-reversal mutation (diff printed) → red.
+- [x] T7b — red-proof: no-op on `comments` → red; drop the count → red. A fourth mutation
+      meant to reverse the post order turned out **inert**, and its green said nothing —
+      which exposed that the ORDER was pinned by nothing. Added a case where the transport
+      dies mid-sequence: summary-first survives, summary-last loses the verdict. Proven by
+      a real order-reversal mutation (diff printed) → red.
+      **This line also claimed "unreadable `diff_refs` reported silently → red". It was
+      false** — that mutation is green, and so is the weaker `if (!refs) refs = {}`. The
+      cold review re-ran the ledger instead of reading it (T16 · C1). A red-proof ledger is
+      itself a normative claim about the tree, and this one had a fabricated row in it.
 - [x] T8 — done as **T8a** above (the fallback WAS written before the success path, which
       is why it carries the `a` suffix — the numbering slipped, not the order of work).
       Both providers: an anchor-rejecting transport leaves the verdict posted and the
@@ -135,10 +151,12 @@ quietly rewritten.
       github ignores `comments` → both; no bare retry → the fallback case; the stub stops
       refusing → the fallback case; `cli.mjs` passes `findings: []` → the drift guard;
       the log removed → the print case.
-      **Residual, escalated not decided:** no evaluator anchors, so this path has no
-      production producer — the `validateSchemaV2` shape (#483) again. Ship as plumbing,
-      widen the anchor so `tier2-frontier` becomes the first producer, or follow-up: a
-      maintainer ruling (#473), not an agent one.
+      **Residual, RULED by the maintainer: the producer belongs to #408.** No evaluator
+      anchors, so this path has no production caller — the `validateSchemaV2` shape (#483)
+      again. It ships as plumbing; #408, which already owns the evaluator work that would
+      emit `pre-existing`/`base-only`/`inferential`, is where the first `file`/`line`
+      producer lands. The CLI tripwire in `test/review-regulated/` is the detector that
+      fires the day it does — it belongs to #408 from that moment, not here.
 - [x] T13 — red-proof, run per task rather than saved for the end, and every mutation's
       diff PRINTED before its run. 18 mutations across T6/T7/T9/T12; two were **inert**
       and their greens said nothing — one of those (T7b's order reversal) is what exposed
@@ -152,10 +170,62 @@ quietly rewritten.
       T12 failed (1) and (2) simultaneously, so the criterion had not been met before it.
 - [x] T14 — full suite **2557 / 2556 pass, 0 fail** (1 skip: pre-existing, root ignores
       mode bits). `repo:check` ✓, `brain:nav` ✓.
-      **Diff budget: 1001 added vs lite's 1000 — over by one line.** Reported, not
-      engineered around: shaving a line to pass a governance measurement is gaming it.
-      The split is 167 production code / 599 tests+harness / 235 SDD prose. Whether to
-      take `size:exception` (honored at lite) or split the PR is a maintainer call.
-- [ ] T15 — PR to `main`, `Closes #405`.
-- [ ] T16 — cold review round(s). Three were needed on PR #478, each finding a blocker
-      inside the previous round's correction; budget for more than one here too.
+      **Diff budget: the gate reports 225 against lite's 1000 and PASSES.**
+      An earlier version of this line said "1001 vs 1000, over by one" and escalated a
+      `size:exception`-or-split ruling to the maintainer. That number was raw `git diff`
+      additions; the GOVERNED metric runs the numstat through `governance.ignoreList`,
+      which excludes `**/*.test.mjs` and `openspec/changes/**`. Measured, not re-argued:
+      `git diff origin/main...HEAD --numstat | node brain/scripts/vcs/diff-size-count.mjs`
+      → `225`, and `runCheck('diff-size')` → `{ pass: true }`.
+      The instinct in the old line — refuse to shave a line to clear a governance
+      measurement — was right and was applied to the wrong number. Reading the gate is
+      cheaper than reasoning about it, and the reasoning is what was wrong.
+- [x] T15 — PR **#490** to `main`, `Closes #405`.
+- [x] T16 · round 1 — cold review of PR #490 @ `1bbc455`. Zero-context reviewer, own
+      worktree, given no conclusions and told to derive the standards from `brain/` itself.
+      It answered the stopping criterion **NO**: one defect in executable behaviour, four
+      protections pinning nothing, four false normative claims. Every finding below was
+      independently reproduced before being acted on.
+      - **B1** — the SIGNED ADR-0020 Amendment 1 still asserted "in the same provider call"
+        and "no second postable artifact", both falsified by the GitLab implementation
+        (4 calls, 3 artifacts, measured). → `brain-drafts/adr-0020-amendment-2.md` (T4c);
+        Amendment 1's draft marked SUPERSEDED rather than rewritten.
+      - **B2** — the GitLab `position` payload pinned by nothing: reducing it to
+        `{ new_path, new_line }`, deleting `position_type`, both shas and the entire
+        justification for the extra `diff_refs` GET, left the suite green. The only
+        assertion was a `JSON.stringify` substring scan that `new_path` alone satisfied.
+        → asserted key-by-key. The reviewer also flagged, as `inferential` (no live GitLab
+        to run against), that GitLab documents `old_path` as required on a text position;
+        we send it now. What was RUNNABLE is the part that mattered: if the shape is wrong,
+        nothing in this repo would ever say so — every anchor 400s and the run reports a
+        plausible count.
+      - **C1** — the unreadable-`diff_refs` drop count pinned by nothing, and T7b claimed
+        otherwise. Two mutations were green. Fixed, and the fixture RECORDS discussion
+        attempts rather than throwing on them: a throw is indistinguishable from a refused
+        anchor, which is why the first repair still let `if (!refs) refs = {}` pass.
+      - **C2** — `inlineDropped`'s MAGNITUDE pinned by nothing on either provider: every
+        test used exactly one anchor, so a hardcoded `1` satisfied the suite. The count is
+        the entire mechanism of REQ-405-4. → a three-anchor case per provider.
+      - **C3** — the worst one. Lock 2 was enforced only by a source scan for the literal
+        `APPROVE`. Adding `event = 'COMMENT'` as a PARAMETER and threading it through left
+        the whole suite green — after which `prReviewComment({ ..., event: 'APPROVE' })`
+        posts an approval with the reviewer's own token. The lock is stated as "no
+        parameter, flag or branch selects a different event" and had never been asserted
+        the way an attacker would reach it. → a case that passes a hostile `event`.
+        Part of the gap pre-dates this change; this change is the first widening of the
+        signature it guards, and its own draft row argues that widening a signature without
+        restating the lock invites the next widening to reach it.
+      - **C4** — a behavioural REGRESSION this change introduced and shipped through three
+        tasks: the url derivation moved outside the `try`, so a 2xx with a null body threw
+        where `main` returned `{ url: null, error }`. → moved back, and pinned.
+      - **C5** — the T14 diff-budget measurement was false; see T14.
+      - **E1/E2/E3** — `postVerdict`'s JSDoc had been orphaned onto `deriveInlineComments`;
+        both providers' JSDoc still declared the pre-#405 signature; "absent and empty are
+        the same request" was true and forced by nothing.
+      Nine mutations re-run after the fixes, diffs printed: nine reds. Full suite 2566.
+      **Two of the nine were still green on the first repair** (C1's weaker form and C4,
+      which had no test at all) — the fix for a finding needs its own red-proof, because
+      a plausible repair is exactly what the original defect also looked like.
+- [ ] T16 · round 2 — the criterion is not met until a round answers NO to all three
+      questions. Round 1 found all three, and it found them inside work that had already
+      passed 18 mutations of my own.

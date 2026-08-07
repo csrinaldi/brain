@@ -1,0 +1,97 @@
+---
+status: draft
+issue: 405
+epic: 313
+artifact_store: openspec
+topic_key: sdd/issue-405-inline-review-comments/brain-drafts/adr-0020-amendment-2
+---
+
+# DRAFT for signature — ADR-0020 Amendment 2: Amendment 1 asserted a property GitLab cannot have
+
+`brain/**` is Tier 2 (human-only). Everything below is ready to paste; the signing commit
+is the human's. Found by the cold review of PR #490 (finding B1).
+
+## Why this amendment exists
+
+Amendment 1 was signed 06/08/2026 and merged in `697bbf3`, **before** the GitLab half of
+#405 was implemented. It asserted:
+
+> `comments` is OPTIONAL: an array of `{ path, line, body }` posted as line-anchored
+> review comments **in the same provider call** as `body`.
+>
+> The verb **count stays four**. No new verb, no new event, no second postable artifact.
+
+Implementing GitLab falsified both sentences. Measured against the shipped verb with two
+anchors:
+
+```
+provider calls made: 4
+ 1. POST .../merge_requests/1/notes        {"body":"THE VERDICT BLOCK"}
+ 2. GET  .../merge_requests/1
+ 3. POST .../merge_requests/1/discussions  {"body":"anchor 1","position":{...}}
+ 4. POST .../merge_requests/1/discussions  {"body":"anchor 2","position":{...}}
+```
+
+Four calls, three postable artifacts. This is not a defect in the implementation — GitLab
+discussions are **one per position**, so N anchors are N+1 calls whatever the order. It is
+a defect in the amendment: it took GitHub's atomic payload, which was the only provider
+measured at the time, and wrote it down as the port's contract.
+
+The spec (REQ-405-5), the design (D5) and the drafted `vcs-contract.md` row were all
+corrected when the implementation falsified them. The ADR that outranks them was not, and
+that is the finding: the change corrected every artefact it owned and none of the one with
+authority over them.
+
+## The correction
+
+**Replace** the verb-contract row and the sentence under it (currently lines 107 and 109
+of `brain/project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md`) with:
+
+```markdown
+| Verb | Contract |
+| --- | --- |
+| `prReviewComment({ project, number, body, comments? })` | `event: 'COMMENT'` **hardcoded** — no APPROVE code path exists, and `comments` does not change that. `comments` is OPTIONAL: an array of `{ path, line, body }` line anchors. Absent and empty are the SAME request. GitHub carries them in the SAME payload as `body` (atomic). GitLab CANNOT — discussions are one per position — so it posts the summary note FIRST, then one discussion per anchor, reading the MR's `diff_refs` in between. |
+
+The verb **count stays four**. No new verb and no new event.
+
+**Exactly ONE payload carries the verdict body**, on every provider. That — not "one
+call" — is the invariant the anti-loop lock needs, because the lock counts PARSEABLE
+VERDICTS, not posts: an inline annotation carries finding text and no `brain-review/N`
+block, so `cold-boot.mjs`'s `reviews.map(parseVerdict).filter(Boolean)` never sees it.
+
+Where the calls cannot be atomic, the ORDER follows from one rule: the verdict is the
+thing that must already be safe when anything after it fails. GitHub therefore attempts
+anchored and retries bare; GitLab posts the summary first and anchors after. Opposite
+sequences, same rule.
+```
+
+**Then**, in the "Why widening rather than a fifth verb" section, the sentence *"Widening
+therefore costs zero additional calls and keeps the verdict atomic"* must be scoped to
+GitHub — it is true there and false on GitLab. Suggested: *"Widening costs zero additional
+calls on GitHub and keeps its review atomic; on GitLab it costs one `diff_refs` read plus
+one call per anchor, which is the floor that provider's API allows."*
+
+**Sign** with the same `**Signed**: <date> — Cristian Rinaldi` convention.
+
+## The cascade — all three steps, or `decision-gate` fails
+
+1. The ADR edit above.
+2. **`brain/HOME.md:69`, in the SAME commit** — `decision-gate` enforces co-occurrence.
+   Replace the parenthetical with:
+
+   ```
+   (**Amendment 1, 06/08/2026; Amendment 2, <date>** — `prReviewComment` carries optional inline `comments[]`; ONE payload carries the verdict on every provider, but GitLab needs N+1 calls — verb count and lock 2 unchanged, #405)
+   ```
+
+3. **Regenerate `AGENTS.md`** — `HOME.md` is one of the five SOURCE_DOCS, and `AGENTS.md:77`
+   currently repeats the falsified "in the same call".
+
+## What is NOT in this amendment
+
+Lock 2 is unchanged and is deliberately restated rather than assumed. The cold review found
+that lock 2 was enforced only by a source scan for the literal `APPROVE`, which a widening
+walks straight past: adding `event = 'COMMENT'` as a parameter left the entire suite green,
+after which `prReviewComment({ ..., event: 'APPROVE' })` posts an approval. That gap is
+closed in code on PR #490 by a contract case that passes a hostile `event` and asserts the
+payload still carries `COMMENT`. It needs no ADR change — the ADR always said "no parameter
+selects a different event"; nothing had ever tested it that way.

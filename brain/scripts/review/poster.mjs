@@ -37,23 +37,6 @@ const STALE_LABEL = 'reviewed:stale';
 const ESCALATION_LABEL = 'needs-decision';
 
 /**
- * @param {object} args
- * @param {string} args.headSha        The run's own anchor (bound at cold boot).
- * @param {string} args.project
- * @param {number} args.number
- * @param {string} [args.provider]
- * @param {'tranche'|'checkpoint'|'ruling'} args.mode  Selects the write verb (design.md §6).
- * @param {string} args.renderedBody   The rendered `brain-review/1` block (verdict.mjs's renderVerdict).
- * @param {string} args.reviewerHandle
- * @param {Array<{head_sha:string, verdict:string, author:string|null}>} [args.priorVerdicts]
- *   Prior `brain-review/1` blocks on the thread, oldest-first (cold-boot's `doctrine.priorVerdicts`).
- * @param {'human'|null} [args.escalate]
- *   The verdict's own `escalate` field (`buildVerdict`'s output, verdict.mjs). When `'human'` AND the
- *   post actually lands, `needs-decision` is applied (escalation inbox, H1-5b).
- * @param {{ getVcs?: Function, reResolveHead?: Function }} [args.deps]
- * @returns {Promise<{ posted: true, result: object } | { posted: false, skipped: 'anti-loop'|'anti-stale' }>}
- */
-/**
  * Derives the provider-neutral inline comments from a verdict's findings
  * (issue #405, REQ-405-2). PURE — no I/O, no provider shape beyond the three
  * fields the contract names.
@@ -78,6 +61,28 @@ export function deriveInlineComments(findings = []) {
   return out;
 }
 
+/**
+ * @param {object} args
+ * @param {string} args.headSha        The run's own anchor (bound at cold boot).
+ * @param {string} args.project
+ * @param {number} args.number
+ * @param {string} [args.provider]
+ * @param {'tranche'|'checkpoint'|'ruling'} args.mode  Selects the write verb (design.md §6).
+ * @param {string} args.renderedBody   The rendered `brain-review/1` block (verdict.mjs's renderVerdict).
+ * @param {string} args.reviewerHandle
+ * @param {Array<{head_sha:string, verdict:string, author:string|null}>} [args.priorVerdicts]
+ *   Prior `brain-review/1` blocks on the thread, oldest-first (cold-boot's `doctrine.priorVerdicts`).
+ * @param {'human'|null} [args.escalate]
+ *   The verdict's own `escalate` field (`buildVerdict`'s output, verdict.mjs). When `'human'` AND the
+ *   post actually lands, `needs-decision` is applied (escalation inbox, H1-5b).
+ * @param {Array<object>} [args.findings]
+ *   The BUILT verdict's findings (issue #405) — the population the rendered body actually claims,
+ *   not the evaluator's. Ones carrying `file`+`line` become inline comments on the PR path only.
+ * @param {{ getVcs?: Function, reResolveHead?: Function }} [args.deps]
+ * @returns {Promise<{ posted: true, result: object, inlineDropped?: number }
+ *   | { posted: false, skipped: 'anti-loop'|'anti-stale' }>}
+ *   `inlineDropped` is ABSENT when no anchor was lost, never 0.
+ */
 export async function postVerdict({
   headSha,
   project,
