@@ -18,7 +18,7 @@ consolidated.
 2. **One anti-pattern per file.** Descriptive naming: `serializacion-jakarta-json.md`,
    `guice-singleton-eager.md`.
 3. **Promoted in the MR**, within the same commit as the code that discovered it —
-   before removing *Draft* status.
+   before removing _Draft_ status.
 4. **Indexed** with `npm run memory:index` whenever the durable knowledge in `brain/`
    needs to be re-projected into engram.
 
@@ -31,12 +31,15 @@ consolidated.
 - **Applies to:** <which modules/services>
 
 ## Symptom
+
 <How it manifests — the observable error or behavior.>
 
 ## Cause
+
 <Why it happens, technically.>
 
 ## Solution / correct pattern
+
 <What to do instead, with a minimal example.>
 ```
 
@@ -52,6 +55,7 @@ Navigable index — add an entry here when promoting a new anti-pattern
 - [Self-updating installers are not innocuous](instaladores-autoactualizantes-no-inocuos.md)
 - [Pre-v0.8.0 upgrader clobbers consumer identity and locks out future upgrades](pre-v0-8-0-upgrade-clobber-lockout.md)
 - [Evidence reader returns empty on failure (fail-open in REQUIRED gates)](evidence-reader-empty-on-failure.md)
+- [The red-proof is blind along an axis the mutation never varies](red-proof-blind-along-an-unvaried-axis.md)
 
 > Only generic harness anti-patterns. Project-specific ones (stack, infra,
 > domain) are indexed by the consuming project separately — `core/` does not reference `project/`,
