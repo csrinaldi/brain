@@ -1013,13 +1013,24 @@ of the one that outranks them.
       - **C2 — round 21's own rule was broken at round 25.** The rule is that the PR body and
         the ledger entry describing it land in one edit or neither does. Round 25 committed
         the entry and left the body at round 24. Applied here for both.
-      **Entries from here are terse by construction.** Rounds 21-26 produced seven
-      corrections and every one is in this ledger or the PR body; none is in the code. The
-      generator is visible in that sentence: each round writes a paragraph of narration, and
-      the paragraph becomes the next round's finding. The change is not getting less correct
-      — the record is getting longer. So the narration stops: a round records commit, verdict,
-      findings, evidence. Nothing else.
-- [ ] T16 · round 27 — the axis has failed at rounds 1 and 11 only. Two consecutive rounds
+      **Entries from here are terse by construction.** Every correction in rounds 21-26 is in
+      this ledger or the PR body; none is in the code. Enumerated: 21/C1 a two-artefact claim
+      verified against one; 22/C1 a list of round numbers written from memory; 22/C2 `T18c`
+      cited and undefined; 23/C1 a stale ordinal in every entry carrying it; 24/C1 a strike
+      that matched one spelling; 25/C1 a streak count gone stale; 26/C1 a paragraph
+      contradicting itself; 26/C2 round 21's rule broken at round 25.
+      Each round writes a paragraph of narration and the paragraph becomes the next round's
+      finding. The change is not getting less correct — the record is getting longer. So the
+      narration stops: commit, verdict, findings, evidence.
+- [x] T16 · round 27 — cold review of `c207de7`. **No blocker, no defect in executable
+      behaviour, ONE correction.**
+      - **C1 — round 26 said "seven corrections" where the enumeration gives eight**
+        (21/C1, 22/C1, 22/C2, 23/C1, 24/C1, 25/C1, 26/C1, 26/C2), in the entry that had just
+        banned carrying counts. Replaced with the enumeration, here and in the PR body.
+      Verified this round: round 26's other claims; the axis list; `013845d` on `origin/main`;
+      #491 open and `status:approved`; the trailer boundary; 2627 tests, 0 fail; governed diff
+      360 of 1000; `repo:check` ✓; `brain:nav` ✓.
+- [ ] T16 · round 28 — the axis has failed at rounds 1 and 11 only. Two consecutive rounds
       with nothing at blocker or correction severity close this.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
