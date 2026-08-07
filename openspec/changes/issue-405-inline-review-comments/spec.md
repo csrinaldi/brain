@@ -19,17 +19,82 @@ absent-by-default, so every existing caller is unaffected.
 
 `event: 'COMMENT'` stays hardcoded on GitHub with no parameter, flag or branch reaching
 it (ADR-0020 lock 2 / REQ-266-3). Asserted at the level that cannot rot: a test that
-inspects the posted payload, plus the existing drift-guard on the verb list.
+inspects **every payload the verb sends**, plus the existing drift-guard on the verb list.
 
-## REQ-405-2 — a finding carries an OPTIONAL anchor, and no anchor means no comment
+"Every" took two rounds to get right, and both were blockers.
 
-`file` (string) and `line` (integer) on a `/2` finding. Both optional. A finding lacking
-either produces **no** inline comment and is unaffected in every other respect.
+`origin/main`'s verb built ONE `event`-carrying payload. This change builds **three**: the
+two branches of the anchored/bare ternary, and the retry. Round 8 found the lock-2 test
+covering only site 1 — its fixture always succeeded, so the retry never fired — and fixed
+it to cover 1 and 3, describing that as "both call sites", because a ternary reads as one
+site. Round 9 found site 2 open, and **site 2 is the only one a production run reaches
+today**: no evaluator emits `file`/`line`, so `comments` is never sent.
+
+Each time, parameterising the uncovered site alone left the entire suite green, after which
+`event: 'APPROVE'` posts an APPROVED review with the reviewer's own token — satisfying
+`main`'s required-approving-review-count. (It does **not** satisfy L6, which counts a
+non-author, non-allow-listed approval: lock 3 holds independently, as §2 promises. Round 8
+claimed both and was wrong about the second half.)
+
+Two rules, earned expensively: **a widening that creates a call site owns proving the lock
+still covers it**, and **count the sites in the code, not in the sentence describing it**.
+
+## REQ-405-2 — a finding carries an OPTIONAL anchor, on BOTH protocols
+
+`file` (string) and `line` (integer). Both optional. A finding lacking either produces
+**no** inline comment and is unaffected in every other respect.
+
+**Corrected in round 2 of the cold review (C-6).** This said *"on a `/2` finding"*, and the
+emitter never gated on protocol — a `/1` verdict carrying an anchored finding renders
+`file:`/`line:` and drives inline comments, measured. That is correct behaviour and a wrong
+requirement, and the repo settled the question one field over: `renderVerdict` emits
+`evidence_class`/`causal_disposition` on the same terms, and `cli.mjs` records why — what
+keeps `/1` output byte-for-byte unchanged is that **nothing emits the field**, not a
+protocol branch. Adding one would be a second place for the two protocols to drift.
 
 This is what keeps the change additive: every evaluator shipping today keeps working
 unchanged and gains inline coverage only when it starts emitting anchors. A test pins
 that a legacy finding — no `file`, no `line` — round-trips and posts exactly as it does
 today.
+
+**A `follow_ups[]` anchor renders and is NOT posted inline.** `renderVerdict` emits the
+pair in both branches; `cli.mjs` hands the poster `verdict.findings` alone. Deliberate, and
+it follows from the admission rule rather than from convenience: a follow-up carries
+`pre-existing` or `base-only`, which is the verdict's own statement that the defect is not
+this change's doing. Anchoring one would put a comment on a line in this author's diff about
+something the same verdict says they did not introduce — causal admission inverted at the
+point a human reads it.
+
+The behaviour was right and undocumented until round 4 of the cold review, which found the
+Tier-2 draft *about to become schema authority* asserting the opposite. Pinned at the poster,
+where the rule is applied; the CLI's half is the drift guard, which reds for
+`findings + follow_ups` as well as for the evaluator's own list — in both spellings. That
+qualifier is the round-6 correction: the guard matched a SUBSTRING, so `.concat(...)`
+passed it while the spread form reded, and this sentence claimed a coverage the guard did
+not have.
+
+The anchor is checked for USABILITY, not presence: a non-empty `file`, and a `line` that
+coerces to a positive integer. Presence was all the first version checked, so `line: 'abc'`
+went out as `line: null` and `line: ''` as `line: 0` — diff lines are 1-based, so both are
+anchors already known not to attach, and spending the un-anchorable fallback on one is the
+exact cost the rule exists to avoid.
+
+**One predicate, `hasUsableAnchor`, exported from `verdict.mjs` and used by both halves.**
+That is the round-11 correction, and the reason it is structural rather than a second copy
+of the rule: round 10 tightened the POSTER and left the renderer testing presence, so the
+block began advertising `line: 0` anchors the poster then refused — the exact state the
+round-8 test forbids, one field-value class over — and this paragraph asserted the opposite
+of the tree for a full round. Two copies of one rule drift; one function cannot.
+
+The rule is **both or neither**, in the block as well as on the wire. A rendered `file:`
+with no `line:` advertises a half anchor, which is the same defect read from the emitting
+end, so the renderer emits the pair or nothing.
+
+`line` survives the round trip as **text** (`parseVerdict` returns entry scalars verbatim;
+`verdict.test.mjs` pins `'42'`), so the consumer coerces. `deriveInlineComments` does —
+GitHub's reviews API rejects a string line, and a verdict that had made the round trip
+would otherwise lose every anchor and report them as un-anchorable diff lines: our defect,
+charged to the diff.
 
 ## REQ-405-3 — the anchor survives the render/parse round trip
 
@@ -42,8 +107,8 @@ Depends on PR #478 (issue #452), which owns that pair today.
 
 ## REQ-405-4 — an un-anchorable comment NEVER costs the verdict
 
-The load-bearing requirement. When a provider rejects the inline payload (GitHub 422 for
-a line outside the diff; GitLab a stale `position`):
+The load-bearing requirement. When an ANCHORED ATTEMPT FAILS — for any reason, not only an
+inline-specific rejection:
 
 1. the summary block **is still posted**, at the same head;
 2. the un-anchorable findings appear **in** that block;
@@ -53,16 +118,65 @@ Point 3 is not decoration. Without it, "no inline comments appeared" is indistin
 from "the anchors would not attach" — `evidence-reader-empty-on-failure` relocated into
 the poster. The count is the reader's only way to tell the two apart.
 
-Proven by making the provider stub reject the inline payload: the failure path IS the
-deliverable, not an edge case, so it is exercised at the same level as the success path.
+**"For any reason" is the round-14 correction, and it is the sentence that explains why no
+test existed.** This requirement said *"when a provider rejects the inline payload (GitHub
+422 …; GitLab a stale `position`)"*, so every fixture written against it emitted a 422 or a
+position error — the failure had exactly one value class, and the retry's TRIGGER was pinned
+by nothing. Narrowing it to a 422 shape left the whole suite green and lost the verdict on a
+transient 502:
 
-## REQ-405-5 — one call, so the anti-loop lock is untouched
+```
+unmutated  attempts 2 → { url, inlineDropped: 1 }        verdict posted
+mutated    attempts 1 → { url: null, error: 'HTTP 502' } VERDICT LOST
+```
 
-Inline comments post in the SAME provider call as the summary body they accompany. No
-second postable artifact, no second parseable verdict, no ordering dependency.
+`github.mjs` had named that exact mutation and rejected it in a comment — *"gating on a
+422-shaped stderr would make a transient failure lose the VERDICT"* — while the requirement
+above it still described the narrow trigger. Round 6 corrected D3 and the ADR draft on the
+same point and left the requirement itself, which is why the correction never reached a test:
+**the requirement never asked for one.**
 
-Asserted behaviourally: a run that posts inline comments must still skip with
-`anti-loop` on a second invocation at the same head, exactly as a summary-only run does.
+The trade is deliberate and stated rather than hidden: retrying on any failure over-counts
+dropped anchors when the cause was a network blip, and REQ-405-4 ranks the verdict above the
+annotation, so the over-count is the cheaper error.
+
+The same rule holds on GitLab, which has no retry: the drop count must not depend on WHY an
+anchor failed. Both are now driven by one shared contract case.
+
+Proven by making the provider stub reject the inline payload — at 422 AND at 502: the failure
+path IS the deliverable, not an edge case, so it is exercised at the same level as the
+success path.
+
+## REQ-405-5 — exactly ONE parseable verdict, so the anti-loop lock is untouched
+
+**Corrected during implementation.** This requirement first read *"inline comments post
+in the SAME provider call as the summary body"* — true of GitHub, and **structurally
+impossible on GitLab**, where discussions are one-per-position, so N anchors mean N+1
+calls whatever the order. A requirement only one provider can satisfy is not a contract;
+it is GitHub's implementation promoted to doctrine.
+
+The invariant that is provider-agnostic, and the one the anti-loop lock actually needs:
+
+**At most one payload the provider ACCEPTS carries the verdict body.** The lock counts PARSEABLE VERDICTS,
+not posts — `cold-boot.mjs:123` runs every review body through `parseVerdict` and
+`.filter(Boolean)`s the nulls, so an inline annotation, which carries finding text and no
+`brain-review/N` block, is invisible to it.
+
+Per provider, then:
+
+- **GitHub** — `comments[]` rides the existing `/reviews` payload. One call, atomic:
+  either the whole review posts or none of it does.
+- **GitLab** — the summary note goes **first**, then one discussion per anchor. The order
+  is the opposite of GitHub's (which attempts anchored and retries bare) and follows from
+  the same rule: when the calls cannot be atomic, the verdict must be the one that is
+  already safe when anything after it fails.
+
+Asserted on the payloads actually SENT — that the anchor reaches the provider, and that
+exactly one payload carries the verdict body **on the success path**. On GitHub's FALLBACK
+path two payloads carry it and one lands, which is why the invariant above says "accepts"
+(round-6 cold review: this sentence was the sharpest surviving copy, because it claims an
+assertion over sent payloads that no test makes on the fallback path). Plus behaviourally: a run that posts inline
+comments must still skip with `anti-loop` on a second invocation at the same head.
 
 ## REQ-405-6 — parity is forced by the contract suite, not by inspection
 
@@ -77,21 +191,90 @@ that asymmetry safe rather than accidental. A provider that silently no-ops on
 `brain/core/methodology/vcs-contract.md`'s `prReviewComment` row must record the widened
 signature, the two-endpoint GitLab mapping, and the extra `diff_refs` read.
 
-`brain/**` is Tier 2 — **human-only**. The agent writes
-`openspec/changes/issue-405-inline-review-comments/brain-drafts/vcs-contract-row.md` and
-the human promotes it. The agent must never write the destination file.
+`brain/core/methodology/reviewer-protocol.md` §6.1/§6.2 must record the `file`/`line`
+anchor too — that document names itself the schema authority, and this change added two
+per-finding fields to that schema while drafting nothing for it (round-2 cold review, C-6).
 
-## REQ-405-8 — the e2e proves a developer actually sees them
+`brain/**` is Tier 2 — **human-only**. The agent writes
+`brain-drafts/vcs-contract-row.md` and `brain-drafts/reviewer-protocol-anchor.md`; the
+human promotes both. The agent must never write the destination files.
+
+## REQ-405-8 — the e2e proves the anchor reaches the wire, and that today NOTHING sends one
 
 On #409's harness (`test/review-regulated/`), whose README already names this change as
-its landing pad: assert the captured `POST …/reviews` payload's `comments` array. The
-`gh` stub captures the full body verbatim, so this needs no harness change — the
-reuse contract REQ-409-7 predicted this exact case.
+its landing pad: assert the captured `POST …/reviews` payload's `comments` array.
+
+**Corrected during implementation — the second requirement on this change to be falsified
+by building it** (the first was REQ-405-5). This one read *"the e2e proves a developer
+actually sees them"* and predicted the harness would need no change. Both halves were
+wrong, for one reason this spec had never stated plainly:
+
+> **No evaluator emits `file`/`line`.** REQ-405-2 made the anchor optional precisely so
+> evaluators could adopt it one at a time, and none has. A CLI-level run therefore cannot
+> produce an anchored finding, and no assertion over a real `brain:review` invocation can
+> observe a developer seeing an inline comment.
+
+What is provable today, and what this requirement now demands:
+
+1. **The wire path carries an anchor.** The anchored cases drive the REAL `postVerdict`
+   against the harness's `gh` stub: poster → `getVcs` → `github.mjs` → `spawnSync('gh')`
+   → the payload captured on disk. The test supplies the whole argument set, including a
+   hand-written `renderedBody` that is not a `renderVerdict` output — so these cases prove
+   the ANCHOR reaches the wire, not that finding text survives into the summary. That half
+   is REQ-405-3's round trip over the real renderer and parser. Corrected in round 3 (E2);
+   the earlier wording claimed more than the fixture supports.
+2. **A refused anchor never costs the verdict.** `GH_STUB_REJECT_INLINE=1` makes the stub
+   422 any payload carrying `comments`, so the fallback runs against the real binary
+   boundary and not only against an in-process fake. Refusals land in a separate
+   `posted/rejected.jsonl` — sharing the file would let a test counting posts read a
+   refusal as a success.
+3. **The absence is honest and load-bearing.** A CLI-level tripwire asserts the real run
+   posts no `comments` key, against a non-empty findings list so it cannot pass
+   vacuously. It is the detector for the first evaluator that anchors.
+
+Row 3 is not a consolation prize — it is what caught the defect. Patching `tranche.mjs`
+to anchor its budget finding left the posted payload's keys at `["body","event"]`, because
+`cli.mjs` never passed `findings` to `postVerdict`. The poster was wired and its only
+production caller was not, and every unit and contract test on this branch was green
+throughout. With the wiring fixed the same mutation yields `["body","event","comments"]`.
+
+The CLI→poster link itself is pinned by a **source-level** drift guard, labelled as such:
+with no evaluator anchoring there is no seam through which a test can put an anchored
+finding into a real `main()` run. It is scheduled for deletion the day one does.
+
+### The residual, stated rather than implied
+
+This change ships an inline path with **no producer**: it is reachable from production
+only once an evaluator starts anchoring. That is the same shape as `validateSchemaV2`'s
+inertness (#483), and it must not be left for a reviewer to discover by reading the code.
+
+**RULED by the maintainer: the producer belongs to #408.** This change ships as plumbing.
+#408 already owns the evaluator work that makes findings say more than a mechanical check
+can (`pre-existing`/`base-only`/`inferential`), which is the same seam that would emit
+`file`/`line` — so the first anchor arrives there, not by widening this change.
+
+Two things follow, and they are the operational form of the ruling:
+
+- The CLI tripwire in `test/review-regulated/` is the DETECTOR for that moment. When #408
+  makes an evaluator anchor, that case goes red; it moves into #408 and becomes a real
+  behavioural test of the CLI→poster link. It is not deleted.
+- The source-level drift guard on `cli.mjs` retires at the same moment, for the same
+  reason: it exists only because no seam can put an anchored finding into a real `main()`
+  run today.
+
+Also ruled: the anchor stays `file` **and** `line`. Widening it to file-level anchors so
+`tier2-frontier` could produce one was considered and not taken — it would have made this
+change the producer by enlarging its own contract.
 
 ## Pending human acts — NOT agent decisions
 
-- **The ADR-0020 amendment** recording D1–D5. Amending an ADR is a three-step cascade
-  (ADR → `brain/HOME.md` → regenerate `AGENTS.md`).
+- **ADR-0020 Amendment 2**, correcting Amendment 1. Amendment 1 was signed and promoted
+  06/08/2026 (`697bbf3`) — this section claimed it was still pending for the whole
+  implementation, which was false about the tree. What is genuinely pending is the
+  CORRECTION: Amendment 1 asserted inline comments post "in the same provider call" with
+  "no second postable artifact", and the GitLab implementation falsified both (4 calls,
+  3 artifacts). Draft: `brain-drafts/adr-0020-amendment-2.md`. Amending an ADR is a
+  three-step cascade (ADR → `brain/HOME.md`, same commit → regenerate `AGENTS.md`).
 - ~~**D6**~~ — **RULED (b), 2026-08-06.** The validator stays untouched here; its
   inertness is **#483**. What replaces "validator coverage" as this change's schema
   evidence: REQ-405-3's round trip over the REAL renderer/parser, and REQ-405-4's

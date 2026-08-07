@@ -17,12 +17,16 @@ preference. **D6 is a sixth the measurements surfaced, and it belongs to the hum
 
 ```
 prReviewComment({ project, number, body, comments? })
-  -> { url } | { url: null, error }
+  -> { url } | { url, inlineDropped } | { url: null, error }
 ```
 
+`inlineDropped` was missing from this shape until round 2 of the cold review (E-6) —
+added in the same change that introduced it, and left out of the design's own signature.
+
 Measured basis: GitHub's `/reviews` endpoint takes `body`, `event` and `comments[]` in
-**one** payload, so widening costs zero additional calls and keeps the verdict atomic —
-either the whole review posts or none of it does. A fifth verb would mean two calls on
+**one** payload, so widening costs zero additional calls **on GitHub** and keeps its review
+atomic — either the whole review posts or none of it does. On GitLab it costs one
+`diff_refs` read plus one call per anchor, which is the floor that API allows (see D3). A fifth verb would mean two calls on
 GitHub, which introduces a state where the summary posted and the inline did not, on the
 provider where that split is otherwise impossible.
 
@@ -58,13 +62,50 @@ The failure mode that matters. GitHub 422s when a comment targets a line outside
 diff; GitLab rejects a stale `position`. The rule:
 
 1. **Attempt the review with `comments[]`.**
-2. **On an inline-specific rejection, retry once with the summary body alone**, and
-   fold the un-anchorable findings back into the block.
+2. **On ANY failure of an anchored attempt, retry once with the summary body alone.**
 3. **Report the count** — the verdict says how many anchors were dropped and why.
 
-Never the reverse order (summary first, inline second): that is two calls, and the
-window between them is exactly the second-postable-artifact the anti-loop lock is built
-to prevent (D5).
+Rule 2 said *"on an inline-specific rejection"*, and rule 2 said the retry *"folds the
+un-anchorable findings back into the block"*. Both were corrected in round 6; neither
+described the implementation.
+
+**The trigger is not inline-specific, deliberately.** `github.mjs` retries on any non-zero
+first exit, because gating on a 422-shaped stderr would make a transient 5xx lose the
+VERDICT — and REQ-405-4 ranks the verdict above the annotation. The cost is an over-count:
+a network blip is reported as dropped anchors. That trade is named in `github.mjs`'s own
+comment, and the design said the opposite of it. Measured — a generic 502 on the first
+attempt still retries:
+
+```
+attempts: 2 | retried after a NON-inline failure: true
+result: { url: 'https://x/1', inlineDropped: 1 }
+```
+
+**And nothing is "folded back".** The retry re-sends the body BYTE-IDENTICAL; the findings
+were already in it, because the summary block is built before any anchor is derived. The
+e2e asserts exactly that identity. There is no fold operation and there never was.
+
+**CORRECTED during implementation — this rule was GitHub's, written as everyone's.**
+It read: *"Never the reverse order (summary first, inline second): that is two calls, and
+the window between them is exactly the second-postable-artifact the anti-loop lock is
+built to prevent (D5)."* The shipped GitLab verb uses exactly that order, because it has
+no other: discussions are one-per-position, so N anchors are N+1 calls whichever way they
+go, and there is no atomic option to prefer.
+
+The reasoning was wrong twice over. The anti-loop lock counts **parseable verdicts**, not
+posts — an inline annotation carries finding text and no `brain-review/N` block, so
+`cold-boot.mjs`'s `reviews.map(parseVerdict).filter(Boolean)` never sees it — and a
+"window between two calls" is not a second postable artifact.
+
+The rule that survives, and that both providers follow: **when the calls cannot be atomic,
+the verdict goes in the one that is already safe if everything after it fails.** GitHub is
+atomic, so it attempts anchored and retries bare. GitLab is not, so the summary goes first.
+Opposite sequences, one rule.
+
+D5 and REQ-405-5 were corrected when the implementation falsified them; this paragraph was
+missed and shipped for two more commits — caught by round 2 of the cold review (C-1). Same
+class as the signed-ADR finding one round earlier: the correction was made everywhere it
+was noticed and nowhere it was not.
 
 The discipline this repo already has a name for: an inline post that failed is
 `uncomputable`, not `no findings`. The count is reported precisely so the reader can
@@ -83,7 +124,21 @@ The verb fetches what its own transport needs. Cost: one extra GitLab request pe
 review with inline comments, and none on GitHub. Contract-visible either way, so the
 contract row records that `comments` support on GitLab implies an additional read.
 
-## D5 — the anti-loop lock is untouched, and D1 is why
+## D5 — the anti-loop lock is untouched — corrected: it counts VERDICTS, not calls
+
+> **Corrected during implementation (T7).** D5 originally rested on "one call", which is
+> a GitHub property. GitLab's discussions are one-per-position, so N anchors are N+1
+> calls and no ordering makes them atomic. The argument below still holds, but on the
+> right invariant: the lock counts **parseable verdicts**. An inline annotation carries
+> finding text and no `brain-review/N` block, so `parseVerdict` returns null on it and
+> `cold-boot.mjs`'s `.filter(Boolean)` drops it. At most one payload the provider ACCEPTS may carry the
+> verdict body — that is the contract, and it is satisfiable on both providers.
+>
+> GitLab therefore posts the **summary first**: when calls cannot be atomic, the verdict
+> is the one that must already be safe if anything after it fails. GitHub attempts
+> anchored and retries bare, which is the same rule from the other side.
+
+### The original argument (D1 is why) — the anti-loop lock is untouched, and D1 is why
 
 `poster.mjs` locks on `lastVerdict.author === reviewerHandle && lastVerdict.head_sha ===
 headSha`, computed from `priorVerdicts` before any vcs call. Inline comments are
@@ -137,16 +192,33 @@ the subject, not a line item inside a feature.
    comment; the same finding without them produces none. Forced by
    `vcs.contract.test.mjs` so a provider cannot silently no-op.
 2. **The fallback, per D3**: a comment targeting a line outside the diff must leave the
-   summary posted and the finding folded in, with the count reported. Proven by making
+   summary posted — body re-sent BYTE-IDENTICAL, the findings already in it — with the
+   count reported. Round 6 corrected "folded back into" in D3 and in the signed ADR and
+   left this copy standing 110 lines further down in the same file (round 8, E2). There is
+   no fold operation: the summary block is built before any anchor is derived. Proven by making
    the stub reject the inline payload — the failure path is the deliverable, not an edge
    case.
 3. **Lock 2 stays structural**: mutating `comments` into the payload must not create a
-   path where `event` is anything but `COMMENT`. Grep-level and test-level.
+   path where `event` is anything but `COMMENT`. Grep-level and test-level, **on every
+   payload the verb sends**.
+   Written correctly and satisfied incompletely twice, both blockers. The verb builds
+   THREE `event`-carrying payloads — the ternary's two branches and the retry — where
+   `main` built one. Round 8 found the retry uncovered (its fixture always succeeded);
+   round 9 found the ternary's bare branch uncovered, which is the ONLY site a production
+   run reaches, since no evaluator anchors. Neither level saw either: the grep finds no
+   literal because a mutated `event` is a variable, and the behavioural case only exercised
+   the paths its fixtures produced. The case now drives both call shapes — anchored (with
+   the anchor refused, so the retry fires) and bare — and asserts across every payload.
 4. **The anti-loop lock**: a run that posts inline comments must still skip on the
    second invocation at the same head.
 5. **E2E on #409's harness** (`test/review-regulated/`), whose README already names this
    change: assert the captured `POST …/reviews` payload's `comments` array — the stub
-   captures the full body verbatim, so no harness change is needed to see it.
+   captures the full body verbatim. **The 'no harness change is needed' half was
+   wrong** — REQ-405-8 records the falsification: no evaluator anchors, so a CLI run
+   cannot produce the payload this line assumed, and the harness gained an
+   inline-refusing mode (`GH_STUB_REJECT_INLINE`) to exercise the fallback against the
+   real binary. Corrected here in round 2 of the cold review (E-6); the spec had
+   carried the correction for two commits while the design still asserted the claim.
 
 Every mutation's diff is printed before its run. Four substitutions silently failed to
 match during PR #478 and produced meaningless greens; the discipline is load-bearing.

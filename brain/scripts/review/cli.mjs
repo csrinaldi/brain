@@ -301,11 +301,34 @@ export async function main(deps = {}) {
     renderedBody: rendered,
     reviewerHandle: identity.handle,
     priorVerdicts: boot.doctrine.priorVerdicts,
+    // #405: the BUILT verdict's `findings`, and DELIBERATELY not its `follow_ups`.
+    //
+    // Two exclusions, and they have different reasons. Evidence-less findings are
+    // dropped by `buildVerdict` and never appear in the block at all, so anchoring
+    // one would put text on the diff that the posted verdict does not support.
+    //
+    // `follow_ups` is the harder case, because those findings ARE in the block —
+    // the round-4 cold review found this comment claiming otherwise. They are
+    // excluded on their own merit: a follow-up is `pre-existing` or `base-only`,
+    // which is precisely the claim that it is NOT this change's doing. Anchoring
+    // one would put a comment on a line in THIS author's diff about a defect the
+    // verdict itself says they did not introduce — the causal-admission rule
+    // (reviewer-protocol §6.2) inverted at the point where a human reads it.
+    // They stay in the summary block, where the annotation that makes them
+    // non-blocking travels with them.
+    findings: verdict.findings,
     escalate: verdict.escalate,
     deps: posterDeps,
   });
 
   if (postResult.skipped) log(`brain:review: ${postResult.skipped} — nothing posted.`);
+  // REQ-405-4: the count has to reach a READER, not just the caller. An anchor
+  // that is dropped, counted, and then never printed is the same silence the
+  // requirement exists to break — the run would look identical to one that had
+  // nothing to anchor in the first place.
+  if (postResult.inlineDropped) {
+    log(`brain:review: ${postResult.inlineDropped} inline comment(s) could not be anchored — the finding text is in the summary block above.`);
+  }
 
   return 0;
 }

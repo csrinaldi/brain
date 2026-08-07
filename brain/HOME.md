@@ -66,13 +66,14 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0016](project/decisions/adr-0016-ci-context-normalization.md) — CI Context Normalization: One Seam Over Provider-Specific Pipeline Evidence
 - [ADR-0017](project/decisions/adr-0017-memory-format-owned-by-brain.md) — The Durable Memory Record Format Is Owned By Brain, Not By Engram
 - [ADR-0019](project/decisions/adr-0019-harness-port.md) — The SDD_HARNESS port: four environment surfaces, artifacts neutral by design
-- [ADR-0020](project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md) — External-reviewer VCS port verbs + the reviewActors/approvalActors two-key split (**Amendment 1, 06/08/2026** — `prReviewComment` carries optional inline `comments[]` in the same call; verb count and lock 2 unchanged, #405)
+- [ADR-0020](project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md) — External-reviewer VCS port verbs + the reviewActors/approvalActors two-key split (**Amendment 1, 06/08/2026; Amendment 2, 07/08/2026** — `prReviewComment` carries optional inline `comments[]`; at most ONE payload the provider accepts carries the verdict, but GitLab needs N+1 calls — verb count and lock 2 unchanged, #405)
 - [ADR-0021](project/decisions/adr-0021-reviewer-port-head-and-rollup.md) — Widen the VCS port for the cold reviewer: headRefOid on prView + a prStatusRollup read verb; retire the H1-1 cold-boot seam
 - [ADR-0022](project/decisions/adr-0022-reviewer-port-base.md) — Widen the VCS port for the cold reviewer: baseRefOid on prView (closes H1-2C-BASE)
 - [ADR-0024](project/decisions/adr-0024-three-axis-decoupling.md) — Three-axis decoupling: AGENT_PLATFORM · SDD_ENGINE · MEMORY_BACKEND (extends ADR-0005/0019; trims the phantom platform allow-list)
 - [ADR-0025](project/decisions/adr-0025-release-audit-gate-ordering.md) — Release Audit Gate Ordering and Substrate Enforcement
 - [ADR-0026](project/decisions/adr-0026-governance-doctrine-tiers.md) — Governance doctrine tiers: a declared lite/standard/regulated axis orthogonal to the detected substrate ladder (amends ADR-0015 REQ-L4-2/L5-1/L6-1; resolves #329; **Amendment 1, 04/08/2026** — at `lite`, distinct-act re-arms only on foreign commits, #418)
 - [ADR-0027](project/decisions/adr-0027-upgrade-rollback-is-restorable-not-atomic.md) — `brain:upgrade` rollback is restorable, not atomic: restates #396's exit criterion from whole-tree byte-identity to restorability of the managed-path copy, names each residual gap instead of implying coverage, and (Decision #3, amended 03/08/2026) refuses only what cannot be rolled back — writes resolving outside the repo — rather than every symlink
+- [ADR-0028](project/decisions/adr-0028-brain-promote-read-confirm-stage.md) — `brain:promote` is read-confirm-stage: the mechanics are automated, the signature is not
 
 ### Project-specific rules
 

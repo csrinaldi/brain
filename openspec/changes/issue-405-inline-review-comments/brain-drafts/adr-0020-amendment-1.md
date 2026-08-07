@@ -1,5 +1,20 @@
 # DRAFT — Amendment 1 to ADR-0020 (issue #405)
 
+> ## ⛔ PROMOTED, AND SUPERSEDED — do not promote this file
+>
+> Signed 06/08/2026 and merged in `697bbf3`. Two of its sentences were then falsified by
+> the GitLab implementation — inline comments do **not** post "in the same provider call",
+> and there **is** more than one postable artifact: GitLab makes 4 calls and 3 artifacts,
+> because discussions are one-per-position.
+>
+> The correction is `adr-0020-amendment-2.md` in this folder (issue **#491**).
+>
+> Nothing below is edited. A signed decision rewritten in place erases the fact that it was
+> ever believed, and the value of this file now is that it records exactly what was signed.
+> The banner is at the TOP because the instruction block immediately below it still tells a
+> reader to promote this text (round-2 cold review, E-5: a warning underneath the thing it
+> warns about is read after the damage).
+
 > **Tier-2 draft.** `brain/**` is human-only. This is the text to append to
 > `brain/project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md`,
 > immediately before its `## References` section. The agent must not write that file.
@@ -25,6 +40,7 @@ themselves. The milestone does not hold.
 | `prReviewComment({ project, number, body, comments? })` | `event: 'COMMENT'` **hardcoded** — no APPROVE code path exists. `comments` is OPTIONAL: an array of `{ path, line, body }` posted as line-anchored review comments **in the same provider call** as `body`. |
 
 The verb **count stays four**. No new verb, no new event, no second postable artifact.
+
 
 ### Why widening rather than a fifth verb
 

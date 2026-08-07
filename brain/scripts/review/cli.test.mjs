@@ -5,8 +5,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { parseArgs, main } from './cli.mjs';
+import { postVerdict } from './poster.mjs';
+import { buildVerdict, renderVerdict } from './verdict.mjs';
 import { REQUIRED_JOBS } from '../vcs/governance-checks.mjs';
 
 const HEAD = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
@@ -491,4 +495,164 @@ test('main: self-review abstains, exits 0, posts nothing', async () => {
   assert.equal(code, 0);
   assert.ok(lines.some(l => /abstain/i.test(l)));
   assert.deepEqual(vcs.calls, { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 });
+});
+
+// ── #405: the CLI hands the BUILT verdict's findings to the poster ───────────
+
+test('#405: the poster receives the verdict findings, and the inline path stays silent while no evaluator anchors', async () => {
+  // The behavioural half of the wiring, at the level a test can reach today.
+  // `deriveInlineComments` and every layer below it are proven by poster.test,
+  // the contract suite and the e2e; what this pins is that the CLI's payload
+  // reaches the verb unchanged while findings carry no anchor — no stray
+  // `comments` key, and the run's own output makes no dropped-anchor claim.
+  const seen = [];
+  const vcs = spyVcs();
+  const lines = [];
+  const deps = readyDeps({ vcs });
+  deps.trancheDeps.fetchRollup = async () =>
+    REQUIRED_JOBS.map(name => ({ name, status: 'COMPLETED', conclusion: name === 'phase-order' ? 'FAILURE' : 'SUCCESS' }));
+  const code = await main({
+    argv: ['--pr', '42'],
+    log: (s) => lines.push(s),
+    ...deps,
+    posterDeps: { getVcs: async () => ({ ...vcs, prReviewComment: async (a) => { seen.push(a); return { url: 'u' }; } }) },
+  });
+  assert.equal(code, 0);
+  assert.equal(seen.length, 1, 'one payload, carrying the verdict body');
+  assert.match(seen[0].body, /gate:phase-order/, 'the finding really is in the posted block — otherwise the check below is vacuous');
+  assert.equal('comments' in seen[0], false,
+    `no evaluator anchors today, so no inline request may be made: ${JSON.stringify(Object.keys(seen[0]))}`);
+  assert.ok(!lines.some(l => /could not be anchored/.test(l)),
+    'and a run that never attempted an anchor must not report a dropped one');
+});
+
+test('#405: an anchored FOLLOW-UP renders but is never posted inline (REQ-405-2)', async () => {
+  // The renderer emits `file`/`line` in BOTH branches; the poster receives only
+  // `findings`. That asymmetry was real, deliberate and undocumented until the
+  // round-4 cold review — and the Tier-2 draft about to become schema authority
+  // asserted the opposite of it.
+  //
+  // The rule: a follow-up is `pre-existing` or `base-only`, which IS the verdict's
+  // own statement that it is not this change's doing. Anchoring one would put a
+  // comment on a line in this author's diff about a defect the same verdict says
+  // they did not introduce.
+  //
+  // Pinned HERE rather than through `main()`: no evaluator emits an anchor or a
+  // `pre-existing` disposition, so a CLI run cannot reach this state at all. The
+  // CLI's half of the link is the drift guard below, which reds when
+  // `findings: verdict.findings` becomes anything else — including
+  // `[...findings, ...follow_ups]`, verified.
+  const v = buildVerdict({
+    headSha: HEAD,
+    conclusion: 'REVISE',
+    protocol: 'brain-review/2',
+    findings: [{ id: 'inherited', severity: 'blocker', evidence: 'e', cites: 'c',
+                 causal_disposition: 'pre-existing', file: 'a.mjs', line: 7 }],
+  });
+  assert.equal(v.follow_ups.length, 1, 'the anchored finding really was routed to follow_ups');
+  assert.equal(v.findings.length, 0, 'and left findings empty — otherwise the check below is vacuous');
+  assert.match(renderVerdict(v), /^ {4}file: a\.mjs$/m,
+    'the anchor IS rendered in the follow_ups block — the two halves genuinely disagree, which is the point');
+
+  const seen = [];
+  await postVerdict({
+    headSha: HEAD, project: 'csrinaldi/brain', number: 42, provider: 'github', mode: 'tranche',
+    renderedBody: renderVerdict(v), reviewerHandle: 'brain-reviewer', priorVerdicts: [],
+    findings: v.findings,
+    deps: { getVcs: async () => ({
+      prView: async () => ({ headRefOid: HEAD }),
+      prReviewComment: async (a) => { seen.push(a); return { url: 'u' }; },
+    }) },
+  });
+  assert.equal('comments' in seen[0], false,
+    `a rendered follow-up anchor must not become an inline comment: ${JSON.stringify(Object.keys(seen[0]))}`);
+});
+
+test('#405: a dropped anchor is PRINTED, not just returned (REQ-405-4)', async () => {
+  // The count reaching `postResult` is not the requirement — a reader seeing it
+  // is. Without this line the run's output is identical whether every anchor was
+  // refused or none was ever attempted, which is the exact silence REQ-405-4
+  // exists to break, relocated one layer up from the poster.
+  const vcs = spyVcs();
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42'],
+    log: (s) => lines.push(s),
+    ...readyDeps({ vcs }),
+    posterDeps: { getVcs: async () => ({ ...vcs, prReviewComment: async () => ({ url: 'u', inlineDropped: 2 }) }) },
+  });
+  assert.equal(code, 0, 'a refused anchor must never fail the run');
+  const reported = lines.filter(l => /could not be anchored/.test(l));
+  assert.equal(reported.length, 1, `the count must be printed exactly once — got: ${JSON.stringify(lines)}`);
+  // The WHOLE line, not a projection over it (round-18 cold review). `match(/\b2\b/)`
+  // plus the filter regex pinned that a number and the phrase "could not be anchored"
+  // are present; everything between them was free. Degrading the message to
+  // `brain:review: 2 could not be anchored` left the suite green, and that message is
+  // the failure REQ-405-4 cites by name: a reader told two things were lost, and not
+  // told WHAT was lost or that the text survives in the summary block, concludes the
+  // findings are gone. That is `evidence-reader-empty-on-failure` at the recovery
+  // instruction instead of at the evidence.
+  // An exact-string assertion is deliberate: rewording this message is a real change
+  // to what a human is told on the one path where the tool has already failed at
+  // something, and it should cost a test edit.
+  assert.strictEqual(reported[0],
+    'brain:review: 2 inline comment(s) could not be anchored — the finding text is in the summary block above.',
+    'the message must name the count, WHAT was lost, and where the text still is');
+});
+
+test('#405: a SINGLE dropped anchor is printed too (REQ-405-4)', async () => {
+  // The only fixture drove `inlineDropped: 2`, so `if (postResult.inlineDropped)`
+  // could become `> 1` and ship silently (round-16 cold review). One lost anchor
+  // is the commonest real loss — an anchor on a context line — and it is exactly
+  // the case where a silent run is indistinguishable from a healthy one.
+  const vcs = spyVcs();
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42'],
+    log: (s) => lines.push(s),
+    ...readyDeps({ vcs }),
+    posterDeps: { getVcs: async () => ({ ...vcs, prReviewComment: async () => ({ url: 'u', inlineDropped: 1 }) }) },
+  });
+  assert.equal(code, 0);
+  const reported = lines.filter(l => /could not be anchored/.test(l));
+  assert.equal(reported.length, 1, `one lost anchor must still be reported — got: ${JSON.stringify(lines)}`);
+  // The WHOLE line here too (round-19 cold review). Round 18 removed this exact
+  // projection from the test three lines above and did not carry it the three
+  // lines down — the correction it made was correct and stopped at the instance
+  // it was pointed at, which is the thing round 18's own lesson had just named.
+  // With only `match(/\b1\b/)` here, the singular case could be special-cased into
+  // its own message and stay green — including
+  // `brain:review: 1 inline comment(s) could not be anchored — no findings were
+  // affected.`, which prints the count and asserts the OPPOSITE of what happened.
+  assert.strictEqual(reported[0],
+    'brain:review: 1 inline comment(s) could not be anchored — the finding text is in the summary block above.',
+    'one lost anchor gets the same message as many — no degraded singular form');
+});
+
+test('#405: the CLI passes `findings` to postVerdict — the one link no seam can observe (drift guard)', () => {
+  // Deliberately a SOURCE assertion, and it is worth saying why rather than
+  // dressing it as behaviour. The anchor originates in an evaluator, and no
+  // evaluator emits `file`/`line` yet (REQ-405-2 made the anchor optional so
+  // they can adopt it one at a time), so there is no injectable seam through
+  // which a test can put an anchored finding into a real `main()` run. The gap
+  // was found the honest way: patching tranche.mjs to anchor its budget finding
+  // left the e2e's posted payload with NO `comments` key, because this argument
+  // was missing — the poster was wired and its caller was not.
+  //
+  // This guard is narrow on purpose: it proves the argument is passed, nothing
+  // about what happens next. Delete it the day an evaluator anchors — at that
+  // point the e2e tripwire becomes a real behavioural test of the same link.
+  const src = readFileSync(fileURLToPath(new URL('./cli.mjs', import.meta.url)), 'utf8');
+  const call = src.slice(src.indexOf('await postVerdict({'));
+  // Anchored to the WHOLE property, not a substring of it. The first version
+  // matched /findings: verdict\.findings/, which `verdict.findings.concat(
+  // verdict.follow_ups)` satisfies — so the guard was green for the exact
+  // population it names as forbidden, and the spec and the task list both said it
+  // had been verified against that population (round-6 cold review, finding 1).
+  // A substring match on a source guard is not a guard: it constrains a prefix.
+  assert.match(call.slice(0, call.indexOf('});')), /^ *findings: verdict\.findings,$/m,
+    'cli.mjs must hand the BUILT verdict\'s `findings` to the poster — EXACTLY that list. The evaluator\'s own ' +
+    'is the wrong population (buildVerdict drops evidence-less findings), and so is findings+follow_ups: a ' +
+    'follow-up is pre-existing/base-only, so anchoring one would comment on this author\'s diff about a defect ' +
+    'the same verdict says they did not introduce. Both wrong populations red this guard.');
 });
