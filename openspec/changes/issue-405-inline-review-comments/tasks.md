@@ -995,13 +995,31 @@ of the one that outranks them.
         round 24 caught round 23's strike. A streak claim about the very pattern "the count
         goes stale between rounds", going stale between rounds.
         This is the fourth ordinal struck since round 23, so the remedy is applied at the
-        level of the rule rather than the instance: **the ledger no longer carries counts of
-        rounds anywhere. It enumerates.** Numbers that are measured once and never re-derived
-        — the test count, the governed diff, the axis list — stay; numbers that grow with the
-        review do not. Re-swept afterwards for every ordinal spelling: what remains is round
-        12's, round 16's and round 19's local streak counts, each verified correct against
-        the entries it refers to, and three quotations of the defect.
-- [ ] T16 · round 26 — the axis has failed at rounds 1 and 11 only. Two consecutive rounds
+        level of the rule rather than the instance: **no NEW entry carries a count of rounds
+        — it enumerates.** Numbers measured once and never re-derived (the test count, the
+        governed diff, the axis list) stay; numbers that grow with the review do not.
+        Re-swept afterwards for every ordinal spelling: what remains is rounds 12, 16 and
+        19's local streak counts, each closed at the time and each verified correct against
+        the entries it refers to, plus three quotations of the defect.
+        (This paragraph first read *"the ledger no longer carries counts of rounds anywhere"*
+        and then listed three it still carries — round-26 cold review, C1. Corrected to the
+        rule that was actually adopted.)
+- [x] T16 · round 26 — cold review of `61d30d0`. **No blocker, no defect in executable
+      behaviour, TWO corrections**, both in round 25's entry.
+      - **C1 — the paragraph contradicted itself in three sentences.** It declared *"the
+        ledger no longer carries counts of rounds anywhere"* and then listed three it still
+        carries. Round 13's B4 shape exactly ("the cascade covers three paragraphs" followed
+        by four). Corrected to the rule actually adopted: no NEW entry carries a count.
+      - **C2 — round 21's own rule was broken at round 25.** The rule is that the PR body and
+        the ledger entry describing it land in one edit or neither does. Round 25 committed
+        the entry and left the body at round 24. Applied here for both.
+      **Entries from here are terse by construction.** Rounds 21-26 produced seven
+      corrections and every one is in this ledger or the PR body; none is in the code. The
+      generator is visible in that sentence: each round writes a paragraph of narration, and
+      the paragraph becomes the next round's finding. The change is not getting less correct
+      — the record is getting longer. So the narration stops: a round records commit, verdict,
+      findings, evidence. Nothing else.
+- [ ] T16 · round 27 — the axis has failed at rounds 1 and 11 only. Two consecutive rounds
       with nothing at blocker or correction severity close this.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
