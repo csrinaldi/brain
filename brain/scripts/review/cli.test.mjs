@@ -616,7 +616,17 @@ test('#405: a SINGLE dropped anchor is printed too (REQ-405-4)', async () => {
   assert.equal(code, 0);
   const reported = lines.filter(l => /could not be anchored/.test(l));
   assert.equal(reported.length, 1, `one lost anchor must still be reported — got: ${JSON.stringify(lines)}`);
-  assert.match(reported[0], /\b1\b/);
+  // The WHOLE line here too (round-19 cold review). Round 18 removed this exact
+  // projection from the test three lines above and did not carry it the three
+  // lines down — the correction it made was correct and stopped at the instance
+  // it was pointed at, which is the thing round 18's own lesson had just named.
+  // With only `match(/\b1\b/)` here, the singular case could be special-cased into
+  // its own message and stay green — including
+  // `brain:review: 1 inline comment(s) could not be anchored — no findings were
+  // affected.`, which prints the count and asserts the OPPOSITE of what happened.
+  assert.strictEqual(reported[0],
+    'brain:review: 1 inline comment(s) could not be anchored — the finding text is in the summary block above.',
+    'one lost anchor gets the same message as many — no degraded singular form');
 });
 
 test('#405: the CLI passes `findings` to postVerdict — the one link no seam can observe (drift guard)', () => {

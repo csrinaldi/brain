@@ -810,10 +810,12 @@ of the one that outranks them.
       axes have been found since it was promoted — FAILURE VALUE CLASS (14), CALL-SITE
       DIMENSION (14/15), SUBSET-VS-TOTAL (15), CARDINALITY/CORRESPONDENCE (16). That doc is
       Tier 2 and on `main`; folding them back is a human promotion, drafted once this
-      settles rather than piecemeal. Round 17 adds a fifth candidate that is not an axis but
-      a rule about axes: **the round that names a failure mode is not thereby immune to it** —
-      a diagnosis has to be swept for across the tree, including the test of the function the
-      diagnosis was about.
+      settles rather than piecemeal. Rounds 17-19 add a fifth item that is not an axis but a
+      rule about repairs, and each round strengthened it: **a repair must be applied by
+      SEARCH, and the search recorded, or the next round finds the sibling.** Three rounds
+      running, each one's correction was the previous one's repair stopping at the instance
+      the reviewer had pointed at — 17 caught 16's, 18 caught 17's, 19 caught 18's, and 19's
+      gap was three lines below 18's fix in the same file.
 - [x] T16 · round 18 — cold review of `a03a63e`. **No blocker, no defect in executable
       behaviour (sixth consecutive), no false claim, ONE correction.** Streak stays at zero.
       Round 17's lesson applied as the round's method: sweep the diagnosis rather than the
@@ -840,9 +842,32 @@ of the one that outranks them.
       Round 18 says the same thing about the *repair*: fixing the instance the reviewer
       pointed at is not the same as sweeping the class. The correction round 17 made was
       correct and incomplete, and the incompleteness was one `grep` away.
-- [ ] T16 · round 19 — six rounds now with no defect in executable behaviour. Round 18 was
-      a single correction, on a test assertion rather than on shipped code. Two consecutive
-      rounds with nothing at blocker or correction severity close this.
+- [x] T16 · round 19 — cold review of `5109b7d`. **No blocker, no defect in executable
+      behaviour (seventh consecutive), no false claim, ONE correction.** Streak stays at zero.
+      - **C1 — round 18's sweep stopped three lines short of itself.** Round 18's whole
+        lesson was "fixing the instance is not sweeping the class", and it removed the
+        `assert.match(reported[0], /\b2\b/)` projection from one CLI test while the
+        identical `assert.match(reported[0], /\b1\b/)` sat in the very next test in the same
+        file. Both green: the singular case can be special-cased into its own message —
+        including `1 inline comment(s) could not be anchored — no findings were affected.`,
+        which prints the count and asserts the **opposite** of what happened — and the suite
+        never notices. Fixed with the same whole-line `strictEqual`. Two mutations, two reds.
+        Swept the rest of the diff for the class rather than eyeballing it: the remaining
+        `assert.match` on a comment body (`poster.test.mjs`, the id+evidence case) and the
+        e2e's `comments[0].body` are both N=1 fixtures whose correspondence is pinned at the
+        contract layer by round 16's full-triple list — verified by mutation, not assumed.
+      **The lesson, third round running and now unmistakable:** the reviewer's finding names
+      a location; the class it belongs to is always larger, and the round that repairs it is
+      not exempt from it. Rounds 17, 18 and 19 each caught the previous round's repair
+      leaving one sibling untouched — 17 caught 16's, 18 caught 17's, 19 caught 18's, and
+      each gap was one `grep` from the fix. That is the fifth item owed to the anti-pattern,
+      and it is a stronger claim than the one drafted after round 17: not merely "the round
+      that names a failure mode is not immune to it", but **a repair must be applied by
+      search, and the search recorded, or the next round will find the sibling.**
+- [ ] T16 · round 20 — seven rounds with no defect in executable behaviour; the last three
+      findings are all one class (an assertion that projects instead of pinning a whole
+      value), each found in the previous round's repair. Two consecutive rounds with nothing
+      at blocker or correction severity close this.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.
