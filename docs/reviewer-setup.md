@@ -46,9 +46,11 @@ npm run brain:review -- --pr <n>
 
 `BRAIN_REVIEWER_TOKEN` is a **gate-only** credential today: it never reaches the
 write path. `prReviewComment`
-(`brain/scripts/vcs/providers/github.mjs`) takes `({ project, number, body })` —
-no token parameter — and shells out to `gh api`, which authenticates with
-whatever credentials are ambient.
+(`brain/scripts/vcs/providers/github.mjs`) takes
+`({ project, number, body, comments? })` — no token parameter — and shells out to
+`gh api`, which authenticates with whatever credentials are ambient. (`comments`
+was added by #405 for inline anchors; it changes nothing about the credential,
+which is the point of this section.)
 
 So if you export only `BRAIN_REVIEWER_TOKEN`:
 

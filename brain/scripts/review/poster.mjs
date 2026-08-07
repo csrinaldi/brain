@@ -32,9 +32,43 @@
 
 import { getVcs } from '../vcs/cli.mjs';
 import { guardedLabelAdd } from './deny-set.mjs';
+import { hasUsableAnchor } from './verdict.mjs';
 
 const STALE_LABEL = 'reviewed:stale';
 const ESCALATION_LABEL = 'needs-decision';
+
+/**
+ * Derives the provider-neutral inline comments from a verdict's findings
+ * (issue #405, REQ-405-2). PURE — no I/O, no provider shape beyond the three
+ * fields the contract names.
+ *
+ * A finding yields a comment only when it carries a non-empty `file` AND a `line`
+ * that coerces to a POSITIVE INTEGER. A half anchor is not an anchor: GitHub 422s
+ * a comment with no line, so passing one would spend the un-anchorable fallback on
+ * a finding already known not to attach — and the dropped-count would then report
+ * a defect of ours as a defect of the diff.
+ *
+ * "Positive integer" rather than "present" is the round-10 correction. Presence was
+ * all the guard checked, so `line: 'abc'` went out as `line: null` and `line: ''`
+ * as `line: 0` — diff lines are 1-based, so both are anchors already known not to
+ * attach, which is the exact cost this guard's own contract says it avoids. The
+ * coercion is the same one the value needs anyway: `parseVerdict` returns entry
+ * scalars as text, so a round-tripped `line` arrives as `'42'`.
+ *
+ * Returns `[]` when nothing is anchored. The VERB is what decides that an empty
+ * array means "no inline requested"; this function does not fabricate a request.
+ *
+ * @param {Array<{id?:string, evidence?:string, file?:string, line?:number}>} findings
+ * @returns {Array<{path:string, line:number, body:string}>}
+ */
+export function deriveInlineComments(findings = []) {
+  const out = [];
+  for (const f of findings ?? []) {
+    if (!hasUsableAnchor(f)) continue;
+    out.push({ path: f.file, line: Number(f.line), body: `${f.id ? `**${f.id}** — ` : ''}${f.evidence ?? ''}` });
+  }
+  return out;
+}
 
 /**
  * @param {object} args
@@ -50,8 +84,13 @@ const ESCALATION_LABEL = 'needs-decision';
  * @param {'human'|null} [args.escalate]
  *   The verdict's own `escalate` field (`buildVerdict`'s output, verdict.mjs). When `'human'` AND the
  *   post actually lands, `needs-decision` is applied (escalation inbox, H1-5b).
+ * @param {Array<object>} [args.findings]
+ *   The BUILT verdict's findings (issue #405) — the population the rendered body actually claims,
+ *   not the evaluator's. Ones carrying `file`+`line` become inline comments on the PR path only.
  * @param {{ getVcs?: Function, reResolveHead?: Function }} [args.deps]
- * @returns {Promise<{ posted: true, result: object } | { posted: false, skipped: 'anti-loop'|'anti-stale' }>}
+ * @returns {Promise<{ posted: true, result: object, inlineDropped?: number }
+ *   | { posted: false, skipped: 'anti-loop'|'anti-stale' }>}
+ *   `inlineDropped` is ABSENT when no anchor was lost, never 0.
  */
 export async function postVerdict({
   headSha,
@@ -62,6 +101,7 @@ export async function postVerdict({
   renderedBody,
   reviewerHandle,
   priorVerdicts = [],
+  findings = [],
   escalate = null,
   deps = {},
 } = {}) {
@@ -91,8 +131,16 @@ export async function postVerdict({
   // R1: mode === 'ruling' → issueComment (rulings post on the issue thread);
   // every other mode → prReviewComment. Neither verb has an APPROVE state —
   // `prReviewComment` hardcodes `event: 'COMMENT'` on both providers.
+  // #405: anchored findings ride the SAME call as the body on the PR path.
+  // `issueComment` (rulings) has no inline surface, so nothing is passed there —
+  // a silently-ignored argument is worse than an absent one.
   const postFn = mode === 'ruling' ? vcs.issueComment : vcs.prReviewComment;
-  const result = await postFn({ project, number, body: renderedBody });
+  const comments = mode === 'ruling' ? [] : deriveInlineComments(findings);
+  const result = await postFn(
+    comments.length > 0
+      ? { project, number, body: renderedBody, comments }
+      : { project, number, body: renderedBody },
+  );
 
   // Escalation inbox, post half: only reachable once the verdict actually
   // landed at this head (past both anti-stale and anti-loop) — an unposted
@@ -101,5 +149,10 @@ export async function postVerdict({
     await guardedLabelAdd(vcs, { project, number, labels: [ESCALATION_LABEL] });
   }
 
-  return { posted: true, result };
+  // REQ-405-4: surface the dropped-anchor count to the caller. ABSENT when
+  // nothing was dropped, never 0 — the poster must not turn the verb's honest
+  // distinction into "no inline comments appeared" one layer up.
+  return result?.inlineDropped
+    ? { posted: true, result, inlineDropped: result.inlineDropped }
+    : { posted: true, result };
 }

@@ -428,21 +428,72 @@ export async function prCommits({ project, number } = {}) {
  * is HARDCODED to `'COMMENT'` — no parameter, flag, or branch selects a
  * different review event (lock 2, REQ-266-3). Never throws.
  *
- * @param {{ project: string, number: number, body: string }} opts
- * @returns {Promise<{ url: string } | { url: null, error: string }>}
+ * `comments` (issue #405) is an optional array of `{ path, line, body }` inline
+ * anchors riding the SAME `/reviews` payload as `body`, so the review stays
+ * atomic. Absent and empty are the SAME request — no inline is attempted. A
+ * refused anchored payload is retried ONCE bare, and `inlineDropped` then counts
+ * what was lost; it is ABSENT when nothing was, never 0. Widening this signature
+ * does not widen `event`: there is no parameter for it, and a contract test
+ * asserts that ALL THREE payload sites — the ternary's anchored branch, its bare
+ * branch, and the retry — still carry `COMMENT` when a caller passes a hostile
+ * `event` argument. Three, and counting them took two review rounds: `main` had
+ * ONE site, this function now builds three, and the ternary reads as one. Round 8
+ * covered sites 1 and 3 and called it "both"; round 9 found site 2 open — the
+ * only one a production run reaches today, since no evaluator anchors.
+ *
+ * @param {{ project: string, number: number, body: string, comments?: Array<{path: string, line: number, body: string}> }} opts
+ * @returns {Promise<{ url: string } | { url: string, inlineDropped: number } | { url: null, error: string }>}
  */
-export async function prReviewComment({ project, number, body } = {}) {
-  const r = run(
-    'gh',
-    ['api', '-X', 'POST', `repos/${project}/pulls/${number}/reviews`, '--input', '-'],
-    { input: JSON.stringify({ body, event: 'COMMENT' }) },
-  );
-  if (!r.ok) return { url: null, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
-  try {
-    return { url: JSON.parse(r.stdout).html_url };
-  } catch (err) {
-    return { url: null, error: err.message };
+export async function prReviewComment({ project, number, body, comments } = {}) {
+  const args = ['api', '-X', 'POST', `repos/${project}/pulls/${number}/reviews`, '--input', '-'];
+  const post = (payload) => run('gh', args, { input: JSON.stringify(payload) });
+  const parse = (r, extra) => {
+    try {
+      return { url: JSON.parse(r.stdout).html_url, ...extra };
+    } catch (err) {
+      return { url: null, error: err.message };
+    }
+  };
+
+  const inline = Array.isArray(comments) && comments.length > 0 ? comments : null;
+
+  // `comments` rides the SAME payload as `body` and `event` — one call, so the
+  // review is atomic and no second postable artifact exists for the anti-loop
+  // lock to miss (ADR-0020 Amendment 1, #405 design D1/D5).
+  const first = post(inline ? { body, event: 'COMMENT', comments: inline } : { body, event: 'COMMENT' });
+  if (first.ok) return parse(first);
+
+  // REQ-405-4 — the verdict is never lost to an inline failure. GitHub 422s a
+  // comment targeting a line outside the diff; the summary alone would have been
+  // accepted. Retry WITHOUT the anchors and report how many were dropped.
+  //
+  // Only reachable when anchors were sent, so a plain post failure costs no extra
+  // call.
+  //
+  // The ATTRIBUTION is not certain, and an earlier version of this comment claimed
+  // it was ("the retry differs in exactly one way, so if dropping the comments
+  // makes it succeed, the comments were the cause"). The retry fires on ANY
+  // non-zero first exit, so a transient 5xx that clears by the second attempt is
+  // reported as dropped anchors — the CLI then prints "could not be anchored",
+  // charging a network blip to the diff. Round-2 cold review, E-3.
+  //
+  // Retrying anyway is the deliberate trade: gating on a 422-shaped stderr would
+  // make a transient failure lose the VERDICT, and REQ-405-4 ranks the verdict
+  // above the annotation. What is fixed here is the CLAIM, not the behaviour — an
+  // over-count of dropped anchors costs a confusing line in a log; a lost verdict
+  // costs the review. (A first call that landed server-side but exited non-zero
+  // would post the verdict twice; that is the anti-loop lock's problem and needs
+  // provider idempotency this port does not have.)
+  //
+  // `inlineDropped` is ABSENT when nothing was dropped, never 0 — "none
+  // requested" and "all dropped" must not be the same answer to a reader
+  // (evidence-reader-empty-on-failure, applied to a poster).
+  if (inline) {
+    const retry = post({ body, event: 'COMMENT' });
+    if (retry.ok) return parse(retry, { inlineDropped: inline.length });
   }
+
+  return { url: null, error: first.stderr.trim() || `gh api failed (status ${first.status})` };
 }
 
 /**
