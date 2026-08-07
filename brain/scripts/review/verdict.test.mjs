@@ -12,7 +12,7 @@ const HEAD_SHA = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
 
 // ── evidence gate ─────────────────────────────────────────────────────────
 
-test('#490/round-8 E1: a null `line` is OMITTED from the block, in BOTH branches (REQ-405-2)', () => {
+test('#490/round-8 E1 (widened round 13): an UNUSABLE anchor is omitted from the block — every value class, BOTH branches (REQ-405-2)', () => {
   // Round 7 pinned the poster's `line === null` guard and justified it with
   // "renderVerdict, which guards both, omits line: from the block". That twin
   // guard was itself pinned by nothing: dropping `!== null` from either branch
@@ -35,13 +35,36 @@ test('#490/round-8 E1: a null `line` is OMITTED from the block, in BOTH branches
       // whole suite green. An empty `file:` in the block is the same defect the
       // `line` rule exists to prevent, one field over: the block advertising an
       // anchor that cannot attach.
-      { id: 'empty-path', severity: 'blocker', evidence: 'e', cites: 'c', file: '', line: null },
+      { id: 'null-line', severity: 'blocker', evidence: 'e', cites: 'c', file: 'a.mjs', line: null },
+      { id: 'null-line-deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'base-only', file: 'b.mjs', line: null },
+      // The empty path carries a PERFECTLY USABLE line, deliberately. With
+      // `line: null` the line check excludes it and the path check is never
+      // consulted — so dropping `Boolean(f?.file)` from the predicate survived
+      // (round 13's own first repair was green under exactly that mutation). A
+      // negative fixture has to fail for the reason under test and no other.
+      { id: 'empty-path', severity: 'blocker', evidence: 'e', cites: 'c', file: '', line: 12 },
       { id: 'empty-path-deferred', severity: 'blocker', evidence: 'e', cites: 'c',
-        causal_disposition: 'base-only', file: '', line: null },
+        causal_disposition: 'base-only', file: '', line: 12 },
+      // Every value class `verdict.mjs`'s own JSDoc and the Tier-2 draft enumerate,
+      // on BOTH branches. Round 12 fixed per-BRANCH blindness and left per-VALUE-CLASS
+      // blindness: its new case drives one positive value per branch, and the
+      // negative side was covered only by `null` (→0) and a poison string (→NaN).
+      // Relaxing the predicate to `Number(f?.line) > 0` — which still rejects both
+      // of those — let `2.5` and `-3` render on both branches with the suite green.
+      { id: 'fractional', severity: 'blocker', evidence: 'e', cites: 'c', file: 'c.mjs', line: 2.5 },
+      { id: 'fractional-deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'base-only', file: 'c.mjs', line: 2.5 },
+      { id: 'negative', severity: 'blocker', evidence: 'e', cites: 'c', file: 'd.mjs', line: -3 },
+      { id: 'negative-deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'base-only', file: 'd.mjs', line: -3 },
+      { id: 'trailing-junk', severity: 'blocker', evidence: 'e', cites: 'c', file: 'e.mjs', line: '42abc' },
+      { id: 'trailing-junk-deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'base-only', file: 'e.mjs', line: '42abc' },
     ],
   });
-  assert.equal(v.findings.length, 2, 'two findings in each branch — otherwise a branch goes unchecked');
-  assert.equal(v.follow_ups.length, 2);
+  assert.equal(v.findings.length, 6, 'every value class present in each branch — otherwise a class goes unchecked');
+  assert.equal(v.follow_ups.length, 6);
   const body = renderVerdict(v);
   // BOTH-OR-NEITHER, tightened in round 11. The earlier version asserted that the
   // `file` half "still renders" when `line` is null — which left the block

@@ -642,10 +642,51 @@ of the one that outranks them.
         understated — the property round 10's E2 identified as why such a number survives,
         reproduced two rounds later in the line that cites it.
       Corrected: rounds 1-11 answered YES on **3, 2, 2, 1, 1, 2, 2, 2, 2, 2 and 3** axes.
-- [ ] T16 · round 13 — rounds 1-12 answered YES on 3, 2, 2, 1, 1, 2, 2, 2, 2, 2, 3 and 2
-      axes. No round has been clean at any severity. Six rounds running with no behavioural
-      defect; the failures are protections and claims, and for three rounds they have been
-      inside the previous round's repair.
+- [x] T16 · round 13 — cold review of `f6978ed`, ~40 live mutations, each with an asserted
+      site count and each green re-confirmed against the FULL suite. **No blocker and no
+      defect in executable behaviour** — seventh round. Five findings, and the first is
+      again inside the previous round's repair, for the fourth round running:
+      - **B1 — the usability rule was pinned for 3 of the 5 value classes the change's own
+        JSDoc enumerates.** Round 12 correctly diagnosed "a both-branch mutation cannot find
+        a one-branch gap" and fixed per-BRANCH blindness — with a case driving ONE positive
+        value class per branch. The negative side was covered only by `null` (→0) and a
+        poison string (→NaN), so a PARTIAL re-inline of the predicate — one that still
+        rejects both of those — let `2.5` and `-3` render on both branches with the suite
+        green. Round 12 fixed blindness by branch and left blindness by value class.
+        **My first repair for it was green under R8** (the path check dropped), because the
+        empty-path fixture carried `line: null` — the line check excluded it and the path
+        check was never consulted. A negative fixture has to fail for the reason under test
+        and no other; it now carries `line: 12`. Five mutations, five reds.
+      - **B2 — "Six rounds running with no behavioural defect" contradicted the axis list in
+        its own bullet.** Round 11 is recorded as `3`, which is only reachable if the
+        behavioural axis is one of them — and it is: round 11's C1 says the block "began
+        emitting `line: 0` … now real rather than mutation-only". The streak ending at round
+        12 was ONE. This is round 10's E2 with the sign flipped: that one understated, this
+        one OVERSTATED, which is the harder direction to catch — and it appeared in the
+        successor of the sentence round 10 corrected, in the round written to fix the
+        ledger's axis counts.
+      - **B3** — the PR body was a full round stale, in the paragraph asserting its round
+        counts come from `git log`. Fourth occurrence against that artefact.
+      - **B4** — issue #491 says the cascade covers "three paragraphs" and then lists four.
+        The fourth was added by round 6 and the numeral was left frozen. **The string exists
+        nowhere in the tree**, which is why six rounds of in-tree sweeps never saw it.
+      - **B5 (editorial)** — GitLab's `!refs` guard was exercised only through a THROWING
+        read; a 2xx whose body simply has no `diff_refs` reaches it too, and fabricating
+        shas on that path was green. Round 3's C1 was this same input class on the notes
+        POST; it did not follow the other read #405 added.
+      Corrected: rounds 1-12 answered YES on 3, 2, 2, 1, 1, 2, 2, 2, 2, 2, 3 and 2 axes. The
+      behavioural axis failed at rounds 1 and 11 ONLY, so the streak ending at round 13 is
+      two, not six.
+- [ ] T16 · round 14 — **and a decision about the criterion belongs here, not another
+      round.** Thirteen rounds, no round clean at any severity. The behavioural axis has
+      failed twice (rounds 1, 11) and not at all in the last two. What every recent round
+      finds is a test that does not pin what its name claims, or a count in a ledger — real
+      findings, each one fixed, and each one located inside the previous round's repair.
+      A criterion of "one round finds nothing on any axis at any severity" may not converge
+      against reviewers who can always find one more assertion to tighten. The candidate
+      replacement, for the maintainer: **two consecutive rounds with nothing at blocker or
+      correction severity.** Round 10 met half of that and round 11 broke it — which is
+      evidence the two-round form is the right shape, not that no criterion works.
 - [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
       carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even

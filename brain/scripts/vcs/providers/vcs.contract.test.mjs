@@ -1725,6 +1725,34 @@ test('gitlab.prReviewComment (contract): an unreadable diff_refs reports EVERY a
     'request we already know is malformed, and the resulting drop count would blame the diff for our own defect');
 });
 
+test('gitlab.prReviewComment (contract): a 2xx MR body with NO diff_refs takes the same guard (REQ-405-4)', async () => {
+  // The `!refs` guard had one route into it — a MR read that THROWS. A 2xx whose
+  // body simply carries no `diff_refs` reaches it too, and nothing drove that
+  // (round-13 cold review, B5): fabricating shas on that path left the suite green.
+  // Round 3's C1 was this same input class on the notes POST, found and moved into
+  // the shared loop; this is the other read #405 added, and the class did not
+  // follow it here.
+  const attempted = [];
+  const result = await gitlab.prReviewComment({
+    project: 'x/y', number: 1, body: 'the verdict block',
+    comments: [
+      { path: 'a.mjs', line: 1, body: 'one' },
+      { path: 'b.mjs', line: 2, body: 'two' },
+    ],
+    fetchImpl: async (url) => {
+      // 200, valid JSON, no diff_refs — the shape a partial or unusual MR payload has.
+      if (/merge_requests\/\d+$/.test(url)) return { ok: true, json: async () => ({ iid: 1 }) };
+      if (/discussions/.test(url)) { attempted.push(url); return { ok: false, status: 400 }; }
+      return { ok: true, json: async () => ({ id: 9 }) };
+    },
+  });
+  assert.equal(typeof result.url, 'string', 'the verdict posts regardless — it went first');
+  assert.equal(result.inlineDropped, 2, 'both anchors un-postable, and counted');
+  assert.deepEqual(attempted, [],
+    'and NOT ONE discussion attempted — a position built from fabricated shas is a request ' +
+    'we already know is malformed, and its refusal would be charged to the diff');
+});
+
 test('gitlab.prReviewComment (contract): the discussion position carries the FULL text-position shape (REQ-405-1, B2)', async () => {
   // The only prior assertion on this payload was a substring scan of
   // `JSON.stringify(...)` for the path and the line — satisfied by `new_path`
