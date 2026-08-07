@@ -728,7 +728,8 @@ of the one that outranks them.
       input dimension the predicate never receives. `hasUsableAnchor` never sees `protocol`.
       A shared rule is not the same as a shared decision.
 - [x] T16 · round 15 — cold review of `7115ab1`, ~15 live mutations. **No blocker, no defect
-      in executable behaviour** — third consecutive, and every round-14 red-proof claim
+      in executable behaviour** (the axis has failed at rounds 1 and 11 only — round-23
+      cold review struck the running ordinal here), and every round-14 red-proof claim
       independently re-verified as holding. Three corrections, so the streak stays at zero.
       **The first two are round 14's own lesson applied to round 14**, which is the
       instructive part:
@@ -755,7 +756,7 @@ of the one that outranks them.
         round-14 entry, corrected above.
       Six mutations, six reds, per-spelling and per-dimension.
 - [x] T16 · round 16 — cold review of `cb3539a`. **The closest yet: no blocker, no defect in
-      executable behaviour (fourth consecutive), NO false normative claim, and exactly ONE
+      executable behaviour (failed at rounds 1 and 11 only), NO false normative claim, and exactly ONE
       correction.** Every prior round's red-proof claim independently re-verified as holding.
       - **C1 — CARDINALITY AND CORRESPONDENCE.** Round 15 varied how many anchors are
         REFUSED and how many are DERIVED. It held constant how many are **delivered**, and
@@ -779,7 +780,7 @@ of the one that outranks them.
       varied delivery count and per-entry correspondence. Each was invisible to the one
       before because a fixture with N=1 makes correspondence trivially true.
 - [x] T16 · round 17 — cold review of `765c6df`. **No blocker, no defect in executable
-      behaviour (fifth consecutive), no false normative claim. Two corrections**, so the
+      behaviour (failed at rounds 1 and 11 only), no false normative claim. Two corrections**, so the
       streak stays at zero.
       - **C1 — the repair's own assertion was still a projection.** Round 16 fixed four
         layers by asserting the full triple per anchor, and wrote in its own test comment
@@ -817,7 +818,7 @@ of the one that outranks them.
       the reviewer had pointed at — 17 caught 16's, 18 caught 17's, 19 caught 18's, and 19's
       gap was three lines below 18's fix in the same file.
 - [x] T16 · round 18 — cold review of `a03a63e`. **No blocker, no defect in executable
-      behaviour (sixth consecutive), no false claim, ONE correction.** Streak stays at zero.
+      behaviour (failed at rounds 1 and 11 only), no false claim, ONE correction.** Streak stays at zero.
       Round 17's lesson applied as the round's method: sweep the diagnosis rather than the
       instance. Twelve mutations across three probes, eleven RED — ORDER at all three layers,
       wire-level type coercion at both providers, the two `inlineDropped` totals, the printed
@@ -843,7 +844,7 @@ of the one that outranks them.
       pointed at is not the same as sweeping the class. The correction round 17 made was
       correct and incomplete, and the incompleteness was one `grep` away.
 - [x] T16 · round 19 — cold review of `5109b7d`. **No blocker, no defect in executable
-      behaviour (seventh consecutive), no false claim, ONE correction.** Streak stays at zero.
+      behaviour (failed at rounds 1 and 11 only), no false claim, ONE correction.** Streak stays at zero.
       - **C1 — round 18's sweep stopped three lines short of itself.** Round 18's whole
         lesson was "fixing the instance is not sweeping the class", and it removed the
         `assert.match(reported[0], /\b2\b/)` projection from one CLI test while the
@@ -890,7 +891,7 @@ of the one that outranks them.
       16-18's mutation results, re-read, not on mutations run that round. The claim is true
       as written; the renderer sweep above is the fresh evidence.
 - [x] T16 · round 21 — cold review of `33b09ca`. **No blocker, no defect in executable
-      behaviour (eighth consecutive), ONE correction.** The streak breaks at 1 and returns
+      behaviour (failed at rounds 1 and 11 only), ONE correction.** The streak breaks at 1 and returns
       to zero.
       - **C1 — the ledger asserted a two-artefact repair it had made in one.** Round 17's E2
         was "T17 and the PR body name different commits for the trailer boundary". The repair
@@ -916,7 +917,7 @@ of the one that outranks them.
       merged in (the branch was `behind`, #493 having landed the anti-pattern there); 2627
       tests, 0 fail; `repo:check` ✓, `brain:nav` ✓.
 - [x] T16 · round 22 — cold review of `f5aba07`. **No blocker, no defect in executable
-      behaviour (ninth consecutive), TWO corrections**, both in round 21's own entry, both
+      behaviour (failed at rounds 1 and 11 only), TWO corrections**, both in round 21's own entry, both
       found by checking its claims against the file instead of against memory.
       - **C1 — round 21's list of prior occurrences was wrong.** It said the PR body had
         gone stale at "rounds 6, 7, 10, 12, 13, 14 and 15 … round 12's C2 … seven
@@ -936,10 +937,32 @@ of the one that outranks them.
       `brain/core/**` out of this PR's diff entirely, so T18b's "does not ship inside PR #490"
       is now true of the diff and not only of the history. 2627 tests, 0 fail; governed diff
       **360** of 1000.
-- [ ] T16 · round 23 — nine rounds with no defect in executable behaviour. Every finding
-      since round 17 has been in the previous round's own repair or claim, never in the
-      shipped code. Two consecutive rounds with nothing at blocker or correction severity
-      close this.
+- [x] T16 · round 23 — cold review of `2afcc10`. **No blocker, no defect in executable
+      behaviour, ONE correction.** Streak back to zero.
+      Round 22's own claims re-verified first, mechanically, since round 22's finding was a
+      claim written from memory: the eight-occurrence list, the round-11 attribution, T18c's
+      existence, `013845d`'s ancestry, #491's state and label, the trailer boundary, the test
+      count and the governed diff all check out.
+      - **C1 — the running "Nth consecutive behaviour-clean round" is wrong in every entry
+        that carries it, and this is the FOURTH time it has been found wrong.** Round 10's
+        E2 and round 13's B2 both caught it contradicting the axis list; round 14 caught
+        *"(eighth round)"* reconciling with nothing and fixed that instance. It broke again
+        immediately. Round 14's own correction establishes the axis failed at **rounds 1 and
+        11 only**, which puts round 12 first in the current run — so round 15 is fourth, not
+        third, and every ordinal from 15 to 22 is off by one. Rounds 21 and 22 are off by
+        two, because round 21 counted from round 19 and skipped round 20, which was clean and
+        carried no ordinal at all.
+        Four repairs of one numeral is the signal that the numeral is the defect. The remedy
+        is the one round 14 already chose for the trailer denominator, and wrote down as
+        such: **do not carry a number that has to be re-derived every round.** All seven
+        ordinals are struck and replaced with *"the axis has failed at rounds 1 and 11 only"*
+        — checkable against this ledger in one scan, and unable to go stale by the passage of
+        rounds. The PR body already stated it as a boundary ("no round since 11"), which is
+        the same invariant and needs no change.
+- [ ] T16 · round 24 — the axis has failed at rounds 1 and 11 only; every finding since
+      round 17 has been in the previous round's repair or in a claim this ledger made about
+      itself, never in the shipped code. Two consecutive rounds with nothing at blocker or
+      correction severity close this.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.
