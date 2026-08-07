@@ -864,10 +864,33 @@ of the one that outranks them.
       and it is a stronger claim than the one drafted after round 17: not merely "the round
       that names a failure mode is not immune to it", but **a repair must be applied by
       search, and the search recorded, or the next round will find the sibling.**
-- [ ] T16 · round 20 — seven rounds with no defect in executable behaviour; the last three
-      findings are all one class (an assertion that projects instead of pinning a whole
-      value), each found in the previous round's repair. Two consecutive rounds with nothing
-      at blocker or correction severity close this.
+- [x] T16 · round 20 — cold review of `176b1fb`. **No blocker, no correction, no false
+      claim. The FIRST clean round; the streak is 1 of 2.**
+      Method: rounds 17-19 each found the previous repair's untouched sibling, so this round
+      swept the class MECHANICALLY before looking at anything else — every assertion in the
+      diff that projects over a value the change produces, mutation-tested rather than read.
+      Eleven mutations, and the two that mattered most were aimed at the one layer rounds
+      16-19 never reached, the RENDERED block:
+      - **Anchors ROTATED among the findings** and **among the follow_ups** — every path and
+        every line still present in the block, each under the WRONG finding. Every assertion
+        on the block is a `/^ {4}file: X$/m` presence regex, which cannot see this. Both RED
+        anyway: the `#381` round-trip tests parse the block back and compare per finding, so
+        correspondence there is pinned by the parser, not by the regexes. Same for the
+        half-rotation (own path, next finding's line).
+      - **`follow_ups` posted inline** (5 red), **the CLI handing the poster a list the block
+        never rendered** — both the follow-ups spread and the raw pre-gate list (1 red each,
+        the source drift guard).
+      - **GitLab's summary-first ordering**: the reorder mutation came back GREEN and was
+        **INERT** — it moved nothing. Recorded as such rather than as a finding, which is the
+        rule this branch's own harness failures taught: a green from a mutation that did not
+        substitute measures nothing. The real axis is already pinned by the `dieAfterFirst`
+        contract case, whose comment records that the same inert mutation is what led to it.
+      One provenance note, below correction severity: round 19's line "verified by mutation,
+      not assumed" about the two remaining `assert.match` body projections rests on rounds
+      16-18's mutation results, re-read, not on mutations run that round. The claim is true
+      as written; the renderer sweep above is the fresh evidence.
+- [ ] T16 · round 21 — **the closing round.** Round 20 is the first with nothing at blocker
+      or correction severity; one more like it meets the ruled criterion and the review ends.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.
