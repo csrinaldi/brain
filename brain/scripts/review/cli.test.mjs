@@ -602,7 +602,13 @@ test('#405: the CLI passes `findings` to postVerdict — the one link no seam ca
   // point the e2e tripwire becomes a real behavioural test of the same link.
   const src = readFileSync(fileURLToPath(new URL('./cli.mjs', import.meta.url)), 'utf8');
   const call = src.slice(src.indexOf('await postVerdict({'));
-  assert.match(call.slice(0, call.indexOf('});')), /findings: verdict\.findings/,
+  // Anchored to the WHOLE property, not a substring of it. The first version
+  // matched /findings: verdict\.findings/, which `verdict.findings.concat(
+  // verdict.follow_ups)` satisfies — so the guard was green for the exact
+  // population it names as forbidden, and the spec and the task list both said it
+  // had been verified against that population (round-6 cold review, finding 1).
+  // A substring match on a source guard is not a guard: it constrains a prefix.
+  assert.match(call.slice(0, call.indexOf('});')), /^ *findings: verdict\.findings,$/m,
     'cli.mjs must hand the BUILT verdict\'s `findings` to the poster — EXACTLY that list. The evaluator\'s own ' +
     'is the wrong population (buildVerdict drops evidence-less findings), and so is findings+follow_ups: a ' +
     'follow-up is pre-existing/base-only, so anchoring one would comment on this author\'s diff about a defect ' +

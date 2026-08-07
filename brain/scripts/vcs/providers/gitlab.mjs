@@ -443,7 +443,8 @@ export async function commitStatus({ project, sha }) {
  *
  * `comments` (issue #405) is an optional array of `{ path, line, body }` inline
  * anchors. Absent and empty are the SAME request — no discussion is attempted.
- * The summary note goes first and exactly ONE payload carries the verdict body;
+ * The summary note goes first and it is the ONLY payload carrying the verdict body
+ * (this provider has no retry, so unlike GitHub it never sends the body twice);
  * each anchor is then its own `discussions` POST, because GitLab's discussions
  * are one-per-position. `inlineDropped` counts anchors that did not attach and is
  * ABSENT when none were, never 0.

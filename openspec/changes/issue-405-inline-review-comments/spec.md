@@ -50,7 +50,10 @@ point a human reads it.
 The behaviour was right and undocumented until round 4 of the cold review, which found the
 Tier-2 draft *about to become schema authority* asserting the opposite. Pinned at the poster,
 where the rule is applied; the CLI's half is the drift guard, which reds for
-`findings + follow_ups` as well as for the evaluator's own list.
+`findings + follow_ups` as well as for the evaluator's own list — in both spellings. That
+qualifier is the round-6 correction: the guard matched a SUBSTRING, so `.concat(...)`
+passed it while the spread form reded, and this sentence claimed a coverage the guard did
+not have.
 
 `line` survives the round trip as **text** (`parseVerdict` returns entry scalars verbatim;
 `verdict.test.mjs` pins `'42'`), so the consumer coerces. `deriveInlineComments` does —
@@ -93,7 +96,7 @@ it is GitHub's implementation promoted to doctrine.
 
 The invariant that is provider-agnostic, and the one the anti-loop lock actually needs:
 
-**Exactly one payload carries the verdict body.** The lock counts PARSEABLE VERDICTS,
+**At most one payload the provider ACCEPTS carries the verdict body.** The lock counts PARSEABLE VERDICTS,
 not posts — `cold-boot.mjs:123` runs every review body through `parseVerdict` and
 `.filter(Boolean)`s the nulls, so an inline annotation, which carries finding text and no
 `brain-review/N` block, is invisible to it.
@@ -108,7 +111,10 @@ Per provider, then:
   already safe when anything after it fails.
 
 Asserted on the payloads actually SENT — that the anchor reaches the provider, and that
-exactly one payload carries the verdict body. Plus behaviourally: a run that posts inline
+exactly one payload carries the verdict body **on the success path**. On GitHub's FALLBACK
+path two payloads carry it and one lands, which is why the invariant above says "accepts"
+(round-6 cold review: this sentence was the sharpest surviving copy, because it claims an
+assertion over sent payloads that no test makes on the fallback path). Plus behaviourally: a run that posts inline
 comments must still skip with `anti-loop` on a second invocation at the same head.
 
 ## REQ-405-6 — parity is forced by the contract suite, not by inspection

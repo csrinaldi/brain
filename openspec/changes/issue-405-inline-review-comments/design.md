@@ -62,9 +62,28 @@ The failure mode that matters. GitHub 422s when a comment targets a line outside
 diff; GitLab rejects a stale `position`. The rule:
 
 1. **Attempt the review with `comments[]`.**
-2. **On an inline-specific rejection, retry once with the summary body alone**, and
-   fold the un-anchorable findings back into the block.
+2. **On ANY failure of an anchored attempt, retry once with the summary body alone.**
 3. **Report the count** — the verdict says how many anchors were dropped and why.
+
+Rule 2 said *"on an inline-specific rejection"*, and rule 2 said the retry *"folds the
+un-anchorable findings back into the block"*. Both were corrected in round 6; neither
+described the implementation.
+
+**The trigger is not inline-specific, deliberately.** `github.mjs` retries on any non-zero
+first exit, because gating on a 422-shaped stderr would make a transient 5xx lose the
+VERDICT — and REQ-405-4 ranks the verdict above the annotation. The cost is an over-count:
+a network blip is reported as dropped anchors. That trade is named in `github.mjs`'s own
+comment, and the design said the opposite of it. Measured — a generic 502 on the first
+attempt still retries:
+
+```
+attempts: 2 | retried after a NON-inline failure: true
+result: { url: 'https://x/1', inlineDropped: 1 }
+```
+
+**And nothing is "folded back".** The retry re-sends the body BYTE-IDENTICAL; the findings
+were already in it, because the summary block is built before any anchor is derived. The
+e2e asserts exactly that identity. There is no fold operation and there never was.
 
 **CORRECTED during implementation — this rule was GitHub's, written as everyone's.**
 It read: *"Never the reverse order (summary first, inline second): that is two calls, and
@@ -112,7 +131,7 @@ contract row records that `comments` support on GitLab implies an additional rea
 > calls and no ordering makes them atomic. The argument below still holds, but on the
 > right invariant: the lock counts **parseable verdicts**. An inline annotation carries
 > finding text and no `brain-review/N` block, so `parseVerdict` returns null on it and
-> `cold-boot.mjs`'s `.filter(Boolean)` drops it. Exactly one payload may carry the
+> `cold-boot.mjs`'s `.filter(Boolean)` drops it. At most one payload the provider ACCEPTS may carry the
 > verdict body — that is the contract, and it is satisfiable on both providers.
 >
 > GitLab therefore posts the **summary first**: when calls cannot be atomic, the verdict

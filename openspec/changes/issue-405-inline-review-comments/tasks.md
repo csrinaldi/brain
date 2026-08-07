@@ -369,7 +369,9 @@ of the one that outranks them.
         about something the same verdict says they did not introduce — causal admission
         inverted at the point a human reads it. Recorded in the spec, in `cli.mjs`, in the
         draft, and pinned at the poster (the CLI's half is the drift guard, which reds for
-        `findings + follow_ups` as well as for the evaluator's own list — verified).
+        `findings + follow_ups` as well as for the evaluator's own list — verified for the
+        spread form, and NOT for `.concat(...)`, which the guard's substring match let
+        through; see round 6).
       - **E1** — `tasks.md` T5 still said "`/2` finding schema". Round 3 was chartered to
         hunt exactly that claim and corrected the ADR and the proposal; the change's own
         task list was the third copy and was not opened.
@@ -414,10 +416,46 @@ of the one that outranks them.
         deleted line cannot attach. `inferential` (no live GitLab) and unreachable today,
         bounded by the drop count. Named in the code and in the contract-row draft so the
         next person to widen the anchor shape finds the constraint, not the symptom.
-- [ ] T16 · round 6 — rounds 1-5 answered YES on 3, 2, 2, 1 and 1 axes. Code has been clean
-      for two consecutive rounds under independent re-verification; every remaining finding
-      has been a sibling copy of a corrected claim. The criterion is not met until a round
-      answers NO to all three.
+- [x] T16 · round 6 — cold review of `6ed288d`, ~35 fresh mutations, every diff printed;
+      34 red. **No blocker and no defect in executable behaviour** for the third round
+      running. Vacuity probes on every case exposed to it came back non-vacuous, including
+      a measurement that the lock-2 source scan really scopes 2952/4973 chars of function
+      body rather than an empty slice. But the "no unpinned protection" bill from rounds 4
+      and 5 did **not** survive re-verification:
+      - **F1 — the CLI drift guard was satisfied by the exact population it forbids.** It
+        matched `/findings: verdict\.findings/`, a SUBSTRING, so
+        `verdict.findings.concat(verdict.follow_ups)` passed it — the causal-admission
+        inversion `cli.mjs`'s own comment and REQ-405-2 exist to prevent — with the whole
+        suite green. Round 4 red-proofed it with the SPREAD form only and wrote "verified"
+        into the spec and this file. A substring match on a source guard is not a guard: it
+        constrains a prefix. Now anchored to the whole line; red for `.concat(...)`, the
+        spread form, and the evaluator's own list.
+        This is the shape the change kept producing, arriving in the mechanism built to
+        detect that shape — a test whose message names two wrong populations while catching
+        one.
+      - **F2** — round 5's "at most one payload the provider ACCEPTS" was applied to the
+        RATIONALE bullet of the contract-row draft and not to the row itself — the text a
+        human pastes into `brain/core/` — nor to `spec.md`'s bolded invariant, nor to the
+        sentence claiming it is "asserted on the payloads actually SENT" (no test asserts
+        that on the fallback path), nor to `design.md`, nor to Amendment 2's `HOME.md` line.
+        The correction landed on the explanation and missed the thing being promoted.
+      - **F3** — the PR body's governed-diff figure was `308`, measured at `e43be3c`; at the
+        head the body claims to describe it is `315`. The frozen-number defect, in the body
+        round 5 rewrote to fix that class.
+      - **F4** — T17's two recorded commands lack `--oneline`, so they print 831 and 402
+        (log lines) rather than 13 and 6 (commits). The conclusion is right and the
+        reproduction instruction is wrong, in the row T14 rewrote specifically to record
+        *what to run*.
+      - **F5** — design D3 rule 2 and the SIGNED `ADR-0020:146` both say the retry fires "on
+        an inline-specific rejection" and that un-anchorable findings are "folded back into"
+        the block. Neither describes the implementation: `github.mjs` retries on ANY
+        non-zero first exit (deliberately — gating on a 422 shape would let a transient
+        failure cost the verdict), and nothing is folded, because the retry re-sends the
+        body byte-identical with the findings already in it. Amendment 2 now covers that
+        paragraph too; it is the "sentence twelve lines down" one section further along.
+- [ ] T16 · round 7 — rounds 1-6 answered YES on 3, 2, 2, 1, 1 and 2 axes. Round 6 is the
+      first to RE-OPEN an axis two earlier rounds had closed, which is the argument for
+      running rounds until one is clean rather than until they look clean.
 - [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
       carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even
@@ -433,8 +471,8 @@ of the one that outranks them.
       measured wrong on the first attempt, one sentence below the paragraph round 4 had
       just rewritten to remove a frozen number:
       ```
-      git log origin/main -i --grep='co-authored-by: claude' | wc -l   # 13
-      git log origin/main    --grep='Co-Authored-By: Claude' | wc -l   #  6
+      git log origin/main --oneline -i --grep='co-authored-by: claude' | wc -l   # 13
+      git log origin/main --oneline    --grep='Co-Authored-By: Claude' | wc -l   #  6
       ```
       `6` counts ONE SPELLING. GitHub's squash-merge normalises the trailer to
       `Co-authored-by:`, and this repo's own detector is case-insensitive

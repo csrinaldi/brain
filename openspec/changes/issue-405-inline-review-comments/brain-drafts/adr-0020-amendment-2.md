@@ -111,6 +111,28 @@ correct Amendment 1's falsified claims — which had corrected two of them and w
 third, twelve lines further down. It is the same failure the amendment exists to fix,
 committed inside the fix.
 
+**And the failure-semantics paragraph**, currently line 146:
+
+> **The verdict is never lost to an inline failure.** On an inline-specific rejection the
+> summary body posts anyway, the un-anchorable findings are folded back into it, and the
+> verdict **reports how many anchors were dropped**.
+
+Two clauses describe an implementation that was deliberately not built (round 6). The
+retry is **not** inline-specific — `github.mjs` fires it on any non-zero first exit,
+because gating on a 422-shaped stderr would make a transient 5xx lose the verdict, and
+REQ-405-4 ranks the verdict above the annotation. And nothing is **folded back**: the
+retry re-sends the body byte-identical, because the findings were already in it. Replace
+with:
+
+```markdown
+**The verdict is never lost to an inline failure.** When an anchored attempt fails — for
+any reason, not only an inline-specific rejection, because gating the retry on a
+422-shaped error would let a transient failure cost the verdict — the summary body posts
+anyway, byte-identical and already carrying every finding, and the verdict **reports how
+many anchors were dropped**. The over-count that trade accepts (a network blip read as
+dropped anchors) is the deliberate cheaper error.
+```
+
 **Sign** with the same `**Signed**: <date> — Cristian Rinaldi` convention.
 
 ## The cascade — all three steps, or `decision-gate` fails
@@ -120,7 +142,7 @@ committed inside the fix.
    Replace the parenthetical with:
 
    ```
-   (**Amendment 1, 06/08/2026; Amendment 2, <date>** — `prReviewComment` carries optional inline `comments[]`; ONE payload carries the verdict on every provider, but GitLab needs N+1 calls — verb count and lock 2 unchanged, #405)
+   (**Amendment 1, 06/08/2026; Amendment 2, <date>** — `prReviewComment` carries optional inline `comments[]`; at most ONE payload the provider accepts carries the verdict, but GitLab needs N+1 calls — verb count and lock 2 unchanged, #405)
    ```
 
 3. **Regenerate `AGENTS.md`** — `HOME.md` is one of the five SOURCE_DOCS, and `AGENTS.md:77`
