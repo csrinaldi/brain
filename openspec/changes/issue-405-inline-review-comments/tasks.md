@@ -778,14 +778,45 @@ of the one that outranks them.
       failure's value class; round 15 varied refusal count and call-site mode; round 16
       varied delivery count and per-entry correspondence. Each was invisible to the one
       before because a fixture with N=1 makes correspondence trivially true.
-- [ ] T16 · round 17 — round 16 is the first with a single finding and nothing false.
-      Under the ruled criterion the streak is still zero: one correction breaks it. Two clean
-      rounds close this.
+- [x] T16 · round 17 — cold review of `765c6df`. **No blocker, no defect in executable
+      behaviour (fifth consecutive), no false normative claim. Two corrections**, so the
+      streak stays at zero.
+      - **C1 — the repair's own assertion was still a projection.** Round 16 fixed four
+        layers by asserting the full triple per anchor, and wrote in its own test comment
+        that a projection is what let `line` and `body` collapse while `path` stayed right.
+        `deriveInlineComments`'s own test was left as three projections — `out.map(c =>
+        c.path)`, two `line` reads, and `assert.match(out[0].body, /e1/)`. So the
+        correspondence between a finding and its comment was unpinned in the one function
+        that establishes it. `body` taken from `findings[out.length]` instead of from `f`
+        left the whole 2588-test suite green, and the live probe showed the payload it
+        produces: a comment on `w.mjs:7` carrying the text of finding `b` — a finding
+        `renderVerdict` emits with no `file:` and no `line:` at all. Text on the diff the
+        posted verdict does not support, which is the single thing the anchor rule exists
+        to prevent, reintroduced by the round that thought it had removed it.
+        Fixed with one whole-list `deepStrictEqual` over the existing mixed fixture — two
+        anchors SEPARATED by ten unanchored findings, so an index shift is observable, and
+        strict so `line: '7'` surviving as a string cannot pass. Five mutations, five reds
+        (index shift, body smear, line smear, id prefix dropped, `Number()` dropped); the
+        last two were invisible to `match(/e1/)` and to loose `deepEqual` respectively.
+      - **C2 — T18b claimed the anti-pattern ships inside PR #490.** It does not: after the
+        maintainer's ruling it went to `main` as `013845d` via PR #493 (issue #492). The
+        entry was written before that ruling and never revisited. Corrected, and E1 gives
+        the drafted copy the same ⛔ banner `promotion-checklist.md` carries, since a draft
+        that reads as a live instruction is how a second promotion happens.
+      **The lesson:** the axis a round is blind along can be one the SAME round named. Round
+      16 diagnosed projections, repaired four call sites, and did not apply the diagnosis to
+      the function under test. Knowing the failure mode is not the same as sweeping for it.
       **Owed to `brain/core/anti-patterns/red-proof-blind-along-an-unvaried-axis.md`:** four
       axes have been found since it was promoted — FAILURE VALUE CLASS (14), CALL-SITE
       DIMENSION (14/15), SUBSET-VS-TOTAL (15), CARDINALITY/CORRESPONDENCE (16). That doc is
       Tier 2 and on `main`; folding them back is a human promotion, drafted once this
-      settles rather than piecemeal.
+      settles rather than piecemeal. Round 17 adds a fifth candidate that is not an axis but
+      a rule about axes: **the round that names a failure mode is not thereby immune to it** —
+      a diagnosis has to be swept for across the tree, including the test of the function the
+      diagnosis was about.
+- [ ] T16 · round 18 — round 17 found no defect in executable behaviour for the fifth
+      round running, but two corrections, so the streak is zero. Two consecutive rounds with
+      nothing at blocker or correction severity close this.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.
@@ -798,8 +829,10 @@ of the one that outranks them.
       It belongs to the reviewer line specifically because the reviewer's three locks are
       where a false green is most expensive: on this PR, two rounds of false greens sat
       between `prReviewComment` and a postable APPROVE carrying the reviewer's own token.
-- [x] T18b — **PROMOTED by the maintainer** at `4447f60`, on this branch, so it ships inside
-      PR #490 rather than as a separate one. `brain:nav` ✓ (the README entry landed with it),
+- [x] T18b — **PROMOTED by the maintainer** at `4447f60` on this branch, and then — on the
+      maintainer's ruling that the other agents should have it without waiting on #490 —
+      cherry-picked onto `main` as `013845d` via PR #493 (issue #492). It is on `main` now, and
+      it does **not** ship inside PR #490. `brain:nav` ✓ (the README entry landed with it),
       `repo:check` ✓, L6 `pass` — the PR author is the maintainer, not a listed bot, which is
       the whole evidence form at `lite`. Original instruction below, kept as the record of
       what was asked for:
@@ -822,7 +855,11 @@ of the one that outranks them.
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even
       if explicitly asked"* — and the agent's own harness instructions require it, which
       is exactly the conflict that phrase anticipates. **Doctrine wins; the trailer stops
-      here** and no commit after `ca6ab5a` carries it.
+      here.** The last commit that carries it is `ca6ab5a` (round 2); every commit from
+      `ec153ea` (round 3) onward is clean. Round 17 flagged that this sentence and the PR
+      body named different commits for the same boundary — both were true, one naming the
+      last dirty commit and the other the first clean one, which is precisely the kind of
+      "two spellings of one fact" this branch keeps finding. Both now say both.
       (The denominator is deliberately not written down: an earlier version said "six of
       eight" and was nine commits later the same day — the exact defect T14 taught itself
       about, committed one paragraph after recording it.)

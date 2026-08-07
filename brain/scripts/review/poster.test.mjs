@@ -412,12 +412,25 @@ test('#405 deriveInlineComments: only ANCHORED findings become comments (REQ-405
     // which is what `parseVerdict` actually returns.
     { id: 'k', evidence: 'e11', file: 'w.mjs', line: '7' },
   ]);
-  assert.deepEqual(out.map(c => c.path), ['x.mjs', 'w.mjs'],
-    'a half anchor is not an anchor — GitHub 422s a comment with no line, so a partial one ' +
-    'would spend the fallback on a finding we already knew could not attach');
-  assert.equal(out[0].line, 4);
-  assert.strictEqual(out[1].line, 7, 'the round-tripped string form survives and arrives as a number');
-  assert.match(out[0].body, /e1/, 'the comment carries the finding evidence — that is what the developer reads');
+  // The whole list, whole entries, strict — NOT a projection. Round 16's own
+  // comment records that projections let `line` and `body` collapse while `path`
+  // stayed correct; round 17 found this assertion was itself still three
+  // projections (`map(path)`, two `line` reads, one `match` on `out[0].body`),
+  // so the CORRESPONDENCE between a finding and its comment was unpinned inside
+  // `deriveInlineComments`: taking `body` from `findings[out.length]` instead of
+  // from `f` left the whole suite green, and under it a comment lands on
+  // `w.mjs:7` carrying the text of finding `b` — a finding `renderVerdict` emits
+  // with no `file:` and no `line:` at all. Text on the diff the posted verdict
+  // does not support is the one thing the anchor rule exists to prevent.
+  // Two anchors SEPARATED by unanchored findings is what makes an index shift
+  // observable; `deepStrictEqual` is what keeps `line: '7'` arriving as the
+  // string it was written as from passing. Both halves are load-bearing.
+  assert.deepStrictEqual(out, [
+    { path: 'x.mjs', line: 4, body: '**a** — e1' },
+    { path: 'w.mjs', line: 7, body: '**k** — e11' },
+  ], 'a half anchor is not an anchor — GitHub 422s a comment with no line, so a partial one ' +
+    'would spend the fallback on a finding we already knew could not attach; and each ' +
+    'surviving comment carries ITS OWN finding’s evidence at ITS OWN anchor');
 });
 
 test('#405 deriveInlineComments: no anchored finding yields an EMPTY array, and the caller decides what that means (REQ-405-2)', () => {

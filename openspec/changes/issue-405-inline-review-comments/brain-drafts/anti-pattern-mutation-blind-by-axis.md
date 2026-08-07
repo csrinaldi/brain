@@ -8,6 +8,19 @@ topic_key: sdd/issue-405-inline-review-comments/brain-drafts/anti-pattern-mutati
 
 # DRAFT for human promotion — new anti-pattern, `brain/core/anti-patterns/`
 
+> ## ⛔ STOP — this draft is ALREADY PROMOTED
+>
+> The maintainer signed it as `4447f60` on this branch and it reached `main` as `013845d`
+> via PR #493 (issue #492). `brain/core/anti-patterns/red-proof-blind-along-an-unvaried-axis.md`
+> and the anti-patterns README entry are both live. **Following the steps below as written
+> would promote it a second time.**
+>
+> What is still owed is an **amendment**, not a promotion: the promoted file names six
+> blindness axes, and rounds 13–17 found four more — FAILURE VALUE CLASS, CALL-SITE
+> DIMENSION, SUBSET-VS-TOTAL, and CARDINALITY/CORRESPONDENCE (T18c). Those fold into the
+> live file; they do not re-create it. The body below is kept verbatim as the record of
+> what was drafted and what was signed.
+
 `brain/**` is Tier 2 (human-only). This is the agent's draft; a human promotes it, in the
 same commit as the change that discovered it (anti-patterns README, rule 3).
 
