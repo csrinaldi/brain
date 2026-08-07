@@ -699,7 +699,12 @@ of the one that outranks them.
       It belongs to the reviewer line specifically because the reviewer's three locks are
       where a false green is most expensive: on this PR, two rounds of false greens sat
       between `prReviewComment` and a postable APPROVE carrying the reviewer's own token.
-- [ ] T18b — **HUMAN: promote** the anti-pattern to
+- [x] T18b — **PROMOTED by the maintainer** at `4447f60`, on this branch, so it ships inside
+      PR #490 rather than as a separate one. `brain:nav` ✓ (the README entry landed with it),
+      `repo:check` ✓, L6 `pass` — the PR author is the maintainer, not a listed bot, which is
+      the whole evidence form at `lite`. Original instruction below, kept as the record of
+      what was asked for:
+      **HUMAN: promote** the anti-pattern to
       `brain/core/anti-patterns/red-proof-blind-along-an-unvaried-axis.md`, and add its entry
       to `brain/core/anti-patterns/README.md` — the index is not optional, `check-brain-nav.mjs`
       requires every `brain/**/*.md` to be reachable from `HOME.md` and that README is the
