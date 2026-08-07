@@ -5,6 +5,27 @@
 const YAML_SCALAR_SAFE_RE = /^[A-Za-z0-9._\-/:]+$/;
 
 /**
+ * Is this finding's anchor USABLE — a non-empty path and a line that exists in a
+ * diff? Diff lines are 1-based, so `0`, `''`, `'abc'`, `2.5` and `-3` are all
+ * anchors already known not to attach. `Number()` because `parseVerdict` returns
+ * entry scalars as text: a round-tripped `line` arrives as `'42'`.
+ *
+ * Exported and shared with `poster.mjs`'s `deriveInlineComments` ON PURPOSE. The
+ * renderer's rule and the poster's were byte-identical duplicates until round 10
+ * of PR #490's review tightened the poster's alone — leaving the block advertising
+ * `line: 0` anchors the poster then refused, which is the exact state the
+ * round-8 test forbids, one field-value class over. Two copies of one rule drift;
+ * one function cannot.
+ *
+ * @param {{file?: string, line?: unknown}} f
+ * @returns {boolean}
+ */
+export function hasUsableAnchor(f) {
+  const line = Number(f?.line);
+  return Boolean(f?.file) && Number.isInteger(line) && line >= 1;
+}
+
+/**
  * Emits a value as a YAML scalar. `parse-verdict.mjs`'s `unyamlScalar` is its
  * exact inverse — change one and the other moves in the same commit.
  *
@@ -129,6 +150,17 @@ export function renderVerdict(v) {
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
       if (f.evidence_class) lines.push(`    evidence_class: ${yamlScalar(f.evidence_class)}`);
       if (f.causal_disposition) lines.push(`    causal_disposition: ${yamlScalar(f.causal_disposition)}`);
+      // The inline-comment anchor (issue #405, REQ-405-2). BOTH optional, and
+      // emitted only when the pair is USABLE — see `hasUsableAnchor`. Not "when
+      // present": a finding carrying `line: 0` or `line: 'abc'` has them and gets
+      // neither, because a block that advertises an anchor the poster refuses is
+      // the same defect read from the emitting end. A finding without them renders
+      // exactly as it does today — that is what keeps the feature additive for every
+      // evaluator shipping now. Through yamlScalar like every other scalar (`line` after the coercion, so the block carries the same integer the wire does).
+      if (hasUsableAnchor(f)) {
+        lines.push(`    file: ${yamlScalar(f.file)}`);
+        lines.push(`    line: ${yamlScalar(Number(f.line))}`);
+      }
     }
   }
 
@@ -141,6 +173,17 @@ export function renderVerdict(v) {
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
       if (f.evidence_class) lines.push(`    evidence_class: ${yamlScalar(f.evidence_class)}`);
       if (f.causal_disposition) lines.push(`    causal_disposition: ${yamlScalar(f.causal_disposition)}`);
+      // The inline-comment anchor (issue #405, REQ-405-2). BOTH optional, and
+      // emitted only when the pair is USABLE — see `hasUsableAnchor`. Not "when
+      // present": a finding carrying `line: 0` or `line: 'abc'` has them and gets
+      // neither, because a block that advertises an anchor the poster refuses is
+      // the same defect read from the emitting end. A finding without them renders
+      // exactly as it does today — that is what keeps the feature additive for every
+      // evaluator shipping now. Through yamlScalar like every other scalar (`line` after the coercion, so the block carries the same integer the wire does).
+      if (hasUsableAnchor(f)) {
+        lines.push(`    file: ${yamlScalar(f.file)}`);
+        lines.push(`    line: ${yamlScalar(Number(f.line))}`);
+      }
     }
   }
 

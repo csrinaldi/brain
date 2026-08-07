@@ -1155,21 +1155,205 @@ for (const providerName of Object.keys(ROLLUP_PROVIDERS)) {
 // test body applies to each provider. Inline mocks (no fixture files) — these
 // are simple write verbs and the normalized shapes are the whole contract.
 
+// `rejectInline` (issue #405, REQ-405-4) fakes the ONE failure that matters: the
+// provider refuses the inline payload but would accept the summary alone —
+// GitHub 422s a comment outside the diff, GitLab rejects a stale `position`.
+// The first attempt fails, every attempt after it succeeds, so a verb that
+// retries without the anchors gets a url and a verb that gives up gets nothing.
+// Captures what the verb actually SENT, so the parity case can assert the
+// payload rather than the return value. Without this the "rides the same call"
+// test passes against a verb that ignores `comments` entirely — it did, before
+// the implementation landed.
+// `sent` records POST BODIES; `requests` records every call the verb makes, url
+// included. The second one exists because the first is blind by construction
+// (cold review of PR #490 round 2, C-2): GitLab's fixture answered the
+// `diff_refs` GET before recording anything, so a mutation that made an EMPTY
+// `comments` array a different request — one extra provider call, and an
+// `inlineDropped: 0` the whole change forbids — left the contract suite green.
+// A payload log cannot see a call that carries no payload.
+const sent = [];
+const requests = [];
+function resetLogs() { sent.length = 0; requests.length = 0; }
+
+function capturingSpawn(data) {
+  return (_cmd, _args, opts) => {
+    requests.push('POST /reviews');
+    try { sent.push(JSON.parse(opts?.input ?? '{}')); } catch { sent.push({ unparseable: opts?.input }); }
+    return { status: 0, stdout: JSON.stringify(data), stderr: '' };
+  };
+}
+
+// First call succeeds, every later one dies. Discriminates the ORDER: a verb
+// that posts the verdict first survives this; one that posts it last does not.
+function dieAfterFirstSpawn(data) {
+  let n = 0;
+  return () => (n++ === 0
+    ? { status: 0, stdout: JSON.stringify(data), stderr: '' }
+    : { status: 1, stdout: '', stderr: 'transport died' });
+}
+
+// Rejects by SHAPE, not by ordering: any request carrying an anchor fails, any
+// request without one succeeds. The first version keyed off call order, which
+// silently encoded GitHub's sequence (inline first, retry bare) and would have
+// rejected GitLab's SUMMARY — the opposite of what it claims to model. Shape is
+// provider-agnostic and is what the real providers actually reject.
+// (This paragraph sat on `dieAfterFirstSpawn` above until the round-2 cold review
+// noticed — E-4, the orphaned-JSDoc defect recurring in the file that fixed it.)
+function rejectAnchoredRequests(data) {
+  return (_cmd, _args, opts) => {
+    const payload = opts?.input ?? '';
+    if (/"comments"|"position"/.test(payload)) {
+      return { status: 1, stdout: '', stderr: 'HTTP 422: line must be part of the diff' };
+    }
+    return { status: 0, stdout: JSON.stringify(data), stderr: '' };
+  };
+}
+
 const WRITE_VERB_PROVIDERS = {
   github: {
     module: github,
     ok: (data) => { setSpawn(jsonSpawn(data)); return {}; },
     fail: () => { setSpawn(failSpawn('fixture: simulated failure')); return {}; },
+    rejectInline: (data) => { setSpawn(rejectAnchoredRequests(data)); return {}; },
+    capture: (data) => { resetLogs(); setSpawn(capturingSpawn(data)); return {}; },
+    dieAfterFirst: (data) => { setSpawn(dieAfterFirstSpawn(data)); return {}; },
+    // A SUCCESSFUL call whose body cannot be read: gh exits 0 with stdout that is
+    // not JSON. The provider-specific shape of "unusable" differs; the contract
+    // does not.
+    unusableBody: () => { setSpawn(() => ({ status: 0, stdout: '', stderr: '' })); return {}; },
+    // A failing transport that still LOGS. `fail()` and `capture()` both call
+    // setSpawn, so spreading both into one call silently kept the last one and
+    // left the request log empty — a call-count assertion over it passed having
+    // observed nothing.
+    failCapturing: () => {
+      resetLogs();
+      setSpawn((_cmd, _args, opts) => {
+        requests.push('POST /reviews');
+        try { sent.push(JSON.parse(opts?.input ?? '{}')); } catch { /* shape not under test here */ }
+        return { status: 1, stdout: '', stderr: 'transport failed' };
+      });
+      return {};
+    },
+    // Refuses the ANCHORED payload and records EVERY one, so a case can inspect
+    // what the fallback sends. `capture` alone always succeeds, so on GitHub the
+    // retry never fires and its payload is unobservable — which is how a
+    // caller-supplied `event` on the retry survived a whole review round.
+    rejectInlineCapturing: (data) => {
+      resetLogs();
+      setSpawn((_cmd, _args, opts) => {
+        const payload = opts?.input ?? '';
+        requests.push('POST /reviews');
+        try { sent.push(JSON.parse(payload)); } catch { sent.push({ unparseable: payload }); }
+        if (/"comments"/.test(payload)) return { status: 1, stdout: '', stderr: 'HTTP 422: line must be part of the diff' };
+        return { status: 0, stdout: JSON.stringify(data), stderr: '' };
+      });
+      return {};
+    },
+    // The anchored attempt fails for a reason that is NOT inline-specific — a
+    // transient gateway error. Every other rejecting fixture in this file emits
+    // `HTTP 422`, so the retry's TRIGGER was pinned by nothing: narrowing it to a
+    // 422 shape left the suite green and lost the verdict on a 502.
+    rejectAnchoredNonInline: (data) => {
+      resetLogs();
+      setSpawn((_cmd, _args, opts) => {
+        const payload = opts?.input ?? '';
+        requests.push('POST /reviews');
+        try { sent.push(JSON.parse(payload)); } catch { sent.push({ unparseable: payload }); }
+        if (/"comments"/.test(payload)) return { status: 1, stdout: '', stderr: 'gh: Bad Gateway (HTTP 502)' };
+        return { status: 0, stdout: JSON.stringify(data), stderr: '' };
+      });
+      return {};
+    },
+    // First attempt refused for its anchors, RETRY succeeds with an unusable body —
+    // the path this change created, and the only one where a parse failure can
+    // follow a 422.
+    unusableOnRetry: () => {
+      let n = 0;
+      setSpawn(() => (n++ === 0
+        ? { status: 1, stdout: '', stderr: 'HTTP 422: line must be part of the diff' }
+        : { status: 0, stdout: '', stderr: '' }));
+      return {};
+    },
+    sentPayloads: () => sent,
   },
   gitlab: {
     module: gitlab,
     ok: (data) => ({ fetchImpl: async () => ({ ok: true, json: async () => data }) }),
     fail: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
+    rejectInlineCapturing: (data) => {
+      resetLogs();
+      return { fetchImpl: async (url, opts) => {
+        requests.push(`${opts?.method ?? 'GET'} ${url.replace(/^.*\/api\/v4\//, '')}`);
+        if (/merge_requests\/\d+$/.test(url)) return { ok: true, json: async () => ({ diff_refs: { base_sha: 'b', head_sha: 'h', start_sha: 's' } }) };
+        try { sent.push(JSON.parse(opts?.body ?? '{}')); } catch { sent.push({ unparseable: opts?.body }); }
+        if (/"position"/.test(opts?.body ?? '')) return { ok: false, status: 400, json: async () => ({ message: 'position is invalid' }) };
+        return { ok: true, json: async () => data };
+      } };
+    },
+    // Same input class, GitLab side: the discussion fails with a 500, not a
+    // position error. GitLab has no retry, so the property under test is that the
+    // DROP COUNT is independent of why the anchor failed — narrowing the catch to
+    // 40x/position shapes also left the suite green.
+    rejectAnchoredNonInline: (data) => {
+      resetLogs();
+      return { fetchImpl: async (url, opts) => {
+        requests.push(`${opts?.method ?? 'GET'} ${url.replace(/^.*\/api\/v4\//, '')}`);
+        if (/merge_requests\/\d+$/.test(url)) return { ok: true, json: async () => ({ diff_refs: { base_sha: 'b', head_sha: 'h', start_sha: 's' } }) };
+        try { sent.push(JSON.parse(opts?.body ?? '{}')); } catch { sent.push({ unparseable: opts?.body }); }
+        if (/"position"/.test(opts?.body ?? '')) return { ok: false, status: 502, json: async () => ({ message: 'Bad Gateway' }) };
+        return { ok: true, json: async () => data };
+      } };
+    },
+    rejectInline: (data) => ({
+      fetchImpl: async (url, opts) => {
+        // Same shape rule. `diff_refs` reads must still succeed — refusing them
+        // would test "the MR is unreadable", a different failure.
+        if (/"position"/.test(opts?.body ?? '')) return { ok: false, status: 400, json: async () => ({ message: 'position is invalid' }) };
+        if (/merge_requests\/\d+$/.test(url)) return { ok: true, json: async () => ({ diff_refs: { base_sha: 'b', head_sha: 'h', start_sha: 's' } }) };
+        return { ok: true, json: async () => data };
+      },
+    }),
+    dieAfterFirst: (data) => {
+      let n = 0;
+      return { fetchImpl: async () => (n++ === 0
+        ? { ok: true, json: async () => data }
+        : { ok: false, status: 503 })
+      };
+    },
+    capture: (data) => {
+      resetLogs();
+      return { fetchImpl: async (url, opts) => {
+        // Every request is logged BEFORE any of them is answered — including the
+        // `diff_refs` GET, which carries no body and was therefore invisible to
+        // the payload log alone.
+        requests.push(`${opts?.method ?? 'GET'} ${url.replace(/^.*\/api\/v4\//, '')}`);
+        if (/merge_requests\/\d+$/.test(url)) return { ok: true, json: async () => ({ diff_refs: { base_sha: 'b', head_sha: 'h', start_sha: 's' } }) };
+        try { sent.push(JSON.parse(opts?.body ?? '{}')); } catch { sent.push({ unparseable: opts?.body }); }
+        return { ok: true, json: async () => data };
+      } };
+    },
+    unusableBody: () => ({ fetchImpl: async () => ({ ok: true, json: async () => null }) }),
+    failCapturing: () => {
+      resetLogs();
+      return { fetchImpl: async (url, opts) => {
+        requests.push(`${opts?.method ?? 'GET'} ${url.replace(/^.*\/api\/v4\//, '')}`);
+        throw new Error('transport failed');
+      } };
+    },
+    // No `unusableOnRetry` here: GitLab has no retry — its summary note goes first
+    // and is never re-sent. The retry case therefore lives OUTSIDE the shared loop
+    // as a github-only test, rather than being faked into existence for a provider
+    // that cannot reach it. (Round 3's version of this comment said the case was
+    // "skipped for it", describing a skip that does not exist, and left a dead
+    // binding in the loop's destructuring — round-4 cold review, E2: the
+    // orphaned-comment defect inside the fix for the orphaned-comment defect.)
+    sentPayloads: () => sent,
   },
 };
 
 for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
-  const { module: vcs, ok, fail } = WRITE_VERB_PROVIDERS[providerName];
+  const { module: vcs, ok, fail, rejectInline, capture, sentPayloads, dieAfterFirst, unusableBody, failCapturing, rejectInlineCapturing, rejectAnchoredNonInline } = WRITE_VERB_PROVIDERS[providerName];
+  const requestLog = () => requests;
 
   test(`${providerName}.prReviewComment (contract): posts event:'COMMENT' (hardcoded), returns { url } on success`, async () => {
     const result = await vcs.prReviewComment({
@@ -1184,6 +1368,373 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
     const result = await vcs.prReviewComment({ project: 'x/y', number: 1, body: 'verdict', ...fail() });
     assert.equal(result.url, null, 'a failed prReviewComment must never fabricate a url');
     assert.equal(typeof result.error, 'string', 'a failed prReviewComment must carry an error string');
+  });
+
+  // ── #405 REQ-405-1/-2/-4: the optional inline `comments[]` ────────────────
+  //
+  // ADR-0020 Amendment 1: `prReviewComment` gains an OPTIONAL `comments` array,
+  // carried in the SAME provider call as `body`. Verb count stays four, and
+  // `event: 'COMMENT'` stays hardcoded — lock 2 (REQ-266-3) preserved by
+  // construction on both providers.
+  //
+  // Parity is forced HERE (REQ-405-6): the implementations differ by design —
+  // GitHub widens one payload, GitLab switches from `notes` to `discussions` and
+  // must read `diff_refs` first — so the contract is what makes that asymmetry
+  // deliberate rather than accidental. A provider that silently no-ops on
+  // `comments` fails this block.
+
+  test(`${providerName}.prReviewComment (contract): comments[] is OPTIONAL — omitting it behaves exactly as before (REQ-405-2)`, async () => {
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      ...ok({ html_url: 'https://example.test/x/y/pull/1#review-1', id: 1 }),
+    });
+    assert.equal(typeof result.url, 'string');
+    assert.equal(result.inlineDropped, undefined,
+      'with no comments requested there is nothing to drop — the key must be ABSENT, not 0. ' +
+      '"none requested" and "all dropped" are different answers (evidence-reader-empty-on-failure).');
+  });
+
+  test(`${providerName}.prReviewComment (contract): an inline rejection NEVER costs the verdict (REQ-405-4)`, async () => {
+    // THE load-bearing case, and the reason it is written before the success
+    // path: GitHub 422s a comment targeting a line outside the diff, GitLab
+    // rejects a stale position. The summary MUST still post, and the verdict
+    // MUST report how many anchors were dropped — without that count, "no inline
+    // comments appeared" is indistinguishable from "the anchors would not
+    // attach", which is evidence-reader-empty-on-failure relocated into a poster.
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      comments: [{ path: 'a.mjs', line: 9999, body: 'out of diff' }],
+      ...rejectInline({ html_url: 'https://example.test/x/y/pull/1#review-2', id: 2 }),
+    });
+    assert.equal(typeof result.url, 'string',
+      'the summary must have posted anyway — losing the verdict to a cosmetic failure trades a working reviewer for a pretty one');
+    assert.equal(result.error, undefined, 'a fallback that succeeded is not an error');
+    assert.equal(result.inlineDropped, 1,
+      'the count is the reader\'s only way to tell "no anchors" from "the anchors would not attach"');
+  });
+
+  test(`${providerName}.prReviewComment (contract): N anchors deliver N comments, each keeping its OWN triple (REQ-405-1)`, async () => {
+    // CARDINALITY AND CORRESPONDENCE — the axis round 15 held constant. It varied
+    // how many anchors are REFUSED (GitLab partial) and how many are DERIVED (the
+    // poster call site). What nothing asserted is how many are DELIVERED, and
+    // whether the k-th comment still belongs to the k-th finding: every assertion
+    // in the tree that inspects an anchor's CONTENT drove exactly one anchored
+    // finding, and the two multi-anchor fixtures assert a projection —
+    // `(path, line)` at the poster, `path` alone on GitLab.
+    //
+    // Six mutations were green because of it (round-16 cold review). The sharp one
+    // is a single token on the primary provider:
+    //
+    //     comments: inline   →   comments: inline.slice(0, 1)
+    //
+    // Every anchor after the first is discarded and `inlineDropped` stays ABSENT —
+    // the run reports a perfectly healthy inline review that delivered one comment
+    // out of five. That is REQ-405-4's stated failure mode with the sign flipped:
+    // the count does not merely fail to distinguish the two states, it positively
+    // asserts nothing was lost.
+    //
+    // Asserted as the FULL TRIPLE per anchor, in order, rather than a projection —
+    // a projection is what let `line` and `body` collapse to the first anchor's on
+    // both providers while `path` stayed correct.
+    const comments = [
+      { path: 'a.mjs', line: 11, body: 'finding ONE' },
+      { path: 'b.mjs', line: 22, body: 'finding TWO' },
+      { path: 'c.mjs', line: 33, body: 'finding THREE' },
+    ];
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'the verdict block',
+      comments,
+      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-10', id: 10 }),
+    });
+    assert.equal(typeof result.url, 'string');
+    assert.equal(result.inlineDropped, undefined, 'nothing was refused, so nothing may be reported dropped');
+
+    // Each provider carries the anchor differently — GitHub in one `comments[]`,
+    // GitLab as one `position` per discussion — so the triple is read back through
+    // a per-provider projection and compared as ONE list.
+    const payloads = sentPayloads();
+    const delivered = providerName === 'github'
+      ? (payloads.find(p => Array.isArray(p.comments))?.comments ?? [])
+          .map(c => ({ path: c.path, line: c.line, body: c.body }))
+      : payloads.filter(p => p.position)
+          .map(p => ({ path: p.position.new_path, line: p.position.new_line, body: p.body }));
+
+    assert.deepEqual(delivered, comments,
+      `every anchor must arrive, in order, with its OWN path, line and body — ` +
+      `got ${JSON.stringify(delivered)}`);
+  });
+
+  test(`${providerName}.prReviewComment (contract): an anchored failure that is NOT inline-specific still saves the verdict and counts the loss (REQ-405-4)`, async () => {
+    // The FAILURE had one value class. Round 13 widened the value classes of the
+    // finding's `line`; every anchored-rejection fixture in this file still emitted
+    // `HTTP 422`, so what an inline failure LOOKS like was never varied — and both
+    // providers had a live protection resting on that.
+    //
+    // GitHub: narrowing the retry's trigger to a 422 shape left all 2579 tests
+    // green, and on a transient 502 the verdict was LOST:
+    //     unmutated  attempts 2 → { url, inlineDropped: 1 }   verdict posted
+    //     mutated    attempts 1 → { url: null, error: 502 }   verdict lost
+    // The code comment at the retry names exactly that mutation and says why it was
+    // rejected — "gating on a 422-shaped stderr would make a transient failure lose
+    // the VERDICT, and REQ-405-4 ranks the verdict above the annotation". Nothing
+    // forced it.
+    //
+    // GitLab has no retry, so the same input class tests the sibling property:
+    // the drop count must not depend on WHY the anchor failed. Narrowing that catch
+    // to 40x/position shapes was green too.
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'the verdict block',
+      comments: [{ path: 'a.mjs', line: 12, body: 'a perfectly good anchor' }],
+      ...rejectAnchoredNonInline({ html_url: 'https://example.test/x/y/pull/1#review-9', id: 9 }),
+    });
+    assert.equal(typeof result.url, 'string',
+      'a transient failure on the anchored attempt must never cost the verdict — REQ-405-4 ranks the ' +
+      'verdict above the annotation, and the over-count is the deliberate cheaper error');
+    assert.equal(result.error, undefined, 'the verdict landed, so this is not an error result');
+    assert.equal(result.inlineDropped, 1,
+      'and the anchor is still counted as lost, whatever the reason for the loss');
+  });
+
+  test(`${providerName}.prReviewComment (contract): the anchor REACHES the provider, and exactly one payload carries the verdict (REQ-405-1/-5)`, async () => {
+    // Asserted on what was SENT, not on what came back. The return-value version
+    // of this test passed against a verb that ignored `comments` entirely — a
+    // provider must not be able to satisfy the contract by silently no-opping
+    // (REQ-405-6).
+    //
+    // CORRECTED while implementing GitLab. This case first asserted ONE call, and
+    // spec REQ-405-5 said inline comments "post in the SAME provider call" —
+    // true of GitHub, and structurally impossible on GitLab, where discussions
+    // are one-per-position so N anchors mean N+1 calls whatever the order. A
+    // contract that only one provider can satisfy is not a contract.
+    //
+    // The invariant that IS provider-agnostic, and the one D5 actually needs:
+    // the anchor reaches the provider, and exactly ONE payload carries the
+    // verdict body — so the anti-loop lock, which counts parseable verdicts
+    // rather than posts, sees exactly what it sees today.
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'the verdict block',
+      comments: [{ path: 'a.mjs', line: 42, body: 'the evidence a developer reads' }],
+      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-3', id: 3 }),
+    });
+    assert.equal(typeof result.url, 'string');
+    assert.equal(result.inlineDropped, undefined, 'nothing was dropped, so no count');
+
+    const payloads = sentPayloads();
+    const anchored = payloads.filter(p => p.comments || p.position);
+    assert.equal(anchored.length >= 1, true,
+      `the anchor must reach the provider, not be dropped: ${JSON.stringify(payloads)}`);
+    const anchorText = JSON.stringify(anchored);
+    assert.match(anchorText, /a\.mjs/, 'the anchored payload must name the path');
+    assert.match(anchorText, /42/, 'and the line');
+    // The BODY, in the shared loop (round-7 cold review, finding 1). It was
+    // asserted on GitHub only, and incidentally — by an e2e case. Replacing
+    // GitLab's `body: c.body` with a constant left all 2574 tests green: every
+    // anchor still attaches, `inlineDropped` stays absent, and the run reports a
+    // perfectly healthy inline review that says nothing.
+    //
+    // Substring-scanning `JSON.stringify(anchored)` for the path and the line is
+    // exactly the weakness B2 was fixed for one round earlier, surviving one field
+    // over on the sibling provider — which is why this assertion is here and not
+    // in either provider's own case.
+    assert.match(anchorText, /the evidence a developer reads/,
+      `the anchored payload must carry the FINDING TEXT, not just its coordinates: ${anchorText}`);
+
+    const verdictCarrying = payloads.filter(p => p.body === 'the verdict block');
+    assert.equal(verdictCarrying.length, 1,
+      `exactly ONE payload may carry the verdict body — a second parseable verdict is what the ` +
+      `anti-loop lock cannot deduplicate (design D5). Got: ${JSON.stringify(payloads)}`);
+  });
+
+  test(`${providerName}.prReviewComment (contract): the verdict survives a transport that dies MID-SEQUENCE (REQ-405-4, ordering)`, async () => {
+    // The ordering half of REQ-405-4, and it was unpinned until this case: the
+    // shape-based rejection fixture cannot tell summary-first from
+    // summary-last, because in both orders the bare summary eventually posts.
+    //
+    // What discriminates is a transport that dies AFTER the first call. On a
+    // provider that posts the verdict first, it is already safe. On one that
+    // leaves it for last, the verdict is lost and only orphaned annotations
+    // remain — which is exactly the outcome REQ-405-4 forbids.
+    //
+    // (Found because a mutation meant to reverse the order turned out to be
+    // inert. The green it produced said nothing; the missing test was real.)
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'the verdict block',
+      comments: [{ path: 'a.mjs', line: 42, body: 'here' }],
+      ...dieAfterFirst({ html_url: 'https://example.test/x/y/pull/1#review-4', id: 4 }),
+    });
+    assert.equal(typeof result.url, 'string',
+      'the verdict must already be posted when the transport dies — anything else loses the deliverable ' +
+      'and keeps the decoration');
+  });
+
+  test(`${providerName}.prReviewComment (contract): comments: [] is the SAME request as omitting it (REQ-405-2)`, async () => {
+    // The draft contract row asserts "absent and empty are the same request".
+    // It was true and forced by nothing (cold review of PR #490 round 1, E3),
+    // and the first repair was forced only on GitHub (round 2, C-2): asserting
+    // the BODIES sent is blind to a call that carries none, and on GitLab
+    // treating `[]` as a request costs an extra `diff_refs` GET and can return
+    // `inlineDropped: 0` — the one value REQ-405-4 forbids.
+    //
+    // So the two runs are compared as CALL SEQUENCES, which is the only form of
+    // the claim that both providers can fail.
+    const absent = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-5a', id: 51 }),
+    });
+    const absentCalls = [...requestLog()];
+    const absentPayloads = JSON.stringify(sentPayloads());
+
+    const empty = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      comments: [],
+      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-5b', id: 52 }),
+    });
+
+    assert.equal(typeof empty.url, 'string');
+    assert.equal(empty.inlineDropped, undefined, 'an empty request drops nothing — and must never report 0');
+    assert.equal(absent.inlineDropped, undefined);
+    assert.deepEqual(requestLog(), absentCalls,
+      `an empty comments array must make exactly the calls omitting it makes. absent=${JSON.stringify(absentCalls)} empty=${JSON.stringify(requestLog())}`);
+    assert.equal(JSON.stringify(sentPayloads()), absentPayloads,
+      'and send exactly the same payloads — no empty array forwarded to the provider');
+  });
+
+  test(`${providerName}.prReviewComment (contract): a non-array \`comments\` is NOT an inline request (REQ-405-2)`, async () => {
+    // `Array.isArray(comments)` is a defensive guard on a line this change added,
+    // and nothing pinned it (round-11 cold review, E2): relaxing it to
+    // `comments && comments.length > 0` left the whole suite green, after which a
+    // string reaches the provider as `comments: "…"` — a malformed request that
+    // GitHub 422s and that would then be charged to `inlineDropped` as if the diff
+    // were at fault. Pinned rather than removed: an unpinned guard is an invitation
+    // to delete it in a refactor and meet the caller that needed it in production.
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      comments: 'a.mjs:42',                                  // a string has .length
+      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-9', id: 9 }),
+    });
+    assert.equal(typeof result.url, 'string');
+    assert.equal(result.inlineDropped, undefined, 'nothing was requested, so nothing was dropped');
+    for (const p of sentPayloads()) {
+      assert.equal(p.comments, undefined,
+        `a non-array comments value must never reach the provider: ${JSON.stringify(p)}`);
+      assert.equal(p.position, undefined, `and must produce no discussion: ${JSON.stringify(p)}`);
+    }
+  });
+
+  test(`${providerName}.prReviewComment (contract): inlineDropped counts what was LOST, it is not a flag (REQ-405-4)`, async () => {
+    // Every earlier case used exactly ONE anchor, so a verb that hardcoded
+    // `inlineDropped: 1` satisfied the whole suite (cold review of PR #490, C2).
+    // The count is the entire mechanism of REQ-405-4 — a reader distinguishes
+    // "the anchors would not attach" from "there were none" by its MAGNITUDE.
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      comments: [
+        { path: 'a.mjs', line: 9001, body: 'out of diff' },
+        { path: 'b.mjs', line: 9002, body: 'also out' },
+        { path: 'c.mjs', line: 9003, body: 'and this one' },
+      ],
+      ...rejectInline({ html_url: 'https://example.test/x/y/pull/1#review-6', id: 6 }),
+    });
+    assert.equal(typeof result.url, 'string', 'the verdict still posts');
+    assert.equal(result.inlineDropped, 3,
+      'three anchors were refused, so three is the honest count — a hardcoded 1 satisfied every other case');
+  });
+
+  test(`${providerName}.prReviewComment (contract): a SUCCESS whose body cannot be read returns { url: null, error } — never throws`, async () => {
+    // Was a GitLab-only case, added because THIS change shipped exactly this
+    // regression on GitLab (round 1, C4: the url derivation moved outside the
+    // try). Round 3 found the GitHub twin unpinned on a code path this change
+    // created — deleting `parse`'s try/catch left all 2569 tests green, and a
+    // throw escapes `postVerdict`, which catches nothing, and kills the run.
+    //
+    // "Never throws" is normative in vcs-contract.md, in ADR-0020 and in this
+    // change's own draft row, so it belongs in the SHARED loop: a guarantee
+    // asserted for one provider is a guarantee for one provider.
+    const result = await vcs.prReviewComment({ project: 'x/y', number: 1, body: 'verdict', ...unusableBody() });
+    assert.equal(result.url, null, 'no url can be derived from a body that cannot be read');
+    assert.equal(typeof result.error, 'string', 'and the failure is REPORTED, not raised');
+  });
+
+  test(`${providerName}.prReviewComment (contract): a plain post failure costs exactly ONE call — the retry is for anchors only`, async () => {
+    // `github.mjs` claims "only reachable when anchors were sent, so a plain post
+    // failure costs no extra call", and nothing forced it (round 3, E3): making
+    // the retry unconditional left the full suite green, so a regression that
+    // re-POSTs the verdict on every transient failure would ship silently — and
+    // a first call that landed server-side would then post the verdict twice.
+    const result = await vcs.prReviewComment({ project: 'x/y', number: 1, body: 'verdict', ...failCapturing() });
+    assert.equal(result.url, null, 'the failure is still reported honestly');
+    assert.equal(requestLog().length, 1,
+      `a failure with no anchors must be attempted exactly once: ${JSON.stringify(requestLog())}`);
+  });
+
+  test(`${providerName}.prReviewComment (contract): lock 2 — a hostile \`event\` argument does not reach the payload (REQ-266-3)`, async () => {
+    // The source-scan below cannot see this, and neither could anything else
+    // (cold review of PR #490, C3): adding `event = 'COMMENT'` as a parameter and
+    // threading it into the payloads left the ENTIRE suite green, after which
+    // `prReviewComment({ ..., event: 'APPROVE' })` posts an approval — satisfying
+    // main's required-approving-review-count with the reviewer's own token.
+    //
+    // Lock 2 is stated as "no parameter, flag, or branch selects a different
+    // event", so it has to be asserted the way an attacker would reach it: by
+    // passing one. This is the guard on the mechanism that keeps the automated
+    // reviewer structurally unable to approve a merge, and this change is the
+    // first widening of the signature it guards.
+    // EVERY payload site, and getting to "every" took two rounds of being wrong
+    // about how many there are.
+    //
+    // `github.prReviewComment` builds THREE `event`-carrying literals: the two
+    // branches of the anchored/bare ternary, and the retry. `origin/main` had one;
+    // this change created the other two. Round 8 found the guard covering only
+    // site 1 (its fixture always succeeded, so the retry never fired) and fixed it
+    // to cover 1 and 3 — while asserting "both call sites", because the ternary
+    // reads as one. Round 9 found site 2 open, and site 2 is the ONLY one a
+    // production run reaches today: no evaluator emits `file`/`line`, so
+    // `deriveInlineComments` returns `[]` and `comments` is never sent.
+    //
+    // Parameterising site 2 alone left all 2575 tests green, after which
+    // `prReviewComment({ ..., event: 'APPROVE' })` — no anchors needed — posts an
+    // APPROVED review with the reviewer's own token, which satisfies `main`'s
+    // required-approving-review-count. It does NOT satisfy L6: that gate counts a
+    // non-author, NON-ALLOW-LISTED approval, so lock 3 holds independently — which
+    // is what reviewer-protocol §2 promises, and round 8's note claimed otherwise
+    // while citing §2 as its authority.
+    //
+    // So the case drives BOTH shapes and asserts across both. A guard that covers
+    // the paths the tests exercise, rather than the paths the verb can take, is
+    // measuring the fixtures.
+    const anchored = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      event: 'APPROVE', comments: [{ path: 'a.mjs', line: 9999, body: 'out of diff' }],
+      ...rejectInlineCapturing({ html_url: 'https://example.test/x/y/pull/1#review-7', id: 7 }),
+    });
+    assert.equal(typeof anchored.url, 'string', 'the verdict still posts — the fallback is one of the paths under test');
+    const anchoredPayloads = [...sentPayloads()];
+    assert.ok(anchoredPayloads.length >= 2,
+      `the fallback must have been exercised, or the retry site goes uninspected: ${JSON.stringify(anchoredPayloads)}`);
+
+    const bare = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      event: 'APPROVE',                                   // no `comments` — the production shape
+      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-8', id: 8 }),
+    });
+    assert.equal(typeof bare.url, 'string');
+    const barePayloads = [...sentPayloads()];
+    assert.ok(barePayloads.length >= 1, 'the no-anchor path must actually have posted');
+
+    for (const p of [...anchoredPayloads, ...barePayloads]) {
+      assert.notEqual(p.event, 'APPROVE', `an approving event reached the wire: ${JSON.stringify(p)}`);
+      assert.ok(p.event === undefined || p.event === 'COMMENT',
+        `only COMMENT (GitHub) or no event at all (GitLab) may be sent: ${JSON.stringify(p)}`);
+    }
+  });
+
+  test(`${providerName}.prReviewComment (contract): lock 2 — no APPROVE path exists in the source`, () => {
+    const src = readFileSync(fileURLToPath(new URL(`./${providerName}.mjs`, import.meta.url)), 'utf8');
+    const fn = src.slice(src.indexOf('export async function prReviewComment'));
+    const end = fn.indexOf('\nexport ', 1);
+    const scoped = end === -1 ? fn : fn.slice(0, end);
+    assert.doesNotMatch(scoped, /APPROVE|REQUEST_CHANGES/,
+      `${providerName}.prReviewComment must contain no approving event, even after the #405 widening (ADR-0020 lock 2)`);
   });
 
   test(`${providerName}.issueComment (contract): returns { url } on success`, async () => {
@@ -1230,6 +1781,169 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
     assert.equal(typeof result.error, 'string');
   });
 }
+
+test('github.prReviewComment (contract): the RETRY\'s never-throws guard holds too', async () => {
+  // The path this change created: first attempt refused for its anchors, retry
+  // accepted with a body that cannot be parsed. Deleting the try/catch around
+  // the retry's parse left all 2569 tests green (round-3 cold review, C1), and a
+  // throw here escapes `postVerdict` — which catches nothing — with the verdict
+  // lost and a stack trace in its place.
+  const result = await github.prReviewComment({
+    project: 'x/y', number: 1, body: 'verdict',
+    comments: [{ path: 'a.mjs', line: 1, body: 'x' }],
+    ...WRITE_VERB_PROVIDERS.github.unusableOnRetry(),
+  });
+  assert.equal(result.url, null);
+  assert.equal(typeof result.error, 'string', 'reported, not raised — on the retry as much as on the first attempt');
+});
+
+// ── #405, GitLab-only: the two halves the shared loop structurally cannot reach.
+// GitHub's review is atomic, so it has no `diff_refs` read and no per-anchor
+// payload. (A THIRD case lived here until round 3 — the never-throws guard for an
+// unusable success body — and it was not GitLab-only at all: GitHub had the
+// identical failure mode, unpinned, on a path this change created. It is in the
+// shared loop now. A block header that miscounts its own contents is the same
+// defect as a comment documenting the function above the one it sits on.)
+
+test('gitlab.prReviewComment (contract): an unreadable diff_refs reports EVERY anchor dropped (REQ-405-4, C1)', async () => {
+  // `tasks.md` claimed this was red-proofed. It was not: deleting the count
+  // (`if (!refs) return { url };`) left the whole suite green, and so did
+  // carrying on with undefined shas. The branch exists because unreadable refs
+  // make every anchor un-postable — reported, never silently skipped.
+  const attempted = [];
+  const result = await gitlab.prReviewComment({
+    project: 'x/y', number: 1, body: 'the verdict block',
+    comments: [
+      { path: 'a.mjs', line: 1, body: 'one' },
+      { path: 'b.mjs', line: 2, body: 'two' },
+    ],
+    fetchImpl: async (url) => {
+      // The MR read fails; the notes POST succeeds. Attempts on `discussions`
+      // are RECORDED rather than thrown: a throw is indistinguishable from a
+      // refused anchor, so the weaker mutation `if (!refs) refs = {}` — carry on
+      // and build every position out of undefined shas — produced the same
+      // count and stayed green. What separates them is whether the call was made.
+      if (/merge_requests\/\d+$/.test(url)) return { ok: false, status: 500 };
+      if (/discussions/.test(url)) { attempted.push(url); return { ok: false, status: 400 }; }
+      return { ok: true, json: async () => ({ id: 9 }) };
+    },
+  });
+  assert.equal(typeof result.url, 'string', 'the verdict posts regardless — it went first');
+  assert.equal(result.inlineDropped, 2,
+    'both anchors were un-postable, and the count is what tells a reader that from "there were none"');
+  assert.deepEqual(attempted, [],
+    'and NOT ONE discussion may be attempted without diff_refs — a position built from undefined shas is a ' +
+    'request we already know is malformed, and the resulting drop count would blame the diff for our own defect');
+});
+
+test('gitlab.prReviewComment (contract): a PARTIAL refusal counts the refused SUBSET, not all of them (REQ-405-4)', async () => {
+  // Round 14 varied WHY an anchor fails (422 → 502) and held constant HOW MANY.
+  // Every anchored-rejection fixture in this file refuses ALL anchors or none —
+  // and on GitLab `dropped` is a PER-ANCHOR counter, which is the only reason the
+  // variable exists (GitHub's is `inline.length` by construction, because its
+  // review is atomic). So the counter's arithmetic was pinned by nothing: both
+  // `inlineDropped: inline.length` and `dropped = inline.length` survived the full
+  // suite (round-15 cold review, C1).
+  //
+  // The partial case is the DESIGNED one, not an edge: `gitlab.mjs` says an anchor
+  // on a context or deleted line "is refused by GitLab and counted by
+  // `inlineDropped` — bounded and visible". A review with one anchor on an added
+  // line and one on a context line is the likeliest real drop there is, and under
+  // either mutation it reports every anchor lost — which is REQ-405-4's own
+  // failure mode, since the count is the reader's only way to tell "no anchors"
+  // from "the anchors would not attach".
+  const attempted = [];
+  const result = await gitlab.prReviewComment({
+    project: 'x/y', number: 1, body: 'the verdict block',
+    comments: [
+      { path: 'a.mjs', line: 1, body: 'attaches' },
+      { path: 'b.mjs', line: 2, body: 'refused' },
+      { path: 'c.mjs', line: 3, body: 'attaches' },
+    ],
+    fetchImpl: async (url, opts) => {
+      if (/merge_requests\/\d+$/.test(url)) {
+        return { ok: true, json: async () => ({ diff_refs: { base_sha: 'b', head_sha: 'h', start_sha: 's' } }) };
+      }
+      if (/discussions/.test(url)) {
+        const body = opts?.body ?? '';
+        attempted.push(JSON.parse(body).position.new_path);
+        // ONE of three refused — a strict, non-empty subset.
+        if (/b\.mjs/.test(body)) return { ok: false, status: 400, json: async () => ({ message: 'position is invalid' }) };
+        return { ok: true, json: async () => ({ id: 1 }) };
+      }
+      return { ok: true, json: async () => ({ id: 9 }) };
+    },
+  });
+  assert.deepEqual(attempted, ['a.mjs', 'b.mjs', 'c.mjs'],
+    'every anchor must be attempted — a refusal must not abort the ones after it');
+  assert.equal(typeof result.url, 'string');
+  assert.equal(result.inlineDropped, 1,
+    `one of three was refused, so the count is one — not three, and not a flag. ` +
+    `Got ${JSON.stringify(result.inlineDropped)}.`);
+});
+
+test('gitlab.prReviewComment (contract): a 2xx MR body with NO diff_refs takes the same guard (REQ-405-4)', async () => {
+  // The `!refs` guard had one route into it — a MR read that THROWS. A 2xx whose
+  // body simply carries no `diff_refs` reaches it too, and nothing drove that
+  // (round-13 cold review, B5): fabricating shas on that path left the suite green.
+  // Round 3's C1 was this same input class on the notes POST, found and moved into
+  // the shared loop; this is the other read #405 added, and the class did not
+  // follow it here.
+  const attempted = [];
+  const result = await gitlab.prReviewComment({
+    project: 'x/y', number: 1, body: 'the verdict block',
+    comments: [
+      { path: 'a.mjs', line: 1, body: 'one' },
+      { path: 'b.mjs', line: 2, body: 'two' },
+    ],
+    fetchImpl: async (url) => {
+      // 200, valid JSON, no diff_refs — the shape a partial or unusual MR payload has.
+      if (/merge_requests\/\d+$/.test(url)) return { ok: true, json: async () => ({ iid: 1 }) };
+      if (/discussions/.test(url)) { attempted.push(url); return { ok: false, status: 400 }; }
+      return { ok: true, json: async () => ({ id: 9 }) };
+    },
+  });
+  assert.equal(typeof result.url, 'string', 'the verdict posts regardless — it went first');
+  assert.equal(result.inlineDropped, 2, 'both anchors un-postable, and counted');
+  assert.deepEqual(attempted, [],
+    'and NOT ONE discussion attempted — a position built from fabricated shas is a request ' +
+    'we already know is malformed, and its refusal would be charged to the diff');
+});
+
+test('gitlab.prReviewComment (contract): the discussion position carries the FULL text-position shape (REQ-405-1, B2)', async () => {
+  // The only prior assertion on this payload was a substring scan of
+  // `JSON.stringify(...)` for the path and the line — satisfied by `new_path`
+  // alone. Reducing the position to `{ new_path, new_line }`, deleting
+  // `position_type` and all three shas along with the entire justification for
+  // the extra `diff_refs` GET, left the suite green.
+  //
+  // That matters more than coverage hygiene: if the anchor shape is wrong, every
+  // discussion 400s, `dropped` equals `inline.length`, and the run reports a
+  // plausible-looking count while GitLab inline review has never once worked.
+  const posted = [];
+  await gitlab.prReviewComment({
+    project: 'x/y', number: 1, body: 'the verdict block',
+    comments: [{ path: 'a.mjs', line: 42, body: 'here' }],
+    fetchImpl: async (url, opts) => {
+      if (/merge_requests\/\d+$/.test(url)) {
+        return { ok: true, json: async () => ({ diff_refs: { base_sha: 'BASE', head_sha: 'HEAD', start_sha: 'START' } }) };
+      }
+      if (/discussions/.test(url)) posted.push(JSON.parse(opts?.body ?? '{}'));
+      return { ok: true, json: async () => ({ id: 9 }) };
+    },
+  });
+  assert.equal(posted.length, 1, 'one anchor, one discussion');
+  assert.deepEqual(posted[0].position, {
+    position_type: 'text',
+    new_path: 'a.mjs',
+    old_path: 'a.mjs',
+    new_line: 42,
+    base_sha: 'BASE',
+    head_sha: 'HEAD',
+    start_sha: 'START',
+  }, 'GitLab requires position_type, BOTH paths and all three shas on a text position — ' +
+     'asserted key-by-key, because a substring scan for the path passed against a position missing everything else');
+});
 
 // ── labelList (issue #334, vcs-label-preflight contract) — inline mocks, no
 // fixture files: a simple normalized READ verb, same precedent as

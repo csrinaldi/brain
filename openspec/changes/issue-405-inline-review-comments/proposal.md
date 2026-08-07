@@ -60,7 +60,8 @@ than fail the review. Details and the four remaining decisions are in `design.md
 - ADR amendment to ADR-0020 recording D1–D6.
 - `brain-drafts/` draft of the `vcs-contract.md` row change → **human promotion**
   (Tier 2: `brain/**` is human-only; the agent drafts, never writes).
-- `/2` finding schema: `file` / `line`.
+- finding schema: `file` / `line` — optional, and NOT gated on protocol (a `/1` verdict
+  omits them the way it omits `evidence_class`; corrected in round 3, see REQ-405-2).
 - Both providers implement the widened contract; `vcs.contract.test.mjs` forces parity
   **including the un-anchorable fallback**.
 - `poster.mjs` wiring, preserving anti-loop, anti-stale, and `event: COMMENT`.

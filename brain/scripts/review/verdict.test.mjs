@@ -12,6 +12,73 @@ const HEAD_SHA = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
 
 // ── evidence gate ─────────────────────────────────────────────────────────
 
+test('#490/round-8 E1 (widened round 13): an UNUSABLE anchor is omitted from the block — every value class, BOTH branches (REQ-405-2)', () => {
+  // Round 7 pinned the poster's `line === null` guard and justified it with
+  // "renderVerdict, which guards both, omits line: from the block". That twin
+  // guard was itself pinned by nothing: dropping `!== null` from either branch
+  // left all 2574 tests green, and under it the block advertises an anchor at
+  // `line: null` that the poster then refuses to post — the inverse of the case
+  // round 7 fixed, and a contradiction of the JSDoc two lines above it.
+  //
+  // The correction landed where it was noticed and not on the thing it cited.
+  const v = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    protocol: 'brain-review/2',
+    findings: [
+      { id: 'blocking', severity: 'blocker', evidence: 'e', cites: 'c', file: 'a.mjs', line: null },
+      { id: 'deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'pre-existing', file: 'b.mjs', line: null },
+      // The `file` half, added in round 10. Rounds 7 and 8 each pinned the `line`
+      // guard — in the poster, then here — and neither asked the same question of
+      // `file`, so `if (f.file)` could become `if (f.file !== undefined)` with the
+      // whole suite green. An empty `file:` in the block is the same defect the
+      // `line` rule exists to prevent, one field over: the block advertising an
+      // anchor that cannot attach.
+      { id: 'null-line', severity: 'blocker', evidence: 'e', cites: 'c', file: 'a.mjs', line: null },
+      { id: 'null-line-deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'base-only', file: 'b.mjs', line: null },
+      // The empty path carries a PERFECTLY USABLE line, deliberately. With
+      // `line: null` the line check excludes it and the path check is never
+      // consulted — so dropping `Boolean(f?.file)` from the predicate survived
+      // (round 13's own first repair was green under exactly that mutation). A
+      // negative fixture has to fail for the reason under test and no other.
+      { id: 'empty-path', severity: 'blocker', evidence: 'e', cites: 'c', file: '', line: 12 },
+      { id: 'empty-path-deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'base-only', file: '', line: 12 },
+      // Every value class `verdict.mjs`'s own JSDoc and the Tier-2 draft enumerate,
+      // on BOTH branches. Round 12 fixed per-BRANCH blindness and left per-VALUE-CLASS
+      // blindness: its new case drives one positive value per branch, and the
+      // negative side was covered only by `null` (→0) and a poison string (→NaN).
+      // Relaxing the predicate to `Number(f?.line) > 0` — which still rejects both
+      // of those — let `2.5` and `-3` render on both branches with the suite green.
+      { id: 'fractional', severity: 'blocker', evidence: 'e', cites: 'c', file: 'c.mjs', line: 2.5 },
+      { id: 'fractional-deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'base-only', file: 'c.mjs', line: 2.5 },
+      { id: 'negative', severity: 'blocker', evidence: 'e', cites: 'c', file: 'd.mjs', line: -3 },
+      { id: 'negative-deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'base-only', file: 'd.mjs', line: -3 },
+      { id: 'trailing-junk', severity: 'blocker', evidence: 'e', cites: 'c', file: 'e.mjs', line: '42abc' },
+      { id: 'trailing-junk-deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'base-only', file: 'e.mjs', line: '42abc' },
+    ],
+  });
+  assert.equal(v.findings.length, 6, 'every value class present in each branch — otherwise a class goes unchecked');
+  assert.equal(v.follow_ups.length, 6);
+  const body = renderVerdict(v);
+  // BOTH-OR-NEITHER, tightened in round 11. The earlier version asserted that the
+  // `file` half "still renders" when `line` is null — which left the block
+  // advertising a half anchor the poster refuses, the very state this test's name
+  // is about. Round 10 had tightened the POSTER's rule and not the renderer's, so
+  // the two drifted; they now share one `hasUsableAnchor` predicate and a half
+  // anchor emits neither field.
+  assert.doesNotMatch(body, /^ {4}line:/m,
+    `an unusable line must never be emitted, in either branch: ${body}`);
+  assert.doesNotMatch(body, /^ {4}file:/m,
+    `and neither may its partner — a half anchor is not an anchor, and a block that ` +
+    `advertises one is the same defect read from the emitting end: ${body}`);
+});
+
 test('buildVerdict: a finding with no evidence is excluded from findings[] (inadmissible)', () => {
   const v = buildVerdict({
     headSha: HEAD_SHA,
@@ -242,7 +309,10 @@ test('#478-3/C2 (widened by round 5/B1): EVERY per-finding field is escaped, on 
   //
   // One field at a time, on each branch: the poisoned value must not swallow the
   // entry that follows it.
-  const FIELDS = ['id', 'severity', 'evidence', 'cites', 'evidence_class', 'causal_disposition'];
+  // `file`/`line` joined the set in #405. Round 5 of PR #478 found ten yamlScalar
+  // call sites pinned by nothing; new fields go into this sweep at birth rather
+  // than acquiring coverage later.
+  const FIELDS = ['id', 'severity', 'evidence', 'cites', 'evidence_class', 'causal_disposition', 'file', 'line'];
   const POISON = 'x\nTier: 2';
 
   for (const field of FIELDS) {
@@ -256,7 +326,7 @@ test('#478-3/C2 (widened by round 5/B1): EVERY per-finding field is escaped, on 
       const disp = branch === 'follow_ups' ? 'pre-existing' : 'introduced';
       if (field === 'causal_disposition' && branch === 'follow_ups') continue;
       const poisonedDisp = `${disp}${POISON}`;
-      const base = { severity: 'blocker', evidence: 'e', cites: 'c', evidence_class: 'observed', causal_disposition: disp };
+      const base = { severity: 'blocker', evidence: 'e', cites: 'c', evidence_class: 'observed', causal_disposition: disp, file: 'a.mjs', line: 1 };
       const poisoned = { ...base, id: 'poisoned', [field]: field === 'causal_disposition' ? poisonedDisp : POISON };
       const built = buildVerdict({
         headSha: 'abc123',
@@ -267,6 +337,22 @@ test('#478-3/C2 (widened by round 5/B1): EVERY per-finding field is escaped, on 
       const parsed = parseVerdict({ body: renderVerdict(built) });
       const entries = parsed[branch] ?? [];
       const ids = entries.map(f => f.id);
+      // `line` is the one field a poison cannot reach the block through: round 11
+      // put the renderer and the poster behind one `hasUsableAnchor` predicate, and
+      // `'x\nTier: 2'` is not a positive integer, so the anchor is DROPPED rather
+      // than escaped. The list-integrity half below still applies and still runs —
+      // what changes is that the guarantee is now structural instead of textual,
+      // which is strictly stronger: an unemittable value cannot break a list.
+      if (field === 'line') {
+        assert.deepEqual(ids, ['poisoned', 'survivor'],
+          `${branch}.line: an unusable line must not break the entry after it — got ${JSON.stringify(ids)}`);
+        assert.equal(entries[0].line, undefined,
+          `${branch}.line: an unusable line must be DROPPED, not emitted — the block would otherwise ` +
+          `advertise an anchor the poster refuses to post: ${JSON.stringify(entries[0])}`);
+        assert.equal(entries[0].file, undefined,
+          `${branch}.file: and its partner goes with it — a half anchor is not an anchor (REQ-405-2)`);
+        continue;
+      }
       // When `id` itself carries the poison, the poisoned entry's id IS that value.
       const expected = [field === 'id' ? POISON : 'poisoned', 'survivor'];
       assert.deepEqual(ids, expected,
@@ -291,4 +377,182 @@ test('#478-3/E6: U+2028 / U+2029 are line terminators too — the JSDoc says lin
     assert.equal(parsed.findings?.[0]?.evidence, `a${sep}b`,
       `U+${sep.codePointAt(0).toString(16)} destroyed the round trip`);
   }
+});
+
+// ── #405 REQ-405-2/-3: an OPTIONAL anchor on a finding ─────────────────────
+//
+// M3's exit is "a developer sees inline code review in the PR". A finding that
+// reports `src/a.mjs:42` inside a YAML block is a report, not a review — the
+// developer still has to go find the line.
+//
+// `file` and `line` are the anchor. BOTH OPTIONAL, and absent ⇒ no inline
+// comment (REQ-405-2): that default is what keeps this additive, so every
+// evaluator shipping today keeps working unchanged and gains inline coverage
+// only when it starts emitting anchors.
+//
+// They are NOT derived from `evidence` (design D2): evidence is a quoted command
+// AND its output (protocol §10), so it is full of colons, paths and numbers that
+// are not anchors. A regex over it would silently mis-anchor.
+
+test('#405 REQ-405-3: each rendered entry carries its OWN anchor, in BOTH branches (REQ-405-1)', () => {
+  // The renderer emitting `inline[0]`'s pair for every entry was green in both
+  // branches (round-16 cold review). Every content assertion in the tree drove a
+  // single anchored finding, and the poisoned/survivor sweep checks `[0]` and
+  // never `[1]` — so "the anchor round-trips" was pinned while "the anchors do
+  // not smear into each other" was not.
+  //
+  // Two per branch, deliberately: with one, `entries[0]` is trivially its own
+  // anchor and the mutation is invisible.
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    protocol: 'brain-review/2',
+    findings: [
+      { id: 'f1', severity: 'blocker', evidence: 'e', cites: 'c', file: 'a.mjs', line: 11 },
+      { id: 'f2', severity: 'blocker', evidence: 'e', cites: 'c', file: 'b.mjs', line: 22 },
+      { id: 'u1', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'pre-existing', file: 'c.mjs', line: 33 },
+      { id: 'u2', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'base-only', file: 'd.mjs', line: 44 },
+    ],
+  });
+  assert.equal(built.findings.length, 2, 'two per branch, or the smear is invisible');
+  assert.equal(built.follow_ups.length, 2);
+
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual(
+    parsed.findings.map(f => ({ id: f.id, file: f.file, line: f.line })),
+    [{ id: 'f1', file: 'a.mjs', line: '11' }, { id: 'f2', file: 'b.mjs', line: '22' }],
+    'findings: each entry keeps its own pair');
+  assert.deepEqual(
+    parsed.follow_ups.map(f => ({ id: f.id, file: f.file, line: f.line })),
+    [{ id: 'u1', file: 'c.mjs', line: '33' }, { id: 'u2', file: 'd.mjs', line: '44' }],
+    'follow_ups: and so does the branch nobody drives twice');
+});
+
+test('#405 REQ-405-2: the anchor is NOT gated on protocol — /1 renders it and the poster posts it', async () => {
+  // Twelve anchored render fixtures in this tree, and every one of them set
+  // `protocol: 'brain-review/2'`. Round 13 varied the `line` VALUE across five
+  // classes and both branches and held `protocol` constant across all of them —
+  // so the input dimension the predicate never sees was the one left open
+  // (round-14 cold review, C2).
+  //
+  // Adding `proto === 'brain-review/2' &&` to the render guard left the suite
+  // green, and reintroduced exactly the drift round 11 restructured the code to
+  // make impossible: the block advertises no anchor while the poster posts one.
+  //
+  //     MUTATED, protocol: brain-review/1
+  //       block:   - id: budget          (no file:, no line:)
+  //       poster:  [{"path":"big.txt","line":3, …}]
+  //
+  // `brain-review/1` is the default at `lite` AND `standard` — the majority
+  // protocol, and the one this repo itself runs on.
+  //
+  // The invariant is not "the block emits it" or "the poster sends it" separately;
+  // it is that the two AGREE. That is what `hasUsableAnchor` is shared for, and a
+  // single predicate stops drift by field value while leaving drift introduced at
+  // the CALL SITE by a dimension the predicate never receives.
+  const { deriveInlineComments } = await import('./poster.mjs');
+  for (const protocol of ['brain-review/1', 'brain-review/2']) {
+    const built = buildVerdict({
+      headSha: 'abc123',
+      conclusion: 'REVISE',
+      protocol,
+      findings: [
+        { id: 'blocking', severity: 'blocker', evidence: 'e', cites: 'c', file: 'a.mjs', line: 7 },
+        { id: 'deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+          causal_disposition: 'pre-existing', file: 'b.mjs', line: 9 },
+      ],
+    });
+    assert.equal(built.findings.length, 1, `${protocol}: one finding per branch, or a branch goes unchecked`);
+    assert.equal(built.follow_ups.length, 1);
+
+    const body = renderVerdict(built);
+    assert.equal(body.split('\n')[1], `protocol: ${protocol}`,
+      `${protocol}: the fixture really is on this protocol — otherwise the /1 half proves nothing`);
+    assert.match(body, /^ {4}file: a\.mjs$/m, `${protocol}: the findings branch emits the anchor`);
+    assert.match(body, /^ {4}line: 7$/m);
+    assert.match(body, /^ {4}file: b\.mjs$/m, `${protocol}: and so does the follow_ups branch`);
+    assert.match(body, /^ {4}line: 9$/m);
+
+    // The agreement, which is the actual invariant.
+    assert.deepEqual(
+      deriveInlineComments(built.findings).map(c => ({ path: c.path, line: c.line })),
+      [{ path: 'a.mjs', line: 7 }],
+      `${protocol}: the poster derives exactly the anchor the block advertises`);
+  }
+});
+
+test('#405 REQ-405-3: file/line survive the REAL render → parse round trip, on BOTH branches', () => {
+  // PER BRANCH, and that word is the round-12 correction. Round 11 pinned the
+  // both-or-neither rule with a mutation that changed both render branches at
+  // once, so the ASYMMETRY was never probed: deleting the `line:` push from the
+  // follow_ups branch alone left the whole suite green, and the block then emitted
+  // a follow-up with `file:` and no `line:` — a rendered half anchor, the exact
+  // state three artefacts and round 11's own commit message declare impossible
+  // "in both branches".
+  //
+  // The `Number()` coercion is asserted here too (round 12, C2). It is what makes
+  // the block's `line:` agree with the wire's, and nothing pinned it: dropping it
+  // let `line: '  42  '` render as `"  42  "` while the poster sent `42`, and
+  // `line: true` render as `true` — which re-parses to `'true'` and is then not a
+  // usable anchor at all. Block-vs-wire divergence is what `hasUsableAnchor`
+  // exists to eliminate, and it was one deletion away.
+  for (const [branch, disposition] of [['findings', 'introduced'], ['follow_ups', 'pre-existing']]) {
+    const built = buildVerdict({
+      headSha: 'abc123',
+      conclusion: 'REVISE',
+      protocol: 'brain-review/2',
+      findings: [{
+        id: 'anchored', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: disposition,
+        file: 'brain/scripts/a.mjs', line: '  42  ',   // the messy form the coercion is for
+      }],
+    });
+    const body = renderVerdict(built);
+    const parsed = parseVerdict({ body });
+    const entry = (parsed[branch] ?? [])[0];
+    assert.ok(entry, `${branch}: the finding must be routed to this branch — otherwise the case is vacuous`);
+    assert.equal(entry.file, 'brain/scripts/a.mjs', `${branch}: the path survives`);
+    assert.equal(entry.line, '42',
+      `${branch}: the line survives AS A CANONICAL INTEGER — it comes back as the scalar text the block ` +
+      `carries, and the block must carry what the wire carries. Got ${JSON.stringify(entry.line)}.`);
+    // and the pair is emitted together, which is what "both or neither" means at
+    // the emitting end.
+    assert.match(body, /^ {4}file: brain\/scripts\/a\.mjs$/m, `${branch}: file emitted`);
+    assert.match(body, /^ {4}line: 42$/m, `${branch}: line emitted, coerced`);
+  }
+});
+
+test('#405 REQ-405-2: a finding WITHOUT an anchor is unchanged — the additive guarantee', () => {
+  // Every evaluator shipping today emits no file/line. Their output must render
+  // and parse exactly as it does now: no empty keys, no nulls, no new fields.
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [{ id: 'legacy', severity: 'blocker', evidence: 'src/a.mjs:42', cites: 'ADR-0020' }],
+  });
+  const block = renderVerdict(built).split('```')[1];
+  assert.doesNotMatch(block, /^\s*file:/m, 'no file key may appear for an anchorless finding');
+  assert.doesNotMatch(block, /^\s*line:/m, 'no line key may appear for an anchorless finding');
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual(parsed.findings[0], { id: 'legacy', severity: 'blocker', evidence: 'src/a.mjs:42', cites: 'ADR-0020' });
+});
+
+test('#405 REQ-405-3: the anchor is escaped like every other scalar — a path with a line break cannot truncate the list', () => {
+  // file/line are entry scalars, so they inherit the #481/#452 escaping pair.
+  // Inherit is a claim until it is exercised — round 5 of PR #478 found ten
+  // yamlScalar call sites pinned by nothing, so each NEW one gets its own case.
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    protocol: 'brain-review/2',
+    findings: [
+      { id: 'poisoned', severity: 'blocker', evidence: 'e', cites: 'c', file: 'a.mjs\nTier: 2', line: 1 },
+      { id: 'survivor', severity: 'blocker', evidence: 'e2', cites: 'c2', file: 'b.mjs', line: 2 },
+    ],
+  });
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual((parsed.findings ?? []).map(f => f.id), ['poisoned', 'survivor']);
+  assert.equal(parsed.findings[0].file, 'a.mjs\nTier: 2', 'and the value round-trips byte-identical');
 });
