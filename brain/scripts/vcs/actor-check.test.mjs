@@ -350,6 +350,33 @@ test('evaluateActor: lite — approval applied BEFORE a FOREIGN commit was pushe
   assert.match(result.reason, /not strictly after/i);
 });
 
+// PR #503 cold-review round 1, finding 3: a caller that never threads the
+// `decisions` field at all (issue #473 pre-existed this field) must get the
+// BYTE-IDENTICAL reason string it got before issue #473 landed — no
+// `(brain-decision/1: ...)` annotation appended. The expected string below is
+// copied verbatim from the true base branch's (feat/issue-473-s1-parser-
+// extraction, pre-slice-2) `evaluateActor` output for this exact fixture —
+// derived by running that file's own `evaluateActor`, not guessed. `decisions`
+// is absent from the input object (not `null`): that is the LEGACY state — a
+// caller that fetched nothing and never intended to. `decisions === null`
+// (fetch attempted, uncomputable) legitimately still annotates, unchanged.
+test('evaluateActor: lite — legacy caller with NO `decisions` field at all → reason is byte-identical to pre-#473 base (no brain-decision/1 annotation)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: 'abc', login: 'mallory', at: '2024-01-01T00:10:00Z' }],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail');
+  assert.equal(
+    result.reason,
+    'the approved label was applied at 2024-01-01T00:00:00Z, not strictly after the latest foreign commit — ' +
+      'authored by "mallory" and pushed at 2024-01-01T00:10:00Z — so the approval predates work the approver has ' +
+      'not seen. Re-apply the approved label after reviewing that commit (REQ-L5-1′ "lite" evidence, ADR-0026 ' +
+      'Amendment 1).',
+  );
+});
+
 // ── ADR-0026 Amendment 1 / issue #418 — re-arm only on foreign commits ──────
 //
 // At `lite` the approver is ALLOWED to be the author, so comparing against
@@ -1382,6 +1409,34 @@ test('evaluateSignedDecision: rule 11 — PR head unresolvable (headSha null) �
   });
   assert.equal(result.admitted, false);
   assert.match(result.note, /cannot resolve the pr head/i);
+});
+
+// PR #503 cold-review round 1, finding 2: the guard at actor-check.mjs:268
+// checked ONLY `headSha === null`; `undefined` or a non-string value (e.g. a
+// number) reached `parsed.head_sha.toLowerCase() !== headSha.toLowerCase()`
+// and THREW instead of refusing. The contract is "never throws, refuse
+// instead" — these two rows drive the SAME rule-11 refusal path with the
+// other non-string shapes, mirroring the null case above exactly.
+test('evaluateSignedDecision: fail-closed — headSha undefined (never resolved/threaded) → refuse, never throws', () => {
+  assert.doesNotThrow(() => {
+    const result = evaluateSignedDecision({
+      decisions: [decisionReview()],
+      headSha: undefined,
+    });
+    assert.equal(result.admitted, false);
+    assert.match(result.note, /cannot resolve the pr head/i);
+  });
+});
+
+test('evaluateSignedDecision: fail-closed — headSha a non-string (number) → refuse, never throws', () => {
+  assert.doesNotThrow(() => {
+    const result = evaluateSignedDecision({
+      decisions: [decisionReview()],
+      headSha: 123,
+    });
+    assert.equal(result.admitted, false);
+    assert.match(result.note, /cannot resolve the pr head/i);
+  });
 });
 
 // ── rules 12-14: actor field vs review author ─────────────────────────────────

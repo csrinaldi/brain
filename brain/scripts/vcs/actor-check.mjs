@@ -233,6 +233,17 @@ function sniffDecisionProtocol(body) {
  * @returns {{admitted:true,reason:string}|{admitted:false,note:string}|null}
  */
 export function evaluateSignedDecision({ decisions, headSha, denyActors = [] } = {}) {
+  // `decisions === undefined` means the caller never threaded the field at
+  // all — a LEGACY caller predating issue #473 (PR #503 cold-review round 1,
+  // finding 3). That is not "a fetch was attempted and came back
+  // uncomputable" (`decisions === null`, which DOES warrant the note below);
+  // it is silence, exactly like rules 2/3's "nothing addressed to this
+  // reader". Treating it as `null` would append a `(brain-decision/1: ...)`
+  // annotation onto every pre-existing caller's verdict, breaking the
+  // byte-for-byte reason-string identity the spec promises for callers this
+  // change never touched.
+  if (decisions === undefined) return null;
+
   if (decisions === null) {
     return {
       admitted: false,
@@ -265,7 +276,13 @@ export function evaluateSignedDecision({ decisions, headSha, denyActors = [] } =
       continue; // rules 5, 6, 7, 8, 9, 12
     }
 
-    if (headSha === null) {
+    // Fail-closed on ANY non-string headSha (PR #503 cold-review round 1,
+    // finding 2), not just `null` — `undefined` (never resolved/threaded) or
+    // a non-string (e.g. a number, from a malformed caller) reached
+    // `.toLowerCase()` below and THREW instead of refusing. The contract is
+    // "never throws, refuse instead"; null semantics are preserved exactly
+    // (typeof null !== 'string').
+    if (typeof headSha !== 'string') {
       notes.push('(brain-decision/1: cannot resolve the PR head — the signature could not be verified.)');
       continue; // rule 11
     }
@@ -290,7 +307,18 @@ export function evaluateSignedDecision({ decisions, headSha, denyActors = [] } =
       continue; // rule 14
     }
 
-    if (denyActors.some(d => d && String(d).toLowerCase() === String(author).toLowerCase())) {
+    // Deny if EITHER the review author OR the block's claimed actor is in
+    // the deny set (PR #503 cold-review round 1, finding 4) — this invariant
+    // must not depend on rule ordering. Today rule 14 (above) already forces
+    // `parsed.actor === author` case-folded before this runs, so checking
+    // only `author` is currently equivalent to checking both; a future
+    // reorder or relaxation of rule 14 must not silently reopen this deny
+    // check to a mutation that targets `parsed.actor` instead of `author`.
+    if (
+      denyActors.some(
+        d => d && (String(d).toLowerCase() === String(author).toLowerCase() || String(d).toLowerCase() === String(parsed.actor).toLowerCase()),
+      )
+    ) {
       notes.push(
         `(brain-decision/1: "${author}" is registered in governance.reviewActors — a review identity may never sign an approval.)`,
       );
@@ -431,7 +459,10 @@ function evaluateNoCommitOnBranch({ actor, commits }) {
  *   `regulated` (approver-authored-commit check) only.
  * @param {Array<{state?:string, author?:string|null, body?:string}>|null} [input.decisions]
  *   `prReviews()`'s normalized shape (issue #473), or `null` when
- *   uncomputable. Consumed by `lite`'s signed-evidence sources only.
+ *   uncomputable — this DOES annotate the fallback verdict (rule 1).
+ *   `undefined`/omitted means the caller never threaded the field at all
+ *   (a legacy caller) and stays silent, no annotation — PR #503 cold-review
+ *   round 1, finding 3. Consumed by `lite`'s signed-evidence sources only.
  * @param {string|null} [input.headSha]  The PR's current head SHA
  *   (`resolveHeadSha(commits)`, issue #473) — a signed decision block binds
  *   to this.
@@ -452,7 +483,15 @@ export function evaluateActor({
   overrideRefused = false,
   tier = 'standard',
   commits = null,
-  decisions = null,
+  // No default here (PR #503 cold-review round 1, finding 3): defaulting to
+  // `null` would collapse "the caller never threaded this field"
+  // (`undefined`) into "a fetch was attempted and came back uncomputable"
+  // (`null`), and `evaluateSignedDecision` treats those two states
+  // differently — see its own comment. `gatherActorCheckInputs` always
+  // threads `decisions` explicitly (both return sites), so production
+  // behavior is unaffected; only a hand-built input object that omits the
+  // key stays silent, as it did before issue #473.
+  decisions,
   headSha = null,
   signedEvidenceSources = LITE_SIGNED_EVIDENCE_SOURCES,
 } = {}) {
