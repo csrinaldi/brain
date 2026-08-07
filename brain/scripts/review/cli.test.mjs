@@ -584,7 +584,20 @@ test('#405: a dropped anchor is PRINTED, not just returned (REQ-405-4)', async (
   assert.equal(code, 0, 'a refused anchor must never fail the run');
   const reported = lines.filter(l => /could not be anchored/.test(l));
   assert.equal(reported.length, 1, `the count must be printed exactly once — got: ${JSON.stringify(lines)}`);
-  assert.match(reported[0], /\b2\b/, 'and must carry the number, not merely say something was lost');
+  // The WHOLE line, not a projection over it (round-18 cold review). `match(/\b2\b/)`
+  // plus the filter regex pinned that a number and the phrase "could not be anchored"
+  // are present; everything between them was free. Degrading the message to
+  // `brain:review: 2 could not be anchored` left the suite green, and that message is
+  // the failure REQ-405-4 cites by name: a reader told two things were lost, and not
+  // told WHAT was lost or that the text survives in the summary block, concludes the
+  // findings are gone. That is `evidence-reader-empty-on-failure` at the recovery
+  // instruction instead of at the evidence.
+  // An exact-string assertion is deliberate: rewording this message is a real change
+  // to what a human is told on the one path where the tool has already failed at
+  // something, and it should cost a test edit.
+  assert.strictEqual(reported[0],
+    'brain:review: 2 inline comment(s) could not be anchored — the finding text is in the summary block above.',
+    'the message must name the count, WHAT was lost, and where the text still is');
 });
 
 test('#405: a SINGLE dropped anchor is printed too (REQ-405-4)', async () => {

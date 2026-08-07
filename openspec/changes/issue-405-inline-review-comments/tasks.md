@@ -814,9 +814,35 @@ of the one that outranks them.
       a rule about axes: **the round that names a failure mode is not thereby immune to it** —
       a diagnosis has to be swept for across the tree, including the test of the function the
       diagnosis was about.
-- [ ] T16 · round 18 — round 17 found no defect in executable behaviour for the fifth
-      round running, but two corrections, so the streak is zero. Two consecutive rounds with
-      nothing at blocker or correction severity close this.
+- [x] T16 · round 18 — cold review of `a03a63e`. **No blocker, no defect in executable
+      behaviour (sixth consecutive), no false claim, ONE correction.** Streak stays at zero.
+      Round 17's lesson applied as the round's method: sweep the diagnosis rather than the
+      instance. Twelve mutations across three probes, eleven RED — ORDER at all three layers,
+      wire-level type coercion at both providers, the two `inlineDropped` totals, the printed
+      count. All already pinned, several by assertions written two rounds before the axis had
+      a name.
+      - **C1 — the diagnosis swept, and it landed one layer past where round 17 stopped.**
+        Round 17 replaced a projection with a whole-value assertion in *one* test. The same
+        shape survived in `cli.test.mjs`: a filter on `/could not be anchored/` plus
+        `assert.match(reported[0], /\b2\b/)` pins that a number and a phrase are present and
+        leaves **everything between them free**. Degrading the message to
+        `brain:review: 2 could not be anchored` left the suite green.
+        That message is the failure REQ-405-4 cites by name. A reader told two things were
+        lost — not told WHAT was lost, nor that the text survives in the summary block —
+        concludes the findings are gone. `evidence-reader-empty-on-failure`, relocated from
+        the evidence to the recovery instruction. And it is the single path where the tool
+        has *already* failed at something, so it is the worst place to be vague.
+        Fixed with an exact-string `strictEqual` on the whole line, deliberately brittle:
+        rewording what a human is told on the failure path should cost a test edit. Three
+        mutations that were green (count hardcoded, pointer deleted, message degraded) are
+        now three reds.
+      **The lesson:** round 17 said a round is not immune to the failure mode it names.
+      Round 18 says the same thing about the *repair*: fixing the instance the reviewer
+      pointed at is not the same as sweeping the class. The correction round 17 made was
+      correct and incomplete, and the incompleteness was one `grep` away.
+- [ ] T16 · round 19 — six rounds now with no defect in executable behaviour. Round 18 was
+      a single correction, on a test assertion rather than on shipped code. Two consecutive
+      rounds with nothing at blocker or correction severity close this.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.
