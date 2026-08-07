@@ -535,6 +535,44 @@ test('#405 T9: nothing dropped means NO inlineDropped key, never 0 (REQ-405-4)',
   assert.equal('inlineDropped' in out, false, `absent, not 0: ${JSON.stringify(out)}`);
 });
 
+test('#405: the anchored path holds at EVERY PR mode, and at more than one anchor (REQ-405-1)', async () => {
+  // Round 14's C2 asserted the block-vs-wire agreement by calling
+  // `deriveInlineComments` DIRECTLY — bypassing `postVerdict`, which is the one
+  // call site where drift can actually enter. And that call site has an input
+  // dimension nothing varied: `mode`. Every anchored fixture in the tree used
+  // `tranche`; only the ANCHORLESS ruling case varied it. So gating the exclusion
+  // on `checkpoint` too survived the full suite (round-15 cold review, C2), and
+  // `checkpoint` is a live production mode — the block would advertise an anchor
+  // the poster refuses to post, which is the drift by name.
+  //
+  // Anchor COUNT was unvaried at this call site as well: every fixture supplied
+  // exactly one, so `.slice(0, 1)` was green too. Both dimensions are driven here.
+  //
+  // Round 14's own lesson, applied to round 14: a shared predicate stops drift by
+  // field value and cannot stop drift introduced at the call site by a dimension
+  // the predicate never receives. The fix is to drive the call site, not to share
+  // one more function.
+  for (const mode of ['tranche', 'checkpoint']) {
+    const spy = recordingSpy();
+    await postVerdict({
+      headSha: HEAD, project: 'csrinaldi/brain', number: 42, provider: 'github', mode,
+      renderedBody: '```yaml\nprotocol: brain-review/2\n```',
+      reviewerHandle: 'brain-reviewer', priorVerdicts: [],
+      findings: [
+        { id: 'f1', evidence: 'first', file: 'a.mjs', line: 3 },
+        { id: 'f2', evidence: 'second', file: 'b.mjs', line: 8 },
+      ],
+      deps: { getVcs: async () => spy.vcs },
+    });
+    const post = spy.calls.find(c => c.verb === 'prReviewComment');
+    assert.ok(post, `${mode}: every non-ruling mode posts on the PR path`);
+    assert.deepEqual(
+      post.args.comments?.map(c => ({ path: c.path, line: c.line })),
+      [{ path: 'a.mjs', line: 3 }, { path: 'b.mjs', line: 8 }],
+      `${mode}: EVERY anchored finding reaches the verb, not just the first — got ${JSON.stringify(post.args.comments)}`);
+  }
+});
+
 test('#405: an inline post does NOT weaken the anti-loop lock (REQ-405-5)', async () => {
   // Asserted in spec REQ-405-5 and design D7-4 and implemented in no test until
   // the round-2 cold review counted them (C-4). The behaviour was already safe —

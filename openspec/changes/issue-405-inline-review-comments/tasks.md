@@ -686,9 +686,17 @@ of the one that outranks them.
       always find one more assertion to tighten. Round 10 met half the new form and round 11
       broke it, which is the evidence that two rounds is the right length rather than that no
       criterion works.
-- [x] T16 · round 14 — first round judged under the ruled criterion. **No blocker, no defect
-      in executable behaviour (eighth round), and — for the first time in fourteen rounds —
-      NO false normative claim.** The PR body and #491 were both current, also a first.
+- [x] T16 · round 14 — first round judged under the ruled criterion. **No blocker and no
+      defect in executable behaviour.** Two corrections, so the streak did not start.
+      **Two claims in this very entry were false and are corrected here** (round 15):
+      - *"the first time in fourteen rounds with NO false normative claim — the PR body and
+        #491 were both current, also a first."* The body was NOT current. The criterion
+        ruling landed at `4a0fd11` (12:51) and round 14 reviewed `5d54f53` (13:22), so the
+        body already asserted the criterion was unruled while the tree recorded it ruled.
+        Written by the same commit that recorded the ruling.
+      - *"(eighth round)"*. It reconciles with nothing. Round 13's own B2 established the
+        behavioural axis failed at rounds **1 and 11 only**, which makes round 14 the
+        twelfth behaviour-clean round, or the third consecutive. "Eighth" counts neither.
       Two corrections, so the streak does not start. Both are the same axis: **the FAILURE
       had one value class.** Round 13 widened the value classes of the finding's `line`;
       nobody had varied what a failure looks like, or what protocol the verdict is on.
@@ -719,6 +727,38 @@ of the one that outranks them.
       stops drift by FIELD VALUE and cannot stop drift introduced at the CALL SITE by an
       input dimension the predicate never receives. `hasUsableAnchor` never sees `protocol`.
       A shared rule is not the same as a shared decision.
+- [x] T16 · round 15 — cold review of `7115ab1`, ~15 live mutations. **No blocker, no defect
+      in executable behaviour** — third consecutive, and every round-14 red-proof claim
+      independently re-verified as holding. Three corrections, so the streak stays at zero.
+      **The first two are round 14's own lesson applied to round 14**, which is the
+      instructive part:
+      - **C1 — the drop count was unpinned along the PARTIAL axis.** Round 14 varied WHY an
+        anchor fails (422 → 502) and held constant HOW MANY: every anchored-rejection
+        fixture in the tree refuses ALL anchors or none. On GitLab `dropped` is a per-anchor
+        counter — the only reason that variable exists, since GitHub's is `inline.length` by
+        construction — so its arithmetic was pinned by nothing. Both `inlineDropped:
+        inline.length` and `dropped = inline.length` survived. With 3 anchors and 1 refused,
+        each reports 3, which is REQ-405-4's own failure mode: the count stops distinguishing
+        "no anchors" from "the anchors would not attach". And the partial case is the
+        DESIGNED one — `gitlab.mjs` names an anchor on a context line as the expected drop.
+      - **C2 — the poster's CALL SITE was unvaried along `mode` and along anchor count.**
+        Round 14's C2 asserted the block-vs-wire agreement by calling `deriveInlineComments`
+        directly, bypassing `postVerdict` — the one place that drift can enter. Every
+        anchored poster fixture used `tranche`; only the anchorless ruling case varied
+        `mode`. Gating `checkpoint` alongside `ruling` survived, and `checkpoint` is a live
+        production mode. `.slice(0, 1)` survived too, because every fixture supplied exactly
+        one anchor.
+        **Round 14 wrote the lesson and did not apply it to its own repair**: it said a
+        shared predicate cannot stop drift introduced at the call site by a dimension the
+        predicate never receives — and then tested the predicate instead of the call site.
+      - **C3** — the PR body stale for the sixth time, plus the two false claims in the
+        round-14 entry, corrected above.
+      Six mutations, six reds, per-spelling and per-dimension.
+- [ ] T16 · round 16 — rounds 1-15 have never produced a clean one. Three consecutive rounds
+      with no behavioural defect; what keeps failing is a dimension the previous round's
+      repair held constant. The axis list in `red-proof-blind-along-an-unvaried-axis.md` has
+      grown by three since it was written (failure-value-class, call-site dimension, and
+      subset-vs-total), which is worth folding back into that doc once this settles.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.

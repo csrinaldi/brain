@@ -1785,6 +1785,52 @@ test('gitlab.prReviewComment (contract): an unreadable diff_refs reports EVERY a
     'request we already know is malformed, and the resulting drop count would blame the diff for our own defect');
 });
 
+test('gitlab.prReviewComment (contract): a PARTIAL refusal counts the refused SUBSET, not all of them (REQ-405-4)', async () => {
+  // Round 14 varied WHY an anchor fails (422 → 502) and held constant HOW MANY.
+  // Every anchored-rejection fixture in this file refuses ALL anchors or none —
+  // and on GitLab `dropped` is a PER-ANCHOR counter, which is the only reason the
+  // variable exists (GitHub's is `inline.length` by construction, because its
+  // review is atomic). So the counter's arithmetic was pinned by nothing: both
+  // `inlineDropped: inline.length` and `dropped = inline.length` survived the full
+  // suite (round-15 cold review, C1).
+  //
+  // The partial case is the DESIGNED one, not an edge: `gitlab.mjs` says an anchor
+  // on a context or deleted line "is refused by GitLab and counted by
+  // `inlineDropped` — bounded and visible". A review with one anchor on an added
+  // line and one on a context line is the likeliest real drop there is, and under
+  // either mutation it reports every anchor lost — which is REQ-405-4's own
+  // failure mode, since the count is the reader's only way to tell "no anchors"
+  // from "the anchors would not attach".
+  const attempted = [];
+  const result = await gitlab.prReviewComment({
+    project: 'x/y', number: 1, body: 'the verdict block',
+    comments: [
+      { path: 'a.mjs', line: 1, body: 'attaches' },
+      { path: 'b.mjs', line: 2, body: 'refused' },
+      { path: 'c.mjs', line: 3, body: 'attaches' },
+    ],
+    fetchImpl: async (url, opts) => {
+      if (/merge_requests\/\d+$/.test(url)) {
+        return { ok: true, json: async () => ({ diff_refs: { base_sha: 'b', head_sha: 'h', start_sha: 's' } }) };
+      }
+      if (/discussions/.test(url)) {
+        const body = opts?.body ?? '';
+        attempted.push(JSON.parse(body).position.new_path);
+        // ONE of three refused — a strict, non-empty subset.
+        if (/b\.mjs/.test(body)) return { ok: false, status: 400, json: async () => ({ message: 'position is invalid' }) };
+        return { ok: true, json: async () => ({ id: 1 }) };
+      }
+      return { ok: true, json: async () => ({ id: 9 }) };
+    },
+  });
+  assert.deepEqual(attempted, ['a.mjs', 'b.mjs', 'c.mjs'],
+    'every anchor must be attempted — a refusal must not abort the ones after it');
+  assert.equal(typeof result.url, 'string');
+  assert.equal(result.inlineDropped, 1,
+    `one of three was refused, so the count is one — not three, and not a flag. ` +
+    `Got ${JSON.stringify(result.inlineDropped)}.`);
+});
+
 test('gitlab.prReviewComment (contract): a 2xx MR body with NO diff_refs takes the same guard (REQ-405-4)', async () => {
   // The `!refs` guard had one route into it — a MR read that THROWS. A 2xx whose
   // body simply carries no `diff_refs` reaches it too, and nothing drove that
