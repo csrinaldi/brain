@@ -441,26 +441,110 @@ export async function commitStatus({ project, sha }) {
  * provider). The API response carries no `web_url`, so the display url is
  * derived from `apiBase` (stripping the trailing `/api/v4`). Never throws.
  *
- * @param {{ project: string, number: number, body: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
- * @returns {Promise<{ url: string } | { url: null, error: string }>}
+ * `comments` (issue #405) is an optional array of `{ path, line, body }` inline
+ * anchors. Absent and empty are the SAME request — no discussion is attempted.
+ * The summary note goes first and it is the ONLY payload carrying the verdict body
+ * (this provider has no retry, so unlike GitHub it never sends the body twice);
+ * each anchor is then its own `discussions` POST, because GitLab's discussions
+ * are one-per-position. `inlineDropped` counts anchors that did not attach and is
+ * ABSENT when none were, never 0.
+ *
+ * @param {{ project: string, number: number, body: string, comments?: Array<{path: string, line: number, body: string}>, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ url: string } | { url: string, inlineDropped: number } | { url: null, error: string }>}
  */
-export async function prReviewComment({ project, number, body, apiBase, token, proxyUrl, fetchImpl } = {}) {
+export async function prReviewComment({ project, number, body, comments, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const base = apiBase ?? 'https://gitlab.com/api/v4';
   const encoded = encodeURIComponent(project);
+  const tok = token ?? vcsToken(PROVIDER);
+  const call = (path, method, payload) =>
+    gitlabApiFetch({ apiBase: base, token: tok, proxyUrl: proxyUrl ?? null, path, method, body: payload, fetchImpl });
+
+  const inline = Array.isArray(comments) && comments.length > 0 ? comments : null;
+
+  // ── the summary note ALWAYS goes first (issue #405, REQ-405-4) ────────────
+  //
+  // GitHub carries `comments[]` in the same payload as `body`, so its review is
+  // atomic. GitLab cannot: discussions are ONE PER POSITION, so N anchors mean
+  // N+1 calls no matter the order. Given that, the verdict goes first — if
+  // anything after it fails, the deliverable is already posted. That is the
+  // opposite of GitHub's order (which attempts anchored, then retries bare) and
+  // it is the same rule underneath: the verdict is never lost to an inline
+  // failure.
+  //
+  // The anti-loop lock survives the extra calls because it counts PARSEABLE
+  // VERDICTS, not posts: only this summary note carries a `brain-review/N`
+  // block, and cold-boot.mjs filters out everything `parseVerdict` rejects.
+  // Pinned by a test rather than left as an argument.
+  // The url derivation stays INSIDE the try (cold review of PR #490, C4). An
+  // earlier version of this widening moved it out, so a 2xx whose JSON body was
+  // `null` threw a TypeError on `note.id` where the pre-#405 verb returned
+  // `{ url: null, error }` — silently breaking the "Never throws" discipline
+  // that this row of vcs-contract.md, ADR-0020 and the poster's error handling
+  // all depend on.
+  let url;
   try {
-    const r = await gitlabApiFetch({
-      apiBase: base,
-      token: token ?? vcsToken(PROVIDER),
-      proxyUrl: proxyUrl ?? null,
-      path: `projects/${encoded}/merge_requests/${number}/notes`,
-      method: 'POST',
-      body: { body },
-      fetchImpl,
-    });
-    return { url: `${base.replace(/\/api\/v4\/?$/, '')}/${project}/-/merge_requests/${number}#note_${r.id}` };
+    const note = await call(`projects/${encoded}/merge_requests/${number}/notes`, 'POST', { body });
+    url = `${base.replace(/\/api\/v4\/?$/, '')}/${project}/-/merge_requests/${number}#note_${note.id}`;
   } catch (err) {
     return { url: null, error: err.message };
   }
+  if (!inline) return { url };
+
+  // ── the anchors, as discussions ───────────────────────────────────────────
+  //
+  // `position` needs the MR's own diff_refs. Read inside the verb rather than
+  // through a widened `prView` (design D4): prView's normalized shape is
+  // consumed by cold-boot, tranche, checkpoint and anti-stale, and a
+  // GitLab-only field for one caller does not belong there.
+  let refs;
+  try {
+    const mr = await call(`projects/${encoded}/merge_requests/${number}`, 'GET');
+    refs = mr?.diff_refs;
+  } catch {
+    refs = null;
+  }
+  // Unreadable refs mean every anchor is un-postable — reported as dropped, not
+  // silently skipped, and never as a failed verdict.
+  if (!refs) return { url, inlineDropped: inline.length };
+
+  let dropped = 0;
+  for (const c of inline) {
+    try {
+      await call(`projects/${encoded}/merge_requests/${number}/discussions`, 'POST', {
+        body: c.body,
+        // GitLab's Discussions API requires BOTH paths on a text position, not
+        // just the one being annotated (cold review of PR #490, B2 — the first
+        // version sent `new_path` alone).
+        //
+        // `new_line` alone, deliberately: `old_line` is what an anchor on an
+        // unchanged (context) or DELETED line needs, and the `{path, line}` anchor
+        // shape has no field to supply it. Such an anchor is refused by GitLab and
+        // counted by `inlineDropped` — bounded and visible, not silently lost. It is
+        // unreachable today (no evaluator anchors) and would be the first thing to
+        // revisit if the anchor shape ever widens. For an added or modified line the two
+        // are the same file; a rename would need the pre-rename path, which this
+        // anchor shape has no way to know and which `deriveInlineComments` never
+        // produces. The three shas come from the MR's own `diff_refs` — that read
+        // is the whole reason for the extra GET above, so the payload is pinned
+        // key-by-key rather than by a substring scan that `new_path` alone
+        // satisfied.
+        position: {
+          position_type: 'text',
+          new_path: c.path,
+          old_path: c.path,
+          new_line: c.line,
+          base_sha: refs.base_sha,
+          head_sha: refs.head_sha,
+          start_sha: refs.start_sha,
+        },
+      });
+    } catch {
+      dropped += 1;
+    }
+  }
+  // Absent when nothing was dropped, never 0 — "none requested" and "all
+  // dropped" must not be the same answer to a reader.
+  return dropped > 0 ? { url, inlineDropped: dropped } : { url };
 }
 
 /**
