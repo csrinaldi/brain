@@ -1045,8 +1045,28 @@ of the one that outranks them.
       applying `status:approved` under any circumstance. Consequence worth stating plainly —
       **every further round invalidates the approval again**, so the round loop now has a
       per-round cost to the maintainer that the criterion does not account for.
-- [ ] T16 · round 29 — the axis has failed at rounds 1 and 11 only; round 28 was clean. One
-      more clean round meets the ruled criterion and the review ends.
+- [x] T16 · round 29 — cold review of `3239c26`. **No blocker, no defect in executable
+      behaviour, no correction, no false claim. Clean.**
+      **Streak 2 of 2 — the ruled criterion is MET and the review-fix loop closes here.**
+      Evidence, deliberately a different batch from round 28's: rounds 15 and 18's mutation
+      sets re-run — 11 mutations, 11 red, covering the partial-refusal counter on GitLab, the
+      poster's `mode` and anchor-count call-site dimensions, the two `inlineDropped` totals,
+      and the CLI message's count and recovery pointer. With round 28's 13, that is 24
+      mutations across 5 files and 4 layers, all red, on the merged tree.
+      Round 28's claims re-verified: 13-of-13 red, `origin/main` touched none of this change's
+      files, eight checks green and `actor-check` red on the 02/08 label. 2627 tests, 0 fail;
+      governed diff 360 of 1000; `repo:check` ✓; `brain:nav` ✓.
+      **What the criterion has and has not established.** Met: no blocker or correction in
+      two consecutive rounds. Established alongside it: the behavioural axis failed at rounds
+      1 and 11 only, the unpinned-protection axis has been clean since round 20, and every
+      finding from 21 to 27 was in the record rather than the code. NOT established, and it
+      cannot be by any number of rounds: that the anchor path works in production. **No
+      evaluator emits `file`/`line`** — ruled to #408 — so what ships is a path with no
+      producer, guarded by the `test/review-regulated/` tripwire.
+      Remaining work is human and listed at T4c, T11b, T11c, T17, T18c, plus re-applying
+      `status:approved` to clear `actor-check` — which every round of this loop invalidated
+      again, and which is the reason the loop should not be restarted without a new finding
+      to justify it.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.
