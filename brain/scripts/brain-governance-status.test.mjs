@@ -12,12 +12,36 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { reportGovernanceStatus } from './brain-governance-status.mjs';
 import { checkContexts } from './vcs/governance-checks.mjs';
 import { setSpawn } from './vcs/lib/exec.mjs';
+import { POSTMERGE_STALE_LABEL } from './vcs/substrate.mjs';
 
 afterEach(() => setSpawn(spawnSync));
+
+// Local fixture-loading glue, copied per vcs.contract.test.mjs:44-61 (design's
+// file-changes note) — this file lives one directory up from `vcs/fixtures/`.
+const FIXTURES_DIR = fileURLToPath(new URL('./vcs/fixtures/', import.meta.url));
+
+/** Loads and parses a fixture JSON file by name. */
+function loadFixture(name) {
+  return JSON.parse(readFileSync(`${FIXTURES_DIR}${name}`, 'utf8'));
+}
+
+/** Every fixture MUST declare exactly one of recorded/derived (never both, never neither). */
+function assertProvenance(fixture, fixtureName) {
+  const p = fixture._provenance;
+  assert.ok(p, `${fixtureName}: missing _provenance`);
+  const recorded = p.recorded === true;
+  const derived = p.derived === true;
+  assert.ok(recorded || derived, `${fixtureName}: must be marked recorded or derived — never ambiguous (lesson #12)`);
+  assert.ok(!(recorded && derived), `${fixtureName}: must not be marked BOTH recorded and derived`);
+  assert.ok(p.endpoint, `${fixtureName}: missing _provenance.endpoint`);
+  assert.ok(p.date, `${fixtureName}: missing _provenance.date`);
+}
 
 test('brain-governance-status: importing is side-effect-free (CLI guard holds)', async () => {
   const mod = await import('./brain-governance-status.mjs');
@@ -256,6 +280,222 @@ test('printSubstrateReport: present-but-inert post-tag workflow (brain\'s own re
   assert.match(output, /release gate\s+present but cannot block/i);
   assert.match(output, /cannot block tags/i);
   assert.match(output, /remedy:.*#210/is);
+});
+
+// ── Rung-3 post-merge-CI breakdown (issue #468, REQ-R3-8) ───────────────────
+//
+// Driven SOLELY by rungs[3].available/active/verifiable/mechanism, mirroring
+// the rung-1/rung-2 discipline above. Every scenario injects `probes.postMergeCi`
+// evidence objects directly (no real probe needed) — one case per branch of
+// the rung-3 print block, `available === false` checked first so it can never
+// be swallowed by an inert render.
+
+test('printSubstrateReport: rung-3 available:false renders UNCOMPUTABLE with reason + remedy, never a neutral inert render', async () => {
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => ({ workflowPresent: true, read: 'failed', lastRun: null, error: 'gh: authentication required', observedAt: null }),
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /post-merge CI\s+UNCOMPUTABLE — /i);
+  assert.match(output, /authentication required/i);
+  assert.doesNotMatch(output, /post-merge CI\s+not armed/i, 'uncomputable must never render as a neutral "not armed"');
+});
+
+test('printSubstrateReport: every rung-3 render NAMES verifiable and mechanism, not merely consumes them (REQ-R3-8)', async () => {
+  // REQ-R3-8 requires the two fields to be reported, not just to drive the
+  // branch choice — "no computed rung-3 signal may go unrendered". Asserted
+  // across two structurally different rows (uncomputable vs the legacy bare-
+  // boolean probe) so that a render which names them on one branch and drops
+  // them on another cannot pass.
+  const render = async (postMergeCi) => {
+    const logs = await captureLog(() =>
+      reportGovernanceStatus({
+        config: baseConfig,
+        env: {},
+        providerModule: fakeProviderModule,
+        probes: {
+          branchProtection: async () => ({ status: 404, contexts: [] }),
+          releaseGate: async () => false,
+          postMergeCi,
+          brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+        },
+      })
+    );
+    return logs.join('\n');
+  };
+
+  const uncomputable = await render(async () => ({ workflowPresent: true, read: 'failed', lastRun: null, error: 'gh: authentication required', observedAt: null }));
+  assert.match(uncomputable, /mechanism=postmerge-run-ledger-uncomputable\s/, 'the uncomputable row must name its mechanism');
+  assert.match(uncomputable, /verifiable=true\b/, 'the uncomputable row must name its verifiability');
+
+  const declared = await render(async () => true);
+  assert.match(declared, /mechanism=postmerge-ci-declared\s/, 'the bare-boolean row must name its mechanism');
+  assert.match(declared, /verifiable=false\b/, 'the bare-boolean row is precisely the unverifiable one — it must say so');
+});
+
+test('printSubstrateReport: rung-3 active with verifiable:false renders the declared-but-unverified caveat (legacy bare-true probe)', async () => {
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => true,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /post-merge CI\s+armed \(declared\) — unverified; no run-ledger evidence/i);
+});
+
+test('printSubstrateReport: rung-3 active AND verifiable renders armed with the run-ledger mechanism, no caveat', async () => {
+  const observedAt = Date.parse('2026-08-05T12:00:00Z');
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => ({
+          workflowPresent: true,
+          read: 'ok',
+          lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T06:00:00Z', htmlUrl: 'https://github.com/o/r/actions/runs/1' },
+          error: null,
+          observedAt,
+        }),
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /RUNG 3\b/);
+  assert.match(output, /post-merge CI\s+armed\s+\[last governance-postmerge run on main succeeded within 48h\]/i);
+  assert.doesNotMatch(output, /post-merge CI[^\n]*declared/i, 'a run-ledger-verified arm must not carry the declared caveat');
+});
+
+test('printSubstrateReport: the armed line quotes the CONFIGURED branch and the CONSTANT, never hardcoded literals', async () => {
+  // Both values were hardcoded until they were derived, and neither derivation
+  // had a test: reverting both to `on main … within 48h` left the whole suite
+  // green. This case is the only one where the literals and the derived values
+  // disagree — `defaultBranch: 'master'` and a threshold read off
+  // POSTMERGE_STALE_LABEL rather than typed into the string.
+  const observedAt = Date.parse('2026-08-05T12:00:00Z');
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: { project: { slug: 'o/r', defaultBranch: 'master' }, vcs: { provider: 'github' } },
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => ({
+          workflowPresent: true,
+          read: 'ok',
+          lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T06:00:00Z', htmlUrl: 'https://github.com/o/r/actions/runs/1' },
+          error: null,
+          observedAt,
+        }),
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /run on master succeeded/, 'the branch named must be the one the probe queried, never a hardcoded "main"');
+  assert.doesNotMatch(output, /run on main succeeded/, 'a consumer on master must never be told a run succeeded on a branch that was never read');
+  assert.match(output, new RegExp(`succeeded within ${POSTMERGE_STALE_LABEL}\\]`), 'the threshold quoted must be derived from POSTMERGE_STALE_MS, not typed into the string');
+});
+
+test('printSubstrateReport: the stale reason quotes the CONSTANT, so the drift guard cannot leave it lying', async () => {
+  const completedAt = Date.parse('2026-07-01T00:00:00Z');
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => ({
+          workflowPresent: true,
+          read: 'ok',
+          lastRun: { id: 1, conclusion: 'success', completedAt: '2026-07-01T00:00:00Z', htmlUrl: 'https://github.com/o/r/actions/runs/1' },
+          error: null,
+          observedAt: completedAt + (49 * 60 * 60 * 1000),
+        }),
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  assert.match(logs.join('\n'), new RegExp(`stale \\(older than ${POSTMERGE_STALE_LABEL}\\)`), 'the staleness threshold stated to the operator must be the one that actually rejected the run');
+});
+
+test('printSubstrateReport: rung-3 inactive (stale run) renders "not armed" with reason + remedy, never swallowed silently', async () => {
+  const completedAt = Date.parse('2026-07-01T00:00:00Z');
+  const observedAt = completedAt + (49 * 60 * 60 * 1000);
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => ({
+          workflowPresent: true,
+          read: 'ok',
+          lastRun: { id: 2, conclusion: 'success', completedAt: '2026-07-01T00:00:00Z', htmlUrl: 'https://github.com/o/r/actions/runs/2' },
+          error: null,
+          observedAt,
+        }),
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /RUNG 4\b/, 'stale evidence does not arm any rung — falls to the floor');
+  assert.match(output, /post-merge CI\s+not armed: last successful governance-postmerge run is stale/i);
+  assert.match(output, /https:\/\/github\.com\/o\/r\/actions\/runs\/2/);
+});
+
+test('printSubstrateReport: rung-3 print does not regress existing rung-1/rung-2 blocks', async () => {
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 200, contexts: OUR_CONTEXTS }),
+        releaseGate: async () => true,
+        postMergeCi: async () => true,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: true, codeownersPresent: true }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /RUNG 1\b/);
+  assert.match(output, /merge gate\s+armed/i);
+  assert.match(output, /post-merge CI\s+armed \(declared\)/i, 'rung-3 evidence still renders even though rung 1 is selected');
 });
 
 // ── GitLab rung-1 ladder awareness (issue #244 A4) ──────────────────────────────
@@ -644,4 +884,250 @@ test('governance-status GitLab fixture: none armed — rung falls below 1, no fa
 
   const output = logs.join('\n');
   assert.doesNotMatch(output, /RUNG 1\b/);
+});
+
+// ── realPostMergeCiProbe — run-ledger reader (issue #468) ───────────────────
+//
+// `postMergeCi` intentionally NOT overridden below — exercises the REAL probe
+// via the shared `setSpawn` seam, mirroring the realBranchProtectionProbe
+// pattern above (:271-294). The top-level RUNG/remedy signals and the rung-3
+// breakdown block's `mechanism=` field are asserted here — and only in ways
+// that are TIME-INDEPENDENT (design's testing
+// strategy: real-probe fixtures own evidence extraction, never freshness;
+// E7-vs-E8 staleness is asserted only at the pure substrate.test.mjs layer
+// with an injected `observedAt`).
+
+const postmergeInertOtherRungs = {
+  branchProtection: async () => ({ status: 404, contexts: [] }),
+  releaseGate: async () => false,
+  brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+};
+
+test('realPostMergeCiProbe: a well-formed success-page run is neither uncomputable nor unproven (evidence extraction, not freshness)', async () => {
+  const fixture = loadFixture('github-postmergeRuns-success.json');
+  assertProvenance(fixture, 'github-postmergeRuns-success.json');
+
+  setSpawn((cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/csrinaldi/brain/actions/workflows/governance-postmerge.yml/runs')) {
+      return { status: 0, stdout: JSON.stringify(fixture.data), stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: 'unexpected call: ' + cmd + ' ' + args.join(' ') };
+  });
+
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: postmergeInertOtherRungs,
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.doesNotMatch(output, /run-ledger evidence is unavailable/i, 'a well-formed lastRun must never render as uncomputable');
+  assert.doesNotMatch(output, /mechanism=postmerge-unproven\s/, 'a well-formed lastRun must never render as unproven — anchored to the MECHANISM, not to reason prose a reword can silently defang');
+  assert.doesNotMatch(output, /verify gh auth/i, 'a well-formed lastRun must never render the read-failure remedy');
+});
+
+test('realPostMergeCiProbe: a non-terminal newest run does not make a readable ledger uncomputable (the terminal-run filter is load-bearing)', async () => {
+  const fixture = loadFixture('github-postmergeRuns-inflight.json');
+  assertProvenance(fixture, 'github-postmergeRuns-inflight.json');
+
+  setSpawn((cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/csrinaldi/brain/actions/workflows/governance-postmerge.yml/runs')) {
+      return { status: 0, stdout: JSON.stringify(fixture.data), stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: 'unexpected call: ' + cmd + ' ' + args.join(' ') };
+  });
+
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: postmergeInertOtherRungs,
+    })
+  );
+
+  const output = logs.join('\n');
+  // Time-independent by construction: the completed run's age decides only
+  // between E9 (armed) and E8 (stale), and neither emits the strings asserted
+  // here — so this test keeps its mutation power after the fixture ages past
+  // the 48h window. What it pins is the filter, not freshness.
+  assert.doesNotMatch(output, /evidence is malformed/i, 'reading the non-terminal entry carries conclusion null into the evaluator (E5) — the completed entry is the one to read');
+  assert.doesNotMatch(output, /mechanism=postmerge-unproven\s/, 'a completed run exists further down the page — this ledger has a terminal run to read');
+  assert.match(output, /mechanism=postmerge-(?:run-ledger|stale)\s/, 'the completed run drives the verdict — armed when fresh, stale when not, never uncomputable');
+});
+
+test('realPostMergeCiProbe: an empty run-ledger page reports unproven (zero terminal runs), deterministic regardless of clock', async () => {
+  const fixture = loadFixture('github-postmergeRuns-empty.json');
+  assertProvenance(fixture, 'github-postmergeRuns-empty.json');
+
+  setSpawn((cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/csrinaldi/brain/actions/workflows/governance-postmerge.yml/runs')) {
+      return { status: 0, stdout: JSON.stringify(fixture.data), stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: 'unexpected call: ' + cmd + ' ' + args.join(' ') };
+  });
+
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: postmergeInertOtherRungs,
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /RUNG 4\b/, 'no rung is armed — falls to the floor');
+  assert.match(output, /remedy:.*push to main.*record a terminal run/is);
+});
+
+test('realPostMergeCiProbe: a non-zero gh exit (auth failure) reports uncomputable, never active', async () => {
+  setSpawn((cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/csrinaldi/brain/actions/workflows/governance-postmerge.yml/runs')) {
+      return { status: 1, stdout: '', stderr: 'gh: authentication required. Run gh auth login.' };
+    }
+    return { status: 1, stdout: '', stderr: 'unexpected call: ' + cmd + ' ' + args.join(' ') };
+  });
+
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: postmergeInertOtherRungs,
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /RUNG 4\b/);
+  assert.match(output, /remedy:.*verify gh auth\/connectivity/is);
+});
+
+test('realPostMergeCiProbe: malformed JSON reports uncomputable, never crashes', async () => {
+  setSpawn((cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/csrinaldi/brain/actions/workflows/governance-postmerge.yml/runs')) {
+      return { status: 0, stdout: '{not valid json', stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: 'unexpected call: ' + cmd + ' ' + args.join(' ') };
+  });
+
+  await assert.doesNotReject(async () => {
+    const logs = await captureLog(() =>
+      reportGovernanceStatus({
+        config: baseConfig,
+        env: {},
+        providerModule: fakeProviderModule,
+        probes: postmergeInertOtherRungs,
+      })
+    );
+    const output = logs.join('\n');
+    assert.match(output, /RUNG 4\b/);
+    assert.match(output, /remedy:.*verify gh auth\/connectivity/is);
+  });
+});
+
+test('realPostMergeCiProbe: a parseable but wrong-shaped 200 body (workflow_runs missing/not-an-array) reports uncomputable, NOT zero-runs unproven', async () => {
+  // A 200 body that parses as JSON but does not have a `workflow_runs` array
+  // (e.g. a proxy/gateway error page, or an API shape change) must be treated
+  // as a read failure — never conflated with "the endpoint legitimately
+  // returned zero runs" (which is the honest, claimable postmerge-unproven
+  // state the 4-state `read` field exists to distinguish).
+  setSpawn((cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/csrinaldi/brain/actions/workflows/governance-postmerge.yml/runs')) {
+      return { status: 0, stdout: JSON.stringify({ message: 'Not Found', documentation_url: 'https://x' }), stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: 'unexpected call: ' + cmd + ' ' + args.join(' ') };
+  });
+
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: postmergeInertOtherRungs,
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.doesNotMatch(output, /mechanism=postmerge-unproven\s/, 'a wrong-shaped body is UNREADABLE, never the honest no-terminal-run-in-window state — the distinction the 4-state read field exists to keep');
+  assert.match(output, /remedy:.*verify gh auth\/connectivity/is, 'a wrong-shaped body must render as a read failure');
+});
+
+test('realPostMergeCiProbe: config.vcs.provider "gitlab" reports unsupported and spawns ZERO gh/glab processes', async () => {
+  const calls = [];
+  setSpawn((cmd, args) => {
+    calls.push({ cmd, args });
+    return { status: 1, stdout: '', stderr: 'unexpected call: ' + cmd + ' ' + args.join(' ') };
+  });
+
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: gitlabConfig,
+      env: {},
+      providerModule: fakeGitlabProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [], pipelineMustSucceed: false }),
+        releaseGate: async () => false,
+        brainWritesReviewed: async () => ({ premiumOrHigher: false }),
+        // postMergeCi intentionally NOT overridden — exercises the real probe.
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.doesNotMatch(output, /run-ledger evidence is unavailable/i, 'unsupported provider must be distinct from uncomputable');
+  const spawnedGhOrGlab = calls.filter((c) => c.cmd === 'gh' || c.cmd === 'glab');
+  assert.deepEqual(spawnedGhOrGlab, [], `expected zero gh/glab spawns for the postMergeCi probe under provider:gitlab — saw: ${JSON.stringify(spawnedGhOrGlab)}`);
+});
+
+// ── Outage-window replay lock (issue #468, REQ-R3-9) ─────────────────────────
+//
+// Replays the real 2026-07-24 → 2026-08-05 governance-postmerge.yml failure
+// window (recorded live via `gh api`, see fixture `_provenance`) through the
+// REAL probe (`postMergeCi` not overridden) and the real `evalRung3`. This is
+// acceptance criterion (a) from the proposal, made executable: the 12-day
+// outage must never report armed. Deterministic without a clock freeze — row
+// E6 (conclusion !== success) precedes row E8 (staleness) in the decision
+// table, so the outage window fails on conclusion, not on age.
+
+test('replay lock: the real 2026-07-24→2026-08-05 outage window reports rung 3 inactive, names the failing run URL, never claims RUNG 3', async () => {
+  const fixture = loadFixture('github-postmergeRuns-outage-window.json');
+  assertProvenance(fixture, 'github-postmergeRuns-outage-window.json');
+
+  setSpawn((cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/csrinaldi/brain/actions/workflows/governance-postmerge.yml/runs')) {
+      return { status: 0, stdout: JSON.stringify(fixture.data), stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: 'unexpected call: ' + cmd + ' ' + args.join(' ') };
+  });
+
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+        // postMergeCi intentionally NOT overridden — exercises the real probe + real evalRung3.
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.doesNotMatch(output, /RUNG 3\b/, 'a continuously-failing post-merge CI ledger must never report RUNG 3 armed');
+  assert.match(output, /post-merge CI\s+not armed:/i);
+  assert.match(output, /https:\/\/github\.com\/csrinaldi\/brain\/actions\/runs\/31035091085/, 'the reason must name the failing run URL (the most recent completed run in the window)');
+  // Pins the CAUSE, not just the outcome. Without this the lock decays with the
+  // calendar: once the fixture is older than POSTMERGE_STALE_MS, evalRung3
+  // reaches E8 (stale) instead of E6 (failed), and E8's reason ALSO carries the
+  // run URL — so all three assertions above keep passing while the conclusion
+  // check they exist to guard can be deleted freely. Asserting the mechanism is
+  // what keeps "inactive because it FAILED" distinguishable from "inactive
+  // because the fixture aged", which is the whole of REQ-R3-9.
+  assert.match(output, /mechanism=postmerge-failing\s/, 'rung 3 must be inactive because the run FAILED (E6) — not because the fixture has aged into E8');
 });

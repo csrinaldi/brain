@@ -71,6 +71,395 @@ test('detectSubstrate: rung 3 inactive when the postMergeCi probe returns false'
   assert.ok(typeof result.rungs[3].remedy === 'string' && result.rungs[3].remedy.length > 0);
 });
 
+// ── Rung 3 — 13-row decision table (issue #468, design "Decision table") ────────
+//
+// evalRung3 is a pure total function over `RunLedgerEvidence`. Every row below
+// asserts the FULL six-field shape (REQ-R3-6): available, active, verifiable,
+// mechanism, reason, remedy. `observedAt` is always supplied BY the injected
+// evidence — never read ambiently — so the skew/staleness rows (E7/E8) are deterministic
+// without a clock freeze.
+
+const SIX_FIELDS = ['available', 'active', 'verifiable', 'mechanism', 'reason', 'remedy'];
+
+function assertShape(rung3, label) {
+  for (const field of SIX_FIELDS) {
+    assert.ok(field in rung3, `${label}: missing field "${field}"`);
+  }
+}
+
+test('rung 3 decision table (L1): bare true is legacy declared-armed — active, unverified', async () => {
+  const result = await detectSubstrate({ env: {}, probes: { postMergeCi: async () => true } });
+  assertShape(result.rungs[3], 'L1');
+  assert.deepEqual(
+    { available: result.rungs[3].available, active: result.rungs[3].active, verifiable: result.rungs[3].verifiable },
+    { available: true, active: true, verifiable: false },
+  );
+  assert.equal(result.rungs[3].mechanism, 'postmerge-ci-declared');
+});
+
+test('rung 3 decision table (L2): bare false is legacy declared-absent — inactive, unverified, non-empty reason/remedy', async () => {
+  const result = await detectSubstrate({ env: {}, probes: { postMergeCi: async () => false } });
+  assertShape(result.rungs[3], 'L2');
+  assert.deepEqual(
+    { available: result.rungs[3].available, active: result.rungs[3].active, verifiable: result.rungs[3].verifiable },
+    { available: true, active: false, verifiable: false },
+  );
+  assert.equal(result.rungs[3].mechanism, 'postmerge-ci-absent');
+  assert.ok(result.rungs[3].reason);
+  assert.ok(result.rungs[3].remedy);
+});
+
+test('rung 3 decision table (L3): no probe wired degrades to uncomputable, never active', async () => {
+  const result = await detectSubstrate({ env: {}, probes: {} });
+  assertShape(result.rungs[3], 'L3');
+  assert.deepEqual(
+    { available: result.rungs[3].available, active: result.rungs[3].active, verifiable: result.rungs[3].verifiable },
+    { available: false, active: false, verifiable: true },
+  );
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-uncomputable');
+});
+
+test('rung 3 decision table (L3): a throwing probe (undefined via safeProbe) degrades to uncomputable, NOT to the false/L2 branch', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: { postMergeCi: () => { throw new Error('boom'); } },
+  });
+  assert.equal(result.rungs[3].available, false, 'undefined must never collapse into the false/L2 branch');
+  assert.equal(result.rungs[3].active, false);
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-uncomputable');
+});
+
+test('rung 3 decision table (E1): workflowPresent:false reports absent, same mechanism as L2', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: { postMergeCi: async () => ({ workflowPresent: false, read: 'skipped', lastRun: null, error: null, observedAt: 1000 }) },
+  });
+  assertShape(result.rungs[3], 'E1');
+  assert.deepEqual(
+    { available: result.rungs[3].available, active: result.rungs[3].active, verifiable: result.rungs[3].verifiable },
+    { available: true, active: false, verifiable: true },
+  );
+  assert.equal(result.rungs[3].mechanism, 'postmerge-ci-absent');
+});
+
+test('rung 3 decision table (E2): read:unsupported (non-GitHub provider) reports uncomputable', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: { postMergeCi: async () => ({ workflowPresent: true, read: 'unsupported', lastRun: null, error: null, observedAt: null }) },
+  });
+  assertShape(result.rungs[3], 'E2');
+  assert.deepEqual(
+    { available: result.rungs[3].available, active: result.rungs[3].active, verifiable: result.rungs[3].verifiable },
+    { available: false, active: false, verifiable: true },
+  );
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-unsupported');
+});
+
+test('rung 3 decision table (E3): read:failed (auth/network/rate-limit/bad JSON) reports uncomputable, never active', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: { postMergeCi: async () => ({ workflowPresent: true, read: 'failed', lastRun: null, error: 'gh: authentication required', observedAt: null }) },
+  });
+  assertShape(result.rungs[3], 'E3');
+  assert.deepEqual(
+    { available: result.rungs[3].available, active: result.rungs[3].active, verifiable: result.rungs[3].verifiable },
+    { available: false, active: false, verifiable: true },
+  );
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-uncomputable');
+  assert.match(result.rungs[3].reason, /authentication required/);
+});
+
+test('rung 3 decision table (E4): read:ok with lastRun:null reports unproven (workflow wired, zero terminal runs)', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: { postMergeCi: async () => ({ workflowPresent: true, read: 'ok', lastRun: null, error: null, observedAt: 5000 }) },
+  });
+  assertShape(result.rungs[3], 'E4');
+  assert.deepEqual(
+    { available: result.rungs[3].available, active: result.rungs[3].active, verifiable: result.rungs[3].verifiable },
+    { available: true, active: false, verifiable: true },
+  );
+  assert.equal(result.rungs[3].mechanism, 'postmerge-unproven');
+});
+
+test('rung 3 decision table (E5): lastRun missing conclusion reports uncomputable, never a fresh success', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        workflowPresent: true,
+        read: 'ok',
+        lastRun: { id: 1, conclusion: undefined, completedAt: new Date(1000).toISOString(), htmlUrl: 'https://x/run/1' },
+        error: null,
+        observedAt: 2000,
+      }),
+    },
+  });
+  assertShape(result.rungs[3], 'E5-conclusion');
+  assert.equal(result.rungs[3].available, false);
+  assert.equal(result.rungs[3].active, false);
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-uncomputable');
+});
+
+test('rung 3 decision table (E5): lastRun with unparseable completedAt reports uncomputable', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        workflowPresent: true,
+        read: 'ok',
+        lastRun: { id: 1, conclusion: 'success', completedAt: 'not-a-date', htmlUrl: 'https://x/run/1' },
+        error: null,
+        observedAt: 2000,
+      }),
+    },
+  });
+  assert.equal(result.rungs[3].available, false);
+  assert.equal(result.rungs[3].active, false);
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-uncomputable');
+});
+
+test('rung 3 decision table (E5): observedAt:null reports uncomputable — staleness cannot be computed', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        workflowPresent: true,
+        read: 'ok',
+        lastRun: { id: 1, conclusion: 'success', completedAt: new Date(1000).toISOString(), htmlUrl: 'https://x/run/1' },
+        error: null,
+        observedAt: null,
+      }),
+    },
+  });
+  assert.equal(result.rungs[3].available, false);
+  assert.equal(result.rungs[3].active, false);
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-uncomputable');
+});
+
+test('rung 3 decision table (E5): observedAt:NaN reports uncomputable, never a fresh success (issue #468 blocker — typeof NaN === "number")', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        workflowPresent: true,
+        read: 'ok',
+        lastRun: { id: 1, conclusion: 'success', completedAt: new Date(1000).toISOString(), htmlUrl: 'https://x/run/1' },
+        error: null,
+        observedAt: NaN,
+      }),
+    },
+  });
+  assert.equal(result.rungs[3].available, false, 'NaN observedAt must never yield available:true');
+  assert.equal(result.rungs[3].active, false, 'NaN observedAt must never arm rung 3 — age comparisons against NaN are always false, which used to fall through to the arming row E9');
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-uncomputable');
+});
+
+test('rung 3 decision table (E5): observedAt:-Infinity reports uncomputable, never a fresh success', async () => {
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        workflowPresent: true,
+        read: 'ok',
+        lastRun: { id: 1, conclusion: 'success', completedAt: new Date(1000).toISOString(), htmlUrl: 'https://x/run/1' },
+        error: null,
+        observedAt: -Infinity,
+      }),
+    },
+  });
+  assert.equal(result.rungs[3].available, false, 'non-finite observedAt must never yield available:true');
+  assert.equal(result.rungs[3].active, false, 'non-finite observedAt must never arm rung 3');
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-uncomputable');
+});
+
+test('rung 3 decision table: a skewed local clock (observedAt far BEFORE completedAt) reports uncomputable, never a fresh success', async () => {
+  // completedAt is GitHub's clock, observedAt is the local wall clock. A local
+  // clock running hours behind (VM resumed from suspend, container without
+  // NTP) yields a large negative age — must not be read as "very fresh".
+  const completedAt = Date.parse('2026-08-05T00:00:00Z');
+  const observedAt = completedAt - (2 * 60 * 60 * 1000); // 2h BEFORE completedAt — well past any reasonable skew tolerance
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        workflowPresent: true,
+        read: 'ok',
+        lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T00:00:00Z', htmlUrl: 'https://x/run/1' },
+        error: null,
+        observedAt,
+      }),
+    },
+  });
+  assert.equal(result.rungs[3].active, false, 'a negative age beyond skew tolerance must never arm rung 3');
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-uncomputable');
+});
+
+test('rung 3 decision table: workflowPresent omitted entirely (not === false) is treated as absent, never falls through to arm', async () => {
+  // Evidence that omits `workflowPresent` altogether must not silently be
+  // treated as "present" — the guard at substrate.mjs must require an
+  // explicit truthy presence, not merely reject a strict `false`.
+  const completedAt = Date.parse('2026-08-05T00:00:00Z');
+  const observedAt = completedAt + (10 * 60 * 60 * 1000);
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        // workflowPresent intentionally omitted
+        read: 'ok',
+        lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T00:00:00Z', htmlUrl: 'https://x/run/1' },
+        error: null,
+        observedAt,
+      }),
+    },
+  });
+  assert.equal(result.rungs[3].active, false, 'missing workflowPresent must never arm rung 3');
+  assert.equal(result.rungs[3].mechanism, 'postmerge-ci-absent', 'missing workflowPresent must be treated the same as workflowPresent:false');
+});
+
+test('rung 3 decision table (E6): last terminal run failed reports inert, reason carries the run URL', async () => {
+  const observedAt = Date.parse('2026-08-01T00:00:00Z');
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        workflowPresent: true,
+        read: 'ok',
+        lastRun: { id: 42, conclusion: 'failure', completedAt: '2026-07-31T23:00:00Z', htmlUrl: 'https://github.com/o/r/actions/runs/42' },
+        error: null,
+        observedAt,
+      }),
+    },
+  });
+  assertShape(result.rungs[3], 'E6');
+  assert.deepEqual(
+    { available: result.rungs[3].available, active: result.rungs[3].active, verifiable: result.rungs[3].verifiable },
+    { available: true, active: false, verifiable: true },
+  );
+  assert.equal(result.rungs[3].mechanism, 'postmerge-failing');
+  assert.match(result.rungs[3].reason, /https:\/\/github\.com\/o\/r\/actions\/runs\/42/);
+});
+
+test('rung 3 decision table (E8): a successful run older than POSTMERGE_STALE_MS reports inactive (stale), independent of outcome', async () => {
+  const completedAt = Date.parse('2026-07-01T00:00:00Z');
+  const observedAt = completedAt + (49 * 60 * 60 * 1000); // 49h later — just past the 48h window
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        workflowPresent: true,
+        read: 'ok',
+        lastRun: { id: 7, conclusion: 'success', completedAt: '2026-07-01T00:00:00Z', htmlUrl: 'https://github.com/o/r/actions/runs/7' },
+        error: null,
+        observedAt,
+      }),
+    },
+  });
+  assertShape(result.rungs[3], 'E8');
+  assert.deepEqual(
+    { available: result.rungs[3].available, active: result.rungs[3].active, verifiable: result.rungs[3].verifiable },
+    { available: true, active: false, verifiable: true },
+  );
+  assert.equal(result.rungs[3].mechanism, 'postmerge-stale');
+});
+
+test('rung 3 decision table (E9): a successful run within POSTMERGE_STALE_MS arms rung 3, run-ledger mechanism', async () => {
+  const completedAt = Date.parse('2026-08-05T00:00:00Z');
+  const observedAt = completedAt + (10 * 60 * 60 * 1000); // 10h later — within the 48h window
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        workflowPresent: true,
+        read: 'ok',
+        lastRun: { id: 9, conclusion: 'success', completedAt: '2026-08-05T00:00:00Z', htmlUrl: 'https://github.com/o/r/actions/runs/9' },
+        error: null,
+        observedAt,
+      }),
+    },
+  });
+  assertShape(result.rungs[3], 'E9');
+  assert.deepEqual(
+    { available: result.rungs[3].available, active: result.rungs[3].active, verifiable: result.rungs[3].verifiable },
+    { available: true, active: true, verifiable: true },
+  );
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger');
+  assert.equal(result.rungs[3].reason, null);
+  assert.equal(result.rungs[3].remedy, null);
+});
+
+// Totality check: across the whole decision table, only L1 and E9 ever produce
+// active:true — every other row (including every uncomputable row) stays
+// active:false, no matter how "close" the evidence looks to success.
+test('rung 3 decision table: only L1 (legacy true) and E9 (fresh success) ever produce active:true', async () => {
+  const rows = [
+    ['L2', async () => false],
+    ['L3-missing', async () => undefined],
+    ['E1-explicit-false', async () => ({ workflowPresent: false, read: 'skipped', lastRun: null, error: null, observedAt: 1 })],
+    ['E1-omitted', async () => ({ read: 'ok', lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T00:00:00Z', htmlUrl: 'u' }, error: null, observedAt: Date.parse('2026-08-05T00:00:00Z') + (10 * 60 * 60 * 1000) })],
+    ['E2', async () => ({ workflowPresent: true, read: 'unsupported', lastRun: null, error: null, observedAt: null })],
+    ['E3', async () => ({ workflowPresent: true, read: 'failed', lastRun: null, error: 'boom', observedAt: null })],
+    // Deliberately carries a FRESH SUCCESSFUL lastRun: with `lastRun: null` this
+    // row stayed active:false even with the read-state guard deleted (it merely
+    // fell through to E4, also inactive), so it passed for the wrong reason and
+    // the guard had no coverage at all. With this evidence, deleting the guard
+    // arms rung 3 on a read state outside the contract — and the row goes red.
+    ['unrecognized-read', async () => ({ workflowPresent: true, read: 'weird', lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T00:00:00Z', htmlUrl: 'u' }, error: null, observedAt: Date.parse('2026-08-05T00:00:00Z') + (60 * 60 * 1000) })],
+    ['E4', async () => ({ workflowPresent: true, read: 'ok', lastRun: null, error: null, observedAt: 5 })],
+    ['E5-malformed', async () => ({ workflowPresent: true, read: 'ok', lastRun: { id: 1, completedAt: 'bad' }, error: null, observedAt: 5 })],
+    ['E5-NaN-observedAt', async () => ({ workflowPresent: true, read: 'ok', lastRun: { id: 1, conclusion: 'success', completedAt: '2026-07-01T00:00:00Z', htmlUrl: 'u' }, error: null, observedAt: NaN })],
+    ['E5-Infinity-observedAt', async () => ({ workflowPresent: true, read: 'ok', lastRun: { id: 1, conclusion: 'success', completedAt: '2026-07-01T00:00:00Z', htmlUrl: 'u' }, error: null, observedAt: Infinity })],
+    ['E6', async () => ({ workflowPresent: true, read: 'ok', lastRun: { id: 1, conclusion: 'failure', completedAt: '2026-07-01T00:00:00Z', htmlUrl: 'u' }, error: null, observedAt: Date.parse('2026-07-01T00:00:00Z') })],
+    ['E7-clock-skew', async () => ({ workflowPresent: true, read: 'ok', lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T00:00:00Z', htmlUrl: 'u' }, error: null, observedAt: Date.parse('2026-08-05T00:00:00Z') - (2 * 60 * 60 * 1000) })],
+    ['E8-stale', async () => ({ workflowPresent: true, read: 'ok', lastRun: { id: 1, conclusion: 'success', completedAt: '2026-07-01T00:00:00Z', htmlUrl: 'u' }, error: null, observedAt: Date.parse('2026-07-01T00:00:00Z') + (49 * 60 * 60 * 1000) })],
+  ];
+
+  for (const [label, postMergeCi] of rows) {
+    const result = await detectSubstrate({ env: {}, probes: { postMergeCi } });
+    assert.equal(result.rungs[3].active, false, `row ${label} must not produce active:true`);
+  }
+
+  const e9 = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        workflowPresent: true,
+        read: 'ok',
+        lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T00:00:00Z', htmlUrl: 'u' },
+        error: null,
+        observedAt: Date.parse('2026-08-05T00:00:00Z') + (10 * 60 * 60 * 1000),
+      }),
+    },
+  });
+  assert.equal(e9.rungs[3].active, true, 'E9 (fresh success) must produce active:true');
+
+  const l1 = await detectSubstrate({ env: {}, probes: { postMergeCi: async () => true } });
+  assert.equal(l1.rungs[3].active, true, 'L1 (legacy true) must produce active:true');
+});
+
+test('rung 3: an unrecognized read state is UNCOMPUTABLE, not merely inactive — the decision table stays total', async () => {
+  // The totality row above proves such evidence never arms. This proves it lands
+  // on the right ROW: a read state outside the four-value contract is a thing
+  // the reader could not interpret, which is uncomputable — not the honest,
+  // claimable "no terminal run yet" (E4) it would otherwise be confused with.
+  const result = await detectSubstrate({
+    env: {},
+    probes: {
+      postMergeCi: async () => ({
+        workflowPresent: true,
+        read: 'weird',
+        lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T00:00:00Z', htmlUrl: 'u' },
+        error: null,
+        observedAt: Date.parse('2026-08-05T00:00:00Z') + (60 * 60 * 1000),
+      }),
+    },
+  });
+
+  assert.equal(result.rungs[3].available, false, 'an uninterpretable read state is uncomputable, never a verdict');
+  assert.equal(result.rungs[3].active, false);
+  assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-uncomputable');
+});
+
 // ── Rung 2 — release (release-gate presence) ────────────────────────────────────
 
 test('detectSubstrate: rung 2 armed when the releaseGate probe returns true (rung 3 absent)', async () => {

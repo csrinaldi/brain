@@ -22,7 +22,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { run } from './vcs/lib/exec.mjs';
-import { detectSubstrate } from './vcs/substrate.mjs';
+import { detectSubstrate, POSTMERGE_STALE_LABEL } from './vcs/substrate.mjs';
 import { GOVERNANCE_JOBS } from './vcs/governance-checks.mjs';
 import { resolveTier, requiredJobs } from './vcs/governance-tiers.mjs';
 
@@ -111,10 +111,78 @@ async function realReleaseGateProbe({ config }) {
   return { declared, workflowPresent, workflowText };
 }
 
-/** Rung 3 — post-merge CI presence: governance-postmerge.yml or env.GITHUB_ACTIONS. */
-async function realPostMergeCiProbe({ config, env }) {
-  if (env?.GITHUB_ACTIONS === 'true') return true;
-  return repoFileExists('.github/workflows/governance-postmerge.yml');
+/**
+ * Rung 3 — post-merge CI run-ledger RAW EVIDENCE, never a verdict (issue #468,
+ * closing the gap that let a 12-day post-merge CI outage report armed). All
+ * interpretation (staleness, conclusion, unproven/uncomputable) lives in
+ * evalRung3 (substrate.mjs), where it stays unit-testable with injected
+ * evidence fixtures — this probe is a dumb I/O wrapper: fs presence + a
+ * WORKFLOW-SCOPED `gh api` read, never the self-referential
+ * `env.GITHUB_ACTIONS === 'true'` short-circuit this replaces (that route
+ * armed unconditionally from inside CI, including from inside the broken
+ * workflow's own run — the second lie identified in the proposal).
+ *
+ * `observedAt` is injected here, AT THE READ (`Date.now()`), because the
+ * clock is I/O — substrate.mjs's pure-orchestrator rule forbids evalRung3
+ * from calling it directly; this is the ONLY place `Date.now()` appears for
+ * this feature.
+ */
+async function realPostMergeCiProbe({ config }) {
+  const workflowPresent = repoFileExists('.github/workflows/governance-postmerge.yml');
+  const observedAt = Date.now();
+
+  if (!workflowPresent) {
+    return { workflowPresent, read: 'skipped', lastRun: null, error: null, observedAt };
+  }
+
+  if (config?.vcs?.provider !== 'github') {
+    // No ledger reader wired for this provider — keeps today's inert +
+    // remedy behavior for GitLab (design "Provider safety"), no `gh`/`glab`
+    // spawn either way.
+    return { workflowPresent, read: 'unsupported', lastRun: null, error: null, observedAt };
+  }
+
+  const project = config?.project?.slug;
+  if (!project) {
+    return { workflowPresent, read: 'failed', lastRun: null, error: 'no project.slug configured', observedAt };
+  }
+  const branch = config?.project?.defaultBranch ?? 'main';
+
+  // Workflow-scoped endpoint (design's "Endpoint" sub-ruling) — deliberately
+  // NOT rerunWorkflowRun's repo-wide `actions/runs?branch=...&per_page=100` +
+  // client-side `.path` filter: on a repo where governance.yml fires on every
+  // PR push, the post-merge run can fall off page 1 of that repo-wide read,
+  // producing a false "zero runs".
+  const r = run('gh', [
+    'api',
+    `repos/${project}/actions/workflows/governance-postmerge.yml/runs?branch=${encodeURIComponent(branch)}&per_page=20`,
+  ]);
+  if (!r.ok) {
+    return { workflowPresent, read: 'failed', lastRun: null, error: r.stderr.trim() || `gh api failed (status ${r.status})`, observedAt };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(r.stdout);
+  } catch (e) {
+    return { workflowPresent, read: 'failed', lastRun: null, error: `malformed run-ledger response: ${e.message}`, observedAt };
+  }
+
+  // A parseable-but-wrong-shaped 200 body (proxy/gateway error page, API
+  // shape change) must be distinguished from a legitimate zero-runs page —
+  // conflating the two would report the honest, claimable postmerge-unproven
+  // state (E4) for what is actually an unreadable ledger. The 4-state `read`
+  // field exists precisely to keep this distinction (issue #468 hardening).
+  if (!Array.isArray(parsed?.workflow_runs)) {
+    return { workflowPresent, read: 'failed', lastRun: null, error: 'malformed run-ledger response: workflow_runs is missing or not an array', observedAt };
+  }
+  const runs = parsed.workflow_runs;
+  const completed = runs.find((entry) => entry.status === 'completed');
+  const lastRun = completed
+    ? { id: completed.id, conclusion: completed.conclusion, completedAt: completed.updated_at, htmlUrl: completed.html_url }
+    : null;
+
+  return { workflowPresent, read: 'ok', lastRun, error: null, observedAt };
 }
 
 /** rungs[1].gates.brainWritesReviewed — per-provider L6 rung-1 sub-probe. */
@@ -205,7 +273,7 @@ function printDoctrineReport(tier, substrate) {
  * writes to console.log, so it is trivially covered by the caller's tests.
  * @param {Awaited<ReturnType<typeof detectSubstrate>>} substrate
  */
-function printSubstrateReport(substrate) {
+function printSubstrateReport(substrate, { defaultBranch = 'main' } = {}) {
   console.log('  --- governance substrate ---');
 
   if (substrate.rung === 4) {
@@ -278,6 +346,35 @@ function printSubstrateReport(substrate) {
     if (rung2.remedy) console.log(`                 remedy: ${rung2.remedy}`);
   } else if (rung2?.active && rung2.verifiable) {
     console.log('  release gate   armed  [workflow triggers pre-tag, invokes brain:audit, holds contents:write]');
+  }
+
+  // Rung-3 post-merge-CI breakdown (issue #468, REQ-R3-8/REQ-HONESTY-1/2).
+  // Driven SOLELY by rungs[3].available/active/verifiable/mechanism — never an
+  // independent hardcoded branch, same discipline as rung 1/rung 2 above.
+  // Order matters: `available === false` (uncomputable) is checked FIRST so
+  // it can never be swallowed by an inert render — the whole point of this
+  // change is that a broken/unreachable read must never masquerade as a
+  // confirmed "not armed".
+  const rung3 = substrate.rungs?.[3];
+  if (rung3?.available === false) {
+    console.log(`  post-merge CI  UNCOMPUTABLE — ${rung3.reason}`);
+    if (rung3.remedy) console.log(`                 remedy: ${rung3.remedy}`);
+  } else if (rung3?.active && rung3.verifiable === false) {
+    console.log('  post-merge CI  armed (declared) — unverified; no run-ledger evidence');
+  } else if (rung3?.active) {
+    console.log(`  post-merge CI  armed  [last governance-postmerge run on ${defaultBranch} succeeded within ${POSTMERGE_STALE_LABEL}]`);
+  } else if (rung3 && rung3.active === false) {
+    console.log(`  post-merge CI  not armed: ${rung3.reason}`);
+    if (rung3.remedy) console.log(`                 remedy: ${rung3.remedy}`);
+  }
+  // REQ-R3-8 names `verifiable` and `mechanism` as the rendered signal, not
+  // merely as the render's input. Emitted from ONE site rather than per branch:
+  // a per-branch trailer drifts the moment a branch is added, and a rung-3
+  // signal that is computed but unrendered is the exact gap this requirement
+  // closes. `String(...)` keeps an uncomputed `verifiable` legible as
+  // "undefined" instead of asserting a `false` nobody derived.
+  if (rung3) {
+    console.log(`                 evidence: mechanism=${rung3.mechanism} verifiable=${String(rung3.verifiable)}`);
   }
 
   console.log('');
@@ -371,7 +468,7 @@ export async function reportGovernanceStatus({
   };
 
   const substrate = await detectSubstrate({ config, vcs: providerModule, env, probes });
-  printSubstrateReport(substrate);
+  printSubstrateReport(substrate, { defaultBranch: config?.project?.defaultBranch ?? 'main' });
 
   // Tier x rung cross-product (issue #358 Q5, REQ-TIER-11). resolveTier()
   // fails closed on an unrecognized governance.tier (REQ-TIER-1) — an invalid
