@@ -419,8 +419,9 @@ of the one that outranks them.
         bounded by the drop count. Named in the code and in the contract-row draft so the
         next person to widen the anchor shape finds the constraint, not the symptom.
 - [x] T16 · round 6 — cold review of `6ed288d`, ~35 fresh mutations, every diff printed;
-      34 red. **No blocker and no defect in executable behaviour** for the third round
-      running. Vacuity probes on every case exposed to it came back non-vacuous, including
+      34 red. **No blocker and no defect in executable behaviour** (the axis has failed at
+      rounds 1 and 11 only — round-24 cold review struck the ordinal here too).
+      Vacuity probes on every case exposed to it came back non-vacuous, including
       a measurement that the lock-2 source scan really scopes 2952/4973 chars of function
       body rather than an empty slice. But the "no unpinned protection" bill from rounds 4
       and 5 did **not** survive re-verification:
@@ -644,8 +645,10 @@ of the one that outranks them.
       Corrected: rounds 1-11 answered YES on **3, 2, 2, 1, 1, 2, 2, 2, 2, 2 and 3** axes.
 - [x] T16 · round 13 — cold review of `f6978ed`, ~40 live mutations, each with an asserted
       site count and each green re-confirmed against the FULL suite. **No blocker and no
-      defect in executable behaviour** — seventh round. Five findings, and the first is
-      again inside the previous round's repair, for the fourth round running:
+      defect in executable behaviour** (the axis has failed at rounds 1 and 11 only —
+      round-24 cold review struck the ordinal here too; this entry carried a wrong one in its
+      header while its own B2 corrected the same counter three paragraphs down). Five
+      findings, and the first is again inside the previous round's repair:
       - **B1 — the usability rule was pinned for 3 of the 5 value classes the change's own
         JSDoc enumerates.** Round 12 correctly diagnosed "a both-branch mutation cannot find
         a one-branch gap" and fixed per-BRANCH blindness — with a case driving ONE positive
@@ -959,10 +962,30 @@ of the one that outranks them.
         — checkable against this ledger in one scan, and unable to go stale by the passage of
         rounds. The PR body already stated it as a boundary ("no round since 11"), which is
         the same invariant and needs no change.
-- [ ] T16 · round 24 — the axis has failed at rounds 1 and 11 only; every finding since
-      round 17 has been in the previous round's repair or in a claim this ledger made about
-      itself, never in the shipped code. Two consecutive rounds with nothing at blocker or
-      correction severity close this.
+- [x] T16 · round 24 — cold review of `5785062`. **No blocker, no defect in executable
+      behaviour, ONE correction.** Streak back to zero.
+      - **C1 — round 23's sweep matched one spelling and missed two entries.** It struck
+        every *"Nth consecutive"* and left *"for the third round running"* (round 6) and
+        *"— seventh round"* (round 13), both of which are wrong: under the axis list round 6
+        is the fifth behaviour-clean round and round 13 the eleventh, or the second
+        consecutive. Round 13's is the sharp one — that entry carries a wrong counter in its
+        header while its own **B2**, three paragraphs down, corrects the same counter.
+        This is round 19's finding again, applied to round 23: **a repair applied by search
+        is only as complete as the pattern searched for.** The rule needs the corollary:
+        search for the CLAIM, not for its wording. Struck both, then re-swept with a pattern
+        covering every ordinal spelling — the three remaining hits are round 14's and round
+        23's quotations of the defect and round 19's unrelated (and correct) count of the
+        repair-stopped-short streak.
+      **A judgement for the maintainer, not a finding.** Rounds 21-24 have produced four
+      corrections and every one of them is in this ledger or the PR body — a wrong list of
+      round numbers, an undefined task id, a stale ordinal, a sweep that matched one
+      spelling. The code has been clean on the behavioural axis since round 11 and on the
+      unpinned-protection axis since round 20. The ruled criterion counts corrections without
+      regard to what they are about, so it is now measuring the accuracy of the record rather
+      than the safety of the change. Both are worth having; they are not the same thing, and
+      the criterion cannot currently distinguish them. Continuing under the ruling as given.
+- [ ] T16 · round 25 — the axis has failed at rounds 1 and 11 only. Two consecutive rounds
+      with nothing at blocker or correction severity close this.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.
