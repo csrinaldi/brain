@@ -889,8 +889,31 @@ of the one that outranks them.
       not assumed" about the two remaining `assert.match` body projections rests on rounds
       16-18's mutation results, re-read, not on mutations run that round. The claim is true
       as written; the renderer sweep above is the fresh evidence.
-- [ ] T16 · round 21 — **the closing round.** Round 20 is the first with nothing at blocker
-      or correction severity; one more like it meets the ruled criterion and the review ends.
+- [x] T16 · round 21 — cold review of `33b09ca`. **No blocker, no defect in executable
+      behaviour (eighth consecutive), ONE correction.** The streak breaks at 1 and returns
+      to zero.
+      - **C1 — the ledger asserted a two-artefact repair it had made in one.** Round 17's E2
+        was "T17 and the PR body name different commits for the trailer boundary". The repair
+        edited T17 and closed with *"Both now say both."* The PR body still said only
+        `ec153ea`, and had said only that for four more rounds. The sentence was **false when
+        written** — round 15's C3 exactly, and round 19's stopped-short repair exactly, in
+        one line.
+        Not an isolated slip: the ledger records the PR body going stale or lagging a repair
+        at rounds 6, 7, 10, 12, 13, 14 and 15, and round 12's C2 has the same shape verbatim
+        — *"the fix landed in `tasks.md`"* while the only copy that mattered was the body.
+        **Seven occurrences of one defect is a process defect, not seven mistakes.** The
+        cause is ordering: the PR body was refreshed LAST, after the ledger entry claiming
+        it. From round 22 the body is rewritten in the same edit as the entry that describes
+        it, before the commit — the claim and the artefact land together or neither does.
+      Everything else swept clean: the change's own artefacts (spec, design, proposal, the
+      five drafts) re-read against the code for claims rounds 17-20 could have falsified —
+      none, because rounds 18-20 changed only test assertions and the ledger. `origin/main`
+      merged in (the branch was `behind`, #493 having landed the anti-pattern there); 2627
+      tests, 0 fail; `repo:check` ✓, `brain:nav` ✓.
+- [ ] T16 · round 22 — eight rounds with no defect in executable behaviour. The last four
+      findings are all the same class read at different levels: a repair applied to the
+      instance rather than the class. Two consecutive rounds with nothing at blocker or
+      correction severity close this.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.
@@ -933,7 +956,10 @@ of the one that outranks them.
       `ec153ea` (round 3) onward is clean. Round 17 flagged that this sentence and the PR
       body named different commits for the same boundary — both were true, one naming the
       last dirty commit and the other the first clean one, which is precisely the kind of
-      "two spellings of one fact" this branch keeps finding. Both now say both.
+      "two spellings of one fact" this branch keeps finding.
+      **This paragraph then said "Both now say both", and that was FALSE when written**
+      (round-21 cold review, C1): the edit landed here and the PR body was left as it was.
+      A claim about two artefacts, verified against one. Corrected in round 21, in both.
       (The denominator is deliberately not written down: an earlier version said "six of
       eight" and was nine commits later the same day — the exact defect T14 taught itself
       about, committed one paragraph after recording it.)
