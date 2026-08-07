@@ -513,7 +513,14 @@ export async function prReviewComment({ project, number, body, comments, apiBase
         body: c.body,
         // GitLab's Discussions API requires BOTH paths on a text position, not
         // just the one being annotated (cold review of PR #490, B2 — the first
-        // version sent `new_path` alone). For an added or modified line the two
+        // version sent `new_path` alone).
+        //
+        // `new_line` alone, deliberately: `old_line` is what an anchor on an
+        // unchanged (context) or DELETED line needs, and the `{path, line}` anchor
+        // shape has no field to supply it. Such an anchor is refused by GitLab and
+        // counted by `inlineDropped` — bounded and visible, not silently lost. It is
+        // unreachable today (no evaluator anchors) and would be the first thing to
+        // revisit if the anchor shape ever widens. For an added or modified line the two
         // are the same file; a rename would need the pre-rename path, which this
         // anchor shape has no way to know and which `deriveInlineComments` never
         // produces. The three shas come from the MR's own `diff_refs` — that read

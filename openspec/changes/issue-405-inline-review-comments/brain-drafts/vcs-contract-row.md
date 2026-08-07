@@ -34,10 +34,23 @@ below. Nothing else in the file moves.
   retries bare; GitLab posts the summary first and then anchors. Both follow from: when
   the calls cannot be atomic, the verdict must be the thing that is already safe when
   anything after it fails.
-- **"Exactly one payload carries the verdict body."** This replaces the draft
-  requirement "inline comments post in the SAME call", which was GitHub's implementation
-  promoted to doctrine — GitLab cannot satisfy it, because discussions are one per
-  position. The invariant the anti-loop lock actually needs is the one stated.
+- **"At most one payload the provider ACCEPTS carries the verdict body."** This replaces
+  the draft requirement "inline comments post in the SAME call", which was GitHub's
+  implementation promoted to doctrine — GitLab cannot satisfy it, because discussions are
+  one per position. The invariant the anti-loop lock actually needs is the one stated.
+  The "accepts" was added in round 5: GitHub's fallback SENDS the body twice (anchored, then
+  bare) and normally only the second lands, and a first call that landed server-side but
+  exited non-zero would post it twice for real. Bounded, not denied — the lock reads the
+  LAST parsed verdict, so a duplicate at one head still skips. `github.mjs` names this
+  residual in its own comment; the row must not be less honest than the code it describes.
+- **What a `{path, line}` anchor can attach to on GitLab, named rather than assumed.**
+  The position carries `new_line` only. GitLab's diff-note position also takes `old_line`,
+  which is what an anchor on an unchanged (context) or deleted line needs — and the anchor
+  shape this port defines has no field to supply it, so `deriveInlineComments` cannot
+  derive one. Such an anchor is refused and counted by `inlineDropped`; it is not silently
+  lost. Flagged `inferential` (round 5 — not established against a live GitLab) and
+  unreachable today, since no evaluator anchors. Written down so the next person to widen
+  the anchor shape finds the constraint instead of the symptom.
 - **The extra `GET` is named.** It is a real cost and a real failure mode, and it is
   GitLab-only. It lives inside the verb rather than in a widened `prView`, whose
   normalized shape is consumed by cold-boot, tranche, checkpoint and anti-stale (design

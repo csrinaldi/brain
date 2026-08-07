@@ -54,10 +54,19 @@ of `brain/project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md`) 
 
 The verb **count stays four**. No new verb and no new event.
 
-**Exactly ONE payload carries the verdict body**, on every provider. That — not "one
-call" — is the invariant the anti-loop lock needs, because the lock counts PARSEABLE
-VERDICTS, not posts: an inline annotation carries finding text and no `brain-review/N`
-block, so `cold-boot.mjs`'s `reviews.map(parseVerdict).filter(Boolean)` never sees it.
+**At most ONE payload the provider ACCEPTS carries the verdict body**, on every
+provider. That — not "one call" — is the invariant the anti-loop lock needs, because the
+lock counts PARSEABLE VERDICTS, not posts: an inline annotation carries finding text and no
+`brain-review/N` block, so `cold-boot.mjs`'s `reviews.map(parseVerdict).filter(Boolean)`
+never sees it.
+
+The "accepts" is load-bearing and was missing from the first draft of this sentence (round
+5). GitHub's fallback SENDS the verdict body twice — the anchored attempt and the bare
+retry — and normally only the second lands. A first call that landed server-side but exited
+non-zero would post it twice for real. That is bounded rather than denied: the lock reads
+the LAST parsed verdict, so a duplicate at the same head still skips. Stating the invariant
+without the caveat would put in doctrine a guarantee the provider code is already more
+honest about than the document.
 
 Where the calls cannot be atomic, the ORDER follows from one rule: the verdict is the
 thing that must already be safe when anything after it fails. GitHub therefore attempts
