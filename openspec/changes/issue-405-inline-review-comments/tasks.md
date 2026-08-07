@@ -75,11 +75,32 @@ acts. The ticket's own body asks for a design pass first — this is it.
       ORDER was pinned by nothing. Added a case where the transport dies mid-sequence:
       summary-first survives, summary-last loses the verdict. Proven by a real
       order-reversal mutation (diff printed) → red.
-- [ ] T8 — REQ-405-4, the one that matters: the un-anchorable fallback. Stub rejects the
-      inline payload → summary still posts, findings fold in, count reported. **Write
-      this before the success path** — it is the deliverable, not an edge case.
-- [ ] T9 — `poster.mjs` wiring, one call, anti-loop and anti-stale unchanged (REQ-405-5).
-- [ ] T10 — `vcs.contract.test.mjs` parity, including the fallback (REQ-405-6).
+- [x] T8 — done as **T8a** above (the fallback WAS written before the success path, which
+      is why it carries the `a` suffix — the numbering slipped, not the order of work).
+      Both providers: an anchor-rejecting transport leaves the verdict posted and the
+      dropped count reported.
+- [x] T9 — `poster.mjs` wiring. `deriveInlineComments` is exported and PURE, so the
+      anchor→comment mapping is testable without a transport; `postVerdict` gained a
+      `findings` param and passes `comments` **only on the PR path** (`issueComment` has
+      no inline surface — a silently-ignored argument is worse than an absent one) and
+      **only when at least one anchor exists** (`comments: []` would ask both providers to
+      do inline work for zero anchors, and on GitHub it is the key's PRESENCE that arms
+      the retry-without-inline fallback). `inlineDropped` is re-surfaced under the verbs'
+      own rule: absent when nothing was dropped, never `0`.
+      Anti-loop and anti-stale are untouched — both still run before any verb is chosen,
+      and the anti-loop early return is still reached with no `getVcs` call at all.
+      Red-proof, **diff printed before every run** — 6 mutations, 6 distinct reds:
+      half-anchor guard removed → the anchored-only case; ruling exclusion removed → the
+      ruling case; `comments: []` always sent → the ruling AND the no-anchor case; count
+      never surfaced → REQ-405-4; count reported as `0` → the absent-not-zero case;
+      evidence dropped from the comment body → the anchored-only case.
+      Two of those cases (no-anchor payload, absent-not-zero) did not exist until the
+      red-proof asked what pinned them: nothing did.
+- [x] T10 — `vcs.contract.test.mjs` parity landed WITH T6/T7 rather than after them,
+      because the contract cases are what proved each provider's half. Both providers run
+      the SAME fixtures — `rejectAnchoredRequests` rejects by SHAPE (any payload carrying
+      an anchor), never by call order, so it cannot encode one provider's sequence as the
+      contract (the defect T7a found).
 - [ ] T11 — `brain-drafts/vcs-contract-row.md` → **human promotes** (REQ-405-7, Tier 2).
       The agent must never write `brain/core/methodology/vcs-contract.md`.
 - [ ] T12 — e2e on #409's harness: assert the captured `comments` array (REQ-405-8).

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { postVerdict } from './poster.mjs';
+import { postVerdict, deriveInlineComments } from './poster.mjs';
 import { guardedLabelAdd } from './deny-set.mjs';
 import { VERBS } from '../vcs/cli.mjs';
 
@@ -365,4 +365,132 @@ test('anti-stale path still applies reviewed:stale (allowed, tightening) end-to-
   assert.equal(result.posted, false);
   assert.equal(result.skipped, 'anti-stale');
   assert.deepEqual(seenLabels, ['reviewed:stale'], 'reviewed:stale matches reviewed:* — allowed through the deny-set unchanged');
+});
+
+// The shared `allowlistSpy` records verb NAMES only. These cases need the
+// ARGUMENTS — asserting that the anchor reached the verb is the whole point, and
+// a name-only spy cannot tell a call with comments from one without.
+function recordingSpy({ headRefOid = HEAD, reviewResult = { url: 'https://example.test/1' } } = {}) {
+  const calls = [];
+  return {
+    calls,
+    vcs: {
+      prView: async (args) => { calls.push({ verb: 'prView', args }); return { headRefOid }; },
+      prReviewComment: async (args) => { calls.push({ verb: 'prReviewComment', args }); return reviewResult; },
+      issueComment: async (args) => { calls.push({ verb: 'issueComment', args }); return { url: 'https://example.test/2' }; },
+      labelAdd: async (args) => { calls.push({ verb: 'labelAdd', args }); return { ok: true }; },
+    },
+  };
+}
+
+// ── #405 T9: the anchors reach the provider through the poster ─────────────
+
+test('#405 deriveInlineComments: only ANCHORED findings become comments (REQ-405-2)', () => {
+  const out = deriveInlineComments([
+    { id: 'a', evidence: 'e1', file: 'x.mjs', line: 4 },
+    { id: 'b', evidence: 'e2' },                          // no anchor at all
+    { id: 'c', evidence: 'e3', file: 'y.mjs' },           // file without line
+    { id: 'd', evidence: 'e4', line: 9 },                 // line without file
+  ]);
+  assert.deepEqual(out.map(c => c.path), ['x.mjs'],
+    'a half anchor is not an anchor — GitHub 422s a comment with no line, so a partial one ' +
+    'would spend the fallback on a finding we already knew could not attach');
+  assert.equal(out[0].line, 4);
+  assert.match(out[0].body, /e1/, 'the comment carries the finding evidence — that is what the developer reads');
+});
+
+test('#405 deriveInlineComments: no anchored finding yields NO array, not an empty one (REQ-405-2)', () => {
+  // The verb treats an empty array as "no inline requested" anyway, but the
+  // distinction is asserted here so the poster cannot start sending `comments: []`
+  // and make "none requested" indistinguishable from "all dropped" downstream.
+  assert.deepEqual(deriveInlineComments([{ id: 'a', evidence: 'e' }]), []);
+});
+
+test('#405 T9: anchored findings reach prReviewComment as comments[] (REQ-405-1)', async () => {
+  const spy = recordingSpy();
+  await postVerdict({
+    headSha: HEAD, project: 'csrinaldi/brain', number: 42, provider: 'github', mode: 'tranche',
+    renderedBody: '```yaml\nprotocol: brain-review/2\n```',
+    reviewerHandle: 'brain-reviewer', priorVerdicts: [],
+    findings: [{ id: 'f1', evidence: 'boom', file: 'brain/a.mjs', line: 12 }],
+    deps: { getVcs: async () => spy.vcs },
+  });
+  const post = spy.calls.find(c => c.verb === 'prReviewComment');
+  assert.ok(post, 'the verdict must still post');
+  assert.ok(Array.isArray(post.args.comments) && post.args.comments.length === 1,
+    `the anchor must reach the verb: ${JSON.stringify(post.args)}`);
+  assert.equal(post.args.comments[0].path, 'brain/a.mjs');
+});
+
+test('#405 T9: a ruling posts on the ISSUE and carries NO comments (REQ-405-1)', async () => {
+  // issueComment has no inline surface. Passing comments there would be a
+  // silently-ignored argument at best; asserted so the wiring cannot drift into it.
+  const spy = recordingSpy();
+  await postVerdict({
+    headSha: HEAD, project: 'csrinaldi/brain', number: 7, provider: 'github', mode: 'ruling',
+    renderedBody: '```yaml\nprotocol: brain-review/2\n```',
+    reviewerHandle: 'brain-reviewer', priorVerdicts: [],
+    findings: [{ id: 'f1', evidence: 'boom', file: 'a.mjs', line: 1 }],
+    deps: { getVcs: async () => spy.vcs },
+  });
+  const post = spy.calls.find(c => c.verb === 'issueComment');
+  assert.ok(post, 'a ruling posts on the issue thread');
+  assert.equal(post.args.comments, undefined, 'no inline surface on an issue comment');
+});
+
+test('#405 T9: a dropped anchor is REPORTED, and the verdict is still posted (REQ-405-4)', async () => {
+  // The poster must surface the count its caller logs. Without it the run says
+  // nothing, and "no inline comments appeared" becomes indistinguishable from
+  // "the anchors would not attach" one layer up from the verb that knew.
+  const vcs = {
+    prView: async () => ({ headRefOid: HEAD }),
+    prReviewComment: async () => ({ url: 'https://example.test/#r1', inlineDropped: 1 }),
+  };
+  const out = await postVerdict({
+    headSha: HEAD, project: 'csrinaldi/brain', number: 42, provider: 'github', mode: 'tranche',
+    renderedBody: '```yaml\nprotocol: brain-review/2\n```',
+    reviewerHandle: 'brain-reviewer', priorVerdicts: [],
+    findings: [{ id: 'f1', evidence: 'boom', file: 'a.mjs', line: 99999 }],
+    deps: { getVcs: async () => vcs },
+  });
+  assert.equal(out.posted, true, 'the verdict posted — an inline failure must never cost it');
+  assert.equal(out.inlineDropped, 1, 'and the count reached the caller');
+});
+
+test('#405 T9: with nothing anchored the payload carries NO comments key (REQ-405-1)', async () => {
+  // `comments: []` is not the same request as no `comments` at all: the verbs
+  // read the key's PRESENCE to decide whether to attempt an inline review, and
+  // GitHub's retry-without-inline fallback keys off the same distinction. An
+  // empty array would ask both providers to do inline work for zero anchors.
+  const spy = recordingSpy();
+  await postVerdict({
+    headSha: HEAD, project: 'csrinaldi/brain', number: 42, provider: 'github', mode: 'tranche',
+    renderedBody: '```yaml\nprotocol: brain-review/2\n```',
+    reviewerHandle: 'brain-reviewer', priorVerdicts: [],
+    findings: [{ id: 'f1', evidence: 'boom' }],   // real finding, no anchor
+    deps: { getVcs: async () => spy.vcs },
+  });
+  const post = spy.calls.find(c => c.verb === 'prReviewComment');
+  assert.ok(post, 'the verdict must still post');
+  assert.equal('comments' in post.args, false,
+    `no anchor means no inline request at all: ${JSON.stringify(post.args)}`);
+});
+
+test('#405 T9: nothing dropped means NO inlineDropped key, never 0 (REQ-405-4)', async () => {
+  // Same rule the verbs follow, one layer up. A literal 0 is a positive claim
+  // ("we tried to anchor and lost none") on runs that anchored nothing at all,
+  // and it would read as a computed measurement in a caller's log.
+  const vcs = {
+    prView: async () => ({ headRefOid: HEAD }),
+    prReviewComment: async () => ({ url: 'https://example.test/#r1' }),
+  };
+  const out = await postVerdict({
+    headSha: HEAD, project: 'csrinaldi/brain', number: 42, provider: 'github', mode: 'tranche',
+    renderedBody: '```yaml\nprotocol: brain-review/2\n```',
+    reviewerHandle: 'brain-reviewer', priorVerdicts: [],
+    findings: [{ id: 'f1', evidence: 'boom', file: 'a.mjs', line: 3 }],
+    deps: { getVcs: async () => vcs },
+  });
+  assert.equal(out.posted, true);
+  assert.equal('inlineDropped' in out, false, `absent, not 0: ${JSON.stringify(out)}`);
 });
