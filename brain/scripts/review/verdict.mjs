@@ -4,11 +4,33 @@
 
 const YAML_SCALAR_SAFE_RE = /^[A-Za-z0-9._\-/:]+$/;
 
+/**
+ * Emits a value as a YAML scalar. `parse-verdict.mjs`'s `unyamlScalar` is its
+ * exact inverse — change one and the other moves in the same commit.
+ *
+ * Line breaks are ESCAPED, not merely quoted (issue #481, ruled in scope for
+ * #452). A quoted scalar containing a RAW newline puts its continuation lines
+ * at column 0, which terminates the findings list. Measured through the real
+ * chain: a two-finding verdict whose first `evidence:` carried multi-line
+ * command stdout — exactly what `checkpoint.mjs` interpolates from
+ * `brain-governance-status` — re-parsed to ONE finding, silently dropping a
+ * blocker. `\r` is escaped for the same reason: CRLF content would otherwise
+ * leave a stray carriage return inside a parsed value.
+ *
+ * Order matters — backslashes first, so the escapes introduced after are not
+ * themselves re-escaped.
+ */
 function yamlScalar(val) {
   if (val === null || val === undefined) return 'null';
   const s = String(val);
   if (s === '' || !YAML_SCALAR_SAFE_RE.test(s)) {
-    return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    return `"${s
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029')}"`;
   }
   return s;
 }
@@ -102,11 +124,11 @@ export function renderVerdict(v) {
     lines.push('findings:');
     for (const f of v.findings) {
       lines.push(`  - id: ${yamlScalar(f.id)}`);
-      lines.push(`    severity: ${f.severity}`);
+      lines.push(`    severity: ${yamlScalar(f.severity)}`);
       lines.push(`    evidence: ${yamlScalar(f.evidence)}`);
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
-      if (f.evidence_class) lines.push(`    evidence_class: ${f.evidence_class}`);
-      if (f.causal_disposition) lines.push(`    causal_disposition: ${f.causal_disposition}`);
+      if (f.evidence_class) lines.push(`    evidence_class: ${yamlScalar(f.evidence_class)}`);
+      if (f.causal_disposition) lines.push(`    causal_disposition: ${yamlScalar(f.causal_disposition)}`);
     }
   }
 
@@ -114,11 +136,11 @@ export function renderVerdict(v) {
     lines.push('follow_ups:');
     for (const f of v.follow_ups) {
       lines.push(`  - id: ${yamlScalar(f.id)}`);
-      lines.push(`    severity: ${f.severity}`);
+      lines.push(`    severity: ${yamlScalar(f.severity)}`);
       lines.push(`    evidence: ${yamlScalar(f.evidence)}`);
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
-      if (f.evidence_class) lines.push(`    evidence_class: ${f.evidence_class}`);
-      if (f.causal_disposition) lines.push(`    causal_disposition: ${f.causal_disposition}`);
+      if (f.evidence_class) lines.push(`    evidence_class: ${yamlScalar(f.evidence_class)}`);
+      if (f.causal_disposition) lines.push(`    causal_disposition: ${yamlScalar(f.causal_disposition)}`);
     }
   }
 

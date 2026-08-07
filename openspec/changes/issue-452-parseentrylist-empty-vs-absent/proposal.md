@@ -1,0 +1,102 @@
+---
+status: draft
+issue: 452
+epic: 313
+artifact_store: openspec
+topic_key: sdd/issue-452-parseentrylist-empty-vs-absent/proposal
+---
+
+# Proposal: `parseEntryList` must distinguish empty from absent (issue #452)
+
+Issue #452. Epic #313, Lane B (reviewer / M3 feeders).
+Change folder: `openspec/changes/issue-452-parseentrylist-empty-vs-absent/`.
+
+## Intent
+
+`parse-verdict.mjs`'s `parseEntryList` ends with:
+
+```js
+return entries.length > 0 ? entries : null;
+```
+
+`null` is the sentinel for **"the key is absent"**. That line makes it *also* the
+sentinel for **"the key is present and its list is empty"**. `parseVerdict` then guards
+`if (followUps !== null) result.follow_ups = followUps`, so both states produce a result
+object with no such property at all.
+
+Measured against the real parser on `main` @ `c724942`:
+
+```
+follow_ups ABSENT                  | 'follow_ups' in result: false | value: undefined
+follow_ups BARE (present, empty)   | 'follow_ups' in result: false | value: undefined
+follow_ups with one entry          | 'follow_ups' in result: true  | value: [{"id":"x"}]
+```
+
+Rows 1 and 2 are indistinguishable. This is `evidence-reader-empty-on-failure` in the
+parser — three states through one sentinel — and it is the **third appearance of the
+#381 class in this same pair of functions**, the second in `follow_ups` specifically.
+
+## Decision
+
+Stop overloading `null` — but `null` keeps TWO legitimate meanings, and the distinction
+is what two cold-review rounds were spent getting right:
+
+```js
+while (i < lines.length && lines[i].trim() === '') i++;
+const endedCleanly = i >= lines.length || TOP_LEVEL_KEY_RE.test(lines[i]);
+if (!endedCleanly) return null;   // there was a body here I could not read
+return entries;                    // [] when genuinely empty, entries otherwise
+```
+
+`null` = **absent or uncomputable**; `[]` = **genuinely empty** — the rule stated verbatim
+in `brain/core/anti-patterns/evidence-reader-empty-on-failure.md`.
+
+> **Superseded draft, kept deliberately.** This section first read *"the block-form branch
+> only runs when the key's line was found, so an empty list is a real answer: `return
+> entries`."* That control-flow observation is true and the conclusion drawn from it is
+> wrong — the entry loop also breaks on the first line it cannot read, so `entries` is
+> empty for two very different reasons. Shipping it turned foreign verdicts carrying real
+> findings into a confident `findings: []`. See `design.md` D0.
+
+## Scope — the parser, plus ONE emitter fix ruled in by the maintainer
+
+Amended 2026-08-06. This section said *"the parser half only"* until #481 was ruled in
+scope; leaving that heading standing would have been the third stale normative claim in
+these artefacts, and the first two were caught by review rather than by me.
+
+- **Parser (here).** `parseEntryList` stops collapsing empty into absent, and stops
+  answering `[]` for a body it could not read. Latent for brain's own output, live for
+  foreign input: `cold-boot.mjs:123` and `board.mjs:104` parse verdicts posted by another
+  actor, an older or newer brain, or a hand-authored comment.
+- **Emitter — the line-break escape (here, REQ-452-7, issue #481).** `yamlScalar` quoted
+  but did not escape newlines, so a multi-line `evidence:` terminated the findings list
+  and dropped every finding after it. **Not** a scope call I was entitled to make: I had
+  filed it as a separate issue, the maintainer ruled it back in, and that ruling is the
+  precedent — the disposition of a review finding belongs to the human, not the reviewer
+  (#473's addendum). The escape and its decoder move together as one contract.
+- **Emitter — `follow_ups` emission POLICY (NOT here — belongs with #408).** Whether
+  `renderVerdict` should emit `follow_ups: []` the way it already emits `findings: []` is
+  a **protocol choice**, not a bug fix, and `follow_ups` is structurally unreachable until
+  an evaluator emits `pre-existing`/`base-only`. PR #444's REQ-409-6 pins today's absence
+  at both the parser and the wire level, with a comment instructing whoever changes it to
+  move the pin rather than delete it. That instruction is addressed to #408, and those two
+  pins staying green is the operational check that this change respected the line.
+
+## Found while measuring — NOT fixed here
+
+The state space has a **fourth** member the ticket does not mention, on the *inline*
+branch rather than the block branch:
+
+```
+findings INLINE unparseable ('findings: {broken')  | 'findings' in result: false | value: undefined
+```
+
+`parseJsonScalar` returns `null` on unparseable input, and `parseVerdict`'s `!== null`
+guard drops the field. **A verdict whose findings list is corrupt reads as a verdict with
+no findings** — "could not be read" presented as "nobody found anything", which is the
+same class pointing in a more dangerous direction than the ticketed one.
+
+It is not fixed here for two reasons: it is a **documented** contract (`@returns … null
+when the key is absent or unparseable`), and fixing it requires deciding what a consumer
+should do with a corrupt list against `parseVerdict`'s never-throws guarantee — a policy
+decision, not a one-liner. Filed separately with this measurement.
