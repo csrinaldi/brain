@@ -984,7 +984,24 @@ of the one that outranks them.
       regard to what they are about, so it is now measuring the accuracy of the record rather
       than the safety of the change. Both are worth having; they are not the same thing, and
       the criterion cannot currently distinguish them. Continuing under the ruling as given.
-- [ ] T16 · round 25 — the axis has failed at rounds 1 and 11 only. Two consecutive rounds
+- [x] T16 · round 25 — cold review of `ba535b4`. **No blocker, no defect in executable
+      behaviour, ONE correction.** Streak back to zero.
+      Round 24's own claims re-verified first and all held: round 6 is the fifth
+      behaviour-clean round, round 13 the eleventh (second consecutive), and the ordinals
+      surviving the re-sweep are quotations of the defect plus one unrelated, correct count.
+      - **C1 — T18c said "Four rounds running", and it is wrong twice over.** The instances
+        it lists (17→16, 18→17, 19→18, 22→21) are **not consecutive** — round 20 was clean
+        and round 21's finding was a different class — and the list is now **five**, because
+        round 24 caught round 23's strike. A streak claim about the very pattern "the count
+        goes stale between rounds", going stale between rounds.
+        This is the fourth ordinal struck since round 23, so the remedy is applied at the
+        level of the rule rather than the instance: **the ledger no longer carries counts of
+        rounds anywhere. It enumerates.** Numbers that are measured once and never re-derived
+        — the test count, the governed diff, the axis list — stay; numbers that grow with the
+        review do not. Re-swept afterwards for every ordinal spelling: what remains is round
+        12's, round 16's and round 19's local streak counts, each verified correct against
+        the entries it refers to, and three quotations of the defect.
+- [ ] T16 · round 26 — the axis has failed at rounds 1 and 11 only. Two consecutive rounds
       with nothing at blocker or correction severity close this.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
@@ -1033,12 +1050,17 @@ of the one that outranks them.
         partial loss reported as a total one was invisible.
       - **CARDINALITY / CORRESPONDENCE** (round 16) — a fixture with N=1 makes "the k-th
         comment belongs to the k-th finding" trivially true.
-      - **A repair must be applied by SEARCH, not to the instance** (rounds 17-19, 21-22) —
-        not an axis but a rule about axes. Four rounds running, the round's principal finding
-        was the previous round's repair stopping where the reviewer had pointed: 17 caught
-        16's, 18 caught 17's, 19 caught 18's (three lines below the fix, same file), 22
-        caught 21's. Corollary, from round 21: when the repair spans two artefacts, they land
-        in one edit or neither does.
+      - **A repair must be applied by SEARCH, not to the instance** — not an axis but a rule
+        about axes. The instances, enumerated rather than counted (round-25 cold review
+        struck "Four rounds running", which was wrong twice over — they are not consecutive,
+        and there are five): **17** caught 16's diagnosis unapplied to the function it was
+        about; **18** caught 17's projection surviving in the CLI message; **19** caught 18's
+        fix stopping three lines short in the same file; **22** caught 21's list of prior
+        occurrences written from memory; **24** caught 23's strike matching one spelling of
+        the claim it was striking.
+        Two corollaries the instances forced: from round 21, when a repair spans two
+        artefacts they land in one edit or neither does; from round 24, **search for the
+        CLAIM, not for its wording**.
       This is an **amendment to a live file**, not a promotion — `brain:promote` slice 1
       accepts only new-file ADR promotions, so it cannot be used here. Tier 2: the agent
       drafts, a human signs. Draft lives at
