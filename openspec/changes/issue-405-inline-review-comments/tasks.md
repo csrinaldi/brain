@@ -677,16 +677,30 @@ of the one that outranks them.
       Corrected: rounds 1-12 answered YES on 3, 2, 2, 1, 1, 2, 2, 2, 2, 2, 3 and 2 axes. The
       behavioural axis failed at rounds 1 and 11 ONLY, so the streak ending at round 13 is
       two, not six.
-- [ ] T16 · round 14 — **and a decision about the criterion belongs here, not another
-      round.** Thirteen rounds, no round clean at any severity. The behavioural axis has
-      failed twice (rounds 1, 11) and not at all in the last two. What every recent round
-      finds is a test that does not pin what its name claims, or a count in a ledger — real
-      findings, each one fixed, and each one located inside the previous round's repair.
-      A criterion of "one round finds nothing on any axis at any severity" may not converge
-      against reviewers who can always find one more assertion to tighten. The candidate
-      replacement, for the maintainer: **two consecutive rounds with nothing at blocker or
-      correction severity.** Round 10 met half of that and round 11 broke it — which is
-      evidence the two-round form is the right shape, not that no criterion works.
+- [x] T16b — **CRITERION RULED by the maintainer**: the review rounds stop after **two
+      consecutive rounds with nothing at blocker or correction severity**. An editorial
+      finding does not break the streak; each reviewer is told this explicitly, so it can
+      neither inflate an editorial to hold the streak open nor deflate a correction to close
+      it. The superseded criterion — "one round finds nothing on any axis at ANY severity" —
+      is recorded as not converging: thirteen rounds, none clean, against reviewers who can
+      always find one more assertion to tighten. Round 10 met half the new form and round 11
+      broke it, which is the evidence that two rounds is the right length rather than that no
+      criterion works.
+- [ ] T16 · round 14 — first round judged under the ruled criterion.
+- [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
+      call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
+      for `brain/core/anti-patterns/`.
+      The claim it records: a red-proof measures the pair (mutation, test), not the code, so
+      a green means nothing until the axis the mutation did NOT vary has been named. Six axes,
+      each found the round after the previous was fixed — PATH, BRANCH, VALUE CLASS, SPELLING,
+      FIELD, SITE — plus three harness failure modes that produce meaningless greens
+      (semantically inert substitution, silent non-substitution, and a negative fixture that
+      fails for the wrong criterion).
+      It belongs to the reviewer line specifically because the reviewer's three locks are
+      where a false green is most expensive: on this PR, two rounds of false greens sat
+      between `prReviewComment` and a postable APPROVE carrying the reviewer's own token.
+- [ ] T18b — **HUMAN: promote** the anti-pattern. Tier 2, and the anti-patterns README's
+      rule 3 asks for promotion in the same commit as the change that discovered it.
 - [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
       carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even
