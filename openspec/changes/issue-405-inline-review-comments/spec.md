@@ -107,8 +107,8 @@ Depends on PR #478 (issue #452), which owns that pair today.
 
 ## REQ-405-4 — an un-anchorable comment NEVER costs the verdict
 
-The load-bearing requirement. When a provider rejects the inline payload (GitHub 422 for
-a line outside the diff; GitLab a stale `position`):
+The load-bearing requirement. When an ANCHORED ATTEMPT FAILS — for any reason, not only an
+inline-specific rejection:
 
 1. the summary block **is still posted**, at the same head;
 2. the un-anchorable findings appear **in** that block;
@@ -118,8 +118,34 @@ Point 3 is not decoration. Without it, "no inline comments appeared" is indistin
 from "the anchors would not attach" — `evidence-reader-empty-on-failure` relocated into
 the poster. The count is the reader's only way to tell the two apart.
 
-Proven by making the provider stub reject the inline payload: the failure path IS the
-deliverable, not an edge case, so it is exercised at the same level as the success path.
+**"For any reason" is the round-14 correction, and it is the sentence that explains why no
+test existed.** This requirement said *"when a provider rejects the inline payload (GitHub
+422 …; GitLab a stale `position`)"*, so every fixture written against it emitted a 422 or a
+position error — the failure had exactly one value class, and the retry's TRIGGER was pinned
+by nothing. Narrowing it to a 422 shape left the whole suite green and lost the verdict on a
+transient 502:
+
+```
+unmutated  attempts 2 → { url, inlineDropped: 1 }        verdict posted
+mutated    attempts 1 → { url: null, error: 'HTTP 502' } VERDICT LOST
+```
+
+`github.mjs` had named that exact mutation and rejected it in a comment — *"gating on a
+422-shaped stderr would make a transient failure lose the VERDICT"* — while the requirement
+above it still described the narrow trigger. Round 6 corrected D3 and the ADR draft on the
+same point and left the requirement itself, which is why the correction never reached a test:
+**the requirement never asked for one.**
+
+The trade is deliberate and stated rather than hidden: retrying on any failure over-counts
+dropped anchors when the cause was a network blip, and REQ-405-4 ranks the verdict above the
+annotation, so the over-count is the cheaper error.
+
+The same rule holds on GitLab, which has no retry: the drop count must not depend on WHY an
+anchor failed. Both are now driven by one shared contract case.
+
+Proven by making the provider stub reject the inline payload — at 422 AND at 502: the failure
+path IS the deliverable, not an edge case, so it is exercised at the same level as the
+success path.
 
 ## REQ-405-5 — exactly ONE parseable verdict, so the anti-loop lock is untouched
 

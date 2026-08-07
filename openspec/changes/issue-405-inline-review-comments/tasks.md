@@ -686,7 +686,39 @@ of the one that outranks them.
       always find one more assertion to tighten. Round 10 met half the new form and round 11
       broke it, which is the evidence that two rounds is the right length rather than that no
       criterion works.
-- [ ] T16 · round 14 — first round judged under the ruled criterion.
+- [x] T16 · round 14 — first round judged under the ruled criterion. **No blocker, no defect
+      in executable behaviour (eighth round), and — for the first time in fourteen rounds —
+      NO false normative claim.** The PR body and #491 were both current, also a first.
+      Two corrections, so the streak does not start. Both are the same axis: **the FAILURE
+      had one value class.** Round 13 widened the value classes of the finding's `line`;
+      nobody had varied what a failure looks like, or what protocol the verdict is on.
+      - **C1 — the retry's TRIGGER was pinned by nothing.** Every anchored-rejection fixture
+        in the tree emits `HTTP 422`. Narrowing the trigger to a 422 shape left all 2579
+        tests green and LOST THE VERDICT on a transient 502:
+        `attempts 1 → { url: null, error: 'HTTP 502' }`.
+        `github.mjs` had named that exact mutation and rejected it in a comment — *"gating on
+        a 422-shaped stderr would make a transient failure lose the VERDICT"* — while
+        REQ-405-4 above it still said *"when a provider rejects the inline payload (GitHub
+        422…)"*. **The requirement never asked for the test.** Round 6 corrected D3 and the
+        ADR draft on this same point and left the requirement, so the correction had nowhere
+        to land. Requirement corrected to "for any reason"; one shared contract case now
+        drives both providers at 502, which also covers GitLab's sibling property — its drop
+        count must not depend on why the anchor failed. Red-proofed in four spellings
+        (422-shape, any-4xx, the word "diff", and GitLab's position-shaped catch): four reds.
+      - **C2 — "not gated on protocol" was pinned by nothing.** All twelve anchored render
+        fixtures set `protocol: 'brain-review/2'`; round 13 varied `line` across five value
+        classes and both branches and held `protocol` constant across every one. Adding
+        `proto === 'brain-review/2' &&` to the guard survived, and reintroduced exactly the
+        drift round 11 restructured the code to prevent: the block advertises no anchor while
+        the poster posts one. `/1` is the default at `lite` AND `standard` — the majority
+        protocol, and the one this repo runs on.
+        The new case asserts the AGREEMENT rather than either half: for both protocols, both
+        branches, the block emits the pair and `deriveInlineComments` derives exactly what it
+        advertises. Red on the mutation applied to both branches and to each one alone.
+      **What this round teaches about the shared predicate**, worth keeping: one function
+      stops drift by FIELD VALUE and cannot stop drift introduced at the CALL SITE by an
+      input dimension the predicate never receives. `hasUsableAnchor` never sees `protocol`.
+      A shared rule is not the same as a shared decision.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.

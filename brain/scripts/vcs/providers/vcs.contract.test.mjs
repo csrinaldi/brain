@@ -1249,6 +1249,21 @@ const WRITE_VERB_PROVIDERS = {
       });
       return {};
     },
+    // The anchored attempt fails for a reason that is NOT inline-specific — a
+    // transient gateway error. Every other rejecting fixture in this file emits
+    // `HTTP 422`, so the retry's TRIGGER was pinned by nothing: narrowing it to a
+    // 422 shape left the suite green and lost the verdict on a 502.
+    rejectAnchoredNonInline: (data) => {
+      resetLogs();
+      setSpawn((_cmd, _args, opts) => {
+        const payload = opts?.input ?? '';
+        requests.push('POST /reviews');
+        try { sent.push(JSON.parse(payload)); } catch { sent.push({ unparseable: payload }); }
+        if (/"comments"/.test(payload)) return { status: 1, stdout: '', stderr: 'gh: Bad Gateway (HTTP 502)' };
+        return { status: 0, stdout: JSON.stringify(data), stderr: '' };
+      });
+      return {};
+    },
     // First attempt refused for its anchors, RETRY succeeds with an unusable body —
     // the path this change created, and the only one where a parse failure can
     // follow a 422.
@@ -1272,6 +1287,20 @@ const WRITE_VERB_PROVIDERS = {
         if (/merge_requests\/\d+$/.test(url)) return { ok: true, json: async () => ({ diff_refs: { base_sha: 'b', head_sha: 'h', start_sha: 's' } }) };
         try { sent.push(JSON.parse(opts?.body ?? '{}')); } catch { sent.push({ unparseable: opts?.body }); }
         if (/"position"/.test(opts?.body ?? '')) return { ok: false, status: 400, json: async () => ({ message: 'position is invalid' }) };
+        return { ok: true, json: async () => data };
+      } };
+    },
+    // Same input class, GitLab side: the discussion fails with a 500, not a
+    // position error. GitLab has no retry, so the property under test is that the
+    // DROP COUNT is independent of why the anchor failed — narrowing the catch to
+    // 40x/position shapes also left the suite green.
+    rejectAnchoredNonInline: (data) => {
+      resetLogs();
+      return { fetchImpl: async (url, opts) => {
+        requests.push(`${opts?.method ?? 'GET'} ${url.replace(/^.*\/api\/v4\//, '')}`);
+        if (/merge_requests\/\d+$/.test(url)) return { ok: true, json: async () => ({ diff_refs: { base_sha: 'b', head_sha: 'h', start_sha: 's' } }) };
+        try { sent.push(JSON.parse(opts?.body ?? '{}')); } catch { sent.push({ unparseable: opts?.body }); }
+        if (/"position"/.test(opts?.body ?? '')) return { ok: false, status: 502, json: async () => ({ message: 'Bad Gateway' }) };
         return { ok: true, json: async () => data };
       } };
     },
@@ -1323,7 +1352,7 @@ const WRITE_VERB_PROVIDERS = {
 };
 
 for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
-  const { module: vcs, ok, fail, rejectInline, capture, sentPayloads, dieAfterFirst, unusableBody, failCapturing, rejectInlineCapturing } = WRITE_VERB_PROVIDERS[providerName];
+  const { module: vcs, ok, fail, rejectInline, capture, sentPayloads, dieAfterFirst, unusableBody, failCapturing, rejectInlineCapturing, rejectAnchoredNonInline } = WRITE_VERB_PROVIDERS[providerName];
   const requestLog = () => requests;
 
   test(`${providerName}.prReviewComment (contract): posts event:'COMMENT' (hardcoded), returns { url } on success`, async () => {
@@ -1382,6 +1411,37 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
     assert.equal(result.error, undefined, 'a fallback that succeeded is not an error');
     assert.equal(result.inlineDropped, 1,
       'the count is the reader\'s only way to tell "no anchors" from "the anchors would not attach"');
+  });
+
+  test(`${providerName}.prReviewComment (contract): an anchored failure that is NOT inline-specific still saves the verdict and counts the loss (REQ-405-4)`, async () => {
+    // The FAILURE had one value class. Round 13 widened the value classes of the
+    // finding's `line`; every anchored-rejection fixture in this file still emitted
+    // `HTTP 422`, so what an inline failure LOOKS like was never varied — and both
+    // providers had a live protection resting on that.
+    //
+    // GitHub: narrowing the retry's trigger to a 422 shape left all 2579 tests
+    // green, and on a transient 502 the verdict was LOST:
+    //     unmutated  attempts 2 → { url, inlineDropped: 1 }   verdict posted
+    //     mutated    attempts 1 → { url: null, error: 502 }   verdict lost
+    // The code comment at the retry names exactly that mutation and says why it was
+    // rejected — "gating on a 422-shaped stderr would make a transient failure lose
+    // the VERDICT, and REQ-405-4 ranks the verdict above the annotation". Nothing
+    // forced it.
+    //
+    // GitLab has no retry, so the same input class tests the sibling property:
+    // the drop count must not depend on WHY the anchor failed. Narrowing that catch
+    // to 40x/position shapes was green too.
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'the verdict block',
+      comments: [{ path: 'a.mjs', line: 12, body: 'a perfectly good anchor' }],
+      ...rejectAnchoredNonInline({ html_url: 'https://example.test/x/y/pull/1#review-9', id: 9 }),
+    });
+    assert.equal(typeof result.url, 'string',
+      'a transient failure on the anchored attempt must never cost the verdict — REQ-405-4 ranks the ' +
+      'verdict above the annotation, and the over-count is the deliberate cheaper error');
+    assert.equal(result.error, undefined, 'the verdict landed, so this is not an error result');
+    assert.equal(result.inlineDropped, 1,
+      'and the anchor is still counted as lost, whatever the reason for the loss');
   });
 
   test(`${providerName}.prReviewComment (contract): the anchor REACHES the provider, and exactly one payload carries the verdict (REQ-405-1/-5)`, async () => {

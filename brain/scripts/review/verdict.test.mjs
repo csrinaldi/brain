@@ -394,6 +394,59 @@ test('#478-3/E6: U+2028 / U+2029 are line terminators too — the JSDoc says lin
 // AND its output (protocol §10), so it is full of colons, paths and numbers that
 // are not anchors. A regex over it would silently mis-anchor.
 
+test('#405 REQ-405-2: the anchor is NOT gated on protocol — /1 renders it and the poster posts it', async () => {
+  // Twelve anchored render fixtures in this tree, and every one of them set
+  // `protocol: 'brain-review/2'`. Round 13 varied the `line` VALUE across five
+  // classes and both branches and held `protocol` constant across all of them —
+  // so the input dimension the predicate never sees was the one left open
+  // (round-14 cold review, C2).
+  //
+  // Adding `proto === 'brain-review/2' &&` to the render guard left the suite
+  // green, and reintroduced exactly the drift round 11 restructured the code to
+  // make impossible: the block advertises no anchor while the poster posts one.
+  //
+  //     MUTATED, protocol: brain-review/1
+  //       block:   - id: budget          (no file:, no line:)
+  //       poster:  [{"path":"big.txt","line":3, …}]
+  //
+  // `brain-review/1` is the default at `lite` AND `standard` — the majority
+  // protocol, and the one this repo itself runs on.
+  //
+  // The invariant is not "the block emits it" or "the poster sends it" separately;
+  // it is that the two AGREE. That is what `hasUsableAnchor` is shared for, and a
+  // single predicate stops drift by field value while leaving drift introduced at
+  // the CALL SITE by a dimension the predicate never receives.
+  const { deriveInlineComments } = await import('./poster.mjs');
+  for (const protocol of ['brain-review/1', 'brain-review/2']) {
+    const built = buildVerdict({
+      headSha: 'abc123',
+      conclusion: 'REVISE',
+      protocol,
+      findings: [
+        { id: 'blocking', severity: 'blocker', evidence: 'e', cites: 'c', file: 'a.mjs', line: 7 },
+        { id: 'deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+          causal_disposition: 'pre-existing', file: 'b.mjs', line: 9 },
+      ],
+    });
+    assert.equal(built.findings.length, 1, `${protocol}: one finding per branch, or a branch goes unchecked`);
+    assert.equal(built.follow_ups.length, 1);
+
+    const body = renderVerdict(built);
+    assert.equal(body.split('\n')[1], `protocol: ${protocol}`,
+      `${protocol}: the fixture really is on this protocol — otherwise the /1 half proves nothing`);
+    assert.match(body, /^ {4}file: a\.mjs$/m, `${protocol}: the findings branch emits the anchor`);
+    assert.match(body, /^ {4}line: 7$/m);
+    assert.match(body, /^ {4}file: b\.mjs$/m, `${protocol}: and so does the follow_ups branch`);
+    assert.match(body, /^ {4}line: 9$/m);
+
+    // The agreement, which is the actual invariant.
+    assert.deepEqual(
+      deriveInlineComments(built.findings).map(c => ({ path: c.path, line: c.line })),
+      [{ path: 'a.mjs', line: 7 }],
+      `${protocol}: the poster derives exactly the anchor the block advertises`);
+  }
+});
+
 test('#405 REQ-405-3: file/line survive the REAL render → parse round trip, on BOTH branches', () => {
   // PER BRANCH, and that word is the round-12 correction. Round 11 pinned the
   // both-or-neither rule with a mutation that changed both render branches at
