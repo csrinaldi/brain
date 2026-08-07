@@ -254,8 +254,12 @@ test('e2e: follow_ups is ABSENT by construction, the refuter silent — flip mea
  *
  * Everything below `postVerdict` is still production and still crosses a real
  * process boundary: `poster.mjs` → `vcs/cli.mjs`'s `getVcs` → `github.mjs` →
- * `spawnSync('gh')` → the payload captured on disk. The only thing the test
- * supplies is the findings array, which is exactly the interface #405 widened.
+ * `spawnSync('gh')` → the payload captured on disk.
+ *
+ * What these cases do NOT prove: the `renderedBody` below is hand-written, not a
+ * `renderVerdict` output, so it carries no findings. They pin the ANCHOR's path to
+ * the wire and the refusal path; that finding text survives into the summary block
+ * is REQ-405-3's round trip over the real renderer and parser.
  */
 function withStubbedGh(t, fx, { rejectInline = false } = {}) {
   const prevPath = process.env.PATH;
@@ -357,5 +361,7 @@ test('e2e: gh REFUSES the anchored payload — the verdict still posts, whole, a
   assert.equal(posted.length, 1, 'and exactly one payload landed');
   assert.equal('comments' in posted[0], false, 'the retry drops the anchors, nothing else');
   assert.equal(posted[0].body, body,
-    'the finding text is still in the summary — a dropped anchor must not drop the finding');
+    'the verdict body is re-sent BYTE-IDENTICAL on the retry — the fallback drops the anchors ' +
+    'and nothing else. (It cannot assert findings survive: this body is hand-written and has ' +
+    'none. REQ-405-3\'s round trip is what covers that.)');
 });

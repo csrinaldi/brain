@@ -64,8 +64,14 @@ Expected flips when the residuals land, by design:
     would read a refusal as a success.
   - the anchored cases drive the REAL `postVerdict` in-process against this same stub
     (`withStubbedGh`) — everything from the poster down is production and still crosses
-    the `spawnSync('gh')` boundary; only the findings array is supplied by the test,
-    which is exactly the interface #405 widened.
+    the `spawnSync('gh')` boundary. The test supplies `postVerdict`'s whole argument
+    set — including a hand-written `renderedBody`, which is NOT a `renderVerdict`
+    output and therefore carries no findings of its own. So these cases prove the
+    ANCHOR reaches the wire and the refusal never costs the verdict; they do not
+    prove finding text survives into the summary. That half is REQ-405-3's
+    render→parse round trip over the real pair. (Round-3 cold review, E2: the
+    earlier wording said "only the findings array is supplied", which read as a
+    much stronger claim than the fixture supports.)
   - a CLI-level **tripwire**: today's run posts no `comments` key, asserted against a
     non-empty findings list so it cannot pass vacuously. Measured rather than assumed —
     patching `tranche.mjs` to anchor its budget finding turns the posted payload's keys

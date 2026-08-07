@@ -399,10 +399,16 @@ test('#405 deriveInlineComments: only ANCHORED findings become comments (REQ-405
   assert.match(out[0].body, /e1/, 'the comment carries the finding evidence — that is what the developer reads');
 });
 
-test('#405 deriveInlineComments: no anchored finding yields NO array, not an empty one (REQ-405-2)', () => {
-  // The verb treats an empty array as "no inline requested" anyway, but the
-  // distinction is asserted here so the poster cannot start sending `comments: []`
-  // and make "none requested" indistinguishable from "all dropped" downstream.
+test('#405 deriveInlineComments: no anchored finding yields an EMPTY array, and the caller decides what that means (REQ-405-2)', () => {
+  // The title used to read "yields NO array, not an empty one", which is the
+  // opposite of both this assertion and the function's JSDoc (round-3 cold
+  // review, E1). It also claimed to be what stops the poster sending
+  // `comments: []`; that is pinned by `#405 T9: with nothing anchored the payload
+  // carries NO comments key`, which reds under the always-send mutation. This one
+  // does not, and should not: `deriveInlineComments` is pure and returns a list.
+  // Deciding that an empty list means "no inline requested" is the POSTER's job,
+  // and keeping those two responsibilities apart is why this function has no
+  // knowledge of the wire at all.
   assert.deepEqual(deriveInlineComments([{ id: 'a', evidence: 'e' }]), []);
 });
 

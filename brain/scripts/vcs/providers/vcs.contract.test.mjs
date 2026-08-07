@@ -1217,6 +1217,33 @@ const WRITE_VERB_PROVIDERS = {
     rejectInline: (data) => { setSpawn(rejectAnchoredRequests(data)); return {}; },
     capture: (data) => { resetLogs(); setSpawn(capturingSpawn(data)); return {}; },
     dieAfterFirst: (data) => { setSpawn(dieAfterFirstSpawn(data)); return {}; },
+    // A SUCCESSFUL call whose body cannot be read: gh exits 0 with stdout that is
+    // not JSON. The provider-specific shape of "unusable" differs; the contract
+    // does not.
+    unusableBody: () => { setSpawn(() => ({ status: 0, stdout: '', stderr: '' })); return {}; },
+    // A failing transport that still LOGS. `fail()` and `capture()` both call
+    // setSpawn, so spreading both into one call silently kept the last one and
+    // left the request log empty — a call-count assertion over it passed having
+    // observed nothing.
+    failCapturing: () => {
+      resetLogs();
+      setSpawn((_cmd, _args, opts) => {
+        requests.push('POST /reviews');
+        try { sent.push(JSON.parse(opts?.input ?? '{}')); } catch { /* shape not under test here */ }
+        return { status: 1, stdout: '', stderr: 'transport failed' };
+      });
+      return {};
+    },
+    // First attempt refused for its anchors, RETRY succeeds with an unusable body —
+    // the path this change created, and the only one where a parse failure can
+    // follow a 422.
+    unusableOnRetry: () => {
+      let n = 0;
+      setSpawn(() => (n++ === 0
+        ? { status: 1, stdout: '', stderr: 'HTTP 422: line must be part of the diff' }
+        : { status: 0, stdout: '', stderr: '' }));
+      return {};
+    },
     sentPayloads: () => sent,
   },
   gitlab: {
@@ -1251,12 +1278,23 @@ const WRITE_VERB_PROVIDERS = {
         return { ok: true, json: async () => data };
       } };
     },
+    unusableBody: () => ({ fetchImpl: async () => ({ ok: true, json: async () => null }) }),
+    failCapturing: () => {
+      resetLogs();
+      return { fetchImpl: async (url, opts) => {
+        requests.push(`${opts?.method ?? 'GET'} ${url.replace(/^.*\/api\/v4\//, '')}`);
+        throw new Error('transport failed');
+      } };
+    },
+    // GitLab has no retry — its summary note goes first and is never re-sent — so
+    // the retry case below is skipped for it rather than faked into existence.
+    unusableOnRetry: null,
     sentPayloads: () => sent,
   },
 };
 
 for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
-  const { module: vcs, ok, fail, rejectInline, capture, sentPayloads, dieAfterFirst } = WRITE_VERB_PROVIDERS[providerName];
+  const { module: vcs, ok, fail, rejectInline, capture, sentPayloads, dieAfterFirst, unusableBody, unusableOnRetry, failCapturing } = WRITE_VERB_PROVIDERS[providerName];
   const requestLog = () => requests;
 
   test(`${providerName}.prReviewComment (contract): posts event:'COMMENT' (hardcoded), returns { url } on success`, async () => {
@@ -1428,6 +1466,33 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
       'three anchors were refused, so three is the honest count — a hardcoded 1 satisfied every other case');
   });
 
+  test(`${providerName}.prReviewComment (contract): a SUCCESS whose body cannot be read returns { url: null, error } — never throws`, async () => {
+    // Was a GitLab-only case, added because THIS change shipped exactly this
+    // regression on GitLab (round 1, C4: the url derivation moved outside the
+    // try). Round 3 found the GitHub twin unpinned on a code path this change
+    // created — deleting `parse`'s try/catch left all 2569 tests green, and a
+    // throw escapes `postVerdict`, which catches nothing, and kills the run.
+    //
+    // "Never throws" is normative in vcs-contract.md, in ADR-0020 and in this
+    // change's own draft row, so it belongs in the SHARED loop: a guarantee
+    // asserted for one provider is a guarantee for one provider.
+    const result = await vcs.prReviewComment({ project: 'x/y', number: 1, body: 'verdict', ...unusableBody() });
+    assert.equal(result.url, null, 'no url can be derived from a body that cannot be read');
+    assert.equal(typeof result.error, 'string', 'and the failure is REPORTED, not raised');
+  });
+
+  test(`${providerName}.prReviewComment (contract): a plain post failure costs exactly ONE call — the retry is for anchors only`, async () => {
+    // `github.mjs` claims "only reachable when anchors were sent, so a plain post
+    // failure costs no extra call", and nothing forced it (round 3, E3): making
+    // the retry unconditional left the full suite green, so a regression that
+    // re-POSTs the verdict on every transient failure would ship silently — and
+    // a first call that landed server-side would then post the verdict twice.
+    const result = await vcs.prReviewComment({ project: 'x/y', number: 1, body: 'verdict', ...failCapturing() });
+    assert.equal(result.url, null, 'the failure is still reported honestly');
+    assert.equal(requestLog().length, 1,
+      `a failure with no anchors must be attempted exactly once: ${JSON.stringify(requestLog())}`);
+  });
+
   test(`${providerName}.prReviewComment (contract): lock 2 — a hostile \`event\` argument does not reach the payload (REQ-266-3)`, async () => {
     // The source-scan below cannot see this, and neither could anything else
     // (cold review of PR #490, C3): adding `event = 'COMMENT'` as a parameter and
@@ -1507,9 +1572,28 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
   });
 }
 
+test('github.prReviewComment (contract): the RETRY\'s never-throws guard holds too', async () => {
+  // The path this change created: first attempt refused for its anchors, retry
+  // accepted with a body that cannot be parsed. Deleting the try/catch around
+  // the retry's parse left all 2569 tests green (round-3 cold review, C1), and a
+  // throw here escapes `postVerdict` — which catches nothing — with the verdict
+  // lost and a stack trace in its place.
+  const result = await github.prReviewComment({
+    project: 'x/y', number: 1, body: 'verdict',
+    comments: [{ path: 'a.mjs', line: 1, body: 'x' }],
+    ...WRITE_VERB_PROVIDERS.github.unusableOnRetry(),
+  });
+  assert.equal(result.url, null);
+  assert.equal(typeof result.error, 'string', 'reported, not raised — on the retry as much as on the first attempt');
+});
+
 // ── #405, GitLab-only: the two halves the shared loop structurally cannot reach.
 // GitHub's review is atomic, so it has no `diff_refs` read and no per-anchor
-// payload. Both of these were found unpinned by the cold review of PR #490.
+// payload. (A THIRD case lived here until round 3 — the never-throws guard for an
+// unusable success body — and it was not GitLab-only at all: GitHub had the
+// identical failure mode, unpinned, on a path this change created. It is in the
+// shared loop now. A block header that miscounts its own contents is the same
+// defect as a comment documenting the function above the one it sits on.)
 
 test('gitlab.prReviewComment (contract): an unreadable diff_refs reports EVERY anchor dropped (REQ-405-4, C1)', async () => {
   // `tasks.md` claimed this was red-proofed. It was not: deleting the count
@@ -1540,20 +1624,6 @@ test('gitlab.prReviewComment (contract): an unreadable diff_refs reports EVERY a
   assert.deepEqual(attempted, [],
     'and NOT ONE discussion may be attempted without diff_refs — a position built from undefined shas is a ' +
     'request we already know is malformed, and the resulting drop count would blame the diff for our own defect');
-});
-
-test('gitlab.prReviewComment (contract): a 2xx with an unusable body returns { url: null, error } — never throws (C4)', async () => {
-  // A behavioural regression this change introduced and shipped through three
-  // tasks: the url derivation was moved OUTSIDE the try, so `note.id` on a null
-  // body threw a TypeError where the pre-#405 verb returned an error object.
-  // "Never throws" is stated in vcs-contract.md's row, in ADR-0020, and in this
-  // change's own draft row — and nothing enforced it for this failure mode.
-  const result = await gitlab.prReviewComment({
-    project: 'x/y', number: 1, body: 'verdict',
-    fetchImpl: async () => ({ ok: true, json: async () => null }),
-  });
-  assert.equal(result.url, null, 'no url can be derived from a body that carries no note id');
-  assert.equal(typeof result.error, 'string', 'and the failure is REPORTED, not raised — the poster catches no exceptions here');
 });
 
 test('gitlab.prReviewComment (contract): the discussion position carries the FULL text-position shape (REQ-405-1, B2)', async () => {

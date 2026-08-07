@@ -71,6 +71,37 @@ GitHub — it is true there and false on GitLab. Suggested: *"Widening costs zer
 calls on GitHub and keeps its review atomic; on GitLab it costs one `diff_refs` read plus
 one call per anchor, which is the floor that provider's API allows."*
 
+**And the anchor's own sentence**, currently line 155:
+
+> Anchors themselves are optional per finding (`file`/`line` on the **`/2` schema**, both
+> optional; absent ⇒ no inline comment).
+
+is false about the shipped tree — nothing gates the anchor on protocol. A `lite` repo runs
+`brain-review/1`, and a `/1` verdict carrying an anchored finding renders `file:`/`line:`
+and posts inline comments. Measured through the real CLI at `lite`:
+
+```
+protocol: brain-review/1
+KEYS ["body","event","comments"]
+COMMENTS [{"path":"big.txt","line":3,"body":"**budget** — … 1200 > 1000 (tier: lite)"}]
+```
+
+Replace with:
+
+```markdown
+Anchors themselves are optional per finding (`file`/`line`, both optional; absent ⇒ no
+inline comment) and are **not gated on protocol** — a `/1` verdict simply omits them, the
+same way it omits `evidence_class`. What keeps `/1` output unchanged is that nothing emits
+the field, not a protocol branch; adding one would be a second place for the two protocols
+to drift. Every evaluator shipping today keeps working unchanged and gains inline coverage
+only when it starts emitting anchors.
+```
+
+This sentence was found by the THIRD review round, in the draft written specifically to
+correct Amendment 1's falsified claims — which had corrected two of them and walked past a
+third, twelve lines further down. It is the same failure the amendment exists to fix,
+committed inside the fix.
+
 **Sign** with the same `**Signed**: <date> — Cristian Rinaldi` convention.
 
 ## The cascade — all three steps, or `decision-gate` fails

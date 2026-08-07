@@ -297,5 +297,63 @@ of the one that outranks them.
       D3 two paragraphs from D5; the checklist beside the draft it describes; the protocol
       document behind the contract row. A correction is not applied until something asks
       which OTHER artefacts said the same thing.
-- [ ] T16 · round 3 — the criterion is not met until a round answers NO to all three
-      questions. Round 1 found all three; round 2 found two, inside round 1's repairs.
+- [x] T16 · round 3 — cold review of `ca6ab5a`, told about the pattern the first two
+      rounds named and asked to look for surviving instances of it. **No blocker, no
+      defect in executable behaviour**, and all 25 mutations aimed at production behaviour
+      red where they should. Criterion still NO on two axes, and the pattern held a third
+      time, in the same shape:
+      - **C1** — GitHub's never-throws guard, **on the retry path this change created**,
+        pinned by nothing: deleting `parse`'s try/catch left all 2569 tests green, and a
+        throw escapes `postVerdict` (which catches nothing) and kills the run. This is
+        round 1's C4 — the identical failure mode, which this change had already shipped
+        once on GitLab. The repair added a GitLab-only case. The GitHub twin got nothing.
+        Now in the SHARED loop, plus a GitHub case for the retry: a guarantee asserted for
+        one provider is a guarantee for one provider.
+      - **C2** — that block's header said "the two halves the shared loop cannot reach"
+        and contained three tests, the third of which was not GitLab-only at all. Round
+        2's E-4 (a comment documenting something other than what follows it) recurring in
+        the file that fixed it.
+      - **C3** — the `/2`-only claim about the anchor survived in the two artefacts round 2
+        did not open: the SIGNED `ADR-0020:155`, and `proposal.md:63`. Worse, the sentence
+        sits **twelve lines** from one Amendment 2 already corrects — so the draft written
+        specifically to repair Amendment 1's falsified claims fixed two and walked past the
+        third. The same failure, committed inside its own fix.
+      - **C4 (AI attribution)** — six of this branch's eight commits carry
+        `Co-Authored-By: Claude…`, which `agent-authorities.md` lists under **Tier 3 —
+        Prohibited**, *"even if explicitly asked"*, and which `openspec/config.yaml` bans
+        in the same words. Not agent-fixable and left for the maintainer: the obvious
+        remedy — amending published commits — is Tier 3 as well. See T17.
+      - **E1** — a test titled "yields NO array, not an empty one" whose assertion is
+        `deepEqual(…, [])`, contradicting itself and the function's own JSDoc.
+      - **E2** — "only the findings array is supplied by the test" was false in three
+        places: those cases hand-write `renderedBody`, so it carries no findings at all,
+        which made one assertion message describe something the fixture cannot observe.
+      - **E3** — a second unforced claim in the same GitHub function ("only reachable when
+        anchors were sent"): making the retry unconditional left the suite green, so a
+        regression that re-POSTs the verdict on every transient failure would ship silently.
+        Now pinned by a failing transport that still LOGS — the first attempt at that case
+        spread `capture()` and `fail()` into one call, and since both set the same seam the
+        second silently won and the call-count assertion passed having observed nothing.
+      Three mutations re-run after the fixes, diffs printed: three reds.
+      **Three rounds, one lesson, stated plainly because it cost three rounds to learn:**
+      a correction is not finished when the sentence that was wrong is fixed. It is
+      finished when something has asked which OTHER artefacts, and which OTHER provider,
+      assert the same thing. Every round found the fix applied exactly where the defect was
+      noticed and nowhere else — sibling provider, sibling protocol claim, sibling proposal
+      bullet, sibling block header, sibling ADR sentence twelve lines down.
+- [ ] T16 · round 4 — the criterion is not met until a round answers NO to all three
+      questions. Rounds 1, 2 and 3 answered yes on 3, 2 and 2 axes respectively; each
+      found part of it inside the previous round's repairs.
+- [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
+      carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
+      (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even
+      if explicitly asked"* — and the agent's own harness instructions require it, which
+      is exactly the conflict that phrase anticipates. **Doctrine wins; the trailer stops
+      here** and no commit after `ca6ab5a` carries it.
+      What is NOT agent-fixable: the six already published. Amending published commits is
+      Tier 3 too, so the remedy is a maintainer call — squash-merge with a clean message,
+      or accept them. Causality is `worsened`, not `introduced`: `main` already carries 6
+      such commits from 02–04/08, and this branch doubles the total.
+      Worth noting either way: `tranche.mjs` has an `ai-attribution` finding that scans the
+      **PR body**, and nothing scans commit messages. A gate would have caught this on the
+      first commit instead of the eighth.

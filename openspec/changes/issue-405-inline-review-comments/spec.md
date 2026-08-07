@@ -138,8 +138,11 @@ What is provable today, and what this requirement now demands:
 
 1. **The wire path carries an anchor.** The anchored cases drive the REAL `postVerdict`
    against the harness's `gh` stub: poster → `getVcs` → `github.mjs` → `spawnSync('gh')`
-   → the payload captured on disk. Only the findings array comes from the test, which is
-   exactly the interface #405 widened.
+   → the payload captured on disk. The test supplies the whole argument set, including a
+   hand-written `renderedBody` that is not a `renderVerdict` output — so these cases prove
+   the ANCHOR reaches the wire, not that finding text survives into the summary. That half
+   is REQ-405-3's round trip over the real renderer and parser. Corrected in round 3 (E2);
+   the earlier wording claimed more than the fixture supports.
 2. **A refused anchor never costs the verdict.** `GH_STUB_REJECT_INLINE=1` makes the stub
    422 any payload carrying `comments`, so the fallback runs against the real binary
    boundary and not only against an in-process fake. Refusals land in a separate
