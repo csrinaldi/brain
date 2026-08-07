@@ -899,9 +899,14 @@ of the one that outranks them.
         written** — round 15's C3 exactly, and round 19's stopped-short repair exactly, in
         one line.
         Not an isolated slip: the ledger records the PR body going stale or lagging a repair
-        at rounds 6, 7, 10, 12, 13, 14 and 15, and round 12's C2 has the same shape verbatim
-        — *"the fix landed in `tasks.md`"* while the only copy that mattered was the body.
-        **Seven occurrences of one defect is a process defect, not seven mistakes.** The
+        at rounds **6, 7, 8, 9, 11, 13, 14 and 15** — eight — and **round 11's** C2 has the
+        same shape verbatim: *"the fix landed in `tasks.md`"* while the only copy that
+        mattered was the body. (This sentence first read "rounds 6, 7, 10, 12, 13, 14 and 15
+        … round 12's C2 … seven occurrences", written from memory rather than from the file;
+        round 22's C1 corrected it against a scan that attributes every `PR body` mention in
+        this ledger to the round it sits under. A paragraph about unverified claims,
+        unverified.)
+        **Eight occurrences of one defect is a process defect, not eight mistakes.** The
         cause is ordering: the PR body was refreshed LAST, after the ledger entry claiming
         it. From round 22 the body is rewritten in the same edit as the entry that describes
         it, before the commit — the claim and the artefact land together or neither does.
@@ -910,10 +915,31 @@ of the one that outranks them.
       none, because rounds 18-20 changed only test assertions and the ledger. `origin/main`
       merged in (the branch was `behind`, #493 having landed the anti-pattern there); 2627
       tests, 0 fail; `repo:check` ✓, `brain:nav` ✓.
-- [ ] T16 · round 22 — eight rounds with no defect in executable behaviour. The last four
-      findings are all the same class read at different levels: a repair applied to the
-      instance rather than the class. Two consecutive rounds with nothing at blocker or
-      correction severity close this.
+- [x] T16 · round 22 — cold review of `f5aba07`. **No blocker, no defect in executable
+      behaviour (ninth consecutive), TWO corrections**, both in round 21's own entry, both
+      found by checking its claims against the file instead of against memory.
+      - **C1 — round 21's list of prior occurrences was wrong.** It said the PR body had
+        gone stale at "rounds 6, 7, 10, 12, 13, 14 and 15 … round 12's C2 … seven
+        occurrences". A scan attributing every `PR body` mention in this ledger to the round
+        it sits under gives **6, 7, 8, 9, 11, 13, 14, 15** — eight — and the verbatim
+        "the fix landed in `tasks.md`" line is **round 11's** C2. A paragraph about claims
+        made without checking, made without checking. Corrected, with the scan recorded.
+      - **C2 — `T18c` was cited in two artefacts and defined in none.** Round 21's PR body
+        lists it twice under open human acts, and round 17's ⛔ banner on
+        `anti-pattern-mutation-blind-by-axis.md` names it as what is still owed. No such task
+        existed. A reader following either citation lands nowhere — and the banner's whole
+        job is to stop a second promotion by pointing at the amendment instead. T18c now
+        exists, spelling out all five items and why `brain:promote` cannot do it.
+      Verified rather than assumed this round: `013845d` is an ancestor of `origin/main`;
+      #491 is open with `status:approved`; the trailer boundary (`ca6ab5a` last, `ec153ea`
+      first clean) re-measured from `git log --format=%(trailers)`; the merge dropped
+      `brain/core/**` out of this PR's diff entirely, so T18b's "does not ship inside PR #490"
+      is now true of the diff and not only of the history. 2627 tests, 0 fail; governed diff
+      **360** of 1000.
+- [ ] T16 · round 23 — nine rounds with no defect in executable behaviour. Every finding
+      since round 17 has been in the previous round's own repair or claim, never in the
+      shipped code. Two consecutive rounds with nothing at blocker or correction severity
+      close this.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.
@@ -947,6 +973,34 @@ of the one that outranks them.
       moved the filenames that way too. Worth recording rather than silently fixing: the
       agent reached for the language of the conversation instead of the language of the
       destination.
+- [ ] T18c — **HUMAN: amend the promoted anti-pattern with what rounds 13-21 added.**
+      `brain/core/anti-patterns/red-proof-blind-along-an-unvaried-axis.md` is on `main`
+      (`013845d`) and names six blindness axes. Five items have been found since it was
+      signed and none of them is in it:
+      - **FAILURE VALUE CLASS** (round 14) — every anchored-rejection fixture emitted
+        `HTTP 422`, so what an inline failure LOOKS like was never varied, and both
+        providers had a live protection resting on that.
+      - **CALL-SITE DIMENSION** (rounds 14-15) — a shared predicate stops drift by field
+        value and cannot stop drift introduced at the call site by a dimension the predicate
+        never receives.
+      - **SUBSET vs TOTAL** (round 15) — every refusal fixture refused all or none, so a
+        partial loss reported as a total one was invisible.
+      - **CARDINALITY / CORRESPONDENCE** (round 16) — a fixture with N=1 makes "the k-th
+        comment belongs to the k-th finding" trivially true.
+      - **A repair must be applied by SEARCH, not to the instance** (rounds 17-19, 21-22) —
+        not an axis but a rule about axes. Four rounds running, the round's principal finding
+        was the previous round's repair stopping where the reviewer had pointed: 17 caught
+        16's, 18 caught 17's, 19 caught 18's (three lines below the fix, same file), 22
+        caught 21's. Corollary, from round 21: when the repair spans two artefacts, they land
+        in one edit or neither does.
+      This is an **amendment to a live file**, not a promotion — `brain:promote` slice 1
+      accepts only new-file ADR promotions, so it cannot be used here. Tier 2: the agent
+      drafts, a human signs. Draft lives at
+      `brain-drafts/anti-pattern-mutation-blind-by-axis.md`, which carries a ⛔ banner saying
+      exactly this.
+      **This task was cited by the PR body and by that draft's banner before it existed**
+      (round-22 cold review, C2) — an id referenced in two artefacts and defined in none.
+      Created here so the citations resolve.
 - [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
       carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even
