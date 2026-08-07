@@ -73,6 +73,14 @@ qualifier is the round-6 correction: the guard matched a SUBSTRING, so `.concat(
 passed it while the spread form reded, and this sentence claimed a coverage the guard did
 not have.
 
+The anchor is checked for USABILITY, not presence (round 10): a non-empty `file`, and a
+`line` that coerces to a positive integer. Presence was all the first version checked, so
+`line: 'abc'` went out as `line: null` and `line: ''` as `line: 0` — diff lines are 1-based,
+so both are anchors already known not to attach, and spending the un-anchorable fallback on
+one is the exact cost the rule exists to avoid. The renderer applies the same rule to what
+it EMITS, in both branches: a block that advertises an anchor the poster will refuse is the
+same defect read from the other end.
+
 `line` survives the round trip as **text** (`parseVerdict` returns entry scalars verbatim;
 `verdict.test.mjs` pins `'42'`), so the consumer coerces. `deriveInlineComments` does —
 GitHub's reviews API rejects a string line, and a verdict that had made the round trip

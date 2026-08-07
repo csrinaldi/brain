@@ -397,11 +397,26 @@ test('#405 deriveInlineComments: only ANCHORED findings become comments (REQ-405
     // omits `line:` from the block. That is text on the diff the posted verdict
     // does not support, which is the one thing the anchor rule exists to prevent.
     { id: 'e', evidence: 'e5', file: 'z.mjs', line: null },
+    // The spellings rounds 7-10 each found unpinned one at a time. `file: ''` is
+    // handled by `!f?.file` and was pinned by nothing — the mutation
+    // `f?.file === undefined` survived. The three unusable LINES were worse than
+    // unpinned: they were SENT, as `line: null` and `line: 0`, and diff lines are
+    // 1-based — anchors already known not to attach, which is the exact cost the
+    // guard's own JSDoc says it exists to avoid.
+    { id: 'f', evidence: 'e6', file: '', line: 3 },        // empty path
+    { id: 'g', evidence: 'e7', file: 'z.mjs', line: 'abc' },// Number() -> NaN
+    { id: 'h', evidence: 'e8', file: 'z.mjs', line: '' },   // Number() -> 0
+    { id: 'i', evidence: 'e9', file: 'z.mjs', line: 0 },    // no line 0 in a diff
+    { id: 'j', evidence: 'e10', file: 'z.mjs', line: 2.5 }, // not an integer
+    // …and the one shape that MUST survive all of that: the round-tripped string,
+    // which is what `parseVerdict` actually returns.
+    { id: 'k', evidence: 'e11', file: 'w.mjs', line: '7' },
   ]);
-  assert.deepEqual(out.map(c => c.path), ['x.mjs'],
+  assert.deepEqual(out.map(c => c.path), ['x.mjs', 'w.mjs'],
     'a half anchor is not an anchor — GitHub 422s a comment with no line, so a partial one ' +
     'would spend the fallback on a finding we already knew could not attach');
   assert.equal(out[0].line, 4);
+  assert.strictEqual(out[1].line, 7, 'the round-tripped string form survives and arrives as a number');
   assert.match(out[0].body, /e1/, 'the comment carries the finding evidence — that is what the developer reads');
 });
 

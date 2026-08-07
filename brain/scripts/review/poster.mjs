@@ -41,10 +41,18 @@ const ESCALATION_LABEL = 'needs-decision';
  * (issue #405, REQ-405-2). PURE — no I/O, no provider shape beyond the three
  * fields the contract names.
  *
- * A finding without BOTH `file` and `line` yields no comment. A half anchor is
- * not an anchor: GitHub 422s a comment with no line, so passing one would spend
- * the un-anchorable fallback on a finding already known not to attach — and the
- * dropped-count would then report a defect of ours as a defect of the diff.
+ * A finding yields a comment only when it carries a non-empty `file` AND a `line`
+ * that coerces to a POSITIVE INTEGER. A half anchor is not an anchor: GitHub 422s
+ * a comment with no line, so passing one would spend the un-anchorable fallback on
+ * a finding already known not to attach — and the dropped-count would then report
+ * a defect of ours as a defect of the diff.
+ *
+ * "Positive integer" rather than "present" is the round-10 correction. Presence was
+ * all the guard checked, so `line: 'abc'` went out as `line: null` and `line: ''`
+ * as `line: 0` — diff lines are 1-based, so both are anchors already known not to
+ * attach, which is the exact cost this guard's own contract says it avoids. The
+ * coercion is the same one the value needs anyway: `parseVerdict` returns entry
+ * scalars as text, so a round-tripped `line` arrives as `'42'`.
  *
  * Returns `[]` when nothing is anchored. The VERB is what decides that an empty
  * array means "no inline requested"; this function does not fabricate a request.
@@ -55,8 +63,9 @@ const ESCALATION_LABEL = 'needs-decision';
 export function deriveInlineComments(findings = []) {
   const out = [];
   for (const f of findings ?? []) {
-    if (!f?.file || f.line === undefined || f.line === null) continue;
-    out.push({ path: f.file, line: Number(f.line), body: `${f.id ? `**${f.id}** — ` : ''}${f.evidence ?? ''}` });
+    const line = Number(f?.line);
+    if (!f?.file || !Number.isInteger(line) || line < 1) continue;
+    out.push({ path: f.file, line, body: `${f.id ? `**${f.id}** — ` : ''}${f.evidence ?? ''}` });
   }
   return out;
 }

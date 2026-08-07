@@ -29,16 +29,27 @@ test('#490/round-8 E1: a null `line` is OMITTED from the block, in BOTH branches
       { id: 'blocking', severity: 'blocker', evidence: 'e', cites: 'c', file: 'a.mjs', line: null },
       { id: 'deferred', severity: 'blocker', evidence: 'e', cites: 'c',
         causal_disposition: 'pre-existing', file: 'b.mjs', line: null },
+      // The `file` half, added in round 10. Rounds 7 and 8 each pinned the `line`
+      // guard — in the poster, then here — and neither asked the same question of
+      // `file`, so `if (f.file)` could become `if (f.file !== undefined)` with the
+      // whole suite green. An empty `file:` in the block is the same defect the
+      // `line` rule exists to prevent, one field over: the block advertising an
+      // anchor that cannot attach.
+      { id: 'empty-path', severity: 'blocker', evidence: 'e', cites: 'c', file: '', line: null },
+      { id: 'empty-path-deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'base-only', file: '', line: null },
     ],
   });
-  assert.equal(v.findings.length, 1, 'one finding in each branch — otherwise a branch goes unchecked');
-  assert.equal(v.follow_ups.length, 1);
+  assert.equal(v.findings.length, 2, 'two findings in each branch — otherwise a branch goes unchecked');
+  assert.equal(v.follow_ups.length, 2);
   const body = renderVerdict(v);
   assert.match(body, /^ {4}file: a\.mjs$/m, 'the file half still renders — the anchor is half-present, which is the case');
   assert.match(body, /^ {4}file: b\.mjs$/m);
   assert.doesNotMatch(body, /^ {4}line:/m,
     `a null line must never be emitted, in either branch — the block would advertise an anchor ` +
     `the poster refuses to post: ${body}`);
+  assert.doesNotMatch(body, /^ {4}file: ""$/m,
+    `an empty file must never be emitted either — same defect, one field over: ${body}`);
 });
 
 test('buildVerdict: a finding with no evidence is excluded from findings[] (inadmissible)', () => {

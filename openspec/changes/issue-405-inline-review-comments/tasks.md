@@ -457,7 +457,7 @@ of the one that outranks them.
         paragraph too; it is the "sentence twelve lines down" one section further along.
 - [x] T16 · round 7 — cold review of `5469b3c`, ~55 mutations across five production
       files, every diff printed, and every natural drift spelling tried rather than one.
-      **No defect in executable behaviour** for the fourth round running. Two findings:
+      **No defect in executable behaviour** (clean on that axis since round 2). Two findings:
       - **F1 — GitLab's inline comment BODY was pinned by nothing.** Replacing `body: c.body`
         with a constant left all 2574 tests green: every anchor still attaches,
         `inlineDropped` stays absent, and the run reports a perfectly healthy inline review
@@ -483,7 +483,7 @@ of the one that outranks them.
       (True of the FIRST payload only. Round 8 found the companion case never reached the
       bare retry at all.)
 - [x] T16 · round 8 — cold review of `2e8e2a9`, ~40 mutations, every diff printed and
-      parse-checked. **No defect in executable behaviour** for the fifth round running, and
+      parse-checked. **No defect in executable behaviour** (clean on that axis since round 2), and
       every one of the seven previous rounds' repairs held under multiple spellings. But it
       found a **BLOCKER**, and it is the most serious finding of the whole sequence:
       - **B1 — lock 2 was asserted on ONE of the verb's payload sites.** (Round 8 wrote
@@ -519,7 +519,7 @@ of the one that outranks them.
       - **E2** — round 6's "nothing is folded back" reached D3 and the signed ADR and not
         D7-2, 110 lines down in the same file.
 - [x] T16 · round 9 — cold review of `f9a19e6`, ~45 mutations, every diff printed AND
-      `node --check`ed. **No defect in executable behaviour** for the sixth round running.
+      `node --check`ed. **No defect in executable behaviour** (clean on that axis since round 2).
       A second **BLOCKER**, and it is round 8's own fix falling one site short:
       - **B1 — three payload sites, not two.** `github.prReviewComment` builds THREE
         `event`-carrying literals: the ternary's anchored branch, its bare branch, and the
@@ -545,10 +545,35 @@ of the one that outranks them.
         defect class as understating one.
       - **C3/E1** — the PR body was a round stale again, and T17 asserted a PR-body
         attribution footer that the round-5 rewrite had removed.
-- [ ] T16 · round 10 — rounds 1-9 answered YES on 3, 2, 2, 1, 1, 2, 2, 2 and 2 axes. TWO
-      blockers have now been found in the same guard, three rounds apart, each in the fix
-      for the previous one. Six consecutive rounds have found no defect in executable
-      behaviour — the code is stable and the CLAIMS about it are not.
+- [x] T16 · round 10 — cold review of `12f62ff`, ~50 mutations, each printed,
+      `node --check`ed, and each red confirmed to be the INTENDED assertion firing.
+      **CLEAN at blocker and correction severity on all three axes** — the first round to
+      be. The reviewer enumerated the three `event` sites independently rather than
+      trusting the count, confirmed the guard's mutations are semantically live (the
+      failure message carries `{"body":"verdict","event":"APPROVE"}` off the wire), and
+      probed every fixture for always-succeeding behaviour. Two editorials, both fixed
+      because the stopping criterion is not severity-qualified:
+      - **E1** — the half-anchor guard was pinned for `undefined` and `null` and not for
+        `file: ''`, and worse: it tested PRESENCE, not usability. `line: 'abc'` went out as
+        `line: null` and `line: ''` as `line: 0`, and diff lines are 1-based — anchors
+        already known not to attach, which is the exact cost the guard's own JSDoc says it
+        exists to avoid. Tightened to "non-empty file AND a line that coerces to a positive
+        integer", which is also what the round-tripped `'42'` needs. Four spellings red.
+        The renderer's `file` twin was open the same way (rounds 7 and 8 each pinned the
+        `line` guard, in the poster then in the renderer, and neither asked about `file`) —
+        now red on both branches.
+      - **E2** — "six consecutive rounds with no defect in executable behaviour" contradicted
+        the table two lines above it, which marks rounds 2-9. The streak is eight. It
+        UNDERSTATED, which is why it survived: a ledger claim is checked against the thing
+        it summarises, and nobody checks a number that makes the change look worse.
+      **My red-proof harness failed twice this round**, both times silently: a `cut -d'|'`
+      pipeline split on the `||` inside the mutations and produced four meaningless greens,
+      after round 9's inert `ev` destructure did the same. Both are the defect the harness
+      exists to catch, in the harness. It now counts substitution SITES and refuses to run
+      when the count is not what was expected — printing the diff was never sufficient.
+- [ ] T16 · round 11 — round 10 is the first clean round at blocker/correction severity.
+      The criterion is met only when a round finds nothing on any of the three axes at ANY
+      severity, so the two editorials above were fixed and the next round judges that.
 - [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
       carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even
