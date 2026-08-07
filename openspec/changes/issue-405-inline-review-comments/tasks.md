@@ -101,8 +101,14 @@ acts. The ticket's own body asks for a design pass first — this is it.
       the SAME fixtures — `rejectAnchoredRequests` rejects by SHAPE (any payload carrying
       an anchor), never by call order, so it cannot encode one provider's sequence as the
       contract (the defect T7a found).
-- [ ] T11 — `brain-drafts/vcs-contract-row.md` → **human promotes** (REQ-405-7, Tier 2).
-      The agent must never write `brain/core/methodology/vcs-contract.md`.
+- [x] T11 — `brain-drafts/vcs-contract-row.md` DRAFTED (REQ-405-7). The verb COUNT does
+      not move; one signature widens. The row restates lock 2 inside itself — a reader
+      checks the row to learn what may reach `event`, and widening a signature without
+      restating the lock invites the next widening to reach it. It also names GitLab's
+      extra `GET .../merge_requests/{number}` (a real cost, a real failure mode) and says
+      plainly that no caller sends `comments` yet.
+- [ ] T11b — **HUMAN: promote** the row into `brain/core/methodology/vcs-contract.md`.
+      Tier 2 — the agent must never write the destination file.
 - [x] T12 — e2e on #409's harness. **This task found the change's real defect.** The
       three cases are the wire path (real `postVerdict` → `github.mjs` → `spawnSync('gh')`
       → the captured payload), the 422 fallback against the real binary
