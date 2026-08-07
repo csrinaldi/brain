@@ -587,6 +587,25 @@ test('#405: a dropped anchor is PRINTED, not just returned (REQ-405-4)', async (
   assert.match(reported[0], /\b2\b/, 'and must carry the number, not merely say something was lost');
 });
 
+test('#405: a SINGLE dropped anchor is printed too (REQ-405-4)', async () => {
+  // The only fixture drove `inlineDropped: 2`, so `if (postResult.inlineDropped)`
+  // could become `> 1` and ship silently (round-16 cold review). One lost anchor
+  // is the commonest real loss — an anchor on a context line — and it is exactly
+  // the case where a silent run is indistinguishable from a healthy one.
+  const vcs = spyVcs();
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42'],
+    log: (s) => lines.push(s),
+    ...readyDeps({ vcs }),
+    posterDeps: { getVcs: async () => ({ ...vcs, prReviewComment: async () => ({ url: 'u', inlineDropped: 1 }) }) },
+  });
+  assert.equal(code, 0);
+  const reported = lines.filter(l => /could not be anchored/.test(l));
+  assert.equal(reported.length, 1, `one lost anchor must still be reported — got: ${JSON.stringify(lines)}`);
+  assert.match(reported[0], /\b1\b/);
+});
+
 test('#405: the CLI passes `findings` to postVerdict — the one link no seam can observe (drift guard)', () => {
   // Deliberately a SOURCE assertion, and it is worth saying why rather than
   // dressing it as behaviour. The anchor originates in an evaluator, and no

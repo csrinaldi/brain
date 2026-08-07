@@ -754,11 +754,38 @@ of the one that outranks them.
       - **C3** — the PR body stale for the sixth time, plus the two false claims in the
         round-14 entry, corrected above.
       Six mutations, six reds, per-spelling and per-dimension.
-- [ ] T16 · round 16 — rounds 1-15 have never produced a clean one. Three consecutive rounds
-      with no behavioural defect; what keeps failing is a dimension the previous round's
-      repair held constant. The axis list in `red-proof-blind-along-an-unvaried-axis.md` has
-      grown by three since it was written (failure-value-class, call-site dimension, and
-      subset-vs-total), which is worth folding back into that doc once this settles.
+- [x] T16 · round 16 — cold review of `cb3539a`. **The closest yet: no blocker, no defect in
+      executable behaviour (fourth consecutive), NO false normative claim, and exactly ONE
+      correction.** Every prior round's red-proof claim independently re-verified as holding.
+      - **C1 — CARDINALITY AND CORRESPONDENCE.** Round 15 varied how many anchors are
+        REFUSED and how many are DERIVED. It held constant how many are **delivered**, and
+        whether the k-th comment still belongs to the k-th finding. Every assertion in the
+        tree that inspects an anchor's CONTENT drove exactly one anchored finding; the two
+        multi-anchor fixtures assert a PROJECTION — `(path, line)` at the poster, `path`
+        alone on GitLab. Seven mutations green because of it, across four files.
+        The sharp one is a single token on the provider production actually uses:
+        `comments: inline` → `comments: inline.slice(0, 1)`. Every anchor after the first is
+        discarded and **`inlineDropped` stays ABSENT** — the run reports a healthy inline
+        review that delivered one comment out of five. That is REQ-405-4's own failure mode
+        with the sign flipped: the count does not merely fail to distinguish "no anchors"
+        from "they would not attach", it positively asserts nothing was lost.
+        Fixed at all four layers, asserting the FULL TRIPLE per anchor rather than a
+        projection — a projection is precisely what let `line` and `body` collapse to the
+        first anchor's on both providers while `path` stayed right. Seven mutations, seven
+        reds.
+      **The lesson, and it is the same one three rounds running:** a repair fixes the
+      dimension it was pointed at and leaves the next one constant. Round 14 varied the
+      failure's value class; round 15 varied refusal count and call-site mode; round 16
+      varied delivery count and per-entry correspondence. Each was invisible to the one
+      before because a fixture with N=1 makes correspondence trivially true.
+- [ ] T16 · round 17 — round 16 is the first with a single finding and nothing false.
+      Under the ruled criterion the streak is still zero: one correction breaks it. Two clean
+      rounds close this.
+      **Owed to `brain/core/anti-patterns/red-proof-blind-along-an-unvaried-axis.md`:** four
+      axes have been found since it was promoted — FAILURE VALUE CLASS (14), CALL-SITE
+      DIMENSION (14/15), SUBSET-VS-TOTAL (15), CARDINALITY/CORRESPONDENCE (16). That doc is
+      Tier 2 and on `main`; folding them back is a human promotion, drafted once this
+      settles rather than piecemeal.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.

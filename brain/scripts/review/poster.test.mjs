@@ -566,10 +566,13 @@ test('#405: the anchored path holds at EVERY PR mode, and at more than one ancho
     });
     const post = spy.calls.find(c => c.verb === 'prReviewComment');
     assert.ok(post, `${mode}: every non-ruling mode posts on the PR path`);
-    assert.deepEqual(
-      post.args.comments?.map(c => ({ path: c.path, line: c.line })),
-      [{ path: 'a.mjs', line: 3 }, { path: 'b.mjs', line: 8 }],
-      `${mode}: EVERY anchored finding reaches the verb, not just the first — got ${JSON.stringify(post.args.comments)}`);
+    // The FULL triple, `body` included (round-16 cold review): asserting
+    // `(path, line)` is a projection, and a projection is what let the comment
+    // body collapse to the first finding's while the coordinates stayed correct.
+    assert.deepEqual(post.args.comments, [
+      { path: 'a.mjs', line: 3, body: '**f1** — first' },
+      { path: 'b.mjs', line: 8, body: '**f2** — second' },
+    ], `${mode}: EVERY anchored finding reaches the verb with its OWN triple — got ${JSON.stringify(post.args.comments)}`);
   }
 });
 

@@ -394,6 +394,42 @@ test('#478-3/E6: U+2028 / U+2029 are line terminators too — the JSDoc says lin
 // AND its output (protocol §10), so it is full of colons, paths and numbers that
 // are not anchors. A regex over it would silently mis-anchor.
 
+test('#405 REQ-405-3: each rendered entry carries its OWN anchor, in BOTH branches (REQ-405-1)', () => {
+  // The renderer emitting `inline[0]`'s pair for every entry was green in both
+  // branches (round-16 cold review). Every content assertion in the tree drove a
+  // single anchored finding, and the poisoned/survivor sweep checks `[0]` and
+  // never `[1]` — so "the anchor round-trips" was pinned while "the anchors do
+  // not smear into each other" was not.
+  //
+  // Two per branch, deliberately: with one, `entries[0]` is trivially its own
+  // anchor and the mutation is invisible.
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    protocol: 'brain-review/2',
+    findings: [
+      { id: 'f1', severity: 'blocker', evidence: 'e', cites: 'c', file: 'a.mjs', line: 11 },
+      { id: 'f2', severity: 'blocker', evidence: 'e', cites: 'c', file: 'b.mjs', line: 22 },
+      { id: 'u1', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'pre-existing', file: 'c.mjs', line: 33 },
+      { id: 'u2', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'base-only', file: 'd.mjs', line: 44 },
+    ],
+  });
+  assert.equal(built.findings.length, 2, 'two per branch, or the smear is invisible');
+  assert.equal(built.follow_ups.length, 2);
+
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.deepEqual(
+    parsed.findings.map(f => ({ id: f.id, file: f.file, line: f.line })),
+    [{ id: 'f1', file: 'a.mjs', line: '11' }, { id: 'f2', file: 'b.mjs', line: '22' }],
+    'findings: each entry keeps its own pair');
+  assert.deepEqual(
+    parsed.follow_ups.map(f => ({ id: f.id, file: f.file, line: f.line })),
+    [{ id: 'u1', file: 'c.mjs', line: '33' }, { id: 'u2', file: 'd.mjs', line: '44' }],
+    'follow_ups: and so does the branch nobody drives twice');
+});
+
 test('#405 REQ-405-2: the anchor is NOT gated on protocol — /1 renders it and the poster posts it', async () => {
   // Twelve anchored render fixtures in this tree, and every one of them set
   // `protocol: 'brain-review/2'`. Round 13 varied the `line` VALUE across five

@@ -1413,6 +1413,57 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
       'the count is the reader\'s only way to tell "no anchors" from "the anchors would not attach"');
   });
 
+  test(`${providerName}.prReviewComment (contract): N anchors deliver N comments, each keeping its OWN triple (REQ-405-1)`, async () => {
+    // CARDINALITY AND CORRESPONDENCE — the axis round 15 held constant. It varied
+    // how many anchors are REFUSED (GitLab partial) and how many are DERIVED (the
+    // poster call site). What nothing asserted is how many are DELIVERED, and
+    // whether the k-th comment still belongs to the k-th finding: every assertion
+    // in the tree that inspects an anchor's CONTENT drove exactly one anchored
+    // finding, and the two multi-anchor fixtures assert a projection —
+    // `(path, line)` at the poster, `path` alone on GitLab.
+    //
+    // Six mutations were green because of it (round-16 cold review). The sharp one
+    // is a single token on the primary provider:
+    //
+    //     comments: inline   →   comments: inline.slice(0, 1)
+    //
+    // Every anchor after the first is discarded and `inlineDropped` stays ABSENT —
+    // the run reports a perfectly healthy inline review that delivered one comment
+    // out of five. That is REQ-405-4's stated failure mode with the sign flipped:
+    // the count does not merely fail to distinguish the two states, it positively
+    // asserts nothing was lost.
+    //
+    // Asserted as the FULL TRIPLE per anchor, in order, rather than a projection —
+    // a projection is what let `line` and `body` collapse to the first anchor's on
+    // both providers while `path` stayed correct.
+    const comments = [
+      { path: 'a.mjs', line: 11, body: 'finding ONE' },
+      { path: 'b.mjs', line: 22, body: 'finding TWO' },
+      { path: 'c.mjs', line: 33, body: 'finding THREE' },
+    ];
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'the verdict block',
+      comments,
+      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-10', id: 10 }),
+    });
+    assert.equal(typeof result.url, 'string');
+    assert.equal(result.inlineDropped, undefined, 'nothing was refused, so nothing may be reported dropped');
+
+    // Each provider carries the anchor differently — GitHub in one `comments[]`,
+    // GitLab as one `position` per discussion — so the triple is read back through
+    // a per-provider projection and compared as ONE list.
+    const payloads = sentPayloads();
+    const delivered = providerName === 'github'
+      ? (payloads.find(p => Array.isArray(p.comments))?.comments ?? [])
+          .map(c => ({ path: c.path, line: c.line, body: c.body }))
+      : payloads.filter(p => p.position)
+          .map(p => ({ path: p.position.new_path, line: p.position.new_line, body: p.body }));
+
+    assert.deepEqual(delivered, comments,
+      `every anchor must arrive, in order, with its OWN path, line and body — ` +
+      `got ${JSON.stringify(delivered)}`);
+  });
+
   test(`${providerName}.prReviewComment (contract): an anchored failure that is NOT inline-specific still saves the verdict and counts the loss (REQ-405-4)`, async () => {
     // The FAILURE had one value class. Round 13 widened the value classes of the
     // finding's `line`; every anchored-rejection fixture in this file still emitted
