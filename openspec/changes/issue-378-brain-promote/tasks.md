@@ -29,7 +29,18 @@ Baseline: `main` @ `0401871`.
       (open question 3 → yes), recording the honest limits as measurements.
 - [x] T9 — `brain-drafts/amendment-convention.md` DRAFTED — writes down the rule that
       today exists only as precedent in `git show 0f54781`. **Prerequisite for slice 2.**
-- [x] T10 — gates: `npm test`, `npm run repo:check`, `npm run brain:nav`.
+- [x] T10 — gates: `npm test` (2654 pass / 0 fail), `npm run repo:check`, `npm run brain:nav`.
+- [x] T11 — ACCEPTANCE, run against the real repo content in an independent clone, with
+      the verb promoting **its own ADR draft**:
+      - plan rendered, header before/after shown, HOME.md line shown and inserted after
+        ADR-0027, `AGENTS.md` regeneration announced;
+      - `git rev-list --count HEAD` unchanged at 1 — **zero commits**;
+      - `git diff --cached --name-only` = the three expected paths;
+      - `npm run repo:check`, `npm run brain:nav`, and the existing
+        `antigravity.drift.test.mjs` all **pass on the result**;
+      - the printed commit message fed to the real `brain/scripts/hooks/commit-msg`
+        exits 0.
+      The verb refuses on the non-TTY of this session, verified live (exit 2).
 
 ## Open human acts — NOT agent decisions
 
@@ -58,3 +69,14 @@ Baseline: `main` @ `0401871`.
 - `insertAdrLink`'s `already-present` branch is a **refusal** here, not a no-op (D5).
 - Root is `process.cwd()`, not `import.meta.url` — the real-child-process non-TTY test
   needs to run against a fixture repo, not the developer's checkout.
+- **Deviation from the issue, stated rather than silently dropped.** Step 1 asks for the
+  draft to be rendered *"in full, paginated"*. It is rendered in full; it is **not**
+  paginated. A pager means spawning a second external process, which would break the
+  single-spawn-site count REQ-378-3 relies on and would hand a child process control of
+  the terminal immediately before a confirmation prompt. Scrollback and the caller's own
+  `| less` cover the ergonomics; the lock does not survive the alternative.
+- A stray acceptance run was executed inside a **copy of the worktree**, whose `.git`
+  file still resolved to the real gitdir — so `git add` staged into the real index.
+  Caught, `git reset`, working tree verified byte-identical to HEAD. Recorded because it
+  is a live hazard for anyone testing a staging tool: the test fixtures use
+  `mkdtemp` + a fresh `git init` precisely so this cannot happen there.
