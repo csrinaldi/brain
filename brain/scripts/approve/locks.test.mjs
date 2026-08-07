@@ -1,0 +1,284 @@
+// locks.test.mjs — the DRIFT-GUARD for issue #473 slice 3's structural locks
+// (REQ-473-7, REQ-473-8, REQ-473-9). Mirrors brain-promote.locks.test.mjs's
+// shapes exactly (design.md §F2: reused PATTERN, not code).
+//
+// `brain:approve` posts a human signature as a durable comment. The locks
+// below are what make that safe to automate:
+//   - the non-TTY refusal is proven against a REAL child process with piped
+//     stdio (an exit code alone is blind to "made a network call, then
+//     failed");
+//   - the no-bypass guarantee is proven BOTH behaviourally (every
+//     `-`-prefixed token aborts, before any vcs call) AND structurally
+//     (`process.env` occurs ZERO times);
+//   - "no new port verb, no APPROVE review, no labels" cannot be a single
+//     assertion — each is its own SITE/occurrence count (anti-pattern doc
+//     §1: never a boolean where a number is checkable);
+//   - the anti-stale re-read is proven by a SITE COUNT (`vcs.prView(`
+//     appears exactly twice: compose, then re-read) — a mutation that
+//     collapses the two into one call would still "have a headSha" and a
+//     boolean-shaped test would not notice.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { CONFIRMATION_WORD, parseArgs, runApprove } from './cli.mjs';
+import { stripComments } from '../brain-promote.mjs';
+
+const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const MODULE_PATH = join(REPO_ROOT, 'brain/scripts/approve/cli.mjs');
+const SOURCE = readFileSync(MODULE_PATH, 'utf8');
+
+const count = (haystack, needle) => haystack.split(needle).length - 1;
+
+const HEAD_SHA = 'a'.repeat(40);
+
+function makeVcs(overrides = {}) {
+  const calls = { whoami: 0, prView: 0, mrList: 0, prReviewComment: 0, prReviews: 0 };
+  const posted = { body: null };
+  return {
+    calls,
+    posted,
+    whoami: async (a) => { calls.whoami += 1; return overrides.whoami ? overrides.whoami(a) : { username: 'alice' }; },
+    prView: async (a) => { calls.prView += 1; return overrides.prView ? overrides.prView(calls.prView, a) : { headRefOid: HEAD_SHA }; },
+    mrList: async (a) => { calls.mrList += 1; return overrides.mrList ? overrides.mrList(a) : [{ number: 7, headBranch: 'feat/x' }]; },
+    prReviewComment: async (a) => {
+      calls.prReviewComment += 1;
+      posted.body = a.body;
+      return overrides.prReviewComment ? overrides.prReviewComment(a) : { url: 'https://example.test/1' };
+    },
+    prReviews: async (a) => {
+      calls.prReviews += 1;
+      if (overrides.prReviews) return overrides.prReviews(a, posted);
+      return posted.body ? [{ state: 'COMMENTED', author: 'alice', body: posted.body }] : [];
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REQ-473-7 lock 1 — TTY, before anything else
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('REQ-473-7 lock 1: the REAL entry point on a REAL non-TTY exits non-zero and never touches the network', () => {
+  const r = spawnSync(process.execPath, [MODULE_PATH], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 10_000,
+  });
+  assert.notEqual(r.status, 0, `expected non-zero on a non-TTY; got ${r.status}\n${r.stdout}${r.stderr}`);
+  assert.match(`${r.stdout}${r.stderr}`, /interactive terminal|non-TTY/i);
+});
+
+test('REQ-473-7 lock 1 (unit): isTTY:false refuses before any vcs call is made', async () => {
+  const vcs = makeVcs();
+  const res = await runApprove({
+    argv: [],
+    isTTY: false,
+    project: 'o/r',
+    getVcsFn: async () => vcs,
+    readLineFn: async () => CONFIRMATION_WORD,
+    write: () => {},
+  });
+  assert.notEqual(res.exitCode, 0);
+  assert.equal(vcs.calls.whoami, 0, 'TTY gate must run before whoami');
+  assert.equal(vcs.calls.prView, 0, 'TTY gate must run before any prView');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REQ-473-7 lock 2 — no bypass. Behavioural, then structural.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const BYPASS_FLAGS = [
+  '--yes', '-y', '--force', '-f', '--non-interactive', '--no-confirm',
+  '--assume-yes', '--auto', '--confirm=SIGN', '--skip-confirmation',
+];
+
+for (const flag of BYPASS_FLAGS) {
+  test(`REQ-473-7 lock 2: \`${flag}\` is an ABORT, not a bypass and not a silent no-op`, async () => {
+    const vcs = makeVcs();
+    let prompted = 0;
+    const res = await runApprove({
+      argv: [flag],
+      isTTY: true,
+      project: 'o/r',
+      getVcsFn: async () => vcs,
+      readLineFn: async () => { prompted += 1; return CONFIRMATION_WORD; },
+      write: () => {},
+    });
+    assert.notEqual(res.exitCode, 0, `${flag} must abort even when the typed word would be supplied`);
+    assert.equal(prompted, 0, `${flag} must abort BEFORE the prompt`);
+    assert.equal(vcs.calls.whoami, 0, `${flag} must abort before touching the network`);
+  });
+}
+
+test('REQ-473-7 lock 2: the module reads process.env ZERO times (kills the env-bypass CLASS)', () => {
+  assert.equal(
+    count(SOURCE, 'process.env'),
+    0,
+    'cli.mjs must not read the environment at all — identity comes from ambient vcs credentials only (design.md §F3)',
+  );
+});
+
+test('REQ-473-7 lock 2: no bypass flag literal appears anywhere in the code (there is no branch to reach)', () => {
+  for (const flag of ['--yes', '--force', '--non-interactive', '--assume-yes', '--no-confirm', '--auto']) {
+    assert.equal(count(SOURCE, flag), 0, `'${flag}' must not appear in approve/cli.mjs`);
+  }
+});
+
+test('REQ-473-7 lock 2: no BRAIN_HUMAN_TOKEN or new token env var (design.md §F3 — rejected)', () => {
+  assert.equal(count(SOURCE, 'BRAIN_HUMAN_TOKEN'), 0);
+  assert.equal(count(SOURCE, 'TOKEN_ENV'), 0);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REQ-473-8 — head_sha race safety: SITE COUNT, not a boolean
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('REQ-473-8 SITE COUNT: `vcs.prView(` appears exactly twice — compose, then the anti-stale re-read', () => {
+  // Enumerated from the CODE (anti-pattern doc: enumerate sites from the code,
+  // not the sentence). A mutation that reuses the composed head instead of
+  // re-reading it would collapse this to 1 and go undetected by any
+  // boolean-shaped assertion.
+  assert.equal(count(SOURCE, 'vcs.prView('), 2, 'exactly one compose read and one anti-stale re-read');
+});
+
+test('REQ-473-8 (unit): head moved between compose and post → refuses, posts NOTHING', async () => {
+  let prViewCall = 0;
+  const vcs = makeVcs({
+    prView: () => {
+      prViewCall += 1;
+      return prViewCall === 1 ? { headRefOid: HEAD_SHA } : { headRefOid: 'b'.repeat(40) };
+    },
+  });
+  const res = await runApprove({
+    argv: ['7'],
+    isTTY: true,
+    project: 'o/r',
+    getVcsFn: async () => vcs,
+    readLineFn: async () => CONFIRMATION_WORD,
+    write: () => {},
+  });
+  assert.notEqual(res.exitCode, 0);
+  assert.equal(vcs.calls.prReviewComment, 0, 'a stale head must never reach the post verb');
+});
+
+test('REQ-473-8 (unit): head unchanged → posts as composed', async () => {
+  const vcs = makeVcs();
+  const res = await runApprove({
+    argv: ['7'],
+    isTTY: true,
+    project: 'o/r',
+    getVcsFn: async () => vcs,
+    readLineFn: async () => CONFIRMATION_WORD,
+    write: () => {},
+  });
+  assert.equal(res.exitCode, 0, JSON.stringify(res));
+  assert.equal(vcs.calls.prReviewComment, 1);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REQ-473-9 — no new port verb, no APPROVE review, zero labels
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('REQ-473-9: cli.mjs never calls labelAdd — this verb writes zero labels', () => {
+  assert.equal(count(SOURCE, 'labelAdd'), 0, 'brain:approve must never write a label (design.md §F1 step 8 note)');
+});
+
+test('REQ-473-9: the prReviewComment call site passes no `event` key', () => {
+  const idx = SOURCE.indexOf('vcs.prReviewComment(');
+  assert.notEqual(idx, -1, 'the post verb must be called');
+  const callSite = SOURCE.slice(idx, SOURCE.indexOf(')', SOURCE.indexOf('{', idx)) + 40);
+  assert.doesNotMatch(callSite, /event\s*:/, 'no event key may be passed — event:\'COMMENT\' stays hardcoded provider-side');
+});
+
+test('REQ-473-9: "APPROVE" appears in CODE (stripped of comments) only as the block\'s `decision` value, never as a compared control token', () => {
+  const stripped = stripComments(SOURCE);
+  const codeOccurrences = [...stripped.matchAll(/APPROVE/g)].length;
+  assert.equal(codeOccurrences, 1, `expected exactly one APPROVE literal in CODE (the decision value), found ${codeOccurrences}`);
+  assert.doesNotMatch(stripped, /answer.*APPROVE|APPROVE.*===|CONFIRMATION_WORD\s*=\s*['"]APPROVE['"]/, 'APPROVE must never be a comparison/confirmation token');
+});
+
+test('REQ-473-9: brain:approve never imports or calls a new port verb — VERBS in vcs/cli.mjs is untouched by this change', () => {
+  const vcsCliPath = join(REPO_ROOT, 'brain/scripts/vcs/cli.mjs');
+  const vcsCliSource = readFileSync(vcsCliPath, 'utf8');
+  assert.doesNotMatch(vcsCliSource, /'approve'|"approve"/, 'no new "approve" verb may be added to the VCS port');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REQ-473-7 — the confirmation is the typed word SIGN, compared exactly
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('CONFIRMATION_WORD is the literal SIGN, not APPROVE (design.md §F4)', () => {
+  assert.equal(CONFIRMATION_WORD, 'SIGN');
+  assert.notEqual(CONFIRMATION_WORD, 'APPROVE');
+  assert.ok(CONFIRMATION_WORD.length > 1);
+});
+
+const REFUSING_ANSWERS = [
+  'y', 'Y', 'yes', 'YES', 'sign', 'Sign', 'sIGN', 'SIGN!', 'SIGNX',
+  'SIGN ME', 'APPROVE', '', '\n', 'n', 'no', 'ok', '1', 'true', null, undefined,
+];
+
+for (const answer of REFUSING_ANSWERS) {
+  test(`REQ-473-7 lock 4: answer ${JSON.stringify(answer)} aborts with ZERO posts`, async () => {
+    const vcs = makeVcs();
+    const res = await runApprove({
+      argv: ['7'],
+      isTTY: true,
+      project: 'o/r',
+      getVcsFn: async () => vcs,
+      readLineFn: async () => answer,
+      write: () => {},
+    });
+    assert.notEqual(res.exitCode, 0, `${JSON.stringify(answer)} must not be accepted`);
+    assert.equal(vcs.calls.prReviewComment, 0, 'a declined run posts nothing at all');
+  });
+}
+
+for (const answer of [CONFIRMATION_WORD, `  ${CONFIRMATION_WORD}  `, `${CONFIRMATION_WORD}\n`]) {
+  test(`REQ-473-7 lock 4: answer ${JSON.stringify(answer)} is accepted (surrounding whitespace only)`, async () => {
+    const vcs = makeVcs();
+    const res = await runApprove({
+      argv: ['7'],
+      isTTY: true,
+      project: 'o/r',
+      getVcsFn: async () => vcs,
+      readLineFn: async () => answer,
+      write: () => {},
+    });
+    assert.equal(res.exitCode, 0, JSON.stringify(res));
+    assert.equal(vcs.calls.prReviewComment, 1);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// parseArgs — pure unit
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('parseArgs: no positionals → ok, number:null (resolve from branch)', () => {
+  assert.deepEqual(parseArgs([]), { ok: true, number: null });
+});
+
+test('parseArgs: one numeric positional → ok, number set', () => {
+  assert.deepEqual(parseArgs(['42']), { ok: true, number: 42 });
+});
+
+test('parseArgs: two positionals → error', () => {
+  const r = parseArgs(['42', '43']);
+  assert.equal(r.ok, false);
+});
+
+test('parseArgs: a non-numeric positional → error', () => {
+  const r = parseArgs(['not-a-number']);
+  assert.equal(r.ok, false);
+});
+
+test('parseArgs: any option-shaped token → error, regardless of position', () => {
+  assert.equal(parseArgs(['--yes']).ok, false);
+  assert.equal(parseArgs(['42', '--yes']).ok, false);
+  assert.equal(parseArgs(['-y', '42']).ok, false);
+});
