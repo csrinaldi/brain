@@ -212,6 +212,98 @@ test('governance-postmerge.yml triggers on push to main and a daily schedule', (
   assert.match(text, /schedule:/, 'governance-postmerge.yml must also trigger on a schedule (daily cron)');
 });
 
+// Drift guard (issue #468, REQ-R3-3): substrate.mjs's POSTMERGE_STALE_MS
+// (rung 3's staleness window) is derived from "2 periods of the daily cron" —
+// a constant, not a live read of this file. If the cron cadence ever changes
+// without updating that constant, the two silently drift apart and rung 3's
+// staleness window stops matching reality. No cron parser (zero-dependency
+// doctrine, substrate.mjs:111-114) — a shape assertion plus a literal value
+// check is enough to catch drift.
+//
+// Uses `matchAll` (every `- cron:` entry), NOT a single non-global `.match()`
+// — a single match only inspects the FIRST cron entry, so ADDING a second
+// entry (e.g. an hourly cron alongside the daily one) would change the
+// effective cadence while the guard silently kept passing on entry #1 alone.
+// `assertCronDriftGuard` is shared by the real-file test below and the
+// synthetic-drift test, so both exercise the identical guard logic.
+function assertCronDriftGuard(text, staleMs) {
+  // Count DECLARED entries independently of the ones this guard can parse. The
+  // value matcher reads quoted scalars; a second entry in a shape it does not
+  // read (double quotes, unquoted) would otherwise change the effective cadence
+  // while the guard passed on the entries it happened to see — a guard blind to
+  // exactly the drift it exists to catch. Any unparseable entry is drift.
+  const declared = [...text.matchAll(/-\s*cron\s*:/g)].length;
+  const matches = [...text.matchAll(/-\s*cron:\s*['"]([^'"]+)['"]/g)];
+  assert.ok(matches.length > 0, 'must declare at least one cron schedule string');
+  assert.equal(
+    matches.length,
+    declared,
+    `found ${declared} cron entr${declared === 1 ? 'y' : 'ies'} but could only read ${matches.length} — an entry this guard cannot parse is an entry it cannot check`,
+  );
+  assert.equal(
+    matches.length,
+    1,
+    `expected exactly one cron entry, found ${matches.length} — multiple schedule entries change the effective cadence and require re-deriving POSTMERGE_STALE_MS`,
+  );
+  assert.match(
+    matches[0][1],
+    /^\d+\s+\d+\s+\*\s+\*\s+\*$/,
+    'the cron must stay daily-shaped (minute hour * * *) — a cadence change requires re-deriving POSTMERGE_STALE_MS',
+  );
+  assert.equal(
+    staleMs,
+    2 * 24 * 60 * 60 * 1000,
+    'POSTMERGE_STALE_MS must stay 2 daily cron periods (48h). A cadence change requires updating THREE things together: this constant, the literal on this line, and the daily-shape regex above — the constant alone leaves this guard failing on its own assertion.',
+  );
+}
+
+// The operator-facing threshold strings must INTERPOLATE the constant, never
+// restate it. No behavioural assertion can prove this while the literal and the
+// derived value coincide — `older than 48h` and `older than ${LABEL}` render
+// identically today, so a unit test passes either way and the regression is
+// invisible until someone changes the constant. Asserting the SOURCE is the only
+// form that distinguishes them, and it is exactly what the drift guard needs:
+// the moment POSTMERGE_STALE_MS moves, a hardcoded string starts lying, and the
+// guard above forces that move to be deliberate.
+test('drift guard: the operator-facing threshold strings interpolate POSTMERGE_STALE_LABEL, never a hardcoded literal', () => {
+  const substrateSrc = readFileSync(fileURLToPath(new URL('./substrate.mjs', import.meta.url)), 'utf8');
+  const statusSrc = readFileSync(fileURLToPath(new URL('../brain-governance-status.mjs', import.meta.url)), 'utf8');
+
+  assert.match(
+    substrateSrc,
+    /stale \(older than \$\{POSTMERGE_STALE_LABEL\}\)/,
+    "E8's stale reason must interpolate POSTMERGE_STALE_LABEL — a hardcoded threshold survives every behavioural test and starts lying the moment the constant moves",
+  );
+  assert.match(
+    statusSrc,
+    /succeeded within \$\{POSTMERGE_STALE_LABEL\}\]/,
+    "the armed line must interpolate POSTMERGE_STALE_LABEL for the same reason",
+  );
+});
+
+test('drift guard: governance-postmerge.yml cron stays daily-shaped, and POSTMERGE_STALE_MS stays 2 daily periods', async () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const { POSTMERGE_STALE_MS } = await import('./substrate.mjs');
+  assertCronDriftGuard(text, POSTMERGE_STALE_MS);
+});
+
+test('drift guard: adding a second cron entry (e.g. an hourly cron alongside the daily one) trips the guard', async () => {
+  const { POSTMERGE_STALE_MS } = await import('./substrate.mjs');
+  const textWithTwoCrons = `
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * *'
+    - cron: '0 * * * *'
+`;
+  assert.throws(
+    () => assertCronDriftGuard(textWithTwoCrons, POSTMERGE_STALE_MS),
+    /exactly one cron entry/,
+    'a second cron entry must trip the drift guard — the effective cadence changed even though entry #1 is still daily-shaped',
+  );
+});
+
 // ── D2 (#259): the cursor-windowed, exit-code-branched, [FAIL-SHA]-consuming
 // shape. These INVERT the pre-D2 assertions above: the window is no longer the
 // push payload's before..sha (which skips offenders and collapses on cron) — it
