@@ -8,9 +8,14 @@ topic_key: sdd/issue-405-inline-review-comments/tasks
 
 # Tasks — inline per-line review comments (issue #405)
 
-**Status: DESIGN PASS COMPLETE, IMPLEMENTATION BLOCKED.** Two blockers, both deliberate:
-PR #478 owns `verdict.mjs`/`parse-verdict.mjs`, and D6 + the ADR amendment are human
-acts. The ticket's own body asks for a design pass first — this is it.
+**Status: IMPLEMENTED, awaiting cold review.** Both original blockers cleared — PR #478
+merged at `ba4921e` (it owned `verdict.mjs`/`parse-verdict.mjs`), and D6 was ruled (b) by
+the maintainer. Two human acts remain OPEN and are marked below: T4b (sign the ADR
+amendment) and T11b (promote the contract row). Neither is an agent act.
+
+**Two requirements were falsified by building them** — REQ-405-5 (T7) and REQ-405-8
+(T12). Both are corrected in the spec with the measurement that falsified them, not
+quietly rewritten.
 
 - [x] T1 — measurements taken BEFORE designing (the five decisions each change the size
       of the work, so guessing them would have mis-sized the whole change):
@@ -134,9 +139,23 @@ acts. The ticket's own body asks for a design pass first — this is it.
       production producer — the `validateSchemaV2` shape (#483) again. Ship as plumbing,
       widen the anchor so `tier2-frontier` becomes the first producer, or follow-up: a
       maintainer ruling (#473), not an agent one.
-- [ ] T13 — red-proof pass per design D7, **printing every mutation's diff before its
-      run** — four silently missed during PR #478 and produced meaningless greens.
-- [ ] T14 — full suite + `repo:check` + `brain:nav`; diff budget.
+- [x] T13 — red-proof, run per task rather than saved for the end, and every mutation's
+      diff PRINTED before its run. 18 mutations across T6/T7/T9/T12; two were **inert**
+      and their greens said nothing — one of those (T7b's order reversal) is what exposed
+      that the GitLab post order was pinned by nothing.
+      Two mutations found real defects rather than confirming tests: T12's evaluator-
+      anchoring mutation exposed `cli.mjs` never passing `findings`, and the same reading
+      exposed the dropped-anchor count reaching the caller and never being printed.
+      **The stopping criterion this change is measuring** (maintainer's question): a round
+      stops being worth running when it finds (1) no defect in executable behaviour,
+      (2) no protection that nothing pins, (3) no false normative claim in the artefacts.
+      T12 failed (1) and (2) simultaneously, so the criterion had not been met before it.
+- [x] T14 — full suite **2557 / 2556 pass, 0 fail** (1 skip: pre-existing, root ignores
+      mode bits). `repo:check` ✓, `brain:nav` ✓.
+      **Diff budget: 1001 added vs lite's 1000 — over by one line.** Reported, not
+      engineered around: shaving a line to pass a governance measurement is gaming it.
+      The split is 167 production code / 599 tests+harness / 235 SDD prose. Whether to
+      take `size:exception` (honored at lite) or split the PR is a maintainer call.
 - [ ] T15 — PR to `main`, `Closes #405`.
 - [ ] T16 — cold review round(s). Three were needed on PR #478, each finding a blocker
       inside the previous round's correction; budget for more than one here too.
