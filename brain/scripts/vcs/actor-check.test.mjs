@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { setSpawn } from './lib/exec.mjs';
+import { renderDecision } from '../review/lib/decision-block.mjs';
 
 import {
   evaluateActor,
@@ -21,6 +22,9 @@ import {
   gatherActorCheckInputs,
   runActorCheck,
   compareTimestamps,
+  evaluateSignedDecision,
+  LITE_SIGNED_EVIDENCE_SOURCES,
+  resolveHeadSha,
   main,
 } from './actor-check.mjs';
 
@@ -1225,3 +1229,467 @@ test('#375: gatherActorCheckInputs sources denyActors from governance.reviewActo
   assert.deepEqual(inputs.denyActors, ['brain-reviewer[bot]']);
   assert.deepEqual(inputs.botAllowlist, ['release-bot']);
 });
+
+// ── issue #473 slice 2 — brain-decision/1 as additional `lite` evidence ─────
+// (design.md §C, §D, §E2). `evaluateSignedDecision` is a PEER evidence source
+// in `evaluateActor`'s `lite` branch, additive-OR with `evaluateDistinctAct`
+// (REQ-473-1, REQ-473-6 monotonicity: a non-admissible block only ANNOTATES
+// the fallback verdict, design.md §C4 — it never blocks a pass the label
+// alone would already grant, and never turns a fail into a pass).
+
+const HEAD_SHA = 'a'.repeat(40);
+const OTHER_SHA = 'b'.repeat(40);
+
+/** Builds a `prReviews()`-shaped review carrying a `brain-decision/1` block,
+ * defaulting to a happy-path APPROVE at HEAD_SHA. `extraBody` overrides the
+ * body entirely, for parse-level fixtures `renderDecision` cannot produce
+ * (missing fields). */
+function decisionReview({ actor = 'alice', head_sha = HEAD_SHA, decision = 'APPROVE', author = actor, protocol, at = '2026-08-07T00:00:00Z', extraBody } = {}) {
+  const body = extraBody ?? renderDecision({ protocol, decision, head_sha, actor, at });
+  return { state: 'COMMENTED', author, body };
+}
+
+// ── resolveHeadSha (design §D) ───────────────────────────────────────────────
+
+test('resolveHeadSha: returns the last commit\'s sha (PR head, ascending prCommits() list)', () => {
+  assert.equal(resolveHeadSha([{ sha: 'a' }, { sha: 'b' }, { sha: HEAD_SHA }]), HEAD_SHA);
+});
+
+test('resolveHeadSha: null/empty commits → null (uncomputable, never assumed) — design §D2, distinct from evaluateDistinctAct\'s OWN null handling', () => {
+  assert.equal(resolveHeadSha(null), null);
+  assert.equal(resolveHeadSha([]), null);
+});
+
+// ── evaluateSignedDecision — rule 1: decisions === null (review list unreadable) ─
+
+test('evaluateSignedDecision: decisions === null (PR review list unreadable) → refuse, note names the reason', () => {
+  const result = evaluateSignedDecision({ decisions: null, headSha: HEAD_SHA });
+  assert.equal(result.admitted, false);
+  assert.match(result.note, /unreadable/i);
+});
+
+// ── PATH axis — rules 2/3: nothing addressed to this reader → silent (null) ──
+
+test('evaluateSignedDecision: PATH — decisions === [] (no reviews at all) → silent (null), never a note', () => {
+  assert.equal(evaluateSignedDecision({ decisions: [], headSha: HEAD_SHA }), null);
+});
+
+test('evaluateSignedDecision: PATH — a review with no fence at all (a plain "+1" comment) → silent (null)', () => {
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body: 'looks good, +1' }],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result, null);
+});
+
+test('evaluateSignedDecision: rule 3 — a review carrying a brain-review/1 block (wrong protocol family) is not addressed to this reader → silent', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ protocol: 'brain-review/1' })],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result, null);
+});
+
+// ── rule 4: addressed but unsupported protocol version → refuse ─────────────
+
+test('evaluateSignedDecision: rule 4 — brain-decision/2 (unsupported version) → refuse, names the version (addressed, unlike rule 3)', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ protocol: 'brain-decision/2' })],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false);
+  assert.match(result.note, /brain-decision\/2/);
+  assert.match(result.note, /unsupported|version/i);
+});
+
+// ── rules 5-9: field-level malformation (parse-level, re-verified end-to-end) ─
+
+test('evaluateSignedDecision: rule 5 — decision field absent → refuse', () => {
+  const body = ['```yaml', 'protocol: brain-decision/1', `head_sha: ${HEAD_SHA}`, 'actor: alice', '```'].join('\n');
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body }],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false);
+});
+
+test('evaluateSignedDecision: rule 6 — decision present but not exactly APPROVE → refuse', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ decision: 'REJECT' })],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false);
+});
+
+test('evaluateSignedDecision: rule 7 — head_sha field absent → refuse', () => {
+  const body = ['```yaml', 'protocol: brain-decision/1', 'decision: APPROVE', 'actor: alice', '```'].join('\n');
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body }],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false);
+});
+
+test('evaluateSignedDecision: VALUE CLASS — rule 8 head_sha malformed (not 40 hex) → refuse', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ head_sha: 'not-a-valid-sha-at-all' })],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false);
+});
+
+test('evaluateSignedDecision: VALUE CLASS — rule 9 head_sha is a 7-char PREFIX of the PR head → refuse (not 40 hex)', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ head_sha: HEAD_SHA.slice(0, 7) })],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false);
+});
+
+// ── VALUE CLASS — rules 10/11: head_sha vs PR head (this function's OWN compare) ─
+
+test('evaluateSignedDecision: VALUE CLASS — rule 10 head_sha mismatches the PR head (39-hex-equivalent-length, different value) → refuse, names both SHAs', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ head_sha: OTHER_SHA })],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false);
+  assert.match(result.note, new RegExp(OTHER_SHA));
+  assert.match(result.note, new RegExp(HEAD_SHA));
+});
+
+test('evaluateSignedDecision: VALUE CLASS — a head_sha sharing only a 7-char PREFIX with the real head (rest differs) → refuse (full-length compare, not a prefix compare)', () => {
+  const prefixColliding = HEAD_SHA.slice(0, 7) + 'b'.repeat(33); // 'aaaaaaa' + 33 'b's — same first 7 chars as HEAD_SHA, differs after
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ head_sha: prefixColliding })],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false, 'a shared 7-char prefix must never be mistaken for a match — the compare is full-length');
+});
+
+test('evaluateSignedDecision: VALUE CLASS — head_sha case-folded (hex case is not identity) — a case-different but otherwise-matching head_sha ADMITS', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ head_sha: HEAD_SHA.toUpperCase() })],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, true);
+});
+
+test('evaluateSignedDecision: rule 11 — PR head unresolvable (headSha null) → refuse', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview()],
+    headSha: null,
+  });
+  assert.equal(result.admitted, false);
+  assert.match(result.note, /cannot resolve the pr head/i);
+});
+
+// ── rules 12-14: actor field vs review author ─────────────────────────────────
+
+test('evaluateSignedDecision: rule 12 — actor field absent → refuse', () => {
+  const body = ['```yaml', 'protocol: brain-decision/1', 'decision: APPROVE', `head_sha: ${HEAD_SHA}`, '```'].join('\n');
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body }],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false);
+});
+
+test('evaluateSignedDecision: rule 13 — review author unresolvable (null) → refuse, an unresolvable identity is never treated as a match', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ author: null })],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false);
+  assert.match(result.note, /unresolvable/i);
+});
+
+test('evaluateSignedDecision: rule 14 — block actor differs from the posting review author → refuse, names both', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ actor: 'alice', author: 'mallory' })],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false);
+  assert.match(result.note, /alice/);
+  assert.match(result.note, /mallory/);
+});
+
+test('evaluateSignedDecision: actor/author comparison case-folds (both providers case-insensitive) — a case-different match ADMITS', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ actor: 'Alice', author: 'alice' })],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, true);
+});
+
+// ── rule 15: deny-set — a review identity may never SIGN an approval either ──
+
+test('evaluateSignedDecision: rule 15 — review author is a denyActors (governance.reviewActors) identity → refuse, regardless of head_sha/actor match', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ actor: 'brain-reviewer[bot]', author: 'brain-reviewer[bot]' })],
+    headSha: HEAD_SHA,
+    denyActors: ['brain-reviewer[bot]'],
+  });
+  assert.equal(result.admitted, false);
+  assert.match(result.note, /reviewActors|never sign/i);
+});
+
+// ── rule 16: multiple reviews — evaluate ALL in order, admit if ANY, else collect notes ─
+
+test('evaluateSignedDecision: rule 16 — first review non-admissible, second admissible → ADMITS on the second (evaluate ALL, order preserved)', () => {
+  const result = evaluateSignedDecision({
+    decisions: [
+      decisionReview({ head_sha: OTHER_SHA, author: 'mallory', actor: 'mallory' }),
+      decisionReview({ head_sha: HEAD_SHA, author: 'alice', actor: 'alice' }),
+    ],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, true);
+});
+
+test('evaluateSignedDecision: rule 16 — none admissible across several reviews → refuse, note collects EACH refusal, not just the first (FIELD axis)', () => {
+  const result = evaluateSignedDecision({
+    decisions: [
+      decisionReview({ head_sha: OTHER_SHA, author: 'mallory', actor: 'mallory' }),
+      decisionReview({ decision: 'REJECT', author: 'bob', actor: 'bob' }),
+    ],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false);
+  assert.match(result.note, new RegExp(OTHER_SHA), 'the note must name the FIRST refused block, not just "refused"');
+  assert.match(result.note, /malformed|not admissible/i, 'the note must ALSO carry the SECOND review\'s refusal, not just the first (a truncating implementation would drop it)');
+});
+
+// ── rule 17: multiple fences in ONE body — only the first is ever read ───────
+
+test('evaluateSignedDecision: rule 17 — a stale FIRST fence refuses even though a fresh SECOND (quoted) fence would be valid', () => {
+  const stale = renderDecision({ decision: 'APPROVE', head_sha: OTHER_SHA, actor: 'alice', at: '2026-01-01T00:00:00Z' });
+  const fresh = renderDecision({ decision: 'APPROVE', head_sha: HEAD_SHA, actor: 'alice', at: '2026-01-02T00:00:00Z' });
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body: `${stale}\n\nQuoting an earlier reply:\n\n${fresh}` }],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, false, 'the FIRST fence governs — a fresher quoted block does not rescue it (fail-closed direction)');
+});
+
+test('evaluateSignedDecision: rule 17 — a valid FIRST fence admits even though a SECOND (ignored) fence would be invalid', () => {
+  const fresh = renderDecision({ decision: 'APPROVE', head_sha: HEAD_SHA, actor: 'alice', at: '2026-01-01T00:00:00Z' });
+  const brokenSecond = ['```yaml', 'protocol: brain-decision/2', '```'].join('\n');
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body: `${fresh}\n\n${brokenSecond}` }],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, true);
+});
+
+// ── FIELD axis — rule 20: an unknown extra field never changes admissibility ──
+
+test('evaluateSignedDecision: FIELD — an unknown extra field (e.g. a future dispositions) does not change admissibility (rule 20)', () => {
+  const body = [
+    '```yaml',
+    'protocol: brain-decision/1',
+    'decision: APPROVE',
+    `head_sha: ${HEAD_SHA}`,
+    'actor: alice',
+    'dispositions: something-not-in-slice-1',
+    '```',
+  ].join('\n');
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body }],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, true);
+});
+
+// ── LITE_SIGNED_EVIDENCE_SOURCES — the pluggable list (design §C2) ──────────
+
+test('LITE_SIGNED_EVIDENCE_SOURCES: frozen, and its sole default member is evaluateSignedDecision', () => {
+  assert.ok(Object.isFrozen(LITE_SIGNED_EVIDENCE_SOURCES));
+  assert.equal(LITE_SIGNED_EVIDENCE_SOURCES.length, 1);
+  assert.equal(LITE_SIGNED_EVIDENCE_SOURCES[0], evaluateSignedDecision);
+});
+
+// ── evaluateActor composite seam — the (b)-swap boundary (design §C2) ────────
+
+test('evaluateActor: lite — signedEvidenceSources is an INJECTED list, not a hardcoded call (order preserved, first-admitted-wins)', () => {
+  const calls = [];
+  const refusing = () => { calls.push('refusing'); return { admitted: false, note: 'source A refuses' }; };
+  const admitting = () => { calls.push('admitting'); return { admitted: true, reason: 'source B admits' }; };
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: HEAD_SHA, login: 'mallory', at: '2024-01-01T00:10:00Z' }],
+    tier: 'lite',
+    signedEvidenceSources: [refusing, admitting],
+  });
+  assert.deepEqual(calls, ['refusing', 'admitting'], 'sources must be tried IN ORDER');
+  assert.equal(result.level, 'pass');
+  assert.match(result.reason, /source B admits/);
+});
+
+test('evaluateActor: lite — first-admitted-wins: a SECOND source is never consulted once an earlier one admits', () => {
+  const calls = [];
+  const admitting = () => { calls.push('first'); return { admitted: true, reason: 'first admits' }; };
+  const neverCalled = () => { calls.push('second'); return { admitted: true, reason: 'must never run' }; };
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: HEAD_SHA, login: 'mallory', at: '2024-01-01T00:10:00Z' }],
+    tier: 'lite',
+    signedEvidenceSources: [admitting, neverCalled],
+  });
+  assert.deepEqual(calls, ['first']);
+  assert.match(result.reason, /first admits/);
+});
+
+// ── success criterion (task 2.1) + monotonicity (REQ-473-6) ─────────────────
+
+test('evaluateActor: lite — a brain-decision/1 APPROVE at the current head passes even though the approved-label PREDATES a later foreign commit (issue #473 REQ-473-1, success criterion)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [
+      { sha: 'x', login: 'alice', at: '2024-01-01T00:00:00Z' },
+      { sha: HEAD_SHA, login: 'mallory', at: '2024-01-01T00:10:00Z' }, // foreign, postdates the label
+    ],
+    headSha: HEAD_SHA,
+    decisions: [decisionReview({ head_sha: HEAD_SHA, author: 'alice', actor: 'alice' })],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass');
+  assert.match(result.reason, /brain-decision\/1/i);
+});
+
+test('evaluateActor: lite — negative control: WITHOUT any decision block, the identical foreign-commit-after-label input still fails (proves the BLOCK admits it, not the commit list)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [
+      { sha: 'x', login: 'alice', at: '2024-01-01T00:00:00Z' },
+      { sha: HEAD_SHA, login: 'mallory', at: '2024-01-01T00:10:00Z' },
+    ],
+    headSha: HEAD_SHA,
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail');
+});
+
+test('evaluateActor: lite — a non-admissible decision block ANNOTATES an otherwise-passing verdict, never blocks it (design §C4 monotonicity)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:10:00Z' }],
+    commits: [{ sha: 'abc', login: 'alice', at: '2024-01-01T00:00:00Z' }],
+    decisions: [decisionReview({ head_sha: OTHER_SHA, author: 'alice', actor: 'alice' })], // stale block
+    headSha: HEAD_SHA,
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass', 'the label alone already satisfies lite — the broken block must not turn this into a fail');
+  assert.match(result.reason, new RegExp(OTHER_SHA), 'the note naming the refused block\'s head_sha must be appended to the passing reason');
+});
+
+test('evaluateActor: lite — a non-admissible decision block does NOT turn an otherwise-failing label check into a pass (fail stays fail, note appended)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: HEAD_SHA, login: 'mallory', at: '2024-01-01T00:10:00Z' }],
+    decisions: [decisionReview({ head_sha: OTHER_SHA, author: 'alice', actor: 'alice' })],
+    headSha: HEAD_SHA,
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, new RegExp(OTHER_SHA));
+});
+
+// ── design §C5 property 1 — the label stays a required precondition ─────────
+
+test('evaluateActor: lite — no labeled event at all → warn+pass even with an ADMISSIBLE decision block present (design §C5 property 1: the block never bypasses the label precondition)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [],
+    headSha: HEAD_SHA,
+    decisions: [decisionReview({ head_sha: HEAD_SHA, author: 'alice', actor: 'alice' })],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'warn', 'a signed block alone must never bypass the "no labeled event" precondition');
+});
+
+// ── gatherActorCheckInputs: decisions/headSha threading (design §D, REQ-473-10) ─
+
+test('gatherActorCheckInputs: standard tier never calls fetchDecisions (REQ-473-10 no-op-migration guarantee)', async () => {
+  let called = false;
+  const deps = { ...makeFakeDeps({ labeledEvents: [{ actor: { login: 'bob' } }] }), fetchDecisions: () => { called = true; return []; } };
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice', prBody: 'Closes #144', baseBranch: 'main', repo: 'org/repo', prNumber: 7, tier: 'standard', deps,
+  });
+  assert.equal(called, false, 'standard must never fetch decisions — it is not part of its evidence form');
+  assert.equal(inputs.decisions, null);
+});
+
+test('gatherActorCheckInputs: regulated tier never calls fetchDecisions', async () => {
+  let called = false;
+  const deps = { ...makeFakeDeps({ labeledEvents: [{ actor: { login: 'bob' } }] }), fetchDecisions: () => { called = true; return []; } };
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice', prBody: 'Closes #144', baseBranch: 'main', repo: 'org/repo', prNumber: 7, tier: 'regulated', deps,
+  });
+  assert.equal(called, false);
+  assert.equal(inputs.decisions, null);
+});
+
+test('gatherActorCheckInputs: lite tier fetches decisions via the injected fetchDecisions when a prNumber is available; headSha resolves from the ALREADY-fetched commits (no second prView, design §D4)', async () => {
+  const fakeDecisions = [decisionReview({ head_sha: HEAD_SHA })];
+  const deps = {
+    ...makeFakeDeps({ labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:10:00Z' }] }),
+    fetchDecisions: prNumber => { assert.equal(prNumber, 7); return fakeDecisions; },
+    fetchCommits: () => [{ sha: HEAD_SHA, login: 'alice', at: '2024-01-01T00:00:00Z' }],
+  };
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice', prBody: 'Closes #144', baseBranch: 'main', repo: 'org/repo', prNumber: 7, tier: 'lite', deps,
+  });
+  assert.deepEqual(inputs.decisions, fakeDecisions);
+  assert.equal(inputs.headSha, HEAD_SHA);
+});
+
+test('gatherActorCheckInputs: lite tier with no resolvable prNumber → decisions/headSha stay null (never throws)', async () => {
+  const deps = makeFakeDeps({ labeledEvents: [{ actor: { login: 'alice' } }] });
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice', prBody: 'Closes #144', baseBranch: 'main', repo: 'org/repo', tier: 'lite', deps,
+  });
+  assert.equal(inputs.decisions, null);
+  assert.equal(inputs.headSha, null);
+});
+
+// ── SITE axis — gatherActorCheckInputs has TWO return statements; both must thread ─
+
+test('gatherActorCheckInputs: SITE — the early return (no resolvable issue number) still carries decisions/headSha, not only the normal-path return (actor-check.mjs:670)', async () => {
+  const fakeDecisions = [decisionReview({ head_sha: HEAD_SHA })];
+  const deps = {
+    fetchDecisions: () => fakeDecisions,
+    fetchCommits: () => [{ sha: HEAD_SHA, login: 'alice', at: '2024-01-01T00:00:00Z' }],
+  };
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice',
+    prBody: 'no issue reference here',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    prNumber: 7,
+    tier: 'lite',
+    deps,
+  });
+  assert.equal(inputs.labeledEvents.length, 0, 'sanity: this exercises the early-return branch (no issue number resolved)');
+  assert.deepEqual(inputs.decisions, fakeDecisions, 'the early return must also thread decisions');
+  assert.equal(inputs.headSha, HEAD_SHA, 'the early return must also thread headSha');
+});
+
+test('SITE — actor-check.mjs never CALLS .prView(; headSha is derived from the already-fetched commits list (design §D4, no second source of truth for "the head")', () => {
+  const srcPath = fileURLToPath(new URL('./actor-check.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  assert.equal(/\.prView\(/.test(src), false, 'headSha must come from resolveHeadSha(commits), never a second prView() call — a doc comment MAY name it, code must not call it');
+});
+
+// ── REQ-473-6 monotonicity — the pre-existing evaluateDistinctAct matrix is untouched ─
+//
+// No new assertions here by design: the entire pre-existing test block above
+// this section (lines 1-1227) is re-run byte-for-byte unmodified by this same
+// `npm test` invocation — that IS the monotonicity proof (task 2.10). Adding a
+// parallel "re-run" block here would test node:test's own re-execution, not
+// this change.

@@ -24,6 +24,8 @@ import { getVcs } from './cli.mjs';
 import { resolveApprovedLabel } from '../governance/approved-label.mjs';
 import { CLOSING_RE, CHAIN_RE } from '../governance/checks/issue-ref-patterns.mjs';
 import { resolveTier, tierParams, resolveGatePolicy } from './governance-tiers.mjs';
+import { parseDecision } from '../review/lib/decision-block.mjs';
+import { extractFencedBlock, scalar } from '../review/lib/yaml-block.mjs';
 
 // ── Pure evaluator (design §5 step 5) ───────────────────────────────────────
 
@@ -184,6 +186,138 @@ function evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors = []
   };
 }
 
+const DECISION_PROTOCOL_PREFIX_RE = /^brain-decision\//;
+const SUPPORTED_DECISION_PROTOCOL = 'brain-decision/1';
+
+/**
+ * Peeks at a review body's raw `protocol` scalar WITHOUT validating the rest
+ * of the block — used only to distinguish "not addressed to this reader"
+ * (design.md §E2 rule 3, silent) from "addressed but an unsupported version"
+ * (rule 4, refuse). Reuses the SAME fence/scalar primitives `parseDecision`
+ * itself uses (`yaml-block.mjs`), never a second, divergent reader.
+ *
+ * @param {unknown} body
+ * @returns {string|null}
+ */
+function sniffDecisionProtocol(body) {
+  if (typeof body !== 'string' || body.length === 0) return null;
+  const block = extractFencedBlock(body);
+  return block === null ? null : scalar(block, 'protocol');
+}
+
+/**
+ * `brain-decision/1` as a PEER `lite` evidence source (design.md §C2, issue
+ * #473). A sibling of `evaluateDistinctAct`, not a branch inside it — this
+ * function speaks its own vocabulary (which diff did a human sign, and who)
+ * and never returns a verdict shape (`{level,reason}`), only `{admitted}`
+ * (design.md §C3): a verdict-shaped return is exactly what a careless caller
+ * would pass straight through, and a stray `level:'fail'` escaping from a
+ * NON-admissible block would break the composite's monotonicity guarantee
+ * (§C4 — refusal ANNOTATES, it never blocks).
+ *
+ * Every review in `decisions` addressed to this reader (protocol starts
+ * `brain-decision/`) is evaluated in order — design.md §E2 rule 16: admit if
+ * ANY is admissible, collect the others' notes. Reviews carrying no fence, or
+ * a fence for a DIFFERENT protocol family entirely, are silent (rules 2/3) —
+ * they contribute nothing, not even a note.
+ *
+ * @param {object} input
+ * @param {Array<{state?:string, author?:string|null, body?:string}>|null} input.decisions
+ *   `prReviews()`'s normalized shape, or `null` when the review list itself
+ *   is uncomputable.
+ * @param {string|null} input.headSha  The PR's current head SHA
+ *   (`resolveHeadSha(commits)`), or `null` when uncomputable.
+ * @param {string[]} [input.denyActors]  `governance.reviewActors` — a review
+ *   identity may never SIGN an approval either (design.md §E2 rule 15,
+ *   mirrors the label's own deny-before-allow rule, `actor-check.mjs:358`).
+ * @returns {{admitted:true,reason:string}|{admitted:false,note:string}|null}
+ */
+export function evaluateSignedDecision({ decisions, headSha, denyActors = [] } = {}) {
+  if (decisions === null) {
+    return {
+      admitted: false,
+      note: '(brain-decision/1: the PR review list is unreadable — a signature could not be verified.)',
+    };
+  }
+
+  if (!Array.isArray(decisions) || decisions.length === 0) return null;
+
+  const notes = [];
+  let addressed = false;
+
+  for (const review of decisions) {
+    const body = review?.body;
+    const protocol = sniffDecisionProtocol(body);
+    if (protocol === null || !DECISION_PROTOCOL_PREFIX_RE.test(protocol)) continue; // rules 2/3: silent
+
+    addressed = true;
+
+    if (protocol !== SUPPORTED_DECISION_PROTOCOL) {
+      notes.push(
+        `(brain-decision/1: unsupported protocol version "${protocol}" — this reader only understands "${SUPPORTED_DECISION_PROTOCOL}".)`,
+      );
+      continue; // rule 4
+    }
+
+    const parsed = parseDecision({ body });
+    if (parsed === null) {
+      notes.push('(brain-decision/1: the block is missing a required field, or is otherwise malformed — not admissible.)');
+      continue; // rules 5, 6, 7, 8, 9, 12
+    }
+
+    if (headSha === null) {
+      notes.push('(brain-decision/1: cannot resolve the PR head — the signature could not be verified.)');
+      continue; // rule 11
+    }
+
+    if (parsed.head_sha.toLowerCase() !== headSha.toLowerCase()) {
+      notes.push(
+        `(brain-decision/1: the signature names ${parsed.head_sha}, the PR head is ${headSha} — re-sign the current head.)`,
+      );
+      continue; // rule 10
+    }
+
+    const author = review?.author;
+    if (!author) {
+      notes.push('(brain-decision/1: the review has no resolvable author — an unresolvable identity is not an identity.)');
+      continue; // rule 13
+    }
+
+    if (String(parsed.actor).toLowerCase() !== String(author).toLowerCase()) {
+      notes.push(
+        `(brain-decision/1: the block claims to be signed by "${parsed.actor}" but was posted by "${author}".)`,
+      );
+      continue; // rule 14
+    }
+
+    if (denyActors.some(d => d && String(d).toLowerCase() === String(author).toLowerCase())) {
+      notes.push(
+        `(brain-decision/1: "${author}" is registered in governance.reviewActors — a review identity may never sign an approval.)`,
+      );
+      continue; // rule 15
+    }
+
+    return {
+      admitted: true,
+      reason:
+        `a brain-decision/1 APPROVE block signed by "${author}" at head ${headSha} is admissible evidence ` +
+        '(REQ-473-1, issue #473).',
+    };
+  }
+
+  if (!addressed) return null; // rules 2/3, aggregate: nothing addressed to this reader
+
+  return { admitted: false, note: notes.join(' ') };
+}
+
+/**
+ * The pluggable `lite` evidence-source list (design.md §C2). A future peer
+ * source (e.g. a real approving review, issue #454) appends here and touches
+ * nothing else in `evaluateActor` — that is the whole reason (b) is a swap.
+ * Frozen: the default list is never mutated in place.
+ */
+export const LITE_SIGNED_EVIDENCE_SOURCES = Object.freeze([evaluateSignedDecision]);
+
 /**
  * `regulated`'s additional REQ-L5-1' evidence beyond `standard`'s distinct
  * actor: the approver must have authored NO commit on the branch. Returns
@@ -295,6 +429,17 @@ function evaluateNoCommitOnBranch({ actor, commits }) {
  *   The PR's commits, ascending (`prCommits()`'s normalized shape), or `null`
  *   when uncomputable. Consumed by `lite` (head-commit timestamp) and
  *   `regulated` (approver-authored-commit check) only.
+ * @param {Array<{state?:string, author?:string|null, body?:string}>|null} [input.decisions]
+ *   `prReviews()`'s normalized shape (issue #473), or `null` when
+ *   uncomputable. Consumed by `lite`'s signed-evidence sources only.
+ * @param {string|null} [input.headSha]  The PR's current head SHA
+ *   (`resolveHeadSha(commits)`, issue #473) — a signed decision block binds
+ *   to this.
+ * @param {Function[]} [input.signedEvidenceSources]  The pluggable `lite`
+ *   evidence-source list (design.md §C2) — defaults to
+ *   `LITE_SIGNED_EVIDENCE_SOURCES`. A test drives a fake source to prove the
+ *   composite honors the LIST (order, first-admitted-wins), not a hardcoded
+ *   call.
  * @returns {{ level: 'pass'|'warn'|'fail', reason: string }}
  */
 export function evaluateActor({
@@ -307,6 +452,9 @@ export function evaluateActor({
   overrideRefused = false,
   tier = 'standard',
   commits = null,
+  decisions = null,
+  headSha = null,
+  signedEvidenceSources = LITE_SIGNED_EVIDENCE_SOURCES,
 } = {}) {
   const withRefusalNote = result => {
     if (!overrideRefused || result.level === 'warn') return result;
@@ -376,8 +524,24 @@ export function evaluateActor({
   // set — no new config key. The two readings do not conflict: a review
   // identity may never APPLY the approval (denied above), and its pushes do
   // not INVALIDATE one (here).
+  //
+  // issue #473 (design.md §C2): `signedEvidenceSources` is tried FIRST, in
+  // order — a `brain-decision/1` block is an ADDITIONAL sufficient form of
+  // evidence, OR-composed with the existing distinct-act check below. A
+  // non-admissible block never blocks; it only annotates the fallback
+  // verdict's reason (§C4 — monotonicity: no PR passes on LESS evidence than
+  // today, and the block grants nothing on unreadable/broken evidence).
   if (tier === 'lite') {
-    return withRefusalNote(evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors: denyActors }));
+    const signedNotes = [];
+    for (const source of signedEvidenceSources) {
+      const signed = source({ decisions, headSha, denyActors });
+      if (signed?.admitted) return withRefusalNote({ level: 'pass', reason: signed.reason });
+      if (signed?.note) signedNotes.push(signed.note);
+    }
+    const base = evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors: denyActors });
+    return withRefusalNote(
+      signedNotes.length ? { ...base, reason: `${base.reason} ${signedNotes.join(' ')}` } : base,
+    );
   }
 
   if (actor === author || (issueAuthor && actor === issueAuthor)) {
@@ -546,6 +710,60 @@ function defaultFetchCommits(repo, provider, { getVcs: getVcsFn = getVcs } = {})
   };
 }
 
+/**
+ * Whether a tier's evidence form needs the PR's reviews (issue #473,
+ * design.md §D3): only `lite`'s `evaluateSignedDecision` reads them.
+ * `standard`/`regulated` make ZERO additional API calls (REQ-473-10's
+ * no-op-migration guarantee, the same discipline `needsCommitEvidence`
+ * already established).
+ *
+ * @param {string} tier
+ * @returns {boolean}
+ */
+function needsDecisionEvidence(tier) {
+  return tier === 'lite';
+}
+
+/**
+ * Default `fetchDecisions` dep: dispatches the `prReviews` CONTRACT verb
+ * (issue #473) via `getVcs({ provider })`, mirroring
+ * `defaultFetchCommits`/`defaultFetchLabeledEvents`'s `{ getVcs }` shape
+ * exactly. Unlike `defaultFetchReviews` (`brain-writes-reviewed.mjs`), this
+ * does NOT map `null` → `[]` — design.md §D2: `prReviews` returns `null` on
+ * an uncomputable review list, and that must stay `null` so
+ * `evaluateSignedDecision` can emit its own "review list unreadable" NOTE
+ * (rule 1) rather than being indistinguishable from "genuinely zero
+ * reviews" (rule 2).
+ *
+ * @param {string} repo
+ * @param {string|undefined} provider
+ * @param {{ getVcs?: Function }} [deps]
+ * @returns {(prNumber: number) => Promise<Array<{state:string,author:string|null,body:string}>|null>}
+ */
+function defaultFetchDecisions(repo, provider, { getVcs: getVcsFn = getVcs } = {}) {
+  return async prNumber => {
+    const vcs = await getVcsFn({ provider });
+    const { apiBase, token, proxyUrl } = gitlabApiConfig();
+    return vcs.prReviews({ project: repo, number: prNumber, apiBase, token, proxyUrl });
+  };
+}
+
+/**
+ * The PR's head SHA, derived from the commit list already in hand
+ * (`prCommits()`'s normalized shape, ascending) — issue #473, design.md §D4.
+ * Deliberately NOT a second `prView` round-trip: that would introduce a
+ * second source of truth for "the head" that could disagree with the commit
+ * list `evaluateSignedDecision` reads. Residual (recorded): GitHub's
+ * `/pulls/N/commits` caps at 250 commits, so a >250-commit PR resolves the
+ * wrong head — the fail-closed direction (a mismatched head never admits).
+ *
+ * @param {Array<{ sha: string }>|null} commits
+ * @returns {string|null}
+ */
+export function resolveHeadSha(commits) {
+  return Array.isArray(commits) && commits.length > 0 ? (commits[commits.length - 1].sha ?? null) : null;
+}
+
 function defaultReadBotAllowlist(cwd) {
   return () => {
     try {
@@ -659,15 +877,18 @@ export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo,
   const readBotAllowlist = deps.readBotAllowlist ?? defaultReadBotAllowlist(cwd);
   const readDenyActors = deps.readDenyActors ?? defaultReadDenyActors(cwd);
   const fetchCommits = deps.fetchCommits ?? defaultFetchCommits(repo, provider, deps);
+  const fetchDecisions = deps.fetchDecisions ?? defaultFetchDecisions(repo, provider, deps);
 
   const botAllowlist = readBotAllowlist();
   const denyActors = readDenyActors();
   const issueNumber = extractIssueNumber(prBody, baseBranch);
 
   const commits = needsCommitEvidence(tier) && prNumber != null ? await fetchCommits(prNumber) : null;
+  const decisions = needsDecisionEvidence(tier) && prNumber != null ? await fetchDecisions(prNumber) : null;
+  const headSha = resolveHeadSha(commits);
 
   if (issueNumber == null) {
-    return { author, issueAuthor: null, labeledEvents: [], botAllowlist, denyActors, adminOverride: false, overrideRefused: false, tier, commits };
+    return { author, issueAuthor: null, labeledEvents: [], botAllowlist, denyActors, adminOverride: false, overrideRefused: false, tier, commits, decisions, headSha };
   }
 
   const labeledEvents = await fetchLabeledEvents(issueNumber);
@@ -676,7 +897,7 @@ export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo,
   const adminOverride = honorOverride && overrideLabelPresent;
   const overrideRefused = overrideLabelPresent && !honorOverride;
 
-  return { author, issueAuthor, labeledEvents, botAllowlist, denyActors, adminOverride, overrideRefused, tier, commits };
+  return { author, issueAuthor, labeledEvents, botAllowlist, denyActors, adminOverride, overrideRefused, tier, commits, decisions, headSha };
 }
 
 /**
