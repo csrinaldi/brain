@@ -1234,6 +1234,21 @@ const WRITE_VERB_PROVIDERS = {
       });
       return {};
     },
+    // Refuses the ANCHORED payload and records EVERY one, so a case can inspect
+    // what the fallback sends. `capture` alone always succeeds, so on GitHub the
+    // retry never fires and its payload is unobservable — which is how a
+    // caller-supplied `event` on the retry survived a whole review round.
+    rejectInlineCapturing: (data) => {
+      resetLogs();
+      setSpawn((_cmd, _args, opts) => {
+        const payload = opts?.input ?? '';
+        requests.push('POST /reviews');
+        try { sent.push(JSON.parse(payload)); } catch { sent.push({ unparseable: payload }); }
+        if (/"comments"/.test(payload)) return { status: 1, stdout: '', stderr: 'HTTP 422: line must be part of the diff' };
+        return { status: 0, stdout: JSON.stringify(data), stderr: '' };
+      });
+      return {};
+    },
     // First attempt refused for its anchors, RETRY succeeds with an unusable body —
     // the path this change created, and the only one where a parse failure can
     // follow a 422.
@@ -1250,6 +1265,16 @@ const WRITE_VERB_PROVIDERS = {
     module: gitlab,
     ok: (data) => ({ fetchImpl: async () => ({ ok: true, json: async () => data }) }),
     fail: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
+    rejectInlineCapturing: (data) => {
+      resetLogs();
+      return { fetchImpl: async (url, opts) => {
+        requests.push(`${opts?.method ?? 'GET'} ${url.replace(/^.*\/api\/v4\//, '')}`);
+        if (/merge_requests\/\d+$/.test(url)) return { ok: true, json: async () => ({ diff_refs: { base_sha: 'b', head_sha: 'h', start_sha: 's' } }) };
+        try { sent.push(JSON.parse(opts?.body ?? '{}')); } catch { sent.push({ unparseable: opts?.body }); }
+        if (/"position"/.test(opts?.body ?? '')) return { ok: false, status: 400, json: async () => ({ message: 'position is invalid' }) };
+        return { ok: true, json: async () => data };
+      } };
+    },
     rejectInline: (data) => ({
       fetchImpl: async (url, opts) => {
         // Same shape rule. `diff_refs` reads must still succeed — refusing them
@@ -1298,7 +1323,7 @@ const WRITE_VERB_PROVIDERS = {
 };
 
 for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
-  const { module: vcs, ok, fail, rejectInline, capture, sentPayloads, dieAfterFirst, unusableBody, failCapturing } = WRITE_VERB_PROVIDERS[providerName];
+  const { module: vcs, ok, fail, rejectInline, capture, sentPayloads, dieAfterFirst, unusableBody, failCapturing, rejectInlineCapturing } = WRITE_VERB_PROVIDERS[providerName];
   const requestLog = () => requests;
 
   test(`${providerName}.prReviewComment (contract): posts event:'COMMENT' (hardcoded), returns { url } on success`, async () => {
@@ -1521,13 +1546,24 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
     // passing one. This is the guard on the mechanism that keeps the automated
     // reviewer structurally unable to approve a merge, and this change is the
     // first widening of the signature it guards.
+    // The fixture REFUSES the anchored payload (round-8 cold review, blocker).
+    // The first version used `capture`, which always succeeds — so on GitHub the
+    // bare retry never fired and its payload was never inspected. #405 CREATED
+    // that second `event`-carrying call site, and parameterising it alone left
+    // the entire 2574-test suite green, after which an out-of-diff anchor plus
+    // `event: 'APPROVE'` posts an APPROVED review with the reviewer's own token —
+    // satisfying main's required-approving-review-count and L6's approver set.
+    // A lock asserted on one of two call sites is not a lock.
     const result = await vcs.prReviewComment({
       project: 'x/y', number: 1, body: 'verdict',
-      event: 'APPROVE', comments: [{ path: 'a.mjs', line: 1, body: 'x' }],
-      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-7', id: 7 }),
+      event: 'APPROVE', comments: [{ path: 'a.mjs', line: 9999, body: 'out of diff' }],
+      ...rejectInlineCapturing({ html_url: 'https://example.test/x/y/pull/1#review-7', id: 7 }),
     });
-    assert.equal(typeof result.url, 'string');
-    for (const p of sentPayloads()) {
+    assert.equal(typeof result.url, 'string', 'the verdict still posts — the fallback is the path under test');
+    const payloads = sentPayloads();
+    assert.ok(payloads.length >= 2,
+      `the fallback must have been exercised — otherwise this case inspects one of two call sites: ${JSON.stringify(payloads)}`);
+    for (const p of payloads) {
       assert.notEqual(p.event, 'APPROVE', `an approving event reached the wire: ${JSON.stringify(p)}`);
       assert.ok(p.event === undefined || p.event === 'COMMENT',
         `only COMMENT (GitHub) or no event at all (GitLab) may be sent: ${JSON.stringify(p)}`);

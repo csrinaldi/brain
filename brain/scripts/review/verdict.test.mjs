@@ -12,6 +12,35 @@ const HEAD_SHA = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
 
 // ── evidence gate ─────────────────────────────────────────────────────────
 
+test('#490/round-8 E1: a null `line` is OMITTED from the block, in BOTH branches (REQ-405-2)', () => {
+  // Round 7 pinned the poster's `line === null` guard and justified it with
+  // "renderVerdict, which guards both, omits line: from the block". That twin
+  // guard was itself pinned by nothing: dropping `!== null` from either branch
+  // left all 2574 tests green, and under it the block advertises an anchor at
+  // `line: null` that the poster then refuses to post — the inverse of the case
+  // round 7 fixed, and a contradiction of the JSDoc two lines above it.
+  //
+  // The correction landed where it was noticed and not on the thing it cited.
+  const v = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    protocol: 'brain-review/2',
+    findings: [
+      { id: 'blocking', severity: 'blocker', evidence: 'e', cites: 'c', file: 'a.mjs', line: null },
+      { id: 'deferred', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: 'pre-existing', file: 'b.mjs', line: null },
+    ],
+  });
+  assert.equal(v.findings.length, 1, 'one finding in each branch — otherwise a branch goes unchecked');
+  assert.equal(v.follow_ups.length, 1);
+  const body = renderVerdict(v);
+  assert.match(body, /^ {4}file: a\.mjs$/m, 'the file half still renders — the anchor is half-present, which is the case');
+  assert.match(body, /^ {4}file: b\.mjs$/m);
+  assert.doesNotMatch(body, /^ {4}line:/m,
+    `a null line must never be emitted, in either branch — the block would advertise an anchor ` +
+    `the poster refuses to post: ${body}`);
+});
+
 test('buildVerdict: a finding with no evidence is excluded from findings[] (inadmissible)', () => {
   const v = buildVerdict({
     headSha: HEAD_SHA,

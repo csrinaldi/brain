@@ -19,7 +19,15 @@ absent-by-default, so every existing caller is unaffected.
 
 `event: 'COMMENT'` stays hardcoded on GitHub with no parameter, flag or branch reaching
 it (ADR-0020 lock 2 / REQ-266-3). Asserted at the level that cannot rot: a test that
-inspects the posted payload, plus the existing drift-guard on the verb list.
+inspects **every payload the verb sends**, plus the existing drift-guard on the verb list.
+
+"Every" is the round-8 correction, and it was a blocker. This change adds a SECOND
+`event`-carrying call site — the bare retry — and the test asserting the lock drove a
+fixture that always succeeded, so the retry never fired. Parameterising that one call site
+left all 2574 tests green, after which an out-of-diff anchor plus `event: 'APPROVE'` posts
+an APPROVED review with the reviewer's own token, satisfying `main`'s
+required-approving-review-count. A lock asserted on one of two call sites is not a lock,
+and the widening that creates a call site owns proving the lock still covers it.
 
 ## REQ-405-2 — a finding carries an OPTIONAL anchor, on BOTH protocols
 

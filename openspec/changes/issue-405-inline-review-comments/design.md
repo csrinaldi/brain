@@ -192,11 +192,20 @@ the subject, not a line item inside a feature.
    comment; the same finding without them produces none. Forced by
    `vcs.contract.test.mjs` so a provider cannot silently no-op.
 2. **The fallback, per D3**: a comment targeting a line outside the diff must leave the
-   summary posted and the finding folded in, with the count reported. Proven by making
+   summary posted — body re-sent BYTE-IDENTICAL, the findings already in it — with the
+   count reported. Round 6 corrected "folded back into" in D3 and in the signed ADR and
+   left this copy standing 110 lines further down in the same file (round 8, E2). There is
+   no fold operation: the summary block is built before any anchor is derived. Proven by making
    the stub reject the inline payload — the failure path is the deliverable, not an edge
    case.
 3. **Lock 2 stays structural**: mutating `comments` into the payload must not create a
-   path where `event` is anything but `COMMENT`. Grep-level and test-level.
+   path where `event` is anything but `COMMENT`. Grep-level and test-level, **on every
+   payload the verb sends**.
+   Written correctly and satisfied incompletely (round 8, and it was a blocker). The bare
+   retry IS a path created by mutating `comments` into the payload, and neither level
+   covered it: the grep finds no literal, because the mutated `event` is a variable; the
+   behavioural case never reached the retry, because its fixture always succeeded. The
+   fixture now refuses the anchored payload, so both call sites are inspected.
 4. **The anti-loop lock**: a run that posts inline comments must still skip on the
    second invocation at the same head.
 5. **E2E on #409's harness** (`test/review-regulated/`), whose README already names this

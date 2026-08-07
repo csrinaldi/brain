@@ -232,6 +232,8 @@ of the one that outranks them.
         posts an approval with the reviewer's own token. The lock is stated as "no
         parameter, flag or branch selects a different event" and had never been asserted
         the way an attacker would reach it. → a case that passes a hostile `event`.
+        **That case covered ONE of the verb's two payload sites** and said so nowhere; see
+        round 8.
         Part of the gap pre-dates this change; this change is the first widening of the
         signature it guards, and its own draft row argues that widening a signature without
         restating the lock invites the next widening to reach it.
@@ -478,9 +480,41 @@ of the one that outranks them.
       The reviewer also re-tested round 6's own axis: the lock-2 SOURCE scan is still
       bypassable by spelling (`'APPROV' + 'E'`), and the behavioural companion case catches
       it — which is the argument for having added that case rather than tightening the scan.
-- [ ] T16 · round 8 — rounds 1-7 answered YES on 3, 2, 2, 1, 1, 2 and 2 axes. Two rounds
-      have now re-opened an axis a previous round closed (6 on protections, 7 on the PR
-      body). Four consecutive rounds have found no defect in executable behaviour.
+      (True of the FIRST payload only. Round 8 found the companion case never reached the
+      bare retry at all.)
+- [x] T16 · round 8 — cold review of `2e8e2a9`, ~40 mutations, every diff printed and
+      parse-checked. **No defect in executable behaviour** for the fifth round running, and
+      every one of the seven previous rounds' repairs held under multiple spellings. But it
+      found a **BLOCKER**, and it is the most serious finding of the whole sequence:
+      - **B1 — lock 2 was asserted on ONE of the verb's TWO payload sites.** Before #405
+        `prReviewComment` had one; this change added the bare retry. Round 1's C3 closed the
+        lock-2 gap with a behavioural case driven by `capture()`, whose transport **always
+        succeeds** — so on GitHub the retry never fired and its payload was never inspected.
+        Parameterising `event` on the retry alone left all 2574 tests green (both source
+        scans miss it — the mutated `event` is a variable, not a literal), after which
+        `prReviewComment({ ..., event: 'APPROVE' })` with one out-of-diff anchor posts an
+        **APPROVED review with the reviewer's own token**, satisfying `main`'s
+        `required_approving_review_count` AND L6's approver set. That is the merge path
+        `reviewer-protocol.md` §2 calls impossible by construction.
+        The fixture now REFUSES the anchored payload and logs every one; the case asserts
+        `>= 2` payloads and checks `event` on each. Red-proofed on the first site alone, the
+        retry alone, and both.
+        **The rule this earns:** a widening that creates a call site owns proving the lock
+        still covers it. Round 1 fixed the lock where the defect was — and #405's own new
+        call site was the sibling nobody checked, for seven rounds, in the guard on the one
+        mechanism that keeps the automated reviewer unable to approve a merge.
+        Eight artefacts asserted that coverage as complete, two of them outside the tree.
+      - **E1** — `renderVerdict`'s `!== null` half, on BOTH branches, pinned by nothing.
+        Round 7 pinned the POSTER's null guard and justified it by citing this one. Under
+        its removal the block advertises `line: null`, an anchor the poster then refuses —
+        the inverse of the case round 7 fixed. The correction had landed where it was
+        noticed and not on the thing it cited.
+      - **E2** — round 6's "nothing is folded back" reached D3 and the signed ADR and not
+        D7-2, 110 lines down in the same file.
+- [ ] T16 · round 9 — rounds 1-8 answered YES on 3, 2, 2, 1, 1, 2, 2 and 2 axes. Round 8 is
+      the first to find a BLOCKER since round 1, in a guard two rounds had inspected and
+      four had trusted — the argument for running until a round is clean, restated by
+      counter-example.
 - [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
       carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even
