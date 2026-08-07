@@ -9,6 +9,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { parseArgs, main } from './cli.mjs';
+import { postVerdict } from './poster.mjs';
+import { buildVerdict, renderVerdict } from './verdict.mjs';
 import { REQUIRED_JOBS } from '../vcs/governance-checks.mjs';
 
 const HEAD = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
@@ -524,6 +526,48 @@ test('#405: the poster receives the verdict findings, and the inline path stays 
     'and a run that never attempted an anchor must not report a dropped one');
 });
 
+test('#405: an anchored FOLLOW-UP renders but is never posted inline (REQ-405-2)', async () => {
+  // The renderer emits `file`/`line` in BOTH branches; the poster receives only
+  // `findings`. That asymmetry was real, deliberate and undocumented until the
+  // round-4 cold review — and the Tier-2 draft about to become schema authority
+  // asserted the opposite of it.
+  //
+  // The rule: a follow-up is `pre-existing` or `base-only`, which IS the verdict's
+  // own statement that it is not this change's doing. Anchoring one would put a
+  // comment on a line in this author's diff about a defect the same verdict says
+  // they did not introduce.
+  //
+  // Pinned HERE rather than through `main()`: no evaluator emits an anchor or a
+  // `pre-existing` disposition, so a CLI run cannot reach this state at all. The
+  // CLI's half of the link is the drift guard below, which reds when
+  // `findings: verdict.findings` becomes anything else — including
+  // `[...findings, ...follow_ups]`, verified.
+  const v = buildVerdict({
+    headSha: HEAD,
+    conclusion: 'REVISE',
+    protocol: 'brain-review/2',
+    findings: [{ id: 'inherited', severity: 'blocker', evidence: 'e', cites: 'c',
+                 causal_disposition: 'pre-existing', file: 'a.mjs', line: 7 }],
+  });
+  assert.equal(v.follow_ups.length, 1, 'the anchored finding really was routed to follow_ups');
+  assert.equal(v.findings.length, 0, 'and left findings empty — otherwise the check below is vacuous');
+  assert.match(renderVerdict(v), /^ {4}file: a\.mjs$/m,
+    'the anchor IS rendered in the follow_ups block — the two halves genuinely disagree, which is the point');
+
+  const seen = [];
+  await postVerdict({
+    headSha: HEAD, project: 'csrinaldi/brain', number: 42, provider: 'github', mode: 'tranche',
+    renderedBody: renderVerdict(v), reviewerHandle: 'brain-reviewer', priorVerdicts: [],
+    findings: v.findings,
+    deps: { getVcs: async () => ({
+      prView: async () => ({ headRefOid: HEAD }),
+      prReviewComment: async (a) => { seen.push(a); return { url: 'u' }; },
+    }) },
+  });
+  assert.equal('comments' in seen[0], false,
+    `a rendered follow-up anchor must not become an inline comment: ${JSON.stringify(Object.keys(seen[0]))}`);
+});
+
 test('#405: a dropped anchor is PRINTED, not just returned (REQ-405-4)', async () => {
   // The count reaching `postResult` is not the requirement — a reader seeing it
   // is. Without this line the run's output is identical whether every anchor was
@@ -559,6 +603,8 @@ test('#405: the CLI passes `findings` to postVerdict — the one link no seam ca
   const src = readFileSync(fileURLToPath(new URL('./cli.mjs', import.meta.url)), 'utf8');
   const call = src.slice(src.indexOf('await postVerdict({'));
   assert.match(call.slice(0, call.indexOf('});')), /findings: verdict\.findings/,
-    'cli.mjs must hand the BUILT verdict findings to the poster — the evaluator\'s own list is the wrong population ' +
-    '(buildVerdict drops evidence-less findings and routes pre-existing/base-only into follow_ups)');
+    'cli.mjs must hand the BUILT verdict\'s `findings` to the poster — EXACTLY that list. The evaluator\'s own ' +
+    'is the wrong population (buildVerdict drops evidence-less findings), and so is findings+follow_ups: a ' +
+    'follow-up is pre-existing/base-only, so anchoring one would comment on this author\'s diff about a defect ' +
+    'the same verdict says they did not introduce. Both wrong populations red this guard.');
 });

@@ -1286,15 +1286,19 @@ const WRITE_VERB_PROVIDERS = {
         throw new Error('transport failed');
       } };
     },
-    // GitLab has no retry — its summary note goes first and is never re-sent — so
-    // the retry case below is skipped for it rather than faked into existence.
-    unusableOnRetry: null,
+    // No `unusableOnRetry` here: GitLab has no retry — its summary note goes first
+    // and is never re-sent. The retry case therefore lives OUTSIDE the shared loop
+    // as a github-only test, rather than being faked into existence for a provider
+    // that cannot reach it. (Round 3's version of this comment said the case was
+    // "skipped for it", describing a skip that does not exist, and left a dead
+    // binding in the loop's destructuring — round-4 cold review, E2: the
+    // orphaned-comment defect inside the fix for the orphaned-comment defect.)
     sentPayloads: () => sent,
   },
 };
 
 for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
-  const { module: vcs, ok, fail, rejectInline, capture, sentPayloads, dieAfterFirst, unusableBody, unusableOnRetry, failCapturing } = WRITE_VERB_PROVIDERS[providerName];
+  const { module: vcs, ok, fail, rejectInline, capture, sentPayloads, dieAfterFirst, unusableBody, failCapturing } = WRITE_VERB_PROVIDERS[providerName];
   const requestLog = () => requests;
 
   test(`${providerName}.prReviewComment (contract): posts event:'COMMENT' (hardcoded), returns { url } on success`, async () => {

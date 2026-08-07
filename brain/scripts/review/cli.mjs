@@ -301,12 +301,21 @@ export async function main(deps = {}) {
     renderedBody: rendered,
     reviewerHandle: identity.handle,
     priorVerdicts: boot.doctrine.priorVerdicts,
-    // #405: the BUILT verdict's findings, not the evaluator's. The two
-    // populations differ — `buildVerdict` drops findings with no evidence and
-    // routes `pre-existing`/`base-only` into `follow_ups` — and an inline
-    // comment must annotate something the summary actually claims. Anchoring a
-    // finding this verdict did not make would put text on the diff that the
-    // posted block does not support.
+    // #405: the BUILT verdict's `findings`, and DELIBERATELY not its `follow_ups`.
+    //
+    // Two exclusions, and they have different reasons. Evidence-less findings are
+    // dropped by `buildVerdict` and never appear in the block at all, so anchoring
+    // one would put text on the diff that the posted verdict does not support.
+    //
+    // `follow_ups` is the harder case, because those findings ARE in the block —
+    // the round-4 cold review found this comment claiming otherwise. They are
+    // excluded on their own merit: a follow-up is `pre-existing` or `base-only`,
+    // which is precisely the claim that it is NOT this change's doing. Anchoring
+    // one would put a comment on a line in THIS author's diff about a defect the
+    // verdict itself says they did not introduce — the causal-admission rule
+    // (reviewer-protocol §6.2) inverted at the point where a human reads it.
+    // They stay in the summary block, where the annotation that makes them
+    // non-blocking travels with them.
     findings: verdict.findings,
     escalate: verdict.escalate,
     deps: posterDeps,

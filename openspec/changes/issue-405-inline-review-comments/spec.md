@@ -39,6 +39,19 @@ unchanged and gains inline coverage only when it starts emitting anchors. A test
 that a legacy finding — no `file`, no `line` — round-trips and posts exactly as it does
 today.
 
+**A `follow_ups[]` anchor renders and is NOT posted inline.** `renderVerdict` emits the
+pair in both branches; `cli.mjs` hands the poster `verdict.findings` alone. Deliberate, and
+it follows from the admission rule rather than from convenience: a follow-up carries
+`pre-existing` or `base-only`, which is the verdict's own statement that the defect is not
+this change's doing. Anchoring one would put a comment on a line in this author's diff about
+something the same verdict says they did not introduce — causal admission inverted at the
+point a human reads it.
+
+The behaviour was right and undocumented until round 4 of the cold review, which found the
+Tier-2 draft *about to become schema authority* asserting the opposite. Pinned at the poster,
+where the rule is applied; the CLI's half is the drift guard, which reds for
+`findings + follow_ups` as well as for the evaluator's own list.
+
 `line` survives the round trip as **text** (`parseVerdict` returns entry scalars verbatim;
 `verdict.test.mjs` pins `'42'`), so the consumer coerces. `deriveInlineComments` does —
 GitHub's reviews API rejects a string line, and a verdict that had made the round trip

@@ -40,13 +40,45 @@ does, the anchor is as meaningful on `/1` as on `/2`.
 So REQ-405-2 is corrected in the spec rather than the code being gated to match it. This
 draft records the schema half of that decision.
 
+## §4 — the verb table, and the return-shape sentence above it
+
+Found by the FOURTH review round. §4 is the **third** copy of this signature — after
+`vcs-contract.md:41` (drafted as T11b) and `ADR-0020:107` (drafted as Amendment 2) — and
+was the only one with no draft, in the very file this change had already opened a draft
+for. The reason it matters is the argument the contract-row draft already makes: *the row
+is where a future reader checks what may reach `event`.*
+
+**Line 121** currently reads:
+
+```markdown
+| `prReviewComment` | `({ project, number, body })` | `event: 'COMMENT'` **hardcoded** — no APPROVE path exists in code (lock 2) |
+```
+
+Replace with:
+
+```markdown
+| `prReviewComment` | `({ project, number, body, comments? })` | `event: 'COMMENT'` **hardcoded** — no APPROVE path exists in code, and `comments` does not reach it (lock 2, asserted against a hostile `event` argument). `comments` is an optional array of `{ path, line, body }` anchors; absent ≡ empty |
+```
+
+**Line 116** currently reads *"Normalized returns match the port's existing
+`{ url } | { url: null, error }` / never-throws discipline"*. The return set gained a third
+member. Replace with:
+
+```markdown
+returns match the port's existing `{ url } | { url: null, error }` / never-throws
+discipline, plus `{ url, inlineDropped }` when a provider accepted the verdict and refused
+some or all of its inline anchors (#405 — the count is ABSENT when nothing was dropped,
+never 0)
+```
+
 ## §6.1 `brain-review/1` — add after the `head_sha` bullet
 
 ```markdown
-- **`file` / `line` are OPTIONAL, on both protocols** (issue #405). When a finding carries
-  both, the poster anchors an inline comment at that position on the diff; a finding with
-  neither, or with only one of them, posts exactly as it did before and is unaffected in
-  every other respect. Like `evidence_class`, they are not gated on protocol — a `/1`
+- **`file` / `line` are OPTIONAL, on both protocols** (issue #405). When a finding in
+  `findings[]` carries both, the poster anchors an inline comment at that position on the
+  diff; a finding with neither, or with only one of them, posts exactly as it did before
+  and is unaffected in every other respect. **An anchor on a `follow_ups[]` entry renders
+  but is never posted inline** — see the §6.2 note below. Like `evidence_class`, they are not gated on protocol — a `/1`
   verdict simply omits them, which is what keeps `/1` output unchanged, and the emitter has
   no protocol branch to drift.
 ```
@@ -68,6 +100,16 @@ And after the `causal_disposition` bullet:
   fallback on a comment already known not to attach. The value travels as a scalar through
   the same `yamlScalar`/`unyamlScalar` pair as `cites`, so `line` comes back from
   `parseVerdict` as TEXT — consumers coerce, and `deriveInlineComments` does.
+- **A `follow_ups[]` anchor renders and is NOT posted inline.** The renderer emits the pair
+  in both branches; the poster receives only `findings[]`. That is deliberate and it
+  follows from the admission rule directly above: a follow-up is `pre-existing` or
+  `base-only`, which is the verdict's own statement that it is not this change's doing.
+  Anchoring it would put a comment on a line in this author's diff about a defect the same
+  verdict says they did not introduce. The follow-up stays in the summary block, where the
+  annotation that makes it non-blocking travels with it.
+  (An earlier version of this draft said the opposite — that anchors work in both blocks —
+  while the shipped poster did what is described here. Found in round 4; the behaviour was
+  right and undocumented, and the document about to become authority was wrong.)
 ```
 
 ## What this draft deliberately does NOT add

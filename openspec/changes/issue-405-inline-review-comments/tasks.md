@@ -56,8 +56,12 @@ of the one that outranks them.
       one that outranks them. Amendment 1's draft in this folder is marked SUPERSEDED
       rather than rewritten: editing a signed decision in place would erase that it was
       once believed.
-- [x] T5 — **UNBLOCKED** (#478 merged at `ba4921e`) and done: `file`/`line` on the `/2` finding schema, with the
-      render/parse round trip over the REAL pair (REQ-405-2, -3). Starting before #478
+- [x] T5 — **UNBLOCKED** (#478 merged at `ba4921e`) and done: `file`/`line` on the finding
+      schema — **not gated on protocol**, see REQ-405-2 — with the render/parse round trip
+      over the REAL pair (REQ-405-2, -3).
+      This line said "`/2` finding schema" and was the THIRD copy of that falsified claim.
+      Round 3 was chartered to hunt exactly this and corrected the ADR and the proposal;
+      the change's own task list was not opened. Found in round 4. Starting before #478
       merges would conflict on the two files three review rounds have already rewritten.
 - [x] T6 — GitHub widened: `comments[]` rides the EXISTING `/reviews` payload,
       `event: 'COMMENT'` untouched. Baseline `main` @ `ba4921e`: **2531 / 2530 pass**.
@@ -318,7 +322,7 @@ of the one that outranks them.
         sits **twelve lines** from one Amendment 2 already corrects — so the draft written
         specifically to repair Amendment 1's falsified claims fixed two and walked past the
         third. The same failure, committed inside its own fix.
-      - **C4 (AI attribution)** — six of this branch's eight commits carry
+      - **C4 (AI attribution)** — six of this branch's commits carry
         `Co-Authored-By: Claude…`, which `agent-authorities.md` lists under **Tier 3 —
         Prohibited**, *"even if explicitly asked"*, and which `openspec/config.yaml` bans
         in the same words. Not agent-fixable and left for the maintainer: the obvious
@@ -341,15 +345,52 @@ of the one that outranks them.
       assert the same thing. Every round found the fix applied exactly where the defect was
       noticed and nowhere else — sibling provider, sibling protocol claim, sibling proposal
       bullet, sibling block header, sibling ADR sentence twelve lines down.
-- [ ] T16 · round 4 — the criterion is not met until a round answers NO to all three
-      questions. Rounds 1, 2 and 3 answered yes on 3, 2 and 2 axes respectively; each
-      found part of it inside the previous round's repairs.
+- [x] T16 · round 4 — cold review of `ec153ea`. **No blocker, no defect in executable
+      behaviour, and — for the first time — NO protection that nothing pins.** 25 mutations
+      across five production files all red, including the ones the earlier rounds' own
+      repairs added, on both providers; the reviewer additionally instrumented the three
+      most vacuity-prone new cases to prove none observes an empty collection. Two of the
+      three axes are now clean. Findings, all normative:
+      - **C1** — `reviewer-protocol.md` §4 carries the pre-#405 signature (line 121) and the
+        pre-#405 return set (line 116). It is the THIRD copy of that signature — after
+        `vcs-contract.md` (drafted T11b) and `ADR-0020` (drafted as Amendment 2) — and was
+        the only one with no draft, **in the file this change had already opened a draft
+        for** in round 2. Drafted now. `docs/reviewer-setup.md` said the same thing and is
+        Tier 1, so it was fixed directly.
+      - **C2** — the sharpest finding of the round, and the only one that was about
+        behaviour. `renderVerdict` emits `file`/`line` in BOTH branches; `cli.mjs` hands the
+        poster `verdict.findings` alone, so an anchored `follow_ups[]` entry renders and is
+        never posted inline. Real, deliberate, and asserted the OTHER way by the Tier-2
+        draft about to become schema authority — the document would have shipped saying the
+        implementation does something it does not.
+        The rule, now stated instead of implied: a follow-up carries `pre-existing` or
+        `base-only`, which IS the verdict's own statement that the defect is not this
+        change's doing. Anchoring one would put a comment on a line in this author's diff
+        about something the same verdict says they did not introduce — causal admission
+        inverted at the point a human reads it. Recorded in the spec, in `cli.mjs`, in the
+        draft, and pinned at the poster (the CLI's half is the drift guard, which reds for
+        `findings + follow_ups` as well as for the evaluator's own list — verified).
+      - **E1** — `tasks.md` T5 still said "`/2` finding schema". Round 3 was chartered to
+        hunt exactly that claim and corrected the ADR and the proposal; the change's own
+        task list was the third copy and was not opened.
+      - **E2** — a comment describing a skip that does not exist, plus the dead binding it
+        left behind: round 3's orphaned-comment fix, containing an orphaned comment.
+      - **E3** — "six of this branch's eight commits" was nine commits by the time it was
+        read. The frozen-number defect T14 taught itself about, committed one paragraph
+        after recording it. The denominator is gone; the six is the claim that matters.
+      Two mutations re-run after the fixes, diffs printed: two reds.
+- [ ] T16 · round 5 — the criterion is not met until a round answers NO to all three
+      questions. Rounds 1-4 answered yes on 3, 2, 2 and 1 axes; each found part of it inside
+      the previous round's repairs. The remaining axis is the one the pattern lives on.
 - [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
       carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even
       if explicitly asked"* — and the agent's own harness instructions require it, which
       is exactly the conflict that phrase anticipates. **Doctrine wins; the trailer stops
       here** and no commit after `ca6ab5a` carries it.
+      (The denominator is deliberately not written down: an earlier version said "six of
+      eight" and was nine commits later the same day — the exact defect T14 taught itself
+      about, committed one paragraph after recording it.)
       What is NOT agent-fixable: the six already published. Amending published commits is
       Tier 3 too, so the remedy is a maintainer call — squash-merge with a clean message,
       or accept them. Causality is `worsened`, not `introduced`: `main` already carries 6
