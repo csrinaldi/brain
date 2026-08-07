@@ -150,10 +150,13 @@ export function renderVerdict(v) {
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
       if (f.evidence_class) lines.push(`    evidence_class: ${yamlScalar(f.evidence_class)}`);
       if (f.causal_disposition) lines.push(`    causal_disposition: ${yamlScalar(f.causal_disposition)}`);
-      // The inline-comment anchor (issue #405, REQ-405-2). BOTH optional and
-      // emitted only when present, so a finding without them renders exactly as
-      // it does today — that is what keeps the feature additive for every
-      // evaluator shipping now. Through yamlScalar like every other scalar.
+      // The inline-comment anchor (issue #405, REQ-405-2). BOTH optional, and
+      // emitted only when the pair is USABLE — see `hasUsableAnchor`. Not "when
+      // present": a finding carrying `line: 0` or `line: 'abc'` has them and gets
+      // neither, because a block that advertises an anchor the poster refuses is
+      // the same defect read from the emitting end. A finding without them renders
+      // exactly as it does today — that is what keeps the feature additive for every
+      // evaluator shipping now. Through yamlScalar like every other scalar (`line` after the coercion, so the block carries the same integer the wire does).
       if (hasUsableAnchor(f)) {
         lines.push(`    file: ${yamlScalar(f.file)}`);
         lines.push(`    line: ${yamlScalar(Number(f.line))}`);
@@ -170,10 +173,13 @@ export function renderVerdict(v) {
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
       if (f.evidence_class) lines.push(`    evidence_class: ${yamlScalar(f.evidence_class)}`);
       if (f.causal_disposition) lines.push(`    causal_disposition: ${yamlScalar(f.causal_disposition)}`);
-      // The inline-comment anchor (issue #405, REQ-405-2). BOTH optional and
-      // emitted only when present, so a finding without them renders exactly as
-      // it does today — that is what keeps the feature additive for every
-      // evaluator shipping now. Through yamlScalar like every other scalar.
+      // The inline-comment anchor (issue #405, REQ-405-2). BOTH optional, and
+      // emitted only when the pair is USABLE — see `hasUsableAnchor`. Not "when
+      // present": a finding carrying `line: 0` or `line: 'abc'` has them and gets
+      // neither, because a block that advertises an anchor the poster refuses is
+      // the same defect read from the emitting end. A finding without them renders
+      // exactly as it does today — that is what keeps the feature additive for every
+      // evaluator shipping now. Through yamlScalar like every other scalar (`line` after the coercion, so the block carries the same integer the wire does).
       if (hasUsableAnchor(f)) {
         lines.push(`    file: ${yamlScalar(f.file)}`);
         lines.push(`    line: ${yamlScalar(Number(f.line))}`);

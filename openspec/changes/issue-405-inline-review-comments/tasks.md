@@ -607,11 +607,45 @@ of the one that outranks them.
       - **E2** — three defensive guards on new code (`Array.isArray(comments)` on both
         providers, `findings ?? []`) survive mutation. They guard shapes no in-tree caller
         produces and no artefact claims null-safety, so they are pinned rather than removed.
-- [ ] T16 · round 12 — rounds 1-11 answered YES on 3, 2, 2, 1, 1, 2, 2, 2, 2, 1 and 3 axes.
-      Round 10 read clean at blocker/correction and round 11 re-opened all three, from a
-      defect round 10 introduced. That is the second time a "clean" reading was overturned
-      by the next round (4/5 → 6), and both times the overturning finding was inside the
-      previous round's own repair.
+- [x] T16 · round 12 — cold review of `c0cab56`, ~72 live mutations with asserted
+      substitution-site counts. **No blocker and no defect in executable behaviour**, and
+      the reviewer independently confirmed the round-11 repair on the point that mattered:
+      renderer and poster agree on all 13 `line` value classes it drove through the real
+      chain, and the both-or-neither change weakened nothing on `file`. Four findings, and
+      **the two protection findings are both inside round 11's own repair** — the third
+      round running where that is true:
+      - **C1 — the `line:` push on the FOLLOW_UPS branch was pinned by nothing.** Deleting
+        it, or freezing its value, on that branch ALONE left the suite green — while the
+        identical mutation on the `findings` branch reds. The block would then emit a
+        follow-up with `file:` and no `line:`: a rendered half anchor, the state three
+        artefacts and round 11's own commit message declare impossible "in both branches".
+        **Why round 11 missed it is the lesson**: its drift mutation changed BOTH branches
+        at once, so the asymmetry was never probed. A both-branch mutation cannot detect a
+        one-branch gap, and this change has now been bitten by per-branch asymmetry three
+        times (rounds 5, 8, 12). Every render mutation in this round's proof runs per
+        branch as well as together — nine of them, nine reds.
+      - **C2 — the `Number()` coercion at both render sites was pinned by nothing**, and it
+        is the sole mechanism making the block's `line:` agree with the wire's. Without it
+        `line: '  42  '` renders as `"  42  "` while the poster sends `42`, and `line: true`
+        renders as `true`, which re-parses to `'true'` and is then not a usable anchor at
+        all. That is precisely the block-vs-wire divergence `hasUsableAnchor` exists to
+        eliminate, one deletion away with a green suite. It is the fourth defensive line on
+        new code to survive mutation; round 11's E2 pinned three and did not ask the
+        question of the line it was itself rewriting.
+      - **C3** — both in-code copies of the anchor comment still said "emitted only when
+        present". False of the code directly beneath them since round 10. Round 11 rewrote
+        that exact sentence in the spec and in the Tier-2 draft and left both copies
+        standing on the lines it was changing.
+      - **C4** — this ledger's own axis count recorded round 10 as `1`. Round 10's entry
+        records findings on two axes (E1 unpinned protection, E2 false claim); the sequence
+        counts at ANY severity, which is the criterion `4e12a3c` states explicitly. It
+        understated — the property round 10's E2 identified as why such a number survives,
+        reproduced two rounds later in the line that cites it.
+      Corrected: rounds 1-11 answered YES on **3, 2, 2, 1, 1, 2, 2, 2, 2, 2 and 3** axes.
+- [ ] T16 · round 13 — rounds 1-12 answered YES on 3, 2, 2, 1, 1, 2, 2, 2, 2, 2, 3 and 2
+      axes. No round has been clean at any severity. Six rounds running with no behavioural
+      defect; the failures are protections and claims, and for three rounds they have been
+      inside the previous round's repair.
 - [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
       carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even

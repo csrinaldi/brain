@@ -371,16 +371,45 @@ test('#478-3/E6: U+2028 / U+2029 are line terminators too — the JSDoc says lin
 // AND its output (protocol §10), so it is full of colons, paths and numbers that
 // are not anchors. A regex over it would silently mis-anchor.
 
-test('#405 REQ-405-3: file/line survive the REAL render → parse round trip', () => {
-  const built = buildVerdict({
-    headSha: 'abc123',
-    conclusion: 'REVISE',
-    protocol: 'brain-review/2',
-    findings: [{ id: 'anchored', severity: 'blocker', evidence: 'e', cites: 'c', file: 'brain/scripts/a.mjs', line: 42 }],
-  });
-  const parsed = parseVerdict({ body: renderVerdict(built) });
-  assert.equal(parsed.findings[0].file, 'brain/scripts/a.mjs');
-  assert.equal(parsed.findings[0].line, '42', 'line comes back as the scalar text the block carries');
+test('#405 REQ-405-3: file/line survive the REAL render → parse round trip, on BOTH branches', () => {
+  // PER BRANCH, and that word is the round-12 correction. Round 11 pinned the
+  // both-or-neither rule with a mutation that changed both render branches at
+  // once, so the ASYMMETRY was never probed: deleting the `line:` push from the
+  // follow_ups branch alone left the whole suite green, and the block then emitted
+  // a follow-up with `file:` and no `line:` — a rendered half anchor, the exact
+  // state three artefacts and round 11's own commit message declare impossible
+  // "in both branches".
+  //
+  // The `Number()` coercion is asserted here too (round 12, C2). It is what makes
+  // the block's `line:` agree with the wire's, and nothing pinned it: dropping it
+  // let `line: '  42  '` render as `"  42  "` while the poster sent `42`, and
+  // `line: true` render as `true` — which re-parses to `'true'` and is then not a
+  // usable anchor at all. Block-vs-wire divergence is what `hasUsableAnchor`
+  // exists to eliminate, and it was one deletion away.
+  for (const [branch, disposition] of [['findings', 'introduced'], ['follow_ups', 'pre-existing']]) {
+    const built = buildVerdict({
+      headSha: 'abc123',
+      conclusion: 'REVISE',
+      protocol: 'brain-review/2',
+      findings: [{
+        id: 'anchored', severity: 'blocker', evidence: 'e', cites: 'c',
+        causal_disposition: disposition,
+        file: 'brain/scripts/a.mjs', line: '  42  ',   // the messy form the coercion is for
+      }],
+    });
+    const body = renderVerdict(built);
+    const parsed = parseVerdict({ body });
+    const entry = (parsed[branch] ?? [])[0];
+    assert.ok(entry, `${branch}: the finding must be routed to this branch — otherwise the case is vacuous`);
+    assert.equal(entry.file, 'brain/scripts/a.mjs', `${branch}: the path survives`);
+    assert.equal(entry.line, '42',
+      `${branch}: the line survives AS A CANONICAL INTEGER — it comes back as the scalar text the block ` +
+      `carries, and the block must carry what the wire carries. Got ${JSON.stringify(entry.line)}.`);
+    // and the pair is emitted together, which is what "both or neither" means at
+    // the emitting end.
+    assert.match(body, /^ {4}file: brain\/scripts\/a\.mjs$/m, `${branch}: file emitted`);
+    assert.match(body, /^ {4}line: 42$/m, `${branch}: line emitted, coerced`);
+  }
 });
 
 test('#405 REQ-405-2: a finding WITHOUT an anchor is unchanged — the additive guarantee', () => {
