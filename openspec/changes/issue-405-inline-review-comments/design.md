@@ -201,11 +201,14 @@ the subject, not a line item inside a feature.
 3. **Lock 2 stays structural**: mutating `comments` into the payload must not create a
    path where `event` is anything but `COMMENT`. Grep-level and test-level, **on every
    payload the verb sends**.
-   Written correctly and satisfied incompletely (round 8, and it was a blocker). The bare
-   retry IS a path created by mutating `comments` into the payload, and neither level
-   covered it: the grep finds no literal, because the mutated `event` is a variable; the
-   behavioural case never reached the retry, because its fixture always succeeded. The
-   fixture now refuses the anchored payload, so both call sites are inspected.
+   Written correctly and satisfied incompletely twice, both blockers. The verb builds
+   THREE `event`-carrying payloads — the ternary's two branches and the retry — where
+   `main` built one. Round 8 found the retry uncovered (its fixture always succeeded);
+   round 9 found the ternary's bare branch uncovered, which is the ONLY site a production
+   run reaches, since no evaluator anchors. Neither level saw either: the grep finds no
+   literal because a mutated `event` is a variable, and the behavioural case only exercised
+   the paths its fixtures produced. The case now drives both call shapes — anchored (with
+   the anchor refused, so the retry fires) and bare — and asserts across every payload.
 4. **The anti-loop lock**: a run that posts inline comments must still skip on the
    second invocation at the same head.
 5. **E2E on #409's harness** (`test/review-regulated/`), whose README already names this

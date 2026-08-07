@@ -21,13 +21,23 @@ absent-by-default, so every existing caller is unaffected.
 it (ADR-0020 lock 2 / REQ-266-3). Asserted at the level that cannot rot: a test that
 inspects **every payload the verb sends**, plus the existing drift-guard on the verb list.
 
-"Every" is the round-8 correction, and it was a blocker. This change adds a SECOND
-`event`-carrying call site — the bare retry — and the test asserting the lock drove a
-fixture that always succeeded, so the retry never fired. Parameterising that one call site
-left all 2574 tests green, after which an out-of-diff anchor plus `event: 'APPROVE'` posts
-an APPROVED review with the reviewer's own token, satisfying `main`'s
-required-approving-review-count. A lock asserted on one of two call sites is not a lock,
-and the widening that creates a call site owns proving the lock still covers it.
+"Every" took two rounds to get right, and both were blockers.
+
+`origin/main`'s verb built ONE `event`-carrying payload. This change builds **three**: the
+two branches of the anchored/bare ternary, and the retry. Round 8 found the lock-2 test
+covering only site 1 — its fixture always succeeded, so the retry never fired — and fixed
+it to cover 1 and 3, describing that as "both call sites", because a ternary reads as one
+site. Round 9 found site 2 open, and **site 2 is the only one a production run reaches
+today**: no evaluator emits `file`/`line`, so `comments` is never sent.
+
+Each time, parameterising the uncovered site alone left the entire suite green, after which
+`event: 'APPROVE'` posts an APPROVED review with the reviewer's own token — satisfying
+`main`'s required-approving-review-count. (It does **not** satisfy L6, which counts a
+non-author, non-allow-listed approval: lock 3 holds independently, as §2 promises. Round 8
+claimed both and was wrong about the second half.)
+
+Two rules, earned expensively: **a widening that creates a call site owns proving the lock
+still covers it**, and **count the sites in the code, not in the sentence describing it**.
 
 ## REQ-405-2 — a finding carries an OPTIONAL anchor, on BOTH protocols
 

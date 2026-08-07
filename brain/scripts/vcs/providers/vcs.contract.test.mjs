@@ -1546,24 +1546,49 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
     // passing one. This is the guard on the mechanism that keeps the automated
     // reviewer structurally unable to approve a merge, and this change is the
     // first widening of the signature it guards.
-    // The fixture REFUSES the anchored payload (round-8 cold review, blocker).
-    // The first version used `capture`, which always succeeds — so on GitHub the
-    // bare retry never fired and its payload was never inspected. #405 CREATED
-    // that second `event`-carrying call site, and parameterising it alone left
-    // the entire 2574-test suite green, after which an out-of-diff anchor plus
-    // `event: 'APPROVE'` posts an APPROVED review with the reviewer's own token —
-    // satisfying main's required-approving-review-count and L6's approver set.
-    // A lock asserted on one of two call sites is not a lock.
-    const result = await vcs.prReviewComment({
+    // EVERY payload site, and getting to "every" took two rounds of being wrong
+    // about how many there are.
+    //
+    // `github.prReviewComment` builds THREE `event`-carrying literals: the two
+    // branches of the anchored/bare ternary, and the retry. `origin/main` had one;
+    // this change created the other two. Round 8 found the guard covering only
+    // site 1 (its fixture always succeeded, so the retry never fired) and fixed it
+    // to cover 1 and 3 — while asserting "both call sites", because the ternary
+    // reads as one. Round 9 found site 2 open, and site 2 is the ONLY one a
+    // production run reaches today: no evaluator emits `file`/`line`, so
+    // `deriveInlineComments` returns `[]` and `comments` is never sent.
+    //
+    // Parameterising site 2 alone left all 2575 tests green, after which
+    // `prReviewComment({ ..., event: 'APPROVE' })` — no anchors needed — posts an
+    // APPROVED review with the reviewer's own token, which satisfies `main`'s
+    // required-approving-review-count. It does NOT satisfy L6: that gate counts a
+    // non-author, NON-ALLOW-LISTED approval, so lock 3 holds independently — which
+    // is what reviewer-protocol §2 promises, and round 8's note claimed otherwise
+    // while citing §2 as its authority.
+    //
+    // So the case drives BOTH shapes and asserts across both. A guard that covers
+    // the paths the tests exercise, rather than the paths the verb can take, is
+    // measuring the fixtures.
+    const anchored = await vcs.prReviewComment({
       project: 'x/y', number: 1, body: 'verdict',
       event: 'APPROVE', comments: [{ path: 'a.mjs', line: 9999, body: 'out of diff' }],
       ...rejectInlineCapturing({ html_url: 'https://example.test/x/y/pull/1#review-7', id: 7 }),
     });
-    assert.equal(typeof result.url, 'string', 'the verdict still posts — the fallback is the path under test');
-    const payloads = sentPayloads();
-    assert.ok(payloads.length >= 2,
-      `the fallback must have been exercised — otherwise this case inspects one of two call sites: ${JSON.stringify(payloads)}`);
-    for (const p of payloads) {
+    assert.equal(typeof anchored.url, 'string', 'the verdict still posts — the fallback is one of the paths under test');
+    const anchoredPayloads = [...sentPayloads()];
+    assert.ok(anchoredPayloads.length >= 2,
+      `the fallback must have been exercised, or the retry site goes uninspected: ${JSON.stringify(anchoredPayloads)}`);
+
+    const bare = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      event: 'APPROVE',                                   // no `comments` — the production shape
+      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-8', id: 8 }),
+    });
+    assert.equal(typeof bare.url, 'string');
+    const barePayloads = [...sentPayloads()];
+    assert.ok(barePayloads.length >= 1, 'the no-anchor path must actually have posted');
+
+    for (const p of [...anchoredPayloads, ...barePayloads]) {
       assert.notEqual(p.event, 'APPROVE', `an approving event reached the wire: ${JSON.stringify(p)}`);
       assert.ok(p.event === undefined || p.event === 'COMMENT',
         `only COMMENT (GitHub) or no event at all (GitLab) may be sent: ${JSON.stringify(p)}`);

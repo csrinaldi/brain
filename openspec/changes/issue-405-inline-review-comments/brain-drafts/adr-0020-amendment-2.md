@@ -154,6 +154,10 @@ Lock 2 is unchanged and is deliberately restated rather than assumed. The cold r
 that lock 2 was enforced only by a source scan for the literal `APPROVE`, which a widening
 walks straight past: adding `event = 'COMMENT'` as a parameter left the entire suite green,
 after which `prReviewComment({ ..., event: 'APPROVE' })` posts an approval. That gap is
-closed in code on PR #490 by a contract case that passes a hostile `event` and asserts the
-payload still carries `COMMENT`. It needs no ADR change — the ADR always said "no parameter
+closed in code on PR #490 by a contract case that passes a hostile `event` and asserts that
+EVERY payload the verb sends still carries `COMMENT` — all THREE sites: the ternary's
+anchored branch, its bare branch, and the retry. `main`'s verb had one; #405 builds three,
+and covering any two of them left the suite green under an exploitable mutation. Round 8
+covered 1 and 3 and called it "both"; round 9 found site 2 — the only one production
+reaches today — still open. It needs no ADR change — the ADR always said "no parameter
 selects a different event"; nothing had ever tested it that way.

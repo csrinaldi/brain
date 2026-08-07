@@ -57,7 +57,7 @@ is where a future reader checks what may reach `event`.*
 Replace with:
 
 ```markdown
-| `prReviewComment` | `({ project, number, body, comments? })` | `event: 'COMMENT'` **hardcoded** — no APPROVE path exists in code, and `comments` does not reach it (lock 2, asserted against a hostile `event` argument). `comments` is an optional array of `{ path, line, body }` anchors; absent ≡ empty |
+| `prReviewComment` | `({ project, number, body, comments? })` | `event: 'COMMENT'` **hardcoded** — no APPROVE path exists in code, and `comments` does not reach it (lock 2, asserted against a hostile `event` argument on EVERY payload the verb sends — all three sites: the ternary's anchored branch, its bare branch, and the retry). `comments` is an optional array of `{ path, line, body }` anchors; absent ≡ empty |
 ```
 
 **Line 116** currently reads *"Normalized returns match the port's existing

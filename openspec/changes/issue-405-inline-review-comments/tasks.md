@@ -232,8 +232,8 @@ of the one that outranks them.
         posts an approval with the reviewer's own token. The lock is stated as "no
         parameter, flag or branch selects a different event" and had never been asserted
         the way an attacker would reach it. → a case that passes a hostile `event`.
-        **That case covered ONE of the verb's two payload sites** and said so nowhere; see
-        round 8.
+        **That case covered ONE of the verb's THREE payload sites** and said so nowhere;
+        see rounds 8 and 9.
         Part of the gap pre-dates this change; this change is the first widening of the
         signature it guards, and its own draft row argues that widening a signature without
         restating the lock invites the next widening to reach it.
@@ -486,24 +486,31 @@ of the one that outranks them.
       parse-checked. **No defect in executable behaviour** for the fifth round running, and
       every one of the seven previous rounds' repairs held under multiple spellings. But it
       found a **BLOCKER**, and it is the most serious finding of the whole sequence:
-      - **B1 — lock 2 was asserted on ONE of the verb's TWO payload sites.** Before #405
-        `prReviewComment` had one; this change added the bare retry. Round 1's C3 closed the
+      - **B1 — lock 2 was asserted on ONE of the verb's payload sites.** (Round 8 wrote
+        "one of TWO". There are THREE — round 9.) Before #405 `prReviewComment` built one
+        payload; this change builds three: the ternary's two branches and the bare retry. Round 1's C3 closed the
         lock-2 gap with a behavioural case driven by `capture()`, whose transport **always
         succeeds** — so on GitHub the retry never fired and its payload was never inspected.
         Parameterising `event` on the retry alone left all 2574 tests green (both source
         scans miss it — the mutated `event` is a variable, not a literal), after which
         `prReviewComment({ ..., event: 'APPROVE' })` with one out-of-diff anchor posts an
         **APPROVED review with the reviewer's own token**, satisfying `main`'s
-        `required_approving_review_count` AND L6's approver set. That is the merge path
-        `reviewer-protocol.md` §2 calls impossible by construction.
-        The fixture now REFUSES the anchored payload and logs every one; the case asserts
-        `>= 2` payloads and checks `event` on each. Red-proofed on the first site alone, the
-        retry alone, and both.
+        `required_approving_review_count`. **NOT L6** — round 8 claimed that too and was
+        wrong: `evaluateBrainWritesReviewed` fails a bot-only approval, because L6 counts a
+        non-author, NON-ALLOW-LISTED approval. Lock 3 holds independently under a lock-2
+        breach, which is exactly what §2 promises — and the sentence asserting the L6 breach
+        cited §2 as its authority (round 9, C4).
+        The fixture REFUSES the anchored payload and logs every one; after round 9 the case
+        ALSO drives the no-anchor shape, and asserts across every payload from both. Red-
+        proofed on each of the three sites independently.
         **The rule this earns:** a widening that creates a call site owns proving the lock
         still covers it. Round 1 fixed the lock where the defect was — and #405's own new
         call site was the sibling nobody checked, for seven rounds, in the guard on the one
         mechanism that keeps the automated reviewer unable to approve a merge.
         Eight artefacts asserted that coverage as complete, two of them outside the tree.
+        **Round 8's commit said "All corrected". Four were not** — the two Tier-2 drafts,
+        the PR body and issue #491 — which is this change's own recurring defect committed
+        inside the sentence claiming it had been avoided (round 9, C2).
       - **E1** — `renderVerdict`'s `!== null` half, on BOTH branches, pinned by nothing.
         Round 7 pinned the POSTER's null guard and justified it by citing this one. Under
         its removal the block advertises `line: null`, an anchor the poster then refuses —
@@ -511,10 +518,37 @@ of the one that outranks them.
         noticed and not on the thing it cited.
       - **E2** — round 6's "nothing is folded back" reached D3 and the signed ADR and not
         D7-2, 110 lines down in the same file.
-- [ ] T16 · round 9 — rounds 1-8 answered YES on 3, 2, 2, 1, 1, 2, 2 and 2 axes. Round 8 is
-      the first to find a BLOCKER since round 1, in a guard two rounds had inspected and
-      four had trusted — the argument for running until a round is clean, restated by
-      counter-example.
+- [x] T16 · round 9 — cold review of `f9a19e6`, ~45 mutations, every diff printed AND
+      `node --check`ed. **No defect in executable behaviour** for the sixth round running.
+      A second **BLOCKER**, and it is round 8's own fix falling one site short:
+      - **B1 — three payload sites, not two.** `github.prReviewComment` builds THREE
+        `event`-carrying literals: the ternary's anchored branch, its bare branch, and the
+        retry. `main` built one. Round 8 covered 1 and 3 and wrote "both call sites",
+        because a ternary reads as one site. **Site 2 is the only one a production run
+        reaches today** — no evaluator anchors, so `comments` is never sent — and
+        parameterising it alone left all 2575 tests green.
+        Fixed by driving BOTH call shapes and asserting across every payload of each.
+        Red-proofed on each site independently. **My first three red-proofs of this fix
+        were INERT**: I destructured a property named `ev` instead of aliasing `event: ev`,
+        so the diff printed clean and the mutation changed nothing. Printing the diff is
+        necessary and not sufficient — a substitution can land on executable code and still
+        be semantically dead.
+      - **C2 — round 8's commit said "All corrected" of eight artefacts. Four were not**:
+        both Tier-2 drafts (including the §4 row the commit named explicitly as the one that
+        would promote the overstatement into doctrine), the PR body, and issue #491. The
+        recurring defect, committed inside the sentence claiming it had been avoided.
+      - **C4 — round 8 overstated the exploit.** It claimed the forged APPROVE satisfies
+        `main`'s branch protection AND L6's approver set. The first is true and is why it is
+        a blocker; the second is false, measured: L6 counts a non-author, NON-ALLOW-LISTED
+        approval, so lock 3 holds independently — which is precisely what §2 promises, in
+        the sentence the claim cited as its authority. Overstating a breach is the same
+        defect class as understating one.
+      - **C3/E1** — the PR body was a round stale again, and T17 asserted a PR-body
+        attribution footer that the round-5 rewrite had removed.
+- [ ] T16 · round 10 — rounds 1-9 answered YES on 3, 2, 2, 1, 1, 2, 2, 2 and 2 axes. TWO
+      blockers have now been found in the same guard, three rounds apart, each in the fix
+      for the previous one. Six consecutive rounds have found no defect in executable
+      behaviour — the code is stable and the CLAIMS about it are not.
 - [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
       carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even
@@ -538,11 +572,15 @@ of the one that outranks them.
       (`tranche.mjs:43`), so the doctrine-relevant count on `main` is **13**, all inside
       02-04/08. This branch's six take it to 19 — a 46% increase, not the "doubling" the
       first version of this line claimed.
-      **And the PR body itself**, which round 5 found T17 escalating past. Every GitHub
-      post the agent authors ends with `_Generated by [Claude Code](...)_` — AI attribution,
-      on the one artefact `tranche.mjs` DOES scan. It is not a Tier-3 item (that list names
-      commits) and the agent's harness requires it, so it is raised here rather than removed
-      unilaterally. What deserves attention is the instrument, not the footer:
+      **And the agent's GitHub COMMENTS**, which round 5 found T17 escalating past. Every
+      comment the agent posts ends with `_Generated by [Claude Code](...)_` — AI
+      attribution. It is not a Tier-3 item (that list names commits) and the agent's harness
+      requires it, so it is raised here rather than removed unilaterally.
+      Round 5 wrote this as "the PR body itself", which was true then and stopped being true
+      when round 5's own rewrite of that body dropped the footer — leaving T17 asking the
+      maintainer to rule on a fact that no longer held (round 9, E1). `tranche.mjs` scans
+      `prBody` and nothing else, so the surface that DOES carry the footer — comments — is
+      the surface nothing scans. What deserves attention is the instrument, not the footer:
       ```
       AI_ATTRIBUTION_RE.test('_Generated by [Claude Code](...)_')   -> false
       AI_ATTRIBUTION_RE.test('Co-Authored-By: Claude Opus 5')       -> true

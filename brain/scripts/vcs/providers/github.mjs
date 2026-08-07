@@ -434,11 +434,12 @@ export async function prCommits({ project, number } = {}) {
  * refused anchored payload is retried ONCE bare, and `inlineDropped` then counts
  * what was lost; it is ABSENT when nothing was, never 0. Widening this signature
  * does not widen `event`: there is no parameter for it, and a contract test
- * asserts that BOTH payloads — the anchored attempt AND the bare retry — still
- * carry `COMMENT` when a caller passes a hostile `event` argument. Both, because
- * #405 created the second one: an earlier version of that test drove a fixture
- * that always succeeded, so the retry never fired and parameterising it alone
- * passed the whole suite.
+ * asserts that ALL THREE payload sites — the ternary's anchored branch, its bare
+ * branch, and the retry — still carry `COMMENT` when a caller passes a hostile
+ * `event` argument. Three, and counting them took two review rounds: `main` had
+ * ONE site, this function now builds three, and the ternary reads as one. Round 8
+ * covered sites 1 and 3 and called it "both"; round 9 found site 2 open — the
+ * only one a production run reaches today, since no evaluator anchors.
  *
  * @param {{ project: string, number: number, body: string, comments?: Array<{path: string, line: number, body: string}> }} opts
  * @returns {Promise<{ url: string } | { url: string, inlineDropped: number } | { url: null, error: string }>}
