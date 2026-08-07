@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -161,6 +161,70 @@ test('#469 _defaultChangedChunkFiles: drops non-chunk files AND directories — 
     mkdirSync(join(dir, 'legacy.jsonl.gz'));
     assert.deepStrictEqual(_defaultChangedChunkFiles(root), [join(dir, 'a.jsonl.gz')]);
   });
+});
+
+test('#469 the SCANNED set contains the READ set — a symlinked chunk is scanned, not bypassed (round-1 BLOCKER)', () => {
+  // The invariant is not that the scanner and _defaultReadObservations agree; it
+  // is that nothing reaches records/ unscanned. The first draft used
+  // Dirent.isFile() to drop directories and thereby dropped SYMLINKS too, while
+  // the reader's readFileSync follows them — so a symlinked chunk carrying a
+  // secret went into the append-only log, in a public repository, unscanned.
+  //
+  // Asserted as the SUPERSET property over a directory holding every awkward
+  // shape at once, rather than one case per test: the defect was a shape nobody
+  // enumerated, so the fixture is what has to be exhaustive.
+  withChunkDir((root) => {
+    const dir = join(root, '.memory', 'chunks');
+    const outside = join(root, 'elsewhere');
+    mkdirSync(outside);
+
+    writeFileSync(join(dir, 'plain.jsonl.gz'), gzipSync('{"observations":[]}\n'));
+    writeFileSync(join(outside, 'target.jsonl.gz'), gzipSync('{"observations":[]}\n'));
+    symlinkSync(join(outside, 'target.jsonl.gz'), join(dir, 'linked.jsonl.gz'));
+    mkdirSync(join(dir, 'adir.jsonl.gz'));                       // a DIRECTORY (E5)
+    symlinkSync(outside, join(dir, 'linkdir.jsonl.gz'));         // a symlink to a DIRECTORY
+    writeFileSync(join(dir, 'notes.txt'), 'not a chunk');
+
+    const scanned = _defaultChangedChunkFiles(root).map((p) => p.split('/').pop()).sort();
+    assert.deepStrictEqual(scanned, ['linked.jsonl.gz', 'plain.jsonl.gz'],
+      'a symlink to a chunk is a chunk the reader will follow, so it must be scanned; ' +
+      'a directory is not, whether reached directly or through a link');
+
+    // The superset property, stated over the reader's own enumeration rule
+    // (suffix match, readFileSync) rather than over a hand-written list — a
+    // hand-written list is how the symlink shape got missed in the first place.
+    const readable = readdirSync(dir)
+      .filter((f) => f.endsWith('.jsonl.gz'))
+      .filter((f) => {
+        try {
+          readFileSync(join(dir, f));
+          return true;
+        } catch {
+          return false; // EISDIR — the reader buckets these as unparseable
+        }
+      })
+      .sort();
+    for (const f of readable) {
+      assert.ok(scanned.includes(f), `${f} is readable by _defaultReadObservations but was NOT scanned`);
+    }
+  });
+});
+
+test('#469 _defaultChangedChunkFiles: an entry that cannot be stat\'d fails CLOSED (round-1 BLOCKER)', () => {
+  // Same rule as the directory read: "cannot look" must never be reported as
+  // "nothing to scan". A broken symlink is the reachable case.
+  assert.throws(
+    () =>
+      _defaultChangedChunkFiles('/fake/root', {
+        _listDir: () => [{ name: 'ghost.jsonl.gz' }],
+        _stat: () => {
+          const e = new Error('no such file');
+          e.code = 'ENOENT';
+          throw e;
+        },
+      }),
+    (err) => /fail closed/i.test(err.message) && err.message.includes('ghost.jsonl.gz'),
+  );
 });
 
 test('#469 scrubMaterializedChunks: a planted secret ABORTS before records/ is touched (REQ-469-1, E1)', async () => {

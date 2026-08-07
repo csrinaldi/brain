@@ -35,9 +35,45 @@ Two further reasons, both structural:
 
 - `_defaultReadObservations` **already** reads `.memory/chunks` from the filesystem
   (`collectChunkObservations`). Having the scanner ask git about the same directory the
-  reader reads directly is two sources of truth for one set. The #405 finding on
-  `hasUsableAnchor` is the same shape: *two copies of one rule drift; one function cannot*.
-  After this change, what gets scanned and what gets read are the same enumeration.
+  reader reads directly is two sources of truth for one set.
+
+  **Corrected in round 1.** This paragraph first closed with *"what gets scanned and what
+  gets read are the same enumeration"*, and that was **false as implemented** — see D4. The
+  two enumerations are still two; what the round established is the invariant that actually
+  matters, which is weaker than equality and is the one worth stating.
+
+## D4 — the invariant is CONTAINMENT, not agreement (round-1 cold review, BLOCKER)
+
+The first draft dropped directories with `Dirent.isFile()` (E5). `isFile()` is also false for
+a **symlink** entry, and the reader's `readFileSync` follows symlinks. Measured on a chunks
+directory holding one symlink to a chunk carrying `ghp_…`:
+
+```
+SCANNER sees : [ 'plain.jsonl.gz' ]
+READER  sees : [{"text":"ghp_0123…"},{"text":"fine"}]
+```
+
+The secret bypassed the scrub and reached the append-only records log, in a public
+repository — the outcome the gate exists to prevent, opened by the guard added to close a
+different one. The #405 pattern, in this change's own first draft: *a repair fixes the
+dimension it was pointed at and leaves the next one constant.* `isFile()` was aimed at
+directories; symlinks are the contiguous shape nobody enumerated.
+
+**The requirement is not that the two sets are equal — it is that the scanned set CONTAINS
+the read set.** Nothing may reach `records/` unscanned; scanning something the reader will
+ignore costs nothing. Equality would be a stronger claim than the gate needs and, as the
+directory case shows, than either function should make.
+
+Implemented with `statSync`, which **follows** symlinks: a symlink to a chunk is scanned, a
+directory — reached directly or through a link — is not, and the reader can read nothing the
+scanner does not see. An entry that cannot be stat'd fails **closed**, for the same reason
+the directory read does: *cannot look* must never be reported as *nothing to scan*, which is
+the whole defect of this ticket restated one level down.
+
+Pinned by a test that asserts the containment over a fixture holding every awkward shape at
+once — plain file, symlink to a chunk, directory named `*.jsonl.gz`, symlink to a directory,
+non-chunk file — and that derives the reader's side from the reader's own rule rather than
+from a hand-written list. A hand-written list is how the symlink shape was missed.
 - The gate stops depending on `.gitignore`. Today the scan's behaviour is a function of a
   file whose purpose has nothing to do with secret scanning, and which no test asserts.
 

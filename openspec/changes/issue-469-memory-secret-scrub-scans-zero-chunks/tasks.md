@@ -39,7 +39,26 @@ issue: 469
       | the scrub skipped entirely | RED ×7 |
 - [x] T7 — 2633 tests, 0 fail · `repo:check` ✓ · `brain:nav` ✓ · governed diff **152**.
 - [ ] T8 — Cold review rounds. Criterion, as ruled by the maintainer on #405: **two
-      consecutive rounds with nothing at blocker or correction severity.**
+      consecutive rounds with nothing at blocker or correction severity**, with a **hard
+      ceiling of four rounds** — at the fourth, escalate what is left rather than continue.
+      #405 ran to 29 because nothing capped it, and its rounds 21-29 found only
+      record-keeping defects.
+
+  - [x] **Round 1 — cold review of `3ba5321`. BLOCKER ×1, and this change introduced it.**
+        - **B1 — the scanned set did not contain the read set.** `Dirent.isFile()`, added to
+          drop directories (E5), also drops **symlinks**, and the reader's `readFileSync`
+          follows them. Measured: a symlinked chunk carrying `ghp_…` was **not scanned** and
+          its observation **was read into `records/`** — the scrub bypassed entirely, in a
+          public repository. The #405 pattern inside this change's own first draft: the
+          repair closed the dimension it was aimed at and opened the contiguous one.
+          Fixed with `statSync` (follows symlinks); an unstattable entry fails closed.
+          Design gains **D4**; D1's *"the same enumeration"* was false as written and is
+          corrected to the containment invariant. 4 mutations, 4 red.
+        - Everything else this round: the 11 T6 mutations re-verified as still red on the
+          merged tree; `origin/main` merged in (ADR-0020 Amendment 2, ADR-0028,
+          consolidation-protocol §1c/§1d); no false claim found in proposal or spec.
+        - Filed out of scope: **#499** — the Tier-2/Tier-3 boundary is written three ways and
+          Tier 3's list names four directories that do not exist.
       Carry #405's rounds 21-29 forward as method, not as narration:
       - a round's entry records commit, verdict, findings, evidence — **no narration
         paragraph**, because on #405 the paragraph became the next round's finding, seven

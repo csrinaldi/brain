@@ -25,6 +25,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -387,12 +388,36 @@ function _defaultLoadBrainConfig(root) {
  * An EMPTY directory is not an error: a fresh clone with no memory yet is
  * legitimate, and that is the distinction the git version could not draw.
  *
+ * ## The scanned set must CONTAIN the read set (round-1 cold review, BLOCKER)
+ *
+ * The invariant is not that this function and `_defaultReadObservations` agree;
+ * it is that **nothing reaches `records/` unscanned**. The first draft of this
+ * fix used `Dirent.isFile()` to drop directories (E5) and thereby dropped
+ * SYMLINKS too — `isFile()` is false for a symlink entry — while the reader's
+ * `readFileSync` follows them. Measured on a chunks directory holding one
+ * symlink to a chunk carrying `ghp_…`:
+ *
+ * ```
+ * SCANNER sees : [ 'plain.jsonl.gz' ]
+ * READER  sees : [{"text":"ghp_0123…"},{"text":"fine"}]
+ * ```
+ *
+ * The secret bypassed the scrub and landed in the append-only log, in a public
+ * repository — the one outcome this gate exists to prevent, opened by the guard
+ * added to close a different one. So the type test is `statSync`, which FOLLOWS
+ * symlinks: a symlink to a chunk is scanned, a directory (or a symlink to one)
+ * is not, and the reader can read nothing this does not see.
+ *
+ * An entry that cannot be stat'd fails CLOSED for the same reason the directory
+ * read does: "cannot look" must never be reported as "nothing to scan".
+ *
  * @param {string} root
  * @param {object} [opts]
  * @param {(dir: string, opts: object) => import("node:fs").Dirent[]} [opts._listDir]
+ * @param {(p: string) => import("node:fs").Stats} [opts._stat]
  * @returns {string[]}  Absolute paths.
  */
-export function _defaultChangedChunkFiles(root, { _listDir = readdirSync } = {}) {
+export function _defaultChangedChunkFiles(root, { _listDir = readdirSync, _stat = statSync } = {}) {
   const dir = join(root, ".memory", "chunks");
   let entries;
   try {
@@ -405,9 +430,24 @@ export function _defaultChangedChunkFiles(root, { _listDir = readdirSync } = {})
       ),
     );
   }
-  return entries
-    .filter((e) => e.isFile() && e.name.endsWith(".jsonl.gz"))
-    .map((e) => join(dir, e.name));
+  const out = [];
+  for (const e of entries) {
+    if (!e.name.endsWith(".jsonl.gz")) continue;
+    const full = join(dir, e.name);
+    let st;
+    try {
+      st = _stat(full);
+    } catch (err) {
+      throw new Error(
+        `secret-scrub: cannot stat ${full} — a chunk the reader may still follow cannot be classified; refusing to share (fail closed): ${err?.code ?? ""} ${err?.message ?? err}`.replace(
+          /\s+/g,
+          " ",
+        ),
+      );
+    }
+    if (st.isFile()) out.push(full);
+  }
+  return out;
 }
 
 /**
