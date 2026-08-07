@@ -21,15 +21,29 @@ absent-by-default, so every existing caller is unaffected.
 it (ADR-0020 lock 2 / REQ-266-3). Asserted at the level that cannot rot: a test that
 inspects the posted payload, plus the existing drift-guard on the verb list.
 
-## REQ-405-2 — a finding carries an OPTIONAL anchor, and no anchor means no comment
+## REQ-405-2 — a finding carries an OPTIONAL anchor, on BOTH protocols
 
-`file` (string) and `line` (integer) on a `/2` finding. Both optional. A finding lacking
-either produces **no** inline comment and is unaffected in every other respect.
+`file` (string) and `line` (integer). Both optional. A finding lacking either produces
+**no** inline comment and is unaffected in every other respect.
+
+**Corrected in round 2 of the cold review (C-6).** This said *"on a `/2` finding"*, and the
+emitter never gated on protocol — a `/1` verdict carrying an anchored finding renders
+`file:`/`line:` and drives inline comments, measured. That is correct behaviour and a wrong
+requirement, and the repo settled the question one field over: `renderVerdict` emits
+`evidence_class`/`causal_disposition` on the same terms, and `cli.mjs` records why — what
+keeps `/1` output byte-for-byte unchanged is that **nothing emits the field**, not a
+protocol branch. Adding one would be a second place for the two protocols to drift.
 
 This is what keeps the change additive: every evaluator shipping today keeps working
 unchanged and gains inline coverage only when it starts emitting anchors. A test pins
 that a legacy finding — no `file`, no `line` — round-trips and posts exactly as it does
 today.
+
+`line` survives the round trip as **text** (`parseVerdict` returns entry scalars verbatim;
+`verdict.test.mjs` pins `'42'`), so the consumer coerces. `deriveInlineComments` does —
+GitHub's reviews API rejects a string line, and a verdict that had made the round trip
+would otherwise lose every anchor and report them as un-anchorable diff lines: our defect,
+charged to the diff.
 
 ## REQ-405-3 — the anchor survives the render/parse round trip
 
@@ -97,9 +111,13 @@ that asymmetry safe rather than accidental. A provider that silently no-ops on
 `brain/core/methodology/vcs-contract.md`'s `prReviewComment` row must record the widened
 signature, the two-endpoint GitLab mapping, and the extra `diff_refs` read.
 
+`brain/core/methodology/reviewer-protocol.md` §6.1/§6.2 must record the `file`/`line`
+anchor too — that document names itself the schema authority, and this change added two
+per-finding fields to that schema while drafting nothing for it (round-2 cold review, C-6).
+
 `brain/**` is Tier 2 — **human-only**. The agent writes
-`openspec/changes/issue-405-inline-review-comments/brain-drafts/vcs-contract-row.md` and
-the human promotes it. The agent must never write the destination file.
+`brain-drafts/vcs-contract-row.md` and `brain-drafts/reviewer-protocol-anchor.md`; the
+human promotes both. The agent must never write the destination files.
 
 ## REQ-405-8 — the e2e proves the anchor reaches the wire, and that today NOTHING sends one
 

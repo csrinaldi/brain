@@ -464,9 +464,22 @@ export async function prReviewComment({ project, number, body, comments } = {}) 
   // accepted. Retry WITHOUT the anchors and report how many were dropped.
   //
   // Only reachable when anchors were sent, so a plain post failure costs no extra
-  // call. The attribution is sound rather than assumed: the retry differs from
-  // the first attempt in exactly one way, so if dropping the comments makes it
-  // succeed, the comments were the cause.
+  // call.
+  //
+  // The ATTRIBUTION is not certain, and an earlier version of this comment claimed
+  // it was ("the retry differs in exactly one way, so if dropping the comments
+  // makes it succeed, the comments were the cause"). The retry fires on ANY
+  // non-zero first exit, so a transient 5xx that clears by the second attempt is
+  // reported as dropped anchors — the CLI then prints "could not be anchored",
+  // charging a network blip to the diff. Round-2 cold review, E-3.
+  //
+  // Retrying anyway is the deliberate trade: gating on a 422-shaped stderr would
+  // make a transient failure lose the VERDICT, and REQ-405-4 ranks the verdict
+  // above the annotation. What is fixed here is the CLAIM, not the behaviour — an
+  // over-count of dropped anchors costs a confusing line in a log; a lost verdict
+  // costs the review. (A first call that landed server-side but exited non-zero
+  // would post the verdict twice; that is the anti-loop lock's problem and needs
+  // provider idempotency this port does not have.)
   //
   // `inlineDropped` is ABSENT when nothing was dropped, never 0 — "none
   // requested" and "all dropped" must not be the same answer to a reader

@@ -1164,19 +1164,25 @@ for (const providerName of Object.keys(ROLLUP_PROVIDERS)) {
 // payload rather than the return value. Without this the "rides the same call"
 // test passes against a verb that ignores `comments` entirely — it did, before
 // the implementation landed.
+// `sent` records POST BODIES; `requests` records every call the verb makes, url
+// included. The second one exists because the first is blind by construction
+// (cold review of PR #490 round 2, C-2): GitLab's fixture answered the
+// `diff_refs` GET before recording anything, so a mutation that made an EMPTY
+// `comments` array a different request — one extra provider call, and an
+// `inlineDropped: 0` the whole change forbids — left the contract suite green.
+// A payload log cannot see a call that carries no payload.
 const sent = [];
+const requests = [];
+function resetLogs() { sent.length = 0; requests.length = 0; }
+
 function capturingSpawn(data) {
   return (_cmd, _args, opts) => {
+    requests.push('POST /reviews');
     try { sent.push(JSON.parse(opts?.input ?? '{}')); } catch { sent.push({ unparseable: opts?.input }); }
     return { status: 0, stdout: JSON.stringify(data), stderr: '' };
   };
 }
 
-// Rejects by SHAPE, not by ordering: any request carrying an anchor fails, any
-// request without one succeeds. The first version keyed off call order, which
-// silently encoded GitHub's sequence (inline first, retry bare) and would have
-// rejected GitLab's SUMMARY — the opposite of what it claims to model. Shape is
-// provider-agnostic and is what the real providers actually reject.
 // First call succeeds, every later one dies. Discriminates the ORDER: a verb
 // that posts the verdict first survives this; one that posts it last does not.
 function dieAfterFirstSpawn(data) {
@@ -1186,6 +1192,13 @@ function dieAfterFirstSpawn(data) {
     : { status: 1, stdout: '', stderr: 'transport died' });
 }
 
+// Rejects by SHAPE, not by ordering: any request carrying an anchor fails, any
+// request without one succeeds. The first version keyed off call order, which
+// silently encoded GitHub's sequence (inline first, retry bare) and would have
+// rejected GitLab's SUMMARY — the opposite of what it claims to model. Shape is
+// provider-agnostic and is what the real providers actually reject.
+// (This paragraph sat on `dieAfterFirstSpawn` above until the round-2 cold review
+// noticed — E-4, the orphaned-JSDoc defect recurring in the file that fixed it.)
 function rejectAnchoredRequests(data) {
   return (_cmd, _args, opts) => {
     const payload = opts?.input ?? '';
@@ -1202,7 +1215,7 @@ const WRITE_VERB_PROVIDERS = {
     ok: (data) => { setSpawn(jsonSpawn(data)); return {}; },
     fail: () => { setSpawn(failSpawn('fixture: simulated failure')); return {}; },
     rejectInline: (data) => { setSpawn(rejectAnchoredRequests(data)); return {}; },
-    capture: (data) => { sent.length = 0; setSpawn(capturingSpawn(data)); return {}; },
+    capture: (data) => { resetLogs(); setSpawn(capturingSpawn(data)); return {}; },
     dieAfterFirst: (data) => { setSpawn(dieAfterFirstSpawn(data)); return {}; },
     sentPayloads: () => sent,
   },
@@ -1227,8 +1240,12 @@ const WRITE_VERB_PROVIDERS = {
       };
     },
     capture: (data) => {
-      sent.length = 0;
+      resetLogs();
       return { fetchImpl: async (url, opts) => {
+        // Every request is logged BEFORE any of them is answered — including the
+        // `diff_refs` GET, which carries no body and was therefore invisible to
+        // the payload log alone.
+        requests.push(`${opts?.method ?? 'GET'} ${url.replace(/^.*\/api\/v4\//, '')}`);
         if (/merge_requests\/\d+$/.test(url)) return { ok: true, json: async () => ({ diff_refs: { base_sha: 'b', head_sha: 'h', start_sha: 's' } }) };
         try { sent.push(JSON.parse(opts?.body ?? '{}')); } catch { sent.push({ unparseable: opts?.body }); }
         return { ok: true, json: async () => data };
@@ -1240,6 +1257,7 @@ const WRITE_VERB_PROVIDERS = {
 
 for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
   const { module: vcs, ok, fail, rejectInline, capture, sentPayloads, dieAfterFirst } = WRITE_VERB_PROVIDERS[providerName];
+  const requestLog = () => requests;
 
   test(`${providerName}.prReviewComment (contract): posts event:'COMMENT' (hardcoded), returns { url } on success`, async () => {
     const result = await vcs.prReviewComment({
@@ -1361,19 +1379,34 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
 
   test(`${providerName}.prReviewComment (contract): comments: [] is the SAME request as omitting it (REQ-405-2)`, async () => {
     // The draft contract row asserts "absent and empty are the same request".
-    // It was true and forced by nothing (cold review of PR #490, E3) — and it is
-    // the distinction the poster relies on to keep "no anchors requested" and
-    // "all anchors dropped" from collapsing into one observation.
-    const result = await vcs.prReviewComment({
+    // It was true and forced by nothing (cold review of PR #490 round 1, E3),
+    // and the first repair was forced only on GitHub (round 2, C-2): asserting
+    // the BODIES sent is blind to a call that carries none, and on GitLab
+    // treating `[]` as a request costs an extra `diff_refs` GET and can return
+    // `inlineDropped: 0` — the one value REQ-405-4 forbids.
+    //
+    // So the two runs are compared as CALL SEQUENCES, which is the only form of
+    // the claim that both providers can fail.
+    const absent = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-5a', id: 51 }),
+    });
+    const absentCalls = [...requestLog()];
+    const absentPayloads = JSON.stringify(sentPayloads());
+
+    const empty = await vcs.prReviewComment({
       project: 'x/y', number: 1, body: 'verdict',
       comments: [],
-      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-5', id: 5 }),
+      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-5b', id: 52 }),
     });
-    assert.equal(typeof result.url, 'string');
-    assert.equal(result.inlineDropped, undefined, 'an empty request drops nothing');
-    const payloads = sentPayloads();
-    assert.equal(payloads.length, 1, `an empty comments array must attempt no inline call: ${JSON.stringify(payloads)}`);
-    assert.equal(payloads[0].comments, undefined, 'and must not forward an empty array to the provider');
+
+    assert.equal(typeof empty.url, 'string');
+    assert.equal(empty.inlineDropped, undefined, 'an empty request drops nothing — and must never report 0');
+    assert.equal(absent.inlineDropped, undefined);
+    assert.deepEqual(requestLog(), absentCalls,
+      `an empty comments array must make exactly the calls omitting it makes. absent=${JSON.stringify(absentCalls)} empty=${JSON.stringify(requestLog())}`);
+    assert.equal(JSON.stringify(sentPayloads()), absentPayloads,
+      'and send exactly the same payloads — no empty array forwarded to the provider');
   });
 
   test(`${providerName}.prReviewComment (contract): inlineDropped counts what was LOST, it is not a flag (REQ-405-4)`, async () => {

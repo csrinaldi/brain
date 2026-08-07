@@ -17,12 +17,16 @@ preference. **D6 is a sixth the measurements surfaced, and it belongs to the hum
 
 ```
 prReviewComment({ project, number, body, comments? })
-  -> { url } | { url: null, error }
+  -> { url } | { url, inlineDropped } | { url: null, error }
 ```
 
+`inlineDropped` was missing from this shape until round 2 of the cold review (E-6) —
+added in the same change that introduced it, and left out of the design's own signature.
+
 Measured basis: GitHub's `/reviews` endpoint takes `body`, `event` and `comments[]` in
-**one** payload, so widening costs zero additional calls and keeps the verdict atomic —
-either the whole review posts or none of it does. A fifth verb would mean two calls on
+**one** payload, so widening costs zero additional calls **on GitHub** and keeps its review
+atomic — either the whole review posts or none of it does. On GitLab it costs one
+`diff_refs` read plus one call per anchor, which is the floor that API allows (see D3). A fifth verb would mean two calls on
 GitHub, which introduces a state where the summary posted and the inline did not, on the
 provider where that split is otherwise impossible.
 
@@ -62,9 +66,27 @@ diff; GitLab rejects a stale `position`. The rule:
    fold the un-anchorable findings back into the block.
 3. **Report the count** — the verdict says how many anchors were dropped and why.
 
-Never the reverse order (summary first, inline second): that is two calls, and the
-window between them is exactly the second-postable-artifact the anti-loop lock is built
-to prevent (D5).
+**CORRECTED during implementation — this rule was GitHub's, written as everyone's.**
+It read: *"Never the reverse order (summary first, inline second): that is two calls, and
+the window between them is exactly the second-postable-artifact the anti-loop lock is
+built to prevent (D5)."* The shipped GitLab verb uses exactly that order, because it has
+no other: discussions are one-per-position, so N anchors are N+1 calls whichever way they
+go, and there is no atomic option to prefer.
+
+The reasoning was wrong twice over. The anti-loop lock counts **parseable verdicts**, not
+posts — an inline annotation carries finding text and no `brain-review/N` block, so
+`cold-boot.mjs`'s `reviews.map(parseVerdict).filter(Boolean)` never sees it — and a
+"window between two calls" is not a second postable artifact.
+
+The rule that survives, and that both providers follow: **when the calls cannot be atomic,
+the verdict goes in the one that is already safe if everything after it fails.** GitHub is
+atomic, so it attempts anchored and retries bare. GitLab is not, so the summary goes first.
+Opposite sequences, one rule.
+
+D5 and REQ-405-5 were corrected when the implementation falsified them; this paragraph was
+missed and shipped for two more commits — caught by round 2 of the cold review (C-1). Same
+class as the signed-ADR finding one round earlier: the correction was made everywhere it
+was noticed and nowhere it was not.
 
 The discipline this repo already has a name for: an inline post that failed is
 `uncomputable`, not `no findings`. The count is reported precisely so the reader can
@@ -160,7 +182,12 @@ the subject, not a line item inside a feature.
    second invocation at the same head.
 5. **E2E on #409's harness** (`test/review-regulated/`), whose README already names this
    change: assert the captured `POST …/reviews` payload's `comments` array — the stub
-   captures the full body verbatim, so no harness change is needed to see it.
+   captures the full body verbatim. **The 'no harness change is needed' half was
+   wrong** — REQ-405-8 records the falsification: no evaluator anchors, so a CLI run
+   cannot produce the payload this line assumed, and the harness gained an
+   inline-refusing mode (`GH_STUB_REJECT_INLINE`) to exercise the fallback against the
+   real binary. Corrected here in round 2 of the cold review (E-6); the spec had
+   carried the correction for two commits while the design still asserted the claim.
 
 Every mutation's diff is printed before its run. Four substitutions silently failed to
 match during PR #478 and produced meaningless greens; the discipline is load-bearing.

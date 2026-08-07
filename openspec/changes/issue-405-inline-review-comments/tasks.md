@@ -10,9 +10,11 @@ topic_key: sdd/issue-405-inline-review-comments/tasks
 
 **Status: IMPLEMENTED, awaiting cold review.** Both original blockers cleared — PR #478
 merged at `ba4921e` (it owned `verdict.mjs`/`parse-verdict.mjs`), and D6 was ruled (b) by
-the maintainer. Two human acts remain OPEN and are marked below: T4c (sign ADR-0020
-Amendment 2 — the correction) and T11b (promote the contract row). Neither is an agent
-act. Amendment 1 itself was signed 06/08/2026 and is already in `main`.
+the maintainer. Three human acts remain OPEN and are marked below: T4c (sign ADR-0020
+Amendment 2 — the correction, tracked as #491), T11b (promote the contract row) and T11c
+(promote the `reviewer-protocol.md` §6 anchor). None is an agent act. Amendment 1 itself
+was signed 06/08/2026 and is already in `main` — this header claimed otherwise for the
+whole implementation.
 
 **Two requirements were falsified by building them** — REQ-405-5 (T7) and REQ-405-8
 (T12). Both are corrected in the spec with the measurement that falsified them, not
@@ -130,6 +132,11 @@ of the one that outranks them.
       plainly that no caller sends `comments` yet.
 - [ ] T11b — **HUMAN: promote** the row into `brain/core/methodology/vcs-contract.md`.
       Tier 2 — the agent must never write the destination file.
+- [ ] T11c — **HUMAN: promote** `brain-drafts/reviewer-protocol-anchor.md` into
+      `brain/core/methodology/reviewer-protocol.md` §6.1/§6.2. Found missing by round 2 of
+      the cold review (C-6): §6 names ITSELF the schema authority, and this change added
+      two per-finding fields to that schema while drafting the `vcs-contract.md` row and
+      the ADR amendment and nothing for it.
 - [x] T12 — e2e on #409's harness. **This task found the change's real defect.** The
       three cases are the wire path (real `postVerdict` → `github.mjs` → `spawnSync('gh')`
       → the captured payload), the 422 fallback against the real binary
@@ -168,18 +175,27 @@ of the one that outranks them.
       stops being worth running when it finds (1) no defect in executable behaviour,
       (2) no protection that nothing pins, (3) no false normative claim in the artefacts.
       T12 failed (1) and (2) simultaneously, so the criterion had not been met before it.
-- [x] T14 — full suite **2557 / 2556 pass, 0 fail** (1 skip: pre-existing, root ignores
-      mode bits). `repo:check` ✓, `brain:nav` ✓.
-      **Diff budget: the gate reports 225 against lite's 1000 and PASSES.**
-      An earlier version of this line said "1001 vs 1000, over by one" and escalated a
-      `size:exception`-or-split ruling to the maintainer. That number was raw `git diff`
-      additions; the GOVERNED metric runs the numstat through `governance.ignoreList`,
-      which excludes `**/*.test.mjs` and `openspec/changes/**`. Measured, not re-argued:
-      `git diff origin/main...HEAD --numstat | node brain/scripts/vcs/diff-size-count.mjs`
-      → `225`, and `runCheck('diff-size')` → `{ pass: true }`.
-      The instinct in the old line — refuse to shave a line to clear a governance
-      measurement — was right and was applied to the wrong number. Reading the gate is
-      cheaper than reasoning about it, and the reasoning is what was wrong.
+- [x] T14 — gates, recorded as COMMANDS rather than as frozen numbers. Two rounds of this
+      row were wrong in two different ways, and the second failure is the instructive one.
+      ```
+      npm test                                                    # 0 fail
+      npm run repo:check                                          # ✓
+      npm run brain:nav                                           # ✓
+      git diff origin/main...HEAD --numstat \
+        | node brain/scripts/vcs/diff-size-count.mjs              # well under lite's 1000
+      node -e "…tierParams('lite').diffBudget"                    # 1000
+      ```
+      **First version:** "1001 added vs lite's 1000 — over by one", escalating a
+      `size:exception`-or-split ruling to the maintainer. That was raw `git diff` additions;
+      the GOVERNED metric runs the numstat through `governance.ignoreList`, which excludes
+      `**/*.test.mjs` and `openspec/changes/**`. The real figure was 225 and the gate passed
+      with room to spare. The instinct — refuse to shave a line to clear a governance
+      measurement — was right and was applied to a number nobody had read.
+      **Second version** wrote `225` down. One commit later it was 272 (round-2 cold review,
+      C-5): the conclusion held, the measurement did not. A number in a ledger is a claim
+      about a tree that keeps moving, so this row now records what to RUN. The suite count
+      is omitted for the same reason — it changes with every test added, and "0 fail" is the
+      claim that matters.
 - [x] T15 — PR **#490** to `main`, `Closes #405`.
 - [x] T16 · round 1 — cold review of PR #490 @ `1bbc455`. Zero-context reviewer, own
       worktree, given no conclusions and told to derive the standards from `brain/` itself.
@@ -226,6 +242,60 @@ of the one that outranks them.
       **Two of the nine were still green on the first repair** (C1's weaker form and C4,
       which had no test at all) — the fix for a finding needs its own red-proof, because
       a plausible repair is exactly what the original defect also looked like.
-- [ ] T16 · round 2 — the criterion is not met until a round answers NO to all three
-      questions. Round 1 found all three, and it found them inside work that had already
-      passed 18 mutations of my own.
+- [x] T16 · round 2 — cold review of `3b87a07`, told explicitly not to trust round 1's
+      repairs. **Stopping criterion still NO, but on two of three axes instead of three:**
+      no defect in executable behaviour (it could not produce a wrong result from either
+      provider with real inputs, and all 9 round-1 repairs red under their own mutations),
+      one protection pinning nothing, four false normative claims.
+      - **C-1** — `design.md` D3 said *"Never the reverse order (summary first, inline
+        second)"*. That is the order GitLab ships, and has no alternative. D5, REQ-405-5 and
+        the contract row all got correction banners when the implementation falsified them;
+        D3 sat two paragraphs away and got none. Round 1's B1 was this same shape against a
+        signed ADR — *"corrected everywhere it was noticed and nowhere it was not"* — and it
+        recurred inside the change's own design doc while that lesson was being written up.
+        The reasoning was wrong twice over: the anti-loop lock counts parseable verdicts,
+        not posts, so a window between two calls is not a second postable artifact.
+      - **C-2** — the round-1 repair for E3 (`comments: []` ≡ absent) was forced on GitHub
+        only. It asserted the BODIES sent, and GitLab's fixture answered the `diff_refs` GET
+        before recording, so a call carrying no payload was invisible: making `[]` an inline
+        request cost an extra provider call and could return `inlineDropped: 0` — the one
+        value this change forbids — with a green suite. The fixtures now log every REQUEST,
+        and the case compares two runs as call SEQUENCES, which is the only form of the
+        claim both providers can fail.
+      - **C-3** — `brain-drafts/promotion-checklist.md`, **not in the diff**, still told the
+        human to promote Amendment 1 and quoted a `HOME.md:69` that no longer exists. A
+        human following it would have re-promoted a superseded, falsified amendment. An
+        untouched artefact still makes claims about the tree; being outside the diff is why
+        nothing caught it.
+      - **C-4** — spec REQ-405-5 and design D7-4 both asserted "a run that posts inline
+        comments must still skip with anti-loop", and no test passed anchored findings to
+        `postVerdict` twice. The behaviour was already safe; the coverage claim was fiction.
+        Now a real case, red when the lock is removed.
+      - **C-5** — T14's own repair went stale in one commit; see T14.
+      - **C-6** — REQ-405-2 said the anchor is "on a `/2` finding" and nothing gated it: a
+        `/1` verdict renders `file:`/`line:` and drives inline comments, measured. Correct
+        behaviour, wrong requirement — `renderVerdict` treats `evidence_class` the same way
+        and `cli.mjs` records why. Spec corrected rather than code gated, and the schema half
+        drafted for `reviewer-protocol.md` §6, the document that names ITSELF the schema
+        authority and that this change had added two fields to while drafting nothing for it.
+      - **E-1/E-2** — `Number(f.line)` and the `**id** — ` prefix both pinned by nothing. The
+        coercion is not cosmetic: `parseVerdict` returns `line` as TEXT (`'42'`, pinned in
+        `verdict.test.mjs`), GitHub rejects a string line, and a round-tripped verdict would
+        have lost every anchor and reported them as un-anchorable diff lines.
+      - **E-3** — the GitHub retry comment claimed the attribution was "sound rather than
+        assumed". It is not: the retry fires on any non-zero exit, so a transient 5xx is
+        reported as dropped anchors. Retrying anyway is the right trade (a lost verdict costs
+        more than an over-count); the CLAIM was corrected, not the behaviour.
+      - **E-4** — the "rejects by SHAPE" paragraph documented one fixture and sat on another:
+        round 1's orphaned-JSDoc finding, recurring in the file that fixed it.
+      - **E-5/E-6** — the SUPERSEDED banner sat below the instruction block telling a reader
+        to promote; D1's return shape omitted the `inlineDropped` this change added, and D7-5
+        still said "no harness change is needed" two commits after the spec recorded that
+        claim as falsified.
+      **The pattern across both rounds**, worth more than any single finding: every artefact
+      that was WRITTEN got corrected, and every artefact that was merely NEARBY did not.
+      D3 two paragraphs from D5; the checklist beside the draft it describes; the protocol
+      document behind the contract row. A correction is not applied until something asks
+      which OTHER artefacts said the same thing.
+- [ ] T16 · round 3 — the criterion is not met until a round answers NO to all three
+      questions. Round 1 found all three; round 2 found two, inside round 1's repairs.

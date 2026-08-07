@@ -494,3 +494,53 @@ test('#405 T9: nothing dropped means NO inlineDropped key, never 0 (REQ-405-4)',
   assert.equal(out.posted, true);
   assert.equal('inlineDropped' in out, false, `absent, not 0: ${JSON.stringify(out)}`);
 });
+
+test('#405: an inline post does NOT weaken the anti-loop lock (REQ-405-5)', async () => {
+  // Asserted in spec REQ-405-5 and design D7-4 and implemented in no test until
+  // the round-2 cold review counted them (C-4). The behaviour was already safe —
+  // the lock returns before any verb is chosen — but an artefact claiming
+  // coverage that does not exist is the same defect class as a red-proof ledger
+  // with a fabricated row.
+  const spy = recordingSpy();
+  const args = {
+    headSha: HEAD, project: 'csrinaldi/brain', number: 42, provider: 'github', mode: 'tranche',
+    renderedBody: '```yaml\nprotocol: brain-review/2\n```',
+    reviewerHandle: 'brain-reviewer',
+    findings: [{ id: 'f1', evidence: 'boom', file: 'a.mjs', line: 3 }],
+    deps: { getVcs: async () => spy.vcs },
+  };
+  const first = await postVerdict({ ...args, priorVerdicts: [] });
+  assert.equal(first.posted, true);
+  assert.ok(spy.calls.some(c => c.verb === 'prReviewComment' && c.args.comments?.length === 1),
+    'the first run really did post inline — otherwise the second half proves nothing');
+
+  const second = await postVerdict({
+    ...args,
+    priorVerdicts: [{ head_sha: HEAD, verdict: 'REVISE', author: 'brain-reviewer' }],
+  });
+  assert.deepEqual(second, { posted: false, skipped: 'anti-loop' },
+    'a second run at the same head must still skip — inline annotations carry no brain-review block, ' +
+    'so the lock, which counts parseable verdicts rather than posts, sees exactly what it saw before #405');
+  assert.equal(spy.calls.filter(c => c.verb === 'prReviewComment').length, 1,
+    'and nothing was posted the second time');
+});
+
+test('#405 deriveInlineComments: the line is COERCED to a number (REQ-405-2)', async () => {
+  // `parseVerdict` returns entry scalars as TEXT — `verdict.test.mjs` pins
+  // `parsed.findings[0].line === '42'`. GitHub's reviews API rejects a string
+  // line, so a verdict that made the round trip would lose every anchor and
+  // report them as un-anchorable diff lines: our defect, blamed on the diff.
+  // The coercion was there and pinned by nothing (round-2 cold review, E-1).
+  const [c] = deriveInlineComments([{ id: 'f', evidence: 'e', file: 'a.mjs', line: '42' }]);
+  assert.strictEqual(c.line, 42, 'the string form must not reach the provider');
+  assert.equal(typeof c.line, 'number');
+});
+
+test('#405 deriveInlineComments: the comment names the finding it came from (REQ-405-2)', async () => {
+  // Only the evidence half of the body was pinned (round-2 cold review, E-2).
+  // The id is what lets a developer match an inline note to the row in the
+  // summary block — without it the two artifacts are read as unrelated.
+  const [c] = deriveInlineComments([{ id: 'budget', evidence: 'the comparison', file: 'a.mjs', line: 1 }]);
+  assert.match(c.body, /budget/, 'the comment must name the finding id');
+  assert.match(c.body, /the comparison/, 'and carry its evidence');
+});
