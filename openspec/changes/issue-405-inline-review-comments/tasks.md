@@ -1030,8 +1030,23 @@ of the one that outranks them.
       Verified this round: round 26's other claims; the axis list; `013845d` on `origin/main`;
       #491 open and `status:approved`; the trailer boundary; 2627 tests, 0 fail; governed diff
       360 of 1000; `repo:check` ✓; `brain:nav` ✓.
-- [ ] T16 · round 28 — the axis has failed at rounds 1 and 11 only. Two consecutive rounds
-      with nothing at blocker or correction severity close this.
+- [x] T16 · round 28 — cold review of `2f7b9c9`. **No blocker, no defect in executable
+      behaviour, no correction, no false claim. Clean. Streak 1 of 2.**
+      Evidence: rounds 16 and 17's mutation batches re-run against the MERGED tree — 13
+      mutations, 13 red, including the two sharpest (`comments: inline.slice(0, 1)` on the
+      provider production uses, and `body` taken from `findings[out.length]` in the poster).
+      Round 27's claims re-verified and all hold. `origin/main` touched none of this change's
+      files, so the merge could not have weakened anything, and the batches confirm it did
+      not. 2627 tests, 0 fail; governed diff 360 of 1000; `repo:check` ✓; `brain:nav` ✓.
+      **CI: eight green, `actor-check` RED, and it is not a finding against this change.**
+      L5′ requires `status:approved` to be applied strictly AFTER the newest foreign commit;
+      the label was applied 02/08 and every review round has pushed since. The gate is
+      working exactly as written. It is also **not agent-fixable**: #124 forbids the agent
+      applying `status:approved` under any circumstance. Consequence worth stating plainly —
+      **every further round invalidates the approval again**, so the round loop now has a
+      per-round cost to the maintainer that the criterion does not account for.
+- [ ] T16 · round 29 — the axis has failed at rounds 1 and 11 only; round 28 was clean. One
+      more clean round meets the ruled criterion and the review ends.
 - [x] T18 — **the transferable finding, drafted for the reviewer line (#313).** Maintainer's
       call that this knowledge outlives #405: `brain-drafts/anti-pattern-mutation-blind-by-axis.md`,
       for `brain/core/anti-patterns/`.
