@@ -49,6 +49,7 @@ const ROWS = [
   { name: 'CRLF line endings throughout the body', opts: { eol: '\r\n' }, expectHeadSha: SHA },
   { name: 'leading tab before the head_sha key (breaks the column-0 anchor)', tabKey: true, expectHeadSha: null },
   { name: 'empty block (fence present, no content)', empty: true, expectHeadSha: null },
+  { name: 'uppercase PROTOCOL key (case-folded key must defeat both parsers identically)', upperProtoKey: true, expectHeadSha: null },
 ];
 
 for (const row of ROWS) {
@@ -64,6 +65,9 @@ for (const row of ROWS) {
     } else if (row.tabKey) {
       rBody = ['```yaml', 'protocol: brain-review/2', 'verdict: APPROVE', `\thead_sha: ${SHA}`, '```'].join('\n');
       dBody = ['```yaml', 'protocol: brain-decision/1', 'decision: APPROVE', `\thead_sha: ${SHA}`, 'actor: alice', '```'].join('\n');
+    } else if (row.upperProtoKey) {
+      rBody = ['```yaml', 'PROTOCOL: brain-review/2', 'verdict: APPROVE', `head_sha: ${SHA}`, '```'].join('\n');
+      dBody = ['```yaml', 'PROTOCOL: brain-decision/1', 'decision: APPROVE', `head_sha: ${SHA}`, 'actor: alice', '```'].join('\n');
     } else {
       rBody = reviewBody([], row.opts);
       dBody = decisionBody([], row.opts);
@@ -81,6 +85,16 @@ for (const row of ROWS) {
       decisionResult?.head_sha ?? null,
       row.expectHeadSha,
       `parseDecision head_sha mismatch for row "${row.name}"`,
+    );
+    assert.equal(
+      reviewResult?.protocol ?? null,
+      row.expectHeadSha === null ? null : 'brain-review/2',
+      `parseVerdict protocol mismatch for row "${row.name}"`,
+    );
+    assert.equal(
+      decisionResult?.protocol ?? null,
+      row.expectHeadSha === null ? null : 'brain-decision/1',
+      `parseDecision protocol mismatch for row "${row.name}"`,
     );
   });
 }
