@@ -65,16 +65,24 @@ a confident verdict.
 - WHEN rung 3 is evaluated
 - THEN it reports `available: false, active: false`
 
-### Requirement: REQ-R3-5 — Zero Runs Ever Reports Unproven
+### Requirement: REQ-R3-5 — No Terminal Run In The Read Window Reports Unproven
 
 Rung 3 MUST report `active: false, mechanism: 'postmerge-unproven'` when the workflow
-file is present but has never had a terminal run.
+file is present, the ledger read succeeded, and no terminal run appears in the page
+the reader retrieved. The requirement is deliberately scoped to the read window and
+NOT to the workflow's whole history: the probe reads a bounded page, so a backlog in
+which every recent entry is still queued or in progress produces this state on a
+workflow with years of successful runs. Claiming "never" from a windowed read is the
+`evidence-reader-empty-on-failure` contract violated one level up — "genuinely zero"
+conflated with "none in the window I looked at".
 
-#### Scenario: Freshly wired workflow with no runs reports unproven
+#### Scenario: A ledger page with no terminal run reports unproven
 
-- GIVEN `governance-postmerge.yml` exists with zero terminal runs recorded
+- GIVEN `governance-postmerge.yml` exists and the ledger read succeeded
+- AND no terminal run appears in the retrieved page
 - WHEN rung 3 is evaluated
 - THEN it reports `active: false, mechanism: 'postmerge-unproven'`
+- AND the `reason` scopes the claim to the read window, never to the workflow's history
 
 ### Requirement: REQ-R3-6 — Shape Parity With Rung 2
 

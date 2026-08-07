@@ -140,7 +140,7 @@ The failing/stale `reason` carries the run URL, so the operator gets the offendi
 | Pure | All 13 decision-table rows; totality (no unmapped input); no row but L1/E9 arms | `detectSubstrate` + injected `postMergeCi` evidence objects, `observedAt` supplied by the fixture ⇒ staleness is clock-free and deterministic |
 | Pure (regression) | 36 bare-boolean call sites unchanged | Existing `substrate.test.mjs` / `brain-governance-status.test.mjs` cases run unmodified |
 | Real probe | Evidence extraction: success page, failure page, empty page, `gh` non-zero (auth), malformed JSON, non-GitHub provider spawns nothing | `setSpawn` with `postMergeCi` **not** overridden — the pattern at `brain-governance-status.test.mjs:271-294`; spy asserts zero `gh` spawns under `provider:'gitlab'` |
-| E2E replay (criterion a) | Outage window ⇒ rung 3 inert | `reportGovernanceStatus` + `captureLog`: output must not claim `RUNG 3` and must name the failing run. Deterministic without a clock freeze because E6 (conclusion) precedes E7 (staleness) |
+| E2E replay (criterion a) | Outage window ⇒ rung 3 inert | `reportGovernanceStatus` + `captureLog`: output must not claim `RUNG 3` and must name the failing run. Deterministic without a clock freeze because E6 (conclusion) precedes E8 (staleness) — and asserted on `mechanism=postmerge-failing`, so the lock pins the CAUSE and does not decay once the fixture ages past `POSTMERGE_STALE_MS` |
 | E2E (criterion b) | Read failure never arms | Every failure fixture asserts `available:false` and `active !== true` |
 | Drift | Cron ↔ constant | See guard above |
 

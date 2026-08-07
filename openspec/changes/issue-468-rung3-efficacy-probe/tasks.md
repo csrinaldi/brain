@@ -52,7 +52,7 @@ Target files:
     confirmed-inert instead of uncomputable. `undefined` and `false` must
     take different code paths.
   - Rewrite `evalRung3({ config, env, probes })` as the 13-row total table
-    (design "Decision table", rows L1/L2/L3/E1..E8), evaluated top to bottom,
+    (design "Decision table", rows L1/L2/L3/E1..E9 plus the unrecognized-read fallback), evaluated top to bottom,
     first match wins. Every branch returns all six fields:
     `{ available, active, verifiable, mechanism, reason, remedy }` (REQ-R3-6).
     Implementation trap: `evalRung3` must NOT call `Date.now()` — staleness
@@ -202,7 +202,7 @@ Target files:
     (exercises the real probe + real `evalRung3`). Assert the output does
     NOT claim `RUNG 3` armed and names the failing run's URL. Deterministic
     without a clock freeze because row E6 (conclusion !== success) precedes
-    row E7 (staleness) in the decision table — the outage window fails on
+    row E8 (staleness) in the decision table — the outage window fails on
     conclusion, not on age, so no `observedAt` fixture-clock trick is needed.
 
 Verification: `node --test brain/scripts/brain-governance-status.test.mjs`

@@ -117,7 +117,9 @@ async function evalRung3({ config, env, probes }) {
 
   // L1 — legacy bare `true`: declared-armed, unverified (unreachable from the
   // real probe, which always returns a structured object — locked by a fixture
-  // test — but kept so config-declared/manual overrides keep working).
+  // test. Its only live producers are test fixtures and programmatic embedders
+  // passing `probes.postMergeCi`; NO config key reaches this row, so it is kept
+  // for the injected-probe seam, not for a config-declared override).
   if (evidence.legacy === 'declared-armed') {
     return { available: true, active: true, verifiable: false, mechanism: 'postmerge-ci-declared', reason: null, remedy: null };
   }
@@ -173,7 +175,7 @@ async function evalRung3({ config, env, probes }) {
       verifiable: true,
       mechanism: 'postmerge-run-ledger-unsupported',
       reason: 'post-merge CI run-ledger read is not supported for this VCS provider',
-      remedy: 'declare governance-postmerge status via a config/postMergeCi override, or wait for a provider-specific run-ledger reader',
+      remedy: 'no action available on this provider — rung 3 cannot be evidenced until a provider-specific run-ledger reader ships (there is no config key that declares it)',
     };
   }
 

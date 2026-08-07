@@ -251,7 +251,7 @@ test('rung 3 decision table (E5): observedAt:NaN reports uncomputable, never a f
     },
   });
   assert.equal(result.rungs[3].available, false, 'NaN observedAt must never yield available:true');
-  assert.equal(result.rungs[3].active, false, 'NaN observedAt must never arm rung 3 — age comparisons against NaN are always false, which used to fall through to E8');
+  assert.equal(result.rungs[3].active, false, 'NaN observedAt must never arm rung 3 — age comparisons against NaN are always false, which used to fall through to the arming row E9');
   assert.equal(result.rungs[3].mechanism, 'postmerge-run-ledger-uncomputable');
 });
 
@@ -355,7 +355,7 @@ test('rung 3 decision table (E8): a successful run older than POSTMERGE_STALE_MS
       }),
     },
   });
-  assertShape(result.rungs[3], 'E7');
+  assertShape(result.rungs[3], 'E8');
   assert.deepEqual(
     { available: result.rungs[3].available, active: result.rungs[3].active, verifiable: result.rungs[3].verifiable },
     { available: true, active: false, verifiable: true },
@@ -378,7 +378,7 @@ test('rung 3 decision table (E9): a successful run within POSTMERGE_STALE_MS arm
       }),
     },
   });
-  assertShape(result.rungs[3], 'E8');
+  assertShape(result.rungs[3], 'E9');
   assert.deepEqual(
     { available: result.rungs[3].available, active: result.rungs[3].active, verifiable: result.rungs[3].verifiable },
     { available: true, active: true, verifiable: true },

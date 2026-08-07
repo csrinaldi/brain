@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { reportGovernanceStatus } from './brain-governance-status.mjs';
 import { checkContexts } from './vcs/governance-checks.mjs';
 import { setSpawn } from './vcs/lib/exec.mjs';
+import { POSTMERGE_STALE_LABEL } from './vcs/substrate.mjs';
 
 afterEach(() => setSpawn(spawnSync));
 
@@ -387,6 +388,64 @@ test('printSubstrateReport: rung-3 active AND verifiable renders armed with the 
   assert.match(output, /RUNG 3\b/);
   assert.match(output, /post-merge CI\s+armed\s+\[last governance-postmerge run on main succeeded within 48h\]/i);
   assert.doesNotMatch(output, /post-merge CI[^\n]*declared/i, 'a run-ledger-verified arm must not carry the declared caveat');
+});
+
+test('printSubstrateReport: the armed line quotes the CONFIGURED branch and the CONSTANT, never hardcoded literals', async () => {
+  // Both values were hardcoded until they were derived, and neither derivation
+  // had a test: reverting both to `on main … within 48h` left the whole suite
+  // green. This case is the only one where the literals and the derived values
+  // disagree — `defaultBranch: 'master'` and a threshold read off
+  // POSTMERGE_STALE_LABEL rather than typed into the string.
+  const observedAt = Date.parse('2026-08-05T12:00:00Z');
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: { project: { slug: 'o/r', defaultBranch: 'master' }, vcs: { provider: 'github' } },
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => ({
+          workflowPresent: true,
+          read: 'ok',
+          lastRun: { id: 1, conclusion: 'success', completedAt: '2026-08-05T06:00:00Z', htmlUrl: 'https://github.com/o/r/actions/runs/1' },
+          error: null,
+          observedAt,
+        }),
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /run on master succeeded/, 'the branch named must be the one the probe queried, never a hardcoded "main"');
+  assert.doesNotMatch(output, /run on main succeeded/, 'a consumer on master must never be told a run succeeded on a branch that was never read');
+  assert.match(output, new RegExp(`succeeded within ${POSTMERGE_STALE_LABEL}\\]`), 'the threshold quoted must be derived from POSTMERGE_STALE_MS, not typed into the string');
+});
+
+test('printSubstrateReport: the stale reason quotes the CONSTANT, so the drift guard cannot leave it lying', async () => {
+  const completedAt = Date.parse('2026-07-01T00:00:00Z');
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: baseConfig,
+      env: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 404, contexts: [] }),
+        releaseGate: async () => false,
+        postMergeCi: async () => ({
+          workflowPresent: true,
+          read: 'ok',
+          lastRun: { id: 1, conclusion: 'success', completedAt: '2026-07-01T00:00:00Z', htmlUrl: 'https://github.com/o/r/actions/runs/1' },
+          error: null,
+          observedAt: completedAt + (49 * 60 * 60 * 1000),
+        }),
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: false, codeownersPresent: false }),
+      },
+    })
+  );
+
+  assert.match(logs.join('\n'), new RegExp(`stale \\(older than ${POSTMERGE_STALE_LABEL}\\)`), 'the staleness threshold stated to the operator must be the one that actually rejected the run');
 });
 
 test('printSubstrateReport: rung-3 inactive (stale run) renders "not armed" with reason + remedy, never swallowed silently', async () => {
@@ -866,7 +925,7 @@ test('realPostMergeCiProbe: a well-formed success-page run is neither uncomputab
 
   const output = logs.join('\n');
   assert.doesNotMatch(output, /run-ledger evidence is unavailable/i, 'a well-formed lastRun must never render as uncomputable');
-  assert.doesNotMatch(output, /never had a terminal run/i, 'a well-formed lastRun must never render as unproven (zero runs)');
+  assert.doesNotMatch(output, /mechanism=postmerge-unproven\s/, 'a well-formed lastRun must never render as unproven — anchored to the MECHANISM, not to reason prose a reword can silently defang');
   assert.doesNotMatch(output, /verify gh auth/i, 'a well-formed lastRun must never render the read-failure remedy');
 });
 
@@ -896,7 +955,7 @@ test('realPostMergeCiProbe: a non-terminal newest run does not make a readable l
   // here — so this test keeps its mutation power after the fixture ages past
   // the 48h window. What it pins is the filter, not freshness.
   assert.doesNotMatch(output, /evidence is malformed/i, 'reading the non-terminal entry carries conclusion null into the evaluator (E5) — the completed entry is the one to read');
-  assert.doesNotMatch(output, /never had a terminal run/i, 'a completed run exists further down the page — this ledger is not zero-terminal-runs');
+  assert.doesNotMatch(output, /mechanism=postmerge-unproven\s/, 'a completed run exists further down the page — this ledger has a terminal run to read');
   assert.match(output, /mechanism=postmerge-(?:run-ledger|stale)\s/, 'the completed run drives the verdict — armed when fresh, stale when not, never uncomputable');
 });
 
@@ -993,7 +1052,7 @@ test('realPostMergeCiProbe: a parseable but wrong-shaped 200 body (workflow_runs
   );
 
   const output = logs.join('\n');
-  assert.doesNotMatch(output, /never had a terminal run/i, 'a wrong-shaped body must never render as the zero-runs unproven state');
+  assert.doesNotMatch(output, /mechanism=postmerge-unproven\s/, 'a wrong-shaped body is UNREADABLE, never the honest no-terminal-run-in-window state — the distinction the 4-state read field exists to keep');
   assert.match(output, /remedy:.*verify gh auth\/connectivity/is, 'a wrong-shaped body must render as a read failure');
 });
 
@@ -1031,7 +1090,7 @@ test('realPostMergeCiProbe: config.vcs.provider "gitlab" reports unsupported and
 // REAL probe (`postMergeCi` not overridden) and the real `evalRung3`. This is
 // acceptance criterion (a) from the proposal, made executable: the 12-day
 // outage must never report armed. Deterministic without a clock freeze — row
-// E6 (conclusion !== success) precedes row E7 (staleness) in the decision
+// E6 (conclusion !== success) precedes row E8 (staleness) in the decision
 // table, so the outage window fails on conclusion, not on age.
 
 test('replay lock: the real 2026-07-24→2026-08-05 outage window reports rung 3 inactive, names the failing run URL, never claims RUNG 3', async () => {
