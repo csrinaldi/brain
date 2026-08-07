@@ -391,6 +391,12 @@ test('#405 deriveInlineComments: only ANCHORED findings become comments (REQ-405
     { id: 'b', evidence: 'e2' },                          // no anchor at all
     { id: 'c', evidence: 'e3', file: 'y.mjs' },           // file without line
     { id: 'd', evidence: 'e4', line: 9 },                 // line without file
+    // `line: null` was the unpinned SPELLING (round-7 cold review): dropping the
+    // `=== null` half of the guard left the suite green, and under it this finding
+    // posts at `Number(null)` — line 0 — while `renderVerdict`, which guards both,
+    // omits `line:` from the block. That is text on the diff the posted verdict
+    // does not support, which is the one thing the anchor rule exists to prevent.
+    { id: 'e', evidence: 'e5', file: 'z.mjs', line: null },
   ]);
   assert.deepEqual(out.map(c => c.path), ['x.mjs'],
     'a half anchor is not an anchor — GitHub 422s a comment with no line, so a partial one ' +

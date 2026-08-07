@@ -453,9 +453,34 @@ of the one that outranks them.
         failure cost the verdict), and nothing is folded, because the retry re-sends the
         body byte-identical with the findings already in it. Amendment 2 now covers that
         paragraph too; it is the "sentence twelve lines down" one section further along.
-- [ ] T16 · round 7 — rounds 1-6 answered YES on 3, 2, 2, 1, 1 and 2 axes. Round 6 is the
-      first to RE-OPEN an axis two earlier rounds had closed, which is the argument for
-      running rounds until one is clean rather than until they look clean.
+- [x] T16 · round 7 — cold review of `5469b3c`, ~55 mutations across five production
+      files, every diff printed, and every natural drift spelling tried rather than one.
+      **No defect in executable behaviour** for the fourth round running. Two findings:
+      - **F1 — GitLab's inline comment BODY was pinned by nothing.** Replacing `body: c.body`
+        with a constant left all 2574 tests green: every anchor still attaches,
+        `inlineDropped` stays absent, and the run reports a perfectly healthy inline review
+        that says nothing at all. The GitHub twin reds — but only incidentally, via an e2e
+        case — because the shared contract case substring-scanned
+        `JSON.stringify(anchored)` for the PATH and the LINE and never the body.
+        That is the exact weakness B2 was fixed for in round 1 (*"a substring scan for the
+        path passed against a position missing everything else"*), surviving one field over,
+        on the sibling provider. The assertion is now in the SHARED loop, so it cannot be
+        one provider's guarantee again — red on both.
+      - **F3 (from round 6, unfixed)** — the PR body's governed-diff figure. Round 6
+        recorded it, fixed F1/F2/F4/F5 in the tree, and left this one because **it lives
+        outside the tree**. The change's own recurring defect, reproduced against the very
+        artefact round 5 added to close it. The body now carries the COMMAND, not a number.
+      - **E1 (editorial, fixed anyway)** — the `line === null` half of the half-anchor guard
+        was unpinned: dropping it left the suite green, and under it a `{file, line: null}`
+        finding posts at `Number(null)` = line 0 while `renderVerdict` — which guards both —
+        omits `line:` from the block. Text on the diff the posted verdict does not support,
+        which is the one thing the anchor rule exists to prevent. Both spellings red now.
+      The reviewer also re-tested round 6's own axis: the lock-2 SOURCE scan is still
+      bypassable by spelling (`'APPROV' + 'E'`), and the behavioural companion case catches
+      it — which is the argument for having added that case rather than tightening the scan.
+- [ ] T16 · round 8 — rounds 1-7 answered YES on 3, 2, 2, 1, 1, 2 and 2 axes. Two rounds
+      have now re-opened an axis a previous round closed (6 on protections, 7 on the PR
+      body). Four consecutive rounds have found no defect in executable behaviour.
 - [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
       carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even

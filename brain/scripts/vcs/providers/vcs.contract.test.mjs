@@ -1377,7 +1377,7 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
     // rather than posts, sees exactly what it sees today.
     const result = await vcs.prReviewComment({
       project: 'x/y', number: 1, body: 'the verdict block',
-      comments: [{ path: 'a.mjs', line: 42, body: 'here' }],
+      comments: [{ path: 'a.mjs', line: 42, body: 'the evidence a developer reads' }],
       ...capture({ html_url: 'https://example.test/x/y/pull/1#review-3', id: 3 }),
     });
     assert.equal(typeof result.url, 'string');
@@ -1390,6 +1390,18 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
     const anchorText = JSON.stringify(anchored);
     assert.match(anchorText, /a\.mjs/, 'the anchored payload must name the path');
     assert.match(anchorText, /42/, 'and the line');
+    // The BODY, in the shared loop (round-7 cold review, finding 1). It was
+    // asserted on GitHub only, and incidentally — by an e2e case. Replacing
+    // GitLab's `body: c.body` with a constant left all 2574 tests green: every
+    // anchor still attaches, `inlineDropped` stays absent, and the run reports a
+    // perfectly healthy inline review that says nothing.
+    //
+    // Substring-scanning `JSON.stringify(anchored)` for the path and the line is
+    // exactly the weakness B2 was fixed for one round earlier, surviving one field
+    // over on the sibling provider — which is why this assertion is here and not
+    // in either provider's own case.
+    assert.match(anchorText, /the evidence a developer reads/,
+      `the anchored payload must carry the FINDING TEXT, not just its coordinates: ${anchorText}`);
 
     const verdictCarrying = payloads.filter(p => p.body === 'the verdict block');
     assert.equal(verdictCarrying.length, 1,
