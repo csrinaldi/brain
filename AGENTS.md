@@ -81,6 +81,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0025](brain/project/decisions/adr-0025-release-audit-gate-ordering.md) — Release Audit Gate Ordering and Substrate Enforcement
 - [ADR-0026](brain/project/decisions/adr-0026-governance-doctrine-tiers.md) — Governance doctrine tiers: a declared lite/standard/regulated axis orthogonal to the detected substrate ladder (amends ADR-0015 REQ-L4-2/L5-1/L6-1; resolves #329; **Amendment 1, 04/08/2026** — at `lite`, distinct-act re-arms only on foreign commits, #418)
 - [ADR-0027](brain/project/decisions/adr-0027-upgrade-rollback-is-restorable-not-atomic.md) — `brain:upgrade` rollback is restorable, not atomic: restates #396's exit criterion from whole-tree byte-identity to restorability of the managed-path copy, names each residual gap instead of implying coverage, and (Decision #3, amended 03/08/2026) refuses only what cannot be rolled back — writes resolving outside the repo — rather than every symlink
+- [ADR-0028](brain/project/decisions/adr-0028-brain-promote-read-confirm-stage.md) — `brain:promote` is read-confirm-stage: the mechanics are automated, the signature is not
 
 ### Project-specific rules
 
