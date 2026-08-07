@@ -699,8 +699,20 @@ of the one that outranks them.
       It belongs to the reviewer line specifically because the reviewer's three locks are
       where a false green is most expensive: on this PR, two rounds of false greens sat
       between `prReviewComment` and a postable APPROVE carrying the reviewer's own token.
-- [ ] T18b — **HUMAN: promote** the anti-pattern. Tier 2, and the anti-patterns README's
-      rule 3 asks for promotion in the same commit as the change that discovered it.
+- [ ] T18b — **HUMAN: promote** the anti-pattern to
+      `brain/core/anti-patterns/red-proof-blind-along-an-unvaried-axis.md`, and add its entry
+      to `brain/core/anti-patterns/README.md` — the index is not optional, `check-brain-nav.mjs`
+      requires every `brain/**/*.md` to be reachable from `HOME.md` and that README is the
+      index that reaches this folder. Tier 2, and the README's rule 3 asks for promotion in
+      the same commit as the change that discovered it.
+      **English, title and filename** — corrected on maintainer feedback. The first draft
+      carried both in Spanish. `core/**` is the generic half that ships to consumers, which is
+      the same reason `check-brain-nav.mjs` refuses a `core → project` link; every title in
+      that folder is already English, and the two most recently promoted files
+      (`evidence-reader-empty-on-failure`, `pre-v0-8-0-upgrade-clobber-lockout`) had already
+      moved the filenames that way too. Worth recording rather than silently fixing: the
+      agent reached for the language of the conversation instead of the language of the
+      destination.
 - [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
       carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even

@@ -11,15 +11,22 @@ topic_key: sdd/issue-405-inline-review-comments/brain-drafts/anti-pattern-mutati
 `brain/**` is Tier 2 (human-only). This is the agent's draft; a human promotes it, in the
 same commit as the change that discovered it (anti-patterns README, rule 3).
 
-**Destination:** `brain/core/anti-patterns/red-proof-blind-por-eje.md`
+**Destination:** `brain/core/anti-patterns/red-proof-blind-along-an-unvaried-axis.md`
 **Index afterwards:** `npm run memory:index`
 
 Promoted for the reviewer line (#313) rather than for #405: the finding is about how to
 know whether a protection protects, which is the whole business of that line.
 
+**English, title and filename.** `brain/core/**` is the generic half that ships to
+consumers — `check-brain-nav.mjs` even refuses a `core → project` link for the same reason.
+The first draft of this file carried a Spanish title and a Spanish filename, which the two
+most recently promoted anti-patterns (`evidence-reader-empty-on-failure`,
+`pre-v0-8-0-upgrade-clobber-lockout`) had already moved away from; every title in the folder
+is English, including those with legacy Spanish filenames.
+
 ---
 
-# El red-proof está ciego por un EJE que la mutación no recorre
+# The red-proof is blind along an axis the mutation never varies
 
 - **Discovered in:** issue #405 / PR #490 — fourteen cold-review rounds over one change
 - **Applies to:** every red-proof in this repo, and with particular force to the
