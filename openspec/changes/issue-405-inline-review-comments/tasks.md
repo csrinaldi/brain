@@ -103,7 +103,31 @@ acts. The ticket's own body asks for a design pass first — this is it.
       contract (the defect T7a found).
 - [ ] T11 — `brain-drafts/vcs-contract-row.md` → **human promotes** (REQ-405-7, Tier 2).
       The agent must never write `brain/core/methodology/vcs-contract.md`.
-- [ ] T12 — e2e on #409's harness: assert the captured `comments` array (REQ-405-8).
+- [x] T12 — e2e on #409's harness. **This task found the change's real defect.** The
+      three cases are the wire path (real `postVerdict` → `github.mjs` → `spawnSync('gh')`
+      → the captured payload), the 422 fallback against the real binary
+      (`GH_STUB_REJECT_INLINE`, refusals to a separate `rejected.jsonl` so a post count
+      cannot read a refusal as a success), and a CLI-level tripwire for the day an
+      evaluator anchors.
+      Building the tripwire required asking what would make it red, and the answer was
+      **nothing**: patching `tranche.mjs` to anchor its budget finding left the posted
+      keys at `["body","event"]`, because `cli.mjs` never passed `findings` to the poster.
+      T9's wiring was complete at the module and dead at its only caller, with the whole
+      suite green. Fixed here — `findings: verdict.findings` (the BUILT verdict's list;
+      `buildVerdict` drops evidence-less findings and routes `pre-existing`/`base-only`
+      into `follow_ups`, and a comment must annotate something the summary claims) — and
+      the same mutation now yields `["body","event","comments"]`.
+      Also added, because the count was reaching the caller and dying there: the CLI
+      PRINTS the dropped-anchor count. Red-proofed behaviourally through the poster seam
+      (a verb returning `inlineDropped: 2`), since deleting the log left the suite green.
+      Red-proof, diffs printed: poster never passes comments → both anchored cases;
+      github ignores `comments` → both; no bare retry → the fallback case; the stub stops
+      refusing → the fallback case; `cli.mjs` passes `findings: []` → the drift guard;
+      the log removed → the print case.
+      **Residual, escalated not decided:** no evaluator anchors, so this path has no
+      production producer — the `validateSchemaV2` shape (#483) again. Ship as plumbing,
+      widen the anchor so `tier2-frontier` becomes the first producer, or follow-up: a
+      maintainer ruling (#473), not an agent one.
 - [ ] T13 — red-proof pass per design D7, **printing every mutation's diff before its
       run** — four silently missed during PR #478 and produced meaningless greens.
 - [ ] T14 — full suite + `repo:check` + `brain:nav`; diff budget.

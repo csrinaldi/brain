@@ -56,6 +56,19 @@ if (argv.includes('-X') && argv.includes('POST') && line.includes('/pulls/') && 
   // this file IS the posted artifact the e2e's assertions read (design D1).
   const body = readFileSync(0, 'utf8');
   mkdirSync(join(DIR, 'posted'), { recursive: true });
+  // GH_STUB_REJECT_INLINE (issue #405): refuse any payload carrying `comments`,
+  // the way GitHub 422s an anchor outside the diff. Rejected attempts go to a
+  // SEPARATE file — `reviews.jsonl` must keep meaning "what actually posted", or
+  // an assertion counting posts would read a refusal as a success.
+  if (process.env.GH_STUB_REJECT_INLINE === '1') {
+    let parsed = null;
+    try { parsed = JSON.parse(body); } catch { /* below */ }
+    if (parsed && Array.isArray(parsed.comments)) {
+      appendFileSync(join(DIR, 'posted', 'rejected.jsonl'), body.trimEnd() + '\n');
+      process.stderr.write('gh: Unprocessable Entity (HTTP 422)\n  pull_request_review_thread.line must be part of the diff\n');
+      process.exit(1);
+    }
+  }
   appendFileSync(join(DIR, 'posted', 'reviews.jsonl'), body.trimEnd() + '\n');
   process.stdout.write(JSON.stringify({ html_url: 'https://stub.local/review/1' }));
   process.exit(0);

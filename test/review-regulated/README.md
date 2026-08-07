@@ -53,8 +53,25 @@ Expected flips when the residuals land, by design:
   `renderVerdict` omits the key when the list is empty, so "present and empty" is not a
   state this protocol can currently be in. If #408 makes it emittable, the pin moves to
   presence — but that is a protocol change and belongs to #408.
-- **#405** (inline `comments[]`): assert on the captured POST payload's `comments`
-  array in `posted/reviews.jsonl` — the stub already captures the full body verbatim.
+- **#405** (inline `comments[]`) — **landed**, with one correction to the prediction
+  above. The stub did capture the body verbatim, but the case #405 needs most cannot be
+  built from a CLI run: **no evaluator emits `file`/`line`**, so the real CLI's posted
+  payload has no `comments` key and cannot have one yet. What the harness gained:
+  - `GH_STUB_REJECT_INLINE=1` — the stub 422s any payload carrying `comments`, the way
+    GitHub refuses an anchor outside the diff, and records the refusal in
+    `posted/rejected.jsonl`. Rejections go to a **separate** file on purpose:
+    `reviews.jsonl` has to keep meaning "what actually posted", or a test counting posts
+    would read a refusal as a success.
+  - the anchored cases drive the REAL `postVerdict` in-process against this same stub
+    (`withStubbedGh`) — everything from the poster down is production and still crosses
+    the `spawnSync('gh')` boundary; only the findings array is supplied by the test,
+    which is exactly the interface #405 widened.
+  - a CLI-level **tripwire**: today's run posts no `comments` key, asserted against a
+    non-empty findings list so it cannot pass vacuously. Measured rather than assumed —
+    patching `tranche.mjs` to anchor its budget finding turns the posted payload's keys
+    into `["body","event","comments"]` and reds exactly that case. That mutation is also
+    what found `cli.mjs` never passing `findings` to the poster. When a real evaluator
+    starts anchoring, MOVE the tripwire into that change; do not delete it.
 
 ## Red-proofs performed (tasks.md T8)
 

@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 import { buildFixture } from './fixture.mjs';
 import { parseVerdict } from '../../brain/scripts/review/lib/parse-verdict.mjs';
+import { postVerdict } from '../../brain/scripts/review/poster.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STUB_BIN = join(HERE, 'gh-stub');
@@ -238,4 +239,123 @@ test('e2e: follow_ups is ABSENT by construction, the refuter silent — flip mea
   // above) — without this, `redJob` could be silently broken and nothing would say so.
   assert.ok(verdict.findings.find(f => f.id === 'gate:phase-order'),
     `redJob's red required gate must reach the posted body — got: ${JSON.stringify(verdict.findings.map(f => f.id))}`);
+});
+
+// ── REQ-405-8: the inline anchor reaches the wire, and its absence is honest ──
+
+/**
+ * Points the REAL provider adapter at this fixture's `gh` stub for the duration
+ * of one test. The cases below drive `postVerdict` in-process instead of
+ * spawning the CLI, and the reason is a fact about today's tree, not a
+ * convenience: **no evaluator emits `file`/`line`**. REQ-405-2 makes the anchor
+ * optional precisely so evaluators can adopt it one at a time, so a CLI-level
+ * case could only ever observe the empty population — which is the case above
+ * this one, and it is asserted there.
+ *
+ * Everything below `postVerdict` is still production and still crosses a real
+ * process boundary: `poster.mjs` → `vcs/cli.mjs`'s `getVcs` → `github.mjs` →
+ * `spawnSync('gh')` → the payload captured on disk. The only thing the test
+ * supplies is the findings array, which is exactly the interface #405 widened.
+ */
+function withStubbedGh(t, fx, { rejectInline = false } = {}) {
+  const prevPath = process.env.PATH;
+  const prevDir = process.env.GH_STUB_DIR;
+  const prevReject = process.env.GH_STUB_REJECT_INLINE;
+  process.env.PATH = `${STUB_BIN}${delimiter}${prevPath}`;
+  process.env.GH_STUB_DIR = fx.stubDir;
+  if (rejectInline) process.env.GH_STUB_REJECT_INLINE = '1';
+  t.after(() => {
+    process.env.PATH = prevPath;
+    if (prevDir === undefined) delete process.env.GH_STUB_DIR; else process.env.GH_STUB_DIR = prevDir;
+    if (prevReject === undefined) delete process.env.GH_STUB_REJECT_INLINE; else process.env.GH_STUB_REJECT_INLINE = prevReject;
+  });
+}
+
+function rejectedBodies(fx) {
+  const p = join(fx.stubDir, 'posted', 'rejected.jsonl');
+  if (!existsSync(p)) return [];
+  return readFileSync(p, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+}
+
+test('e2e: today NO evaluator anchors, so the real CLI posts NO comments key — and this is the tripwire for the first one that does (REQ-405-2/8)', (t) => {
+  // The additive guarantee, measured at the real process boundary rather than
+  // reasoned about: widening the port must leave every shipping evaluator's
+  // payload byte-for-byte what it was. When an evaluator starts emitting
+  // `file`/`line` this case goes red — MOVE it to that change, do not delete it;
+  // a red here means inline comments became reachable from the CLI, which is
+  // the event #405 exists to make possible.
+  const fx = withFixture(t, { tier: 'regulated' });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, r.stderr);
+  const posted = postedBodies(fx);
+  assert.equal(posted.length, 1);
+  const verdict = parseVerdict({ body: posted[0].body });
+  assert.ok(verdict.findings.length >= 1,
+    'findings must exist — otherwise "no comments" would be true for the boring reason and this case would observe nothing');
+  assert.ok(verdict.findings.every(f => f.file === undefined && f.line === undefined),
+    `an evaluator has started anchoring: ${JSON.stringify(verdict.findings)}`);
+  assert.equal('comments' in posted[0], false,
+    `no anchor means no inline request at all — got: ${JSON.stringify(Object.keys(posted[0]))}`);
+  assert.equal(posted[0].event, 'COMMENT', 'ADR-0020 lock 2: the event stays COMMENT, unreachable by any parameter');
+});
+
+test('e2e: an anchored finding rides the SAME payload as the verdict body, to the real gh binary (REQ-405-1/5/8)', async (t) => {
+  const fx = withFixture(t, { tier: 'regulated' });
+  withStubbedGh(t, fx);
+  const body = '```yaml\nprotocol: brain-review/2\nverdict: REVISE\n```';
+  const out = await postVerdict({
+    headSha: fx.headSha,
+    project: 'fixture/consumer',
+    number: fx.prNumber,
+    provider: 'github',
+    mode: 'tranche',
+    renderedBody: body,
+    reviewerHandle: 'stub-reviewer',
+    priorVerdicts: [],
+    findings: [
+      { id: 'anchored', evidence: 'line 3 is the offender', file: 'big.txt', line: 3 },
+      { id: 'unanchored', evidence: 'a whole-PR concern' },
+    ],
+  });
+  assert.equal(out.posted, true, `the verdict must post — got ${JSON.stringify(out)}`);
+
+  const posted = postedBodies(fx);
+  assert.equal(posted.length, 1, 'exactly ONE payload carries the verdict body — the anti-loop lock counts parseable verdicts');
+  assert.equal(posted[0].body, body);
+  assert.equal(posted[0].comments.length, 1, 'only the anchored finding becomes a comment');
+  assert.equal(posted[0].comments[0].path, 'big.txt');
+  assert.equal(posted[0].comments[0].line, 3);
+  assert.match(posted[0].comments[0].body, /line 3 is the offender/,
+    'the developer reads the EVIDENCE on the line — an id alone would send them back to the summary');
+  assert.equal('inlineDropped' in out, false, 'nothing was dropped, so no count is claimed');
+});
+
+test('e2e: gh REFUSES the anchored payload — the verdict still posts, whole, and the loss is COUNTED (REQ-405-4/8)', async (t) => {
+  // The load-bearing case, against the real binary boundary: GitHub 422s an
+  // anchor outside the diff, and the summary must survive that. Without the
+  // count, "no inline comments appeared" and "every anchor was refused" are the
+  // same observation — `evidence-reader-empty-on-failure` relocated into the poster.
+  const fx = withFixture(t, { tier: 'regulated' });
+  withStubbedGh(t, fx, { rejectInline: true });
+  const body = '```yaml\nprotocol: brain-review/2\nverdict: REVISE\n```';
+  const out = await postVerdict({
+    headSha: fx.headSha,
+    project: 'fixture/consumer',
+    number: fx.prNumber,
+    provider: 'github',
+    mode: 'tranche',
+    renderedBody: body,
+    reviewerHandle: 'stub-reviewer',
+    priorVerdicts: [],
+    findings: [{ id: 'anchored', evidence: 'unreachable line', file: 'big.txt', line: 99999 }],
+  });
+  assert.equal(out.posted, true, `a refused anchor must never cost the verdict — got ${JSON.stringify(out)}`);
+  assert.equal(out.inlineDropped, 1, 'and the count must reach the caller');
+
+  assert.equal(rejectedBodies(fx).length, 1, 'the anchored attempt really was refused by the binary');
+  const posted = postedBodies(fx);
+  assert.equal(posted.length, 1, 'and exactly one payload landed');
+  assert.equal('comments' in posted[0], false, 'the retry drops the anchors, nothing else');
+  assert.equal(posted[0].body, body,
+    'the finding text is still in the summary — a dropped anchor must not drop the finding');
 });

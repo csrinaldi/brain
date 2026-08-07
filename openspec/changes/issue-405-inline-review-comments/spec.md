@@ -101,12 +101,54 @@ signature, the two-endpoint GitLab mapping, and the extra `diff_refs` read.
 `openspec/changes/issue-405-inline-review-comments/brain-drafts/vcs-contract-row.md` and
 the human promotes it. The agent must never write the destination file.
 
-## REQ-405-8 — the e2e proves a developer actually sees them
+## REQ-405-8 — the e2e proves the anchor reaches the wire, and that today NOTHING sends one
 
 On #409's harness (`test/review-regulated/`), whose README already names this change as
-its landing pad: assert the captured `POST …/reviews` payload's `comments` array. The
-`gh` stub captures the full body verbatim, so this needs no harness change — the
-reuse contract REQ-409-7 predicted this exact case.
+its landing pad: assert the captured `POST …/reviews` payload's `comments` array.
+
+**Corrected during implementation — the second requirement on this change to be falsified
+by building it** (the first was REQ-405-5). This one read *"the e2e proves a developer
+actually sees them"* and predicted the harness would need no change. Both halves were
+wrong, for one reason this spec had never stated plainly:
+
+> **No evaluator emits `file`/`line`.** REQ-405-2 made the anchor optional precisely so
+> evaluators could adopt it one at a time, and none has. A CLI-level run therefore cannot
+> produce an anchored finding, and no assertion over a real `brain:review` invocation can
+> observe a developer seeing an inline comment.
+
+What is provable today, and what this requirement now demands:
+
+1. **The wire path carries an anchor.** The anchored cases drive the REAL `postVerdict`
+   against the harness's `gh` stub: poster → `getVcs` → `github.mjs` → `spawnSync('gh')`
+   → the payload captured on disk. Only the findings array comes from the test, which is
+   exactly the interface #405 widened.
+2. **A refused anchor never costs the verdict.** `GH_STUB_REJECT_INLINE=1` makes the stub
+   422 any payload carrying `comments`, so the fallback runs against the real binary
+   boundary and not only against an in-process fake. Refusals land in a separate
+   `posted/rejected.jsonl` — sharing the file would let a test counting posts read a
+   refusal as a success.
+3. **The absence is honest and load-bearing.** A CLI-level tripwire asserts the real run
+   posts no `comments` key, against a non-empty findings list so it cannot pass
+   vacuously. It is the detector for the first evaluator that anchors.
+
+Row 3 is not a consolation prize — it is what caught the defect. Patching `tranche.mjs`
+to anchor its budget finding left the posted payload's keys at `["body","event"]`, because
+`cli.mjs` never passed `findings` to `postVerdict`. The poster was wired and its only
+production caller was not, and every unit and contract test on this branch was green
+throughout. With the wiring fixed the same mutation yields `["body","event","comments"]`.
+
+The CLI→poster link itself is pinned by a **source-level** drift guard, labelled as such:
+with no evaluator anchoring there is no seam through which a test can put an anchored
+finding into a real `main()` run. It is scheduled for deletion the day one does.
+
+### The residual, stated rather than implied
+
+This change ships an inline path with **no producer**: it is reachable from production
+only once an evaluator starts anchoring. That is the same shape as `validateSchemaV2`'s
+inertness (#483), and it must not be left for a reviewer to discover by reading the code.
+Whether to ship it as plumbing for #408, to widen the anchor so `tier2-frontier` — which
+already knows the file — becomes the first producer, or to file a follow-up, is a **scope
+ruling for the maintainer**, not an agent decision (#473).
 
 ## Pending human acts — NOT agent decisions
 

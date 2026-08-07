@@ -5,6 +5,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { parseArgs, main } from './cli.mjs';
 import { REQUIRED_JOBS } from '../vcs/governance-checks.mjs';
@@ -491,4 +493,72 @@ test('main: self-review abstains, exits 0, posts nothing', async () => {
   assert.equal(code, 0);
   assert.ok(lines.some(l => /abstain/i.test(l)));
   assert.deepEqual(vcs.calls, { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 });
+});
+
+// ── #405: the CLI hands the BUILT verdict's findings to the poster ───────────
+
+test('#405: the poster receives the verdict findings, and the inline path stays silent while no evaluator anchors', async () => {
+  // The behavioural half of the wiring, at the level a test can reach today.
+  // `deriveInlineComments` and every layer below it are proven by poster.test,
+  // the contract suite and the e2e; what this pins is that the CLI's payload
+  // reaches the verb unchanged while findings carry no anchor — no stray
+  // `comments` key, and the run's own output makes no dropped-anchor claim.
+  const seen = [];
+  const vcs = spyVcs();
+  const lines = [];
+  const deps = readyDeps({ vcs });
+  deps.trancheDeps.fetchRollup = async () =>
+    REQUIRED_JOBS.map(name => ({ name, status: 'COMPLETED', conclusion: name === 'phase-order' ? 'FAILURE' : 'SUCCESS' }));
+  const code = await main({
+    argv: ['--pr', '42'],
+    log: (s) => lines.push(s),
+    ...deps,
+    posterDeps: { getVcs: async () => ({ ...vcs, prReviewComment: async (a) => { seen.push(a); return { url: 'u' }; } }) },
+  });
+  assert.equal(code, 0);
+  assert.equal(seen.length, 1, 'one payload, carrying the verdict body');
+  assert.match(seen[0].body, /gate:phase-order/, 'the finding really is in the posted block — otherwise the check below is vacuous');
+  assert.equal('comments' in seen[0], false,
+    `no evaluator anchors today, so no inline request may be made: ${JSON.stringify(Object.keys(seen[0]))}`);
+  assert.ok(!lines.some(l => /could not be anchored/.test(l)),
+    'and a run that never attempted an anchor must not report a dropped one');
+});
+
+test('#405: a dropped anchor is PRINTED, not just returned (REQ-405-4)', async () => {
+  // The count reaching `postResult` is not the requirement — a reader seeing it
+  // is. Without this line the run's output is identical whether every anchor was
+  // refused or none was ever attempted, which is the exact silence REQ-405-4
+  // exists to break, relocated one layer up from the poster.
+  const vcs = spyVcs();
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42'],
+    log: (s) => lines.push(s),
+    ...readyDeps({ vcs }),
+    posterDeps: { getVcs: async () => ({ ...vcs, prReviewComment: async () => ({ url: 'u', inlineDropped: 2 }) }) },
+  });
+  assert.equal(code, 0, 'a refused anchor must never fail the run');
+  const reported = lines.filter(l => /could not be anchored/.test(l));
+  assert.equal(reported.length, 1, `the count must be printed exactly once — got: ${JSON.stringify(lines)}`);
+  assert.match(reported[0], /\b2\b/, 'and must carry the number, not merely say something was lost');
+});
+
+test('#405: the CLI passes `findings` to postVerdict — the one link no seam can observe (drift guard)', () => {
+  // Deliberately a SOURCE assertion, and it is worth saying why rather than
+  // dressing it as behaviour. The anchor originates in an evaluator, and no
+  // evaluator emits `file`/`line` yet (REQ-405-2 made the anchor optional so
+  // they can adopt it one at a time), so there is no injectable seam through
+  // which a test can put an anchored finding into a real `main()` run. The gap
+  // was found the honest way: patching tranche.mjs to anchor its budget finding
+  // left the e2e's posted payload with NO `comments` key, because this argument
+  // was missing — the poster was wired and its caller was not.
+  //
+  // This guard is narrow on purpose: it proves the argument is passed, nothing
+  // about what happens next. Delete it the day an evaluator anchors — at that
+  // point the e2e tripwire becomes a real behavioural test of the same link.
+  const src = readFileSync(fileURLToPath(new URL('./cli.mjs', import.meta.url)), 'utf8');
+  const call = src.slice(src.indexOf('await postVerdict({'));
+  assert.match(call.slice(0, call.indexOf('});')), /findings: verdict\.findings/,
+    'cli.mjs must hand the BUILT verdict findings to the poster — the evaluator\'s own list is the wrong population ' +
+    '(buildVerdict drops evidence-less findings and routes pre-existing/base-only into follow_ups)');
 });

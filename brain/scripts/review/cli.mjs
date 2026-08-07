@@ -301,11 +301,25 @@ export async function main(deps = {}) {
     renderedBody: rendered,
     reviewerHandle: identity.handle,
     priorVerdicts: boot.doctrine.priorVerdicts,
+    // #405: the BUILT verdict's findings, not the evaluator's. The two
+    // populations differ — `buildVerdict` drops findings with no evidence and
+    // routes `pre-existing`/`base-only` into `follow_ups` — and an inline
+    // comment must annotate something the summary actually claims. Anchoring a
+    // finding this verdict did not make would put text on the diff that the
+    // posted block does not support.
+    findings: verdict.findings,
     escalate: verdict.escalate,
     deps: posterDeps,
   });
 
   if (postResult.skipped) log(`brain:review: ${postResult.skipped} — nothing posted.`);
+  // REQ-405-4: the count has to reach a READER, not just the caller. An anchor
+  // that is dropped, counted, and then never printed is the same silence the
+  // requirement exists to break — the run would look identical to one that had
+  // nothing to anchor in the first place.
+  if (postResult.inlineDropped) {
+    log(`brain:review: ${postResult.inlineDropped} inline comment(s) could not be anchored — the finding text is in the summary block above.`);
+  }
 
   return 0;
 }
