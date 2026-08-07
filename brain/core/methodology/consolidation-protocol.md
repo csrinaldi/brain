@@ -5,6 +5,7 @@
 > **Purpose:** Force design micro-decisions, technical tricks, or anti-patterns discovered in a branch chat to scale up into the global brain at zero capture cost for the small team.
 
 ## 1. Hot Capture (During the Agent Chat)
+
 - The human programmer or the main orchestrator agent must dump session technical agreements directly into the `## Micro-decisiones en caliente` section of the `tasks.md` for the corresponding change in `./openspec/changes/[change-id]/`. No floating micro-decisions are allowed in the chat history.
 - If the direct change does not require SDD/OpenSpec, micro-decisions that must persist are documented in the commit/MR and promoted to `brain/` only if they apply to more than one module, resolve a recurring risk, or change a working rule.
 
@@ -26,12 +27,51 @@ Every time a new ADR is created or a file is added to `brain/methodology/` or
 include the new link in the corresponding section. Without this update the MR
 is not complete.
 
+## 1c. Amending a signed ADR
+
+An ADR that has been signed is never edited silently and never rewritten in place. Amending one
+is **three acts in one commit**:
+
+1. **Mark the Status line.** `**Status**: Accepted · **amended DD/MM/YYYY** (Amendment N — see below)`.
+2. **Amend the original body in place.** Every line the amendment supersedes is rewritten, or
+   annotated `**[Amended by Amendment N (#issue) — <what changed>]**`. A reader who never scrolls
+   to the amendment must not be left with the superseded rule.
+3. **Append a signed section.** `## Amendment N — <title> (issue #N)`, opening with
+   `**Signed**: DD/MM/YYYY — <Name>`, recording what changed, why, the measurement, and the
+   accepted losses.
+
+The `brain/HOME.md` entry for that ADR is updated in the same commit to carry the amendment
+marker — `decision-gate` requires an ADR change and a `brain/HOME.md` change to co-occur, so
+omitting it fails the gate as well as leaving the index wrong.
+
+Precedent: ADR-0026 Amendment 1 (`git show 0f54781`).
+
+## 1d. The promotion cascade
+
+Adding or amending any file under `brain/**` is not one edit. In this repo it is three:
+
+1. the `brain/**` file itself;
+2. the `brain/HOME.md` entry (§1b) — required for `brain:nav` reachability _and_ by
+   `decision-gate`'s ADR ⇔ `HOME.md` co-occurrence rule;
+3. **`AGENTS.md`, regenerated** — `brain/HOME.md` is one of the five `SOURCE_DOCS` the file is
+   compiled from, so a `HOME.md` change without a regeneration leaves the compiled file every
+   agent actually reads carrying stale content.
+
+Regenerate with `AGENT_PLATFORM=antigravity npm run brain:env:init`. Never hand-edit `AGENTS.md`.
+
+**Step 3 does fail a gate.** `antigravity.drift.test.mjs` asserts byte-equality between the
+committed `AGENTS.md` and a fresh compile of the five sources, and it runs under `npm test`.
+Measured on `main` @ `0401871`: appending one line to `brain/HOME.md` turns that test red. The
+reason to automate step 3 is that it is a cascade nobody remembers, so forgetting it costs a red
+CI round trip — not that nothing catches it.
+
 ## 2. Promotion in the Merge Request (GitLab)
 
 > **Hard Rule — Mandatory human gate:**
 > No AI agent may commit directly to `brain/decisions/`,
 > `brain/anti-patterns/`, `brain/domain/`, or `brain/methodology/`.
 > Promotion works as follows:
+>
 > 1. The agent drafts the artifact (ADR, anti-pattern, glossary entry)
 >    as a file under `openspec/changes/{iid}/brain-drafts/`.
 > 2. The human reviews the draft in the MR, edits it if needed, and moves it to `brain/`
@@ -41,21 +81,21 @@ is not complete.
 > No agent promotes its own artifacts to `brain/`. That signature is human.
 > See anti-pattern: `brain/anti-patterns/ia-escribe-brain-sin-gate.md`.
 
-- Before removing the *Draft* status from the MR in your self-hosted GitLab, the organization's closing skill will analytically process the micro-decisions accumulated in the branch.
+- Before removing the _Draft_ status from the MR in your self-hosted GitLab, the organization's closing skill will analytically process the micro-decisions accumulated in the branch.
 - If the learning applies to multiple microservices or resolves a critical compatibility bug (e.g., Jakarta JSON serializations), the agent must draft the artifact in `openspec/changes/{iid}/brain-drafts/` for the human to review and promote.
 
 ## 3. Zone map — who can write what
 
-| Zone | Who writes | Allowed operations | Enforcement |
-|------|---------------|----------------------|-------------|
-| `brain/**` | Human only | create, update, delete | CODEOWNERS + human gate in MR |
-| `openspec/changes/**` | Agent or human | create, update | None — flight zone |
-| `openspec/changes/*/brain-drafts/**` | Agent (draft) | create, update | None — proposal zone |
-| `openspec/changes/archive/**` | Agent or human | create (on archive) | None |
-| `openspec/specs/**` | Agent or human | create, update | `npm run brain:repo:check` validates references |
-| `.engram/**` | Agent or human | create, update | Merge driver content-addressed |
-| `scripts/**`, `package.json` | Agent or human | create, update, delete | `npm run brain:repo:check` |
-| `.gitlab-ci.yml`, `settings.xml` | Human recommended | update | Requires issue + MR (not mechanical) |
+| Zone                                 | Who writes        | Allowed operations     | Enforcement                                     |
+| ------------------------------------ | ----------------- | ---------------------- | ----------------------------------------------- |
+| `brain/**`                           | Human only        | create, update, delete | CODEOWNERS + human gate in MR                   |
+| `openspec/changes/**`                | Agent or human    | create, update         | None — flight zone                              |
+| `openspec/changes/*/brain-drafts/**` | Agent (draft)     | create, update         | None — proposal zone                            |
+| `openspec/changes/archive/**`        | Agent or human    | create (on archive)    | None                                            |
+| `openspec/specs/**`                  | Agent or human    | create, update         | `npm run brain:repo:check` validates references |
+| `.engram/**`                         | Agent or human    | create, update         | Merge driver content-addressed                  |
+| `scripts/**`, `package.json`         | Agent or human    | create, update, delete | `npm run brain:repo:check`                      |
+| `.gitlab-ci.yml`, `settings.xml`     | Human recommended | update                 | Requires issue + MR (not mechanical)            |
 
 **Golden rule:** if the destination is `brain/`, the signature is human. Everything else may
 originate from an agent, always with issue + MR as the delivery unit.
@@ -75,11 +115,11 @@ readable without the harness active.
 
 Every observation saved in Engram must declare in its content:
 
-| Field | Format | Example |
-|-------|---------|---------|
-| **Actor** | First line of body | `**Actor:** @crinaldi (humano)` / `**Actor:** claude-sonnet-4-6 (agente)` |
-| **Source** | Reference to issue/MR if applicable | `**Fuente:** issue #78 / MR !72` |
-| **Supersede** | Only if it replaces something previous | `**Supersede:** observación anterior "Spring prohibido"` |
+| Field         | Format                                 | Example                                                                   |
+| ------------- | -------------------------------------- | ------------------------------------------------------------------------- |
+| **Actor**     | First line of body                     | `**Actor:** @crinaldi (humano)` / `**Actor:** claude-sonnet-4-6 (agente)` |
+| **Source**    | Reference to issue/MR if applicable    | `**Fuente:** issue #78 / MR !72`                                          |
+| **Supersede** | Only if it replaces something previous | `**Supersede:** observación anterior "Spring prohibido"`                  |
 
 This convention lives in the content — it is portable to any harness.
 
@@ -96,12 +136,12 @@ contradicts active ADRs in `brain/decisions/`.
 
 ### Resolution criteria
 
-| Condition | Action |
-|-----------|--------|
-| Type `architecture`, `decision`, or `policy` in conflict | **The human decides** — the agent presents both versions and waits for explicit confirmation |
-| One observation declares `**Supersede:**` pointing to the other | The previous one is marked `needs_review`; the agent continues without escalating |
-| Type `pattern`, `bugfix`, `config`, or `discovery` in conflict | The agent resolves by recency (newest wins) unless there is an obvious contradiction |
-| One observation is human-authored and the conflicting one is agent-authored, same type | The human one takes precedence |
+| Condition                                                                              | Action                                                                                       |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Type `architecture`, `decision`, or `policy` in conflict                               | **The human decides** — the agent presents both versions and waits for explicit confirmation |
+| One observation declares `**Supersede:**` pointing to the other                        | The previous one is marked `needs_review`; the agent continues without escalating            |
+| Type `pattern`, `bugfix`, `config`, or `discovery` in conflict                         | The agent resolves by recency (newest wins) unless there is an obvious contradiction         |
+| One observation is human-authored and the conflicting one is agent-authored, same type | The human one takes precedence                                                               |
 
 ### Resolution authority
 
@@ -116,6 +156,7 @@ The human is the final authority over conflicts of type `architecture`, `decisio
 ## 5. Memory Synchronization (Engram git-based)
 
 `npm run brain:day:start` closes the full cycle at the start of the workday:
+
 1. **import** (`engram sync --import`) — pulls `.engram/` from the repo → local `~/.engram`
 2. **index** (`brain-to-engram.mjs`) — reprojects `brain/` → `~/.engram`
 3. **export** (`engram sync --export`) — publishes `~/.engram` → `.engram/` in the repo
