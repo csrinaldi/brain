@@ -5,6 +5,27 @@
 const YAML_SCALAR_SAFE_RE = /^[A-Za-z0-9._\-/:]+$/;
 
 /**
+ * Is this finding's anchor USABLE — a non-empty path and a line that exists in a
+ * diff? Diff lines are 1-based, so `0`, `''`, `'abc'`, `2.5` and `-3` are all
+ * anchors already known not to attach. `Number()` because `parseVerdict` returns
+ * entry scalars as text: a round-tripped `line` arrives as `'42'`.
+ *
+ * Exported and shared with `poster.mjs`'s `deriveInlineComments` ON PURPOSE. The
+ * renderer's rule and the poster's were byte-identical duplicates until round 10
+ * of PR #490's review tightened the poster's alone — leaving the block advertising
+ * `line: 0` anchors the poster then refused, which is the exact state the
+ * round-8 test forbids, one field-value class over. Two copies of one rule drift;
+ * one function cannot.
+ *
+ * @param {{file?: string, line?: unknown}} f
+ * @returns {boolean}
+ */
+export function hasUsableAnchor(f) {
+  const line = Number(f?.line);
+  return Boolean(f?.file) && Number.isInteger(line) && line >= 1;
+}
+
+/**
  * Emits a value as a YAML scalar. `parse-verdict.mjs`'s `unyamlScalar` is its
  * exact inverse — change one and the other moves in the same commit.
  *
@@ -133,8 +154,10 @@ export function renderVerdict(v) {
       // emitted only when present, so a finding without them renders exactly as
       // it does today — that is what keeps the feature additive for every
       // evaluator shipping now. Through yamlScalar like every other scalar.
-      if (f.file) lines.push(`    file: ${yamlScalar(f.file)}`);
-      if (f.line !== undefined && f.line !== null) lines.push(`    line: ${yamlScalar(f.line)}`);
+      if (hasUsableAnchor(f)) {
+        lines.push(`    file: ${yamlScalar(f.file)}`);
+        lines.push(`    line: ${yamlScalar(Number(f.line))}`);
+      }
     }
   }
 
@@ -151,8 +174,10 @@ export function renderVerdict(v) {
       // emitted only when present, so a finding without them renders exactly as
       // it does today — that is what keeps the feature additive for every
       // evaluator shipping now. Through yamlScalar like every other scalar.
-      if (f.file) lines.push(`    file: ${yamlScalar(f.file)}`);
-      if (f.line !== undefined && f.line !== null) lines.push(`    line: ${yamlScalar(f.line)}`);
+      if (hasUsableAnchor(f)) {
+        lines.push(`    file: ${yamlScalar(f.file)}`);
+        lines.push(`    line: ${yamlScalar(Number(f.line))}`);
+      }
     }
   }
 

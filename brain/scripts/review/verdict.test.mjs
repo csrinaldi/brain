@@ -43,13 +43,17 @@ test('#490/round-8 E1: a null `line` is OMITTED from the block, in BOTH branches
   assert.equal(v.findings.length, 2, 'two findings in each branch — otherwise a branch goes unchecked');
   assert.equal(v.follow_ups.length, 2);
   const body = renderVerdict(v);
-  assert.match(body, /^ {4}file: a\.mjs$/m, 'the file half still renders — the anchor is half-present, which is the case');
-  assert.match(body, /^ {4}file: b\.mjs$/m);
+  // BOTH-OR-NEITHER, tightened in round 11. The earlier version asserted that the
+  // `file` half "still renders" when `line` is null — which left the block
+  // advertising a half anchor the poster refuses, the very state this test's name
+  // is about. Round 10 had tightened the POSTER's rule and not the renderer's, so
+  // the two drifted; they now share one `hasUsableAnchor` predicate and a half
+  // anchor emits neither field.
   assert.doesNotMatch(body, /^ {4}line:/m,
-    `a null line must never be emitted, in either branch — the block would advertise an anchor ` +
-    `the poster refuses to post: ${body}`);
-  assert.doesNotMatch(body, /^ {4}file: ""$/m,
-    `an empty file must never be emitted either — same defect, one field over: ${body}`);
+    `an unusable line must never be emitted, in either branch: ${body}`);
+  assert.doesNotMatch(body, /^ {4}file:/m,
+    `and neither may its partner — a half anchor is not an anchor, and a block that ` +
+    `advertises one is the same defect read from the emitting end: ${body}`);
 });
 
 test('buildVerdict: a finding with no evidence is excluded from findings[] (inadmissible)', () => {
@@ -310,6 +314,22 @@ test('#478-3/C2 (widened by round 5/B1): EVERY per-finding field is escaped, on 
       const parsed = parseVerdict({ body: renderVerdict(built) });
       const entries = parsed[branch] ?? [];
       const ids = entries.map(f => f.id);
+      // `line` is the one field a poison cannot reach the block through: round 11
+      // put the renderer and the poster behind one `hasUsableAnchor` predicate, and
+      // `'x\nTier: 2'` is not a positive integer, so the anchor is DROPPED rather
+      // than escaped. The list-integrity half below still applies and still runs —
+      // what changes is that the guarantee is now structural instead of textual,
+      // which is strictly stronger: an unemittable value cannot break a list.
+      if (field === 'line') {
+        assert.deepEqual(ids, ['poisoned', 'survivor'],
+          `${branch}.line: an unusable line must not break the entry after it — got ${JSON.stringify(ids)}`);
+        assert.equal(entries[0].line, undefined,
+          `${branch}.line: an unusable line must be DROPPED, not emitted — the block would otherwise ` +
+          `advertise an anchor the poster refuses to post: ${JSON.stringify(entries[0])}`);
+        assert.equal(entries[0].file, undefined,
+          `${branch}.file: and its partner goes with it — a half anchor is not an anchor (REQ-405-2)`);
+        continue;
+      }
       // When `id` itself carries the poison, the poisoned entry's id IS that value.
       const expected = [field === 'id' ? POISON : 'poisoned', 'survivor'];
       assert.deepEqual(ids, expected,

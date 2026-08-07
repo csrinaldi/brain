@@ -32,6 +32,7 @@
 
 import { getVcs } from '../vcs/cli.mjs';
 import { guardedLabelAdd } from './deny-set.mjs';
+import { hasUsableAnchor } from './verdict.mjs';
 
 const STALE_LABEL = 'reviewed:stale';
 const ESCALATION_LABEL = 'needs-decision';
@@ -63,9 +64,8 @@ const ESCALATION_LABEL = 'needs-decision';
 export function deriveInlineComments(findings = []) {
   const out = [];
   for (const f of findings ?? []) {
-    const line = Number(f?.line);
-    if (!f?.file || !Number.isInteger(line) || line < 1) continue;
-    out.push({ path: f.file, line, body: `${f.id ? `**${f.id}** — ` : ''}${f.evidence ?? ''}` });
+    if (!hasUsableAnchor(f)) continue;
+    out.push({ path: f.file, line: Number(f.line), body: `${f.id ? `**${f.id}** — ` : ''}${f.evidence ?? ''}` });
   }
   return out;
 }

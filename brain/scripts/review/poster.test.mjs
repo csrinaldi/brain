@@ -433,6 +433,19 @@ test('#405 deriveInlineComments: no anchored finding yields an EMPTY array, and 
   assert.deepEqual(deriveInlineComments([{ id: 'a', evidence: 'e' }]), []);
 });
 
+test('#405: deriveInlineComments tolerates a non-array findings value (REQ-405-2)', () => {
+  // `findings ?? []` and the providers' `Array.isArray(comments)` are defensive
+  // guards on lines this change added, and mutation showed nothing pinned them
+  // (round-11 cold review, E2). No in-tree caller produces these shapes and no
+  // artefact promises null-safety — so they are PINNED rather than removed: an
+  // unpinned guard is an invitation to delete it during a refactor and discover
+  // the caller that needed it in production.
+  assert.deepEqual(deriveInlineComments(undefined), []);
+  assert.deepEqual(deriveInlineComments(null), []);
+  assert.deepEqual(deriveInlineComments([null, undefined, 0, 'nonsense']), [],
+    'entries that are not objects yield no comment, rather than throwing mid-list');
+});
+
 test('#405 T9: anchored findings reach prReviewComment as comments[] (REQ-405-1)', async () => {
   const spy = recordingSpy();
   await postVerdict({

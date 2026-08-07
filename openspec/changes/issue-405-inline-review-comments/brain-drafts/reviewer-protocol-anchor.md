@@ -75,9 +75,12 @@ never 0)
 
 ```markdown
 - **`file` / `line` are OPTIONAL, on both protocols** (issue #405). When a finding in
-  `findings[]` carries both, the poster anchors an inline comment at that position on the
-  diff; a finding with neither, or with only one of them, posts exactly as it did before
-  and is unaffected in every other respect. **An anchor on a `follow_ups[]` entry renders
+  `findings[]` carries a **usable** anchor — a non-empty `file` and a `line` that coerces to
+  a positive integer — the poster anchors an inline comment at that position on the diff.
+  Anything else (neither field, one of them, or a `line` that is not a diff line: `0`, `''`,
+  `'abc'`, `2.5`, `-3`) posts exactly as it did before and is unaffected in every other
+  respect. The block emits the pair or nothing — **both or neither**, since a rendered
+  `file:` with no `line:` advertises an anchor that cannot attach. **An anchor on a `follow_ups[]` entry renders
   but is never posted inline** — see the §6.2 note below. Like `evidence_class`, they are not gated on protocol — a `/1`
   verdict simply omits them, which is what keeps `/1` output unchanged, and the emitter has
   no protocol branch to drift.
@@ -95,9 +98,11 @@ never 0)
 And after the `causal_disposition` bullet:
 
 ```markdown
-- **`file` / `line`** anchor the finding to a position in the diff. Both or neither: a half
-  anchor is not an anchor, and the poster drops it rather than spend the un-anchorable
-  fallback on a comment already known not to attach. The value travels as a scalar through
+- **`file` / `line`** anchor the finding to a position in the diff. Both or neither, and
+  both USABLE: a half anchor is not an anchor, and neither is a line a diff cannot contain.
+  The poster drops either rather than spend the un-anchorable fallback on a comment already
+  known not to attach. Renderer and poster share ONE predicate (`hasUsableAnchor`), because
+  they were byte-identical duplicates until one of them was tightened alone. The value travels as a scalar through
   the same `yamlScalar`/`unyamlScalar` pair as `cites`, so `line` comes back from
   `parseVerdict` as TEXT — consumers coerce, and `deriveInlineComments` does.
 - **A `follow_ups[]` anchor renders and is NOT posted inline.** The renderer emits the pair

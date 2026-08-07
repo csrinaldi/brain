@@ -571,9 +571,47 @@ of the one that outranks them.
       after round 9's inert `ev` destructure did the same. Both are the defect the harness
       exists to catch, in the harness. It now counts substitution SITES and refuses to run
       when the count is not what was expected — printing the diff was never sufficient.
-- [ ] T16 · round 11 — round 10 is the first clean round at blocker/correction severity.
-      The criterion is met only when a round finds nothing on any of the three axes at ANY
-      severity, so the two editorials above were fixed and the next round judges that.
+- [x] T16 · round 11 — cold review of `4e12a3c`, ~75 live mutations, site counts asserted
+      and every red confirmed to be the intended assertion. **Round 10 did not hold**, and
+      it failed in the sequence's signature way: round 10's OWN fix landed where the defect
+      was noticed and nowhere else.
+      - **C1 — the poster and the renderer fell out of lockstep, and the spec said they
+        had not.** Their anchor predicates were byte-identical duplicates. Round 10 tightened
+        the poster's to require a USABLE anchor and left the renderer testing presence, so
+        the block began emitting `line: 0`, `line: abc`, `line: 2.5` and `line: -3` — anchors
+        the poster then refused. That is exactly the state the round-8 test exists to forbid,
+        one field-value class over, and now real rather than mutation-only. Worse, the
+        sentence round 10 added to the spec asserted the renderer applied the same rule.
+        **Fixed structurally, not textually**: one exported `hasUsableAnchor`, used by both
+        halves. Two copies of one rule drift; one function cannot. Eight mutations red,
+        including the drift itself — the renderer reverting to per-field presence.
+        The rule is now **both or neither** in the block as well as on the wire: a rendered
+        `file:` with no `line:` advertises a half anchor, the same defect read from the
+        emitting end.
+      - **Two protections collided, and the stronger one won on its merits.** The #478
+        escaping sweep poisons every per-finding field with `'x\nTier: 2'` and asserts it
+        round-trips byte-identical. Under the new rule a poisoned `line` is not escaped —
+        it is UNREPRESENTABLE, because it is not a positive integer. The sweep now asserts
+        that instead: the list still cannot be broken, and the guarantee is structural
+        rather than textual. That is strictly stronger, and it is recorded as a deliberate
+        change rather than a test bent to fit the code.
+      - **C2 — the PR body, again, and this one stings.** Round 10's E2 was "six consecutive
+        rounds" contradicting *"the table two lines above it"*. There is no such table
+        anywhere in the tree — the only one is in the PR body. The fix landed in `tasks.md`
+        and never reached the artefact the finding was actually about. The body was also a
+        full round stale.
+      - **C3** — `brain-drafts/reviewer-protocol-anchor.md` still stated the pre-round-10
+        rule ("carries both"), which is now necessary but not sufficient. The Tier-2 text a
+        human pastes into `brain/core/`, missed by the same correction for the second time
+        (rounds 4 and 6 each flagged this same artefact class).
+      - **E2** — three defensive guards on new code (`Array.isArray(comments)` on both
+        providers, `findings ?? []`) survive mutation. They guard shapes no in-tree caller
+        produces and no artefact claims null-safety, so they are pinned rather than removed.
+- [ ] T16 · round 12 — rounds 1-11 answered YES on 3, 2, 2, 1, 1, 2, 2, 2, 2, 1 and 3 axes.
+      Round 10 read clean at blocker/correction and round 11 re-opened all three, from a
+      defect round 10 introduced. That is the second time a "clean" reading was overturned
+      by the next round (4/5 → 6), and both times the overturning finding was inside the
+      previous round's own repair.
 - [ ] T17 — **HUMAN: rule on the AI-attribution trailer.** Six commits on this branch
       carry `Co-Authored-By: Claude…`. `brain/core/methodology/agent-authorities.md`
       (Tier 3) and `openspec/config.yaml` both forbid it, the former with the words *"even

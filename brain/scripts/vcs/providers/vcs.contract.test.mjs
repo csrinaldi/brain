@@ -1488,6 +1488,28 @@ for (const providerName of Object.keys(WRITE_VERB_PROVIDERS)) {
       'and send exactly the same payloads — no empty array forwarded to the provider');
   });
 
+  test(`${providerName}.prReviewComment (contract): a non-array \`comments\` is NOT an inline request (REQ-405-2)`, async () => {
+    // `Array.isArray(comments)` is a defensive guard on a line this change added,
+    // and nothing pinned it (round-11 cold review, E2): relaxing it to
+    // `comments && comments.length > 0` left the whole suite green, after which a
+    // string reaches the provider as `comments: "…"` — a malformed request that
+    // GitHub 422s and that would then be charged to `inlineDropped` as if the diff
+    // were at fault. Pinned rather than removed: an unpinned guard is an invitation
+    // to delete it in a refactor and meet the caller that needed it in production.
+    const result = await vcs.prReviewComment({
+      project: 'x/y', number: 1, body: 'verdict',
+      comments: 'a.mjs:42',                                  // a string has .length
+      ...capture({ html_url: 'https://example.test/x/y/pull/1#review-9', id: 9 }),
+    });
+    assert.equal(typeof result.url, 'string');
+    assert.equal(result.inlineDropped, undefined, 'nothing was requested, so nothing was dropped');
+    for (const p of sentPayloads()) {
+      assert.equal(p.comments, undefined,
+        `a non-array comments value must never reach the provider: ${JSON.stringify(p)}`);
+      assert.equal(p.position, undefined, `and must produce no discussion: ${JSON.stringify(p)}`);
+    }
+  });
+
   test(`${providerName}.prReviewComment (contract): inlineDropped counts what was LOST, it is not a flag (REQ-405-4)`, async () => {
     // Every earlier case used exactly ONE anchor, so a verb that hardcoded
     // `inlineDropped: 1` satisfied the whole suite (cold review of PR #490, C2).

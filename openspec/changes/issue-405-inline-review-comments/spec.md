@@ -73,13 +73,22 @@ qualifier is the round-6 correction: the guard matched a SUBSTRING, so `.concat(
 passed it while the spread form reded, and this sentence claimed a coverage the guard did
 not have.
 
-The anchor is checked for USABILITY, not presence (round 10): a non-empty `file`, and a
-`line` that coerces to a positive integer. Presence was all the first version checked, so
-`line: 'abc'` went out as `line: null` and `line: ''` as `line: 0` — diff lines are 1-based,
-so both are anchors already known not to attach, and spending the un-anchorable fallback on
-one is the exact cost the rule exists to avoid. The renderer applies the same rule to what
-it EMITS, in both branches: a block that advertises an anchor the poster will refuse is the
-same defect read from the other end.
+The anchor is checked for USABILITY, not presence: a non-empty `file`, and a `line` that
+coerces to a positive integer. Presence was all the first version checked, so `line: 'abc'`
+went out as `line: null` and `line: ''` as `line: 0` — diff lines are 1-based, so both are
+anchors already known not to attach, and spending the un-anchorable fallback on one is the
+exact cost the rule exists to avoid.
+
+**One predicate, `hasUsableAnchor`, exported from `verdict.mjs` and used by both halves.**
+That is the round-11 correction, and the reason it is structural rather than a second copy
+of the rule: round 10 tightened the POSTER and left the renderer testing presence, so the
+block began advertising `line: 0` anchors the poster then refused — the exact state the
+round-8 test forbids, one field-value class over — and this paragraph asserted the opposite
+of the tree for a full round. Two copies of one rule drift; one function cannot.
+
+The rule is **both or neither**, in the block as well as on the wire. A rendered `file:`
+with no `line:` advertises a half anchor, which is the same defect read from the emitting
+end, so the renderer emits the pair or nothing.
 
 `line` survives the round trip as **text** (`parseVerdict` returns entry scalars verbatim;
 `verdict.test.mjs` pins `'42'`), so the consumer coerces. `deriveInlineComments` does —
