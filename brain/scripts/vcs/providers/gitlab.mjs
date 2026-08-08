@@ -9,9 +9,26 @@
 import { run, runJson } from '../lib/exec.mjs';
 import { normalizeCommitStatus, providerState, assigneeParams } from '../lib/normalize.mjs';
 import { vcsToken } from '../lib/token.mjs';
+import { currentIdentity } from '../lib/identity-context.mjs';
 import { gitlabApiFetch } from '../gitlab-api.mjs';
 
 export const PROVIDER = 'gitlab';
+
+// The single credential resolver (issue #501). Thirteen verbs resolved
+// `token ?? vcsToken(PROVIDER)` inline. The parameter was correct and the
+// reviewer still wrote with the wrong credential, because poster.mjs never passed
+// one — GitLab fell back to the GENERIC VCS_TOKEN while GitHub fell back to gh's
+// ambient login. Two mechanisms, one failure: the identity was not bound where the
+// port is obtained.
+//
+// Order is load-bearing. An explicit `token` argument still wins, so a caller
+// deliberately acting as someone else — whoami() verifying a candidate credential —
+// is unaffected. Then the identity bound to this port. Only then the generic
+// credential, which is what every non-reviewer caller keeps using.
+//
+// PINNED ON THE SOURCE by the identity drift test: a verb resolving
+// vcsToken(PROVIDER) inline again would ignore the binding and stay green.
+const glToken = (token) => token ?? currentIdentity() ?? vcsToken(PROVIDER);
 
 const toQs = (params) =>
   Object.entries(params)
@@ -24,7 +41,7 @@ export async function authCheck({ host }) {
 }
 
 export async function authLogin({ host, token } = {}) {
-  const tok = token ?? vcsToken(PROVIDER);
+  const tok = glToken(token);
   return run('glab', ['auth', 'login', '--hostname', host, '--git-protocol', 'https', '--stdin'], { input: tok }).ok;
 }
 
@@ -80,7 +97,7 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
   const encoded = encodeURIComponent(project);
   const r = await gitlabApiFetch({
     apiBase: apiBase ?? 'https://gitlab.com/api/v4',
-    token: token ?? vcsToken(PROVIDER),
+    token: glToken(token),
     proxyUrl: proxyUrl ?? null,
     path: `projects/${encoded}/issues/${number}`,
     fetchImpl,
@@ -143,7 +160,7 @@ export async function prView({ project, number, apiBase, token, proxyUrl, fetchI
   try {
     const r = await gitlabApiFetch({
       apiBase: apiBase ?? 'https://gitlab.com/api/v4',
-      token: token ?? vcsToken(PROVIDER),
+      token: glToken(token),
       proxyUrl: proxyUrl ?? null,
       path: `projects/${encoded}/merge_requests/${number}`,
       fetchImpl,
@@ -189,7 +206,7 @@ export async function prView({ project, number, apiBase, token, proxyUrl, fetchI
 export async function prStatusRollup({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
   const base = apiBase ?? 'https://gitlab.com/api/v4';
-  const tok = token ?? vcsToken(PROVIDER);
+  const tok = glToken(token);
   try {
     const mr = await gitlabApiFetch({
       apiBase: base,
@@ -237,7 +254,7 @@ export async function labelEvents({ project, number, apiBase, token, proxyUrl, f
   try {
     events = await gitlabApiFetch({
       apiBase: apiBase ?? 'https://gitlab.com/api/v4',
-      token: token ?? vcsToken(PROVIDER),
+      token: glToken(token),
       proxyUrl: proxyUrl ?? null,
       path: `projects/${encoded}/issues/${number}/resource_label_events`,
       fetchImpl,
@@ -316,7 +333,7 @@ export async function labelEvents({ project, number, apiBase, token, proxyUrl, f
 export async function prReviews({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
   const base = apiBase ?? 'https://gitlab.com/api/v4';
-  const tok = token ?? vcsToken(PROVIDER);
+  const tok = glToken(token);
   const perPage = 100;
 
   let notes;
@@ -398,7 +415,7 @@ export async function prCommits({ project, number, apiBase, token, proxyUrl, fet
   try {
     commits = await gitlabApiFetch({
       apiBase: apiBase ?? 'https://gitlab.com/api/v4',
-      token: token ?? vcsToken(PROVIDER),
+      token: glToken(token),
       proxyUrl: proxyUrl ?? null,
       path: `projects/${encoded}/merge_requests/${number}/commits`,
       fetchImpl,
@@ -455,7 +472,7 @@ export async function commitStatus({ project, sha }) {
 export async function prReviewComment({ project, number, body, comments, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const base = apiBase ?? 'https://gitlab.com/api/v4';
   const encoded = encodeURIComponent(project);
-  const tok = token ?? vcsToken(PROVIDER);
+  const tok = glToken(token);
   const call = (path, method, payload) =>
     gitlabApiFetch({ apiBase: base, token: tok, proxyUrl: proxyUrl ?? null, path, method, body: payload, fetchImpl });
 
@@ -560,7 +577,7 @@ export async function issueComment({ project, number, body, apiBase, token, prox
   try {
     const r = await gitlabApiFetch({
       apiBase: base,
-      token: token ?? vcsToken(PROVIDER),
+      token: glToken(token),
       proxyUrl: proxyUrl ?? null,
       path: `projects/${encoded}/issues/${number}/notes`,
       method: 'POST',
@@ -587,7 +604,7 @@ export async function labelAdd({ project, number, labels, apiBase, token, proxyU
   try {
     await gitlabApiFetch({
       apiBase: apiBase ?? 'https://gitlab.com/api/v4',
-      token: token ?? vcsToken(PROVIDER),
+      token: glToken(token),
       proxyUrl: proxyUrl ?? null,
       path: `projects/${encoded}/issues/${number}`,
       method: 'PUT',
@@ -612,7 +629,7 @@ export async function labelRemove({ project, number, labels, apiBase, token, pro
   try {
     await gitlabApiFetch({
       apiBase: apiBase ?? 'https://gitlab.com/api/v4',
-      token: token ?? vcsToken(PROVIDER),
+      token: glToken(token),
       proxyUrl: proxyUrl ?? null,
       path: `projects/${encoded}/issues/${number}`,
       method: 'PUT',
@@ -652,7 +669,7 @@ export async function labelRemove({ project, number, labels, apiBase, token, pro
 export async function labelList({ project, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
   const base = apiBase ?? 'https://gitlab.com/api/v4';
-  const tok = token ?? vcsToken(PROVIDER);
+  const tok = glToken(token);
   const perPage = 100;
   const names = [];
   let page = 1;
@@ -849,7 +866,7 @@ export async function mrCreate({
   try {
     const r = await gitlabApiFetch({
       apiBase: apiBase ?? 'https://gitlab.com/api/v4',
-      token: token ?? vcsToken(PROVIDER),
+      token: glToken(token),
       proxyUrl: proxyUrl ?? null,
       path: `projects/${encoded}/merge_requests`,
       method: 'POST',

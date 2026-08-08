@@ -13,6 +13,7 @@
 //                     e.g. node brain/scripts/vcs/cli.mjs issue-list '{"state":"open"}'
 
 import { pathToFileURL } from 'node:url';
+import { runAsIdentity } from './lib/identity-context.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 
 // The verbs every provider must implement (see vcs-contract.md). Reconciled
@@ -62,10 +63,31 @@ export function resolveProviderName({ config, env = process.env, provider } = {}
 
 /**
  * Loads and returns the active provider module (object of verb functions).
- * @param {{ config?: object, env?: object }} [opts]
+ *
+ * `identity` (issue #501) BINDS a credential to the returned port: every verb it
+ * exposes makes its server calls under that credential. Omitted, resolution is
+ * exactly what it is today — gh's ambient login on GitHub, `VCS_TOKEN` on GitLab
+ * — so no non-reviewer caller changes behaviour.
+ *
+ * Bound at the PORT rather than passed per verb, and that is the whole point.
+ * GitLab already had a per-verb `token` parameter, at thirteen sites, correct;
+ * the reviewer still wrote with the wrong credential because `poster.mjs` never
+ * passed one. A parameter a caller may omit is a rule the caller must remember,
+ * and `reviewer-protocol.md` §2 requires the opposite: "It must be impossible by
+ * construction." Here there is no argument to forget — a verb obtained from a
+ * bound port cannot be called unbound, and a verb ADDED tomorrow inherits the
+ * binding without knowing it exists.
+ *
+ * `_import` is a test seam for the dynamic import, so the binding can be driven
+ * with a stub provider — the binding under test lives in the wrapper here and is
+ * provider-agnostic, and a test that needed a real `gh` could not drive the two
+ * DIFFERENT identities the defect only shows under.
+ *
+ * @param {{ config?: object, env?: object, provider?: string, identity?: string|null,
+ *   _import?: (url: URL) => Promise<object> }} [opts]
  * @returns {Promise<object>}
  */
-export async function getVcs({ config, env, provider } = {}) {
+export async function getVcs({ config, env, provider, identity = null, _import } = {}) {
   const cfg = config ?? loadBrainConfig();
   const name = resolveProviderName({ config: cfg, env, provider });
   // Guard the dynamic import path: provider names are simple identifiers, never
@@ -74,13 +96,41 @@ export async function getVcs({ config, env, provider } = {}) {
   if (!/^[a-z][a-z0-9-]*$/.test(name)) {
     throw new Error(`vcs: invalid provider name '${name}' — must match [a-z][a-z0-9-]*.`);
   }
+  let mod;
   try {
-    return await import(new URL(`./providers/${name}.mjs`, import.meta.url));
+    const url = new URL(`./providers/${name}.mjs`, import.meta.url);
+    mod = _import ? await _import(url) : await import(url);
   } catch (err) {
     throw new Error(
       `vcs: provider '${name}' not found at providers/${name}.mjs — ${err.message}`,
     );
   }
+  if (!identity) return mod;
+  return bindIdentity(mod, identity);
+}
+
+/**
+ * Wraps every FUNCTION export so its call runs inside the identity context. Non
+ * -function exports (`PROVIDER`) pass through unchanged.
+ *
+ * Wrapping is exhaustive by construction — it enumerates the module rather than a
+ * list of verb names — because a hand-maintained list is the shape that failed:
+ * `whoami` was the one call site that applied the credential, and it stayed the
+ * only one for the whole life of #413 while nineteen others did not follow.
+ *
+ * @param {object} mod
+ * @param {string} identity
+ * @returns {object}
+ */
+function bindIdentity(mod, identity) {
+  const bound = {};
+  for (const [key, value] of Object.entries(mod)) {
+    bound[key] =
+      typeof value === 'function'
+        ? (...args) => runAsIdentity(identity, () => value(...args))
+        : value;
+  }
+  return bound;
 }
 
 const kebabToCamel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());

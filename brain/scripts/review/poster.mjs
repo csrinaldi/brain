@@ -109,6 +109,18 @@ export async function postVerdict({
   // already-loaded cold-boot data — actor lock AND sha lock, both. No vcs
   // call is made at all when it fires (cheapest check, and "skip" means
   // exactly that: not even a re-fetch).
+  //
+  // The ACTOR half rests on an invariant established elsewhere, and it is named
+  // here because it was false in production (issue #501). `reviewerHandle` is the
+  // CONFIGURED handle; `lastVerdict.author` is whoever actually wrote. They are
+  // the same identity only because `identity.mjs` verifies the handle against the
+  // reviewer token (#413) AND the port is bound to that same token, so the writes
+  // carry it (#501). Before the second half existed the reviewer verified as
+  // `csrinaldibot` and posted under the operator's ambient gh login, so this
+  // comparison could never be true: the lock SAW its own prior verdict — `rev: 2`
+  // proves `prReviews` returned it and `parseVerdict` parsed it — and disowned it.
+  // Measured on PR #500: two identical verdicts at `663d850`, and `rev` climbing
+  // on every further run until §7 escalates to a human on a PR nothing changed on.
   const lastVerdict = priorVerdicts.length > 0 ? priorVerdicts[priorVerdicts.length - 1] : null;
   if (lastVerdict && lastVerdict.author === reviewerHandle && lastVerdict.head_sha === headSha) {
     return { posted: false, skipped: 'anti-loop' };
