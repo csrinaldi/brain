@@ -196,6 +196,44 @@ test('REQ-473-CONFIG: whoami, prView (both calls), prReviewComment, and prReview
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Cold-review round 1, Fix 2 (MINOR) — behavioral env-bypass mirror of
+// brain-promote.locks.test.mjs:133-165. Red-impossible against correct code
+// by construction (cli.mjs reads process.env ZERO times by Lock 2 above) —
+// its value is PINNING that future, the same rationale promote's own suite
+// states for its BYPASS_ENV loop.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const BYPASS_ENV = ['BRAIN_APPROVE_YES', 'CI', 'YES', 'NONINTERACTIVE', 'BRAIN_NON_INTERACTIVE'];
+
+for (const name of BYPASS_ENV) {
+  test(`REQ-473-7 lock 2 (behavioral): \`${name}\` in the environment does not skip or satisfy the prompt`, async () => {
+    const had = Object.prototype.hasOwnProperty.call(process.env, name);
+    const prev = process.env[name];
+    process.env[name] = CONFIRMATION_WORD;
+    const vcs = makeVcs();
+    let prompted = 0;
+    try {
+      const res = await runApprove({
+        argv: ['7'],
+        isTTY: true,
+        project: 'o/r',
+        getVcsFn: async () => vcs,
+        readLineFn: async () => { prompted += 1; return 'n'; },
+        write: () => {},
+      });
+      // Liveness: if the env var short-circuited the gate, the prompt would
+      // never have been reached — the count proves the bypass absent, not
+      // merely the refusal (a wrong answer alone would also produce that).
+      assert.equal(prompted, 1, `${name} must not short-circuit the prompt`);
+      assert.notEqual(res.exitCode, 0);
+      assert.equal(vcs.calls.prReviewComment, 0, 'nothing may post while an env var claims confirmation');
+    } finally {
+      if (had) process.env[name] = prev; else delete process.env[name];
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // REQ-473-8 — head_sha race safety: SITE COUNT, not a boolean
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -205,6 +243,14 @@ test('REQ-473-8 SITE COUNT: `vcs.prView(` appears exactly twice — compose, the
   // re-reading it would collapse this to 1 and go undetected by any
   // boolean-shaped assertion.
   assert.equal(count(SOURCE, 'vcs.prView('), 2, 'exactly one compose read and one anti-stale re-read');
+});
+
+test('SITE COUNT: `vcs.prReviewComment(` appears exactly once — guards a future duplicate-post path', () => {
+  assert.equal(count(SOURCE, 'vcs.prReviewComment('), 1, 'the post verb may only be called once per run');
+});
+
+test('SITE COUNT: `vcs.whoami(` appears exactly once — guards a second mid-run identity resolution', () => {
+  assert.equal(count(SOURCE, 'vcs.whoami('), 1, 'identity must be resolved exactly once and reused, never re-checked mid-run');
 });
 
 test('REQ-473-8 (unit): head moved between compose and post → refuses, posts NOTHING', async () => {
