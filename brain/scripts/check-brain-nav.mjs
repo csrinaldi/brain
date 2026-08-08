@@ -16,7 +16,6 @@
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname, basename, normalize, relative } from "node:path";
-import { citedPathsIn } from "./lib/cited-paths.mjs";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -98,11 +97,24 @@ function linksOf(file) {
 // Las otras incluyen §2 citando el anti-patrón que la sostiene en su ruta
 // vieja, y consolidation-protocol.md citándose A SÍ MISMO en la suya.
 //
-// El extractor vive en lib/cited-paths.mjs — este script corre sus chequeos al
-// importarse, así que un test que importara desde acá ejecutaría la compuerta
-// entera contra el repo real (issue #499).
+// El extractor vive ACÁ, inline, y no en un lib/ importado: este script se COPIA
+// solo a fixtures y al scaffolding de adopción, y un import relativo lo rompe
+// fuera de su árbol. Medido: moverlo a lib/ puso 5 tests existentes en rojo
+// (ERR_MODULE_NOT_FOUND en cada fixture que lo copia suelto). La portabilidad del
+// script es una restricción real, no un detalle de estilo.
+//
+// Sobre los GLOBS (`brain/**`): NO matchean, medido. El regex exige backtick de
+// cierre y `*` está fuera de la clase, así que la cita nunca cierra — no degrada a
+// `brain/`, simplemente no hay match. El `.filter()` es entonces código muerto
+// hoy: una mutación que lo desactiva deja la suite verde, y eso está pinneado a
+// propósito. Queda como cinturón y tiradores, anotado como tal, porque una
+// protección aparente es la clase de defecto que este ticket persigue.
+const CITED_RE = /`(brain\/[A-Za-z0-9_./-]+)`/g;
+
 function citedPathsOf(file) {
-  return citedPathsIn(readFileSync(file, "utf8"));
+  return [...readFileSync(file, "utf8").matchAll(CITED_RE)]
+    .map((m) => m[1])
+    .filter((p) => !p.includes("*"));
 }
 
 // 1. Links rotos + leaks core→project en cualquier doc de brain/.
