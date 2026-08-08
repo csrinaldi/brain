@@ -17,6 +17,7 @@ import { pathToFileURL } from 'node:url';
 
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { loadContext } from '../vcs/ci-context.mjs';
+import { getVcs } from '../vcs/cli.mjs';
 import { resolveTier, tierParams } from '../vcs/governance-tiers.mjs';
 import { gatherIdentity } from './identity.mjs';
 import { gatherColdBoot } from './cold-boot.mjs';
@@ -168,12 +169,27 @@ export async function main(deps = {}) {
     return 1;
   }
 
+  // #501: every server call this run makes — read AND write — goes through a port
+  // BOUND to the token `gatherIdentity` just verified. The SAME value, threaded;
+  // never a second read of the env var, because a second read is a second chance
+  // to differ from the one that was checked.
+  //
+  // Before this the token reached `whoami` and nothing else. The reviewer verified
+  // as `csrinaldibot` and posted as whoever `gh` was logged in as (measured on PR
+  // #500, review 4887057484), so the two-key split was checked and not enforced —
+  // and `poster.mjs`'s anti-loop lock then compared the verdict's author against a
+  // handle that never reached the wire.
+  //
+  // Reads are bound too, deliberately: a port reading under one credential and
+  // writing under another can report on a repository it is not writing to.
+  const boundGetVcs = (opts = {}) => getVcs({ ...opts, identity: identity.token });
+
   const boot = await gatherColdBoot({
     project,
     number: args.pr,
     provider: deps.provider,
     reviewerHandle: identity.handle,
-    deps: deps.coldBootDeps ?? {},
+    deps: deps.coldBootDeps ?? { getVcs: boundGetVcs },
   });
 
   if (boot.abstain) {
@@ -291,7 +307,13 @@ export async function main(deps = {}) {
     return 0;
   }
 
-  const posterDeps = deps.posterDeps ?? (deps.writeVerbs ? { getVcs: async () => deps.writeVerbs } : {});
+  // The poster gets the SAME bound port the cold boot read through (#501) — the
+  // verdict is written under the identity that was verified, so the anti-loop
+  // lock's `lastVerdict.author === reviewerHandle` becomes a true statement by
+  // construction rather than by the two happening to be configured alike.
+  const posterDeps =
+    deps.posterDeps ??
+    (deps.writeVerbs ? { getVcs: async () => deps.writeVerbs } : { getVcs: boundGetVcs });
   const postResult = await postVerdict({
     headSha: boot.headSha,
     project,
