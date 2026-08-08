@@ -1,0 +1,214 @@
+---
+status: draft
+issue: 473
+artifact_store: hybrid
+topic_key: sdd/issue-473-approval-signature-on-diff/spec
+---
+
+# Delta Spec: issue-473 — approval signature lands on the diff
+
+Scope: `lite` tier only. `brain-decision/1` is an ADDITIONAL sufficient evidence
+form for L5 admissibility, OR-composed with the existing label-timestamp check
+(`evaluateDistinctAct`). No new port verb, no APPROVE-state review, no new
+config key, no provider shape change, no `dispositions` field. Level shape
+throughout: `{ level: 'pass'|'fail', reason }` (fail-closed, no `warn` for a
+present-but-broken block — `warn` stays reserved for "no evidence at all").
+
+## Domain: L5 actor-check — lite admissibility (read side)
+
+### ADDED Requirements
+
+#### Requirement: brain-decision/1 as additional sufficient evidence
+At `lite`, a valid `brain-decision/1 APPROVE` block MUST satisfy L5 admissibility
+on its own, without requiring the label-timestamp check to also pass. The
+existing label-timestamp check MUST remain unmodified and independently
+sufficient.
+
+##### Scenario: Valid block, no approved-label event at all
+- GIVEN a PR with a readable, head_sha-matching `brain-decision/1 APPROVE` block and zero `status:approved` label events
+- WHEN L5 evaluates admissibility at `lite`
+- THEN the verdict is `warn` (unchanged "no labeled event found" branch, REQ-L5-2), NOT `pass` — the block is never even reached, because the label-existence check runs ABOVE the tier dispatch in `evaluateActor` (design.md §C5, property 1: "The label is still required")
+
+[Amended after PR #503 cold-review round 1, finding 1: the original scenario
+claimed a valid decision block + NO `status:approved` label event yields
+`pass`. This contradicted design.md §C5 ("The label is still required... a
+signed block alone therefore never reaches the evidence list. Authorization
+(`status:approved`, #124, on the issue) stays the precondition; the block
+supplies per-diff verification") and the proposal's decision that
+`status:approved` stays required as scope authorization, with the signed
+block supplying per-diff/per-timing verification, not replacing the label.
+The block is evidence FOR the label's timing/distinct-act requirement, not a
+replacement for the label's existence. The implementation (slice 2, PR2)
+correctly returns `warn` here — the label-existence check happens before the
+tier dispatch, so `evaluateSignedDecision` is never even invoked when there
+is no labeled event. This amendment brings the spec back in line with the
+design and the implementation; no code changed as a result of this finding.]
+
+##### Scenario: No block, valid label-timestamp evidence (today's path, unchanged)
+- GIVEN a PR with no `brain-decision/1` block but a `status:approved` label postdating the latest foreign commit
+- WHEN L5 evaluates admissibility at `lite`
+- THEN the verdict is `pass`, exactly as before this change
+
+#### Requirement: head_sha freshness (anti-staleness)
+A `brain-decision/1` block's `head_sha` MUST equal the PR's current head commit
+SHA for the block to be admissible. A push that moves the head invalidates
+every prior block.
+
+##### Scenario: head_sha mismatch after a later push
+- GIVEN a `brain-decision/1` block signed against SHA `A`, and the PR head has since moved to SHA `B` via a later push
+- WHEN L5 evaluates admissibility at `lite`
+- THEN the block is not admissible; the verdict falls through to the label-timestamp check alone (`fail` if that check also fails)
+
+##### Scenario: head_sha matches (happy path)
+- GIVEN a block whose `head_sha` equals the PR's current head
+- WHEN L5 evaluates admissibility
+- THEN the block passes the freshness test
+
+#### Requirement: review author must equal the block's actor field
+The PR review's author (per `prReviews()`) MUST equal the block's declared
+`actor` field for the block to be admissible.
+
+##### Scenario: block author differs from the actor field
+- GIVEN a `brain-decision/1` block whose `actor` field names user X, posted as a review by user Y
+- WHEN L5 evaluates admissibility
+- THEN the block is not admissible (fails closed on this axis, independent of head_sha and reviewActors)
+
+##### Scenario: review author has no resolvable login (agent-posted, unattributed)
+- GIVEN a block posted by an identity the provider cannot resolve to a login (e.g. an agent posting under a bare noreply identity)
+- WHEN L5 compares the review author to the block's `actor` field
+- THEN the comparison cannot succeed and the block is not admissible — an unresolvable author is never treated as a match
+
+#### Requirement: block author must not be a reviewActors identity
+A `brain-decision/1` review whose author resolves to an identity registered in
+`governance.reviewActors` MUST NOT be admissible, mirroring the existing
+deny-before-allow rule for the approved label (actor-check.mjs:358-365).
+
+##### Scenario: block posted by a reviewActors identity
+- GIVEN a `brain-decision/1` block whose review author's resolved login is in `governance.reviewActors`
+- WHEN L5 evaluates admissibility
+- THEN the block is not admissible, regardless of head_sha match or actor-field match
+
+##### Scenario: block posted by an agent using its own verified token
+- GIVEN a `brain-decision/1` block posted by an agent identity that is registered in `governance.reviewActors`
+- WHEN L5 evaluates admissibility
+- THEN the block is refused on the same deny-before-allow ground as a human reviewActors identity — an agent cannot manufacture L5 evidence via this path
+
+#### Requirement: unreadable or incomplete blocks fail closed
+Any `brain-decision/1`-tagged block missing a required field (`protocol`,
+`decision`, `actor`, `head_sha`), carrying an unparseable body, or matching no
+recognized protocol string MUST be treated as non-admissible — never as a
+crash, and never as silently equivalent to "no block present" if a
+DECISION-shaped block was present but broken (distinguish "absent" from
+"broken" only insofar as neither is ever admissible).
+
+##### Scenario: missing head_sha field
+- GIVEN a block with `protocol: brain-decision/1`, `decision: APPROVE`, `actor: X`, and no `head_sha` line
+- WHEN parsed and evaluated
+- THEN the block is not admissible
+
+##### Scenario: missing decision field
+- GIVEN a block with `protocol`, `actor`, `head_sha` present and no `decision` line
+- WHEN parsed and evaluated
+- THEN the block is not admissible
+
+##### Scenario: missing actor field
+- GIVEN a block with `protocol`, `decision`, `head_sha` present and no `actor` line
+- WHEN parsed and evaluated
+- THEN the block is not admissible (the actor-equality check in the requirement above has nothing to compare against, and must not default to "pass")
+
+##### Scenario: unreadable body (malformed fence, truncated list content)
+- GIVEN a review body whose fenced block cannot be located, or whose content the parser recognizes as a partial/truncated read
+- WHEN parsed
+- THEN the parser returns non-admissible (never a partial best-effort object), matching `parseVerdict`'s existing "unreadable → null" discipline
+
+##### Scenario: L5 never raises an exception on malformed input
+- GIVEN any of the above malformed shapes, across every field in isolation and combinations of two fields
+- WHEN L5 evaluates admissibility
+- THEN evaluation completes and returns a `fail`-or-fallthrough verdict, never throws
+
+#### Requirement: monotonicity — no PR passes on less evidence than today
+For every PR-state input that passes L5 admissibility at `lite` under today's
+label-timestamp-only logic, admissibility MUST still pass after this change
+(the block check is additive, never a replacement or a stricter gate on the
+existing path). No PR that fails today's label-timestamp check AND has no
+`brain-decision/1` evidence may pass after this change.
+
+##### Scenario: existing label-only pass set is preserved
+- GIVEN the full existing `evaluateDistinctAct` test matrix (label predates/postdates foreign commit, no foreign commit, unreadable timestamps)
+- WHEN re-run unchanged after this change lands
+- THEN every existing verdict (pass/fail) is identical, byte-for-byte reason strings included
+
+##### Scenario: absence of any evidence still fails, never passes by default
+- GIVEN a PR with no `status:approved` label event and no `brain-decision/1` block
+- WHEN L5 evaluates admissibility at `lite`
+- THEN the verdict is not `pass` (unchanged from today's `warn`/`fail` behavior for "no evidence")
+
+## Domain: brain:approve CLI (write side)
+
+### ADDED Requirements
+
+#### Requirement: identity verification before composing a block
+`brain:approve` MUST resolve the caller's identity via `whoami` before
+composing a `brain-decision/1` block, and MUST refuse if the resolved login is
+registered in `governance.reviewActors` (deny-before-allow, mirroring the read
+side).
+
+##### Scenario: caller identity is a reviewActors identity
+- GIVEN a caller whose token resolves to a login in `governance.reviewActors`
+- WHEN `brain:approve` runs
+- THEN it refuses before composing or posting any block
+
+##### Scenario: caller identity is verified and not denied
+- GIVEN a caller whose token resolves to a login outside `governance.reviewActors`
+- WHEN `brain:approve` runs
+- THEN it proceeds to compose the block with `actor` set to the resolved login
+
+#### Requirement: head_sha race safety at write time
+`brain:approve` MUST re-read the PR's head SHA after composing the block and
+MUST refuse to post if the head has moved since composition began.
+
+##### Scenario: head moves between compose and post
+- GIVEN `brain:approve` composes a block stamped with SHA `A`, and a push lands moving the head to SHA `B` before posting
+- WHEN `brain:approve` re-reads the head SHA
+- THEN it refuses to post the stale block; no review is created
+
+##### Scenario: head unchanged
+- GIVEN no push occurs between compose and post
+- WHEN `brain:approve` re-reads the head SHA
+- THEN it posts the block as composed
+
+## Domain: Scope invariants (non-goals, testable as MUST NOT)
+
+### ADDED Requirements
+
+#### Requirement: no new port verb, no APPROVE-state review, ever
+`brain-decision/1` MUST be posted using only the existing `prReviewComment`
+verb with `event: 'COMMENT'`. No code path introduced by this change may post
+or read an `event: 'APPROVE'` review, on either provider.
+
+##### Scenario: posting path uses the existing verb unmodified
+- GIVEN `brain:approve` posts a valid block
+- WHEN the VCS port call is inspected
+- THEN it is `prReviewComment` with `event: 'COMMENT'` — no new verb name appears in the VCS port's exported surface
+
+##### Scenario: ADR-0020 Locks 1–3 remain intact
+- GIVEN the full change diff
+- WHEN checked against ADR-0020's three locks (no APPROVE code path, adapter never gains approve capability, reviewer handle never enters `approvalActors`)
+- THEN all three hold verbatim
+
+#### Requirement: status:approved label remains authorization-only; L6 unaffected
+The `status:approved` label's role (#124 authorization) MUST NOT be altered by
+this change. `brain-writes-reviewed` (L6) evidence at every tier MUST be
+byte-for-byte unaffected, and `prReviews()`'s normalized shape (`{ state,
+author, body }`) MUST NOT change on either provider. No new
+`governance.*` config key is introduced.
+
+##### Scenario: L6 lite behavior unchanged
+- GIVEN a `brain/**`-touching PR at `lite`
+- WHEN L6 evaluates evidence
+- THEN it still performs zero `fetchReviews` calls and evaluates agent-authorship exclusion only, exactly as before
+
+##### Scenario: no new config key present
+- GIVEN `brain.config.json`'s governance schema after this change
+- WHEN diffed against before
+- THEN no new key (e.g. `approvalMarker`, `human.handle`) has been added

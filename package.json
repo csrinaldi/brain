@@ -57,6 +57,7 @@
     "brain:next": "node ./brain/scripts/brain-next.mjs",
     "brain:adopt": "node ./brain/scripts/adopt.mjs",
     "brain:promote": "node ./brain/scripts/brain-promote.mjs",
+    "brain:approve": "node ./brain/scripts/approve/cli.mjs",
     "brain:review": "node ./brain/scripts/review/cli.mjs",
     "brain:review:queue": "node ./brain/scripts/review/cli.mjs queue",
     "brain:review:board": "node ./brain/scripts/review/cli.mjs board",
