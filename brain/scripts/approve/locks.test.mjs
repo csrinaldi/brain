@@ -37,10 +37,11 @@ const count = (haystack, needle) => haystack.split(needle).length - 1;
 
 const HEAD_SHA = 'a'.repeat(40);
 
-function makeVcs(overrides = {}) {
+function makeVcs(overrides = {}, provider = 'gitlab') {
   const calls = { whoami: 0, prView: 0, mrList: 0, prReviewComment: 0, prReviews: 0 };
   const posted = { body: null };
   return {
+    PROVIDER: provider,
     calls,
     posted,
     whoami: async (a) => { calls.whoami += 1; return overrides.whoami ? overrides.whoami(a) : { username: 'alice' }; },
@@ -142,18 +143,29 @@ test('REQ-473-7 lock 2: no BRAIN_HUMAN_TOKEN or new token env var (design.md §F
 // `prReviews` fell back to `vcsToken()` + a hardcoded gitlab.com apiBase
 // inside the provider — two different credential mechanisms. On self-hosted
 // GitLab this broke entirely; even on gitlab.com the deny-check could
-// evaluate an identity different from the one that ultimately posts. The fix
-// mirrors identity.mjs/actor-check.mjs/board.mjs/cold-boot.mjs: resolve
-// `gitlabApiConfig()` ONCE and thread it into every call site (harmless
-// no-op params on the GitHub provider).
+// evaluate an identity different from the one that ultimately posts.
+//
+// Cold-review round 2, Fix 1 (MAJOR) — the round-1 fix threaded
+// `gitlabApiConfig()` UNCONDITIONALLY into every call site. Correct on
+// GitLab (every site honors it — one credential source). WRONG on GitHub
+// (this repo's ACTIVE provider, brain.config.json's `vcs.provider`):
+// `whoami({token})` overrides identity to the TOKEN's account
+// (providers/github.mjs:35-39) while `prView`/`mrList`/`prReviews`/
+// `prReviewComment` ignore `token`/`apiBase`/`proxyUrl` entirely and use the
+// ambient `gh` session — with `VCS_TOKEN` divergent from the `gh` login,
+// whoami claims one identity and the post lands under another. Fix: thread
+// `gitlabApiConfig()` ONLY when `vcs.PROVIDER === 'gitlab'` — mirrors
+// identity.mjs's `defaultWhoami` guard exactly
+// (`if (vcs.PROVIDER === 'gitlab') { ... }`). On GitHub every site receives
+// `{}` — ambient `gh` everywhere, including whoami, never a token.
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('REQ-473-CONFIG: whoami, prView (both calls), prReviewComment, and prReviews all receive the SAME threaded transport config object', async () => {
+test('REQ-473-CONFIG (gitlab): whoami, prView (both calls), prReviewComment, and prReviews all receive the SAME threaded transport config object', async () => {
   // makeVcs's stubs already implement the correct compose→post→verify data
   // flow (posted body, matching author); this test only needs to WATCH the
   // args each call receives, so it wraps the real stubs rather than
   // reimplementing their behavior.
-  const vcs = makeVcs();
+  const vcs = makeVcs({}, 'gitlab');
   const captured = { whoami: null, prView: [], prReviewComment: null, prReviews: null };
   const origWhoami = vcs.whoami;
   const origPrView = vcs.prView;
@@ -195,11 +207,11 @@ test('REQ-473-CONFIG: whoami, prView (both calls), prReviewComment, and prReview
   assert.deepEqual(configShape(captured.prReviews), expected, 'prReviews must receive the SAME resolved transport config');
 });
 
-test('REQ-473-CONFIG (SITE completeness): mrList on the branch-resolution path receives the SAME threaded transport config', async () => {
+test('REQ-473-CONFIG (gitlab, SITE completeness): mrList on the branch-resolution path receives the SAME threaded transport config', async () => {
   // The round-1 fix threaded five call sites; mrList lives on a PATH the
   // number-given fixture never reaches (argv omitted → resolve via branch),
   // which is exactly how a SITE slips a config sweep. This drives that path.
-  const vcs = makeVcs();
+  const vcs = makeVcs({}, 'gitlab');
   let capturedMrList = null;
   const origMrList = vcs.mrList;
   vcs.mrList = async (a) => { capturedMrList = a; return origMrList(a); };
@@ -222,6 +234,73 @@ test('REQ-473-CONFIG (SITE completeness): mrList on the branch-resolution path r
     expected,
     'mrList must receive the SAME resolved transport config as every other call site',
   );
+});
+
+test('REQ-473-CONFIG (github): whoami receives NO token key — ambient `gh` session decides identity, exactly like every other site', async () => {
+  // github.mjs's whoami({token}) OVERRIDES identity to the token's account
+  // when `token` is present (providers/github.mjs:35-39: `GH_TOKEN` env
+  // override). Passing gitlabApiConfig()'s VCS_TOKEN here would silently
+  // diverge whoami's identity from what the ambient `gh` session posts under.
+  const vcs = makeVcs({}, 'github');
+  let capturedWhoami = null;
+  const origWhoami = vcs.whoami;
+  vcs.whoami = async (a) => { capturedWhoami = a; return origWhoami(a); };
+
+  const res = await runApprove({
+    argv: ['7'],
+    isTTY: true,
+    project: 'o/r',
+    getVcsFn: async () => vcs,
+    readLineFn: async () => CONFIRMATION_WORD,
+    write: () => {},
+  });
+  assert.equal(res.exitCode, 0, JSON.stringify(res));
+  assert.equal('token' in capturedWhoami, false, 'whoami must never be passed a `token` key on GitHub');
+  assert.equal(capturedWhoami.token, undefined);
+});
+
+test('REQ-473-CONFIG (github): no call site receives a gitlab-derived apiBase — every site gets an empty config', async () => {
+  const vcs = makeVcs({}, 'github');
+  const captured = { whoami: null, prView: [], mrList: null, prReviewComment: null, prReviews: null };
+  const origWhoami = vcs.whoami;
+  const origPrView = vcs.prView;
+  const origMrList = vcs.mrList;
+  const origPrReviewComment = vcs.prReviewComment;
+  const origPrReviews = vcs.prReviews;
+  vcs.whoami = async (a) => { captured.whoami = a; return origWhoami(a); };
+  vcs.prView = async (a) => { captured.prView.push(a); return origPrView(a); };
+  vcs.mrList = async (a) => { captured.mrList = a; return origMrList(a); };
+  vcs.prReviewComment = async (a) => { captured.prReviewComment = a; return origPrReviewComment(a); };
+  vcs.prReviews = async (a) => { captured.prReviews = a; return origPrReviews(a); };
+
+  // argv omitted (→ resolve via branch, exercising mrList) covers all 6 sites
+  // in one run, same shape as the gitlab SITE-completeness test above.
+  const res = await runApprove({
+    argv: [],
+    isTTY: true,
+    project: 'o/r',
+    getVcsFn: async () => vcs,
+    branchFn: () => 'feat/x',
+    readLineFn: async () => CONFIRMATION_WORD,
+    write: () => {},
+  });
+  assert.equal(res.exitCode, 0, JSON.stringify(res));
+  assert.equal(captured.prView.length, 2, 'sanity: both prView calls were captured');
+
+  const gitlabApiBase = gitlabApiConfig().apiBase;
+  for (const [name, call] of [
+    ['whoami', captured.whoami],
+    ['mrList', captured.mrList],
+    ['prView[0]', captured.prView[0]],
+    ['prView[1]', captured.prView[1]],
+    ['prReviewComment', captured.prReviewComment],
+    ['prReviews', captured.prReviews],
+  ]) {
+    assert.equal(call.apiBase, undefined, `${name} must not receive a gitlab-derived apiBase on GitHub`);
+    assert.notEqual(call.apiBase, gitlabApiBase, `${name} must not receive the gitlab apiBase value on GitHub`);
+    assert.equal(call.token, undefined, `${name} must not receive a token on GitHub`);
+    assert.equal(call.proxyUrl, undefined, `${name} must not receive a proxyUrl on GitHub`);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

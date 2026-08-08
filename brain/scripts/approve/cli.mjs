@@ -27,8 +27,15 @@
 // Four structural locks, drift-guarded by approve/locks.test.mjs (mirrors
 // brain-promote.locks.test.mjs's shapes — design.md §F2, reused PATTERN):
 //   1. Refuses on a non-TTY, before anything is read or written.
-//   2. No auto-accept option and no environment read exists — every
-//      option-shaped token is a hard abort, not a silent no-op.
+//   2. No auto-accept option, and this FILE never reads the environment
+//      itself (structurally pinned at zero occurrences — Lock 2,
+//      locks.test.mjs) — every option-shaped token is a hard abort, not a
+//      silent no-op. Transport config resolved via ci-context.mjs MAY read
+//      the environment for GitLab transport (VCS_TOKEN/CI_API_V4_URL/proxy);
+//      that cannot affect whether the prompt fires, what word confirms, or
+//      any abort path (pinned behaviorally by locks.test.mjs's BYPASS_ENV
+//      tests). On GitHub no transport config is read at all (cold-review
+//      round 2: provider-conditional config, below).
 //   3. Writes ZERO labels, and never passes an `event` key to
 //      `prReviewComment` — the write surface stays exactly what ADR-0020
 //      already allows.
@@ -166,13 +173,20 @@ export async function runApprove({
 
   // Resolved ONCE, threaded into every vcs call below (issue #473 cold-review
   // round 1 finding: whoami and the post/verify calls must share ONE
-  // credential source). `{ apiBase, token, proxyUrl }` are GitLab-only
-  // transport config — harmless no-op params on the GitHub provider, same
-  // pattern as identity.mjs's `defaultWhoami` / actor-check.mjs's
-  // `defaultFetch*` helpers. Reading the environment is `gitlabApiConfig`'s
-  // own module's business, not this one's — this file's environment-read
-  // count (Lock 2, locks.test.mjs) stays at zero occurrences.
-  const vcsConfig = gitlabApiConfig();
+  // credential source) — PROVIDER-CONDITIONAL (cold-review round 2 finding):
+  // on GitLab every site honors `{ apiBase, token, proxyUrl }`, so threading
+  // it keeps whoami and the post on the SAME source. On GitHub, `whoami`
+  // DOES honor a `token` key (providers/github.mjs's `GH_TOKEN` override) but
+  // `prView`/`mrList`/`prReviews`/`prReviewComment` do not — they always use
+  // the ambient `gh` session. Threading a GitLab-derived token into whoami
+  // there would let it resolve a DIFFERENT identity than the one that posts.
+  // So on GitHub every site gets an empty config — ambient `gh` everywhere,
+  // including whoami. Mirrors identity.mjs's `defaultWhoami` guard exactly
+  // (`if (vcs.PROVIDER === 'gitlab') { ... }`). Reading the environment is
+  // `gitlabApiConfig`'s own module's business, not this one's — this file's
+  // environment-read count (Lock 2, locks.test.mjs) stays at zero
+  // occurrences.
+  const vcsConfig = vcs.PROVIDER === 'gitlab' ? gitlabApiConfig() : {};
 
   // ── Identity — ambient credentials, verified before anything else ─────────
   let who;
