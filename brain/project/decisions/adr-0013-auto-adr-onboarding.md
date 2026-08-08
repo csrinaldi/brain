@@ -11,7 +11,7 @@ The hardest constraint on any solution is `agent-authorities.md`. `brain/project
 
 - **Tier 1 (autonomous):** the agent may read any file and write freely to `openspec/changes/**`.
 - **Tier 2 (confirm per action):** the agent may write to `brain/**` only after explicit per-action human confirmation; the canonical flow is *agent drafts in `openspec/changes/{iid}/brain-drafts/` → human reviews → the artifact reaches `brain/`*.
-- **Tier 3 (prohibited):** the agent must **never** commit directly to `brain/decisions/`, even if asked. The anti-pattern is explicit: *"No agent promotes its own artifacts to `brain/`. That signature is human."*
+- **Tier 3 (prohibited):** the agent must **never** commit directly to `brain/project/decisions/`, even if asked. The anti-pattern is explicit: *"No agent promotes its own artifacts to `brain/`. That signature is human."*
 
 So the feature cannot be "a script that writes ADRs into `brain/`." Bootstrap shell/node code can only **detect and notice**; the intelligence — exploring the repo, drafting prose, running the review — belongs to an agent, and every write into `brain/` must pass a Tier 2 gate. A second constraint: ADR drafting must not hallucinate. The agent captures what the repo **IS** (descriptive facts), not why the team chose it — the signature on the *reasoning* is also human.
 

@@ -65,7 +65,7 @@ tasks.md      — checklist de implementación
 
 Artifacts live in `openspec/` during the change flight.
 Only the durable residue (ADRs, anti-patterns, glossary) is promoted to `brain/` — see
-`brain/methodology/consolidation-protocol.md`.
+`brain/core/methodology/consolidation-protocol.md`.
 
 ## Current implementation (gentle-ai)
 
@@ -73,7 +73,6 @@ Only the durable residue (ADRs, anti-patterns, glossary) is promoted to `brain/`
 `gentle-ai install` and maintained with `gentle-ai upgrade`. The local registry is
 refreshed automatically on `brain:day:start` and `brain:env:init`.
 
-See `brain/methodology/agent-skills.md` for the full skill inventory.
 
 ## Implementation note — materialized memory layer
 

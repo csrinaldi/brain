@@ -147,8 +147,8 @@ The agent proposes and waits for explicit human approval:
 
 The agent must never do this, even if explicitly asked:
 
-- Commit directly to `brain/decisions/`, `brain/anti-patterns/`,
-  `brain/domain/`, or `brain/methodology/`
+- Commit directly to `brain/core/**` or `brain/project/**` — the knowledge half,
+  whatever its subdirectories are called
 - Approve or merge its own MR
 - Modify git history (`--force`, `--amend` of published commits,
   `rebase` of branches others use)
@@ -246,7 +246,7 @@ tasks.md      — checklist de implementación
 
 Artifacts live in `openspec/` during the change flight.
 Only the durable residue (ADRs, anti-patterns, glossary) is promoted to `brain/` — see
-`brain/methodology/consolidation-protocol.md`.
+`brain/core/methodology/consolidation-protocol.md`.
 
 ## Current implementation (gentle-ai)
 
@@ -254,7 +254,6 @@ Only the durable residue (ADRs, anti-patterns, glossary) is promoted to `brain/`
 `gentle-ai install` and maintained with `gentle-ai upgrade`. The local registry is
 refreshed automatically on `brain:day:start` and `brain:env:init`.
 
-See `brain/methodology/agent-skills.md` for the full skill inventory.
 
 ## Implementation note — materialized memory layer
 

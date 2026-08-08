@@ -47,8 +47,8 @@ The agent proposes and waits for explicit human approval:
 
 The agent must never do this, even if explicitly asked:
 
-- Commit directly to `brain/decisions/`, `brain/anti-patterns/`,
-  `brain/domain/`, or `brain/methodology/`
+- Commit directly to `brain/core/**` or `brain/project/**` — the knowledge half,
+  whatever its subdirectories are called
 - Approve or merge its own MR
 - Modify git history (`--force`, `--amend` of published commits,
   `rebase` of branches others use)
