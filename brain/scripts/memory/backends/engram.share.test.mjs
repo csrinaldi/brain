@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,6 +18,7 @@ import {
   share,
   scrubMaterializedChunks,
   dualWriteRecords,
+  assertExportDestinationIsRead,
   _defaultChangedChunkFiles,
   _defaultReadObservations,
 } from './engram.mjs';
@@ -67,70 +68,286 @@ test('scrubMaterializedChunks: a secret hit fails closed and names the pattern +
   );
 });
 
-test('_defaultChangedChunkFiles: git failure fails CLOSED (refuses to share), never returns [] silently', () => {
+// ── issue #469: the detector reads the FILESYSTEM, not git ──────────────────
+//
+// These four cases replace the `_spawn`-shaped ones. They were not wrong about
+// git; they were about the wrong question. `.memory/chunks/` is GITIGNORED
+// (`.gitignore:84`) and `git status --porcelain` never reports ignored paths, so
+// the set was ALWAYS empty and the scrub had never scanned a chunk — while every
+// one of those tests passed. That is the reason this file now drives the outcome
+// (which files come back) rather than the plumbing (what git printed): a suite
+// that pins the plumbing of a query that cannot return anything is green for a
+// gate that does nothing.
+//
+// `--ignored` is not the fix, measured (design D1): three of four git spellings
+// report `!! .memory/chunks/` — the DIRECTORY — which the old suffix-only filter
+// dropped, leaving the scan at zero. Hence the isFile() case below.
+
+const withChunkDir = (fn) => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-469-'));
+  try {
+    mkdirSync(join(root, '.memory', 'chunks'), { recursive: true });
+    return fn(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+
+test('#469 _defaultChangedChunkFiles: returns the chunks that EXIST on disk, whatever git thinks (REQ-469-1)', () => {
+  withChunkDir((root) => {
+    const dir = join(root, '.memory', 'chunks');
+    writeFileSync(join(dir, 'a.jsonl.gz'), gzipSync('{}\n'));
+    writeFileSync(join(dir, 'b.jsonl.gz'), gzipSync('{}\n'));
+    // The whole point: these files are gitignored, so the previous implementation
+    // returned [] here. Sorted because readdir order is not guaranteed and the
+    // claim is about the SET, not the order.
+    assert.deepStrictEqual(_defaultChangedChunkFiles(root).sort(), [
+      join(dir, 'a.jsonl.gz'),
+      join(dir, 'b.jsonl.gz'),
+    ]);
+  });
+});
+
+test('#469 _defaultChangedChunkFiles: an unreadable chunk directory fails CLOSED (REQ-469-2, E3)', () => {
+  // ENOENT is deliberately fatal, not empty. share() reaches the scrub only AFTER
+  // `engram sync --export` ran, so a missing chunk directory at that point means
+  // the export wrote where this process does not read — REQ-469-3's failure,
+  // caught a second way.
+  const missing = join(mkdtempSync(join(tmpdir(), 'brain-469-')), 'nope');
+  assert.throws(
+    () => _defaultChangedChunkFiles(missing),
+    (err) => {
+      assert.ok(/fail closed/i.test(err.message), `expected fail-closed message, got: ${err.message}`);
+      assert.ok(err.message.includes('ENOENT'), `expected the error CODE surfaced, got: ${err.message}`);
+      assert.ok(
+        err.message.includes(join(missing, '.memory', 'chunks')),
+        `expected the directory named, got: ${err.message}`,
+      );
+      return true;
+    },
+  );
+  // And any other read error too — EACCES is the one an operator actually hits.
   assert.throws(
     () =>
       _defaultChangedChunkFiles('/fake/root', {
-        _spawn: () => ({ status: 128, stdout: '', stderr: 'fatal: dubious ownership' }),
+        _listDir: () => {
+          const e = new Error('permission denied');
+          e.code = 'EACCES';
+          throw e;
+        },
+      }),
+    (err) => /fail closed/i.test(err.message) && err.message.includes('EACCES'),
+  );
+});
+
+test('#469 _defaultChangedChunkFiles: an EMPTY chunk directory returns [] — a fresh clone is not a failure (REQ-469-2, E4)', () => {
+  // This is the distinction the git version could not draw, and the reason it
+  // failed open: it could not tell "nothing to scan" from "cannot look", so it
+  // reported the second as the first on every single run.
+  withChunkDir((root) => {
+    assert.deepStrictEqual(_defaultChangedChunkFiles(root), []);
+  });
+});
+
+test('#469 _defaultChangedChunkFiles: drops non-chunk files AND directories — on type, not on name (REQ-469-1, E5)', () => {
+  withChunkDir((root) => {
+    const dir = join(root, '.memory', 'chunks');
+    writeFileSync(join(dir, 'a.jsonl.gz'), gzipSync('{}\n'));
+    writeFileSync(join(dir, 'notes.txt'), 'not a chunk');
+    // A DIRECTORY whose name ends in .jsonl.gz. Not contrived: three of the four
+    // git spellings in design D1 returned a directory path, and a suffix-only
+    // filter cannot see the difference. scrubChunkFile would readFileSync it →
+    // EISDIR, on the one path that must never fail on its own input.
+    mkdirSync(join(dir, 'legacy.jsonl.gz'));
+    assert.deepStrictEqual(_defaultChangedChunkFiles(root), [join(dir, 'a.jsonl.gz')]);
+  });
+});
+
+test('#469 the SCANNED set contains the READ set — a symlinked chunk is scanned, not bypassed (round-1 BLOCKER)', () => {
+  // The invariant is not that the scanner and _defaultReadObservations agree; it
+  // is that nothing reaches records/ unscanned. The first draft used
+  // Dirent.isFile() to drop directories and thereby dropped SYMLINKS too, while
+  // the reader's readFileSync follows them — so a symlinked chunk carrying a
+  // secret went into the append-only log, in a public repository, unscanned.
+  //
+  // Asserted as the SUPERSET property over a directory holding every awkward
+  // shape at once, rather than one case per test: the defect was a shape nobody
+  // enumerated, so the fixture is what has to be exhaustive.
+  withChunkDir((root) => {
+    const dir = join(root, '.memory', 'chunks');
+    const outside = join(root, 'elsewhere');
+    mkdirSync(outside);
+
+    writeFileSync(join(dir, 'plain.jsonl.gz'), gzipSync('{"observations":[]}\n'));
+    writeFileSync(join(outside, 'target.jsonl.gz'), gzipSync('{"observations":[]}\n'));
+    symlinkSync(join(outside, 'target.jsonl.gz'), join(dir, 'linked.jsonl.gz'));
+    mkdirSync(join(dir, 'adir.jsonl.gz'));                       // a DIRECTORY (E5)
+    symlinkSync(outside, join(dir, 'linkdir.jsonl.gz'));         // a symlink to a DIRECTORY
+    writeFileSync(join(dir, 'notes.txt'), 'not a chunk');
+
+    const scanned = _defaultChangedChunkFiles(root).map((p) => p.split('/').pop()).sort();
+    assert.deepStrictEqual(scanned, ['linked.jsonl.gz', 'plain.jsonl.gz'],
+      'a symlink to a chunk is a chunk the reader will follow, so it must be scanned; ' +
+      'a directory is not, whether reached directly or through a link');
+
+    // The superset property, stated over the reader's own enumeration rule
+    // (suffix match, readFileSync) rather than over a hand-written list — a
+    // hand-written list is how the symlink shape got missed in the first place.
+    const readable = readdirSync(dir)
+      .filter((f) => f.endsWith('.jsonl.gz'))
+      .filter((f) => {
+        try {
+          readFileSync(join(dir, f));
+          return true;
+        } catch {
+          return false; // EISDIR — the reader buckets these as unparseable
+        }
+      })
+      .sort();
+    for (const f of readable) {
+      assert.ok(scanned.includes(f), `${f} is readable by _defaultReadObservations but was NOT scanned`);
+    }
+  });
+});
+
+test('#469 _defaultChangedChunkFiles: an entry that cannot be stat\'d fails CLOSED (round-1 BLOCKER)', () => {
+  // Same rule as the directory read: "cannot look" must never be reported as
+  // "nothing to scan". A broken symlink is the reachable case.
+  assert.throws(
+    () =>
+      _defaultChangedChunkFiles('/fake/root', {
+        _listDir: () => [{ name: 'ghost.jsonl.gz' }],
+        _stat: () => {
+          const e = new Error('no such file');
+          e.code = 'ENOENT';
+          throw e;
+        },
+      }),
+    (err) => /fail closed/i.test(err.message) && err.message.includes('ghost.jsonl.gz'),
+  );
+});
+
+test('#469 scrubMaterializedChunks: a planted secret ABORTS before records/ is touched (REQ-469-1, E1)', async () => {
+  // The acceptance case, end to end over the REAL scrubChunkFile and a REAL gzip
+  // chunk on a REAL directory — no seam between the plant and the abort. The
+  // ticket is explicit that a passing test proves nothing here, because the old
+  // code passed everything while scanning zero chunks. What this asserts is the
+  // abort itself.
+  await withChunkDir(async (root) => {
+    const dir = join(root, '.memory', 'chunks');
+    writeFileSync(join(dir, 'clean.jsonl.gz'), gzipSync('{"text":"nothing here"}\n'));
+    writeFileSync(
+      join(dir, 'leaked.jsonl.gz'),
+      gzipSync('{"text":"token ghp_0123456789abcdefghijklmnopqrstuvwxyz"}\n'),
+    );
+    await assert.rejects(
+      () => scrubMaterializedChunks(root, { _loadConfig: () => ({}), _scrubChunk: scrubChunkFile }),
+      (err) => {
+        assert.ok(err.message.includes('leaked.jsonl.gz'), `expected the chunk named, got: ${err.message}`);
+        return true;
+      },
+    );
+  });
+});
+
+test('#469 share: a planted secret aborts BEFORE records/ is appended (REQ-469-1, E1 — the ticket acceptance)', async () => {
+  // E1 claims two things and the case above only measured one. This measures the
+  // other: not merely that the scrub throws, but that the append-only records log
+  // was never touched. That ordering is the whole reason scrubMaterializedChunks
+  // runs before dualWriteRecords (issue #221 fix pass), and nothing was driving it
+  // through a REAL chunk on disk — only through injected file lists, which cannot
+  // fail the way the gitignored directory failed.
+  await withChunkDir(async (root) => {
+    writeFileSync(
+      join(root, '.memory', 'chunks', 'leaked.jsonl.gz'),
+      gzipSync('{"text":"token ghp_0123456789abcdefghijklmnopqrstuvwxyz"}\n'),
+    );
+    const appended = [];
+    await assert.rejects(
+      () =>
+        share({
+          root,
+          _requireEngram: () => 'engram',
+          _export: () => {},
+          _loadConfig: () => ({}),
+          _scrubChunk: scrubChunkFile,
+          _readObservations: () => ({ observations: [{ text: 'x' }] }),
+          _appendRecord: (...args) => appended.push(args),
+          _rebuildIndex: () => ({}),
+        }),
+      (err) => err.message.includes('leaked.jsonl.gz'),
+    );
+    assert.deepStrictEqual(appended, [], 'the append-only records log must never be written on an aborted share');
+  });
+});
+
+test('#469 scrubMaterializedChunks: a directory of clean chunks resolves (REQ-469-1, E2)', async () => {
+  await withChunkDir(async (root) => {
+    writeFileSync(join(root, '.memory', 'chunks', 'clean.jsonl.gz'), gzipSync('{"text":"fine"}\n'));
+    await assert.doesNotReject(() =>
+      scrubMaterializedChunks(root, { _loadConfig: () => ({}), _scrubChunk: scrubChunkFile }),
+    );
+  });
+});
+
+// ── issue #469 REQ-469-3: the export must write where share() reads ──────────
+
+test('#469 assertExportDestinationIsRead: a real .engram directory THROWS (E6)', () => {
+  assert.throws(
+    () =>
+      assertExportDestinationIsRead('/fake/root', {
+        _resolveDir: (p) => (p.endsWith('.engram') ? '/fake/root/.engram' : '/fake/root/.memory'),
       }),
     (err) => {
-      assert.ok(/fail closed/i.test(err.message), `expected fail-closed message, got: ${err.message}`);
-      assert.ok(err.message.includes('dubious ownership'), `expected git stderr surfaced, got: ${err.message}`);
+      assert.ok(err.message.includes('.engram'), `expected both paths named, got: ${err.message}`);
+      assert.ok(err.message.includes('.memory'), `expected both paths named, got: ${err.message}`);
+      assert.ok(
+        /symlink|memory:setup/.test(err.message),
+        `expected the remedy, got: ${err.message}`,
+      );
       return true;
     },
   );
 });
 
-test('_defaultChangedChunkFiles: a clean git run (status 0, no changes) returns [] — no scan, no permablock', () => {
-  const out = _defaultChangedChunkFiles('/fake/root', { _spawn: () => ({ status: 0, stdout: '', stderr: '' }) });
-  assert.deepEqual(out, []);
-});
-
-// ── cutover finding 7 (id:388): porcelain deletions must not reach the scrubber ──
-//
-// After the cutover moved chunks to legacy/, `git status --porcelain` on
-// .memory/chunks reports DELETION lines. A deletion whose path still ends in
-// `.jsonl.gz` used to pass the suffix-only filter, so scrubChunkFile() would
-// readFileSync() a path that no longer exists → ENOENT. Fix: exclude porcelain
-// deletions before the suffix filter runs.
-
-test('_defaultChangedChunkFiles: porcelain deletions of .jsonl.gz chunks are excluded, live changes survive (finding 7, id:388)', () => {
-  const out = _defaultChangedChunkFiles('/fake/root', {
-    _spawn: () => ({
-      status: 0,
-      stdout: [
-        ' D .memory/chunks/unstaged-deleted.jsonl.gz',
-        'D  .memory/chunks/staged-deleted.jsonl.gz',
-        'AD .memory/chunks/added-then-deleted.jsonl.gz',
-        ' M .memory/chunks/modified.jsonl.gz',
-        '?? .memory/chunks/new-untracked.jsonl.gz',
-      ].join('\n'),
-      stderr: '',
-    }),
-  });
-  assert.deepEqual(out, [
-    join('/fake/root', '.memory/chunks/modified.jsonl.gz'),
-    join('/fake/root', '.memory/chunks/new-untracked.jsonl.gz'),
-  ]);
-});
-
-test('scrubMaterializedChunks: a porcelain-deleted .jsonl.gz chunk does not reach _scrubChunk / does not throw ENOENT (finding 7, id:388)', async () => {
-  await assert.doesNotReject(() =>
-    scrubMaterializedChunks('/fake/root', {
-      _changedChunkFiles: (root) =>
-        _defaultChangedChunkFiles(root, {
-          _spawn: () => ({
-            status: 0,
-            stdout: ' D .memory/chunks/nonexistent-deleted.jsonl.gz\n',
-            stderr: '',
-          }),
-        }),
-      _loadConfig: () => ({}),
-      // REAL scrubChunkFile — would throw ENOENT if the deletion leaked through
-      // to a readFileSync() on a path that no longer exists on disk.
-      _scrubChunk: scrubChunkFile,
+test('#469 assertExportDestinationIsRead: a RESOLVED match passes, an absent .engram passes (E7)', () => {
+  // Compared on resolved paths, not on symlink type — a symlink, a bind mount or
+  // anything else that lands both on one directory is the same fact.
+  assert.doesNotThrow(() =>
+    assertExportDestinationIsRead('/fake/root', { _resolveDir: () => '/fake/root/.memory' }),
+  );
+  // Absent .engram: engram writes to .memory directly, the post-migration state.
+  assert.doesNotThrow(() =>
+    assertExportDestinationIsRead('/fake/root', {
+      _resolveDir: (p) => (p.endsWith('.engram') ? null : '/fake/root/.memory'),
     }),
   );
+});
+
+test('#469 share: the destination check runs BEFORE the scrub, and stops the run (REQ-469-3, E6)', async () => {
+  // Ordering is the claim. If the check ran after the scrub, the run would report
+  // a clean scrub it performed on an unrelated directory — which is the failure.
+  const called = [];
+  await assert.rejects(
+    () =>
+      share({
+        root: '/fake/root',
+        _requireEngram: () => 'engram',
+        _export: () => called.push('export'),
+        _resolveDir: (p) => (p.endsWith('.engram') ? '/elsewhere' : '/fake/root/.memory'),
+        _changedChunkFiles: () => {
+          called.push('scrub');
+          return [];
+        },
+        _readObservations: () => {
+          called.push('records');
+          return { observations: [] };
+        },
+        _loadConfig: () => ({}),
+      }),
+    (err) => /engram sync --export/.test(err.message),
+  );
+  assert.deepStrictEqual(called, ['export'], 'neither the scrub nor the record write may run');
 });
 
 test('scrubMaterializedChunks: default patterns are used when config has no governance keys', async () => {

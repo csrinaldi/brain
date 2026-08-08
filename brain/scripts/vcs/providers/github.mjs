@@ -2,14 +2,50 @@
 //
 // All verbs return the NORMALIZED shapes from the contract (number, body,
 // headBranch, username, canonical commit-status enum). Auth uses the gh session
-// (ensured by day:start); the token is only needed by the URL-building verbs,
-// which receive it from the caller.
+// (ensured by day:start) unless the port was obtained with a bound identity
+// (issue #501), in which case every call carries that credential instead.
 
 import { run, runJson } from '../lib/exec.mjs';
 import { normalizeCommitStatus, providerState, assigneeParams } from '../lib/normalize.mjs';
 import { vcsToken } from '../lib/token.mjs';
+import { currentIdentity } from '../lib/identity-context.mjs';
 
 export const PROVIDER = 'github';
+
+// ── the single chokepoint for `gh` (issue #501) ────────────────────────────────
+//
+// Every verb reaches the network through `gh` / `ghJson` and nothing else, so the
+// bound identity is applied once instead of at 21 call sites. It was applied at
+// exactly ONE before this: `GH_TOKEN` appeared twice in this file, both inside
+// `whoami`. The reviewer therefore VERIFIED as `csrinaldibot` and WROTE as
+// whoever `gh` was logged in as — measured on PR #500, review 4887057484.
+//
+// `GH_TOKEN` takes precedence over gh's keyring auth, and it is set on the CHILD
+// env only: `gh auth login --with-token` would mutate the operator's machine-wide
+// gh state as a side effect of running a review, and race any concurrent gh use.
+//
+// With no bound identity the options pass through untouched, so every
+// non-reviewer caller — the `brain:vcs` CLI, the governance checks — keeps
+// resolving auth exactly as it does today.
+//
+// An explicit `opts.env` from the caller still wins for every key it sets; the
+// identity only fills `GH_TOKEN`, and only when one is bound. That ordering is
+// what lets `whoami({ token })` keep verifying a token OTHER than the bound one.
+//
+// PINNED ON THE SOURCE by `github.identity.drift.test.mjs`: a verb that calls
+// `run('gh', …)` directly would bypass this, pass every behavioural test, and
+// reopen the exact defect this comment records.
+function ghOpts(opts = {}) {
+  const identity = currentIdentity();
+  if (!identity) return opts;
+  return { ...opts, env: { ...process.env, GH_TOKEN: identity, ...(opts.env ?? {}) } };
+}
+
+/** `run('gh', …)` under the bound identity — the only way to invoke gh here. */
+const gh = (args, opts) => run('gh', args, ghOpts(opts));
+
+/** `runJson('gh', …)` under the bound identity. */
+const ghJson = (args, opts) => runJson('gh', args, ghOpts(opts));
 
 const toQs = (params) =>
   Object.entries(params)
@@ -19,12 +55,12 @@ const toQs = (params) =>
 
 export async function authCheck({ host } = {}) {
   const args = host ? ['auth', 'status', '--hostname', host] : ['auth', 'status'];
-  return run('gh', args).ok;
+  return gh(args).ok;
 }
 
 export async function authLogin({ host, token } = {}) {
   const tok = token ?? vcsToken(PROVIDER);
-  return run('gh', ['auth', 'login', '--hostname', host || 'github.com', '--with-token'], { input: tok }).ok;
+  return gh(['auth', 'login', '--hostname', host || 'github.com', '--with-token'], { input: tok }).ok;
 }
 
 // `token` (optional, issue #413): resolves the identity OF THAT TOKEN rather
@@ -34,7 +70,7 @@ export async function authLogin({ host, token } = {}) {
 // behavior (current CLI user) is unchanged.
 export async function whoami({ token } = {}) {
   const opts = token ? { env: { ...process.env, GH_TOKEN: token } } : {};
-  const resp = runJson('gh', ['api', '/user'], opts);
+  const resp = ghJson(['api', '/user'], opts);
   return { username: resp.login };
 }
 
@@ -44,7 +80,7 @@ export async function projectResolve({ project }) {
 }
 
 export async function issueView({ project, number }) {
-  const r = runJson('gh', ['api', `repos/${project}/issues/${number}`]);
+  const r = ghJson(['api', `repos/${project}/issues/${number}`]);
   return {
     number: r.number,
     title: r.title,
@@ -71,10 +107,9 @@ export async function branchProtect({ project, branch = 'main', checks, required
     allow_force_pushes: false,
     allow_deletions: false,
   };
-  const r = run(
-    'gh',
+  const r = gh(
     ['api', '-X', 'PUT', `repos/${project}/branches/${branch}/protection`, '--input', '-'],
-    { input: JSON.stringify(payload) }
+    { input: JSON.stringify(payload) },
   );
   if (r.ok) return { enforced: true };
   // Tier / plan limitation — GitHub free plan blocks protection on private repos
@@ -104,7 +139,7 @@ export async function branchProtect({ project, branch = 'main', checks, required
  */
 export async function checkRuns({ project, branch = 'main' } = {}) {
   try {
-    const resp = runJson('gh', ['api', `repos/${project}/commits/${branch}/check-runs`]);
+    const resp = ghJson(['api', `repos/${project}/commits/${branch}/check-runs`]);
     return (resp.check_runs ?? []).map(cr => cr.name);
   } catch {
     return [];
@@ -125,7 +160,7 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
   const key = `${project}:${branch}`;
   if (_capabilityCache.has(key)) return _capabilityCache.get(key);
 
-  const r = run('gh', ['api', `repos/${project}/branches/${branch}/protection`]);
+  const r = gh(['api', `repos/${project}/branches/${branch}/protection`]);
   let result;
   if (r.ok) {
     result = { hardEnforcement: 'available' };
@@ -182,11 +217,11 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
  * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null }>}
  */
 export async function prView({ project, number } = {}) {
-  const r = run('gh', ['pr', 'view', String(number), '--json', 'number,labels,body,author,headRefOid']);
+  const r = gh(['pr', 'view', String(number), '--json', 'number,labels,body,author,headRefOid']);
   if (!r.ok) return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
   try {
     const data = JSON.parse(r.stdout);
-    const br = run('gh', ['api', `repos/{owner}/{repo}/pulls/${number}`, '--jq', '.base.sha']);
+    const br = gh(['api', `repos/{owner}/{repo}/pulls/${number}`, '--jq', '.base.sha']);
     // `gh api --jq .base.sha` prints the literal "null" on a JSON-null base.sha —
     // normalize it to null, matching gitlab.mjs's `diff_refs?.base_sha ?? null`.
     const baseSha = br.ok ? br.stdout.trim() : '';
@@ -210,7 +245,7 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
   const assigneePs = assigneeParams('github', assignee, currentUser);
   const extra = Object.keys(assigneePs).length > 0 ? '&' + toQs(assigneePs) : '';
   const endpoint = `repos/${project}/issues?state=${providerState('github', state)}&per_page=100${extra}`;
-  const arr = runJson('gh', ['api', endpoint]);
+  const arr = ghJson(['api', endpoint]);
   // GitHub /issues returns both issues and PRs — filter out PRs.
   return arr
     .filter(r => !r.pull_request)
@@ -218,12 +253,12 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
 }
 
 export async function mrList({ project, state = 'open' } = {}) {
-  const arr = runJson('gh', ['api', `repos/${project}/pulls?state=${providerState('github', state)}&per_page=100`]);
+  const arr = ghJson(['api', `repos/${project}/pulls?state=${providerState('github', state)}&per_page=100`]);
   return arr.map(r => ({ number: r.number, title: r.title, headBranch: r.head.ref }));
 }
 
 export async function commitStatus({ project, sha }) {
-  const resp = runJson('gh', ['api', `repos/${project}/commits/${sha}/check-runs`]);
+  const resp = ghJson(['api', `repos/${project}/commits/${sha}/check-runs`]);
   const cr = resp.check_runs?.[0];
   if (!cr) return null;
   // An unfinished check has conclusion=null; its live state lives in `status`
@@ -256,7 +291,7 @@ export async function commitStatus({ project, sha }) {
 export async function prStatusRollup({ project, number } = {}) {
   let data;
   try {
-    data = runJson('gh', ['pr', 'view', String(number), '--json', 'statusCheckRollup']);
+    data = ghJson(['pr', 'view', String(number), '--json', 'statusCheckRollup']);
   } catch {
     return null;
   }
@@ -306,7 +341,7 @@ export async function prStatusRollup({ project, number } = {}) {
 export async function prReviews({ project, number } = {}) {
   let reviews;
   try {
-    reviews = runJson('gh', ['api', '--paginate', `repos/${project}/pulls/${number}/reviews`]);
+    reviews = ghJson(['api', '--paginate', `repos/${project}/pulls/${number}/reviews`]);
   } catch {
     return null;
   }
@@ -339,7 +374,7 @@ export async function mrCreate({
     args.push('--label', label);
   }
 
-  const r = run('gh', args);
+  const r = gh(args);
   if (r.ok) return { url: r.stdout.trim() };
   return { url: null, error: r.stderr.trim() || `gh pr create failed (status ${r.status})` };
 }
@@ -369,7 +404,7 @@ export async function mrCreate({
 export async function labelEvents({ project, number } = {}) {
   let events;
   try {
-    events = runJson('gh', ['api', '--paginate', `repos/${project}/issues/${number}/events`]);
+    events = ghJson(['api', '--paginate', `repos/${project}/issues/${number}/events`]);
   } catch {
     return null;
   }
@@ -412,7 +447,7 @@ export async function labelEvents({ project, number } = {}) {
 export async function prCommits({ project, number } = {}) {
   let commits;
   try {
-    commits = runJson('gh', ['api', '--paginate', `repos/${project}/pulls/${number}/commits`]);
+    commits = ghJson(['api', '--paginate', `repos/${project}/pulls/${number}/commits`]);
   } catch {
     return null;
   }
@@ -446,7 +481,7 @@ export async function prCommits({ project, number } = {}) {
  */
 export async function prReviewComment({ project, number, body, comments } = {}) {
   const args = ['api', '-X', 'POST', `repos/${project}/pulls/${number}/reviews`, '--input', '-'];
-  const post = (payload) => run('gh', args, { input: JSON.stringify(payload) });
+  const post = (payload) => gh(args, { input: JSON.stringify(payload) });
   const parse = (r, extra) => {
     try {
       return { url: JSON.parse(r.stdout).html_url, ...extra };
@@ -504,8 +539,7 @@ export async function prReviewComment({ project, number, body, comments } = {}) 
  * @returns {Promise<{ url: string } | { url: null, error: string }>}
  */
 export async function issueComment({ project, number, body } = {}) {
-  const r = run(
-    'gh',
+  const r = gh(
     ['api', '-X', 'POST', `repos/${project}/issues/${number}/comments`, '--input', '-'],
     { input: JSON.stringify({ body }) },
   );
@@ -526,8 +560,7 @@ export async function issueComment({ project, number, body } = {}) {
  * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
  */
 export async function labelAdd({ project, number, labels } = {}) {
-  const r = run(
-    'gh',
+  const r = gh(
     ['api', '-X', 'POST', `repos/${project}/issues/${number}/labels`, '--input', '-'],
     { input: JSON.stringify({ labels }) },
   );
@@ -546,7 +579,7 @@ export async function labelAdd({ project, number, labels } = {}) {
  */
 export async function labelRemove({ project, number, labels } = {}) {
   for (const label of labels) {
-    const r = run('gh', ['api', '-X', 'DELETE', `repos/${project}/issues/${number}/labels/${encodeURIComponent(label)}`]);
+    const r = gh(['api', '-X', 'DELETE', `repos/${project}/issues/${number}/labels/${encodeURIComponent(label)}`]);
     if (!r.ok) return { ok: false, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
   }
   return { ok: true };
@@ -569,7 +602,7 @@ export async function labelRemove({ project, number, labels } = {}) {
  * @returns {Promise<string[]>}
  */
 export async function labelList({ project } = {}) {
-  const arr = runJson('gh', ['api', '--paginate', `repos/${project}/labels?per_page=100`]);
+  const arr = ghJson(['api', '--paginate', `repos/${project}/labels?per_page=100`]);
   return arr.map(l => l.name);
 }
 
@@ -601,7 +634,7 @@ export async function labelList({ project } = {}) {
 export async function rerunWorkflowRun({ project, ref, workflow = 'governance.yml' } = {}) {
   let runsResp;
   try {
-    runsResp = runJson('gh', ['api', `repos/${project}/actions/runs?branch=${encodeURIComponent(ref)}&per_page=100`]);
+    runsResp = ghJson(['api', `repos/${project}/actions/runs?branch=${encodeURIComponent(ref)}&per_page=100`]);
   } catch (err) {
     return { ok: false, reason: `could not list workflow runs: ${err.message}` };
   }
@@ -612,7 +645,7 @@ export async function rerunWorkflowRun({ project, ref, workflow = 'governance.ym
     return { ok: false, reason: `no run of ${workflow} found for ref '${ref}'` };
   }
 
-  const r = run('gh', ['api', '-X', 'POST', `repos/${project}/actions/runs/${match.id}/rerun`]);
+  const r = gh(['api', '-X', 'POST', `repos/${project}/actions/runs/${match.id}/rerun`]);
   if (!r.ok) {
     return { ok: false, reason: r.stderr.trim() || `gh api failed (status ${r.status})` };
   }

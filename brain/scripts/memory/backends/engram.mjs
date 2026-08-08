@@ -23,7 +23,9 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -151,9 +153,10 @@ function requireEngram() {
  * @param {typeof exportObservation} [opts._exportObservation]
  * @param {typeof appendRecord} [opts._appendRecord]
  * @param {typeof rebuildIndex} [opts._rebuildIndex]
- * @param {(root: string) => string[]} [opts._changedChunkFiles]  Chunk files materialized this run.
+ * @param {(root: string) => string[]} [opts._changedChunkFiles]  Every chunk present (issue #469).
  * @param {(root: string) => object} [opts._loadConfig]  Reads brain.config.json.
  * @param {(path: string, patterns: RegExp[], allowPatterns: RegExp[]) => object|null} [opts._scrubChunk]
+ * @param {(p: string) => string|null} [opts._resolveDir]  Resolves .engram/.memory (issue #469, REQ-469-3).
  */
 export async function share({
   root = repoRoot,
@@ -166,9 +169,15 @@ export async function share({
   _changedChunkFiles = _defaultChangedChunkFiles,
   _loadConfig = _defaultLoadBrainConfig,
   _scrubChunk = scrubChunkFile,
+  _resolveDir = _defaultResolveDir,
 } = {}) {
   const engram = _requireEngram();
   _export(engram);
+  // BEFORE the scrub, not after (issue #469, REQ-469-3): if the export wrote
+  // somewhere this process does not read, the scrub would scan an unrelated
+  // directory and pass, which is the failure being caught. Ordering the check
+  // ahead of it means the run cannot report a clean scrub it never performed.
+  assertExportDestinationIsRead(root, { _resolveDir });
   await scrubMaterializedChunks(root, { _changedChunkFiles, _loadConfig, _scrubChunk });
   // Record-write is UNCONDITIONAL (design.md Decision 1, D3/C4, issue #229 — the
   // `memory.dualWrite` gate is retired BY DELETION). Records-only is the only
@@ -342,43 +351,164 @@ function _defaultLoadBrainConfig(root) {
 }
 
 /**
- * Default seam: the `.memory/chunks/*.jsonl.gz` files `git status` reports as
- * changed (new or modified) after `engram sync --export` ran. Chunks are
- * content-addressed, so an untouched chunk never appears here — this is the
- * "materialized THIS run" boundary the scrubber respects (never the whole store).
+ * Default seam: every `.memory/chunks/*.jsonl.gz` present, read from the
+ * FILESYSTEM (issue #469, design D1). Same directory `_defaultReadObservations`
+ * already enumerates via `collectChunkObservations` — one source of truth for
+ * what a share run touches, not two.
  *
- * Excludes porcelain DELETIONS (cutover finding 7, id:388): once chunks moved
- * to `legacy/`, `git status --porcelain` on `.memory/chunks` reports deletion
- * lines (` D`, `D `, `AD`, …) whose path still ends in `.jsonl.gz`. Left
- * unfiltered, a deletion would pass the suffix-only filter and `scrubChunkFile`
- * would `readFileSync` a path that no longer exists → ENOENT. A status code
- * containing `D` in either column is a deletion and is dropped before the
- * suffix filter runs.
+ * This used to ask `git status --porcelain -- .memory/chunks` and describe the
+ * result as the "materialized THIS run" boundary. `.memory/chunks/` is
+ * GITIGNORED (`.gitignore:84`), and `git status --porcelain` never reports
+ * ignored paths, so the set was **always empty**: the scrub had never scanned a
+ * chunk. An empty set is not an error, so the fail-closed guard below never
+ * tripped — it fails closed on a git ERROR and passed on a git result that was
+ * empty for a structural reason. `evidence-reader-empty-on-failure` with a
+ * third case neither branch modelled: the query cannot ever return anything.
+ *
+ * `--ignored` is NOT the fix, measured rather than argued (design D1): three of
+ * the four git spellings report `!! .memory/chunks/` — the DIRECTORY — which the
+ * `.jsonl.gz` suffix filter then dropped, leaving the scan at zero. Only plain
+ * `--ignored -uall` lists files, while `--ignored=matching -uall`, which reads as
+ * the tighter request, does not. A gate one plausible flag edit silently disarms
+ * is the defect being fixed, re-armed and harder to see.
+ *
+ * The "materialized THIS run" boundary is gone, and was never real for
+ * gitignored chunks: it did not narrow the scan, it emptied it. This scans the
+ * WHOLE store, deliberately — the premise that an untouched chunk was cleared by
+ * an earlier run is false, because no earlier run scanned anything. Restoring a
+ * real boundary (pre/post-export snapshot) trades completeness for speed in a
+ * gate whose whole job is completeness; deferred to a ticket with a measurement.
+ *
+ * Directories are dropped on their TYPE, not their name — the git spellings that
+ * returned a directory path are exactly what a suffix-only filter cannot see.
+ *
+ * Fail CLOSED on any read error, including ENOENT. `share()` reaches here only
+ * AFTER `engram sync --export` ran, so a missing chunk directory means the export
+ * wrote where this process does not read — the REQ-469-3 failure, caught twice.
+ * An EMPTY directory is not an error: a fresh clone with no memory yet is
+ * legitimate, and that is the distinction the git version could not draw.
+ *
+ * ## The scanned set must CONTAIN the read set (round-1 cold review, BLOCKER)
+ *
+ * The invariant is not that this function and `_defaultReadObservations` agree;
+ * it is that **nothing reaches `records/` unscanned**. The first draft of this
+ * fix used `Dirent.isFile()` to drop directories (E5) and thereby dropped
+ * SYMLINKS too — `isFile()` is false for a symlink entry — while the reader's
+ * `readFileSync` follows them. Measured on a chunks directory holding one
+ * symlink to a chunk carrying `ghp_…`:
+ *
+ * ```
+ * SCANNER sees : [ 'plain.jsonl.gz' ]
+ * READER  sees : [{"text":"ghp_0123…"},{"text":"fine"}]
+ * ```
+ *
+ * The secret bypassed the scrub and landed in the append-only log, in a public
+ * repository — the one outcome this gate exists to prevent, opened by the guard
+ * added to close a different one. So the type test is `statSync`, which FOLLOWS
+ * symlinks: a symlink to a chunk is scanned, a directory (or a symlink to one)
+ * is not, and the reader can read nothing this does not see.
+ *
+ * An entry that cannot be stat'd fails CLOSED for the same reason the directory
+ * read does: "cannot look" must never be reported as "nothing to scan".
  *
  * @param {string} root
+ * @param {object} [opts]
+ * @param {(dir: string, opts: object) => import("node:fs").Dirent[]} [opts._listDir]
+ * @param {(p: string) => import("node:fs").Stats} [opts._stat]
  * @returns {string[]}  Absolute paths.
  */
-export function _defaultChangedChunkFiles(root, { _spawn = spawnSync } = {}) {
-  const r = _spawn("git", ["status", "--porcelain", "--", ".memory/chunks"], {
-    encoding: "utf8",
-    cwd: root,
-  });
-  // Fail CLOSED on any git failure (binary absent, not a repo, or the common
-  // safe.directory "dubious ownership" → status 128 with empty stdout). A silent
-  // [] here would scan ZERO chunks and let a secret through — the one path that
-  // must never fail open in a fail-closed slice (matches the r.status guard in
-  // _defaultIsManifestDirty / _defaultRestoreManifest).
-  if (r.error || r.status !== 0) {
+export function _defaultChangedChunkFiles(root, { _listDir = readdirSync, _stat = statSync } = {}) {
+  const dir = join(root, ".memory", "chunks");
+  let entries;
+  try {
+    entries = _listDir(dir, { withFileTypes: true });
+  } catch (err) {
     throw new Error(
-      `secret-scrub: 'git status' failed — cannot determine which chunks were materialized this run; refusing to share (fail closed): ${r.stderr || r.error || `exit ${r.status}`}`
+      `secret-scrub: cannot read ${dir} — cannot determine which chunks this run materialized; refusing to share (fail closed): ${err?.code ?? ""} ${err?.message ?? err}`.replace(
+        /\s+/g,
+        " ",
+      ),
     );
   }
-  return (r.stdout ?? "")
-    .split("\n")
-    .filter((line) => line.length > 3 && !line.slice(0, 2).includes("D"))
-    .map((line) => line.slice(3).trim())
-    .filter((p) => p.endsWith(".jsonl.gz"))
-    .map((p) => join(root, p));
+  const out = [];
+  for (const e of entries) {
+    if (!e.name.endsWith(".jsonl.gz")) continue;
+    const full = join(dir, e.name);
+    let st;
+    try {
+      st = _stat(full);
+    } catch (err) {
+      throw new Error(
+        `secret-scrub: cannot stat ${full} — a chunk the reader may still follow cannot be classified; refusing to share (fail closed): ${err?.code ?? ""} ${err?.message ?? err}`.replace(
+          /\s+/g,
+          " ",
+        ),
+      );
+    }
+    if (st.isFile()) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * Default seam: resolve a path through symlinks, or `null` when it does not
+ * exist (issue #469, REQ-469-3). Separated so `share()`'s export-destination
+ * check is testable without building a real symlink.
+ *
+ * @param {string} p
+ * @returns {string|null}
+ */
+export function _defaultResolveDir(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Throws when `engram sync --export` writes to a directory `share()` does not
+ * read from (issue #469, REQ-469-3).
+ *
+ * engram writes under `.engram/`; every reader here — `_defaultReadObservations`,
+ * `_defaultChangedChunkFiles` — reads under `.memory/`. `ensureMemorySymlink`
+ * keeps those the same directory, but its case 3 (`.engram` is a REAL directory)
+ * only `console.warn`s and does not clobber, which is right. Nothing downstream
+ * checked, so the export succeeded, printed `Created chunk …`, zero records were
+ * appended, and the run reported success. Reproduced in the maintainer's own
+ * checkout.
+ *
+ * Compares RESOLVED paths rather than symlink type: what matters is that the two
+ * land on the same directory, and `realpathSync` answers that for a symlink, a
+ * bind mount, or anything else that makes them agree.
+ *
+ * An ABSENT `.engram` passes — engram then writes to `.memory` directly, the
+ * normal post-migration state on a fresh clone.
+ *
+ * Throws rather than warns: a warning is what `ensureMemorySymlink` already does,
+ * and the defect reached production with that warning in place.
+ *
+ * @param {string} root
+ * @param {object} [opts]
+ * @param {(p: string) => string|null} [opts._resolveDir]
+ */
+export function assertExportDestinationIsRead(root, { _resolveDir = _defaultResolveDir } = {}) {
+  const engramPath = join(root, ".engram");
+  const engramResolved = _resolveDir(engramPath);
+  if (engramResolved === null) return;
+
+  const memoryPath = join(root, ".memory");
+  const memoryResolved = _resolveDir(memoryPath);
+  if (engramResolved === memoryResolved) return;
+
+  throw new Error(
+    `memory:share: 'engram sync --export' writes under ${engramPath} (${engramResolved}), ` +
+      `but this run reads chunks and records from ${memoryPath} (${memoryResolved ?? "missing"}). ` +
+      `Every chunk the export just wrote would be invisible: the secret scrub would scan nothing and ` +
+      `zero records would be appended, while the run reported success. ` +
+      `Fix: make .engram a symlink to .memory (npm run memory:setup, after pulling the migration), ` +
+      `or remove the real .engram directory once its contents are merged.`,
+  );
 }
 
 /**
