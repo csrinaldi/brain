@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 
 import { CONFIRMATION_WORD, parseArgs, runApprove } from './cli.mjs';
 import { stripComments } from '../brain-promote.mjs';
+import { gitlabApiConfig } from '../vcs/ci-context.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const MODULE_PATH = join(REPO_ROOT, 'brain/scripts/approve/cli.mjs');
@@ -132,6 +133,66 @@ test('REQ-473-7 lock 2: no bypass flag literal appears anywhere in the code (the
 test('REQ-473-7 lock 2: no BRAIN_HUMAN_TOKEN or new token env var (design.md §F3 — rejected)', () => {
   assert.equal(count(SOURCE, 'BRAIN_HUMAN_TOKEN'), 0);
   assert.equal(count(SOURCE, 'TOKEN_ENV'), 0);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cold-review round 1, Fix 1 (MAJOR) — every vcs call shares ONE resolved
+// GitLab transport config. Before this fix, `whoami` resolved identity via
+// ambient `glab` session credentials while `prView`/`prReviewComment`/
+// `prReviews` fell back to `vcsToken()` + a hardcoded gitlab.com apiBase
+// inside the provider — two different credential mechanisms. On self-hosted
+// GitLab this broke entirely; even on gitlab.com the deny-check could
+// evaluate an identity different from the one that ultimately posts. The fix
+// mirrors identity.mjs/actor-check.mjs/board.mjs/cold-boot.mjs: resolve
+// `gitlabApiConfig()` ONCE and thread it into every call site (harmless
+// no-op params on the GitHub provider).
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('REQ-473-CONFIG: whoami, prView (both calls), prReviewComment, and prReviews all receive the SAME threaded transport config object', async () => {
+  // makeVcs's stubs already implement the correct compose→post→verify data
+  // flow (posted body, matching author); this test only needs to WATCH the
+  // args each call receives, so it wraps the real stubs rather than
+  // reimplementing their behavior.
+  const vcs = makeVcs();
+  const captured = { whoami: null, prView: [], prReviewComment: null, prReviews: null };
+  const origWhoami = vcs.whoami;
+  const origPrView = vcs.prView;
+  const origPrReviewComment = vcs.prReviewComment;
+  const origPrReviews = vcs.prReviews;
+  vcs.whoami = async (a) => { captured.whoami = a; return origWhoami(a); };
+  vcs.prView = async (a) => { captured.prView.push(a); return origPrView(a); };
+  vcs.prReviewComment = async (a) => { captured.prReviewComment = a; return origPrReviewComment(a); };
+  vcs.prReviews = async (a) => { captured.prReviews = a; return origPrReviews(a); };
+
+  const res = await runApprove({
+    argv: ['7'],
+    isTTY: true,
+    project: 'o/r',
+    getVcsFn: async () => vcs,
+    readLineFn: async () => CONFIRMATION_WORD,
+    write: () => {},
+  });
+  assert.equal(res.exitCode, 0, JSON.stringify(res));
+
+  // Pinned against the REAL `gitlabApiConfig()` output, not merely against
+  // each other — two call sites that both omit apiBase/token/proxyUrl would
+  // be "equal" (all `undefined`) without threading ANYTHING, which would
+  // make an equality-only assertion pass on the unfixed code too. Asserting
+  // a concrete, non-empty `apiBase` is what makes this red against the
+  // pre-fix code (each site got `{}`/`{project,number[,body]}` — no
+  // apiBase key at all).
+  const expected = gitlabApiConfig();
+  assert.equal(typeof expected.apiBase, 'string');
+  assert.ok(expected.apiBase.length > 0);
+
+  const configShape = ({ apiBase, token, proxyUrl }) => ({ apiBase, token, proxyUrl });
+  assert.deepEqual(configShape(captured.whoami), expected, 'whoami must receive the resolved transport config');
+  assert.equal(captured.prView.length, 2, 'sanity: both prView calls were captured');
+  for (const call of captured.prView) {
+    assert.deepEqual(configShape(call), expected, 'prView must receive the SAME resolved transport config');
+  }
+  assert.deepEqual(configShape(captured.prReviewComment), expected, 'prReviewComment must receive the SAME resolved transport config');
+  assert.deepEqual(configShape(captured.prReviews), expected, 'prReviews must receive the SAME resolved transport config');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

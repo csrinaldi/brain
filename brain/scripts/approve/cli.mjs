@@ -43,6 +43,7 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { currentBranch } from '../lib/git-branch.mjs';
 import { renderDecision } from '../review/lib/decision-block.mjs';
 import { originIdentity } from '../vcs/lib/repo.mjs';
+import { gitlabApiConfig } from '../vcs/ci-context.mjs';
 
 // ── Frozen contract ──────────────────────────────────────────────────────────
 
@@ -163,10 +164,20 @@ export async function runApprove({
 
   const vcs = await getVcsFn({ provider });
 
+  // Resolved ONCE, threaded into every vcs call below (issue #473 cold-review
+  // round 1 finding: whoami and the post/verify calls must share ONE
+  // credential source). `{ apiBase, token, proxyUrl }` are GitLab-only
+  // transport config — harmless no-op params on the GitHub provider, same
+  // pattern as identity.mjs's `defaultWhoami` / actor-check.mjs's
+  // `defaultFetch*` helpers. Reading the environment is `gitlabApiConfig`'s
+  // own module's business, not this one's — this file's environment-read
+  // count (Lock 2, locks.test.mjs) stays at zero occurrences.
+  const vcsConfig = gitlabApiConfig();
+
   // ── Identity — ambient credentials, verified before anything else ─────────
   let who;
   try {
-    who = await vcs.whoami({});
+    who = await vcs.whoami({ ...vcsConfig });
   } catch (err) {
     say(`✗ could not verify your identity: ${err.message}`);
     say('  Never proceed on an unverified identity.');
@@ -205,7 +216,7 @@ export async function runApprove({
   }
 
   // ── Compose: read the head, render the block ────────────────────────────
-  const composedView = await vcs.prView({ project, number });
+  const composedView = await vcs.prView({ project, number, ...vcsConfig });
   const headSha = composedView?.headRefOid || null;
   if (!headSha) {
     say(`✗ could not resolve the head commit for PR #${number}.`);
@@ -232,7 +243,7 @@ export async function runApprove({
   }
 
   // ── Anti-stale: re-read the head immediately before posting ────────────
-  const reRead = await vcs.prView({ project, number });
+  const reRead = await vcs.prView({ project, number, ...vcsConfig });
   const currentHead = reRead?.headRefOid || null;
   if (currentHead !== headSha) {
     say('');
@@ -242,7 +253,7 @@ export async function runApprove({
   }
 
   // ── Post: existing verb only, no event, no comments ─────────────────────
-  const posted = await vcs.prReviewComment({ project, number, body });
+  const posted = await vcs.prReviewComment({ project, number, body, ...vcsConfig });
   if (!posted?.url) {
     say('');
     say(`✗ the review comment failed to post: ${posted?.error ?? 'unknown error'}.`);
@@ -251,7 +262,7 @@ export async function runApprove({
   }
 
   // ── Post-then-verify: the landed review must be authored by `actor` ────
-  const reviews = await vcs.prReviews({ project, number });
+  const reviews = await vcs.prReviews({ project, number, ...vcsConfig });
   const landed = Array.isArray(reviews) ? reviews.find((r) => r.body === body) : null;
   const landedAuthor = landed?.author ?? null;
   if (!landedAuthor || String(landedAuthor).toLowerCase() !== String(actor).toLowerCase()) {
