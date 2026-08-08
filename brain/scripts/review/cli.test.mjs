@@ -656,3 +656,41 @@ test('#405: the CLI passes `findings` to postVerdict — the one link no seam ca
     'follow-up is pre-existing/base-only, so anchoring one would comment on this author\'s diff about a defect ' +
     'the same verdict says they did not introduce. Both wrong populations red this guard.');
 });
+
+test('#501: the CLI binds the VERIFIED token to the port it hands cold-boot and the poster (drift guard)', () => {
+  // A SOURCE assertion for the same reason as the guard above, and found the same
+  // way: mutating this wiring to hand the poster an UNBOUND port left the whole
+  // 2722-test suite green. The port-level binding was covered from six angles and
+  // the one line that USES it was covered by nothing — this change reproducing its
+  // own defect. `whoami` could always take a token; what was missing was a caller
+  // passing one.
+  //
+  // No seam observes this: `getVcs` is imported directly, and a real `main()` run
+  // cannot reach the poster without a live gh binary and a reviewer token — the
+  // two things absent from the environment where this defect was found.
+  const src = readFileSync(fileURLToPath(new URL('./cli.mjs', import.meta.url)), 'utf8');
+
+  // `identity` must come from the identity that was VERIFIED, not from a second
+  // read of the env var: a second read is a second chance to differ from the value
+  // whoami() checked.
+  assert.match(
+    src,
+    /^ *const boundGetVcs = \(opts = \{\}\) => getVcs\(\{ \.\.\.opts, identity: identity\.token \}\);$/m,
+    'the port must be bound to `identity.token` — the value gatherIdentity verified, threaded, not re-read',
+  );
+
+  // Both consumers must receive it, asserted separately: binding a port nobody
+  // uses is precisely the state this change found on main.
+  assert.match(
+    src,
+    /^ *deps: deps\.coldBootDeps \?\? \{ getVcs: boundGetVcs \},$/m,
+    'cold-boot must READ through the bound port — a port reading under one credential and writing ' +
+      'under another can report on a repository it is not writing to',
+  );
+  assert.match(
+    src,
+    /^ *\(deps\.writeVerbs \? \{ getVcs: async \(\) => deps\.writeVerbs \} : \{ getVcs: boundGetVcs \}\);$/m,
+    'the poster must WRITE through the bound port — the absence of this line is what made the reviewer ' +
+      'verify as csrinaldibot and post as csrinaldi (PR #500, review 4887057484)',
+  );
+});
