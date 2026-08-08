@@ -19,9 +19,24 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { evaluateTranche, gatherTrancheInputs } from './tranche.mjs';
+import { TIERS, tierParams } from '../../vcs/governance-tiers.mjs';
 import { changeDir, missingRequiredArtifacts } from '../../lib/sdd-layout.mjs';
 
-const BUDGET_CLAIM_RE = /(\d+)\s*\/\s*400\b/;
+// A budget claim is `N/M` where M is a budget SOME tier declares — derived from
+// the tier table, never written as a literal (ADR-0026: lite 1000 · standard
+// 400 · regulated 200). The `400` this replaced matched `standard` by accident
+// and returned null at the other two tiers, leaving §10.1 checking nothing
+// while reporting nothing (issue #472, the second untiered literal after #443).
+const CLAIM_PAIR_RE = /(\d+)\s*\/\s*(\d+)\b/g;
+const DEFAULT_TIER = 'standard';
+
+/** The set of denominators that are a declared tier budget. Resolved from the
+ * tier table so a new tier needs no edit here, and so no budget number is ever
+ * written twice (REQ-TIER-9). */
+function declaredBudgets() {
+  return new Set(TIERS.map((t) => tierParams(t).diffBudget));
+}
+
 const CHECKPOINT_REPORT_RE = /(?:^|\/)openspec\/changes\/([^/]+)\/checkpoint-report\.md$/;
 // Mirrors workflow-governance.md Invariant 4 step 2's scanned surfaces.
 const ARCHITECTURAL_SURFACE_RE = [/providers\//, /^brain\/core\//, /config-migrations\.mjs$/, /^package\.json$/];
@@ -32,9 +47,55 @@ const ARCHITECTURAL_SURFACE_RE = [/providers\//, /^brain\/core\//, /config-migra
  * an array of `{key, claimed, recomputed}` — more parsers can be added
  * without changing the contract; this is deliberately not a generic
  * arbitrary-number parser. */
-export function parseBudgetClaim(reportText) {
-  const m = BUDGET_CLAIM_RE.exec(reportText ?? '');
-  return m ? Number(m[1]) : null;
+export function parseBudgetClaim(reportText, diffBudget = tierParams(DEFAULT_TIER).diffBudget) {
+  const budgets = declaredBudgets();
+  const candidates = [];
+  // Deliberately NOT filtered by markdown structure. An earlier round excluded
+  // table rows on the theory that a row is always a per-file component — but
+  // this repo's reports state the diff-size GATE verdict in a table
+  // (`| diff-size | REQUIRED | PASS | 1/400 — … |`), and for a report whose
+  // prose total carries no denominator that row is the only machine-readable
+  // compliance claim it has. Excluding rows sent such a report back to `null`,
+  // which is the very silence this issue removes, introduced at `standard`.
+  // Measured against this repo's 17 real reports: with the exclusion removed,
+  // exactly one differs from the pre-#472 parser at `standard` — archive/217,
+  // 476 → 251, where 251 is the MR's real figure and 476 was a pre-split total
+  // the old first-match regex reached first. A correction, not a regression.
+  for (const line of (reportText ?? '').split('\n')) {
+    for (const m of line.matchAll(CLAIM_PAIR_RE)) {
+      const declaredBudget = Number(m[2]);
+      // A denominator no tier declares is not a budget claim — it is a test
+      // count (`npm test: **1269/1269**`), a slice count, a version. Admitting
+      // those would let the drift check fabricate evidence from ordinary prose,
+      // which is strictly worse than the silence this issue removes.
+      if (!budgets.has(declaredBudget)) continue;
+      candidates.push({ claimed: Number(m[1]), declaredBudget });
+    }
+  }
+  if (candidates.length === 0) return null;
+
+  // Prefer claims stated against THIS tier's budget — the same specificity the
+  // hardcoded regex had, so an honest report at any tier parses exactly.
+  //
+  // When more than one survives, take the SMALLEST numerator rather than the
+  // first or the last. Position is not a property of the claim: a report that
+  // states its count twice would otherwise be read differently depending on
+  // where the author put each sentence, and a drift check must not be softened
+  // by a second, larger number appearing elsewhere. Smallest is the
+  // fail-closed choice — it is the one most likely to fall below the cold
+  // recomputation and surface the drift.
+  const matching = candidates.filter((c) => c.declaredBudget === diffBudget);
+  if (matching.length > 0) {
+    return { claimed: Math.min(...matching.map((c) => c.claimed)), declaredBudget: diffBudget, matchesTierBudget: true };
+  }
+
+  // Every candidate quotes a budget some tier declares, but none quotes THIS
+  // repo's. The report asserts compliance against doctrine that does not apply
+  // here, and its numerator was judged under the wrong ceiling — report drift in
+  // its own right (issue #472, option 2). Returning null would convert a
+  // doctrine error back into the silence this change removes.
+  const lowest = candidates.reduce((a, c) => (c.claimed < a.claimed ? c : a));
+  return { ...lowest, matchesTierBudget: false };
 }
 
 /** Finds the change id from a `checkpoint-report.md` path in `changedFiles`. */
@@ -60,6 +121,20 @@ function checkReportDrift(claims = []) {
         severity: 'blocker',
         evidence: `checkpoint-report.md claims ${claim.key}=${claim.claimed}; cold recomputation = ${claim.recomputed}`,
         cites: 'reviewer-protocol.md §10 report-vs-tree drift',
+      });
+    }
+    // A report quoting a budget the repo does not operate under is itself
+    // report drift: it asserts compliance against doctrine that does not apply
+    // here, and the numerator it states was judged under the wrong ceiling
+    // (issue #472). Dropping the claim instead would restore the silence this
+    // check exists to remove — the parse failure would be indistinguishable
+    // from a report that matched.
+    if (claim.matchesTierBudget === false) {
+      findings.push({
+        id: `drift:${claim.key}-budget`,
+        severity: 'blocker',
+        evidence: `checkpoint-report.md states the ${claim.key} budget as ${claim.declaredBudget}; this repo resolves ${claim.tierBudget}${claim.tier ? ` (tier: ${claim.tier})` : ''}`,
+        cites: 'ADR-0026 tierParams(tier).diffBudget; reviewer-protocol.md §10 report-vs-tree drift',
       });
     }
   }
@@ -321,8 +396,21 @@ export async function gatherCheckpointInputs({
     if (!missing.includes('checkpoint-report.md')) {
       try {
         const reportText = readFile(`${changeDir(changeId)}/checkpoint-report.md`);
-        const claim = parseBudgetClaim(reportText);
-        if (claim !== null) reportClaims = [{ key: 'counted-lines', claimed: claim, recomputed: trancheInputs.budget?.lines ?? null }];
+        // The tier's budget rides the SAME resolution the job sets and the
+        // tranche budget use — `gatherTrancheInputs` already returns it, so
+        // there is exactly one place a tier becomes a number (issue #472/#443).
+        const claim = parseBudgetClaim(reportText, trancheInputs.diffBudget);
+        if (claim !== null) {
+          reportClaims = [{
+            key: 'counted-lines',
+            claimed: claim.claimed,
+            recomputed: trancheInputs.budget?.lines ?? null,
+            declaredBudget: claim.declaredBudget,
+            matchesTierBudget: claim.matchesTierBudget,
+            tierBudget: trancheInputs.diffBudget ?? null,
+            tier: trancheInputs.tier ?? null,
+          }];
+        }
       } catch { /* report absent — no drift claim to check */ }
     }
   }
