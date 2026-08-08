@@ -195,6 +195,35 @@ test('REQ-473-CONFIG: whoami, prView (both calls), prReviewComment, and prReview
   assert.deepEqual(configShape(captured.prReviews), expected, 'prReviews must receive the SAME resolved transport config');
 });
 
+test('REQ-473-CONFIG (SITE completeness): mrList on the branch-resolution path receives the SAME threaded transport config', async () => {
+  // The round-1 fix threaded five call sites; mrList lives on a PATH the
+  // number-given fixture never reaches (argv omitted → resolve via branch),
+  // which is exactly how a SITE slips a config sweep. This drives that path.
+  const vcs = makeVcs();
+  let capturedMrList = null;
+  const origMrList = vcs.mrList;
+  vcs.mrList = async (a) => { capturedMrList = a; return origMrList(a); };
+
+  const res = await runApprove({
+    argv: [],
+    isTTY: true,
+    project: 'o/r',
+    getVcsFn: async () => vcs,
+    branchFn: () => 'feat/x',
+    readLineFn: async () => CONFIRMATION_WORD,
+    write: () => {},
+  });
+  assert.equal(res.exitCode, 0, JSON.stringify(res));
+
+  const expected = gitlabApiConfig();
+  const configShape = ({ apiBase, token, proxyUrl }) => ({ apiBase, token, proxyUrl });
+  assert.deepEqual(
+    configShape(capturedMrList),
+    expected,
+    'mrList must receive the SAME resolved transport config as every other call site',
+  );
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Cold-review round 1, Fix 2 (MINOR) — behavioral env-bypass mirror of
 // brain-promote.locks.test.mjs:133-165. Red-impossible against correct code

@@ -205,7 +205,7 @@ export async function runApprove({
       say('  Usage: npm run brain:approve -- [<pr-number>]');
       return done(1);
     }
-    const prs = await vcs.mrList({ project, state: 'open' });
+    const prs = await vcs.mrList({ project, state: 'open', ...vcsConfig });
     const match = Array.isArray(prs) ? prs.find((p) => p.headBranch === branch) : null;
     if (!match) {
       say(`✗ no open PR found for branch "${branch}". Pass the PR number explicitly.`);
