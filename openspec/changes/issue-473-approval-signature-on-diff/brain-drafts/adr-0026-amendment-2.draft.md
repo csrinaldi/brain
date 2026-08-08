@@ -133,6 +133,15 @@ that pinned suite, not a new one written to match the new behavior.
 - **`dispositions` (per-finding structured verdicts inside the block) is a
   separate ticket**, deliberately absent from `brain-decision/1`'s field set
   (design.md §E1). This amendment answers only "which diff, signed by whom."
+- **Post-then-verify matches the landed body by exact string equality.** A
+  provider that normalizes whitespace server-side (trailing-newline
+  collapse, CRLF→LF, trimmed trailing spaces on a line) would make the
+  landed comment's body no longer `===` the block `brain:approve` composed,
+  and the run would refuse post-hoc even though the signature is sitting on
+  the PR. This is a fail-closed false negative — a loud non-zero exit and an
+  explicit "delete the stray comment" instruction, never a silent success —
+  and is accepted as the cheaper error over a normalized/fuzzy comparison
+  that could paper over a genuinely different landed body.
 
 ### Promotion is manual
 
