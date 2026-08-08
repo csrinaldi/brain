@@ -1,0 +1,112 @@
+diff --git a/brain/core/anti-patterns/ia-escribe-brain-sin-gate.md b/brain/core/anti-patterns/ia-escribe-brain-sin-gate.md
+index ef7ac06..c8a0b18 100644
+--- a/brain/core/anti-patterns/ia-escribe-brain-sin-gate.md
++++ b/brain/core/anti-patterns/ia-escribe-brain-sin-gate.md
+@@ -6,8 +6,8 @@
+ 
+ ## The problem
+ 
+-An AI agent that commits directly to `brain/decisions/`, `brain/anti-patterns/`,
+-`brain/domain/` or `brain/methodology/` can introduce:
++An AI agent that commits directly to `brain/core/**` or `brain/project/**`
++can introduce:
+ 
+ - Incorrect or misinterpreted decisions without critical review.
+ - Anti-patterns that describe local solutions as if they were global rules.
+diff --git a/brain/core/anti-patterns/ia-promueve-sus-propios-artefactos.md b/brain/core/anti-patterns/ia-promueve-sus-propios-artefactos.md
+index 4b5feb0..b81648f 100644
+--- a/brain/core/anti-patterns/ia-promueve-sus-propios-artefactos.md
++++ b/brain/core/anti-patterns/ia-promueve-sus-propios-artefactos.md
+@@ -5,7 +5,7 @@
+ 
+ ## Symptom
+ 
+-A methodology document appeared in `brain/methodology/` with the header
++A methodology document appeared in `brain/core/methodology/` with the header
+ "**Status:** Approved — initial operational" — but no human approved it. An AI
+ agent drafted it from a discussion draft and, when promoting it, set the final
+ status on its own. The team later discovers it is governed by a document nobody
+diff --git a/brain/core/methodology/agent-authorities.md b/brain/core/methodology/agent-authorities.md
+index a2a79f2..6df1c76 100644
+--- a/brain/core/methodology/agent-authorities.md
++++ b/brain/core/methodology/agent-authorities.md
+@@ -47,8 +47,8 @@ The agent proposes and waits for explicit human approval:
+ 
+ The agent must never do this, even if explicitly asked:
+ 
+-- Commit directly to `brain/decisions/`, `brain/anti-patterns/`,
+-  `brain/domain/`, or `brain/methodology/`
++- Commit directly to `brain/core/**` or `brain/project/**` — the knowledge half,
++  whatever its subdirectories are called
+ - Approve or merge its own MR
+ - Modify git history (`--force`, `--amend` of published commits,
+   `rebase` of branches others use)
+diff --git a/brain/core/methodology/consolidation-protocol.md b/brain/core/methodology/consolidation-protocol.md
+index 3cc47de..264c082 100644
+--- a/brain/core/methodology/consolidation-protocol.md
++++ b/brain/core/methodology/consolidation-protocol.md
+@@ -22,8 +22,8 @@ Mandatory pattern for changes with parallel sub-agents:
+ 
+ ## 1b. HOME.md maintenance rule
+ 
+-Every time a new ADR is created or a file is added to `brain/methodology/` or
+-`brain/anti-patterns/`, the corresponding MR **must** update `brain/HOME.md` to
++Every time a new ADR is created or a file is added under `brain/core/**` or
++`brain/project/**`, the corresponding MR **must** update `brain/HOME.md` to
+ include the new link in the corresponding section. Without this update the MR
+ is not complete.
+ 
+@@ -68,8 +68,7 @@ CI round trip — not that nothing catches it.
+ ## 2. Promotion in the Merge Request (GitLab)
+ 
+ > **Hard Rule — Mandatory human gate:**
+-> No AI agent may commit directly to `brain/decisions/`,
+-> `brain/anti-patterns/`, `brain/domain/`, or `brain/methodology/`.
++> No AI agent may commit directly to `brain/core/**` or `brain/project/**`.
+ > Promotion works as follows:
+ >
+ > 1. The agent drafts the artifact (ADR, anti-pattern, glossary entry)
+@@ -79,7 +78,7 @@ CI round trip — not that nothing catches it.
+ > 3. The MR description documents what was promoted and why.
+ >
+ > No agent promotes its own artifacts to `brain/`. That signature is human.
+-> See anti-pattern: `brain/anti-patterns/ia-escribe-brain-sin-gate.md`.
++> See anti-pattern: `brain/core/anti-patterns/ia-escribe-brain-sin-gate.md`.
+ 
+ - Before removing the _Draft_ status from the MR in your self-hosted GitLab, the organization's closing skill will analytically process the micro-decisions accumulated in the branch.
+ - If the learning applies to multiple microservices or resolves a critical compatibility bug (e.g., Jakarta JSON serializations), the agent must draft the artifact in `openspec/changes/{iid}/brain-drafts/` for the human to review and promote.
+@@ -132,7 +131,7 @@ mem_review --action list --project <your-project>
+ 
+ Observations with `needs_review` status are candidates. If `mem_review` is not
+ available, look for observations with type `architecture` or `decision` whose content
+-contradicts active ADRs in `brain/decisions/`.
++contradicts the project's active ADRs.
+ 
+ ### Resolution criteria
+ 
+diff --git a/brain/core/methodology/harness-contract.md b/brain/core/methodology/harness-contract.md
+index b309a69..e75c1c8 100644
+--- a/brain/core/methodology/harness-contract.md
++++ b/brain/core/methodology/harness-contract.md
+@@ -65,7 +65,7 @@ tasks.md      — checklist de implementación
+ 
+ Artifacts live in `openspec/` during the change flight.
+ Only the durable residue (ADRs, anti-patterns, glossary) is promoted to `brain/` — see
+-`brain/methodology/consolidation-protocol.md`.
++`brain/core/methodology/consolidation-protocol.md`.
+ 
+ ## Current implementation (gentle-ai)
+ 
+diff --git a/brain/project/decisions/adr-0013-auto-adr-onboarding.md b/brain/project/decisions/adr-0013-auto-adr-onboarding.md
+index 327c259..1c6ab2e 100644
+--- a/brain/project/decisions/adr-0013-auto-adr-onboarding.md
++++ b/brain/project/decisions/adr-0013-auto-adr-onboarding.md
+@@ -11,7 +11,7 @@ The hardest constraint on any solution is `agent-authorities.md`. `brain/project
+ 
+ - **Tier 1 (autonomous):** the agent may read any file and write freely to `openspec/changes/**`.
+ - **Tier 2 (confirm per action):** the agent may write to `brain/**` only after explicit per-action human confirmation; the canonical flow is *agent drafts in `openspec/changes/{iid}/brain-drafts/` → human reviews → the artifact reaches `brain/`*.
+-- **Tier 3 (prohibited):** the agent must **never** commit directly to `brain/decisions/`, even if asked. The anti-pattern is explicit: *"No agent promotes its own artifacts to `brain/`. That signature is human."*
++- **Tier 3 (prohibited):** the agent must **never** commit directly to `brain/project/decisions/`, even if asked. The anti-pattern is explicit: *"No agent promotes its own artifacts to `brain/`. That signature is human."*
+ 
+ So the feature cannot be "a script that writes ADRs into `brain/`." Bootstrap shell/node code can only **detect and notice**; the intelligence — exploring the repo, drafting prose, running the review — belongs to an agent, and every write into `brain/` must pass a Tier 2 gate. A second constraint: ADR drafting must not hallucinate. The agent captures what the repo **IS** (descriptive facts), not why the team chose it — the signature on the *reasoning* is also human.
+ 
