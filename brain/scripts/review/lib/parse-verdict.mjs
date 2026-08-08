@@ -4,70 +4,17 @@
 // (rev derivation + doctrine load); nested findings/gates land with H1-5's
 // board. Shared by cold-boot, the anti-loop lock (H1-2), and the board
 // (H1-5) — extracted once so they read the same parser (design.md §2).
-
-const FENCE_RE = /```(?:yaml)?\s*\n([\s\S]*?)```/;
-
-function scalar(block, key) {
-  const m = block.match(new RegExp(`^${key}:[ \\t]*(.+)$`, 'm'));
-  return m ? m[1].trim() : null;
-}
-
-// THE decoder for `verdict.mjs`'s `yamlScalar` — its exact inverse, and the
-// ONLY one. Both readers below delegate here.
 //
-// There used to be two (issue #452, found by the fourth cold review of PR #478
-// while it was tracing the consequence into board.mjs's label writes). When
-// #481 taught the encoder to escape line terminators, only the entry-field
-// reader learned to decode them; the JSON reader kept a generic `\X -> X`
-// strip, which turns the `\u2028` escape into the literal text `u2028`:
-//
-//   in : seq:blocked-on<U+2028>411
-//   out: seq:blocked-onu2028411
-//
-// `sequencing` is the one member of this family with a DESTRUCTIVE live
-// consumer — board.mjs reconciles labels by name, so a corrupted name puts the
-// real label in `toRemove` and a fabricated one in `toAdd`. One emitter must
-// have exactly one inverse; two decoders is the defect, not the escape.
-function decodeYamlEscapes(inner) {
-  return inner.replace(/\\(u2028|u2029|.)/g, (_, c) =>
-    (c === 'n' ? '\n' : c === 'r' ? '\r' : c === 'u2028' ? '\u2028' : c === 'u2029' ? '\u2029' : c));
-}
+// The low-level fence/scalar primitives (`extractFencedBlock`, `scalar`,
+// `decodeYamlEscapes`, `unyamlScalar`, `parseJsonScalar`) live in
+// `yaml-block.mjs` (issue #473, design.md §B1) — shared with
+// `decision-block.mjs`'s `brain-decision/1` reader, since both protocols ride
+// the same fenced-YAML carrier. This module still owns everything specific to
+// the `brain-review/N` schema: the two-protocol allowlist below, and the
+// findings/follow_ups list machinery (kept private — see yaml-block.mjs's own
+// header comment for why it did not move too).
 
-// Reverses verdict.mjs's `yamlScalar(JSON.stringify(...))` encoding: strips
-// the outer quotes (if present) and un-escapes `\X` -> `X` (covers both
-// `\\` -> `\` and `\"` -> `"`, the only two escapes yamlScalar ever
-// produces), then JSON.parses the result. Never throws — an unparseable
-// scalar (hand-edited comment, corruption) yields `null`, tolerated by the
-// caller (board.mjs treats an absent/unparseable sequencing as "nothing to
-// reconcile from this block", never a crash).
-function parseJsonScalar(raw) {
-  try {
-    const unquoted =
-      raw.length >= 2 && raw[0] === '"' && raw[raw.length - 1] === '"'
-        ? decodeYamlEscapes(raw.slice(1, -1))
-        : raw;
-    return JSON.parse(unquoted);
-  } catch {
-    return null;
-  }
-}
-
-// Reverses verdict.mjs's `yamlScalar()`: a value it had to quote comes back with
-// its outer quotes stripped and its escapes decoded; an unquoted scalar is
-// already literal.
-//
-// `\n` and `\r` decode to the CHARACTERS, not to the letters (issue #481).
-// yamlScalar escapes line breaks so a multi-line value cannot terminate the
-// findings list mid-way; the generic `\X -> X` rule this used to apply would
-// have turned that escape into a bare "n" and lost the newline a different way.
-// Every other escape keeps the generic rule, which covers yamlScalar's `\\` and
-// `\"` — and, because backslashes are escaped on the way out, `\\n` still decodes
-// to a literal backslash followed by "n" rather than to a newline.
-function unyamlScalar(raw) {
-  const s = raw.trim();
-  if (!(s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"')) return s;
-  return decodeYamlEscapes(s.slice(1, -1));
-}
+import { extractFencedBlock, scalar, unyamlScalar, parseJsonScalar } from './yaml-block.mjs';
 
 // Matches the two line shapes renderVerdict emits inside a findings /
 // follow_ups list: `  - key: value` opens an entry, `    key: value` extends
@@ -206,9 +153,8 @@ function parseEntryList(block, key) {
 export function parseVerdict({ body, author = null } = {}) {
   if (typeof body !== 'string' || body.length === 0) return null;
 
-  const fence = body.match(FENCE_RE);
-  if (!fence) return null;
-  const block = fence[1];
+  const block = extractFencedBlock(body);
+  if (block === null) return null;
 
   const proto = scalar(block, 'protocol');
   if (proto !== 'brain-review/1' && proto !== 'brain-review/2') return null;
