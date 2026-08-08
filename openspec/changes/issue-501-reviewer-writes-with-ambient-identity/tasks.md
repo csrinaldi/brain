@@ -66,9 +66,10 @@ issue: 501
       - an unbound port starts injecting a token → must red (E2)
       - **the three lock-2 mutations from PR #490, re-run** → must still be red (E8)
 - [x] T10 — 2723 tests, 0 fail.
-- [ ] T11 — **Draft the `vcs-contract.md` row** for `brain-drafts/`: a bound port carries its
-      identity to every verb, on both providers. Tier 2 — the agent drafts, a human promotes,
-      now via `brain:promote` (ADR-0028) where the shape allows.
+- [x] T11 — Drafted at `brain-drafts/vcs-contract-identity-binding.md`. A **section**, not a
+      verb row: the rule is about the PORT, and putting it in one verb's row is the shape that
+      failed. `brain:promote` handles new-file ADRs only, so this is an in-place edit under
+      `consolidation-protocol.md` §1c/§1d. Tier 2 — a human signs.
 - [ ] T12 — **PR, then the EXTERNAL reviewer on it.** Not self-review: `reviewer-protocol.md`
       §13 requires a cold subagent that is strictly a command executor of
       `npm run brain:review -- --pr <id>`, and forbids manual diff reading. #469's round 1
