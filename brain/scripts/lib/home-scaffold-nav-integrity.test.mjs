@@ -27,12 +27,16 @@ const LIB_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(LIB_DIR, '..', '..', '..');
 const REAL_CHECK_SCRIPT = join(REPO_ROOT, 'brain', 'scripts', 'check-brain-nav.mjs');
 const REAL_CORE_DIR = join(REPO_ROOT, 'brain', 'core');
+const REAL_SCRIPTS_DIR = join(REPO_ROOT, 'brain', 'scripts');
 
 function makeFreshConsumerFixture() {
   const dir = mkdtempSync(join(tmpdir(), 'home-scaffold-nav-'));
-  const scriptsDir = join(dir, 'brain', 'scripts');
-  mkdirSync(scriptsDir, { recursive: true });
-  cpSync(REAL_CHECK_SCRIPT, join(scriptsDir, 'check-brain-nav.mjs'));
+  // brain/scripts/** is a MANAGED path (managed-paths.mjs) — a real consumer
+  // receives all of it on brain:upgrade, and brain/core/** docs cite into it
+  // (reviewer-protocol.md → vcs/cli.mjs, sdd-layout.md → lib/sdd-layout.mjs).
+  // Copying one script modelled an environment no consumer is ever in, which
+  // the link-only check could not see and the citation check can.
+  cpSync(REAL_SCRIPTS_DIR, join(dir, 'brain', 'scripts'), { recursive: true });
   cpSync(REAL_CORE_DIR, join(dir, 'brain', 'core'), { recursive: true });
   return dir;
 }

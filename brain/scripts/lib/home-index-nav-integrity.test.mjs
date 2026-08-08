@@ -29,6 +29,7 @@ const LIB_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(LIB_DIR, '..', '..', '..');
 const REAL_CHECK_SCRIPT = join(REPO_ROOT, 'brain', 'scripts', 'check-brain-nav.mjs');
 const REAL_CORE_DIR = join(REPO_ROOT, 'brain', 'core');
+const REAL_SCRIPTS_DIR = join(REPO_ROOT, 'brain', 'scripts');
 
 const ADR_CONTENT = [
   '# ADR-0099 — Example: Decision title',
@@ -43,7 +44,10 @@ function makeFreshConsumerFixture() {
   const dir = mkdtempSync(join(tmpdir(), 'home-index-nav-'));
   const scriptsDir = join(dir, 'brain', 'scripts');
   mkdirSync(scriptsDir, { recursive: true });
-  cpSync(REAL_CHECK_SCRIPT, join(scriptsDir, 'check-brain-nav.mjs'));
+  // brain/scripts/** is MANAGED (managed-paths.mjs): a real consumer gets all of
+  // it, and brain/core/** docs cite into it. One script modelled an environment
+  // no consumer is ever in — invisible to a link-only check, visible to this one.
+  cpSync(REAL_SCRIPTS_DIR, scriptsDir, { recursive: true });
   cpSync(REAL_CORE_DIR, join(dir, 'brain', 'core'), { recursive: true });
   return dir;
 }

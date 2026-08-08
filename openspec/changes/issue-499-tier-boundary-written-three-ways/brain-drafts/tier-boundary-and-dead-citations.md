@@ -244,3 +244,57 @@ does not prove the prose states the same boundary as `BRAIN_MANAGED_PREFIXES` �
 need the prose to carry a machine-readable marker, which is a heavier change than this
 ticket's evidence justifies. What it does guarantee is that a prohibition can never again
 name a directory that isn't there.
+
+---
+
+## A third class, found by the two red nav-integrity fixtures
+
+The fixtures were red "by design" (T8). Measuring them separated two causes that looked
+like one.
+
+**Cause A — the fixture, not the tree.** Both fixtures copy `check-brain-nav.mjs` **alone**
+into `brain/scripts/` and then assert over the real `brain/core/**`. But `brain/scripts/**`
+is a MANAGED path (`managed-paths.mjs:41`): a real consumer receives all of it on
+`brain:upgrade`, and core docs cite into it — `reviewer-protocol.md` → `vcs/cli.mjs`,
+`sdd-layout.md` → `lib/sdd-layout.mjs`, `pre-v0-8-0-upgrade-clobber-lockout.md` →
+`lib/installer.mjs`. The fixture modelled an environment no consumer is ever in. Invisible
+to a link-only check; visible the moment citations are read. Fixed here — this is the
+COLDBOOT ruling #489 quotes: *the fixture must reproduce the real ENVIRONMENT, not just
+exercise the real default.*
+
+Measured, with the doctrine patch applied:
+
+| fixture | before | scripts/** copied |
+| --- | --- | --- |
+| `home-index-nav-integrity` | 12 | **0 — passes** |
+| `home-scaffold-nav-integrity` | 10 | **2** |
+
+**Cause B — a real defect, and a class the guard has no answer for yet.** The 2 that
+survive are the scaffolded `brain/HOME.md` citing `` `brain/project/` `` and
+`` `brain/project/decisions/` ``. `brain/project/**` is deliberately **not** a managed path
+— it is the consumer's own — so a genuinely fresh consumer runs `ensureHome()` and receives
+a HOME.md that points at two directories they do not have.
+
+That is neither a live pointer nor a historical one. It is **prescriptive**: *this is where
+you will put your ADRs.* Three classes now, and the guard's model ("a cited path exists")
+only fits the first:
+
+| class | example | what "correct" means |
+| --- | --- | --- |
+| live | `harness-contract.md` → a script | the path must exist |
+| historical | the §2 quote from before #54 | the path must NOT be rewritten |
+| **prescriptive** | scaffolded HOME → `brain/project/decisions/` | the path must exist *eventually* |
+
+**Options — this needs the same ruling as the other three:**
+
+- **(a) `ensureHome()` creates the skeleton it advertises** (`brain/project/decisions/` with
+  a README explaining what belongs there — git does not track empty directories). The
+  promise becomes true for every consumer, and the verb that writes the HOME.md is the one
+  that makes its links resolve. Costs a behaviour change on the adoption path (REQ-3/REQ-6).
+- **(b) The template stops citing prospective paths in backticks.** Cheapest, consistent
+  with the leaning on the two historical citations, and it keeps `ensureHome` doing one
+  thing.
+
+**Leaning (a).** A knowledge base whose entry point names a place that does not exist is
+the same defect this ticket opened on, one tense over — and (b) fixes the symptom by making
+the doc quieter rather than making it true.

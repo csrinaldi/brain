@@ -50,6 +50,13 @@ issue: 499
       keeps 4/4 citation tests green, and names no consumer-specific path. Patch attached at
       `brain-drafts/tier-boundary.patch`, measured in a scratch worktree, `brain/` never
       committed by the agent.
+- [x] T8c — **The two red nav-integrity fixtures split into two causes.** The fixture copied
+      ONE script into a tree whose docs cite ten — `brain/scripts/**` is managed, so a real
+      consumer has all of it. Fixed (12 → 0 and 10 → 2 with the doctrine patch applied). What
+      survives is a real defect in a different tense: the scaffolded HOME.md cites
+      `brain/project/**`, which is deliberately NOT managed, so a fresh consumer is handed an
+      entry point naming two directories they do not have. Third citation class —
+      PRESCRIPTIVE — recorded in the draft with options.
 - [ ] T9 — **HUMAN: apply the drafted corrections**, which turns `brain:nav`, the two
       `nav-integrity` tests and `gate:local-checks` green together. Precedent for landing them
       with the code: #405/T18b, where the maintainer committed the promotion onto the agent's
@@ -58,6 +65,9 @@ issue: 499
       read before #54, and a `Discovered in:` provenance line) and the one genuinely dead
       pointer (`agent-skills.md`, an inventory that has never existed). Options and a leaning
       for each are in the draft.
+- [ ] T10b — **HUMAN: a fourth ruling** — the prescriptive class (scaffolded HOME.md →
+      `brain/project/**`). (a) `ensureHome` creates the skeleton, or (b) the template drops
+      the backticks. Leaning (a); see the draft.
 - [ ] T11 — **Follow-up ticket:** the citation check should carry the `coreLeaks` rule, or a
       core doc can cite a `brain/project/…` path and pass. Found by T8b.
 - [ ] T10 — **HUMAN: re-apply `status:approved` on #499** after the last agent commit — L5′
