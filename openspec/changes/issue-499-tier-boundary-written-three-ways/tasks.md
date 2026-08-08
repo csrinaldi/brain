@@ -43,10 +43,23 @@ issue: 499
       the full set for #469 and #501. Written now; that is what this file is.
       The other two findings were expected: `gate:local-checks` (the 2 red nav-integrity
       tests, by design) and `gate:actor-check` (the label on #499, a human act).
+- [x] T8b — **Second agent pass: the mechanical bucket is not mechanical.** Applying the
+      rename table verbatim reaches 22 → 7 with the suite green, and introduces 7
+      core→project citations — the class `check-brain-nav.mjs`'s own `coreLeaks` rule stops
+      for links and does not yet check for citations. The prefix form reaches **22 → 3**,
+      keeps 4/4 citation tests green, and names no consumer-specific path. Patch attached at
+      `brain-drafts/tier-boundary.patch`, measured in a scratch worktree, `brain/` never
+      committed by the agent.
 - [ ] T9 — **HUMAN: apply the drafted corrections**, which turns `brain:nav`, the two
       `nav-integrity` tests and `gate:local-checks` green together. Precedent for landing them
       with the code: #405/T18b, where the maintainer committed the promotion onto the agent's
       branch.
+- [ ] T9b — **HUMAN: three rulings** — the two historical citations (a quotation of §2 as it
+      read before #54, and a `Discovered in:` provenance line) and the one genuinely dead
+      pointer (`agent-skills.md`, an inventory that has never existed). Options and a leaning
+      for each are in the draft.
+- [ ] T11 — **Follow-up ticket:** the citation check should carry the `coreLeaks` rule, or a
+      core doc can cite a `brain/project/…` path and pass. Found by T8b.
 - [ ] T10 — **HUMAN: re-apply `status:approved` on #499** after the last agent commit — L5′
       wants it strictly after the newest foreign commit, and re-marking an already-present
       label emits no event.

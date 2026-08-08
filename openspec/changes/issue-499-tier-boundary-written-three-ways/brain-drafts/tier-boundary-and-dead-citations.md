@@ -52,24 +52,110 @@ The last one is `consolidation-protocol.md` cited **by another doc at the path i
 longer has**, and the second-to-last is §2 citing the anti-pattern that justifies its own
 hard rule.
 
-## Bucket 2 — needs a ruling: `brain/anti-patterns/` is ambiguous
+## Bucket 1 is NOT mechanical — measured, and it changes the fix
 
-It resolves to **two** real directories, `brain/core/anti-patterns/` and
-`brain/project/anti-patterns/`. Every occurrence is inside a prohibition, so the intent is
-almost certainly **both** — but that is a doctrine decision, not a rename, and writing one of
-the two would narrow a prohibition silently.
+The rename table above is right about where the paths went and wrong about applying it
+inside `brain/core/**`. Applying it verbatim and re-running the guard gives **22 → 7**, all
+green — and it introduces the exact class the script's OWN older rule exists to stop:
 
-## Bucket 3 — dangling: the target does not exist anywhere
+```js
+// check-brain-nav.mjs — the coreLeaks rule
+} else if (isUnder(f, CORE) && isUnder(r, PROJECT)) {
+  // core/** es genérico y se distribuye a consumidores; project/** es del consumidor
+  // y varía. Un link core→project resuelve acá (self-hosting) pero rompe en todo
+  // consumidor, donde ese target no existe.
+```
 
-| cited | note |
+That rule runs over `linksOf(f)` — markdown links and wikilinks. **The new citation check
+does not carry it.** So rewriting `` `brain/decisions/` `` to `` `brain/project/decisions/` ``
+inside a core doc satisfies the new guard while committing the older violation one notation
+over. `workflow-governance.md:3` already states the convention in prose: *"Core docs
+reference project ADRs by name, not by path — `brain/project/**` is consumer-owned and
+varies per repo."*
+
+**Seven of the fifteen renames are core→project** (`brain/decisions/` ×3 and
+`brain/domain/` ×3 in `agent-authorities.md`, `consolidation-protocol.md` and
+`ia-escribe-brain-sin-gate.md`, plus the ADR line in `brain/project/**`, which is fine —
+project→project is not a leak).
+
+**This is why the prefix form proposed further down is the correct fix, not merely the
+tidier one.** `` `brain/core/**` `` / `` `brain/project/**` `` names no consumer-specific
+path, and the citation regex does not match globs (measured — the source documents it at
+`check-brain-nav.mjs:106`), so a prohibition stated as a prefix is both honest in a consumer
+tree and un-breakable by the next reorganization.
+
+**Follow-up worth a ticket:** the citation check should carry the coreLeaks rule too, or a
+future core doc can cite a `brain/project/…` path and pass. The guard closed
+"names something that does not exist" and left "names something that does not exist *in a
+consumer*" open in the notation it just started reading.
+
+## The verified patch — 22 → 3
+
+Applied in a scratch worktree and measured, not proposed:
+
+| step | dead citations |
 | --- | --- |
-| `brain/methodology/agent-skills.md` | no file of that name in `brain/` |
-| `brain/methodology/project-workflow.md` | no file of that name in `brain/` |
-| `brain/project/architecture/` | no such directory |
-| `brain/core/methodology/intro.md` | exists only inside a **test fixture**, not in real `brain/` |
+| baseline (`443f48b`) | 22 |
+| naive rename table | 7 — but 7 core→project leaks introduced |
+| **prefix form (below)** | **3** |
 
-These are references to documents deleted or never written. Each needs a call: drop the
-reference, or create the doc. An agent guessing here would invent doctrine.
+`check-brain-nav.citations.test.mjs` — 4/4 pass under the prefix form.
+
+```diff
+- Commit directly to `brain/decisions/`, `brain/anti-patterns/`,
+-   `brain/domain/`, or `brain/methodology/`
++ Commit directly to `brain/core/**` or `brain/project/**` — the knowledge half,
++   whatever its subdirectories are called
+```
+(`agent-authorities.md` Tier 3 · `consolidation-protocol.md` §2 Hard Rule ·
+`ia-escribe-brain-sin-gate.md` §problem — same shape in all three.)
+
+Plus, in `consolidation-protocol.md`:
+- §1b *"a file is added to `brain/methodology/` or `brain/anti-patterns/`"* →
+  *"a file is added under `brain/core/**` or `brain/project/**`"*
+- §4 *"contradicts active ADRs in `brain/decisions/`"* → *"contradicts the project's active
+  ADRs"* (by name, not by path — the stated convention)
+- §2 *"See anti-pattern: `brain/anti-patterns/ia-escribe-…`"* → `brain/core/anti-patterns/…`
+  (core→core, a plain rename)
+
+And two plain core→core renames: `harness-contract.md`'s `consolidation-protocol.md` cite,
+and `ia-promueve-…`'s `` `brain/methodology/` `` in its Symptom. One project→project rename
+in `adr-0013`.
+
+The full patch is attached to this change as the reviewed evidence; it touches 6 files,
++12/−13.
+
+## The 3 that remain — each needs a ruling
+
+Two of them share a class the first draft missed: **the citation is historically true.**
+Rewriting it falsifies the record; deleting it loses provenance. The guard cannot tell that
+shape from a live pointer, and that is the interesting part.
+
+| # | where | what it is | why it is not a rename |
+| --- | --- | --- | --- |
+| 1 | `ia-escribe-brain-sin-gate.md:23` | quotes `consolidation-protocol.md §2` **as it read before issue #54**: *"draft and attach an append-only file in `brain/anti-patterns/`"* | it is a quotation of a past document. `brain/anti-patterns/` is what that document said |
+| 2 | `ia-promueve-…:3` | `**Discovered in:** ISSUE-8 / governance of `brain/methodology/project-workflow.md`` | a provenance record of where an incident happened. The doc existed then |
+| 3 | `harness-contract.md:76` | *"See `brain/methodology/agent-skills.md` for the full skill inventory."* | a **live** cross-reference to a document that does not exist. The only genuinely dead pointer of the three |
+
+**Options for 1 and 2 (they take one ruling together):**
+
+- **(a) Drop the backticks** on a historical path, keeping the words. Cheapest, works today,
+  and it says what is true: this is prose about the past, not a pointer. Costs nothing and
+  needs no change to the guard.
+- **(b) A marker convention** — e.g. `` `brain/anti-patterns/` `` *(historical)* — and teach
+  the extractor to skip a marked citation. Honest and machine-readable; adds surface to a
+  guard whose value is that it has none.
+- **(c) Rewrite them to today's paths.** Do not. It makes a quotation say something the
+  quoted document never said.
+
+**Leaning (a)** — the guard reads backticks as "this is a path in this tree", and a
+historical path is not one. That is a convention, not a mechanism, which is the right weight
+for two occurrences.
+
+**Option for 3:** either write `agent-skills.md` (it is referenced as *the* skill inventory
+and does not exist anywhere), or drop the sentence. Dropping is honest; writing it is a
+different ticket. **Leaning: drop the sentence here, open a ticket for the inventory** —
+`harness-contract.md` promising an inventory that has never existed is its own small lie.
 
 ---
 
