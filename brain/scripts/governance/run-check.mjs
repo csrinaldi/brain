@@ -95,6 +95,31 @@ function defaultReadRecords(cwd) {
  * @param {{ baseSha?: string|null, headSha?: string|null }} ctx
  * @returns {string[]}
  */
+/**
+ * Computes `git diff --diff-filter=A --name-only $base...$head` — the ADDED half of
+ * the same diff. Separate from defaultDiffNameOnly so both fail closed identically:
+ * an uncomputable added-list must never degrade into an empty one, which would make
+ * every added ADR look modified and re-open #510 from the other side.
+ *
+ * @param {{ baseSha?: string|null, headSha?: string|null }} ctx
+ * @returns {string[]}
+ */
+function defaultDiffNameOnlyAdded(ctx = {}) {
+  const base = ctx.baseSha;
+  const head = ctx.headSha;
+  if (!base || !head) {
+    throw new Error('BASE_SHA/HEAD_SHA not set — cannot compute diff');
+  }
+  try {
+    const out = execFileSync('git', ['diff', '--diff-filter=A', '--name-only', `${base}...${head}`], {
+      encoding: 'utf8',
+    });
+    return out.split('\n').filter(Boolean);
+  } catch (err) {
+    throw new Error(`git diff failed: ${err.message}`);
+  }
+}
+
 function defaultDiffNameOnly(ctx = {}) {
   const base = ctx.baseSha;
   const head = ctx.headSha;
@@ -461,7 +486,7 @@ export function mapDetectionToWarning(result, tier, gate) {
  * git/IO (or from injected `deps` in tests).
  *
  * @param {'memory-gate'|'decision-gate'|'issue-link'|'diff-size'} checkName
- * @param {{ cwd?: string, ctx?: object, readRecords?: (cwd: string) => unknown[], diffNameOnly?: () => string[], fetchIssue?: Function, diffNumstat?: Function, readConfig?: () => object }} [deps]
+ * @param {{ cwd?: string, ctx?: object, readRecords?: (cwd: string) => unknown[], diffNameOnly?: () => string[], diffNameOnlyAdded?: () => string[], fetchIssue?: Function, diffNumstat?: Function, readConfig?: () => object }} [deps]
  * @returns {Promise<{ pass: boolean, reason?: string }>}
  */
 export async function runCheck(checkName, deps = {}) {
@@ -469,6 +494,7 @@ export async function runCheck(checkName, deps = {}) {
   const readRecords = deps.readRecords ?? defaultReadRecords;
   const ctx = deps.ctx ?? {};
   const diffNameOnly = deps.diffNameOnly ?? (() => defaultDiffNameOnly(ctx));
+  const diffNameOnlyAdded = deps.diffNameOnlyAdded ?? (() => defaultDiffNameOnlyAdded(ctx));
 
   if (checkName === 'memory-gate') {
     // A THROWING read (IO/permission failure) is UNCOMPUTABLE (→2) — never a
@@ -490,8 +516,14 @@ export async function runCheck(checkName, deps = {}) {
   }
   if (checkName === 'decision-gate') {
     let changedFiles;
+    let addedFiles;
     try {
       changedFiles = diffNameOnly();
+      // #510: added vs modified. Inside the SAME try — an added-list that failed to
+      // compute must fail closed with the rest, never fall back to null (which reads
+      // as "assume everything touched is new") or to [] (which reads as "nothing was
+      // added"). Both defaults are a silent verdict about evidence we do not have.
+      addedFiles = diffNameOnlyAdded();
     } catch (err) {
       return {
         pass: false,
@@ -499,7 +531,7 @@ export async function runCheck(checkName, deps = {}) {
         reason: `cannot compute diff — failing closed (uncomputable): ${err.message}`,
       };
     }
-    return adrPresence(changedFiles);
+    return adrPresence(changedFiles, addedFiles);
   }
   if (checkName === 'issue-link') {
     return runIssueLinkCheck(ctx, deps);

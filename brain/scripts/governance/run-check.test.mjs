@@ -79,6 +79,7 @@ test('runCheck: memory-gate — only chunks has session_summary (records empty) 
 test('runCheck: decision-gate — injected diff has HOME.md but no ADR file → fail with reason', async () => {
   const result = await runCheck('decision-gate', {
     diffNameOnly: () => ['brain/HOME.md', 'src/other.mjs'],
+    diffNameOnlyAdded: () => [],
   });
   assert.equal(result.pass, false);
   assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
@@ -87,12 +88,15 @@ test('runCheck: decision-gate — injected diff has HOME.md but no ADR file → 
 test('runCheck: decision-gate — injected diff has ADR file and HOME.md → pass', async () => {
   const result = await runCheck('decision-gate', {
     diffNameOnly: () => ['brain/project/decisions/adr-0099-foo.md', 'brain/HOME.md'],
+    diffNameOnlyAdded: () => ['brain/project/decisions/adr-0099-foo.md'],
   });
   assert.deepEqual(result, { pass: true });
 });
 
 test('runCheck: decision-gate — injected diff touches neither ADR nor HOME.md → pass (non-architectural PR)', async () => {
-  const result = await runCheck('decision-gate', { diffNameOnly: () => ['src/whatever.mjs'] });
+  const result = await runCheck('decision-gate', {
+    diffNameOnly: () => ['src/whatever.mjs'], diffNameOnlyAdded: () => [],
+  });
   assert.deepEqual(result, { pass: true });
 });
 
@@ -185,7 +189,9 @@ test('main: memory-gate failing → returns 1, prints the reason', async () => {
 test('main: decision-gate failing → returns 1, prints the reason', async () => {
   let code;
   const logs = await captureLog(async () => {
-    code = await main('decision-gate', { diffNameOnly: () => ['brain/HOME.md'] });
+    code = await main('decision-gate', {
+      diffNameOnly: () => ['brain/HOME.md'], diffNameOnlyAdded: () => [],
+    });
   });
   assert.equal(code, 1);
   assert.ok(logs.length === 1 && logs[0].length > 0);
@@ -194,7 +200,9 @@ test('main: decision-gate failing → returns 1, prints the reason', async () =>
 test('main: decision-gate passing (non-architectural PR) → returns 0, prints nothing', async () => {
   let code;
   const logs = await captureLog(async () => {
-    code = await main('decision-gate', { diffNameOnly: () => ['src/foo.mjs'] });
+    code = await main('decision-gate', {
+      diffNameOnly: () => ['src/foo.mjs'], diffNameOnlyAdded: () => [],
+    });
   });
   assert.equal(code, 0);
   assert.deepEqual(logs, []);
@@ -959,4 +967,62 @@ test('runCheck: memory-gate — readRecords throwing still returns uncomputable:
   });
   assert.equal(result.uncomputable, true);
   assert.equal(resultToExit(result), 2);
+});
+
+// ── #510: a MODIFIED ADR is not an added one ────────────────────────────────
+//
+// The defect these pin: adrPresence decided on `git diff --name-only`, which cannot
+// tell added from modified, so correcting one line in an ADR from months ago demanded
+// re-indexing it in brain/HOME.md. Found blocking PR #507.
+//
+// A fixture built only from ADDED paths cannot see this — the whole defect lives in
+// the gap between the two lists, so the modified case has to be driven explicitly.
+
+test('runCheck: decision-gate — a MODIFIED ADR without HOME.md passes (#510)', async () => {
+  const result = await runCheck('decision-gate', {
+    diffNameOnly: () => ['brain/project/decisions/adr-0013-auto-adr-onboarding.md'],
+    diffNameOnlyAdded: () => [],
+  });
+  assert.deepEqual(result, { pass: true },
+    'touching an existing ADR must not require re-indexing it in brain/HOME.md');
+});
+
+test('runCheck: decision-gate — an ADDED ADR without HOME.md still fails, and names it (#510)', async () => {
+  const result = await runCheck('decision-gate', {
+    diffNameOnly: () => ['brain/project/decisions/adr-0099-new.md'],
+    diffNameOnlyAdded: () => ['brain/project/decisions/adr-0099-new.md'],
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /adr-0099-new\.md/,
+    'the reason must name the ADR — the pre-#510 message asserted "added" on evidence that could not establish it');
+});
+
+test('runCheck: decision-gate — an uncomputable ADDED list fails closed, never defaults (#510)', async () => {
+  const result = await runCheck('decision-gate', {
+    diffNameOnly: () => ['brain/project/decisions/adr-0099-new.md'],
+    diffNameOnlyAdded: () => { throw new Error('git exploded'); },
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.uncomputable, true,
+    'a missing added-list is absent evidence, not evidence of absence');
+});
+
+// The three above inject `diffNameOnlyAdded`, so none of them ever executes the REAL
+// reader. Mutation M3 proved the cost: turning `defaultDiffNameOnlyAdded`'s catch into
+// `return []` left every one of them green while the shipped gate silently degraded to
+// "nothing was added" on any git failure — which reads every added ADR as modified and
+// re-opens #510 from the opposite side, this time fail-OPEN.
+//
+// So this one drives the default: `diffNameOnly` is injected (it is not what is under
+// test) and the added-list read runs for real against a rev that does not exist.
+test('runCheck: decision-gate — the REAL added-list reader fails closed when git fails (#510)', async () => {
+  const result = await runCheck('decision-gate', {
+    ctx: { baseSha: 'no-such-ref-510', headSha: 'HEAD' },
+    diffNameOnly: () => ['brain/project/decisions/adr-0099-new.md'],
+    // diffNameOnlyAdded deliberately NOT injected — defaultDiffNameOnlyAdded runs.
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.uncomputable, true,
+    'the shipped reader must fail closed too — an injected-only guarantee guards nothing');
+  assert.match(result.reason, /uncomputable/);
 });
