@@ -60,48 +60,28 @@ WHEN the same evidence is evaluated by CI, by brain:check and by the audit
 THEN the three verdicts are identical
 ```
 
-## REQ-510-5 — the audit evaluates the human-gate invariant directly
+## REQ-510-5 — the audit's blindness is recorded, not covered
 
-The audit MUST evaluate an L6-shaped check over merged history, so that I2 is enforced by the
-invariant that owns it rather than by `adrPresence` as a proxy.
+I2 (an ADR's content changed without a human gate) has **no owner** on merged history. This
+change MUST NOT assert coverage it does not have: no proxy, no similarly-named check standing
+in. The blindness is recorded in `KNOWN-LIMITATIONS` and tracked in **#511**.
 
-- It keys on PR review evidence, reached through the existing port verb (`prReviews`) and the
-  existing per-merge PR resolution (`fetchPrMeta`).
-- **It is NOT a member of `TREE_KEYED_CHECKS`.** It keys on PR metadata, like `issueLink`, not
-  on the tree. Consequence, stated rather than discovered: it never emits `[FAIL-SHA]` and
-  never auto-reverts.
+Measured, so it is not re-litigated: `evaluateBrainWritesReviewed` with `reviews: []` returns
+PASS at `lite` (agent-authorship exclusion — reviews never consulted) and WARN at
+`standard`/`regulated` (*"never failing on missing evidence"*). L6 catches A10 at no tier.
 
-## REQ-510-6 — absent review evidence is uncomputable, never a verdict
+## REQ-510-6 — the sequencing against A10 is an explicit choice
 
-A merge whose PR cannot be resolved (a direct push, a squash outside the PR flow, an offline
-run) yields **absent** evidence, not negative evidence. The check MUST report `uncomputable`
-using the vocabulary #474 established, and MUST NOT report the merge as ungoverned.
+This change disarms A10. It MUST NOT merge without one of the three postures on #510 having
+been chosen and recorded: hold for #511 · keep the audit surface coarse · land and record the
+loss with A10 re-frozen by ruling.
 
-```
-GIVEN a merge whose ADR change carries an approving human review
-WHEN the audit evaluates it
-THEN it passes
+A10's frozen invariants (`^M`, never `^A`) MUST NOT be edited to make this change pass.
 
-GIVEN a merge whose ADR change carries no human review
-WHEN the audit evaluates it
-THEN it is reported as ungoverned
+## REQ-510-7 — evidence rules state which reading of absence they take
 
-GIVEN a merge whose PR cannot be resolved at all
-WHEN the audit evaluates it
-THEN it is reported as UNCOMPUTABLE, distinguishable in the output from both of the above
-```
-
-## REQ-510-7 — A10 is reinforced, and keeps meaning what its comment says
-
-A10's frozen property is unchanged: **a live-at-HEAD ungoverned artifact must always be
-reported.** Its fixture invariants (`^M`, never `^A`) MUST remain untouched — the MODIFY
-channel is what it exists to pin.
-
-It MUST additionally distinguish the three outcomes of REQ-510-6, so that a pass is a pass for
-the reason the fixture describes and not for an accident of fail-closed arithmetic. Its
-header comment MUST be updated to name the invariant now doing the work, because a fixture
-whose comment describes a mechanism that no longer runs is an apparent protection — the class
-#499 closed in the doctrine and this change must not re-open in the tests.
+Any check reused across PR time and merged history MUST state whether absent evidence means
+*not yet* or *never*. A rule that does not say is two rules sharing a name.
 
 ## REQ-510-8 — every new guard is proven by mutation
 

@@ -20,11 +20,12 @@ issue: 510
       option-1 branch and is measured: 7/7 cases, backward compatible.
 - [ ] T7 — Thread the added-only list through the three surfaces via the same failure path
       (REQ-510-3, REQ-510-4).
-- [ ] T8 — The L6-shaped audit check (REQ-510-5), NOT in `TREE_KEYED_CHECKS`.
-- [ ] T9 — Three-state evidence handling, borrowing #474's vocabulary (REQ-510-6).
-- [ ] T10 — **Reinforce A10** (REQ-510-7): a resolvable PR with review evidence, all three
-      outcomes pinned, `^M`/never-`^A` untouched, header comment updated.
-- [ ] T11 — `metrics-aggregate` check→gate map, and the audit's forward-fix special case.
+- [x] T8 — **Third refutation, measured.** L6 cannot be I2: PASS at `lite`, WARN at
+      `standard`/`regulated` on A10's inputs. I2 split out to **#511**; T8-T10 of the old plan
+      go with it.
+- [ ] T9 — Record the blindness (REQ-510-5): `KNOWN-LIMITATIONS` entry pointing at #511.
+- [ ] T10 — **HUMAN: choose the A10 posture** (REQ-510-6) — hold · coarse audit · record the
+      loss. Nothing merges until this is answered.
 - [ ] T12 — **Mutation proof for every guard** (REQ-510-8), diffs printed before running.
 - [ ] T13 — **HUMAN: promote the ADR** and sign the diff (`brain:approve`).
 
@@ -33,8 +34,8 @@ issue: 510
 - **The naive fix had to be written to be refuted.** Reading `adrPresence` shows an indexing
   rule; only running the suite shows the content tripwire. Recorded on the issue so the next
   reader does not re-derive it.
-- **Three states, never two.** Absent review evidence is not negative review evidence. The
-  audit already learned this in #474; a second vocabulary for the same distinction would be
-  its own drift.
+- **Evidence is time-dependent.** L6's fail-open is correct at PR time ("not reviewed YET")
+  and wrong post-merge ("never reviewed"). Same evidence, two meanings, and nothing in either
+  check said which reading it took. This is the finding that survived the whole investigation.
 - **A fixture is a claim about a mechanism.** A10 would have passed under the new design for
   the wrong reason, and a green nobody can explain is the defect this repo keeps paying for.

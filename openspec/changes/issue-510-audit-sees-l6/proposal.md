@@ -34,29 +34,33 @@ because no PR had ever modified an ADR without also touching `brain/HOME.md`.
 | **I1** | a NEW ADR appears with its `brain/HOME.md` entry | added paths |
 | **I2** | an ADR change carries a human gate | review evidence |
 
-**I2 already exists and is already enforced.** `brain-writes-reviewed` (L6) covers
-`brain/core/**` and `brain/project/**` at every tier, so an ADR modification cannot merge
-without human evidence. What does not exist is the audit's ability to *see* it:
-`evaluateMerge` builds four results and L6 is not among them. `adrPresence`'s coarseness has
-been standing in for that answer since #297, when it was the only instrument available.
+**I2 has no owner.** The obvious candidate was `brain-writes-reviewed` (L6), which covers
+`brain/core/**` and `brain/project/**` at every tier — but driving its evaluator with A10's
+inputs (`reviews: []`) returns **PASS** at `lite` (its evidence is agent-authorship exclusion,
+never reviews) and **WARN** at `standard`/`regulated` (*"never failing on missing evidence"*).
+It catches A10 at no tier, and that fail-open is deliberate: at PR time, absent review evidence
+means *not reviewed yet*. An audit reads merged history, where the same absence means *never
+reviewed*. **The same evidence carries different meaning depending on when it is read.**
+
+So I2 is genuinely unenforced on merged history, covered only by `adrPresence`'s imprecision.
+It moves to **#511**.
 
 ## What this change does
 
-1. `adrPresence` keeps I1 and takes an added-only list. Backward compatible: omitting the
-   list preserves pre-#510 behaviour for callers that cannot cheaply produce one.
-2. The audit gains an L6-shaped check, so I2 is enforced by the invariant that owns it on
-   both surfaces rather than by a proxy on one.
-3. A10 is **reinforced**, not retired: it gains a synthetic reviewed PR so it distinguishes
-   *ungoverned* from *undeterminable*, and proves the MODIFY channel under the new design
-   rather than passing for an accident of fail-closed arithmetic (maintainer ruling).
+`adrPresence` keeps I1 and takes an added-only list. Backward compatible: omitting the list
+preserves pre-#510 behaviour for callers that cannot cheaply produce one.
 
-## What it does not do
+That is all it does. I2 is #511's.
 
-No new gate. No `GATE_MATRIX` row, no `governance.yml` job, no `GOVERNANCE_JOBS` entry, no
-branch-protection re-arm, no tier decision — L6 already carries all of them. This is not a
-new invariant; it is an existing one reaching a surface that could not see it.
+## The sequencing constraint
+
+This fix **disarms A10**, which is the only thing guarding the MODIFY channel today. It cannot
+land unexamined. Three postures, chosen deliberately on #510 rather than implied:
+hold until #511 lands · keep the audit surface coarse and accept two surfaces disagreeing ·
+land it and record the loss in `KNOWN-LIMITATIONS` with A10 re-frozen by ruling.
 
 ## Why it still needs an ADR
 
-It changes **what the audit is allowed to be blind to**, and it re-freezes a fixture a prior
-ruling froze. Both are decisions about the governance model, not implementation details.
+Not for the code. For the two rules the investigation produced — evidence is time-dependent,
+and a blind surface is recorded rather than given a proxy — and because it narrows what the
+audit guarantees until #511 closes.
