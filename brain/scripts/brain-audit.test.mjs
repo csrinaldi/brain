@@ -773,6 +773,37 @@ function writeFailingGhStub(binDir) {
   chmodSync(gh, 0o755);
 }
 
+/**
+ * Put a `gh` on PATH that answers `pr view` and `pr review` for ONE pull request.
+ *
+ * A10's reinforcement (#511 ruling, option 3). Its original fixture has no PR at all, so
+ * under the human-gate check it would ABSTAIN — and A10 would keep passing purely on
+ * adrPresence's imprecision, which is what #510 removes. Giving it a resolvable PR is what
+ * makes the fixture pin the invariant that now does the work, rather than a leftover.
+ *
+ * @param {string} binDir
+ * @param {{ number: number, author: string, reviews: Array<{state: string, login: string}> }} pr
+ */
+function writeReviewedGhStub(binDir, pr) {
+  mkdirSync(binDir, { recursive: true });
+  const gh = join(binDir, 'gh');
+  const view = JSON.stringify({
+    number: pr.number, labels: [], body: `Closes #${pr.number}`,
+    author: { login: pr.author }, headRefOid: 'deadbeef',
+  });
+  const reviews = JSON.stringify(pr.reviews.map(r => ({ state: r.state, user: { login: r.login }, body: '' })));
+  writeFileSync(gh, [
+    '#!/usr/bin/env bash',
+    'case "$*" in',
+    `  *"pr view"*)   printf '%s' ${JSON.stringify(view)} ;;`,
+    `  *"/reviews"*|*"pr review"*) printf '%s' ${JSON.stringify(reviews)} ;;`,
+    "  *) echo '{}' ;;",
+    'esac',
+    'exit 0',
+  ].join('\n') + '\n');
+  chmodSync(gh, 0o755);
+}
+
 /** Build the c724942 shape: a PR-shaped merge whose commit body has no closing keyword. */
 function c724942Fixture(dir) {
   const git = makeRepo(dir);
@@ -1130,6 +1161,75 @@ test('SIG drift-guard — the local signature strips the same position-only line
 // ALWAYS BE REPORTED. Each of R / O carries a Closes #N ref and a valid
 // session_summary sits at HEAD, so adrPresence is the only governance axis in
 // play — the audit has exactly one honest thing to say about O.
+
+// A10b/A10c — the REINFORCEMENT (#511 ruling, option 3).
+//
+// A10 above proves the property through adrPresence, which #510 must make precise. These
+// two prove the SAME property through the invariant that owns it, so the fixture keeps
+// meaning what its comment says once the proxy is gone. They also pin the distinction the
+// whole #511 investigation turned on: at PR time absent review evidence means "not yet";
+// on merged history it means "never".
+//
+// Tier note: the fixture repo declares no governance.tier, and resolveTier defaults to
+// `standard`, where the evidence IS an approving human review. At `lite` the ratified
+// doctrine (ADR-0026) holds the maintainer's own authorship to be the gate — which is why
+// A10's property is a standard/regulated property, and why A10 predating the tiering work
+// (#297, before #358 Q5) is not a contradiction.
+
+function a10Repo(dir) {
+  const git = makeRepo(dir);
+  const OFFENDING = '# ADR 902 example\n\nBody.\n\nUngoverned decision text.\n';
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+    'brain.config.json': JSON.stringify({
+      vcs: { provider: 'github' }, project: { slug: 'acme/x' },
+    }),
+    [ADR_FILE]: OFFENDING,
+  }, 'chore: initial with pre-existing ungoverned ADR (#0)');
+  const base = headShaOf(git);
+  commit(git, dir, { [ADR_FILE]: '# ADR 902 example\n\nBody.\n' }, 'R: clean Closes #2');
+  return { git, base, OFFENDING };
+}
+
+function runAuditWithReviews(dir, range, reviews) {
+  const binDir = join(dir, '.stubbin');
+  writeReviewedGhStub(binDir, { number: 3, author: 'a-human', reviews });
+  return spawnSync('node', [AUDIT_SCRIPT, range], {
+    cwd: dir, encoding: 'utf8',
+    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}`, GH_TOKEN: 'x' },
+  });
+}
+
+test('A10b: the MODIFY channel with NO approving review is reported — post-merge, "not yet" is "never" (#511)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a10b-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { git, base, OFFENDING } = a10Repo(dir);
+  const oSha = mergeAddingPayload(git, dir, { [ADR_FILE]: OFFENDING }, 'O',
+    'Merge pull request #3 from acme/restore');
+
+  const oStatus = git('diff', '--name-status', `${oSha}^1`, oSha).stdout;
+  assert.match(oStatus, /^M\s/m, 'fixture invariant: O must MODIFY the ADR (never add it)');
+  assert.doesNotMatch(oStatus, /^A\s/m, 'fixture invariant: O must add NO path — that is the attack');
+
+  const r = runAuditWithReviews(dir, `${base}..HEAD`, [{ state: 'COMMENTED', login: 'a-human' }]);
+  assert.notEqual(r.status, 0,
+    `an ungoverned ADR edit, merged, must be reported\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+  assert.match(r.stdout, /writesGoverned/,
+    'and it must be the human-gate invariant saying so, not adrPresence standing in for it');
+});
+
+test('A10c: the same edit WITH an approving human review is not reported (#511)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a10c-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { git, base, OFFENDING } = a10Repo(dir);
+  mergeAddingPayload(git, dir, { [ADR_FILE]: OFFENDING }, 'O',
+    'Merge pull request #3 from acme/restore');
+
+  const r = runAuditWithReviews(dir, `${base}..HEAD`, [{ state: 'APPROVED', login: 'a-reviewer' }]);
+  assert.doesNotMatch(r.stdout, /writesGoverned/,
+    'a reviewed ADR change is governed — the check must not fire, or it is not reading reviews at all');
+});
 
 test('brain-audit: A10 modification-shaped payload — an ungoverned ADR edited back in and LIVE at HEAD is reported, never all-[SKIP]', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a10-'));

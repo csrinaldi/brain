@@ -31,6 +31,7 @@ import { gitOrThrow, gitTry } from '../governance/postmerge/git-seam.mjs';
 import { diffSize } from '../governance/checks/diff-size.mjs';
 import { issueLink } from '../governance/checks/issue-link.mjs';
 import { adrPresence } from '../governance/checks/adr-presence.mjs';
+import { writesGoverned } from '../governance/checks/writes-governed.mjs';
 import { memoryPresence } from '../governance/checks/memory-presence.mjs';
 // COMPOSE the frozen net-parity primitives (design §15, PR2b). NEVER import the
 // retired direction-blind pairwise `isReverterOf` — a no-import drift-guard test
@@ -47,6 +48,10 @@ import { isResolvedAt, netAddFull, addedPathsAbsentAt, revertResurrectsAt } from
  * `[FAIL-SHA]` auto-revert signal (design §15.5, REQ-D2-10a).
  */
 export const TREE_KEYED_CHECKS = new Set(['adrPresence', 'diffSize']);
+// `writesGoverned` (#511) is deliberately ABSENT: it keys on PR metadata — reviews and
+// authorship — not on the tree, exactly like `issueLink`. So it is never exempted by the
+// reverter-skip and never emits [FAIL-SHA]. Auto-reverting on review evidence would be
+// wrong on its face: the remedy for "nobody reviewed this" is a human reviewing it.
 
 /**
  * Resolve the audit baseline ref from `config.governance.auditBaseline`
@@ -242,11 +247,13 @@ export function readMergeDiff(parent1, sha, cwd) {
  * @param {string} subject
  * @param {object|null} vcs
  * @param {object} config
- * @returns {Promise<{ prNum: number|null, prLabels: string[]|null, prBody: string|null, prMetaError: string|null }>}
+ * @returns {Promise<{ prNum: number|null, prLabels: string[]|null, prBody: string|null, prAuthor: string|null, prReviews: Array|null, prMetaError: string|null }>}
  */
 export async function fetchPrMeta(subject, vcs, config) {
   let prLabels = null;
   let prBody = null;
+  let prAuthor = null;
+  let prReviews = null;
   let prMetaError = null;
   const prNum = parsePrNumber(subject);
   if (prNum !== null && vcs) {
@@ -257,6 +264,7 @@ export async function fetchPrMeta(subject, vcs, config) {
       });
       prLabels = pr.labels;
       prBody = pr.body;
+      prAuthor = pr.author;
       // ── REQ-CIC-2's uncomputable sentinel — the path #467 ACTUALLY took ──
       // `prView` NEVER THROWS (ci-context.mjs: "an internal failure yields
       // `null` on the affected fields only, never an exception"). On a failed
@@ -277,6 +285,32 @@ export async function fetchPrMeta(subject, vcs, config) {
       if (prLabels === null && prBody === null) {
         prMetaError = `PR metadata unreadable (prView returned the REQ-CIC-2 uncomputable sentinel for #${prNum}) `
           + '— the API call failed; the evaluator has no evidence, not empty evidence';
+      } else {
+        // Reviews, for the human-gate invariant on merged history (#511). Only
+        // when prView SUCCEEDED: asking for reviews on a PR whose metadata is
+        // already uncomputable would produce a second, weaker sentinel for the
+        // same failure. `prReviews` returns null on a failed call and an array
+        // on success — null is preserved as "no evidence", never flattened to
+        // [], which would read as "reviewed by nobody" and is a verdict.
+        // Three outcomes, and they are NOT the same thing:
+        //   verb absent   → the adapter cannot answer this question at all. A capability
+        //                   gap, not a failed read: the check abstains and the window
+        //                   stays clean. (Every real provider implements it — VERBS —
+        //                   so this is the injected/partial-adapter case.)
+        //   returns null  → the verb exists and the call FAILED. That rides the SAME
+        //                   uncomputable channel prView's sentinel does; inventing a
+        //                   second one inside the check is what turned 16 tests red.
+        //   returns array → evidence.
+        if (typeof vcs.prReviews === 'function') {
+          prReviews = await vcs.prReviews({
+            project: config?.project?.slug,
+            number: prNum,
+          });
+          if (prReviews === null) {
+            prMetaError = `PR reviews unreadable for #${prNum} — the API call failed; `
+              + 'the evaluator has no evidence, not empty evidence';
+          }
+        }
       }
     } catch (err) {
       // The fetch was attempted and threw. Surface it as DATA — never swallow,
@@ -286,7 +320,7 @@ export async function fetchPrMeta(subject, vcs, config) {
       prMetaError = err?.message ? String(err.message) : String(err);
     }
   }
-  return { prNum, prLabels, prBody, prMetaError };
+  return { prNum, prLabels, prBody, prAuthor, prReviews, prMetaError };
 }
 
 /**
@@ -359,6 +393,7 @@ export async function resolveVcs(config) {
 export function evaluateMerge(sha, ctx) {
   const {
     numstat, changedFiles, issueLinkBody, prLabels, ignoreList,
+    prReviews = null, prAuthor = null, prResolved = false, botAllowlist = [],
     allObservations, resolutionGit, windowFrom, windowTo,
     diffBudget = 400, honorSizeException = true, tier,
   } = ctx;
@@ -379,6 +414,14 @@ export function evaluateMerge(sha, ctx) {
     adrPresence: adrPresence(changedFiles),
     memoryPresence: memoryPresence(allObservations),
   };
+  // Abstention is ABSENCE. A check that has nothing to say about this merge is simply
+  // not in the result set — the walk, the reverter-skip, the metrics parity and the
+  // exit contract all keep working on the states they already know.
+  const governed = writesGoverned({
+    changedFiles, reviews: prReviews, author: prAuthor,
+    prResolved, botAllowlist, tier: tier ?? 'standard',
+  });
+  if (!governed.abstain) realResults.writesGoverned = governed;
 
   const tierRefusedDiffSize = exceptionLabelPresent && !honorSizeException && !realResults.diffSize.pass;
 
