@@ -286,7 +286,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // evidence" correctly; re-fabricating an empty default here would
       // re-introduce the exact fail-open the seam removes, just on a
       // parallel path (prView fix-at-source disposition).
-      const { prNum, prLabels, prBody, prMetaError } = await fetchPrMeta(subject, vcs, config);
+      const { prNum, prLabels, prBody, prAuthor, prReviews, prMetaError } = await fetchPrMeta(subject, vcs, config);
 
       // ── Uncomputable merge (REQ-TS-1/-2, issue #474) ─────────────────────
       // The PR fetch was ATTEMPTED and FAILED. Do NOT evaluate this merge:
@@ -314,6 +314,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
       const rec = evaluateMerge(sha, {
         numstat, changedFiles, issueLinkBody, prLabels, ignoreList, allObservations,
+        prReviews, prAuthor, prResolved: prNum !== null && !prMetaError,
+        botAllowlist: config?.governance?.reviewActors ?? [],
         resolutionGit, windowFrom, windowTo,
         diffBudget, honorSizeException, tier,
       });
