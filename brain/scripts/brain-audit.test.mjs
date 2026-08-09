@@ -586,8 +586,18 @@ test('D2 A6 — a genuine O(adrPresence)+R reverter pair: R is tree-keyed exempt
   assert.equal(r.status, 0, `expected exit 0\n${r.stdout}\n${r.stderr}`);
   const lines = r.stdout.split('\n').filter(Boolean);
   const rLine = lines.find(l => l.includes(rSha.slice(0, 7)));
-  assert.ok(rLine && rLine.startsWith('[SKIP]'),
-    `R (genuine revert of an adrPresence offender) must be [SKIP], not itself flagged:\n${r.stdout}`);
+  // The PROPERTY: R, whose whole contribution is undoing O, is not itself reported.
+  //
+  // It used to be `[SKIP]` specifically, and #510 changed WHY rather than WHAT. R
+  // deletes the ADR path, and the pre-#510 adrPresence — deciding on `git diff
+  // --name-only`, which lists deletions alongside additions — scored that as "an ADR
+  // without a HOME.md entry" and failed R. The exemption then had to rescue it, so
+  // `[SKIP]` was the observable outcome. With the added-only list R has no failure to
+  // rescue and comes out `[PASS]`.
+  //
+  // Asserting `[SKIP]` here would be asserting that the spurious failure still exists.
+  assert.ok(rLine && !rLine.startsWith('[FAIL'),
+    `R (genuine revert of an adrPresence offender) must not itself be flagged:\n${r.stdout}`);
   assert.ok(!r.stdout.includes('[FAIL-SHA]'), `no [FAIL-SHA] on a settled O+R pair:\n${r.stdout}`);
 });
 
@@ -770,6 +780,37 @@ function writeFailingGhStub(binDir) {
   mkdirSync(binDir, { recursive: true });
   const gh = join(binDir, 'gh');
   writeFileSync(gh, '#!/usr/bin/env bash\necho "gh: not authenticated" >&2\nexit 1\n');
+  chmodSync(gh, 0o755);
+}
+
+/**
+ * Put a `gh` on PATH that answers `pr view` and `pr review` for ONE pull request.
+ *
+ * A10's reinforcement (#511 ruling, option 3). Its original fixture has no PR at all, so
+ * under the human-gate check it would ABSTAIN — and A10 would keep passing purely on
+ * adrPresence's imprecision, which is what #510 removes. Giving it a resolvable PR is what
+ * makes the fixture pin the invariant that now does the work, rather than a leftover.
+ *
+ * @param {string} binDir
+ * @param {{ number: number, author: string, reviews: Array<{state: string, login: string}> }} pr
+ */
+function writeReviewedGhStub(binDir, pr) {
+  mkdirSync(binDir, { recursive: true });
+  const gh = join(binDir, 'gh');
+  const view = JSON.stringify({
+    number: pr.number, labels: [], body: `Closes #${pr.number}`,
+    author: { login: pr.author }, headRefOid: 'deadbeef',
+  });
+  const reviews = JSON.stringify(pr.reviews.map(r => ({ state: r.state, user: { login: r.login }, body: '' })));
+  writeFileSync(gh, [
+    '#!/usr/bin/env bash',
+    'case "$*" in',
+    `  *"pr view"*)   printf '%s' ${JSON.stringify(view)} ;;`,
+    `  *"/reviews"*|*"pr review"*) printf '%s' ${JSON.stringify(reviews)} ;;`,
+    "  *) echo '{}' ;;",
+    'esac',
+    'exit 0',
+  ].join('\n') + '\n');
   chmodSync(gh, 0o755);
 }
 
@@ -1128,8 +1169,177 @@ test('SIG drift-guard — the local signature strips the same position-only line
 //
 // The property, unchanged across both: A LIVE-AT-HEAD UNGOVERNED ARTIFACT MUST
 // ALWAYS BE REPORTED. Each of R / O carries a Closes #N ref and a valid
-// session_summary sits at HEAD, so adrPresence is the only governance axis in
-// play — the audit has exactly one honest thing to say about O.
+// session_summary sits at HEAD, so the governance axis under test is the only
+// one in play — the audit has exactly one honest thing to say about O.
+//
+// ── #510 REINFORCEMENT (maintainer's ruling on this ticket, option 3) ───────
+//
+// The PROPERTY above is frozen and untouched. What changed is which invariant
+// carries it, and the fixture had to move with it or become an ornament.
+//
+// Until #510, the thing that reported O was `adrPresence` — a name-only check
+// that could not tell an added path from a modified one, and therefore fired on
+// O's MODIFY. That was never the rule `adrPresence` states ("a NEW ADR must be
+// indexed in brain/HOME.md"); it was imprecision doing useful work by accident,
+// documented only in another module's docstring. #510 makes the check precise,
+// and the accident goes with it.
+//
+// The invariant that now owns the MODIFY channel is `writesGoverned` (#511) —
+// "an ADR change on merged history carries a human gate". It keys on PR review
+// evidence, so the fixture needs a RESOLVABLE PR: with none, the check abstains
+// (it cannot determine governance, and #474/#511 settled that absence of
+// evidence is not a verdict), and O would come out `[PASS]` — the fixture green
+// for the reason the ruling explicitly rejected, its comment describing a
+// mechanism that no longer runs.
+//
+// So R and O become PR-shaped merges and a PATH-stubbed `gh` serves one PR whose
+// only review is a COMMENT — a real, resolvable, NON-approving review. That is
+// the honest shape of the attack under the new design: the merge was seen and
+// nobody gated it.
+//
+// Two things worth naming rather than discovering:
+//   · What this fixture does NOT prove, stated because the first draft of this
+//     comment claimed it did: it does not prove that `writesGoverned` survives
+//     the net-parity exemption. Adding `writesGoverned` to TREE_KEYED_CHECKS
+//     leaves A10 green — O's payload is LIVE at the tip, so the exemption never
+//     applies to O whatever the membership. That property is real and load-
+//     bearing, and it is pinned where it can actually fail, in
+//     merge-walk.test.mjs, not asserted by proximity here.
+//   · A merge with NO resolvable PR is no longer reported at all. The audit's
+//     guarantee is now conditional on being able to read review evidence, and
+//     that narrowing is recorded in ADR-0029 rather than left to be found here.
+
+// A10b/A10c — the REINFORCEMENT (#511 ruling, option 3).
+//
+// A10 above proves the property through adrPresence, which #510 must make precise. These
+// two prove the SAME property through the invariant that owns it, so the fixture keeps
+// meaning what its comment says once the proxy is gone. They also pin the distinction the
+// whole #511 investigation turned on: at PR time absent review evidence means "not yet";
+// on merged history it means "never".
+//
+// Tier note: the fixture repo declares no governance.tier, and resolveTier defaults to
+// `standard`, where the evidence IS an approving human review. At `lite` the ratified
+// doctrine (ADR-0026) holds the maintainer's own authorship to be the gate — which is why
+// A10's property is a standard/regulated property, and why A10 predating the tiering work
+// (#297, before #358 Q5) is not a contradiction.
+
+function a10Repo(dir) {
+  const git = makeRepo(dir);
+  const OFFENDING = '# ADR 902 example\n\nBody.\n\nUngoverned decision text.\n';
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+    'brain.config.json': JSON.stringify({
+      vcs: { provider: 'github' }, project: { slug: 'acme/x' },
+    }),
+    [ADR_FILE]: OFFENDING,
+  }, 'chore: initial with pre-existing ungoverned ADR (#0)');
+  const base = headShaOf(git);
+  commit(git, dir, { [ADR_FILE]: '# ADR 902 example\n\nBody.\n' }, 'R: clean Closes #2');
+  return { git, base, OFFENDING };
+}
+
+function runAuditWithReviews(dir, range, reviews) {
+  const binDir = join(dir, '.stubbin');
+  writeReviewedGhStub(binDir, { number: 3, author: 'a-human', reviews });
+  return spawnSync('node', [AUDIT_SCRIPT, range], {
+    cwd: dir, encoding: 'utf8',
+    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}`, GH_TOKEN: 'x' },
+  });
+}
+
+test('A10b: the MODIFY channel with NO approving review is reported — post-merge, "not yet" is "never" (#511)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a10b-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { git, base, OFFENDING } = a10Repo(dir);
+  const oSha = mergeAddingPayload(git, dir, { [ADR_FILE]: OFFENDING }, 'O',
+    'Merge pull request #3 from acme/restore');
+
+  const oStatus = git('diff', '--name-status', `${oSha}^1`, oSha).stdout;
+  assert.match(oStatus, /^M\s/m, 'fixture invariant: O must MODIFY the ADR (never add it)');
+  assert.doesNotMatch(oStatus, /^A\s/m, 'fixture invariant: O must add NO path — that is the attack');
+
+  const r = runAuditWithReviews(dir, `${base}..HEAD`, [{ state: 'COMMENTED', login: 'a-human' }]);
+  assert.notEqual(r.status, 0,
+    `an ungoverned ADR edit, merged, must be reported\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+  assert.match(r.stdout, /writesGoverned/,
+    'and it must be the human-gate invariant saying so, not adrPresence standing in for it');
+});
+
+test('A10c: the same edit WITH an approving human review is not reported (#511)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a10c-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { git, base, OFFENDING } = a10Repo(dir);
+  mergeAddingPayload(git, dir, { [ADR_FILE]: OFFENDING }, 'O',
+    'Merge pull request #3 from acme/restore');
+
+  const r = runAuditWithReviews(dir, `${base}..HEAD`, [{ state: 'APPROVED', login: 'a-reviewer' }]);
+  assert.doesNotMatch(r.stdout, /writesGoverned/,
+    'a reviewed ADR change is governed — the check must not fire, or it is not reading reviews at all');
+});
+
+// A10d — the exemption must not swallow the invariant that now carries A10.
+//
+// #511 made `writesGoverned` deliberately absent from TREE_KEYED_CHECKS and wrote why
+// at the declaration; nothing tested it. #510 is what makes it load-bearing: while
+// `adrPresence` still reported the MODIFY channel, an exemption swallowing the human
+// gate left a tree-keyed failure behind anyway. With the proxy gone, `writesGoverned`
+// is the only thing between an ungoverned brain/ write and a silent [SKIP].
+//
+// This exists because a mutation found the gap: adding 'writesGoverned' to
+// TREE_KEYED_CHECKS left the entire suite green, A10 included. A10 cannot see it —
+// its offender's payload is LIVE at the tip, so the net-parity exemption never applies
+// to it whatever the membership says.
+//
+// Which merge CAN see it took a second wrong turn to find. Not the offender O: a merge
+// whose contribution is net-absent at the tip is dropped by the PRE-EVALUATION resolved
+// -skip (`resolvedSkipLine`, design §3.5/REQ-D2-10), which runs before any check and so
+// before `writesGoverned` exists to have an opinion. The merge the exemption is actually
+// FOR is the cleanup reverter R — `netAddFull`'s full-window range exists precisely so a
+// tip-most R, with nothing after it to cancel it, still earns its exemption (§15.3's
+// range-asymmetry note). R is a brain/ write like any other, and if `writesGoverned`
+// were tree-keyed the exemption would take it with the rest.
+//
+// So the property here is about R, and it is the one A11 already frames from the other
+// side: the good citizen MAY be reported, and must never be auto-reverted.
+test('A10d: the cleanup reverter is a brain/ write too — its missing human gate survives the reverter-skip and is never nominated (#510/#511)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-a10d-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+    'brain.config.json': JSON.stringify({
+      vcs: { provider: 'github' }, project: { slug: 'acme/x' },
+    }),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  const oSha = mergeAddingAdr(git, dir, 'O', 'Merge pull request #3 from acme/add-adr');
+  // R — a genuine revert, tip-most. Its whole contribution is removal, so it is
+  // exemption-ELIGIBLE: without the membership rule the exemption would clear it.
+  const rSha = genuineRevertMerge(git, dir, oSha, 'revert-O', 'Merge pull request #2 from acme/revert');
+
+  const r = runAuditWithReviews(dir, `${base}..HEAD`, [{ state: 'COMMENTED', login: 'a-human' }]);
+
+  const rLine = r.stdout.split('\n').filter(Boolean)
+    .find(l => l.includes(rSha) || l.includes(rSha.slice(0, 7)));
+  assert.ok(rLine, `R must appear in the audit output:\n${r.stdout}`);
+
+  // THE PROPERTY: R edited brain/project/** with no approving review. That is not a
+  // statement about the tree, so the tree-parity exemption must not clear it.
+  assert.ok(!rLine.startsWith('[SKIP]'),
+    `R's brain/ write was never gated — the net-parity exemption must not clear a non-tree-keyed failure:\n${r.stdout}`);
+  assert.match(rLine, /writesGoverned/,
+    `and writesGoverned must be what survives — that is the membership decision under test:\n${r.stdout}`);
+  // A11's property, restated for this class: the remedy for "nobody reviewed this" is
+  // a human reviewing it, never a machine undoing it — and undoing R would resurrect
+  // the very payload R removed.
+  assert.ok(!r.stdout.split('\n').filter(l => l.startsWith('[FAIL-SHA]'))
+    .some(l => l.includes(rSha) || l.includes(rSha.slice(0, 7))),
+  `a review-evidence failure must never emit [FAIL-SHA]:\n${r.stdout}`);
+});
 
 test('brain-audit: A10 modification-shaped payload — an ungoverned ADR edited back in and LIVE at HEAD is reported, never all-[SKIP]', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a10-'));
@@ -1145,19 +1355,25 @@ test('brain-audit: A10 modification-shaped payload — an ungoverned ADR edited 
   commit(git, dir, {
     'README.md': 'init',
     '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+    // #510 reinforcement: the audit must be ABLE to ask "was this reviewed?".
+    // Without a VCS adapter it cannot, `writesGoverned` abstains, and the fixture
+    // would go green on an unanswered question.
+    'brain.config.json': JSON.stringify({
+      vcs: { provider: 'github' }, project: { slug: 'acme/x' },
+    }),
     [ADR_FILE]: A10_OFFENDING,
   }, 'chore: initial with pre-existing ungoverned ADR (#0)');
   const base = headShaOf(git);
 
   // R — cleanup merge that EDITS the offending text out (inside the window).
-  // May legitimately be [SKIP]/[PASS]; not asserted either way.
+  // May legitimately be [SKIP]/[PASS]/[FAIL]; not asserted either way.
   mergeAddingPayload(git, dir, { [ADR_FILE]: A10_CLEANED }, 'R',
-    'R: remove ungoverned decision text Closes #2');
+    'Merge pull request #2 from acme/clean');
 
   // O — merge that EDITS the offending text back in (inside the window). No
   // brain/HOME.md entry accompanies it, and the text is LIVE on disk at HEAD.
   const oSha = mergeAddingPayload(git, dir, { [ADR_FILE]: A10_OFFENDING }, 'O',
-    'O: restore ungoverned decision text Closes #3');
+    'Merge pull request #3 from acme/restore');
 
   // Fixture invariants — if these break, the fixture is not testing the attack.
   assert.ok(existsSync(join(dir, ADR_FILE)),
@@ -1170,9 +1386,8 @@ test('brain-audit: A10 modification-shaped payload — an ungoverned ADR edited 
   assert.doesNotMatch(oStatus, /^A\s/m,
     `fixture invariant: O must add NO path — that is the attack — got:\n${oStatus}`);
 
-  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], {
-    cwd: dir, encoding: 'utf8',
-  });
+  // A resolvable PR whose only review is a COMMENT: seen, and not gated.
+  const r = runAuditWithReviews(dir, `${base}..HEAD`, [{ state: 'COMMENTED', login: 'a-human' }]);
 
   // ── PROPERTY assertions — WHAT is reported / exit code, never the mechanism ──
 
@@ -1184,6 +1399,12 @@ test('brain-audit: A10 modification-shaped payload — an ungoverned ADR edited 
   assert.ok(oLine, `O must appear in the audit output:\n${r.stdout}`);
   assert.ok(!oLine.startsWith('[SKIP]'),
     `O restored the ungoverned ADR and it is LIVE at HEAD — it must never be exempted on a [SKIP] line:\n${r.stdout}`);
+
+  // #510: and it is the invariant that OWNS the MODIFY channel saying so. Without
+  // this, the fixture would be satisfied again by any future check whose imprecision
+  // happens to fire here — which is the state #510 found it in.
+  assert.match(r.stdout, /writesGoverned/,
+    `the report must come from the human-gate invariant, not from a proxy standing in for it:\n${r.stdout}`);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -15,9 +15,36 @@ import { crossCheckExit } from '../../brain-audit.mjs';
 // The registry: for each check, a way to force a genuine VIOLATION and a way to
 // force an infra UNCOMPUTABLE, each yielding the corresponding exit code.
 const CHECKS = {
+  // #510: decision-gate now performs TWO git reads — the touched list and the added
+  // list — so a violation cell has to inject both. It is worth stating why the second
+  // uncomputable driver is here rather than only in run-check.test.mjs: this guard is
+  // the standing one, and it is what turned red when `diffNameOnlyAdded` arrived
+  // uninjected and the whole gate degraded from VIOLATION to UNCOMPUTABLE. A gate that
+  // silently stops being able to reach 1 is the fail-open this file exists to name.
   'decision-gate': {
-    violation: () => runCheck('decision-gate', { diffNameOnly: () => ['brain/HOME.md'] }), // HOME without ADR
-    uncomputable: () => runCheck('decision-gate', { diffNameOnly: () => { throw new Error('git'); } }),
+    violation: () => runCheck('decision-gate', {
+      diffNameOnly: () => ['brain/HOME.md'],          // HOME without ADR
+      diffNameOnlyAdded: () => [],
+    }),
+    uncomputable: () => runCheck('decision-gate', {
+      diffNameOnly: () => { throw new Error('git'); },
+      diffNameOnlyAdded: () => [],
+    }),
+  },
+  // The same gate through its OTHER read. Registered as its own cell rather than
+  // folded into the one above, because a fail-closed path that exists for the touched
+  // list says nothing about the added list — and defaulting that one to [] instead of
+  // failing is precisely how #510 could return from the opposite side, with every
+  // added ADR reading as modified.
+  'decision-gate (added-list read)': {
+    violation: () => runCheck('decision-gate', {
+      diffNameOnly: () => ['brain/project/decisions/adr-0099-new.md'],
+      diffNameOnlyAdded: () => ['brain/project/decisions/adr-0099-new.md'],
+    }),
+    uncomputable: () => runCheck('decision-gate', {
+      diffNameOnly: () => ['brain/project/decisions/adr-0099-new.md'],
+      diffNameOnlyAdded: () => { throw new Error('git'); },
+    }),
   },
   'diff-size': {
     violation: () => runCheck('diff-size', {

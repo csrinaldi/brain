@@ -74,6 +74,9 @@ function spawnCommand(cmd, args, cwd) {
  * @param {object}   ctx
  * @param {string}   ctx.numstat       Raw `git diff --numstat` output.
  * @param {string[]} ctx.changedFiles  Files from `git diff --name-only`.
+ * @param {string[]|null} [ctx.addedFiles]  Files from `git diff --diff-filter=A --name-only`.
+ *   #510: this verb must reach the SAME verdict the CI gate reaches — a local green
+ *   that CI rejects is the defect #340 already records for issue-link.
  * @param {string}   ctx.prBody        Latest commit body (for issueLink check).
  * @param {string[]} ctx.ignoreList    brain.config.json governance.ignoreList.
  * @param {Array}    ctx.observations  Parsed engram observations for memoryPresence.
@@ -89,6 +92,7 @@ function spawnCommand(cmd, args, cwd) {
 export async function runCheck({
   numstat,
   changedFiles,
+  addedFiles = null,
   prBody,
   ignoreList,
   observations = [],
@@ -99,7 +103,7 @@ export async function runCheck({
   const checks = [
     { check: 'diffSize',        result: diffSize(numstat, ignoreList, budget) },
     { check: 'issueLink',       result: issueLink(prBody) },
-    { check: 'adrPresence',     result: adrPresence(changedFiles) },
+    { check: 'adrPresence',     result: adrPresence(changedFiles, addedFiles) },
     { check: 'memoryPresence',  result: memoryPresence(observations) },
   ];
 
@@ -130,6 +134,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const base = getBase(cwd);
   const numstat = git(`diff --numstat ${base} HEAD`, cwd);
   const changedFiles = git(`diff --name-only ${base} HEAD`, cwd).split('\n').filter(Boolean);
+  const addedFiles = git(`diff --diff-filter=A --name-only ${base} HEAD`, cwd).split('\n').filter(Boolean);
   // Use the last commit body as the PR body proxy for issueLink check.
   const prBody = git('log -1 --format=%B HEAD', cwd);
   const ignoreList = loadIgnoreList(cwd);
@@ -141,6 +146,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const result = await runCheck({
     numstat,
     changedFiles,
+    addedFiles,
     prBody,
     ignoreList,
     observations,

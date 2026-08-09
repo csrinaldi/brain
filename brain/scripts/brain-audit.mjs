@@ -275,7 +275,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // silently PASSes diffSize and adrPresence. A missing parent1 (design
       // §5) also throws — never a silent [SKIP].
       const parent1 = readMergeParent(sha, subject, cwd);
-      const { numstat, changedFiles, body } = readMergeDiff(parent1, sha, cwd);
+      const { numstat, changedFiles, addedFiles, body } = readMergeDiff(parent1, sha, cwd);
 
       // ── Best-effort PR metadata fetch (single call for labels + body) ─────
       // Any failure (VCS unconfigured, adapter error, no PR number found)
@@ -286,7 +286,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // evidence" correctly; re-fabricating an empty default here would
       // re-introduce the exact fail-open the seam removes, just on a
       // parallel path (prView fix-at-source disposition).
-      const { prNum, prLabels, prBody, prMetaError } = await fetchPrMeta(subject, vcs, config);
+      const { prNum, prLabels, prBody, prAuthor, prReviews, prMetaError } = await fetchPrMeta(subject, vcs, config);
 
       // ── Uncomputable merge (REQ-TS-1/-2, issue #474) ─────────────────────
       // The PR fetch was ATTEMPTED and FAILED. Do NOT evaluate this merge:
@@ -313,7 +313,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const issueLinkBody = selectIssueLinkBody(prBody, body);
 
       const rec = evaluateMerge(sha, {
-        numstat, changedFiles, issueLinkBody, prLabels, ignoreList, allObservations,
+        numstat, changedFiles, addedFiles, issueLinkBody, prLabels, ignoreList, allObservations,
+        prReviews, prAuthor, prResolved: prNum !== null && !prMetaError,
+        botAllowlist: config?.governance?.reviewActors ?? [],
         resolutionGit, windowFrom, windowTo,
         diffBudget, honorSizeException, tier,
       });
