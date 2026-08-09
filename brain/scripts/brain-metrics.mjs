@@ -392,7 +392,7 @@ async function evaluateOneMerge(sha, subject, ctx) {
 
   try {
     const parent1 = readMergeParent(sha, subject, cwd);
-    const { numstat, changedFiles, body } = readMergeDiff(parent1, sha, cwd);
+    const { numstat, changedFiles, addedFiles, body } = readMergeDiff(parent1, sha, cwd);
     const { prLabels, prBody, prMetaError } = await fetchPrMeta(subject, vcs, config);
 
     // REQ-TS-1 (#474) — the PR fetch was attempted and FAILED. brain-audit
@@ -415,7 +415,7 @@ async function evaluateOneMerge(sha, subject, ctx) {
     const tier = resolveTier(config);
     const { diffBudget, honorSizeException } = tierParams(tier);
     const evalRec = evaluateMerge(sha, {
-      numstat, changedFiles, issueLinkBody, prLabels, ignoreList, allObservations,
+      numstat, changedFiles, addedFiles, issueLinkBody, prLabels, ignoreList, allObservations,
       resolutionGit, windowFrom, windowTo,
       diffBudget, honorSizeException, tier,
     });

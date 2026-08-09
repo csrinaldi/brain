@@ -203,8 +203,14 @@ export function readMergeDiff(parent1, sha, cwd) {
   const numstat = gitOrThrow(['diff', '--numstat', parent1, sha], { cwd }).trim();
   const changedFiles = gitOrThrow(['diff', '--name-only', parent1, sha], { cwd })
     .split('\n').filter(Boolean);
+  // #510: the ADDED half, through the SAME gitOrThrow — the audit must reach the
+  // identical verdict CI reached on the same merge, and it can only do that from the
+  // identical evidence. A cheaper read here (or a null default) would put measurement
+  // and enforcement on different rules, which is the drift #340 already records.
+  const addedFiles = gitOrThrow(['diff', '--diff-filter=A', '--name-only', parent1, sha], { cwd })
+    .split('\n').filter(Boolean);
   const body = gitOrThrow(['log', '-1', '--format=%B', sha], { cwd }).trim();
-  return { numstat, changedFiles, body };
+  return { numstat, changedFiles, addedFiles, body };
 }
 
 /**
@@ -355,6 +361,7 @@ export async function resolveVcs(config) {
  * @param {object} ctx
  * @param {string} ctx.numstat
  * @param {string[]} ctx.changedFiles
+ * @param {string[]} [ctx.addedFiles]  #510: the added-only half; omit for pre-#510 behaviour
  * @param {string} ctx.issueLinkBody
  * @param {string[]|null} ctx.prLabels
  * @param {string[]} ctx.ignoreList
@@ -392,7 +399,7 @@ export async function resolveVcs(config) {
  */
 export function evaluateMerge(sha, ctx) {
   const {
-    numstat, changedFiles, issueLinkBody, prLabels, ignoreList,
+    numstat, changedFiles, addedFiles = null, issueLinkBody, prLabels, ignoreList,
     prReviews = null, prAuthor = null, prResolved = false, botAllowlist = [],
     allObservations, resolutionGit, windowFrom, windowTo,
     diffBudget = 400, honorSizeException = true, tier,
@@ -411,7 +418,7 @@ export function evaluateMerge(sha, ctx) {
   const realResults = {
     diffSize: diffSize(numstat, ignoreList, diffBudget),
     issueLink: issueLink(issueLinkBody),
-    adrPresence: adrPresence(changedFiles),
+    adrPresence: adrPresence(changedFiles, addedFiles),
     memoryPresence: memoryPresence(allObservations),
   };
   // Abstention is ABSENCE. A check that has nothing to say about this merge is simply
