@@ -47,6 +47,18 @@ export function ensureHome(root = REPO_ROOT, { templatePath = TEMPLATE_PATH, wri
     try {
       mkdirSync(dirname(homePath), { recursive: true });
       writeFileSync(homePath, template, 'utf8');
+      // The template advertises where project knowledge goes, and brain/project/**
+      // is deliberately NOT a managed path — nothing else creates it. Writing an
+      // entry point that cites two directories the consumer does not have is the
+      // defect issue #499 opened on, one tense forward: not "this path was true
+      // once" but "this path is where you will put your ADRs".
+      //
+      // .gitkeep, not a README: the orphan rule walks brain/**/*.md, so a markdown
+      // file here would be unreachable from HOME.md and turn the gate red again for
+      // a different reason. An empty marker keeps the directory through a clone
+      // without entering the navigation graph at all.
+      mkdirSync(join(root, 'brain', 'project', 'decisions'), { recursive: true });
+      writeFileSync(join(root, 'brain', 'project', 'decisions', '.gitkeep'), '', 'utf8');
     } catch {
       return { created: false };
     }

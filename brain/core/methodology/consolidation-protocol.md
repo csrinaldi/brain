@@ -22,8 +22,8 @@ Mandatory pattern for changes with parallel sub-agents:
 
 ## 1b. HOME.md maintenance rule
 
-Every time a new ADR is created or a file is added to `brain/methodology/` or
-`brain/anti-patterns/`, the corresponding MR **must** update `brain/HOME.md` to
+Every time a new ADR is created or a file is added under `brain/core/**` or
+`brain/project/**`, the corresponding MR **must** update `brain/HOME.md` to
 include the new link in the corresponding section. Without this update the MR
 is not complete.
 
@@ -68,8 +68,7 @@ CI round trip — not that nothing catches it.
 ## 2. Promotion in the Merge Request (GitLab)
 
 > **Hard Rule — Mandatory human gate:**
-> No AI agent may commit directly to `brain/decisions/`,
-> `brain/anti-patterns/`, `brain/domain/`, or `brain/methodology/`.
+> No AI agent may commit directly to `brain/core/**` or `brain/project/**`.
 > Promotion works as follows:
 >
 > 1. The agent drafts the artifact (ADR, anti-pattern, glossary entry)
@@ -79,7 +78,7 @@ CI round trip — not that nothing catches it.
 > 3. The MR description documents what was promoted and why.
 >
 > No agent promotes its own artifacts to `brain/`. That signature is human.
-> See anti-pattern: `brain/anti-patterns/ia-escribe-brain-sin-gate.md`.
+> See anti-pattern: `brain/core/anti-patterns/ia-escribe-brain-sin-gate.md`.
 
 - Before removing the _Draft_ status from the MR in your self-hosted GitLab, the organization's closing skill will analytically process the micro-decisions accumulated in the branch.
 - If the learning applies to multiple microservices or resolves a critical compatibility bug (e.g., Jakarta JSON serializations), the agent must draft the artifact in `openspec/changes/{iid}/brain-drafts/` for the human to review and promote.
@@ -132,7 +131,7 @@ mem_review --action list --project <your-project>
 
 Observations with `needs_review` status are candidates. If `mem_review` is not
 available, look for observations with type `architecture` or `decision` whose content
-contradicts active ADRs in `brain/decisions/`.
+contradicts the project's active ADRs.
 
 ### Resolution criteria
 

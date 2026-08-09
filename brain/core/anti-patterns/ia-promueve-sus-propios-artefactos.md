@@ -1,11 +1,11 @@
 # AI that promotes its own artifacts
 
-- **Discovered in:** ISSUE-8 / governance of `brain/methodology/project-workflow.md`
+- **Discovered in:** ISSUE-8 / governance of brain/methodology/project-workflow.md (a document that no longer exists; the path is recorded as it was)
 - **Applies to:** any artifact with an approval lifecycle (methodology in `brain/`, openspec proposals, ADRs)
 
 ## Symptom
 
-A methodology document appeared in `brain/methodology/` with the header
+A methodology document appeared in `brain/core/methodology/` with the header
 "**Status:** Approved — initial operational" — but no human approved it. An AI
 agent drafted it from a discussion draft and, when promoting it, set the final
 status on its own. The team later discovers it is governed by a document nobody

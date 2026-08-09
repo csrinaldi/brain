@@ -80,9 +80,54 @@ function linksOf(file) {
   return out;
 }
 
+// Extrae RUTAS CITADAS: `brain/...` entre backticks (issue #499).
+//
+// Un link markdown no es la única forma en que brain/ se apunta a sí mismo — la
+// más frecuente en la doctrina es la cita entre backticks, y este checker no la
+// veía. Medido en `main` @ 5313182: 22 rutas citadas en 6 archivos no resolvían mientras
+// `brain:nav` reportaba "sin links rotos".
+//
+// Cuatro de ellas eran `brain/decisions/`, `brain/anti-patterns/`,
+// `brain/domain/` y `brain/methodology/` — los cuatro directorios que la lista
+// "Tier 3 — Prohibido" de agent-authorities.md nombra, y que la reorganización
+// core/project dejó sin existir. La prohibición más fuerte de la doctrina, la que
+// lleva "even if explicitly asked", no cubría ningún directorio real: lo que
+// frenaba a los agentes era Tier 2 más el gate L6, nunca ese listado.
+//
+// Las otras incluyen §2 citando el anti-patrón que la sostiene en su ruta
+// vieja, y consolidation-protocol.md citándose A SÍ MISMO en la suya.
+//
+// El extractor vive ACÁ, inline, y no en un lib/ importado: este script se COPIA
+// solo a fixtures y al scaffolding de adopción, y un import relativo lo rompe
+// fuera de su árbol. Medido: moverlo a lib/ puso 5 tests existentes en rojo
+// (ERR_MODULE_NOT_FOUND en cada fixture que lo copia suelto). La portabilidad del
+// script es una restricción real, no un detalle de estilo.
+//
+// Sobre los GLOBS (`brain/**`): NO matchean, medido. El regex exige backtick de
+// cierre y `*` está fuera de la clase, así que la cita nunca cierra — no degrada a
+// `brain/`, simplemente no hay match. El `.filter()` es entonces código muerto
+// hoy: una mutación que lo desactiva deja la suite verde, y eso está pinneado a
+// propósito. Queda como cinturón y tiradores, anotado como tal, porque una
+// protección aparente es la clase de defecto que este ticket persigue.
+const CITED_RE = /`(brain\/[A-Za-z0-9_./-]+)`/g;
+
+function citedPathsOf(file) {
+  return [...readFileSync(file, "utf8").matchAll(CITED_RE)]
+    .map((m) => m[1])
+    .filter((p) => !p.includes("*"));
+}
+
 // 1. Links rotos + leaks core→project en cualquier doc de brain/.
 const dead = [];
 const coreLeaks = [];
+const deadCitations = [];
+for (const f of brainFiles) {
+  for (const cited of citedPathsOf(f)) {
+    if (!existsSync(join(ROOT, cited))) {
+      deadCitations.push(`${relative(ROOT, f)} → \`${cited}\``);
+    }
+  }
+}
 for (const f of brainFiles) {
   for (const { raw, kind } of linksOf(f)) {
     const r = resolveLink(f, raw, kind);
@@ -137,9 +182,23 @@ if (coreLeaks.length) {
   );
 }
 
-const problems = orphans.length + dead.length + coreLeaks.length;
+if (deadCitations.length) {
+  console.error(
+    `\n✗ ${deadCitations.length} ruta(s) CITADA(S) en brain/ que no existen:`,
+  );
+  for (const c of deadCitations) console.error(`  • ${c}`);
+  console.error(
+    "  Una ruta citada entre backticks no es menos normativa que un link: si un listado\n" +
+      "  de prohibiciones nombra un directorio que no existe, no prohíbe nada (issue #499).",
+  );
+}
+
+const problems =
+  orphans.length + dead.length + coreLeaks.length + deadCitations.length;
 if (problems === 0) {
-  console.log("✓ Navegación de brain/ íntegra: sin huérfanos, sin links rotos.");
+  console.log(
+    "✓ Navegación de brain/ íntegra: sin huérfanos, sin links rotos, sin rutas citadas inexistentes.",
+  );
   process.exit(0);
 }
 console.error(`\n${problems} problema(s) de navegación en brain/.`);

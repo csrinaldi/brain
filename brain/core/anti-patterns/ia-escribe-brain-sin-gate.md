@@ -6,8 +6,8 @@
 
 ## The problem
 
-An AI agent that commits directly to `brain/decisions/`, `brain/anti-patterns/`,
-`brain/domain/` or `brain/methodology/` can introduce:
+An AI agent that commits directly to `brain/core/**` or `brain/project/**`
+can introduce:
 
 - Incorrect or misinterpreted decisions without critical review.
 - Anti-patterns that describe local solutions as if they were global rules.
@@ -20,7 +20,7 @@ other agents and future sessions will read it as established fact.
 ## Why it happens
 
 `consolidation-protocol.md §2` (version prior to issue #54) explicitly stated
-"the agent must draft and attach an append-only file in `brain/anti-patterns/`
+"the agent must draft and attach an append-only file in brain/anti-patterns/
 within the same commit". Without a human gate, the intent to capture knowledge in the
 moment becomes a direct contamination vector.
 
