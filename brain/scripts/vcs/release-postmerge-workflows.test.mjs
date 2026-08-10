@@ -164,7 +164,7 @@ test('release.yml does NOT have push:tags trigger (audit-then-tag prevents post-
 
 test('release.yml declares write contents permission (needed to create and push tags)', () => {
   const text = readFileSync(RELEASE_YML, 'utf8');
-  assert.match(text, /permissions:\s*\{\s*contents:\s*write\s*\}/, 'release.yml must declare permissions: { contents: write } (to create/push tags)');
+  assert.match(text, /permissions:\s*\{[^}]*\bcontents:\s*write\b/, 'release.yml must declare contents: write (to create/push tags)');
 });
 
 // audit-then-tag mode: the audit runs BEFORE tag creation, from PREV_TAG..HEAD
@@ -187,6 +187,121 @@ test('release.yml has a step that creates and pushes the tag (only after audit s
 test('release.yml routes tag_name via env: not spliced into run: (security precedent from governance-postmerge.yml)', () => {
   const text = readFileSync(RELEASE_YML, 'utf8');
   assert.match(text, /env:\s*TAG_NAME:\s*\$\{\{\s*inputs\.tag_name\s*\}\}/, 'tag_name must be routed via env: (untrusted user input)');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #479 / #475 — THE AUDIT'S CREDENTIAL, AND THE SCOPE THAT MAKES IT WORK.
+//
+// Both tickets describe this guard as an EXTENSION of one #467 added ("every
+// step that reads the API declares its own env: GH_TOKEN"). Measured while
+// implementing them: no such guard exists in this file, or anywhere else in the
+// suite — changing governance-postmerge.yml's audit step from `GH_TOKEN` to
+// `VCS_TOKEN` left all 3004 other tests green. #467 fixed the workflow and the
+// guard was never written, which is why #475 could then ship the identical
+// defect one rung down without anything noticing.
+//
+// TWO conditions, and the second is the load-bearing one:
+//
+//   1. Every step that runs the audit declares the credential.
+//   2. Every workflow that declares a `permissions:` block grants the audit a
+//      scope to read pull requests.
+//
+// A `permissions:` block sets every scope it OMITS to `none`, so a step can
+// carry a perfectly good token and still be unable to read `pulls/{n}`. Asserting
+// only (1) produces a gate that LOOKS fixed and still runs blind — #475's central
+// point, and the reason the two are asserted together and never apart.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Split a workflow into per-step text blocks, comment lines removed.
+ *
+ *  Shape-independent BY CONSTRUCTION: it slices on the step bullets and searches
+ *  each slice whole, so it does not care whether `env:` precedes or follows
+ *  `run:`, whether `run:` is `|`, `>` or inline, or whether the step leads with
+ *  `name:` or `id:`. #480 records the cost of the other approach — a guard keyed
+ *  on step shape was defeated by seven ordinary ones. Comments are stripped first
+ *  so a step cannot satisfy the rule by MENTIONING the credential.
+ */
+function stepBlocks(yamlText) {
+  const lines = yamlText.split('\n').filter(l => !/^\s*#/.test(l));
+  const starts = [];
+  lines.forEach((l, i) => { if (/^\s*- /.test(l)) starts.push([i, l.indexOf('- ')]); });
+  return starts.map(([i, indent], n) => {
+    let end = lines.length;
+    for (let j = n + 1; j < starts.length; j++) {
+      if (starts[j][1] <= indent) { end = starts[j][0]; break; }
+    }
+    return lines.slice(i, end).join('\n');
+  });
+}
+
+/** Violations of the two conditions above, as human-readable strings. */
+export function auditPortAuth(yamlText, file = 'workflow') {
+  const violations = [];
+  const runsAudit = stepBlocks(yamlText).filter(b => /brain-audit\.mjs/.test(b));
+  for (const block of runsAudit) {
+    if (!/^\s*VCS_TOKEN:/m.test(block)) {
+      const name = (block.match(/name:\s*(.+)/) ?? [, '(unnamed)'])[1].trim();
+      violations.push(`${file}: step '${name}' runs brain-audit.mjs without env: VCS_TOKEN`);
+    }
+  }
+  // Only meaningful when the workflow narrows permissions at all — with no block,
+  // the default token already carries read scope.
+  const perms = yamlText.match(/^permissions:\s*\{([^}]*)\}/m);
+  if (runsAudit.length > 0 && perms && !/pull-requests:\s*(read|write)/.test(perms[1])) {
+    violations.push(`${file}: declares permissions: {…} without pull-requests — every omitted scope is 'none', so the audit's token cannot read PRs`);
+  }
+  return violations;
+}
+
+test('#479/#475 drift guard: every step running brain-audit declares VCS_TOKEN, with a scope that can read PRs', () => {
+  for (const [file, path] of [['release.yml', RELEASE_YML], ['governance-postmerge.yml', POSTMERGE_YML]]) {
+    assert.deepEqual(auditPortAuth(readFileSync(path, 'utf8'), file), []);
+  }
+});
+
+test('#479/#475 drift guard: it has TEETH — each condition alone is caught', () => {
+  // Condition 1: the credential removed.
+  const noToken = [
+    'permissions: { contents: write, pull-requests: read }',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: Run the audit',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.match(auditPortAuth(noToken).join('\n'), /without env: VCS_TOKEN/);
+
+  // Condition 2: the credential present, the SCOPE missing. This is the one an
+  // eyeball review passes — the step looks authenticated, and the token it gets
+  // cannot read a pull request.
+  const noScope = [
+    'permissions: { contents: write }',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: Run the audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.match(auditPortAuth(noScope).join('\n'), /every omitted scope is 'none'/);
+
+  // And a step that merely NAMES the credential in a comment is not compliant.
+  const commentOnly = noToken.replace(
+    '        run: node',
+    '        # VCS_TOKEN: handled elsewhere\n        run: node',
+  );
+  assert.match(auditPortAuth(commentOnly).join('\n'), /without env: VCS_TOKEN/);
+});
+
+test('#479/#475 drift guard: reverting the audit step to the provider-specific GH_TOKEN is caught', () => {
+  // The precise regression #479 removes. `GH_TOKEN` is not wrong on a step that
+  // shells out to `gh` directly — it is wrong on the step that reaches the server
+  // THROUGH the port, because that is the path GitLab consumers also execute.
+  const reverted = readFileSync(POSTMERGE_YML, 'utf8')
+    .replace('VCS_TOKEN: ${{ github.token }}', 'GH_TOKEN: ${{ github.token }}');
+  assert.notEqual(reverted, readFileSync(POSTMERGE_YML, 'utf8'), 'the mutation must land');
+  assert.match(auditPortAuth(reverted, 'governance-postmerge.yml').join('\n'), /without env: VCS_TOKEN/);
 });
 
 // ── governance-postmerge.yml (rung 3, auto-revert) — REQ-L2-2 ──────────────

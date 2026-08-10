@@ -14,6 +14,7 @@
 
 import { pathToFileURL } from 'node:url';
 import { runAsIdentity } from './lib/identity-context.mjs';
+import { vcsToken } from './lib/token.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 
 // The verbs every provider must implement (see vcs-contract.md). Reconciled
@@ -65,9 +66,28 @@ export function resolveProviderName({ config, env = process.env, provider } = {}
  * Loads and returns the active provider module (object of verb functions).
  *
  * `identity` (issue #501) BINDS a credential to the returned port: every verb it
- * exposes makes its server calls under that credential. Omitted, resolution is
- * exactly what it is today — gh's ambient login on GitHub, `VCS_TOKEN` on GitLab
- * — so no non-reviewer caller changes behaviour.
+ * exposes makes its server calls under that credential.
+ *
+ * OMITTED, THE PORT FALLS BACK TO `VCS_TOKEN` (issue #479) — brain's one
+ * provider-neutral credential (ADR-0007, #33). It used to fall back to nothing,
+ * which meant gh's ambient login on GitHub and `VCS_TOKEN` on GitLab: **the same
+ * code authenticated under two different conventions depending on provider**, and
+ * nothing asserted they stayed in sync. "brain runs on GitLab" was true of the
+ * port and false of everything that reached the port without binding an identity.
+ *
+ * That is why the fallback belongs HERE and not in the audit path. #479's scope
+ * offered the choice — thread `vcsToken()` through `merge-walk.mjs`, or close the
+ * seam — and noted that a partial thread leaving ambient-auth fallbacks "is a
+ * half-seam and should be a deliberate choice, not a leftover". Measured: **one**
+ * of the 20+ `getVcs` call sites bound an identity (the reviewer, `review/cli.mjs`).
+ * Threading the audit would have fixed the one path #467 happened to expose and
+ * left the rest, which is the shape `bindIdentity` below already refuses for verbs:
+ * "a hand-maintained list is the shape that failed".
+ *
+ * With no `VCS_TOKEN` set, `vcsToken()` answers `null` and `runAsIdentity(null, …)`
+ * binds nothing — so a developer relying on their ambient `gh` login is unaffected.
+ * The change is only ever additive: a credential that was declared and ignored is
+ * now used.
  *
  * Bound at the PORT rather than passed per verb, and that is the whole point.
  * GitLab already had a per-verb `token` parameter, at thirteen sites, correct;
@@ -83,11 +103,17 @@ export function resolveProviderName({ config, env = process.env, provider } = {}
  * provider-agnostic, and a test that needed a real `gh` could not drive the two
  * DIFFERENT identities the defect only shows under.
  *
+ * `_token` is the same kind of seam for the credential read. It exists because
+ * `vcsToken()` reads the developer's `.env` before `process.env`, so a test that
+ * merely set or deleted `process.env.VCS_TOKEN` would assert one thing on a clean
+ * checkout and the opposite on a configured one — an env-dependent guard, which is
+ * how the "unbound" assertion below was passing by accident rather than by design.
+ *
  * @param {{ config?: object, env?: object, provider?: string, identity?: string|null,
- *   _import?: (url: URL) => Promise<object> }} [opts]
+ *   _import?: (url: URL) => Promise<object>, _token?: (provider: string) => string|null }} [opts]
  * @returns {Promise<object>}
  */
-export async function getVcs({ config, env, provider, identity = null, _import } = {}) {
+export async function getVcs({ config, env, provider, identity = null, _import, _token = vcsToken } = {}) {
   const cfg = config ?? loadBrainConfig();
   const name = resolveProviderName({ config: cfg, env, provider });
   // Guard the dynamic import path: provider names are simple identifiers, never
@@ -105,8 +131,11 @@ export async function getVcs({ config, env, provider, identity = null, _import }
       `vcs: provider '${name}' not found at providers/${name}.mjs — ${err.message}`,
     );
   }
-  if (!identity) return mod;
-  return bindIdentity(mod, identity);
+  // An explicit `identity` always wins — the reviewer verifies and writes as a
+  // specific credential and must not be silently redirected to the generic one.
+  const bound = identity ?? _token(name);
+  if (!bound) return mod;
+  return bindIdentity(mod, bound);
 }
 
 /**
