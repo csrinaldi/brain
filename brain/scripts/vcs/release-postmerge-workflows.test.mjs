@@ -18,6 +18,8 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
+import { auditWorkflowAuth } from './lib/workflow-auth.mjs';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '../../..');
 
@@ -212,50 +214,14 @@ test('release.yml routes tag_name via env: not spliced into run: (security prece
 // point, and the reason the two are asserted together and never apart.
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Split a workflow into per-step text blocks, comment lines removed.
- *
- *  Shape-independent BY CONSTRUCTION: it slices on the step bullets and searches
- *  each slice whole, so it does not care whether `env:` precedes or follows
- *  `run:`, whether `run:` is `|`, `>` or inline, or whether the step leads with
- *  `name:` or `id:`. #480 records the cost of the other approach — a guard keyed
- *  on step shape was defeated by seven ordinary ones. Comments are stripped first
- *  so a step cannot satisfy the rule by MENTIONING the credential.
- */
-function stepBlocks(yamlText) {
-  const lines = yamlText.split('\n').filter(l => !/^\s*#/.test(l));
-  const starts = [];
-  lines.forEach((l, i) => { if (/^\s*- /.test(l)) starts.push([i, l.indexOf('- ')]); });
-  return starts.map(([i, indent], n) => {
-    let end = lines.length;
-    for (let j = n + 1; j < starts.length; j++) {
-      if (starts[j][1] <= indent) { end = starts[j][0]; break; }
-    }
-    return lines.slice(i, end).join('\n');
-  });
-}
-
-/** Violations of the two conditions above, as human-readable strings. */
-export function auditPortAuth(yamlText, file = 'workflow') {
-  const violations = [];
-  const runsAudit = stepBlocks(yamlText).filter(b => /brain-audit\.mjs/.test(b));
-  for (const block of runsAudit) {
-    if (!/^\s*VCS_TOKEN:/m.test(block)) {
-      const name = (block.match(/name:\s*(.+)/) ?? [, '(unnamed)'])[1].trim();
-      violations.push(`${file}: step '${name}' runs brain-audit.mjs without env: VCS_TOKEN`);
-    }
-  }
-  // Only meaningful when the workflow narrows permissions at all — with no block,
-  // the default token already carries read scope.
-  const perms = yamlText.match(/^permissions:\s*\{([^}]*)\}/m);
-  if (runsAudit.length > 0 && perms && !/pull-requests:\s*(read|write)/.test(perms[1])) {
-    violations.push(`${file}: declares permissions: {…} without pull-requests — every omitted scope is 'none', so the audit's token cannot read PRs`);
-  }
-  return violations;
-}
+// The rule lives in `lib/workflow-auth.mjs` and is imported, never restated here.
+// #480 hardened it against the ten shapes that defeated PR #476's version, and a
+// second copy of a rule is the defect #340 records: two implementations of one rule
+// disagree, and the one CI runs is not the one anybody reads.
 
 test('#479/#475 drift guard: every step running brain-audit declares VCS_TOKEN, with a scope that can read PRs', () => {
   for (const [file, path] of [['release.yml', RELEASE_YML], ['governance-postmerge.yml', POSTMERGE_YML]]) {
-    assert.deepEqual(auditPortAuth(readFileSync(path, 'utf8'), file), []);
+    assert.deepEqual(auditWorkflowAuth(readFileSync(path, 'utf8'), { file, repoRoot: REPO_ROOT }), []);
   }
 });
 
@@ -269,7 +235,7 @@ test('#479/#475 drift guard: it has TEETH — each condition alone is caught', (
     '      - name: Run the audit',
     '        run: node brain/scripts/brain-audit.mjs "a..b"',
   ].join('\n');
-  assert.match(auditPortAuth(noToken).join('\n'), /without env: VCS_TOKEN/);
+  assert.match(auditWorkflowAuth(noToken, { repoRoot: REPO_ROOT }).join('\n'), /does not declare VCS_TOKEN/);
 
   // Condition 2: the credential present, the SCOPE missing. This is the one an
   // eyeball review passes — the step looks authenticated, and the token it gets
@@ -284,14 +250,14 @@ test('#479/#475 drift guard: it has TEETH — each condition alone is caught', (
     '          VCS_TOKEN: ${{ github.token }}',
     '        run: node brain/scripts/brain-audit.mjs "a..b"',
   ].join('\n');
-  assert.match(auditPortAuth(noScope).join('\n'), /every omitted scope is 'none'/);
+  assert.match(auditWorkflowAuth(noScope, { repoRoot: REPO_ROOT }).join('\n'), /every omitted scope is 'none'/);
 
   // And a step that merely NAMES the credential in a comment is not compliant.
   const commentOnly = noToken.replace(
     '        run: node',
     '        # VCS_TOKEN: handled elsewhere\n        run: node',
   );
-  assert.match(auditPortAuth(commentOnly).join('\n'), /without env: VCS_TOKEN/);
+  assert.match(auditWorkflowAuth(commentOnly, { repoRoot: REPO_ROOT }).join('\n'), /does not declare VCS_TOKEN/);
 });
 
 test('#479/#475 drift guard: reverting the audit step to the provider-specific GH_TOKEN is caught', () => {
@@ -301,7 +267,7 @@ test('#479/#475 drift guard: reverting the audit step to the provider-specific G
   const reverted = readFileSync(POSTMERGE_YML, 'utf8')
     .replace('VCS_TOKEN: ${{ github.token }}', 'GH_TOKEN: ${{ github.token }}');
   assert.notEqual(reverted, readFileSync(POSTMERGE_YML, 'utf8'), 'the mutation must land');
-  assert.match(auditPortAuth(reverted, 'governance-postmerge.yml').join('\n'), /without env: VCS_TOKEN/);
+  assert.match(auditWorkflowAuth(reverted, { file: 'governance-postmerge.yml', repoRoot: REPO_ROOT }).join('\n'), /does not declare VCS_TOKEN/);
 });
 
 // ── governance-postmerge.yml (rung 3, auto-revert) — REQ-L2-2 ──────────────
