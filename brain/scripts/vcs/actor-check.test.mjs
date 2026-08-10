@@ -1748,3 +1748,144 @@ test('SITE — actor-check.mjs never CALLS .prView(; headSha is derived from the
 // `npm test` invocation — that IS the monotonicity proof (task 2.10). Adding a
 // parallel "re-run" block here would test node:test's own re-execution, not
 // this change.
+
+// ── ADR-0026 Amendment 3 / issue #454 — an agent identity inside the loop ────
+//
+// The gate's purpose is "the approval postdates work the approver has SEEN".
+// That is not served by re-arming on commits the approver's own agent made under
+// their instruction; it is served against commits from OUTSIDE the approved loop.
+// `governance.agentActors` names the inside, the same way `reviewActors` already
+// does for the cold reviewer, and for the same evidential reason.
+//
+// The key is separate from `reviewActors` on purpose (see defaultReadAgentActors):
+// reusing it would get every behaviour right and the MEANING wrong, and a consumer
+// with an agent but no cold reviewer would meet a refusal whose stated reason is
+// false. It ships ABSENT — no migration — because a key that weakens a gate may
+// never arrive by upgrade.
+
+test('evaluateActor: lite — a registered agentActors identity\'s pushes do not re-arm (REQ-454-1, #454)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: 'abc', login: 'some-agent', at: '2024-01-01T00:10:00Z' }],
+    agentActors: ['some-agent'],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass',
+    'the approver\'s own agent, working under the instruction the approval covers, certifies nothing new');
+  assert.match(result.reason, /no push re-arms/i);
+});
+
+// The negative control that makes the test above mean something. Identical input,
+// key absent — which is also the shipped default for every consumer who never
+// declares it, so this pins the no-op-by-default guarantee at the same time.
+test('evaluateActor: lite — the SAME commit re-arms when agentActors is absent (REQ-454-2, #454)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: 'abc', login: 'some-agent', at: '2024-01-01T00:10:00Z' }],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail',
+    'absent the key, behaviour must be byte-identical to pre-#454 — a gate is never weakened by upgrade');
+});
+
+test('evaluateActor: lite — an UNRESOLVABLE author still re-arms even with agentActors declared (REQ-454-3, #454)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: 'abc', login: null, at: '2024-01-01T00:10:00Z' }],
+    agentActors: ['some-agent'],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail',
+    'fail-closed on unattributable authorship is the feature — the relief never extends to an identity the provider cannot vouch for');
+});
+
+test('evaluateActor: lite — a third party still re-arms while an agent identity is exempt in the same commit list (REQ-454-4, #454)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [
+      { sha: 'abc', login: 'some-agent', at: '2024-01-01T00:10:00Z' },
+      { sha: 'def', login: 'mallory', at: '2024-01-01T00:20:00Z' },
+    ],
+    agentActors: ['some-agent'],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail', 'the exemption must narrow the foreign set, never empty it');
+});
+
+// §9 is untouched, and this is the assertion that says so. Exemption from
+// re-arming and permission to approve are DIFFERENT POWERS; #454 grants only the
+// first. If an agent identity is also registered as a review identity, the deny
+// branch still refuses it the label — deny-before-allow, tier-agnostic (#375).
+test('evaluateActor: an agent identity that is ALSO a review identity may still never APPLY the label (§9 unchanged, #454)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'some-agent' }, at: '2024-01-01T00:30:00Z' }],
+    commits: [{ sha: 'abc', login: 'alice', at: '2024-01-01T00:10:00Z' }],
+    denyActors: ['some-agent'],
+    agentActors: ['some-agent'],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /may never apply the approved label/i);
+});
+
+test('gatherActorCheckInputs: governance.agentActors is read and threaded (REQ-454-5, #454)', async () => {
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice',
+    prBody: 'Closes #1',
+    baseBranch: 'main',
+    repo: 'acme/x',
+    prNumber: 7,
+    tier: 'lite',
+    deps: {
+      readConfig: () => ({ governance: { tier: 'lite' } }),
+      readBotAllowlist: () => [],
+      readDenyActors: () => [],
+      readAgentActors: () => ['some-agent'],
+      fetchLabeledEvents: async () => [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+      fetchIssue: async () => ({ labels: [], author: 'alice' }),
+      fetchCommits: async () => [{ sha: 'abc', login: 'some-agent', at: '2024-01-01T00:10:00Z' }],
+      fetchDecisions: async () => [],
+    },
+  });
+  assert.deepEqual(inputs.agentActors, ['some-agent'],
+    'a reader that is never threaded is a reader that does nothing in production');
+  assert.equal(evaluateActor(inputs).level, 'pass');
+});
+
+// The three tests above drive `evaluateActor` directly, so none of them ever runs
+// `defaultReadAgentActors`. Mutation M3 measured the cost: making the reader return
+// a non-empty default left every one of them green while the SHIPPED gate silently
+// exempted an identity no consumer had declared — a gate weakened by upgrade, which
+// is the single outcome the no-migration rule exists to prevent. An injected-only
+// guarantee guards nothing (#510 paid for this lesson one ticket ago).
+test('gatherActorCheckInputs: the REAL reader returns [] for a config with no agentActors key (REQ-454-6, #454)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agent-actors-'));
+  writeFileSync(join(dir, 'brain.config.json'),
+    JSON.stringify({ governance: { tier: 'lite', reviewActors: ['some-bot'] } }), 'utf8');
+
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice',
+    prBody: 'Closes #1',
+    baseBranch: 'main',
+    repo: 'acme/x',
+    prNumber: 7,
+    cwd: dir,               // the real readers run against this config
+    tier: 'lite',
+    deps: {
+      fetchLabeledEvents: async () => [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+      fetchIssue: async () => ({ labels: [], author: 'alice' }),
+      fetchCommits: async () => [{ sha: 'abc', login: 'some-agent', at: '2024-01-01T00:10:00Z' }],
+      fetchDecisions: async () => [],
+    },
+  });
+
+  assert.deepEqual(inputs.agentActors, [],
+    'an undeclared key must read as [] — a default value here would exempt an identity nobody registered');
+  assert.equal(evaluateActor(inputs).level, 'fail',
+    'and the gate must behave exactly as it did before #454 for every consumer who never declares the key');
+});

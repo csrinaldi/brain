@@ -105,10 +105,18 @@ function isForeignCommit(commit, exempt) {
  * the shared warn+pass branch in `evaluateActor` — REQ-L5-2 — before this
  * function ever runs.)
  *
- * @param {{ actor: string|undefined, labelCreatedAt: string|undefined, commits: Array<{ at?: string, login?: string|null }>|null, reviewActors?: string[] }} input
+ * `agentActors` (issue #454, Amendment 3) joins the same exempt set for the same
+ * reason, one step further out: the gate's purpose is "the approval postdates work
+ * the approver has seen", and it is not served by re-arming on commits the
+ * approver's own agent made under their instruction. It is served against commits
+ * from OUTSIDE the approved loop, which is what stays foreign. See
+ * `defaultReadAgentActors` for why this is a separate key, why it ships absent,
+ * and what the exemption does NOT prove.
+ *
+ * @param {{ actor: string|undefined, labelCreatedAt: string|undefined, commits: Array<{ at?: string, login?: string|null }>|null, reviewActors?: string[], agentActors?: string[] }} input
  * @returns {{ level: 'pass'|'fail', reason: string }}
  */
-function evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors = [] }) {
+function evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors = [], agentActors = [] }) {
   // An approval whose own timestamp is unreadable is not an approval —
   // checked BEFORE the foreign-commit search, which would otherwise let a
   // timestamp-less label through the no-foreign-commit branch below. Pre-
@@ -135,7 +143,7 @@ function evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors = []
     };
   }
 
-  const exempt = [actor, ...reviewActors].filter(Boolean);
+  const exempt = [actor, ...reviewActors, ...agentActors].filter(Boolean);
   const foreign = commits.filter(c => isForeignCommit(c, exempt));
 
   // No foreign commit: every commit on the branch is the approver's or a
@@ -146,9 +154,9 @@ function evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors = []
       level: 'pass',
       reason:
         `the approved label was applied by "${actor ?? 'unknown'}" at ${labelCreatedAt ?? 'an unreadable time'}; ` +
-        'every commit on the branch is authored by the approver or a registered governance.reviewActors ' +
-        'identity, so no push re-arms the approval — distinct-act evidence satisfied at the "lite" tier ' +
-        '(REQ-L5-1′, ADR-0026 Amendment 1).',
+        'every commit on the branch is authored by the approver, a registered governance.reviewActors ' +
+        'identity, or a registered governance.agentActors identity, so no push re-arms the approval — ' +
+        'distinct-act evidence satisfied at the "lite" tier (REQ-L5-1′, ADR-0026 Amendments 1 and 3).',
     };
   }
 
@@ -479,6 +487,7 @@ export function evaluateActor({
   labeledEvents = [],
   botAllowlist = [],
   denyActors = [],
+  agentActors = [],
   adminOverride = false,
   overrideRefused = false,
   tier = 'standard',
@@ -577,7 +586,7 @@ export function evaluateActor({
       if (signed?.admitted) return withRefusalNote({ level: 'pass', reason: signed.reason });
       if (signed?.note) signedNotes.push(signed.note);
     }
-    const base = evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors: denyActors });
+    const base = evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors: denyActors, agentActors });
     return withRefusalNote(
       signedNotes.length ? { ...base, reason: `${base.reason} ${signedNotes.join(' ')}` } : base,
     );
@@ -832,6 +841,53 @@ function defaultReadDenyActors(cwd) {
   };
 }
 
+/**
+ * `lite`'s AGENT identity set (issue #454, ADR-0026 Amendment 3):
+ * `governance.agentActors` — identities acting inside the approved loop under the
+ * approver's instruction, whose commits therefore do NOT re-arm an existing
+ * approval. Read with `?? []`, ABSENT by default, and deliberately NOT added to
+ * `config-migrations.mjs`: a key that WEAKENS a gate may never arrive by upgrade.
+ * `governance.reviewActors` set that precedent — its 0.8.0 migration says outright
+ * that it "stays absent" — and a consumer who never declares the key keeps today's
+ * behaviour byte for byte.
+ *
+ * A THIRD reader rather than a reuse of `readDenyActors`, and the reason is not
+ * tidiness. `reviewActors` means "acts as the cold reviewer". Reusing it would get
+ * every behaviour right for an agent and the MEANING wrong, and the wrongness
+ * surfaces as a lying refusal: a consumer who runs an agent but has no cold
+ * reviewer would have to register their coding agent there, and `brain:approve`
+ * would then refuse it with "a review identity may never sign an approval" — said
+ * about something that reviews nothing. Correct refusal, false reason. Ruling R2
+ * ("no key feeds two gates") was already knowingly excepted once, in #375; twice
+ * is how an exception becomes the rule.
+ *
+ * PLATFORM-AGNOSTIC BY CONSTRUCTION. No vendor name appears here or anywhere else
+ * under `brain/scripts/**` or `brain/core/**` — the identity lives in the
+ * CONSUMER's `brain.config.json`, which `brain:upgrade` never touches (ADR-0003 /
+ * ADR-0006's golden rule). Today's agent platform is not tomorrow's; swapping it
+ * is editing one array, not editing brain. `agnostic-identity.test.mjs` holds that
+ * as a structural lock rather than an intention.
+ *
+ * WHAT THIS IS NOT. An identity string in a config file is not an authenticated
+ * identity: the provider attributes a commit by matching the author email against
+ * an account, and git authorship is unauthenticated by construction, so anyone
+ * with push access can spell it. That is a `lite`-tier trade, signed as one in
+ * Amendment 3, and it is exactly the basis on which `reviewActors` is already
+ * exempt here — #413 verified the reviewer identity at the review-POSTING seam,
+ * never at the authorship seam. The `standard`-tier upgrade is signature
+ * verification normalized through the port (#454's option B), not a longer list.
+ */
+function defaultReadAgentActors(cwd) {
+  return () => {
+    try {
+      const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
+      return Array.isArray(config?.governance?.agentActors) ? config.governance.agentActors : [];
+    } catch {
+      return [];
+    }
+  };
+}
+
 function defaultReadConfig(cwd) {
   return () => {
     try {
@@ -915,11 +971,13 @@ export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo,
   const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(repo, provider, deps);
   const readBotAllowlist = deps.readBotAllowlist ?? defaultReadBotAllowlist(cwd);
   const readDenyActors = deps.readDenyActors ?? defaultReadDenyActors(cwd);
+  const readAgentActors = deps.readAgentActors ?? defaultReadAgentActors(cwd);
   const fetchCommits = deps.fetchCommits ?? defaultFetchCommits(repo, provider, deps);
   const fetchDecisions = deps.fetchDecisions ?? defaultFetchDecisions(repo, provider, deps);
 
   const botAllowlist = readBotAllowlist();
   const denyActors = readDenyActors();
+  const agentActors = readAgentActors();
   const issueNumber = extractIssueNumber(prBody, baseBranch);
 
   const commits = needsCommitEvidence(tier) && prNumber != null ? await fetchCommits(prNumber) : null;
@@ -927,7 +985,7 @@ export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo,
   const headSha = resolveHeadSha(commits);
 
   if (issueNumber == null) {
-    return { author, issueAuthor: null, labeledEvents: [], botAllowlist, denyActors, adminOverride: false, overrideRefused: false, tier, commits, decisions, headSha };
+    return { author, issueAuthor: null, labeledEvents: [], botAllowlist, denyActors, agentActors, adminOverride: false, overrideRefused: false, tier, commits, decisions, headSha };
   }
 
   const labeledEvents = await fetchLabeledEvents(issueNumber);
@@ -936,7 +994,7 @@ export async function gatherActorCheckInputs({ author, prBody, baseBranch, repo,
   const adminOverride = honorOverride && overrideLabelPresent;
   const overrideRefused = overrideLabelPresent && !honorOverride;
 
-  return { author, issueAuthor, labeledEvents, botAllowlist, denyActors, adminOverride, overrideRefused, tier, commits, decisions, headSha };
+  return { author, issueAuthor, labeledEvents, botAllowlist, denyActors, agentActors, adminOverride, overrideRefused, tier, commits, decisions, headSha };
 }
 
 /**

@@ -29,6 +29,9 @@
     ],
     "reviewActors": [
       "csrinaldibot"
+    ],
+    "agentActors": [
+      "claude"
     ]
   },
   "reviewer": {
