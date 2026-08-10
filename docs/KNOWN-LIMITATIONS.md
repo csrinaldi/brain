@@ -156,6 +156,50 @@ does not control. The gate is now checkable: the danger-path e2e suite (#401) mu
   #386/#387/#388 (clone/PAT URL host + encoding), #361 (index reindex asymmetry engram vs
   plainfiles).
 
+## Post-merge audit coverage
+
+- **The audit sees MERGE COMMITS ONLY. A squash or rebase merge is invisible to it, and the
+  cursor advances past it — permanently.** `listMerges` selects
+  `git log --first-parent --merges`, so a single-parent commit is never enumerated: none of
+  `diffSize` / `issueLink` / `adrPresence` / `memoryPresence` / `writesGoverned` ever runs on
+  it. On a clean window the cursor then moves to the tip, and because the cursor only advances,
+  those commits fall outside every future window.
+
+  Measured on `origin/main`, 60 days to 2026-08-10:
+
+  | | count |
+  |---|---|
+  | first-parent commits | 101 |
+  | merges — what the audit enumerates | 70 |
+  | **never audited** | **33** (32 carrying a `(#N)` PR reference) |
+
+  **What this does and does not mean.** These commits still passed the PR-time gates, which are
+  required contexts on `main` — nothing merged ungoverned. What is missing is the *second* line:
+  `brain-audit` exists precisely so the guarantee does not rest on CI having been configured
+  correctly (ADR-0015's ladder), and for a third of recent history it does rest on exactly that.
+  There is also no remediation path for them, since `[FAIL-SHA]` can only nominate a commit the
+  audit enumerated.
+
+  **Mitigation in place**, and it is a report rather than a fix: the audit now emits
+  `[WARN] N first-parent commit(s) … were NOT audited`. It does not change the verdict, the exit
+  code or the cursor — failing would halt the cursor over existing history and make
+  `cursor.mjs accept` routine, which is its own erosion.
+
+  **Operator action while this stands:** disable *Squash merging* and *Rebase merging* in the
+  repository's merge-button settings, leaving *Merge commits* only. That is a platform setting,
+  not something brain can enforce — `brain:protect` arms branch protection, not merge methods.
+
+  **The real fix is #518**: widen the walk to first-parent non-merges. It is held because the
+  reverter-exemption model keys on `<sha>^1..<sha>` — a merge's contribution against its first
+  parent — and for a linear commit that is simply its own diff, so `netAddFull`,
+  `addedPathsAbsentAt` and `[FAIL-SHA]` nomination each need re-deriving. A design change, not a
+  filter change.
+
+  **Not the J-2 gap.** J-2 (`resolution.mjs`) is the same `--merges` filter on the *revert* side
+  and is fail-CLOSED — an offender simply never auto-clears. This one is fail-OPEN. J-2's own
+  note that "brain merges PRs with `--merge` … the gap is currently unexercised here" has also
+  expired: 32 squashes in 60 days.
+
 ## Agent / SDD neutrality
 
 - Real neutrality is n=1 in practice: the only fully-wired SDD engine with per-stage behavior is
