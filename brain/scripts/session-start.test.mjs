@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -20,6 +20,7 @@ import {
   step2HydrateEngram,
   step3ResolveChange,
   step4LoadTicketMemory,
+  step4bMemoryRecency,
   step5SynthesizeContext,
   runSessionStart,
   resolveSessionStrings,
@@ -165,6 +166,8 @@ const SESSION_STRINGS = {
   manifestRestored: en['session.manifest.restored'],
   ticketLabel:      en['session.ticket.label'],
   ticketNone:       en['session.ticket.none'],
+  memoryRecencyStale:   en['session.memory.recency.stale'],
+  memoryRecencyUnknown: en['session.memory.recency.unknown'],
 };
 
 test('renderContextBlock: full success — resolved change, engram ok, manifest restored, ticket present', () => {
@@ -548,13 +551,23 @@ test('runSessionStart: output composition matches renderContextBlock for the res
   const _changes = () => [direntDir('issue-138-session-start')];
   const _resume = () => 'next_action: ship it\n';
 
-  const result = await runSessionStart('/repo', { _spawn, _branch, _changes, _resume }, SESSION_STRINGS);
+  // #519 — `recency` is injected rather than left to the real reader. This test's job
+  // is COMPOSITION: it must fail when a step's result stops reaching the renderer, and
+  // it did exactly that when step4b was added. Letting it read '/repo' off the real
+  // filesystem would make it assert whatever that path happens to contain.
+  //
+  // The injected value is STALE on purpose. A fresh one renders no line, so a `recency`
+  // that never reaches the renderer would look identical to one that did — measured:
+  // mutation M3 (drop the field from the call) was GREEN until this changed.
+  const _recency = () => ({ ageDays: 6, newest: '2026-08-04T00:00:00Z' });
+  const result = await runSessionStart('/repo', { _spawn, _branch, _changes, _resume, _recency }, SESSION_STRINGS);
 
   const expected = renderContextBlock({
     manifest: { restored: false },
     engram: { ok: true },
     change: { branch: 'feat/issue-138-x', token: ISSUE_138, matches: ['issue-138-session-start'] },
     ticket: 'next_action: ship it\n',
+    recency: { ageDays: 6, newest: '2026-08-04T00:00:00Z' },
   }, SESSION_STRINGS);
   assert.equal(result.output, expected);
 });
@@ -789,4 +802,118 @@ test('fixtures: detects ambiguity from two issue-138-* dirs', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// step4bMemoryRecency + the banner line (issue #519)
+//
+// The durable layer went six days without a record and the only signal was
+// `memory: engram unavailable (skipped)` — a line that reads as housekeeping. These
+// pin the two things that make the new line worth having: it answers from COMMITTED
+// records (so it still answers when engram is the thing that is missing), and it
+// distinguishes "cannot determine" from "captured today".
+// ---------------------------------------------------------------------------
+
+const DAY = 86400000;
+
+function memoryRepo(records) {
+  const dir = mkdtempSync(join(tmpdir(), 'mem-recency-'));
+  mkdirSync(join(dir, '.memory', 'records'), { recursive: true });
+  for (const [file, lines] of Object.entries(records)) {
+    writeFileSync(join(dir, '.memory', 'records', file), lines.join('\n') + '\n', 'utf8');
+  }
+  return dir;
+}
+
+test('#519: step4bMemoryRecency reports the age of the NEWEST record across every file', (t) => {
+  const dir = memoryRepo({
+    '2026-07.jsonl': [JSON.stringify({ ts: '2026-07-01T00:00:00Z' })],
+    '2026-08.jsonl': [
+      JSON.stringify({ ts: '2026-08-04T00:00:00Z' }),
+      JSON.stringify({ ts: '2026-08-02T00:00:00Z' }),
+    ],
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = step4bMemoryRecency(dir, { _now: () => Date.parse('2026-08-10T00:00:00Z') });
+  assert.equal(r.ageDays, 6);
+  assert.equal(r.newest, '2026-08-04T00:00:00Z');
+});
+
+test('#519: an EMPTY or absent store answers null (unknown), never 0 (fresh)', (t) => {
+  const empty = memoryRepo({ '2026-08.jsonl': [] });
+  t.after(() => rmSync(empty, { recursive: true, force: true }));
+
+  // The whole point of the ticket: "cannot determine" and "captured today" are
+  // different answers. Collapsing them is the evidence-reader-empty-on-failure class.
+  assert.deepEqual(step4bMemoryRecency(empty, { _now: () => 0 }), { ageDays: null, newest: null });
+
+  const none = mkdtempSync(join(tmpdir(), 'mem-none-'));
+  t.after(() => rmSync(none, { recursive: true, force: true }));
+  assert.deepEqual(step4bMemoryRecency(none, { _now: () => 0 }), { ageDays: null, newest: null });
+});
+
+test('#519: a corrupt line or an unparseable ts is skipped, never treated as the newest', (t) => {
+  const dir = memoryRepo({
+    '2026-08.jsonl': [
+      '{ not json at all',
+      JSON.stringify({ ts: 'no es una fecha' }),
+      JSON.stringify({ ts: 42 }),
+      JSON.stringify({ ts: '2026-08-04T00:00:00Z' }),
+    ],
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = step4bMemoryRecency(dir, { _now: () => Date.parse('2026-08-06T00:00:00Z') });
+  assert.equal(r.ageDays, 2, 'a corrupt neighbour must not change the answer');
+  assert.equal(r.newest, '2026-08-04T00:00:00Z');
+});
+
+test('#519: the reader does not consult engram — it answers when engram is exactly what is missing', (t) => {
+  const dir = memoryRepo({ '2026-08.jsonl': [JSON.stringify({ ts: '2026-08-04T00:00:00Z' })] });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  // No `_spawn` is supplied, and any subprocess attempt would throw through the gate.
+  // The six-day outage happened in sessions where engram was absent, so a probe that
+  // needs engram to answer cannot report the case it exists for.
+  const r = step4bMemoryRecency(dir, { _now: () => Date.parse('2026-08-10T00:00:00Z') });
+  assert.equal(r.ageDays, 6);
+});
+
+test('#519: a FRESH store adds no line — the banner only speaks when there is something to say', () => {
+  const output = renderContextBlock({
+    manifest: { restored: false }, engram: { ok: true },
+    change: { branch: 'main', token: null, matches: [] }, ticket: null,
+    recency: { ageDays: 0, newest: '2026-08-10T00:00:00Z' },
+  }, SESSION_STRINGS);
+  assert.ok(!output.includes('newest durable record'), `a fresh store must not be reported:\n${output}`);
+});
+
+test('#519: a STALE store is reported with its age', () => {
+  const output = renderContextBlock({
+    manifest: { restored: false }, engram: { ok: false },
+    change: { branch: 'main', token: null, matches: [] }, ticket: null,
+    recency: { ageDays: 6, newest: '2026-08-04T00:00:00Z' },
+  }, SESSION_STRINGS);
+  assert.match(output, /newest durable record is 6 days old/);
+});
+
+test('#519: an UNKNOWN store is reported as unknown, not as stale-with-a-number', () => {
+  const output = renderContextBlock({
+    manifest: { restored: false }, engram: { ok: false },
+    change: { branch: 'main', token: null, matches: [] }, ticket: null,
+    recency: { ageDays: null, newest: null },
+  }, SESSION_STRINGS);
+  assert.match(output, /cannot determine when memory was last captured/);
+  assert.ok(!/\d+ days old/.test(output), 'unknown must not be dressed up as a measured age');
+});
+
+test('#519: a model with no recency renders exactly as before — the field is additive', () => {
+  const model = {
+    manifest: { restored: false }, engram: { ok: true },
+    change: { branch: 'main', token: null, matches: [] }, ticket: null,
+  };
+  const output = renderContextBlock(model, SESSION_STRINGS);
+  assert.ok(!output.includes('memory:   newest'), 'an absent recency must add nothing');
+  assert.ok(!output.includes('cannot determine'), 'an absent recency is not an unknown recency');
 });

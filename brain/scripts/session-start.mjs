@@ -25,7 +25,7 @@
 // feature-working-memory change, out of scope here); its existing seam is
 // reused as-is from the caller side.
 
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -153,6 +153,11 @@ export function gatedSpawn(cmd, args, opts, spawnFn = spawnSync) {
 
 // Structural separators only — NOT translatable user-facing text, so they
 // stay plain constants outside the i18n layer (design §1.7's fixed format).
+// #519 — the age at which a silent memory layer is worth a line. A REPORTING
+// threshold: nothing gates on it, and it is deliberately not derived from the tier
+// matrix, because it decides what to SAY, never what to allow.
+const STALE_MEMORY_DAYS = 2;
+
 const RULE_DOUBLE = '========================';
 const RULE_SINGLE = '------------------------------------------';
 
@@ -196,7 +201,7 @@ function formatChangeLine(change, strings) {
  * @returns {string}
  */
 export function renderContextBlock(model, strings) {
-  const { manifest, engram, change, ticket } = model;
+  const { manifest, engram, change, ticket, recency = null } = model;
   const s = strings;
 
   const lines = [
@@ -206,6 +211,17 @@ export function renderContextBlock(model, strings) {
     formatChangeLine(change, s),
     engram.ok ? s.memoryOk : s.memorySkip,
   ];
+
+  // Only when it is worth saying. A store captured today needs no line; an unknown or
+  // stale one does. The threshold is a REPORTING choice, not a policy — nothing branches
+  // on it but this string.
+  if (recency) {
+    if (recency.ageDays === null) {
+      lines.push(s.memoryRecencyUnknown);
+    } else if (recency.ageDays >= STALE_MEMORY_DAYS) {
+      lines.push(fill(s.memoryRecencyStale, { days: String(recency.ageDays) }));
+    }
+  }
 
   if (manifest.restored) {
     lines.push(s.manifestRestored);
@@ -325,6 +341,58 @@ export function step4LoadTicketMemory(cwd, deps = {}) {
 }
 
 /**
+ * Step 4b — how old is the newest durable memory record? (issue #519.)
+ *
+ * The durable layer went SIX DAYS without a record and nothing said so. Two phases,
+ * and only the first was legitimate: materialization was genuinely blocked by #469
+ * until 2026-08-08, and then the block lifted and the practice simply did not resume.
+ * The only signal in either phase was `memory: engram unavailable (skipped)` — a line
+ * that reads as housekeeping, in a banner nobody reads as a warning.
+ *
+ * This REPORTS. It blocks nothing, gates nothing, and takes no position on whether
+ * `memory-gate` should be able to see this (that is #519's open ruling). The claim it
+ * makes is narrow and checkable: a system whose memory layer can go silent should not
+ * be silent about it.
+ *
+ * Reads `.memory/records/*.jsonl` directly rather than asking engram, deliberately —
+ * the case worth reporting is exactly the one where engram is ABSENT, so a probe that
+ * needs engram to answer cannot answer it. Committed records are the durable truth
+ * (ADR-0002); engram is the queryable projection.
+ *
+ * An unreadable or empty store yields `null` (unknown), never `0` (fresh). "Cannot
+ * determine" and "captured today" are different answers, and collapsing them is the
+ * `evidence-reader-empty-on-failure` class this repo has now paid for nine times.
+ *
+ * @returns {{ ageDays: number|null, newest: string|null }}
+ */
+export function step4bMemoryRecency(cwd, deps = {}) {
+  try {
+    if (deps._recency) return deps._recency(cwd);
+    const dir = join(cwd, '.memory', 'records');
+    if (!existsSync(dir)) return { ageDays: null, newest: null };
+    let newestMs = null;
+    let newestTs = null;
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.jsonl')) continue;
+      for (const line of readFileSync(join(dir, name), 'utf8').split('\n')) {
+        if (!line.trim()) continue;
+        let ts;
+        try { ts = JSON.parse(line)?.ts; } catch { continue; }
+        if (typeof ts !== 'string') continue;
+        const ms = Date.parse(ts);
+        if (!Number.isFinite(ms)) continue;
+        if (newestMs === null || ms > newestMs) { newestMs = ms; newestTs = ts; }
+      }
+    }
+    if (newestMs === null) return { ageDays: null, newest: null };
+    const nowMs = deps._now ? deps._now() : Date.now();
+    return { ageDays: Math.floor((nowMs - newestMs) / 86400000), newest: newestTs };
+  } catch {
+    return { ageDays: null, newest: null };
+  }
+}
+
+/**
  * Step 5 — synthesize targeted agent context floor + ADRs (REQ-CTX-4).
  * @returns {Promise<{ coreFloor: string[], matchedDecisions: string[], markdown: string }>}
  */
@@ -373,7 +441,8 @@ export async function runSessionStart(cwd, deps = {}, strings) {
   const engram = step2HydrateEngram(cwd, deps);
   const change = step3ResolveChange(cwd, deps);
   const ticket = step4LoadTicketMemory(cwd, deps);
-  const output = renderContextBlock({ manifest, engram, change, ticket }, strings);
+  const recency = step4bMemoryRecency(cwd, deps);
+  const output = renderContextBlock({ manifest, engram, change, ticket, recency }, strings);
   return { exitCode: 0, output };
 }
 
@@ -396,6 +465,8 @@ const SESSION_I18N_KEYS = {
   changeAmbiguous:  'session.change.ambiguous',
   memoryOk:         'session.memory.ok',
   memorySkip:       'session.memory.skip',
+  memoryRecencyStale:   'session.memory.recency.stale',
+  memoryRecencyUnknown: 'session.memory.recency.unknown',
   manifestRestored: 'session.manifest.restored',
   ticketLabel:      'session.ticket.label',
   ticketNone:       'session.ticket.none',
