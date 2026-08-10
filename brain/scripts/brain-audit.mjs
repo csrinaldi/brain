@@ -67,7 +67,7 @@ import { makeGit } from './governance/postmerge/resolution.mjs';
 // helper from returning (re-pointed at lib/merge-walk.mjs, issue #324 Phase 2).
 import {
   resolvedSkipLine, listMerges, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge,
-  resolveBaseline, makeGitIsAncestor,
+  resolveBaseline, makeGitIsAncestor, countUnauditedNonMerges,
 } from './lib/merge-walk.mjs';
 // Tier resolution (issue #358 Q5, REQ-TIER-9): the audit path is the rung-2/
 // rung-3 enforcement surface (release.yml's pre-tag gate, governance-postmerge.yml's
@@ -237,6 +237,29 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.log(`[FAIL] governance:audit-uncomputable — could not compute merge range ${range}: ${err.message}`);
       process.exit(2);
     }
+    // #518 residual (2) — SAY WHAT WAS NOT LOOKED AT.
+    //
+    // The walk enumerates `--first-parent --merges`. A squash merge lands as a
+    // single-parent commit, so it is never in the audited set — and on a clean
+    // window the cursor then advances past it, permanently. Until the walk is
+    // widened (#518, a design change: the exemption model keys on `sha^1..sha`,
+    // which for a linear commit is just its own diff), the honest thing the audit
+    // can do is stop reporting a window clean without saying how much of it it
+    // never read.
+    //
+    // Advisory ONLY. It does not touch the verdict, the exit code or the cursor.
+    // Making it fail would halt the cursor on 33 commits of existing history and
+    // turn `cursor.mjs accept` into routine — the erosion #518 already names.
+    const skipped = countUnauditedNonMerges(range, cwd);
+    if (skipped === null) {
+      console.log('[WARN] could not count the first-parent commits this audit does not enumerate — '
+        + 'coverage over this window is unknown (#518)');
+    } else if (skipped > 0) {
+      console.log(`[WARN] ${skipped} first-parent commit(s) in this range are NOT merges and were NOT audited `
+        + '— squash/rebase merges are invisible to `--first-parent --merges`, and the cursor advances past them '
+        + '(#518). This window is reported over the merges only.');
+    }
+
     if (walk.merges.length === 0) {
       console.log(`[INFO] No merge commits found in range: ${range}`);
       process.exit(0);

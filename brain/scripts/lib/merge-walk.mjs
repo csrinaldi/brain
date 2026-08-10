@@ -141,6 +141,46 @@ export function resolvedSkipLine(sha, subject, { git, tip }) {
  * @param {string} cwd
  * @returns {{ merges: {sha: string, subject: string}[], windowFrom: string|null, windowTo: string }}
  */
+/**
+ * The first-parent commits in `range` that `listMerges` does NOT enumerate —
+ * issue #518 residual (2).
+ *
+ * `listMerges` selects `--first-parent --merges`, i.e. commits with more than one
+ * parent. A SQUASH merge lands as a single-parent commit, so it is never in the
+ * audited set: no check runs on it, and the cursor then advances past it. The
+ * audit reports the window clean by not reporting that commit at all, and because
+ * the cursor only moves forward, the commit is permanently un-re-auditable.
+ *
+ * Measured on `origin/main` over 60 days: 70 merges, **33 first-parent commits the
+ * audit never enumerated** (32 of them carrying a `(#N)` PR reference).
+ *
+ * NOT the J-2 gap, and the difference is the reason this exists. J-2
+ * (`resolution.mjs`) is the same `--merges` filter on the REVERT side: a revert
+ * that lands as a squash is not seen, so an offender never auto-clears and is
+ * routed to the human gate — fail-CLOSED, "no forgery slips through". Here the
+ * OFFENDER is the one not seen, and nothing looks at it at all — fail-OPEN.
+ * Reading one as the other is how this stayed unrecorded.
+ *
+ * THIS FUNCTION DOES NOT CLOSE THE GAP. It makes the audit say what it did not
+ * look at. Closing it means deciding what `netAddFull`, `addedPathsAbsentAt` and
+ * `[FAIL-SHA]` nomination mean for a commit with no second parent — the exemption
+ * model is built on `${sha}^1..${sha}`, which for a linear commit is just its own
+ * diff. That is a design change (#518), not a report.
+ *
+ * Never throws on a bad range for the same reason the count is advisory: an
+ * unreadable count must not turn a healthy audit red. It returns `null`
+ * (unknown), which the caller reports as unknown rather than as zero.
+ *
+ * @param {string} range
+ * @param {string} cwd
+ * @returns {number|null} how many first-parent commits the audit skipped, or null.
+ */
+export function countUnauditedNonMerges(range, cwd) {
+  const r = gitTry(['log', '--first-parent', '--no-merges', '--format=%H', range], { cwd });
+  if (r.status !== 0) return null;
+  return r.stdout.split('\n').filter(Boolean).length;
+}
+
 export function listMerges(range, cwd) {
   const log = gitOrThrow(['log', '--first-parent', '--merges', '--format=%H%x09%s', range], { cwd }).trim();
   const windowTo = auditedTip(range);
