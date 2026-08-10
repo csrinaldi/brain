@@ -5,7 +5,7 @@
 // emits can block a merge. The one write it performs is bounded by markers in the
 // epic's body, and everything outside them is byte-identical afterwards.
 //
-// SLICE 1. What lands: dependencies as DECLARED DATA, the graph, the mermaid block,
+// SLICE 1 (#533 carries slice 2). What lands: dependencies as DECLARED DATA, the graph, the mermaid block,
 // the idempotent write. What does NOT: the "who is executing" half. `issueList`
 // normalises assignees away and `issueView` never carried them, so surfacing them is
 // a change to the port's return CONTRACT — a `decision`-labelled change with an ADR,
@@ -48,7 +48,7 @@ export function composeMap(graph) {
     renderSummary(graph),
     '',
     '_El «quién lo ejecuta» todavía no aparece: el puerto normaliza los assignees '
-    + 'afuera, y exponerlos cambia el contrato de retorno — un cambio con ADR (#459 slice 2)._',
+    + 'afuera, y exponerlos cambia el contrato de retorno — un cambio con ADR (#533, slice 2)._',
   ].join('\n');
 }
 
@@ -117,7 +117,7 @@ export async function main(argv = [], deps = {}) {
   if (typeof vcs.issueUpdate !== 'function') {
     // No body-write verb exists on the port yet. Print the region rather than
     // pretending: an operator can paste it, and the map is still derived.
-    say('! the port has no issue-body write verb — printing the region instead (#459 slice 2).');
+    say('! the port has no issue-body write verb — printing the region instead (#533, slice 2).');
     say('');
     say(content);
     return 0;

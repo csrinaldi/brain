@@ -22,5 +22,6 @@ issue: 459
       GitLab 50). Fixed with each file's own existing pattern, three guards, two mutations
       RED.
 - [x] **T9** Full suite: **2981 tests, 0 failures**.
-- [ ] **T10** *(slice 2, not in this change)* assignees + a body-write verb — both are port
-      changes needing a `decision` label and an ADR.
+- [ ] **T10** *(slice 2 — filed as #533, not in this change)* assignees, native provider
+      relations and a body-write verb — all three are port changes needing a `decision`
+      label and an ADR.
