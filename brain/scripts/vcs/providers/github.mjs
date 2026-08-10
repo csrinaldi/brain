@@ -9,6 +9,7 @@ import { run, runJson } from '../lib/exec.mjs';
 import { normalizeCommitStatus, providerState, assigneeParams } from '../lib/normalize.mjs';
 import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
+import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
 
 export const PROVIDER = 'github';
 
@@ -91,6 +92,40 @@ export async function issueView({ project, number }) {
     // same API call already carries `user.login`, no extra round-trip.
     author: r.user?.login ?? null,
   };
+}
+
+/**
+ * issueCreate — open an issue through the port (issue #528).
+ *
+ * brain could read issues, list them and open merge requests, and could not open an
+ * issue. So the first step of its own workflow — `issue-link` refuses any PR to main
+ * without an APPROVED issue behind it — was the one step brain did not support, and
+ * every ticket in this repository was authored outside the adapter boundary.
+ *
+ * `assertNoApprovalLabel` THROWS rather than filtering the label out. Silently
+ * dropping it would create the issue and report success while the caller believed it
+ * had approved something — the caller must learn that the request was refused, not
+ * discover later that half of it was ignored.
+ *
+ * @param {{ project: string, title: string, body?: string, labels?: string[], config?: object }} params
+ * @returns {Promise<{ number: number|null, url: string|null, error?: string }>}
+ */
+export async function issueCreate({ project, title, body = '', labels = [], config } = {}) {
+  assertNoApprovalLabel(labels, { config, provider: 'github' });
+
+  const args = ['issue', 'create', '--repo', project, '--title', title, '--body', body];
+  for (const label of labels) args.push('--label', label);
+
+  const r = gh(args);
+  if (!r.ok) {
+    return { number: null, url: null, error: r.stderr.trim() || `gh issue create failed (status ${r.status})` };
+  }
+  // `gh issue create` prints the URL. The number is its last path segment — parsed
+  // rather than re-fetched, and `null` when it does not parse, because a fabricated
+  // number is worse than an absent one for a caller about to write `Closes #N`.
+  const url = r.stdout.trim();
+  const m = url.match(/\/(\d+)\s*$/);
+  return { number: m ? Number(m[1]) : null, url };
 }
 
 export async function branchProtect({ project, branch = 'main', checks, requiredReviews = 1 }) {

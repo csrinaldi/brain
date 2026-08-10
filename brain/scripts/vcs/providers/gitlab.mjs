@@ -11,6 +11,7 @@ import { normalizeCommitStatus, providerState, assigneeParams } from '../lib/nor
 import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
 import { gitlabApiFetch } from '../gitlab-api.mjs';
+import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
 
 export const PROVIDER = 'gitlab';
 
@@ -875,6 +876,42 @@ export async function projectMergeSettings({ project = '' } = {}) {
  * @param {{ project: string, title: string, body: string, head: string, base?: string, labels?: string[], apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
  * @returns {Promise<{ url: string } | { url: null, error: string }>}
  */
+/**
+ * issueCreate — open an issue through the port (issue #528). GitHub's twin above.
+ *
+ * The refusal resolves the approval label through `resolveApprovedLabel`, which maps
+ * it to GitLab's SCOPED form (`status::approved`). A hardcoded `status:approved`
+ * would never match here, so the guard would be inert on this provider only — the
+ * exact shape of "green in test, inert in production" that epic #335 exists to close.
+ *
+ * @param {{ project: string, title: string, body?: string, labels?: string[], config?: object, apiBase?: string, token?: string, proxyUrl?: string, fetchImpl?: Function }} params
+ * @returns {Promise<{ number: number|null, url: string|null, error?: string }>}
+ */
+export async function issueCreate({
+  project, title, body = '', labels = [], config,
+  apiBase, token, proxyUrl, fetchImpl,
+} = {}) {
+  assertNoApprovalLabel(labels, { config, provider: 'gitlab' });
+
+  const payload = { title, description: body };
+  if (labels.length > 0) payload.labels = labels.join(',');
+
+  try {
+    const r = await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: glToken(token),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encodeURIComponent(project)}/issues`,
+      method: 'POST',
+      body: payload,
+      fetchImpl,
+    });
+    return { number: r.iid ?? null, url: r.web_url ?? null };
+  } catch (err) {
+    return { number: null, url: null, error: err.message };
+  }
+}
+
 export async function mrCreate({
   project,
   title,

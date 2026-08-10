@@ -22,6 +22,7 @@
     "brain:env:init": "bash ./brain/scripts/bootstrap.sh",
     "brain:day:start": "node ./brain/scripts/day-start.mjs",
     "brain:session:start": "node ./brain/scripts/session-start.mjs",
+    "brain:ticket:new": "node ./brain/scripts/ticket-new.mjs",
     "brain:ticket:start": "node ./brain/scripts/ticket-start.mjs",
     "brain:project:feature": "node ./brain/scripts/new-change.mjs",
     "brain:project:status": "node ./brain/scripts/project-status.mjs",

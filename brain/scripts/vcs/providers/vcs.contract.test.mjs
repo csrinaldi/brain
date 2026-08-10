@@ -2389,3 +2389,65 @@ test('gitlab.prReviews (contract): source reads BOTH the notes and approvals end
   assert.match(body, /merge_requests\/\$\{number\}\/notes/, 'prReviews must fetch MR notes — the verdict thread lives there, and approvals alone carries no body (the #317 defect)');
   assert.match(body, /merge_requests\/\$\{number\}\/approvals/, 'prReviews must still fetch approvals — the L6 brain-writes-reviewed gate reads only APPROVED entries');
 });
+
+// ── issueCreate (issue #528) ────────────────────────────────────────────────
+//
+// The port could READ an issue, LIST issues and OPEN a merge request, and could not
+// open an issue. So the first step of brain's own workflow — `issue-link` refuses any
+// PR to main without an APPROVED issue behind it — was the one step brain did not
+// support, and every ticket in this repository was authored outside the adapter.
+//
+// Parity here is the SHAPE, not the transport: GH shells `gh issue create` and parses
+// the printed URL; GL POSTs and reads `iid`. Both must answer `{ number, url }` and
+// both must normalise a transport failure to `{ number: null, url: null, error }`
+// rather than throwing — `mrCreate`'s discipline, because a caller about to write
+// `Closes #N` needs a value it can test, not an exception to catch.
+
+test('github.issueCreate (contract): returns { number, url }, with the number parsed from the printed URL', async () => {
+  setSpawn(() => ({ status: 0, stdout: 'https://github.com/acme/x/issues/531\n', stderr: '' }));
+  const r = await github.issueCreate({ project: 'acme/x', title: 'T', body: 'B', labels: ['type:bug'] });
+  assert.deepEqual(r, { number: 531, url: 'https://github.com/acme/x/issues/531' });
+});
+
+test('github.issueCreate (contract): an unparseable URL yields number null — never a fabricated one', async () => {
+  // A caller is about to write `Closes #N`. A guessed number would link the PR to
+  // somebody else's ticket, which is worse than having no number at all.
+  setSpawn(() => ({ status: 0, stdout: 'created, see the dashboard\n', stderr: '' }));
+  const r = await github.issueCreate({ project: 'acme/x', title: 'T' });
+  assert.equal(r.number, null);
+  assert.equal(r.url, 'created, see the dashboard');
+});
+
+test('github.issueCreate (contract): a transport failure normalises to { number: null, url: null, error } — never a throw', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 403\n' }));
+  const r = await github.issueCreate({ project: 'acme/x', title: 'T' });
+  assert.deepEqual(r, { number: null, url: null, error: 'HTTP 403' });
+});
+
+test('gitlab.issueCreate (contract): returns { number, url } from iid + web_url', async () => {
+  const r = await gitlab.issueCreate({
+    project: 'grp/x', title: 'T', body: 'B', labels: ['type::bug'],
+    token: PLACEHOLDER_CREDENTIAL,
+    fetchImpl: async () => ({ ok: true, status: 201, json: async () => ({ iid: 77, web_url: 'https://gitlab.test/grp/x/-/issues/77' }) }),
+  });
+  assert.deepEqual(r, { number: 77, url: 'https://gitlab.test/grp/x/-/issues/77' });
+});
+
+test('gitlab.issueCreate (contract): a transport failure normalises the same way', async () => {
+  const r = await gitlab.issueCreate({
+    project: 'grp/x', title: 'T', token: PLACEHOLDER_CREDENTIAL,
+    fetchImpl: async () => { throw new Error('ECONNRESET'); },
+  });
+  assert.equal(r.number, null);
+  assert.equal(r.url, null);
+  assert.match(r.error, /ECONNRESET/);
+});
+
+// The one deliberate divergence from `mrCreate`'s never-throws rule, and the reason
+// it is deliberate: a refused approval label is a POLICY refusal, not an outage. A
+// caller that gets `{ error }` back may reasonably retry; a caller that tried to
+// self-approve must not be handed something retryable.
+test('issueCreate (contract): the approval refusal THROWS on both providers, unlike a transport failure', async () => {
+  await assert.rejects(() => github.issueCreate({ project: 'a/b', title: 'T', labels: ['status:approved'] }), /HUMAN signature/);
+  await assert.rejects(() => gitlab.issueCreate({ project: 'a/b', title: 'T', labels: ['status::approved'] }), /HUMAN signature/);
+});
