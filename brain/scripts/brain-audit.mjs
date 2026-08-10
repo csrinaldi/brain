@@ -49,7 +49,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
-import { isAfterBaseline, selectIssueLinkBody } from './lib/audit-helpers.mjs';
+import { isAfterBaseline, selectIssueLinkBody, auditedBase, auditedTip } from './lib/audit-helpers.mjs';
 import { readRecordObservations } from './memory/lib/store.mjs';
 import { makeGit } from './governance/postmerge/resolution.mjs';
 // The first-parent merge walk (EVIDENCE + VERDICT layers) is SHARED with
@@ -363,9 +363,27 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // (REQ-D2-10a): append the human-gate remediation so the [FAIL] line is
       // self-documenting (design §15.6a).
       if (survivingNames.includes('adrPresence')) {
-        reasons += ` — resolve by reverting ${sha.slice(0, 7)}, or: `
-          + `node brain/scripts/governance/postmerge/cursor.mjs accept ${sha} `
-          + `--reason "<why the ungoverned ADR is accepted>"`;
+        // #518 — this used to print `accept ${sha} --reason "…"`, which is not a
+        // runnable command and misdescribes the verb. `accept` takes `<from> <to>`
+        // and advances the CURSOR across a WINDOW; there is no per-merge accept, and
+        // `from` is the cursor value the human asserts they reviewed (that is what
+        // gives the CAS its function), never the offending sha. The old form did not
+        // even fail on arity — `--reason` bound to `<to>` and the run printed
+        // `accept: <reason>` to stdout before dying on the non-hex target.
+        //
+        // The window is what the audit already knows, so the command is emitted from
+        // it. When the range names no base (a bare revision — a local `brain:audit`
+        // with no argument and no origin/main), the placeholder is left VISIBLY a
+        // placeholder rather than filled with a guess: a fabricated sha in a
+        // force-with-lease is worse than an obvious blank.
+        const windowBase = auditedBase(range);
+        const windowTip = auditedTip(range);
+        const acceptCmd = windowBase
+          ? `node brain/scripts/governance/postmerge/cursor.mjs accept ${windowBase} ${windowTip} `
+            + `--reason "<why the ungoverned ADR is accepted>"`
+          : 'node brain/scripts/governance/postmerge/cursor.mjs accept <cursor-sha> <target-sha> '
+            + '--reason "<why the ungoverned ADR is accepted>"  (run `cursor.mjs window` for the shas)';
+        reasons += ` — resolve by reverting ${sha.slice(0, 7)}, or ACCEPT THE WHOLE AUDITED WINDOW: ${acceptCmd}`;
       }
       console.log(`[FAIL] ${sha.slice(0, 7)} ${subject} — ${reasons}`);
 

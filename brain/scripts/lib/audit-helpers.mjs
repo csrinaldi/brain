@@ -125,3 +125,51 @@ export function auditedTip(range) {
   }
   return trimmed;
 }
+
+/**
+ * The BASE of an audit range — `auditedTip`'s mirror (issue #518).
+ *
+ *   'A..B' / 'A...B'  → 'A'
+ *   'HEAD' / 'v2.0.0' → null   (a bare revision names no base)
+ *   '..B'             → null   (an empty left side is not a base)
+ *
+ * Exists for ONE caller: the remediation line `brain-audit` prints next to a
+ * surviving `adrPresence` failure. That line used to read
+ *
+ *   cursor.mjs accept <offending-sha> --reason "…"
+ *
+ * which was wrong three times over, and the third is the one worth naming.
+ *
+ *   1. It omitted `<to>`. The CLI's contract is `accept <from> <to> --reason`.
+ *   2. It did not even fail on arity: `rest = [sha, '--reason', '<why…>']` makes
+ *      `to === '--reason'`, all three bindings truthy, `usage()` never fires —
+ *      and `acceptManually` prints `accept: <reason>` to stdout BEFORE
+ *      `advanceCursor` rejects the non-hex `to`. A success-shaped line, then a
+ *      failure.
+ *   3. It named the OFFENDING merge in the `from` position. `from` is the
+ *      human's assertion of the CURSOR value they reviewed — that is what gives
+ *      the CAS its function — and the verb advances a WINDOW, not a merge. There
+ *      is no per-merge accept. So the old line also misdescribed what accepting
+ *      does, which is the part a correct-looking fix would have preserved.
+ *
+ * `null` rather than a guess when there is no base: the caller then prints an
+ * explicitly placeholder-shaped command instead of a runnable-looking wrong one.
+ * Fabricating `HEAD~1` here would put a plausible sha in a CAS lease.
+ *
+ * Three-dot split first, same reason as `auditedTip`: `'A...B'` cut on `'..'`
+ * yields a base with a stray trailing dot.
+ *
+ * @param {string} range  A git range or bare revision.
+ * @returns {string|null} The revision the audit window starts at, or null.
+ */
+export function auditedBase(range) {
+  const trimmed = String(range).trim();
+  for (const sep of ['...', '..']) {
+    const i = trimmed.indexOf(sep);
+    if (i !== -1) {
+      const lhs = trimmed.slice(0, i).trim();
+      return lhs || null;
+    }
+  }
+  return null;
+}
