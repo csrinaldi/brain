@@ -198,6 +198,51 @@ test('gitlab.issueList returns normalized array', async () => {
   assert.deepEqual(result[0], { number: 10, title: 'GL Issue', labels: ['backend'] });
 });
 
+// #459: both verbs used to return a PREFIX of the issue list — GitHub capped at one
+// page of 100, GitLab at 50 — and every consumer read that prefix as "the issues".
+// `brain:epic:map` draws a dependency graph from it, so a truncated list makes the map
+// assert an absence of dependencies it never looked for. Silent truncation, same class
+// as the unpaginated `prReviews` fetch that dropped the latest verdict.
+
+test('#459: github.issueList paginates — an unpaginated fetch returned a silent prefix', async () => {
+  let argv = null;
+  setSpawn((cmd, args) => {
+    argv = args;
+    return { status: 0, stdout: '[]', stderr: '' };
+  });
+  await github.issueList({ project: 'o/r', state: 'open' });
+  assert.ok(argv.includes('--paginate'), '`gh api` does not auto-paginate: without this flag the list stops at page 1');
+});
+
+test('#459: gitlab.issueList follows pages until a short one', async () => {
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ iid: i + 1, title: `t${i + 1}`, labels: [] }));
+  const page2 = [{ iid: 101, title: 't101', labels: [] }];
+  const seen = [];
+  setSpawn((cmd, args) => {
+    const endpoint = args[args.length - 1];
+    seen.push(endpoint);
+    const page = Number(endpoint.match(/[&?]page=(\d+)/)[1]);
+    return { status: 0, stdout: JSON.stringify(page === 1 ? page1 : page === 2 ? page2 : []), stderr: '' };
+  });
+
+  const result = await gitlab.issueList({ project: 'g/r', state: 'open' });
+
+  assert.equal(result.length, 101, 'the second page must be fetched and appended, not dropped');
+  assert.equal(result[100].number, 101);
+  assert.equal(seen.length, 2, 'a short page terminates the walk — it must not keep asking for empty pages');
+});
+
+test('#459: gitlab.issueList stops after a single short page — no wasted round-trip', async () => {
+  let calls = 0;
+  setSpawn(() => {
+    calls += 1;
+    return { status: 0, stdout: JSON.stringify([{ iid: 10, title: 'GL Issue', labels: [] }]), stderr: '' };
+  });
+  const result = await gitlab.issueList({ project: 'g/r', state: 'open' });
+  assert.equal(result.length, 1);
+  assert.equal(calls, 1);
+});
+
 // ── mrList ───────────────────────────────────────────────────────────────────────
 
 test('github.mrList returns headBranch from head.ref', async () => {
