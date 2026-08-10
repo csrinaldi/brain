@@ -66,8 +66,8 @@ import { makeGit } from './governance/postmerge/resolution.mjs';
 // adrPresence PASS. A source-scan test in brain-audit.test.mjs keeps the
 // helper from returning (re-pointed at lib/merge-walk.mjs, issue #324 Phase 2).
 import {
-  resolvedSkipLine, listMerges, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge,
-  resolveBaseline, makeGitIsAncestor, countUnauditedNonMerges,
+  resolvedSkipLine, listAuditedCommits, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge,
+  resolveBaseline, makeGitIsAncestor,
 } from './lib/merge-walk.mjs';
 // Tier resolution (issue #358 Q5, REQ-TIER-9): the audit path is the rung-2/
 // rung-3 enforcement surface (release.yml's pre-tag gate, governance-postmerge.yml's
@@ -232,39 +232,27 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // "the range genuinely has zero merges" (→ exit 0, below).
     let walk;
     try {
-      walk = listMerges(range, cwd);
+      walk = listAuditedCommits(range, cwd);
     } catch (err) {
       console.log(`[FAIL] governance:audit-uncomputable — could not compute merge range ${range}: ${err.message}`);
       process.exit(2);
     }
-    // #518 residual (2) — SAY WHAT WAS NOT LOOKED AT.
+    // #518 stood here: an advisory `[WARN] N first-parent commit(s) … were NOT
+    // audited`, counting what the merges-only walk skipped. It is gone because
+    // the walk no longer skips anything — `listAuditedCommits` enumerates the
+    // whole first-parent line, so the count it reported is structurally zero and
+    // a warning that can never fire is a protection that only looks like one.
     //
-    // The walk enumerates `--first-parent --merges`. A squash merge lands as a
-    // single-parent commit, so it is never in the audited set — and on a clean
-    // window the cursor then advances past it, permanently. Until the walk is
-    // widened (#518, a design change: the exemption model keys on `sha^1..sha`,
-    // which for a linear commit is just its own diff), the honest thing the audit
-    // can do is stop reporting a window clean without saying how much of it it
-    // never read.
-    //
-    // Advisory ONLY. It does not touch the verdict, the exit code or the cursor.
-    // Making it fail would halt the cursor on 33 commits of existing history and
-    // turn `cursor.mjs accept` into routine — the erosion #518 already names.
-    const skipped = countUnauditedNonMerges(range, cwd);
-    if (skipped === null) {
-      console.log('[WARN] could not count the first-parent commits this audit does not enumerate — '
-        + 'coverage over this window is unknown (#518)');
-    } else if (skipped > 0) {
-      console.log(`[WARN] ${skipped} first-parent commit(s) in this range are NOT merges and were NOT audited `
-        + '— squash/rebase merges are invisible to `--first-parent --merges`, and the cursor advances past them '
-        + '(#518). This window is reported over the merges only.');
-    }
-
-    if (walk.merges.length === 0) {
-      console.log(`[INFO] No merge commits found in range: ${range}`);
+    // What replaces it is not another runtime line but a SOURCE guard
+    // (`brain-audit.test.mjs`): no enumerator on the audited path may carry
+    // `--merges` again. The completeness is a property of the command, so that is
+    // where it is pinned — a runtime re-count would re-run the same git query and
+    // agree with itself.
+    if (walk.commits.length === 0) {
+      console.log(`[INFO] No commits found on the audited first-parent line in range: ${range}`);
       process.exit(0);
     }
-    const { merges, windowFrom, windowTo } = walk;
+    const { commits: merges, windowFrom, windowTo } = walk;
 
     let failCount = 0;          // [FAIL] lines of ANY class — governs exit 1.
     let nominableTreeKeyedCount = 0; // tree-keyed survivors whose revert does NOT resurrect a payload (auto-revert-nominable, §15.5).

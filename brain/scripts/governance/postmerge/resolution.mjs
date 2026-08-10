@@ -146,27 +146,35 @@ function normDiff(git, a, b) {
 }
 
 /**
- * The first-parent merges strictly after `offender`, up to and including
- * `tip` — exactly the set brain-audit tracks:
- * `git rev-list --first-parent --merges <offender>..<tip>`. Enumeration
- * order does not matter; every candidate is checked.
+ * The commits on the audited first-parent line strictly after `offender`, up to
+ * and including `tip` — exactly the set brain-audit tracks:
+ * `git rev-list --first-parent <offender>..<tip>`. Enumeration order does not
+ * matter; every candidate is checked.
  *
- * LIVENESS GAP (J-2, documented not fixed) — this enumerates
- * `--first-parent --merges` ONLY, so a revert landing as a squash-merge, a
- * rebase-merge, or a direct non-merge push is NEVER enumerated here, no
- * matter what it reverted. `isResolvedAt` then falls through to
- * `{ resolved: false }` → the human gate (`accept --reason`). This is
- * fail-CLOSED (a liveness gap — more human-gate load — not a security
- * hole: no forgery slips through, the offender just never auto-clears).
- * brain merges PRs with `--merge` (design §6), so its own revert PRs are
- * first-parent merges and ARE seen; a repository using Squash or Rebase
- * merge for revert PRs would route 100% of its genuine reverts to the
- * human gate. Measured (brain `git log`, this branch): 105 first-parent
- * merges, 0 non-merge reverts — the gap is real but currently unexercised
- * here.
+ * J-2 IS CLOSED (issue #518). This carried `--merges`, so a revert landing as a
+ * squash, a rebase-merge, or a direct non-merge push was NEVER enumerated here,
+ * whatever it reverted — `isResolvedAt` fell through to `{ resolved: false }` and
+ * routed a genuine revert to the human gate. That was fail-CLOSED and therefore
+ * survivable, which is why it was documented rather than fixed.
+ *
+ * Two things changed. First, its premise expired: the docstring reassured that
+ * brain merges with `--merge` so "the gap is real but currently unexercised
+ * here", measured at 105 first-parent merges and 0 non-merge reverts. Re-measured
+ * over the 60 days to 2026-08-10: **31 single-parent commits on the first-parent
+ * line**. Both directions are live now.
+ *
+ * Second — and this is why it could not stay documented — the OFFENDER side
+ * widened in the same change. Two enumerators that disagree about what a window
+ * contains is worse than either narrow one: an offender enumerated by
+ * `listAuditedCommits` whose genuine revert is invisible here would be reported
+ * and never clear. They move together or not at all.
+ *
+ * Note for anyone following the old pointer: J-2's reassurance that "no forgery
+ * slips through" described THIS function's direction. It never applied to the
+ * offender-side walk, where the same filter was fail-OPEN.
  */
 function firstParentMergesAfter(git, offender, tip) {
-  const out = git.orThrow(['rev-list', '--first-parent', '--merges', `${offender}..${tip}`]);
+  const out = git.orThrow(['rev-list', '--first-parent', `${offender}..${tip}`]);
   return out.split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
@@ -273,15 +281,19 @@ export function isResolvedAt(offender, tip, { git }) {
 }
 
 /**
- * The first-parent merges in the CLOSED window `[from, to]` — inclusive of
- * BOTH endpoints, unlike `firstParentMergesAfter`'s half-open `(from, to]`.
- * Enumerated as `${from}^1..${to}` so the merge AT `from` is itself counted.
+ * The audited first-parent commits in the CLOSED window `[from, to]` — inclusive
+ * of BOTH endpoints, unlike `firstParentMergesAfter`'s half-open `(from, to]`.
+ * Enumerated as `${from}^1..${to}` so the commit AT `from` is itself counted.
+ *
+ * `--merges` dropped in the same pass as its sibling above (issue #518): the
+ * reverter-exemption's signed count and the audited set must range over the same
+ * commits, or a candidate can be exempted by a window it was never measured in.
  * This is the range the FULL-WINDOW reverter-skip primitive needs: its signed
  * count must see the offender sitting at the window base BEHIND a cleanup
  * revert that lands at the tip. PURE-READ.
  */
 function firstParentMergesInclusive(git, from, to) {
-  const out = git.orThrow(['rev-list', '--first-parent', '--merges', `${from}^1..${to}`]);
+  const out = git.orThrow(['rev-list', '--first-parent', `${from}^1..${to}`]);
   return out.split('\n').map((s) => s.trim()).filter(Boolean);
 }
 

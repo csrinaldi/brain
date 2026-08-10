@@ -158,47 +158,55 @@ does not control. The gate is now checkable: the danger-path e2e suite (#401) mu
 
 ## Post-merge audit coverage
 
-- **The audit sees MERGE COMMITS ONLY. A squash or rebase merge is invisible to it, and the
-  cursor advances past it — permanently.** `listMerges` selects
-  `git log --first-parent --merges`, so a single-parent commit is never enumerated: none of
-  `diffSize` / `issueLink` / `adrPresence` / `memoryPresence` / `writesGoverned` ever runs on
-  it. On a clean window the cursor then moves to the tip, and because the cursor only advances,
-  those commits fall outside every future window.
+- **CLOSED by #518 (2026-08-10).** Kept here as a record, because the shape of the defect is
+  more useful than its absence.
+
+  The audit used to see MERGE COMMITS ONLY. `listMerges` selected
+  `git log --first-parent --merges`, so a squash — a single-parent commit — was never
+  enumerated: none of `diffSize` / `issueLink` / `adrPresence` / `memoryPresence` /
+  `writesGoverned` ever ran on it. On a clean window the cursor then advanced to the tip, and
+  because the cursor only moves forward, those commits fell outside every future window.
+  Permanently un-re-auditable.
 
   Measured on `origin/main`, 60 days to 2026-08-10:
 
-  | | count |
-  |---|---|
-  | first-parent commits | 101 |
-  | merges — what the audit enumerates | 70 |
-  | **never audited** | **33** (32 carrying a `(#N)` PR reference) |
+  | | before | after |
+  |---|---|---|
+  | first-parent commits | 112 | 112 |
+  | enumerated by the walk | 79 | **112** |
+  | never audited | **33** (32 carrying a `(#N)` PR reference) | **0** |
 
-  **What this does and does not mean.** These commits still passed the PR-time gates, which are
-  required contexts on `main` — nothing merged ungoverned. What is missing is the *second* line:
-  `brain-audit` exists precisely so the guarantee does not rest on CI having been configured
-  correctly (ADR-0015's ladder), and for a third of recent history it does rest on exactly that.
-  There is also no remediation path for them, since `[FAIL-SHA]` can only nominate a commit the
-  audit enumerated.
+  **The fix was not a filter edit**, which is why it stood open through three PRs. Every
+  exemption predicate is built on `<sha>^1..<sha>`, and the question was what that means with no
+  second parent. The answer turned out to make the model *simpler*, not harder: `^1` resolves for
+  any non-root commit, and for a linear one it is just its own diff. `sign`, `netPresent`,
+  `netAddFull` and `addedPathsAbsentAt` needed no change. What had to move — together — were the
+  three ENUMERATORS: the offender walk, and `firstParentMerges{After,Inclusive}` on the revert
+  side. Widening one alone leaves the two disagreeing about what a window contains, which is
+  worse than either narrow one.
 
-  **Mitigation in place**, and it is a report rather than a fix: the audit now emits
-  `[WARN] N first-parent commit(s) … were NOT audited`. It does not change the verdict, the exit
-  code or the cursor — failing would halt the cursor over existing history and make
-  `cursor.mjs accept` routine, which is its own erosion.
+  **The `[WARN] N first-parent commit(s) … were NOT audited` line is gone**, along with the
+  operator instruction to disable *Squash merging* in the repository settings. Both were option
+  (a) — a stopgap the ticket recorded as not durable: it rested on a platform setting nobody
+  enforces and a warning nobody had to act on, and it bought nothing for a consumer who
+  squash-merges by policy, which is most of them.
 
-  **Operator action while this stands:** disable *Squash merging* and *Rebase merging* in the
-  repository's merge-button settings, leaving *Merge commits* only. That is a platform setting,
-  not something brain can enforce — `brain:protect` arms branch protection, not merge methods.
+  **J-2 is closed in the same change.** It was the same `--merges` filter on the *revert* side —
+  fail-CLOSED, so a genuine revert was simply never seen and the offender never auto-cleared. Its
+  docstring's premise had also expired: "brain merges PRs with `--merge` … the gap is currently
+  unexercised here", measured at 0 non-merge reverts. Re-measured: 33.
 
-  **The real fix is #518**: widen the walk to first-parent non-merges. It is held because the
-  reverter-exemption model keys on `<sha>^1..<sha>` — a merge's contribution against its first
-  parent — and for a linear commit that is simply its own diff, so `netAddFull`,
-  `addedPathsAbsentAt` and `[FAIL-SHA]` nomination each need re-deriving. A design change, not a
-  filter change.
+- **A range that reaches the ROOT commit is uncomputable.** The widened walk rests on `<sha>^1`
+  resolving, which is true of every commit except the root, so `brain:audit HEAD` over a
+  repository's entire history fails closed rather than silently narrowing. Every production
+  caller already excludes it — the cursor is seeded at `rev-list --max-parents=0` and
+  `release.yml` falls back to the same, both of which produce `root..HEAD`.
 
-  **Not the J-2 gap.** J-2 (`resolution.mjs`) is the same `--merges` filter on the *revert* side
-  and is fail-CLOSED — an offender simply never auto-clears. This one is fail-OPEN. J-2's own
-  note that "brain merges PRs with `--merge` … the gap is currently unexercised here" has also
-  expired: 32 squashes in 60 days.
+- **Every commit on the integration line is now governed, including direct pushes.** This is the
+  intended consequence and worth stating plainly: a commit pushed straight to the default branch
+  with no issue reference now fails `issueLink`, where before it was invisible. `--first-parent`
+  is untouched, so a `Part of #N` commit inside a merged feature branch is still not audited as
+  though it had landed on its own.
 
 ## Agent / SDD neutrality
 

@@ -1,8 +1,8 @@
-// merge-walk.mjs — the shared first-parent merge walk (EVIDENCE + VERDICT
+// merge-walk.mjs — the shared first-parent walk (EVIDENCE + VERDICT
 // layers only, design §"Technical Approach", issue #324/M9).
 //
 // EXTRACTED VERBATIM from brain-audit.mjs (issue #324 Phase 1): the walk that
-// enumerates first-parent merges and re-derives each one's governance verdict
+// enumerates the audited first-parent line and re-derives each commit's governance verdict
 // is now the SAME code both `brain-audit` (enforcement) and `brain-metrics`
 // (reporting) run — duplicating it would guarantee the exact drift between
 // measurement and enforcement the metrics verb exists to prevent (design D1).
@@ -14,7 +14,7 @@
 // throw, brain-metrics catches per-merge and counts an `uncomputable` row.
 //
 // Layer split (design table):
-//   EVIDENCE  — listMerges, readMergeParent, readMergeDiff, fetchPrMeta.
+//   EVIDENCE  — listAuditedCommits, readMergeParent, readMergeDiff, fetchPrMeta.
 //               Enumerate merges, window anchors, per-merge parents/numstat/
 //               changed-files/body, one prView() per merge for labels+body.
 //   VERDICT   — evaluateMerge, resolvedSkipLine. Runs the 4 checks,
@@ -129,81 +129,81 @@ export function resolvedSkipLine(sha, subject, { git, tip }) {
 }
 
 /**
- * Enumerate the first-parent merges in `range` plus the window anchors every
- * skip/exemption predicate shares (design "Data Flow").
+ * Enumerate the commits on the audited first-parent line in `range`, plus the
+ * window anchors every skip/exemption predicate shares (design "Data Flow").
+ *
+ * `--first-parent` AND NOTHING ELSE (issue #518). This used to carry `--merges`
+ * as well, which selects commits with MORE THAN ONE PARENT — so a squash merge,
+ * landing as a single-parent commit, was never enumerated. Not evaluated and
+ * passed: never looked at. None of diffSize / issueLink / adrPresence /
+ * memoryPresence / writesGoverned ran on it, the window reported clean by not
+ * reporting that commit at all, and the cursor then advanced past it. Because
+ * the cursor only moves forward, every such commit became permanently
+ * un-re-auditable.
+ *
+ * Measured on `origin/main` over the 60 days to 2026-08-10: 101 first-parent
+ * commits, 70 enumerated, **31 never audited** — 32 of them carrying a `(#N)`
+ * PR reference, among them #404, #433, #448, #462 and #401. Governance work.
+ *
+ * `--first-parent` is still load-bearing and is NOT what was wrong: it keeps the
+ * walk on the INTEGRATION line, so a slice merge nested inside a feature branch
+ * is not audited as though it had landed on main. Dropping it would fail every
+ * `Part of #N` commit inside a merged branch.
+ *
+ * WHY THIS IS SAFE FOR THE EXEMPTION MODEL, which is what made it a design
+ * change rather than a filter edit: every predicate is built on `${sha}^1..${sha}`,
+ * and `^1` resolves for ANY non-root commit — for a single-parent commit it is
+ * simply its own diff, which is if anything less ambiguous than a merge's
+ * contribution against its first parent. `sign`, `netPresent`, `netAddFull` and
+ * `addedPathsAbsentAt` therefore need no change. What needed changing is the
+ * three ENUMERATORS, and they had to move together: this one on the offender
+ * side, and `firstParentMerges{After,Inclusive}` on the revert side
+ * (`resolution.mjs`). Widening one alone would leave the two disagreeing about
+ * what a window contains.
  *
  * Range-load via the throwing seam (salvaged R-2 exit-2 site, re-derived
  * against git-seam.mjs — never cherry-picked; design §8): a throwing call
  * distinguishes "git could not compute the range" (infra → fail-closed) from
- * "the range genuinely has zero merges" (→ `merges: []`, a caller decision).
+ * "the range genuinely has zero commits" (→ `commits: []`, a caller decision).
+ *
+ * NAMED for what it enumerates. It was `listMerges` returning `{ merges }`, and
+ * keeping that would have propagated the untruth into every caller's
+ * destructuring — the audited set is no longer the merges.
  *
  * @param {string} range
  * @param {string} cwd
- * @returns {{ merges: {sha: string, subject: string}[], windowFrom: string|null, windowTo: string }}
+ * @returns {{ commits: {sha: string, subject: string}[], windowFrom: string|null, windowTo: string }}
  */
-/**
- * The first-parent commits in `range` that `listMerges` does NOT enumerate —
- * issue #518 residual (2).
- *
- * `listMerges` selects `--first-parent --merges`, i.e. commits with more than one
- * parent. A SQUASH merge lands as a single-parent commit, so it is never in the
- * audited set: no check runs on it, and the cursor then advances past it. The
- * audit reports the window clean by not reporting that commit at all, and because
- * the cursor only moves forward, the commit is permanently un-re-auditable.
- *
- * Measured on `origin/main` over 60 days: 70 merges, **33 first-parent commits the
- * audit never enumerated** (32 of them carrying a `(#N)` PR reference).
- *
- * NOT the J-2 gap, and the difference is the reason this exists. J-2
- * (`resolution.mjs`) is the same `--merges` filter on the REVERT side: a revert
- * that lands as a squash is not seen, so an offender never auto-clears and is
- * routed to the human gate — fail-CLOSED, "no forgery slips through". Here the
- * OFFENDER is the one not seen, and nothing looks at it at all — fail-OPEN.
- * Reading one as the other is how this stayed unrecorded.
- *
- * THIS FUNCTION DOES NOT CLOSE THE GAP. It makes the audit say what it did not
- * look at. Closing it means deciding what `netAddFull`, `addedPathsAbsentAt` and
- * `[FAIL-SHA]` nomination mean for a commit with no second parent — the exemption
- * model is built on `${sha}^1..${sha}`, which for a linear commit is just its own
- * diff. That is a design change (#518), not a report.
- *
- * Never throws on a bad range for the same reason the count is advisory: an
- * unreadable count must not turn a healthy audit red. It returns `null`
- * (unknown), which the caller reports as unknown rather than as zero.
- *
- * @param {string} range
- * @param {string} cwd
- * @returns {number|null} how many first-parent commits the audit skipped, or null.
- */
-export function countUnauditedNonMerges(range, cwd) {
-  const r = gitTry(['log', '--first-parent', '--no-merges', '--format=%H', range], { cwd });
-  if (r.status !== 0) return null;
-  return r.stdout.split('\n').filter(Boolean).length;
-}
-
-export function listMerges(range, cwd) {
-  const log = gitOrThrow(['log', '--first-parent', '--merges', '--format=%H%x09%s', range], { cwd }).trim();
+export function listAuditedCommits(range, cwd) {
+  const log = gitOrThrow(['log', '--first-parent', '--format=%H%x09%s', range], { cwd }).trim();
   const windowTo = auditedTip(range);
-  if (!log) return { merges: [], windowFrom: null, windowTo };
+  if (!log) return { commits: [], windowFrom: null, windowTo };
 
-  const merges = log.split('\n').filter(Boolean).map(line => {
+  const commits = log.split('\n').filter(Boolean).map(line => {
     const i = line.indexOf('\t');
     return { sha: line.slice(0, i), subject: line.slice(i + 1) };
   });
 
   // The reverter-skip is FULL-WINDOW (design §15.3): its signed count must see
   // an offender sitting at the window base BEHIND a tip-most cleanup revert.
-  // `netAddFull` enumerates `${from}^1..${to}`, so `from` is the OLDEST merge in
-  // the window (git log is newest-first) — a merge, so `from^1` always resolves,
-  // and the inclusive window then covers every audited merge. `to` is always HEAD.
-  const windowFrom = merges[merges.length - 1].sha;
-  return { merges, windowFrom, windowTo };
+  // `netAddFull` enumerates `${from}^1..${to}`, so `from` is the OLDEST commit in
+  // the window (git log is newest-first) and `from^1` must resolve. It does for
+  // every non-root commit; a range reaching the root commit is refused upstream
+  // by `readMergeParent`, fail-closed, rather than silently narrowed here.
+  const windowFrom = commits[commits.length - 1].sha;
+  return { commits, windowFrom, windowTo };
 }
 
 /**
- * Resolve a merge's first parent — a `--merges`-qualified commit always has
- * ≥2 parents; reaching a missing parent1 means the local git state cannot
- * answer (never a silent skip, design §5). Fail-closed: throws with the exact
+ * Resolve an audited commit's first parent.
+ *
+ * Every non-root commit has one, whatever its shape (issue #518) — this used to
+ * say "a `--merges`-qualified commit always has ≥2 parents", which was true of
+ * the old walk and is not of this one. The guarantee it rests on is weaker and
+ * still sufficient: `%P` is empty ONLY for the root commit. So the throw below
+ * now fires exactly when the range reaches the root, which is genuinely
+ * uncomputable for a diff-against-parent model — never a silent skip (design
+ * §5). Fail-closed: throws with the exact
  * message brain-audit's top-level catch prints (byte-identical to pre-
  * extraction output — the catch prepends `[FAIL] governance:audit-uncomputable
  * — ` to `err.message`).
