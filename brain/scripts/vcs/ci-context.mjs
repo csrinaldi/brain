@@ -11,7 +11,7 @@
 // Never throws: an internal failure (fetch error, malformed JSON) yields `null` on the
 // affected fields only, never an exception (Decision 2 / REQ-CIC-2).
 
-import { prView as githubPrView } from './providers/github.mjs';
+import { getVcs } from './cli.mjs';
 import { gitlabApiFetch } from './gitlab-api.mjs';
 
 /**
@@ -49,7 +49,18 @@ async function loadGithubContext(env, deps) {
   // Guard against a malformed PR_NUMBER: '' → null, 'x' → null (never NaN → prView).
   const prNumber =
     env.PR_NUMBER && Number.isInteger(Number(env.PR_NUMBER)) ? Number(env.PR_NUMBER) : null;
-  const prView = deps.prView ?? githubPrView;
+  // THROUGH THE PORT, not the module (issue #130, the residual #479 did not name).
+  //
+  // This used to call `githubPrView` directly, which bypasses `getVcs()` — and
+  // `getVcs()` is where #479 put the credential resolution. The direct call therefore
+  // reached `gh` with whatever the environment happened to hold, which is exactly the
+  // ambient-auth defect #479 removed one layer up. It looked fine only because every
+  // job that needed it also set `GH_TOKEN`, so `gh` authenticated by accident.
+  //
+  // Measured: migrating `issue-link` to declare only `VCS_TOKEN` turned this job red
+  // with "MR body uncomputable (context API fetch failed)" — the seam's last hole,
+  // found by removing the accident that was covering it.
+  const prView = deps.prView ?? (async (args) => (await getVcs({ provider: 'github' })).prView(args));
 
   let labels = null;
   let body = null;

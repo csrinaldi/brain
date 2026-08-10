@@ -21,20 +21,26 @@ permissions:
 jobs:
   # ── Invariant 1 — Every PR links an approved issue ──────────────────────────
   #
-  # Chained-PR awareness: slice PRs target a feature/tracker branch (base != main)
-  # and legitimately carry "Part of #N" instead of "Closes #N".  The integration
-  # PR (base == main) must still use Closes|Fixes|Resolves #N.  Both patterns
-  # must reference an issue labelled status:approved.
+  # Chained-PR awareness: slice PRs target a feature/tracker branch (base != the
+  # default branch) and legitimately carry "Part of #N" instead of "Closes #N".
+  # The integration PR must still use Closes|Fixes|Resolves #N. Both patterns must
+  # reference an issue carrying the resolved approved label.
   #
-  # KNOWN DIVERGENCE (issue #231 A2 phase 2 addendum, pre-existing, out of
-  # scope here): this job compares BASE_BRANCH against the LITERAL 'main',
-  # not the repo's actual default branch — a consumer whose default branch is
-  # not 'main' inherits the wrong policy here. The Node run-check.mjs
-  # issue-link case (used by GitLab, and by this run-check.test.mjs's parity
-  # table) was fixed to compare against ctx.defaultBranch (the real default
-  # branch) instead — see run-check.mjs's "THE ADDENDUM GOTCHA" comment.
-  # Porting this bash job to the same ctx.defaultBranch-aware policy is a
-  # recorded follow-up, not done in this addendum (this job stays bash).
+  # THE RULE LIVES IN ONE PLACE (issue #130). This job used to be ~50 lines of
+  # inline bash implementing that policy a second time, while GitLab ran
+  # `run-check.mjs issue-link`. Two implementations of one rule is the defect #340
+  # records, and here it had already produced a REAL divergence, recorded in this
+  # file's own comment as a follow-up: the bash compared BASE_BRANCH against the
+  # LITERAL 'main', so a consumer whose default branch is `master` or `develop`
+  # got the SLICE policy on their integration PRs — "Part of #N" accepted where a
+  # closing keyword was required. The gate silently weakened, on exactly the
+  # consumers #130 exists to serve.
+  #
+  # run-check.mjs derives it from ctx.defaultBranch and FAILS CLOSED when that is
+  # uncomputable, rather than assuming. It also distinguishes "could not read the
+  # PR body" (infra) from "no issue reference found" (governance) — a distinction
+  # the bash could not make, and the one that made #522/#523 read as a governance
+  # failure when the reader had simply come back empty.
   issue-link:
     name: issue-link
     runs-on: ubuntu-latest
@@ -43,58 +49,18 @@ jobs:
 
       - name: Verify approved issue link
         env:
-          GH_TOKEN: ${{ github.token }}
+          # VCS_TOKEN, not GH_TOKEN (#479): this step now reaches the server
+          # through the port, which resolves brain's one neutral credential.
+          VCS_TOKEN: ${{ github.token }}
+          # PR_NUMBER lets ci-context fetch the body API-primary; PR_BODY stays as
+          # the documented fallback for when that fetch is uncomputable.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
-        run: |
-          set -euo pipefail
-
-          # grep exits 1 on no-match; || true prevents -e from aborting here —
-          # we handle the empty case explicitly below.
-
-          if [ "$BASE_BRANCH" = "main" ]; then
-            # Integration PR to main: must use a closing keyword (Closes / Fixes / Resolves).
-            # This closes the tracked issue and provides a definitive governance link.
-            num=$(printf '%s' "$PR_BODY" \
-              | grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?) +#[0-9]+' \
-              | grep -oE '[0-9]+' | head -n1 || true)
-            if [ -z "$num" ]; then
-              echo "::error::PR to main must have a Closes/Fixes/Resolves #<issue> reference."
-              exit 1
-            fi
-          else
-            # Slice PR (base != main): accept "Part of #N" for chained-PR flows.
-            # Also accept a closing keyword so slice PRs that target the tracker
-            # branch directly still work.
-            num=$(printf '%s' "$PR_BODY" \
-              | grep -oiE 'part +of +#[0-9]+' \
-              | grep -oE '[0-9]+' | head -n1 || true)
-            if [ -z "$num" ]; then
-              num=$(printf '%s' "$PR_BODY" \
-                | grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?) +#[0-9]+' \
-                | grep -oE '[0-9]+' | head -n1 || true)
-            fi
-            if [ -z "$num" ]; then
-              echo "::error::Slice PR must have a Part of #<issue> (or Closes/Fixes/Resolves) reference."
-              exit 1
-            fi
-          fi
-
-          # In both cases the referenced issue must carry the resolved approved
-          # label. Sourced from the config-driven resolver (design.md Decision
-          # 4, REQ-A2-3, issue #231 A2 phase 5) via approved-label.mjs's CLI
-          # printer — never a hardcoded literal, so a consumer-set
-          # governance.approvedLabel value is honored here too.
-          APPROVED_LABEL=$(node brain/scripts/governance/approved-label.mjs github)
-
-          # Handle gh failure explicitly: under `set -e` an unguarded non-zero
-          # would abort the step with no actionable message.
-          labels=$(gh api "repos/${{ github.repository }}/issues/${num}" --jq '.labels[].name') \
-            || { echo "::error::Could not fetch issue #${num} (gh api failed — does it exist?)."; exit 1; }
-          if ! printf '%s\n' "$labels" | grep -qx "$APPROVED_LABEL"; then
-            echo "::error::Issue #${num} is not labeled ${APPROVED_LABEL}."
-            exit 1
-          fi
+          # The repo's REAL default branch — repo metadata, never trigger identity
+          # (ADR-0016 ruling 1). This is the input the literal 'main' used to be.
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node brain/scripts/governance/run-check.mjs issue-link
 
   # ── Invariant 2 — PR diff fits within the tiered review budget ──────────────
   #

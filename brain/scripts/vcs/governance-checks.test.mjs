@@ -243,20 +243,29 @@ test('memory-gate and decision-gate are present in the parsed governance.yml job
 // (brain/scripts/governance/approved-label.mjs) is the sanctioned non-Node
 // consumer path — no bash config-parser was invented.
 
-test('REQ-A2-3: governance.yml issue-link job sources the approved label from approved-label.mjs (github), never a hardcoded literal', () => {
-  const yamlPath = resolve(REPO_ROOT, '.github/workflows/governance.yml');
-  const yamlText = readFileSync(yamlPath, 'utf8');
+test('REQ-A2-3: governance.yml issue-link resolves the approved label from config, never a hardcoded literal', () => {
+  // The REQUIREMENT is "no runtime code, bash included, hardcodes the label" — not
+  // "the job shells out to approved-label.mjs". That was the MECHANISM, and it was
+  // the mechanism because the job was bash and bash has no config parser.
+  //
+  // Since #130 the job runs `run-check.mjs issue-link`, which resolves the label
+  // through `resolveApprovedLabel(readConfig(), ctx.provider)` — the same resolver
+  // approved-label.mjs's CLI printer wraps, reached directly instead of through a
+  // subprocess. The requirement is better served, so the assertion is rewritten to
+  // state the requirement rather than to pin the old shape.
+  const yamlText = readFileSync(resolve(REPO_ROOT, '.github/workflows/governance.yml'), 'utf8');
   const jobStart = yamlText.indexOf('\n  issue-link:');
   assert.ok(jobStart !== -1, 'issue-link job not found in governance.yml');
   const nextJobStart = yamlText.indexOf('\n  diff-size:', jobStart);
   const block = nextJobStart === -1 ? yamlText.slice(jobStart) : yamlText.slice(jobStart, nextJobStart);
+  const code = block.replace(/^\s*#.*$/gm, '');   // prose may name the label; code may not
 
-  assert.match(
-    block, /\$\(node brain\/scripts\/governance\/approved-label\.mjs github\)/,
-    'issue-link job must source the approved label via `node brain/scripts/governance/approved-label.mjs github`'
-  );
   assert.doesNotMatch(
-    block, /'status:approved'/,
-    'issue-link job must not hardcode the literal \'status:approved\' — it must read the resolved value'
+    code, /status:approved/,
+    'the issue-link job must not name the approved label at all — it is resolved from config',
+  );
+  assert.match(
+    code, /run-check\.mjs issue-link/,
+    'the job must delegate to the portable check, which owns the resolution (#130)',
   );
 });
