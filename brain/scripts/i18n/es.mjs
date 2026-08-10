@@ -259,6 +259,8 @@ export default {
   'session.change.ambiguous':   'cambio:    ambiguo ({count}): {list}',
   'session.memory.ok':          'memoria:   engram hidratado',
   'session.memory.skip':        'memoria:   engram no disponible (omitido)',
+  'session.memory.recency.stale':   'memoria:  el registro durable más nuevo tiene {days} días — nada capturado desde entonces (ver #519)',
+  'session.memory.recency.unknown': 'memoria:  sin registro durable — no se puede determinar cuándo se capturó memoria por última vez',
   'session.manifest.restored':  'manifest:  cambios descartados (seguro)',
   'session.ticket.label':       'ticket:',
   'session.ticket.none':        '(sin memoria de ticket activa)',
