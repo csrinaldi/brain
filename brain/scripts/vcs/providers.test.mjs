@@ -274,9 +274,18 @@ test('gitlab.repoCloneUrl builds oauth2 URL', async () => {
 
 // ── patSetupUrl ──────────────────────────────────────────────────────────────────
 
+// #388 — the scope values are percent-encoded, so `read:user` reaches the URL as
+// `read%3Auser`. That is not over-caution, it is the consequence of choosing ONE
+// rule: `encodeURIComponent` per value. A narrower hand-rolled encoder that spared
+// `:` would be a list of characters someone has to keep correct, and the character
+// it eventually misses is the defect. Both standard encoders agree here —
+// `URLSearchParams` also emits `%3A` — and every conforming server percent-decodes
+// a query value before reading it.
+//
+// The comma is NOT encoded: it separates scopes, so it is structure, not data.
 test('github.patSetupUrl builds settings URL', async () => {
   const result = await github.patSetupUrl({ host: 'github.com', name: 'brain', scopes: ['read:user', 'repo'] });
-  assert.equal(result, 'https://github.com/settings/tokens/new?description=brain&scopes=read:user,repo');
+  assert.equal(result, 'https://github.com/settings/tokens/new?description=brain&scopes=read%3Auser,repo');
 });
 
 test('gitlab.patSetupUrl builds settings URL', async () => {

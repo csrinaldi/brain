@@ -652,10 +652,48 @@ export async function rerunWorkflowRun({ project, ref, workflow = 'governance.ym
   return { ok: true, runId: match.id };
 }
 
+/**
+ * Percent-encode a value that is about to be interpolated into a URL (#388).
+ *
+ * `patSetupUrl` builds a query string by hand on both providers. An unencoded
+ * `name` containing `&` does not merely look wrong — it SPLITS: `brain & co`
+ * becomes `description=brain ` plus a second, spurious ` co` parameter, and the
+ * page opens with a truncated token name the operator then saves.
+ *
+ * Scopes are encoded PER ENTRY and joined with a literal comma, never encoded as
+ * one string: the comma is the separator the provider parses, not data. Encoding
+ * it would send `repo%2Cworkflow` as a single scope name.
+ */
+const enc = (v) => encodeURIComponent(String(v));
+
+/**
+ * Percent-encode a project slug for a URL PATH, segment by segment (#388).
+ *
+ * `encodeURIComponent(project)` would be wrong here: a slug is `group/repo` — and
+ * on GitLab `group/subgroup/repo` — so encoding it whole turns the separators into
+ * `%2F` and the clone URL stops resolving. The slashes are structure; only what
+ * sits between them is data.
+ */
+const encPath = (p) => String(p).split('/').map(encodeURIComponent).join('/');
+
 export async function repoCloneUrl({ host, project, token }) {
-  return `https://x-access-token:${token}@${host || 'github.com'}/${project}.git`;
+  return `https://x-access-token:${token}@${host || 'github.com'}/${encPath(project)}.git`;
 }
 
+/**
+ * The PAT-creation page for the host the caller named (#387).
+ *
+ * This used to hardcode `github.com` and never read its own `host` parameter, so a
+ * GitHub Enterprise Server operator who passed their GHES hostname was silently
+ * sent to the PUBLIC github.com token page — where any token they created would be
+ * useless against their own server, with nothing saying why. GitLab's equivalent
+ * has always been host-driven; this is the divergence that made self-hosted GitLab
+ * work while GHES did not.
+ *
+ * `host || 'github.com'` mirrors `repoCloneUrl` directly above — the same default,
+ * spelled the same way, in the same file.
+ */
 export async function patSetupUrl({ host, name, scopes }) {
-  return `https://github.com/settings/tokens/new?description=${name}&scopes=${scopes.join(',')}`;
+  return `https://${host || 'github.com'}/settings/tokens/new`
+    + `?description=${enc(name)}&scopes=${scopes.map(enc).join(',')}`;
 }
