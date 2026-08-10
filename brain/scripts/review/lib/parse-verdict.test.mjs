@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 
 import { parseVerdict } from './parse-verdict.mjs';
 import { buildVerdict, renderVerdict } from '../verdict.mjs';
+import { reconcileBoardLabels } from '../board.mjs';
 
 test('parseVerdict: extracts head_sha, rev, verdict, and the passed-through author', () => {
   const body = [
@@ -528,4 +529,123 @@ test('#478-4: the same holds for every ESCAPED value, on BOTH decoders', () => {
     assert.equal(parsed.findings[0].evidence, v, `entry path corrupted ${JSON.stringify(v)}`);
     assert.deepEqual(parsed.sequencing, [v], `JSON path corrupted ${JSON.stringify(v)}`);
   }
+});
+
+// ── #487 — a code fence in any verdict value truncated the block ─────────────
+//
+// `FENCE_RE` had no anchor on its terminator, so the first ``` appearing ANYWHERE —
+// including in the middle of an `evidence:` value — ended the block. Not a corner case:
+// `reviewer-protocol.md:187` defines evidence as a command the reviewer actually ran
+// cold, and command output is normally fenced; `checkpoint.mjs` interpolates raw
+// `brain:audit` stdout straight into `evidence:`.
+//
+// Measured on `main` @ c9d2b36 before the fix, through the REAL chain:
+//
+//   findings 2 -> 1  |  evidence intacta: false  |  sequencing: undefined
+//   toRemove: ["seq:after-411","seq:blocked-on-412"]
+//
+// The case below is the one #478 round 5 predicted in the comment above, promoted from
+// a note into a guard.
+
+const FENCED_EVIDENCE = 'repro:\n```bash\nnpm test -- --grep x\n```\nexit 1';
+
+test('#487: a fenced value does not truncate the block — every finding survives and `sequencing` is intact', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [
+      { id: 'f1', severity: 'blocker', evidence: FENCED_EVIDENCE, cites: 'reviewer-protocol.md' },
+      { id: 'f2', severity: 'major', evidence: 'the second finding must survive', cites: 'x.md' },
+    ],
+  });
+  built.sequencing = ['seq:after-411', 'seq:blocked-on-412'];
+
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+
+  assert.equal(parsed.findings.length, 2, 'the findings list truncated at the fence');
+  assert.equal(parsed.findings[0].evidence, FENCED_EVIDENCE, 'the fenced evidence came back mangled');
+  assert.equal(parsed.findings[1].id, 'f2', 'a blocker after the fenced finding was silently dropped');
+  assert.deepEqual(parsed.sequencing, built.sequencing, '`sequencing` disappeared — indistinguishable from "no sequencing"');
+});
+
+// THE acceptance test, and the reason this ticket is data-loss rather than parsing.
+// A parser-only guard would let the same end state return through a third door: what
+// must never happen is a REAL `seq:*` label landing in `toRemove` because a verdict was
+// unreadable. board.mjs reconciles by NAME and the write is destructive.
+test('#487: a real `seq:*` label is never scheduled for deletion because a verdict carried a fence', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [{ id: 'f1', severity: 'blocker', evidence: FENCED_EVIDENCE, cites: 'x.md' }],
+  });
+  built.sequencing = ['seq:after-411', 'seq:blocked-on-412'];
+
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  const { toAdd, toRemove } = reconcileBoardLabels({
+    latestVerdict: parsed,
+    currentLabels: ['seq:after-411', 'seq:blocked-on-412', 'reviewed:revised'],
+  });
+
+  assert.deepEqual(toRemove, [], `a live label was scheduled for deletion: ${JSON.stringify(toRemove)}`);
+  assert.deepEqual(toAdd, [], 'nothing should be added — the PR already carries exactly what the verdict wants');
+});
+
+// ── Adversarial fence shapes ────────────────────────────────────────────────
+//
+// The anchor is what makes these decidable, so each one pins a DIFFERENT reason the
+// old regex was wrong. They are not variations on the case above.
+
+test('#487: an UNTERMINATED fence reads as null, never as a confident prefix (#452 guarantee)', () => {
+  const body = '```yaml\nprotocol: brain-review/1\nverdict: APPROVE\nhead_sha: abc123\n';
+  assert.equal(parseVerdict({ body }), null,
+    'a partially-read block must answer null — a truncated prefix reported as complete is the #452 defect');
+});
+
+test('#487: a fence in prose before the block no longer costs the verdict, when it carries a language tag', () => {
+  const built = buildVerdict({ headSha: 'abc123', conclusion: 'APPROVE', findings: [] });
+  const body = 'Contexto previo:\n\n```bash\nnpm test\n```\n\n' + renderVerdict(built);
+
+  // Measured on `main` @ c9d2b36 this returned NULL, and board.mjs then silently
+  // reconciles from an OLDER verdict — the third adversarial shape #487 listed. The
+  // anchored opener only accepts ``` or ```yaml, so a tagged prose fence is skipped
+  // rather than mistaken for the block. Not the goal of the fix; a consequence of it,
+  // pinned so it cannot regress unnoticed.
+  const parsed = parseVerdict({ body });
+  assert.equal(parsed?.head_sha, 'abc123', 'the verdict block must be found past a tagged prose fence');
+  assert.equal(parsed?.verdict, 'APPROVE');
+});
+
+// KNOWN LIMITATION, pinned rather than fixed — see the PR for why it is not this
+// ticket's call. An UNTAGGED ``` fence in prose above the verdict IS a valid opener, so
+// it becomes "the first fence" and the verdict is never located. Behaviour is identical
+// before and after #487; closing it means letting the reader scan past a fence that does
+// not parse, which contradicts design.md §E2 rule 17 ("only the first fence is ever
+// read") — a documented rule with a stated reason, not an oversight to patch in passing.
+//
+// This assertion exists so the day someone changes rule 17, this file objects.
+test('#487: an UNTAGGED prose fence still shadows the verdict block — documented, not fixed here', () => {
+  const built = buildVerdict({ headSha: 'abc123', conclusion: 'APPROVE', findings: [] });
+  const body = 'Contexto:\n\n```\nnpm test\n```\n\n' + renderVerdict(built);
+  assert.equal(parseVerdict({ body }), null,
+    'if this now parses, rule 17 changed — update the doctrine and this comment together');
+});
+
+test('#487: an indented ``` inside a value is not a terminator', () => {
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [{ id: 'f1', severity: 'blocker', evidence: 'salida:\n    ```\n    x\n    ```', cites: 'x.md' }],
+  });
+  built.sequencing = ['seq:after-411'];
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.equal(parsed.findings.length, 1);
+  assert.deepEqual(parsed.sequencing, ['seq:after-411']);
+});
+
+test('#487: with TWO fenced blocks in one body, the first is still the one read', () => {
+  const first = buildVerdict({ headSha: 'aaa111', conclusion: 'APPROVE', findings: [] });
+  const second = buildVerdict({ headSha: 'bbb222', conclusion: 'STOP', findings: [] });
+  const parsed = parseVerdict({ body: `${renderVerdict(first)}\n\nquoted below:\n\n${renderVerdict(second)}` });
+  assert.equal(parsed.head_sha, 'aaa111',
+    'the single-fence read is the documented rule — a stale block quoted above a fresh one is not addressed here');
 });

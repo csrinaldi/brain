@@ -20,7 +20,29 @@
 // When a second protocol needs a list, extract
 // `makeEntryListParser({ topLevelKeys })` then — not before.
 
-export const FENCE_RE = /```(?:yaml)?\s*\n([\s\S]*?)```/;
+// The closing fence must START A LINE (issue #487).
+//
+// It used to be `/```(?:yaml)?\s*\n([\s\S]*?)```/` — non-greedy, with no anchor on the
+// terminator — so the FIRST ``` appearing anywhere, including in the middle of a value,
+// ended the block. `reviewer-protocol.md:187` defines evidence as a command the reviewer
+// actually ran cold, and command output is normally fenced, so the most ordinary shape of
+// evidence produced a verdict that read back truncated. `checkpoint.mjs` interpolates raw
+// `brain:audit` stdout into `evidence:`, so brain's own verdicts reached this path.
+//
+// The fix is in the LOCATOR, not the payload. Escaping ``` inside `yamlScalar` would work
+// and would make the posted comment less readable for the human it exists to be read by —
+// evidence that has to be decoded is evidence nobody checks. Greedy would have been worse
+// still: it swallows a LATER legitimate block.
+//
+// Why the anchor suffices: `yamlScalar` escapes `\n` (issue #481), so a fenced value is
+// emitted on ONE physical line and its ``` is never preceded by a real newline. The
+// terminator therefore cannot match inside a value at all — not "usually does not".
+//
+// The reader-side guarantee from #452 is preserved BY the anchor rather than despite it:
+// an unterminated block now fails to match and `extractFencedBlock` answers `null`. A
+// confident truncated prefix — the end state rounds 2 and 3 of PR #478 closed, reached
+// here through a third door — is no longer reachable from this regex.
+export const FENCE_RE = /```(?:yaml)?[ \t]*\r?\n([\s\S]*?\r?\n)```[ \t]*(?:\r?\n|$)/;
 
 /** Returns the content of the FIRST fenced block in `body`, or `null` if
  * none is found. Only the first fence is ever read — a stale block quoted
