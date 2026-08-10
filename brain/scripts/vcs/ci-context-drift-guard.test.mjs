@@ -261,6 +261,118 @@ for (const job of GOVERNANCE_JOBS) {
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// #130 — ONE RULE, TWO PIPELINES: the same job must run the same check on both
+// providers.
+//
+// The guards above assert the two files declare the same JOB NAMES and the same
+// allow_failure classification. Neither says the jobs DO the same thing, and they
+// did not: `issue-link` ran ~50 lines of inline bash on GitHub and
+// `run-check.mjs issue-link` on GitLab. Two implementations of one rule is the
+// defect #340 records, and this pair had already diverged in production — the bash
+// compared the base branch against the LITERAL 'main', so a consumer whose default
+// branch is `master` got the slice policy on integration PRs. A name-set guard is
+// blind to that by construction: both files said `issue-link`.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const GITHUB_GOVERNANCE_YML = join(VCS_DIR, '..', '..', '..', '.github', 'workflows', 'governance.yml');
+
+/** Commands a GitLab job runs, `&&`-chains split so a chain and a step list compare equal. */
+function gitlabJobCommands(yml, job) {
+  const block = extractGitlabJobBlock(yml, job) ?? '';
+  return [...block.matchAll(/^\s*-\s+((?:node|npm)\s+[^\n]*)$/gm)]
+    .flatMap(m => m[1].split('&&'))
+    .map(c => c.trim())
+    .filter(Boolean);
+}
+
+/** Commands a GitHub job runs. Inline `run:` scalars only — a `run: |` block is a
+ *  bash re-implementation, which is exactly what this guard exists to forbid. */
+function githubJobCommands(yml, job) {
+  const m = yml.match(new RegExp(`^  ${job}:\\s*$`, 'm'));
+  if (!m) return null;
+  const rest = yml.slice(m.index + m[0].length);
+  const next = rest.match(/^ {2}[a-z][\w-]*:\s*$/m);
+  const block = next ? rest.slice(0, next.index) : rest;
+  return [...block.matchAll(/^\s*run:\s+((?:node|npm)\s+[^\n]*)$/gm)]
+    .flatMap(m2 => m2[1].split('&&'))
+    .map(c => c.trim())
+    .filter(Boolean);
+}
+
+test('#130: every governance job runs the SAME command on GitHub and GitLab', () => {
+  const gl = readFileSync(GITLAB_GOVERNANCE_YML, 'utf8');
+  const gh = readFileSync(GITHUB_GOVERNANCE_YML, 'utf8');
+  const divergent = [];
+  for (const job of GOVERNANCE_JOBS) {
+    const a = githubJobCommands(gh, job);
+    const b = gitlabJobCommands(gl, job);
+    if (a === null) { divergent.push(`${job}: absent from governance.yml`); continue; }
+    if (JSON.stringify([...a].sort()) !== JSON.stringify([...b].sort())) {
+      divergent.push(`${job}:\n    github=${JSON.stringify(a)}\n    gitlab=${JSON.stringify(b)}`);
+    }
+  }
+  assert.deepEqual(divergent, [],
+    `one rule, two implementations — the #340 shape, at the CI layer:\n${divergent.join('\n')}`);
+});
+
+test('#130: a job re-implemented as inline bash is caught, not silently accepted', () => {
+  // TEETH, and specifically against the failure mode that let the divergence live:
+  // a `run: |` block yields NO extractable command, so a guard that only compared
+  // what it could read would see two empty lists and call them equal.
+  const bashed = readFileSync(GITHUB_GOVERNANCE_YML, 'utf8')
+    .replace(
+      '        run: node brain/scripts/governance/run-check.mjs issue-link',
+      '        run: |\n          set -euo pipefail\n          grep -oiE "closes +#[0-9]+" <<< "$PR_BODY"');
+  assert.notEqual(bashed, readFileSync(GITHUB_GOVERNANCE_YML, 'utf8'), 'the mutation must land');
+  const gl = readFileSync(GITLAB_GOVERNANCE_YML, 'utf8');
+  assert.notDeepEqual(
+    githubJobCommands(bashed, 'issue-link'),
+    gitlabJobCommands(gl, 'issue-link'),
+    'a bash re-implementation must not compare equal to the portable check');
+});
+
+test('#130: issue-link runs the PORTABLE check on both providers, by name', () => {
+  // Named explicitly because it is the job #130 was filed about, and the one whose
+  // two implementations had already drifted.
+  for (const [file, cmds] of [
+    ['governance.yml', githubJobCommands(readFileSync(GITHUB_GOVERNANCE_YML, 'utf8'), 'issue-link')],
+    ['gitlab-governance.yml', gitlabJobCommands(readFileSync(GITLAB_GOVERNANCE_YML, 'utf8'), 'issue-link')],
+  ]) {
+    assert.deepEqual(cmds, ['node brain/scripts/governance/run-check.mjs issue-link'], file);
+  }
+});
+
+test('#130: the issue-link job supplies every input the portable check consumes', () => {
+  // Delegating to run-check.mjs moves the policy into Node and moves the CONTEXT
+  // into `env:`. Drop one and the check does the right thing — `requiresClosingKeyword`
+  // returns null and it fails CLOSED rather than assuming 'main' — but the gate then
+  // goes red on every PR for a reason that has nothing to do with the change. That is
+  // the shape #467 and #475 are both about: an operator told the repo violated
+  // governance when the reader simply had nothing to read.
+  //
+  // Fail-closed is the correct direction and is NOT a reason to leave it unguarded.
+  const gh = readFileSync(GITHUB_GOVERNANCE_YML, 'utf8');
+  const m = gh.match(/^  issue-link:\s*$[\s\S]*?(?=^  [a-z][\w-]*:\s*$)/m);
+  assert.ok(m, 'the issue-link job must be locatable');
+  const code = m[0].replace(/^\s*#.*$/gm, '');
+  for (const key of ['VCS_TOKEN', 'BASE_BRANCH', 'DEFAULT_BRANCH', 'PR_NUMBER', 'PR_BODY']) {
+    assert.match(code, new RegExp(`^\\s*${key}:`, 'm'),
+      `${key} is consumed by run-check.mjs issue-link (via ci-context) and must be declared`);
+  }
+});
+
+test('#130: governance.yml no longer hardcodes the literal default-branch name', () => {
+  // The divergence itself, pinned on the source. `run-check.mjs` derives the policy
+  // from ctx.defaultBranch and fails closed when it is uncomputable; a comparison
+  // against a literal cannot fail closed because it never knows it is wrong.
+  const gh = readFileSync(GITHUB_GOVERNANCE_YML, 'utf8');
+  const m = gh.match(/^  issue-link:\s*$[\s\S]*?(?=^  [a-z][\w-]*:\s*$)/m);
+  assert.ok(m, 'the issue-link job must be locatable');
+  assert.doesNotMatch(m[0].replace(/^\s*#.*$/gm, ''), /["']main["']/,
+    'the issue-link job must not compare against a literal branch name — that is the bug #130 inherited');
+});
+
 // ── CI wiring (GitLab side of the A2 phase 2 addendum, issue #231 A2 phase
 // 3/4): CI_DEFAULT_BRANCH is a standard GitLab-predefined variable, always
 // available to every job automatically — unlike GitHub Actions, no job
