@@ -873,60 +873,94 @@ test('commitStatus (contract): selection asymmetry — GitHub takes check_runs[0
   );
 });
 
-// repoCloneUrl host-default divergence (design D4) — following the shape of
-// the authLogin host-default divergence test at :819-856.
+// repoCloneUrl / patSetupUrl — the three locks that USED to freeze latent defects
+// (issues #386/#387/#388, filed out of #385's test-only slice and fixed here).
+//
+// #385 pinned all three as "LATENT DEFECT, PINNED NOT FIXED (follow-up filed)".
+// That was the right call for a test-only slice — a test that documents wrong
+// behaviour is worth more than no test, PROVIDED the follow-up actually lands.
+// These are those follow-ups, so each lock is inverted rather than deleted: the
+// same call sites, asserting the corrected behaviour, with the defect they used
+// to hold named so the history is not lost.
 
-test('repoCloneUrl (contract): host-default divergence — GitHub falls back to github.com, GitLab emits a literal "undefined" host', async () => {
+test('repoCloneUrl (contract): BOTH providers default a falsy host — no URL ever carries the literal "undefined" (#386)', async () => {
   const gh = new URL(await github.repoCloneUrl({ project: 'x/y', token: PLACEHOLDER_CREDENTIAL }));
-  assert.equal(gh.host, 'github.com', "github.mjs:481 substitutes the literal default (host || 'github.com') when host is omitted");
+  assert.equal(gh.host, 'github.com', "github substitutes the literal default (host || 'github.com')");
   assert.equal(gh.username, 'x-access-token', 'the GitHub user literal is x-access-token');
 
   const gl = new URL(await gitlab.repoCloneUrl({ project: 'x/y', token: PLACEHOLDER_CREDENTIAL }));
   assert.equal(
     gl.host,
-    'undefined',
-    'LATENT DEFECT, PINNED NOT FIXED (follow-up filed) — gitlab.mjs:531 interpolates ${host} with no fallback, so an omitted host produces the literally broken https://oauth2:***@undefined/x/y.git; locked as current behavior — fixing it is a production change, out of scope for this test-only slice',
+    'gitlab.com',
+    'FIXED (#386) — this asserted the literal string "undefined" until 2026-08-10. `${host}` had no fallback, '
+    + 'so an omitted host produced https://oauth2:***@undefined/x/y.git: a URL that parses, reads plausibly in a '
+    + 'log, and resolves to nothing.',
   );
   assert.equal(gl.username, 'oauth2', 'the GitLab user literal is oauth2');
 });
 
-// patSetupUrl divergence locks (design D5) — GitHub ignores `host` entirely
-// (GHES-breaking), GitLab is correctly host-driven; and the shared
-// no-URL-encoding gap that affects both providers.
-
-test('github.patSetupUrl (contract): the host parameter is IGNORED — the URL is hardcoded to github.com', async () => {
-  const parsed = new URL(await github.patSetupUrl({ host: 'ghes.example.test', name: 'brain', scopes: ['repo'] }));
+test('patSetupUrl (contract): BOTH providers are host-driven — a GHES/self-hosted operator reaches THEIR server (#387)', async () => {
+  const gh = new URL(await github.patSetupUrl({ host: 'ghes.example.test', name: 'brain', scopes: ['repo'] }));
   assert.equal(
-    parsed.host,
-    'github.com',
-    'LATENT DEFECT, PINNED NOT FIXED (follow-up filed) — github.mjs:485 hardcodes github.com and never reads `host`, so a GitHub Enterprise Server operator is silently sent to the public github.com PAT page',
+    gh.host,
+    'ghes.example.test',
+    'FIXED (#387) — this asserted github.com until 2026-08-10. The verb hardcoded the public host and never read '
+    + 'its own `host`, so a GitHub Enterprise Server operator was sent to github.com to create a token that would '
+    + 'be useless against their own server, with nothing saying why.',
   );
-  assert.equal(parsed.pathname, '/settings/tokens/new');
-  assert.equal(parsed.searchParams.get('description'), 'brain', 'GitHub keys the token name as `description`');
+  assert.equal(gh.pathname, '/settings/tokens/new');
+  assert.equal(gh.searchParams.get('description'), 'brain', 'GitHub keys the token name as `description`');
+
+  const gl = new URL(await gitlab.patSetupUrl({ host: 'gitlab.example.test', name: 'brain', scopes: ['api'] }));
+  assert.equal(gl.host, 'gitlab.example.test', 'GitLab was already host-driven — that was the divergence');
+  assert.equal(gl.pathname, '/-/user_settings/personal_access_tokens');
+  assert.equal(gl.searchParams.get('name'), 'brain', 'GitLab keys the token name as `name`');
 });
 
-test('gitlab.patSetupUrl (contract): the URL is host-driven — the supplied host appears verbatim', async () => {
-  const parsed = new URL(await gitlab.patSetupUrl({ host: 'gitlab.example.test', name: 'brain', scopes: ['api'] }));
-  assert.equal(
-    parsed.host,
-    'gitlab.example.test',
-    'gitlab.mjs:535 interpolates the supplied host — the divergence from GitHub above, and the reason self-hosted GitLab works while GHES does not',
-  );
-  assert.equal(parsed.pathname, '/-/user_settings/personal_access_tokens');
-  assert.equal(parsed.searchParams.get('name'), 'brain', 'GitLab keys the token name as `name`');
+test('patSetupUrl (contract): a falsy host still yields each provider\'s public default — the fix adds a default, it does not demand a host (#387)', async () => {
+  assert.equal(new URL(await github.patSetupUrl({ name: 'brain', scopes: ['repo'] })).host, 'github.com');
+  assert.equal(new URL(await gitlab.patSetupUrl({ name: 'brain', scopes: ['api'] })).host, 'gitlab.com');
 });
 
-test('patSetupUrl (contract): neither provider URL-encodes the token name — a name containing & injects a spurious query parameter', async () => {
+test('patSetupUrl (contract): BOTH providers URL-encode the token name — an & no longer splits it into a second parameter (#388)', async () => {
   for (const [label, url] of [
     ['github', await github.patSetupUrl({ host: 'h.example.test', name: 'brain & co', scopes: ['repo'] })],
     ['gitlab', await gitlab.patSetupUrl({ host: 'h.example.test', name: 'brain & co', scopes: ['api'] })],
   ]) {
     const parsed = new URL(url);
-    assert.ok(
-      parsed.searchParams.has(' co'),
-      `${label}: LATENT DEFECT, PINNED NOT FIXED (follow-up filed) — the raw & splits the name into a second, spurious query parameter; neither provider calls encodeURIComponent on name/scopes`,
+    assert.equal(
+      parsed.searchParams.has(' co'), false,
+      `${label}: FIXED (#388) — this asserted the PRESENCE of a spurious " co" parameter until 2026-08-10.`,
+    );
+    const name = parsed.searchParams.get('description') ?? parsed.searchParams.get('name');
+    assert.equal(
+      name, 'brain & co',
+      `${label}: the whole name must survive the round trip — a truncated one is what the operator would have saved`,
     );
   }
+});
+
+test('patSetupUrl (contract): the comma between scopes stays a SEPARATOR, not encoded data (#388)', async () => {
+  // Encoding `scopes.join(',')` as one string would send `repo%2Cworkflow` — a
+  // single scope by that literal name. Each entry is encoded; the comma is not.
+  for (const [label, url] of [
+    ['github', await github.patSetupUrl({ host: 'h.example.test', name: 'n', scopes: ['repo', 'workflow'] })],
+    ['gitlab', await gitlab.patSetupUrl({ host: 'h.example.test', name: 'n', scopes: ['api', 'read_user'] })],
+  ]) {
+    const raw = url.slice(url.indexOf('scopes=') + 'scopes='.length);
+    assert.ok(raw.includes(','), `${label}: the separator must reach the provider as a literal comma, got: ${raw}`);
+    assert.ok(!raw.includes('%2C'), `${label}: an encoded comma would name one scope instead of two, got: ${raw}`);
+  }
+});
+
+test('repoCloneUrl (contract): a project slug keeps its slashes and encodes only what sits between them (#388)', async () => {
+  // encodeURIComponent(project) would turn `group/repo` into `group%2Frepo` and the
+  // clone URL would stop resolving. GitLab subgroups make this concrete.
+  const gl = new URL(await gitlab.repoCloneUrl({ host: 'h.example.test', project: 'grupo/sub/repo', token: PLACEHOLDER_CREDENTIAL }));
+  assert.equal(gl.pathname, '/grupo/sub/repo.git', 'the separators are structure, not data');
+
+  const gh = new URL(await github.repoCloneUrl({ host: 'h.example.test', project: 'owner/my repo', token: PLACEHOLDER_CREDENTIAL }));
+  assert.equal(gh.pathname, '/owner/my%20repo.git', 'and what sits between them IS data');
 });
 
 // ── authCheck/authLogin argument-building divergence + token security ──────

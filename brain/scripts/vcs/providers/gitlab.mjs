@@ -688,12 +688,45 @@ export async function labelList({ project, apiBase, token, proxyUrl, fetchImpl }
   return names;
 }
 
+/**
+ * Percent-encode a value that is about to be interpolated into a URL (#388).
+ *
+ * `patSetupUrl` builds a query string by hand on both providers. An unencoded
+ * `name` containing `&` does not merely look wrong — it SPLITS: `brain & co`
+ * becomes `description=brain ` plus a second, spurious ` co` parameter, and the
+ * page opens with a truncated token name the operator then saves.
+ *
+ * Scopes are encoded PER ENTRY and joined with a literal comma, never encoded as
+ * one string: the comma is the separator the provider parses, not data. Encoding
+ * it would send `repo%2Cworkflow` as a single scope name.
+ */
+const enc = (v) => encodeURIComponent(String(v));
+
+/**
+ * Percent-encode a project slug for a URL PATH, segment by segment (#388).
+ *
+ * `encodeURIComponent(project)` would be wrong here: a slug is `group/repo` — and
+ * on GitLab `group/subgroup/repo` — so encoding it whole turns the separators into
+ * `%2F` and the clone URL stops resolving. The slashes are structure; only what
+ * sits between them is data.
+ */
+const encPath = (p) => String(p).split('/').map(encodeURIComponent).join('/');
+
+/**
+ * The clone URL, with a host default (#386).
+ *
+ * `${host}` had no fallback, so an omitted host produced the literal string
+ * `https://oauth2:***@undefined/x/y.git` — a URL that parses, looks plausible in a
+ * log, and resolves to nothing. GitHub's equivalent has always defaulted; this is
+ * the same default in the same shape, on the provider that lacked it.
+ */
 export async function repoCloneUrl({ host, project, token }) {
-  return `https://oauth2:${token}@${host}/${project}.git`;
+  return `https://oauth2:${token}@${host || 'gitlab.com'}/${encPath(project)}.git`;
 }
 
 export async function patSetupUrl({ host, name, scopes }) {
-  return `https://${host}/-/user_settings/personal_access_tokens?name=${name}&scopes=${scopes.join(',')}`;
+  return `https://${host || 'gitlab.com'}/-/user_settings/personal_access_tokens`
+    + `?name=${enc(name)}&scopes=${scopes.map(enc).join(',')}`;
 }
 
 /**
