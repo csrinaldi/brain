@@ -32,7 +32,7 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 // providers/github.mjs#prCommits / providers/gitlab.mjs#prCommits.
 export const VERBS = [
   'authCheck', 'authLogin', 'whoami',
-  'issueView', 'issueList', 'mrList', 'prView', 'mrCreate', 'labelEvents', 'prReviews',
+  'issueView', 'issueList', 'issueCreate', 'mrList', 'prView', 'mrCreate', 'labelEvents', 'prReviews',
   'commitStatus', 'repoCloneUrl', 'patSetupUrl', 'projectResolve',
   'branchProtect', 'capabilities',
   'prReviewComment', 'issueComment', 'labelAdd', 'labelRemove',
