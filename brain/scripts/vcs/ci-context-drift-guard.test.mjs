@@ -300,6 +300,28 @@ function githubJobCommands(yml, job) {
     .filter(Boolean);
 }
 
+test('#130/#479: ci-context reaches a provider THROUGH the port, never by direct import', () => {
+  // The seam's last hole, and it was invisible until the accident covering it was
+  // removed. `ci-context.mjs` imported `prView` straight from `providers/github.mjs`,
+  // which bypasses `getVcs()` — and `getVcs()` is where #479 put the credential
+  // resolution. Every job that needed the PR body also happened to set `GH_TOKEN`, so
+  // `gh` authenticated ambiently and nothing looked wrong.
+  //
+  // Measured on this PR: declaring only `VCS_TOKEN` on the migrated issue-link job
+  // turned it red with "MR body uncomputable (context API fetch failed)".
+  //
+  // Pinned on the SOURCE, because no behavioural test can see it: a direct import and
+  // a port call return the same shape, and differ only in which credential reaches the
+  // wire — the same reason `github.identity.drift.test.mjs` exists one layer down.
+  const src = readFileSync(join(VCS_DIR, 'ci-context.mjs'), 'utf8');
+  assert.doesNotMatch(
+    src, /from\s+['"]\.\/providers\/[a-z-]+\.mjs['"]/,
+    'ci-context.mjs must obtain a provider via getVcs(), never by importing the module — ' +
+    'a direct import silently opts out of the credential binding',
+  );
+  assert.match(src, /getVcs/, 'and it must actually go through the port');
+});
+
 test('#130: every governance job runs the SAME command on GitHub and GitLab', () => {
   const gl = readFileSync(GITLAB_GOVERNANCE_YML, 'utf8');
   const gh = readFileSync(GITHUB_GOVERNANCE_YML, 'utf8');
