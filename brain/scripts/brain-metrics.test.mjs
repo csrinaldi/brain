@@ -320,7 +320,7 @@ test('integration smoke — a small real history produces sane markdown counts (
   const r = spawnSync('node', [METRICS_SCRIPT, `${base}..HEAD`, '--json'], { cwd: dir, encoding: 'utf8' });
   assert.equal(r.status, 0, `expected exit 0\n${r.stdout}\n${r.stderr}`);
   const parsed = JSON.parse(r.stdout);
-  assert.equal(parsed.length, 1, 'both merges land in the same month bucket');
+  assert.equal(parsed.length, 1, 'every commit lands in the same month bucket');
   assert.equal(parsed[0].changesMerged, 2);
   assert.equal(parsed[0].gates['diff-size'].raw, 1);
   assert.equal(parsed[0].gates['diff-size'].enforced, 1, 'no VCS configured — no size:exception label reachable, so raw === enforced');
@@ -479,7 +479,7 @@ test('brain-metrics: a pre-baseline merge is skipped, not counted as a raw gate 
   // Config carrying the baseline, tagged v0.1.0 AFTER MERGE_BAD.
   commit(git, dir, {
     'brain.config.json': JSON.stringify({ governance: { auditBaseline: 'v0.1.0' } }),
-  }, 'chore: add audit config');
+  }, 'chore: add audit config Closes #9');   // #518: on the audited line now
   git('tag', 'v0.1.0');
 
   // MERGE_GOOD: after the baseline tag, all invariants satisfied.
@@ -492,11 +492,13 @@ test('brain-metrics: a pre-baseline merge is skipped, not counted as a raw gate 
   const r = spawnSync('node', [METRICS_SCRIPT, '--json'], { cwd: dir, encoding: 'utf8' });
   assert.equal(r.status, 0, `expected exit 0\n${r.stdout}\n${r.stderr}`);
   const parsed = JSON.parse(r.stdout);
-  assert.equal(parsed.length, 1, 'both merges land in the same month bucket');
+  assert.equal(parsed.length, 1, 'every commit lands in the same month bucket');
 
-  // 2 changes merged total (MERGE_BAD + MERGE_GOOD), but MERGE_BAD contributes
-  // ZERO raw gate failures — brain-audit never evaluated it either.
-  assert.equal(parsed[0].changesMerged, 2);
+  // 4 changes on the audited line since #518 — the two merges plus the two
+  // ordinary commits, which the merges-only walk used to skip. MERGE_BAD still
+  // contributes ZERO raw gate failures: brain-audit never evaluated it either, and
+  // that parity — not the count — is what this test is about.
+  assert.equal(parsed[0].changesMerged, 4);
   assert.equal(parsed[0].gates['issue-link'].raw, 0,
     'pre-baseline merge has no issue link, but brain-audit never evaluated it — metrics must not either');
   assert.equal(parsed[0].gates['diff-size'].raw, 0,

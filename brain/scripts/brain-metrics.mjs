@@ -37,7 +37,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
-  listMerges, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge, resolvedSkipLine,
+  listAuditedCommits, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge, resolvedSkipLine,
   resolveBaseline, makeGitIsAncestor,
 } from './lib/merge-walk.mjs';
 // Tier resolution (issue #358 Q5, REQ-TIER-9): metrics re-derives the SAME
@@ -560,7 +560,7 @@ export async function runMetrics({ argv, cwd = process.cwd(), vcs: injectedVcs }
 
   let walk;
   try {
-    walk = listMerges(range, cwd);
+    walk = listAuditedCommits(range, cwd);
   } catch (err) {
     return {
       output: `brain-metrics: invalid git range "${range}" — ${err.message}\n`
@@ -569,7 +569,7 @@ export async function runMetrics({ argv, cwd = process.cwd(), vcs: injectedVcs }
     };
   }
 
-  if (walk.merges.length === 0) {
+  if (walk.commits.length === 0) {
     if (json) return { output: '[]', exitCode: 0 };
     return {
       output: renderMarkdown({
@@ -579,7 +579,7 @@ export async function runMetrics({ argv, cwd = process.cwd(), vcs: injectedVcs }
     };
   }
 
-  const { merges, windowFrom, windowTo } = walk;
+  const { commits: merges, windowFrom, windowTo } = walk;
   let rows = emptyRows();
   const leadTimeCache = new Map(); // issue number -> Promise<labelEvents() result> (design Data Flow: 1 call/issue)
   const bypassAuthorCache = new Map(); // PR number -> Promise<labelEvents() result> (size:exception by-author breakdown)

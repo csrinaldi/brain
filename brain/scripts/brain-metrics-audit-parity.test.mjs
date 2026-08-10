@@ -95,7 +95,7 @@ function buildFixture(dir) {
   // Baseline config + tag, AFTER M1 — everything from here on is "post-baseline".
   commit(git, dir, {
     'brain.config.json': JSON.stringify({ governance: { auditBaseline: 'v0.1.0' } }),
-  }, 'chore: add audit baseline config');
+  }, 'chore: add audit baseline config Closes #9');   // #518: on the audited line now
   git('tag', 'v0.1.0');
 
   // M2 — clean PASS.
@@ -142,21 +142,37 @@ test('brain-metrics re-execution matches brain-audit\'s own verdict, per gate, o
   const auditIssueLinkFails = countAuditFails(auditRun.stdout, 'issueLink');
   const auditDiffSizeFails = countAuditFails(auditRun.stdout, 'diffSize');
 
-  assert.equal(auditSkipCount, 1, `expected 1 [SKIP] (M1, pre-baseline):\n${auditRun.stdout}`);
-  assert.equal(auditPassCount, 1, `expected 1 [PASS] (M2):\n${auditRun.stdout}`);
+  // #518 widened the walk to the whole first-parent line, so the two ORDINARY
+  // commits in this fixture are audited too: `chore: initial (#0)` joins M1 as
+  // pre-baseline [SKIP], and the baseline-config commit (now carrying `Closes #9`)
+  // joins M2 as [PASS]. The per-gate failure counts below are unchanged, which is
+  // the point — widening added coverage, it did not add failures.
+  //
+  // And both CLIs had to shift TOGETHER. That is exactly what this test is for: a
+  // shared function called with different inputs still diverges (bug B2), so if
+  // only one of them had widened, these counts would disagree instead of both
+  // moving from 1 to 2.
+  assert.equal(auditSkipCount, 2, `expected 2 [SKIP] (root + M1, both pre-baseline):\n${auditRun.stdout}`);
+  assert.equal(auditPassCount, 2, `expected 2 [PASS] (baseline-config commit + M2):\n${auditRun.stdout}`);
   assert.equal(auditFailCount, 2, `expected 2 [FAIL] (M3 issue-link, M4 diff-size):\n${auditRun.stdout}`);
   assert.equal(auditIssueLinkFails, 1, `expected exactly 1 issueLink failure (M3 only, M1 is baseline-skipped):\n${auditRun.stdout}`);
   assert.equal(auditDiffSizeFails, 1, `expected exactly 1 diffSize failure (M4 only, M1 is baseline-skipped):\n${auditRun.stdout}`);
 
   // ── brain-metrics' re-derived verdict, parsed from its --json output ──────
   const metricsRows = JSON.parse(metricsRun.stdout);
-  assert.equal(metricsRows.length, 1, 'all 4 merges land in the same month bucket');
+  assert.equal(metricsRows.length, 1, 'every commit in this fixture lands in the same month bucket');
   const row = metricsRows[0];
 
-  // Every merge that MERGED counts toward changesMerged — including the
+  // Every change that LANDED counts toward changesMerged — including the
   // baseline-skipped one (it is still a real change, brain-audit just never
   // evaluated its governance verdict).
-  assert.equal(row.changesMerged, 4, `expected 4 total changes merged:\n${JSON.stringify(row)}`);
+  //
+  // Six, not four, since #518: the denominator is the audited first-parent line,
+  // so the two ordinary commits count as well. That is the correct reading of the
+  // metric and not a side effect to tolerate — a squashed PR is a change that
+  // merged, and a throughput number that silently omitted a third of them was
+  // measuring the walk's blind spot rather than the repo.
+  assert.equal(row.changesMerged, 6, `expected 6 changes on the audited line:\n${JSON.stringify(row)}`);
   assert.equal(row.uncomputable, 0, 'no infra-level failures in this fixture');
 
   // THE PARITY ASSERTION (spec REQ-7): brain-metrics' raw AND enforced counts

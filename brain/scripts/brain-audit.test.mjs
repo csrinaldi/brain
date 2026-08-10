@@ -17,7 +17,7 @@ import { gzipSync } from 'node:zlib';
 const AUDIT_SCRIPT = new URL('./brain-audit.mjs', import.meta.url).pathname;
 
 import { crossCheckExit } from './brain-audit.mjs';
-import { countUnauditedNonMerges } from './lib/merge-walk.mjs';
+import { readMergeParent } from './lib/merge-walk.mjs';
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
 
@@ -109,20 +109,41 @@ test('brain-audit: FAIL merge — emits [FAIL] with invariants and exits 1', (t)
   assert.equal(r.status, 1, `expected exit 1, got ${r.status}`);
 });
 
-test('brain-audit: no merges in range — exits 0 with info message', (t) => {
+// This test used to be `no merges in range — exits 0 with info message`, and its
+// fixture was a range holding one ordinary commit. That is not an empty range: it
+// is the #518 defect stated as an expectation. A commit was there, nothing looked
+// at it, and the audit called the window clean.
+//
+// The property that survives is about a range with NOTHING in it, which is a real
+// state (a cron run with no new commits since the cursor) and must still exit 0.
+test('brain-audit: a genuinely EMPTY range exits 0 with an info message', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-empty-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
-  // A second non-merge commit
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, 'HEAD..HEAD'], { cwd: dir, encoding: 'utf8' });
+
+  assert.equal(r.status, 0, `an empty range is clean, not uncomputable:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /No commits found/, `and says so:\n${r.stdout}`);
+});
+
+test('#518: an ordinary commit in range is AUDITED — the old "no merges" silence is gone', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-nonmerge-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
   commit(git, dir, { 'x.md': 'x' }, 'docs: add x (#1)');
 
-  const r = spawnSync('node', [AUDIT_SCRIPT, 'HEAD~1..HEAD'], {
-    cwd: dir, encoding: 'utf8',
-  });
+  const r = spawnSync('node', [AUDIT_SCRIPT, 'HEAD~1..HEAD'], { cwd: dir, encoding: 'utf8' });
 
-  assert.equal(r.status, 0, `expected exit 0 when no merges, got ${r.status}\nstderr: ${r.stderr}`);
+  // `(#1)` is a PR reference, not a closing keyword — issueLink's rule is unchanged
+  // and now actually reaches this commit. Before #518 this window exited 0 having
+  // read nothing.
+  assert.equal(r.status, 1, `a direct commit on the audited line is governed like any other:\n${r.stdout}`);
+  assert.match(r.stdout, /\[FAIL\][^\n]*issueLink/, `and by the same rule:\n${r.stdout}`);
 });
 
 // ── --first-parent regression — nested slice merges must be EXCLUDED ──────────
@@ -207,13 +228,15 @@ test('brain-audit: baseline skips pre-baseline merges (no false failure)', (t) =
   commit(git, dir, { 'src/bad.mjs': 'export const x = 1;' }, 'feat: pre-baseline work');
   git('checkout', 'main');
   git('merge', '--no-ff', 'feature/bad', '-m', 'Merge feature/bad (no issue ref)');  // MERGE_BAD
+  // The branch commit itself is NOT on the first-parent line, so it stays unaudited
+  // for the reason it always did — `--first-parent`, which #518 did not touch.
 
   // (C) commit that carries the brain.config.json with the baseline setting
   commit(git, dir, {
     'brain.config.json': JSON.stringify({
       governance: { auditBaseline: 'v0.1.0' },
     }),
-  }, 'chore: add audit config');
+  }, 'chore: add audit config Closes #9');   // #518: now audited like any other commit
 
   // Tag v0.1.0 on the current HEAD (commit C — after MERGE_BAD)
   git('tag', 'v0.1.0');
@@ -251,13 +274,14 @@ test('brain-audit: invalid baseline ref warns and falls back to auditing all', (
 
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const root = headShaOf(git);
 
   // Config with a baseline ref that does not exist
   commit(git, dir, {
     'brain.config.json': JSON.stringify({
       governance: { auditBaseline: 'v99.0.0-nonexistent' },
     }),
-  }, 'chore: add config');
+  }, 'chore: add config Closes #9');   // #518: on the audited line now
 
   // One good merge after the config
   git('checkout', '-b', 'feature/ok');
@@ -266,7 +290,13 @@ test('brain-audit: invalid baseline ref warns and falls back to auditing all', (
   git('checkout', 'main');
   git('merge', '--no-ff', 'feature/ok', '-m', 'Merge feature/ok Closes #1');
 
-  const r = spawnSync('node', [AUDIT_SCRIPT], {
+  // The range EXCLUDES the root commit, which is what every production caller does
+  // (the cursor is seeded at `rev-list --max-parents=0`, release.yml falls back to
+  // the same) — and since #518 it matters: the exemption model reads `windowFrom^1`,
+  // and the root has no parent, so a window based ON the root is uncomputable. That
+  // is asserted directly in the #518 block; here it would only be noise obscuring
+  // what this test is about, which is the baseline fallback.
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${root}..HEAD`], {
     cwd: dir, encoding: 'utf8',
   });
 
@@ -1596,26 +1626,70 @@ test('brain-audit: A12 replace-shaped cleanup — a merge whose net effect remov
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// #518 residual (2) — the audit says what it did not look at.
+// #518 — THE WALK IS THE WHOLE FIRST-PARENT LINE.
 //
-// `listMerges` selects `--first-parent --merges`. A squash merge is a single-parent
-// commit, so it is never enumerated: no check runs on it, and on a clean window the
-// cursor advances past it — permanently, since the cursor only moves forward.
+// It used to select `--first-parent --merges`, i.e. commits with more than one
+// parent. A squash lands as a single-parent commit and was therefore never in the
+// audited set — not evaluated and passed, NEVER LOOKED AT — and on a clean window
+// the cursor advanced past it, permanently, because the cursor only moves forward.
+// Measured on origin/main over 60 days: 101 first-parent commits, 70 enumerated,
+// 31 never audited.
 //
-// The shape of the old silence is the first test below: a window whose ONLY content
-// is a squash printed `[INFO] No merge commits found` and exited 0. Not "checked and
-// clean" — never read, reported as nothing to read.
+// The old shape of the silence: a window whose only content was a squash printed
+// `[INFO] No merge commits found` and exited 0. Not "checked and clean" — never
+// read, reported as nothing to read.
 //
-// These pin the REPORT. They do not pin a verdict, an exit code or a cursor move,
-// because the fix for the gap itself is a design change (#518) and failing here would
-// halt the cursor over existing history.
+// THE ACCEPTANCE IS PARITY, and the ticket says so explicitly: a squash-shaped
+// offender must receive the same verdict a merge-shaped one carrying the identical
+// payload receives. Two separate assertions would let the two shapes drift into two
+// policies; one comparison cannot.
 
 function squashCommit(git, dir, files, message) {
   commit(git, dir, files, message);
   return headShaOf(git);
 }
 
-test('#518: a window whose only content is a squash is REPORTED as unaudited, not as empty', (t) => {
+/** The audit's verdict lines, with shas stripped so two shapes compare equal. */
+function verdictShape(stdout) {
+  return stdout
+    .split('\n')
+    .filter(l => /^\[(PASS|FAIL|SKIP|WARN)/.test(l))
+    .map(l => l.replace(/\b[0-9a-f]{7,40}\b/g, '<sha>'))
+    .sort();
+}
+
+test('#518 PARITY: a squash-shaped offender gets the SAME verdict as a merge-shaped one', (t) => {
+  // The two repos differ in ONE thing: how the identical payload landed. Anything
+  // else in the fixture is held byte-identical, because a parity assertion over two
+  // fixtures that differ in two ways proves nothing about either.
+  const payload = { 'src/feature.mjs': 'export const x = 1;\n' };
+  const subject = 'feat: the same payload (#77)';
+
+  const run = (how) => {
+    const dir = mkdtempSync(join(tmpdir(), `audit-518par-${how}-`));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const git = makeRepo(dir);
+    commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+    const base = headShaOf(git);
+    if (how === 'squash') squashCommit(git, dir, payload, subject);
+    else mergeAddingPayload(git, dir, payload, 'F', subject);
+    return spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  };
+
+  const squashed = run('squash');
+  const merged = run('merge');
+
+  assert.deepEqual(verdictShape(squashed.stdout), verdictShape(merged.stdout),
+    `the same payload must earn the same verdict whatever its shape:\nsquash:\n${squashed.stdout}\nmerge:\n${merged.stdout}`);
+  assert.equal(squashed.status, merged.status,
+    `and the same exit code — squash=${squashed.status} merge=${merged.status}`);
+  // And it must be a REAL verdict, not two matching silences. Without this the
+  // assertion above is satisfied by the defect: both windows reporting nothing.
+  assert.ok(verdictShape(squashed.stdout).length > 0,
+    `both shapes must actually be audited, not both ignored:\n${squashed.stdout}`);
+});
+
+test('#518: a window whose only content is a squash is AUDITED, not reported empty', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-518sq-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -1625,70 +1699,110 @@ test('#518: a window whose only content is a squash is REPORTED as unaudited, no
     '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
   }, 'chore: initial (#0)');
   const base = headShaOf(git);
-  squashCommit(git, dir, { 'src/feature.mjs': 'export const x = 1;\n' }, 'feat: squash-shaped (#77)');
+  const sq = squashCommit(git, dir, { 'src/feature.mjs': 'export const x = 1;\n' }, 'feat: squash-shaped (#77)');
 
   const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
 
-  assert.match(r.stdout, /1 first-parent commit\(s\) in this range are NOT merges and were NOT audited/,
-    `the audit must name what it skipped:\n${r.stdout}`);
-  assert.match(r.stdout, /#518/, 'and point at the ticket that owns the gap');
-  // ADVISORY. Failing here would halt the cursor over 33 commits of existing history
-  // and make `cursor.mjs accept` routine — the erosion #518 itself names.
-  assert.equal(r.status, 0, `the warning must not change the verdict:\n${r.stdout}`);
+  assert.ok(!/No merge commits found|No commits found/.test(r.stdout),
+    `the exact old silence — a squash-only window reported as nothing to read:\n${r.stdout}`);
+  assert.ok(r.stdout.includes(sq.slice(0, 7)),
+    `the squash must appear by sha in the verdict lines:\n${r.stdout}`);
 });
 
-test('#518: a window of real merges only says nothing — the line is not noise on every run', (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'audit-518mg-'));
+test('#518: a squash carrying a governance violation FAILS, where it used to pass unseen', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-518bad-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
-  const git = makeRepo(dir);
-  commit(git, dir, {
-    'README.md': 'init',
-    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
-  }, 'chore: initial (#0)');
-  const base = headShaOf(git);
-  mergeAddingPayload(git, dir, { 'src/a.mjs': 'a\n' }, 'M', 'M: a real merge Closes #1');
-
-  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
-  assert.ok(!/were NOT audited/.test(r.stdout), `a fully-merged window must not warn:\n${r.stdout}`);
-});
-
-test('#518: with both shapes present, the count is the UNAUDITED ones — not the window size', (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'audit-518mix-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-
-  const git = makeRepo(dir);
-  commit(git, dir, {
-    'README.md': 'init',
-    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
-  }, 'chore: initial (#0)');
-  const base = headShaOf(git);
-  mergeAddingPayload(git, dir, { 'src/a.mjs': 'a\n' }, 'M', 'M: merged Closes #1');
-  squashCommit(git, dir, { 'src/b.mjs': 'b\n' }, 'feat: squashed (#2)');
-  squashCommit(git, dir, { 'src/c.mjs': 'c\n' }, 'feat: squashed again (#3)');
-
-  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
-  assert.match(r.stdout, /^\[WARN\] 2 first-parent commit\(s\)/m,
-    `exactly the two squashes, not the three commits:\n${r.stdout}`);
-});
-
-test('#518: an uncountable range answers UNKNOWN, never zero', (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'audit-518unk-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
   const base = headShaOf(git);
-  mergeAddingPayload(git, dir, { 'src/a.mjs': 'a\n' }, 'M', 'M: merged Closes #1');
+  // No issue reference anywhere — the violation issueLink exists to catch.
+  squashCommit(git, dir, { 'src/sneaky.mjs': 'export const x = 1;\n' }, 'feat: no issue reference at all');
 
-  // Driven as a UNIT, not through the CLI. The first version of this test asserted
-  // `/unknown|audit-uncomputable/` on the CLI's output, and the audit dies on the bad
-  // range before the count is ever consulted — so the assertion was satisfied by the
-  // OTHER branch and a mutation returning 0 instead of null stayed green. An `||` in
-  // an assertion is a place a weaker answer can hide.
-  assert.equal(countUnauditedNonMerges('no-such-ref-518..HEAD', dir), null,
-    '"I could not measure coverage" must not be reported as "coverage is complete"');
-  assert.equal(countUnauditedNonMerges(`${base}..HEAD`, dir), 0,
-    'and a window that really contains only merges is a real zero, not unknown');
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 1, `a squash-shaped violation must fail the window:\n${r.stdout}`);
+  assert.match(r.stdout, /\[FAIL\]/, `and be reported:\n${r.stdout}`);
+});
+
+test('#518: a squash-shaped offender can be NOMINATED for auto-revert', (t) => {
+  // `[FAIL-SHA]` can only nominate a commit the audit enumerated, so before this
+  // there was no remediation path for a squash at all. The workflow's revert step
+  // already branches on parent count (`-m 1` only when nparents >= 2), so a linear
+  // nomination is executable — that branch existed before anything could reach it.
+  const dir = mkdtempSync(join(tmpdir(), 'audit-518nom-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init', 'brain/HOME.md': '# home\n' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  // An ADR added with no HOME.md update — adrPresence is TREE-KEYED, so it is the
+  // class that earns a [FAIL-SHA] nomination.
+  squashCommit(git, dir,
+    { 'brain/project/decisions/adr-0099-x.md': '# adr\n' }, 'feat: adr without index (#88)');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.match(r.stdout, /\[FAIL-SHA\]/,
+    `a tree-keyed failure on a squash must be nominatable, or it has no remediation path:\n${r.stdout}`);
+});
+
+test('#518: a range reaching the ROOT commit is uncomputable, never silently narrowed', (t) => {
+  // The widened walk rests on `sha^1` resolving, which is true of every commit
+  // EXCEPT the root. `readMergeParent` used to justify itself with "a
+  // --merges-qualified commit always has >=2 parents"; that premise is gone, and the
+  // replacement guarantee (`%P` is empty only at the root) has to be asserted rather
+  // than assumed — fail-closed, never a skip.
+  const dir = mkdtempSync(join(tmpdir(), 'audit-518root-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, 'HEAD'], { cwd: dir, encoding: 'utf8' });
+  assert.notEqual(r.status, 0, `a window containing the root must not pass silently:\n${r.stdout}`);
+  assert.match(`${r.stdout}${r.stderr}`, /uncomputable|no resolvable parent/,
+    `and must say it could not compute, not that it found nothing:\n${r.stdout}\n${r.stderr}`);
+});
+
+test('#518: readMergeParent REFUSES the root commit — driven as a unit, not through the CLI', (t) => {
+  // The CLI-level root test above goes red for a DIFFERENT reason: the exemption
+  // model reads `windowFrom^1` and git rejects it before this guard is consulted.
+  // So the guard itself had no coverage, and a mutation returning the sha instead
+  // of throwing stayed green through the whole suite.
+  //
+  // That is the `||`-in-an-assertion lesson in another shape: an outcome satisfied
+  // by a second path proves nothing about the first. This drives the function.
+  const dir = mkdtempSync(join(tmpdir(), 'audit-518parent-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const root = headShaOf(git);
+
+  assert.throws(() => readMergeParent(root, 'chore: initial (#0)', dir),
+    /no resolvable parent/,
+    'the root has no parent and the diff-against-parent model cannot answer — fail closed, never a skip');
+
+  // And the ordinary case still resolves, or the guard would be trivially satisfied
+  // by refusing everything.
+  commit(git, dir, { 'x.md': 'x' }, 'docs: x Closes #1');
+  const child = headShaOf(git);
+  assert.equal(readMergeParent(child, 'docs: x Closes #1', dir), root,
+    'a single-parent commit resolves its one parent — that is what makes the wider walk possible');
+});
+
+test('#518 DRIFT GUARD: no enumerator on the audited path may filter to merges again', () => {
+  // The completeness is a property of the git command, so it is pinned on the
+  // SOURCE. A runtime re-count would issue the same query and agree with itself —
+  // the shape of self-confirming evidence this repo keeps removing.
+  //
+  // All three move together or the two sides disagree about what a window contains:
+  // the offender walk, and the revert side's two.
+  for (const rel of ['lib/merge-walk.mjs', 'governance/postmerge/resolution.mjs']) {
+    const src = readFileSync(fileURLToPath(new URL(`./${rel}`, import.meta.url)), 'utf8');
+    const offenders = src.split('\n')
+      .map((l, i) => [i + 1, l])
+      .filter(([, l]) => /'--first-parent'/.test(l) && /'--merges'/.test(l));
+    assert.deepEqual(offenders, [],
+      `${rel}: an enumerator filtering to --merges skips every squash (#518)`);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
