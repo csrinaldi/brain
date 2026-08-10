@@ -24,6 +24,17 @@ on:
     branches: [main]
   schedule:
     - cron: '0 6 * * *'
+  # On demand (#518). Without this, a halted cursor can only be re-run by pushing
+  # to main or waiting for 06:00 UTC — and the halt is precisely the state where
+  # nobody wants to push to main to find out whether it recovered. #462 was a
+  # 12-day rung-3 outage discovered by hand; the recovery path for the next one
+  # should not require a commit.
+  #
+  # No `inputs:` on purpose. The window comes from the CURSOR, never from a
+  # caller-supplied range (REQ-D2-1, the skip-over theorem): an operator-chosen
+  # range could silently skip an offender that landed while an earlier run was
+  # pinned, which is the one thing the cursor model exists to prevent.
+  workflow_dispatch:
 
 # trusted: runs post-merge on main.
 #   contents: write        — push auto-revert branches and CAS the governance cursor

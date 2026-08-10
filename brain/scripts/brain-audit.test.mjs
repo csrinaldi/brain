@@ -1593,3 +1593,101 @@ test('brain-audit: A12 replace-shaped cleanup — a merge whose net effect remov
   const rLine = r.stdout.split('\n').filter(Boolean).find(l => l.includes(rSha.slice(0, 7)));
   assert.ok(rLine, `R must still appear in the audit output — never a silent PASS:\n${r.stdout}`);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #518 — the remediation line the audit prints must be a command that RUNS.
+//
+// It used to be `cursor.mjs accept <sha> --reason "…"`, and the reason a unit test
+// on the emitter's text would not have caught it is the whole point: the string
+// LOOKS right. The CLI takes `<from> <to> --reason`, and the missing `<to>` does not
+// even trip the arity guard — `--reason` binds to `to`, all three bindings are
+// truthy, `usage()` never fires, and `acceptManually` prints `accept: <reason>` to
+// stdout BEFORE `advanceCursor` rejects the non-hex target. A success-shaped line
+// followed by a failure.
+//
+// So this test EXTRACTS the printed command and EXECUTES it, which is the only shape
+// that can tell "the text changed" from "the instruction works".
+
+function extractAcceptCommand(stdout) {
+  const line = stdout.split('\n').find(l => l.includes('cursor.mjs accept'));
+  if (!line) return null;
+  const m = line.match(/node (brain\/scripts\/governance\/postmerge\/cursor\.mjs accept [^"]*"[^"]*")/);
+  return m ? m[1] : null;
+}
+
+test('#518: the printed accept command PARSES — it reaches the CAS, not the usage error', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-518-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  mergeAddingAdr(git, dir, 'O', 'O: add ungoverned ADR Closes #1');
+
+  const audit = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.equal(audit.status, 1, `expected a surviving adrPresence failure:\n${audit.stdout}\n${audit.stderr}`);
+
+  const cmd = extractAcceptCommand(audit.stdout);
+  assert.ok(cmd, `the remediation line must carry an accept command:\n${audit.stdout}`);
+
+  // Run it. There is no remote here, so the CAS push cannot succeed — that is fine
+  // and is not what is under test. What IS under test: the command must get PAST
+  // argument parsing and PAST both 40-hex validations, i.e. it must fail (if at all)
+  // at the push, never at `usage` and never at "to must be a 40-hex sha".
+  const parts = cmd.split(' ');
+  const reasonIdx = parts.indexOf('--reason');
+  const argv = [...parts.slice(1, reasonIdx + 1), parts.slice(reasonIdx + 1).join(' ').replace(/^"|"$/g, '')];
+  const run = spawnSync('node', argv, { cwd: dir, encoding: 'utf8' });
+  const out = `${run.stdout}\n${run.stderr}`;
+
+  assert.ok(!/Usage: cursor\.mjs/.test(out),
+    `the printed command must not hit the usage error — it is what the audit tells a human to run:\n${out}`);
+  assert.ok(!/to must be a 40-hex sha/.test(out),
+    `the printed command must supply a real <to> — this is the exact defect #518 records:\n${out}`);
+});
+
+test('#518: the accept command names the WINDOW, never the offending merge as <from>', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-518b-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  const oSha = mergeAddingAdr(git, dir, 'O', 'O: add ungoverned ADR Closes #1');
+
+  const audit = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  const cmd = extractAcceptCommand(audit.stdout);
+
+  // `from` is the human's assertion of the CURSOR value they reviewed — that is what
+  // gives the CAS its function. `accept` advances a WINDOW; there is no per-merge
+  // accept, and a fix that only appended a `<to>` would have kept this half wrong.
+  assert.match(cmd, new RegExp(`accept ${base} `), `<from> must be the window base:\n${cmd}`);
+  assert.ok(!cmd.includes(`accept ${oSha}`), `the offending merge must not sit in the <from> slot:\n${cmd}`);
+  assert.match(audit.stdout, /ACCEPT THE WHOLE AUDITED WINDOW/,
+    'the line must say what accepting does — the old wording read as a per-merge accept');
+});
+
+test('#518: with no window base, the command is VISIBLY a placeholder rather than a plausible guess', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-518c-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+  }, 'chore: initial (#0)');
+  mergeAddingAdr(git, dir, 'O', 'O: add ungoverned ADR Closes #1');
+
+  // A bare revision names no base — a local `brain:audit` with no origin/main.
+  const audit = spawnSync('node', [AUDIT_SCRIPT, 'HEAD'], { cwd: dir, encoding: 'utf8' });
+  assert.match(audit.stdout, /accept <cursor-sha> <target-sha>/,
+    'a fabricated sha in a force-with-lease is worse than an obvious blank');
+  assert.match(audit.stdout, /cursor\.mjs window/,
+    'and it must say where to get the real values');
+});
