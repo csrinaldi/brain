@@ -33,6 +33,7 @@
 import { getVcs } from '../vcs/cli.mjs';
 import { guardedLabelAdd } from './deny-set.mjs';
 import { hasUsableAnchor } from './verdict.mjs';
+import { verdictsAtHead } from './lib/parse-verdict.mjs';
 
 const STALE_LABEL = 'reviewed:stale';
 const ESCALATION_LABEL = 'needs-decision';
@@ -121,8 +122,13 @@ export async function postVerdict({
   // proves `prReviews` returned it and `parseVerdict` parsed it — and disowned it.
   // Measured on PR #500: two identical verdicts at `663d850`, and `rev` climbing
   // on every further run until §7 escalates to a human on a PR nothing changed on.
+  // The SHA half is `verdictsAtHead`'s definition (#506) — the rev bound now cites
+  // the same one, so the two guards can no longer disagree silently about what "the
+  // same review iteration" means. The AUTHOR half is this lock's own addition and is
+  // the difference between them: the bound counts every reviewer's verdicts at this
+  // head, while the lock only refuses to repeat ITSELF.
   const lastVerdict = priorVerdicts.length > 0 ? priorVerdicts[priorVerdicts.length - 1] : null;
-  if (lastVerdict && lastVerdict.author === reviewerHandle && lastVerdict.head_sha === headSha) {
+  if (lastVerdict && lastVerdict.author === reviewerHandle && verdictsAtHead([lastVerdict], headSha).length === 1) {
     return { posted: false, skipped: 'anti-loop' };
   }
 
