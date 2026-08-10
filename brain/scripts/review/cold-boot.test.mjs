@@ -18,6 +18,7 @@ import { setSpawn } from '../vcs/lib/exec.mjs';
 import * as github from '../vcs/providers/github.mjs';
 import { postVerdict } from './poster.mjs';
 import { buildVerdict } from './verdict.mjs';
+import { verdictsAtHead } from './lib/parse-verdict.mjs';
 
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 
@@ -463,4 +464,147 @@ test('#317 end-to-end: the rev-bound sees a real priorRevCount — rev >= 3 REVI
   // assertion above is the bound firing rather than an unconditional STOP.
   const unbounded = buildVerdict({ headSha: LAST_RECORDED_HEAD, conclusion: 'REVISE', priorRevCount: 0 });
   assert.equal(unbounded.verdict, 'REVISE');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #506 — the rev bound counts an ITERATION, and the escalation has an exit.
+//
+// The ticket's red-proof duty, stated there and honoured here: every existing test
+// of the bound drives `priorRevCount` DIRECTLY, so none of them exercises the
+// counting RULE at all. These derive the count from a review list — which is the
+// only shape that can tell "the bound triggers at 4" from "the bound triggers at 4
+// verdicts about the same diff".
+//
+// Measured on PR #505 before the fix: four runs at the same head_sha `3ae6eb9`,
+// same single finding, nothing changed in the code — run 4 returned STOP +
+// escalate:human, and every run after it did too. A new commit did not reset it
+// (no head filter). Dismissing the reviews did not (a dismissed review keeps its
+// body). The only exit was closing the PR and losing the history the escalation
+// exists to summarise.
+
+const HEAD_A = 'a'.repeat(40);
+const HEAD_B = 'b'.repeat(40);
+
+function verdictReview(headSha, rev, author = 'brain-reviewer') {
+  return {
+    state: 'COMMENTED',
+    author,
+    body: `\`\`\`yaml\nprotocol: brain-review/1\nverdict: REVISE\nhead_sha: ${headSha}\nrev: ${rev}\n\`\`\``,
+  };
+}
+
+function decisionReview(headSha, actor = 'csrinaldi') {
+  return {
+    state: 'COMMENTED',
+    author: actor,
+    body: `\`\`\`yaml\nprotocol: brain-decision/1\ndecision: APPROVE\nhead_sha: ${headSha}\nactor: ${actor}\n\`\`\``,
+  };
+}
+
+async function bootWith(reviews, headSha = HEAD_A) {
+  return gatherColdBoot({
+    ...PR,
+    reviewerHandle: 'brain-reviewer',
+    deps: baseDeps({
+      fetchPr: async () => ({ number: 42, author: 'alice', labels: [], body: '', headRefOid: headSha }),
+      fetchReviews: async () => reviews,
+    }),
+  });
+}
+
+test('#506: three verdicts at OLD heads do not count toward the bound at the current head', async () => {
+  const boot = await bootWith([
+    verdictReview(HEAD_B, 1), verdictReview(HEAD_B, 2), verdictReview(HEAD_B, 3),
+    verdictReview(HEAD_A, 1),
+  ]);
+
+  assert.equal(boot.doctrine.priorVerdicts.length, 4, 'the raw list is unfiltered — other consumers need it whole');
+  const atHead = verdictsAtHead(boot.doctrine.priorVerdicts, boot.headSha);
+  assert.equal(atHead.length, 1, 'only the verdict about THIS diff is this iteration');
+
+  // The count is what buildVerdict receives. Before the fix this was 4 → STOP on a
+  // PR whose author had just pushed a fix.
+  const v = buildVerdict({
+    headSha: boot.headSha, conclusion: 'REVISE',
+    priorRevCount: atHead.length,
+    findings: [{ id: 'f1', severity: 'blocker', evidence: 'e', cites: 'c' }],
+  });
+  assert.equal(v.verdict, 'REVISE', 'pushing a fix must re-arm the loop, not leave it escalated');
+  assert.equal(v.escalate, null);
+});
+
+test('#506: FOUR verdicts at the CURRENT head still escalate — the bound is not weakened, only re-aimed', async () => {
+  const boot = await bootWith([
+    verdictReview(HEAD_A, 1), verdictReview(HEAD_A, 2),
+    verdictReview(HEAD_A, 3), verdictReview(HEAD_A, 4),
+  ]);
+  const atHead = verdictsAtHead(boot.doctrine.priorVerdicts, boot.headSha);
+  assert.equal(atHead.length, 4);
+
+  const v = buildVerdict({
+    headSha: boot.headSha, conclusion: 'REVISE',
+    priorRevCount: atHead.length,
+    findings: [{ id: 'f1', severity: 'blocker', evidence: 'e', cites: 'c' }],
+  });
+  assert.equal(v.verdict, 'STOP', 'arguing four times about one diff IS what §7 escalates');
+  assert.equal(v.escalate, 'human');
+});
+
+test('#506: cold boot surfaces brain-decision/1 blocks from the SAME review list', async () => {
+  const boot = await bootWith([verdictReview(HEAD_A, 1), decisionReview(HEAD_A)]);
+  assert.equal(boot.doctrine.priorVerdicts.length, 1, 'a decision block is not a verdict');
+  assert.equal(boot.doctrine.priorDecisions.length, 1, 'and a verdict is not a decision');
+  assert.equal(boot.doctrine.priorDecisions[0].head_sha, HEAD_A);
+});
+
+test('#506: a human ruling at the current head CLEARS the escalation — the trapdoor becomes a door', async () => {
+  const boot = await bootWith([
+    verdictReview(HEAD_A, 1), verdictReview(HEAD_A, 2),
+    verdictReview(HEAD_A, 3), verdictReview(HEAD_A, 4),
+    decisionReview(HEAD_A),
+  ]);
+  const atHead = verdictsAtHead(boot.doctrine.priorVerdicts, boot.headSha);
+  const rulingAtHead = boot.doctrine.priorDecisions.some(d => d.head_sha === boot.headSha);
+  assert.equal(atHead.length, 4, 'the count is still past the bound');
+  assert.equal(rulingAtHead, true);
+
+  const v = buildVerdict({
+    headSha: boot.headSha, conclusion: 'REVISE',
+    priorRevCount: atHead.length, rulingAtHead,
+    findings: [{ id: 'f1', severity: 'blocker', evidence: 'e', cites: 'c' }],
+  });
+  assert.equal(v.verdict, 'REVISE', 'the human was summoned and ruled — the escalation is answered');
+  assert.equal(v.escalate, null);
+});
+
+test('#506: a ruling at an OLD head does not clear an escalation at the current one', async () => {
+  const boot = await bootWith([
+    verdictReview(HEAD_A, 1), verdictReview(HEAD_A, 2),
+    verdictReview(HEAD_A, 3), verdictReview(HEAD_A, 4),
+    decisionReview(HEAD_B),
+  ]);
+  const rulingAtHead = boot.doctrine.priorDecisions.some(d => d.head_sha === boot.headSha);
+  assert.equal(rulingAtHead, false, 'a push is work the human has not ruled on — the same rule actor-check applies');
+
+  const v = buildVerdict({
+    headSha: boot.headSha, conclusion: 'REVISE',
+    priorRevCount: verdictsAtHead(boot.doctrine.priorVerdicts, boot.headSha).length,
+    rulingAtHead,
+    findings: [{ id: 'f1', severity: 'blocker', evidence: 'e', cites: 'c' }],
+  });
+  assert.equal(v.verdict, 'STOP');
+});
+
+// The exit is scoped to ONE escalation. `unknownCausality` says "the reviewer cannot
+// determine whether this finding is caused by the diff" — a ruling about going around
+// in circles does not answer that, and a fix that cleared both would silently widen
+// what a signature means.
+test('#506: a ruling does NOT clear the unknown-causality escalation — two questions, one answer', async () => {
+  const v = buildVerdict({
+    headSha: HEAD_A, conclusion: 'REVISE', priorRevCount: 0, rulingAtHead: true,
+    protocol: 'brain-review/2',
+    findings: [{ id: 'f1', severity: 'blocker', evidence: 'e', cites: 'c', causal_disposition: 'unknown' }],
+  });
+  assert.equal(v.verdict, 'STOP');
+  assert.equal(v.escalate, 'human');
 });

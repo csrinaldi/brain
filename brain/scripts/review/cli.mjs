@@ -27,6 +27,7 @@ import { evaluateTranche, gatherTrancheInputs } from './evaluators/tranche.mjs';
 import { evaluateCheckpoint, gatherCheckpointInputs } from './evaluators/checkpoint.mjs';
 import { evaluateRuling, gatherRulingInputs } from './evaluators/ruling.mjs';
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
+import { verdictsAtHead } from './lib/parse-verdict.mjs';
 import { postVerdict } from './poster.mjs';
 import { gatherQueue } from './queue.mjs';
 import { runBoard } from './board.mjs';
@@ -288,7 +289,10 @@ export async function main(deps = {}) {
     headSha: boot.headSha,
     conclusion: evalResult.conclusion,
     protocol,
-    priorRevCount: boot.doctrine.priorVerdicts.length,
+    // #506 — at THIS head, not over the PR's lifetime. One definition, shared with
+    // the anti-loop lock in poster.mjs.
+    priorRevCount: verdictsAtHead(boot.doctrine.priorVerdicts, boot.headSha).length,
+    rulingAtHead: (boot.doctrine.priorDecisions ?? []).some(d => d?.head_sha === boot.headSha),
     gates: evalResult.gates,
     findings,
     conditions: evalResult.conditions,

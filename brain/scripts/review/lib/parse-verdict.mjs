@@ -194,3 +194,35 @@ export function parseVerdict({ body, author = null } = {}) {
 
   return result;
 }
+
+/**
+ * THE definition of "the same review iteration" (issue #506).
+ *
+ * §7's bound says *"this has gone around too many times, a human must rule"* — a
+ * statement about iterations on a DISAGREEMENT. Counting over a PR's whole life
+ * measures something else entirely: how many times the reviewer was invoked,
+ * including runs where the diff never moved. A long-lived PR reviewed once at each
+ * of four successive heads, correctly every time, was indistinguishable from one
+ * that argued four times about the same diff — and the fourth run turned a REVISE
+ * into STOP + escalate:human with nothing in the code changed (measured on PR #505,
+ * four runs at `3ae6eb9`).
+ *
+ * Worse, it had no exit. A new commit did not reset it (no head filter). Dismissing
+ * the reviews did not (a dismissed review keeps its body, so it still parses). Past
+ * the bound every future run returned STOP. The only way out was closing the PR and
+ * losing the history the escalation exists to summarise.
+ *
+ * This exists as ONE exported function because the ticket requires it: the anti-loop
+ * lock (`poster.mjs`) already filtered by head while the bound did not, and nothing
+ * said why. Now both cite this. The anti-loop adds an AUTHOR condition on top — that
+ * difference is real and stated where it is applied, not hidden in a second notion of
+ * sameness.
+ *
+ * @param {Array<{head_sha?: string}>} priorVerdicts  parsed verdicts, any head
+ * @param {string} headSha  the head under review
+ * @returns {Array} the subset belonging to this iteration
+ */
+export function verdictsAtHead(priorVerdicts, headSha) {
+  if (!Array.isArray(priorVerdicts) || !headSha) return [];
+  return priorVerdicts.filter(v => v?.head_sha === headSha);
+}

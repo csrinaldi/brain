@@ -78,6 +78,7 @@ export function buildVerdict({
   pin,
   sequencing,
   escalate = null,
+  rulingAtHead = false,
 } = {}) {
   if (!headSha) throw new Error('brain-review/1: head_sha is mandatory — refusing to build a headless verdict.');
 
@@ -98,7 +99,17 @@ export function buildVerdict({
     }
   }
 
-  const boundHit = priorRevCount >= 3 && conclusion === 'REVISE';
+  // #506 — `priorRevCount` is now the count AT THIS HEAD (see verdictsAtHead), so
+  // the bound measures what §7 means: iterations on one disagreement, not how many
+  // times the reviewer was invoked over a long-lived PR's life.
+  //
+  // `rulingAtHead` is the exit. A human summoned by the escalation posts a
+  // `brain-decision/1` block via `brain:approve`, bound to this head; that clears
+  // the count-based escalation. It deliberately does NOT clear `unknownCausality`:
+  // that escalation says "the reviewer cannot determine whether this finding is
+  // caused by the diff", which a ruling on iteration count does not answer. Two
+  // escalations, two questions, and only one of them is about going around in circles.
+  const boundHit = priorRevCount >= 3 && conclusion === 'REVISE' && !rulingAtHead;
   const shouldEscalate = boundHit || unknownCausality;
   const finalEscalate = shouldEscalate ? 'human' : escalate;
   

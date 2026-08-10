@@ -17,6 +17,7 @@ import { getVcs } from '../vcs/cli.mjs';
 import { gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { readRecordObservations } from '../memory/lib/store.mjs';
 import { parseVerdict } from './lib/parse-verdict.mjs';
+import { parseDecision } from './lib/decision-block.mjs';
 
 const DOCTRINE_TYPES = new Set(['decision', 'architecture']);
 /** Pure guard (REQ-H1-3): a reviewer whose handle equals the PR author abstains. */
@@ -122,6 +123,23 @@ export async function gatherColdBoot({ project, number, provider, reviewerHandle
   const reviews = await fetchReviews({ project, number, provider });
   const priorVerdicts = reviews.map(r => parseVerdict(r)).filter(Boolean);
 
+  // #506 — the escalation's EXIT. §7 summons a human to rule; the ruling needs
+  // somewhere to land, and until now there was nowhere: past the bound every run
+  // returned STOP, and the only way out was closing the PR and discarding the
+  // history the escalation exists to summarise. That is a trapdoor, not a
+  // decision point.
+  //
+  // The ruling lands on the surface the signature already lives on. `brain:approve`
+  // posts a `brain-decision/1` block bound to a head (#473), read from this SAME
+  // review list — a human clearing an escalation is that act with a different
+  // consequence, so it needs no new mechanism, no new label and no new port verb.
+  // A label would be the wrong home: labels are the derived index, verdicts are truth.
+  //
+  // Bound to the head, like everything else here. A push is new work the human has
+  // not ruled on, and it re-arms — the same reasoning `actor-check` applies to an
+  // approval that predates a commit.
+  const priorDecisions = reviews.map(r => parseDecision(r)).filter(Boolean);
+
   // worktreePath: the isolated detached worktree (H1-2 evaluators operate inside it).
-  return { abstain: false, headSha, worktreePath: clone?.worktreePath, prView, doctrine: { records, priorVerdicts } };
+  return { abstain: false, headSha, worktreePath: clone?.worktreePath, prView, doctrine: { records, priorVerdicts, priorDecisions } };
 }
