@@ -26,6 +26,7 @@
     "brain:project:feature": "node ./brain/scripts/new-change.mjs",
     "brain:project:status": "node ./brain/scripts/project-status.mjs",
     "brain:tracker:board": "node ./brain/scripts/tracker-board.mjs",
+    "brain:epic:map": "node ./brain/scripts/status/epic-map.mjs",
     "brain:repo:check": "node ./brain/scripts/check-refs.mjs",
     "brain:change:verify": "node ./brain/scripts/verify-change.mjs",
     "brain:change:archive": "node ./brain/scripts/archive.mjs",

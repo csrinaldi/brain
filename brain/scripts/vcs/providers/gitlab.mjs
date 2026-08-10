@@ -433,8 +433,21 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
   const encoded = encodeURIComponent(project);
   const assigneePs = assigneeParams('gitlab', assignee, currentUser);
   const extra = Object.keys(assigneePs).length > 0 ? '&' + toQs(assigneePs) : '';
-  const endpoint = `projects/${encoded}/issues?state=${providerState('gitlab', state)}&per_page=50${extra}`;
-  const arr = runJson('glab', ['api', endpoint]);
+  // Paginated for the reason the GitHub side carries `--paginate`, and more sharply:
+  // this endpoint capped at 50, so truncation began at half GitHub's threshold. Fetched
+  // page-by-page (stop on a short page), the same termination condition `prReviews` and
+  // `labelList` use, because `runJson` returns only the parsed body and cannot follow a
+  // `Link` header. A prefix of the issue list is what makes `brain:epic:map` (#459) draw
+  // a graph missing nodes and say nothing about it.
+  const perPage = 100;
+  const arr = [];
+  for (let page = 1; ; page += 1) {
+    const endpoint = `projects/${encoded}/issues?state=${providerState('gitlab', state)}&per_page=${perPage}&page=${page}${extra}`;
+    const chunk = runJson('glab', ['api', endpoint]);
+    if (!Array.isArray(chunk)) break;
+    arr.push(...chunk);
+    if (chunk.length < perPage) break;
+  }
   return arr.map(r => ({ number: r.iid, title: r.title, labels: r.labels ?? [] }));
 }
 

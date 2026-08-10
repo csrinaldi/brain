@@ -245,7 +245,13 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
   const assigneePs = assigneeParams('github', assignee, currentUser);
   const extra = Object.keys(assigneePs).length > 0 ? '&' + toQs(assigneePs) : '';
   const endpoint = `repos/${project}/issues?state=${providerState('github', state)}&per_page=100${extra}`;
-  const arr = ghJson(['api', endpoint]);
+  // `--paginate` is load-bearing, same discipline as `labelEvents`/`prReviews`/
+  // `labelList`: `gh api` does not auto-paginate, so a repo with more than one page
+  // of open issues silently returned a PREFIX. Every consumer of this verb reads the
+  // result as "the issues", and `brain:epic:map` (#459) draws a dependency graph from
+  // it — a truncated list makes the map assert there is no dependency where there is
+  // one, which is a stronger and falser statement than admitting it cannot see.
+  const arr = ghJson(['api', '--paginate', endpoint]);
   // GitHub /issues returns both issues and PRs — filter out PRs.
   return arr
     .filter(r => !r.pull_request)
