@@ -219,8 +219,24 @@ test('release.yml routes tag_name via env: not spliced into run: (security prece
 // second copy of a rule is the defect #340 records: two implementations of one rule
 // disagree, and the one CI runs is not the one anybody reads.
 
-test('#479/#475 drift guard: every step running brain-audit declares VCS_TOKEN, with a scope that can read PRs', () => {
-  for (const [file, path] of [['release.yml', RELEASE_YML], ['governance-postmerge.yml', POSTMERGE_YML]]) {
+// ═══════════════════════════════════════════════════════════════════════════
+// T1 (issue #535, Requirement 7) — the integration proof, deliberately LAST.
+// `governance.yml` joins the audited set alongside the two workflows the
+// guard already covered. This is the point where every fix from #535 has to
+// hold TOGETHER: WU1's credential swap, WU2's entry-point invariant, WU3's
+// manifest, WU4's per-invocation resolution, WU7's block-style permissions
+// parse. Before all of them landed, this was red for two unrelated reasons at
+// once (the GH_TOKEN steps AND the whole-file over-approximation flagging
+// memory-gate/decision-gate) — indistinguishable from here alone, which is
+// why this proof runs only once everything else is in place.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('#479/#475/#535 drift guard: every audited workflow is compliant — VCS_TOKEN declared with a scope that can read PRs', () => {
+  for (const [file, path] of [
+    ['release.yml', RELEASE_YML],
+    ['governance-postmerge.yml', POSTMERGE_YML],
+    ['governance.yml', GOVERNANCE_YML],
+  ]) {
     assert.deepEqual(auditWorkflowAuth(readFileSync(path, 'utf8'), { file, repoRoot: REPO_ROOT }), []);
   }
 });
@@ -268,6 +284,19 @@ test('#479/#475 drift guard: reverting the audit step to the provider-specific G
     .replace('VCS_TOKEN: ${{ github.token }}', 'GH_TOKEN: ${{ github.token }}');
   assert.notEqual(reverted, readFileSync(POSTMERGE_YML, 'utf8'), 'the mutation must land');
   assert.match(auditWorkflowAuth(reverted, { file: 'governance-postmerge.yml', repoRoot: REPO_ROOT }).join('\n'), /does not declare VCS_TOKEN/);
+});
+
+test('#535 T1: reverting governance.yml\'s diff-size step to GH_TOKEN is caught (the precise #535 regression, this time on the PR-time gate)', () => {
+  const original = readFileSync(GOVERNANCE_YML, 'utf8');
+  const diffSizeBlock = original.match(/^  diff-size:\s*$[\s\S]*?(?=^  [a-z][\w-]*:\s*$)/m);
+  assert.ok(diffSizeBlock, 'the diff-size job must be locatable in governance.yml');
+  const revertedBlock = diffSizeBlock[0].replace('VCS_TOKEN: ${{ github.token }}', 'GH_TOKEN: ${{ github.token }}');
+  assert.notEqual(revertedBlock, diffSizeBlock[0], 'the mutation must land');
+  const reverted = original.replace(diffSizeBlock[0], revertedBlock);
+  assert.match(
+    auditWorkflowAuth(reverted, { file: 'governance.yml', repoRoot: REPO_ROOT }).join('\n'),
+    /does not declare VCS_TOKEN/
+  );
 });
 
 // ── governance-postmerge.yml (rung 3, auto-revert) — REQ-L2-2 ──────────────
