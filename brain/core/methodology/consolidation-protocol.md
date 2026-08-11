@@ -41,8 +41,18 @@ is **three acts in one commit**:
    accepted losses.
 
 The `brain/HOME.md` entry for that ADR is updated in the same commit to carry the amendment
-marker — `decision-gate` requires an ADR change and a `brain/HOME.md` change to co-occur, so
-omitting it fails the gate as well as leaving the index wrong.
+marker. **Nothing enforces this. You are the enforcement.**
+
+`decision-gate` requires an ADR and a `brain/HOME.md` change to co-occur only when the ADR is
+**added**. An amendment MODIFIES an existing ADR, and since #510 a modified ADR without a
+`HOME.md` change PASSES — deliberately, because the previous behaviour blocked every PR that
+corrected a line in an old ADR (PR #507). The other two nets do not close it either:
+`brain:nav` passes because `HOME.md` already links the ADR — it is the *marker* that goes
+missing, not the link — and `phase-order` is detection-only at `lite`.
+
+So an amendment can land with the index still describing the previous version, and no gate
+will say so. Until `brain:promote` gains the amendment path (#509), the three acts above and
+this fourth one are convention held by whoever runs them.
 
 Precedent: ADR-0026 Amendment 1 (`git show 0f54781`).
 
@@ -51,8 +61,11 @@ Precedent: ADR-0026 Amendment 1 (`git show 0f54781`).
 Adding or amending any file under `brain/**` is not one edit. In this repo it is three:
 
 1. the `brain/**` file itself;
-2. the `brain/HOME.md` entry (§1b) — required for `brain:nav` reachability _and_ by
-   `decision-gate`'s ADR ⇔ `HOME.md` co-occurrence rule;
+2. the `brain/HOME.md` entry (§1b) — always required for `brain:nav` reachability, and
+   enforced by `decision-gate` only when the ADR is **added**: `decision-gate` fails an added
+   ADR with no `HOME.md` change, and fails a `HOME.md` change that touches no ADR at all, but
+   passes a MODIFIED ADR alone (#510). On an amendment (§1c) this step therefore has no gate
+   behind it;
 3. **`AGENTS.md`, regenerated** — `brain/HOME.md` is one of the five `SOURCE_DOCS` the file is
    compiled from, so a `HOME.md` change without a regeneration leaves the compiled file every
    agent actually reads carrying stale content.

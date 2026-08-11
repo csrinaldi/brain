@@ -21,7 +21,7 @@ Job names are **load-bearing**: they form the check context strings
 | 1 | Every PR links an approved ticket | `issue-link` | _(none — not skippable)_ | Hard |
 | 2 | PR diff ≤ 400 changed lines | `diff-size` | `size:exception` | Hard with override |
 | 3 | `.memory/` has EVER held a session summary (repo-scoped) | `memory-gate` _(S4)_ | _(none — `skip:memory-gate` is named but unimplemented)_ | Soft — see below |
-| 4 | ADR exists for labeled decisions | `decision-gate` _(S4)_ | label-conditional (see below) | Mixed |
+| 4 | An ADDED ADR co-occurs with a `brain/HOME.md` entry | `decision-gate` _(S4)_ | _(none — the gate reads no labels)_ | Hard, in one direction — see below |
 
 ### Invariant 3 scope — what `memory-gate` does and does not check
 
@@ -53,14 +53,35 @@ The constant `GOVERNANCE_JOBS` in `scripts/vcs/governance-checks.mjs` is the sin
 of truth for these names. A drift-guard unit test reads `governance.yml` and asserts the
 YAML job names match the constant — fail-closed on any mismatch.
 
-### Invariant 4 — two-step `decision-gate` (S4)
+### Invariant 4 scope — what `decision-gate` does and does not check
 
-- **Step 1 (hard)**: if the PR carries the `decision` label, require an `adr-NNNN-*.md` AND
-  a `brain/HOME.md` change in the diff. Fails the PR if either is missing.
-- **Step 2 (heuristic)**: scan known architectural surfaces (`scripts/.*/providers/`,
-  `brain/core/`, `config-migrations.mjs`, `package.json`) for changes without the `decision`
-  label → emit `::warning::`, always `exit 0`. **Never a hard block** — the heuristic can be
-  wrong; it raises attention, not a veto.
+**It reads no labels, and it runs on every PR.** `adrPresence` takes the changed-file list and
+the added-file list; no call site passes labels and the workflow job carries no condition. The
+`decision` label changes nothing about the verdict.
+
+**It fails in exactly two cases** (measured 2026-08-11, issue #516):
+
+| condition | verdict |
+|---|---|
+| an ADR is **added** and `brain/HOME.md` is not in the diff | fail |
+| `brain/HOME.md` is in the diff and **no** ADR path is touched | fail |
+| anything else, including a **modified** ADR alone | pass |
+
+The two are keyed differently on purpose: the first reads the ADDED list, the second the
+TOUCHED list. That asymmetry is #510's content — a PR correcting one line of an old ADR must
+not be forced to re-index it (the previous behaviour blocked PR #507 for months) — and its
+consequence is that **an amendment's `brain/HOME.md` marker has no gate behind it**
+(`consolidation-protocol.md` §1c now says so; the net belongs in the amendment verb, #509).
+
+**There is no step-2 heuristic.** This file described one — a scan of
+`scripts/.*/providers/`, `brain/core/`, `config-migrations.mjs` and `package.json` emitting a
+`::warning::` for changes without the `decision` label. Nothing scans those surfaces and
+nothing emits that warning; the description was aspirational and read as shipped. An
+architectural change carrying no ADR simply passes, in silence.
+
+Both facts are pinned by test (`run-check.test.mjs`, #516), each proven a real detector by a
+mutation that IMPLEMENTS the claim. If either is ever built, those tests fail and name this
+section, so the doctrine cannot silently fall behind the code again.
 
 ---
 
@@ -73,12 +94,12 @@ L1 enforces **observable outputs** of each invariant. It does NOT enforce judgme
 | A ticket link exists and has `status:approved` | Whether the ticket describes the right work |
 | PR diff ≤ 400 lines (excluding ignore-list) | Whether the PR is sliced coherently |
 | `.memory/` changed (memory-gate proxy) | Capture quality or session completeness |
-| ADR exists when `decision` label is set | Whether the PR actually made a new decision |
+| An added ADR is indexed in `brain/HOME.md` | Whether the PR actually made a new decision |
 
 This boundary is **not a gap to close** — it is the line between what a machine can verify
-and what requires a human mind. The heuristic in step 2 of `decision-gate` warns and
-`exit 0`s precisely because "is this a decision?" is judgment. Only the label-conditional
-step is hard.
+and what requires a human mind. *"Is this a decision?"* is judgment, and `decision-gate` does
+not attempt it: it verifies a cascade (an added ADR is indexed) and says nothing about whether
+an ADR was owed. Applying the `decision` label is a human act with no gate reading it.
 
 ---
 
