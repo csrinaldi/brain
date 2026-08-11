@@ -1533,6 +1533,7 @@
 {"id":"rec-bea8659412fd2267","ts":"2026-07-11T21:57:54Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-beb0fd8eb50c6020","ts":"2026-07-25T21:50:29Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-bf1a1c3efd490bac","ts":"2026-07-25T21:51:48Z","actor":"feat/issue-259-d2-pr3-net-parity-reverter-skip","type":"decision","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-bf243645c13a32a7","ts":"2026-08-11T15:00:54Z","actor":"fix/issue-340-local-ci-parity","type":"discovery","project":"brain","issue":340,"file":"2026-08.jsonl"}
 {"id":"rec-bf653964f502a209","ts":"2026-07-10T22:30:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-bfa29d6333eaf72b","ts":"2026-07-29T14:26:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-bfee9ef8f3eae9f9","ts":"2026-07-25T21:50:47Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07.jsonl"}
