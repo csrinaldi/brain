@@ -95,7 +95,7 @@ test('gitlab.whoami({ token }) rejects on a transport failure — the contract d
 test('github.issueView returns normalized shape', async () => {
   setSpawn(fakeSpawn({ number: 42, title: 'Test issue', labels: [{ name: 'bug' }], body: 'Fix this', user: { login: 'alice' } }));
   const result = await github.issueView({ project: 'o/r', number: 42 });
-  assert.deepEqual(result, { number: 42, title: 'Test issue', labels: ['bug'], body: 'Fix this', author: 'alice' });
+  assert.deepEqual(result, { number: 42, title: 'Test issue', labels: ['bug'], body: 'Fix this', author: 'alice', assignees: null });
 });
 
 // issueView gains `author` (issue #239 A3 TASK1 — a fresh-context review
@@ -132,7 +132,7 @@ test('gitlab.issueView returns normalized shape (direct API v4 fetch, no glab CL
   });
   assert.equal(seenUrl, 'https://gitlab.example.com/api/v4/projects/g%2Fr/issues/7');
   assert.equal(seenHeaders?.['PRIVATE-TOKEN'], 'tok-abc');
-  assert.deepEqual(result, { number: 7, title: 'GL issue', labels: ['feat'], body: 'body text', author: 'bob' });
+  assert.deepEqual(result, { number: 7, title: 'GL issue', labels: ['feat'], body: 'body text', author: 'bob', assignees: null });
 });
 
 test('gitlab.issueView author defaults to null when the underlying author field is absent', async () => {
@@ -188,14 +188,14 @@ test('github.issueList filters pull_request entries', async () => {
   ]));
   const result = await github.issueList({ project: 'o/r', state: 'open' });
   assert.equal(result.length, 1);
-  assert.deepEqual(result[0], { number: 1, title: 'Issue A', labels: ['bug'] });
+  assert.deepEqual(result[0], { number: 1, title: 'Issue A', labels: ['bug'], assignees: null });
 });
 
 test('gitlab.issueList returns normalized array', async () => {
   setSpawn(fakeSpawn([{ iid: 10, title: 'GL Issue', labels: ['backend'] }]));
   const result = await gitlab.issueList({ project: 'g/r', state: 'open' });
   assert.equal(result.length, 1);
-  assert.deepEqual(result[0], { number: 10, title: 'GL Issue', labels: ['backend'] });
+  assert.deepEqual(result[0], { number: 10, title: 'GL Issue', labels: ['backend'], assignees: null });
 });
 
 // #459: both verbs used to return a PREFIX of the issue list — GitHub capped at one
@@ -1351,4 +1351,164 @@ test('gitlab.prCommits returns null when the response body is not an array (malf
     fetchImpl: async () => ({ ok: true, json: async () => ({ message: 'not found' }) }),
   });
   assert.equal(result, null);
+});
+
+// ── issueRelations — the SECOND edge source (#533, ADR-0029 Decision 2) ──────
+//
+// Everything below is about what the verb REFUSES to report, because that is
+// where a native-relation reader goes wrong: a containment relation read as an
+// ordering one, a "see also" read as a blocker, a cross-repo number drawn against
+// this repo's issue of the same number, and a failed fetch read as "no relations".
+
+/** Dispatches one canned payload per GitHub dependencies endpoint. */
+const ghRelSpawn = (blocking, blockedBy, { fail } = {}) => (_cmd, args) => {
+  const endpoint = args[args.length - 1];
+  if (fail && endpoint.includes(fail)) return { status: 1, stdout: '', stderr: 'HTTP 404' };
+  const body = endpoint.endsWith('/blocking') ? blocking : blockedBy;
+  return { status: 0, stdout: JSON.stringify(body), stderr: '' };
+};
+
+test('#533: github.issueRelations maps blocking→blocks and blocked_by→needs', async () => {
+  setSpawn(ghRelSpawn([{ number: 20 }], [{ number: 10 }]));
+  const r = await github.issueRelations({ project: 'o/r', number: 5 });
+  assert.deepEqual(r, { blocks: [20], needs: [10], foreign: 0 });
+});
+
+test('#533: github.issueRelations COUNTS cross-repo relations instead of drawing them', async () => {
+  // Issue numbers are per-repo. A foreign #12 rendered as a node asserts an edge to
+  // THIS repo's #12 — a fabricated dependency, which is worse than an omitted one.
+  setSpawn(ghRelSpawn(
+    [{ number: 12, repository: { full_name: 'other/repo' } }, { number: 13, repository: { full_name: 'o/r' } }],
+    [],
+  ));
+  const r = await github.issueRelations({ project: 'o/r', number: 5 });
+  assert.deepEqual(r.blocks, [13], 'the same-repo relation survives');
+  assert.equal(r.foreign, 1, 'and the dropped one is COUNTED — an omission nobody can hear is a silent lie');
+});
+
+test('#533: github.issueRelations returns null when EITHER side fails — half a graph reports absent edges', async () => {
+  setSpawn(ghRelSpawn([{ number: 20 }], [], { fail: 'blocked_by' }));
+  assert.equal(await github.issueRelations({ project: 'o/r', number: 5 }), null);
+
+  setSpawn(ghRelSpawn([], [{ number: 10 }], { fail: '/blocking' }));
+  assert.equal(await github.issueRelations({ project: 'o/r', number: 5 }), null);
+});
+
+test('#533: github.issueRelations distinguishes "no relations" from "could not read"', async () => {
+  setSpawn(ghRelSpawn([], []));
+  assert.deepEqual(await github.issueRelations({ project: 'o/r', number: 5 }), { blocks: [], needs: [], foreign: 0 });
+  setSpawn(ghRelSpawn([], [], { fail: '/blocking' }));
+  assert.equal(await github.issueRelations({ project: 'o/r', number: 5 }), null);
+});
+
+test('#533: github.issueRelations NEVER reads sub-issues — containment is not ordering', async () => {
+  // A slice is "part of" its epic, not a blocker on it. Feeding sub-issues into a
+  // blocking graph would make every slice of #313 appear to block #313.
+  const seen = [];
+  setSpawn((_cmd, args) => {
+    seen.push(args[args.length - 1]);
+    return { status: 0, stdout: '[]', stderr: '' };
+  });
+  await github.issueRelations({ project: 'o/r', number: 5 });
+  assert.ok(seen.length > 0, 'sanity: the verb must actually call something');
+  for (const endpoint of seen) {
+    assert.ok(!endpoint.includes('sub_issue'), `sub-issues must not be read — saw ${endpoint}`);
+  }
+});
+
+const glLinks = (links) => ({
+  project: 'g/r', number: 7,
+  fetchImpl: async () => ({ ok: true, json: async () => links }),
+});
+
+test('#533: gitlab.issueRelations maps blocks/is_blocked_by and DROPS relates_to', async () => {
+  // `relates_to` is not a start-order constraint. Reading it as one turns every
+  // "see also" a human clicked into a blocker.
+  const r = await gitlab.issueRelations(glLinks([
+    { iid: 20, link_type: 'blocks', references: { relative: '#20' } },
+    { iid: 10, link_type: 'is_blocked_by', references: { relative: '#10' } },
+    { iid: 30, link_type: 'relates_to', references: { relative: '#30' } },
+  ]));
+  assert.deepEqual(r, { blocks: [20], needs: [10], foreign: 0 });
+});
+
+test('#533: gitlab.issueRelations counts cross-project links, and an undecidable reference is foreign', async () => {
+  const r = await gitlab.issueRelations(glLinks([
+    { iid: 12, link_type: 'blocks', references: { relative: 'other/proj#12' } },
+    { iid: 13, link_type: 'blocks' },
+  ]));
+  assert.deepEqual(r.blocks, [], 'neither is drawn');
+  assert.equal(r.foreign, 2, 'a missing `references` is undecidable, and undecidable must not become a local edge');
+});
+
+test('#533: gitlab.issueRelations returns null on a failed fetch, never a fabricated empty graph', async () => {
+  const r = await gitlab.issueRelations({
+    project: 'g/r', number: 7,
+    fetchImpl: async () => ({ ok: false, status: 500, json: async () => ({}) }),
+  });
+  assert.equal(r, null);
+  assert.deepEqual(await gitlab.issueRelations(glLinks([])), { blocks: [], needs: [], foreign: 0 });
+});
+
+// ── issueUpdate — the first verb that can overwrite human prose (#533) ───────
+
+test('#533: github.issueUpdate PATCHes the body and nothing else', async () => {
+  let seen = null;
+  setSpawn((_cmd, args, opts) => {
+    seen = { args, payload: JSON.parse(opts.input) };
+    return { status: 0, stdout: JSON.stringify({ html_url: 'https://x/1' }), stderr: '' };
+  });
+  const r = await github.issueUpdate({ project: 'o/r', number: 5, body: 'nuevo' });
+  assert.deepEqual(r, { ok: true, url: 'https://x/1' });
+  assert.deepEqual(seen.payload, { body: 'nuevo' },
+    'body is the ONLY writable field — a payload that could carry state/title would make this the verb that closes a ticket');
+  assert.ok(seen.args.includes('PATCH'));
+});
+
+test('#533: gitlab.issueUpdate PUTs `description` and nothing else', async () => {
+  let seen = null;
+  const r = await gitlab.issueUpdate({
+    project: 'g/r', number: 7, body: 'nuevo',
+    fetchImpl: async (url, options) => {
+      seen = { url, method: options.method, payload: JSON.parse(options.body) };
+      return { ok: true, json: async () => ({ web_url: 'https://gl/7' }) };
+    },
+  });
+  assert.deepEqual(r, { ok: true, url: 'https://gl/7' });
+  assert.equal(seen.method, 'PUT');
+  assert.deepEqual(seen.payload, { description: 'nuevo' });
+  assert.match(seen.url, /projects\/g%2Fr\/issues\/7$/);
+});
+
+test('#533: issueUpdate refuses a non-string body on BOTH providers, without calling the network', async () => {
+  let called = false;
+  setSpawn(() => { called = true; return { status: 0, stdout: '{}', stderr: '' }; });
+  const gh = await github.issueUpdate({ project: 'o/r', number: 5, body: undefined });
+  const gl = await gitlab.issueUpdate({
+    project: 'g/r', number: 7, body: { toString: () => 'sneaky' },
+    fetchImpl: async () => { called = true; return { ok: true, json: async () => ({}) }; },
+  });
+  assert.equal(gh.ok, false);
+  assert.equal(gl.ok, false);
+  assert.equal(called, false, 'a body that is not a string must never reach the wire — an object stringifies to "[object Object]" and would REPLACE the epic with it');
+});
+
+test('#533: a zero-exit write whose echo is unparseable stays ok:true — the overwrite already landed', async () => {
+  // Reporting a successful write as a failure sends the caller into retrying an
+  // overwrite that has already happened.
+  setSpawn(() => ({ status: 0, stdout: 'not json', stderr: '' }));
+  assert.deepEqual(await github.issueUpdate({ project: 'o/r', number: 5, body: 'x' }), { ok: true, url: null });
+});
+
+test('#533: issueUpdate reports a transport failure rather than throwing', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 403' }));
+  const gh = await github.issueUpdate({ project: 'o/r', number: 5, body: 'x' });
+  assert.equal(gh.ok, false);
+  assert.match(gh.error, /403/);
+
+  const gl = await gitlab.issueUpdate({
+    project: 'g/r', number: 7, body: 'x',
+    fetchImpl: async () => ({ ok: false, status: 403, json: async () => ({}) }),
+  });
+  assert.equal(gl.ok, false);
 });

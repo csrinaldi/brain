@@ -27,13 +27,18 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 // REQ-266-3).
 // prStatusRollup (ADR-0021 Decision 2): READ-only status-check rollup — no
 // write path, no APPROVE path, no label mutation.
+// issueUpdate / issueRelations (issue #533, ADR-0029): the first verb that can
+// overwrite human prose, and the native-relation READ that feeds the same graph
+// builder as the declared `brain-graph/1` block. `issueUpdate` writes `body` and
+// nothing else — no title, no state, no labels — so it cannot close a ticket.
 // prCommits (issue #358 Q5 Phase 4): READ-only PR/MR commit list, added to
 // resolve REQ-L5-1's tiered evidence (lite's distinct-act head-commit
 // timestamp; regulated's approver-authored-no-commit check) — see
 // providers/github.mjs#prCommits / providers/gitlab.mjs#prCommits.
 export const VERBS = [
   'authCheck', 'authLogin', 'whoami',
-  'issueView', 'issueList', 'issueCreate', 'mrList', 'prView', 'mrCreate', 'labelEvents', 'prReviews',
+  'issueView', 'issueList', 'issueCreate', 'issueUpdate', 'issueRelations',
+  'mrList', 'prView', 'mrCreate', 'labelEvents', 'prReviews',
   'commitStatus', 'repoCloneUrl', 'patSetupUrl', 'projectResolve',
   'branchProtect', 'capabilities',
   'prReviewComment', 'issueComment', 'labelAdd', 'labelRemove',

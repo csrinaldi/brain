@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { parseGraphBlock, buildGraph, filesOverlap, READY, BLOCKED, AWAITING_HUMAN, UNCLASSIFIED } from './epic-graph.mjs';
-import { renderMermaid, renderSummary, replaceMapRegion, BEGIN, END } from './epic-render.mjs';
+import { renderMermaid, renderSummary, replaceMapRegion, outsideRegion, BEGIN, END } from './epic-render.mjs';
 import { parseArgs, composeMap, main } from './epic-map.mjs';
 
 const block = ({ track = 'A', needs = [], blocks = [], files = [] } = {}) =>
@@ -15,7 +15,12 @@ const block = ({ track = 'A', needs = [], blocks = [], files = [] } = {}) =>
 const issue = (number, o = {}) => ({
   number, title: o.title ?? `t${number}`, labels: o.labels ?? ['status:approved'],
   state: o.state ?? 'open', body: o.body ?? block(o),
+  ...(o.assignees !== undefined ? { assignees: o.assignees } : {}),
+  ...(o.relations !== undefined ? { relations: o.relations } : {}),
 });
+
+/** A successful native read that found nothing — distinct from `null`. */
+const noRelations = { blocks: [], needs: [], foreign: 0 };
 
 // ── the declared block ──────────────────────────────────────────────────────
 
@@ -60,12 +65,13 @@ test('#459: an OPEN prerequisite blocks; a CLOSED one does not', () => {
 test('#459: `A needs B` and `B blocks A` are ONE edge, declared from either end', () => {
   const fromNeeds = buildGraph([issue(1), issue(2, { needs: [1] })]);
   const fromBlocks = buildGraph([issue(1, { blocks: [2] }), issue(2)]);
-  assert.deepEqual(fromNeeds.edges, [{ from: 1, to: 2 }]);
-  assert.deepEqual(fromBlocks.edges, [{ from: 1, to: 2 }]);
+  const edge = [{ from: 1, to: 2, sources: ['declared'] }];
+  assert.deepEqual(fromNeeds.edges, edge);
+  assert.deepEqual(fromBlocks.edges, edge);
 
   // And declaring BOTH ends does not double it.
   const both = buildGraph([issue(1, { blocks: [2] }), issue(2, { needs: [1] })]);
-  assert.deepEqual(both.edges, [{ from: 1, to: 2 }]);
+  assert.deepEqual(both.edges, edge);
 });
 
 test('#459: an unapproved issue waits on a HUMAN, not on code', () => {
@@ -130,11 +136,11 @@ test('#459: an edge to an out-of-scope issue is DRAWN, not dropped', () => {
   assert.match(out, /N1 --> N999/);
 });
 
-test('#459: the summary reports the undeclared COUNT rather than hiding them', () => {
+test('#459: the summary reports the unplaced COUNT rather than hiding them', () => {
   const s = renderSummary(buildGraph([
     issue(1), { number: 8, title: 'x', labels: [], state: 'open', body: '' },
   ]));
-  assert.match(s, /\*\*Sin declarar\*\* \(1\)/);
+  assert.match(s, /\*\*Sin ubicar\*\* \(1\)/);
   assert.match(s, /#8/);
   // The count is the point: an undeclared issue must not be quietly absorbed into
   // "Listos ahora", which would make the map overstate what is startable.
@@ -172,18 +178,18 @@ test('#459: a malformed marker region (END before BEGIN) appends rather than cor
 // ── the CLI ─────────────────────────────────────────────────────────────────
 
 test('#459: parseArgs requires an issue number', () => {
-  assert.deepEqual(parseArgs(['313']), { ok: true, number: 313, dryRun: false });
-  assert.deepEqual(parseArgs(['313', '--dry-run']), { ok: true, number: 313, dryRun: true });
+  assert.deepEqual(parseArgs(['313']), { ok: true, number: 313, dryRun: false, relations: true });
+  assert.deepEqual(parseArgs(['313', '--dry-run']), { ok: true, number: 313, dryRun: true, relations: true });
   assert.equal(parseArgs([]).ok, false);
   assert.match(parseArgs(['--bogus']).error, /unknown argument/);
 });
 
-test('#459: the map NAMES what it cannot see — assignees are absent, not empty', () => {
-  // Reporting an empty assignee list would read as "nobody is on this" when the truth
-  // is "brain cannot see". The port normalises assignees away; slice 2 changes that.
-  const text = composeMap(buildGraph([issue(1)]));
-  assert.match(text, /quién lo ejecuta/);
-  assert.match(text, /slice 2/);
+test('#533: native relations are read BY DEFAULT — the flag turns them OFF, never on', () => {
+  // A second source that ships behind an opt-in flag is a source nobody turns on:
+  // green in test, inert in production (#335). The flag exists for the cost, not
+  // for the feature.
+  assert.equal(parseArgs(['313']).relations, true);
+  assert.equal(parseArgs(['313', '--no-relations']).relations, false);
 });
 
 test('#459: a failed issue list REFUSES rather than drawing a graph with holes', async () => {
@@ -211,4 +217,302 @@ test('#459: with no body-write verb on the port, it prints the region instead of
   const out = lines.join('\n');
   assert.match(out, /no issue-body write verb/);
   assert.match(out, /```mermaid/);
+});
+
+// ── slice 2: two sources, one graph (#533, ADR-0029 Decision 2) ─────────────
+
+test('#533: an edge only the NATIVE side knows is in the graph', () => {
+  // "A repo that never declares a block should still get a graph" — the ticket's
+  // own words, and the reason the two sources are not exclusive.
+  const g = buildGraph([
+    { number: 1, title: 'sin bloque', labels: ['status:approved'], state: 'open', body: 'prosa',
+      relations: { blocks: [2], needs: [], foreign: 0 } },
+    issue(2, { relations: noRelations }),
+  ]);
+  assert.deepEqual(g.edges, [{ from: 1, to: 2, sources: ['native'] }]);
+  const n1 = g.nodes.find(n => n.number === 1);
+  assert.notEqual(n1.status, UNCLASSIFIED, 'a native relation PLACES the node — it is not "sin ubicar"');
+  assert.deepEqual(n1.sources, ['native']);
+  assert.equal(g.nodes.find(n => n.number === 2).status, BLOCKED);
+});
+
+test('#533: when both sources declare the SAME edge it is one edge, and no disagreement', () => {
+  const g = buildGraph([
+    issue(1, { blocks: [2], relations: { blocks: [2], needs: [], foreign: 0 } }),
+    issue(2, { relations: noRelations }),
+  ]);
+  assert.deepEqual(g.edges, [{ from: 1, to: 2, sources: ['declared', 'native'] }]);
+  assert.deepEqual(g.divergences, [], 'agreement is not a divergence');
+});
+
+test('#533: the UNION is taken and the disagreement is REPORTED — neither source overrides', () => {
+  // Precedence is a way of DISCARDING an assertion. An edge either source knows
+  // about is a real constraint; dropping it makes the map say "there is no
+  // dependency", the stronger and falser statement. The report is what keeps the
+  // union honest — a relation someone clicked by accident shows up in a list a
+  // human can act on, where a silently overridden one never would.
+  const g = buildGraph([
+    issue(1, { blocks: [2], relations: noRelations }),            // declared only
+    issue(2, { relations: { blocks: [3], needs: [], foreign: 0 } }), // native only
+    issue(3, { relations: noRelations }),
+  ]);
+  assert.deepEqual(g.edges.map(e => [e.from, e.to, e.sources.join('+')]).sort(),
+    [[1, 2, 'declared'], [2, 3, 'native']]);
+  assert.deepEqual(g.divergences, [
+    { from: 1, to: 2, only: 'declared' },
+    { from: 2, to: 3, only: 'native' },
+  ]);
+
+  const s = renderSummary(g);
+  assert.match(s, /Las dos fuentes no coinciden/);
+  assert.match(s, /#1→#2 \(sólo declarado\)/);
+  assert.match(s, /#2→#3 \(sólo nativo\)/);
+});
+
+test('#533: an UNREADABLE native side is not "no relations", and manufactures no divergence', () => {
+  // Reporting "the declared edge is missing from native" when native could not be
+  // read charges an outage to the data — the same substitution of absence for
+  // emptiness the assignees half of this ticket exists to stop.
+  const g = buildGraph([
+    issue(1, { blocks: [2], relations: null }),
+    issue(2, { relations: null }),
+  ]);
+  assert.deepEqual(g.relationsUnreadable, [1, 2]);
+  assert.deepEqual(g.divergences, [], 'a fetch failure is not a disagreement');
+  assert.deepEqual(g.edges, [{ from: 1, to: 2, sources: ['declared'] }], 'and the declared edge survives');
+  assert.match(renderSummary(g), /Relaciones nativas ilegibles.*#1 #2/s);
+});
+
+test('#533: not ASKING for relations is not the same as asking and failing', () => {
+  // `--no-relations` (undefined) must leave slice 1's output untouched: no
+  // divergence list, no "ilegibles" line, nothing claiming a source was consulted.
+  const g = buildGraph([issue(1, { blocks: [2] }), issue(2)]);
+  assert.deepEqual(g.divergences, []);
+  assert.deepEqual(g.relationsUnreadable, []);
+  const s = renderSummary(g);
+  assert.ok(!/Las dos fuentes/.test(s));
+  assert.ok(!/ilegibles/.test(s));
+});
+
+test('#533: cross-repo relations are counted through to the summary, never silently dropped', () => {
+  const g = buildGraph([issue(1, { relations: { blocks: [], needs: [], foreign: 2 } })]);
+  assert.equal(g.foreignRelations, 2);
+  assert.match(renderSummary(g), /Relaciones cross-repo omitidas:\*\* 2/);
+});
+
+test('#533: a node no source places is still UNCLASSIFIED — a successful empty read places nothing', () => {
+  const g = buildGraph([
+    { number: 9, title: 'x', labels: ['status:approved'], state: 'open', body: 'prosa', relations: noRelations },
+  ]);
+  assert.equal(g.nodes[0].status, UNCLASSIFIED, 'reading "no relations" is not the same as being placed by one');
+});
+
+// ── slice 2: the executor (#533, ADR-0029 Decision 1) ───────────────────────
+
+test('#533: the map shows WHO — and keeps "nobody" and "cannot see" apart', () => {
+  const g = buildGraph([
+    issue(1, { assignees: ['alice'] }),
+    issue(2, { assignees: [] }),
+    issue(3, { assignees: null }),
+  ]);
+  const m = renderMermaid(g);
+  assert.match(m, /N1\["#1 t1 · alice"\]/);
+  assert.match(m, /N2\["#2 t2 · sin asignar"\]/, 'read, and nobody is on it');
+  assert.match(m, /N3\["#3 t3"\]/, 'brain cannot see — it says NOTHING rather than "sin asignar"');
+
+  const s = renderSummary(g);
+  assert.match(s, /#1 → alice/);
+  assert.match(s, /#2 \(sin asignar\)/);
+  assert.match(s, /#3 \(\?\)/);
+});
+
+test('#533: buildGraph does not erase `null` assignees into an empty list', () => {
+  // `?? []` here would silently undo the whole reason the port was widened.
+  const g = buildGraph([issue(1, { assignees: null }), issue(2, { assignees: [] })]);
+  assert.equal(g.nodes.find(n => n.number === 1).assignees, null);
+  assert.deepEqual(g.nodes.find(n => n.number === 2).assignees, []);
+});
+
+test('#533: an assignee name carrying mermaid syntax cannot break the block', () => {
+  const node = renderMermaid(buildGraph([issue(1, { assignees: ['a["b"]|c'] })]))
+    .split('\n').find(l => l.includes('N1['));
+  const inner = node.slice(node.indexOf('["') + 2, node.lastIndexOf('"]'));
+  for (const c of '"<>[]{}()|') {
+    assert.ok(!inner.includes(c), `the label must not carry ${c} — names are user text too`);
+  }
+});
+
+test('#533: a READY node with no `files` is reported unverifiable, not silently parallelisable', () => {
+  // An empty `conflictsWith` reads as "proven parallelisable". It proved nothing —
+  // and native-only nodes carry no `files` at all, so this became routine.
+  const g = buildGraph([issue(1, { files: [] }), issue(2, { files: ['a/**'] })]);
+  assert.equal(g.nodes.find(n => n.number === 1).filesUnknown, true);
+  assert.equal(g.nodes.find(n => n.number === 2).filesUnknown, false);
+  assert.match(renderSummary(g), /Paralelización no verificable[^\n]*#1/);
+});
+
+// ── slice 2: the body write (#533, ADR-0029 Decision 3) ─────────────────────
+
+test('#533: outsideRegion is blind to the region and exact everywhere else', () => {
+  const body = `# Épico\n\nprosa\n\n${BEGIN}\nviejo\n${END}\n\nfinal\n`;
+  assert.equal(outsideRegion(replaceMapRegion(body, 'nuevo')), outsideRegion(body),
+    'a regeneration changes nothing outside the markers');
+  assert.equal(outsideRegion(replaceMapRegion('# Épico\n\nsolo prosa', 'X')), outsideRegion('# Épico\n\nsolo prosa'),
+    'and a FIRST run, which appends, is still contained');
+  assert.notEqual(outsideRegion(body), outsideRegion(body.replace('prosa', 'prosa.')),
+    'one character of surrounding prose is enough to differ — this is not a fuzzy check');
+});
+
+test('#533: the map REFUSES to write when the prose outside the markers would change', async () => {
+  // A stray BEGIN with no END is the real shape of this: appending a full region
+  // leaves the stray marker as the FIRST one, so the next run would swallow the
+  // prose between it and the real END. Refuse instead of writing the trap.
+  const lines = [];
+  let wrote = false;
+  const code = await main(['313'], {
+    say: (s) => lines.push(String(s)),
+    config: {}, origin: { project: 'a/b' },
+    vcs: {
+      issueList: async () => [{ number: 1, title: 't', labels: ['status:approved'], assignees: [] }],
+      issueView: async ({ number }) => (number === 313
+        ? { body: `# Épico\n\nprosa\n${BEGIN}\ntexto huérfano` }
+        : { body: block({}) }),
+      issueRelations: async () => noRelations,
+      issueUpdate: async () => { wrote = true; return { ok: true, url: null }; },
+    },
+  });
+  assert.equal(code, 1);
+  assert.equal(wrote, false, 'nothing may be written when containment cannot be proven');
+  assert.match(lines.join('\n'), /refusing to write/);
+});
+
+test('#533: the map WRITES through issueUpdate, with the body it composed', async () => {
+  let seen = null;
+  const lines = [];
+  const code = await main(['313'], {
+    say: (s) => lines.push(String(s)),
+    config: {}, origin: { project: 'a/b' },
+    vcs: {
+      issueList: async () => [{ number: 1, title: 't', labels: ['status:approved'], assignees: ['alice'] }],
+      issueView: async ({ number }) => (number === 313 ? { body: '# Épico\n\nprosa' } : { body: block({}) }),
+      issueRelations: async () => noRelations,
+      issueUpdate: async (args) => { seen = args; return { ok: true, url: 'u' }; },
+    },
+  });
+  assert.equal(code, 0);
+  assert.equal(seen.number, 313);
+  assert.match(seen.body, /```mermaid/);
+  assert.match(seen.body, /N1\["#1 t · alice"\]/, 'the executor read from issueList reaches the written body');
+  assert.ok(seen.body.startsWith('# Épico\n\nprosa'), 'the prose is intact');
+  assert.match(lines.join('\n'), /map regenerated/);
+});
+
+test('#533: a refused write is reported as a failure, not as a regenerated map', async () => {
+  const lines = [];
+  const code = await main(['313'], {
+    say: (s) => lines.push(String(s)),
+    config: {}, origin: { project: 'a/b' },
+    vcs: {
+      issueList: async () => [{ number: 1, title: 't', labels: ['status:approved'] }],
+      issueView: async () => ({ body: block({}) }),
+      issueRelations: async () => noRelations,
+      issueUpdate: async () => ({ ok: false, error: 'HTTP 403' }),
+    },
+  });
+  assert.equal(code, 1);
+  const out = lines.join('\n');
+  assert.match(out, /could not write #313: HTTP 403/);
+  assert.ok(!/map regenerated/.test(out), 'a failed write must never print success');
+});
+
+test('#533: --no-relations does not call issueRelations at all', async () => {
+  let called = 0;
+  await main(['313', '--no-relations', '--dry-run'], {
+    say: () => {},
+    config: {}, origin: { project: 'a/b' },
+    vcs: {
+      issueList: async () => [{ number: 1, title: 't', labels: [] }],
+      issueView: async () => ({ body: block({}) }),
+      issueRelations: async () => { called += 1; return noRelations; },
+    },
+  });
+  assert.equal(called, 0);
+});
+
+test('#533: a provider WITHOUT issueRelations degrades to the declared block alone', async () => {
+  // A third provider that has not implemented the verb must still get slice 1's
+  // map, and must not be reported as "unreadable" — it was never asked.
+  const lines = [];
+  const code = await main(['313', '--dry-run'], {
+    say: (s) => lines.push(String(s)),
+    config: {}, origin: { project: 'a/b' },
+    vcs: {
+      issueList: async () => [{ number: 1, title: 't', labels: ['status:approved'] }],
+      issueView: async () => ({ body: block({}) }),
+    },
+  });
+  assert.equal(code, 0);
+  assert.ok(!/ilegibles/.test(lines.join('\n')));
+});
+
+test('#533: the body written is EXACTLY composeMap over the same graph — one composer, not two', () => {
+  // `composeMap` is exported so a test can assert the CLI writes the same text a
+  // reader can reproduce. Two spellings of one rule is the #340 defect, and here it
+  // would mean the region a human reviews is not the region the verb writes.
+  const issues = [
+    { number: 1, title: 't', labels: ['status:approved'], state: 'open', body: block({}), assignees: ['alice'], relations: noRelations },
+  ];
+  const region = composeMap(buildGraph(issues));
+  const body = replaceMapRegion('# Épico\n\nprosa', region);
+  assert.ok(body.includes(`${BEGIN}\n${region}\n${END}`));
+  assert.equal(outsideRegion(body), outsideRegion('# Épico\n\nprosa'));
+});
+
+test('#533: when NEITHER source carries assignees the map stays silent — it does not invent "sin asignar"', async () => {
+  // The CLI-level twin of the port rule. A `?? []` here would undo the whole point
+  // one layer above where the port defends it, and the map — the artefact a human
+  // actually reads — would say "nobody is on this" about issues it never saw.
+  const lines = [];
+  await main(['313', '--dry-run'], {
+    say: (s) => lines.push(String(s)),
+    config: {}, origin: { project: 'a/b' },
+    vcs: {
+      issueList: async () => [{ number: 1, title: 't', labels: ['status:approved'] }],
+      issueView: async () => ({ body: block({}) }),
+    },
+  });
+  const out = lines.join('\n');
+  assert.match(out, /N1\["#1 t"\]/);
+  assert.ok(!/sin asignar/.test(out), 'absent must not be rendered as empty');
+  assert.match(out, /#1 \(\?\)/, 'and the summary says it cannot see, rather than saying nobody');
+});
+
+test('#533: an EMPTY list from issueList is an answer — it does not fall through to issueView', async () => {
+  // `||` instead of `??` here would treat "read, and nobody is assigned" as a
+  // miss and quietly prefer a second, staler source.
+  const lines = [];
+  await main(['313', '--dry-run'], {
+    say: (s) => lines.push(String(s)),
+    config: {}, origin: { project: 'a/b' },
+    vcs: {
+      issueList: async () => [{ number: 1, title: 't', labels: ['status:approved'], assignees: [] }],
+      issueView: async () => ({ body: block({}), assignees: ['fantasma'] }),
+    },
+  });
+  const out = lines.join('\n');
+  assert.match(out, /N1\["#1 t · sin asignar"\]/);
+  assert.ok(!/fantasma/.test(out));
+});
+
+test('#533: issueView is the fallback when the LIST endpoint cannot carry assignees', async () => {
+  const lines = [];
+  await main(['313', '--dry-run'], {
+    say: (s) => lines.push(String(s)),
+    config: {}, origin: { project: 'a/b' },
+    vcs: {
+      issueList: async () => [{ number: 1, title: 't', labels: ['status:approved'] }],
+      issueView: async () => ({ body: block({}), assignees: ['alice'] }),
+    },
+  });
+  assert.match(lines.join('\n'), /N1\["#1 t · alice"\]/);
 });

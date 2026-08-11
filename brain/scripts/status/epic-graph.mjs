@@ -102,6 +102,10 @@ export function filesOverlap(a = [], b = []) {
   return false;
 }
 
+/** The two sources an edge can come from (#533, ADR-0029). */
+export const SRC_DECLARED = 'declared';
+export const SRC_NATIVE = 'native';
+
 /**
  * Builds the execution graph from a set of issues.
  *
@@ -109,23 +113,73 @@ export function filesOverlap(a = [], b = []) {
  * same edge declared from either end, and a graph that only read one would go quiet
  * the moment someone declared it from the other. Duplicates collapse.
  *
+ * TWO SOURCES, ONE GRAPH (#533 slice 2, ADR-0029 Decision 2). The declared
+ * `brain-graph/1` block and the provider's native relations (`issue.relations`, from
+ * the `issueRelations` verb) both assert edges, and the graph takes their UNION —
+ * neither overrides the other.
+ *
+ * Precedence was the open question, and the answer is that precedence is a way of
+ * DISCARDING an assertion. An edge either source knows about is a real constraint on
+ * start order, and dropping it because the other source is silent makes the map say
+ * "there is no dependency" — the stronger and falser statement this whole module
+ * refuses (the out-of-scope stub in `renderMermaid`, the pagination fix behind
+ * `issueList`, #518's unenumerated commits). Union is also the safe direction: an
+ * extra blocker delays one ticket, a missing one licenses two agents onto colliding
+ * work.
+ *
+ * The union is only honest with the DIVERGENCE REPORTED. Every edge present in one
+ * source and absent from the other lands in `divergences`, and `renderSummary` prints
+ * it. That is what answers the ticket's worry about "a relation someone clicked by
+ * accident": a wrong click shows up in a list a human can act on, where a silently
+ * overridden one never would. A silent merge of two sources is how a derived artefact
+ * starts lying again.
+ *
+ * `relations === null` means UNCOMPUTABLE — the native side could not be read for that
+ * issue — and it is carried through to `relationsUnreadable` rather than being read as
+ * "no native relations". `undefined` means the caller did not ask for them at all.
+ *
  * An edge to an issue that is CLOSED or absent from the set does not block — the work
  * is done or out of scope. An edge to an OPEN issue does.
  *
- * @param {Array<{number:number,title:string,labels:string[],state:string,body?:string,assignees?:string[]}>} issues
- * @returns {{ nodes: Array, edges: Array<{from:number,to:number}>, tracks: Map }}
+ * @param {Array<{number:number,title:string,labels:string[],state:string,body?:string,assignees?:string[]|null,relations?:{blocks:number[],needs:number[],foreign?:number}|null}>} issues
+ * @returns {{ nodes: Array, edges: Array<{from:number,to:number,sources:string[]}>, tracks: Map, divergences: Array, relationsUnreadable: number[], foreignRelations: number }}
  */
 export function buildGraph(issues = []) {
   const byNumber = new Map(issues.map(i => [i.number, i]));
   const nodes = [];
-  const edgeSet = new Set();
+  /** @type {Map<string, Set<string>>} edge key → the sources that assert it. */
+  const edgeSources = new Map();
+  const addEdge = (key, source) => {
+    if (!edgeSources.has(key)) edgeSources.set(key, new Set());
+    edgeSources.get(key).add(source);
+  };
+  const relationsUnreadable = [];
+  let foreignRelations = 0;
 
   for (const issue of issues) {
     const g = parseGraphBlock(issue.body ?? '');
     // `needs` → an edge INTO this node. `blocks` → an edge OUT of it. Same relation,
     // two ends; declaring either is enough.
-    for (const n of g?.needs ?? []) edgeSet.add(`${n}->${issue.number}`);
-    for (const b of g?.blocks ?? []) edgeSet.add(`${issue.number}->${b}`);
+    for (const n of g?.needs ?? []) addEdge(`${n}->${issue.number}`, SRC_DECLARED);
+    for (const b of g?.blocks ?? []) addEdge(`${issue.number}->${b}`, SRC_DECLARED);
+
+    const rel = issue.relations;
+    if (rel === null) relationsUnreadable.push(issue.number);
+    let nativeTouches = false;
+    if (rel) {
+      foreignRelations += rel.foreign ?? 0;
+      for (const n of rel.needs ?? []) { addEdge(`${n}->${issue.number}`, SRC_NATIVE); nativeTouches = true; }
+      for (const b of rel.blocks ?? []) { addEdge(`${issue.number}->${b}`, SRC_NATIVE); nativeTouches = true; }
+    }
+
+    // `sources` is what PLACES a node in the graph. A repo that never declares a
+    // block still gets one when the provider carries the relations, which is the
+    // property the ticket asked for; a node no source places stays UNCLASSIFIED
+    // rather than silently becoming a free-standing leaf.
+    const sources = [];
+    if (g !== null) sources.push(SRC_DECLARED);
+    if (nativeTouches) sources.push(SRC_NATIVE);
+
     nodes.push({
       number: issue.number,
       title: issue.title,
@@ -134,14 +188,32 @@ export function buildGraph(issues = []) {
       track: g?.track ?? null,
       files: g?.files ?? [],
       declared: g !== null,
-      assignees: issue.assignees ?? [],
+      sources,
+      // `assignees` passes through UNCHANGED, `null` included (#533): `[]` is
+      // "nobody is assigned", `null` is "brain cannot see", and `?? []` here would
+      // erase exactly the distinction the port was widened to carry.
+      assignees: issue.assignees ?? null,
     });
   }
 
-  const edges = [...edgeSet].map(k => {
+  const edges = [...edgeSources].map(([k, srcs]) => {
     const [from, to] = k.split('->').map(Number);
-    return { from, to };
+    return { from, to, sources: [...srcs].sort() };
   });
+
+  // Only edges whose endpoints BOTH had a native read can diverge: if the native
+  // side was unreadable for an endpoint, "absent from native" is not a fact about
+  // the relation, it is a fact about the fetch — and reporting it as disagreement
+  // would manufacture divergences out of an outage.
+  const nativeRead = new Set(
+    issues.filter(i => i.relations != null).map(i => i.number),
+  );
+  const askedNative = nativeRead.size > 0 || relationsUnreadable.length > 0;
+  const divergences = !askedNative ? [] : edges
+    .filter(e => e.sources.length === 1)
+    .filter(e => nativeRead.has(e.from) || nativeRead.has(e.to))
+    .map(e => ({ from: e.from, to: e.to, only: e.sources[0] }))
+    .sort((a, b) => a.from - b.from || a.to - b.to);
 
   // Classify. An OPEN prerequisite blocks; a closed or unknown one does not.
   const openBlockers = new Map();
@@ -153,7 +225,7 @@ export function buildGraph(issues = []) {
   for (const node of nodes) {
     const blockers = openBlockers.get(node.number) ?? [];
     node.blockedBy = blockers;
-    if (!node.declared) node.status = UNCLASSIFIED;
+    if (node.sources.length === 0) node.status = UNCLASSIFIED;
     else if (blockers.length > 0) node.status = BLOCKED;
     else if (!node.labels.includes('status:approved')) node.status = AWAITING_HUMAN;
     else node.status = READY;
@@ -174,8 +246,13 @@ export function buildGraph(issues = []) {
       n.conflictsWith = ready
         .filter(o => o.number !== n.number && filesOverlap(n.files, o.files))
         .map(o => o.number);
+      // A node with NO file claim yields an empty `conflictsWith`, which reads as
+      // "proven parallelisable" when nothing was proven. Native relations make this
+      // routine rather than rare — they carry no `files` at all — so the absence is
+      // marked instead of being left to look like a clean result (#533).
+      n.filesUnknown = n.files.length === 0;
     }
   }
 
-  return { nodes, edges, tracks };
+  return { nodes, edges, tracks, divergences, relationsUnreadable, foreignRelations };
 }

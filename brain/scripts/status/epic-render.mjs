@@ -19,6 +19,25 @@ function label(s) {
 }
 
 /**
+ * The executor, as a node suffix (#533 slice 2).
+ *
+ * THREE OUTCOMES, never two. `null` is "brain cannot see the assignment" and prints
+ * nothing at all; `[]` is "read, and nobody is assigned" and prints `· sin asignar`;
+ * a non-empty list prints the names. Slice 1 could only ever produce the first, and
+ * said so in prose because printing `sin asignar` for it would have been a claim the
+ * port could not back.
+ *
+ * Names are `label()`ed for the same reason titles are: they land inside a mermaid
+ * node and a `|` or `[` there breaks the syntax rather than merely looking wrong.
+ */
+function who(n) {
+  const a = n?.assignees;
+  if (a === null || a === undefined) return '';
+  if (a.length === 0) return ' · sin asignar';
+  return ` · ${a.map(x => label(x)).join(', ')}`;
+}
+
+/**
  * Renders the graph. Deterministic: nodes sorted by number, edges by endpoints, so
  * two runs over unchanged server state produce byte-identical output — which is what
  * makes the body write idempotent rather than merely usually-idempotent.
@@ -31,7 +50,7 @@ export function renderMermaid({ nodes = [], edges = [] } = {}) {
   const lines = ['```mermaid', 'graph LR'];
 
   for (const n of shown) {
-    lines.push(`  N${n.number}["#${n.number} ${label(n.title)}"]`);
+    lines.push(`  N${n.number}["#${n.number} ${label(n.title)}${who(n)}"]`);
   }
   for (const e of [...edges].sort((a, b) => a.from - b.from || a.to - b.to)) {
     // An edge to a node outside the set is kept and drawn to a stub: dropping it
@@ -63,24 +82,72 @@ export function renderMermaid({ nodes = [], edges = [] } = {}) {
  * `unclassified` is reported with its count and never hidden. A map that silently
  * omits what it could not read is a map that overstates its own coverage.
  */
-export function renderSummary({ nodes = [], tracks = new Map() } = {}) {
+export function renderSummary({
+  nodes = [], tracks = new Map(),
+  divergences = [], relationsUnreadable = [], foreignRelations = 0,
+} = {}) {
   const by = (s) => nodes.filter(n => n.status === s).sort((a, b) => a.number - b.number);
   const ref = (ns) => (ns.length ? ns.map(n => `#${n.number}`).join(' ') : '—');
+  const ready = by('ready');
+  const exec = (n) => (n.assignees === null || n.assignees === undefined
+    ? `#${n.number} (?)`
+    : n.assignees.length === 0 ? `#${n.number} (sin asignar)` : `#${n.number} → ${n.assignees.join(', ')}`);
   const lines = [
-    `**Listos ahora:** ${ref(by('ready'))}`,
+    `**Listos ahora:** ${ready.length ? ready.map(exec).join(' · ') : '—'}`,
     `**Bloqueados:** ${by('blocked').map(n => `#${n.number} ← ${n.blockedBy.map(b => `#${b}`).join(' ')}`).join(' · ') || '—'}`,
     `**Esperando firma humana:** ${ref(by('awaiting-human'))}`,
   ];
   const un = by('unclassified');
   if (un.length) {
-    lines.push(`**Sin declarar** (${un.length}) — no llevan bloque \`brain-graph/1\`, así que el grafo no los ubica: ${ref(un)}`);
+    lines.push(`**Sin ubicar** (${un.length}) — ninguna fuente los coloca (ni bloque \`brain-graph/1\` ni relación nativa): ${ref(un)}`);
   }
-  const conflicts = by('ready').filter(n => (n.conflictsWith ?? []).length > 0);
+  const conflicts = ready.filter(n => (n.conflictsWith ?? []).length > 0);
   if (conflicts.length) {
     lines.push(`**No paralelizables entre sí** (reclaman los mismos archivos): ${conflicts.map(n => `#${n.number}↔${n.conflictsWith.map(c => `#${c}`).join(',')}`).join(' · ')}`);
   }
+  // A ready node with no `files` produces an empty `conflictsWith`, which reads as
+  // "proven parallelisable". It was proven nothing. Say so (#533).
+  const unknownFiles = ready.filter(n => n.filesUnknown);
+  if (unknownFiles.length) {
+    lines.push(`**Paralelización no verificable** (no declaran \`files\`, así que «sin conflicto» no está probado): ${ref(unknownFiles)}`);
+  }
+  // The union of the two edge sources is only honest reported (#533, ADR-0029).
+  if (divergences.length) {
+    const fmt = (d) => `#${d.from}→#${d.to} (sólo ${d.only === 'declared' ? 'declarado' : 'nativo'})`;
+    lines.push(`**Las dos fuentes no coinciden** (${divergences.length}) — se toma la unión y se reporta la diferencia, ninguna pisa a la otra: ${divergences.map(fmt).join(' · ')}`);
+  }
+  if (relationsUnreadable.length) {
+    lines.push(`**Relaciones nativas ilegibles** en ${relationsUnreadable.length}: ${relationsUnreadable.map(n => `#${n}`).join(' ')} — no es «no tienen», es «no se pudieron leer».`);
+  }
+  if (foreignRelations > 0) {
+    lines.push(`**Relaciones cross-repo omitidas:** ${foreignRelations}. Los números son por repositorio, así que dibujarlas afirmaría una arista contra el \`#N\` de ESTE repo.`);
+  }
   lines.push('', `_Regenerado por \`brain:epic:map\` sobre ${nodes.length} issues y ${tracks.size} tracks. No editar a mano: la próxima corrida lo pisa._`);
   return lines.join('\n');
+}
+
+/**
+ * Everything OUTSIDE the marker region, with the region removed (#533 slice 2).
+ *
+ * The precondition for having a body-write verb at all. `replaceMapRegion` is
+ * marker-bounded by construction, but `issueUpdate` writes an OPAQUE body and cannot
+ * check that — so the caller proves byte-equality here before it writes, and a bug in
+ * the composer becomes a refusal to write instead of a lost epic.
+ *
+ * `trimEnd` on both sides is the one normalisation, and it is required rather than
+ * lenient: a first run APPENDS the region, which necessarily trims the trailing
+ * whitespace of the original body. Nothing else is normalised — a change to a single
+ * character of the surrounding prose makes the two differ.
+ *
+ * @param {string} body
+ * @returns {string}
+ */
+export function outsideRegion(body) {
+  const src = typeof body === 'string' ? body : '';
+  const i = src.indexOf(BEGIN);
+  const j = src.indexOf(END);
+  if (i === -1 || j === -1 || j < i) return src.trimEnd();
+  return (src.slice(0, i) + src.slice(j + END.length)).trimEnd();
 }
 
 /**
