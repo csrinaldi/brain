@@ -238,8 +238,8 @@ export function _defaultReadObservations(root) {
  * @param {typeof readRecordIds} [opts._readRecordIds]
  * @param {(root: string) => object} [opts._loadConfig]
  * @returns {Promise<{written: number, deduped: number, errored: number, rejected: number,
- *   skippedPersonal: number, unparseableChunks: number, emptyObservationsChunks: number,
- *   indexCount?: number}>}
+ *   skippedPersonal: number, unprovenanced: number, unparseableChunks: number,
+ *   emptyObservationsChunks: number, indexCount?: number}>}
  */
 export async function dualWriteRecords(
   root,
@@ -258,6 +258,18 @@ export async function dualWriteRecords(
   let errored = 0;
   let rejected = 0;
   let skippedPersonal = 0;
+  // #541: observations that arrived with NO §4 provenance block. `exportObservation`
+  // has always returned this flag and the loop has always discarded it, so the
+  // fallback — actor `@legacy`, no `issue` — was applied silently and the resulting
+  // record looked like any other. Counting it is what turns "the emitter does not
+  // exist" from a thing you discover by reading 2000 records into a number printed on
+  // every share.
+  //
+  // Counted, NOT rejected. Failing here would refuse the 2070 historical observations
+  // this repository already holds and make `share` unusable — the same trap #529's
+  // ruling refused for `memory-gate`. Visibility first; the gate only once the emitter
+  // exists to satisfy it.
+  let unprovenanced = 0;
   for (const obs of observations) {
     let result;
     try {
@@ -274,6 +286,7 @@ export async function dualWriteRecords(
       rejected += 1;
       continue;
     }
+    if (!result.recovered) unprovenanced += 1;
     candidates.push(result.record);
   }
 
@@ -283,6 +296,7 @@ export async function dualWriteRecords(
     errored,
     rejected,
     skippedPersonal,
+    unprovenanced,
     unparseableChunks: unparseable.length,
     emptyObservationsChunks: emptyObservations.length,
   };

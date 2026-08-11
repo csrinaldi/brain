@@ -303,6 +303,7 @@ export default {
   'memory.resolveIndex.failed': '✗ resolve-index failed — {message}',
 
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
+  'memory.share.unprovenanced': '{count} observation(s) arrived with no provenance block, so they materialised as `@legacy` with no `issue` — nothing emits the block on the capture path yet (#541). Counted, not refused: refusing would reject the store that already exists.',
   'memory.share.secretFound': 'Secret detected in {file}:{line} — pattern "{pattern}" matched. Redact the secret, or add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive. Run `gunzip -c {file} | jq .` to inspect (the line number is against that pretty-printed view).',
 
   // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
