@@ -9,11 +9,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { resolve, dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-import { auditWorkflowAuth, stepBlocks } from './workflow-auth.mjs';
+import { auditWorkflowAuth, stepBlocks, parseSubcommandManifest } from './workflow-auth.mjs';
 
 // brain/scripts/vcs/lib → the repository root is FOUR levels up, not three. Three
 // lands on `brain/`, where no entry point resolves, and every fixture then reports
@@ -235,4 +236,131 @@ test('#480 A3 at the splitter: a step whose first key is run: is its own step', 
   const blocks = stepBlocks(y);
   assert.equal(blocks.length, 2, 'two steps, not one absorbing the other');
   assert.ok(!/VCS_TOKEN/.test(blocks[1]), 'the second step must not inherit the first step\'s credential');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// issue #535 — per-invocation resolution: a multiplexer's subcommands can
+// resolve to DIFFERENT requirements, and PR_NUMBER presence governs the
+// ci-context.mjs bootstrap edge.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── T2 (Requirement 3/5) ────────────────────────────────────────────────────
+
+const fixtureT2 = (memoryGateHasPrNumber) => [
+  'permissions: { contents: write, pull-requests: read }',
+  'jobs:',
+  '  g:',
+  '    steps:',
+  '      - name: diff-size',
+  '        env:',
+  '          PR_NUMBER: ${{ github.event.pull_request.number }}',
+  '        run: node brain/scripts/governance/run-check.mjs diff-size',
+  '      - name: memory-gate',
+  ...(memoryGateHasPrNumber
+    ? ['        env:', '          PR_NUMBER: ${{ github.event.pull_request.number }}']
+    : []),
+  '        run: node brain/scripts/governance/run-check.mjs memory-gate',
+].join('\n');
+
+test('T2: diff-size (+PR_NUMBER, no credential) is flagged; memory-gate (no PR_NUMBER) yields zero violations', () => {
+  const v = audit(fixtureT2(false));
+  assert.ok(v.some(m => /diff-size/.test(m) && /VCS_TOKEN/.test(m)), `diff-size must be flagged:\n${v.join('\n')}`);
+  assert.ok(!v.some(m => /memory-gate/.test(m)), `memory-gate must NOT be flagged:\n${v.join('\n')}`);
+});
+
+test('T2 mutation: adding PR_NUMBER to the memory-gate step now flags it too — the rule is live, not vacuous, in both directions', () => {
+  const v = audit(fixtureT2(true));
+  assert.ok(v.some(m => /memory-gate/.test(m) && /VCS_TOKEN/.test(m)), `memory-gate with PR_NUMBER must now be flagged:\n${v.join('\n')}`);
+});
+
+// ── T3 (Requirement 4) ──────────────────────────────────────────────────────
+
+test('T3: an unknown run-check.mjs subcommand is a violation, with the correct message', () => {
+  const y = wrap('      - name: evil\n        run: node brain/scripts/governance/run-check.mjs frobnicate');
+  assert.match(audit(y).join('\n'), /cannot resolve|undecidable/);
+});
+
+test('T3: a run-check.mjs invocation missing its subcommand argument is also a violation, with the same message', () => {
+  const y = wrap('      - name: evil\n        run: node brain/scripts/governance/run-check.mjs');
+  assert.match(audit(y).join('\n'), /cannot resolve|undecidable/);
+});
+
+test('T3 mutation: the unknown subcommand is STILL flagged even with VCS_TOKEN declared — unresolvable is not curable by producing a credential', () => {
+  const y = wrap([
+    '      - name: evil',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/governance/run-check.mjs frobnicate',
+  ].join('\n'));
+  assert.match(audit(y).join('\n'), /cannot resolve|undecidable/);
+});
+
+// ── T4 (Requirement 3/6, D8) ─────────────────────────────────────────────────
+
+test('T4: parseSubcommandManifest — empty source is null; the real run-check.mjs source yields exactly its 4 keys', () => {
+  assert.equal(parseSubcommandManifest(''), null);
+  const src = readFileSync(resolve(REPO_ROOT, 'brain/scripts/governance/run-check.mjs'), 'utf8');
+  const manifest = parseSubcommandManifest(src);
+  assert.deepEqual(Object.keys(manifest).sort(), ['decision-gate', 'diff-size', 'issue-link', 'memory-gate']);
+});
+
+test('T4 mutation: renaming the SUBCOMMAND_PORT_REACH const makes the manifest unreadable (null), not zero-requirement', () => {
+  const src = readFileSync(resolve(REPO_ROOT, 'brain/scripts/governance/run-check.mjs'), 'utf8');
+  const mutated = src.replace('SUBCOMMAND_PORT_REACH = {', 'RENAMED_MANIFEST = {');
+  assert.notEqual(mutated, src, 'the mutation must land');
+  assert.equal(parseSubcommandManifest(mutated), null);
+});
+
+test('T4 mutation via the caller: a manifest-less multiplexer whose closure reaches cli.mjs is never silently treated as "no requirement"', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'wfauth-t4-'));
+  try {
+    mkdirSync(join(tmp, 'scripts'), { recursive: true });
+    mkdirSync(join(tmp, 'vcs'), { recursive: true });
+    writeFileSync(join(tmp, 'vcs', 'cli.mjs'), 'export function getVcs() {}\n');
+    writeFileSync(
+      join(tmp, 'scripts', 'multiplexer.mjs'),
+      "import { getVcs } from '../vcs/cli.mjs';\n// no SUBCOMMAND_PORT_REACH here — not recognized as a multiplexer\n"
+    );
+    const y = [
+      'jobs:', '  g:', '    steps:',
+      '      - name: whatever',
+      '        run: node scripts/multiplexer.mjs some-subcommand',
+    ].join('\n');
+    const v = auditWorkflowAuth(y, { file: 'probe', repoRoot: tmp });
+    assert.ok(v.length > 0,
+      'a manifest-less multiplexer whose whole-file closure reaches the port must still be flagged (D2 safe fallback), never read as no requirement');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── T5 (Requirement 2/6, D1/D7) ──────────────────────────────────────────────
+
+test('T5: a phase-order-check.mjs step with no credential and no PR_NUMBER is credential-free', () => {
+  const y = [
+    'permissions: { contents: write, pull-requests: read }',
+    'jobs:', '  g:', '    steps:',
+    '      - name: phase-order',
+    '        env:',
+    '          BASE_SHA: ${{ github.event.pull_request.base.sha }}',
+    '          HEAD_SHA: ${{ github.event.pull_request.head.sha }}',
+    '          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}',
+    '        run: node brain/scripts/vcs/phase-order-check.mjs',
+  ].join('\n');
+  assert.deepEqual(audit(y), []);
+});
+
+test('T5 mutation: the same step WITH PR_NUMBER added is flagged — the pruning and the PR_NUMBER conditional both proven', () => {
+  const y = [
+    'permissions: { contents: write, pull-requests: read }',
+    'jobs:', '  g:', '    steps:',
+    '      - name: phase-order',
+    '        env:',
+    '          PR_NUMBER: ${{ github.event.pull_request.number }}',
+    '          BASE_SHA: ${{ github.event.pull_request.base.sha }}',
+    '          HEAD_SHA: ${{ github.event.pull_request.head.sha }}',
+    '          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}',
+    '        run: node brain/scripts/vcs/phase-order-check.mjs',
+  ].join('\n');
+  assert.ok(audit(y).length > 0, 'adding PR_NUMBER must flag the step — it now reaches the port via the ci-context bootstrap');
 });
