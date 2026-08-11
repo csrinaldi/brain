@@ -322,7 +322,16 @@ if (op === "search") {
 
 try {
   // Forward positional args (e.g., [feature]) to the backend function.
-  await backend[fn](...process.argv.slice(3));
+  const result = await backend[fn](...process.argv.slice(3));
+
+  // `share` returns an accounting and nothing ever printed it, so every number it
+  // measured — including the one added for #541 — died in the return value. The
+  // observations that arrived WITHOUT a §4 provenance block are surfaced here, because
+  // an outage nobody sees is the same outage: their records land as `@legacy` with no
+  // `issue` and read exactly like a healthy one.
+  if (op === "share" && result && typeof result.unprovenanced === "number" && result.unprovenanced > 0) {
+    console.log(`memory/cli: ${await t("memory.share.unprovenanced", { count: result.unprovenanced })}`);
+  }
 } catch (err) {
   console.error(`memory/cli: ${MEMORY_BACKEND}.${fn}() failed — ${err.message}`);
   process.exit(1);

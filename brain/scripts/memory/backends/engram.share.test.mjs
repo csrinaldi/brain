@@ -514,6 +514,7 @@ test('dualWriteRecords: no observations → resolves without appending or reinde
     errored: 0,
     rejected: 0,
     skippedPersonal: 0,
+    unprovenanced: 0,
     unparseableChunks: 0,
     emptyObservationsChunks: 0,
   });
@@ -560,6 +561,9 @@ test('dualWriteRecords: skipped/rejected/errored observations are ALL accounted 
     errored: 1,
     rejected: 1,
     skippedPersonal: 1,
+    // #541 — the surviving candidate carried no §4 block, which is what the whole
+    // store looks like: 2070 of 2163 records materialised that way.
+    unprovenanced: 1,
     unparseableChunks: 0,
     emptyObservationsChunks: 0,
     indexCount: 1,
@@ -620,6 +624,7 @@ test('dualWriteRecords: unparseable/empty-observations chunk buckets are surface
     errored: 0,
     rejected: 0,
     skippedPersonal: 0,
+    unprovenanced: 0,
     unparseableChunks: 1,
     emptyObservationsChunks: 1,
   });
@@ -829,4 +834,61 @@ test('share(): a secret in a candidate RECORD aborts the share AFTER the chunk b
     /AKIA/,
   );
   assert.equal(chunkScrubRan, true, 'the chunk backstop (unconditional, now first) must have already run before the records dual-write aborted');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #541 — the emitter's absence is COUNTED, not absorbed.
+//
+// `exportObservation` has always returned `recovered`, and the share loop has
+// always discarded it. So an observation arriving with no §4 provenance block got
+// the fallback — actor `@legacy`, `issue` never set — and the resulting record
+// read exactly like a healthy one. Measured on the real store: 2070 of 2163.
+//
+// COUNTED, never rejected. Refusing would turn `share` against the 2070
+// observations this repository already holds — the same trap #529's ruling refused
+// for `memory-gate`, where tightening before the writer worked would have blocked
+// every PR with no override.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('#541: an observation with NO provenance block is counted as unprovenanced, and still written', async () => {
+  const bare = {
+    // engram's naive timestamp shape ('YYYY-MM-DD HH:MM:SS'), the same one every
+    // other fixture in this file uses — an ISO string with a Z throws in toUtcSeconds
+    // and the observation lands in `errored`, not in the bucket under test.
+    id: 1, sync_id: 'obs-bare', type: 'discovery', project: 'brain', scope: 'project',
+    created_at: '2026-08-11 10:00:00', title: 'no block', content: 'just prose, no Actor line',
+  };
+  const appended = [];
+  const result = await dualWriteRecords('/fake/root', {
+    _readObservations: () => ({ observations: [bare] }),
+    _appendRecord: (r) => { appended.push(r); return { file: 'f' }; },
+    _rebuildIndex: () => ({ count: 1 }),
+    _loadConfig: () => ({}),
+  });
+
+  assert.equal(result.unprovenanced, 1, 'the absence must reach the accounting, not stop at a discarded flag');
+  assert.equal(result.written, 1, 'and the record is still written — counting is not refusing');
+  assert.equal(appended[0].actor, '@legacy', 'the fallback is what makes it invisible without the count');
+  assert.ok(!('issue' in appended[0]), 'and the field #368 measured 2157 times empty is simply absent');
+});
+
+test('#541: an observation WITH a provenance block is not counted', async () => {
+  // The counterweight. Without it the counter could be a constant and the test above
+  // would still pass — a number that is always 1 measures nothing.
+  const withBlock = {
+    id: 2, sync_id: 'obs-good', type: 'discovery', project: 'brain', scope: 'project',
+    created_at: '2026-08-11 10:00:00', title: 'has a block',
+    content: '**Actor:** @crinaldi (humano)\n**Fuente:** issue #541\n\nthe body',
+  };
+  const appended = [];
+  const result = await dualWriteRecords('/fake/root', {
+    _readObservations: () => ({ observations: [withBlock] }),
+    _appendRecord: (r) => { appended.push(r); return { file: 'f' }; },
+    _rebuildIndex: () => ({ count: 1 }),
+    _loadConfig: () => ({}),
+  });
+
+  assert.equal(result.unprovenanced, 0, 'a compliant observation must not inflate the count');
+  assert.equal(appended[0].actor, '@crinaldi', 'and its real actor survives instead of @legacy');
+  assert.equal(appended[0].issue, 541, 'and its issue is recovered — the adapter was never the defect');
 });
