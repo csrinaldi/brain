@@ -69,15 +69,14 @@ reading the capture code."* This session is materialised **through `npm run memo
 verb this change makes reachable — not by a script calling `appendRecord`. Six records, every one
 carrying `issue`, every one `project: brain` derived from config.
 
-## What this does NOT fix, and it is the bigger finding
+## What this does NOT fix — corrected after review
 
-**The dependency runs the wrong way.** `cli.mjs`'s own header states the durable layer is
-brain-owned and backend-independent (ADR-0017), and for `reindex` it is — dispatched directly,
-never through a backend. But **`save` is dispatched to the backend**, and `engram.save` refuses,
-pointing at engram's native tool. So under the default backend, capture goes *into engram first*
-and `memory:share` materialises records *out of it*.
+An earlier draft called the engram-first flow a dependency inversion and proposed restructuring
+the dispatch. **That was overstated.** Being below engram is fine; both directions already exist
+as explicit adapters (`engram-import` emits provenance, `engram-export`/`memory:share` recovers
+it), so brain's own round-trip is lossless.
 
-That inversion is why the outage was total rather than partial: no engram meant no capture,
-even though records need nothing. This change makes the correct path reachable; it does not
-make it the default, and it does not restructure the dispatch. Filed separately — see
-`design.md` §"the inversion".
+The real gap sits one step further up: **nothing emits the §4 provenance block on the path that
+captures new knowledge** — the agent calling engram's native tool from outside brain.
+`provenance.mjs`'s own header measured it as **0/278 observations**, and that, not adoption lag,
+is why #368 counted 2157 records with no `issue`. Filed as its own ticket; see `design.md`.

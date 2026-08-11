@@ -22,30 +22,42 @@ The rule was written, tested at its own layer, and never reached from the path t
 Rather than reorder the pipeline (which would change the id-hashing contract), the refusal is
 placed ahead of it where the caller's input is still recognisable as theirs.
 
-## The inversion — the finding this change does not fix
+## Not an inversion — a missing emitter. (Corrected)
 
-`cli.mjs` states the durable record layer is **brain-owned and backend-independent** (ADR-0017),
-and `reindex` honours it: dispatched directly, never through a backend. `save` does not — it is
-dispatched to `backend[op]`, and `engram.save` refuses by design, pointing at engram's native
-tool. Under the default backend, capture therefore goes **into engram first**, and
-`memory:share` materialises records **out of it**.
+An earlier draft of this file called the engram-first flow a **dependency inversion** and
+proposed restructuring the dispatch so records became the substrate and backends projections
+over them. **That diagnosis was overstated, and the maintainer was right to push back.**
 
-So the layer brain owns is downstream of a third-party tool for the one operation that creates
-data. That is why the outage was total: no engram, no capture, even though records need nothing
-but a file.
+Being "below engram" is not the defect. Both directions are legitimate and both already exist
+as explicit, named adapters:
 
-The right shape is the opposite, and it is what the user's question names:
+| direction | adapter | provenance |
+|---|---|---|
+| records → engram | `engram-import.mjs` | **emits** it via `renderProvenance` |
+| engram → records | `engram-export.mjs` (`memory:share`) | **recovers** it via `parseProvenance` |
+| capture → records | `memory:save` | native — this change |
 
+So brain's own round-trip is lossless, and the transform the maintainer asked for — *"tell it to
+take what is in engram and put it in the record"* — is `memory:share`, and it does carry `issue`.
+
+**The real gap is one step further up.** `exportObservation` recovers the fields only when
+`parseProvenance` finds a §4 block:
+
+```js
+const recovered = Boolean(parsed.actor && parsed.actorKind);
+if (recovered) { …; if (parsed.issue !== undefined) fields.issue = parsed.issue; }
+else           { fields.actor = LEGACY_ACTOR; /* issue is never set */ }
 ```
-capture ──► .memory/records/   (the substrate; brain-owned, validated, one chokepoint)
-                  │
-                  ├──► engram        (index/search adapter)
-                  └──► a RAG store   (tomorrow, the same way)
-```
 
-Adapters would then be **projections over records**, subscribing to a layer that never depends
-on them. `memory:share` already does exactly this in reverse; inverting it is a design change
-with an ADR, not a slice of this ticket. **Filed for that reason, not overlooked.**
+And `provenance.mjs`'s own header records the measurement: **"0/278 real engram observations
+carry this prose — this pair exists for FUTURE first-class writers."** The renderer has a caller
+on the records→engram path and **none on the path that captures new knowledge**, which is the
+agent calling engram's native `mem_session_summary` from outside brain entirely.
+
+That is the cause of #368's 2157 untagged records, and it is not adoption lag: nothing ever
+emitted the block those records would have been read from. Filed as its own ticket rather than
+folded in here — this change's subject is reachability, and the emitter is a different defect
+with a different fix.
 
 ## Red-proof
 

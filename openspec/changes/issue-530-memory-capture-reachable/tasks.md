@@ -15,5 +15,8 @@ issue: 530
 - [x] **T7** Materialise this session THROUGH the verb — six records, all issue-tagged.
 - [x] **T8** Seven mutations RED; M5 needed a CLI-layer test written for it.
 - [x] **T9** Full suite: **3053 tests, 0 failures**.
-- [ ] **T10** *(filed, not done)* invert the dispatch: capture writes records, backends become
-      projections over them. A `decision` change with an ADR.
+- [x] **T10** Correct an overstated diagnosis of my own: the engram-first flow is NOT a
+      dependency inversion. Both adapters exist and brain's round-trip is lossless.
+- [ ] **T11** *(filed, not done)* the missing EMITTER: nothing writes the §4 provenance block on
+      the path that captures new knowledge, so `exportObservation` has nothing to recover.
+      Measured at 0/278 by `provenance.mjs` itself, and the cause of #368's 2157.
