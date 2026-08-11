@@ -30,22 +30,38 @@
 // resolves ambiguity toward "fine" grants exactly the permission it exists to
 // withhold.
 //
-// ── THE ONE PLACE THIS OVER-APPROXIMATES, MEASURED ───────────────────────────
+// ── RESOLUTION IS PER INVOCATION, NOT PER FILE (issue #535) ──────────────────
 //
-// An import closure answers "can this ENTRY POINT reach the port", which is exact
-// for a single-purpose script (`brain-audit.mjs`, `actor-check.mjs`) and coarse for
-// a MULTIPLEXER. `governance/run-check.mjs` dispatches issue-link, diff-size,
-// memory-gate, decision-gate and more; only the issue-link branch calls `getVcs`,
-// yet the closure of the file includes the port for every subcommand. Pointed at
-// `governance.yml`, this guard therefore flags `memory-gate` and `decision-gate`,
-// which reach nothing and are correctly credential-free today.
+// An import closure alone answers "can this ENTRY POINT reach the port", which
+// is exact for a single-purpose script (`brain-audit.mjs`, `actor-check.mjs`)
+// and was coarse for a MULTIPLEXER: `governance/run-check.mjs` dispatches
+// issue-link, diff-size, memory-gate, decision-gate and more, but only the
+// issue-link branch calls `getVcs` — the closure of the FILE used to include
+// the port for every subcommand regardless, which is why this guard was kept
+// off `governance.yml` (T2).
 //
-// So it is applied to the workflows that run the audit — #480's stated scope —
-// where the entry points are single-purpose and the answer is exact. Widening it to
-// the PR-time gate needs per-subcommand resolution, and shipping false alarms there
-// would be worse than not covering it: a guard that cries wolf is a guard someone
-// switches off. That remaining coupling is tracked separately rather than papered
-// over here.
+// `requirementFor` now resolves per (entry point, subcommand) pair. A
+// multiplexer DECLARES ITSELF by exporting a `SUBCOMMAND_PORT_REACH` object
+// literal in its own source — recognized by presence, never by path spelling,
+// so a rename or a second multiplexer costs nothing (T4). The manifest is read
+// as TEXT, never imported: importing it would make this guard the first
+// violator of "`run-check.mjs` is an entry point, never a library"
+// (Requirement 6, T6), and would drag `cli.mjs` into this file's own closure.
+// An unknown subcommand, a missing one, or a manifest that fails to parse is
+// `unresolvable` — a violation, never a silent pass (T3).
+//
+// Separately, `importClosure` stops at `vcs/ci-context.mjs` (a cut vertex,
+// T5): an entry point that reaches the port ONLY through that shared bootstrap
+// requires `VCS_TOKEN` if and only if the step's own `env:` declares
+// `PR_NUMBER` — key PRESENCE, value ignored (T2). This is sound only because
+// `ci-context.mjs` calls `getVcs` exactly once, itself gated on
+// `prNumber != null` — pinned as its own canary in
+// `ci-context-drift-guard.test.mjs` (T8), which names this rule if that ever
+// stops being true.
+//
+// A job-level or workflow-level `env:` stays a KNOWN, asserted limitation
+// (this guard reads the step block, never a parent scope) — see the test at
+// line ~99 below, not denied by this comment.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
