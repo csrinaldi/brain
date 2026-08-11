@@ -30,8 +30,22 @@
 // produces an inferential finding, but genuinely WIRED into the execution
 // path (not dead code) so a future inferential finding-producer needs no
 // second integration point.
+//
+// ISSUE #408 amends the sentence above about `pre-existing`. It stays true of
+// tranche/checkpoint/ruling themselves — none of them compares against base —
+// and it is no longer true of this pipeline, because a step that DOES compare
+// now runs between the annotation and the refuter: `base-comparison.mjs`
+// re-derives `local-checks` in a worktree at base and re-classifies a gate
+// finding that fails there too. The default stays `introduced`; the override
+// only ever fires on an observation, never on an absence.
+//
+// ORDER IS LOAD-BEARING: annotate → classify against base → refute. The
+// refuter forks on BLOCKERS, and a finding reclassified to `pre-existing` is
+// on its way out of the blocking set (`verdict.mjs`), so refuting it would be
+// challenging a finding that no longer blocks anything.
 
 import { evaluateRefuter } from '../evaluators/refuter.mjs';
+import { classifyAgainstBase } from './base-comparison.mjs';
 
 const DEFAULT_EVIDENCE_CLASS = 'deterministic';
 const DEFAULT_CAUSAL_DISPOSITION = 'introduced';
@@ -61,14 +75,29 @@ export function annotateDeterministicFindings(findings = []) {
  * escalation always wins when it fires, since it is strictly MORE
  * conservative than "no escalation yet decided".
  *
- * @param {{ findings?: Array<object>, escalate?: string|null, runner?: Function|null }} args
- * @returns {Promise<{ findings: Array<object>, escalate: string|null }>}
+ * `baseProbe`/`probeAttempted` (issue #408) carry the base re-run's result to the
+ * classifier. `null` + `probeAttempted: false` is the common case — no
+ * base-comparable blocker existed, so nothing was run and nothing is reported.
+ * `null` + `probeAttempted: true` is a probe that FAILED, which surfaces as a
+ * condition and leaves every finding blocking.
+ *
+ * `conditions` is returned, not merged: the caller owns the evaluator's own
+ * condition list and this function has no business rewriting it.
+ *
+ * @param {{ findings?: Array<object>, escalate?: string|null, runner?: Function|null,
+ *   baseProbe?: object|null, probeAttempted?: boolean }} args
+ * @returns {Promise<{ findings: Array<object>, escalate: string|null, conditions: string[] }>}
  */
-export async function applyCausalAdmission({ findings = [], escalate = null, runner = null } = {}) {
+export async function applyCausalAdmission({
+  findings = [], escalate = null, runner = null,
+  baseProbe = null, probeAttempted = false,
+} = {}) {
   const annotated = annotateDeterministicFindings(findings);
-  const refuterResult = await evaluateRefuter({ findings: annotated, runner });
+  const classified = classifyAgainstBase({ findings: annotated, baseProbe, probeAttempted });
+  const refuterResult = await evaluateRefuter({ findings: classified.findings, runner });
   return {
     findings: refuterResult.adjustedFindings,
     escalate: refuterResult.escalate ?? escalate,
+    conditions: classified.conditions,
   };
 }
