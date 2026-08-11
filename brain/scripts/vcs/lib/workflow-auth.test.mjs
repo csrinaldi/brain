@@ -374,6 +374,46 @@ test('T5: a phase-order-check.mjs step with no credential and no PR_NUMBER is cr
   assert.deepEqual(audit(y), []);
 });
 
+// ── T10 (D9) — block-style `permissions:` was silently unevaluated ─────────
+//
+// governance.yml:16-19 is block style (`permissions:\n  contents: read\n...`),
+// not flow style (`permissions: { ... }`). The scope regex only recognized
+// flow style, so condition 2 of the #479/#475 rule (a credential under a
+// permissions block that omits pull-requests) was silently NOT EVALUATED for
+// governance.yml — a guard claiming coverage it lacked, the exact #480
+// defect class this issue removes.
+
+test('T10: block-style permissions without pull-requests is a violation, even with VCS_TOKEN declared', () => {
+  const y = [
+    'permissions:',
+    '  contents: read',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.match(audit(y).join('\n'), /every omitted scope/);
+});
+
+test('T10 mutation: adding pull-requests: read to the block-style permissions clears the violation', () => {
+  const y = [
+    'permissions:',
+    '  contents: read',
+    '  pull-requests: read',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.deepEqual(audit(y), []);
+});
+
 test('T5 mutation: the same step WITH PR_NUMBER added is flagged — the pruning and the PR_NUMBER conditional both proven', () => {
   const y = [
     'permissions: { contents: write, pull-requests: read }',
