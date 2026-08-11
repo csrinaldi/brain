@@ -16,9 +16,15 @@ import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { diffSize } from './governance/checks/diff-size.mjs';
-import { issueLink } from './governance/checks/issue-link.mjs';
 import { adrPresence } from './governance/checks/adr-presence.mjs';
-import { memoryPresence } from './governance/checks/memory-presence.mjs';
+// THE CI EVALUATOR ITSELF, not a second implementation of the same rules (#340).
+// `issue-link` and `memory-gate` each apply POLICY on top of a pure check — the
+// default-branch-conditional closing keyword, the approved-label verification, the
+// issue-scoped record match — and this verb used to call the pure functions bare, so
+// it was strictly more permissive than the gate it exists to predict. Two of the six
+// checks greenlit PRs CI then rejected. Importing the evaluator is the only version of
+// this fix that cannot drift again, because there is nothing left to keep in sync.
+import { runCheck as runGovernanceCheck } from './governance/run-check.mjs';
 import { readRecordObservations } from './memory/lib/store.mjs';
 // Tier resolution (issue #358 Q5, REQ-TIER-9): brain:check is a local
 // golden-path verb, not a labeled-PR gate — it has no size:exception surface —
@@ -61,6 +67,50 @@ function getBase(cwd) {
   }
 }
 
+/**
+ * The remote's default branch, read from git rather than assumed (#340).
+ *
+ * `null` when it cannot be resolved, and the caller must NOT substitute `'main'`:
+ * `requiresClosingKeyword` fails closed on a null, and that is the correct answer.
+ * Hardcoding a fallback here would be the second implementation of a rule the gate
+ * already owns — and it would be wrong on any repo whose default branch is not `main`.
+ */
+function getDefaultBranch(cwd, env = process.env) {
+  // `DEFAULT_BRANCH` first, and it is the SAME env var `ci-context.mjs` reads on the
+  // GitHub side — one name across both surfaces rather than a local-only spelling.
+  if (env.DEFAULT_BRANCH) return env.DEFAULT_BRANCH;
+  // Then git's own record of the remote's default. Not set in a fresh clone, which is
+  // why the remedy is printed rather than a fallback invented: `init.defaultBranch`
+  // describes branches git CREATES, not this remote's, and reading it here would answer
+  // confidently with a value that has nothing to do with the repo.
+  const ref = git('symbolic-ref --short refs/remotes/origin/HEAD', cwd);
+  return ref ? ref.replace(/^origin\//, '') : null;
+}
+
+/** What an operator can actually do about an UNVERIFIED check (#340). */
+const REMEDY = {
+  issueLink:
+    'set the remote default (`git remote set-head origin -a`) or export DEFAULT_BRANCH; '
+    + 'a network failure on the approved-label lookup also lands here',
+};
+
+/**
+ * The branch this work will be PROPOSED against — which no local command can know for
+ * certain, because the PR does not exist yet (#340).
+ *
+ * So it defaults to the default branch, and that direction is the whole point: the
+ * default-branch rule is the STRICTER one (a closing keyword is required), and #340's
+ * ruling is that a local check stricter than CI is an annoyance while a local check
+ * laxer than CI is a broken promise. Assuming "slice" would be the permissive guess and
+ * would reproduce this ticket exactly.
+ *
+ * `BASE_BRANCH` overrides it, matching the env var the CI job already reads, so a slice
+ * PR author asks for the laxer rule explicitly instead of receiving it by accident.
+ */
+function getTargetBranch(cwd, env = process.env) {
+  return env.BASE_BRANCH || getDefaultBranch(cwd);
+}
+
 function spawnCommand(cmd, args, cwd) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', cwd });
   return { ok: r.status === 0, output: (r.stdout ?? '') + (r.stderr ?? '') };
@@ -85,9 +135,15 @@ function spawnCommand(cmd, args, cwd) {
  *   Q5, REQ-TIER-9). Undefined falls through to diffSize()'s own 400-line
  *   default (standard tier) — real callers resolve
  *   `tierParams(resolveTier(config)).diffBudget` and pass it explicitly.
+ * @param {string|null} [ctx.targetBranch]  The branch the PR will target (#340). `null`
+ *   makes `issueLink` UNCOMPUTABLE rather than assuming the permissive slice rule.
+ * @param {string|null} [ctx.defaultBranch] The remote's default branch (#340).
+ * @param {Function} [ctx.fetchIssue]   Async (n) → { labels }. The approved-label
+ *   lookup CI performs; a network call, so it is injected here and its failure
+ *   surfaces as UNVERIFIED rather than as a pass.
  * @param {Function} ctx.npmTestFn     Async fn() → {ok,output}. Injected for tests.
  * @param {Function} ctx.repoCheckFn   Async fn() → {ok,output}. Injected for tests.
- * @returns {Promise<{exitCode:number, failures:Array, summary:string}>}
+ * @returns {Promise<{exitCode:number, failures:Array, unverified:Array, summary:string}>}
  */
 export async function runCheck({
   numstat,
@@ -97,14 +153,36 @@ export async function runCheck({
   ignoreList,
   observations = [],
   budget,
+  targetBranch = null,
+  defaultBranch = null,
+  fetchIssue,
   npmTestFn,
   repoCheckFn,
 }) {
+  // The context the CI evaluator reads. ONE object feeding both checks, because
+  // `memory-gate` resolves the issue number from the same body `issue-link` does — two
+  // contexts would be two chances to disagree about which issue this change is about.
+  const govCtx = { body: prBody, targetBranch, defaultBranch };
+  const govDeps = { ctx: govCtx, ...(fetchIssue ? { fetchIssue } : {}) };
+
   const checks = [
+    // diffSize and adrPresence stay on the pure functions, and that is a decision, not
+    // an omission (#340's audit). `adrPresence` is already fed the same two lists CI
+    // feeds it, so it is aligned by construction. `diffSize` diverges in the SAFE
+    // direction only: CI honours a `size:exception` label, and no label exists before
+    // the PR does — so local is stricter. Routing it through the CI evaluator would
+    // mean inventing a label set, which is the one change that could make local LAXER.
     { check: 'diffSize',        result: diffSize(numstat, ignoreList, budget) },
-    { check: 'issueLink',       result: issueLink(prBody) },
     { check: 'adrPresence',     result: adrPresence(changedFiles, addedFiles) },
-    { check: 'memoryPresence',  result: memoryPresence(observations) },
+    // Both of these now run THE CI EVALUATOR. `issueLink` gains the
+    // default-branch-conditional closing keyword and the approved-label check;
+    // `memoryPresence` gains the issue-scoped record match. Each was a documented
+    // false green before (#340).
+    { check: 'issueLink',       result: await runGovernanceCheck('issue-link', govDeps) },
+    {
+      check: 'memoryPresence',
+      result: await runGovernanceCheck('memory-gate', { ...govDeps, readRecords: () => observations }),
+    },
   ];
 
   // Run async checks
@@ -115,16 +193,31 @@ export async function runCheck({
   if (npmResult.ok) checks.push({ check: 'npmTest', result: { pass: true } });
   if (repoResult.ok) checks.push({ check: 'repoCheck', result: { pass: true } });
 
-  const failures = checks
-    .filter(c => !c.result.pass)
+  // THREE outcomes, not two (#340). A check whose evidence could not be gathered —
+  // no network for the approved-label lookup, an unresolvable default branch — is
+  // UNVERIFIED. It is not a pass, and printing it as one is exactly the confident false
+  // green this ticket is about.
+  //
+  // It is not an exit-1 either, and that is deliberate: CI fails closed on uncomputable
+  // because a merge is at stake, while a local verb that refuses to run offline is a
+  // verb people stop running — the "gates are obstacles" lesson from #529's ruling.
+  // What it must never do is CLAIM. The `unverified` list is what the CLI prints
+  // instead of "Ready to brain:ship".
+  const unverified = checks
+    .filter(c => !c.result.pass && c.result.uncomputable)
     .map(c => ({ check: c.check, reason: c.result.reason }));
 
+  const failures = checks
+    .filter(c => !c.result.pass && !c.result.uncomputable)
+    .map(c => ({ check: c.check, reason: c.result.reason }));
+
+  const state = (r) => (r.pass ? 'PASS' : r.uncomputable ? 'UNVERIFIED' : 'FAIL');
   const lines = checks.map(c =>
-    `  [${c.result.pass ? 'PASS' : 'FAIL'}] ${c.check}${c.result.reason ? ` — ${c.result.reason}` : ''}`
+    `  [${state(c.result)}] ${c.check}${c.result.reason ? ` — ${c.result.reason}` : ''}`
   );
 
   const summary = lines.join('\n');
-  return { exitCode: failures.length > 0 ? 1 : 0, failures, summary };
+  return { exitCode: failures.length > 0 ? 1 : 0, failures, unverified, summary };
 }
 
 // ── CLI entry-point ───────────────────────────────────────────────────────────
@@ -151,6 +244,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     ignoreList,
     observations,
     budget,
+    defaultBranch: getDefaultBranch(cwd),
+    targetBranch: getTargetBranch(cwd),
     npmTestFn: () => spawnCommand('npm', ['test'], cwd),
     repoCheckFn: () => spawnCommand('node', ['brain/scripts/check-refs.mjs'], cwd),
   });
@@ -159,10 +254,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   console.log(result.summary);
   console.log('');
 
-  if (result.exitCode === 0) {
-    console.log('All checks passed. Ready to brain:ship.');
-  } else {
+  if (result.exitCode > 0) {
     console.error(`${result.failures.length} check(s) failed. Fix before brain:ship.`);
+  } else if (result.unverified.length > 0) {
+    // NOT "Ready to brain:ship" (#340). This verb's whole value is predicting CI, and
+    // it cannot predict a check whose evidence it could not read. Naming them is the
+    // difference between "I checked and it is fine" and "I could not check".
+    console.log(`${result.unverified.length} check(s) could NOT be verified locally — CI will still evaluate them:`);
+    for (const u of result.unverified) {
+      console.log(`  · ${u.check}${REMEDY[u.check] ? ` — ${REMEDY[u.check]}` : ''}`);
+    }
+    console.log('\nEverything else passed.');
+  } else {
+    console.log('All checks passed. Ready to brain:ship.');
   }
 
   process.exit(result.exitCode);
