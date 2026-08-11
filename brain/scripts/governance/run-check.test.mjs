@@ -14,7 +14,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runCheck, main } from './run-check.mjs';
+import { runCheck, main, SUBCOMMAND_PORT_REACH } from './run-check.mjs';
 import { mapDetectionToWarning } from './detection-policy.mjs';
 
 async function captureLog(fn) {
@@ -268,6 +268,39 @@ test('Requirement 6: no non-test module imports run-check.mjs — it is an entry
 test('Requirement 6: importsRunCheck detects a synthetic import (mutation proof — the walk is not vacuously passing)', () => {
   const synthetic = `import { x } from '../governance/run-check.mjs';\n`;
   assert.ok(importsRunCheck(synthetic), 'importsRunCheck must detect a synthetic import of run-check.mjs');
+});
+
+// ── SUBCOMMAND_PORT_REACH — the manifest matches the dispatch, symmetrically (T7) ──
+//
+// Per-subcommand resolution (workflow-auth.mjs, Requirement 3) trusts this
+// manifest as the authority on which subcommand reaches the VCS port. That
+// trust is only sound if the manifest's key set is EXACTLY the set of
+// checkNames run-check.mjs actually dispatches — never a superset (a phantom
+// entry) or a subset (an undeclared, silently-unresolvable subcommand).
+
+function dispatchedCheckNames(src) {
+  return [...src.matchAll(/checkName === '([\w-]+)'/g)].map(m => m[1]).sort();
+}
+
+test('T7: SUBCOMMAND_PORT_REACH keys sorted-equal the dispatched checkName cases, both directions', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const dispatched = dispatchedCheckNames(src);
+  const manifestKeys = Object.keys(SUBCOMMAND_PORT_REACH).sort();
+  assert.deepEqual(dispatched, manifestKeys,
+    'run-check.mjs dispatches these checkNames but SUBCOMMAND_PORT_REACH does not declare exactly the same set');
+});
+
+test('T7 mutation: dispatchedCheckNames is a real extractor, not a constant — a synthetic dispatch branch is detected and breaks symmetry', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const withExtra = src + `\nif (checkName === 'frobnicate') {}\n`;
+  const dispatched = dispatchedCheckNames(withExtra);
+  assert.ok(dispatched.includes('frobnicate'), 'the extractor must detect the synthetic dispatch branch');
+  assert.notDeepEqual(dispatched, Object.keys(SUBCOMMAND_PORT_REACH).sort(),
+    'the symmetry check must report the gap once a dispatch branch has no manifest entry');
+});
+
+test('runCheck: an unknown check name throws even when it superficially resembles a manifest key', () => {
+  return assert.rejects(() => runCheck('frobnicate', {}), /unknown check/i);
 });
 
 // ── issue-link — THE GOTCHA (issue #231 A2 phase 2, design.md Decision 2) ──
