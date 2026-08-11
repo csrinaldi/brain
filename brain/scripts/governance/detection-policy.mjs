@@ -27,9 +27,11 @@ import { resolveGatePolicy } from '../vcs/governance-tiers.mjs';
  * failure regardless of tier position. A `required`-policy gate at this tier
  * passes through unchanged.
  *
- * ONE shared helper, not per-job logic (design §8) — every run-check.mjs case
- * and every other tier-aware gate wrapper is meant to route its result
- * through this before returning.
+ * ONE shared helper, not per-job logic (design §8). Today's only production
+ * caller is `vcs/phase-order-check.mjs`; run-check.mjs's own dispatch does
+ * NOT yet route any case through this (that wiring is scoped to T2.1,
+ * design.md §6 — this module being extracted from run-check.mjs, issue #535
+ * Requirement 6, does not by itself wire it in).
  *
  * @param {{ pass: boolean, reason?: string, uncomputable?: boolean }} result
  * @param {'lite'|'standard'|'regulated'} tier
