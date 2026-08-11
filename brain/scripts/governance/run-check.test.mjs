@@ -299,6 +299,61 @@ test('T7 mutation: dispatchedCheckNames is a real extractor, not a constant — 
     'the symmetry check must report the gap once a dispatch branch has no manifest entry');
 });
 
+// ── SUBCOMMAND_PORT_REACH — the manifest's VALUES are checked, not just its keys ──
+//
+// T7 above proves the KEY SET is live. It proves nothing about the booleans:
+// workflow-auth.mjs trusts a `true`/`false` per subcommand completely (D4),
+// so a handler that starts calling getVcs without its manifest entry
+// flipping to `true` would silently keep resolving as credential-free. This
+// extracts each dispatch branch's own handler function name, then walks that
+// function's LOCAL call closure (mirroring `importClosure`'s transitive-walk
+// shape elsewhere in this codebase) for a `getVcs`/`getVcsFn` reference. A
+// handler dispatched to an imported function (decision-gate → `adrPresence`)
+// has no local body to walk — `bodyClosure` returns '' for it, which only
+// matches a `false` manifest entry, never silently confirms a `true` one.
+
+function bodyClosure(src, entryName, seen = new Set()) {
+  if (seen.has(entryName)) return '';
+  seen.add(entryName);
+  const head = src.match(new RegExp(`function ${entryName}\\([^)]*\\)[^{]*\\{`));
+  if (!head) return '';
+  let depth = 1, i = head.index + head[0].length;
+  const start = i;
+  while (depth > 0 && i < src.length) { if (src[i] === '{') depth++; else if (src[i] === '}') depth--; i++; }
+  const body = src.slice(start, i);
+  let text = body;
+  for (const m of body.matchAll(/\b([a-zA-Z_]\w*)\(/g)) text += bodyClosure(src, m[1], seen);
+  return text;
+}
+
+function dispatchedHandlers(src) {
+  const heads = [...src.matchAll(/checkName === '([\w-]+)'\)\s*\{/g)];
+  return heads.map(({ index, 0: match, 1: checkName }, n) => {
+    const end = heads[n + 1]?.index ?? src.length;
+    const fn = src.slice(index, end).match(/\breturn (\w+)\(/);
+    return [checkName, fn ? fn[1] : null];
+  });
+}
+
+test('T7b: SUBCOMMAND_PORT_REACH values match each handler\'s own local getVcs reach, not just its key set', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  for (const [checkName, fnName] of dispatchedHandlers(src)) {
+    const reaches = fnName != null && /\bgetVcs(Fn)?\b/.test(bodyClosure(src, fnName));
+    assert.equal(reaches, SUBCOMMAND_PORT_REACH[checkName],
+      `${checkName} (${fnName}): manifest says ${SUBCOMMAND_PORT_REACH[checkName]}, source scan says ${reaches}`);
+  }
+});
+
+test('T7b mutation: a getVcs( reference injected into the false-declared memory-gate handler is detected', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const mutated = src.replace('function runMemoryGateCheck(ctx, records) {',
+    'function runMemoryGateCheck(ctx, records) {\n  getVcs();');
+  const reaches = /\bgetVcs(Fn)?\b/.test(bodyClosure(mutated, 'runMemoryGateCheck'));
+  assert.equal(reaches, true);
+  assert.notEqual(reaches, SUBCOMMAND_PORT_REACH['memory-gate'],
+    'the mutation must break the value correlation for a false-declared handler');
+});
+
 test('runCheck: an unknown check name throws even when it superficially resembles a manifest key', () => {
   return assert.rejects(() => runCheck('frobnicate', {}), /unknown check/i);
 });
