@@ -214,8 +214,14 @@ function isCliPort(path) {
  * second traversal or a hand-written exemption. Sound only because
  * `ci-context.mjs` has exactly one port call site, itself gated on
  * `prNumber != null` (ci-context-drift-guard.test.mjs's T8 canary).
+ *
+ * EXPORTED (issue #535, Requirement 6) so the invariant test can ask "does
+ * this entry point reach `run-check.mjs`" through the SAME walk the guard
+ * uses, rather than a second one — two implementations of one rule is #340.
+ * The cut vertex is a hole for that use, closed by its own canary: the test
+ * asserts directly that `ci-context.mjs` imports no multiplexer.
  */
-function importClosure(entry, seen = new Set()) {
+export function importClosure(entry, seen = new Set()) {
   if (!entry || seen.has(entry) || !existsSync(entry)) return seen;
   seen.add(entry);
   if (isCiContext(entry)) return seen; // cut vertex — added, not traversed
@@ -358,6 +364,28 @@ function declared(block) {
   const keys = new Set();
   for (const m of block.matchAll(/^\s*(VCS_TOKEN|GH_TOKEN|GITLAB_TOKEN):\s*(\S.*)$/gm)) keys.add(m[1]);
   return keys;
+}
+
+/**
+ * Every entry point the steps of ONE workflow invoke, as absolute paths.
+ *
+ * Unresolvable `npm run` recursions are dropped here — `auditWorkflowAuth` is
+ * the surface that reports those as violations, and this one exists only so a
+ * caller can ask "which files does CI actually execute" without re-deriving
+ * the extraction (a second implementation of one rule is #340). Its caller
+ * today is Requirement 6's invariant test.
+ *
+ * @param {string} yamlText @param {string} [repoRoot]
+ * @returns {string[]}
+ */
+export function workflowEntryPoints(yamlText, repoRoot = process.cwd()) {
+  const paths = new Set();
+  for (const block of stepBlocks(yamlText)) {
+    const script = runScript(block);
+    if (script === null) continue;                       // a `uses:` step
+    for (const e of entryPoints(script, repoRoot)) if (e.path) paths.add(e.path);
+  }
+  return [...paths];
 }
 
 /**

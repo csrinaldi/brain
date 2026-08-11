@@ -10,12 +10,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { join, dirname, resolve, relative } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { runCheck, main, SUBCOMMAND_PORT_REACH } from './run-check.mjs';
 import { mapDetectionToWarning } from './detection-policy.mjs';
+import { importClosure, workflowEntryPoints } from '../vcs/lib/workflow-auth.mjs';
 
 async function captureLog(fn) {
   const logs = [];
@@ -230,44 +232,86 @@ test('neutrality source-scan (REQ-NEUTRALITY-2): run-check.mjs source contains n
   assert.equal(src.includes('SKILL.md'), false, 'source must not reference SKILL.md');
 });
 
-// ── Requirement 6 (issue #535) — run-check.mjs is an entry point, never a library ──
+// ── Requirement 6 (issue #535) — run-check.mjs is a CI entry point, never a
+//    library reached from a second CI entry point ──
 //
-// Per-subcommand resolution (workflow-auth.mjs, Requirement 3) is only sound if
-// nothing outside run-check.mjs's own dispatch imports and reuses its internals
-// under a different port-reach profile. This walks the real source tree so the
-// invariant is a standing, testable property — not a comment nobody re-checks.
+// Per-subcommand resolution (workflow-auth.mjs, Requirement 3) reads
+// `SUBCOMMAND_PORT_REACH` for a step that invokes run-check.mjs DIRECTLY. Any
+// other workflow-invoked entry point is resolved by its whole-file import
+// closure instead, with no manifest of its own — so one that reaches
+// run-check.mjs inherits every subcommand's port-reach at once and the
+// per-invocation precision this chain exists to buy is silently gone for that
+// step. THAT is the property, and it is what these tests pin.
+//
+// NARROWED FROM A BLANKET IMPORT BAN, deliberately. The first form of this
+// test forbade ANY non-test module from importing run-check.mjs. #546 (#340,
+// merged after this chain branched) makes `brain-check.mjs` call
+// `runCheck('issue-link', …)` on purpose: brain:check and CI must be ONE
+// implementation of one rule, which is the whole point of that ticket. The two
+// requirements only collided in the blanket form — brain-check.mjs is a local
+// developer verb, invoked by no workflow, so it cannot cost any CI step its
+// per-invocation resolution. Narrowing keeps both, and keeps the polarity:
+// the day brain-check.mjs (or anything else reaching run-check.mjs) becomes a
+// workflow step, this test goes red and the extraction has to happen then.
+//
+// Derived from the real workflows and the real import graph, through
+// workflow-auth's OWN extraction and OWN closure walk — never a second copy of
+// either (#340), and never an allowlist of files (#480's defeated guard).
 
-const SCRIPTS_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const REPO_ROOT = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
+const WORKFLOWS_DIR = join(REPO_ROOT, '.github', 'workflows');
+const RUN_CHECK_PATH = fileURLToPath(new URL('./run-check.mjs', import.meta.url));
+const CI_CONTEXT_PATH = join(REPO_ROOT, 'brain', 'scripts', 'vcs', 'ci-context.mjs');
 
-/** 5-line recursive walker — no readdirSync({ recursive: true }) version bet. */
-function walkMjsFiles(dir) {
-  const out = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...walkMjsFiles(full));
-    else if (entry.name.endsWith('.mjs')) out.push(full);
+/** Every entry point every workflow in the repo invokes, deduped. */
+function allWorkflowEntryPoints() {
+  const files = readdirSync(WORKFLOWS_DIR).filter(f => /\.ya?ml$/.test(f));
+  const out = new Set();
+  for (const f of files) {
+    for (const e of workflowEntryPoints(readFileSync(join(WORKFLOWS_DIR, f), 'utf8'), REPO_ROOT)) {
+      out.add(e);
+    }
   }
-  return out;
+  return [...out];
 }
 
-/** True when the source text imports run-check.mjs, under any relative spelling. */
-function importsRunCheck(src) {
-  return /from\s+['"][^'"]*\brun-check\.mjs['"]/.test(src);
-}
+test('Requirement 6: no workflow-invoked entry point OTHER than run-check.mjs itself reaches run-check.mjs', () => {
+  const entries = allWorkflowEntryPoints();
+  assert.ok(entries.length >= 5,
+    `sanity: the workflows must yield >=5 entry points, yielded ${entries.length} — an empty ` +
+    `extraction would make this test agree with everything`);
+  assert.ok(entries.includes(RUN_CHECK_PATH),
+    'sanity: run-check.mjs must be among the extracted entry points — CI invokes it by name');
 
-test('Requirement 6: no non-test module imports run-check.mjs — it is an entry point, never a library', () => {
-  const files = walkMjsFiles(SCRIPTS_ROOT).filter(
-    f => !f.endsWith('.test.mjs') && !f.endsWith(join('governance', 'run-check.mjs'))
-  );
-  assert.ok(files.length > 100, `sanity: the walk must visit >100 files, visited ${files.length}`);
-  const offenders = files.filter(f => importsRunCheck(readFileSync(f, 'utf8')));
+  const offenders = entries
+    .filter(e => e !== RUN_CHECK_PATH)
+    .filter(e => importClosure(e).has(RUN_CHECK_PATH));
   assert.deepEqual(offenders, [],
-    'these files import run-check.mjs and must not — it is an entry point, never a library');
+    'these workflow entry points reach run-check.mjs: they get no manifest of their own, so ' +
+    'workflow-auth resolves them by whole-file closure and inherits every subcommand at once');
 });
 
-test('Requirement 6: importsRunCheck detects a synthetic import (mutation proof — the walk is not vacuously passing)', () => {
-  const synthetic = `import { x } from '../governance/run-check.mjs';\n`;
-  assert.ok(importsRunCheck(synthetic), 'importsRunCheck must detect a synthetic import of run-check.mjs');
+test('Requirement 6 mutation: the reach walk detects a synthetic workflow entry point that imports run-check.mjs', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'req6-'));
+  const synthetic = join(dir, 'synthetic-entry.mjs');
+  const spec = relative(dir, RUN_CHECK_PATH);
+  writeFileSync(synthetic, `import { runCheck } from '${spec.startsWith('.') ? spec : `./${spec}`}';\nrunCheck;\n`);
+  try {
+    assert.ok(importClosure(synthetic).has(RUN_CHECK_PATH),
+      'the closure walk must reach run-check.mjs from a file that imports it — otherwise the ' +
+      'test above passes by seeing nothing');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Requirement 6 canary: ci-context.mjs — importClosure\'s cut vertex — imports no multiplexer', () => {
+  // importClosure stops AT ci-context.mjs without walking its imports (D1), so a
+  // path to run-check.mjs THROUGH it would be invisible to the test above. This
+  // closes that hole directly rather than assuming it away.
+  const src = readFileSync(CI_CONTEXT_PATH, 'utf8');
+  assert.equal(/from\s+['"][^'"]*\brun-check\.mjs['"]/.test(src), false,
+    'ci-context.mjs must not import run-check.mjs — it is the one node the reach walk does not traverse');
 });
 
 // ── SUBCOMMAND_PORT_REACH — the manifest matches the dispatch, symmetrically (T7) ──
