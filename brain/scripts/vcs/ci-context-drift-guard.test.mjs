@@ -81,6 +81,115 @@ test('drift-guard: PIPELINE_ENV_PATTERN also covers the ADDENDUM seam vars DEFAU
     'PIPELINE_ENV_PATTERN must forbid a gate wrapper reading process.env.CI_DEFAULT_BRANCH directly');
 });
 
+// ── T8 (issue #535) — the canary for workflow-auth.mjs's PR_NUMBER rule ──────
+//
+// workflow-auth.mjs's Requirement 5 (an entry point that only reaches the VCS
+// port through ci-context.mjs's shared bootstrap requires VCS_TOKEN iff the
+// step declares PR_NUMBER) is sound ONLY because ci-context.mjs calls getVcs(
+// exactly once, gated behind `if (prNumber != null)`. If a second, UNGATED
+// port call is ever added to ci-context.mjs, that soundness silently breaks —
+// the guard would keep reading PR_NUMBER presence as the whole story while a
+// second call reaches the port regardless. This canary pins the fact directly
+// on ci-context.mjs's own source, with a failure message naming the dependent
+// rule so the next reader knows what broke and why.
+
+/** Extracts the brace-matched body range `{ start, end }` of the first
+ *  occurrence of `header` followed by a `{`, or null if not found. */
+function extractIfBody(src, header) {
+  const headerStart = src.indexOf(header);
+  if (headerStart === -1) return null;
+  const braceStart = src.indexOf('{', headerStart);
+  let depth = 0;
+  for (let i = braceStart; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') {
+      depth--;
+      if (depth === 0) return { start: braceStart, end: i };
+    }
+  }
+  return null;
+}
+
+/**
+ * True (with a reason on failure) when ci-context.mjs's port reach is exactly
+ * the shape workflow-auth.mjs's PR_NUMBER rule assumes: ONE `getVcs(` call,
+ * sitting on the `deps.prView ??` line, and the only `prView(` INVOCATION
+ * (excluding the `.prView(args)` method reference on that same definition
+ * line) lies inside an `if (prNumber != null) { ... }` block.
+ */
+function portCallIsGated(rawSrc) {
+  // Scan CODE only — a drift-guard that trips on its own prose is noise (this
+  // file's line AND block comments mention `getVcs()`/`prView()` in prose
+  // while explaining WHY the seam exists).
+  const src = rawSrc
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter(l => !/^\s*\/\//.test(l))
+    .join('\n');
+  const getVcsCount = (src.match(/getVcs\(/g) ?? []).length;
+  if (getVcsCount !== 1) {
+    return {
+      sound: false,
+      reason: `workflow-auth.mjs's PR_NUMBER rule assumes ci-context.mjs calls getVcs( exactly ` +
+        `once — found ${getVcsCount}. A second call makes that rule UNSOUND: it would ` +
+        `under-approximate a real port reach the guard cannot see.`,
+    };
+  }
+
+  const getVcsIdx = src.indexOf('getVcs(');
+  const lineStart = src.lastIndexOf('\n', getVcsIdx) + 1;
+  const lineEndIdx = src.indexOf('\n', getVcsIdx);
+  const getVcsLine = src.slice(lineStart, lineEndIdx === -1 ? src.length : lineEndIdx);
+  if (!/deps\.prView\s*\?\?/.test(getVcsLine)) {
+    return {
+      sound: false,
+      reason: `workflow-auth.mjs's PR_NUMBER rule assumes ci-context.mjs's getVcs( call sits ` +
+        `on the 'deps.prView ??' line. Found: ${getVcsLine.trim()}`,
+    };
+  }
+
+  const ifBody = extractIfBody(src, 'if (prNumber != null)');
+  if (!ifBody) {
+    return {
+      sound: false,
+      reason: `workflow-auth.mjs's PR_NUMBER rule assumes an 'if (prNumber != null) { ... }' ` +
+        `block gates the port call, and none was found in ci-context.mjs.`,
+    };
+  }
+
+  // Exclude the `.prView(args)` METHOD REFERENCE on the definition line — only
+  // an actual invocation of the local `prView` variable counts.
+  const invocationRe = /(?<!\.)\bprView\(/g;
+  const invocationIdxs = [...src.matchAll(invocationRe)].map(m => m.index);
+  const ungated = invocationIdxs.filter(i => i < ifBody.start || i > ifBody.end);
+  if (ungated.length > 0) {
+    return {
+      sound: false,
+      reason: `workflow-auth.mjs's PR_NUMBER rule is UNSOUND: ci-context.mjs invokes prView( ` +
+        `outside the 'if (prNumber != null)' gate.`,
+    };
+  }
+  return { sound: true };
+}
+
+test('T8: ci-context.mjs\'s single getVcs( call sits gated inside if (prNumber != null) — the PR_NUMBER rule\'s soundness canary', () => {
+  const src = readFileSync(join(VCS_DIR, 'ci-context.mjs'), 'utf8');
+  const result = portCallIsGated(src);
+  assert.equal(result.sound, true, result.reason);
+});
+
+test('T8 mutation: an ungated prView( call inserted before the if is reported as unsound, naming workflow-auth.mjs\'s rule', () => {
+  const src = readFileSync(join(VCS_DIR, 'ci-context.mjs'), 'utf8');
+  const mutated = src.replace(
+    'if (prNumber != null) {',
+    'await prView({ number: 1 }); // canary mutation — ungated\n  if (prNumber != null) {'
+  );
+  assert.notEqual(mutated, src, 'the mutation must land');
+  const result = portCallIsGated(mutated);
+  assert.equal(result.sound, false);
+  assert.match(result.reason, /workflow-auth\.mjs/);
+});
+
 test('drift-guard: ci-context.mjs IS the sanctioned reader — it references process.env AND the pipeline var names (sanity: pattern is not vacuous)', () => {
   const src = readFileSync(join(VCS_DIR, 'ci-context.mjs'), 'utf8');
   assert.match(src, /deps\.env \?\? process\.env/, 'sanity: ci-context.mjs should read process.env as its default env source');
