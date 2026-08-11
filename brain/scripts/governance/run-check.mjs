@@ -438,6 +438,26 @@ async function runDiffSizeCheck(ctx, deps) {
 }
 
 /**
+ * Declares, per subcommand, whether THIS FILE'S OWN HANDLER reaches the VCS
+ * port (issue #535, Requirement 3/5). Read from source text — never imported
+ * — by workflow-auth.mjs's `parseSubcommandManifest`, which recognizes this
+ * file as a multiplexer by the presence of this exported const, never by path
+ * spelling. Values describe the HANDLER's own port use, not the file's whole
+ * import closure: `diff-size: false` because `runDiffSizeCheck` never calls
+ * `getVcs` itself — the bootstrap reach through `ci-context.mjs` is a
+ * separate, `PR_NUMBER`-gated rule in the guard, not baked opaquely in here.
+ * A test (run-check.test.mjs T7) asserts this key set sorted-equals the
+ * checkNames actually dispatched below, in both directions — a manifest that
+ * drifts from the dispatch is a violation the workflow-auth guard cannot see.
+ */
+export const SUBCOMMAND_PORT_REACH = {
+  'memory-gate': false,   // runMemoryGateCheck — records only
+  'decision-gate': false, // adrPresence — git diff only
+  'issue-link': true,     // runIssueLinkCheck → defaultFetchIssue → getVcs
+  'diff-size': false,     // runDiffSizeCheck — ctx.labels/diffNumstat only
+};
+
+/**
  * Runs a named governance check via its pure function, computing inputs from
  * git/IO (or from injected `deps` in tests).
  *
