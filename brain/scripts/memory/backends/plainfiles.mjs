@@ -14,8 +14,18 @@ import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
 
 import { _getGitBranch } from "./engram.mjs";
-import { buildRecord, serializeRecord, nowUtcSeconds } from "../lib/format.mjs";
+import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../lib/format.mjs";
 import { appendRecord, rebuildIndex, readRecordObservations } from "../lib/store.mjs";
+
+/** The repository this record belongs to, from config, falling back to the checkout
+ *  directory name. Records in this repo carry the bare name ("brain"), not the slug. */
+function deriveProject(config, root) {
+  const slug = config?.project?.slug;
+  if (typeof slug === "string" && slug.trim() !== "") return slug.split("/").pop();
+  const name = config?.project?.name;
+  if (typeof name === "string" && name.trim() !== "") return name;
+  return String(root).replace(/\/+$/, "").split("/").pop();
+}
 import { resolveSecretConfig, compilePatterns, scanTextForSecrets } from "../lib/secret-scrub.mjs";
 import { unsupportedOp } from "../lib/unsupported-op.mjs";
 import { t } from "../../i18n/t.mjs";
@@ -62,7 +72,7 @@ export async function save(
   // format has no home for them (out of scope for C3), so they are ignored
   // LOUDLY (a console.warn naming them, never a silent drop) rather than
   // erroring (an error would break the arg-shape parity the mirror exists for).
-  { type, project, scope, topic } = {},
+  { type, project, issue, scope, topic } = {},
   {
     root = repoRoot,
     getBranch = _getGitBranch,
@@ -82,10 +92,37 @@ export async function save(
   const actor = getBranch(root);
   const actorKind = PLAINFILES_ACTOR_KIND;
   const source = `plainfiles save on ${getHostname()}`;
+  const config = _loadConfig(root);
 
-  const candidate = buildRecord({ ts, actor, actorKind, type, project, content, title, source });
+  // DERIVE WHAT IS DERIVABLE, REFUSE WHAT IS A CHOICE (issue #530).
+  //
+  // Both fields are required by `buildRecord`, and omitting either used to reach
+  // `computeRecordId` → `canonicalJson`, which threw
+  // `unsupported value type 'undefined'` — a message naming neither the field nor
+  // the flag. `memory save "t" "c"`, the most obvious invocation of the capture
+  // path, failed that way.
+  //
+  // `project` is derivable: it is this repository, and the config already says
+  // which. Refusing it would be asking the caller to retype something the tool
+  // knows. `type` is a CHOICE among seven, and defaulting it would put a
+  // fabricated meaning on a durable record — so it is refused, by name, with the
+  // list. The asymmetry is the point: derive facts, never opinions.
+  const resolvedProject = project ?? deriveProject(config, root);
+  if (!type) {
+    throw new Error(await t("memory.plainfiles.save.typeRequired", { types: RECORD_TYPES.join(", ") }));
+  }
+  // `validateWritableRecord`'s W2 already says "issue must be an integer" — and it is
+  // UNREACHABLE for a non-numeric one, because `computeRecordId` hashes the field and
+  // `canonicalJson` throws on NaN first. So `--issue abc` failed closed with
+  // "non-finite numbers are not supported": correct direction, useless message, and a
+  // rule that reads as enforced while the path never arrives. Refused here, by name.
+  if (issue !== undefined && issue !== null && !Number.isInteger(issue)) {
+    throw new Error(await t("memory.plainfiles.save.issueInvalid", { value: String(issue) }));
+  }
 
-  const { patternSources, allowPatternSources } = resolveSecretConfig(_loadConfig(root));
+  const candidate = buildRecord({ ts, actor, actorKind, type, project: resolvedProject, issue, content, title, source });
+
+  const { patternSources, allowPatternSources } = resolveSecretConfig(config);
   const patterns = compilePatterns(patternSources);
   const allowPatterns = compilePatterns(allowPatternSources);
   const hit = scanTextForSecrets(serializeRecord(candidate), patterns, allowPatterns);

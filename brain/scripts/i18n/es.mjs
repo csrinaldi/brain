@@ -298,10 +298,12 @@ export default {
 
   // ── memory/lib/unsupported-op.mjs — helper compartido de rechazo explícito (C3, issue #246) ──
   'memory.op.unsupported':            "la operación '{op}' no está soportada por el backend de memoria '{backend}' (diferida — ver openspec/changes/issue-246-c3).",
-  'memory.save.engramUnsupported':    "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_save nativo de engram / 'engram save' en su lugar.",
+  'memory.save.engramUnsupported': "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_save nativo de engram / 'engram save'. Si engram no está instalado acá (el entorno del agente), capturá registros directo con `MEMORY_BACKEND=plainfiles npm run memory:save -- \"título\" \"contenido\" --type <tipo>` — mismos registros, misma validación, sin backend (#530).",
   'memory.search.engramUnsupported':  "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_search nativo de engram / 'engram search' en su lugar.",
 
   // ── memory/backends/plainfiles.mjs — verbos cli save/search (C3, issue #246) ──
+  'memory.plainfiles.save.issueInvalid': '--issue tiene que ser un NÚMERO de issue; llegó {value}. Se guarda como entero para que el registro quede atado a su ticket.',
+  'memory.plainfiles.save.typeRequired': '--type es obligatorio y no tiene default seguro — es una elección, no un dato que la herramienta pueda derivar. Uno de: {types}.',
   'memory.plainfiles.save.done':    '✓ guardado {id} → {file}',
   'memory.plainfiles.save.secretFound': 'Se detectó un secreto en el registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
   'memory.save.plainfilesIgnoredOpts': 'se ignoraron la(s) opción(es) {opts} — el formato de registro de plainfiles no tiene un campo para ellas (scope/topic son conceptos exclusivos de engram); el registro se guardó igualmente.',
