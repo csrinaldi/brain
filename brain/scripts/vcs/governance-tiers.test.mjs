@@ -14,6 +14,7 @@ import {
   resolveTier,
   resolveGatePolicy,
   resolveGateEvidence,
+  resolveReviewProtocol,
   tierParams,
   requiredJobs,
   printDiffBudget,
@@ -281,4 +282,54 @@ test('drift-guard: GATE_MATRIX keys match governance.yml job names exactly', () 
     `Drift detected: GATE_MATRIX keys=${JSON.stringify(Object.keys(GATE_MATRIX))} ` +
     `but governance.yml job names=${JSON.stringify(yamlJobNames)}`
   );
+});
+
+// ── #442: the reviewer protocol is separable from the tier ───────────────────
+//
+// `/2` is `regulated`'s default and brain cannot declare `regulated` — at that tier
+// `actor-check` wants an approver distinct from the author who authored no commit on
+// the branch, unsatisfiable at n=1 (#329, the contradiction ADR-0026 resolves). The
+// override is what lets `/2` be DOGFOODED without moving a single gate.
+
+test('#442: with no override, every tier returns its own default — byte-identical to pre-#442', () => {
+  // The no-op migration guarantee (REQ-TIER-10's shape). If this drifts, every
+  // consumer's protocol changed under them without their config saying anything.
+  for (const tier of TIERS) {
+    assert.equal(resolveReviewProtocol({}, tier), tierParams(tier).reviewProtocol);
+    assert.equal(resolveReviewProtocol(undefined, tier), tierParams(tier).reviewProtocol);
+    assert.equal(resolveReviewProtocol({ reviewer: {} }, tier), tierParams(tier).reviewProtocol);
+    assert.equal(resolveReviewProtocol({ reviewer: { protocol: null } }, tier), tierParams(tier).reviewProtocol);
+  }
+  assert.equal(resolveReviewProtocol({}, 'lite'), 'brain-review/1', 'sanity: lite really does default to /1');
+});
+
+test('#442: an explicit protocol wins at EVERY tier — the tier sets a default, not a ceiling', () => {
+  // T2.3 design §3.4, quoted in this module's own TIER_PARAMS docstring.
+  for (const tier of TIERS) {
+    assert.equal(resolveReviewProtocol({ reviewer: { protocol: 'brain-review/2' } }, tier), 'brain-review/2');
+    assert.equal(resolveReviewProtocol({ reviewer: { protocol: 'brain-review/1' } }, tier), 'brain-review/1');
+  }
+  assert.equal(resolveReviewProtocol({ reviewer: { protocol: 'brain-review/1' } }, 'regulated'), 'brain-review/1',
+    'downward too — a ceiling in either direction would be a rule this doctrine does not have');
+});
+
+test('#442: an unknown protocol THROWS — it never falls back to the tier default', () => {
+  // Falling back would hand the operator a /1 verdict while they believed they had
+  // /2, silently dropping causal admission. Same fail-closed shape as resolveTier.
+  assert.throws(() => resolveReviewProtocol({ reviewer: { protocol: 'brain-review/3' } }, 'lite'), /unknown reviewer\.protocol/);
+  assert.throws(() => resolveReviewProtocol({ reviewer: { protocol: '' } }, 'lite'), /unknown reviewer\.protocol/);
+  assert.throws(() => resolveReviewProtocol({ reviewer: { protocol: 'brain-review/2 ' } }, 'lite'), /unknown reviewer\.protocol/,
+    'a trailing space is a typo, not a dialect');
+});
+
+test('#442: brain\'s OWN config requests /2 — the dogfooding, asserted rather than assumed', () => {
+  // This is the whole ticket. Without this guard the line could be dropped from
+  // brain.config.json and every test above would stay green while brain went back to
+  // reviewing its own PRs at /1 — green in test, inert in production (#335).
+  const config = JSON.parse(readFileSync(resolve(REPO_ROOT, 'brain.config.json'), 'utf8'));
+  const tier = resolveTier(config);
+  assert.equal(tier, 'lite', 'brain stays at lite — the override moves the protocol, never a gate');
+  assert.equal(tierParams(tier).reviewProtocol, 'brain-review/1', 'and lite still defaults to /1');
+  assert.equal(resolveReviewProtocol(config, tier), 'brain-review/2',
+    'brain.config.json must request brain-review/2 — that is what "dogfooded" means here');
 });

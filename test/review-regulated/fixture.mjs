@@ -32,6 +32,9 @@ const git = (cwd, ...args) =>
  * file. Each fixture vendors brain/core + brain/scripts, measured at ~8 MB with the
  * clone and the bare origin, so seven un-cleaned runs leak ~57 MB per suite pass.
  *
+ * `protocol` (issue #442) sets `reviewer.protocol` in the consumer's config; `null`
+ * omits the key, which is what makes the tier-default path testable.
+ *
  * `redJob` marks ONE required gate FAILURE in the canned rollup. It defaulted to
  * `'phase-order'` for as long as the diff-budget path was broken (#443) — with the
  * fix landed, the budget breach is the finding source again, as design D4 intended,
@@ -68,6 +71,7 @@ export function buildFixture({
   prNumber = 1,
   redJob = null,
   breakBase = false,
+  protocol = null,
 } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'brain-rev-e2e-'));
   const originDir = join(base, 'origin.git');
@@ -107,7 +111,11 @@ export function buildFixture({
     schemaVersion: '1.0.0',
     project: { slug: 'fixture/consumer', name: 'fixture-consumer', gitHost: 'github.com' },
     vcs: { provider: 'github' },
-    reviewer: { handle, tokenEnv: 'BRAIN_REVIEWER_TOKEN' },
+    // `protocol` (issue #442): the config override. `null` omits the key entirely,
+    // which is the no-op case — a fixture that always wrote a protocol could never
+    // exercise "absent ⇒ tier default", which is the guarantee the override has to
+    // preserve.
+    reviewer: { handle, tokenEnv: 'BRAIN_REVIEWER_TOKEN', ...(protocol ? { protocol } : {}) },
     governance: { tier, ignoreList: [] },
   }, null, 2) + '\n');
 

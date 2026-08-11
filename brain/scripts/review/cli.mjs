@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { loadContext } from '../vcs/ci-context.mjs';
 import { getVcs } from '../vcs/cli.mjs';
-import { resolveTier, tierParams } from '../vcs/governance-tiers.mjs';
+import { resolveTier, tierParams, resolveReviewProtocol } from '../vcs/governance-tiers.mjs';
 import { gatherIdentity } from './identity.mjs';
 import { gatherColdBoot } from './cold-boot.mjs';
 import { buildVerdict, renderVerdict } from './verdict.mjs';
@@ -121,14 +121,31 @@ export async function main(deps = {}) {
   const args = parseArgs(rawArgv);
   const config = loadBrainConfig();
   const project = deps.project ?? config.project?.slug;
-  // Reviewer protocol version (issue #391 T2.3 §3, issue #394 M3): tiered,
-  // never operator-declared per run — `deps.tier` is a test-only override
-  // (mirrors trancheDeps.tier's own convention), never a production seam.
-  // `resolveTier`/`tierParams` are pure (governance-tiers.mjs) — this is the
-  // ONE call site (design.md §2.2) that turns `governance.tier` into the
-  // `protocol` `buildVerdict` receives below.
-  const tier = deps.tier ?? resolveTier(config);
-  const protocol = tierParams(tier).reviewProtocol;
+  // Reviewer protocol version (issue #391 T2.3 §3, issue #394 M3): the TIER sets
+  // the default, and since #442 `reviewer.protocol` in brain.config.json may
+  // override it — the D5 middle path, which exists because brain cannot declare
+  // `regulated` (at that tier `actor-check` is unsatisfiable at n=1, the #329
+  // contradiction) and `/2` still had to be dogfooded rather than only tested.
+  // `deps.tier` remains a TEST-only override (mirrors trancheDeps.tier's own
+  // convention), never a production seam; the config override is the production one.
+  // `resolveTier`/`resolveReviewProtocol` are pure (governance-tiers.mjs) — this is
+  // still the ONE call site (design.md §2.2) that produces the `protocol`
+  // `buildVerdict` receives below.
+  //
+  // BOTH resolutions can THROW on an explicit unknown value, and the refusal is
+  // caught here rather than allowed to escape as a stack trace: a typo in the config
+  // must refuse the run with a readable reason and post NOTHING (#382/#413's shape).
+  // Falling back to a default would hand the operator a `/1` verdict while they
+  // believed they had `/2` — silently dropping causal admission.
+  let tier;
+  let protocol;
+  try {
+    tier = deps.tier ?? resolveTier(config);
+    protocol = resolveReviewProtocol(config, tier);
+  } catch (err) {
+    error(`brain:review: refusing to run — ${err.message}`);
+    return 1;
+  }
 
   const identity = await gatherIdentity({ deps: deps.identityDeps ?? {} });
   if (!identity.ok) {

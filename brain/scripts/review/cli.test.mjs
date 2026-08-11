@@ -91,7 +91,8 @@ test('main --dry-run: prints the verdict to stdout and invokes zero write verbs'
   });
 
   assert.equal(code, 0);
-  assert.ok(lines.some(l => /protocol: brain-review\/1/.test(l)));
+  assert.ok(lines.some(l => /protocol: brain-review\/2/.test(l)),
+    'brain.config.json requests /2 since #442 — these run against the REAL config, so the resolved protocol is the dogfooded one, not lite\'s default');
   assert.ok(lines.some(l => /verdict: APPROVE/.test(l)), 'green gates + budget in range → APPROVE');
   assert.deepEqual(vcs.calls, { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 });
 });
@@ -106,7 +107,8 @@ test('main WITHOUT --dry-run (mode auto → tranche): posts the verdict via prRe
   assert.equal(vcs.calls.prReviewComment, 1);
   assert.equal(vcs.calls.issueComment, 0);
   assert.equal(vcs.calls.labelAdd, 0);
-  assert.ok(lines.some(l => /protocol: brain-review\/1/.test(l)));
+  assert.ok(lines.some(l => /protocol: brain-review\/2/.test(l)),
+    'brain.config.json requests /2 since #442 — these run against the REAL config, so the resolved protocol is the dogfooded one, not lite\'s default');
 });
 
 test('main: a failing required gate produces a REVISE verdict that still posts (the reviewer never approves/blocks merge itself)', async () => {
@@ -128,7 +130,19 @@ test('main: a failing required gate produces a REVISE verdict that still posts (
 // buildVerdict, so every finding is annotated (never left `unknown` —
 // no escalation-storm).
 
-test('main: lite tier (brain\'s own declared tier, no override) → brain-review/1, findings carry no evidence_class/causal_disposition', async () => {
+// #442 REWROTE THIS CASE, and its old name is why. It read "lite tier (brain's own
+// declared tier, NO OVERRIDE) → brain-review/1" — true until brain.config.json began
+// requesting `/2`. These CLI tests load the REAL config (there is no `deps.config`
+// seam, deliberately: `deps.tier` is the one test-only override and #442 did not add a
+// second), so what they observe is brain's ACTUAL resolved protocol. That makes this
+// case the dogfooding, visible from the CLI: the tier is still `lite`, every gate is
+// still lite's, and the verdict is `/2`.
+//
+// The property this case used to carry — "lite with no override defaults to /1" —
+// did not disappear, it moved to the two layers that can express it honestly: pure
+// (governance-tiers.test.mjs, every tier × absent override) and wire
+// (test/review-regulated, a real config file with the key omitted).
+test('main: lite tier + brain\'s own reviewer.protocol override → brain-review/2, findings ARE annotated (#442 dogfooding)', async () => {
   const vcs = spyVcs();
   const deps = readyDeps({ vcs });
   deps.tier = 'lite';
@@ -137,9 +151,11 @@ test('main: lite tier (brain\'s own declared tier, no override) → brain-review
   const lines = [];
   const code = await main({ argv: ['--pr', '42'], log: (s) => lines.push(s), ...deps });
   assert.equal(code, 0);
-  assert.ok(lines.some(l => /protocol: brain-review\/1/.test(l)));
-  assert.ok(!lines.some(l => /evidence_class:/.test(l)), '/1 must never render evidence_class');
-  assert.ok(!lines.some(l => /causal_disposition:/.test(l)), '/1 must never render causal_disposition');
+  assert.ok(lines.some(l => /protocol: brain-review\/2/.test(l)),
+    'the config override must beat the tier default — that is the whole of #442');
+  assert.ok(lines.some(l => /evidence_class:/.test(l)),
+    'and /2 annotates: the vocabulary is what dogfooding buys over testing');
+  assert.ok(lines.some(l => /causal_disposition:/.test(l)));
 });
 
 // ── #408: the base probe's inability reaches the RENDERED verdict ───────────
@@ -263,7 +279,8 @@ test('main: an explicit --mode checkpoint → wires gatherCheckpointInputs + eva
   const code = await main({ argv: ['--pr', '42', '--mode', 'checkpoint'], log: (s) => lines.push(s), ...deps });
   assert.equal(code, 0);
   assert.equal(vcs.calls.prReviewComment, 1);
-  assert.ok(lines.some(l => /protocol: brain-review\/1/.test(l)));
+  assert.ok(lines.some(l => /protocol: brain-review\/2/.test(l)),
+    'brain.config.json requests /2 since #442 — these run against the REAL config, so the resolved protocol is the dogfooded one, not lite\'s default');
 });
 
 test('main: --mode checkpoint with a genuinely uncomputable base (no ci-context, no port baseRefOid) → reversion skipped, fail-closed REVISE (never a silent APPROVE)', async () => {
