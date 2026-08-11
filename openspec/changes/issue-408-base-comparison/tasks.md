@@ -40,3 +40,66 @@ issue: 408
       module says so where a reader meets them rather than leaving the absence to be inferred.
 - [x] **R6** **M1 survived and the test was the defect.** The guard's value is not its return
       value — the failure path returns the same `null` — it is that nothing gets spawned.
+
+## Cold review — the round that changed the change
+
+A zero-context reviewer was run over the finished PR before merge, per #313's method note
+(*"a zero-context reviewer belongs in the loop, not at the margins"*). It returned **two
+blockers and six lesser findings**, every one reproduced by running code. All are fixed and
+each fix is now proven by the reviewer's own mutation.
+
+- [x] **C1 — BLOCKER, a FALSE PASS.** `probeBase`'s command loop treated **any** throw as
+      "the gate is red at base": `ENOENT`, `ENOBUFS`, a signal, a script missing from the base
+      tree. So a reader's own failure became the gate's approval — `pre-existing` →
+      `follow_ups[]` → REVISE softens to APPROVE. The header claimed twice that a failed probe
+      "costs a false block, never a false pass"; that was true of the git layer and **false**
+      inside the loop. Reproduced against a base with no `brain/scripts/` — a PR that vendors
+      brain for the first time. Fixed: only a numeric non-zero `err.status` means red;
+      everything else, and any command missing from the base tree, is `unreproducible` — which
+      keeps the finding blocking and emits a condition naming the gate.
+- [x] **C2 — BLOCKER, a race on the happy path.** The worktree path was keyed on the base sha,
+      so **two PRs branched off the same `main` tip shared it** — and each run's first act was
+      `worktree remove --force`. Run B deleted run A's live worktree; A's next command failed;
+      by C1 that read as a red base. Reproduced: a **healthy** base returned `pre-existing` for
+      both concurrent runs. Fixed with `mkdtempSync`, which also retires the pre-emptive remove.
+- [x] **C3 — the teardown was unguarded.** `filter(c => c.includes('worktree remove')).length
+      >= 1` was satisfied by the pre-emptive remove, so deleting the `finally` left all 3128
+      tests green and leaked a worktree per run — in the test whose title ends *"and tears it
+      down"*. The repo's own `red-proof-blind-along-an-unvaried-axis`. Now: exactly one
+      teardown, and its POSITION (last call) is what is asserted.
+- [x] **C4 — the "ORDER IS LOAD-BEARING" test observed nothing.** It injected a runner and
+      asserted it saw `null` — but `evaluateRefuter` only calls a runner when an `inferential`
+      blocker exists, and the fixture had none. `null === null`, having watched nothing;
+      reversing the pipeline left the suite green. The stub's signature was wrong too
+      (`runner(blockers)` takes an array, not `{ findings }`), so it would have thrown had it
+      ever fired. **`evidence-reader-empty-on-failure` in the assertion layer, in a test written
+      to guard an ordering claim.** Now the finding is `inferential`, the refuter really forks,
+      and what it sees is asserted.
+- [x] **C5 — the `conditions` plumbing was unproven.** Dropping the append in `cli.mjs` left
+      everything green, so *"the inability is reported, never swallowed"* was a claim about a
+      layer nothing observed. Two CLI cases now drive it through `deps.probeBase` — a seam the
+      review noted had no caller at all — and assert the condition reaches the rendered block.
+- [x] **C6 — a false factual claim in the header.** It said seven of eight required jobs are
+      diff- or PR-scoped, listing `memory-gate` among them. `memory-gate` reads
+      `.memory/records/` from the **checked-out tree** (`memory-presence.mjs`: *"the repo has
+      AT LEAST ONE session summary captured, EVER"*), so a repo that never captured one fails
+      it identically at base and head — inherited. Verified independently before accepting.
+      Corrected to **six of eight**, with `memory-gate` named as a second base-reproducible
+      gate left out for a stated scope reason rather than by an error.
+- [x] **C7 — the healthy-base e2e passed over an inert probe.** It asserted only that the
+      finding stayed `introduced`, which is also what happens when the probe never runs.
+      Making `probeBase` return `null` unconditionally left it green. Now it asserts
+      `conditions` is EMPTY — the only observation that separates "ran and found base green"
+      from "never measured", and the fix REQ-443-1 established for the silent-budget case in
+      the same file.
+- [x] **C8 — `maxBuffer` at 74 %.** The suite command emits ~776 KB on a green run against
+      `execFileSync`'s 1 MiB default; crossing it throws `ENOBUFS`, which under C1 read as a
+      red base. Set explicitly to 64 MiB, and `stdio` now captures rather than inherits so a
+      base run's stack traces stay out of `brain:review`'s stderr (C9).
+- [x] **C10** `deps.probeBase`'s sync contract documented — a promise degrades silently.
+- [x] **C11** Wording: the evidence said *"SAME gate fails at base"*. What was observed is that
+      a gate **with the same name** is red there; a base broken for reason A under a head
+      broken for reason B is indistinguishable to this probe. Now *"`<gate>` is ALSO red at
+      base"*, which is the claim it can actually make.
+- [x] **C12** All seven of the review's mutations re-run against the fixes: **all RED.**
+      Full suite **3135 tests, 0 failures**.

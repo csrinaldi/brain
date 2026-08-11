@@ -142,6 +142,49 @@ test('main: lite tier (brain\'s own declared tier, no override) → brain-review
   assert.ok(!lines.some(l => /causal_disposition:/.test(l)), '/1 must never render causal_disposition');
 });
 
+// ── #408: the base probe's inability reaches the RENDERED verdict ───────────
+//
+// Cold review F5: nothing verified that `baseConditions` survives from
+// `classifyAgainstBase` to the block a human reads. Dropping the append in cli.mjs
+// left all 3128 tests green, so "the inability is reported, never swallowed" was an
+// unproven claim at the only layer that matters. This also exercises `deps.probeBase`,
+// which was a documented seam with no caller.
+test('main: an UNCOMPUTABLE base probe puts its condition in the rendered verdict (#408)', async () => {
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.tier = 'regulated';
+  deps.trancheDeps.fetchRollup = async () =>
+    greenRollup().map(g => (g.name === 'local-checks' ? { ...g, conclusion: 'FAILURE' } : g));
+  let probed = 0;
+  deps.probeBase = () => { probed += 1; return null; };
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), ...deps });
+  assert.equal(code, 0);
+  assert.equal(probed, 1, 'a blocking gate:local-checks must trigger exactly one probe');
+  const out = lines.join('\n');
+  assert.match(out, /conditions:/, 'the verdict must carry a conditions block');
+  assert.match(out, /evidence uncomputable: base comparison/,
+    'and the probe\'s own inability must be IN it — appended to the evaluator\'s, not replacing them');
+  assert.match(out, /causal_disposition: introduced/,
+    'and the finding keeps blocking: a failed base check is a false block, never a false pass');
+});
+
+test('main: no base-comparable blocker ⇒ the probe never runs and no condition appears (#408)', async () => {
+  // The laziness rule, at the CLI. Without this, a probe that ran on every review
+  // would be invisible until someone noticed the wall-clock.
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.tier = 'regulated';
+  deps.trancheDeps.fetchRollup = async () =>
+    greenRollup().map(g => (g.name === 'memory-gate' ? { ...g, conclusion: 'FAILURE' } : g));
+  let probed = 0;
+  deps.probeBase = () => { probed += 1; return null; };
+  const lines = [];
+  await main({ argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), ...deps });
+  assert.equal(probed, 0, 'memory-gate is not in BASE_REPRODUCIBLE_GATES — nothing to re-run');
+  assert.ok(!lines.join('\n').includes('base comparison'), 'and no condition about a probe that never ran');
+});
+
 test('main: regulated tier → brain-review/2, a blocker finding is annotated evidence_class:deterministic + causal_disposition:introduced, and does NOT escalate (no escalation-storm)', async () => {
   const vcs = spyVcs();
   const deps = readyDeps({ vcs });

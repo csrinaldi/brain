@@ -411,7 +411,7 @@ test('e2e #408: a gate failure that exists at BASE routes to follow_ups[] and st
   assert.ok(followUp,
     `the inherited gate failure must land in follow_ups[] — verdict was ${JSON.stringify(verdict, null, 2)}`);
   assert.equal(followUp.causal_disposition, 'pre-existing');
-  assert.match(followUp.evidence, /SAME gate fails at base/,
+  assert.match(followUp.evidence, /local-checks is ALSO red at base/,
     'the routing must be justified by an observation the reader can check, not by a bare label');
 
   assert.ok(!(verdict.findings ?? []).some(f => f.id === 'gate:local-checks'),
@@ -434,4 +434,13 @@ test('e2e #408: the SAME gate failure with a healthy base keeps blocking', (t) =
   assert.equal(blocking.causal_disposition, 'introduced');
   assert.ok(!(verdict.follow_ups ?? []).some(f => f.id === 'gate:local-checks'));
   assert.equal(verdict.verdict, 'REVISE');
+
+  // POSITIVE EVIDENCE THAT THE PROBE RAN, and cold review F7 is why it is here:
+  // `introduced` is also what you get when the probe never runs, or returns null. An
+  // unreproducible or failed probe emits a condition, so an EMPTY conditions list is
+  // the only observation that separates "ran and found base green" from "never
+  // measured". Exactly the fix REQ-443-1 established for the silent-budget case, three
+  // hundred lines up in this same file.
+  assert.deepEqual(verdict.conditions ?? [], [],
+    'no uncomputable condition ⇒ the base probe ran to completion and found the base healthy');
 });

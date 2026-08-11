@@ -64,7 +64,8 @@ test('#408: a gate that fails at base too becomes pre-existing, and KEEPS its ev
   assert.equal(findings[0].causal_disposition, 'pre-existing');
   assert.match(findings[0].evidence, /prStatusRollup: gate:local-checks/,
     'the original quote must survive — a claim must keep the thing it is a claim about');
-  assert.match(findings[0].evidence, /SAME gate fails at base/);
+  assert.match(findings[0].evidence, /local-checks is ALSO red at base/,
+    'ALSO red, not "the same failure" — a base broken for reason A under a head broken for reason B looks identical to this probe');
 });
 
 test('#408: a gate that is GREEN at base stays introduced — this change broke it', () => {
@@ -108,35 +109,117 @@ test('#408: a probe that was never NEEDED reports nothing — silence, not a con
 
 // ── the probe itself ────────────────────────────────────────────────────────
 
-test('#408: probeBase runs in a DETACHED worktree at base and tears it down', () => {
+test('#408: probeBase runs in a PER-RUN detached worktree and tears it down LAST', () => {
   const calls = [];
   const r = probeBase({
     baseSha: 'basesha', gates: ['local-checks'], cwd: '/repo', tmp: '/tmp',
-    _exists: () => false,
+    _exists: () => true,
+    _mkdtemp: (prefix) => `${prefix}XY7z`,
     _exec: (file, args) => { calls.push([file, ...args].join(' ')); return ''; },
   });
   assert.deepEqual(r.failed, [], 'both checks passed at base');
-  const joined = calls.join('\n');
-  assert.match(joined, /git worktree add --detach \/tmp\/brain-review-base-basesha basesha/);
-  assert.ok(calls.filter(c => c.includes('worktree remove')).length >= 1,
-    'the worktree must be removed — never a checkout in the operator cwd, never a leak');
-  assert.ok(!joined.includes('--test'), 'no .brain-source marker ⇒ no suite, mirroring the workflow');
+  assert.deepEqual(r.unreproducible, []);
+
+  // PER-RUN, not keyed on the base sha (cold review F2): two PRs off the same `main`
+  // tip would share a sha-keyed path, and the second run's teardown would delete the
+  // first's LIVE worktree — after which its next command fails and reads as a red base.
+  assert.match(calls[0], /git worktree add --detach \/tmp\/brain-review-base-XY7z basesha/);
+  assert.ok(!calls[0].includes('basesha basesha'), 'the sha must not be the path');
+
+  // AND TORN DOWN LAST, which is the assertion that observes the `finally` rather than
+  // some other remove. The previous form was `filter(...).length >= 1` while TWO
+  // remove sites existed — deleting the finally left every test green and leaked a
+  // worktree per run (cold review F3). One site now, and its POSITION is what is pinned.
+  const removes = calls.filter(c => c.includes('worktree remove'));
+  assert.equal(removes.length, 1, 'exactly one teardown — the pre-emptive remove is gone with the shared path');
+  assert.equal(calls[calls.length - 1], removes[0], 'the teardown must be the LAST call: anything after it runs against a deleted tree');
 });
 
-test('#408: a failing command marks the gate failed and STOPS — the rest add nothing', () => {
+test('#408: two concurrent probes on the SAME base do not share a worktree', () => {
+  // The regression cold review F2 reproduced end to end: with a sha-keyed path, run B's
+  // first act deleted run A's live worktree and a HEALTHY base came back `pre-existing`
+  // for both.
+  const paths = [];
+  const mk = (prefix) => `${prefix}${paths.length}`;
+  for (const _ of [0, 1]) {
+    probeBase({
+      baseSha: 'same', gates: ['local-checks'], cwd: '/repo', tmp: '/tmp', _exists: () => true, _mkdtemp: mk,
+      _exec: (file, args) => { if (args.includes('add')) paths.push(args[args.length - 2]); return ''; },
+    });
+  }
+  assert.equal(new Set(paths).size, 2, `two runs must get two paths — got ${JSON.stringify(paths)}`);
+});
+
+test('#408: a NON-ZERO EXIT marks the gate red at base and STOPS — the rest add nothing', () => {
   const ran = [];
   const r = probeBase({
-    baseSha: 'b', gates: ['local-checks'], cwd: '/repo', tmp: '/tmp', _exists: () => false,
+    baseSha: 'b', gates: ['local-checks'], cwd: '/repo', tmp: '/tmp', _exists: () => true,
+    _mkdtemp: (p) => `${p}x`,
     _exec: (file, args) => {
       const cmd = [file, ...args].join(' ');
       if (cmd.includes('worktree')) return '';
       ran.push(cmd);
-      if (cmd.includes('check-refs')) throw new Error('exit 1');
+      if (cmd.includes('check-refs')) { const e = new Error('exit 1'); e.status = 1; throw e; }
       return '';
     },
   });
   assert.deepEqual(r.failed, ['local-checks']);
+  assert.deepEqual(r.unreproducible, []);
   assert.equal(ran.length, 1, 'once the gate is red at base, the remaining steps prove nothing new');
+});
+
+// ── the distinction the whole module rests on (cold review F1) ──────────────
+
+test('#408: a SPAWN failure is unreproducible, NOT "red at base" — the false-pass direction', () => {
+  // ENOENT/ENOBUFS/a signal throw with no numeric `status`. Reading them as "the gate
+  // is red at base" turns the reader's own failure into the gate's approval:
+  // pre-existing → follow_ups → REVISE softens to APPROVE. A FALSE PASS, in the
+  // direction this module claims it can never take.
+  for (const err of [
+    Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }),
+    Object.assign(new Error('ENOBUFS'), { code: 'ENOBUFS', status: null }),
+    Object.assign(new Error('killed'), { status: null, signal: 'SIGTERM' }),
+  ]) {
+    const r = probeBase({
+      baseSha: 'b', gates: ['local-checks'], cwd: '/repo', tmp: '/tmp', _exists: () => true,
+      _mkdtemp: (p) => `${p}x`,
+      _exec: (file, args) => { if (args.includes('worktree')) return ''; throw err; },
+    });
+    assert.deepEqual(r.failed, [], `${err.code ?? err.signal}: must NOT be recorded as a red base`);
+    assert.deepEqual(r.unreproducible, ['local-checks']);
+  }
+});
+
+test('#408: a command MISSING from the base tree is unreproducible, not red', () => {
+  // The real case: a PR that vendors brain for the first time. Its base has no
+  // brain/scripts/, every command fails to spawn, and the naive reading defers every
+  // blocker the PR has.
+  const r = probeBase({
+    baseSha: 'b', gates: ['local-checks'], cwd: '/repo', tmp: '/tmp',
+    _mkdtemp: (p) => `${p}x`,
+    _exists: (p) => !String(p).includes('check-refs'),
+    _exec: () => '',
+  });
+  assert.deepEqual(r.failed, []);
+  assert.deepEqual(r.unreproducible, ['local-checks']);
+});
+
+test('#408: an unreproducible gate KEEPS its finding blocking and names why', () => {
+  const { findings, conditions } = classifyAgainstBase({
+    findings: [{ ...blocker('gate:local-checks'), causal_disposition: 'introduced' }],
+    baseProbe: { failed: [], unreproducible: ['local-checks'], command: 'cmd' },
+  });
+  assert.equal(findings[0].causal_disposition, 'introduced', 'not reproducible ⇒ not deferred');
+  assert.equal(conditions.length, 1);
+  assert.match(conditions[0], /local-checks could not be re-run at base/);
+});
+
+test('#408: an unreproducible gate NOBODY reported on produces no condition', () => {
+  const { conditions } = classifyAgainstBase({
+    findings: [blocker('budget')],
+    baseProbe: { failed: [], unreproducible: ['local-checks'], command: 'cmd' },
+  });
+  assert.deepEqual(conditions, [], 'a gate with no finding needs no excuse');
 });
 
 test('#408: a git failure is null (uncomputable), never a crash and never a verdict', () => {
@@ -184,21 +267,30 @@ test('#408: probeBase strips NODE_TEST_CONTEXT from the child env', () => {
 // ── the pipeline order ──────────────────────────────────────────────────────
 
 test('#408: admission classifies against base BEFORE the refuter forks', async () => {
-  // The refuter forks on BLOCKERS. A finding on its way out of the blocking set must
-  // not be challenged as though it were still blocking.
-  let refuterSawDisposition = null;
+  // THE FIRST VERSION OF THIS TEST OBSERVED NOTHING, and a cold review caught it (F4).
+  // It injected a runner and asserted the runner saw `null` — but `evaluateRefuter`
+  // only calls a runner when an `evidence_class: 'inferential'` BLOCKER exists, and
+  // the fixture had none. So it compared null to null having watched nothing happen,
+  // and swapping the pipeline to refute-first left the whole suite green. That is
+  // `evidence-reader-empty-on-failure` in the assertion layer — the exact class this
+  // repo's own doctrine names, in a test written to guard an ordering claim.
+  //
+  // Two fixes, both required. The finding must be INFERENTIAL so the refuter actually
+  // forks, and the runner's real signature is `runner(inferentialBlockers)` — an
+  // ARRAY, not `{ findings }`; the old stub would have thrown if it had ever fired.
+  let seen = null;
+  const inferential = { ...blocker('gate:local-checks'), evidence_class: 'inferential' };
   const { findings } = await applyCausalAdmission({
-    findings: [blocker('gate:local-checks')],
-    baseProbe: { failed: ['local-checks'], command: 'cmd' },
+    findings: [inferential],
+    baseProbe: { failed: ['local-checks'], unreproducible: [], command: 'cmd' },
     probeAttempted: true,
-    runner: async ({ findings: fs }) => { refuterSawDisposition = fs[0].causal_disposition; return null; },
+    runner: async (blockers) => { seen = blockers.map(f => f.causal_disposition); return { outcomes: [] }; },
   });
+  assert.deepEqual(seen, ['pre-existing'],
+    'the refuter must see the CLASSIFIED disposition — if it sees `introduced`, the classifier ran after it');
   assert.equal(findings[0].causal_disposition, 'pre-existing');
-  // The refuter is lazy and does not fire on deterministic findings, so the runner is
-  // never called — asserting the ORDER means asserting the classifier already ran by
-  // the time the refuter had its chance.
-  assert.equal(refuterSawDisposition, null, 'the refuter stays a no-op on deterministic findings');
 });
+
 
 test('#408: annotation still defaults to introduced when no probe ran', async () => {
   const { findings, conditions } = await applyCausalAdmission({ findings: [blocker('gate:local-checks')] });

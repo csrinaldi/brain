@@ -97,7 +97,10 @@ function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
  * override of `resolveTier(config)` — selects the `brain-review/1` vs `/2`
  * protocol via `tierParams(tier).reviewProtocol`, issue #391 T2.3/#394 M3),
  * `refuterRunner` (→ lib/causal-admission.mjs's `applyCausalAdmission`, only
- * consulted at `protocol === 'brain-review/2'`), `posterDeps` (→
+ * consulted at `protocol === 'brain-review/2'`), `probeBase` (→
+ * lib/base-comparison.mjs — a SYNCHRONOUS override of the base re-run; returning a
+ * promise from it degrades silently to "probed, nothing failed", so the seam's
+ * contract is sync and its callers are tested), `posterDeps` (→
  * poster.mjs), `writeVerbs` (a spy/real VCS used as the poster's default
  * `getVcs` when `posterDeps.getVcs` is not separately injected), `queueDeps`
  * (→ queue.mjs, `queue` subcommand only), `boardDeps` (→ board.mjs, `board`

@@ -21,15 +21,26 @@
 //     exactly, and it is why this module RE-RUNS the check at base instead of reading a
 //     status somebody else recorded.
 //
-// (2) ONLY ONE GATE CAN INHERIT A FAILURE. Of the eight required jobs, seven are
-//     diff-scoped or PR-scoped BY CONSTRUCTION — `diff-size` measures `base...head`,
-//     `issue-link`/`decision-gate`/`memory-gate`/`phase-order` read this PR's body and
+// (2) SIX OF THE EIGHT REQUIRED JOBS CANNOT INHERIT A FAILURE — `diff-size` measures
+//     `base...head`, `issue-link`/`decision-gate`/`phase-order` read this PR's body and
 //     this change's artefacts, `actor-check`/`brain-writes-reviewed` read this PR's
 //     approval and authorship. A defect in any of them is this change's doing by
 //     definition; asking whether it "exists on base" is not a hard question, it is a
-//     meaningless one. `local-checks` is the exception: it runs `repo:check`,
-//     `brain:nav` and the unit suite over the TREE, and a tree can be broken before
-//     this branch touched it.
+//     meaningless one.
+//
+//     TWO CAN. `local-checks` runs `repo:check`, `brain:nav` and the unit suite over
+//     the TREE, and a tree can be broken before this branch touched it. And
+//     `memory-gate` — corrected by a cold review of this file, which caught the
+//     original claim of "seven" — reads `.memory/records/` from the CHECKED-OUT TREE
+//     (`defaultReadRecords`, and `memory-presence.mjs`'s own note: *"it verifies that
+//     the repo has AT LEAST ONE session summary captured, EVER"*), so a repo that never
+//     captured one fails it identically at base and at head.
+//
+//     Only `local-checks` is in the set below, and that is a scope decision rather
+//     than the measurement: `memory-gate` is not reproduced by RUNNING A COMMAND — it
+//     needs the check's own reader pointed at the base worktree, a second mechanism —
+//     and it is `detection` at `lite`, so it never blocks brain itself. Tracked
+//     separately rather than smuggled in behind a table that says "commands".
 //
 // So the honest producer is narrow on purpose: one gate, re-derived at base, in a
 // throwaway worktree. It answers #408's design question 1 — *"is the base...head diff
@@ -47,7 +58,7 @@
 // becomes reachable on `pre-existing` alone.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -133,37 +144,68 @@ export function needsBaseProbe(findings = []) {
  * inversion of the claim being made.
  *
  * @param {{ baseSha: string|null, gates: string[], cwd?: string, tmp?: string, _exec?: Function }} args
- * @returns {{ failed: string[], command: string }|null}
+ * @returns {{ failed: string[], unreproducible: string[], command: string }|null}
  */
-export function probeBase({ baseSha, gates = [], cwd = process.cwd(), tmp = tmpdir(), _exec, _exists = existsSync } = {}) {
+export function probeBase({ baseSha, gates = [], cwd = process.cwd(), tmp = tmpdir(), _exec, _exists = existsSync, _mkdtemp = mkdtempSync } = {}) {
   if (!baseSha || gates.length === 0) return null;
   const exec = _exec ?? ((file, args, opts) => execFileSync(file, args, opts));
-  const worktreePath = join(tmp, `brain-review-base-${baseSha}`);
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
+  // A PER-RUN path, not one derived from the base sha. Keying it on the sha looked
+  // tidy and was a race: two PRs branched off the same `main` tip — the common case,
+  // not an exotic one — share the path, and the second run's teardown deletes the
+  // first run's LIVE worktree. Its next command then fails, which (before the
+  // `err.status` discipline below) read as "the gate is red at base" and deferred a
+  // real blocker on a perfectly healthy base. Found by a cold review of this file.
+  const worktreePath = _mkdtemp(join(tmp, 'brain-review-base-'));
 
   try {
-    try { exec('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' }); } catch { /* no prior worktree */ }
     exec('git', ['worktree', 'add', '--detach', worktreePath, baseSha], { cwd, encoding: 'utf8' });
 
     const failed = [];
+    const unreproducible = [];
     const ran = [];
     for (const gate of gates) {
       const commands = commandsFor(gate, worktreePath, _exists);
       if (commands.length === 0) continue;
-      let gateFailed = false;
+
+      // THE SCRIPT MUST EXIST AT BASE. A gate whose command is missing from the base
+      // tree was not "red at base" — it could not be RUN there, which is a different
+      // fact and the opposite verdict. Real case: a PR that vendors brain for the
+      // first time, or renames a check script; its base has no `brain/scripts/`, every
+      // command fails to spawn, and the naive reading defers every blocker it has.
+      const missing = commands.filter(([, args]) => !_exists(join(worktreePath, args[args.length - 1])) && !args.includes('--test'));
+      if (missing.length > 0) { unreproducible.push(gate); continue; }
+
+      let outcome = 'green';
       for (const [file, args] of commands) {
         ran.push(`${file} ${args.join(' ')}`);
         try {
-          exec(file, args, { cwd: worktreePath, encoding: 'utf8', env });
-        } catch {
-          gateFailed = true;
-          break; // the gate is already red at base; the remaining steps add nothing
+          // `maxBuffer` explicit: the default is 1 MiB and this branch's own suite
+          // already emits ~776 KB on a GREEN run. Crossing it throws ENOBUFS and
+          // SIGTERMs the child — which, without the discipline below, would read as
+          // "the suite fails at base". `stdio` captures rather than inherits, so a
+          // base run's stack traces do not surface in brain:review's own stderr.
+          exec(file, args, { cwd: worktreePath, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+        } catch (err) {
+          // THE DISTINCTION THIS WHOLE MODULE RESTS ON, and it was missing until a
+          // cold review found it. `execFileSync` throws for two unrelated reasons:
+          //   · a numeric non-zero `status` — the command RAN and the gate is red;
+          //   · everything else (`status` null/undefined: ENOENT, ENOBUFS, a signal)
+          //     — the command never produced a verdict at all.
+          // Collapsing them makes a reader's own failure into the gate's approval:
+          // `pre-existing` → `follow_ups[]` → REVISE softens to APPROVE. That is
+          // `evidence-reader-empty-on-failure` inverted, one layer below where anyone
+          // is looking, and it is a FALSE PASS — the direction this module claims it
+          // can never take.
+          outcome = Number.isInteger(err?.status) && err.status !== 0 ? 'red' : 'unreproducible';
+          break;
         }
       }
-      if (gateFailed) failed.push(gate);
+      if (outcome === 'red') failed.push(gate);
+      else if (outcome === 'unreproducible') unreproducible.push(gate);
     }
-    return { failed, command: `git worktree add --detach <base> && ${ran.join(' && ')}` };
+    return { failed, unreproducible, command: `git worktree add --detach <base> && ${ran.join(' && ')}` };
   } catch {
     // A git/fs failure is uncomputable evidence, never a crash and never a verdict.
     return null;
@@ -193,7 +235,7 @@ export function probeBase({ baseSha, gates = [], cwd = process.cwd(), tmp = tmpd
  * original gate quote and the base observation that reclassified it; a finding that
  * says only "it is pre-existing" is a claim without the thing it is a claim about.
  *
- * @param {{ findings?: Array<object>, baseProbe?: {failed: string[], command: string}|null, probeAttempted?: boolean }} args
+ * @param {{ findings?: Array<object>, baseProbe?: {failed: string[], unreproducible?: string[], command: string}|null, probeAttempted?: boolean }} args
  * @returns {{ findings: Array<object>, conditions: string[] }}
  */
 export function classifyAgainstBase({ findings = [], baseProbe = null, probeAttempted = false } = {}) {
@@ -211,14 +253,28 @@ export function classifyAgainstBase({ findings = [], baseProbe = null, probeAtte
   }
 
   const failed = new Set(baseProbe.failed ?? []);
+  const unreproducible = new Set(baseProbe.unreproducible ?? []);
   const out = findings.map((f) => {
     const gate = gateNameOf(f);
     if (!gate || !failed.has(gate)) return f;
     return {
       ...f,
       causal_disposition: 'pre-existing',
-      evidence: `${f.evidence} — SAME gate fails at base: ${baseProbe.command}`,
+      // "ALSO red at base", not "the SAME failure". What the probe observed is that a
+      // gate WITH THIS NAME is red at base — a base broken for reason A under a head
+      // broken for reason B looks identical to it. The weaker word is the true one,
+      // and the evidence carries the command so a reader can go further than the probe
+      // could.
+      evidence: `${f.evidence} — ${gate} is ALSO red at base: ${baseProbe.command}`,
     };
   });
-  return { findings: out, conditions: [] };
+
+  // A gate that could not be REPRODUCED at base is not a gate that passed there. Its
+  // finding keeps blocking (the safe direction) and the inability is named, per gate,
+  // so the reason is actionable rather than a shrug.
+  const conditions = [...unreproducible]
+    .filter(g => findings.some(f => gateNameOf(f) === g))
+    .map(g => `evidence uncomputable: ${g} could not be re-run at base (command absent, or it never produced an exit status)`);
+
+  return { findings: out, conditions };
 }
