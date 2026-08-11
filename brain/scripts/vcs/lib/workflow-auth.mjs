@@ -47,8 +47,12 @@
 // as TEXT, never imported: importing it would make this guard the first
 // violator of "`run-check.mjs` is an entry point, never a library"
 // (Requirement 6, T6), and would drag `cli.mjs` into this file's own closure.
-// An unknown subcommand, a missing one, or a manifest that fails to parse is
-// `unresolvable` — a violation, never a silent pass (T3).
+// An unknown subcommand or a missing one resolves to `unresolvable` — a
+// violation, never a silent pass (T3). A manifest that fails to parse is a
+// DIFFERENT codepath: `parseSubcommandManifest` returns `null`, so the entry
+// falls back to the whole-file closure rule below (D2's safe over-
+// approximation) — still fail-closed, but via a "does not declare VCS_TOKEN"
+// message rather than an unresolvable one.
 //
 // Separately, `importClosure` stops at `vcs/ci-context.mjs` (a cut vertex,
 // T5): an entry point that reaches the port ONLY through that shared bootstrap
