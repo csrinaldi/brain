@@ -16,8 +16,8 @@
 // stub); everything git-shaped is real.
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { join, dirname, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -39,6 +39,27 @@ const git = (cwd, ...args) =>
  *
  * @returns {{ base: string, repoDir: string, stubDir: string, headSha: string, baseSha: string, prNumber: number }}
  */
+
+/**
+ * A flat `brain/HOME.md` index linking every `brain/**\/*.md` in the vendored tree.
+ *
+ * `check-brain-nav.mjs` enforces two invariants: no broken links, and no orphan —
+ * every `brain/**\/*.md` reachable transitively from HOME.md. A generated flat index
+ * satisfies both for ANY core payload, so this fixture does not silently start
+ * failing `brain:nav` the next time a doc lands in `brain/core/`.
+ */
+function buildHomeIndex(brainDir) {
+  const walk = (dir) =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],
+    );
+  const docs = walk(brainDir)
+    .filter((f) => f.endsWith('.md') && !f.endsWith(`${sep}HOME.md`))
+    .map((f) => relative(brainDir, f).split(sep).join('/'))
+    .sort();
+  return ['# HOME — fixture consumer', '', ...docs.map((d) => `- [${d}](${d})`), ''].join('\n');
+}
+
 export function buildFixture({
   tier = 'regulated',
   diffLines = 250,
@@ -46,6 +67,7 @@ export function buildFixture({
   author = 'alice',
   prNumber = 1,
   redJob = null,
+  breakBase = false,
 } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'brain-rev-e2e-'));
   const originDir = join(base, 'origin.git');
@@ -68,6 +90,19 @@ export function buildFixture({
   mkdirSync(join(repoDir, '.memory', 'records'), { recursive: true });
   writeFileSync(join(repoDir, '.memory', 'records', '.gitkeep'), '');
   writeFileSync(join(repoDir, 'README.md'), '# fixture consumer\n');
+  // brain/HOME.md — issue #408. It is neither `managed` nor `local` in
+  // managed-paths.mjs: a real consumer's is written by `brain:env:init` at adopt
+  // time, so a fixture that vendors brain/core WITHOUT it is not a consumer after
+  // adopt — it is a consumer mid-adopt, and `brain:nav` fails on it for that reason
+  // alone. That mattered the moment a base probe started RUNNING `brain:nav`
+  // (#408): every fixture would have reported "the tree was already broken", which
+  // is true of the fixture and false of the thing it models.
+  //
+  // GENERATED, not copied. brain's own HOME.md links `brain/project/decisions/**`,
+  // which is `local` and not vendored here — copying it would trade an orphan
+  // failure for a broken-link one. A flat index over whatever `brain/**` actually
+  // contains satisfies both nav invariants by construction, whatever ships in core.
+  writeFileSync(join(repoDir, 'brain', 'HOME.md'), buildHomeIndex(join(repoDir, 'brain')));
   writeFileSync(join(repoDir, 'brain.config.json'), JSON.stringify({
     schemaVersion: '1.0.0',
     project: { slug: 'fixture/consumer', name: 'fixture-consumer', gitHost: 'github.com' },
@@ -75,6 +110,17 @@ export function buildFixture({
     reviewer: { handle, tokenEnv: 'BRAIN_REVIEWER_TOKEN' },
     governance: { tier, ignoreList: [] },
   }, null, 2) + '\n');
+
+  // `breakBase` (issue #408): the baseline commit carries a defect the PR does NOT
+  // introduce and does NOT fix — a broken wikilink in the index, which `brain:nav`
+  // rejects. This is what makes `gate:local-checks` honestly INHERITED: the base
+  // probe re-runs the gate at this commit and finds it already red.
+  if (breakBase) {
+    writeFileSync(
+      join(repoDir, 'brain', 'HOME.md'),
+      buildHomeIndex(join(repoDir, 'brain')) + '\n- [roto](core/no-existe-en-el-base.md)\n',
+    );
+  }
 
   git(repoDir, 'add', '-A');
   git(repoDir, 'commit', '-q', '-m', 'baseline: consumer after adopt');

@@ -27,6 +27,7 @@ import { evaluateTranche, gatherTrancheInputs } from './evaluators/tranche.mjs';
 import { evaluateCheckpoint, gatherCheckpointInputs } from './evaluators/checkpoint.mjs';
 import { evaluateRuling, gatherRulingInputs } from './evaluators/ruling.mjs';
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
+import { needsBaseProbe, probeBase, BASE_REPRODUCIBLE_GATES } from './lib/base-comparison.mjs';
 import { verdictsAtHead } from './lib/parse-verdict.mjs';
 import { postVerdict } from './poster.mjs';
 import { gatherQueue } from './queue.mjs';
@@ -96,7 +97,10 @@ function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
  * override of `resolveTier(config)` — selects the `brain-review/1` vs `/2`
  * protocol via `tierParams(tier).reviewProtocol`, issue #391 T2.3/#394 M3),
  * `refuterRunner` (→ lib/causal-admission.mjs's `applyCausalAdmission`, only
- * consulted at `protocol === 'brain-review/2'`), `posterDeps` (→
+ * consulted at `protocol === 'brain-review/2'`), `probeBase` (→
+ * lib/base-comparison.mjs — a SYNCHRONOUS override of the base re-run; returning a
+ * promise from it degrades silently to "probed, nothing failed", so the seam's
+ * contract is sync and its callers are tested), `posterDeps` (→
  * poster.mjs), `writeVerbs` (a spy/real VCS used as the poster's default
  * `getVcs` when `posterDeps.getVcs` is not separately injected), `queueDeps`
  * (→ queue.mjs, `queue` subcommand only), `boardDeps` (→ board.mjs, `board`
@@ -277,11 +281,30 @@ export async function main(deps = {}) {
   // 'introduced' are the safe defaults for tranche/checkpoint/ruling's
   // mechanically-derived findings.
   let { findings, escalate } = evalResult;
+  let baseConditions = [];
   if (protocol === 'brain-review/2') {
-    ({ findings, escalate } = await applyCausalAdmission({
+    // #408 — the base probe is LAZY and it is expensive on purpose. It re-runs
+    // `local-checks` in a worktree at base, which is the slowest thing the reviewer
+    // can do, and it only happens when a gate it can speak to is ALREADY a blocker:
+    // the PR is stopped and a human is about to be summoned, so paying ~a minute to
+    // tell them "this is not your change's doing" is the cheap side of the trade. A
+    // green PR never pays it, and neither does a PR blocked for any other reason.
+    let baseProbe = null;
+    let probeAttempted = false;
+    if (needsBaseProbe(evalResult.findings)) {
+      probeAttempted = true;
+      const runProbe = deps.probeBase ?? probeBase;
+      baseProbe = runProbe({
+        baseSha,
+        gates: BASE_REPRODUCIBLE_GATES,
+      });
+    }
+    ({ findings, escalate, conditions: baseConditions } = await applyCausalAdmission({
       findings: evalResult.findings,
       escalate: evalResult.escalate,
       runner: deps.refuterRunner ?? null,
+      baseProbe,
+      probeAttempted,
     }));
   }
 
@@ -295,7 +318,10 @@ export async function main(deps = {}) {
     rulingAtHead: (boot.doctrine.priorDecisions ?? []).some(d => d?.head_sha === boot.headSha),
     gates: evalResult.gates,
     findings,
-    conditions: evalResult.conditions,
+    // #408 — the base probe's own inability to run is a condition of THIS verdict,
+    // appended to the evaluator's rather than replacing it: two different things
+    // could not be computed and a reader needs to see both.
+    conditions: [...evalResult.conditions, ...baseConditions],
     // undefined for tranche/checkpoint (they never set these) — buildVerdict's
     // own defaults (`pin` undefined, `escalate` null) apply unchanged, so this
     // is a no-op for those two modes.

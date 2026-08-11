@@ -199,9 +199,28 @@ test('e2e: a missing token refuses at boot — nothing posted (REQ-409-5c)', (t)
   assert.equal(postedBodies(fx).length, 0);
 });
 
-// ── REQ-409-6: /2 plumbing honesty — the #408 boundary ───────────────────────
+// ── REQ-409-6: /2 plumbing honesty — the boundary, redrawn by #408 ───────────
+//
+// #408 HAS LANDED, and this pin was left with the instruction "flip means #408
+// landed, move these, do not delete them". It did not flip, and that is correct
+// rather than lucky: this case's finding is `gate:phase-order`, and `phase-order`
+// reads THIS PR's artefacts, so no base comparison can speak to it. What the pin
+// asserted has become a statement about SCOPE — findings outside the
+// base-reproducible set still never reach `follow_ups` — and it is worth keeping
+// under that reading, because that boundary is exactly what a future producer
+// would widen.
+//
+// The two e2e cases at the bottom of this file are where the flip actually happens.
+//
+// The REFUTER half below is unchanged and is now the ONLY half tracking something
+// unlanded: no evaluator emits `evidence_class: 'inferential'`, and #408
+// deliberately did not build one. A base re-run answers a question about CAUSALITY
+// by observing; `inferential` is a claim about how a finding was ESTABLISHED —
+// reasoned rather than observed — and every evaluator brain has is deterministic by
+// construction. Inventing a reasoner so a fork can fire is the error
+// `causal-admission.mjs` already refuses one level down.
 
-test('e2e: follow_ups is ABSENT by construction, the refuter silent — flip means #408 landed, move these, do not delete them (REQ-409-6)', (t) => {
+test('e2e: a finding OUTSIDE the base-reproducible set never reaches follow_ups, and the refuter stays silent (REQ-409-6, boundary redrawn by #408)', (t) => {
   // `redJob` here is not incidental (review finding, cold review of PR #471): when
   // #443 restored the diff-budget breach as the default finding source, `redJob`'s
   // default went to null and NO case passed it — so the gate-shaped finding path,
@@ -228,13 +247,15 @@ test('e2e: follow_ups is ABSENT by construction, the refuter silent — flip mea
   //
   // Pin the true state instead, in BOTH layers, so a flip is detectable either way.
   assert.ok(!('follow_ups' in verdict),
-    'follow_ups is absent by construction today (renderVerdict omits the key when empty). ' +
-    'If present: either #408 landed, or the render/parse contract changed — check WHICH before moving this.');
+    'phase-order reads THIS PR\'s artefacts, so no base comparison can speak to it and nothing ' +
+    'may be deferred. If present: either the base-reproducible set widened (base-comparison.mjs ' +
+    'BASE_REPRODUCIBLE_GATES) or the render/parse contract changed — check WHICH before moving this.');
   assert.doesNotMatch(body, /^follow_ups:/m,
     'and the posted body carries no follow_ups block — the wire-level half of the same pin');
   // No evaluator emits evidence_class: inferential (#408): the refuter must not have run.
   assert.ok(verdict.findings.every(f => f.evidence_class !== 'inferential'),
-    'an inferential finding appeared — the refuter fork is live; #408 has landed and this pin must move with it');
+    'an inferential finding appeared — the refuter fork is live. #408 deliberately did NOT build ' +
+    'an inferential producer (see the header), so this is the pin for whoever does.');
   // And the gate-shaped source is genuinely live end to end (see the fixture note
   // above) — without this, `redJob` could be silently broken and nothing would say so.
   assert.ok(verdict.findings.find(f => f.id === 'gate:phase-order'),
@@ -364,4 +385,62 @@ test('e2e: gh REFUSES the anchored payload — the verdict still posts, whole, a
     'the verdict body is re-sent BYTE-IDENTICAL on the retry — the fallback drops the anchors ' +
     'and nothing else. (It cannot assert findings survive: this body is hand-written and has ' +
     'none. REQ-405-3\'s round trip is what covers that.)');
+});
+
+// ── #408: the follow_ups producer, end to end ───────────────────────────────
+//
+// #408's exit criterion refuses a unit test that hand-feeds `causal_disposition`:
+// "A review over a PR carrying a defect that exists unchanged on the base branch
+// routes that finding to follow_ups[] instead of blocking on it — proven end-to-end."
+// So both cases below spawn the real CLI against a real git history and read the
+// POSTED body back with the real parser. Nothing about causality is injected: the
+// only difference between them is whether the BASELINE COMMIT is broken.
+
+test('e2e #408: a gate failure that exists at BASE routes to follow_ups[] and stops blocking', (t) => {
+  // `breakBase` puts a broken wikilink in the baseline commit's brain/HOME.md. The PR
+  // neither introduces nor fixes it, so `brain:nav` — and therefore `local-checks` —
+  // is red at base and red here for the SAME inherited reason.
+  const fx = withFixture(t, { tier: 'regulated', redJob: 'local-checks', diffLines: 10, breakBase: true });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, `brain:review must exit 0 — stderr:\n${r.stderr}`);
+
+  const verdict = parseVerdict({ body: postedBodies(fx)[0].body });
+  assert.equal(verdict.protocol, 'brain-review/2');
+
+  const followUp = (verdict.follow_ups ?? []).find(f => f.id === 'gate:local-checks');
+  assert.ok(followUp,
+    `the inherited gate failure must land in follow_ups[] — verdict was ${JSON.stringify(verdict, null, 2)}`);
+  assert.equal(followUp.causal_disposition, 'pre-existing');
+  assert.match(followUp.evidence, /local-checks is ALSO red at base/,
+    'the routing must be justified by an observation the reader can check, not by a bare label');
+
+  assert.ok(!(verdict.findings ?? []).some(f => f.id === 'gate:local-checks'),
+    'and it must be OUT of the blocking set — routed, not copied');
+  assert.equal(verdict.verdict, 'APPROVE',
+    'with its only blocker deferred, the REVISE-to-APPROVE softening applies (protocol §Findings)');
+});
+
+test('e2e #408: the SAME gate failure with a healthy base keeps blocking', (t) => {
+  // The inverse, and it is what makes the case above mean anything: without it, a
+  // classifier hardcoded to answer "pre-existing" would pass. Identical fixture,
+  // identical red gate — only the baseline is healthy.
+  const fx = withFixture(t, { tier: 'regulated', redJob: 'local-checks', diffLines: 10, breakBase: false });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, `brain:review must exit 0 — stderr:\n${r.stderr}`);
+
+  const verdict = parseVerdict({ body: postedBodies(fx)[0].body });
+  const blocking = (verdict.findings ?? []).find(f => f.id === 'gate:local-checks');
+  assert.ok(blocking, 'a gate this change broke must stay in findings[]');
+  assert.equal(blocking.causal_disposition, 'introduced');
+  assert.ok(!(verdict.follow_ups ?? []).some(f => f.id === 'gate:local-checks'));
+  assert.equal(verdict.verdict, 'REVISE');
+
+  // POSITIVE EVIDENCE THAT THE PROBE RAN, and cold review F7 is why it is here:
+  // `introduced` is also what you get when the probe never runs, or returns null. An
+  // unreproducible or failed probe emits a condition, so an EMPTY conditions list is
+  // the only observation that separates "ran and found base green" from "never
+  // measured". Exactly the fix REQ-443-1 established for the silent-budget case, three
+  // hundred lines up in this same file.
+  assert.deepEqual(verdict.conditions ?? [], [],
+    'no uncomputable condition ⇒ the base probe ran to completion and found the base healthy');
 });
