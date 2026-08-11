@@ -10,10 +10,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runCheck, main, mapDetectionToWarning } from './run-check.mjs';
+import { runCheck, main, SUBCOMMAND_PORT_REACH } from './run-check.mjs';
+import { mapDetectionToWarning } from './detection-policy.mjs';
 
 async function captureLog(fn) {
   const logs = [];
@@ -226,6 +228,265 @@ test('neutrality source-scan (REQ-NEUTRALITY-2): run-check.mjs source contains n
   const src = readFileSync(srcPath, 'utf8');
   assert.equal(src.includes('.claude'), false, 'source must not reference .claude');
   assert.equal(src.includes('SKILL.md'), false, 'source must not reference SKILL.md');
+});
+
+// ── Requirement 6 (issue #535) — run-check.mjs is an entry point, never a
+//    library, with ONE named exception that has to keep earning itself ──
+//
+// THE PROPERTY. Per-subcommand resolution (workflow-auth.mjs, Requirement 3)
+// reads `SUBCOMMAND_PORT_REACH` for a step that invokes run-check.mjs
+// DIRECTLY. Any other CI-invoked entry point is resolved by its whole-file
+// import closure instead, with no manifest of its own — so one that reaches
+// run-check.mjs inherits every subcommand's port-reach at once, and the
+// per-invocation precision this chain exists to buy is gone for that step.
+//
+// THE SHAPE, AND WHY IT IS NOT A REACHABILITY COMPUTATION. The obvious test
+// is "compute which files CI executes, walk their imports, assert none reaches
+// run-check.mjs". That form was written, reviewed cold, and REJECTED — every
+// step of it under-approximates, and every under-approximation resolves toward
+// "fine", which is `evidence-reader-empty-on-failure` three times over:
+//
+//   · `importClosure` prunes AT `vcs/ci-context.mjs` (the D1 cut vertex), so
+//     `ci-context.mjs → any helper → run-check.mjs` is invisible. Proven by
+//     mutation, twice, independently, via two different helpers.
+//   · The entry-point extraction reads `.github/workflows` only, and this repo
+//     ALSO ships `brain/scripts/ci/gitlab-governance.yml`, which invokes the
+//     same seven entry points with `script:` lists (ADR-0018). Nothing there
+//     was ever scanned.
+//   · The extraction resolves `node <path>` and `npm run <verb>` and nothing
+//     else — not `npm test`, not `bash wrapper.sh`, not `npx`, not a quoted
+//     path. Each unrecognised spelling made the invariant agree with anything
+//     on that route.
+//
+// So this reverts to the BLANKET source-text ban, which has no cut vertex, no
+// YAML parsing and no spelling dependence, and pays for that bluntness with a
+// single exception that is itself pinned in both directions.
+//
+// THE EXCEPTION. #546 (#340, merged after this chain branched) makes
+// `brain-check.mjs` call `runCheck('issue-link', …)` ON PURPOSE: brain:check
+// and CI must be ONE implementation of one rule. That is why the blanket form
+// went red on the merge, and reverting the import would re-create the defect
+// #340 exists to remove. It is safe for exactly one reason — `brain-check.mjs`
+// is a local developer verb that NO CI SURFACE INVOKES — and that reason is a
+// fact about the repo that can change without anyone noticing. So it is
+// asserted, over-approximatingly and fail-closed: no CI file may so much as
+// MENTION brain-check, comments included. The exception set is frozen and
+// compared BOTH WAYS, so a second importer is red, and so is silently dropping
+// this one.
+
+const REPO_ROOT = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
+const SCRIPTS_ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+/** CI surfaces, both providers. `.github/workflows/**` is GitHub; `brain/scripts/ci/**`
+ *  is the GitLab fragment `.gitlab-ci.yml` includes (ADR-0018) — a first-class,
+ *  dogfooded surface that the earlier reachability form of this test never read. */
+const CI_DIRS = [join(REPO_ROOT, '.github', 'workflows'), join(REPO_ROOT, 'brain', 'scripts', 'ci')];
+
+/** The one module allowed to import run-check.mjs, and why. Frozen: asserted by
+ *  equality, so ADDING an importer and DROPPING this one are both red. */
+const SANCTIONED_IMPORTERS = Object.freeze([join('brain', 'scripts', 'brain-check.mjs')]);
+
+/** 5-line recursive walker — no readdirSync({ recursive: true }) version bet. */
+function walkFiles(dir, ext) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkFiles(full, ext));
+    else if (ext.test(entry.name)) out.push(full);
+  }
+  return out;
+}
+
+/** True when the source text pulls in run-check.mjs under ANY spelling — the
+ *  static `from '…'` form and the dynamic `import('…')` form alike. The
+ *  previous form of this predicate knew only the static one, so a real workflow
+ *  entry point rewritten to `await import('../governance/run-check.mjs')` was
+ *  invisible: the SPELLING axis the red-proof left unvaried. */
+function importsRunCheck(src) {
+  return /from\s+['"][^'"]*\brun-check\.mjs['"]/.test(src)
+    || /\bimport\s*\(\s*['"][^'"]*\brun-check\.mjs['"]\s*\)/.test(src);
+}
+
+test('Requirement 6: run-check.mjs is imported by nothing outside its sanctioned exception', () => {
+  const files = walkFiles(SCRIPTS_ROOT, /\.mjs$/).filter(
+    f => !f.endsWith('.test.mjs') && !f.endsWith(join('governance', 'run-check.mjs'))
+  );
+  assert.ok(files.length > 100, `sanity: the walk must visit >100 files, visited ${files.length}`);
+  const offenders = files
+    .filter(f => importsRunCheck(readFileSync(f, 'utf8')))
+    .map(f => relative(REPO_ROOT, f))
+    .sort();
+  assert.deepEqual(offenders, [...SANCTIONED_IMPORTERS].sort(),
+    'run-check.mjs is an entry point, never a library. The only sanctioned importer is ' +
+    'brain-check.mjs (#340: brain:check and CI are one implementation of one rule), and it is ' +
+    'sanctioned only while no CI surface invokes it — see the test below. Both directions are ' +
+    'asserted: a new importer is a violation, and so is this list drifting out of date.');
+});
+
+test('Requirement 6: the exception holds only while NO CI surface invokes brain-check — asserted, not assumed', () => {
+  const ciFiles = CI_DIRS.flatMap(d => walkFiles(d, /\.ya?ml$/));
+  assert.ok(ciFiles.length >= 5,
+    `sanity: expected >=5 CI files across ${CI_DIRS.length} surfaces, found ${ciFiles.length}`);
+  for (const marker of ['gitlab-governance.yml', 'governance.yml']) {
+    assert.ok(ciFiles.some(f => f.endsWith(marker)),
+      `sanity: ${marker} must be among the scanned CI files — a surface this test cannot see ` +
+      `is a surface where the exception is unguarded`);
+  }
+  // A raw substring over the WHOLE file, comments included. Deliberately
+  // over-approximating: a mention costs a false alarm and one line of thought,
+  // while a missed invocation costs the invariant. No `run:`/`script:` parsing,
+  // no command-spelling list — those are what made the previous form blind.
+  const mentions = ciFiles
+    .filter(f => /brain-check|brain:check/.test(readFileSync(f, 'utf8')))
+    .map(f => relative(REPO_ROOT, f))
+    .sort();
+  assert.deepEqual(mentions, [],
+    'a CI file mentions brain-check: if CI now invokes it, it is a CI entry point that reaches ' +
+    'run-check.mjs by whole-file closure with no manifest of its own, and the #340 import must be ' +
+    'replaced by an extraction rather than carried as an exception');
+});
+
+test('Requirement 6 mutation: importsRunCheck detects BOTH spellings, and the CI scan detects a mention', () => {
+  assert.ok(importsRunCheck(`import { x } from '../governance/run-check.mjs';\n`),
+    'the static import spelling must be detected');
+  assert.ok(importsRunCheck(`const { x } = await import('../governance/run-check.mjs');\n`),
+    'the dynamic import spelling must be detected — the axis the earlier red-proof left unvaried');
+  assert.equal(importsRunCheck(`import { x } from './run-checker.mjs';\n`), false,
+    'a similarly-named module must NOT match — an over-eager predicate would pass by flagging noise');
+  assert.ok(/brain-check|brain:check/.test('    - run: npm run brain:check\n'),
+    'the CI scan must detect an npm-verb invocation');
+  assert.ok(/brain-check|brain:check/.test('    - node brain/scripts/brain-check.mjs\n'),
+    'the CI scan must detect a direct node invocation, including in a GitLab script: list');
+});
+
+// ── SUBCOMMAND_PORT_REACH — the manifest matches the dispatch, symmetrically (T7) ──
+//
+// Per-subcommand resolution (workflow-auth.mjs, Requirement 3) trusts this
+// manifest as the authority on which subcommand reaches the VCS port. That
+// trust is only sound if the manifest's key set is EXACTLY the set of
+// checkNames run-check.mjs actually dispatches — never a superset (a phantom
+// entry) or a subset (an undeclared, silently-unresolvable subcommand).
+
+function dispatchedCheckNames(src) {
+  return [...src.matchAll(/checkName === '([\w-]+)'/g)].map(m => m[1]).sort();
+}
+
+test('T7: SUBCOMMAND_PORT_REACH keys sorted-equal the dispatched checkName cases, both directions', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const dispatched = dispatchedCheckNames(src);
+  const manifestKeys = Object.keys(SUBCOMMAND_PORT_REACH).sort();
+  assert.deepEqual(dispatched, manifestKeys,
+    'run-check.mjs dispatches these checkNames but SUBCOMMAND_PORT_REACH does not declare exactly the same set');
+});
+
+test('T7 mutation: dispatchedCheckNames is a real extractor, not a constant — a synthetic dispatch branch is detected and breaks symmetry', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const withExtra = src + `\nif (checkName === 'frobnicate') {}\n`;
+  const dispatched = dispatchedCheckNames(withExtra);
+  assert.ok(dispatched.includes('frobnicate'), 'the extractor must detect the synthetic dispatch branch');
+  assert.notDeepEqual(dispatched, Object.keys(SUBCOMMAND_PORT_REACH).sort(),
+    'the symmetry check must report the gap once a dispatch branch has no manifest entry');
+});
+
+// ── SUBCOMMAND_PORT_REACH — the manifest's VALUES are checked, not just its keys ──
+//
+// T7 above proves the KEY SET is live. It proves nothing about the booleans:
+// workflow-auth.mjs trusts a `true`/`false` per subcommand completely (D4),
+// so a handler that starts calling getVcs without its manifest entry
+// flipping to `true` would silently keep resolving as credential-free. This
+// extracts each dispatch branch's own handler function name, then walks that
+// function's LOCAL call closure (mirroring `importClosure`'s transitive-walk
+// shape elsewhere in this codebase) for a `getVcs`/`getVcsFn` reference. A
+// handler dispatched to an IMPORTED function (decision-gate → `adrPresence`)
+// is resolved CROSS-FILE (T7b fix, issue #535): bodyClosure follows the
+// import to its module and walks THAT source, rather than silently
+// returning '' — which only ever agreed with a `false` manifest entry
+// regardless of what the imported function actually does.
+
+const GOVERNANCE_DIR = fileURLToPath(new URL('.', import.meta.url));
+
+function bodyClosure(src, entryName, seen = new Set(), dir = GOVERNANCE_DIR) {
+  if (seen.has(entryName)) return '';
+  const head = src.match(new RegExp(`function ${entryName}\\([^)]*\\)[^{]*\\{`));
+  if (!head) return crossFileClosure(src, entryName, seen, dir);
+  seen.add(entryName);
+  let depth = 1, i = head.index + head[0].length;
+  const start = i;
+  while (depth > 0 && i < src.length) { if (src[i] === '{') depth++; else if (src[i] === '}') depth--; i++; }
+  const body = src.slice(start, i);
+  let text = body;
+  for (const m of body.matchAll(/\b([a-zA-Z_]\w*)\(/g)) text += bodyClosure(src, m[1], seen, dir);
+  return text;
+}
+
+/** Cross-file half of bodyClosure: follows an import to its module and walks
+ *  THAT source for `entryName` (T7b fix, issue #535). */
+function crossFileClosure(src, entryName, seen, dir) {
+  const target = importMap(src).get(entryName);
+  if (!target || !target.specifier.startsWith('.')) return '';
+  const modulePath = resolve(dir, target.specifier);
+  let modSrc;
+  try {
+    modSrc = readFileSync(modulePath, 'utf8');
+  } catch {
+    return '';
+  }
+  return bodyClosure(modSrc, target.orig, seen, dirname(modulePath));
+}
+
+/** Maps each locally-bound import name to its origin module specifier. */
+function importMap(src) {
+  const map = new Map();
+  for (const m of src.matchAll(/import\s*\{([^}]+)\}\s*from\s*'([^']+)'/g)) {
+    for (const raw of m[1].split(',')) {
+      const name = raw.trim();
+      if (!name) continue;
+      const [orig, alias] = name.split(/\s+as\s+/).map(s => s.trim());
+      map.set(alias || orig, { orig, specifier: m[2] });
+    }
+  }
+  return map;
+}
+
+// Tolerates BOTH the block-brace dispatch form and the single-line form
+// (`if (checkName === 'x') return fn(ctx, deps);`, already used elsewhere in
+// this codebase — actor-check.mjs, substrate.mjs). The completeness assert
+// below is the load-bearing guarantee either way: nothing is silently
+// dropped by the extraction format (WARNING, issue #535).
+function dispatchedHandlers(src) {
+  const heads = [...src.matchAll(/checkName === '([\w-]+)'\)\s*(?:\{|return\s+(\w+)\()/g)];
+  return heads.map(({ index, 0: match, 1: checkName, 2: singleLineFn }, n) => {
+    if (singleLineFn) return [checkName, singleLineFn];
+    const end = heads[n + 1]?.index ?? src.length;
+    const fn = src.slice(index, end).match(/\breturn (\w+)\(/);
+    return [checkName, fn ? fn[1] : null];
+  });
+}
+
+test('T7b: SUBCOMMAND_PORT_REACH values match each handler\'s own local getVcs reach, not just its key set', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const handlers = dispatchedHandlers(src);
+  assert.deepEqual(handlers.map(([checkName]) => checkName).sort(), dispatchedCheckNames(src),
+    'dispatchedHandlers extraction must be COMPLETE — a format-driven miss must fail loudly, never silently shrink this loop');
+  for (const [checkName, fnName] of handlers) {
+    const reaches = fnName != null && /\bgetVcs(Fn)?\b/.test(bodyClosure(src, fnName));
+    assert.equal(reaches, SUBCOMMAND_PORT_REACH[checkName],
+      `${checkName} (${fnName}): manifest says ${SUBCOMMAND_PORT_REACH[checkName]}, source scan says ${reaches}`);
+  }
+});
+
+test('T7b mutation: a getVcs( reference injected into the false-declared memory-gate handler is detected', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const mutated = src.replace('function runMemoryGateCheck(ctx, records) {',
+    'function runMemoryGateCheck(ctx, records) {\n  getVcs();');
+  const reaches = /\bgetVcs(Fn)?\b/.test(bodyClosure(mutated, 'runMemoryGateCheck'));
+  assert.equal(reaches, true);
+  assert.notEqual(reaches, SUBCOMMAND_PORT_REACH['memory-gate'],
+    'the mutation must break the value correlation for a false-declared handler');
+});
+
+test('runCheck: an unknown check name throws even when it superficially resembles a manifest key', () => {
+  return assert.rejects(() => runCheck('frobnicate', {}), /unknown check/i);
 });
 
 // ── issue-link — THE GOTCHA (issue #231 A2 phase 2, design.md Decision 2) ──
