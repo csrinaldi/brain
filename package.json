@@ -41,6 +41,7 @@
     "test": "node --test \"brain/scripts/**/*.test.mjs\" \"test/**/*.e2e.test.mjs\"",
     "test:fresh-install": "bash test/fresh-install/run.sh",
     "test:upgrade": "bash test/upgrade/run.sh",
+    "memory:save": "MEMORY_BACKEND=plainfiles node ./brain/scripts/memory/cli.mjs save",
     "memory:index": "node ./brain/scripts/memory/cli.mjs index",
     "memory:share": "node ./brain/scripts/memory/cli.mjs share",
     "memory:pull": "node ./brain/scripts/memory/cli.mjs pull",

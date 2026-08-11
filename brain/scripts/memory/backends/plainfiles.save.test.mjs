@@ -133,3 +133,125 @@ test('save: getBranch/getTimestamp/getHostname default to real implementations w
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #530 — THE MOST OBVIOUS INVOCATION OF THE CAPTURE PATH USED TO CRASH.
+//
+// Every test above passes BOTH `type` and `project`, so the omission path had
+// zero coverage and `memory save "t" "c"` reached `computeRecordId` →
+// `canonicalJson` and threw `unsupported value type 'undefined'` — a message
+// naming neither the field nor the flag.
+//
+// The two are not symmetric, and that asymmetry is the fix: `project` is a FACT
+// about this repository and the config already carries it, so deriving it is not
+// a default but a read. `type` is a CHOICE among seven, and defaulting it would
+// stamp a fabricated meaning onto a durable record.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('#530: save without a type REFUSES by name, listing the choices — never a crash, never a default', async () => {
+  const root = tmpRoot();
+  try {
+    await assert.rejects(
+      () => save('t', 'c', { project: 'brain' },
+        { root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z', getHostname: () => 'h' }),
+      (err) => {
+        assert.match(err.message, /--type/, 'the refusal must name the flag the caller has to supply');
+        assert.match(err.message, /session_summary/, 'and list the valid values, or it is a riddle');
+        assert.doesNotMatch(err.message, /canonicalJson|undefined/,
+          'the old message named an internal serializer and neither the field nor the flag');
+        return true;
+      },
+    );
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('#530: save without a project DERIVES it from the config slug — a fact, not a choice', async () => {
+  const root = tmpRoot();
+  try {
+    const r = await save('t', 'c', { type: 'discovery' }, {
+      root,
+      getBranch: () => 'main',
+      getTimestamp: () => '2026-08-11T09:00:00Z',
+      getHostname: () => 'h',
+      _loadConfig: () => ({ project: { slug: 'csrinaldi/brain' } }),
+    });
+    const line = readFileSync(r.file, 'utf8').trim().split('\n').pop();
+    assert.equal(JSON.parse(line).project, 'brain',
+      'records in this repo carry the bare name, not the owner/repo slug');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('#530: the derivation falls back slug → name → directory, and never lands undefined', async () => {
+  for (const [config, expected, why] of [
+    [{ project: { slug: 'o/repo-a' } }, 'repo-a', 'slug wins'],
+    [{ project: { slug: '', name: 'repo-b' } }, 'repo-b', 'an empty slug is not a value'],
+    [{}, null, 'no config at all still yields a name, never undefined'],
+  ]) {
+    const root = tmpRoot();
+    try {
+      const r = await save('t', 'c', { type: 'discovery' }, {
+        root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z',
+        getHostname: () => 'h', _loadConfig: () => config,
+      });
+      const rec = JSON.parse(readFileSync(r.file, 'utf8').trim().split('\n').pop());
+      assert.equal(typeof rec.project, 'string', why);
+      assert.notEqual(rec.project, '', why);
+      if (expected) assert.equal(rec.project, expected, why);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test('#530: an explicit project still wins over the derivation', async () => {
+  const root = tmpRoot();
+  try {
+    const r = await save('t', 'c', { type: 'discovery', project: 'explicit' }, {
+      root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z',
+      getHostname: () => 'h', _loadConfig: () => ({ project: { slug: 'o/derived' } }),
+    });
+    assert.equal(JSON.parse(readFileSync(r.file, 'utf8').trim().split('\n').pop()).project, 'explicit');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('#530: --issue lands as an INTEGER, so a record can be tied to its ticket', async () => {
+  const root = tmpRoot();
+  try {
+    const r = await save('t', 'c', { type: 'discovery', project: 'brain', issue: 530 }, {
+      root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z', getHostname: () => 'h',
+    });
+    const rec = JSON.parse(readFileSync(r.file, 'utf8').trim().split('\n').pop());
+    assert.equal(rec.issue, 530);
+    assert.equal(typeof rec.issue, 'number', 'a string here is what #368 measured across 2157 records');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('#530: a non-integer --issue is refused BY NAME, not by an internal serializer', async () => {
+  // `validateWritableRecord`'s W2 already says "issue must be an integer" and is
+  // UNREACHABLE for a non-numeric one: `computeRecordId` hashes the field and
+  // `canonicalJson` throws on NaN first. So the rule read as enforced while the path
+  // never arrived, and `--issue abc` failed with "non-finite numbers are not
+  // supported" — right direction, useless message.
+  const root = tmpRoot();
+  try {
+    await assert.rejects(
+      () => save('t', 'c', { type: 'discovery', project: 'brain', issue: Number('abc') }, {
+        root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z', getHostname: () => 'h',
+      }),
+      (err) => {
+        assert.match(err.message, /--issue/, 'name the flag the caller typed');
+        assert.doesNotMatch(err.message, /canonicalJson|non-finite/, 'not the serializer that happened to notice');
+        return true;
+      },
+    );
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('#530: an absent --issue is still allowed — tagging is encouraged, not compulsory', async () => {
+  const root = tmpRoot();
+  try {
+    const r = await save('t', 'c', { type: 'discovery', project: 'brain' }, {
+      root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z', getHostname: () => 'h',
+    });
+    const rec = JSON.parse(readFileSync(r.file, 'utf8').trim().split('\n').pop());
+    assert.ok(!('issue' in rec), 'the field is optional and must stay absent rather than land null');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
