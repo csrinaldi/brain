@@ -444,3 +444,66 @@ test('e2e #408: the SAME gate failure with a healthy base keeps blocking', (t) =
   assert.deepEqual(verdict.conditions ?? [], [],
     'no uncomputable condition ⇒ the base probe ran to completion and found the base healthy');
 });
+
+// ── #442: /2 dogfooded at lite, through the config override ─────────────────
+//
+// The D5 middle path. `/2` is `regulated`'s default and brain cannot declare
+// `regulated` — `actor-check` there is unsatisfiable at n=1 (#329) — so the protocol
+// had to become separable from the tier for `/2` to be dogfooded rather than only
+// tested. These cases drive the REAL config file through the REAL CLI, because the
+// override is a production seam and `deps.tier` deliberately is not.
+
+test('e2e #442: lite + reviewer.protocol=/2 posts a /2 verdict, with every gate still on lite', (t) => {
+  const fx = withFixture(t, { tier: 'lite', protocol: 'brain-review/2', diffLines: 1001 });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, `brain:review must exit 0 — stderr:\n${r.stderr}`);
+
+  const body = postedBodies(fx)[0].body;
+  const verdict = parseVerdict({ body });
+  assert.equal(verdict.protocol, 'brain-review/2',
+    'the override must reach the POSTED body — resolving it in memory and posting /1 is the whole defect this ticket prevents');
+  // And the tier did NOT move: lite's budget is 1000, so 1001 lines is what tripped
+  // the finding. At regulated (200) the same diff would trip too, which would make
+  // this assertion unable to tell the two apart.
+  const budget = verdict.findings.find(f => f.id === 'budget');
+  assert.ok(budget, `lite's 1000-line budget must be what judged this diff — got ${JSON.stringify(verdict.findings.map(f => f.id))}`);
+  assert.match(budget.evidence, /> 1000/, 'the budget quoted must be lite\'s, not regulated\'s — the override moves the protocol, never a gate');
+  // /2's vocabulary is present, which is what "dogfooded" buys over "tested".
+  assert.ok(verdict.findings.every(f => f.causal_disposition),
+    'every finding must carry a causal_disposition — that is the annotation /1 does not have');
+});
+
+test('e2e #442: with NO override, lite still posts /1 — byte-identical to pre-#442', (t) => {
+  // The no-op migration guarantee, at the only layer that matters: the wire. Without
+  // this, the override could have silently become the default for everyone.
+  const fx = withFixture(t, { tier: 'lite', diffLines: 1001 });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, r.stderr);
+  const body = postedBodies(fx)[0].body;
+
+  // TWO LAYERS, because `parseVerdict` assigns `result.protocol` only for /2 — a /1
+  // result has no such key at all. Asserting `verdict.protocol === 'brain-review/1'`
+  // would fail against correct output, and asserting it is falsy would pass against a
+  // parser that stopped reading the field. So: the WIRE carries /1 explicitly, and the
+  // parser's /1 shape is pinned as ABSENT rather than as some value. Same discipline
+  // REQ-409-6 above arrived at for `follow_ups`, one field over.
+  assert.match(body, /^protocol: brain-review\/1$/m,
+    'the posted body must declare /1 — the override was absent, so the tier default stands');
+  const verdict = parseVerdict({ body });
+  assert.ok(!('protocol' in verdict),
+    'and the parser\'s /1 shape omits the key entirely (parse-verdict.mjs sets it only for /2)');
+  assert.ok(verdict.findings.every(f => !f.causal_disposition),
+    'a /1 verdict carries no causal annotation — the keys must be absent, not empty');
+});
+
+test('e2e #442: an UNKNOWN protocol refuses at boot and posts nothing', (t) => {
+  // Falling back to the tier default would hand the operator a /1 verdict while they
+  // believed they had /2 — silently dropping causal admission. The #382/#413 shape:
+  // refuse, name the value, write nothing.
+  const fx = withFixture(t, { tier: 'lite', protocol: 'brain-review/3' });
+  const r = runReview(fx);
+  assert.notEqual(r.status, 0, 'an unknown protocol must refuse the run');
+  assert.match(r.stderr, /refusing to run/);
+  assert.match(r.stderr, /brain-review\/3/, 'the refusal must name the value it rejected');
+  assert.equal(postedBodies(fx).length, 0, 'nothing may be posted on a refused boot');
+});

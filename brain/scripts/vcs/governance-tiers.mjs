@@ -255,6 +255,45 @@ export function resolveTier(config) {
   return raw;
 }
 
+/** The two `brain-review` verdict protocol versions. Not tiered — the tier picks a
+ *  DEFAULT among them (T2.3 design §3.4: "never forbids the other version at any
+ *  tier"). */
+export const REVIEW_PROTOCOLS = Object.freeze(['brain-review/1', 'brain-review/2']);
+
+/**
+ * Resolves the reviewer protocol: an explicit `reviewer.protocol` wins, otherwise the
+ * tier's default (issue #442, the D5 middle path).
+ *
+ * THE OVERRIDE EXISTS BECAUSE THE TIER CANNOT MOVE. `/2` is `regulated`'s default, and
+ * brain cannot declare `regulated`: at that tier `actor-check` requires an approver
+ * distinct from the author who authored no commit on the branch, which is structurally
+ * unsatisfiable for a solo maintainer — the #329 contradiction ADR-0026 exists to
+ * resolve. So the protocol had to become separable from the tier for `/2` to be
+ * DOGFOODED rather than only tested. No new doctrine was needed: T2.3 §3.4 already
+ * says the tier sets a default and not a ceiling, and this function is the one it
+ * names.
+ *
+ * FAIL-CLOSED ON AN UNKNOWN VALUE, exactly like `resolveTier` above and for the same
+ * reason: a typo in `reviewer.protocol` must never silently fall back to the tier
+ * default. Silently downgrading `/2` to `/1` would drop causal admission — the
+ * annotation, the base comparison, the refuter fork — while the operator believed they
+ * had it, which is the #382/#413 boot-refusal shape.
+ *
+ * @param {{ reviewer?: { protocol?: string } }} [config]
+ * @param {'lite'|'standard'|'regulated'} tier
+ * @returns {'brain-review/1'|'brain-review/2'}
+ */
+export function resolveReviewProtocol(config, tier) {
+  const raw = config?.reviewer?.protocol;
+  if (raw === undefined || raw === null) return tierParams(tier).reviewProtocol;
+  if (!REVIEW_PROTOCOLS.includes(raw)) {
+    throw new Error(
+      `governance-tiers: unknown reviewer.protocol "${raw}" — must be one of: ${REVIEW_PROTOCOLS.join(', ')}.`
+    );
+  }
+  return raw;
+}
+
 function requireGateRow(gate) {
   const row = GATE_MATRIX[gate];
   if (!row) {
