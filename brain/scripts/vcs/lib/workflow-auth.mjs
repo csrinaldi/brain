@@ -315,6 +315,30 @@ function requirementFor(script, repoRoot, envKeys = new Set()) {
   return unknown.length ? { need: 'credential', because: unknown } : { need: null };
 }
 
+/**
+ * The text of a top-level `permissions:` block's scope declarations, in
+ * EITHER YAML shape — flow (`permissions: { contents: write }`) or block
+ * (`permissions:\n  contents: write\n  ...`, governance.yml's own shape,
+ * issue #535 D9). `null` when no `permissions:` key exists at all (the
+ * default-token-carries-read-scope case, where the rule is intentionally
+ * silent — see the caller).
+ */
+function permissionsScopes(yamlText) {
+  const flow = yamlText.match(/^permissions:\s*\{([^}]*)\}/m);
+  if (flow) return flow[1];
+
+  const blockHeader = yamlText.match(/^permissions:\s*$/m);
+  if (!blockHeader) return null;
+  const lines = yamlText.slice(blockHeader.index + blockHeader[0].length).split('\n');
+  const scopeLines = [];
+  for (const line of lines) {
+    if (line.trim() === '') continue;
+    if (/^\s{2,}[\w-]+:\s*\S/.test(line)) { scopeLines.push(line); continue; }
+    break; // dedent — the block ended
+  }
+  return scopeLines.length ? scopeLines.join('\n') : null;
+}
+
 /** Which credential keys a step declares in its own `env:` (empty value = absent). */
 function declared(block) {
   const keys = new Set();
@@ -364,11 +388,13 @@ export function auditWorkflowAuth(yamlText, { file = 'workflow', repoRoot = proc
   // every scope it omits to `none`, so a perfectly-formed credential under
   // `permissions: { contents: write }` reads nothing from the pulls API — the gate
   // green, the reads blind. With no block at all the default token already carries
-  // read scope, so the rule would be noise there and is not applied.
-  const perms = yamlText.match(/^permissions:\s*\{([^}]*)\}/m);
-  if (reachesServer && perms && !/pull-requests:\s*(read|write)/.test(perms[1])) {
+  // read scope, so the rule would be noise there and is not applied. Recognizes
+  // BOTH flow style and block style (issue #535 D9) — governance.yml is block
+  // style, and the flow-only regex silently left it unevaluated.
+  const scopes = permissionsScopes(yamlText);
+  if (reachesServer && scopes !== null && !/pull-requests:\s*(read|write)/.test(scopes)) {
     violations.push(
-      `${file}: declares permissions: {…} without pull-requests — every omitted scope ` +
+      `${file}: declares permissions without pull-requests — every omitted scope ` +
       `is 'none', so the credential cannot read PRs and the gate passes while blind`);
   }
   return violations;
