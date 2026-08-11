@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { runCheck, main, SUBCOMMAND_PORT_REACH } from './run-check.mjs';
@@ -308,27 +308,66 @@ test('T7 mutation: dispatchedCheckNames is a real extractor, not a constant — 
 // extracts each dispatch branch's own handler function name, then walks that
 // function's LOCAL call closure (mirroring `importClosure`'s transitive-walk
 // shape elsewhere in this codebase) for a `getVcs`/`getVcsFn` reference. A
-// handler dispatched to an imported function (decision-gate → `adrPresence`)
-// has no local body to walk — `bodyClosure` returns '' for it, which only
-// matches a `false` manifest entry, never silently confirms a `true` one.
+// handler dispatched to an IMPORTED function (decision-gate → `adrPresence`)
+// is resolved CROSS-FILE (T7b fix, issue #535): bodyClosure follows the
+// import to its module and walks THAT source, rather than silently
+// returning '' — which only ever agreed with a `false` manifest entry
+// regardless of what the imported function actually does.
 
-function bodyClosure(src, entryName, seen = new Set()) {
+const GOVERNANCE_DIR = fileURLToPath(new URL('.', import.meta.url));
+
+function bodyClosure(src, entryName, seen = new Set(), dir = GOVERNANCE_DIR) {
   if (seen.has(entryName)) return '';
-  seen.add(entryName);
   const head = src.match(new RegExp(`function ${entryName}\\([^)]*\\)[^{]*\\{`));
-  if (!head) return '';
+  if (!head) return crossFileClosure(src, entryName, seen, dir);
+  seen.add(entryName);
   let depth = 1, i = head.index + head[0].length;
   const start = i;
   while (depth > 0 && i < src.length) { if (src[i] === '{') depth++; else if (src[i] === '}') depth--; i++; }
   const body = src.slice(start, i);
   let text = body;
-  for (const m of body.matchAll(/\b([a-zA-Z_]\w*)\(/g)) text += bodyClosure(src, m[1], seen);
+  for (const m of body.matchAll(/\b([a-zA-Z_]\w*)\(/g)) text += bodyClosure(src, m[1], seen, dir);
   return text;
 }
 
+/** Cross-file half of bodyClosure: follows an import to its module and walks
+ *  THAT source for `entryName` (T7b fix, issue #535). */
+function crossFileClosure(src, entryName, seen, dir) {
+  const target = importMap(src).get(entryName);
+  if (!target || !target.specifier.startsWith('.')) return '';
+  const modulePath = resolve(dir, target.specifier);
+  let modSrc;
+  try {
+    modSrc = readFileSync(modulePath, 'utf8');
+  } catch {
+    return '';
+  }
+  return bodyClosure(modSrc, target.orig, seen, dirname(modulePath));
+}
+
+/** Maps each locally-bound import name to its origin module specifier. */
+function importMap(src) {
+  const map = new Map();
+  for (const m of src.matchAll(/import\s*\{([^}]+)\}\s*from\s*'([^']+)'/g)) {
+    for (const raw of m[1].split(',')) {
+      const name = raw.trim();
+      if (!name) continue;
+      const [orig, alias] = name.split(/\s+as\s+/).map(s => s.trim());
+      map.set(alias || orig, { orig, specifier: m[2] });
+    }
+  }
+  return map;
+}
+
+// Tolerates BOTH the block-brace dispatch form and the single-line form
+// (`if (checkName === 'x') return fn(ctx, deps);`, already used elsewhere in
+// this codebase — actor-check.mjs, substrate.mjs). The completeness assert
+// below is the load-bearing guarantee either way: nothing is silently
+// dropped by the extraction format (WARNING, issue #535).
 function dispatchedHandlers(src) {
-  const heads = [...src.matchAll(/checkName === '([\w-]+)'\)\s*\{/g)];
-  return heads.map(({ index, 0: match, 1: checkName }, n) => {
+  const heads = [...src.matchAll(/checkName === '([\w-]+)'\)\s*(?:\{|return\s+(\w+)\()/g)];
+  return heads.map(({ index, 0: match, 1: checkName, 2: singleLineFn }, n) => {
+    if (singleLineFn) return [checkName, singleLineFn];
     const end = heads[n + 1]?.index ?? src.length;
     const fn = src.slice(index, end).match(/\breturn (\w+)\(/);
     return [checkName, fn ? fn[1] : null];
@@ -337,7 +376,10 @@ function dispatchedHandlers(src) {
 
 test('T7b: SUBCOMMAND_PORT_REACH values match each handler\'s own local getVcs reach, not just its key set', () => {
   const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
-  for (const [checkName, fnName] of dispatchedHandlers(src)) {
+  const handlers = dispatchedHandlers(src);
+  assert.deepEqual(handlers.map(([checkName]) => checkName).sort(), dispatchedCheckNames(src),
+    'dispatchedHandlers extraction must be COMPLETE — a format-driven miss must fail loudly, never silently shrink this loop');
+  for (const [checkName, fnName] of handlers) {
     const reaches = fnName != null && /\bgetVcs(Fn)?\b/.test(bodyClosure(src, fnName));
     assert.equal(reaches, SUBCOMMAND_PORT_REACH[checkName],
       `${checkName} (${fnName}): manifest says ${SUBCOMMAND_PORT_REACH[checkName]}, source scan says ${reaches}`);
