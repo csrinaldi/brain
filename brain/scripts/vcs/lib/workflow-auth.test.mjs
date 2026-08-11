@@ -123,6 +123,30 @@ test('#480: a job-level or workflow-level env: is NOT claimed to be impossible',
     'the step-scoped read cannot see a job-level env: — recorded as a limitation, not denied');
 });
 
+test('#535: the same job-level limitation extends to PR_NUMBER — a job-level PR_NUMBER is invisible to this guard (known limitation, not denied, D6)', () => {
+  // The PR_NUMBER rule (Requirement 5) reads step-scoped `env:` the same way
+  // the credential read does — so a job-level PR_NUMBER is exactly as
+  // invisible as a job-level VCS_TOKEN above. This is a genuine MISS (an
+  // under-approximation, the one direction #480's over-reading discipline does
+  // not cover), named here rather than denied.
+  const jobLevel = [
+    'permissions: { contents: write, pull-requests: read }',
+    'jobs:',
+    '  g:',
+    '    env:',
+    '      PR_NUMBER: ${{ github.event.pull_request.number }}',
+    '    steps:',
+    '      - name: phase-order',
+    '        env:',
+    '          BASE_SHA: ${{ github.event.pull_request.base.sha }}',
+    '          HEAD_SHA: ${{ github.event.pull_request.head.sha }}',
+    '          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}',
+    '        run: node brain/scripts/vcs/phase-order-check.mjs',
+  ].join('\n');
+  assert.deepEqual(audit(jobLevel), [],
+    'the step-scoped read cannot see a job-level PR_NUMBER — a real miss, recorded as a limitation, not denied');
+});
+
 // ── the polarity: undecidable is a violation ────────────────────────────────
 
 test('#480: an entry point that cannot be resolved is a VIOLATION, not an empty answer', () => {
