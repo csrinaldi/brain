@@ -10,10 +10,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runCheck, main, mapDetectionToWarning } from './run-check.mjs';
+import { runCheck, main } from './run-check.mjs';
+import { mapDetectionToWarning } from './detection-policy.mjs';
 
 async function captureLog(fn) {
   const logs = [];
@@ -226,6 +228,46 @@ test('neutrality source-scan (REQ-NEUTRALITY-2): run-check.mjs source contains n
   const src = readFileSync(srcPath, 'utf8');
   assert.equal(src.includes('.claude'), false, 'source must not reference .claude');
   assert.equal(src.includes('SKILL.md'), false, 'source must not reference SKILL.md');
+});
+
+// ── Requirement 6 (issue #535) — run-check.mjs is an entry point, never a library ──
+//
+// Per-subcommand resolution (workflow-auth.mjs, Requirement 3) is only sound if
+// nothing outside run-check.mjs's own dispatch imports and reuses its internals
+// under a different port-reach profile. This walks the real source tree so the
+// invariant is a standing, testable property — not a comment nobody re-checks.
+
+const SCRIPTS_ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+/** 5-line recursive walker — no readdirSync({ recursive: true }) version bet. */
+function walkMjsFiles(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkMjsFiles(full));
+    else if (entry.name.endsWith('.mjs')) out.push(full);
+  }
+  return out;
+}
+
+/** True when the source text imports run-check.mjs, under any relative spelling. */
+function importsRunCheck(src) {
+  return /from\s+['"][^'"]*\brun-check\.mjs['"]/.test(src);
+}
+
+test('Requirement 6: no non-test module imports run-check.mjs — it is an entry point, never a library', () => {
+  const files = walkMjsFiles(SCRIPTS_ROOT).filter(
+    f => !f.endsWith('.test.mjs') && !f.endsWith(join('governance', 'run-check.mjs'))
+  );
+  assert.ok(files.length > 100, `sanity: the walk must visit >100 files, visited ${files.length}`);
+  const offenders = files.filter(f => importsRunCheck(readFileSync(f, 'utf8')));
+  assert.deepEqual(offenders, [],
+    'these files import run-check.mjs and must not — it is an entry point, never a library');
+});
+
+test('Requirement 6: importsRunCheck detects a synthetic import (mutation proof — the walk is not vacuously passing)', () => {
+  const synthetic = `import { x } from '../governance/run-check.mjs';\n`;
+  assert.ok(importsRunCheck(synthetic), 'importsRunCheck must detect a synthetic import of run-check.mjs');
 });
 
 // ── issue-link — THE GOTCHA (issue #231 A2 phase 2, design.md Decision 2) ──
