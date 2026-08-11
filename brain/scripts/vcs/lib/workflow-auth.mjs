@@ -333,6 +333,7 @@ function permissionsScopes(yamlText) {
   const scopeLines = [];
   for (const line of lines) {
     if (line.trim() === '') continue;
+    if (/^\s*#/.test(line)) continue;                       // comment — not a terminator (issue #535)
     if (/^\s{2,}[\w-]+:\s*\S/.test(line)) { scopeLines.push(line); continue; }
     break; // dedent — the block ended
   }
