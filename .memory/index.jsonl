@@ -1815,6 +1815,7 @@
 {"id":"rec-e28d97e4192fa5f6","ts":"2026-07-13T00:22:10Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-e2a4b7ec00a5fe63","ts":"2026-07-25T21:51:09Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-e2bc995c218d4cba","ts":"2026-07-25T00:47:40Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-e33c86b9ead9d9a2","ts":"2026-08-11T22:09:33Z","actor":"feat/issue-535-vcs-token-gate-landing","type":"session_summary","project":"brain","file":"2026-08.jsonl"}
 {"id":"rec-e36ad48e2f3aa105","ts":"2026-07-29T14:26:50Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-e39ab765cc99dbeb","ts":"2026-07-17T23:20:23Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-e39d248b4c182ca8","ts":"2026-07-25T00:46:23Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}

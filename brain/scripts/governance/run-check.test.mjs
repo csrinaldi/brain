@@ -10,14 +10,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve, relative } from 'node:path';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { runCheck, main, SUBCOMMAND_PORT_REACH } from './run-check.mjs';
 import { mapDetectionToWarning } from './detection-policy.mjs';
-import { importClosure, workflowEntryPoints } from '../vcs/lib/workflow-auth.mjs';
 
 async function captureLog(fn) {
   const logs = [];
@@ -232,86 +230,133 @@ test('neutrality source-scan (REQ-NEUTRALITY-2): run-check.mjs source contains n
   assert.equal(src.includes('SKILL.md'), false, 'source must not reference SKILL.md');
 });
 
-// ── Requirement 6 (issue #535) — run-check.mjs is a CI entry point, never a
-//    library reached from a second CI entry point ──
+// ── Requirement 6 (issue #535) — run-check.mjs is an entry point, never a
+//    library, with ONE named exception that has to keep earning itself ──
 //
-// Per-subcommand resolution (workflow-auth.mjs, Requirement 3) reads
-// `SUBCOMMAND_PORT_REACH` for a step that invokes run-check.mjs DIRECTLY. Any
-// other workflow-invoked entry point is resolved by its whole-file import
-// closure instead, with no manifest of its own — so one that reaches
-// run-check.mjs inherits every subcommand's port-reach at once and the
-// per-invocation precision this chain exists to buy is silently gone for that
-// step. THAT is the property, and it is what these tests pin.
+// THE PROPERTY. Per-subcommand resolution (workflow-auth.mjs, Requirement 3)
+// reads `SUBCOMMAND_PORT_REACH` for a step that invokes run-check.mjs
+// DIRECTLY. Any other CI-invoked entry point is resolved by its whole-file
+// import closure instead, with no manifest of its own — so one that reaches
+// run-check.mjs inherits every subcommand's port-reach at once, and the
+// per-invocation precision this chain exists to buy is gone for that step.
 //
-// NARROWED FROM A BLANKET IMPORT BAN, deliberately. The first form of this
-// test forbade ANY non-test module from importing run-check.mjs. #546 (#340,
-// merged after this chain branched) makes `brain-check.mjs` call
-// `runCheck('issue-link', …)` on purpose: brain:check and CI must be ONE
-// implementation of one rule, which is the whole point of that ticket. The two
-// requirements only collided in the blanket form — brain-check.mjs is a local
-// developer verb, invoked by no workflow, so it cannot cost any CI step its
-// per-invocation resolution. Narrowing keeps both, and keeps the polarity:
-// the day brain-check.mjs (or anything else reaching run-check.mjs) becomes a
-// workflow step, this test goes red and the extraction has to happen then.
+// THE SHAPE, AND WHY IT IS NOT A REACHABILITY COMPUTATION. The obvious test
+// is "compute which files CI executes, walk their imports, assert none reaches
+// run-check.mjs". That form was written, reviewed cold, and REJECTED — every
+// step of it under-approximates, and every under-approximation resolves toward
+// "fine", which is `evidence-reader-empty-on-failure` three times over:
 //
-// Derived from the real workflows and the real import graph, through
-// workflow-auth's OWN extraction and OWN closure walk — never a second copy of
-// either (#340), and never an allowlist of files (#480's defeated guard).
+//   · `importClosure` prunes AT `vcs/ci-context.mjs` (the D1 cut vertex), so
+//     `ci-context.mjs → any helper → run-check.mjs` is invisible. Proven by
+//     mutation, twice, independently, via two different helpers.
+//   · The entry-point extraction reads `.github/workflows` only, and this repo
+//     ALSO ships `brain/scripts/ci/gitlab-governance.yml`, which invokes the
+//     same seven entry points with `script:` lists (ADR-0018). Nothing there
+//     was ever scanned.
+//   · The extraction resolves `node <path>` and `npm run <verb>` and nothing
+//     else — not `npm test`, not `bash wrapper.sh`, not `npx`, not a quoted
+//     path. Each unrecognised spelling made the invariant agree with anything
+//     on that route.
+//
+// So this reverts to the BLANKET source-text ban, which has no cut vertex, no
+// YAML parsing and no spelling dependence, and pays for that bluntness with a
+// single exception that is itself pinned in both directions.
+//
+// THE EXCEPTION. #546 (#340, merged after this chain branched) makes
+// `brain-check.mjs` call `runCheck('issue-link', …)` ON PURPOSE: brain:check
+// and CI must be ONE implementation of one rule. That is why the blanket form
+// went red on the merge, and reverting the import would re-create the defect
+// #340 exists to remove. It is safe for exactly one reason — `brain-check.mjs`
+// is a local developer verb that NO CI SURFACE INVOKES — and that reason is a
+// fact about the repo that can change without anyone noticing. So it is
+// asserted, over-approximatingly and fail-closed: no CI file may so much as
+// MENTION brain-check, comments included. The exception set is frozen and
+// compared BOTH WAYS, so a second importer is red, and so is silently dropping
+// this one.
 
 const REPO_ROOT = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
-const WORKFLOWS_DIR = join(REPO_ROOT, '.github', 'workflows');
-const RUN_CHECK_PATH = fileURLToPath(new URL('./run-check.mjs', import.meta.url));
-const CI_CONTEXT_PATH = join(REPO_ROOT, 'brain', 'scripts', 'vcs', 'ci-context.mjs');
+const SCRIPTS_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
-/** Every entry point every workflow in the repo invokes, deduped. */
-function allWorkflowEntryPoints() {
-  const files = readdirSync(WORKFLOWS_DIR).filter(f => /\.ya?ml$/.test(f));
-  const out = new Set();
-  for (const f of files) {
-    for (const e of workflowEntryPoints(readFileSync(join(WORKFLOWS_DIR, f), 'utf8'), REPO_ROOT)) {
-      out.add(e);
-    }
+/** CI surfaces, both providers. `.github/workflows/**` is GitHub; `brain/scripts/ci/**`
+ *  is the GitLab fragment `.gitlab-ci.yml` includes (ADR-0018) — a first-class,
+ *  dogfooded surface that the earlier reachability form of this test never read. */
+const CI_DIRS = [join(REPO_ROOT, '.github', 'workflows'), join(REPO_ROOT, 'brain', 'scripts', 'ci')];
+
+/** The one module allowed to import run-check.mjs, and why. Frozen: asserted by
+ *  equality, so ADDING an importer and DROPPING this one are both red. */
+const SANCTIONED_IMPORTERS = Object.freeze([join('brain', 'scripts', 'brain-check.mjs')]);
+
+/** 5-line recursive walker — no readdirSync({ recursive: true }) version bet. */
+function walkFiles(dir, ext) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkFiles(full, ext));
+    else if (ext.test(entry.name)) out.push(full);
   }
-  return [...out];
+  return out;
 }
 
-test('Requirement 6: no workflow-invoked entry point OTHER than run-check.mjs itself reaches run-check.mjs', () => {
-  const entries = allWorkflowEntryPoints();
-  assert.ok(entries.length >= 5,
-    `sanity: the workflows must yield >=5 entry points, yielded ${entries.length} — an empty ` +
-    `extraction would make this test agree with everything`);
-  assert.ok(entries.includes(RUN_CHECK_PATH),
-    'sanity: run-check.mjs must be among the extracted entry points — CI invokes it by name');
+/** True when the source text pulls in run-check.mjs under ANY spelling — the
+ *  static `from '…'` form and the dynamic `import('…')` form alike. The
+ *  previous form of this predicate knew only the static one, so a real workflow
+ *  entry point rewritten to `await import('../governance/run-check.mjs')` was
+ *  invisible: the SPELLING axis the red-proof left unvaried. */
+function importsRunCheck(src) {
+  return /from\s+['"][^'"]*\brun-check\.mjs['"]/.test(src)
+    || /\bimport\s*\(\s*['"][^'"]*\brun-check\.mjs['"]\s*\)/.test(src);
+}
 
-  const offenders = entries
-    .filter(e => e !== RUN_CHECK_PATH)
-    .filter(e => importClosure(e).has(RUN_CHECK_PATH));
-  assert.deepEqual(offenders, [],
-    'these workflow entry points reach run-check.mjs: they get no manifest of their own, so ' +
-    'workflow-auth resolves them by whole-file closure and inherits every subcommand at once');
+test('Requirement 6: run-check.mjs is imported by nothing outside its sanctioned exception', () => {
+  const files = walkFiles(SCRIPTS_ROOT, /\.mjs$/).filter(
+    f => !f.endsWith('.test.mjs') && !f.endsWith(join('governance', 'run-check.mjs'))
+  );
+  assert.ok(files.length > 100, `sanity: the walk must visit >100 files, visited ${files.length}`);
+  const offenders = files
+    .filter(f => importsRunCheck(readFileSync(f, 'utf8')))
+    .map(f => relative(REPO_ROOT, f))
+    .sort();
+  assert.deepEqual(offenders, [...SANCTIONED_IMPORTERS].sort(),
+    'run-check.mjs is an entry point, never a library. The only sanctioned importer is ' +
+    'brain-check.mjs (#340: brain:check and CI are one implementation of one rule), and it is ' +
+    'sanctioned only while no CI surface invokes it — see the test below. Both directions are ' +
+    'asserted: a new importer is a violation, and so is this list drifting out of date.');
 });
 
-test('Requirement 6 mutation: the reach walk detects a synthetic workflow entry point that imports run-check.mjs', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'req6-'));
-  const synthetic = join(dir, 'synthetic-entry.mjs');
-  const spec = relative(dir, RUN_CHECK_PATH);
-  writeFileSync(synthetic, `import { runCheck } from '${spec.startsWith('.') ? spec : `./${spec}`}';\nrunCheck;\n`);
-  try {
-    assert.ok(importClosure(synthetic).has(RUN_CHECK_PATH),
-      'the closure walk must reach run-check.mjs from a file that imports it — otherwise the ' +
-      'test above passes by seeing nothing');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+test('Requirement 6: the exception holds only while NO CI surface invokes brain-check — asserted, not assumed', () => {
+  const ciFiles = CI_DIRS.flatMap(d => walkFiles(d, /\.ya?ml$/));
+  assert.ok(ciFiles.length >= 5,
+    `sanity: expected >=5 CI files across ${CI_DIRS.length} surfaces, found ${ciFiles.length}`);
+  for (const marker of ['gitlab-governance.yml', 'governance.yml']) {
+    assert.ok(ciFiles.some(f => f.endsWith(marker)),
+      `sanity: ${marker} must be among the scanned CI files — a surface this test cannot see ` +
+      `is a surface where the exception is unguarded`);
   }
+  // A raw substring over the WHOLE file, comments included. Deliberately
+  // over-approximating: a mention costs a false alarm and one line of thought,
+  // while a missed invocation costs the invariant. No `run:`/`script:` parsing,
+  // no command-spelling list — those are what made the previous form blind.
+  const mentions = ciFiles
+    .filter(f => /brain-check|brain:check/.test(readFileSync(f, 'utf8')))
+    .map(f => relative(REPO_ROOT, f))
+    .sort();
+  assert.deepEqual(mentions, [],
+    'a CI file mentions brain-check: if CI now invokes it, it is a CI entry point that reaches ' +
+    'run-check.mjs by whole-file closure with no manifest of its own, and the #340 import must be ' +
+    'replaced by an extraction rather than carried as an exception');
 });
 
-test('Requirement 6 canary: ci-context.mjs — importClosure\'s cut vertex — imports no multiplexer', () => {
-  // importClosure stops AT ci-context.mjs without walking its imports (D1), so a
-  // path to run-check.mjs THROUGH it would be invisible to the test above. This
-  // closes that hole directly rather than assuming it away.
-  const src = readFileSync(CI_CONTEXT_PATH, 'utf8');
-  assert.equal(/from\s+['"][^'"]*\brun-check\.mjs['"]/.test(src), false,
-    'ci-context.mjs must not import run-check.mjs — it is the one node the reach walk does not traverse');
+test('Requirement 6 mutation: importsRunCheck detects BOTH spellings, and the CI scan detects a mention', () => {
+  assert.ok(importsRunCheck(`import { x } from '../governance/run-check.mjs';\n`),
+    'the static import spelling must be detected');
+  assert.ok(importsRunCheck(`const { x } = await import('../governance/run-check.mjs');\n`),
+    'the dynamic import spelling must be detected — the axis the earlier red-proof left unvaried');
+  assert.equal(importsRunCheck(`import { x } from './run-checker.mjs';\n`), false,
+    'a similarly-named module must NOT match — an over-eager predicate would pass by flagging noise');
+  assert.ok(/brain-check|brain:check/.test('    - run: npm run brain:check\n'),
+    'the CI scan must detect an npm-verb invocation');
+  assert.ok(/brain-check|brain:check/.test('    - node brain/scripts/brain-check.mjs\n'),
+    'the CI scan must detect a direct node invocation, including in a GitLab script: list');
 });
 
 // ── SUBCOMMAND_PORT_REACH — the manifest matches the dispatch, symmetrically (T7) ──
