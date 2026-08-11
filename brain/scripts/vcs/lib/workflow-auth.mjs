@@ -48,7 +48,7 @@
 // over here.
 
 import { readFileSync, existsSync } from 'node:fs';
-import { dirname, join, resolve, relative } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 /** Commands that cannot reach a server, so a step made only of them needs nothing.
  *  Deliberately tiny and deliberately a SAFE-side list: anything absent from it is
@@ -111,11 +111,24 @@ function runScript(block) {
 }
 
 /** Entry points a script invokes: `node <path>` and `npm run <verb>` (#480 A5),
- *  matched case-insensitively so `brain-audit.MJS` resolves too (#480 A6). */
+ *  matched case-insensitively so `brain-audit.MJS` resolves too (#480 A6).
+ *  Each entry also captures its trailing `subcommand` (issue #535, Requirement
+ *  3) — the first non-flag token immediately following the entry point path in
+ *  the SAME `node <path> <subcommand>` invocation, or `null` when absent. An
+ *  `npm run <verb>` recursion does NOT thread trailing args through (design's
+ *  own named limitation): an npm-wrapped multiplexer's subcommand is always
+ *  `null`, which is fail-closed (unresolvable), never a silent pass. */
 function entryPoints(script, repoRoot) {
   const out = [];
-  for (const m of script.matchAll(/\bnode\s+(?:--\S+\s+)*([^\s"';|&]+\.mjs)/gi)) {
-    out.push({ raw: m[1], path: resolve(repoRoot, m[1].replace(/^\.\//, '')) });
+  const nodeInvocationRe = /\bnode\s+(?:--\S+\s+)*([^\s"';|&]+\.mjs)/gi;
+  for (const m of script.matchAll(nodeInvocationRe)) {
+    const rest = script.slice(m.index + m[0].length);
+    const nextTokenMatch = rest.match(/^\s+(\S+)/);
+    const subcommand =
+      nextTokenMatch && !nextTokenMatch[1].startsWith('-')
+        ? nextTokenMatch[1].replace(/^["']|["']$/g, '')
+        : null;
+    out.push({ raw: m[1], path: resolve(repoRoot, m[1].replace(/^\.\//, '')), subcommand });
   }
   for (const m of script.matchAll(/\bnpm\s+run\s+([\w:.-]+)/gi)) {
     const pkgPath = join(repoRoot, 'package.json');
@@ -128,12 +141,64 @@ function entryPoints(script, repoRoot) {
   return out;
 }
 
-/** Transitive relative-import closure of an .mjs entry point. Relative specifiers
- *  only — a bare specifier is a node builtin or a dependency, and neither reaches
- *  this repo's port. Cycles terminate on the visited set. */
+/**
+ * Reads a multiplexer's self-declared per-subcommand port-reach manifest out of
+ * its SOURCE TEXT — never `import`ed (issue #535, D3): importing it would make
+ * this guard the first violator of "entry point, never a library" (Requirement
+ * 6) and would drag `cli.mjs` into workflow-auth.mjs's own closure. A file is
+ * recognized as a multiplexer by the PRESENCE of an exported
+ * `SUBCOMMAND_PORT_REACH` object literal, never by path spelling (D2) — an
+ * unrecognized multiplexer is safe by construction: `requirementFor` falls
+ * back to the whole-file closure rule, which over-approximates (false alarm),
+ * never under-approximates (a miss).
+ *
+ * @param {string} src
+ * @returns {{ [subcommand: string]: boolean } | null} `null` when the const is
+ *   absent, or when it parses to zero pairs (D8 — a corrupted manifest must
+ *   never silently resolve as "nothing to declare").
+ */
+export function parseSubcommandManifest(src) {
+  if (typeof src !== 'string') return null;
+  const start = src.indexOf('SUBCOMMAND_PORT_REACH = {');
+  if (start === -1) return null;
+  const end = src.indexOf('\n};', start);
+  if (end === -1) return null;
+  const block = src.slice(start, end);
+  const manifest = {};
+  for (const m of block.matchAll(/'([\w-]+)':\s*(true|false)/g)) {
+    manifest[m[1]] = m[2] === 'true';
+  }
+  return Object.keys(manifest).length ? manifest : null;
+}
+
+/** True when an absolute path IS `vcs/ci-context.mjs`, regardless of repoRoot prefix. */
+function isCiContext(path) {
+  return path.endsWith(join('vcs', 'ci-context.mjs'));
+}
+
+/** True when an absolute path IS `vcs/cli.mjs`, regardless of repoRoot prefix. */
+function isCliPort(path) {
+  return path.endsWith(join('vcs', 'cli.mjs'));
+}
+
+/**
+ * Transitive relative-import closure of an .mjs entry point. Relative
+ * specifiers only — a bare specifier is a node builtin or a dependency, and
+ * neither reaches this repo's port. Cycles terminate on the visited set.
+ *
+ * CUT VERTEX (issue #535, D1): traversal STOPS at `vcs/ci-context.mjs` — the
+ * file is added to the returned set, but its OWN imports are never walked.
+ * This separates "reaches the port directly" (`vcs/cli.mjs` in the pruned
+ * set) from "reaches the port only through the shared CI bootstrap"
+ * (`vcs/ci-context.mjs` in the pruned set) with a SINGLE walk, rather than a
+ * second traversal or a hand-written exemption. Sound only because
+ * `ci-context.mjs` has exactly one port call site, itself gated on
+ * `prNumber != null` (ci-context-drift-guard.test.mjs's T8 canary).
+ */
 function importClosure(entry, seen = new Set()) {
   if (!entry || seen.has(entry) || !existsSync(entry)) return seen;
   seen.add(entry);
+  if (isCiContext(entry)) return seen; // cut vertex — added, not traversed
   let src;
   try { src = readFileSync(entry, 'utf8'); } catch { return seen; }
   for (const m of src.matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
@@ -142,26 +207,87 @@ function importClosure(entry, seen = new Set()) {
   return seen;
 }
 
-/** What a step needs, derived from what its scripts can actually reach. */
-function requirementFor(script, repoRoot) {
+/** Which uppercase env-like keys a step declares ANYWHERE in its own block,
+ *  value ignored (issue #535, D6) — over-reading (e.g. a key mentioned inside
+ *  a `run:` heredoc) demands MORE credential, which is the safe side; the one
+ *  under-reading this cannot see is a job-level `env:` block, a known,
+ *  asserted limitation (workflow-auth.test.mjs:99-123), not a denied one. */
+function declaredEnvKeys(block) {
+  const keys = new Set();
+  for (const m of block.matchAll(/^\s*([A-Z][A-Z0-9_]*):/gm)) keys.add(m[1]);
+  return keys;
+}
+
+/**
+ * What a step needs, derived from what its scripts can actually reach —
+ * resolved PER INVOCATION (issue #535, Requirement 3), not per file.
+ *
+ * For each entry point: the import closure is pruned at `ci-context.mjs`
+ * (D1), splitting `directPort` (`vcs/cli.mjs` in the pruned set) from
+ * `contextPort` (`vcs/ci-context.mjs` in the pruned set). If the entry's OWN
+ * source declares a `SUBCOMMAND_PORT_REACH` manifest (D2 — recognized by
+ * presence, never by path), the entry is a multiplexer: its subcommand MUST
+ * be present and MUST be a manifest key, or the step is `unresolvable`
+ * (Requirement 4); when resolvable, the manifest's OWN verdict replaces the
+ * closure-derived `directPort` and the closure gh/glab scan for that entry
+ * (D4 — both discarded together, never just one). Absent a manifest, the
+ * entry falls back to the whole-file closure rule (D2's safe over-
+ * approximation). `contextPort` is always source-derived, manifest or not.
+ *
+ * A `VCS_TOKEN` is required when any entry directly reaches the port, OR when
+ * any entry reaches it only through `ci-context.mjs` AND the step's own
+ * `env:` declares `PR_NUMBER` (Requirement 5, D6 — key presence, value
+ * ignored).
+ *
+ * @param {string} script
+ * @param {string} repoRoot
+ * @param {Set<string>} envKeys  Uppercase keys declared anywhere in the step block.
+ */
+function requirementFor(script, repoRoot, envKeys = new Set()) {
   const entries = entryPoints(script, repoRoot);
   if (entries.some(e => e.unresolved)) return { need: 'unresolvable' };
 
-  let port = false;
+  let directPort = false;
+  let contextPort = false;
   let cli = PROVIDER_CLI.test(script);           // the shell itself calls gh/glab (#480 A4, A7)
   const missing = [];
+  const unresolvableSubcommands = [];
+
   for (const e of entries) {
     if (!existsSync(e.path)) { missing.push(e.raw); continue; }
     const closure = importClosure(e.path);
+    if ([...closure].some(isCiContext)) contextPort = true;
+
+    let entrySrc;
+    try { entrySrc = readFileSync(e.path, 'utf8'); } catch { entrySrc = ''; }
+    const manifest = parseSubcommandManifest(entrySrc);
+
+    if (manifest != null) {
+      // Multiplexer, recognized by the manifest's presence (D2). Resolution is
+      // PER SUBCOMMAND (Requirement 3) — an absent or unknown subcommand is a
+      // violation (Requirement 4), never a silent pass.
+      if (e.subcommand == null || !Object.prototype.hasOwnProperty.call(manifest, e.subcommand)) {
+        unresolvableSubcommands.push(`${e.raw} ${e.subcommand ?? '(no subcommand)'}`);
+        continue;
+      }
+      if (manifest[e.subcommand]) directPort = true;
+      // The closure-derived port flag AND the closure gh/glab scan are BOTH
+      // discarded for this entry (D4) — the manifest's self-declaration wins.
+      continue;
+    }
+
+    // Not manifest-bearing: the whole-file over-approximation (D2's safe
+    // fallback) — exact for a single-purpose script, coarse (never a miss)
+    // for an unrecognized multiplexer.
+    if ([...closure].some(isCliPort)) directPort = true;
     for (const f of closure) {
-      const rel = relative(repoRoot, f);
-      if (rel.endsWith(join('vcs', 'cli.mjs'))) port = true;
-      // A script that spawns a provider CLI itself, outside the port (alarm.mjs).
       if (/(['"])(gh|glab)\1/.test(readFileSync(f, 'utf8'))) cli = true;
     }
   }
   if (missing.length) return { need: 'unresolvable', missing };
-  if (port) return { need: 'VCS_TOKEN' };
+  if (unresolvableSubcommands.length) return { need: 'unresolvable', missing: unresolvableSubcommands };
+
+  if (directPort || (contextPort && envKeys.has('PR_NUMBER'))) return { need: 'VCS_TOKEN' };
   if (cli) return { need: 'credential' };
 
   // Nothing invoked reaches a server. Only then may the step declare nothing — and
@@ -196,7 +322,7 @@ export function auditWorkflowAuth(yamlText, { file = 'workflow', repoRoot = proc
     const script = runScript(block);
     if (script === null) continue;                       // a `uses:` step
     const name = (block.match(/name:\s*(.+)/) ?? [, '(unnamed)'])[1].trim();
-    const { need, missing, because } = requirementFor(script, repoRoot);
+    const { need, missing, because } = requirementFor(script, repoRoot, declaredEnvKeys(block));
     if (need === null) continue;
     reachesServer = true;
 
