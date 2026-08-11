@@ -30,10 +30,17 @@ Insert §2's subsection immediately after the invariant table, before the line b
 Trim the metrics caveat per §3. Optional in the sense that leaving it costs nothing but a
 duplicated rule; not optional if you want one statement per rule.
 
-## Step 4 — commit
+## Step 4 — AGENTS.md (the script does this; listed so the cascade is visible)
+
+`workflow-governance.md` is one of the five SOURCE_DOCS compiled into `AGENTS.md`, and a
+drift guard fails CI when the committed copy is not byte-equal to the compile. The first
+version of this checklist described a two-file edit for a three-file cascade and CI caught
+it — the exact class of instruction this ruling is about.
+
+## Step 5 — commit
 
 ```bash
-git add brain/core/methodology/workflow-governance.md
+git add brain/core/methodology/workflow-governance.md AGENTS.md
 git commit -m "docs(governance): invariant 3 is repo-scoped — the ruling #519 asked for (closes #529)"
 ```
 

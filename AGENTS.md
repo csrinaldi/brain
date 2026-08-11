@@ -366,8 +366,32 @@ Job names are **load-bearing**: they form the check context strings
 |---|-----------|-----------------|------------|-----------|
 | 1 | Every PR links an approved ticket | `issue-link` | _(none — not skippable)_ | Hard |
 | 2 | PR diff ≤ 400 changed lines | `diff-size` | `size:exception` | Hard with override |
-| 3 | Memory dumped before closing (proxy) | `memory-gate` _(S4)_ | `skip:memory-gate` | Hard with override |
+| 3 | `.memory/` has EVER held a session summary (repo-scoped) | `memory-gate` _(S4)_ | _(none — `skip:memory-gate` is named but unimplemented)_ | Soft — see below |
 | 4 | ADR exists for labeled decisions | `decision-gate` _(S4)_ | label-conditional (see below) | Mixed |
+
+### Invariant 3 scope — what `memory-gate` does and does not check
+
+**It is repo-scoped and it is permanently satisfied.** `memoryPresence` asks whether ANY
+`session_summary` observation exists in `.memory/records/`. There are 205. The gate therefore
+passes on every PR regardless of whether that PR captured anything, and it will keep passing if
+nothing is ever captured again.
+
+**Nothing enforces per-change capture.** The PR template's "Memory materialized before closing"
+is a promise the checklist makes and no gate keeps. Read invariant 3 as *"this repository has a
+memory layer"*, never as *"this change was remembered"*.
+
+Measured 2026-08-11 (issue #529): `.memory/records/` went **seven days** without a new record
+while **34 merges** landed. `memory-gate` was green on all of them — correctly, by the definition
+above. That is the gap this scope note exists to stop hiding.
+
+**`skip:memory-gate` does not exist in code.** No path checks for it. It is listed here and in
+`AGENTS.md` as documentation of an intent, and `brain:metrics` counts its usage raw without ever
+subtracting it. Applying the label changes nothing.
+
+**This is a ruling, not a resting place** (issue #529). The sequence is: #530 makes capture a
+mechanism rather than a habit → `skip:memory-gate` becomes real → invariant 3 tightens to
+recency. Tightening it before the writer is reliable would block every PR with no override,
+which is how a gate teaches people that gates are obstacles.
 
 Check context format: `governance / <job-name>` (GitHub prefixes the workflow `name:` field).
 

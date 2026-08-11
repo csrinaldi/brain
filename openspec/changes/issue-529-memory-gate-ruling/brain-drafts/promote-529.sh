@@ -15,6 +15,12 @@
 #   git commit -am "docs(governance): invariant 3 is repo-scoped — the ruling #519 asked for"
 #   git push
 #
+# The script now regenerates AGENTS.md itself. It did not on the first pass, and CI
+# caught it: workflow-governance.md is one of the five SOURCE_DOCS compiled into
+# AGENTS.md, and a drift guard asserts the committed file is byte-equal to the
+# compile. The checklist described a two-file edit for a three-file cascade — the
+# exact class of instruction this ruling is about, one step from being a procedure.
+#
 # Then merge the PR. #529 closes with the doctrine already changed, instead of closing
 # on a promise to change it.
 
@@ -69,6 +75,16 @@ s = s.replace(old_row, new_row, 1)
 s = s.replace(anchor, section + anchor, 1)
 open(doc, 'w', encoding='utf-8').write(s)
 PY
+
+# AGENTS.md is COMPILED from five SOURCE_DOCS, this file among them, and a drift
+# guard fails CI when the committed copy is not byte-equal to the compile. Not a
+# signature — a build step — so the script does it rather than asking you to.
+#
+# Through the backend's own init, NOT `brain:env:init`: that verb prompts for a PAT,
+# upgrades tooling and reprojects memory, all to rewrite one file (recorded while
+# promoting ADR-0026 Amendment 3 earlier in this session).
+node -e "import('./brain/scripts/harness/backends/antigravity.mjs').then(m => m.init())"
+echo "✓ AGENTS.md regenerated from the SOURCE_DOCS."
 
 echo "✓ $DOC updated. Read \`git diff\` before committing — you are signing the ORDER"
 echo "  (#530 → skip:memory-gate implemented → recency), not just the wording."
