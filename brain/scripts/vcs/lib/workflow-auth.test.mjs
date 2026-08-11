@@ -9,7 +9,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, symlinkSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -427,4 +427,81 @@ test('T5 mutation: the same step WITH PR_NUMBER added is flagged — the pruning
     '        run: node brain/scripts/vcs/phase-order-check.mjs',
   ].join('\n');
   assert.ok(audit(y).length > 0, 'adding PR_NUMBER must flag the step — it now reaches the port via the ci-context bootstrap');
+});
+
+// ── W1/W2 (issue #535 verify-report remediation) ─────────────────────────────
+//
+// W1: diff-size's manifest value (`false`) had zero mutation coverage — the
+// real governance.yml step always declares PR_NUMBER, so the PR_NUMBER branch
+// alone already demands VCS_TOKEN, masking the manifest value. This pins the
+// manifest value itself, isolated from PR_NUMBER.
+// W2: a corrupt/unreadable manifest does not resolve to the literal
+// "unresolvable" message (spec Requirement 4c, amended) — it falls back to
+// the D2 whole-file rule, which for run-check.mjs (imports getVcs directly)
+// still fails closed. This pins that safety direction against silent drift.
+
+// Mirrors real brain/scripts into a tmp dir (siblings symlinked, so
+// run-check.mjs's whole-file closure fallback can genuinely reach the real
+// vcs/cli.mjs), with only governance/run-check.mjs replaced by mutated
+// content — real production files are never written to.
+function withMutatedRunCheck(mutate, fn) {
+  const scriptsDir = resolve(REPO_ROOT, 'brain/scripts');
+  const src = readFileSync(join(scriptsDir, 'governance', 'run-check.mjs'), 'utf8');
+  const mutated = mutate(src);
+  assert.notEqual(mutated, src, 'the mutation must land');
+  const tmp = mkdtempSync(join(tmpdir(), 'wfauth-mut-'));
+  try {
+    const tmpScripts = join(tmp, 'brain', 'scripts');
+    const tmpGov = join(tmpScripts, 'governance');
+    mkdirSync(tmpGov, { recursive: true });
+    for (const name of readdirSync(scriptsDir)) {
+      if (name !== 'governance') symlinkSync(resolve(scriptsDir, name), join(tmpScripts, name));
+    }
+    for (const name of readdirSync(join(scriptsDir, 'governance'))) {
+      if (name !== 'run-check.mjs') symlinkSync(resolve(scriptsDir, 'governance', name), join(tmpGov, name));
+    }
+    writeFileSync(join(tmpGov, 'run-check.mjs'), mutated);
+    fn(tmp);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+const fixtureW1 = () => [
+  'permissions: { contents: write, pull-requests: read }',
+  'jobs:', '  g:', '    steps:',
+  '      - name: diff-size',
+  '        run: node brain/scripts/governance/run-check.mjs diff-size',
+].join('\n');
+
+test('W1: diff-size without PR_NUMBER and without credential is credential-free — pins the manifest value, isolated from the PR_NUMBER bootstrap edge', () => {
+  assert.deepEqual(audit(fixtureW1()), []);
+});
+
+test('W1 mutation: flipping diff-size to true in the manifest flags the same step — the manifest value has real teeth', () => {
+  withMutatedRunCheck(
+    src => src.replace("'diff-size': false,", "'diff-size': true,"),
+    tmp => {
+      const v = auditWorkflowAuth(fixtureW1(), { file: 'probe', repoRoot: tmp });
+      assert.ok(v.some(m => /diff-size/.test(m) && /VCS_TOKEN/.test(m)),
+        `flipping diff-size to true must flag the credential-free step:\n${v.join('\n')}`);
+    }
+  );
+});
+
+test('W2: a corrupt manifest still fails closed via the D2 whole-file fallback — memory-gate (credential-free today) gets flagged, never silently passed', () => {
+  withMutatedRunCheck(
+    src => src.replace('SUBCOMMAND_PORT_REACH = {', 'CORRUPTED_MANIFEST = {'),
+    tmp => {
+      const y = [
+        'permissions: { contents: write, pull-requests: read }',
+        'jobs:', '  g:', '    steps:',
+        '      - name: memory-gate',
+        '        run: node brain/scripts/governance/run-check.mjs memory-gate',
+      ].join('\n');
+      const v = auditWorkflowAuth(y, { file: 'probe', repoRoot: tmp });
+      assert.ok(v.length > 0,
+        'a corrupt manifest must fail closed, never silently pass a step it can no longer resolve');
+    }
+  );
 });
