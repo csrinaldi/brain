@@ -360,6 +360,96 @@ function declared(block) {
   return keys;
 }
 
+/** The `script:`/`before_script:`/`after_script:` lists of one GitLab job block —
+ *  GitLab's equivalent of a step's `run:`. Returns the commands joined, or null
+ *  when the block declares none. */
+function gitlabScripts(block) {
+  const lines = block.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*(before_script|after_script|script):\s*$/.test(lines[i])) continue;
+    const indent = lines[i].search(/\S/);
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].trim() === '') continue;
+      if (lines[j].search(/\S/) <= indent) break;
+      out.push(lines[j].replace(/^\s*-\s*/, ''));
+    }
+  }
+  return out.length ? out.join('\n') : null;
+}
+
+/**
+ * Audits the GitLab pipeline fragment (`brain/scripts/ci/gitlab-governance.yml`,
+ * ADR-0018). Returns human-readable violations — empty means compliant.
+ *
+ * ── WHY THIS IS NOT `auditWorkflowAuth` WITH A SECOND STEP READER ────────────
+ *
+ * Issue #558 proposed teaching the step reader GitLab's `script:` list "so the
+ * audit is one implementation across both providers". MEASURED, that proposal
+ * is wrong, and shipping it would have produced seven false alarms on a file
+ * that is correct: GitLab injects CI/CD variables configured in project
+ * settings into EVERY job's environment automatically, so `VCS_TOKEN` is
+ * legitimately absent from this YAML — the fragment says so in its own header,
+ * and it declares no `variables:` block at all. `auditWorkflowAuth`'s central
+ * rule ("a port-reaching step must DECLARE the credential in its own `env:`")
+ * is a GitHub Actions rule, because GitHub Actions is the provider that
+ * requires explicit per-step mapping. A guard that cries wolf is a guard
+ * someone switches off (#535).
+ *
+ * So the credential-DECLARATION question is not applicable here by
+ * construction, and this asserts the two properties that ARE:
+ *
+ *   1. No provider-specific credential. `GH_TOKEN`/`GITHUB_TOKEN` in a GitLab
+ *      pipeline is the #479/#535 coupling in its purest form — a credential
+ *      the provider never reads.
+ *   2. Every entry point it invokes EXISTS. Nobody runs this pipeline in
+ *      brain's own CI, so a renamed script breaks it silently and stays broken
+ *      until a consumer hits it. The GitHub side is protected by its jobs
+ *      actually running; this side has only this assertion.
+ *
+ * Polarity is the file's usual one: a `node`/`npm` invocation whose entry point
+ * cannot be resolved is a VIOLATION, never a skip.
+ *
+ * @param {string} yamlText @param {{file?: string, repoRoot?: string}} [opts]
+ * @returns {string[]}
+ */
+export function auditGitlabFragment(yamlText, { file = 'gitlab fragment', repoRoot = process.cwd() } = {}) {
+  const violations = [];
+
+  const uncommented = yamlText.split('\n').filter(l => !/^\s*#/.test(l)).join('\n');
+  for (const cred of ['GH_TOKEN', 'GITHUB_TOKEN']) {
+    if (uncommented.includes(cred)) {
+      violations.push(
+        `${file}: declares ${cred} — a GitLab pipeline authenticating through a ` +
+        `GitHub-only credential is the #479/#535 coupling; the port resolves VCS_TOKEN`);
+    }
+  }
+
+  // Job blocks are top-level keys; `script:` lists hang under them. Reading the
+  // whole file at once is enough here — the question is which entry points the
+  // fragment invokes ANYWHERE, not which job invokes which.
+  const script = gitlabScripts(yamlText);
+  if (script === null) {
+    violations.push(
+      `${file}: no script: list found — this fragment's whole purpose is invoking ` +
+      `brain's entry points, so reading none means the parse failed, not that there ` +
+      `is nothing to check`);
+    return violations;
+  }
+  for (const e of entryPoints(script, repoRoot)) {
+    if (e.unresolved) {
+      violations.push(
+        `${file}: invokes '${e.raw}', which resolves to no entry point — undecidable ` +
+        `is a violation, never a pass`);
+    } else if (e.path && !existsSync(e.path)) {
+      violations.push(
+        `${file}: invokes '${e.raw}', which does not exist — this pipeline runs in no ` +
+        `CI of brain's own, so a renamed script breaks it silently`);
+    }
+  }
+  return violations;
+}
+
 /**
  * Audits one workflow. Returns a list of human-readable violations — empty means
  * compliant. Never returns empty because it failed to understand something: an
