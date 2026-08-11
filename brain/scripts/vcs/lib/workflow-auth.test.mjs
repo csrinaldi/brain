@@ -414,6 +414,48 @@ test('T10 mutation: adding pull-requests: read to the block-style permissions cl
   assert.deepEqual(audit(y), []);
 });
 
+// ── T11 (issue #535 fix) — a comment inside a block-style `permissions:` ────
+//
+// governance.yml's own style puts explanatory comments inside blocks (its
+// `env:` blocks, lines 52-53/55-56/60-61). Before the fix, the block scan
+// `break`s on the first line that is not blank and not a `key: value` scope
+// line — a comment qualifies, so it either empties `scopeLines` entirely
+// (returning `null`, silently skipping the whole rule) or truncates the
+// block before a later compliant key is read.
+
+test('T11: a comment as the FIRST line under a block-style permissions: that lacks pull-requests is still flagged, not silently skipped', () => {
+  const y = [
+    'permissions:',
+    '  # only read what we need',
+    '  contents: read',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.match(audit(y).join('\n'), /every omitted scope/);
+});
+
+test('T11: a comment BETWEEN scope keys does not truncate the block — pull-requests after the comment still counts as declared', () => {
+  const y = [
+    'permissions:',
+    '  contents: read',
+    '  # PR read access for the gate',
+    '  pull-requests: read',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.deepEqual(audit(y), []);
+});
+
 test('T5 mutation: the same step WITH PR_NUMBER added is flagged — the pruning and the PR_NUMBER conditional both proven', () => {
   const y = [
     'permissions: { contents: write, pull-requests: read }',
