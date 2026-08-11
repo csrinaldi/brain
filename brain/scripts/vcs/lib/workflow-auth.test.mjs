@@ -456,6 +456,58 @@ test('T11: a comment BETWEEN scope keys does not truncate the block — pull-req
   assert.deepEqual(audit(y), []);
 });
 
+// ── T12 (issue #535 WARNING 4) — a `permissions:` header present but parsed
+// to ZERO scope lines must still fire the pull-requests check ────────────
+//
+// permissionsScopes() used to collapse "header present, no scope lines" into
+// the SAME `null` as "no permissions: key at all" — the caller treats `null`
+// as the intentionally-silent default-token case and skips the check. But an
+// explicit empty grant (a block containing only comments, or flow-style
+// `permissions: {}`) sets EVERY scope to `none` in Actions semantics — the
+// most restrictive case, and the one that most needs the check to fire.
+
+test('T12: a block-style permissions: header containing ONLY comments (zero scope lines) is still flagged, not silently skipped like "no header at all"', () => {
+  const y = [
+    'permissions:',
+    '  # nothing granted here on purpose',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.match(audit(y).join('\n'), /every omitted scope/);
+});
+
+test('T12: flow-style permissions: {} (explicit empty grant) is still flagged', () => {
+  const y = [
+    'permissions: {}',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.match(audit(y).join('\n'), /every omitted scope/);
+});
+
+test('T12: no permissions: key at all is still the intentionally-silent default-token case (regression — must stay unflagged)', () => {
+  const y = [
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.deepEqual(audit(y), []);
+});
+
 test('T5 mutation: the same step WITH PR_NUMBER added is flagged — the pruning and the PR_NUMBER conditional both proven', () => {
   const y = [
     'permissions: { contents: write, pull-requests: read }',

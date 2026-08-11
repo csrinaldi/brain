@@ -323,9 +323,15 @@ function requirementFor(script, repoRoot, envKeys = new Set()) {
  * The text of a top-level `permissions:` block's scope declarations, in
  * EITHER YAML shape — flow (`permissions: { contents: write }`) or block
  * (`permissions:\n  contents: write\n  ...`, governance.yml's own shape,
- * issue #535 D9). `null` when no `permissions:` key exists at all (the
+ * issue #535 D9). `null` ONLY when no `permissions:` key exists at all (the
  * default-token-carries-read-scope case, where the rule is intentionally
- * silent — see the caller).
+ * silent — see the caller). A `permissions:` header that IS present but
+ * parses to zero scope lines (e.g. a block containing only comments, or
+ * flow-style `permissions: {}`) returns `''`, never `null` — in Actions
+ * semantics an explicit empty grant sets EVERY scope to `none`, the most
+ * restrictive case, so the caller's pull-requests check must still fire for
+ * it (issue #535 WARNING 4 — this must stay distinguishable from "no header
+ * at all", which is the one case the check is meant to skip).
  */
 function permissionsScopes(yamlText) {
   const flow = yamlText.match(/^permissions:\s*\{([^}]*)\}/m);
@@ -341,7 +347,10 @@ function permissionsScopes(yamlText) {
     if (/^\s{2,}[\w-]+:\s*\S/.test(line)) { scopeLines.push(line); continue; }
     break; // dedent — the block ended
   }
-  return scopeLines.length ? scopeLines.join('\n') : null;
+  // A header present with zero scope lines is Actions' explicit "every scope
+  // is none" — return '' (present, empty), never null (absent), so the
+  // caller does not mistake it for the intentionally-silent no-header case.
+  return scopeLines.join('\n');
 }
 
 /** Which credential keys a step declares in its own `env:` (empty value = absent). */
