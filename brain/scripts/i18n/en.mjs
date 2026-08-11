@@ -327,10 +327,12 @@ export default {
 
   // ── memory/lib/unsupported-op.mjs — the shared never-cryptic deferral helper (C3, issue #246) ──
   'memory.op.unsupported':            "op '{op}' is not supported by the '{backend}' memory backend (deferred — see openspec/changes/issue-246-c3).",
-  'memory.save.engramUnsupported':    "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_save / 'engram save' instead.",
+  'memory.save.engramUnsupported': "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_save / 'engram save'. If engram is not installed here (the agent environment), capture records directly with `MEMORY_BACKEND=plainfiles npm run memory:save -- \"title\" \"content\" --type <type>` — same records, same validation, no backend (#530).",
   'memory.search.engramUnsupported':  "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_search / 'engram search' instead.",
 
   // ── memory/backends/plainfiles.mjs — save/search CLI verbs (C3, issue #246) ──
+  'memory.plainfiles.save.issueInvalid': '--issue must be an issue NUMBER; got {value}. It is stored as an integer so a record can be tied to its ticket.',
+  'memory.plainfiles.save.typeRequired': '--type is required and has no safe default — it is a choice, not a fact the tool can derive. One of: {types}.',
   'memory.plainfiles.save.done':    "✓ saved {id} → {file}",
   'memory.plainfiles.save.secretFound': 'Secret detected in the candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
   'memory.save.plainfilesIgnoredOpts': 'ignored option(s) {opts} — the plainfiles record format has no field for them (scope/topic are engram-only concepts); the record was still written normally.',

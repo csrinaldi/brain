@@ -288,7 +288,14 @@ if (op === "save") {
     }
   }
   const [title, content] = positionals;
-  const opts = { type: flags.type, project: flags.project, scope: flags.scope, topic: flags.topic };
+  // `--issue` (#530): the record format has carried an `issue` field all along and
+  // no verb ever populated it — #368 measured 2157 records with it empty. A record
+  // that cannot be tied to a ticket is one the coverage metric already reports as
+  // "adoption pending". Parsed here as a NUMBER: `validateWritableRecord`'s W2
+  // refuses a non-integer, so a typo fails closed at the chokepoint rather than
+  // landing a string in a durable field.
+  const issue = flags.issue === undefined ? undefined : Number(flags.issue);
+  const opts = { type: flags.type, project: flags.project, issue, scope: flags.scope, topic: flags.topic };
   const seams = memoryTestRoot ? { root: memoryTestRoot } : {};
   try {
     const result = await backend.save(title, content, opts, seams);
