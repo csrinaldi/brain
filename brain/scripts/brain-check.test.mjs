@@ -20,11 +20,19 @@ function makeCtx(overrides = {}) {
   return {
     numstat: '1\t0\tsrc/feature.mjs\n',
     changedFiles: ['src/feature.mjs'],
-    // Inject a session_summary observation so memoryPresence passes without
-    // reading from the filesystem (decoupled from changedFiles).
-    observations: [{ type: 'session_summary', title: 'Session summary: brain' }],
+    // The summary is SCOPED TO #42 (#340). Before this verb ran the CI evaluator, an
+    // unscoped summary passed here and failed in CI — memory-gate matches the issue the
+    // body closes. The old fixture encoded that divergence as the expected behaviour.
+    observations: [{ type: 'session_summary', issue: 42, title: 'Session summary: brain' }],
     prBody: 'Closes #42',
     ignoreList: [],
+    // The branch pair and the label lookup are what `issue-link` actually decides on
+    // (#340). Omitting them is a real state — it makes the check UNVERIFIED, exercised
+    // by its own test below — so a fixture that means "everything passes" must supply
+    // them rather than leave the check unevaluated.
+    targetBranch: 'feature/x',
+    defaultBranch: 'main',
+    fetchIssue: async () => ({ labels: ['status:approved'] }),
     npmTestFn: async () => ({ ok: true }),
     repoCheckFn: async () => ({ ok: true }),
     ...overrides,
