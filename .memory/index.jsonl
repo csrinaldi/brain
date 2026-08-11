@@ -1114,6 +1114,7 @@
 {"id":"rec-88fc6b30e19b5ee2","ts":"2026-07-11T12:33:50Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-88ff87278397aaf4","ts":"2026-07-25T21:51:37Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-891f961cc2fa9cc8","ts":"2026-07-25T21:51:33Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-897af5f4dbb254b6","ts":"2026-08-11T16:08:31Z","actor":"feat/issue-535-vcs-token-gate","type":"session_summary","project":"brain","issue":535,"file":"2026-08.jsonl"}
 {"id":"rec-899e4007e3f069eb","ts":"2026-07-13T00:21:53Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-89a102a4d485eee4","ts":"2026-07-13T20:19:30Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-89a522b5330c0ea4","ts":"2026-08-04T09:43:23Z","actor":"claude/m4-upgrade-safety","type":"session_summary","project":"brain","file":"2026-08.jsonl"}
