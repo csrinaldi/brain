@@ -1026,3 +1026,49 @@ test('runCheck: decision-gate — the REAL added-list reader fails closed when g
     'the shipped reader must fail closed too — an injected-only guarantee guards nothing');
   assert.match(result.reason, /uncomputable/);
 });
+
+// ── #516: what the DOCTRINE claims decision-gate does, pinned against the code ──
+//
+// `workflow-governance.md` invariant 4 describes a TWO-STEP, LABEL-CONDITIONAL gate:
+// step 1 fires "if the PR carries the `decision` label", step 2 scans architectural
+// surfaces and warns. Neither step exists. `adrPresence` reads no labels and scans no
+// surfaces — it is keyed on the diff alone and runs on every PR.
+//
+// The code half was already well pinned (the #510 tests above). What had NO pin was
+// the doctrine's claim, so the two could drift for as long as nobody happened to read
+// both — which is #499's class and how #516 was found. These two tests are the
+// machine-readable half of the sentence #516 corrects: if someone later IMPLEMENTS
+// label-conditionality or the heuristic, they fail here, and the failure names the
+// doctrine files that must move in the same change.
+
+test('runCheck: decision-gate — the verdict is IDENTICAL with and without the `decision` label (#516)', async () => {
+  const diff = {
+    diffNameOnly: () => ['brain/project/decisions/adr-0099-new.md'],
+    diffNameOnlyAdded: () => ['brain/project/decisions/adr-0099-new.md'],
+  };
+  const withLabel = await runCheck('decision-gate', { ...diff, ctx: { labels: ['decision'] } });
+  const without = await runCheck('decision-gate', { ...diff, ctx: { labels: [] } });
+
+  assert.deepEqual(withLabel, without,
+    'decision-gate reads no labels. If this fails, the gate became label-conditional — ' +
+    'update brain/core/methodology/workflow-governance.md invariant 4 and ' +
+    'brain/project/decisions/adr-0026 GATE_MATRIX in the SAME change (#516).');
+  assert.equal(withLabel.pass, false, 'sanity: the case under test must be one the gate actually decides');
+});
+
+test('runCheck: decision-gate — an architectural change with NO ADR passes; there is no step-2 heuristic (#516)', async () => {
+  // The doctrine names `brain/core/`, `scripts/.*/providers/` and `package.json` as
+  // surfaces a heuristic scans. Nothing scans them. A PR touching all three, carrying
+  // no ADR and no HOME.md, is simply a pass — no warning, no verdict, no scan.
+  const result = await runCheck('decision-gate', {
+    diffNameOnly: () => [
+      'brain/core/methodology/workflow-governance.md',
+      'brain/scripts/vcs/providers/github.mjs',
+      'package.json',
+    ],
+    diffNameOnlyAdded: () => [],
+  });
+  assert.deepEqual(result, { pass: true },
+    'no architectural-surface heuristic exists. If this fails, step 2 was implemented — ' +
+    'the doctrine describing it must stop being aspirational in the same change (#516).');
+});
