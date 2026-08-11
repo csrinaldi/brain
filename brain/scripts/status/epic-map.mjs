@@ -5,15 +5,21 @@
 // emits can block a merge. The one write it performs is bounded by markers in the
 // epic's body, and everything outside them is byte-identical afterwards.
 //
-// SLICE 1 (#533 carries slice 2). What lands: dependencies as DECLARED DATA, the graph, the mermaid block,
-// the idempotent write. What does NOT: the "who is executing" half. `issueList`
-// normalises assignees away and `issueView` never carried them, so surfacing them is
-// a change to the port's return CONTRACT — a `decision`-labelled change with an ADR,
-// by the port's own rule. Reporting an empty assignee list would be worse than
-// reporting none: it reads as "nobody is on this" when the truth is "brain cannot
-// see". The map says so out loud instead.
+// SLICE 1 landed dependencies as DECLARED DATA, the graph, the mermaid block and the
+// idempotent write. SLICE 2 (#533, ADR-0029) lands the executor half: `assignees` on
+// the port's return contract, the provider's NATIVE relations as a second source
+// feeding the same builder, and `issueUpdate` — so the map writes itself instead of
+// printing a region for someone to paste.
 //
-// Usage: npm run brain:epic:map -- <issue-number> [--dry-run]
+// Three things this file is careful about, each recorded where it happens:
+//   · `assignees === null` is "brain cannot see", `[]` is "nobody is assigned".
+//     Slice 1 could only produce the first and said so in prose.
+//   · the two edge sources are UNIONED and their disagreement is REPORTED — see
+//     `buildGraph`. Nothing here picks a winner.
+//   · nothing is written until `outsideRegion` proves the prose around the markers
+//     is byte-identical. `issueUpdate` writes an opaque body and cannot check that.
+//
+// Usage: npm run brain:epic:map -- <issue-number> [--dry-run] [--no-relations]
 
 import { fileURLToPath } from 'node:url';
 
@@ -21,19 +27,25 @@ import { getVcs } from '../vcs/cli.mjs';
 import { originIdentity } from '../vcs/lib/repo.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { buildGraph } from './epic-graph.mjs';
-import { renderMermaid, renderSummary, replaceMapRegion } from './epic-render.mjs';
+import { renderMermaid, renderSummary, replaceMapRegion, outsideRegion } from './epic-render.mjs';
 
-/** @returns {{ok:true,number:number,dryRun:boolean}|{ok:false,error:string}} */
+/** @returns {{ok:true,number:number,dryRun:boolean,relations:boolean}|{ok:false,error:string}} */
 export function parseArgs(argv = []) {
   let number = null;
   let dryRun = false;
+  // Native relations are read BY DEFAULT. A source that ships behind an opt-in flag
+  // is a source nobody turns on — green in test, inert in production (#335). The
+  // flag exists for its opposite: 2 extra calls per issue is a real cost on a large
+  // board, and an operator who wants the cheap run must be able to ask for it.
+  let relations = true;
   for (const a of argv) {
     if (a === '--dry-run') dryRun = true;
+    else if (a === '--no-relations') relations = false;
     else if (/^\d+$/.test(a)) number = Number(a);
     else return { ok: false, error: `unknown argument: ${a}` };
   }
   if (number == null) return { ok: false, error: 'an issue number is required' };
-  return { ok: true, number, dryRun };
+  return { ok: true, number, dryRun, relations };
 }
 
 /**
@@ -46,9 +58,6 @@ export function composeMap(graph) {
     renderMermaid(graph),
     '',
     renderSummary(graph),
-    '',
-    '_El «quién lo ejecuta» todavía no aparece: el puerto normaliza los assignees '
-    + 'afuera, y exponerlos cambia el contrato de retorno — un cambio con ADR (#533, slice 2)._',
   ].join('\n');
 }
 
@@ -85,11 +94,36 @@ export async function main(argv = [], deps = {}) {
     try {
       full = await vcs.issueView({ project, number: i.number });
     } catch {
-      // Unreadable body ⇒ undeclared, never silently dropped. It lands in the
-      // "sin declarar" count, which is visible in the summary.
-      full = { body: '' };
+      // Unreadable body ⇒ no declared block, never silently dropped. It lands in the
+      // "sin ubicar" count, which is visible in the summary.
+      full = { body: '', assignees: null };
     }
-    issues.push({ number: i.number, title: i.title, labels: i.labels ?? [], state: 'open', body: full.body ?? '' });
+
+    // `relations` is `undefined` when the operator asked for the cheap run, `null`
+    // when the read FAILED, and an object when it succeeded. `buildGraph` treats the
+    // three differently on purpose, so none of them is flattened here.
+    let relations;
+    if (parsed.relations && typeof vcs.issueRelations === 'function') {
+      relations = await vcs.issueRelations({ project, number: i.number });
+    }
+
+    issues.push({
+      number: i.number,
+      title: i.title,
+      labels: i.labels ?? [],
+      state: 'open',
+      body: full.body ?? '',
+      // The list carries assignees on both providers; `issueView` is the fallback
+      // for a provider whose list endpoint does not. Only `null` — "the list could
+      // not see" — falls through; `[]` is a real answer and stops the chain.
+      //
+      // (`||` would behave identically here, because `[]` is truthy in JS. An
+      // earlier version of this comment claimed `??` was what protected the empty
+      // list; a mutation to `||` survived every test, which is how the claim was
+      // found wrong. `??` is written for intent, not for a difference it makes.)
+      assignees: i.assignees ?? full.assignees ?? null,
+      relations,
+    });
   }
 
   const graph = buildGraph(issues);
@@ -108,22 +142,38 @@ export async function main(argv = [], deps = {}) {
     return 1;
   }
 
-  const body = replaceMapRegion(epic.body ?? '', content);
-  if (body === (epic.body ?? '')) {
+  const before = epic.body ?? '';
+  const body = replaceMapRegion(before, content);
+  if (body === before) {
     say(`✓ #${parsed.number} already up to date — nothing written.`);
     return 0;
   }
 
+  // THE PRECONDITION FOR HAVING A WRITE VERB AT ALL (#533, ADR-0029 Decision 3).
+  // `issueUpdate` replaces a whole body and cannot inspect it; `replaceMapRegion` is
+  // marker-bounded by construction, and this is the check that the construction held
+  // on THIS body. A composer bug becomes a refusal to write instead of a lost epic.
+  if (outsideRegion(body) !== outsideRegion(before)) {
+    say(`✗ refusing to write #${parsed.number}: the text outside the map markers would change.`);
+    say('  Nothing was written. This is a bug in the map composer, not in the epic.');
+    return 1;
+  }
+
   if (typeof vcs.issueUpdate !== 'function') {
-    // No body-write verb exists on the port yet. Print the region rather than
-    // pretending: an operator can paste it, and the map is still derived.
-    say('! the port has no issue-body write verb — printing the region instead (#533, slice 2).');
+    // A provider without the verb prints the region rather than pretending. Both
+    // shipped providers implement it (#533); this is what a THIRD one gets before it
+    // does, and it degrades to slice 1's behaviour instead of throwing.
+    say('! this provider has no issue-body write verb — printing the region instead.');
     say('');
     say(content);
     return 0;
   }
 
-  await vcs.issueUpdate({ project, number: parsed.number, body });
+  const res = await vcs.issueUpdate({ project, number: parsed.number, body });
+  if (res && res.ok === false) {
+    say(`✗ could not write #${parsed.number}: ${res.error}`);
+    return 1;
+  }
   say(`✓ #${parsed.number} map regenerated over ${graph.nodes.length} issues.`);
   return 0;
 }

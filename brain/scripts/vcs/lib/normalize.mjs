@@ -51,6 +51,36 @@ export function providerState(provider, state = 'open') {
 }
 
 /**
+ * Normalizes a provider's assignee payload to `string[] | null` (issue #533).
+ *
+ * ABSENT IS NOT EMPTY, and this helper exists because collapsing the two is the
+ * defect the ticket was opened over. `[]` means the fetch SUCCEEDED and nobody is
+ * assigned; `null` means the payload carried no assignee field at all and brain
+ * cannot see. A reader shown `[]` for both would read "nobody is on this" when the
+ * truth is "brain does not know" — `evidence-reader-empty-on-failure`, on the half
+ * of the map that makes it actionable.
+ *
+ * Both providers expose a plural array AND a legacy singular. The singular is read
+ * only when the plural key is missing entirely: on GitLab CE the array is present
+ * and capped at one, so preferring it costs nothing there and is required on the
+ * tiers that carry several.
+ *
+ * @param {object} raw           The provider's issue payload.
+ * @param {'login'|'username'} key  The provider's user-name field.
+ * @returns {string[]|null}
+ */
+export function normalizeAssignees(raw, key) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (Array.isArray(raw.assignees)) {
+    return raw.assignees.map(a => a?.[key]).filter(n => typeof n === 'string');
+  }
+  // No plural key. A singular one still answers the question; nothing at all does not.
+  if (raw.assignee && typeof raw.assignee[key] === 'string') return [raw.assignee[key]];
+  if (raw.assignee === null && 'assignee' in raw) return [];
+  return null;
+}
+
+/**
  * Normalizes an assignee filter ('me' | 'none' | undefined) to provider syntax.
  * Returns an object of query params to merge into the request, so each provider
  * stays declarative.

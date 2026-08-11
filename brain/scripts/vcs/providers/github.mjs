@@ -6,7 +6,7 @@
 // (issue #501), in which case every call carries that credential instead.
 
 import { run, runJson } from '../lib/exec.mjs';
-import { normalizeCommitStatus, providerState, assigneeParams } from '../lib/normalize.mjs';
+import { normalizeCommitStatus, providerState, assigneeParams, normalizeAssignees } from '../lib/normalize.mjs';
 import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
 import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
@@ -91,7 +91,108 @@ export async function issueView({ project, number }) {
     // approval actor against BOTH the PR author and the issue author — the
     // same API call already carries `user.login`, no extra round-trip.
     author: r.user?.login ?? null,
+    // `assignees` (issue #533, ADR-0029): `string[]` when the payload carried the
+    // field, `null` when it did not. Same call, no extra round-trip.
+    assignees: normalizeAssignees(r, 'login'),
   };
+}
+
+/**
+ * issueUpdate — the port's first verb that can OVERWRITE HUMAN PROSE (issue #533,
+ * ADR-0029 Decision 3).
+ *
+ * Every other write verb on this port appends: `issueComment` adds a comment,
+ * `labelAdd` adds a label, `prReviewComment` posts a review. This one replaces a
+ * body, and there is no undo behind it — GitHub keeps an edit history a human can
+ * read, not one this port can restore from.
+ *
+ * The containment is at the CALLER and it is a precondition, not a nicety:
+ * `epic-render.mjs`'s `replaceMapRegion` is marker-bounded, and `outsideRegion`
+ * proves byte-equality outside the markers before `epic-map.mjs` ever calls this.
+ * Both properties are asserted by test. The verb itself cannot enforce them —
+ * a body is opaque here — which is exactly why the proof had to exist first.
+ *
+ * `body` is the only writable field. Adding `title`/`state`/`labels` would make
+ * this the verb that can close a ticket, and closing is a governance act
+ * (`issue-link` reads the closing keyword). Widening it is a `decision`.
+ *
+ * Never throws — `mrCreate`'s discipline, not `issueCreate`'s: there is no
+ * refusal here that a caller must not retry.
+ *
+ * @param {{ project: string, number: number, body: string }} opts
+ * @returns {Promise<{ ok: true, url: string|null } | { ok: false, error: string }>}
+ */
+export async function issueUpdate({ project, number, body } = {}) {
+  if (typeof body !== 'string') {
+    return { ok: false, error: 'issueUpdate: `body` must be a string' };
+  }
+  const r = gh(
+    ['api', '-X', 'PATCH', `repos/${project}/issues/${number}`, '--input', '-'],
+    { input: JSON.stringify({ body }) },
+  );
+  if (!r.ok) return { ok: false, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
+  try {
+    return { ok: true, url: JSON.parse(r.stdout).html_url ?? null };
+  } catch {
+    // The write LANDED — a non-zero exit is the only failure signal, and this was
+    // zero. Only the echo was unreadable, so `url` folds to null and `ok` stays
+    // true: reporting a successful write as a failure would send a caller into a
+    // retry of an overwrite that already happened.
+    return { ok: true, url: null };
+  }
+}
+
+/**
+ * issueRelations — the provider's NATIVE dependency graph (issue #533, ADR-0029
+ * Decision 2), read from GitHub's issue-dependencies API:
+ *   `blocking`   → issues this one blocks  → `blocks`
+ *   `blocked_by` → issues this one needs   → `needs`
+ *
+ * Sub-issues (`/issues/:n/sub_issues`) are deliberately NOT read. They are a
+ * CONTAINMENT relation ("this epic holds that slice"), not an ordering one, and
+ * feeding them into a blocking graph would make every slice of #313 appear to
+ * block the epic that merely lists it.
+ *
+ * CROSS-REPO relations are counted, never mapped. GitHub's dependencies may point
+ * at another repository, and issue numbers are per-repo: a foreign `#12` drawn as
+ * a node would assert an edge to THIS repo's #12, which is a fabricated
+ * dependency rather than a missing one. They land in `foreign` so the map can say
+ * how many it dropped instead of dropping them quietly.
+ *
+ * Never throws, and NEVER fabricates an empty graph: a fetch failure returns
+ * `null` (uncomputable), distinct from a successful read of an issue that has no
+ * relations (`{ blocks: [], needs: [], foreign: 0 }`). A caller that collapsed the
+ * two would report "no native dependency" for an endpoint it could not reach.
+ *
+ * @param {{ project: string, number: number }} opts
+ * @returns {Promise<{ blocks: number[], needs: number[], foreign: number }|null>}
+ */
+export async function issueRelations({ project, number } = {}) {
+  const fetchSide = (side) => {
+    try {
+      const arr = ghJson(['api', '--paginate', `repos/${project}/issues/${number}/dependencies/${side}`]);
+      return Array.isArray(arr) ? arr : null;
+    } catch {
+      return null;
+    }
+  };
+  const blocking = fetchSide('blocking');
+  const blockedBy = fetchSide('blocked_by');
+  // One side unreadable makes the WHOLE answer partial. Returning the half that
+  // resolved would report a graph missing edges and say nothing about it.
+  if (blocking === null || blockedBy === null) return null;
+
+  let foreign = 0;
+  const local = (arr) => {
+    const out = [];
+    for (const r of arr) {
+      const owner = r.repository?.full_name ?? r.repository?.fullName ?? null;
+      if (owner && owner !== project) { foreign += 1; continue; }
+      if (Number.isInteger(r.number)) out.push(r.number);
+    }
+    return out;
+  };
+  return { blocks: local(blocking), needs: local(blockedBy), foreign };
 }
 
 /**
@@ -290,7 +391,15 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
   // GitHub /issues returns both issues and PRs — filter out PRs.
   return arr
     .filter(r => !r.pull_request)
-    .map(r => ({ number: r.number, title: r.title, labels: (r.labels ?? []).map(l => l.name) }));
+    // `assignees` (issue #533, ADR-0029) — the list endpoint already carries them,
+    // so the map's "who is executing this" costs no extra round-trip. `null` when
+    // the payload has no assignee field; `[]` only when it has one and it is empty.
+    .map(r => ({
+      number: r.number,
+      title: r.title,
+      labels: (r.labels ?? []).map(l => l.name),
+      assignees: normalizeAssignees(r, 'login'),
+    }));
 }
 
 export async function mrList({ project, state = 'open' } = {}) {

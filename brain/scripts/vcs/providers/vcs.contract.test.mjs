@@ -445,8 +445,8 @@ for (const providerName of Object.keys(PROVIDERS)) {
     for (const entry of result) {
       assert.deepEqual(
         Object.keys(entry).sort(),
-        ['labels', 'number', 'title'],
-        'each issueList entry must normalize to EXACTLY { number, title, labels } — no narrowed or widened shape',
+        ['assignees', 'labels', 'number', 'title'],
+        'each issueList entry must normalize to EXACTLY { number, title, labels, assignees } — no narrowed or widened shape',
       );
       for (const label of entry.labels) {
         assert.equal(
@@ -462,21 +462,51 @@ for (const providerName of Object.keys(PROVIDERS)) {
     // content rather than re-derived from fixture.data via the same
     // number/iid/labels mapping the normalizer performs — doing so would let
     // a normalizer bug that mirrors this test's mapping pass undetected.
+    // `assignees: null` throughout is TRUTHFUL for these fixtures and is not a
+    // claim about the endpoints: both payloads were trimmed when recorded/derived
+    // and carry no assignee field at all, which is exactly the case
+    // `normalizeAssignees` answers `null` to. The populated and genuinely-empty
+    // cases are exercised by the *-issueList-assignees.json fixtures (#533).
     const expected =
       providerName === 'github'
         ? [
-            { number: 362, title: 'feat(m10-phase2): issueList contract-parity coverage (rank 4)', labels: ['type:feature', 'status:needs-review'] },
-            { number: 361, title: 'fix(memory): index self-healing is backend-asymmetric — engram.share() reindexes conditionally and engram.pull() never does', labels: [] },
-            { number: 358, title: 'Q5 — Architecture decision: doctrine tiers (lite/standard/regulated)', labels: [] },
-            { number: 340, title: 'fix(governance): issue-link local check and CI job implement the same rule differently — brain:check greenlights PRs that CI rejects', labels: ['type:bug', 'status:needs-review'] },
-            { number: 336, title: 'feat(vcs): M10 Phase 1 — port-verb contract coverage audit (detection only)', labels: ['type:feature', 'status:needs-review'] },
-            { number: 329, title: 'fix(governance): actor-check L5 and #124 are mutually unsatisfiable for a solo maintainer', labels: ['type:bug'] },
+            { number: 362, title: 'feat(m10-phase2): issueList contract-parity coverage (rank 4)', labels: ['type:feature', 'status:needs-review'], assignees: null },
+            { number: 361, title: 'fix(memory): index self-healing is backend-asymmetric — engram.share() reindexes conditionally and engram.pull() never does', labels: [], assignees: null },
+            { number: 358, title: 'Q5 — Architecture decision: doctrine tiers (lite/standard/regulated)', labels: [], assignees: null },
+            { number: 340, title: 'fix(governance): issue-link local check and CI job implement the same rule differently — brain:check greenlights PRs that CI rejects', labels: ['type:bug', 'status:needs-review'], assignees: null },
+            { number: 336, title: 'feat(vcs): M10 Phase 1 — port-verb contract coverage audit (detection only)', labels: ['type:feature', 'status:needs-review'], assignees: null },
+            { number: 329, title: 'fix(governance): actor-check L5 and #124 are mutually unsatisfiable for a solo maintainer', labels: ['type:bug'], assignees: null },
           ]
         : [
-            { number: 42, title: 'Add pagination guard to labelList', labels: ['type:bug', 'status:needs-review'] },
-            { number: 41, title: 'Fix issueView author normalization', labels: [] },
+            { number: 42, title: 'Add pagination guard to labelList', labels: ['type:bug', 'status:needs-review'], assignees: null },
+            { number: 41, title: 'Fix issueView author normalization', labels: [], assignees: null },
           ];
     assert.deepEqual(result, expected);
+  });
+
+  // ── assignees: THREE outcomes, one assertion set, both providers (#533) ──
+  // The whole reason this field was worth an ADR is that `[]` and `null` must not
+  // be the same answer. One fixture per outcome, mirrored entry-for-entry across
+  // the two providers, so a provider that quietly `?? []`s its way to "nobody is
+  // assigned" fails here rather than in a map somebody trusted.
+  test(`${providerName}.issueList (contract): assignees distinguish "nobody" ([]) from "cannot see" (null)`, async () => {
+    const fixtureName = `${providerName}-issueList-assignees.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.issueList({ project: 'x/y', state: 'open', ...issueListArgs(fixture) });
+    const by = (n) => result.find(r => r.number === n);
+
+    assert.deepEqual(by(901).assignees, ['alice', 'bob'], 'the plural array normalizes to bare names');
+    assert.deepEqual(by(902).assignees, [], 'read, and nobody is assigned — an EMPTY list, not null');
+    assert.deepEqual(by(903).assignees, ['carol'], 'no plural key, but a singular one still answers the question');
+    assert.equal(by(904).assignees, null, 'NO assignee field at all is "brain cannot see" — null, never []');
+
+    // The two failing outcomes must be distinguishable by a caller, which is the
+    // property `evidence-reader-empty-on-failure` is about. Asserting each value
+    // separately above would still pass if both were `[]`.
+    assert.notDeepEqual(by(902).assignees, by(904).assignees,
+      '"nobody is assigned" and "brain cannot see" must not be the same value');
   });
 
   test(`${providerName}.issueList (contract): an empty open-list yields [], never a fabricated null/undefined`, async () => {

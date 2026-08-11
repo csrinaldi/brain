@@ -7,7 +7,7 @@
 // API accepts the URL-encoded project path everywhere, so the slug is used directly.
 
 import { run, runJson } from '../lib/exec.mjs';
-import { normalizeCommitStatus, providerState, assigneeParams } from '../lib/normalize.mjs';
+import { normalizeCommitStatus, providerState, assigneeParams, normalizeAssignees } from '../lib/normalize.mjs';
 import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
 import { gitlabApiFetch } from '../gitlab-api.mjs';
@@ -112,7 +112,103 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
     // approval actor against BOTH the PR author and the issue author — the
     // same API call already carries `author.username`, no extra round-trip.
     author: r.author?.username ?? null,
+    // `assignees` (issue #533, ADR-0029): `string[]` when the payload carried the
+    // field, `null` when it did not. GitLab CE caps the array at one entry rather
+    // than omitting it, so the plural key is read on every tier.
+    assignees: normalizeAssignees(r, 'username'),
   };
+}
+
+/**
+ * issueUpdate — the port's first verb that can OVERWRITE HUMAN PROSE (issue #533,
+ * ADR-0029 Decision 3). GitHub's twin, over `PUT /projects/:id/issues/:iid`.
+ *
+ * `body` maps to GitLab's `description`, and it is the ONLY field written: a
+ * payload that could also carry `state_event` would make this the verb that closes
+ * a ticket, which is a governance act, not a body edit.
+ *
+ * The containment lives at the caller (`replaceMapRegion` + `outsideRegion`) and is
+ * asserted by test before this verb exists — see the GitHub twin's note.
+ *
+ * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS, same discipline as
+ * `issueCreate`/`prView` — this file is a GATE_FILE and never reads pipeline env.
+ * Never throws.
+ *
+ * @param {{ project: string, number: number, body: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ ok: true, url: string|null } | { ok: false, error: string }>}
+ */
+export async function issueUpdate({ project, number, body, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  if (typeof body !== 'string') {
+    return { ok: false, error: 'issueUpdate: `body` must be a string' };
+  }
+  try {
+    const r = await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: glToken(token),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encodeURIComponent(project)}/issues/${number}`,
+      method: 'PUT',
+      body: { description: body },
+      fetchImpl,
+    });
+    return { ok: true, url: r?.web_url ?? null };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * issueRelations — the provider's NATIVE dependency graph (issue #533, ADR-0029
+ * Decision 2), read from `GET /projects/:id/issues/:iid/links`.
+ *
+ * GitLab states the direction in `link_type`, from the perspective of the issue
+ * asked about:
+ *   `blocks`        → this issue blocks that one     → `blocks`
+ *   `is_blocked_by` → this issue needs that one      → `needs`
+ *   `relates_to`    → DROPPED, deliberately
+ *
+ * `relates_to` is not an ordering relation. Reading it as one would turn every
+ * "see also" a human clicked into a blocker, and the graph's whole job is to answer
+ * *can this start now* — an edge that does not constrain start order is noise that
+ * blocks work.
+ *
+ * CROSS-PROJECT links are counted, never mapped, for the reason the GitHub twin
+ * records: iids are per-project, so a foreign `#12` drawn as a node asserts an edge
+ * to THIS project's #12. `references.relative` is the decidable signal — GitLab
+ * renders it as `#12` within the project and `group/proj#12` outside it.
+ *
+ * Never throws, and NEVER fabricates an empty graph: a fetch failure returns `null`
+ * (uncomputable), distinct from a successful read of an issue with no links.
+ *
+ * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ blocks: number[], needs: number[], foreign: number }|null>}
+ */
+export async function issueRelations({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  let links;
+  try {
+    links = await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: glToken(token),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encodeURIComponent(project)}/issues/${number}/links`,
+      fetchImpl,
+    });
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(links)) return null;
+
+  const out = { blocks: [], needs: [], foreign: 0 };
+  for (const l of links) {
+    const key = l?.link_type === 'blocks' ? 'blocks' : l?.link_type === 'is_blocked_by' ? 'needs' : null;
+    if (!key) continue;
+    const relative = l.references?.relative;
+    // A missing `references` block is undecidable, and undecidable must not become
+    // a local edge — the same direction `filesOverlap` takes when it cannot decide.
+    if (typeof relative !== 'string' || !relative.startsWith('#')) { out.foreign += 1; continue; }
+    if (Number.isInteger(l.iid)) out[key].push(l.iid);
+  }
+  return out;
 }
 
 /**
@@ -449,7 +545,15 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
     arr.push(...chunk);
     if (chunk.length < perPage) break;
   }
-  return arr.map(r => ({ number: r.iid, title: r.title, labels: r.labels ?? [] }));
+  // `assignees` (issue #533, ADR-0029) — the list endpoint already carries them,
+  // so the map's "who is executing this" costs no extra round-trip. `null` when
+  // the payload has no assignee field; `[]` only when it has one and it is empty.
+  return arr.map(r => ({
+    number: r.iid,
+    title: r.title,
+    labels: r.labels ?? [],
+    assignees: normalizeAssignees(r, 'username'),
+  }));
 }
 
 export async function mrList({ project, state = 'open' } = {}) {
