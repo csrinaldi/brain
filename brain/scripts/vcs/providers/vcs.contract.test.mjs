@@ -345,6 +345,36 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assert.deepEqual(result.labels, [], 'an empty label set must normalize to [], not null/undefined');
   });
 
+  // ── issueView.state / stateReason (issue #557, D2 — the archive sweep's
+  // closed-issue selector) ──────────────────────────────────────────────────
+  // The recorded/derived happy fixtures above predate this field (queried
+  // BEFORE the widening), so — same discipline as `prView`'s headRefOid tests
+  // (:263-282) — these are exercised inline rather than mutating
+  // provenance-tracked fixture files.
+  test(`${providerName}.issueView (contract): a closed issue with a completed reason normalizes state:'closed', stateReason:'completed' (or GitLab's always-null residual)`, async () => {
+    const closedFixture =
+      providerName === 'github'
+        ? { throws: false, data: { number: 7, title: 'x', body: '', user: null, state: 'closed', state_reason: 'completed' } }
+        : { throws: false, data: { iid: 7, title: 'x', description: '', author: null, state: 'closed' } };
+    const result = await vcs.issueView({ project: 'x/y', number: 7, ...issueViewArgs(closedFixture) });
+    assert.equal(result.state, 'closed', 'a closed issue must normalize state to the literal "closed" on both providers');
+    if (providerName === 'github') {
+      assert.equal(result.stateReason, 'completed', "GitHub's state_reason passes through unchanged");
+    } else {
+      assert.equal(result.stateReason, null, "GitLab has no state_reason field — always null, the documented residual (vcs-contract.md)");
+    }
+  });
+
+  test(`${providerName}.issueView (contract): an open issue normalizes state:'open' — GitHub passes 'open' through, GitLab normalizes 'opened'`, async () => {
+    const openFixture =
+      providerName === 'github'
+        ? { throws: false, data: { number: 8, title: 'x', body: '', user: null, state: 'open', state_reason: null } }
+        : { throws: false, data: { iid: 8, title: 'x', description: '', author: null, state: 'opened' } };
+    const result = await vcs.issueView({ project: 'x/y', number: 8, ...issueViewArgs(openFixture) });
+    assert.equal(result.state, 'open', "GitLab's 'opened' must normalize to the shared 'open' enum, matching GitHub's own literal");
+    assert.equal(result.stateReason, null, 'an open issue carries no closure reason on either provider');
+  });
+
   // ── mrList (issue #355, M10 Phase 2 rank-3) ─────────────────────────────
   // `({ project, state }) -> [{ number, title, headBranch }]`. Unlike its
   // sibling read verbs (prView/prReviews/labelEvents/prStatusRollup), `mrList`
