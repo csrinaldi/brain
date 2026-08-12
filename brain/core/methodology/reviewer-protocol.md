@@ -1,6 +1,6 @@
 # Reviewer Protocol — the cold external reviewer as doctrine
 
-> **status:** proposed — pending human signature (see ADR-0020) | **last-reviewed:** — | **owner:** —
+> **status:** current | **last-reviewed:** 2026-08-12 | **owner:** @crinaldi
 
 > **Purpose:** defines the external reviewer as an invocable cold agent instead of a
 > human-mediated role. It fixes the one thing that must never be mechanized — the
