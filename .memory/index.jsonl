@@ -1871,6 +1871,7 @@
 {"id":"rec-ea1d065cf48c4bb0","ts":"2026-07-25T00:47:33Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-ea4bc3bc5238a013","ts":"2026-07-25T21:50:37Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-ea4ef223ee7b2aef","ts":"2026-07-25T21:50:26Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-ea724fff6ae8a2f6","ts":"2026-08-12T00:40:05Z","actor":"feat/issue-558-audited-set-derived","type":"session_summary","project":"brain","file":"2026-08.jsonl"}
 {"id":"rec-ea7b5a2aaf60ee3a","ts":"2026-07-25T21:50:25Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-eaa566d2d4910da8","ts":"2026-07-29T14:29:09Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-eab2d41f55815bf2","ts":"2026-07-25T21:50:45Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}

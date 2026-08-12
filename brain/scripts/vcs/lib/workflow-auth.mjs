@@ -140,7 +140,14 @@ function runScript(block) {
  *  `null`, which is fail-closed (unresolvable), never a silent pass. */
 function entryPoints(script, repoRoot) {
   const out = [];
-  const nodeInvocationRe = /\bnode\s+(?:--\S+\s+)*([^\s"';|&]+\.mjs)/gi;
+  // The path may be QUOTED (`node "brain/scripts/x.mjs"`) — an ordinary spelling,
+  // and mandatory once a path contains a space. The first form of this class
+  // excluded quotes from the character class, so a quoted invocation resolved to
+  // NO entry point, `requirementFor` returned `need: null`, and a port-reaching
+  // step passed clean (#559). Closed here rather than deferred, because on the
+  // GitLab surface "the entry point exists" is the only substantive check there
+  // is, so the blind spot nullifies that audit entirely rather than narrowing it.
+  const nodeInvocationRe = /\bnode\s+(?:--\S+\s+)*["']?([^\s"';|&]+\.mjs)["']?/gi;
   for (const m of script.matchAll(nodeInvocationRe)) {
     const rest = script.slice(m.index + m[0].length);
     const nextTokenMatch = rest.match(/^\s+(\S+)/);
@@ -360,19 +367,44 @@ function declared(block) {
   return keys;
 }
 
-/** The `script:`/`before_script:`/`after_script:` lists of one GitLab job block —
+/** Top-level job blocks of a GitLab pipeline: every zero-indent `name:` key and
+ *  the indented lines under it, comments stripped. Per JOB, not whole-file — a
+ *  whole-file read lets `entryPoints`' trailing-token capture run across a job
+ *  boundary and read the next job's `node` as the previous job's subcommand. */
+function gitlabJobBlocks(yamlText) {
+  const lines = yamlText.split('\n').filter(l => !/^\s*#/.test(l));
+  const starts = [];
+  lines.forEach((l, i) => { if (/^[A-Za-z_.][\w.-]*:\s*(#.*)?$/.test(l)) starts.push(i); });
+  return starts.map((i, n) => ({
+    name: lines[i].replace(/:.*$/, ''),
+    block: lines.slice(i, n + 1 < starts.length ? starts[n + 1] : lines.length).join('\n'),
+  }));
+}
+
+/** The `script:`/`before_script:`/`after_script:` commands of one GitLab job block —
  *  GitLab's equivalent of a step's `run:`. Returns the commands joined, or null
- *  when the block declares none. */
+ *  when the block declares none.
+ *
+ *  ALL THREE SPELLINGS GitLab accepts, because recognising only one is how a
+ *  reader's blind spot becomes the audit's approval (#480's whole lesson, and the
+ *  defect a cold review found in this function's first form): a bare `script:`
+ *  with a `-` list under it, an inline `script: <command>` scalar, and a block
+ *  scalar `script: |` / `script: >`. A job spelled either of the last two used to
+ *  be invisible, and because OTHER jobs still supplied a list the whole-file read
+ *  came back non-empty, so the vacuous-pass guard did not fire either. */
 function gitlabScripts(block) {
   const lines = block.split('\n');
   const out = [];
   for (let i = 0; i < lines.length; i++) {
-    if (!/^\s*(before_script|after_script|script):\s*$/.test(lines[i])) continue;
+    const m = lines[i].match(/^\s*(?:before_script|after_script|script):\s*(.*)$/);
+    if (!m) continue;
+    const rest = m[1].trim();
+    if (rest !== '' && rest !== '|' && rest !== '>') { out.push(rest); continue; }  // inline scalar
     const indent = lines[i].search(/\S/);
     for (let j = i + 1; j < lines.length; j++) {
       if (lines[j].trim() === '') continue;
       if (lines[j].search(/\S/) <= indent) break;
-      out.push(lines[j].replace(/^\s*-\s*/, ''));
+      out.push(lines[j].replace(/^\s*-\s*/, ''));                                   // list or block scalar
     }
   }
   return out.length ? out.join('\n') : null;
@@ -425,27 +457,65 @@ export function auditGitlabFragment(yamlText, { file = 'gitlab fragment', repoRo
     }
   }
 
-  // Job blocks are top-level keys; `script:` lists hang under them. Reading the
-  // whole file at once is enough here — the question is which entry points the
-  // fragment invokes ANYWHERE, not which job invokes which.
-  const script = gitlabScripts(yamlText);
-  if (script === null) {
+  // PER JOB, never whole-file: `entryPoints` captures the token trailing an entry
+  // point as its subcommand, and `\s` matches newlines, so a whole-file read makes
+  // the NEXT job's `node` the previous job's subcommand. Harmless while the
+  // subcommand was discarded; this function now resolves it, so it is not.
+  const jobs = gitlabJobBlocks(yamlText).filter(j => gitlabScripts(j.block) !== null);
+  if (jobs.length === 0) {
     violations.push(
-      `${file}: no script: list found — this fragment's whole purpose is invoking ` +
+      `${file}: no job with a script: found — this fragment's whole purpose is invoking ` +
       `brain's entry points, so reading none means the parse failed, not that there ` +
       `is nothing to check`);
     return violations;
   }
-  for (const e of entryPoints(script, repoRoot)) {
-    if (e.unresolved) {
+
+  let entryCount = 0;
+  for (const job of jobs) {
+    const script = gitlabScripts(job.block);
+
+    // A GitLab job shelling `gh` reaches GitHub outside the port — the #479/#535
+    // coupling in a purer form than a token literal, and the same PROVIDER_CLI
+    // this file already uses on the other surface.
+    if (PROVIDER_CLI.test(script)) {
       violations.push(
-        `${file}: invokes '${e.raw}', which resolves to no entry point — undecidable ` +
-        `is a violation, never a pass`);
-    } else if (e.path && !existsSync(e.path)) {
-      violations.push(
-        `${file}: invokes '${e.raw}', which does not exist — this pipeline runs in no ` +
-        `CI of brain's own, so a renamed script breaks it silently`);
+        `${file}: job '${job.name}' shells a provider CLI — a GitLab pipeline reaching ` +
+        `a provider directly is the coupling the port exists to remove`);
     }
+
+    for (const e of entryPoints(script, repoRoot)) {
+      if (e.unresolved) {
+        violations.push(
+          `${file}: job '${job.name}' invokes '${e.raw}', which resolves to no entry ` +
+          `point — undecidable is a violation, never a pass`);
+        continue;
+      }
+      if (!e.path) continue;
+      entryCount++;
+      if (!existsSync(e.path)) {
+        violations.push(
+          `${file}: job '${job.name}' invokes '${e.raw}', which does not exist — this ` +
+          `pipeline runs in no CI of brain's own, so a renamed script breaks it silently`);
+        continue;
+      }
+      // A multiplexer's SUBCOMMAND is as renameable as its path, and breaks this
+      // pipeline just as silently. Same manifest, same fail-closed reading as the
+      // GitHub side (`requirementFor`) — asymmetry here would mean the two
+      // surfaces disagree about what a valid invocation is.
+      const manifest = parseSubcommandManifest(readFileSync(e.path, 'utf8'));
+      if (manifest && (e.subcommand === null || !(e.subcommand in manifest))) {
+        violations.push(
+          `${file}: job '${job.name}' invokes '${e.raw}' with subcommand ` +
+          `'${e.subcommand ?? '(none)'}', which its manifest does not declare — ` +
+          `undecidable is a violation, never a pass`);
+      }
+    }
+  }
+
+  if (entryCount === 0) {
+    violations.push(
+      `${file}: every job parsed and not one resolved an entry point — the reader found ` +
+      `nothing, which is a parse failure, not a clean bill`);
   }
   return violations;
 }
@@ -461,6 +531,20 @@ export function auditGitlabFragment(yamlText, { file = 'gitlab fragment', repoRo
 export function auditWorkflowAuth(yamlText, { file = 'workflow', repoRoot = process.cwd() } = {}) {
   const violations = [];
   let reachesServer = false;
+
+  // A file that declares jobs and yields not one step is a READER FAILURE, and
+  // this function's contract is that it never returns empty because it failed to
+  // understand something. `stepBlocks` slices on `- ` bullets, so YAML flow style
+  // (`steps: [{run: …}]`) produced zero blocks and a clean bill — a port-reaching
+  // step with no credential, reported as nothing to see. Now that the audited set
+  // is derived from disk rather than listed, an unparseable NEW workflow would
+  // have been silently welcomed (issue #558's own acceptance asks for this).
+  if (/^jobs:\s*$/m.test(yamlText) && stepBlocks(yamlText).length === 0) {
+    violations.push(
+      `${file}: declares jobs: and yields no readable step — this guard could not parse ` +
+      `it, and undecidable is a violation, never a pass`);
+    return violations;
+  }
 
   for (const block of stepBlocks(yamlText)) {
     const script = runScript(block);
