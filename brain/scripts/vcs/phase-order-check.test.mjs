@@ -345,6 +345,98 @@ test('#264: ARCHIVE_DIR_NAME is derived from sdd-layout.archivePath(), no hardco
   );
 });
 
+// ── issue #557 D7-a: openspec/specs/** is allowlisted, not implementation ──
+
+test('#557 D7-a: an archive-PR diff shape (deleted changes/<name>/*, added changes/archive/<iid>/*, modified openspec/specs/<cap>/spec.md) evaluates pass', () => {
+  const result = evaluatePhaseOrder({
+    changedFiles: [
+      // Deleted from the swept folder.
+      'openspec/changes/issue-999-foo/proposal.md',
+      'openspec/changes/issue-999-foo/design.md',
+      'openspec/changes/issue-999-foo/tasks.md',
+      'openspec/changes/issue-999-foo/spec.md',
+      // Added under the archive container.
+      'openspec/changes/archive/999/proposal.md',
+      'openspec/changes/archive/999/design.md',
+      'openspec/changes/archive/999/tasks.md',
+      'openspec/changes/archive/999/spec.md',
+      // The consolidated durable spec — the file this fix allowlists.
+      'openspec/specs/some-capability/spec.md',
+    ],
+    changeDirs: [
+      // What the git-I/O wrapper's buildChangeDir would produce for the swept
+      // folder at HEAD: every artifact gone, zero checked tasks — because the
+      // folder no longer exists post-move, not because phases were skipped.
+      {
+        name: 'issue-999-foo',
+        hasProposal: false,
+        hasSpec: false,
+        hasDesign: false,
+        hasTasks: false,
+        checkedTasks: 0,
+        statusBefore: 'tasked',
+        statusAfter: undefined,
+      },
+      // The archive container itself — already excluded from touchedDirs by
+      // ARCHIVE_DIR_NAME (issue #264), asserted here as a belt-and-braces
+      // sanity check that this fix does not depend on that exclusion.
+      {
+        name: 'archive',
+        hasProposal: false,
+        hasSpec: false,
+        hasDesign: false,
+        hasTasks: false,
+        checkedTasks: 0,
+        statusBefore: undefined,
+        statusAfter: undefined,
+      },
+    ],
+  });
+
+  assert.equal(result.level, 'pass', `expected pass, got ${result.level}: ${JSON.stringify(result.findings)}`);
+  assert.equal(result.findings.length, 0, 'openspec/specs/** must not be counted as implementation code — Rule A/C must not fire');
+});
+
+test('#557 D7-a teeth: the SAME diff shape with the consolidated spec under a path NOT covered by the openspec/specs/ allowlist restores Rule A/C failures', () => {
+  // Identical shape to the passing test above, except the durable-spec file
+  // lives one path segment off (openspec/other-specs/... instead of
+  // openspec/specs/...) — proving the passing test's result is attributable
+  // to the openspec/specs/ prefix rule specifically, not to some unrelated
+  // reason the diff might otherwise pass (e.g. an empty impl set by
+  // accident). If the openspec/specs/ allowlist entry ever regresses (typo,
+  // narrowed prefix, deleted rule), THIS shape is what the real diff would
+  // degrade to, and it must fail.
+  const result = evaluatePhaseOrder({
+    changedFiles: [
+      'openspec/changes/issue-999-foo/proposal.md',
+      'openspec/changes/issue-999-foo/design.md',
+      'openspec/changes/issue-999-foo/tasks.md',
+      'openspec/changes/issue-999-foo/spec.md',
+      'openspec/changes/archive/999/proposal.md',
+      'openspec/changes/archive/999/design.md',
+      'openspec/changes/archive/999/tasks.md',
+      'openspec/changes/archive/999/spec.md',
+      'openspec/other-specs/some-capability/spec.md', // NOT under openspec/specs/
+    ],
+    changeDirs: [
+      {
+        name: 'issue-999-foo',
+        hasProposal: false,
+        hasSpec: false,
+        hasDesign: false,
+        hasTasks: false,
+        checkedTasks: 0,
+        statusBefore: 'tasked',
+        statusAfter: undefined,
+      },
+    ],
+  });
+
+  assert.equal(result.level, 'fail');
+  assert.ok(result.findings.some(f => f.rule === 'C' && f.change === 'issue-999-foo'), 'expected Rule C to fire once the durable-spec path escapes the allowlist');
+  assert.ok(result.findings.some(f => f.rule === 'A' && f.change === 'issue-999-foo'), 'expected Rule A to fire once the durable-spec path escapes the allowlist');
+});
+
 // ── Aggregation — level + findings across rules (REQ-L4-1) ────────────────────
 
 test('aggregation: level is pass and findings is empty when no rule reports a violation', () => {
