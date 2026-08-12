@@ -17,7 +17,7 @@ import { loadContext } from './ci-context.mjs';
 import { archivePath, CHANGES_ROOT, LEGACY_GRANDFATHERED } from '../lib/sdd-layout.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { resolveTier, tierParams } from './governance-tiers.mjs';
-import { mapDetectionToWarning } from '../governance/run-check.mjs';
+import { mapDetectionToWarning } from '../governance/detection-policy.mjs';
 
 const GATE_NAME = 'phase-order';
 
@@ -449,9 +449,10 @@ function defaultReadConfig() {
  * `::warning::`-annotated reason naming the tier — never a hard block at a
  * tier whose policy for this gate is not `required` ("every job whose lite
  * policy is detection exits 0 with a warning annotation stating the tier as
- * the reason"). `mapDetectionToWarning` (run-check.mjs, design §8) is the one
- * shared helper every tier-aware check routes an uncomputable-diff result
- * through, rather than duplicating the tier branch here.
+ * the reason"). `mapDetectionToWarning` (governance/detection-policy.mjs,
+ * design §8) is the one shared helper every tier-aware check routes an
+ * uncomputable-diff result through, rather than duplicating the tier branch
+ * here.
  *
  * @param {string} message
  * @param {'lite'|'standard'|'regulated'} tier
