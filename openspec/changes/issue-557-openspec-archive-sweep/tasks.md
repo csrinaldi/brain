@@ -27,10 +27,10 @@ Chain strategy: pending
 
 ## Phase 1: PR1 — VCS Port Widening
 
-- [ ] 1.1 `brain/scripts/vcs/providers/github.mjs`: widen `issueView` — add `state` (`r.state`), `stateReason` (`r.state_reason ?? null`).
-- [ ] 1.2 `brain/scripts/vcs/providers/gitlab.mjs`: widen `issueView` — add `state` (`opened`→`open`), `stateReason: null`.
-- [ ] 1.3 Update `brain/core/methodology/vcs-contract.md`: `issueView` row + GitLab `stateReason` residual note.
-- [ ] 1.4 Extend `vcs.contract.test.mjs` + provider fixtures: assert `state`/`stateReason` on both providers.
+- [x] 1.1 `brain/scripts/vcs/providers/github.mjs`: widen `issueView` — add `state` (`r.state`), `stateReason` (`r.state_reason ?? null`).
+- [x] 1.2 `brain/scripts/vcs/providers/gitlab.mjs`: widen `issueView` — add `state` (`opened`→`open`), `stateReason: null`.
+- [x] 1.3 Update `brain/core/methodology/vcs-contract.md`: `issueView` row + GitLab `stateReason` residual note.
+- [x] 1.4 Extend `vcs.contract.test.mjs` + provider fixtures: assert `state`/`stateReason` on both providers.
 
 ## Phase 2: PR1 — Selector Module
 
