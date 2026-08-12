@@ -94,6 +94,15 @@ export async function issueView({ project, number }) {
     // `assignees` (issue #533, ADR-0029): `string[]` when the payload carried the
     // field, `null` when it did not. Same call, no extra round-trip.
     assignees: normalizeAssignees(r, 'login'),
+    // `state`/`stateReason` (issue #557, D2): the archive sweep's selector needs
+    // to know whether an issue is CLOSED and, if so, why — same call, no extra
+    // round-trip. `state` passes through GitHub's own `'open'|'closed'` enum
+    // unchanged (no normalization needed, unlike GitLab's `'opened'`).
+    // `stateReason` is GitHub's native `state_reason` (`'completed'|
+    // 'not_planned'|'reopened'|null`), which the selector's row 9 reads to
+    // distinguish "shipped" from "abandoned" closures.
+    state: r.state,
+    stateReason: r.state_reason ?? null,
   };
 }
 

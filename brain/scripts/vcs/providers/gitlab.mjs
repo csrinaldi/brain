@@ -116,6 +116,17 @@ export async function issueView({ project, number, apiBase, token, proxyUrl, fet
     // field, `null` when it did not. GitLab CE caps the array at one entry rather
     // than omitting it, so the plural key is read on every tier.
     assignees: normalizeAssignees(r, 'username'),
+    // `state`/`stateReason` (issue #557, D2): same call, no extra round-trip.
+    // GitLab's issue `state` is `'opened'|'closed'`, normalized to the shared
+    // `'open'|'closed'` enum GitHub already uses. `stateReason` is a documented
+    // residual (vcs-contract.md): GitLab issues carry no `state_reason` field,
+    // so this is ALWAYS `null` here — the selector's row 9 (not-planned) never
+    // fires on GitLab, and a closed-as-abandoned change is archived like any
+    // other closure. `null` here means "the provider does not distinguish",
+    // deliberately distinct from `readIssueState` itself returning `null`
+    // (no answer at all).
+    state: r.state === 'opened' ? 'open' : r.state,
+    stateReason: null,
   };
 }
 
