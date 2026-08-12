@@ -379,6 +379,48 @@ test('5.4: --backfill exits 1 when complete:false (an issue state could not be r
   assert.equal(result.exitCode, 1);
 });
 
+test('5.4b: mixed batch — one archivable folder alongside one unreadable folder — fail-closed archives NOTHING, not just the unreadable one (issue #557 CRITICAL-1)', async () => {
+  // Regression for the fail-closed bug: the archive loop used to run
+  // unconditionally over `selection.archivable`, so a readable+closed folder
+  // was renamed/archived BEFORE the loop (implicitly) reported
+  // `complete: false` — a partial archive on a partial read, exactly what
+  // design D3 and the archive-closed-issue-selection spec's "Selector Reads
+  // Are Fail-Closed" requirement forbid. Unlike 5.4 (a single, unreadable
+  // folder — which passes trivially even with the loop unguarded, since
+  // `selection.archivable` is empty either way), this batch keeps a genuinely
+  // READABLE, ARCHIVABLE folder in play so the loop has something to
+  // wrongly archive if the gate regresses.
+  const fixture = fakeBackfillFs(['issue-901-readable-closed', 'issue-902-unreadable']);
+  const result = await runBackfill({
+    fs: fixture.fs,
+    entries: ['issue-901-readable-closed', 'issue-902-unreadable'],
+    readIssueState: async (iid) => (iid === '901' ? { state: 'closed', stateReason: 'completed' } : null),
+    log: () => {},
+    logError: () => {},
+  });
+
+  assert.equal(result.selection.complete, false);
+  assert.deepEqual(result.selection.readFailures, ['902']);
+  // The selector itself still correctly classifies 901 as archivable —
+  // fail-closed is the CALLER's responsibility, not the selector's.
+  assert.equal(
+    result.selection.folders.find(f => f.name === 'issue-901-readable-closed').outcome,
+    OUTCOME.ARCHIVABLE,
+    "the selector must still report 901 as archivable — fail-closed is enforced by the caller's loop gate, not by miscategorizing 901",
+  );
+
+  assert.equal(result.archivedCount, 0, 'NOTHING may archive when the batch is incomplete, including the readable folder');
+  assert.equal(result.consolidatedCount, 0);
+  assert.equal(result.unconsolidatedCount, 0);
+  assert.equal(fixture.renames.length, 0, 'no rename call may occur for ANY folder in an incomplete batch');
+  assert.equal(
+    fixture.fs.exists('openspec/changes/issue-901-readable-closed'),
+    true,
+    'the readable, archivable folder must still be present in openspec/changes/ — not moved',
+  );
+  assert.equal(result.exitCode, 1);
+});
+
 test('5.5: --backfill on a clean run (archivable + open + not-planned + grandfathered, no blocked outcomes) exits 0', async () => {
   const fixture = fakeBackfillFs(['issue-100-ship', 'issue-200-inflight', 'issue-300-abandoned']);
   const result = await runBackfill({

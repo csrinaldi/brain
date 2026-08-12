@@ -101,6 +101,17 @@ function reportGroup(log, label, folders) {
  * when open/not-planned/grandfathered/not-a-change folders were left in
  * place, which is expected steady-state, not a failure.
  *
+ * FAIL-CLOSED (design D3, spec `archive-closed-issue-selection` — "Selector
+ * Reads Are Fail-Closed"): when `selection.complete === false`, the archive
+ * loop below MUST NOT RUN AT ALL — not even for folders the selector already
+ * classified `archivable` before the unreadable one was hit. A partial batch
+ * (some folders archived, some left because one issue read failed) is a
+ * quieter version of the exact lie the spec forbids: "the selector MUST
+ * abort sweep-set computation rather than proceeding as if zero folders were
+ * eligible; the caller MUST surface the failure." Archiving the readable
+ * subset would report success for a run that could not fully classify the
+ * tree.
+ *
  * @returns {Promise<{ exitCode: 0|1, selection: object, archivedCount: number,
  *   consolidatedCount: number, unconsolidatedCount: number,
  *   archiveErrors: Array<{name: string, message: string}> }>}
@@ -126,20 +137,25 @@ export async function runBackfill({
   let unconsolidatedCount = 0;
   const archiveErrors = [];
 
-  for (const name of selection.archivable) {
-    try {
-      const result = await archiveChange({ changeId: name, fs, dateStr });
-      archivedCount += 1;
-      if (result.unconsolidated) {
-        unconsolidatedCount += 1;
-        log(`  ✓ Archived: ${name} (unconsolidated — no capability: declared)`);
-      } else {
-        consolidatedCount += 1;
-        log(`  ✓ Archived: ${name} (consolidated: ${result.consolidated.join(', ')})`);
+  // Fail-closed (design D3): an incomplete selection archives NOTHING, even
+  // when some folders already resolved to `archivable` — see the doc comment
+  // above. The report below still runs, so the unreadable iid(s) are named.
+  if (selection.complete) {
+    for (const name of selection.archivable) {
+      try {
+        const result = await archiveChange({ changeId: name, fs, dateStr });
+        archivedCount += 1;
+        if (result.unconsolidated) {
+          unconsolidatedCount += 1;
+          log(`  ✓ Archived: ${name} (unconsolidated — no capability: declared)`);
+        } else {
+          consolidatedCount += 1;
+          log(`  ✓ Archived: ${name} (consolidated: ${result.consolidated.join(', ')})`);
+        }
+      } catch (err) {
+        archiveErrors.push({ name, message: err.message });
+        logError(`  ✗ Failed to archive ${name}: ${err.message}`);
       }
-    } catch (err) {
-      archiveErrors.push({ name, message: err.message });
-      logError(`  ✗ Failed to archive ${name}: ${err.message}`);
     }
   }
 
