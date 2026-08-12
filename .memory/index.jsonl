@@ -994,6 +994,7 @@
 {"id":"rec-7bc31a546ba7e963","ts":"2026-07-29T13:59:27Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-7c024d96611b8bf0","ts":"2026-07-25T00:46:30Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-7c29d93a9405738d","ts":"2026-07-13T00:21:57Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-7c54fdaa21023774","ts":"2026-08-12T17:46:33Z","actor":"docs/issue-572-docsreview-materialize-the-m3-reviewer-p","type":"discovery","project":"brain","issue":572,"file":"2026-08.jsonl"}
 {"id":"rec-7c5b3c0885d797c5","ts":"2026-07-25T00:48:43Z","actor":"fix/issue-291-coldboot-fetch-base","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-7c76c8006d6430e8","ts":"2026-07-25T21:52:02Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-7c78511b85e166fc","ts":"2026-07-25T00:46:37Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
