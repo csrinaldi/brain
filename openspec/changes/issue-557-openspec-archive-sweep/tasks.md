@@ -39,20 +39,20 @@ Chain strategy: pending
 
 ## Phase 3: PR1 — archive-logic.mjs / archive.mjs Rewire
 
-- [ ] 3.1 `brain/scripts/lib/archive-logic.mjs`: `archiveChange` returns `{moved, consolidated, unconsolidated}`; `unconsolidated: true` replaces silent `console.warn`.
-- [ ] 3.2 Extend `archive-logic.test.mjs`: `unconsolidated: true` (flat, no `capability:`), `consolidated: ['<cap>']` (nested), existing-destination throw retained.
-- [ ] 3.3 `brain/scripts/archive.mjs`: route `--backfill` through `selectSweep`; alias `--all` with deprecation notice; delete `iid === '260'` hardcode; grouped non-archived report; exit 1 on `complete===false` or blocked, else 0.
-- [ ] 3.4 Test: no `'260'` literal remains in `archive.mjs`; iid 260 receives standard row-8/10 treatment.
+- [x] 3.1 `brain/scripts/lib/archive-logic.mjs`: `archiveChange` returns `{moved, consolidated, unconsolidated}`; `unconsolidated: true` replaces silent `console.warn`.
+- [x] 3.2 Extend `archive-logic.test.mjs`: `unconsolidated: true` (flat, no `capability:`), `consolidated: ['<cap>']` (nested), existing-destination throw retained.
+- [x] 3.3 `brain/scripts/archive.mjs`: route `--backfill` through `selectSweep`; alias `--all` with deprecation notice; delete `iid === '260'` hardcode; grouped non-archived report; exit 1 on `complete===false` or blocked, else 0.
+- [x] 3.4 Test: no `'260'` literal remains in `archive.mjs`; iid 260 receives standard row-8/10 treatment.
 
 ## Phase 4: PR1 — Phase-Order Allowlist Fix
 
-- [ ] 4.1 `brain/scripts/vcs/phase-order-check.mjs`: add `openspec/specs/` to `isAllowlisted`.
-- [ ] 4.2 Extend `phase-order-check.test.mjs`: archive-PR diff shape (delete `changes/<name>/*`, add `changes/archive/<iid>/*`, modify `specs/<cap>/spec.md`) → `pass`; removing the allowlist entry restores Rule C/A failures (teeth).
+- [x] 4.1 `brain/scripts/vcs/phase-order-check.mjs`: add `openspec/specs/` to `isAllowlisted`.
+- [x] 4.2 Extend `phase-order-check.test.mjs`: archive-PR diff shape (delete `changes/<name>/*`, add `changes/archive/<iid>/*`, modify `specs/<cap>/spec.md`) → `pass`; removing the allowlist entry restores Rule C/A failures (teeth).
 
 ## Phase 5: PR1 — Verification
 
-- [ ] 5.1 Run `npm test` — all new/extended suites green.
-- [ ] 5.2 Manual: confirm `archive.mjs <changeId>` single-folder path unchanged (no `readIssueState` call).
+- [x] 5.1 Run `npm test` — all new/extended suites green.
+- [x] 5.2 Manual: confirm `archive.mjs <changeId>` single-folder path unchanged (no `readIssueState` call).
 
 ## Phase 6: PR2 — Backfill Execution (no code)
 
