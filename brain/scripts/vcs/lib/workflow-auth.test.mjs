@@ -9,11 +9,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, symlinkSync } from 'node:fs';
+import { resolve, dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-import { auditWorkflowAuth, stepBlocks } from './workflow-auth.mjs';
+import { auditWorkflowAuth, stepBlocks, parseSubcommandManifest } from './workflow-auth.mjs';
 
 // brain/scripts/vcs/lib → the repository root is FOUR levels up, not three. Three
 // lands on `brain/`, where no entry point resolves, and every fixture then reports
@@ -120,6 +121,30 @@ test('#480: a job-level or workflow-level env: is NOT claimed to be impossible',
   ].join('\n');
   assert.ok(audit(jobLevel).length > 0,
     'the step-scoped read cannot see a job-level env: — recorded as a limitation, not denied');
+});
+
+test('#535: the same job-level limitation extends to PR_NUMBER — a job-level PR_NUMBER is invisible to this guard (known limitation, not denied, D6)', () => {
+  // The PR_NUMBER rule (Requirement 5) reads step-scoped `env:` the same way
+  // the credential read does — so a job-level PR_NUMBER is exactly as
+  // invisible as a job-level VCS_TOKEN above. This is a genuine MISS (an
+  // under-approximation, the one direction #480's over-reading discipline does
+  // not cover), named here rather than denied.
+  const jobLevel = [
+    'permissions: { contents: write, pull-requests: read }',
+    'jobs:',
+    '  g:',
+    '    env:',
+    '      PR_NUMBER: ${{ github.event.pull_request.number }}',
+    '    steps:',
+    '      - name: phase-order',
+    '        env:',
+    '          BASE_SHA: ${{ github.event.pull_request.base.sha }}',
+    '          HEAD_SHA: ${{ github.event.pull_request.head.sha }}',
+    '          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}',
+    '        run: node brain/scripts/vcs/phase-order-check.mjs',
+  ].join('\n');
+  assert.deepEqual(audit(jobLevel), [],
+    'the step-scoped read cannot see a job-level PR_NUMBER — a real miss, recorded as a limitation, not denied');
 });
 
 // ── the polarity: undecidable is a violation ────────────────────────────────
@@ -235,4 +260,342 @@ test('#480 A3 at the splitter: a step whose first key is run: is its own step', 
   const blocks = stepBlocks(y);
   assert.equal(blocks.length, 2, 'two steps, not one absorbing the other');
   assert.ok(!/VCS_TOKEN/.test(blocks[1]), 'the second step must not inherit the first step\'s credential');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// issue #535 — per-invocation resolution: a multiplexer's subcommands can
+// resolve to DIFFERENT requirements, and PR_NUMBER presence governs the
+// ci-context.mjs bootstrap edge.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── T2 (Requirement 3/5) ────────────────────────────────────────────────────
+
+const fixtureT2 = (memoryGateHasPrNumber) => [
+  'permissions: { contents: write, pull-requests: read }',
+  'jobs:',
+  '  g:',
+  '    steps:',
+  '      - name: diff-size',
+  '        env:',
+  '          PR_NUMBER: ${{ github.event.pull_request.number }}',
+  '        run: node brain/scripts/governance/run-check.mjs diff-size',
+  '      - name: memory-gate',
+  ...(memoryGateHasPrNumber
+    ? ['        env:', '          PR_NUMBER: ${{ github.event.pull_request.number }}']
+    : []),
+  '        run: node brain/scripts/governance/run-check.mjs memory-gate',
+].join('\n');
+
+test('T2: diff-size (+PR_NUMBER, no credential) is flagged; memory-gate (no PR_NUMBER) yields zero violations', () => {
+  const v = audit(fixtureT2(false));
+  assert.ok(v.some(m => /diff-size/.test(m) && /VCS_TOKEN/.test(m)), `diff-size must be flagged:\n${v.join('\n')}`);
+  assert.ok(!v.some(m => /memory-gate/.test(m)), `memory-gate must NOT be flagged:\n${v.join('\n')}`);
+});
+
+test('T2 mutation: adding PR_NUMBER to the memory-gate step now flags it too — the rule is live, not vacuous, in both directions', () => {
+  const v = audit(fixtureT2(true));
+  assert.ok(v.some(m => /memory-gate/.test(m) && /VCS_TOKEN/.test(m)), `memory-gate with PR_NUMBER must now be flagged:\n${v.join('\n')}`);
+});
+
+// ── T3 (Requirement 4) ──────────────────────────────────────────────────────
+
+test('T3: an unknown run-check.mjs subcommand is a violation, with the correct message', () => {
+  const y = wrap('      - name: evil\n        run: node brain/scripts/governance/run-check.mjs frobnicate');
+  assert.match(audit(y).join('\n'), /cannot resolve|undecidable/);
+});
+
+test('T3: a run-check.mjs invocation missing its subcommand argument is also a violation, with the same message', () => {
+  const y = wrap('      - name: evil\n        run: node brain/scripts/governance/run-check.mjs');
+  assert.match(audit(y).join('\n'), /cannot resolve|undecidable/);
+});
+
+test('T3 mutation: the unknown subcommand is STILL flagged even with VCS_TOKEN declared — unresolvable is not curable by producing a credential', () => {
+  const y = wrap([
+    '      - name: evil',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/governance/run-check.mjs frobnicate',
+  ].join('\n'));
+  assert.match(audit(y).join('\n'), /cannot resolve|undecidable/);
+});
+
+// ── T4 (Requirement 3/6, D8) ─────────────────────────────────────────────────
+
+test('T4: parseSubcommandManifest — empty source is null; the real run-check.mjs source yields exactly its 4 keys', () => {
+  assert.equal(parseSubcommandManifest(''), null);
+  const src = readFileSync(resolve(REPO_ROOT, 'brain/scripts/governance/run-check.mjs'), 'utf8');
+  const manifest = parseSubcommandManifest(src);
+  assert.deepEqual(Object.keys(manifest).sort(), ['decision-gate', 'diff-size', 'issue-link', 'memory-gate']);
+});
+
+test('T4 mutation: renaming the SUBCOMMAND_PORT_REACH const makes the manifest unreadable (null), not zero-requirement', () => {
+  const src = readFileSync(resolve(REPO_ROOT, 'brain/scripts/governance/run-check.mjs'), 'utf8');
+  const mutated = src.replace('SUBCOMMAND_PORT_REACH = {', 'RENAMED_MANIFEST = {');
+  assert.notEqual(mutated, src, 'the mutation must land');
+  assert.equal(parseSubcommandManifest(mutated), null);
+});
+
+test('T4 mutation via the caller: a manifest-less multiplexer whose closure reaches cli.mjs is never silently treated as "no requirement"', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'wfauth-t4-'));
+  try {
+    mkdirSync(join(tmp, 'scripts'), { recursive: true });
+    mkdirSync(join(tmp, 'vcs'), { recursive: true });
+    writeFileSync(join(tmp, 'vcs', 'cli.mjs'), 'export function getVcs() {}\n');
+    writeFileSync(
+      join(tmp, 'scripts', 'multiplexer.mjs'),
+      "import { getVcs } from '../vcs/cli.mjs';\n// no SUBCOMMAND_PORT_REACH here — not recognized as a multiplexer\n"
+    );
+    const y = [
+      'jobs:', '  g:', '    steps:',
+      '      - name: whatever',
+      '        run: node scripts/multiplexer.mjs some-subcommand',
+    ].join('\n');
+    const v = auditWorkflowAuth(y, { file: 'probe', repoRoot: tmp });
+    assert.ok(v.length > 0,
+      'a manifest-less multiplexer whose whole-file closure reaches the port must still be flagged (D2 safe fallback), never read as no requirement');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── T5 (Requirement 2/6, D1/D7) ──────────────────────────────────────────────
+
+test('T5: a phase-order-check.mjs step with no credential and no PR_NUMBER is credential-free', () => {
+  const y = [
+    'permissions: { contents: write, pull-requests: read }',
+    'jobs:', '  g:', '    steps:',
+    '      - name: phase-order',
+    '        env:',
+    '          BASE_SHA: ${{ github.event.pull_request.base.sha }}',
+    '          HEAD_SHA: ${{ github.event.pull_request.head.sha }}',
+    '          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}',
+    '        run: node brain/scripts/vcs/phase-order-check.mjs',
+  ].join('\n');
+  assert.deepEqual(audit(y), []);
+});
+
+// ── T10 (D9) — block-style `permissions:` was silently unevaluated ─────────
+//
+// governance.yml:16-19 is block style (`permissions:\n  contents: read\n...`),
+// not flow style (`permissions: { ... }`). The scope regex only recognized
+// flow style, so condition 2 of the #479/#475 rule (a credential under a
+// permissions block that omits pull-requests) was silently NOT EVALUATED for
+// governance.yml — a guard claiming coverage it lacked, the exact #480
+// defect class this issue removes.
+
+test('T10: block-style permissions without pull-requests is a violation, even with VCS_TOKEN declared', () => {
+  const y = [
+    'permissions:',
+    '  contents: read',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.match(audit(y).join('\n'), /every omitted scope/);
+});
+
+test('T10 mutation: adding pull-requests: read to the block-style permissions clears the violation', () => {
+  const y = [
+    'permissions:',
+    '  contents: read',
+    '  pull-requests: read',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.deepEqual(audit(y), []);
+});
+
+// ── T11 (issue #535 fix) — a comment inside a block-style `permissions:` ────
+//
+// governance.yml's own style puts explanatory comments inside blocks (its
+// `env:` blocks, lines 52-53/55-56/60-61). Before the fix, the block scan
+// `break`s on the first line that is not blank and not a `key: value` scope
+// line — a comment qualifies, so it either empties `scopeLines` entirely
+// (returning `null`, silently skipping the whole rule) or truncates the
+// block before a later compliant key is read.
+
+test('T11: a comment as the FIRST line under a block-style permissions: that lacks pull-requests is still flagged, not silently skipped', () => {
+  const y = [
+    'permissions:',
+    '  # only read what we need',
+    '  contents: read',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.match(audit(y).join('\n'), /every omitted scope/);
+});
+
+test('T11: a comment BETWEEN scope keys does not truncate the block — pull-requests after the comment still counts as declared', () => {
+  const y = [
+    'permissions:',
+    '  contents: read',
+    '  # PR read access for the gate',
+    '  pull-requests: read',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.deepEqual(audit(y), []);
+});
+
+// ── T12 (issue #535 WARNING 4) — a `permissions:` header present but parsed
+// to ZERO scope lines must still fire the pull-requests check ────────────
+//
+// permissionsScopes() used to collapse "header present, no scope lines" into
+// the SAME `null` as "no permissions: key at all" — the caller treats `null`
+// as the intentionally-silent default-token case and skips the check. But an
+// explicit empty grant (a block containing only comments, or flow-style
+// `permissions: {}`) sets EVERY scope to `none` in Actions semantics — the
+// most restrictive case, and the one that most needs the check to fire.
+
+test('T12: a block-style permissions: header containing ONLY comments (zero scope lines) is still flagged, not silently skipped like "no header at all"', () => {
+  const y = [
+    'permissions:',
+    '  # nothing granted here on purpose',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.match(audit(y).join('\n'), /every omitted scope/);
+});
+
+test('T12: flow-style permissions: {} (explicit empty grant) is still flagged', () => {
+  const y = [
+    'permissions: {}',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.match(audit(y).join('\n'), /every omitted scope/);
+});
+
+test('T12: no permissions: key at all is still the intentionally-silent default-token case (regression — must stay unflagged)', () => {
+  const y = [
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: audit',
+    '        env:',
+    '          VCS_TOKEN: ${{ github.token }}',
+    '        run: node brain/scripts/brain-audit.mjs "a..b"',
+  ].join('\n');
+  assert.deepEqual(audit(y), []);
+});
+
+test('T5 mutation: the same step WITH PR_NUMBER added is flagged — the pruning and the PR_NUMBER conditional both proven', () => {
+  const y = [
+    'permissions: { contents: write, pull-requests: read }',
+    'jobs:', '  g:', '    steps:',
+    '      - name: phase-order',
+    '        env:',
+    '          PR_NUMBER: ${{ github.event.pull_request.number }}',
+    '          BASE_SHA: ${{ github.event.pull_request.base.sha }}',
+    '          HEAD_SHA: ${{ github.event.pull_request.head.sha }}',
+    '          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}',
+    '        run: node brain/scripts/vcs/phase-order-check.mjs',
+  ].join('\n');
+  assert.ok(audit(y).length > 0, 'adding PR_NUMBER must flag the step — it now reaches the port via the ci-context bootstrap');
+});
+
+// ── W1/W2 (issue #535 verify-report remediation) ─────────────────────────────
+//
+// W1: diff-size's manifest value (`false`) had zero mutation coverage — the
+// real governance.yml step always declares PR_NUMBER, so the PR_NUMBER branch
+// alone already demands VCS_TOKEN, masking the manifest value. This pins the
+// manifest value itself, isolated from PR_NUMBER.
+// W2: a corrupt/unreadable manifest does not resolve to the literal
+// "unresolvable" message (spec Requirement 4c, amended) — it falls back to
+// the D2 whole-file rule, which for run-check.mjs (imports getVcs directly)
+// still fails closed. This pins that safety direction against silent drift.
+
+// Mirrors real brain/scripts into a tmp dir (siblings symlinked, so
+// run-check.mjs's whole-file closure fallback can genuinely reach the real
+// vcs/cli.mjs), with only governance/run-check.mjs replaced by mutated
+// content — real production files are never written to.
+function withMutatedRunCheck(mutate, fn) {
+  const scriptsDir = resolve(REPO_ROOT, 'brain/scripts');
+  const src = readFileSync(join(scriptsDir, 'governance', 'run-check.mjs'), 'utf8');
+  const mutated = mutate(src);
+  assert.notEqual(mutated, src, 'the mutation must land');
+  const tmp = mkdtempSync(join(tmpdir(), 'wfauth-mut-'));
+  try {
+    const tmpScripts = join(tmp, 'brain', 'scripts');
+    const tmpGov = join(tmpScripts, 'governance');
+    mkdirSync(tmpGov, { recursive: true });
+    for (const name of readdirSync(scriptsDir)) {
+      if (name !== 'governance') symlinkSync(resolve(scriptsDir, name), join(tmpScripts, name));
+    }
+    for (const name of readdirSync(join(scriptsDir, 'governance'))) {
+      if (name !== 'run-check.mjs') symlinkSync(resolve(scriptsDir, 'governance', name), join(tmpGov, name));
+    }
+    writeFileSync(join(tmpGov, 'run-check.mjs'), mutated);
+    fn(tmp);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+const fixtureW1 = () => [
+  'permissions: { contents: write, pull-requests: read }',
+  'jobs:', '  g:', '    steps:',
+  '      - name: diff-size',
+  '        run: node brain/scripts/governance/run-check.mjs diff-size',
+].join('\n');
+
+test('W1: diff-size without PR_NUMBER and without credential is credential-free — pins the manifest value, isolated from the PR_NUMBER bootstrap edge', () => {
+  assert.deepEqual(audit(fixtureW1()), []);
+});
+
+test('W1 mutation: flipping diff-size to true in the manifest flags the same step — the manifest value has real teeth', () => {
+  withMutatedRunCheck(
+    src => src.replace("'diff-size': false,", "'diff-size': true,"),
+    tmp => {
+      const v = auditWorkflowAuth(fixtureW1(), { file: 'probe', repoRoot: tmp });
+      assert.ok(v.some(m => /diff-size/.test(m) && /VCS_TOKEN/.test(m)),
+        `flipping diff-size to true must flag the credential-free step:\n${v.join('\n')}`);
+    }
+  );
+});
+
+test('W2: a corrupt manifest still fails closed via the D2 whole-file fallback — memory-gate (credential-free today) gets flagged, never silently passed', () => {
+  withMutatedRunCheck(
+    src => src.replace('SUBCOMMAND_PORT_REACH = {', 'CORRUPTED_MANIFEST = {'),
+    tmp => {
+      const y = [
+        'permissions: { contents: write, pull-requests: read }',
+        'jobs:', '  g:', '    steps:',
+        '      - name: memory-gate',
+        '        run: node brain/scripts/governance/run-check.mjs memory-gate',
+      ].join('\n');
+      const v = auditWorkflowAuth(y, { file: 'probe', repoRoot: tmp });
+      assert.ok(v.length > 0,
+        'a corrupt manifest must fail closed, never silently pass a step it can no longer resolve');
+    }
+  );
 });

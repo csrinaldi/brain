@@ -255,3 +255,33 @@ test('compileGeminiSettingsJson() emits valid JSON with SessionStart and PreTool
   assert.match(preToolUseHook, /--no-verify/);
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// REQ-509-6 — the AGENTS.md compiler no longer fails open for a new caller
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('REQ-509-6: compileAgentsMd THROWS on an array — the shape a new caller reaches for first', () => {
+  const docs = SOURCE_DOCS.map(() => 'content');
+  assert.throws(() => compileAgentsMd(docs), /array|missing/i);
+});
+
+test('REQ-509-6: compileAgentsMd THROWS on a map missing one key, and names the key', () => {
+  const docs = {};
+  for (const rel of SOURCE_DOCS) docs[rel] = 'content';
+  delete docs['brain/HOME.md'];
+  assert.throws(() => compileAgentsMd(docs), /brain\/HOME\.md/);
+});
+
+test('REQ-509-6: the old fail-open would have produced a plausible file — proof the throw is load-bearing', () => {
+  const complete = {};
+  for (const rel of SOURCE_DOCS) complete[rel] = 'content';
+  const good = compileAgentsMd(complete);
+  const empty = {};
+  for (const rel of SOURCE_DOCS) empty[rel] = '';
+  const gutted = compileAgentsMd(empty);
+  // Both are well-formed AGENTS.md files with the same banner and the same five
+  // section headers. That is exactly why the old `?? ''` fallback was invisible:
+  // the gutted output does not look like an error.
+  assert.match(gutted, /generated from/);
+  assert.equal(gutted.split('<!-- source: ').length, good.split('<!-- source: ').length);
+  assert.ok(gutted.length < good.length);
+});

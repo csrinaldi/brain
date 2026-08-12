@@ -149,17 +149,36 @@ function rebaseRelativeLinks(content, sourceRelPath, emitRelPath) {
  * (REQ-B2-2 binds the outcome — a working, provenance-declared file — not a
  * byte-identical splice of link targets that would only be correct in situ).
  *
+ * REFUSES an incomplete docs map (#509). It used to fall back to `?? ''` per
+ * section, so passing an ARRAY — the shape a new caller reaches for first —
+ * keyed nothing, emitted five empty sections, deleted 543 lines from AGENTS.md
+ * and returned normally (measured while promoting #529 by hand; caught only by
+ * reading the diff). `init()` never relied on that fallback — it substitutes ''
+ * explicitly on a read failure and warns — so a missing key means the CALLER is
+ * wrong: the evidence-reader-empty-on-failure anti-pattern, one layer down.
+ *
  * @param {{ [relPath: string]: string }} docs Keyed by SOURCE_DOCS relative path.
  * @returns {string} The compiled AGENTS.md content.
+ * @throws {TypeError} When any SOURCE_DOCS key is missing or is not a string.
  */
 export function compileAgentsMd(docs) {
+  const missing = SOURCE_DOCS.filter((relPath) => typeof docs?.[relPath] !== 'string');
+  if (missing.length > 0) {
+    throw new TypeError(
+      `compileAgentsMd: docs must be an object keyed by SOURCE_DOCS relative path — ` +
+        `${missing.length} of ${SOURCE_DOCS.length} missing or not a string: ${missing.join(', ')}. ` +
+        `Got ${Array.isArray(docs) ? 'an array' : typeof docs}. ` +
+        'Compiling with empty sections would silently gut AGENTS.md (#509).',
+    );
+  }
+
   const banner =
     `<!-- generated from ${SOURCE_DOCS.join(', ')} — do not edit.\n` +
     `     Regenerate: ${REGENERATE_HINT}\n` +
     `     Drift-guarded by antigravity.drift.test.mjs — hand-edits fail CI. -->`;
 
   const sections = SOURCE_DOCS.map((relPath) => {
-    const rebased = rebaseRelativeLinks(docs[relPath] ?? '', relPath, AGENTS_EMIT_PATH);
+    const rebased = rebaseRelativeLinks(docs[relPath], relPath, AGENTS_EMIT_PATH);
     return `<!-- source: ${relPath} -->\n\n${rebased}`;
   });
 

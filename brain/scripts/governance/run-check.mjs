@@ -72,7 +72,7 @@ import { resultToExit } from './postmerge/exit-codes.mjs';
 import { loadContext, gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { getVcs } from '../vcs/cli.mjs';
-import { resolveTier, tierParams, resolveGatePolicy } from '../vcs/governance-tiers.mjs';
+import { resolveTier, tierParams } from '../vcs/governance-tiers.mjs';
 
 /**
  * Default `readRecords` dep for the memory-gate (issue #222 cutover fix):
@@ -438,48 +438,24 @@ async function runDiffSizeCheck(ctx, deps) {
 }
 
 /**
- * Maps a check result to its tier-appropriate exit shape (issue #358 Q5,
- * design §8, REQ-TIER-3): when a gate's policy at the resolved tier is
- * `detection` (position-tiered, e.g. `memory-gate` at `lite`), a genuine
- * VIOLATION (`pass:false`, NOT `uncomputable`) is downgraded to `pass:true`
- * with a `::warning::`-annotated reason naming the tier — never a bare,
- * unexplained pass (REQ-TIER-3: "never absent, never silent"). An
- * `uncomputable` result is NEVER downgraded — an infra failure is infra
- * failure regardless of tier position. A `required`-policy gate at this tier
- * passes through unchanged.
- *
- * ONE shared helper, not per-job logic (design §8) — every run-check.mjs case
- * is meant to route its result through this before returning.
- *
- * NOT YET WIRED into any of this file's four checks (issue #358 Q5 phases
- * 1-3, deliberately): `issue-link`/`decision-gate`/`diff-size` are
- * never-tiered (REQ-TIER-2 — `resolveGatePolicy` is `'required'` at every
- * tier for all three, so wiring today would be a permanent no-op).
- * `memory-gate` DOES vary by tier in GATE_MATRIX (`detection` at `lite`), but
- * design.md §6 explicitly scopes that wiring to **T2.1** ("T2.1 ships the
- * per-change check as detection-capable with a tier parameter... do not
- * couple T2.1's merge to that flip") — memory-gate's *precision* (matching a
- * specific issue's record, not just global presence) is T2.1's own
- * deliverable, and flipping its run-check.mjs exit behavior ahead of that
- * would both jump a separate issue's scope and break run-check.test.mjs's
- * existing hard-required memory-gate fixtures, which assume today's
- * pre-tiering global behavior. This function is the reusable primitive T2.1
- * (and any future position-tiered promotion) wires in; exported for that.
- *
- * @param {{ pass: boolean, reason?: string, uncomputable?: boolean }} result
- * @param {'lite'|'standard'|'regulated'} tier
- * @param {string} gate
- * @returns {{ pass: boolean, reason?: string, uncomputable?: boolean }}
+ * Declares, per subcommand, whether THIS FILE'S OWN HANDLER reaches the VCS
+ * port (issue #535, Requirement 3/5). Read from source text — never imported
+ * — by workflow-auth.mjs's `parseSubcommandManifest`, which recognizes this
+ * file as a multiplexer by the presence of this exported const, never by path
+ * spelling. Values describe the HANDLER's own port use, not the file's whole
+ * import closure: `diff-size: false` because `runDiffSizeCheck` never calls
+ * `getVcs` itself — the bootstrap reach through `ci-context.mjs` is a
+ * separate, `PR_NUMBER`-gated rule in the guard, not baked opaquely in here.
+ * A test (run-check.test.mjs T7) asserts this key set sorted-equals the
+ * checkNames actually dispatched below, in both directions — a manifest that
+ * drifts from the dispatch is a violation the workflow-auth guard cannot see.
  */
-export function mapDetectionToWarning(result, tier, gate) {
-  if (!result || result.pass !== false || result.uncomputable) return result;
-  if (resolveGatePolicy(gate, tier) !== 'detection') return result;
-  return {
-    ...result,
-    pass: true,
-    reason: `::warning::${gate}: ${result.reason} (tier: ${tier})`,
-  };
-}
+export const SUBCOMMAND_PORT_REACH = {
+  'memory-gate': false,   // runMemoryGateCheck — records only
+  'decision-gate': false, // adrPresence — git diff only
+  'issue-link': true,     // runIssueLinkCheck → defaultFetchIssue → getVcs
+  'diff-size': false,     // runDiffSizeCheck — ctx.labels/diffNumstat only
+};
 
 /**
  * Runs a named governance check via its pure function, computing inputs from
