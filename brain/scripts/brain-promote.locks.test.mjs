@@ -39,9 +39,47 @@ import { makeFixtureRepo, statusOf, commitCount, stagedPaths, REPO_ROOT } from '
 
 const MODULE_PATH = join(REPO_ROOT, 'brain/scripts/brain-promote.mjs');
 const SOURCE = readFileSync(MODULE_PATH, 'utf8');
-const CODE = stripComments(SOURCE);
+
+// ── The verb's OWN modules, enumerated from the code, not from memory ────────
+// Lock 2's structural half used to scan brain-promote.mjs alone. When the verb
+// grew a second module (#509) half of it stopped being covered: an env read
+// inserted into planAmendment left this suite 55/55 green while
+// BRAIN_PROMOTE_AS forged the `**Signed**:` attribution in a promoted ADR.
+//
+// The fix is not "add the other file" — it is to derive the list from the
+// import statements, and to pin it, so a THIRD module cannot slip in silently
+// either. `harness/backends/antigravity.mjs` and `lib/home-index.mjs` are
+// shared library code with their own suites and are deliberately out of scope;
+// they are named here so adding a new import fails this test until someone
+// decides which side of that line it is on.
+const OWN_IMPORTS = ['./lib/amendment-draft.mjs'];
+const SHARED_IMPORTS = ['./lib/home-index.mjs', './harness/backends/antigravity.mjs'];
+
+const relativeImportsOf = (src) =>
+  [...src.matchAll(/^\s*(?:import|export)[\s\S]*?from\s+'(\.[^']+)';/gm)].map((m) => m[1]);
+
+const VERB_MODULES = [MODULE_PATH, ...OWN_IMPORTS.map((rel) => join(REPO_ROOT, 'brain/scripts', rel.slice(2)))];
+const CODE = VERB_MODULES.map((f) => stripComments(readFileSync(f, 'utf8'))).join('\n');
 
 const count = (haystack, needle) => haystack.split(needle).length - 1;
+
+test('REQ-378-2 harness proof: the scanned module set IS the verb — every relative import is classified', () => {
+  const found = relativeImportsOf(SOURCE).sort();
+  assert.deepEqual(
+    found,
+    [...OWN_IMPORTS, ...SHARED_IMPORTS].sort(),
+    'brain-promote.mjs imported a module this guard does not know about — classify it as the verb\'s own ' +
+      '(scanned for env reads and bypass flags) or as shared library code, then update OWN_IMPORTS/SHARED_IMPORTS.',
+  );
+  assert.equal(VERB_MODULES.length, 2, 'the verb spans two modules; both must be scanned');
+});
+
+test('REQ-378-2 harness proof: the concatenated CODE really contains BOTH modules', () => {
+  // Without this, a broken path would produce an empty second half and every
+  // occurrence-count assertion below would pass by reading nothing.
+  assert.ok(count(CODE, 'export async function runPromote') === 1, 'brain-promote.mjs must be in the scan');
+  assert.ok(count(CODE, 'export function assessEdit') === 1, 'amendment-draft.mjs must be in the scan');
+});
 
 function cleanup(root) {
   rmSync(root, { recursive: true, force: true });
@@ -211,7 +249,14 @@ test('REQ-378-3: ALLOWED_GIT_SUBCOMMANDS excludes commit and push, and is frozen
   assert.ok(Object.isFrozen(ALLOWED_GIT_SUBCOMMANDS));
   assert.equal(ALLOWED_GIT_SUBCOMMANDS.includes('commit'), false);
   assert.equal(ALLOWED_GIT_SUBCOMMANDS.includes('push'), false);
-  assert.deepEqual([...ALLOWED_GIT_SUBCOMMANDS].sort(), ['add', 'config']);
+  assert.deepEqual([...ALLOWED_GIT_SUBCOMMANDS].sort(), ['add', 'config', 'status']);
+  // `status` is read-only and was added WITH the write preconditions (#509):
+  // `git add` on an unmerged path resolves the conflict, so the allowlist alone
+  // never made lock 3 true. The property it protects is what matters, and it is
+  // asserted above by name rather than by the list's length.
+  for (const forbidden of ['commit', 'push', 'tag', 'reset', 'rebase', 'merge', 'checkout', 'restore']) {
+    assert.equal(ALLOWED_GIT_SUBCOMMANDS.includes(forbidden), false, `'${forbidden}' must never be allow-listed`);
+  }
 });
 
 for (const forbidden of ['commit', 'push', 'tag', 'reset']) {

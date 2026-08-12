@@ -23,20 +23,27 @@ promoted with an edit.
 
 ## Run it
 
+> **This promotion already landed** (ADR-0026 Amendment 4, 11/08/2026). The steps below are kept
+> as the record of how it was executed. `promote-516.sh` no longer exists: #509 replaced the
+> bespoke promoters with `brain:promote`'s amendment path, and the script was deleted with it.
+> For a NEW amendment, write a `*.draft.md` carrying a `brain-amendment/1` block and run
+> `npm run brain:promote -- <draft>` — same anchoring discipline, one implementation.
+
 ```bash
 git fetch origin fix/issue-516-doctrine-gate-claim
 git checkout fix/issue-516-doctrine-gate-claim
-bash openspec/changes/issue-516-doctrine-gate-claim/brain-drafts/promote-516.sh
+bash openspec/changes/issue-516-doctrine-gate-claim/brain-drafts/promote-516.sh   # deleted by #509
 git diff
 git commit -am "docs(governance): decision-gate is added-only and label-blind — ADR-0026 Amendment 4 (#516)"
 git push
 ```
 
-The script anchors on exact strings and **refuses** if any anchor is not found exactly once,
-rather than editing something adjacent. Running it twice reports *"already promoted"*.
+The script anchored on exact strings and **refused** if any anchor was not found exactly once,
+rather than editing something adjacent. Running it twice reported *"already promoted"*. Both
+properties carry over to the verb that replaced it.
 
-It was executed and reverted before shipping — so what you are running is a path that has been
-walked, not a checklist that has been written.
+It was executed and reverted before shipping — so what was run is a path that has been walked,
+not a checklist that has been written.
 
 ## What it touches, and why each one
 
