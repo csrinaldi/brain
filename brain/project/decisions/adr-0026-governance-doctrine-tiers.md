@@ -1,6 +1,6 @@
 # ADR-0026 — Governance Doctrine Tiers: A Declared Axis Orthogonal to the Detected Substrate Ladder
 
-**Status**: Accepted · **amended 11/08/2026** (Amendments 1-4 — see below)  
+**Status**: Accepted · **amended 11/08/2026** (Amendments 1-4 — see below) · **Amendment 5 (#581) PENDING SIGNATURE**  
 **Date**: 31/07/2026 — Cristian Rinaldi
 
 ## Context
@@ -83,7 +83,7 @@ permanently red — it blocks, on evidence a solo maintainer can actually produc
 | `local-checks` | `repo:check` + `brain:nav` + `npm test` | same | same |
 | `decision-gate` | ADR ⇔ `brain/HOME.md` co-occurrence **[Amended by Amendment 4 (#516) — only in the ADDED direction: an added ADR requires a `HOME.md` change, and a `HOME.md` change requires some ADR to be touched, but a MODIFIED ADR alone passes (#510). See Amendment 4.]** | + the `decision`-label step hard — **not implemented; the gate reads no labels at any tier (Amendment 4)** | + the ADR carries a recorded human signature |
 | `diff-size` | ≤ 1000, `size:exception` honored | ≤ 400, honored | ≤ 200, **not honored** |
-| `actor-check` | **distinct act over foreign commits** (Amendment 1, #418) — the approval event is strictly later than the latest *foreign* commit: one authored by anyone other than the approver or a registered `governance.reviewActors` identity. Commits by the approver or a verified reviewer identity never re-arm an existing approval. An author that cannot be resolved to an account counts as **foreign** (fail closed). With no foreign commit on the branch, any approval event satisfies the evidence. **[Amended by Amendment 2 (#473) — a `brain-decision/1 APPROVE` review comment, anchored on the PR's head SHA and posted via `brain:approve`, is ALSO sufficient `lite` evidence, OR'd with the distinct-act check above; see Amendment 2.]** **[Amended by Amendment 3 (#454) — the exempt set also includes identities registered in `governance.agentActors`: an agent acting inside the approved loop under the approver's instruction does not re-arm the approval; see Amendment 3.]** | distinct act **+ distinct actor** — unchanged: the approval postdates the head-commit push | + the approver authored no commit on the branch — unchanged |
+| `actor-check` | **distinct act over foreign commits** (Amendment 1, #418) — the approval event is strictly later than the latest *foreign* commit: one authored by anyone other than the approver or a registered `governance.reviewActors` identity. Commits by the approver or a verified reviewer identity never re-arm an existing approval. An author that cannot be resolved to an account counts as **foreign** (fail closed). With no foreign commit on the branch, any approval event satisfies the evidence. **[Amended by Amendment 2 (#473) — a `brain-decision/1 APPROVE` review comment, anchored on the PR's head SHA and posted via `brain:approve`, is ALSO sufficient `lite` evidence, OR'd with the distinct-act check above; see Amendment 2.]** **[Amended by Amendment 3 (#454) — the exempt set also includes identities registered in `governance.agentActors`: an agent acting inside the approved loop under the approver's instruction does not re-arm the approval; see Amendment 3.]** **[Amended by Amendment 5 (#581), PENDING SIGNATURE — `governance.reviewActors` is REMOVED from the exempt set: a read-only identity has no commits to exempt, so a commit under one re-arms like any other foreign commit; see Amendment 5.]** | distinct act **+ distinct actor** — unchanged: the approval postdates the head-commit push | + the approver authored no commit on the branch — unchanged |
 | `brain-writes-reviewed` | **agent-authorship exclusion** — no `governance.reviewActors` identity authored the `brain/**` change | non-author, non-bot **human** APPROVED review | + CODEOWNERS armed at rung 1 where the substrate allows |
 
 The reviewer's `event: COMMENT` constraint (ADR-0020) is likewise never-tiered: **no
@@ -595,3 +595,92 @@ now pinned by test (`run-check.test.mjs`, #516), each proven a real detector by 
 IMPLEMENTS the claim, and those tests name this ADR and `workflow-governance.md` in their
 failure messages. The doctrine cannot silently fall behind the code again; it can still be
 ahead of it, which is exactly what that row is.
+
+---
+
+## Amendment 5 — a read-only review identity has no commits to exempt (issue #581)
+
+**Status**: PENDING SIGNATURE — drafted 12/08/2026 on the maintainer's ruling of the same
+date. Not in force until signed. The code change it records is in the same pull request; if
+this amendment is refused, that change goes with it.
+
+### What changed
+
+Amendment 1 defined a *foreign* commit as one authored by neither the approver nor a
+registered `governance.reviewActors` identity, and only a foreign commit re-arms an
+existing approval at `lite`. This amendment **removes `reviewActors` from that exempt
+set**, narrowing REQ-418-3. The set becomes: the approver, plus `governance.agentActors`
+(Amendment 3).
+
+### Why
+
+**Maintainer ruling, 12/08/2026: `reviewActors` is read-only.**
+
+A read-only identity authors no commits. That leaves exactly two states, and the exemption
+was wrong in both:
+
+1. **The normal state — the reviewer never commits.** The entry exempted a case that
+   cannot arise. Dead weight in a security predicate is not neutral: it read as *"we expect
+   commits from this identity"*, which contradicts the role `reviewer-protocol.md` §4
+   defines — four COMMENT-only port verbs, no git path anywhere in `poster.mjs`.
+2. **The off-nominal state — a commit appears under a review identity** (a compromised
+   token, an identity registered in the wrong key, a misconfigured handle). This is
+   precisely when the re-arm rule should fire, and the exemption is what stopped it. The
+   approval stayed green over a commit no human saw.
+
+Zero value in the state it was written for; negative in the state where it fired. An
+exemption that can only ever trigger in the case doctrine forbids is not a safeguard.
+
+### What this does NOT change
+
+Amendment 1's *reason* is untouched and still load-bearing — it is simply carried by the
+key that actually describes it. The rationale was always *"commits the approver's own agent
+made under their instruction"*, and that is **`agentActors`** (Amendment 3), which keeps its
+exemption in full. A read-only reviewer was never an agent acting under instruction.
+
+The comparison target stays the latest foreign commit rather than the head commit, which is
+the substance of Amendment 1 and the thing that made the reviewer loop affordable. Only the
+membership of the exempt set narrows.
+
+Also unchanged: `reviewActors` keeps every one of its other meanings, all of them denials —
+it may not sign a `brain-decision/1` (Amendment 2's path), it may not apply the approved
+label, and it does not count toward L6's human-approver tally. After this amendment the key
+carries **one** meaning, *this identity is not a human approver*, enforced at L5 as denial
+and at L6 as exclusion.
+
+### The precondition this retires
+
+Amendment 1 recorded that its exemption *"is only safe because the reviewer identity is now
+VERIFIED against its token (#413)"*. That precondition is not what changed and #413 still
+holds. The ruling is narrower and prior to it: a read-only identity should never have had
+commits to exempt at all, verified or not.
+
+### Accepted loss, recorded rather than implied
+
+If a reviewer identity ever *does* legitimately push — a use this doctrine does not sanction
+but which the platform does not prevent, since nothing in brain stops a token with write
+scope from using ordinary git — its push now re-arms the approval and demands a fresh human
+signature. That is the intended cost. The alternative is the state this amendment removes:
+an approval that survives a commit nobody reviewed.
+
+### Red-proof
+
+`actor-check.test.mjs` pins the narrowed behaviour directly: a `lite` PR approved at one
+commit, then given a commit authored by a registered `reviewActors` identity, **fails**
+distinct-act evidence. Two further tests hold the edges — the `agentActors` exemption stays
+green (so the wrong exemption cannot be removed silently), and the `pass` reason string no
+longer advertises an exemption the predicate does not grant.
+
+Two mutations, each diffed against the pre-mutation file and read back from disk before the
+result was trusted: restoring `reviewActors` to the exempt set turns the first test red;
+restoring the old reason string turns the third red.
+
+### References
+
+- #581 (this amendment) · #418 / REQ-418-3 (Amendment 1, which introduced the exemption)
+- #454 (Amendment 3 — `agentActors`, which keeps the rationale)
+- #413 (token-verified reviewer identity — the retired precondition)
+- #328 (the stale-green property the re-arm rule protects)
+- #580 — the `reviewer-protocol.md` signature this unblocks; its §2 Lock 3 could not be
+  ratified while the key carried two meanings
+- `brain/scripts/vcs/actor-check.mjs` — `evaluateDistinctAct`, `isForeignCommit`
