@@ -44,6 +44,14 @@ function isAllowlisted(path) {
   if (ROOT_MD_RE.test(path)) return true; // *.md at repo root
   if (path.startsWith('docs/')) return true;
   if (path.startsWith('.memory/')) return true;
+  // openspec/specs/** (issue #557 D7-a): the durable, consolidated SDD
+  // artifact an archive PR appends to — the same class docs/ and .memory/
+  // are already allowlisted for, never implementation code. Without this,
+  // every archive PR that consolidates a spec delta trips Rule C ("code
+  // without checked tasks") and Rule A ("implementation without
+  // spec.md/design.md") on the archived-away folder, forever, because the
+  // folder no longer exists at HEAD once the archive move lands.
+  if (path.startsWith('openspec/specs/')) return true;
   return false;
 }
 

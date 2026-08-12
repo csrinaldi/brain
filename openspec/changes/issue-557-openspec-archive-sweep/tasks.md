@@ -46,8 +46,8 @@ Chain strategy: pending
 
 ## Phase 4: PR1 — Phase-Order Allowlist Fix
 
-- [ ] 4.1 `brain/scripts/vcs/phase-order-check.mjs`: add `openspec/specs/` to `isAllowlisted`.
-- [ ] 4.2 Extend `phase-order-check.test.mjs`: archive-PR diff shape (delete `changes/<name>/*`, add `changes/archive/<iid>/*`, modify `specs/<cap>/spec.md`) → `pass`; removing the allowlist entry restores Rule C/A failures (teeth).
+- [x] 4.1 `brain/scripts/vcs/phase-order-check.mjs`: add `openspec/specs/` to `isAllowlisted`.
+- [x] 4.2 Extend `phase-order-check.test.mjs`: archive-PR diff shape (delete `changes/<name>/*`, add `changes/archive/<iid>/*`, modify `specs/<cap>/spec.md`) → `pass`; removing the allowlist entry restores Rule C/A failures (teeth).
 
 ## Phase 5: PR1 — Verification
 
