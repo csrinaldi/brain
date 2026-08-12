@@ -34,8 +34,8 @@ Chain strategy: pending
 
 ## Phase 2: PR1 — Selector Module
 
-- [ ] 2.1 New `brain/scripts/lib/archive-sweep.mjs`: `OUTCOME` enum + `selectSweep({entries, exists, readIssueState})`, 10-row decision table (design D1), per-iid memoized reads.
-- [ ] 2.2 New `brain/scripts/lib/archive-sweep.test.mjs` (`node --test`): closed, open, not-planned, `stateReason: null`, `readIssueState` null, unrecognized state, collision (incl. reversed order), destination-exists, container/not-a-change (zero reads), iid `260` parity, memoization (Testing table cases 1-11).
+- [x] 2.1 New `brain/scripts/lib/archive-sweep.mjs`: `OUTCOME` enum + `selectSweep({entries, exists, readIssueState})`, 10-row decision table (design D1), per-iid memoized reads.
+- [x] 2.2 New `brain/scripts/lib/archive-sweep.test.mjs` (`node --test`): closed, open, not-planned, `stateReason: null`, `readIssueState` null, unrecognized state, collision (incl. reversed order), destination-exists, container/not-a-change (zero reads), iid `260` parity, memoization (Testing table cases 1-11).
 
 ## Phase 3: PR1 — archive-logic.mjs / archive.mjs Rewire
 
