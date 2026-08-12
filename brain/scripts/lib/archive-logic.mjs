@@ -115,11 +115,12 @@ export async function archiveChange({ changeId, fs, dateStr }) {
     const { frontmatter } = parseYamlFrontmatter(content);
     if (frontmatter.capability) {
       merges.push({ capability: frontmatter.capability, deltaPath: flatSpecFile });
-    } else {
-      console.warn(
-        `[archive] Warning: Flat spec.md in ${changeId} has no 'capability' declared in YAML. Skipping spec merge.`,
-      );
     }
+    // No 'capability:' declared — the delta is not consolidated into
+    // openspec/specs/. This is reported via the `unconsolidated` return flag
+    // below (issue #557 D7-b), not a console.warn buried in a loop: the
+    // folder is archived anyway (blocking it would leave the directory
+    // mostly dead for no benefit), and the caller decides how to surface it.
   }
 
   for (const { capability, deltaPath } of merges) {
@@ -137,4 +138,12 @@ export async function archiveChange({ changeId, fs, dateStr }) {
 
   fs.mkdir('openspec/changes/archive');
   fs.rename(srcDir, destDir);
+
+  // Additive return value (issue #557 D4) — `mergeSpecs` itself is untouched.
+  // `unconsolidated: true` means this archive carried NO spec delta into
+  // openspec/specs/ (no flat `capability:` declared, or no nested
+  // `specs/*/spec.md` matched anything) — a distinct, reported outcome
+  // rather than a silently dropped one.
+  const consolidated = [...new Set(merges.map(m => m.capability))];
+  return { moved: true, consolidated, unconsolidated: merges.length === 0 };
 }

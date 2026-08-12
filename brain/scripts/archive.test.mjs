@@ -127,7 +127,7 @@ issue: 138
     },
   };
 
-  await archiveChange({
+  const result = await archiveChange({
     changeId: 'issue-138-session-start',
     fs: fakeFs,
     dateStr: '2026-07-13',
@@ -144,9 +144,73 @@ issue: 138
   assert.ok(Object.prototype.hasOwnProperty.call(writes, 'openspec/specs/session/spec.md'));
   assert.match(writes['openspec/specs/session/spec.md'], /### \[issue-138\] session-start — 2026-07-13/);
   assert.match(writes['openspec/specs/session/spec.md'], /- REQ-1: Do something/);
+
+  // issue #557 D4: additive return value — nested convention consolidates.
+  assert.deepEqual(result, { moved: true, consolidated: ['session'], unconsolidated: false });
 });
 
-test('3.2: archiveChange fails when target archive directory already exists', async () => {
+// ── Test 3.1b: archiveChange return value — flat spec.md, no capability ──
+test('3.1b: archiveChange reports unconsolidated:true for a flat spec.md with no capability declared (issue #557 D7-b)', async () => {
+  const files = {
+    'openspec/changes/issue-466-no-cap': true,
+    'openspec/changes/issue-466-no-cap/proposal.md': 'proposal text',
+    'openspec/changes/issue-466-no-cap/design.md': 'design text',
+    'openspec/changes/issue-466-no-cap/tasks.md': 'tasks text',
+    'openspec/changes/issue-466-no-cap/spec.md': '# No frontmatter at all\n- REQ-1: Something\n',
+  };
+  const renames = [];
+  const fakeFs = {
+    exists: (p) => Object.prototype.hasOwnProperty.call(files, p),
+    listDir: () => { throw new Error('should not list a dir — flat spec.md has no specs/ subdir'); },
+    readFile: (p) => files[p],
+    writeFile: () => { throw new Error('should not write any central spec — nothing to consolidate'); },
+    mkdir: () => {},
+    rename: (src, dest) => { renames.push({ src, dest }); },
+  };
+
+  const result = await archiveChange({
+    changeId: 'issue-466-no-cap',
+    fs: fakeFs,
+    dateStr: '2026-07-13',
+  });
+
+  assert.equal(renames.length, 1, 'the folder must still archive even when its spec delta cannot be consolidated');
+  assert.deepEqual(result, { moved: true, consolidated: [], unconsolidated: true });
+});
+
+// ── Test 3.1c: archiveChange return value — nested convention, multiple capabilities ──
+test('3.1c: archiveChange reports consolidated:[<cap>, ...] for the nested specs/*/spec.md convention', async () => {
+  const files = {
+    'openspec/changes/issue-700-multi-cap': true,
+    'openspec/changes/issue-700-multi-cap/proposal.md': 'p',
+    'openspec/changes/issue-700-multi-cap/design.md': 'd',
+    'openspec/changes/issue-700-multi-cap/tasks.md': 't',
+    'openspec/changes/issue-700-multi-cap/specs': ['alpha', 'beta'],
+    'openspec/changes/issue-700-multi-cap/specs/alpha/spec.md': '---\nstatus: approved\n---\n# Alpha\n- REQ-A: a\n',
+    'openspec/changes/issue-700-multi-cap/specs/beta/spec.md': '---\nstatus: approved\n---\n# Beta\n- REQ-B: b\n',
+  };
+  const writes = {};
+  const fakeFs = {
+    exists: (p) => Object.prototype.hasOwnProperty.call(files, p),
+    listDir: (p) => files[p],
+    readFile: (p) => files[p],
+    writeFile: (p, content) => { writes[p] = content; },
+    mkdir: () => {},
+    rename: () => {},
+  };
+
+  const result = await archiveChange({
+    changeId: 'issue-700-multi-cap',
+    fs: fakeFs,
+    dateStr: '2026-07-13',
+  });
+
+  assert.deepEqual(result, { moved: true, consolidated: ['alpha', 'beta'], unconsolidated: false });
+  assert.ok(writes['openspec/specs/alpha/spec.md']);
+  assert.ok(writes['openspec/specs/beta/spec.md']);
+});
+
+test('3.2: archiveChange fails when target archive directory already exists — still throws (backstop, issue #557 D4)', async () => {
   const files = {
     'openspec/changes/issue-138-session-start': true,
     'openspec/changes/issue-138-session-start/proposal.md': 'proposal text',
