@@ -10,9 +10,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 
 import { runCheck, main, SUBCOMMAND_PORT_REACH } from './run-check.mjs';
 import { mapDetectionToWarning } from './detection-policy.mjs';
@@ -405,6 +406,20 @@ test('T7 mutation: dispatchedCheckNames is a real extractor, not a constant — 
 
 const GOVERNANCE_DIR = fileURLToPath(new URL('.', import.meta.url));
 
+/**
+ * Walks `entryName`'s local call closure as TEXT.
+ *
+ * @returns {string|null}
+ *   `null` — the entry could not be RESOLVED: no `function <entryName>(` declaration in `src`
+ *            and no followable import of that name. NOT a statement about getVcs; a statement
+ *            that no statement can be made. The caller MUST refuse it, never test it.
+ *   `''`   — RESOLVED. Either a genuinely empty body, or a name already accounted for earlier
+ *            in this walk (`seen`). A real, usable answer meaning "no getVcs found here".
+ *
+ * The null sentinel is meaningful ONLY for a TOP-LEVEL call (fresh `seen`). Recursive callers
+ * inside this module coerce it away on purpose — see the nullish-coalescing fallback at the
+ * walk below (issue #551).
+ */
 function bodyClosure(src, entryName, seen = new Set(), dir = GOVERNANCE_DIR) {
   if (seen.has(entryName)) return '';
   const head = src.match(new RegExp(`function ${entryName}\\([^)]*\\)[^{]*\\{`));
@@ -415,21 +430,33 @@ function bodyClosure(src, entryName, seen = new Set(), dir = GOVERNANCE_DIR) {
   while (depth > 0 && i < src.length) { if (src[i] === '{') depth++; else if (src[i] === '}') depth--; i++; }
   const body = src.slice(start, i);
   let text = body;
-  for (const m of body.matchAll(/\b([a-zA-Z_]\w*)\(/g)) text += bodyClosure(src, m[1], seen, dir);
+  // ACCUMULATOR role (issue #551): an unresolvable transitive callee (if(, for(, keys(, ...)
+  // must contribute '' here, never null — a null escaping this walk would make T7b permanently
+  // red. The nullish-coalescing fallback below is the ONLY coercion in this file; see
+  // bodyClosure's/crossFileClosure's contracts above/below for why nowhere else may have one.
+  for (const m of body.matchAll(/\b([a-zA-Z_]\w*)\(/g)) text += bodyClosure(src, m[1], seen, dir) ?? '';
   return text;
 }
 
-/** Cross-file half of bodyClosure: follows an import to its module and walks
- *  THAT source for `entryName` (T7b fix, issue #535). */
+/**
+ * Cross-file half of bodyClosure: follows an import to its module and walks THAT source for
+ * `entryName` (T7b fix, issue #535).
+ *
+ * @returns {string|null} `null` when the name is not a followable import (absent, non-relative,
+ *   or a spelling importMap does not read), when the module cannot be read, or when the target
+ *   module does not resolve the origin name either (propagated from bodyClosure — issue #551:
+ *   this propagation is INTENTIONAL and must not be coerced with a nullish-coalescing fallback
+ *   here; doing so would restore a vacuous pass for every cross-file handler).
+ */
 function crossFileClosure(src, entryName, seen, dir) {
   const target = importMap(src).get(entryName);
-  if (!target || !target.specifier.startsWith('.')) return '';
+  if (!target || !target.specifier.startsWith('.')) return null;
   const modulePath = resolve(dir, target.specifier);
   let modSrc;
   try {
     modSrc = readFileSync(modulePath, 'utf8');
   } catch {
-    return '';
+    return null;
   }
   return bodyClosure(modSrc, target.orig, seen, dirname(modulePath));
 }
@@ -469,9 +496,36 @@ test('T7b: SUBCOMMAND_PORT_REACH values match each handler\'s own local getVcs r
   assert.deepEqual(handlers.map(([checkName]) => checkName).sort(), dispatchedCheckNames(src),
     'dispatchedHandlers extraction must be COMPLETE — a format-driven miss must fail loudly, never silently shrink this loop');
   for (const [checkName, fnName] of handlers) {
-    const reaches = fnName != null && /\bgetVcs(Fn)?\b/.test(bodyClosure(src, fnName));
+    // GATE 1 (site 1, issue #551): an unextractable handler NAME is not "does not reach the
+    // port" — it is "nobody looked". `fnName != null &&` used to fold it into false.
+    assert.ok(typeof fnName === 'string',
+      `${checkName}: dispatchedHandlers extracted NO handler function name from this dispatch ` +
+      `branch, so SUBCOMMAND_PORT_REACH['${checkName}'] is UNVERIFIED. This assert does not say ` +
+      `the manifest value is wrong — it says nothing checked it. The branch shape is outside this ` +
+      `scanner's decidable domain: it reads \`return <fn>(\` inside an \`if (checkName === '...')\` ` +
+      `branch. Restore that shape, widen dispatchedHandlers for the new one, or verify the reach ` +
+      `behaviourally — but do not restore \`fnName != null &&\`, which folded this case into ` +
+      `"false" and agreed with a false manifest entry. Undecidable is a VIOLATION, never a pass ` +
+      `(brain/scripts/vcs/lib/workflow-auth.mjs header).`);
+
+    const closure = bodyClosure(src, fnName);
+    // GATE 2 (sites 2/3). `typeof === 'string'`, NEVER `assert.ok(closure)`: '' is a RESOLVED
+    // value (see the seen-guard/genuinely-empty-body cases above) and must stay green.
+    assert.ok(typeof closure === 'string',
+      `${checkName} (${fnName}): no call closure could be RESOLVED for this handler, so ` +
+      `SUBCOMMAND_PORT_REACH['${checkName}'] is UNVERIFIED. The manifest value is not being ` +
+      `reported as wrong — it is being reported as unchecked. \`${fnName}\` matched neither a ` +
+      `\`function ${fnName}(\` declaration in run-check.mjs nor a named, single-quoted, relative ` +
+      `import this scanner can follow. Widen the scanner for that shape, or prove the reach ` +
+      `behaviourally; do not make this green by letting unresolvable read as '' again — that is ` +
+      `the defect of issue #551 and of the three rounds before it.`);
+
+    const reaches = /\bgetVcs(Fn)?\b/.test(closure);
     assert.equal(reaches, SUBCOMMAND_PORT_REACH[checkName],
-      `${checkName} (${fnName}): manifest says ${SUBCOMMAND_PORT_REACH[checkName]}, source scan says ${reaches}`);
+      `${checkName} (${fnName}): manifest says ${SUBCOMMAND_PORT_REACH[checkName]}, resolved ` +
+      `source scan says ${reaches}. The closure WAS resolved, so this is a genuine disagreement, ` +
+      `not an extraction miss — fixing it by editing SUBCOMMAND_PORT_REACH is a separate finding ` +
+      `that needs its own issue, not a quiet edit.`);
   }
 });
 
@@ -479,10 +533,102 @@ test('T7b mutation: a getVcs( reference injected into the false-declared memory-
   const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
   const mutated = src.replace('function runMemoryGateCheck(ctx, records) {',
     'function runMemoryGateCheck(ctx, records) {\n  getVcs();');
-  const reaches = /\bgetVcs(Fn)?\b/.test(bodyClosure(mutated, 'runMemoryGateCheck'));
+  assert.notEqual(mutated, src, 'the mutation must land');
+  const closure = bodyClosure(mutated, 'runMemoryGateCheck');
+  assert.ok(typeof closure === 'string', 'runMemoryGateCheck must still resolve under this mutation');
+  const reaches = /\bgetVcs(Fn)?\b/.test(closure);
   assert.equal(reaches, true);
   assert.notEqual(reaches, SUBCOMMAND_PORT_REACH['memory-gate'],
     'the mutation must break the value correlation for a false-declared handler');
+});
+
+// ── T7b sentinel — issue #551: an unresolvable closure must be null, never '' ──
+//
+// The tests below pin the RESOLVER/ACCUMULATOR split (design §1.1): bodyClosure
+// and crossFileClosure return `null` when an entry cannot be RESOLVED at all, and
+// `''` only when it IS resolved (either genuinely empty, or already accounted for
+// via `seen`). `null` must stay confined to top-level resolution — an unresolvable
+// transitive callee inside an already-resolved body must still contribute `''`,
+// never let `null` escape the recursive walk (that would make T7b permanently red).
+
+test('T7b sentinel: an entry that cannot be resolved is null, never \'\'', () => {
+  assert.equal(bodyClosure('const x = 1;\n', 'runMemoryGateCheck'), null,
+    'unresolvable must not read as "no getVcs" — that conflation is issue #551');
+});
+
+test('T7b sentinel: a name already resolved earlier in this walk is \'\', not null', () => {
+  // Empirically verified (not assumed): the `seen` guard at bodyClosure's
+  // top (unchanged by #551) is the reliable source of a literal '' RESOLVED
+  // value — a genuinely brace-empty function body (`{}`) is NOT a clean ''
+  // here (the brace-walk includes the closing brace itself, a pre-existing
+  // extractor property this PR does not touch), so this fixture exercises
+  // the SAME contract (resolved, falsy, must not be rejected by gate 2)
+  // through the path that actually produces it.
+  const c = bodyClosure('function f(ctx) { return 1; }\n', 'f', new Set(['f']));
+  assert.equal(c, '');
+  assert.equal(typeof c, 'string');
+  assert.equal(/\bgetVcs(Fn)?\b/.test(c), false);
+});
+
+test('T7b sentinel: an import spelling this scanner cannot follow is null, not \'\'', () => {
+  const fixture = 'import { adrPresence } from "./checks/adr-presence.mjs";\n';
+  assert.equal(bodyClosure(fixture, 'adrPresence'), null,
+    'a double-quoted import is outside importMap\'s decidable domain (single-quoted only) — ' +
+    'that must report as UNVERIFIED, never as a resolved empty closure');
+});
+
+test('T7b sentinel: an unreadable target module is null, not \'\'', () => {
+  const fixture = "import { x } from './definitely-not-here.mjs';\n";
+  assert.equal(bodyClosure(fixture, 'x'), null);
+});
+
+test('T7b sentinel does NOT leak out of the recursive walk', () => {
+  const fixture = 'function h(ctx) {\n  if (ctx) { Object.keys(ctx).forEach(k => k); }\n  return getVcs();\n}\n';
+  const closure = bodyClosure(fixture, 'h');
+  assert.equal(typeof closure, 'string',
+    'unresolvable transitive callees (if(, keys(, forEach() must contribute \'\', never null — a null ' +
+    'escaping the walk makes T7b permanently red and invites reverting the sentinel');
+  assert.ok(/\bgetVcs(Fn)?\b/.test(closure));
+});
+
+test('T7b sentinel: crossFileClosure\'s tail call PROPAGATES null', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'run-check-t7b-'));
+  try {
+    writeFileSync(join(dir, 'mod.mjs'), 'const target = () => {};\n', 'utf8');
+    const caller = "import { target } from './mod.mjs';\n";
+    assert.equal(bodyClosure(caller, 'target', new Set(), dir), null,
+      'a name resolved to a module that does not declare it must stay null — a `?? \'\'` at the ' +
+      'crossFileClosure tail call would restore the vacuous pass for every cross-file handler');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('T7b site 1: a dispatch branch with no extractable handler name yields null — and the key-completeness assert stays GREEN on that input', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const mutated = src.replace(
+    '    return runMemoryGateCheck(ctx, records);',
+    '    const result = runMemoryGateCheck(ctx, records);\n    return result;',
+  );
+  assert.notEqual(mutated, src, 'the mutation must land');
+  const handlers = dispatchedHandlers(mutated);
+  const entry = handlers.find(([checkName]) => checkName === 'memory-gate');
+  assert.equal(entry[1], null);
+  assert.deepEqual(handlers.map(([checkName]) => checkName).sort(), dispatchedCheckNames(mutated),
+    'the completeness assert stays green on this input — which is precisely why site 1 needs its ' +
+    'own gate and :469 cannot substitute for it');
+});
+
+test('T7b mutation (#551): an arrow-form handler is REFUSED as unresolvable, not read as "no getVcs"', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const mutated = src.replace(
+    'function runMemoryGateCheck(ctx, records) {',
+    'const runMemoryGateCheck = async (ctx, records) => {\n  if (process.env.NEVER === "1") getVcs();',
+  );
+  assert.notEqual(mutated, src, 'the mutation must land');
+  assert.equal(bodyClosure(mutated, 'runMemoryGateCheck'), null,
+    "before #551 this returned '', which tested false and agreed with " +
+    "SUBCOMMAND_PORT_REACH['memory-gate'] === false — a green that had checked nothing");
 });
 
 test('runCheck: an unknown check name throws even when it superficially resembles a manifest key', () => {
