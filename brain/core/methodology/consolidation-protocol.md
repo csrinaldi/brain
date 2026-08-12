@@ -51,8 +51,23 @@ corrected a line in an old ADR (PR #507). The other two nets do not close it eit
 missing, not the link — and `phase-order` is detection-only at `lite`.
 
 So an amendment can land with the index still describing the previous version, and no gate
-will say so. Until `brain:promote` gains the amendment path (#509), the three acts above and
-this fourth one are convention held by whoever runs them.
+will say so. That is still true of an amendment executed by hand.
+
+What changed with #509 is that one path no longer lets you skip a step by accident:
+`brain:promote` takes an amendment draft — a `*.draft.md` file carrying one `brain-amendment/1`
+block naming its target and the passages it supersedes — and performs the three acts, this fourth
+one and the §1d cascade in one run, then stages and stops. It derives the `brain/HOME.md` marker
+from the same amendment number it writes into the Status line, so those two cannot disagree, and
+it refuses outright when it finds the cascade half-applied rather than reporting success over the
+missing acts. What it does NOT do is make a partial promotion impossible: it applies the whole
+cascade or none of it, and anything already half-done is your repair, not its. Use it:
+
+```
+npm run brain:promote -- openspec/changes/<change-id>/brain-drafts/<name>.draft.md
+```
+
+**Off that path, you are still the enforcement.** A hand-run edit, or the next bespoke script,
+is exactly as unguarded as it was before — no gate reads the marker.
 
 Precedent: ADR-0026 Amendment 1 (`git show 0f54781`).
 
@@ -71,6 +86,9 @@ Adding or amending any file under `brain/**` is not one edit. In this repo it is
    agent actually reads carrying stale content.
 
 Regenerate with `AGENT_PLATFORM=antigravity npm run brain:env:init`. Never hand-edit `AGENTS.md`.
+`brain:promote` does this step itself, for a new ADR (#378) and for an amendment (#509) alike —
+a promoter written from THIS TEXT rather than from the verb is how the step gets lost, which is
+what happened on #529 and failed the drift guard on the human's signing commit.
 
 **Step 3 does fail a gate.** `antigravity.drift.test.mjs` asserts byte-equality between the
 committed `AGENTS.md` and a fresh compile of the five sources, and it runs under `npm test`.
