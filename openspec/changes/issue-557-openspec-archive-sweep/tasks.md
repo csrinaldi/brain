@@ -41,8 +41,8 @@ Chain strategy: pending
 
 - [x] 3.1 `brain/scripts/lib/archive-logic.mjs`: `archiveChange` returns `{moved, consolidated, unconsolidated}`; `unconsolidated: true` replaces silent `console.warn`.
 - [x] 3.2 Extend `archive-logic.test.mjs`: `unconsolidated: true` (flat, no `capability:`), `consolidated: ['<cap>']` (nested), existing-destination throw retained.
-- [ ] 3.3 `brain/scripts/archive.mjs`: route `--backfill` through `selectSweep`; alias `--all` with deprecation notice; delete `iid === '260'` hardcode; grouped non-archived report; exit 1 on `complete===false` or blocked, else 0.
-- [ ] 3.4 Test: no `'260'` literal remains in `archive.mjs`; iid 260 receives standard row-8/10 treatment.
+- [x] 3.3 `brain/scripts/archive.mjs`: route `--backfill` through `selectSweep`; alias `--all` with deprecation notice; delete `iid === '260'` hardcode; grouped non-archived report; exit 1 on `complete===false` or blocked, else 0.
+- [x] 3.4 Test: no `'260'` literal remains in `archive.mjs`; iid 260 receives standard row-8/10 treatment.
 
 ## Phase 4: PR1 — Phase-Order Allowlist Fix
 

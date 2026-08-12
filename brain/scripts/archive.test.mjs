@@ -278,3 +278,197 @@ issue: 999
   rmSync(sandbox, { recursive: true, force: true });
 });
 
+// ── Test 5: --backfill routed through the closed-issue selector (issue #557) ──
+
+import { fileURLToPath } from 'node:url';
+import { runBackfill, runSingle, BLOCKED_OUTCOMES } from './archive.mjs';
+import { OUTCOME } from './lib/archive-sweep.mjs';
+
+test('5.1: no literal \'260\' string remains in archive.mjs — the hardcode is deleted, not merely unused (issue #557 D4)', () => {
+  const srcPath = fileURLToPath(new URL('./archive.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  assert.doesNotMatch(src, /['"]260['"]/, "no quoted literal '260' may remain in archive.mjs — protection for an in-flight change now falls out of the selector's row 8 (its issue is open), not a hardcoded exclusion");
+});
+
+/** Builds a minimal fake fs sufficient for archiveChange over grandfathered-shaped
+ * flat dirs (no specs to merge) — matches the shape runBackfill's callers use. */
+function fakeBackfillFs(dirNames) {
+  const files = {};
+  for (const name of dirNames) {
+    files[`openspec/changes/${name}`] = true;
+    files[`openspec/changes/${name}/proposal.md`] = 'p';
+    files[`openspec/changes/${name}/design.md`] = 'd';
+    files[`openspec/changes/${name}/tasks.md`] = 't';
+    // No spec.md/specs/ — archiveChange treats a missing spec as nothing to merge.
+  }
+  const renames = [];
+  return {
+    fs: {
+      exists: (p) => Object.prototype.hasOwnProperty.call(files, p),
+      listDir: () => { throw new Error('no nested specs dir in this fixture'); },
+      readFile: (p) => files[p],
+      writeFile: () => { throw new Error('no spec merge expected in this fixture'); },
+      mkdir: () => {},
+      rename: (src, dest) => renames.push({ src, dest }),
+    },
+    renames,
+  };
+}
+
+test('5.2: iid 260 receives standard row-8/10 treatment via --backfill — open leaves it in place, closed archives it like any other iid', async () => {
+  // Open: left in place, same as iid 261.
+  const openFixture = fakeBackfillFs(['issue-260-in-flight', 'issue-261-also-in-flight']);
+  const openResult = await runBackfill({
+    fs: openFixture.fs,
+    entries: ['issue-260-in-flight', 'issue-261-also-in-flight'],
+    readIssueState: async () => ({ state: 'open', stateReason: null }),
+    log: () => {},
+    logError: () => {},
+  });
+  assert.equal(openResult.archivedCount, 0);
+  assert.equal(openFixture.renames.length, 0);
+  const outcomes260 = openResult.selection.folders.find(f => f.name === 'issue-260-in-flight').outcome;
+  const outcomes261 = openResult.selection.folders.find(f => f.name === 'issue-261-also-in-flight').outcome;
+  assert.equal(outcomes260, OUTCOME.OPEN);
+  assert.equal(outcomes260, outcomes261, '260 must be classified identically to any other open iid');
+  assert.equal(openResult.exitCode, 0, 'open folders left in place is expected steady-state, not a failure');
+
+  // Closed: archived like any other closed iid — no special-case skip.
+  const closedFixture = fakeBackfillFs(['issue-260-in-flight']);
+  const closedResult = await runBackfill({
+    fs: closedFixture.fs,
+    entries: ['issue-260-in-flight'],
+    readIssueState: async () => ({ state: 'closed', stateReason: 'completed' }),
+    log: () => {},
+    logError: () => {},
+  });
+  assert.equal(closedResult.archivedCount, 1);
+  assert.equal(closedFixture.renames.length, 1);
+  assert.deepEqual(closedFixture.renames[0], { src: 'openspec/changes/issue-260-in-flight', dest: 'openspec/changes/archive/260' });
+  assert.equal(closedResult.exitCode, 0);
+});
+
+test('5.3: --backfill exits 1 when a collision is present, even though every read answered (complete:true)', async () => {
+  const fixture = fakeBackfillFs(['issue-518-a', 'issue-518-b']);
+  const result = await runBackfill({
+    fs: fixture.fs,
+    entries: ['issue-518-a', 'issue-518-b'],
+    readIssueState: async () => ({ state: 'closed', stateReason: 'completed' }),
+    log: () => {},
+    logError: () => {},
+  });
+  assert.equal(result.selection.complete, true, 'every distinct iid answered — this is not a read failure');
+  assert.equal(result.archivedCount, 0, 'a colliding folder must never be archived');
+  assert.equal(fixture.renames.length, 0);
+  assert.equal(result.exitCode, 1, 'a collision must fail the run — it is a BLOCKED_OUTCOMES member requiring a human decision');
+  assert.ok(BLOCKED_OUTCOMES.has(OUTCOME.COLLISION));
+});
+
+test('5.4: --backfill exits 1 when complete:false (an issue state could not be read) — nothing archived for the unreadable folder', async () => {
+  const fixture = fakeBackfillFs(['issue-900-unreadable']);
+  const result = await runBackfill({
+    fs: fixture.fs,
+    entries: ['issue-900-unreadable'],
+    readIssueState: async () => null,
+    log: () => {},
+    logError: () => {},
+  });
+  assert.equal(result.selection.complete, false);
+  assert.deepEqual(result.selection.readFailures, ['900']);
+  assert.equal(result.archivedCount, 0);
+  assert.equal(result.exitCode, 1);
+});
+
+test('5.5: --backfill on a clean run (archivable + open + not-planned + grandfathered, no blocked outcomes) exits 0', async () => {
+  const fixture = fakeBackfillFs(['issue-100-ship', 'issue-200-inflight', 'issue-300-abandoned']);
+  const result = await runBackfill({
+    fs: fixture.fs,
+    entries: ['issue-100-ship', 'issue-200-inflight', 'issue-300-abandoned'],
+    readIssueState: async (iid) => {
+      if (iid === '100') return { state: 'closed', stateReason: 'completed' };
+      if (iid === '200') return { state: 'open', stateReason: null };
+      return { state: 'closed', stateReason: 'not_planned' };
+    },
+    log: () => {},
+    logError: () => {},
+  });
+  assert.equal(result.archivedCount, 1);
+  assert.equal(result.exitCode, 0);
+  const byName = Object.fromEntries(result.selection.folders.map(f => [f.name, f.outcome]));
+  assert.equal(byName['issue-100-ship'], OUTCOME.ARCHIVABLE);
+  assert.equal(byName['issue-200-inflight'], OUTCOME.OPEN);
+  assert.equal(byName['issue-300-abandoned'], OUTCOME.NOT_PLANNED);
+});
+
+test('5.6: --backfill reports unconsolidated vs consolidated counts distinctly', async () => {
+  const files = {
+    'openspec/changes/issue-466-flat': true,
+    'openspec/changes/issue-466-flat/proposal.md': 'p',
+    'openspec/changes/issue-466-flat/design.md': 'd',
+    'openspec/changes/issue-466-flat/tasks.md': 't',
+    'openspec/changes/issue-466-flat/spec.md': '# No frontmatter\n- REQ-1: x\n',
+    'openspec/changes/issue-700-nested': true,
+    'openspec/changes/issue-700-nested/proposal.md': 'p',
+    'openspec/changes/issue-700-nested/design.md': 'd',
+    'openspec/changes/issue-700-nested/tasks.md': 't',
+    'openspec/changes/issue-700-nested/specs': ['alpha'],
+    'openspec/changes/issue-700-nested/specs/alpha/spec.md': '---\nstatus: approved\n---\n# Alpha\n- REQ-A: a\n',
+  };
+  const writes = {};
+  const fs = {
+    exists: (p) => Object.prototype.hasOwnProperty.call(files, p),
+    listDir: (p) => files[p],
+    readFile: (p) => files[p],
+    writeFile: (p, content) => { writes[p] = content; },
+    mkdir: () => {},
+    rename: () => {},
+  };
+  const result = await runBackfill({
+    fs,
+    entries: ['issue-466-flat', 'issue-700-nested'],
+    readIssueState: async () => ({ state: 'closed', stateReason: 'completed' }),
+    dateStr: '2026-08-11',
+    log: () => {},
+    logError: () => {},
+  });
+  assert.equal(result.archivedCount, 2);
+  assert.equal(result.consolidatedCount, 1);
+  assert.equal(result.unconsolidatedCount, 1);
+  assert.ok(writes['openspec/specs/alpha/spec.md']);
+});
+
+test("5.7: --all prints a deprecation notice; --backfill does not — both otherwise identical", async () => {
+  const fixture = fakeBackfillFs(['issue-100-x']);
+  const logsAll = [];
+  await runBackfill({
+    fs: fixture.fs,
+    entries: ['issue-100-x'],
+    readIssueState: async () => ({ state: 'open', stateReason: null }),
+    log: (msg) => logsAll.push(msg),
+    logError: () => {},
+    deprecated: true,
+  });
+  assert.ok(logsAll.some(l => l.includes('--all is deprecated')));
+
+  const fixture2 = fakeBackfillFs(['issue-100-x']);
+  const logsBackfill = [];
+  await runBackfill({
+    fs: fixture2.fs,
+    entries: ['issue-100-x'],
+    readIssueState: async () => ({ state: 'open', stateReason: null }),
+    log: (msg) => logsBackfill.push(msg),
+    logError: () => {},
+    deprecated: false,
+  });
+  assert.ok(!logsBackfill.some(l => l.includes('deprecated')));
+});
+
+test('5.8: runSingle never touches the VCS — it accepts no readIssueState parameter at all', () => {
+  // Structural guard: the human-override path's signature has no readIssueState
+  // slot, so a caller cannot accidentally wire the VCS into it (design D4).
+  assert.equal(runSingle.length, 1, 'runSingle takes exactly one destructured options argument');
+  const src = readFileSync(fileURLToPath(new URL('./archive.mjs', import.meta.url)), 'utf8');
+  const runSingleBody = src.slice(src.indexOf('export async function runSingle'), src.indexOf('// ── CLI entrypoint'));
+  assert.doesNotMatch(runSingleBody, /readIssueState/, 'runSingle must never reference readIssueState — a human naming one folder has already made the decision the selector exists to make');
+});
+
