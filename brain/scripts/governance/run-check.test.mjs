@@ -389,20 +389,52 @@ test('T7 mutation: dispatchedCheckNames is a real extractor, not a constant — 
     'the symmetry check must report the gap once a dispatch branch has no manifest entry');
 });
 
-// ── SUBCOMMAND_PORT_REACH — the manifest's VALUES are checked, not just its keys ──
+// ── SUBCOMMAND_PORT_REACH — the manifest's VALUES, and this scanner's LIMITS ──
 //
 // T7 above proves the KEY SET is live. It proves nothing about the booleans:
-// workflow-auth.mjs trusts a `true`/`false` per subcommand completely (D4),
-// so a handler that starts calling getVcs without its manifest entry
-// flipping to `true` would silently keep resolving as credential-free. This
-// extracts each dispatch branch's own handler function name, then walks that
-// function's LOCAL call closure (mirroring `importClosure`'s transitive-walk
-// shape elsewhere in this codebase) for a `getVcs`/`getVcsFn` reference. A
-// handler dispatched to an IMPORTED function (decision-gate → `adrPresence`)
-// is resolved CROSS-FILE (T7b fix, issue #535): bodyClosure follows the
-// import to its module and walks THAT source, rather than silently
-// returning '' — which only ever agreed with a `false` manifest entry
-// regardless of what the imported function actually does.
+// workflow-auth.mjs trusts a true/false per subcommand completely (D4). T7b
+// extracts each dispatch branch's handler name, walks that function's local
+// call closure (mirroring importClosure's transitive-walk shape elsewhere in
+// this codebase), and looks for getVcs/getVcsFn. A handler dispatched to an
+// IMPORTED function (decision-gate → adrPresence) is resolved cross-file (#535).
+//
+// This is a TEXT scan, so its answer is only as wide as its vocabulary. Rounds
+// 1-3 (#535 and after) each WIDENED that vocabulary and each left the same hole:
+// an input the scanner could not resolve returned '', which tested false, which
+// agreed with a manifest entry of false. The assert passed having checked
+// nothing. #551 does not widen the vocabulary. It changes what happens at the
+// EDGE of it: bodyClosure/crossFileClosure return null for "could not resolve"
+// and '' only for "resolved, empty", and the loop below refuses a null BEFORE
+// testing content — "Undecidable is a VIOLATION, never a pass"
+// (vcs/lib/workflow-auth.mjs header), applied to the test that guards it.
+//
+// DECIDABLE (an answer here is a real verification):
+//   • dispatch spelled `if (checkName === 'x')` with a `return <fn>(` in the branch
+//   • handler declared as `function <fn>(` (async/export prefixes included)
+//   • cross-file handler via a named, single-quoted, RELATIVE import
+//
+// NOT DECIDABLE — these now fail LOUD instead of passing vacuously:
+//   • arrow / anonymous-expression handlers; default, namespace, double-quoted
+//     or dynamic imports; a handler inlined into its own dispatch branch
+//
+// NOT DECIDABLE AND NOT DETECTED — the honest residuals, UNCHANGED by #551:
+//   • NAME SHADOWING/COLLISION: bodyClosure matches `function <name>(` by text
+//     with no scope analysis, so a same-named local in a followed module can
+//     yield a real-but-WRONG body — a confident wrong answer in either
+//     direction. Text matching cannot decide this; only scope analysis or
+//     behavioural proof can. Tracked in #569.
+//   • SWITCH / LOOKUP-TABLE DISPATCH: invisible to dispatchedCheckNames, so the
+//     branch drops out of `dispatched` while the manifest keeps its key and T7's
+//     symmetric deepEqual goes RED. Verified by live mutation at #551 apply
+//     time, not inferred from the assert text. Sub-case NOT covered: a switch
+//     migration AND an emptied manifest ([] === []) — see #569 (verified by
+//     execution at #551 apply time that an empty SUBCOMMAND_PORT_REACH makes
+//     parseSubcommandManifest return null, falling back to the fail-closed
+//     whole-file closure; not covered by a committed regression test).
+//
+// This list is this scanner's current limit as measured, not a claim of
+// completeness. The next shape it cannot read will be red, not green; that is
+// the only property #551 buys.
 
 const GOVERNANCE_DIR = fileURLToPath(new URL('.', import.meta.url));
 
