@@ -95,6 +95,30 @@ export function makeFixtureRepo({
   };
 }
 
+/**
+ * Creates a temporary git repo from an explicit relPath → content map, with one
+ * commit. Used by the amendment suites (issue #509), whose starting tree is a
+ * REAL historical tree rather than the current checkout.
+ *
+ * @param {{[relPath:string]: string}} files
+ * @param {{userName?:string}} [opts]
+ * @returns {{root:string}}
+ */
+export function makeRepoFromFiles(files, { userName = 'Fixture Human' } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'brain-amend-'));
+  for (const [rel, content] of Object.entries(files)) {
+    mkdirSync(join(root, dirname(rel)), { recursive: true });
+    writeFileSync(join(root, rel), content, 'utf8');
+  }
+  git(['init', '--quiet'], root);
+  git(['config', 'user.name', userName], root);
+  git(['config', 'user.email', 'fixture@example.invalid'], root);
+  git(['config', 'commit.gpgsign', 'false'], root);
+  git(['add', '-A'], root);
+  git(['-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '-m', 'chore: fixture baseline (#509)'], root);
+  return { root };
+}
+
 /** Porcelain status of the fixture — '' means nothing was written or staged. */
 export function statusOf(root) {
   return spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).stdout.trim();
