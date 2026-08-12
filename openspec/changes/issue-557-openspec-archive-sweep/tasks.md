@@ -51,8 +51,8 @@ Chain strategy: pending
 
 ## Phase 5: PR1 — Verification
 
-- [ ] 5.1 Run `npm test` — all new/extended suites green.
-- [ ] 5.2 Manual: confirm `archive.mjs <changeId>` single-folder path unchanged (no `readIssueState` call).
+- [x] 5.1 Run `npm test` — all new/extended suites green.
+- [x] 5.2 Manual: confirm `archive.mjs <changeId>` single-folder path unchanged (no `readIssueState` call).
 
 ## Phase 6: PR2 — Backfill Execution (no code)
 
