@@ -66,6 +66,11 @@ jobs:
       - name: Force a full rerun of governance.yml on open PRs referencing this issue
         if: steps.gate.outputs.match == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          # VCS_TOKEN, not GH_TOKEN (#558): relabel-retrigger.mjs imports getVcs
+          # and reaches the server through the port, which resolves brain's one
+          # neutral credential. #479 did the audit path, #535 the PR-time gate;
+          # this workflow was in neither scope and kept the coupling because the
+          # guard's audited set was a hand-written list that did not name it.
+          VCS_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: node brain/scripts/governance/relabel-retrigger.mjs
