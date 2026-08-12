@@ -409,13 +409,20 @@ test('T7 mutation: dispatchedCheckNames is a real extractor, not a constant — 
 // (vcs/lib/workflow-auth.mjs header), applied to the test that guards it.
 //
 // DECIDABLE (an answer here is a real verification):
-//   • dispatch spelled `if (checkName === 'x')` with a `return <fn>(` in the branch
+//   • dispatch spelled `if (checkName === 'x')` with a `return <fn>(` in the branch,
+//     including a branch inlined to call a governance handler directly — the
+//     handler's own body/import still resolves normally
 //   • handler declared as `function <fn>(` (async/export prefixes included)
 //   • cross-file handler via a named, single-quoted, RELATIVE import
+//   • the dispatch target IS the sentinel itself (`return getVcs()` /
+//     `return getVcsFn()`) — a terminal reach, decided without walking a body
+//     (#551: walking `getVcs`'s own implementation found no call to itself
+//     and read as a resolved-empty '', a FIFTH vacuous-pass route this file
+//     shipped as "fails loud" without it; see bodyClosure's base case)
 //
 // NOT DECIDABLE — these now fail LOUD instead of passing vacuously:
 //   • arrow / anonymous-expression handlers; default, namespace, double-quoted
-//     or dynamic imports; a handler inlined into its own dispatch branch
+//     or dynamic imports
 //
 // NOT DECIDABLE AND NOT DETECTED — the honest residuals, UNCHANGED by #551:
 //   • NAME SHADOWING/COLLISION: bodyClosure matches `function <name>(` by text
@@ -433,8 +440,14 @@ test('T7 mutation: dispatchedCheckNames is a real extractor, not a constant — 
 //     whole-file closure; not covered by a committed regression test).
 //
 // This list is this scanner's current limit as measured, not a claim of
-// completeness. The next shape it cannot read will be red, not green; that is
-// the only property #551 buys.
+// completeness. Five vacuous-pass routes across four review rounds is the
+// record so far, each closed by naming the specific shape that slipped
+// through — not by a guarantee that no further shape exists. #569 (raised
+// priority:high) names the structural answer: a runtime `getVcs` spy proves
+// reach by execution instead of by reading text. Until that lands, this
+// scanner's guarantee stays bounded to the shapes named above; the next
+// shape it cannot read will be red, not green, which is the only property
+// this file can currently promise.
 
 const GOVERNANCE_DIR = fileURLToPath(new URL('.', import.meta.url));
 
@@ -445,14 +458,26 @@ const GOVERNANCE_DIR = fileURLToPath(new URL('.', import.meta.url));
  *   `null` — the entry could not be RESOLVED: no `function <entryName>(` declaration in `src`
  *            and no followable import of that name. NOT a statement about getVcs; a statement
  *            that no statement can be made. The caller MUST refuse it, never test it.
- *   `''`   — RESOLVED. Either a genuinely empty body, or a name already accounted for earlier
- *            in this walk (`seen`). A real, usable answer meaning "no getVcs found here".
+ *   `''`   — RESOLVED via the `seen` short-circuit: this name was already accounted for earlier
+ *            in this walk. A real, usable answer meaning "no getVcs found here" — NOT a
+ *            genuinely brace-empty body; the brace walk always consumes and includes the
+ *            closing `}`, so `function f(ctx) {}` resolves to the literal string `"}"`, never `''`.
  *
  * The null sentinel is meaningful ONLY for a TOP-LEVEL call (fresh `seen`). Recursive callers
  * inside this module coerce it away on purpose — see the nullish-coalescing fallback at the
  * walk below (issue #551).
  */
 function bodyClosure(src, entryName, seen = new Set(), dir = GOVERNANCE_DIR) {
+  // TERMINAL BASE CASE (issue #551, fifth vacuous-pass route): the sentinel dispatched directly as the
+  // handler itself (`return getVcs();` inlined into a dispatch branch) IS the reach —
+  // do not attempt to RESOLVE it. Resolving `getVcs` walks to its OWN implementation in
+  // vcs/cli.mjs, whose body naturally does not call itself, so the regex below would
+  // read a real reach as a resolved-empty '' and agree with a false manifest entry
+  // having checked nothing. This is not another vocabulary widening: every other
+  // inlined target still resolves correctly (its body's call to getVcs is present in
+  // its own text); getVcs is pathological precisely because its body cannot mention
+  // itself.
+  if (entryName === 'getVcs' || entryName === 'getVcsFn') return entryName;
   if (seen.has(entryName)) return '';
   const head = src.match(new RegExp(`function ${entryName}\\([^)]*\\)[^{]*\\{`));
   if (!head) return crossFileClosure(src, entryName, seen, dir);
@@ -548,7 +573,7 @@ test('T7b: SUBCOMMAND_PORT_REACH values match each handler\'s own local getVcs r
 
     const closure = bodyClosure(src, fnName);
     // GATE 2 (sites 2/3). `typeof === 'string'`, NEVER `assert.ok(closure)`: '' is a RESOLVED
-    // value (see the seen-guard/genuinely-empty-body cases above) and must stay green.
+    // value (see the seen-guard case above) and must stay green.
     assert.ok(typeof closure === 'string',
       `${checkName} (${fnName}): no call closure could be RESOLVED for this handler, so ` +
       `SUBCOMMAND_PORT_REACH['${checkName}'] is UNVERIFIED. The manifest value is not being ` +
@@ -580,12 +605,33 @@ test('T7b mutation: a getVcs( reference injected into the false-declared memory-
     'the mutation must break the value correlation for a false-declared handler');
 });
 
+test('T7b mutation (#551, fifth vacuous-pass route): a dispatch branch inlined to call the sentinel directly is a REACH, not a resolved-empty closure', () => {
+  // Reproduces the FIFTH vacuous-pass route: `return getVcs();` inlined straight into the
+  // memory-gate dispatch branch. Before bodyClosure's terminal base case, `fnName` resolved
+  // to 'getVcs', which has no LOCAL declaration in run-check.mjs, so bodyClosure fell through
+  // to crossFileClosure, followed the import to vcs/cli.mjs, and successfully resolved
+  // getVcs's OWN implementation body — which naturally does not call itself. That real,
+  // non-null closure tested false against the getVcs regex and agreed with the manifest's
+  // `false` for memory-gate, having verified nothing.
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const mutated = src.replace('    return runMemoryGateCheck(ctx, records);', '    return getVcs();');
+  assert.notEqual(mutated, src, 'the mutation must land');
+  const closure = bodyClosure(mutated, 'getVcs');
+  assert.ok(typeof closure === 'string', 'the sentinel dispatched directly must still resolve — as a REACH, not as undecidable');
+  const reaches = /\bgetVcs(Fn)?\b/.test(closure);
+  assert.equal(reaches, true, 'dispatching the sentinel directly IS the reach; it must never read as "no getVcs found"');
+  assert.notEqual(reaches, SUBCOMMAND_PORT_REACH['memory-gate'],
+    'the mutation must break the value correlation for a false-declared handler — this is the assertion ' +
+    'that previously passed vacuously (issue #551, fifth vacuous-pass route)');
+});
+
 // ── T7b sentinel — issue #551: an unresolvable closure must be null, never '' ──
 //
 // The tests below pin the RESOLVER/ACCUMULATOR split (design §1.1): bodyClosure
 // and crossFileClosure return `null` when an entry cannot be RESOLVED at all, and
-// `''` only when it IS resolved (either genuinely empty, or already accounted for
-// via `seen`). `null` must stay confined to top-level resolution — an unresolvable
+// `''` only via the `seen` short-circuit — a name already accounted for earlier
+// in this walk (a genuinely brace-empty body is NOT `''`; see the fixture below).
+// `null` must stay confined to top-level resolution — an unresolvable
 // transitive callee inside an already-resolved body must still contribute `''` to
 // the accumulator, not `null` (contract boundary, not a crash-prevention measure —
 // see the `?? ''` fallback's comment above for why a leaked `null` here would only
@@ -622,19 +668,24 @@ test('T7b sentinel: an unreadable target module is null, not \'\'', () => {
   assert.equal(bodyClosure(fixture, 'x'), null);
 });
 
-test('T7b characterization: getVcs is still detected alongside unresolvable transitive callees', () => {
-  // DOCUMENTATION PIN, not a regression guard: this fixture is self-contained (it never reads
-  // run-check.mjs), so no production mutation in this file's scope can flip it red — including
-  // the design's own predicted kill (dropping the `?? ''` fallback at the accumulator above),
-  // which does not flip it either, because the string-seeded accumulator coerces a leaked `null`
-  // to the harmless literal substring "null" rather than propagating `null` itself (see that
-  // fallback's comment). This test records the observed contract — a real `getVcs()` call stays
-  // detectable in the accumulated closure text even when sibling callees (if(, keys(, forEach()
-  // are themselves unresolvable — it does not prove the sentinel guards against a regression.
+test('T7b guard: getVcs is still detected alongside unresolvable transitive callees, and the accumulator never leaks the literal "null"', () => {
+  // Promoted from a documentation pin (issue #551): the `?? ''` fallback at the accumulator
+  // (bodyClosure's recursion site) had ZERO test coverage. Removing it makes an unresolvable
+  // transitive callee (if(, keys(, forEach() below) coerce through `text += null` — JS string
+  // concatenation turns a leaked `null` into the literal substring "null" appended to the
+  // closure, rather than propagating `null` itself (harmless to the getVcs regex, but a real,
+  // previously-unverified behaviour of this accumulator). The assertion on `!closure.includes
+  // ('null')` is what makes this a live guard rather than a pin: it flips RED when that
+  // fallback is removed (verified by mutation at #551 apply time), where the bare
+  // "getVcs is still detected" assertion below does not.
   const fixture = 'function h(ctx) {\n  if (ctx) { Object.keys(ctx).forEach(k => k); }\n  return getVcs();\n}\n';
   const closure = bodyClosure(fixture, 'h');
   assert.equal(typeof closure, 'string');
   assert.ok(/\bgetVcs(Fn)?\b/.test(closure));
+  assert.ok(!closure.includes('null'),
+    'the accumulator must never let an unresolvable transitive callee leak the literal "null" ' +
+    'into the closure text — this is the `?? \'\'` fallback at the recursion site, previously ' +
+    'uncovered by any test in this file');
 });
 
 test('T7b sentinel: crossFileClosure\'s tail call PROPAGATES null', () => {
@@ -662,7 +713,8 @@ test('T7b site 1: a dispatch branch with no extractable handler name yields null
   assert.equal(entry[1], null);
   assert.deepEqual(handlers.map(([checkName]) => checkName).sort(), dispatchedCheckNames(mutated),
     'the completeness assert stays green on this input — which is precisely why site 1 needs its ' +
-    'own gate and :469 cannot substitute for it');
+    'own gate and GATE 1 (the `typeof fnName === \'string\'` assert in the T7b test) cannot ' +
+    'substitute for it, since GATE 1 never runs on this fixture at all');
 });
 
 test('T7b mutation (#551): an arrow-form handler is REFUSED as unresolvable, not read as "no getVcs"', () => {
