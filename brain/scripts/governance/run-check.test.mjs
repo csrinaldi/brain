@@ -403,51 +403,95 @@ test('T7 mutation: dispatchedCheckNames is a real extractor, not a constant — 
 // an input the scanner could not resolve returned '', which tested false, which
 // agreed with a manifest entry of false. The assert passed having checked
 // nothing. #551 does not widen the vocabulary. It changes what happens at the
-// EDGE of it: bodyClosure/crossFileClosure return null for "could not resolve"
-// and '' only for "resolved, empty", and the loop below refuses a null BEFORE
-// testing content — "Undecidable is a VIOLATION, never a pass"
-// (vcs/lib/workflow-auth.mjs header), applied to the test that guards it.
+// EDGE of it, for a TOP-LEVEL dispatch call ONLY: bodyClosure/crossFileClosure
+// return null there for "could not resolve" and '' only for "resolved, empty",
+// and the loop below refuses a null BEFORE testing content — "Undecidable is a
+// VIOLATION, never a pass" (vcs/lib/workflow-auth.mjs header), applied to the
+// test that guards it. A callee reached WHILE walking an already-resolved body
+// is a different case: its own unresolvability is absorbed by the
+// accumulator's `?? ''` fallback, not refused — that is the gap route 6 below
+// lives in, on purpose: propagating null through that recursion would make
+// nearly every closure unresolvable (the walk hits `if(`, `for(`, `keys(`, …
+// on almost every body) and this loop permanently red — see the fallback's
+// own comment below for the accumulator/resolver contract this respects.
 //
-// DECIDABLE (an answer here is a real verification):
+// DECIDABLE (this scanner RESOLVES to a string, not null, for these shapes —
+// resolving is not the same as reading correctly; see the cross-file bullet
+// and route 6 below):
 //   • dispatch spelled `if (checkName === 'x')` with a `return <fn>(` in the branch,
 //     including a branch inlined to call a governance handler directly — the
 //     handler's own body/import still resolves normally
 //   • handler declared as `function <fn>(` (async/export prefixes included)
-//   • cross-file handler via a named, single-quoted, RELATIVE import
+//   • cross-file handler via a named, single-quoted, RELATIVE import — a real
+//     RESOLUTION of the handler itself, not a completeness guarantee about
+//     what it calls: the walk only re-enters the target module's OWN text, so
+//     a helper THAT module calls, which this scanner cannot resolve (arrow-
+//     declared, a second import hop, …), is absorbed by the `?? ''`
+//     accumulator fallback and silently drops out of the answer — route 6
+//     below reproduces exactly this against decision-gate → adrPresence
 //   • the dispatch target IS the sentinel itself (`return getVcs()` /
 //     `return getVcsFn()`) — a terminal reach, decided without walking a body
-//     (#551: walking `getVcs`'s own implementation found no call to itself
-//     and read as a resolved-empty '', a FIFTH vacuous-pass route this file
-//     shipped as "fails loud" without it; see bodyClosure's base case)
+//     (#551: walking `getVcs`'s own implementation found no call to itself and
+//     read as a resolved-empty '' — a fifth vacuous-pass route this file
+//     shipped silently until this fix's base case closed it; see bodyClosure's
+//     base case)
 //
 // NOT DECIDABLE — these now fail LOUD instead of passing vacuously:
 //   • arrow / anonymous-expression handlers; default, namespace, double-quoted
 //     or dynamic imports
 //
-// NOT DECIDABLE AND NOT DETECTED — the honest residuals, UNCHANGED by #551:
+// NOT DECIDABLE AND NOT DETECTED — the honest residuals:
 //   • NAME SHADOWING/COLLISION: bodyClosure matches `function <name>(` by text
 //     with no scope analysis, so a same-named local in a followed module can
 //     yield a real-but-WRONG body — a confident wrong answer in either
 //     direction. Text matching cannot decide this; only scope analysis or
-//     behavioural proof can. Tracked in #569.
+//     behavioural proof can. Tracked in #569. The `getVcs`/`getVcsFn` sentinel
+//     short-circuit (bodyClosure's terminal base case, #551) shares this same
+//     no-scope-analysis limitation from the other side: it matches by NAME
+//     only, with no module/origin check, so an unrelated function
+//     coincidentally named `getVcs` would read as a terminal reach — this
+//     fails in the SAFE direction (a spurious red), never silently (it cannot
+//     produce a false pass).
 //   • SWITCH / LOOKUP-TABLE DISPATCH: invisible to dispatchedCheckNames, so the
 //     branch drops out of `dispatched` while the manifest keeps its key and T7's
 //     symmetric deepEqual goes RED. Verified by live mutation at #551 apply
 //     time, not inferred from the assert text. Sub-case NOT covered: a switch
 //     migration AND an emptied manifest ([] === []) — see #569 (verified by
 //     execution at #551 apply time that an empty SUBCOMMAND_PORT_REACH makes
-//     parseSubcommandManifest return null, falling back to the fail-closed
-//     whole-file closure; not covered by a committed regression test).
+//     parseSubcommandManifest return null, falling back to the whole-file
+//     closure rule — D2's safe over-approximation in workflow-auth.mjs: it
+//     raises false alarms, never misses; not covered by a committed
+//     regression test here).
+//   • ROUTE 6 (PR #571 review, NOT closed by this fix — see route 6's own
+//     tests below and #569): a resolved-looking closure — a real, non-null
+//     string — can still be WRONG, silently, because the accumulator absorbs
+//     an unresolvable transitive callee rather than refusing it. Three shapes
+//     reproduced against real production files:
+//       - a transitively-called helper reached through an import this scanner
+//         cannot follow (double-quoted, non-relative, dynamic, or a
+//         re-export-with-rename) — the `?? ''` accumulator fallback absorbs
+//         the unresolvability at ANY recursion depth, not just the top level;
+//       - an arrow-declared helper inside checks/adr-presence.mjs, reached
+//         from decision-gate's own handler chain: getVcs() is genuinely
+//         called at runtime, SUBCOMMAND_PORT_REACH['decision-gate'] stays
+//         false, and this suite stays green;
+//       - a sentinel name that never appears contiguously in source text,
+//         e.g. `const _n = 'get' + 'Vcs'; globalThis[_n]();` — nothing here
+//         scans for string concatenation or dynamic property access.
 //
 // This list is this scanner's current limit as measured, not a claim of
-// completeness. Five vacuous-pass routes across four review rounds is the
-// record so far, each closed by naming the specific shape that slipped
-// through — not by a guarantee that no further shape exists. #569 (raised
-// priority:high) names the structural answer: a runtime `getVcs` spy proves
-// reach by execution instead of by reading text. Until that lands, this
-// scanner's guarantee stays bounded to the shapes named above; the next
-// shape it cannot read will be red, not green, which is the only property
-// this file can currently promise.
+// completeness. Six vacuous-pass routes have been found into this ONE defect
+// across four review rounds; five were closed, each by naming and closing the
+// specific shape that slipped through — not by a guarantee that no further
+// shape exists — and the sixth (route 6 above) is NOT closed here, only named
+// and added to the residuals. #569 (raised priority:high) names the
+// structural answer: a runtime `getVcs` spy that proves reach by EXECUTION
+// instead of by reading text. Until that lands, a resolved (non-null) closure
+// from this scanner is not a guarantee the read is complete or correct —
+// route 6 is proof of that, not a hypothetical. The narrower property this
+// file can still promise: an entry this scanner cannot RESOLVE at the top
+// level of a walk is refused as UNVERIFIED by the T7b gates below, rather
+// than passing vacuously as '' the way it did before #551.
 
 const GOVERNANCE_DIR = fileURLToPath(new URL('.', import.meta.url));
 
@@ -553,8 +597,16 @@ function dispatchedHandlers(src) {
   });
 }
 
-test('T7b: SUBCOMMAND_PORT_REACH values match each handler\'s own local getVcs reach, not just its key set', () => {
-  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+/**
+ * Runs the T7b gate-guarded verification loop against `src`/`manifest`. Extracted (PR #571
+ * review) so a regression test can drive a MUTATED source through the SAME two gates the T7b
+ * test below relies on, instead of calling bodyClosure/crossFileClosure directly in isolation —
+ * every prior "gate" test did the latter, which is why a reviewer deleting GATE 1, GATE 2, or
+ * both from this loop left the suite at 100/100: nothing ran this loop on a source where a real
+ * dispatch branch yields an unresolvable name or closure. See the two `T7b gate coverage` tests
+ * below.
+ */
+function verifySubcommandPortReach(src, manifest) {
   const handlers = dispatchedHandlers(src);
   assert.deepEqual(handlers.map(([checkName]) => checkName).sort(), dispatchedCheckNames(src),
     'dispatchedHandlers extraction must be COMPLETE — a format-driven miss must fail loudly, never silently shrink this loop');
@@ -584,12 +636,48 @@ test('T7b: SUBCOMMAND_PORT_REACH values match each handler\'s own local getVcs r
       `the defect of issue #551 and of the three rounds before it.`);
 
     const reaches = /\bgetVcs(Fn)?\b/.test(closure);
-    assert.equal(reaches, SUBCOMMAND_PORT_REACH[checkName],
-      `${checkName} (${fnName}): manifest says ${SUBCOMMAND_PORT_REACH[checkName]}, resolved ` +
+    assert.equal(reaches, manifest[checkName],
+      `${checkName} (${fnName}): manifest says ${manifest[checkName]}, resolved ` +
       `source scan says ${reaches}. The closure WAS resolved, so this is a genuine disagreement, ` +
       `not an extraction miss — fixing it by editing SUBCOMMAND_PORT_REACH is a separate finding ` +
       `that needs its own issue, not a quiet edit.`);
   }
+}
+
+test('T7b: SUBCOMMAND_PORT_REACH values match each handler\'s own local getVcs reach, not just its key set', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  verifySubcommandPortReach(src, SUBCOMMAND_PORT_REACH);
+});
+
+test('T7b gate coverage: GATE 1 fires inside the ACTUAL loop when a dispatch branch has no extractable handler name', () => {
+  // Same mutation as "T7b site 1" below (no `return fn(` left in the branch), but driven through
+  // verifySubcommandPortReach itself — the shared loop GATE 1 guards — not through
+  // dispatchedHandlers alone. Deleting GATE 1 from that function makes this go green; restoring
+  // it makes this go red again (verified by mutation at apply time — see the PR description).
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const mutated = src.replace(
+    '    return runMemoryGateCheck(ctx, records);',
+    '    const result = runMemoryGateCheck(ctx, records);\n    return result;',
+  );
+  assert.notEqual(mutated, src, 'the mutation must land');
+  // GATE 1's message specifically, not the generic /UNVERIFIED/ both gates' messages share —
+  // a null fnName also makes bodyClosure resolve to null, so GATE 2 backstops a missing GATE 1
+  // on THIS fixture; a loose regex would stay green with GATE 1 deleted and prove nothing.
+  assert.throws(() => verifySubcommandPortReach(mutated, SUBCOMMAND_PORT_REACH),
+    /extracted NO handler function name/,
+    'GATE 1 must refuse a dispatch branch with no extractable handler name from inside the actual loop');
+});
+
+test('T7b gate coverage: GATE 2 fires inside the ACTUAL loop when a handler is declared as an arrow function', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const mutated = src.replace(
+    'function runMemoryGateCheck(ctx, records) {',
+    'const runMemoryGateCheck = (ctx, records) => {',
+  );
+  assert.notEqual(mutated, src, 'the mutation must land');
+  assert.throws(() => verifySubcommandPortReach(mutated, SUBCOMMAND_PORT_REACH),
+    /no call closure could be RESOLVED/,
+    'GATE 2 must refuse an arrow-form handler as unresolvable from inside the actual loop');
 });
 
 test('T7b mutation: a getVcs( reference injected into the false-declared memory-gate handler is detected', () => {
