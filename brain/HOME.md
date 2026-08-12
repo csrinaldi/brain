@@ -9,6 +9,7 @@ This repo is **self-hosting**: brain uses itself to document and evolve brain.
 ## Getting started
 
 - [Adoption guide](../docs/adoption.md) — bring brain into a repo (new repo vs existing repo, step by step)
+- [Agent review handoff](../docs/inbox/AGENT-REVIEW-HANDOFF.md) — read before running any review on this repo: the reviewer-protocol §13 routing rule and the open decisions in the reviewer subsystem
 
 ---
 
