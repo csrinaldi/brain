@@ -10,9 +10,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 
 import { runCheck, main, SUBCOMMAND_PORT_REACH } from './run-check.mjs';
 import { mapDetectionToWarning } from './detection-policy.mjs';
@@ -388,24 +389,139 @@ test('T7 mutation: dispatchedCheckNames is a real extractor, not a constant — 
     'the symmetry check must report the gap once a dispatch branch has no manifest entry');
 });
 
-// ── SUBCOMMAND_PORT_REACH — the manifest's VALUES are checked, not just its keys ──
+// ── SUBCOMMAND_PORT_REACH — the manifest's VALUES, and this scanner's LIMITS ──
 //
 // T7 above proves the KEY SET is live. It proves nothing about the booleans:
-// workflow-auth.mjs trusts a `true`/`false` per subcommand completely (D4),
-// so a handler that starts calling getVcs without its manifest entry
-// flipping to `true` would silently keep resolving as credential-free. This
-// extracts each dispatch branch's own handler function name, then walks that
-// function's LOCAL call closure (mirroring `importClosure`'s transitive-walk
-// shape elsewhere in this codebase) for a `getVcs`/`getVcsFn` reference. A
-// handler dispatched to an IMPORTED function (decision-gate → `adrPresence`)
-// is resolved CROSS-FILE (T7b fix, issue #535): bodyClosure follows the
-// import to its module and walks THAT source, rather than silently
-// returning '' — which only ever agreed with a `false` manifest entry
-// regardless of what the imported function actually does.
+// workflow-auth.mjs trusts a true/false per subcommand completely (D4). T7b
+// extracts each dispatch branch's handler name, walks that function's local
+// call closure (mirroring importClosure's transitive-walk shape elsewhere in
+// this codebase), and looks for getVcs/getVcsFn. A handler dispatched to an
+// IMPORTED function (decision-gate → adrPresence) is resolved cross-file (#535).
+//
+// This is a TEXT scan, so its answer is only as wide as its vocabulary. Rounds
+// 1-3 (#535 and after) each WIDENED that vocabulary and each left the same hole:
+// an input the scanner could not resolve returned '', which tested false, which
+// agreed with a manifest entry of false. The assert passed having checked
+// nothing. #551 does not widen the vocabulary. It changes what happens at the
+// EDGE of it, for a TOP-LEVEL dispatch call ONLY: bodyClosure/crossFileClosure
+// return null there for "could not resolve" and '' only for "resolved, empty",
+// and the loop below refuses a null BEFORE testing content — "Undecidable is a
+// VIOLATION, never a pass" (vcs/lib/workflow-auth.mjs header), applied to the
+// test that guards it. A callee reached WHILE walking an already-resolved body
+// is a different case: its own unresolvability is absorbed by the
+// accumulator's `?? ''` fallback, not refused — that is the gap route 6 below
+// lives in, on purpose: propagating null through that recursion would make
+// nearly every closure unresolvable (the walk hits `if(`, `for(`, `keys(`, …
+// on almost every body) and this loop permanently red — see the fallback's
+// own comment below for the accumulator/resolver contract this respects.
+//
+// DECIDABLE (this scanner RESOLVES to a string, not null, for these shapes —
+// resolving is not the same as reading correctly; see the cross-file bullet
+// and route 6 below):
+//   • dispatch spelled `if (checkName === 'x')` with a `return <fn>(` in the branch,
+//     including a branch inlined to call a governance handler directly — the
+//     handler's own body/import still resolves normally
+//   • handler declared as `function <fn>(` (async/export prefixes included)
+//   • cross-file handler via a named, single-quoted, RELATIVE import — a real
+//     RESOLUTION of the handler itself, not a completeness guarantee about
+//     what it calls: the walk only re-enters the target module's OWN text, so
+//     a helper THAT module calls, which this scanner cannot resolve (arrow-
+//     declared, a second import hop, …), is absorbed by the `?? ''`
+//     accumulator fallback and silently drops out of the answer — route 6
+//     below reproduces exactly this against decision-gate → adrPresence
+//   • the dispatch target IS the sentinel itself (`return getVcs()` /
+//     `return getVcsFn()`) — a terminal reach, decided without walking a body
+//     (#551: walking `getVcs`'s own implementation found no call to itself and
+//     read as a resolved-empty '' — a fifth vacuous-pass route this file
+//     shipped silently until this fix's base case closed it; see bodyClosure's
+//     base case)
+//
+// NOT DECIDABLE — these now fail LOUD instead of passing vacuously:
+//   • arrow / anonymous-expression handlers; default, namespace, double-quoted
+//     or dynamic imports
+//
+// NOT DECIDABLE AND NOT DETECTED — the honest residuals:
+//   • NAME SHADOWING/COLLISION: bodyClosure matches `function <name>(` by text
+//     with no scope analysis, so a same-named local in a followed module can
+//     yield a real-but-WRONG body — a confident wrong answer in either
+//     direction. Text matching cannot decide this; only scope analysis or
+//     behavioural proof can. Tracked in #569. The `getVcs`/`getVcsFn` sentinel
+//     short-circuit (bodyClosure's terminal base case, #551) shares this same
+//     no-scope-analysis limitation from the other side: it matches by NAME
+//     only, with no module/origin check, so an unrelated function
+//     coincidentally named `getVcs` would read as a terminal reach — this
+//     fails in the SAFE direction (a spurious red), never silently (it cannot
+//     produce a false pass).
+//   • SWITCH / LOOKUP-TABLE DISPATCH: invisible to dispatchedCheckNames, so the
+//     branch drops out of `dispatched` while the manifest keeps its key and T7's
+//     symmetric deepEqual goes RED. Verified by live mutation at #551 apply
+//     time, not inferred from the assert text. Sub-case NOT covered: a switch
+//     migration AND an emptied manifest ([] === []) — see #569 (verified by
+//     execution at #551 apply time that an empty SUBCOMMAND_PORT_REACH makes
+//     parseSubcommandManifest return null, falling back to the whole-file
+//     closure rule — D2's safe over-approximation in workflow-auth.mjs: it
+//     raises false alarms, never misses; not covered by a committed
+//     regression test here).
+//   • ROUTE 6 (PR #571 review, NOT closed by this fix — see route 6's own
+//     tests below and #569): a resolved-looking closure — a real, non-null
+//     string — can still be WRONG, silently, because the accumulator absorbs
+//     an unresolvable transitive callee rather than refusing it. Three shapes
+//     reproduced against real production files:
+//       - a transitively-called helper reached through an import this scanner
+//         cannot follow (double-quoted, non-relative, dynamic, or a
+//         re-export-with-rename) — the `?? ''` accumulator fallback absorbs
+//         the unresolvability at ANY recursion depth, not just the top level;
+//       - an arrow-declared helper inside checks/adr-presence.mjs, reached
+//         from decision-gate's own handler chain: getVcs() is genuinely
+//         called at runtime, SUBCOMMAND_PORT_REACH['decision-gate'] stays
+//         false, and this suite stays green;
+//       - a sentinel name that never appears contiguously in source text,
+//         e.g. `const _n = 'get' + 'Vcs'; globalThis[_n]();` — nothing here
+//         scans for string concatenation or dynamic property access.
+//
+// This list is this scanner's current limit as measured, not a claim of
+// completeness. Six vacuous-pass routes have been found into this ONE defect
+// across four review rounds; five were closed, each by naming and closing the
+// specific shape that slipped through — not by a guarantee that no further
+// shape exists — and the sixth (route 6 above) is NOT closed here, only named
+// and added to the residuals. #569 (raised priority:high) names the
+// structural answer: a runtime `getVcs` spy that proves reach by EXECUTION
+// instead of by reading text. Until that lands, a resolved (non-null) closure
+// from this scanner is not a guarantee the read is complete or correct —
+// route 6 is proof of that, not a hypothetical. The narrower property this
+// file can still promise: an entry this scanner cannot RESOLVE at the top
+// level of a walk is refused as UNVERIFIED by the T7b gates below, rather
+// than passing vacuously as '' the way it did before #551.
 
 const GOVERNANCE_DIR = fileURLToPath(new URL('.', import.meta.url));
 
+/**
+ * Walks `entryName`'s local call closure as TEXT.
+ *
+ * @returns {string|null}
+ *   `null` — the entry could not be RESOLVED: no `function <entryName>(` declaration in `src`
+ *            and no followable import of that name. NOT a statement about getVcs; a statement
+ *            that no statement can be made. The caller MUST refuse it, never test it.
+ *   `''`   — RESOLVED via the `seen` short-circuit: this name was already accounted for earlier
+ *            in this walk. A real, usable answer meaning "no getVcs found here" — NOT a
+ *            genuinely brace-empty body; the brace walk always consumes and includes the
+ *            closing `}`, so `function f(ctx) {}` resolves to the literal string `"}"`, never `''`.
+ *
+ * The null sentinel is meaningful ONLY for a TOP-LEVEL call (fresh `seen`). Recursive callers
+ * inside this module coerce it away on purpose — see the nullish-coalescing fallback at the
+ * walk below (issue #551).
+ */
 function bodyClosure(src, entryName, seen = new Set(), dir = GOVERNANCE_DIR) {
+  // TERMINAL BASE CASE (issue #551, fifth vacuous-pass route): the sentinel dispatched directly as the
+  // handler itself (`return getVcs();` inlined into a dispatch branch) IS the reach —
+  // do not attempt to RESOLVE it. Resolving `getVcs` walks to its OWN implementation in
+  // vcs/cli.mjs, whose body naturally does not call itself, so the regex below would
+  // read a real reach as a resolved-empty '' and agree with a false manifest entry
+  // having checked nothing. This is not another vocabulary widening: every other
+  // inlined target still resolves correctly (its body's call to getVcs is present in
+  // its own text); getVcs is pathological precisely because its body cannot mention
+  // itself.
+  if (entryName === 'getVcs' || entryName === 'getVcsFn') return entryName;
   if (seen.has(entryName)) return '';
   const head = src.match(new RegExp(`function ${entryName}\\([^)]*\\)[^{]*\\{`));
   if (!head) return crossFileClosure(src, entryName, seen, dir);
@@ -415,21 +531,39 @@ function bodyClosure(src, entryName, seen = new Set(), dir = GOVERNANCE_DIR) {
   while (depth > 0 && i < src.length) { if (src[i] === '{') depth++; else if (src[i] === '}') depth--; i++; }
   const body = src.slice(start, i);
   let text = body;
-  for (const m of body.matchAll(/\b([a-zA-Z_]\w*)\(/g)) text += bodyClosure(src, m[1], seen, dir);
+  // ACCUMULATOR role (issue #551): an unresolvable transitive callee (if(, for(, keys(, ...)
+  // must contribute '' here, not null, to preserve the RESOLVED/UNRESOLVABLE contract boundary
+  // between this recursive walk and bodyClosure's top-level entry (see the contract above): the
+  // walk tolerates an unresolvable inner name, the top-level caller does not. Note this fallback
+  // is defensive, not load-bearing for a crash here — `text` is seeded as a string (`let text =
+  // body`), so `text += x` always goes through JS's string-concatenation coercion; even a leaked
+  // `null` would degrade to the literal substring "null" (harmless pollution the getVcs regex
+  // below ignores), never turn `text` itself into `null`. The nullish-coalescing fallback below
+  // is the ONLY coercion in this file; see bodyClosure's/crossFileClosure's contracts above/below
+  // for why nowhere else may have one.
+  for (const m of body.matchAll(/\b([a-zA-Z_]\w*)\(/g)) text += bodyClosure(src, m[1], seen, dir) ?? '';
   return text;
 }
 
-/** Cross-file half of bodyClosure: follows an import to its module and walks
- *  THAT source for `entryName` (T7b fix, issue #535). */
+/**
+ * Cross-file half of bodyClosure: follows an import to its module and walks THAT source for
+ * `entryName` (T7b fix, issue #535).
+ *
+ * @returns {string|null} `null` when the name is not a followable import (absent, non-relative,
+ *   or a spelling importMap does not read), when the module cannot be read, or when the target
+ *   module does not resolve the origin name either (propagated from bodyClosure — issue #551:
+ *   this propagation is INTENTIONAL and must not be coerced with a nullish-coalescing fallback
+ *   here; doing so would restore a vacuous pass for every cross-file handler).
+ */
 function crossFileClosure(src, entryName, seen, dir) {
   const target = importMap(src).get(entryName);
-  if (!target || !target.specifier.startsWith('.')) return '';
+  if (!target || !target.specifier.startsWith('.')) return null;
   const modulePath = resolve(dir, target.specifier);
   let modSrc;
   try {
     modSrc = readFileSync(modulePath, 'utf8');
   } catch {
-    return '';
+    return null;
   }
   return bodyClosure(modSrc, target.orig, seen, dirname(modulePath));
 }
@@ -463,26 +597,224 @@ function dispatchedHandlers(src) {
   });
 }
 
-test('T7b: SUBCOMMAND_PORT_REACH values match each handler\'s own local getVcs reach, not just its key set', () => {
-  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+/**
+ * Runs the T7b gate-guarded verification loop against `src`/`manifest`. Extracted (PR #571
+ * review) so a regression test can drive a MUTATED source through the SAME two gates the T7b
+ * test below relies on, instead of calling bodyClosure/crossFileClosure directly in isolation —
+ * every prior "gate" test did the latter, which is why a reviewer deleting GATE 1, GATE 2, or
+ * both from this loop left the suite at 100/100: nothing ran this loop on a source where a real
+ * dispatch branch yields an unresolvable name or closure. See the two `T7b gate coverage` tests
+ * below.
+ */
+function verifySubcommandPortReach(src, manifest) {
   const handlers = dispatchedHandlers(src);
   assert.deepEqual(handlers.map(([checkName]) => checkName).sort(), dispatchedCheckNames(src),
     'dispatchedHandlers extraction must be COMPLETE — a format-driven miss must fail loudly, never silently shrink this loop');
   for (const [checkName, fnName] of handlers) {
-    const reaches = fnName != null && /\bgetVcs(Fn)?\b/.test(bodyClosure(src, fnName));
-    assert.equal(reaches, SUBCOMMAND_PORT_REACH[checkName],
-      `${checkName} (${fnName}): manifest says ${SUBCOMMAND_PORT_REACH[checkName]}, source scan says ${reaches}`);
+    // GATE 1 (site 1, issue #551): an unextractable handler NAME is not "does not reach the
+    // port" — it is "nobody looked". `fnName != null &&` used to fold it into false.
+    assert.ok(typeof fnName === 'string',
+      `${checkName}: dispatchedHandlers extracted NO handler function name from this dispatch ` +
+      `branch, so SUBCOMMAND_PORT_REACH['${checkName}'] is UNVERIFIED. This assert does not say ` +
+      `the manifest value is wrong — it says nothing checked it. The branch shape is outside this ` +
+      `scanner's decidable domain: it reads \`return <fn>(\` inside an \`if (checkName === '...')\` ` +
+      `branch. Restore that shape, widen dispatchedHandlers for the new one, or verify the reach ` +
+      `behaviourally — but do not restore \`fnName != null &&\`, which folded this case into ` +
+      `"false" and agreed with a false manifest entry. Undecidable is a VIOLATION, never a pass ` +
+      `(brain/scripts/vcs/lib/workflow-auth.mjs header).`);
+
+    const closure = bodyClosure(src, fnName);
+    // GATE 2 (sites 2/3). `typeof === 'string'`, NEVER `assert.ok(closure)`: '' is a RESOLVED
+    // value (see the seen-guard case above) and must stay green.
+    assert.ok(typeof closure === 'string',
+      `${checkName} (${fnName}): no call closure could be RESOLVED for this handler, so ` +
+      `SUBCOMMAND_PORT_REACH['${checkName}'] is UNVERIFIED. The manifest value is not being ` +
+      `reported as wrong — it is being reported as unchecked. \`${fnName}\` matched neither a ` +
+      `\`function ${fnName}(\` declaration in run-check.mjs nor a named, single-quoted, relative ` +
+      `import this scanner can follow. Widen the scanner for that shape, or prove the reach ` +
+      `behaviourally; do not make this green by letting unresolvable read as '' again — that is ` +
+      `the defect of issue #551 and of the three rounds before it.`);
+
+    const reaches = /\bgetVcs(Fn)?\b/.test(closure);
+    assert.equal(reaches, manifest[checkName],
+      `${checkName} (${fnName}): manifest says ${manifest[checkName]}, resolved ` +
+      `source scan says ${reaches}. The closure WAS resolved, so this is a genuine disagreement, ` +
+      `not an extraction miss — fixing it by editing SUBCOMMAND_PORT_REACH is a separate finding ` +
+      `that needs its own issue, not a quiet edit.`);
   }
+}
+
+test('T7b: SUBCOMMAND_PORT_REACH values match each handler\'s own local getVcs reach, not just its key set', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  verifySubcommandPortReach(src, SUBCOMMAND_PORT_REACH);
+});
+
+test('T7b gate coverage: GATE 1 fires inside the ACTUAL loop when a dispatch branch has no extractable handler name', () => {
+  // Same mutation as "T7b site 1" below (no `return fn(` left in the branch), but driven through
+  // verifySubcommandPortReach itself — the shared loop GATE 1 guards — not through
+  // dispatchedHandlers alone. Deleting GATE 1 from that function makes this go green; restoring
+  // it makes this go red again (verified by mutation at apply time — see the PR description).
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const mutated = src.replace(
+    '    return runMemoryGateCheck(ctx, records);',
+    '    const result = runMemoryGateCheck(ctx, records);\n    return result;',
+  );
+  assert.notEqual(mutated, src, 'the mutation must land');
+  // GATE 1's message specifically, not the generic /UNVERIFIED/ both gates' messages share —
+  // a null fnName also makes bodyClosure resolve to null, so GATE 2 backstops a missing GATE 1
+  // on THIS fixture; a loose regex would stay green with GATE 1 deleted and prove nothing.
+  assert.throws(() => verifySubcommandPortReach(mutated, SUBCOMMAND_PORT_REACH),
+    /extracted NO handler function name/,
+    'GATE 1 must refuse a dispatch branch with no extractable handler name from inside the actual loop');
+});
+
+test('T7b gate coverage: GATE 2 fires inside the ACTUAL loop when a handler is declared as an arrow function', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const mutated = src.replace(
+    'function runMemoryGateCheck(ctx, records) {',
+    'const runMemoryGateCheck = (ctx, records) => {',
+  );
+  assert.notEqual(mutated, src, 'the mutation must land');
+  assert.throws(() => verifySubcommandPortReach(mutated, SUBCOMMAND_PORT_REACH),
+    /no call closure could be RESOLVED/,
+    'GATE 2 must refuse an arrow-form handler as unresolvable from inside the actual loop');
 });
 
 test('T7b mutation: a getVcs( reference injected into the false-declared memory-gate handler is detected', () => {
   const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
   const mutated = src.replace('function runMemoryGateCheck(ctx, records) {',
     'function runMemoryGateCheck(ctx, records) {\n  getVcs();');
-  const reaches = /\bgetVcs(Fn)?\b/.test(bodyClosure(mutated, 'runMemoryGateCheck'));
+  assert.notEqual(mutated, src, 'the mutation must land');
+  const closure = bodyClosure(mutated, 'runMemoryGateCheck');
+  assert.ok(typeof closure === 'string', 'runMemoryGateCheck must still resolve under this mutation');
+  const reaches = /\bgetVcs(Fn)?\b/.test(closure);
   assert.equal(reaches, true);
   assert.notEqual(reaches, SUBCOMMAND_PORT_REACH['memory-gate'],
     'the mutation must break the value correlation for a false-declared handler');
+});
+
+test('T7b mutation (#551, fifth vacuous-pass route): a dispatch branch inlined to call the sentinel directly is a REACH, not a resolved-empty closure', () => {
+  // Reproduces the FIFTH vacuous-pass route: `return getVcs();` inlined straight into the
+  // memory-gate dispatch branch. Before bodyClosure's terminal base case, `fnName` resolved
+  // to 'getVcs', which has no LOCAL declaration in run-check.mjs, so bodyClosure fell through
+  // to crossFileClosure, followed the import to vcs/cli.mjs, and successfully resolved
+  // getVcs's OWN implementation body — which naturally does not call itself. That real,
+  // non-null closure tested false against the getVcs regex and agreed with the manifest's
+  // `false` for memory-gate, having verified nothing.
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const mutated = src.replace('    return runMemoryGateCheck(ctx, records);', '    return getVcs();');
+  assert.notEqual(mutated, src, 'the mutation must land');
+  const closure = bodyClosure(mutated, 'getVcs');
+  assert.ok(typeof closure === 'string', 'the sentinel dispatched directly must still resolve — as a REACH, not as undecidable');
+  const reaches = /\bgetVcs(Fn)?\b/.test(closure);
+  assert.equal(reaches, true, 'dispatching the sentinel directly IS the reach; it must never read as "no getVcs found"');
+  assert.notEqual(reaches, SUBCOMMAND_PORT_REACH['memory-gate'],
+    'the mutation must break the value correlation for a false-declared handler — this is the assertion ' +
+    'that previously passed vacuously (issue #551, fifth vacuous-pass route)');
+});
+
+// ── T7b sentinel — issue #551: an unresolvable closure must be null, never '' ──
+//
+// The tests below pin the RESOLVER/ACCUMULATOR split (design §1.1): bodyClosure
+// and crossFileClosure return `null` when an entry cannot be RESOLVED at all, and
+// `''` only via the `seen` short-circuit — a name already accounted for earlier
+// in this walk (a genuinely brace-empty body is NOT `''`; see the fixture below).
+// `null` must stay confined to top-level resolution — an unresolvable
+// transitive callee inside an already-resolved body must still contribute `''` to
+// the accumulator, not `null` (contract boundary, not a crash-prevention measure —
+// see the `?? ''` fallback's comment above for why a leaked `null` here would only
+// degrade to harmless literal text, never make `text` itself non-string).
+
+test('T7b sentinel: an entry that cannot be resolved is null, never \'\'', () => {
+  assert.equal(bodyClosure('const x = 1;\n', 'runMemoryGateCheck'), null,
+    'unresolvable must not read as "no getVcs" — that conflation is issue #551');
+});
+
+test('T7b sentinel: a name already resolved earlier in this walk is \'\', not null', () => {
+  // Empirically verified (not assumed): the `seen` guard at bodyClosure's
+  // top (unchanged by #551) is the reliable source of a literal '' RESOLVED
+  // value — a genuinely brace-empty function body (`{}`) is NOT a clean ''
+  // here (the brace-walk includes the closing brace itself, a pre-existing
+  // extractor property this PR does not touch), so this fixture exercises
+  // the SAME contract (resolved, falsy, must not be rejected by gate 2)
+  // through the path that actually produces it.
+  const c = bodyClosure('function f(ctx) { return 1; }\n', 'f', new Set(['f']));
+  assert.equal(c, '');
+  assert.equal(typeof c, 'string');
+  assert.equal(/\bgetVcs(Fn)?\b/.test(c), false);
+});
+
+test('T7b sentinel: an import spelling this scanner cannot follow is null, not \'\'', () => {
+  const fixture = 'import { adrPresence } from "./checks/adr-presence.mjs";\n';
+  assert.equal(bodyClosure(fixture, 'adrPresence'), null,
+    'a double-quoted import is outside importMap\'s decidable domain (single-quoted only) — ' +
+    'that must report as UNVERIFIED, never as a resolved empty closure');
+});
+
+test('T7b sentinel: an unreadable target module is null, not \'\'', () => {
+  const fixture = "import { x } from './definitely-not-here.mjs';\n";
+  assert.equal(bodyClosure(fixture, 'x'), null);
+});
+
+test('T7b guard: getVcs is still detected alongside unresolvable transitive callees, and the accumulator never leaks the literal "null"', () => {
+  // Promoted from a documentation pin (issue #551): the `?? ''` fallback at the accumulator
+  // (bodyClosure's recursion site) had ZERO test coverage. Removing it makes an unresolvable
+  // transitive callee (if(, keys(, forEach() below) coerce through `text += null` — JS string
+  // concatenation turns a leaked `null` into the literal substring "null" appended to the
+  // closure, rather than propagating `null` itself (harmless to the getVcs regex, but a real,
+  // previously-unverified behaviour of this accumulator). The assertion on `!closure.includes
+  // ('null')` is what makes this a live guard rather than a pin: it flips RED when that
+  // fallback is removed (verified by mutation at #551 apply time), where the bare
+  // "getVcs is still detected" assertion below does not.
+  const fixture = 'function h(ctx) {\n  if (ctx) { Object.keys(ctx).forEach(k => k); }\n  return getVcs();\n}\n';
+  const closure = bodyClosure(fixture, 'h');
+  assert.equal(typeof closure, 'string');
+  assert.ok(/\bgetVcs(Fn)?\b/.test(closure));
+  assert.ok(!closure.includes('null'),
+    'the accumulator must never let an unresolvable transitive callee leak the literal "null" ' +
+    'into the closure text — this is the `?? \'\'` fallback at the recursion site, previously ' +
+    'uncovered by any test in this file');
+});
+
+test('T7b sentinel: crossFileClosure\'s tail call PROPAGATES null', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'run-check-t7b-'));
+  try {
+    writeFileSync(join(dir, 'mod.mjs'), 'const target = () => {};\n', 'utf8');
+    const caller = "import { target } from './mod.mjs';\n";
+    assert.equal(bodyClosure(caller, 'target', new Set(), dir), null,
+      'a name resolved to a module that does not declare it must stay null — a `?? \'\'` at the ' +
+      'crossFileClosure tail call would restore the vacuous pass for every cross-file handler');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('T7b site 1: a dispatch branch with no extractable handler name yields null — and the key-completeness assert stays GREEN on that input', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const mutated = src.replace(
+    '    return runMemoryGateCheck(ctx, records);',
+    '    const result = runMemoryGateCheck(ctx, records);\n    return result;',
+  );
+  assert.notEqual(mutated, src, 'the mutation must land');
+  const handlers = dispatchedHandlers(mutated);
+  const entry = handlers.find(([checkName]) => checkName === 'memory-gate');
+  assert.equal(entry[1], null);
+  assert.deepEqual(handlers.map(([checkName]) => checkName).sort(), dispatchedCheckNames(mutated),
+    'the completeness assert stays green on this input — which is precisely why site 1 needs its ' +
+    'own gate and GATE 1 (the `typeof fnName === \'string\'` assert in the T7b test) cannot ' +
+    'substitute for it, since GATE 1 never runs on this fixture at all');
+});
+
+test('T7b mutation (#551): an arrow-form handler is REFUSED as unresolvable, not read as "no getVcs"', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const mutated = src.replace(
+    'function runMemoryGateCheck(ctx, records) {',
+    'const runMemoryGateCheck = async (ctx, records) => {\n  if (process.env.NEVER === "1") getVcs();',
+  );
+  assert.notEqual(mutated, src, 'the mutation must land');
+  assert.equal(bodyClosure(mutated, 'runMemoryGateCheck'), null,
+    "before #551 this returned '', which tested false and agreed with " +
+    "SUBCOMMAND_PORT_REACH['memory-gate'] === false — a green that had checked nothing");
 });
 
 test('runCheck: an unknown check name throws even when it superficially resembles a manifest key', () => {
