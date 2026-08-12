@@ -93,9 +93,9 @@ test('gitlab.whoami({ token }) rejects on a transport failure — the contract d
 // ── issueView ────────────────────────────────────────────────────────────────────
 
 test('github.issueView returns normalized shape', async () => {
-  setSpawn(fakeSpawn({ number: 42, title: 'Test issue', labels: [{ name: 'bug' }], body: 'Fix this', user: { login: 'alice' } }));
+  setSpawn(fakeSpawn({ number: 42, title: 'Test issue', labels: [{ name: 'bug' }], body: 'Fix this', user: { login: 'alice' }, state: 'open', state_reason: null }));
   const result = await github.issueView({ project: 'o/r', number: 42 });
-  assert.deepEqual(result, { number: 42, title: 'Test issue', labels: ['bug'], body: 'Fix this', author: 'alice', assignees: null });
+  assert.deepEqual(result, { number: 42, title: 'Test issue', labels: ['bug'], body: 'Fix this', author: 'alice', assignees: null, state: 'open', stateReason: null });
 });
 
 // issueView gains `author` (issue #239 A3 TASK1 — a fresh-context review
@@ -127,12 +127,12 @@ test('gitlab.issueView returns normalized shape (direct API v4 fetch, no glab CL
     fetchImpl: async (url, options) => {
       seenUrl = url;
       seenHeaders = options?.headers;
-      return { ok: true, json: async () => ({ iid: 7, title: 'GL issue', labels: ['feat'], description: 'body text', author: { username: 'bob' } }) };
+      return { ok: true, json: async () => ({ iid: 7, title: 'GL issue', labels: ['feat'], description: 'body text', author: { username: 'bob' }, state: 'opened' }) };
     },
   });
   assert.equal(seenUrl, 'https://gitlab.example.com/api/v4/projects/g%2Fr/issues/7');
   assert.equal(seenHeaders?.['PRIVATE-TOKEN'], 'tok-abc');
-  assert.deepEqual(result, { number: 7, title: 'GL issue', labels: ['feat'], body: 'body text', author: 'bob', assignees: null });
+  assert.deepEqual(result, { number: 7, title: 'GL issue', labels: ['feat'], body: 'body text', author: 'bob', assignees: null, state: 'open', stateReason: null });
 });
 
 test('gitlab.issueView author defaults to null when the underlying author field is absent', async () => {
