@@ -2,6 +2,12 @@
 // Pure (no seams, design.md §5) — enforces the §6 hard rules + §7 rev>=3
 // bound as BUILD-TIME invariants. The only place a block is constructed.
 
+import {
+  validateSchemaV2,
+  ALLOWED_EVIDENCE_CLASSES,
+  ALLOWED_CAUSAL_DISPOSITIONS,
+} from './lib/schema-v2.mjs';
+
 const YAML_SCALAR_SAFE_RE = /^[A-Za-z0-9._\-/:]+$/;
 
 /**
@@ -58,10 +64,79 @@ function yamlScalar(val) {
 
 // Evidence gate (drops findings without `evidence:`) + cites gate (an
 // uncited blocker downgrades to `correction` — never invents a citation, §5).
+//
+// ISSUE #483 ruling point 4 put this gate in scope, offering two exits: adopt
+// the schema gate's annotate-and-surface shape, or justify the silent drop in
+// writing. The DROP is justified and stays: protocol §5 rules a finding
+// without a command the reviewer ran cold **inadmissible** — it is not a
+// finding at all, which is a different thing from a finding whose causal claim
+// cannot be read (that one is real, established, and merely unreadable — hence
+// annotated instead). The SILENCE is not justified, and is what changes here:
+// the count is returned so `buildVerdict` can surface it. "No findings" and
+// "findings discarded" must not look identical to the reader — that is the
+// `evidence-reader-empty-on-failure` shape, one function over.
 function processFindings(findings = []) {
-  return findings
-    .filter(f => Boolean(f?.evidence))
-    .map(f => (f.severity === 'blocker' && !f.cites ? { ...f, severity: 'correction' } : f));
+  const admissible = findings.filter(f => Boolean(f?.evidence));
+  return {
+    findings: admissible.map(f => (f.severity === 'blocker' && !f.cites ? { ...f, severity: 'correction' } : f)),
+    inadmissible: findings.length - admissible.length,
+  };
+}
+
+/**
+ * The reason a finding's causal claim cannot be read, or `null` if it can.
+ *
+ * The gate fires on a claim that FAILS validation, never on a claim that was
+ * not made. That distinction is load-bearing and is what the scope is built
+ * around: protocol §6.2 states the two causal fields are "optional in the
+ * sense that a `/1` verdict simply omits them", and rendering is "when
+ * present". Treating an absent field as invalid would mark every legacy
+ * finding — and every `/2` finding built without passing through
+ * `annotateDeterministicFindings` — as schema-invalid, which is a presence
+ * requirement neither the protocol nor the #483 ruling asks for.
+ *
+ * So:
+ * - Neither field present → no claim to read. Routes as it always has.
+ * - BOTH present → `validateSchemaV2`'s exact contract, called directly. This
+ *   is the shape `annotateDeterministicFindings` always produces, i.e. every
+ *   real `/2` finding, which is what makes the wiring (issue #483's actual
+ *   deliverable) real rather than nominal.
+ * - Exactly one present → a PARTIAL claim. Validated against the same exported
+ *   allow-list `validateSchemaV2` uses, because `buildVerdict`'s routing loop
+ *   is protocol-agnostic: it routes on `causal_disposition` whatever the
+ *   protocol string says, so a lone typo'd disposition steers a real routing
+ *   decision and ruling point 2 binds that decision to a validated value.
+ */
+function causalClaimFault(f) {
+  const hasClass = f?.evidence_class !== undefined;
+  const hasDisposition = f?.causal_disposition !== undefined;
+
+  if (!hasClass && !hasDisposition) return null;
+
+  if (hasClass && hasDisposition) {
+    const result = validateSchemaV2(f);
+    return result.valid ? null : result.reason;
+  }
+
+  if (hasClass && !ALLOWED_EVIDENCE_CLASSES.includes(f.evidence_class)) {
+    return `invalid evidence_class: ${f.evidence_class}. Allowed: ${ALLOWED_EVIDENCE_CLASSES.join(', ')}`;
+  }
+  if (hasDisposition && !ALLOWED_CAUSAL_DISPOSITIONS.includes(f.causal_disposition)) {
+    return `invalid causal_disposition: ${f.causal_disposition}. Allowed: ${ALLOWED_CAUSAL_DISPOSITIONS.join(', ')}`;
+  }
+  return null;
+}
+
+// Schema gate (issue #483, maintainer ruling option 3 — downgrade + annotate).
+// A finding whose causal claim fails validation is NEVER dropped and NEVER
+// silently reclassified: it carries `schema_invalid` (the validator's own
+// reason, so the human reading the block is told WHAT failed, not merely that
+// something did) and the routing loop below refuses to read its disposition.
+function applySchemaGate(findings) {
+  return findings.map((f) => {
+    const fault = causalClaimFault(f);
+    return fault ? { ...f, schema_invalid: fault } : f;
+  });
 }
 
 /** Pure builder. Throws when `headSha` is absent (protocol §6 — no headless
@@ -82,12 +157,27 @@ export function buildVerdict({
 } = {}) {
   if (!headSha) throw new Error('brain-review/1: head_sha is mandatory — refusing to build a headless verdict.');
 
-  const processed = processFindings(findings);
+  const { findings: admitted, inadmissible } = processFindings(findings);
+  const processed = applySchemaGate(admitted);
   const candidateFindings = [];
   const followUps = [];
   let unknownCausality = false;
 
   for (const f of processed) {
+    // #483 ruling point 2: routing happens only on values that passed
+    // validation. An unreadable disposition is not routed on its merits at
+    // all — it lands in `findings` and forces the escalation, because protocol
+    // §6.2 already rules that "any finding whose causality could not be
+    // determined forces verdict: STOP and escalate: human ... never silently
+    // admitted ... nor silently dropped". A disposition the validator cannot
+    // read IS causality that could not be determined; the near-miss spelling
+    // of `unknown` is the case that makes this concrete — it loses the whole
+    // escalation without this branch.
+    if (f.schema_invalid) {
+      unknownCausality = true;
+      candidateFindings.push(f);
+      continue;
+    }
     const disp = f.causal_disposition;
     if (disp === 'unknown') {
       unknownCausality = true;
@@ -116,9 +206,21 @@ export function buildVerdict({
   let finalVerdict = conclusion;
   if (boundHit || unknownCausality) {
     finalVerdict = 'STOP';
-  } else if (protocol === 'brain-review/2' && findings.length > 0 && candidateFindings.length === 0 && conclusion === 'REVISE') {
+  } else if (protocol === 'brain-review/2' && processed.length > 0 && candidateFindings.length === 0 && conclusion === 'REVISE') {
+    // #483: `processed.length`, not `findings.length`. The softening means
+    // "every finding that exists was routed OUT of the blocking set by the
+    // admission rule". Measured against the raw input, a verdict whose
+    // findings were all DROPPED as inadmissible satisfies it vacuously and
+    // softens REVISE to APPROVE on the strength of findings nobody ever read —
+    // fail-open, from the same silent drop this ticket came to fix.
     finalVerdict = 'APPROVE';
   }
+
+  // #483 point 4: the inadmissible drop is protocol §5 and stays, but it is
+  // reported. Appended, never mutated in place — the caller owns its list.
+  const finalConditions = inadmissible > 0
+    ? [...conditions, `${inadmissible} finding(s) dropped: no evidence (inadmissible, protocol §5)`]
+    : conditions;
 
   return {
     protocol,
@@ -128,7 +230,7 @@ export function buildVerdict({
     gates: { required: gates.required ?? [], detection: gates.detection ?? [] },
     findings: candidateFindings,
     follow_ups: followUps,
-    conditions,
+    conditions: finalConditions,
     pin,
     sequencing,
     escalate: finalEscalate,
@@ -161,6 +263,14 @@ export function renderVerdict(v) {
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
       if (f.evidence_class) lines.push(`    evidence_class: ${yamlScalar(f.evidence_class)}`);
       if (f.causal_disposition) lines.push(`    causal_disposition: ${yamlScalar(f.causal_disposition)}`);
+      // #483 ruling point 3: the marker is rendered, or it does not exist. A
+      // marker only the code can see leaves the human reading the block with
+      // the same unqualified `causal_disposition:` line the gate exists to
+      // distrust. Rendered HERE only, and deliberately not in the follow_ups
+      // loop below: a schema-invalid finding is routed to `findings[]` by the
+      // gate itself and can never reach `follow_ups[]`, so emitting it there
+      // would be render code no input can reach.
+      if (f.schema_invalid) lines.push(`    schema_invalid: ${yamlScalar(f.schema_invalid)}`);
       // The inline-comment anchor (issue #405, REQ-405-2). BOTH optional, and
       // emitted only when the pair is USABLE — see `hasUsableAnchor`. Not "when
       // present": a finding carrying `line: 0` or `line: 'abc'` has them and gets

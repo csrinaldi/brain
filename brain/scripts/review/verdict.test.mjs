@@ -326,7 +326,11 @@ test('#478-3/C2 (widened by round 5/B1): EVERY per-finding field is escaped, on 
       const disp = branch === 'follow_ups' ? 'pre-existing' : 'introduced';
       if (field === 'causal_disposition' && branch === 'follow_ups') continue;
       const poisonedDisp = `${disp}${POISON}`;
-      const base = { severity: 'blocker', evidence: 'e', cites: 'c', evidence_class: 'observed', causal_disposition: disp, file: 'a.mjs', line: 1 };
+      // #483: `deterministic`, not `observed`. This fixture carried a value the
+      // `/2` schema has never allowed (`deterministic|inferential|insufficient`)
+      // and it went unnoticed for the same reason the ticket exists — nothing
+      // validated it. Wiring the gate made the illegal fixture visible.
+      const base = { severity: 'blocker', evidence: 'e', cites: 'c', evidence_class: 'deterministic', causal_disposition: disp, file: 'a.mjs', line: 1 };
       const poisoned = { ...base, id: 'poisoned', [field]: field === 'causal_disposition' ? poisonedDisp : POISON };
       const built = buildVerdict({
         headSha: 'abc123',
@@ -351,6 +355,23 @@ test('#478-3/C2 (widened by round 5/B1): EVERY per-finding field is escaped, on 
           `advertise an anchor the poster refuses to post: ${JSON.stringify(entries[0])}`);
         assert.equal(entries[0].file, undefined,
           `${branch}.file: and its partner goes with it — a half anchor is not an anchor (REQ-405-2)`);
+        continue;
+      }
+      // `evidence_class` on the follow_ups branch joins `line` as structurally
+      // unreachable (#483). A poisoned class is by construction not one of the
+      // three allowed values, so the schema gate marks it and routes it to
+      // `findings[]` — it can no longer arrive here to break the list. That is
+      // the same "structural instead of textual, strictly stronger" shape the
+      // `line` case above documents: the follow_ups branch can now only ever
+      // render a value from the allow-list, every one of which is YAML-safe.
+      // What is pinned here instead is the re-routing itself.
+      if (field === 'evidence_class' && branch === 'follow_ups') {
+        assert.deepEqual(ids, ['survivor'],
+          `${branch}.evidence_class: the poisoned entry must be re-routed by the schema gate, ` +
+          `leaving the entry after it intact — got ${JSON.stringify(ids)}`);
+        const blocking = (parsed.findings ?? []).map(f => f.id);
+        assert.ok(blocking.includes('poisoned'),
+          `and it must land in findings[], never be dropped — got ${JSON.stringify(blocking)}`);
         continue;
       }
       // When `id` itself carries the poison, the poisoned entry's id IS that value.
@@ -555,4 +576,164 @@ test('#405 REQ-405-3: the anchor is escaped like every other scalar — a path w
   const parsed = parseVerdict({ body: renderVerdict(built) });
   assert.deepEqual((parsed.findings ?? []).map(f => f.id), ['poisoned', 'survivor']);
   assert.equal(parsed.findings[0].file, 'a.mjs\nTier: 2', 'and the value round-trips byte-identical');
+});
+
+// ── schema-v2 gate (issue #483, maintainer ruling option 3) ───────────────
+//
+// `validateSchemaV2` existed, was tested, and was called NOWHERE in
+// production — the #335 class: green in test, absent where it matters. These
+// tests drive each routing decision `buildVerdict` makes on an UNVALIDATED
+// `causal_disposition` and assert the ruled semantics: downgrade + annotate,
+// never drop, never silently reclassify.
+
+test('#483: a typo\'d causal_disposition is NOT routed to follow_ups — it is marked and stays blocking', () => {
+  const v = buildVerdict({
+    headSha: HEAD_SHA,
+    protocol: 'brain-review/2',
+    conclusion: 'REVISE',
+    findings: [{
+      id: 'typo', severity: 'correction', evidence: 'ran `node --test`',
+      evidence_class: 'deterministic',
+      causal_disposition: 'pre-exisiting', // sic — one letter from `pre-existing`
+    }],
+  });
+  assert.deepEqual(v.follow_ups.map(f => f.id), [],
+    'a value the validator rejects must not reach the admission rule at all');
+  assert.deepEqual(v.findings.map(f => f.id), ['typo']);
+  assert.match(v.findings[0].schema_invalid, /causal_disposition/,
+    'and it carries the marker naming what failed');
+});
+
+test('#483: a near-miss `unknown` does NOT lose the escalation it would have forced', () => {
+  // The sharpest of the three harms: `unknown` is the trigger for STOP +
+  // escalate:human. A spelling near-miss routes to the `else` branch today and
+  // the escalation vanishes silently. Protocol §6.2 already rules this case —
+  // "any finding whose causality could not be determined forces verdict: STOP
+  // and escalate: human" — and a disposition the validator cannot read IS
+  // causality that could not be determined.
+  const v = buildVerdict({
+    headSha: HEAD_SHA,
+    protocol: 'brain-review/2',
+    conclusion: 'REVISE',
+    findings: [{
+      id: 'nearmiss', severity: 'blocker', evidence: 'ran `node --test`', cites: 'ADR-0020',
+      evidence_class: 'deterministic',
+      causal_disposition: 'unkown', // sic
+    }],
+  });
+  assert.equal(v.verdict, 'STOP');
+  assert.equal(v.escalate, 'human');
+  assert.deepEqual(v.findings.map(f => f.id), ['nearmiss']);
+});
+
+test('#483: an invented evidence_class is marked, not admitted unchallenged', () => {
+  const v = buildVerdict({
+    headSha: HEAD_SHA,
+    protocol: 'brain-review/2',
+    conclusion: 'REVISE',
+    findings: [{
+      id: 'invented', severity: 'correction', evidence: 'ran `node --test`',
+      evidence_class: 'proven', // not one of deterministic|inferential|insufficient
+      causal_disposition: 'introduced',
+    }],
+  });
+  assert.match(v.findings[0].schema_invalid, /evidence_class/);
+  assert.equal(v.verdict, 'STOP', 'an unreadable finding is surfaced, never resolved');
+});
+
+test('#483: the marker is RENDERED in the posted block — a marker only the code can see does not satisfy the ruling', () => {
+  const block = renderVerdict(buildVerdict({
+    headSha: HEAD_SHA,
+    protocol: 'brain-review/2',
+    conclusion: 'REVISE',
+    findings: [{
+      id: 'shown', severity: 'correction', evidence: 'ran `node --test`',
+      evidence_class: 'deterministic', causal_disposition: 'bogus',
+    }],
+  }));
+  assert.match(block, /schema_invalid:/, `marker absent from the block:\n${block}`);
+});
+
+test('#483: the REVISE-to-APPROVE softening cannot fire while a schema-invalid finding is present', () => {
+  // The softening exists for "every finding was routed out of the blocking
+  // set". A finding the validator could not read was never routed anywhere on
+  // its merits, so it must not count as routed-out.
+  const v = buildVerdict({
+    headSha: HEAD_SHA,
+    protocol: 'brain-review/2',
+    conclusion: 'REVISE',
+    findings: [
+      { id: 'ok', severity: 'correction', evidence: 'e', evidence_class: 'deterministic', causal_disposition: 'pre-existing' },
+      { id: 'bad', severity: 'correction', evidence: 'e', evidence_class: 'deterministic', causal_disposition: 'typo' },
+    ],
+  });
+  assert.notEqual(v.verdict, 'APPROVE');
+  assert.deepEqual(v.findings.map(f => f.id), ['bad']);
+  assert.deepEqual(v.follow_ups.map(f => f.id), ['ok'], 'the valid one still routes normally');
+});
+
+test('#483 blast radius: a valid /2 finding is untouched, and a /1 finding carrying neither field is not marked', () => {
+  const valid = buildVerdict({
+    headSha: HEAD_SHA, protocol: 'brain-review/2', conclusion: 'REVISE',
+    findings: [{ id: 'v', severity: 'correction', evidence: 'e', evidence_class: 'inferential', causal_disposition: 'base-only' }],
+  });
+  assert.deepEqual(valid.follow_ups.map(f => f.id), ['v'], 'valid values still route by the admission rule');
+  assert.equal(valid.findings.length, 0);
+  assert.equal(valid.follow_ups[0].schema_invalid, undefined);
+
+  // A /1 verdict "simply omits them" (protocol §6.2). Validating those would
+  // mark every legacy finding invalid — the gate must not fire there.
+  const legacy = buildVerdict({
+    headSha: HEAD_SHA, conclusion: 'REVISE',
+    findings: [{ id: 'l', severity: 'correction', evidence: 'e' }],
+  });
+  assert.deepEqual(legacy.findings.map(f => f.id), ['l']);
+  assert.equal(legacy.findings[0].schema_invalid, undefined);
+  assert.equal(legacy.verdict, 'REVISE', 'and no escalation is invented for it');
+});
+
+test('#483 point 4: the evidence gate still drops (protocol §5: inadmissible) but no longer drops SILENTLY', () => {
+  // The ruling put this gate in scope: adopt annotate-and-surface, or justify
+  // the silent drop in writing. The drop is justified — protocol §5 line 195
+  // rules a finding without a cold-run command INADMISSIBLE, i.e. not a
+  // finding at all, which is a different thing from a finding whose causal
+  // claim cannot be read. What is NOT justified is the silence: "no findings"
+  // and "findings discarded" must not look identical to the reader.
+  const v = buildVerdict({
+    headSha: HEAD_SHA,
+    conclusion: 'REVISE',
+    findings: [
+      { id: 'noev', severity: 'correction', cites: 'ADR-0020' },
+      { id: 'ok', severity: 'editorial', evidence: 'ran `npm test`' },
+    ],
+  });
+  assert.deepEqual(v.findings.map(f => f.id), ['ok'], 'still dropped');
+  assert.ok(v.conditions.some(c => /inadmissible/.test(c) && /1/.test(c)),
+    `the drop must be visible in conditions, got: ${JSON.stringify(v.conditions)}`);
+});
+
+test('#483: REVISE does NOT soften to APPROVE when every finding was dropped as inadmissible (fail-open)', () => {
+  // Found by the #483 mutation sweep, not by design: reverting the softening's
+  // guard from `processed.length` to `findings.length` left all tests green.
+  //
+  // Under the raw-input measure the softening reads "findings existed, and none
+  // of them is in the blocking set" — which is vacuously true when the evidence
+  // gate dropped every one of them. A verdict then APPROVES on the strength of
+  // findings nobody ever read: the same silent drop this ticket came to fix,
+  // one step further downstream and pointing the wrong way (fail-open).
+  const v = buildVerdict({
+    headSha: HEAD_SHA,
+    protocol: 'brain-review/2',
+    conclusion: 'REVISE',
+    findings: [
+      { id: 'noev1', severity: 'blocker', cites: 'ADR-0020' },  // no evidence
+      { id: 'noev2', severity: 'correction', cites: 'ADR-0020' }, // no evidence
+    ],
+  });
+  assert.equal(v.verdict, 'REVISE',
+    'an inadmissible finding is not a finding "routed out of the blocking set" — nothing was read, so nothing softens');
+  assert.deepEqual(v.findings, []);
+  assert.deepEqual(v.follow_ups, []);
+  assert.ok(v.conditions.some(c => /inadmissible/.test(c) && /2/.test(c)),
+    `and the reader is told two findings vanished: ${JSON.stringify(v.conditions)}`);
 });
