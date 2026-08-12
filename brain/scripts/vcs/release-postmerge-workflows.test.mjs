@@ -12,13 +12,13 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-import { auditWorkflowAuth } from './lib/workflow-auth.mjs';
+import { auditWorkflowAuth, auditGitlabFragment } from './lib/workflow-auth.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '../../..');
@@ -231,13 +231,171 @@ test('release.yml routes tag_name via env: not spliced into run: (security prece
 // why this proof runs only once everything else is in place.
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('#479/#475/#535 drift guard: every audited workflow is compliant — VCS_TOKEN declared with a scope that can read PRs', () => {
-  for (const [file, path] of [
-    ['release.yml', RELEASE_YML],
-    ['governance-postmerge.yml', POSTMERGE_YML],
-    ['governance.yml', GOVERNANCE_YML],
-  ]) {
-    assert.deepEqual(auditWorkflowAuth(readFileSync(path, 'utf8'), { file, repoRoot: REPO_ROOT }), []);
+// ── The audited set is DERIVED FROM DISK, never listed (issue #558) ─────────
+//
+// It used to be this literal:
+//
+//     [release.yml, governance-postmerge.yml, governance.yml]
+//
+// and `governance-relabel.yml` — whose step invokes `relabel-retrigger.mjs`,
+// which imports `getVcs` — sat outside it declaring `GH_TOKEN`, the exact
+// coupling #479 and #535 exist to remove, for as long as both of those tickets
+// were open. Nothing was broken and nothing said anything: adding a workflow to
+// the repo did not add it to the audit, and someone had to remember. #535's own
+// history is that nobody does (#476's guard died with its PR; #467's fix went
+// unguarded for a month).
+//
+// That is the very shape the guard was built to avoid — a checker whose
+// COVERAGE is an allowlist, where absence from the list reads as "nothing to
+// report" (`evidence-reader-empty-on-failure`, one level up from the guard's
+// own logic). So the set comes off disk, and the sanity assertions below make
+// an empty or shrunken read a failure rather than a silent agreement.
+
+const WORKFLOWS_DIR = resolve(REPO_ROOT, '.github/workflows');
+const GITLAB_CI_DIR = resolve(REPO_ROOT, 'brain/scripts/ci');
+
+/** Every `.yml`/`.yaml` under a directory, recursively, as [relative name, absolute path]. */
+function ciFilesUnder(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...ciFilesUnder(full).map(([n, p]) => [join(entry.name, n), p]));
+    else if (/\.ya?ml$/.test(entry.name)) out.push([entry.name, full]);
+  }
+  return out.sort(([a], [b]) => a.localeCompare(b));
+}
+
+/** Every GitHub workflow on disk, as [file, absolute path]. */
+function githubWorkflows() {
+  return ciFilesUnder(WORKFLOWS_DIR);
+}
+
+/** Every GitLab pipeline file on disk — the SECOND surface, derived the same way.
+ *  It was a single hardcoded path in this test's first form: the audited set was
+ *  taken off an allowlist on one surface while an allowlist was reintroduced on
+ *  the other, which is the defect this whole file exists to remove. */
+function gitlabPipelines() {
+  return ciFilesUnder(GITLAB_CI_DIR);
+}
+
+test('#479/#475/#535/#558 drift guard: EVERY workflow on disk is compliant — the audited set is derived, not listed', () => {
+  const workflows = githubWorkflows();
+  assert.ok(workflows.length >= 5,
+    `sanity: expected >=5 workflows on disk, found ${workflows.length} — a read that returns ` +
+    `little or nothing would make this test agree with everything`);
+  // Named explicitly so a rename or a deletion is a failure here rather than a
+  // quietly smaller set. This is a floor on coverage, not the coverage itself:
+  // a NEW workflow is audited without touching this list, which is the point.
+  for (const known of ['release.yml', 'governance-postmerge.yml', 'governance.yml', 'governance-relabel.yml']) {
+    assert.ok(workflows.some(([f]) => f === known), `sanity: ${known} must be among the audited workflows`);
+  }
+  const findings = workflows
+    .map(([file, path]) => [file, auditWorkflowAuth(readFileSync(path, 'utf8'), { file, repoRoot: REPO_ROOT })])
+    .filter(([, v]) => v.length > 0);
+  assert.deepEqual(findings, [],
+    'these workflows reach the server without a usable credential declaration');
+});
+
+test('#558: EVERY GitLab pipeline file on disk is audited — by the rule that applies to GitLab, not GitHub\'s', () => {
+  // NOT auditWorkflowAuth. #558 proposed one step reader across both providers;
+  // measured, that is wrong — GitLab injects project CI/CD variables into every
+  // job automatically, so VCS_TOKEN is legitimately absent from this YAML and
+  // the "must declare the credential" rule would flag three correct jobs (the
+  // three whose entry point reaches the port: issue-link, actor-check,
+  // brain-writes-reviewed). See auditGitlabFragment's header.
+  const pipelines = gitlabPipelines();
+  assert.ok(pipelines.length >= 1,
+    `sanity: expected >=1 GitLab pipeline file on disk, found ${pipelines.length}`);
+  assert.ok(pipelines.some(([f]) => f === 'gitlab-governance.yml'),
+    'sanity: gitlab-governance.yml must be among them');
+  const findings = pipelines
+    .map(([file, path]) => [file, auditGitlabFragment(readFileSync(path, 'utf8'), { file, repoRoot: REPO_ROOT })])
+    .filter(([, v]) => v.length > 0);
+  assert.deepEqual(findings, []);
+});
+
+test('#558: the GitLab audit has TEETH — every condition alone is caught, in every spelling GitLab accepts', () => {
+  const src = readFileSync(join(GITLAB_CI_DIR, 'gitlab-governance.yml'), 'utf8');
+  const audit = (t) => auditGitlabFragment(t, { file: 'gl', repoRoot: REPO_ROOT }).join('\n');
+
+  // 1. A GitHub-only credential in a GitLab pipeline.
+  assert.match(audit(src.replace('default:', 'variables:\n  GH_TOKEN: $CI_JOB_TOKEN\ndefault:')),
+    /declares GH_TOKEN/);
+
+  // 2. An entry point that no longer exists — the failure mode this file is most
+  //    exposed to, since no CI of brain's own ever runs it. ALL THREE SPELLINGS
+  //    GitLab accepts: a `-` list, an inline scalar, and a block scalar. The
+  //    first form of this reader knew only the list, so the other two were
+  //    invisible AND kept the vacuous-pass guard from firing, because the
+  //    remaining jobs still supplied lists.
+  const gone = 'brain/scripts/vcs/actor-check-RENAMED.mjs';
+  assert.match(audit(src.replace('vcs/actor-check.mjs', 'vcs/actor-check-RENAMED.mjs')),
+    /does not exist/, 'list form');
+  assert.match(audit(src.replace('  script:\n    - node brain/scripts/vcs/actor-check.mjs',
+    `  script: node ${gone}`)), /does not exist/, 'inline scalar form');
+  assert.match(audit(src.replace('  script:\n    - node brain/scripts/vcs/actor-check.mjs',
+    `  script: |\n    node ${gone}`)), /does not exist/, 'block scalar form');
+
+  // 3. A quoted path — #559's blind spot on the GitHub side nullifies the whole
+  //    audit on this one, where a missing entry point is the ONLY thing checked.
+  assert.match(audit(src.replace('- node brain/scripts/vcs/actor-check.mjs',
+    `- node "${gone}"`)), /does not exist|resolves to no entry point/, 'quoted path');
+
+  // 4. A renamed SUBCOMMAND breaks this pipeline exactly as silently as a renamed
+  //    file, and the GitHub side already refuses it. Asymmetry would mean the two
+  //    surfaces disagree about what a valid invocation is.
+  assert.match(audit(src.replace('run-check.mjs issue-link', 'run-check.mjs issue-lynk')),
+    /manifest does not declare/);
+
+  // 5. A job shelling a provider CLI — the coupling in a purer form than a literal.
+  assert.match(audit(src.replace('    - node brain/scripts/vcs/actor-check.mjs',
+    '    - gh api repos/x/pulls\n    - node brain/scripts/vcs/actor-check.mjs')),
+    /shells a provider CLI/);
+
+  // 6. A parse that reads nothing must be a violation, not a clean bill.
+  assert.match(audit(src.replace(/^(\s*)script:/gm, '$1notscript:')), /no job with a script/);
+});
+
+test('#558: the derived set is a real read — a file written into the REAL directory is audited without editing any list', () => {
+  // The first form of this test built its own mkdtemp directory and never touched
+  // githubWorkflows(), so it proved nothing about the derivation it was named
+  // after. This one writes into the directory the production walk reads.
+  const planted = join(WORKFLOWS_DIR, 'zz-derivation-probe.yml');
+  try {
+    writeFileSync(planted, [
+      'permissions: { contents: read, pull-requests: read }',
+      'jobs:',
+      '  g:',
+      '    steps:',
+      '      - name: Run the audit',
+      '        run: node brain/scripts/brain-audit.mjs "a..b"',
+    ].join('\n'));
+    const seen = githubWorkflows().map(([f]) => f);
+    assert.ok(seen.includes('zz-derivation-probe.yml'),
+      'the production walk must see a file nobody registered');
+    const findings = githubWorkflows()
+      .map(([file, path]) => [file, auditWorkflowAuth(readFileSync(path, 'utf8'), { file, repoRoot: REPO_ROOT })])
+      .filter(([, v]) => v.length > 0);
+    assert.ok(findings.some(([f]) => f === 'zz-derivation-probe.yml'),
+      'a newly added, non-compliant workflow must be caught by the derived set — if this passes, ' +
+      'the derivation is decorative and the coverage is still whatever someone remembered to list');
+  } finally {
+    rmSync(planted, { force: true });
+  }
+});
+
+test('#558: a workflow this guard cannot parse is a violation, not a clean bill', () => {
+  // YAML flow style yields zero step blocks, so the audit used to return [] for a
+  // port-reaching step with no credential at all. Harmless while the audited set
+  // was three known files; a silent welcome now that any new file joins the set.
+  const flow = 'jobs:\n  g:\n    steps: [{name: "audit", run: "node brain/scripts/brain-audit.mjs a..b"}]\n';
+  assert.match(auditWorkflowAuth(flow, { file: 'flow.yml', repoRoot: REPO_ROOT }).join('\n'),
+    /could not parse it/);
+  // And it must NOT fire on the real workflows, or it is a check that blocks
+  // everything and protects nothing (#499).
+  for (const [file, path] of githubWorkflows()) {
+    assert.doesNotMatch(auditWorkflowAuth(readFileSync(path, 'utf8'), { file, repoRoot: REPO_ROOT }).join('\n'),
+      /could not parse it/, `${file} must remain parseable`);
   }
 });
 
