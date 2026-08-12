@@ -38,22 +38,56 @@ impossible by construction. Three independent locks (§2) make it so.
 Three independent locks. **Any one holds if the other two fail.** Removing any one leaves
 the other two standing.
 
+> **Citations here name symbols, never line numbers.** An earlier revision of this section
+> cited `brain-writes-reviewed.mjs:99` for lock 1; within one release cycle line 99 had become
+> an unrelated JSDoc block while the mechanism moved to line 167. A doctrine that points at a
+> moving target sends its own verifier to the wrong text (#580).
+
 **Lock 1 — COMMENT-state verdicts.** Every verdict posts as a COMMENT-state review. L6's
-approver set is built only from `reviews.filter(r => r.state === 'APPROVED')`
-(`brain-writes-reviewed.mjs:99`); a `COMMENTED` review contributes nothing to it. A
-verdict cannot be miscounted as an approval **by construction of the counter**, not by a
-rule the reviewer follows.
+approver set is built only from `reviews.filter(r => r.state === 'APPROVED')`, inside
+`evaluateBrainWritesReviewed` (`brain-writes-reviewed.mjs`); a `COMMENTED` review contributes
+nothing to it. A verdict cannot be miscounted as an approval **by construction of the
+counter**, not by a rule the reviewer follows.
 
 **Lock 2 — no approve capability in the adapter.** The verb that posts a verdict,
-`prReviewComment`, hardcodes `event: 'COMMENT'` (§4). There is no APPROVE sibling verb, no
-APPROVE argument, and no branch that selects a different event. Even a fully compromised
-reviewer process has no code path to reach an APPROVE review.
+`prReviewComment`, has no APPROVE sibling verb, no APPROVE argument, and no branch that
+selects one. Even a fully compromised reviewer process has no code path to an APPROVE review.
 
-**Lock 3 — key separation.** The reviewer handle registers in a **new**
-`governance.reviewActors`, read ONLY by L6, whose sole meaning is "these identities do not
-count as the human reviewer." It is NEVER in `governance.approvalActors`, read ONLY by L5
-(`actor-check.mjs`), whose meaning is "these identities may apply `status:approved`." No
-key feeds two gates (§3).
+The lock holds on **both providers, by two different mechanisms** — worth stating separately,
+because describing it as one mechanism gets it wrong for one of them:
+
+| provider | mechanism |
+|---|---|
+| GitHub | `event: 'COMMENT'` is hardcoded at every call site in `providers/github.mjs` — the initial post (inline and plain) and the retry alike. No call constructs any other event. |
+| GitLab | **stronger** — GitLab's notes API has no review-event concept at all (`providers/gitlab.mjs`). A plain note is posted, and there is no APPROVE state for it to reach (REQ-266-3). |
+
+**Lock 3 — one key, one meaning, enforced at two gates.** The reviewer handle registers in
+`governance.reviewActors`, whose sole meaning is **"this identity is not a human approver."**
+That single meaning is enforced in two places, and the two never disagree because there is
+only one thing to agree about:
+
+- **L5 — as denial.** A `brain-decision/1` authored by such an identity is refused
+  (`evaluateSignedDecision`), and a `status:approved` label applied by one is refused
+  (`evaluateActor`); the key is read by `defaultReadDenyActors`.
+- **L6 — as exclusion.** Such an identity does not count toward the human-approver tally
+  (`evaluateBrainWritesReviewed`), reading the key through `defaultReadBotAllowlist`.
+
+`governance.approvalActors` is a **separate key with a separate meaning** — "these identities
+may apply `status:approved`" — read only at L5. The reviewer handle is never in it. L6
+deliberately does not read it: `defaultReadBotAllowlist` reads `reviewActors` alone and says
+so, because unioning them would be the dual-semantics coupling ADR-0020's ruling R2 exists to
+dissolve. Both effects require both registrations, explicitly, never implicitly.
+
+> **What R2 forbids, precisely.** R2 forbids **one key carrying two meanings**, not two gates
+> reading the same fact. Denial at L5 and exclusion at L6 are one fact — *not a human
+> approver* — applied where each gate needs it.
+>
+> That distinction was not academic. Until #581, `reviewActors` also bought a commit an
+> exemption from re-arming an approval at `lite` (ADR-0026 Amendment 1) — a **second**
+> meaning, and the only one that loosened rather than tightened. On the maintainer's ruling
+> that the identity is read-only, Amendment 5 removed it: a read-only identity has no commits
+> to exempt, and the exemption could only ever have fired in the off-nominal case it should
+> have been catching.
 
 > Lock 1 defends against a config regression that mis-registers the reviewer. Lock 2
 > against a bug that posts the wrong event. Lock 3 against the dual-semantics coupling.
@@ -118,7 +152,7 @@ returns match the port's existing `{ url } | { url: null, error }` / never-throw
 
 | Verb | Signature | Note |
 |---|---|---|
-| `prReviewComment` | `({ project, number, body })` | `event: 'COMMENT'` **hardcoded** — no APPROVE path exists in code (lock 2) |
+| `prReviewComment` | `({ project, number, body })` | no APPROVE path exists in code (lock 2), by a different mechanism per provider — GitHub hardcodes `event: 'COMMENT'` at every call site; GitLab's notes API has no review-event concept at all. See §2 lock 2 |
 | `issueComment` | `({ project, number, body })` | rulings on issues |
 | `labelAdd` | `({ project, number, labels })` | **caller** enforces the deny-set (§9), not the verb |
 | `labelRemove` | `({ project, number, labels })` | monotonic-tightening removals only |
