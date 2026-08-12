@@ -52,8 +52,12 @@ export function compareTimestamps(labelCreatedAt, headCommitAt) {
  * Is this commit FOREIGN to the approval? (ADR-0026 Amendment 1, issue #418.)
  *
  * Foreign = authored by neither the approver nor a registered
- * `governance.reviewActors` identity. Only a foreign commit re-arms an
+ * `governance.agentActors` identity. Only a foreign commit re-arms an
  * existing approval at `lite`.
+ *
+ * `governance.reviewActors` was in that set until #581 (Amendment 5) removed
+ * it: a read-only identity has no commits to exempt, so its presence here only
+ * ever mattered in the off-nominal case it should have been catching.
  *
  * The test keys off the login the PROVIDER attributes the commit to — never
  * the commit header's name/email, which anyone can spell. An unresolvable
@@ -69,7 +73,7 @@ export function compareTimestamps(labelCreatedAt, headCommitAt) {
  * refusing on case alone would be a false positive.
  *
  * @param {{ login?: string|null }} commit
- * @param {string[]} exempt  Approver + reviewActors, already collected.
+ * @param {string[]} exempt  Approver + agentActors, already collected.
  * @returns {boolean}
  */
 function isForeignCommit(commit, exempt) {
@@ -95,9 +99,24 @@ function isForeignCommit(commit, exempt) {
  * The stale-green property #328 fixed is retained in full against every actor
  * whose work the approver has not seen: any third-party push still re-arms.
  *
- * The `reviewActors` exemption is only safe because the reviewer identity is
- * now VERIFIED against its token (#413) — before that, anyone holding any
- * token could declare themselves the bot.
+ * ISSUE #581 REMOVES the `reviewActors` exemption Amendment 1 introduced here
+ * (REQ-418-3), on the maintainer's ruling of 2026-08-12 that `reviewActors` is
+ * READ-ONLY. Amendment 5 records it. The reasoning, kept because the removal
+ * looks like a tightening for its own sake otherwise:
+ *
+ * A read-only identity authors no commits. That leaves two states and the
+ * exemption was wrong in both. In the NORMAL state it exempted a case that
+ * cannot arise — dead weight in a security predicate, which is not neutral: it
+ * read as "we expect commits from this identity", contradicting the role
+ * `reviewer-protocol.md` §4 defines (four COMMENT-only verbs, no git path). In
+ * the OFF-NOMINAL state — a commit appearing under a review identity via a
+ * compromised token or a misregistration — the re-arm rule is exactly what
+ * should fire, and the exemption is what stopped it, carrying an approval over
+ * a commit no human saw. Zero value where it was aimed, negative where it fired.
+ *
+ * The #413 token verification that made the exemption "safe" is not what
+ * changed; the ruling is that a read-only identity should never have had
+ * commits to exempt in the first place.
  *
  * Fails CLOSED (never warn) once a labeled event exists but the timing cannot
  * be established — spec.md REQ-L5-1': "an unreadable approval is not an
@@ -113,10 +132,10 @@ function isForeignCommit(commit, exempt) {
  * `defaultReadAgentActors` for why this is a separate key, why it ships absent,
  * and what the exemption does NOT prove.
  *
- * @param {{ actor: string|undefined, labelCreatedAt: string|undefined, commits: Array<{ at?: string, login?: string|null }>|null, reviewActors?: string[], agentActors?: string[] }} input
+ * @param {{ actor: string|undefined, labelCreatedAt: string|undefined, commits: Array<{ at?: string, login?: string|null }>|null, agentActors?: string[] }} input
  * @returns {{ level: 'pass'|'fail', reason: string }}
  */
-function evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors = [], agentActors = [] }) {
+function evaluateDistinctAct({ actor, labelCreatedAt, commits, agentActors = [] }) {
   // An approval whose own timestamp is unreadable is not an approval —
   // checked BEFORE the foreign-commit search, which would otherwise let a
   // timestamp-less label through the no-foreign-commit branch below. Pre-
@@ -143,7 +162,7 @@ function evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors = []
     };
   }
 
-  const exempt = [actor, ...reviewActors, ...agentActors].filter(Boolean);
+  const exempt = [actor, ...agentActors].filter(Boolean);
   const foreign = commits.filter(c => isForeignCommit(c, exempt));
 
   // No foreign commit: every commit on the branch is the approver's or a
@@ -154,9 +173,9 @@ function evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors = []
       level: 'pass',
       reason:
         `the approved label was applied by "${actor ?? 'unknown'}" at ${labelCreatedAt ?? 'an unreadable time'}; ` +
-        'every commit on the branch is authored by the approver, a registered governance.reviewActors ' +
-        'identity, or a registered governance.agentActors identity, so no push re-arms the approval — ' +
-        'distinct-act evidence satisfied at the "lite" tier (REQ-L5-1′, ADR-0026 Amendments 1 and 3).',
+        'every commit on the branch is authored by the approver or a registered governance.agentActors ' +
+        'identity, so no push re-arms the approval — distinct-act evidence satisfied at the "lite" tier ' +
+        '(REQ-L5-1′, ADR-0026 Amendments 1, 3 and 5).',
     };
   }
 
@@ -586,7 +605,7 @@ export function evaluateActor({
       if (signed?.admitted) return withRefusalNote({ level: 'pass', reason: signed.reason });
       if (signed?.note) signedNotes.push(signed.note);
     }
-    const base = evaluateDistinctAct({ actor, labelCreatedAt, commits, reviewActors: denyActors, agentActors });
+    const base = evaluateDistinctAct({ actor, labelCreatedAt, commits, agentActors });
     return withRefusalNote(
       signedNotes.length ? { ...base, reason: `${base.reason} ${signedNotes.join(' ')}` } : base,
     );

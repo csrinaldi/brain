@@ -401,7 +401,20 @@ test('evaluateActor: lite — the approver\'s OWN later pushes do not re-arm the
   assert.match(result.reason, /no push re-arms/i);
 });
 
-test('evaluateActor: lite — a registered reviewActors identity\'s pushes do not re-arm (REQ-418-3, #418)', () => {
+// ── #581: REQ-418-3 is NARROWED — reviewActors loses the exemption ─────────
+//
+// Maintainer ruling 2026-08-12: `reviewActors` is READ-ONLY. A read-only
+// identity authors no commits, so the exemption is inert in the state it was
+// written for and fail-open in the only state where it can fire: a commit
+// appearing under a review identity (a compromised token, a misregistration)
+// is exactly when the re-arm rule should trigger, and the exemption was what
+// stopped it — leaving an approval green over a commit no human saw.
+//
+// The originating rationale of Amendment 1 survives intact in `agentActors`,
+// which is the key it actually describes: "commits the approver's own agent
+// made under their instruction." A read-only reviewer was never that.
+
+test('#581: lite — a registered reviewActors identity\'s push DOES re-arm the approval (narrows REQ-418-3)', () => {
   const result = evaluateActor({
     author: 'alice',
     labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
@@ -409,7 +422,39 @@ test('evaluateActor: lite — a registered reviewActors identity\'s pushes do no
     denyActors: ['csrinaldibot'], // governance.reviewActors
     tier: 'lite',
   });
-  assert.equal(result.level, 'pass', 'a verified reviewer identity\'s fix-push must not demand a fresh signature');
+  assert.equal(result.level, 'fail',
+    'a read-only identity has no commits to exempt — a commit under one is off-nominal, and that is ' +
+    'precisely when the approval must be re-armed rather than carried over');
+});
+
+test('#581: the pass message no longer advertises a reviewActors exemption that does not exist', () => {
+  // A reason string that claims an exemption the predicate no longer grants is
+  // report-vs-tree drift on a security message — the reader is told the gate
+  // does something it does not.
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: 'abc', login: 'alice', at: '2024-01-01T00:10:00Z' }],
+    denyActors: ['csrinaldibot'],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass');
+  assert.doesNotMatch(result.reason, /reviewActors/,
+    `the exemption is gone; the message must not still claim it: ${result.reason}`);
+});
+
+test('#581 blast radius: the agentActors exemption is UNTOUCHED (Amendment 3 survives)', () => {
+  // If this goes red, the wrong exemption was removed. Amendment 3's rationale
+  // is the one that still holds: an agent acting inside the approved loop under
+  // the approver's instruction is not work the approver has not seen.
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2024-01-01T00:00:00Z' }],
+    commits: [{ sha: 'abc', login: 'alice-agent', at: '2024-01-01T00:10:00Z' }],
+    agentActors: ['alice-agent'],
+    tier: 'lite',
+  });
+  assert.equal(result.level, 'pass', 'agentActors still exempts — Amendment 3 is not in scope of #581');
 });
 
 test('evaluateActor: lite — a THIRD-PARTY push still re-arms; the stale-green property survives (REQ-418-1, #418)', () => {
