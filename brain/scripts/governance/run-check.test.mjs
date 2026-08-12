@@ -463,9 +463,15 @@ function bodyClosure(src, entryName, seen = new Set(), dir = GOVERNANCE_DIR) {
   const body = src.slice(start, i);
   let text = body;
   // ACCUMULATOR role (issue #551): an unresolvable transitive callee (if(, for(, keys(, ...)
-  // must contribute '' here, never null — a null escaping this walk would make T7b permanently
-  // red. The nullish-coalescing fallback below is the ONLY coercion in this file; see
-  // bodyClosure's/crossFileClosure's contracts above/below for why nowhere else may have one.
+  // must contribute '' here, not null, to preserve the RESOLVED/UNRESOLVABLE contract boundary
+  // between this recursive walk and bodyClosure's top-level entry (see the contract above): the
+  // walk tolerates an unresolvable inner name, the top-level caller does not. Note this fallback
+  // is defensive, not load-bearing for a crash here — `text` is seeded as a string (`let text =
+  // body`), so `text += x` always goes through JS's string-concatenation coercion; even a leaked
+  // `null` would degrade to the literal substring "null" (harmless pollution the getVcs regex
+  // below ignores), never turn `text` itself into `null`. The nullish-coalescing fallback below
+  // is the ONLY coercion in this file; see bodyClosure's/crossFileClosure's contracts above/below
+  // for why nowhere else may have one.
   for (const m of body.matchAll(/\b([a-zA-Z_]\w*)\(/g)) text += bodyClosure(src, m[1], seen, dir) ?? '';
   return text;
 }
@@ -580,8 +586,10 @@ test('T7b mutation: a getVcs( reference injected into the false-declared memory-
 // and crossFileClosure return `null` when an entry cannot be RESOLVED at all, and
 // `''` only when it IS resolved (either genuinely empty, or already accounted for
 // via `seen`). `null` must stay confined to top-level resolution — an unresolvable
-// transitive callee inside an already-resolved body must still contribute `''`,
-// never let `null` escape the recursive walk (that would make T7b permanently red).
+// transitive callee inside an already-resolved body must still contribute `''` to
+// the accumulator, not `null` (contract boundary, not a crash-prevention measure —
+// see the `?? ''` fallback's comment above for why a leaked `null` here would only
+// degrade to harmless literal text, never make `text` itself non-string).
 
 test('T7b sentinel: an entry that cannot be resolved is null, never \'\'', () => {
   assert.equal(bodyClosure('const x = 1;\n', 'runMemoryGateCheck'), null,
@@ -614,12 +622,18 @@ test('T7b sentinel: an unreadable target module is null, not \'\'', () => {
   assert.equal(bodyClosure(fixture, 'x'), null);
 });
 
-test('T7b sentinel does NOT leak out of the recursive walk', () => {
+test('T7b characterization: getVcs is still detected alongside unresolvable transitive callees', () => {
+  // DOCUMENTATION PIN, not a regression guard: this fixture is self-contained (it never reads
+  // run-check.mjs), so no production mutation in this file's scope can flip it red — including
+  // the design's own predicted kill (dropping the `?? ''` fallback at the accumulator above),
+  // which does not flip it either, because the string-seeded accumulator coerces a leaked `null`
+  // to the harmless literal substring "null" rather than propagating `null` itself (see that
+  // fallback's comment). This test records the observed contract — a real `getVcs()` call stays
+  // detectable in the accumulated closure text even when sibling callees (if(, keys(, forEach()
+  // are themselves unresolvable — it does not prove the sentinel guards against a regression.
   const fixture = 'function h(ctx) {\n  if (ctx) { Object.keys(ctx).forEach(k => k); }\n  return getVcs();\n}\n';
   const closure = bodyClosure(fixture, 'h');
-  assert.equal(typeof closure, 'string',
-    'unresolvable transitive callees (if(, keys(, forEach() must contribute \'\', never null — a null ' +
-    'escaping the walk makes T7b permanently red and invites reverting the sentinel');
+  assert.equal(typeof closure, 'string');
   assert.ok(/\bgetVcs(Fn)?\b/.test(closure));
 });
 
