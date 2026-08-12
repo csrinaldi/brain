@@ -194,6 +194,11 @@ escalate: human | null
 
 - **`evidence:` is mandatory on every finding.** A finding without a command the reviewer ran
   cold is inadmissible — the reviewer never trusts the implementer's report, it re-derives.
+  Inadmissible findings are dropped, and the drop is **counted into `conditions:`** (issue #483):
+  the rule stands, but "no findings" and "findings discarded" must never look identical to the
+  reader. For the same reason the REVISE-to-APPROVE softening below is measured against the
+  findings that survived this gate, not against the raw input — otherwise a verdict whose every
+  finding was dropped unread would soften to APPROVE.
 - **`cites:` is mandatory for `severity: blocker`.** An uncited blocker is downgraded to
   `correction`. A blocker is an assertion that doctrine forbids something; without the citation,
   the reviewer is inventing doctrine, which §5 forbids.
@@ -214,6 +219,7 @@ findings:
     cites: "<ADR / REQ / record id / gate>"
     evidence_class: deterministic | inferential | insufficient
     causal_disposition: introduced | behavior-activated | worsened | pre-existing | base-only | unknown
+    schema_invalid: "<why the causal claim above could not be read>"   # present only when it could not
 follow_ups:                # present only when non-empty
   - id: <id>
     severity: blocker | correction | editorial
@@ -238,6 +244,14 @@ follow_ups:                # present only when non-empty
   conclusion (`verdict.mjs:48-49,63-64`) — uncertainty about causality is never silently
   admitted (treated as blocking without being sure) or silently dropped (routed to
   `follow_ups[]` without being sure it's safe to defer).
+- **The schema gate — an unreadable causal claim is annotated, never resolved** (issue #483).
+  `validateSchemaV2` runs inside `buildVerdict` before any routing decision is made. A finding
+  whose `evidence_class` or `causal_disposition` carries a value outside the allowed set is
+  **not** dropped and **not** silently reclassified: it keeps its place in `findings[]`, gains a
+  `schema_invalid:` line naming what failed, and forces `verdict: STOP` + `escalate: human` on
+  the same grounds as `unknown` — a disposition the validator cannot read *is* causality that
+  could not be determined. The gate fires on a claim that **fails**, never on one that was never
+  made: a finding carrying neither field (every `/1` finding) is untouched.
 - **REVISE-to-APPROVE softening.** If every finding that exists was routed out of the
   blocking set (all `pre-existing`/`base-only`) and the evaluator's conclusion was `REVISE`,
   the verdict becomes `APPROVE` (`verdict.mjs:65-66`) — findings existed, but nothing causal to
