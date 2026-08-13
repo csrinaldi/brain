@@ -9,6 +9,64 @@ import { join } from 'node:path';
 
 
 
+/**
+ * The file each tier-table artefact name resolves to (#555).
+ *
+ * NOT a suffix rule. `verification` is `verify-report.md` — the sdd-verify
+ * convention `phase-order-check.mjs` has always probed. The first cut of #555
+ * derived filenames by appending `.md`, which produced `verification.md`: a file
+ * this repository writes nowhere. A `regulated` change carrying all five REAL
+ * artefacts then passed `phase-order` and failed `check-refs` — #555's own
+ * complaint, relocated from `lite` to `regulated`.
+ *
+ * The mapping used to exist twice — here as a suffix, and in `phase-order-check`'s
+ * `buildChangeDir` as explicit probes — and they disagreed. This is the one copy.
+ * `phase-order`'s missing-artefact MESSAGE reads from it too: that message carried
+ * the same defect before #555 touched anything, naming `verification.md` for a
+ * probe of `verify-report.md`.
+ */
+export const ARTEFACT_FILE = Object.freeze({
+  proposal: 'proposal.md',
+  spec: 'spec.md',
+  design: 'design.md',
+  tasks: 'tasks.md',
+  verification: 'verify-report.md',
+});
+
+/**
+ * Bare artefact names → the files they are written as. Refuses an unknown name
+ * rather than guessing, because guessing is exactly what produced the blocker:
+ * a name with no file behind it is a config error, and inventing one hides it
+ * until a consumer at that tier cannot satisfy a gate it has already satisfied.
+ *
+ * @param {string[]} names
+ * @returns {string[]}
+ */
+export function artefactFiles(names) {
+  return names.map((name) => {
+    const file = ARTEFACT_FILE[name];
+    if (!file) {
+      throw new Error(
+        `sdd-layout: unknown artefact name "${name}" — no file is declared for it in ARTEFACT_FILE. ` +
+        'Appending ".md" would invent a path no gate probes (#555).',
+      );
+    }
+    return file;
+  });
+}
+
+/**
+ * The SCAFFOLD set: what `brain:project:feature` writes into a new change dir.
+ * Four, at every tier.
+ *
+ * This is NOT what the gates demand — that is tier-scoped, `requiredArtifactsFor`
+ * (governance-tiers.mjs). REQ-L4-2′ draws the line in as many words: "the tier
+ * scopes what the GATE demands, never what the SCAFFOLD produces." #555's first
+ * cut deleted this constant while fixing the gate question, collapsing two things
+ * the spec deliberately separates.
+ */
+export const REQUIRED_ARTIFACTS = Object.freeze(artefactFiles(['proposal', 'spec', 'design', 'tasks']));
+
 /** Machine-written, never required, staleness expected & discardable. NEVER a gate condition. */
 export const OPERATIONAL_ARTIFACTS = Object.freeze(['resume.md']);
 

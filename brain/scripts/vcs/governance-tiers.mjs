@@ -61,6 +61,7 @@
 
 import { fileURLToPath } from 'node:url';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
+import { artefactFiles } from '../lib/sdd-layout.mjs';
 
 export const TIERS = Object.freeze(['lite', 'standard', 'regulated']);
 
@@ -382,7 +383,7 @@ export function resolveGateEvidence(gate, tier) {
  * @returns {string[]}   e.g. `['spec.md']` at `lite`.
  */
 export function requiredArtifactsFor(tier) {
-  return tierParams(tier).artefacts.map(name => `${name}.md`);
+  return artefactFiles(tierParams(tier).artefacts);
 }
 
 export function tierParams(tier) {

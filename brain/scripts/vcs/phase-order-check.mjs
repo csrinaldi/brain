@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadContext } from './ci-context.mjs';
-import { archivePath, CHANGES_ROOT, LEGACY_GRANDFATHERED } from '../lib/sdd-layout.mjs';
+import { artefactFiles, archivePath, CHANGES_ROOT, LEGACY_GRANDFATHERED } from '../lib/sdd-layout.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { resolveTier, tierParams } from './governance-tiers.mjs';
 import { mapDetectionToWarning } from '../governance/detection-policy.mjs';
@@ -124,7 +124,11 @@ function messageForArtefacts(artefacts, dir) {
     return 'spec.md/design.md';
   }
   const missing = artefacts.filter(name => !dir[ARTEFACT_FIELD[name]]);
-  return missing.map(name => `${name}.md`).join('/');
+  // #555: through the shared map, not `${name}.md`. This message named
+  // `verification.md` while `buildChangeDir` probed `verify-report.md` — the same
+  // invented-filename defect, here before #555 touched anything, and the reason
+  // the mapping is one declaration now.
+  return artefactFiles(missing).join('/');
 }
 
 function evaluateRuleA(impl, touchedDirs, artefacts = STANDARD_ARTEFACTS) {

@@ -129,10 +129,30 @@ if (existsSync(changesDir)) {
   // Absent or unreadable config falls back to `standard`, matching `resolveTier`'s
   // own default (REQ-TIER-10): a repo that declares nothing keeps the stricter set,
   // so the loosening only ever reaches a repo that asked for it.
+  // Three states, three answers — the first cut collapsed them into one `catch`
+  // and a typo'd tier silently became `standard`, which is LOOSER than a
+  // `regulated` declarant asked for. Fail-open in a NEVER_TIERED required gate.
+  //
+  //   absent      → `standard` (REQ-TIER-10 — declaring nothing keeps the strict set)
+  //   unparseable → refuse; unreadable config is not "no config"
+  //   unknown tier→ refuse; `resolveTier` throws by design (REQ-TIER-1: "a typo in
+  //                 governance.tier must never quietly downgrade a repo's doctrine")
+  //
+  // `review/cli.mjs` already handles this exact throw by refusing the run. This
+  // gate now agrees with it instead of being the only tier reader that degrades.
+  const configPath = join(ROOT, 'brain.config.json');
   let declaredTier = 'standard';
-  try {
-    declaredTier = resolveTier(JSON.parse(readFileSync(join(ROOT, 'brain.config.json'), 'utf8')));
-  } catch { /* absent or malformed — the stricter default stands */ }
+  if (existsSync(configPath)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+    } catch (err) {
+      console.error(`✗ brain.config.json is present but unreadable — ${err.message}`);
+      console.error('  The required-artefact set is tier-scoped, so an unreadable tier is uncomputable.');
+      process.exit(1);
+    }
+    declaredTier = resolveTier(parsed);   // throws on an unrecognized tier — deliberately uncaught
+  }
   const declaredArtefacts = requiredArtifactsFor(declaredTier);
   for (const entry of readdirSync(changesDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name === 'archive') continue;
@@ -143,8 +163,8 @@ if (existsSync(changesDir)) {
         path: `${CHANGES_ROOT}/${entry.name}`,
         rule: 'openspec-incomplete',
         reason:
-          `Active change missing ${missing.join(', ')} — required by the SDD workflow ` +
-          '(see brain/core/methodology/sdd-layout.md).',
+          `Active change missing ${missing.join(', ')} — required at the declared ` +
+          `"${declaredTier}" tier (ADR-0026; layout in brain/core/methodology/sdd-layout.md).`,
       });
     }
   }

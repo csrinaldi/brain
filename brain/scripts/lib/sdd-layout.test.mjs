@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 // Task 1.1 (RED): fails with "module not found" until sdd-layout.mjs exists.
 import {
+  REQUIRED_ARTIFACTS,
   OPERATIONAL_ARTIFACTS,
   CHANGES_ROOT,
   LEGACY_GRANDFATHERED,
@@ -479,18 +480,27 @@ test('#555: requiredArtifactsFor resolves from the tier table, with the extensio
   assert.deepEqual(requiredArtifactsFor('lite'), ['spec.md']);
   assert.deepEqual(requiredArtifactsFor('standard'), ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
   assert.deepEqual(requiredArtifactsFor('regulated'),
-    ['proposal.md', 'spec.md', 'design.md', 'tasks.md', 'verification.md']);
+    ['proposal.md', 'spec.md', 'design.md', 'tasks.md', 'verify-report.md']);
 });
 
-test('#555: the tier table is the ONLY source — every tier round-trips through one normaliser', () => {
-  // The guard the ticket asks for: a consumer that goes back to its own list
-  // fails here. Driven over every tier that exists rather than the three spelled
-  // above, so a new tier cannot be added without this test seeing it.
+test('#555: the resolver adds nothing and drops nothing — one entry in, one file out, per tier', () => {
+  // REPLACED after a cold review (C5): the first version asserted
+  // `requiredArtifactsFor(tier)` equalled `artefacts.map(n => n + '.md')` — which
+  // was character-for-character the function's own body. It asserted the function
+  // equals itself, and it agreed with the `verification.md` bug rather than
+  // catching it. A guard written from the implementation cannot see the
+  // implementation's mistake.
+  //
+  // This one checks a property the body does not state: cardinality and
+  // membership against the MAP, which is a separate declaration.
   for (const tier of ALL_TIERS) {
-    const raw = tierParamsFor(tier).artefacts;
-    assert.deepEqual(requiredArtifactsFor(tier), raw.map(n => `${n}.md`),
-      `${tier}: the resolved set must be the tier table's own list plus the layout's extension, ` +
-      `nothing added, nothing dropped, and no second list anywhere`);
+    const names = tierParamsFor(tier).artefacts;
+    const files = requiredArtifactsFor(tier);
+    assert.equal(files.length, names.length, `${tier}: one file per declared artefact, no more, no fewer`);
+    for (const f of files) {
+      assert.ok(Object.values(ARTEFACT_FILE).includes(f),
+        `${tier}: "${f}" is not a file any artefact name declares — a filename was invented`);
+    }
   }
 });
 
@@ -524,4 +534,67 @@ test('#555: omitting the set THROWS — a consumer cannot silently fall back to 
     () => missingRequiredArtifacts('issue-999-x', { exists: () => false, listDir: () => [] }),
     /artefacts` is required/,
     'an absent set must refuse, not quietly assume the four');
+});
+
+// ── #555 round 2: the name→file map, found by a cold review ─────────────────
+//
+// The first cut derived filenames by appending `.md` to the tier table's bare
+// names. That is not the convention: `verification` is `verify-report.md`
+// (phase-order-check.mjs's `buildChangeDir`). So `regulated` demanded a file that
+// exists nowhere, and a change carrying all five REAL artefacts passed
+// `phase-order` and failed `check-refs` — #555's own complaint, relocated from
+// `lite` to `regulated`.
+//
+// The root cause was that the mapping existed TWICE and disagreed. It is one map
+// now, and `phase-order`'s message reads from it too — that message had the same
+// defect already, naming `verification.md` for a probe of `verify-report.md`.
+
+import { ARTEFACT_FILE, artefactFiles } from './sdd-layout.mjs';
+
+test('#555: the artefact name→file map is NOT a suffix rule — verification is verify-report.md', () => {
+  assert.equal(ARTEFACT_FILE.verification, 'verify-report.md',
+    'the one name that breaks the `.md` rule is the whole reason this map exists');
+  assert.deepEqual(artefactFiles(['proposal', 'spec', 'design', 'tasks']),
+    ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
+  assert.deepEqual(artefactFiles(['verification']), ['verify-report.md']);
+});
+
+test('#555: an unmapped artefact name REFUSES — it is never guessed at with .md', () => {
+  // Guessing is what produced the blocker. A name the map does not know is a
+  // config error, and inventing a filename for it hides that error until a
+  // consumer at that tier cannot satisfy a gate.
+  assert.throws(() => artefactFiles(['whatever']), /unknown artefact name/i);
+});
+
+test('#555: every tier the table declares resolves to files the repo actually writes', () => {
+  // Driven over EVERY tier rather than the three spelled out, so a tier added
+  // later cannot introduce a name with no file behind it.
+  for (const tier of ALL_TIERS) {
+    for (const name of tierParamsFor(tier).artefacts) {
+      assert.ok(ARTEFACT_FILE[name], `${tier} declares "${name}" and the map has no file for it`);
+    }
+  }
+});
+
+test('#555: at `regulated`, a change carrying the five REAL artefacts is complete', () => {
+  // The blocker, driven end to end. Before the fix this returned
+  // ['verification.md'] over a dir that had everything the repo's own convention
+  // writes.
+  const present = new Set(['proposal.md', 'spec.md', 'design.md', 'tasks.md', 'verify-report.md']);
+  const seam = {
+    exists: (p) => present.has(p.split('/').pop()),
+    listDir: () => [...present],
+  };
+  assert.deepEqual(
+    missingRequiredArtifacts('issue-999-reg', { artefacts: requiredArtifactsFor('regulated'), ...seam }),
+    []);
+});
+
+test('#555: REQUIRED_ARTIFACTS is restored as the SCAFFOLD set — four, at every tier', () => {
+  // REQ-L4-2′: "REQUIRED_ARTIFACTS in sdd-layout.mjs stays the canonical scaffold
+  // set at every tier — the tier scopes what the GATE demands, never what the
+  // SCAFFOLD produces." The first cut deleted it to fix the gate question, which
+  // collapsed two things the spec deliberately separates.
+  assert.deepEqual(REQUIRED_ARTIFACTS, ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
+  assert.ok(Object.isFrozen(REQUIRED_ARTIFACTS));
 });

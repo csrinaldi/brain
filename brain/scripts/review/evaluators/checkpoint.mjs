@@ -151,8 +151,8 @@ function checkArtifactCompleteness({ missing = [], hasCheckedTask, tier = 'stand
       // a reader could not tell whether the finding held at THIS repo's tier.
       id: 'artifacts-missing',
       severity: 'blocker',
-      evidence: `sdd-layout requiredArtifactsFor("${tier}") missing: ${missing.join(', ')}`,
-      cites: `sdd-layout.mjs requiredArtifactsFor (tier "${tier}", ADR-0026)`,
+      evidence: `governance-tiers requiredArtifactsFor("${tier}") missing: ${missing.join(', ')}`,
+      cites: `governance-tiers.mjs requiredArtifactsFor (tier "${tier}", ADR-0026)`,
     });
   }
   if (hasCheckedTask === false) {
