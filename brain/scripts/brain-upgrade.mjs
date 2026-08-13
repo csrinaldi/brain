@@ -18,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { copyManaged, readOutgoing, strategyFor, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, compareSemver, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets, semverOrNull, keysAheadOfTarget, installedPackageRoot } from './lib/installer.mjs';
+import { copyManaged, readOutgoing, strategyFor, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, compareSemver, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets, semverOrNull, keysAheadOfTarget, installedPackageRoot, describeInstalledPackageSearch } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
 import { managedStrategy, STRATEGY } from '../core/managed-paths.mjs';
 import { detectAgentsClobber } from './lib/agents-clobber.mjs';
@@ -416,7 +416,8 @@ if (!noInstall) {
 // ── 2. Copy managed paths ───────────────────────────────────────────────────────
 const pkgRoot = installedPackageRoot(ROOT);
 if (!existsSync(pkgRoot)) {
-  die(`node_modules/brain not found — install brain first (drop --no-install).`);
+  // Names every place `installedPackageRoot` actually probed — see #625.
+  die(`${describeInstalledPackageSearch()} not found — install brain first (drop --no-install).`);
 }
 
 const { managed, local } = await import(join(pkgRoot, 'brain', 'core', 'managed-paths.mjs'));

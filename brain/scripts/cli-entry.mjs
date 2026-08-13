@@ -22,7 +22,7 @@ import {
   resolveInstalledTag,
   writeBootstrapAlias,
 } from './lib/init.mjs';
-import { installedPackageRoot } from './lib/installer.mjs';
+import { installedPackageRoot, describeInstalledPackageSearch } from './lib/installer.mjs';
 
 /**
  * `init` — write the bootstrap alias, then delegate to the real upgrade.
@@ -57,7 +57,8 @@ export function runInit({
 
   const tag = argTag ?? resolveInstalledTag({ root, exists, readFile });
   if (!tag) {
-    error('brain init: refusing to run — could not read the installed brain version from node_modules/brain/package.json.');
+    // Names every place `resolveInstalledTag` actually probed — see #625.
+    error(`brain init: refusing to run — could not read the installed brain version from ${describeInstalledPackageSearch({ rest: ['package.json'] })}.`);
     error('  Install brain first (see README), or pass the tag explicitly: `npx brain init v1.0.0`.');
     error('  Never guessed: a default tag would install a version you did not pin.');
     return 1;
