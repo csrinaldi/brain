@@ -327,8 +327,21 @@ test('the brain-writes-reviewed row is TIER-CONDITIONAL because the gate is — 
     'lite: agent-authorship exclusion is the whole evidence form — a self-approved human write passes');
   assert.equal(evaluateBrainWritesReviewed({ ...input, tier: 'standard' }).level, 'fail',
     'standard: a review by someone OTHER than the author is required');
-  assert.match(GATE_SUMMARY['brain-writes-reviewed'], /required/i,
-    'the row must say REQUIRED above the lightest tier — which is what the verdicts above establish');
+  // Binding PROSE to a measured verdict is the hard half, and the first two attempts
+  // failed it. `/required/i` passes on "never required" — the inversion contains the
+  // word. So: the row must assert the requirement AND must not weaken it.
+  //
+  // Named limit, not a claim of airtightness: this is a negation blacklist, and a
+  // wording nobody has thought of ("dispensable", "at your discretion") slips past it.
+  // The durable fix is to make the tier claim DATA that both the sentence and the
+  // assertion are derived from — the same one-source shape as the rest of this module.
+  // Until then the blacklist is what stands between the row and its own inversion.
+  const bwr = GATE_SUMMARY['brain-writes-reviewed'];
+  assert.match(bwr, /\brequired\b/i, 'the row must state the requirement the verdicts above establish');
+  assert.doesNotMatch(bwr, /\b(?:never|not|no longer)\s+required\b/i,
+    'standard FAILS without a distinct reviewer — a row saying it is never required is the inversion');
+  assert.doesNotMatch(bwr, /\b(?:recommended|optional|advisory|encouraged|unnecessary|discretionary)\b/i,
+    'the gate fails; a row hedging it into advice contradicts the measured verdict');
 
   // The row also claims the gate WARNS rather than fails on absent evidence.
   assert.notEqual(evaluateBrainWritesReviewed({ ...input, reviews: [], tier: 'standard' }).level, 'fail',
