@@ -17,10 +17,11 @@ import { detectPM } from './lib/pm.mjs';
 import { t } from './i18n/t.mjs';
 import { currentBranch } from './lib/git-branch.mjs';
 import { restoreManifestChurn } from './lib/memory-manifest.mjs';
+import { agentRuntimeReport } from './harness/backends/agent-runtime.mjs';
 
 const ROOT = process.cwd();
 const NODE = process.execPath;
-const TOTAL = 6;
+const TOTAL = 7;
 let step = 0;
 
 const config = loadBrainConfig();
@@ -272,7 +273,33 @@ sep(await t('day.brain.section'));
   }
 }
 
-// ── 5. Team memory ───────────────────────────────────────────────────────────
+// ── 5. AI agent runtime ──────────────────────────────────────────────────────
+// Check-and-notify, mirroring the brain-tag check above (ADR-0006 and
+// brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md): this
+// step NEVER runs an update command.
+//
+// Harness-agnostic by construction (ADR-0005): it asks whichever platform the
+// repo declares (AGENT_PLATFORM / .env / brain.config.json's optional `harness`
+// section — the ADR-0024 axis, resolved by harness/cli.mjs's resolvePlatform,
+// which this entrypoint used to bypass) for its own AGENT_RUNTIME descriptor.
+// Nothing here names a vendor; a backend declaring no runtime says so, and a
+// probe that could not read one says THAT instead of reporting silence.
+//
+// Strings are English literals, not `t()` keys: the catalogs under
+// brain/scripts/i18n/** are outside this change's file claim (see the PR).
+sep('AI agent runtime');
+{
+  const { platform, notice } = await agentRuntimeReport({
+    env: process.env,
+    envVars: { AGENT_PLATFORM: readEnvVar('AGENT_PLATFORM') },
+    config: config?.harness ?? {},
+  });
+  console.log(`  ${C.dim}harness: ${platform}${C.reset}`);
+  ({ ok, warn, info }[notice.level] ?? info)(notice.message);
+  if (notice.hint) console.log(`       ${C.dim}${notice.hint}${C.reset}`);
+}
+
+// ── 6. Team memory ───────────────────────────────────────────────────────────
 sep(await t('day.memory.section'));
 
 // 4a. Auto-install/repair the pre-push hook that materializes memory (ADR-0003).
@@ -321,7 +348,7 @@ if (engram.status === 0) {
   console.log(`       ${await t('day.memory.install')}`);
 }
 
-// ── 6. Ticket board ──────────────────────────────────────────────────────────
+// ── 7. Ticket board ──────────────────────────────────────────────────────────
 sep(await t('day.board.section'));
 await run(NODE, ['brain/scripts/tracker-board.mjs']);
 
