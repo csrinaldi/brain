@@ -24,6 +24,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { t } from "../i18n/t.mjs";
+import { formatDuplicateReport } from "./lib/duplicates.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -46,6 +47,26 @@ function readEnvFile() {
 
 const envVars = readEnvFile();
 const MEMORY_BACKEND = process.env.MEMORY_BACKEND ?? envVars.MEMORY_BACKEND ?? "engram";
+
+// ---------------------------------------------------------------------------
+// Duplicate reporting (issue #574) — the ONE printer, used by every op.
+//
+// The rule itself lives in lib/duplicates.mjs and is enforced in
+// lib/store.mjs#rebuildIndex; this is the half that makes it audible. Before
+// #574 the store's second failure mode reached a human through no path at all:
+// `rebuildIndex` collapsed repeated ids into its Map and returned only a count,
+// `plainfiles.share` returned an `indexCount` nobody printed, and
+// `engram.share` returned undefined outright — which also meant the #541
+// `unprovenanced` line below could never fire on the engram backend, since
+// there was never a `result` to read it from.
+//
+// Printed for ANY op whose result carries the accounting, rather than
+// per-verb: a rule that only speaks on the verbs someone remembered to wire up
+// is the silence this ticket is about.
+// ---------------------------------------------------------------------------
+function reportDuplicates(duplicates, { indexCount } = {}) {
+  for (const line of formatDuplicateReport(duplicates, { indexCount })) console.log(line);
+}
 
 // ---------------------------------------------------------------------------
 // Validate op
@@ -81,14 +102,22 @@ if (!VALID_OPS.includes(op)) {
 // .memory/index.jsonl) is brain-owned (ADR-0017), not a MEMORY_BACKEND concern.
 // Dispatched directly here instead of through backends/<backend>.mjs.
 // ---------------------------------------------------------------------------
+//
+// BRAIN_MEMORY_TEST_ROOT (test-only seam, see the note further down where
+// save/search read it): reindex honours it too, so cli.reindex-duplicates.test.mjs
+// can drive this op end-to-end against a fixture and assert what it PRINTS —
+// the only way to test the reporting half of #574 without touching the real
+// `.memory/`.
 if (op === "reindex") {
   const { rebuildIndex } = await import("./lib/store.mjs");
+  const memoryRoot = process.env.BRAIN_MEMORY_TEST_ROOT ?? repoRoot;
   try {
-    const { count } = rebuildIndex({
-      recordsDir: join(repoRoot, ".memory", "records"),
-      indexPath: join(repoRoot, ".memory", "index.jsonl"),
+    const { count, duplicates } = rebuildIndex({
+      recordsDir: join(memoryRoot, ".memory", "records"),
+      indexPath: join(memoryRoot, ".memory", "index.jsonl"),
     });
     console.log(`memory/cli: ${await t("memory.reindex.done", { count })}`);
+    reportDuplicates(duplicates, { indexCount: count });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.reindex.failed", { message: err.message })}`);
@@ -105,9 +134,12 @@ if (op === "reindex") {
 if (op === "resolve-index") {
   const { resolveIndex } = await import("./lib/resolve-index.mjs");
   try {
-    const { count, staged } = resolveIndex({ repoRoot });
+    const { count, staged, duplicates } = resolveIndex({ repoRoot });
     const key = staged ? "memory.resolveIndex.staged" : "memory.resolveIndex.done";
     console.log(`memory/cli: ${await t(key, { count })}`);
+    // The op that exists BECAUSE two branches merged is the last one that
+    // should stay quiet about what the merge duplicated (#574).
+    reportDuplicates(duplicates, { indexCount: count });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.resolveIndex.failed", { message: err.message })}`);
@@ -300,6 +332,7 @@ if (op === "save") {
   try {
     const result = await backend.save(title, content, opts, seams);
     console.log(`memory/cli: ${await t("memory.plainfiles.save.done", { id: result?.id, file: result?.file })}`);
+    reportDuplicates(result?.duplicates);
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${MEMORY_BACKEND}.save() failed — ${err.message}`);
@@ -320,6 +353,9 @@ if (op === "search") {
         console.log(`  - ${m.id} [${m.type}] ${m.content.slice(0, 120)}`);
       }
     }
+    // A duplicated record used to come back as two identical hits and inflate
+    // the count printed above (#574) — it is collapsed now, and said so.
+    reportDuplicates(result?.duplicates);
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${MEMORY_BACKEND}.search() failed — ${err.message}`);
@@ -339,6 +375,12 @@ try {
   if (op === "share" && result && typeof result.unprovenanced === "number" && result.unprovenanced > 0) {
     console.log(`memory/cli: ${await t("memory.share.unprovenanced", { count: result.unprovenanced })}`);
   }
+
+  // #574 — the duplicate accounting, for every op that produced one (`share`,
+  // `pull`, `setup`, and anything added later that reindexes). Keyed on the
+  // result carrying it, not on a list of verbs: the failure this ticket names
+  // is a store-wide rule that only some callers happened to voice.
+  reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });
 } catch (err) {
   console.error(`memory/cli: ${MEMORY_BACKEND}.${fn}() failed — ${err.message}`);
   process.exit(1);

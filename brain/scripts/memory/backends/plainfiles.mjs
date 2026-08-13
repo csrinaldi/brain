@@ -15,7 +15,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 
 import { _getGitBranch } from "./engram.mjs";
 import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../lib/format.mjs";
-import { appendRecord, rebuildIndex, readRecordObservations } from "../lib/store.mjs";
+import { appendRecord, rebuildIndex, readRecords } from "../lib/store.mjs";
+import { normalizeDuplicates } from "../lib/duplicates.mjs";
 
 /** The repository this record belongs to, from config, falling back to the checkout
  *  directory name. Records in this repo carry the bare name ("brain"), not the slug. */
@@ -136,9 +137,12 @@ export async function save(
   const indexPath = join(root, ".memory", "index.jsonl");
 
   const { file } = _appendRecord(candidate, { recordsDir });
-  _rebuildIndex({ recordsDir, indexPath });
+  const reindex = _rebuildIndex({ recordsDir, indexPath });
 
-  return { id: candidate.id, file, written: true };
+  // #574: every op that reindexes carries the duplicate accounting out to the
+  // CLI, which prints it. `save` included — it is the verb most likely to be
+  // the first thing run after a `git pull` that union-merged a duplicate in.
+  return { id: candidate.id, file, written: true, duplicates: normalizeDuplicates(reindex?.duplicates) };
 }
 
 /** Default seam: `which rg` — never throws. */
@@ -175,18 +179,23 @@ function _buildPredicate(query, mode) {
  * ALWAYS produced by the same Node predicate over the same observation set —
  * rg's presence changes speed, never output.
  *
+ * Reads through `readRecords` (#574): a duplicated physical line used to come
+ * back as two identical hits, and the count printed by cli.mjs was the store's
+ * line count, not its record count. The repeats are collapsed AND reported —
+ * search is not exempt from the rule just because it writes nothing.
+ *
  * @param {string} query
  * @param {{root?: string, mode?: 'substring'|'regex'}} [opts]
- * @param {object} [seams]  _which, _rg, _readRecordObservations
- * @returns {Promise<{matches: object[]}>}
+ * @param {object} [seams]  _which, _rg, _readRecords
+ * @returns {Promise<{matches: object[], duplicates: object}>}
  */
 export async function search(
   query,
   { root = repoRoot, mode = "substring" } = {},
-  { _which = _defaultWhich, _rg = _defaultRg, _readRecordObservations = readRecordObservations } = {},
+  { _which = _defaultWhich, _rg = _defaultRg, _readRecords = readRecords } = {},
 ) {
   const recordsDir = join(root, ".memory", "records");
-  const observations = _readRecordObservations({ recordsDir });
+  const { records: observations, duplicates } = _readRecords({ recordsDir });
 
   if (_which("rg")) {
     try {
@@ -197,18 +206,22 @@ export async function search(
   }
 
   const predicate = _buildPredicate(query, mode);
-  return { matches: observations.filter(predicate) };
+  return { matches: observations.filter(predicate), duplicates: normalizeDuplicates(duplicates) };
 }
 
 /**
  * share() — a self-check `rebuildIndex()` ONLY (REQ-C3-4). Records already
  * ARE the store, so no data movement whatsoever.
+ *
+ * The self-check now has something to say (#574): `duplicates` travels out to
+ * cli.mjs, which prints it. A `share` that silently indexes 139 fewer lines
+ * than the store holds is not a self-check.
  */
 export async function share({ root = repoRoot } = {}, { _rebuildIndex = rebuildIndex } = {}) {
   const recordsDir = join(root, ".memory", "records");
   const indexPath = join(root, ".memory", "index.jsonl");
-  const { count } = _rebuildIndex({ recordsDir, indexPath });
-  return { indexCount: count };
+  const { count, duplicates } = _rebuildIndex({ recordsDir, indexPath });
+  return { indexCount: count, duplicates: normalizeDuplicates(duplicates) };
 }
 
 /** Default seam: `git pull` — throws on non-zero exit (mirrors engram.mjs's `_defaultGitPull`). */
@@ -222,13 +235,18 @@ function _defaultGitPull(root) {
  * materializes anything, git is the only writer, so a dirty tree is real
  * work and MUST NOT be auto-discarded — `_gitPull`'s error propagates
  * unmodified through this rejection into cli.mjs's existing catch-and-exit-1.
+ *
+ * This is the path #574's rule matters most on: the `git pull` immediately
+ * above is where `merge=union` MINTS the duplicate, so the reindex right after
+ * it is the first reader that can see it. It reports (or, on a disagreeing
+ * pair, refuses) instead of absorbing it.
  */
 export async function pull({ root = repoRoot } = {}, { _gitPull = _defaultGitPull, _rebuildIndex = rebuildIndex } = {}) {
   _gitPull(root); // throws unmodified on a dirty/conflicting tree — never auto-discarded
   const recordsDir = join(root, ".memory", "records");
   const indexPath = join(root, ".memory", "index.jsonl");
-  const { count } = _rebuildIndex({ recordsDir, indexPath });
-  return { indexCount: count };
+  const { count, duplicates } = _rebuildIndex({ recordsDir, indexPath });
+  return { indexCount: count, duplicates: normalizeDuplicates(duplicates) };
 }
 
 /**
@@ -241,7 +259,8 @@ export async function setup({ root = repoRoot } = {}, { _rebuildIndex = rebuildI
   const recordsDir = join(root, ".memory", "records");
   const indexPath = join(root, ".memory", "index.jsonl");
   mkdirSync(recordsDir, { recursive: true });
-  _rebuildIndex({ recordsDir, indexPath });
+  const reindex = _rebuildIndex({ recordsDir, indexPath });
+  return { duplicates: normalizeDuplicates(reindex?.duplicates) };
 }
 
 // ---------------------------------------------------------------------------

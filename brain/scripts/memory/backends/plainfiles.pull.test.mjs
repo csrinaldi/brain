@@ -24,7 +24,22 @@ test('pull: on a clean tree, runs _gitPull(root) then rebuildIndex() — records
 
   assert.deepEqual(calls.map((c) => c[0]), ['gitPull', 'rebuildIndex'], 'gitPull must run BEFORE rebuildIndex');
   assert.equal(calls[0][1], '/fake/root');
-  assert.deepEqual(result, { indexCount: 5 });
+  assert.deepEqual(result, { indexCount: 5, duplicates: { ids: 0, lines: 0, groups: [] } });
+});
+
+// ── #574 — pull is where `merge=union` mints the duplicate ───────────────────
+
+test('pull: reports the duplicates the just-merged records/ carries — the pull is what creates them', async () => {
+  const duplicates = { ids: 1, lines: 1, groups: [{ id: 'rec-a', occurrences: ['2026-07.jsonl:2', '2026-07.jsonl:7'] }] };
+  const result = await pull(
+    { root: '/fake/root' },
+    {
+      _gitPull: () => {},
+      _rebuildIndex: () => ({ count: 4, duplicates }),
+    },
+  );
+
+  assert.deepEqual(result.duplicates, duplicates);
 });
 
 // ── 2.11 — dirty tree: the underlying git error propagates unmodified ──────

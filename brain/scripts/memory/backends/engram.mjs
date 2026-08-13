@@ -41,7 +41,8 @@ import { currentBranch } from "../../lib/git-branch.mjs";
 import { resolveSecretConfig, compilePatterns, scrubChunkFile, scanTextForSecrets } from "../lib/secret-scrub.mjs";
 import { exportObservation } from "../lib/engram-export.mjs";
 import { importRecord } from "../lib/engram-import.mjs";
-import { appendRecord, rebuildIndex, readRecordIds, readRecordObservations } from "../lib/store.mjs";
+import { appendRecord, rebuildIndex, readRecordIds, readRecords } from "../lib/store.mjs";
+import { emptyDuplicates, normalizeDuplicates } from "../lib/duplicates.mjs";
 import { serializeRecord } from "../lib/format.mjs";
 import { collectChunkObservations } from "../lib/migrate-v1.mjs";
 import { unsupportedOp } from "../lib/unsupported-op.mjs";
@@ -185,7 +186,12 @@ export async function share({
   // marker (C2b-1/C2b-2) served its purpose: the key is also removed from
   // brain.config.json (move 2) and the 0.6.0 migration entry that introduced it
   // is removed too (move 3) — it was never shipped to any released consumer.
-  await dualWriteRecords(root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig });
+  // RETURNED, not discarded (#574). Every number dualWriteRecords measures used
+  // to die here: cli.mjs printed `unprovenanced` only because the generic
+  // dispatch tail happened to see the value, and it never saw one from `share`
+  // because `share` returned undefined. The duplicate accounting would have
+  // died the same way.
+  return dualWriteRecords(root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig });
 }
 
 /**
@@ -299,6 +305,12 @@ export async function dualWriteRecords(
     unprovenanced,
     unparseableChunks: unparseable.length,
     emptyObservationsChunks: emptyObservations.length,
+    // #574. `deduped` above counts candidates this RUN declined to append; this
+    // counts physical lines already sitting in `records/` under a repeated id —
+    // the union-merge residual. Zero here means "measured, none", and on the
+    // early returns below it means "no reindex ran, so nothing was measured":
+    // never a number this function did not observe.
+    duplicates: emptyDuplicates(),
   };
 
   if (candidates.length === 0) return accounting;
@@ -337,10 +349,19 @@ export async function dualWriteRecords(
     _appendRecord(record, { recordsDir });
   }
   accounting.written = toAppend.length;
-  if (toAppend.length > 0) {
-    const { count } = _rebuildIndex({ recordsDir, indexPath });
-    accounting.indexCount = count;
-  }
+  // Reindex UNCONDITIONALLY from here on (#574) — the former `toAppend.length > 0`
+  // guard was the churn discipline reading of ADR-0017, but it also meant that
+  // the steady-state share (engram exported, everything already in `records/`,
+  // nothing to append) never read the log and so could never notice the
+  // duplicates a `git pull` had merged in since. The guard bought nothing it
+  // was meant to: `rebuildIndex` is deterministic, so re-running it over an
+  // unchanged store rewrites byte-identical content and `git diff` stays empty
+  // — the churn rule is about the DIFF, not the write. The two early returns
+  // above still short-circuit before this, so a run that read no observations
+  // at all still touches nothing.
+  const { count, duplicates } = _rebuildIndex({ recordsDir, indexPath });
+  accounting.indexCount = count;
+  accounting.duplicates = normalizeDuplicates(duplicates);
   return accounting;
 }
 
@@ -616,13 +637,18 @@ function _defaultGitPull(root) {
 }
 
 /**
- * Default seam: read every record observation currently in `.memory/records/`.
+ * Default seam: read every record currently in `.memory/records/`, ONE per
+ * `id`. Deduped at the reader since #574 — `engram import` INSERTS, so a
+ * union-merged duplicate physical line that reaches the payload twice becomes
+ * two observations in the live layer, permanently (importMemory's own measured
+ * note below). The dedup that used to happen only at index time now also
+ * happens on the hydration path.
  *
  * @param {string} root
  * @returns {object[]}
  */
 export function _defaultReadRecordObservations(root) {
-  return readRecordObservations({ recordsDir: join(root, ".memory", "records") });
+  return readRecords({ recordsDir: join(root, ".memory", "records") }).records;
 }
 
 /**
@@ -681,7 +707,19 @@ export function buildImportPayload({
   // immutable: an id is content-derived, so an edit yields a NEW record instead
   // of mutating one already imported. `engram.batch-import.test.mjs` pins that
   // premise separately — it is the test that fails first if it ever breaks.
-  const fresh = records.filter((r) => !existingTopicKeys.has(r.id));
+  //
+  // The `seenInBatch` half is #574's rule applied where it bites hardest. The
+  // reader now hands over one record per id (`readRecords`), so this is the
+  // belt to that suspenders — but it is not decoration: `engram import`
+  // INSERTS, the duplicate it creates is permanent (nothing self-heals it, per
+  // the note in importMemory), and the input is a log a `git merge` is allowed
+  // to append repeats to. A dedup this cheap belongs on both sides of the seam.
+  const seenInBatch = new Set();
+  const fresh = records.filter((r) => {
+    if (existingTopicKeys.has(r.id) || seenInBatch.has(r.id)) return false;
+    seenInBatch.add(r.id);
+    return true;
+  });
   const skipped = records.length - fresh.length;
 
   // Nothing new: return no payload at all rather than an empty one. An empty
@@ -824,7 +862,19 @@ export async function importMemory({
  * export. Discarding local churn is therefore always safe. This function:
  *   1. Detects and discards uncommitted manifest churn before pulling.
  *   2. Runs `git pull` (the union-merge driver handles any committed-manifest merges).
- *   3. Calls importMemory() to hydrate local engram from the merged .memory/.
+ *   3. Rebuilds `.memory/index.jsonl` from the merged `records/` (#574).
+ *   4. Calls importMemory() to hydrate local engram from the merged .memory/.
+ *
+ * Step 3 is new, and it is where #574's rule reaches the engram side of
+ * `pull()`. The `git pull` in step 2 is the exact event that MINTS a duplicate
+ * physical line (`merge=union`, ADR-0017 REQ-MF-3), and this path used to walk
+ * straight from there into hydrating the live layer — never rebuilding the
+ * derived index, never reading the log, reporting nothing. `plainfiles.pull()`
+ * has always been `git pull` + reindex; both backends now say the same thing
+ * about the same store. Ordering matters as much as presence: the reindex is
+ * the fail-closed gate, so a store that cannot be indexed (a tampered line, or
+ * two lines claiming one id with different bytes) refuses BEFORE engram is
+ * hydrated from it, rather than after.
  *
  * Use pullMemory() for cross-machine syncs (npm run memory:pull).
  * Use importMemory() when git pull already ran (post-merge hook, day-start step 5).
@@ -847,6 +897,7 @@ export async function pullMemory({
   _isManifestDirty = _defaultIsManifestDirty,
   _restoreManifest = _defaultRestoreManifest,
   _gitPull = _defaultGitPull,
+  _rebuildIndex = rebuildIndex,
   _import = importMemory,
 } = {}) {
   // Step 1: discard regenerable manifest churn so git pull can proceed.
@@ -860,8 +911,18 @@ export async function pullMemory({
   // Step 2: pull latest commits (throws on failure — import must not run).
   _gitPull(root);
 
-  // Step 3: hydrate local engram from the newly merged .memory/.
+  // Step 3: rebuild the derived index from the just-merged records/ (#574).
+  // Throws on a store the merge left unindexable — hydration must not run on
+  // one, so this deliberately sits BEFORE the import.
+  const { count, duplicates } = _rebuildIndex({
+    recordsDir: join(root, ".memory", "records"),
+    indexPath: join(root, ".memory", "index.jsonl"),
+  });
+
+  // Step 4: hydrate local engram from the newly merged .memory/.
   await _import();
+
+  return { indexCount: count, duplicates: normalizeDuplicates(duplicates) };
 }
 
 /**
@@ -871,7 +932,7 @@ export async function pullMemory({
  * Called by brain/scripts/memory/cli.mjs when op = "pull".
  */
 export async function pull() {
-  await pullMemory();
+  return pullMemory();
 }
 
 // ---------------------------------------------------------------------------

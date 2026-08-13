@@ -517,6 +517,10 @@ test('dualWriteRecords: no observations → resolves without appending or reinde
     unprovenanced: 0,
     unparseableChunks: 0,
     emptyObservationsChunks: 0,
+    // #574: zero here means "no reindex ran, so nothing was measured" — the
+    // accounting is present and honest rather than absent, and this run read
+    // no observations at all, so it read no records either.
+    duplicates: { ids: 0, lines: 0, groups: [] },
   });
 });
 
@@ -567,6 +571,9 @@ test('dualWriteRecords: skipped/rejected/errored observations are ALL accounted 
     unparseableChunks: 0,
     emptyObservationsChunks: 0,
     indexCount: 1,
+    // #574 — an `_rebuildIndex` stub that predates the accounting reports zero,
+    // never a fabricated number (normalizeDuplicates).
+    duplicates: { ids: 0, lines: 0, groups: [] },
   });
 });
 
@@ -627,6 +634,7 @@ test('dualWriteRecords: unparseable/empty-observations chunk buckets are surface
     unprovenanced: 0,
     unparseableChunks: 1,
     emptyObservationsChunks: 1,
+    duplicates: { ids: 0, lines: 0, groups: [] },
   });
 });
 
