@@ -53,7 +53,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0003](project/decisions/adr-0003-split-core-project-self-hosting.md) — core/project split and self-hosting
 - [ADR-0004](project/decisions/adr-0004-adapter-memoria-memory-backend.md) — Memory adapter: MEMORY_BACKEND selector
 - [ADR-0005](project/decisions/adr-0005-adapter-harness-sdd-harness.md) — Harness adapter: SDD_HARNESS selector
-- [ADR-0006](project/decisions/adr-0006-distribucion-installer-versionado.md) — Distribution: versioned installer via git tags
+- [ADR-0006](project/decisions/adr-0006-distribucion-installer-versionado.md) — Distribution: versioned installer via git tags (**Amendment 1, 13/08/2026** — **SUPERSEDED by ADR-0030** — the private-repo premise that chose git tags no longer exists; distribution moves to a scoped registry package, #617)
 - [ADR-0007](project/decisions/adr-0007-config-vcs-agnostica-y-checkrefs.md) — VCS-agnostic config and check-refs engine
 - [ADR-0008](project/decisions/adr-0008-adapter-vcs-provider.md) — VCS adapter: explicit provider + verb contract
 - [ADR-0009](project/decisions/adr-0009-documentation-language-policy.md) — Documentation language policy: core English, project docs configurable
@@ -76,6 +76,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0028](project/decisions/adr-0028-brain-promote-read-confirm-stage.md) — `brain:promote` is read-confirm-stage: the mechanics are automated, the signature is not (**Amendment 1, 12/08/2026** — `brain:promote` also performs §1c's in-place amendment cascade; the four locks and the human signature are unchanged, #509)
 - [ADR-0029](project/decisions/adr-0029-two-sources-one-graph.md) — Two sources feed one graph: the union is taken, the divergence is reported
 - [ADR-0018](project/decisions/adr-0018-gitlab-governance-fragment.md) — The GitLab governance surface is an opt-in fragment, not a pipeline
+- [ADR-0030](project/decisions/adr-0030-distribution-scoped-registry-package.md) — Distribution moves to a scoped registry package; ADR-0006's premise no longer exists
 
 ### Project-specific rules
 
