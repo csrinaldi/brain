@@ -147,8 +147,14 @@ export async function postVerdict({
   }
 
   // R1: mode === 'ruling' → issueComment (rulings post on the issue thread);
-  // every other mode → prReviewComment. Neither verb has an APPROVE state —
-  // `prReviewComment` hardcodes `event: 'COMMENT'` on both providers.
+  // every other mode → prReviewComment. Neither verb has an APPROVE state, on
+  // either provider — but NOT by the same mechanism, and saying "hardcodes
+  // `event: 'COMMENT'` on both providers" (as this comment did until #580) is
+  // false for one of them. GitHub hardcodes `event: 'COMMENT'` at every call
+  // site in `providers/github.mjs`. GitLab has no review-event concept at all:
+  // a plain note is posted and there is no APPROVE state for it to reach —
+  // structurally stronger, and a different fact (REQ-266-3, and gitlab.mjs's
+  // own `prReviewComment` JSDoc, which had it right all along).
   // #405: anchored findings ride the SAME call as the body on the PR path.
   // `issueComment` (rulings) has no inline surface, so nothing is passed there —
   // a silently-ignored argument is worse than an absent one.
