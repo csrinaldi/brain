@@ -354,3 +354,30 @@ test('#477: the `malformed` flag WINS over a value supplied beside it — found 
   assert.deepEqual(toRemove, [], 'and the real label must not be deleted in its favour');
   assert.deepEqual(unreadable, ['sequencing']);
 });
+
+test('#477/review: a block-sequence `sequencing` never reaches guardedLabelAdd as an object', async () => {
+  // The consumer-level half of the regression. `assertAllowed` threw
+  // `refused label "[object Object]"` OUT of reconcileOnePr, so runBoard's loop
+  // died and every remaining open PR went unreconciled.
+  const body = ['```yaml', 'protocol: brain-review/2', 'head_sha: abc123', 'verdict: APPROVE',
+    'sequencing:', '  - seq:after-411', '```'].join('\n');
+  const results = await runBoard({
+    project: 'o/r',
+    deps: {
+      listOpenPrs: async () => [{ number: 1 }, { number: 2 }],
+      // `reviewed:approved` is already present, so the ONLY movement this
+      // fixture can produce is the seq:* damage under test — the reviewed:*
+      // half is deliberately still reconciled and would be a legitimate write.
+      fetchPr: async () => ({ number: 1, labels: ['seq:after-411', 'reviewed:approved'] }),
+      fetchReviews: async () => [{ body, author: 'brain-reviewer' }],
+      getVcs: async () => ({
+        labelAdd: async () => { throw new Error('must not write off an unreadable verdict'); },
+        labelRemove: async () => { throw new Error('must not write off an unreadable verdict'); },
+      }),
+    },
+  });
+  assert.equal(results.length, 2, 'the loop must survive — a throw here strands every remaining PR');
+  assert.deepEqual(results[0].unreadable, ['sequencing']);
+  assert.deepEqual(results[0].toAdd, []);
+  assert.deepEqual(results[0].toRemove, [], 'and the real seq:* label is not deleted either');
+});

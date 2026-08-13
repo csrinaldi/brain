@@ -66,6 +66,12 @@ const TOP_LEVEL_KEY_RE = new RegExp(`^(?:${TOP_LEVEL_KEYS.join('|')}):`);
  */
 const UNREADABLE = Symbol('brain-review: field present but unreadable');
 
+// "Did the block mention `sequencing` at all?" — asked separately from "could I
+// read it", because those are the two states #477 exists to keep apart and
+// `scalar()` collapses them (it answers `null` for both a missing key and a key
+// whose inline value it could not capture).
+const SEQUENCING_KEY_RE = /^sequencing:/m;
+
 /**
  * Parses a findings-shaped key in EITHER encoding (issue #381):
  *   - same-line  — `findings: []`, and any JSON-scalar form, via parseJsonScalar
@@ -116,7 +122,10 @@ const UNREADABLE = Symbol('brain-review: field present but unreadable');
  *
  * NOT covered by the table above: a trailing space on the key line routes the
  * key into the INLINE branch below (`scalar`'s `(.+)` captures the space), so it
- * returns `null` even with entries under it. Pre-existing and pinned by test.
+ * answers `UNREADABLE` even with entries under it — `null` until #477, which is
+ * the improvement: the caller now learns the field was there and unreadable
+ * instead of being told nothing was said about it. The trailing space itself is
+ * still not repaired. Pre-existing and pinned by test.
  * Deferred to #477 on SCOPE — `scalar`'s contract for whitespace-only values
  * belongs with the sentinel policy being settled there. Measured, not assumed:
  * applying the candidate repair (`(.+)` → `(\S.*)`) fails exactly one test in
@@ -211,15 +220,18 @@ function parseEntryList(block, key) {
  * result: the ruling chose visibility WITHOUT a control-flow change, so a
  * consumer that ignores `malformed` behaves exactly as it did.
  *
- * That is also the limit of what this function can fix, and it is deliberate:
- * a consumer counting findings must now read `malformed` and refuse to call the
+ * A consumer counting findings must read `malformed` and refuse to call the
  * verdict clean. Doctrine already requires the equivalent one layer up —
  * `reviewer-protocol.md` §6.1, "'no findings' and 'findings discarded' must
  * never look identical to the reader" (#483) — and §10 forbids concluding on
- * uncomputable evidence. `board.mjs` and `cold-boot.mjs` adopting it is #477's
- * second half; until they do, an unreadable verdict is DETECTABLE but not yet
- * REFUSED, and `parse-verdict.test.mjs` pins that remaining gap rather than
- * implying it is closed.
+ * uncomputable evidence.
+ *
+ * The consumers HAVE adopted it (#477's second half, same change): `board.mjs`
+ * treats `seq:*` as uncomputable rather than empty when `sequencing` is
+ * unreadable, and `cold-boot.mjs` names the affected prior verdicts in
+ * `doctrine.unreadableVerdicts`, which `cli.mjs` reports on both the board and
+ * the reviewer run. A future consumer that ignores `malformed` reintroduces the
+ * defect on its own path — this field is the evidence, not the enforcement.
  */
 export function parseVerdict({ body, author = null } = {}) {
   if (typeof body !== 'string' || body.length === 0) return null;
@@ -262,12 +274,31 @@ export function parseVerdict({ body, author = null } = {}) {
   // readable `sequencing:` line; omitted otherwise (not `null`), so a block
   // without it round-trips through parseVerdict unchanged.
   //
-  // Read through `readList` as of #477: `sequencing` is the one member of this
-  // family with a live consumer, and it is a DESTRUCTIVE one — board.mjs
-  // reconciles labels by name, so an unreadable value puts every real `seq:*`
-  // label into `toRemove`. It has always been a JSON list on the wire; reading
-  // it with the list reader is what lets it be reported rather than dropped.
-  readList('sequencing');
+  // `sequencing` gets its OWN reader, deliberately NOT `parseEntryList` (review
+  // of this change). It is a flat list of label STRINGS; `parseEntryList` is the
+  // inverse of the findings/follow_ups entry emitter. Routing one through the
+  // other made `  - seq:after-411` match `ENTRY_OPEN_RE` and parse to
+  // `[{ seq: 'after-411' }]` — accepted as readable, then handed to
+  // `guardedLabelAdd`, which threw `refused label "[object Object]"` out of
+  // runBoard's per-PR loop and stranded every remaining open PR. Two readers
+  // because there are two shapes on the wire, not one reader stretched over both.
+  //
+  // The membership test is the load-bearing part: board.mjs compares and DELETES
+  // labels by name, so a non-string member is not a label under any reading and
+  // must reach the consumer as "unreadable", never as a value.
+  if (SEQUENCING_KEY_RE.test(block)) {
+    const raw = scalar(block, 'sequencing');
+    const parsed = raw !== null ? parseJsonScalar(raw) : null;
+    if (Array.isArray(parsed) && parsed.every(label => typeof label === 'string')) {
+      result.sequencing = parsed;
+    } else {
+      // Covers every remaining shape: unparseable, non-array, non-string members,
+      // and the block-sequence form (`scalar` finds no inline value, and this
+      // parser has no reader for that encoding). The key WAS here, so "absent" is
+      // not an available answer — #477's whole point.
+      malformed.push('sequencing');
+    }
+  }
 
   // Optional (v2 REQ-H2-2, fixed in #381) — findings and follow_ups are read
   // in whichever encoding the block carries. Both are rendered as YAML lists

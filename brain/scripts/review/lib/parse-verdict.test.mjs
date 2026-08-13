@@ -818,3 +818,51 @@ test('#477 consumer-level: an unreadable sequencing never deletes a real `seq:*`
     () => reconcileBoardLabels({ latestVerdict: nonArray, currentLabels: ['seq:after-411'] }),
     'a non-array sequencing used to reach `for…of 3` in board.mjs and take down the entire board run');
 });
+
+// ── #477 review round: `sequencing` is NOT findings-shaped ──────────────────
+//
+// Regression introduced by the first cut of this change and caught by review.
+// `sequencing` was routed through `parseEntryList` for the malformed reporting,
+// but that function is the inverse of ONE emitter — the findings/follow_ups
+// entry list — and `sequencing` is a FLAT LIST OF LABEL STRINGS.
+//
+// So `sequencing:` followed by a 2-space block sequence (what `yaml.dump`
+// emits, and the natural hand-edited form) matched ENTRY_OPEN_RE:
+//
+//   sequencing:
+//     - seq:after-411        →  [{ seq: 'after-411' }]     NOT flagged malformed
+//
+// Measured: those objects reached `guardedLabelAdd`, which threw
+// `refused label "[object Object]"` out of runBoard's per-PR loop and left
+// every REMAINING open PR unreconciled — the exact "takes down the whole board
+// run" failure this change's own comment claims to retire, reintroduced through
+// a different door. On `origin/main` the same block produced no `sequencing`
+// key at all: a safe no-op. This was a regression, not a pre-existing defect.
+
+test('#477/review: a block-sequence `sequencing` is UNREADABLE — never entry-parsed into objects', () => {
+  const parsed = parseVerdict({
+    body: blockWith(['sequencing:', '  - seq:after-411', '  - seq:blocked-on-412']),
+  });
+  assert.equal('sequencing' in parsed, false,
+    'the findings-shaped entry regexes must not be applied to a flat label list');
+  assert.deepEqual(parsed.malformed, ['sequencing'],
+    'this block CARRIES sequencing this parser cannot read — it must say so, not invent entries');
+});
+
+test('#477/review: an inline `sequencing` whose members are not strings is UNREADABLE', () => {
+  // The same end state through the inline door: labels are compared and deleted
+  // BY NAME, so a non-string member is not a label under any reading.
+  for (const raw of ['[{"seq":"a"}]', '[1,2]', '[null]', '"seq:a"', '{}']) {
+    const parsed = parseVerdict({ body: blockWith([`sequencing: ${raw}`]) });
+    assert.equal('sequencing' in parsed, false, `sequencing: ${raw} must not land on the result`);
+    assert.deepEqual(parsed.malformed, ['sequencing'], `sequencing: ${raw} must be reported unreadable`);
+  }
+});
+
+test('#477/review: the READABLE inline forms still work — the control', () => {
+  assert.deepEqual(parseVerdict({ body: blockWith(['sequencing: "[\\"seq:merge-next\\"]"']) }).sequencing,
+    ['seq:merge-next'], 'the form renderVerdict actually emits');
+  assert.deepEqual(parseVerdict({ body: blockWith(['sequencing: []']) }).sequencing, [],
+    'a genuinely empty sequencing is empty, not unreadable');
+  assert.equal('malformed' in parseVerdict({ body: blockWith(['sequencing: []']) }), false);
+});
