@@ -35,14 +35,21 @@ Closes #
 ## Diff Size Budget
 
 <!--
-Default budget: 400 changed lines (additions + deletions), excluding:
-  .memory/**, openspec/changes/**, package-lock.json, pnpm-lock.yaml, yarn.lock
+The budget is resolved from the repo's declared governance tier, NOT a flat number
+(#496): 1000 changed lines at `lite`, 400 at `standard`, 200 at `regulated`.
+Additions + deletions, excluding whatever `governance.ignoreList` in this repo's
+brain.config.json lists (test files, fixtures and lock files are the usual
+entries — the list varies per repo, so read it rather than assuming).
 
-If this PR exceeds 400 lines, add the `size:exception` label and explain why
+If this PR exceeds the budget, add the `size:exception` label and explain why
 splitting was not feasible. CI will block merges over budget without it.
+
+`regulated` does NOT honor `size:exception` — at that tier the label is refused
+and the only way through is a smaller diff. Run `npm run brain:governance-status`
+if you are unsure which tier this repo declares.
 -->
 
-- [ ] Diff is under 400 lines (or `size:exception` label added with justification)
+- [ ] Diff is under the tier's budget (or `size:exception` label added with justification — not available at `regulated`)
 
 ## Decision / ADR
 
