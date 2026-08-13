@@ -52,7 +52,7 @@ test('importMemory: reads records via _readRecords and hydrates engram in ONE ba
   const result = await importMemory({
     root: '/fake/root',
     _requireEngram: () => 'engram',
-    _readRecords: () => records,
+    _readRecords: () => ({ records }),
     _engramExistingTopicKeys: () => new Set(),
     _engramImport: (payload) => imports.push(payload),
     _log: () => {},
@@ -77,7 +77,7 @@ test('importMemory: no chunk path is read — never spawns `engram sync --import
   await importMemory({
     root: '/fake/root',
     _requireEngram: () => 'engram',
-    _readRecords: () => records,
+    _readRecords: () => ({ records }),
     _engramExistingTopicKeys: () => new Set(),
     _engramImport: () => {},
     _log: () => {},
@@ -102,7 +102,7 @@ test('importMemory: empty records/ → zero writes, no throw', async () => {
   const result = await importMemory({
     root: '/fake/root',
     _requireEngram: () => 'engram',
-    _readRecords: () => [],
+    _readRecords: () => ({ records: [] }),
     _engramSave: () => {
       throw new Error('_engramSave must not be called when there are no records');
     },
@@ -168,7 +168,7 @@ test('importMemory: re-running over the same records creates NO duplicate observ
   const run = () => importMemory({
     root: '/fake/root',
     _requireEngram: () => 'engram',
-    _readRecords: () => records,
+    _readRecords: () => ({ records }),
     _engramExistingTopicKeys: store._engramExistingTopicKeys,
     _engramImport: store._engramImport,
     _log: () => {},

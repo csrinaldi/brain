@@ -135,7 +135,7 @@ test('importMemory: ONE import call, not one save per record (#433)', async () =
   const res = await importMemory({
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
-    _readRecords: () => records,
+    _readRecords: () => ({ records }),
     _engramExistingTopicKeys: () => new Set(),
     _engramImport: (payload) => { imports.push(payload); },
     _log: () => {},
@@ -163,7 +163,7 @@ test('importMemory: a second run over the same records sends NOTHING (#433 + ide
   const run = () => importMemory({
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
-    _readRecords: () => records,
+    _readRecords: () => ({ records }),
     _engramExistingTopicKeys: () => new Set(store),
     _engramImport: (payload) => {
       imports.push(payload);
@@ -185,7 +185,7 @@ test('importMemory: empty records/ → zero writes, no import spawned, no throw'
   const res = await importMemory({
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
-    _readRecords: () => [],
+    _readRecords: () => ({ records: [] }),
     _engramExistingTopicKeys: () => new Set(),
     _engramImport: (p) => imports.push(p),
     _log: () => {},
@@ -227,7 +227,7 @@ test('importMemory: an unreadable state SKIPS the import — a full re-import wo
   await importMemory({
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
-    _readRecords: () => records,
+    _readRecords: () => ({ records }),
     _engramExistingTopicKeys: () => store.keys(),
     _engramImport: (p) => { imports.push(p); store.insert(p); },
     _log: () => {},
@@ -238,7 +238,7 @@ test('importMemory: an unreadable state SKIPS the import — a full re-import wo
   const res = await importMemory({
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
-    _readRecords: () => records,
+    _readRecords: () => ({ records }),
     _engramExistingTopicKeys: () => { throw new Error('database is locked'); },
     _engramImport: (p) => { imports.push(p); store.insert(p); },
     _warn: (line) => logs.push(line),
@@ -263,7 +263,7 @@ test('importMemory: the deferred warning goes to STDERR, not stdout (#448)', asy
   await importMemory({
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
-    _readRecords: () => [rec('rec-aaa')],
+    _readRecords: () => ({ records: [rec('rec-aaa')] }),
     _engramExistingTopicKeys: () => { throw new Error('database is locked'); },
     _engramImport: () => {},
     _log: (l) => out.push(l),
@@ -283,7 +283,7 @@ test('importMemory: a reader that returns a non-Set is uncomputable too, not an 
   const res = await importMemory({
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
-    _readRecords: () => [rec('rec-aaa')],
+    _readRecords: () => ({ records: [rec('rec-aaa')] }),
     _engramExistingTopicKeys: () => null,
     _engramImport: (p) => imports.push(p),
     _log: () => {},
@@ -301,7 +301,7 @@ test('importMemory: a genuinely EMPTY store still imports everything', async () 
   const res = await importMemory({
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
-    _readRecords: () => [rec('rec-aaa')],
+    _readRecords: () => ({ records: [rec('rec-aaa')] }),
     _engramExistingTopicKeys: () => new Set(),
     _engramImport: (p) => imports.push(p),
     _log: () => {},
