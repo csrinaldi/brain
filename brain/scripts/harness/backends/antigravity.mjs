@@ -50,8 +50,13 @@ const REGENERATE_HINT = 'AGENT_PLATFORM=antigravity npm run brain:env:init';
 
 // The settings-hooks payload itself is NOT antigravity-specific and no longer
 // lives here (issue #315): it was byte-identical to claude's copy, down to the
-// `--no-verify` guard string. What is antigravity-specific is
+// commit-bypass guard string. What is antigravity-specific is
 // GEMINI_SETTINGS_EMIT_PATH above. See settings-hooks.mjs.
+//
+// This comment deliberately does NOT spell out the flag it refers to. Naming it
+// would be the only line in this file matching the `no-verify-bypass` rule, and
+// keeping the file exempt for the sake of one comment blinds that rule to a real
+// invocation added here later — measured, and removed with the exemption.
 
 // ---------------------------------------------------------------------------
 // Relative-link rebasing (CP-B2 inaugural-read finding, owner ruling).

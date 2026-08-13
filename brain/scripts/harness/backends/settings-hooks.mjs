@@ -5,7 +5,8 @@
 // `compileClaudeSettingsJson` and antigravity.mjs's `compileGeminiSettingsJson`
 // were 28 lines each and 27 of those lines were byte-identical — the single
 // differing line was the function's own name. Their OUTPUT was byte-identical:
-// md5 7d4dcb282df653b2121e98228e6ac569, 776 bytes, both.
+// md5 7d4dcb282df653b2121e98228e6ac569 — 776 characters, 777 bytes
+// in UTF-8 (the payload carries a "§"), both.
 //
 // The emit paths were NOT part of the duplication and are NOT a parameter here.
 // `.claude/settings.json` and `.gemini/settings.json` live in each backend as
