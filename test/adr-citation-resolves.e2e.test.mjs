@@ -53,6 +53,21 @@ const ADR_FILE_RE = /^adr-(\d{4})-[a-z0-9][a-z0-9-]*\.md$/;
 const UNSCANNED_ROOTS = Object.freeze(['.memory/', 'openspec/', 'brain-drafts/']);
 
 /**
+ * This file, and only this file, is excluded from its own scan.
+ *
+ * Measured before adding it: scanning itself produced 8 self-inflicted
+ * findings out of 13 — the registries below must NAME the numbers they exempt,
+ * and the failure messages must name the number the ticket is about, so every
+ * one of those strings read back as an unresolved citation. That is noise
+ * about the checker, not evidence about the tree.
+ *
+ * The cost is real and stated: a rotted pointer in THIS file's own comments is
+ * not caught by this check. The guard below pins the exclusion to this exact
+ * path so it can never be widened into a second exempt file.
+ */
+const SELF = 'test/adr-citation-resolves.e2e.test.mjs';
+
+/**
  * Numbers that are deliberate fakes in test material — a fixture ADR must not
  * name a real decision record, or editing doctrine would break unrelated tests.
  * These are not rot and never resolve.
@@ -100,14 +115,18 @@ function trackedFiles() {
   return files;
 }
 
-/** @returns {Set<string>} the four-digit numbers of the ADRs on disk. Throws if the dir is unreadable. */
-function signedAdrNumbers() {
+/**
+ * @param {string} [dir] repo-relative decisions dir; parameterised so the
+ *   empty-result branch is drivable by a test rather than merely asserted about.
+ * @returns {Set<string>} the four-digit numbers of the ADRs on disk. Throws if the dir is unreadable.
+ */
+function signedAdrNumbers(dir = DECISIONS_DIR) {
   const numbers = new Set();
-  for (const name of readdirSync(join(REPO_ROOT, DECISIONS_DIR))) {
+  for (const name of readdirSync(join(REPO_ROOT, dir))) {
     const m = name.match(ADR_FILE_RE);
     if (m) numbers.add(m[1]);
   }
-  if (numbers.size === 0) throw new Error(`${DECISIONS_DIR} holds no ADR — the scan cannot run`);
+  if (numbers.size === 0) throw new Error(`${dir} holds no ADR — the scan cannot run`);
   return numbers;
 }
 
@@ -126,6 +145,7 @@ function collectCitations(files) {
   let scanned = 0;
   let binary = 0;
   for (const file of files) {
+    if (file === SELF) continue;
     if (UNSCANNED_ROOTS.some((root) => file.startsWith(root))) continue;
     const buf = readFileSync(join(REPO_ROOT, file)); // throws — never a silent skip
     if (buf.includes(0)) { binary++; continue; }
@@ -157,6 +177,30 @@ test('adr-citations: the scan actually read the tree (a vacuous pass is a failur
   assert.ok(citations.length > 100, `only ${citations.length} citations found — the regex is not matching`);
   assert.ok(signed.size >= 25, `only ${signed.size} signed ADRs found — ${DECISIONS_DIR} was misread`);
   assert.ok(binary >= 0 && Number.isInteger(binary), 'binary-file count was not computed');
+});
+
+test('adr-citations: a reader that cannot read FAILS — it never reports an empty scan (evidence-reader-empty-on-failure)', () => {
+  // The class this guards against: a reader that swallows its error and returns
+  // `[]` makes "nothing cited anything" indistinguishable from "the scan never
+  // ran", and this suite's whole verdict is the emptiness of a list.
+  assert.throws(
+    () => collectCitations(['brain/project/decisions/adr-0000-does-not-exist.md']),
+    /ENOENT/,
+    'collectCitations swallowed a read failure — an unreadable file must abort the scan, not vanish from it',
+  );
+  assert.throws(
+    () => signedAdrNumbers('test/fixtures'),
+    /holds no ADR/,
+    'signedAdrNumbers returned an empty set instead of failing — every citation would then read as unresolved-or-fine depending on nothing',
+  );
+});
+
+test('adr-citations: the self-exclusion covers exactly this file and nothing else', () => {
+  // Derived from the module's own URL, so SELF cannot be re-pointed at another
+  // file to quiet a finding: the constant and the running file must agree.
+  const actual = fileURLToPath(import.meta.url).slice(REPO_ROOT.length + 1).split('\\').join('/');
+  assert.equal(SELF, actual, `SELF names ${SELF} but this file is ${actual} — the exclusion moved`);
+  assert.equal(files.includes(SELF), true, `${SELF} is not tracked — the exclusion exempts nothing`);
 });
 
 test('adr-citations: a citation that DOES resolve is reached by the scan (the check can say yes)', () => {
