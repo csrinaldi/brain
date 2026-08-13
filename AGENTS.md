@@ -61,7 +61,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0003](brain/project/decisions/adr-0003-split-core-project-self-hosting.md) — core/project split and self-hosting
 - [ADR-0004](brain/project/decisions/adr-0004-adapter-memoria-memory-backend.md) — Memory adapter: MEMORY_BACKEND selector
 - [ADR-0005](brain/project/decisions/adr-0005-adapter-harness-sdd-harness.md) — Harness adapter: SDD_HARNESS selector
-- [ADR-0006](brain/project/decisions/adr-0006-distribucion-installer-versionado.md) — Distribution: versioned installer via git tags
+- [ADR-0006](brain/project/decisions/adr-0006-distribucion-installer-versionado.md) — Distribution: versioned installer via git tags (**Amendment 1, 13/08/2026** — **SUPERSEDED by ADR-0030** — the private-repo premise that chose git tags no longer exists; distribution moves to a scoped registry package, #617)
 - [ADR-0007](brain/project/decisions/adr-0007-config-vcs-agnostica-y-checkrefs.md) — VCS-agnostic config and check-refs engine
 - [ADR-0008](brain/project/decisions/adr-0008-adapter-vcs-provider.md) — VCS adapter: explicit provider + verb contract
 - [ADR-0009](brain/project/decisions/adr-0009-documentation-language-policy.md) — Documentation language policy: core English, project docs configurable

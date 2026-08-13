@@ -1,6 +1,6 @@
 # ADR-0006 — Distribution: Versioned Installer via Git Tags
 
-**Status**: Accepted (updated 2026-06-29 — S3: brain/scripts/ namespace + 3-pillar model)
+**Status**: Accepted (updated 2026-06-29 — S3: brain/scripts/ namespace + 3-pillar model) · **amended 13/08/2026** (Amendment 1 — see below)
 **Date**: 2026-06-26
 
 ## Context
@@ -9,14 +9,20 @@
 
 - **git subtree**: complex to maintain, mixes upstream history with the consumer repo.
 - **npm registry**: requires publishing to npmjs.com or a private registry; bureaucratic overhead.
+  **[Amended by Amendment 1 (#617) — this rejection is reversed. ADR-0030 chooses the registry. The "overhead" was weighed against a private repo that no longer exists.]**
 - **git tags + npm install**: installs directly from GitHub by version tag; compatible with private repos; zero registry.
+  **[Amended by Amendment 1 (#617) — SUPERSEDED. "Compatible with private repos" is the property this whole decision rested on, and there is no private repo left: `private: false`. See ADR-0030.]**
 - **manual copy**: no way to receive updates in a controlled manner.
 
 ## Decision
 
 Distribution uses **git tags + npm install**:
 
+**[Amended by Amendment 1 (#617) — SUPERSEDED. Distribution is a published scoped package, `@csrinaldi/brain`. See ADR-0030. The install line below is historical.]**
+
 ```bash
+# HISTORICAL — superseded by ADR-0030. The current line is:
+#   npm install --save-dev @csrinaldi/brain
 npm install --save-dev github:csrinaldi/brain#v1.0.0
 ```
 
@@ -31,10 +37,12 @@ This installs `brain/core/` and the generic scripts as a devDependency of the co
 ## Consequences
 
 - **Positive**: one-liner installation, no registry, compatible with private repos (GitHub).
+  **[Amended by Amendment 1 (#617) — no longer a Positive. The repository is public (`private: false`), so "compatible with private repos" describes nothing, and "no registry" is now the cost rather than the benefit.]**
 - **Positive**: the version is explicit in the consumer's `package.json` — upgrades are conscious decisions.
 - **Positive**: `git tag` is the release mechanism — zero complex CI to publish.
 - **Positive (Slice 6)**: additive `brain.config.json` migrations run automatically and are idempotent; the consumer only reads the changelog for renames.
 - **Negative**: distributing via npm install from GitHub requires the consumer to have access to the brain repo (authenticated, if private).
+  **[Amended by Amendment 1 (#617) — this is the friction ADR-0030 removes. `test/fresh-install/run.sh` still refuses to run without a `VCS_TOKEN` for exactly this reason; when that fixture stops needing one, this Negative is gone.]**
 - **Implemented (Slice 6)**: `brain:upgrade` (`brain/scripts/brain-upgrade.mjs`), the path manifest (`brain/core/managed-paths.mjs`), the migrations (`brain/core/config-migrations.mjs`), and the check-and-notify in `day:start`. See `openspec/changes/installer-versionado/`.
 
 ## S3 Update — 3-Pillar Model and brain/scripts/ Namespace (2026-06-29)
@@ -89,3 +97,65 @@ additively appends brain's `hooks.PreToolUse` entries deduplicated by serializat
 dest vs src for all non-`specialMerge` managed paths. The result reports
 `collisions[]`. The `--abort-on-collision` flag makes the guard hard (all-or-nothing
 before any write). Default: warn and proceed (current behavior preserved).
+
+## Amendment 1 — SUPERSEDED by ADR-0030: the premise that chose git tags no longer exists (issue #617)
+
+**Signed**: 13/08/2026 — Cristian Rinaldi
+
+### What changed
+
+**This ADR is superseded by ADR-0030 for its distribution mechanism.** Not amended
+— superseded. The distinction is the point: its Decision did not become
+inconvenient, its **premise was deleted**.
+
+ADR-0006's own comparison chose `git tags + npm install` on one property:
+
+> **git tags + npm install**: installs directly from GitHub by version tag;
+> **compatible with private repos**; zero registry.
+
+Measured on `main` @ `3dfbdd4`: **`private: false`**. There is no private repo for
+that compatibility to serve. The option it rejected — *"npm registry: requires
+publishing […] bureaucratic overhead"* — is what ADR-0030 chooses, and the
+overhead was weighed against a constraint that no longer applies.
+
+Its stated Negative, that the consumer needs authenticated access to this
+repository, is precisely the friction #435 exists to remove.
+
+### What is NOT superseded
+
+Narrower than a reader might assume, and stated so the supersession is not read
+as wider than it is. Everything below stands unchanged and is still current
+doctrine:
+
+- **`brain/core/**` is read-only in the consumer**, and improvements go upstream.
+- **The three-pillar model** — core / project / scripts — and the `brain/scripts/`
+  namespace decided in the S3 update, which removed the root `scripts/` collision.
+- **Additive `brain.config.json` migrations**, `schemaVersion`, and the rule that
+  a consumer-set value is never overwritten, falsy values included.
+- **Check-and-notify in `day:start`, never auto-update.** A registry makes
+  auto-update easier to reach for, so `instaladores-autoactualizantes-no-inocuos`
+  is *more* load-bearing after this, not less.
+- **`specialMerge` and the collision guard** in `copyManaged()`.
+
+What is superseded is one thing: **how the bytes reach the consumer**, and the
+private-repo premise that chose it.
+
+### The measurement
+
+| ADR-0006 asserts | measured on `main` @ `3dfbdd4` |
+|---|---|
+| "compatible with private repos" | `private: false` — public |
+| "no registry" as a Positive | `brain` is a deprecated placeholder (`200`); `@csrinaldi/brain` is free (`404`) |
+| consumer needs repo access | `test/fresh-install/run.sh` still exits 2 without `VCS_TOKEN` |
+
+### The accepted loss
+
+**ADR-0030 is signed while the mechanism is still ADR-0006's.** `main` carries
+`private: true`, `"name": "brain"` and an install spec pointing at the git URL.
+For as long as #435's mechanical half is open, ADR-0030 records an intent and
+ADR-0006's install line is what actually runs.
+
+That ordering is deliberate. #590 measured what the reverse costs: a mechanism
+shipped, its decision record never written, and five live files citing an ADR
+that did not exist — for months. Writing the decision first means a reader can
+see the gap. Writing it last means nobody can.
