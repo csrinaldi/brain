@@ -33,7 +33,9 @@ import { resolvePlatform } from '../cli.mjs';
  */
 export const RUNTIME_STATES = Object.freeze([
   'not-declared',    // the backend declares no runtime to check (e.g. plain)
+  'seam-missing',    // the backend exports no AGENT_RUNTIME at all — nobody declared anything
   'unresolved',      // the backend module could not be loaded — we did not look
+  'timeout',         // the binary is installed and did not answer in time
   'absent',          // the runtime binary is not installed
   'unreadable',      // the binary answered, but not with a version
   'unknown-latest',  // installed version known; newest version could not be read
@@ -105,15 +107,25 @@ export function probeAgentRuntime(descriptor, { _run = defaultRun } = {}) {
   try {
     versionResult = _run(descriptor.bin, descriptor.versionArgs ?? []);
   } catch (err) {
-    return { ...base, state: 'absent', detail: err.message };
+    // The runner itself blew up — we never got an answer ABOUT the binary.
+    return { ...base, state: 'unreadable', detail: err.message };
   }
 
-  // A MISSING binary surfaces as `error` (ENOENT) — that, and only that, is
-  // "not installed". A binary that is installed and exits non-zero is present
-  // but illegible: telling that user to install it is wrong advice, and
-  // collapsing the two is the failure this module exists to avoid.
+  // Only ENOENT means "not installed" — and it is the CODE that says so, never
+  // the message. spawnSync also sets `error` for ETIMEDOUT (installed, hung
+  // past our own timeout) and EACCES (installed, not executable by this user);
+  // both describe a binary that IS there. Reading `error` alone told an
+  // operator behind a proxy to install the CLI they already had (#614).
   if (versionResult?.error) {
-    return { ...base, state: 'absent', detail: failureDetail(versionResult) };
+    const code = versionResult.error.code;
+    if (code === 'ENOENT') {
+      return { ...base, state: 'absent', detail: failureDetail(versionResult) };
+    }
+    return {
+      ...base,
+      state: code === 'ETIMEDOUT' ? 'timeout' : 'unreadable',
+      detail: failureDetail(versionResult),
+    };
   }
   if (versionResult?.status !== 0) {
     return { ...base, state: 'unreadable', detail: failureDetail(versionResult) };
@@ -232,6 +244,18 @@ export function formatRuntimeNotice(status, platform = null) {
         message: `${who} is not installed${detail}.`,
         hint: status?.updateHint ? `Install it with: ${status.updateHint}` : null,
       };
+    case 'seam-missing':
+      return {
+        level: 'warn',
+        message: `harness '${platform ?? who}' declares no AGENT_RUNTIME export at all.`,
+        hint: 'Every backend must declare the seam — export `AGENT_RUNTIME = null` if there is deliberately nothing to probe.',
+      };
+    case 'timeout':
+      return {
+        level: 'warn',
+        message: `${who} is installed but did not answer in time${detail}.`,
+        hint: 'Version check skipped — a slow network or proxy will do this; the runtime itself may be fine.',
+      };
     case 'unreadable':
       return {
         level: 'warn',
@@ -306,6 +330,18 @@ export async function agentRuntimeReport({
     return { platform, status, notice: formatRuntimeNotice(status, platform) };
   }
 
-  const status = probeAgentRuntime(backend?.AGENT_RUNTIME ?? null, { _run });
+  // `?? null` here would make "nobody wrote the export" indistinguishable from
+  // "this backend deliberately declares nothing" — the two comments that used
+  // to claim otherwise were measurably false (#614).
+  if (!backend || !Object.hasOwn(backend, 'AGENT_RUNTIME')) {
+    const status = {
+      state: 'seam-missing', name: null, bin: null,
+      installed: null, latest: null, updateHint: null,
+      detail: `backend '${platform}' exports no AGENT_RUNTIME`,
+    };
+    return { platform, status, notice: formatRuntimeNotice(status, platform) };
+  }
+
+  const status = probeAgentRuntime(backend.AGENT_RUNTIME, { _run });
   return { platform, status, notice: formatRuntimeNotice(status, platform) };
 }

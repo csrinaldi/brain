@@ -8,7 +8,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { readdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import {
+  RUNTIME_STATES,
   probeAgentRuntime,
   formatRuntimeNotice,
   agentRuntimeReport,
@@ -55,7 +60,7 @@ test('probeAgentRuntime: no descriptor → not-declared, and nothing is executed
 
 test('probeAgentRuntime: binary absent → absent, with the failure detail preserved', () => {
   const { _run, calls } = runner({
-    [VERSION_CALL]: { status: null, stdout: '', stderr: '', error: new Error('spawn fakeagent ENOENT') },
+    [VERSION_CALL]: { status: null, stdout: '', stderr: '', error: Object.assign(new Error('spawn fakeagent ENOENT'), { code: 'ENOENT' }) },
   });
   const status = probeAgentRuntime(DESC, { _run });
 
@@ -260,11 +265,91 @@ test('probeAgentRuntime: binary PRESENT but exiting non-zero is unreadable, not 
   assert.match(status.detail, /config corrupt/);
 });
 
-test('probeAgentRuntime: only a spawn error (ENOENT) means absent', () => {
-  const { _run } = runner({
-    [VERSION_CALL]: { status: null, stdout: '', stderr: '', error: new Error('spawn fakeagent ENOENT') },
+test('probeAgentRuntime: ONLY ENOENT means absent — a real spawn error carries a code', () => {
+  // spawnSync sets `error.code`. ENOENT is the one code that means "the binary
+  // is not there"; every other code describes a binary that IS there and did
+  // not answer. Reading the message instead of the code makes them one fact.
+  const spawnError = (code) => ({
+    [VERSION_CALL]: { status: null, stdout: '', stderr: '', error: Object.assign(new Error(`spawn fakeagent ${code}`), { code }) },
   });
-  assert.equal(probeAgentRuntime(DESC, { _run }).state, 'absent');
+
+  assert.equal(probeAgentRuntime(DESC, { _run: runner(spawnError('ENOENT'))._run }).state, 'absent');
+
+  // A hung binary: the probe's own timeout fired. It is installed.
+  const timedOut = probeAgentRuntime(DESC, { _run: runner(spawnError('ETIMEDOUT'))._run });
+  assert.equal(timedOut.state, 'timeout');
+  assert.notEqual(timedOut.state, 'absent');
+
+  // Installed, but not executable by this user.
+  const denied = probeAgentRuntime(DESC, { _run: runner(spawnError('EACCES'))._run });
+  assert.equal(denied.state, 'unreadable');
+  assert.notEqual(denied.state, 'absent');
+
+  // A descriptor so malformed that the runner itself throws is not evidence
+  // that the binary is missing either.
+  const thrown = probeAgentRuntime(DESC, { _run: () => { throw new TypeError('The "file" argument must be of type string'); } });
+  assert.notEqual(thrown.state, 'absent');
+});
+
+test('formatRuntimeNotice: a timed-out or unexecutable binary is NEVER told to install itself', () => {
+  for (const state of ['timeout', 'unreadable']) {
+    const notice = formatRuntimeNotice({
+      state, name: 'fake-agent', bin: 'fakeagent', installed: null, latest: null,
+      updateHint: 'npm install -g @fake/agent@latest', detail: 'spawn fakeagent ETIMEDOUT',
+    });
+    assert.doesNotMatch(notice.message, /not installed/i, `${state} must not claim the binary is missing`);
+    assert.doesNotMatch(notice.hint ?? '', /^Install it with/, `${state} must not advise installing it`);
+    // …and it must actually SAY something about this state, not fall through to
+    // the catch-all — which would satisfy the two assertions above vacuously.
+    assert.doesNotMatch(notice.message, /unrecognized runtime state/, `${state} has no case of its own`);
+  }
+  const timedOut = formatRuntimeNotice({ state: 'timeout', name: 'fake-agent', bin: 'fakeagent', installed: null, latest: null, updateHint: 'x', detail: 'spawn fakeagent ETIMEDOUT' });
+  assert.match(timedOut.message, /did not answer|timed out/i);
+});
+
+test('RUNTIME_STATES: every listed state has its own notice — none falls through to default', () => {
+  // The list and the switch used to be two unbound copies: adding a state here
+  // without a `case` there degraded silently into the catch-all.
+  for (const state of RUNTIME_STATES) {
+    const notice = formatRuntimeNotice({ state, name: 'x', bin: 'x', installed: '1.0.0', latest: '1.0.0', updateHint: 'y', detail: null }, 'some-harness');
+    assert.doesNotMatch(notice.message, /unrecognized runtime state/, `${state} is listed but has no case`);
+  }
+});
+
+test('agentRuntimeReport: a backend MISSING the export is not the same as one declaring null', async () => {
+  const missing = await agentRuntimeReport({
+    env: { AGENT_PLATFORM: 'forgetful' },
+    _loadBackend: async () => ({ init: () => {} }),          // no AGENT_RUNTIME at all
+    _run: () => { throw new Error('must not run'); },
+  });
+  const declared = await agentRuntimeReport({
+    env: { AGENT_PLATFORM: 'deliberate' },
+    _loadBackend: async () => ({ init: () => {}, AGENT_RUNTIME: null }),
+    _run: () => { throw new Error('must not run'); },
+  });
+
+  assert.equal(declared.status.state, 'not-declared');
+  assert.equal(missing.status.state, 'seam-missing');
+  assert.notEqual(missing.status.state, declared.status.state);
+  assert.notEqual(missing.notice.message, declared.notice.message);
+  assert.equal(missing.notice.level, 'warn');
+});
+
+test('registry: EVERY backend implementing init() declares the runtime seam', async () => {
+  // Replaces four hand-written per-backend assertions: a fifth backend added
+  // tomorrow is covered by this one without anybody remembering to add a test.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const files = readdirSync(here).filter((f) => f.endsWith('.mjs') && !f.endsWith('.test.mjs'));
+  const backends = [];
+  for (const f of files) {
+    const mod = await import(`./${f}`);
+    if (typeof mod.init === 'function') backends.push([f, mod]);
+  }
+
+  assert.ok(backends.length >= 4, `expected the known backends, found ${backends.length}`);
+  for (const [f, mod] of backends) {
+    assert.ok(Object.hasOwn(mod, 'AGENT_RUNTIME'), `${f} implements init() but declares no AGENT_RUNTIME`);
+  }
 });
 
 test('probeAgentRuntime: two versions it cannot order are unknown-latest, never up-to-date', () => {

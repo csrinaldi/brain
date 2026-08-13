@@ -18,8 +18,9 @@
  * gentle-ai is the SDD ENGINE axis (ADR-0024), not an agent platform:
  * `resolvePlatform` never returns it, and day:start already checks its version
  * in the ecosystem step. The export exists so every backend answers the same
- * question — a missing export would read as "someone forgot", which is exactly
- * what the seam is meant to make impossible.
+ * question. A backend that omits it entirely reports `seam-missing` and a
+ * registry test fails, so "someone forgot" cannot pass for "declares nothing"
+ * (#614 — until then the two were byte-identical outcomes).
  */
 export const AGENT_RUNTIME = null;
 
