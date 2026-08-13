@@ -813,7 +813,14 @@ export async function importMemory({
 } = {}) {
   _requireEngram();
 
-  const { records, duplicates } = _readRecords(root);
+  // Tolerant of a seam that still returns a bare array (#574 changed this
+  // shape). The module already wrote `normalizeDuplicates` so an older
+  // `_rebuildIndex` seam degrades to "measured nothing"; giving the reader seam
+  // no such tolerance while changing its shape in the same PR was the
+  // asymmetry. An array means "records, no accounting", not a TypeError.
+  const read = _readRecords(root);
+  const records = Array.isArray(read) ? read : (read?.records ?? []);
+  const duplicates = Array.isArray(read) ? undefined : read?.duplicates;
   const total = records.length;
 
   if (total === 0) {
@@ -905,9 +912,10 @@ export async function importMemory({
  * derived index, never reading the log, reporting nothing. `plainfiles.pull()`
  * has always been `git pull` + reindex; both backends now say the same thing
  * about the same store. Ordering matters as much as presence: the reindex is
- * the fail-closed gate, so a store that cannot be indexed (a tampered line, or
- * two lines claiming one id with different bytes) refuses BEFORE engram is
- * hydrated from it, rather than after.
+ * the fail-closed gate, so a store that cannot be indexed — a TAMPERED line,
+ * which is the only refusal left — refuses BEFORE engram is hydrated from it,
+ * rather than after. (Two lines claiming one id with different bytes is NOT
+ * that case: it is reported as divergent and resolved first-wins.)
  *
  * Use pullMemory() for cross-machine syncs (npm run memory:pull).
  * Use importMemory() when git pull already ran (post-merge hook, day-start step 5).

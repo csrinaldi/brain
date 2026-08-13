@@ -128,7 +128,17 @@ export function rebuildIndex({ recordsDir, indexPath }) {
       // not as the raw line: two lines that differ only in key order or
       // whitespace ARE the same record, and calling those divergent would
       // mis-report a store a different-but-conformant writer produced.
-      const canonical = canonicalJson(record);
+      //
+      // canonicalOrNull, never bare canonicalJson: `JSON.parse` admits values
+      // this canonicalizer refuses — `1e999` parses to `Infinity`, and deep
+      // nesting overflows the recursion — in any field OUTSIDE the eight
+      // hashed ones, which `computeRecordId` never touches and `validateRecord`
+      // does not strip. A bare call therefore ADDED a read-path rejection to a
+      // store that indexed fine before #574, on consumer-owned `.memory/**`
+      // that brain cannot migrate: the very thing duplicates.mjs argues must
+      // never happen. An uncomparable line stays INDEXED; it only loses the
+      // ability to prove it agrees with its twin, which reports as divergent.
+      const canonical = canonicalOrNull(record);
       const prior = firstSeen.get(record.id);
       if (prior === undefined) {
         firstSeen.set(record.id, { canonical, at });
@@ -145,7 +155,13 @@ export function rebuildIndex({ recordsDir, indexPath }) {
         // not refused: `source` is hash-excluded precisely so two writers citing
         // it differently do not split one record in two, and brain's own
         // renderFuente widens it on every export→import→export.
-        if (prior.canonical !== canonical) divergentIds.add(record.id);
+        //
+        // A null on either side means "could not be compared", which is
+        // reported as divergence rather than assumed to be agreement — the
+        // safe direction, and the same rule readRecords() applies.
+        if (prior.canonical === null || canonical === null || prior.canonical !== canonical) {
+          divergentIds.add(record.id);
+        }
       }
     }
   }
@@ -293,11 +309,19 @@ export function readRecords({ recordsDir }) {
 }
 
 /**
- * canonicalJson() over a record that this best-effort reader has NOT validated,
- * so a shape canonicalJson refuses (an array value, a non-finite number) yields
- * `null` instead of throwing. Two nulls compare as divergent, which is the safe
- * direction here: it over-reports on a shape `rebuildIndex()` refuses anyway,
- * rather than claiming two unreadable lines agree.
+ * canonicalJson() over a record neither reader has fully vetted, so a value
+ * canonicalJson cannot express yields `null` instead of throwing. Used by BOTH
+ * `rebuildIndex()` and `readRecords()`: the comparison is an equality proof, and
+ * failing to prove equality must never escalate into refusing the store.
+ *
+ * The reachable cases are non-finite numbers (`JSON.parse('1e999')` is
+ * `Infinity`, and `validateRecord` does not police fields outside the schema)
+ * and nesting deep enough to overflow the recursion. NOT an array value —
+ * `canonicalJson` handles arrays; this docblock said otherwise and was wrong.
+ *
+ * A null compares as divergent, which is the safe direction: it over-reports a
+ * pair it cannot vouch for, instead of claiming two lines agree when nobody
+ * checked.
  */
 function canonicalOrNull(record) {
   try {

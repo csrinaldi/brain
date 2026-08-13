@@ -139,6 +139,33 @@ test('formatDuplicateReport: a real accounting is never silenced by a malformed 
   assert.match(report[0], /139 excess physical line/);
 });
 
+test('formatDuplicateReport: a half-filled group NEVER throws — the reporter cannot fail the op it reports on', () => {
+  // Round-2 review finding. `normalizeDuplicates` documents that a partial
+  // accounting reports as zero "never as a crash", but the formatter then
+  // dereferenced `g.occurrences` unguarded. In cli.mjs these calls sit INSIDE
+  // the try blocks, so the throw turned an already-completed `save` into
+  // "plainfiles.save() failed …" and exit 1, with the record durably on disk.
+  const report = formatDuplicateReport({ groups: [{ id: 'rec-a' }] });
+  assert.ok(report.length > 0);
+  assert.ok(report.some((l) => l.includes('rec-a ×0')), 'reports what it has, rather than dying on what it lacks');
+});
+
+test('formatDuplicateReport: a divergence-only accounting is not silenced by the gate', () => {
+  const report = formatDuplicateReport({ ids: 0, lines: 0, divergent: 7, groups: [] });
+  assert.ok(report.length > 0, 'the channel this ticket added is the last one allowed to be silent');
+  assert.match(report.join('\n'), /7 of them DISAGREE/);
+});
+
+test('formatDuplicateReport: `brief` keeps the counts and drops the evidence', () => {
+  const occurrences = new Map();
+  for (let i = 0; i < 12; i++) occurrences.set(`rec-${i}`, ['2026-07.jsonl:1', '2026-07.jsonl:9']);
+  const report = formatDuplicateReport(summarizeDuplicates(occurrences), { brief: true });
+
+  assert.match(report[0], /12 duplicate record id\(s\)/, 'brief is not silent');
+  assert.equal(report.some((l) => /^ {2}rec-/.test(l)), false, 'no per-id lines');
+  assert.match(report.at(-1), /memory:reindex/, 'and it names where the locations live');
+});
+
 test('formatDuplicateReport: caps the per-id locations too, counting the rest', () => {
   const occurrences = new Map([['rec-a', Array.from({ length: 8 }, (_, i) => `f:${i + 1}`)]]);
   const report = formatDuplicateReport(summarizeDuplicates(occurrences));

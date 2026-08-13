@@ -128,5 +128,22 @@ test('memory:search REPORTS it without claiming it touched the index', (t) => {
 
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /1 matching record\(s\)/, 'the duplicate is collapsed out of the hit count');
-  assert.match(run.stderr, /collapsed into the result set/, 'search never reindexes and does not say it did');
+  assert.match(run.stderr, /collapsed into the records read/, 'search never reindexes and does not say it did');
+});
+
+test('memory:search on a query that matches NOTHING still says the store repeats, but briefly', (t) => {
+  // The accounting is store-wide, so "collapsed into the result set" would have
+  // named a collapse that did not happen in this result set — and a question
+  // that matched nothing should not be answered with a dozen lines of store
+  // history. Counts yes, per-id evidence no.
+  const a = buildRecord({ ...base, content: 'A findable decision' });
+  const root = fixtureRoot(t, [serializeRecord(a), serializeRecord(a)]);
+
+  const run = runCli(root, 'search', 'zzznomatchzzz');
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /no matching records found/);
+  assert.match(run.stderr, /1 duplicate record id\(s\)/, 'still reported — brief is not silent');
+  assert.match(run.stderr, /memory:reindex.*locations/, 'and it points at the verb that lists them');
+  assert.equal(/2026-07\.jsonl:1/.test(run.stderr), false, 'no per-id evidence on a query verb');
 });

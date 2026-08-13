@@ -203,7 +203,11 @@ export async function search(
   { _which = _defaultWhich, _rg = _defaultRg, _readRecords = readRecords } = {},
 ) {
   const recordsDir = join(root, ".memory", "records");
-  const { records: observations, duplicates } = _readRecords({ recordsDir });
+  // Same tolerance as importMemory's reader: a seam returning a bare array is
+  // "records, no accounting", never a TypeError (#574 changed this shape).
+  const read = _readRecords({ recordsDir });
+  const observations = Array.isArray(read) ? read : (read?.records ?? []);
+  const duplicates = Array.isArray(read) ? undefined : read?.duplicates;
 
   if (_which("rg")) {
     try {
@@ -246,8 +250,9 @@ function _defaultGitPull(root) {
  *
  * This is the path #574's rule matters most on: the `git pull` immediately
  * above is where `merge=union` MINTS the duplicate, so the reindex right after
- * it is the first reader that can see it. It reports (or, on a disagreeing
- * pair, refuses) instead of absorbing it.
+ * it is the first reader that can see it. It REPORTS the duplicate instead of
+ * absorbing it — including a disagreeing pair, which is counted as divergent
+ * and resolved first-wins, never refused.
  */
 export async function pull({ root = repoRoot } = {}, { _gitPull = _defaultGitPull, _rebuildIndex = rebuildIndex } = {}) {
   _gitPull(root); // throws unmodified on a dirty/conflicting tree — never auto-discarded

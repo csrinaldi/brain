@@ -175,13 +175,21 @@ const MAX_OCCURRENCES = 6;
  * `surface` names what the repeats were collapsed INTO, so the verbs that never
  * touch the index (`search`) do not claim they did.
  *
+ * `brief` drops the per-id evidence and keeps the counts, for the query verbs:
+ * a `search` that matched nothing should not answer with twelve lines about the
+ * store's history. The counts still travel — `memory:reindex` prints the
+ * locations — so brevity never becomes silence.
+ *
  * @param {{ids: number, lines: number, divergent: number, groups: object[]}} duplicates
- * @param {{indexCount?: number, surface?: string}} [opts]
+ * @param {{indexCount?: number, surface?: string, brief?: boolean}} [opts]
  * @returns {string[]}
  */
-export function formatDuplicateReport(duplicates, { indexCount, surface = 'the index' } = {}) {
+export function formatDuplicateReport(duplicates, { indexCount, surface = 'the index', brief = false } = {}) {
   const { ids, lines, divergent, groups } = normalizeDuplicates(duplicates);
-  if (ids === 0 && lines === 0) return [];
+  // `divergent` is in the gate too: it is the channel this ticket added, so it
+  // is the last thing that may be silent. A half-filled accounting reaching
+  // here with only a divergence count would otherwise print nothing.
+  if (ids === 0 && lines === 0 && divergent === 0) return [];
 
   const store = indexCount === undefined ? '' : ` (${indexCount + lines} physical line(s) → ${indexCount} indexed)`;
   const out = [
@@ -201,10 +209,21 @@ export function formatDuplicateReport(duplicates, { indexCount, surface = 'the i
     );
   }
 
+  if (brief) {
+    out.push('  Run `npm run memory:reindex` for the per-id locations.');
+    return out;
+  }
+
   for (const g of groups.slice(0, MAX_GROUPS)) {
-    const shown = g.occurrences.slice(0, MAX_OCCURRENCES).join(', ');
-    const more = g.occurrences.length > MAX_OCCURRENCES ? `, +${g.occurrences.length - MAX_OCCURRENCES} more` : '';
-    out.push(`  ${g.id} ×${g.occurrences.length}${g.divergent ? ' [divergent]' : ''} — ${shown}${more}`);
+    // `?? []`, matching normalizeDuplicates' own guard on the same field. This
+    // function is called from INSIDE cli.mjs's try blocks, so a throw here does
+    // not merely lose the report — it turns an already-completed `save` into
+    // `plainfiles.save() failed …` and exit 1, with the record durably on disk.
+    // A reporter may never be the thing that fails the operation it reports on.
+    const occurrences = Array.isArray(g?.occurrences) ? g.occurrences : [];
+    const shown = occurrences.slice(0, MAX_OCCURRENCES).join(', ');
+    const more = occurrences.length > MAX_OCCURRENCES ? `, +${occurrences.length - MAX_OCCURRENCES} more` : '';
+    out.push(`  ${g?.id ?? '(unknown id)'} ×${occurrences.length}${g?.divergent ? ' [divergent]' : ''} — ${shown}${more}`);
   }
   if (groups.length > MAX_GROUPS) {
     out.push(`  … +${groups.length - MAX_GROUPS} more duplicated id(s).`);

@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { share, dualWriteRecords, pullMemory, buildImportPayload } from './engram.mjs';
+import { share, dualWriteRecords, pullMemory, buildImportPayload, importMemory } from './engram.mjs';
 import { buildRecord } from '../lib/format.mjs';
 
 const baseRecordFields = {
@@ -111,6 +111,26 @@ test('pullMemory: a store the merge left unindexable REFUSES before engram is hy
 });
 
 // ── import ───────────────────────────────────────────────────────────────────
+
+test('importMemory: a seam still returning a BARE ARRAY degrades to "no accounting", never a TypeError', async () => {
+  // Round-2 review finding: #574 changed this seam's shape while the module
+  // argued elsewhere (normalizeDuplicates) that an older seam must degrade
+  // rather than crash. The asymmetry is the finding.
+  const rec = { id: 'rec-aaa', ts: '2026-07-04T12:00:00Z', actor: '@crinaldi', actorKind: 'agent', type: 'decision', project: 'brain', content: 'x' };
+
+  const result = await importMemory({
+    root: '/fake/root',
+    _requireEngram: () => 'engram',
+    _readRecords: () => [rec],                       // the OLD shape
+    _engramExistingTopicKeys: () => new Set(),
+    _engramImport: () => {},
+    _log: () => {},
+    _now: () => '2026-07-04 12:00:00',
+  });
+
+  assert.equal(result.written, 1);
+  assert.deepEqual(result.duplicates, { ids: 0, lines: 0, divergent: 0, groups: [] });
+});
 
 test('buildImportPayload: a repeated id in one batch is sent ONCE — `engram import` INSERTS, so this is permanent damage', () => {
   const rec = (id) => ({ id, ts: '2026-07-04T12:00:00Z', actor: '@crinaldi', actorKind: 'agent', type: 'decision', project: 'brain', content: 'x' });

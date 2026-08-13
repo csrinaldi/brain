@@ -74,8 +74,8 @@ const MEMORY_BACKEND = process.env.MEMORY_BACKEND ?? envVars.MEMORY_BACKEND ?? "
 // files are outside this ticket's file claim — flagged, not silently worked
 // around.)
 // ---------------------------------------------------------------------------
-function reportDuplicates(duplicates, { indexCount, surface } = {}) {
-  for (const line of formatDuplicateReport(duplicates, { indexCount, surface })) console.error(line);
+function reportDuplicates(duplicates, { indexCount, surface, brief } = {}) {
+  for (const line of formatDuplicateReport(duplicates, { indexCount, surface, brief })) console.error(line);
 }
 
 // ---------------------------------------------------------------------------
@@ -365,8 +365,13 @@ if (op === "search") {
     }
     // A duplicated record used to come back as two identical hits and inflate
     // the count printed above (#574) — it is collapsed now, and said so.
-    // `search` never touches the index, so it does not claim it did.
-    reportDuplicates(result?.duplicates, { surface: 'the result set' });
+    //
+    // `the records read`, not `the result set`: the accounting is store-wide
+    // (the reader collapses every repeat it passes, matched or not), so on a
+    // query that matched nothing "collapsed into the result set" would name a
+    // collapse that did not happen there. And `brief`, because a search is a
+    // question about records, not a maintenance run on the store.
+    reportDuplicates(result?.duplicates, { surface: 'the records read', brief: true });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${MEMORY_BACKEND}.search() failed — ${err.message}`);
@@ -374,14 +379,23 @@ if (op === "search") {
   }
 }
 
-// BRAIN_MEMORY_TEST_ROOT for the store-wide ops too (#574). `share`, `pull`,
-// `import` and `setup` all take an options object whose first field is `root`,
-// and without this they resolve the REAL `.memory/` no matter what the seam
-// says — which is how the end-to-end test for `share`'s duplicate report first
-// ran against this repository's own store. Restricted to those four by name:
+// BRAIN_MEMORY_TEST_ROOT for the store-wide ops too (#574). Without it these
+// ops resolve the REAL `.memory/` no matter what the seam says — which is how
+// the end-to-end test for `share`'s duplicate report first ran against this
+// repository's own store. Restricted to these four by name:
 // `feature-checkpoint`/`feature-resume` take a positional [feature], and
 // passing them an options object would silently become a feature named
 // "[object Object]".
+//
+// HONEST BOUND, because the first version of this comment claimed a guarantee
+// it does not have: the `{root}` is HONOURED by every plainfiles op and by
+// `engram.share`/`engram.importMemory`, but `engram.pull()` and
+// `engram.setup()` take NO parameters (see their definitions), so the object is
+// discarded and they act on the real repo root. Not reachable today — the env
+// var is set nowhere outside three test files, never in package.json, the hooks
+// or CI — so this is a bound on the seam, not a live defect. Any test that
+// needs a rooted `engram.pull`/`setup` must give those two a `{root}` first
+// rather than trusting this set.
 const ROOTED_OPS = new Set(["share", "pull", "import", "setup"]);
 
 try {
@@ -401,10 +415,17 @@ try {
   }
 
   // #574 — the duplicate accounting, for every op that produced one (`share`,
-  // `pull`, `setup`, and anything added later that reindexes). Keyed on the
-  // result carrying it, not on a list of verbs: the failure this ticket names
-  // is a store-wide rule that only some callers happened to voice.
-  reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });
+  // `pull`, `setup`, `import`, and anything added later that reads the store).
+  // Keyed on the result carrying it, not on a list of verbs: the failure this
+  // ticket names is a store-wide rule that only some callers happened to voice.
+  //
+  // `import` gets its own surface: it hydrates engram from `records/` and never
+  // writes the index (only `pullMemory` reindexes), so the default wording
+  // would have it claim a collapse into an index it did not touch.
+  reportDuplicates(result?.duplicates, {
+    indexCount: result?.indexCount,
+    surface: op === "import" ? "the records read" : undefined,
+  });
 } catch (err) {
   console.error(`memory/cli: ${MEMORY_BACKEND}.${fn}() failed — ${err.message}`);
   process.exit(1);

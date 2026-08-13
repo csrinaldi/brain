@@ -200,6 +200,38 @@ test('roundtrip-divergence: brain\'s OWN export→import→export widens `source
   assert.equal(duplicates.divergent, 1, 'and reported, so nobody has to discover it by reading 2000 records');
 });
 
+test('rebuildIndex: a value canonicalJson cannot express does NOT become a new read-path refusal', (t) => {
+  // Round-2 review finding. `JSON.parse('1e999')` is `Infinity`, and
+  // `validateRecord` does not police fields outside the schema, so a record
+  // could carry one in an unhashed/unknown field, pass the id check, and then
+  // die in the bare `canonicalJson(record)` the duplicate rule added — a store
+  // that indexed fine BEFORE #574 turned unindexable, which is precisely the
+  // class duplicates.mjs argues must never happen.
+  const rec = buildRecord({ ...base, content: 'A' });
+  const overflowing = serializeRecord(rec).slice(0, -1) + ',"weight":1e999}';
+  const { recordsDir, indexPath } = fixture(t, [overflowing]);
+
+  assert.equal(JSON.parse(overflowing).weight, Infinity, 'the value really is non-finite after parsing');
+  const { count, duplicates } = rebuildIndex({ recordsDir, indexPath });
+
+  assert.equal(count, 1, 'indexed, not refused');
+  assert.equal(duplicates.ids, 0, 'and a single such line is no kind of duplicate');
+});
+
+test('rebuildIndex: two uncomparable same-id lines report as DIVERGENT rather than as agreeing', (t) => {
+  // Failing to prove equality must not be reported as equality. The safe
+  // direction is over-reporting a pair nothing could vouch for.
+  const rec = buildRecord({ ...base, content: 'A' });
+  const overflowing = serializeRecord(rec).slice(0, -1) + ',"weight":1e999}';
+  const { recordsDir, indexPath } = fixture(t, [overflowing, overflowing]);
+
+  const { count, duplicates } = rebuildIndex({ recordsDir, indexPath });
+
+  assert.equal(count, 1);
+  assert.equal(duplicates.ids, 1);
+  assert.equal(duplicates.divergent, 1, 'uncomparable ⇒ divergent, never a silent "they agree"');
+});
+
 // ── the reader half (the hydration path) ─────────────────────────────────────
 
 test('readRecords: an identical repeat is collapsed and reported — one record, accounting intact', (t) => {
