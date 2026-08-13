@@ -16,11 +16,17 @@ premise was deleted; that is a supersession.
 ADR-0030 first, then the amendment — the amendment's `brain/HOME.md` marker
 points at a record that must already exist. Stated in both drafts.
 
-## D3 — Five in-place anchors, each verified unique
+## D3 — Six in-place anchors, each verified unique
 
-The rejected-registry line, the Decision line, the install command, the Positive
-and the Negative. Each occurs exactly once in ADR-0006; `planAmendment` resolves
-all five and returns 8 acts.
+The Context bullet for `git tags + npm install`, the rejected-registry bullet,
+the Decision line, the install command, the Positive and the Negative. Each
+occurs exactly once in ADR-0006; `planAmendment` resolves all six and returns
+9 acts.
+
+The Context bullet was **missing from the first version** and is the one that
+matters most: it carries *"compatible with private repos"*, the property the
+whole decision rested on. It was quoted in the appended section and left
+unannotated in the original — exactly what §1c forbids.
 
 ## D4 — Say what survives, at length
 
@@ -39,7 +45,14 @@ literally would repeal a working model.
   No ADR in the repo has ever been marked superseded. The amendment path is used
   and the limitation is recorded in ADR-0030's closing section rather than worked
   around.
-- The `edits` array sits at the top level of `parseAmendmentDraft`'s result, not
-  inside `contract` — a first validation looked in the wrong place and reported 0
-  pairs. Checked against `planAmendment` instead of against a reading of the
-  contract.
+- **Twice now a validation harness guessed at a return shape instead of
+  inspecting it**: `edits` sits at the top level of `parseAmendmentDraft`'s
+  result (not inside `contract`), and `acts` sits at `plan.plan.acts` (not
+  `plan.acts`). Both produced a confident 0 against a healthy draft. The habit
+  that fixes it is dumping `Object.keys()` first, not reading harder.
+- The npm facts in ADR-0030 were lifted from #435's body and stated as measured.
+  One half was right (the `description` is verbatim), one was invented
+  (*"deprecated since 2023"* — `1.0.0` published **2018-02-17**, name created
+  **2011-04-29**). Now measured against the registry, and the real facts carry
+  the argument better: npm holds the name *"to avoid malicious use"*, which is
+  why it is not obtainable by asking.

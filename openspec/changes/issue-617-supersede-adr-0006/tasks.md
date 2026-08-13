@@ -11,7 +11,11 @@ issue: 617
 - [x] Write ADR-0030 (new-ADR draft)
 - [x] Write ADR-0006 Amendment 1 (`brain-amendment/1` draft), five anchors each verified unique
 - [x] Validate draft A with `transformDraft`: destination, number, title, commit command
-- [x] Validate draft B with `parseAmendmentDraft` + `planAmendment` against the real target — ok, 8 acts, 5 in-place edits resolved
+- [x] Validate draft B with `parseAmendmentDraft` + `planAmendment` against the real target
+- [x] Cold review round: C1 (branch left half-promoted), C2 (the Context bullet
+      carrying the deciding property was never annotated in place), C3 (the npm
+      facts were quoted from a ticket, not measured — the date was wrong)
+- [x] Re-verify after the fixes: 6 in-place edits, `planAmendment` ok, 9 acts
 - [ ] **HUMAN**: promote ADR-0030, then the amendment, and commit each signature
 
 ## Out of scope

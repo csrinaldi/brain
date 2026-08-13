@@ -28,11 +28,16 @@ which is why it is superseded rather than amended.
 
 Two constraints were measured before choosing a name:
 
-- **`brain` is unavailable.** `https://registry.npmjs.org/brain` returns `200`:
-  a package deprecated since 2023, whose description opens *"This package is no
-  longer supported and has been deprecated."* A security placeholder over an
-  abandoned name, unobtainable at any price. **A scope is mandatory**, not a
-  preference.
+- **`brain` is unavailable.** `https://registry.npmjs.org/brain` returns `200`.
+  Measured against the registry, not quoted from a ticket: the name was created
+  **2011-04-29**, its last of 20 versions (`1.0.0`) published **2018-02-17**, and
+  it carries a `deprecated` field reading *"Package no longer supported. Contact
+  support@npmjs.com for more info."* Its `description` is explicit about why it
+  still exists: *"This package is no longer supported and has been deprecated.
+  **To avoid malicious use, npm is hanging on to the package name.**"*
+
+  A name npm holds deliberately to keep it out of circulation is not obtainable
+  by asking. **A scope is mandatory**, not a preference.
 - **`@csrinaldi/brain` is free** — `404` on the registry, a user scope requiring
   no organisation.
 

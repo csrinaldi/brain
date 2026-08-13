@@ -30,6 +30,15 @@ body-end: ### Notes for the promoter
 ```
 
 ```amend-find
+- **git tags + npm install**: installs directly from GitHub by version tag; compatible with private repos; zero registry.
+```
+
+```amend-replace
+- **git tags + npm install**: installs directly from GitHub by version tag; compatible with private repos; zero registry.
+  **[Amended by Amendment 1 (#617) — SUPERSEDED. "Compatible with private repos" is the property this whole decision rested on, and there is no private repo left: `private: false`. See ADR-0030.]**
+```
+
+```amend-find
 - **npm registry**: requires publishing to npmjs.com or a private registry; bureaucratic overhead.
 ```
 
@@ -139,6 +148,14 @@ that did not exist — for months. Writing the decision first means a reader can
 see the gap. Writing it last means nobody can.
 
 ### Notes for the promoter
+
+**Six in-place edits, not five.** The first version of this draft annotated the
+Decision, the install line, the Positive, the Negative and the rejected-registry
+bullet — and missed the Context bullet that carries the deciding property itself
+(*"compatible with private repos"*). It was quoted in this section and left
+unannotated in the original, which is precisely what §1c forbids: *"A reader who
+never scrolls to the amendment must not be left with the superseded rule."* A
+reader opening Context would have read the winning reason clean.
 
 Promote **ADR-0030 first**, then this draft. The `brain/HOME.md` marker this
 amendment writes points at a record that must already exist.
