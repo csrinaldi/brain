@@ -326,6 +326,10 @@ test('each provider\'s emitted file on disk is byte-identical to what the one so
 // ── delivery: a consumer on EITHER provider receives a scaffold ─────────────
 
 test('the REAL installer, over the REAL manifest, delivers a scaffold for EVERY provider (#570)', () => {
+  // BRAIN SOURCE ONLY, same reason as the on-disk test above: this copies THIS tree
+  // as if it were the package being installed, so in a consumer it would assert that
+  // the consumer's own (legitimately rewritten) scaffold equals brain's bytes.
+  if (!IS_BRAIN_SOURCE) return;
   const dest = mkdtempSync(join(tmpdir(), 'brain-570-delivery-'));
   const { copied } = copyManaged({ srcRoot: REPO_ROOT, destRoot: dest, managed, local });
   for (const provider of SCAFFOLD_PROVIDERS) {
