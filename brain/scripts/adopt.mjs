@@ -28,7 +28,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { listFiles } from './lib/installer.mjs';
+import { listFiles, installedPackageRoot } from './lib/installer.mjs';
 import { buildPlan } from './lib/adopt/build-plan.mjs';
 import { renderReport } from './lib/adopt/render-report.mjs';
 import { managed, local } from '../core/managed-paths.mjs';
@@ -86,7 +86,7 @@ Read-only: writes only inside --out. No git, no hooks, no --apply in S1.
  */
 function resolveUpstreamRoot(targetRoot) {
   // 1. Installed package in the consumer's node_modules.
-  const nmBrain = join(targetRoot, 'node_modules', 'brain');
+  const nmBrain = installedPackageRoot(targetRoot);
   if (existsSync(nmBrain)) {
     return { upstreamRoot: nmBrain, manifestSource: 'node_modules/brain' };
   }

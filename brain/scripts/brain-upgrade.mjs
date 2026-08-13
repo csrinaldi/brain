@@ -18,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { copyManaged, readOutgoing, strategyFor, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, compareSemver, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets, semverOrNull, keysAheadOfTarget } from './lib/installer.mjs';
+import { copyManaged, readOutgoing, strategyFor, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, compareSemver, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets, semverOrNull, keysAheadOfTarget, installedPackageRoot } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
 import { managedStrategy, STRATEGY } from '../core/managed-paths.mjs';
 import { detectAgentsClobber } from './lib/agents-clobber.mjs';
@@ -242,7 +242,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 // source is a guess, and this has to be right to name the keys correctly.
 async function migrationsForGuard() {
   try {
-    const mod = await import(join(ROOT, 'node_modules', 'brain', 'brain', 'core', 'config-migrations.mjs'));
+    const mod = await import(installedPackageRoot(ROOT, 'brain', 'core', 'config-migrations.mjs'));
     return Array.isArray(mod?.migrations) ? mod.migrations : [];
   } catch { return []; }  // not installed yet, or unreadable — the guard still compares versions
 }
@@ -308,7 +308,7 @@ const currentSchema = (() => {
   catch { return null; }  // no config yet, or unreadable — nothing recorded to compare
 })();
 const installedSemver = (() => {
-  try { return semverOrNull(JSON.parse(readFileSync(join(ROOT, 'node_modules', 'brain', 'package.json'), 'utf8')).version); }
+  try { return semverOrNull(JSON.parse(readFileSync(installedPackageRoot(ROOT, 'package.json'), 'utf8')).version); }
   catch { return null; }
 })();
 const taggedSemver = semverOrNull(tag);
@@ -384,7 +384,7 @@ const outgoingSnapshotPaths = Object.keys(managedStrategy).filter((rel) => !rel.
 // a clean bill of health.
 const outgoing = noInstall
   ? null
-  : readOutgoing({ pkgRoot: join(ROOT, 'node_modules', 'brain'), relPaths: outgoingSnapshotPaths });
+  : readOutgoing({ pkgRoot: installedPackageRoot(ROOT), relPaths: outgoingSnapshotPaths });
 
 // ── 1. Install the tag ─────────────────────────────────────────────────────────
 // Derive the install specifier from the currently installed brain's package.json
@@ -414,7 +414,7 @@ if (!noInstall) {
 }
 
 // ── 2. Copy managed paths ───────────────────────────────────────────────────────
-const pkgRoot = join(ROOT, 'node_modules', 'brain');
+const pkgRoot = installedPackageRoot(ROOT);
 if (!existsSync(pkgRoot)) {
   die(`node_modules/brain not found — install brain first (drop --no-install).`);
 }
