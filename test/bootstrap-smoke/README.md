@@ -66,6 +66,39 @@ suite run, then reverted and verified byte-identical.
 | F | `env:init` appends a timestamp to `HOME.md` on every run | 1 red — the idempotency manifest |
 | G | the `.env` set comparison degenerates to an empty set | 1 red — the guard that stops the one relaxation becoming "accept anything" |
 
+### Second round — the cold review of this suite
+
+Five findings, each fixed and each re-proven. Two of them meant the gate did not
+gate.
+
+| # | mutation | result |
+|---|---|---|
+| R1 | delete `brain/core/**` from the workflow's `paths:` | 2 red in `workflow-triggers.e2e.test.mjs` |
+| R2 | **the exact mutation that used to pass** — `env:init` never scaffolds `brain/HOME.md` | 1 red. It was **GREEN** before the fix |
+| R3 | stop stripping credentials from the fixture's environment | 1 red, naming what actually leaked: `GH_TOKEN, GITHUB_TOKEN, HTTPS_PROXY, https_proxy` |
+| R4 | `day:start` stops printing its step counter but still reaches the board | 1 red **with** the fix; **GREEN** with the old `\|\|` fallback restored — the fallback was hiding a real regression |
+| R5 | exclude `.git`/`node_modules` by root-relative path again instead of by name | 1 red — the nested `node_modules` reaches the manifest |
+
+R2 and R4 are the two that matter: in both, the same mutation that this suite
+used to pass now fails it.
+
+## What the review changed
+
+- **The trigger missed `brain/core/**`.** `bootstrap.sh` runs
+  `brain/scripts/lib/brain-config.mjs ensure`, which imports
+  `../../core/config-migrations.mjs`. Breaking that module turns 11 assertions
+  red — and a PR touching only it never started the job. #446's failure mode one
+  level up. `workflow-triggers.e2e.test.mjs` now fails if a required path is
+  removed; it runs in `npm test`, because a guard over a trigger cannot be gated
+  on that trigger.
+- **The `brain/HOME.md` post-condition measured nothing.** The fixture copies
+  `HOME.md` and did not delete it, so the check passed on the copy. It is
+  deleted now, like `brain.config.json`, `AGENTS.md` and `.env`.
+- **"No token, no network" was a property of the machine.** The fixture
+  inherited the parent environment wholesale. `STRIPPED_ENV` removes
+  credentials and proxies, and a child process is asked what it actually
+  received so the list cannot go decorative.
+
 ## The one relaxation, and the finding behind it
 
 `.env` is compared as a **set** of `KEY=value` lines rather than byte-for-byte.
