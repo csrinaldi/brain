@@ -12,7 +12,10 @@ import {
   probeAgentRuntime,
   formatRuntimeNotice,
   agentRuntimeReport,
+  platformEnvVars,
+  platformConfig,
 } from './agent-runtime.mjs';
+import { resolvePlatform } from '../cli.mjs';
 
 // A synthetic descriptor — deliberately not any real backend's.
 const DESC = Object.freeze({
@@ -239,4 +242,75 @@ test('agentRuntimeReport: a backend that fails to load is unresolved, NOT silent
   assert.notEqual(report.status.state, 'not-declared');
   assert.match(report.status.detail, /backend not found/);
   assert.equal(report.notice.level, 'warn');
+});
+
+// ── review follow-ups (PR #594) ──────────────────────────────────────────────
+
+test('probeAgentRuntime: binary PRESENT but exiting non-zero is unreadable, not absent', () => {
+  // spawnSync reports a MISSING binary through `error` (ENOENT). A binary that
+  // is installed and merely fails has no `error` — those are different facts,
+  // and "not installed. Install it with: …" is wrong advice for the second.
+  const { _run } = runner({
+    [VERSION_CALL]: { status: 1, stdout: '', stderr: 'panic: config corrupt' },
+  });
+  const status = probeAgentRuntime(DESC, { _run });
+
+  assert.equal(status.state, 'unreadable');
+  assert.notEqual(status.state, 'absent');
+  assert.match(status.detail, /config corrupt/);
+});
+
+test('probeAgentRuntime: only a spawn error (ENOENT) means absent', () => {
+  const { _run } = runner({
+    [VERSION_CALL]: { status: null, stdout: '', stderr: '', error: new Error('spawn fakeagent ENOENT') },
+  });
+  assert.equal(probeAgentRuntime(DESC, { _run }).state, 'absent');
+});
+
+test('probeAgentRuntime: two versions it cannot order are unknown-latest, never up-to-date', () => {
+  // compareSemver ignores prerelease suffixes, so 2.0.0-alpha.3 vs 2.0.0 ranks
+  // equal. Reporting "up to date" there states an ordering that was not measured.
+  const { _run } = runner({
+    [VERSION_CALL]: { status: 0, stdout: '2.0.0-alpha.3\n', stderr: '' },
+    [LATEST_CALL]: { status: 0, stdout: '2.0.0\n', stderr: '' },
+  });
+  const status = probeAgentRuntime(DESC, { _run });
+
+  assert.equal(status.state, 'unknown-latest');
+  assert.equal(status.installed, '2.0.0-alpha.3');
+  assert.match(status.detail, /2\.0\.0/);
+});
+
+test('defaultRun: a hung command is cut off, it does not block day:start forever', async () => {
+  const { defaultRun, RUN_TIMEOUT_MS } = await import('./agent-runtime.mjs');
+  assert.ok(RUN_TIMEOUT_MS > 0 && RUN_TIMEOUT_MS <= 30_000, `implausible timeout: ${RUN_TIMEOUT_MS}`);
+
+  const started = Date.now();
+  const r = defaultRun(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { timeoutMs: 300 });
+  const elapsed = Date.now() - started;
+
+  assert.ok(elapsed < 5_000, `defaultRun waited ${elapsed}ms — no timeout is being passed to spawnSync`);
+  assert.ok(r.error || r.signal, 'a timed-out spawn must surface as error/signal, not as a clean exit');
+});
+
+test('platformEnvVars: BOTH axis keys reach resolvePlatform, not just AGENT_PLATFORM', () => {
+  // ADR-0024 keeps SDD_HARNESS as the legacy fallback; a repo declaring only
+  // SDD_HARNESS=claude must not silently resolve to the antigravity default.
+  const seen = [];
+  const read = (key) => { seen.push(key); return key === 'SDD_HARNESS' ? 'claude' : null; };
+  const envVars = platformEnvVars(read);
+
+  assert.ok(seen.includes('AGENT_PLATFORM'), 'AGENT_PLATFORM must be read');
+  assert.ok(seen.includes('SDD_HARNESS'), 'SDD_HARNESS must be read');
+  assert.equal(resolvePlatform({ env: {}, envVars }), 'claude');
+});
+
+test('platformConfig: a harness section of the WRONG shape degrades to {}, never to a crash', () => {
+  // resolvePlatform reads config.platform / config.harness; a consumer writing
+  // "harness": "claude" passes a STRING where an object is expected.
+  assert.deepEqual(platformConfig({ harness: 'claude' }), { harness: 'claude' });
+  assert.deepEqual(platformConfig({ harness: { platform: 'claude' } }), { platform: 'claude' });
+  assert.deepEqual(platformConfig({}), {});
+  assert.deepEqual(platformConfig(null), {});
+  assert.equal(resolvePlatform({ env: {}, envVars: {}, config: platformConfig({ harness: 'claude' }) }), 'claude');
 });

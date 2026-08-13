@@ -60,8 +60,22 @@ function failureDetail(result) {
   return detail || `exited with status ${result?.status ?? 'unknown'}`;
 }
 
-function defaultRun(cmd, args) {
-  return spawnSync(cmd, args, { stdio: 'pipe', encoding: 'utf8' });
+/**
+ * How long a single probe command may take. day:start is interactive and the
+ * latest-version probe is a network call: without this, an offline or
+ * proxy-blocked run hangs the whole verb at this step (spawnSync is
+ * synchronous — nothing else proceeds meanwhile).
+ */
+export const RUN_TIMEOUT_MS = 10_000;
+
+/**
+ * Default command runner: captured output, never a shell, always bounded.
+ * @param {string} cmd
+ * @param {string[]} args
+ * @param {{ timeoutMs?: number }} [opts]
+ */
+export function defaultRun(cmd, args, { timeoutMs = RUN_TIMEOUT_MS } = {}) {
+  return spawnSync(cmd, args, { stdio: 'pipe', encoding: 'utf8', timeout: timeoutMs });
 }
 
 /**
@@ -94,8 +108,15 @@ export function probeAgentRuntime(descriptor, { _run = defaultRun } = {}) {
     return { ...base, state: 'absent', detail: err.message };
   }
 
-  if (versionResult?.error || versionResult?.status !== 0) {
+  // A MISSING binary surfaces as `error` (ENOENT) — that, and only that, is
+  // "not installed". A binary that is installed and exits non-zero is present
+  // but illegible: telling that user to install it is wrong advice, and
+  // collapsing the two is the failure this module exists to avoid.
+  if (versionResult?.error) {
     return { ...base, state: 'absent', detail: failureDetail(versionResult) };
+  }
+  if (versionResult?.status !== 0) {
+    return { ...base, state: 'unreadable', detail: failureDetail(versionResult) };
   }
 
   const installed = parseVersion(versionResult.stdout);
@@ -129,12 +150,52 @@ export function probeAgentRuntime(descriptor, { _run = defaultRun } = {}) {
     return { ...base, state: 'unknown-latest', installed, detail: failureDetail(latestResult) };
   }
 
+  const order = compareSemver(latest, installed);
+  if (order === 0 && latest !== installed) {
+    // compareSemver reads major.minor.patch only. Two strings it ranks equal
+    // while differing (a prerelease suffix, build metadata) were NOT ordered —
+    // saying "up to date" there would assert a comparison nobody made.
+    return {
+      ...base,
+      state: 'unknown-latest',
+      installed,
+      detail: `cannot order "${installed}" against "${latest}" — prerelease/build suffixes are not compared`,
+    };
+  }
+
+  return { ...base, state: order > 0 ? 'update-available' : 'up-to-date', installed, latest };
+}
+
+/**
+ * Reads BOTH platform axis keys through the caller's env reader, so a repo
+ * declaring only the legacy `SDD_HARNESS` (ADR-0024 keeps it as a fallback)
+ * resolves to what it declared instead of the default platform.
+ *
+ * @param {(key: string) => string|null} readEnvVar
+ * @returns {{ AGENT_PLATFORM: string|null, SDD_HARNESS: string|null }}
+ */
+export function platformEnvVars(readEnvVar) {
   return {
-    ...base,
-    state: compareSemver(latest, installed) > 0 ? 'update-available' : 'up-to-date',
-    installed,
-    latest,
+    AGENT_PLATFORM: readEnvVar('AGENT_PLATFORM'),
+    SDD_HARNESS: readEnvVar('SDD_HARNESS'),
   };
+}
+
+/**
+ * Normalizes brain.config.json's optional harness declaration into the shape
+ * `resolvePlatform` reads. A consumer may reasonably write either
+ * `"harness": "claude"` (a string) or `"harness": { "platform": "claude" }`;
+ * passing the raw string through as the config object silently resolves to the
+ * default instead of to what the consumer declared.
+ *
+ * @param {object|null} config The full brain.config.json object.
+ * @returns {{ platform?: string, harness?: string }}
+ */
+export function platformConfig(config) {
+  const harness = config?.harness;
+  if (typeof harness === 'string') return { harness };
+  if (harness && typeof harness === 'object') return { ...harness };
+  return {};
 }
 
 /**
