@@ -270,3 +270,96 @@ test('#555: a present-but-unparseable config REFUSES — unreadable is not "abse
   assert.match(`${r.stdout}${r.stderr}`, /unreadable/i,
     'and the refusal must say WHY, or it is indistinguishable from an artefact failure');
 });
+
+// ── Dead-exemption sweep (issue #616) ────────────────────────────────────────
+//
+// An exemption whose file no longer matches its rule is not inert: it blinds
+// that rule for that path forever, silently. #315 and #616 each had to run this
+// check by hand against one rule; this is its general form, so dead entries
+// cannot accumulate again.
+//
+// "Dead" has three shapes, and all three are caught here: the file is gone, the
+// rule can never read it (its extension is outside `onlyExt`), or it is read and
+// nothing in it matches.
+
+test('every exemption is load-bearing — no rule exempts a path it would not flag', async () => {
+  const { prohibitedRefs, globalExempt } = await import('../project/check-refs-rules.mjs');
+  const { readFileSync, existsSync, statSync } = await import('node:fs');
+  const { join: joinPath } = await import('node:path');
+
+  // The engine's own extension test, not a lookalike: check-refs.mjs asks
+  // `file.slice(file.lastIndexOf('.'))`, which differs from path.extname on
+  // dotfiles. A second, divergent copy of a rule is what #315 was about.
+  const engineExt = (file) => file.slice(file.lastIndexOf('.'));
+
+  const dead = [];
+  let inspectedRuleExemptions = 0;
+  let inspectedGlobal = 0;
+
+  for (const rule of prohibitedRefs) {
+    // A /g regex is stateful across .test() calls — the engine reuses the same
+    // object per line, so one would produce alternating misses there too.
+    assert.ok(rule.pattern instanceof RegExp, `rule ${rule.id} has no RegExp pattern`);
+    assert.ok(!rule.pattern.flags.includes('g'), `rule ${rule.id} uses /g — .test() would be stateful`);
+
+    for (const relPath of rule.exempt ?? []) {
+      inspectedRuleExemptions++;
+      const full = joinPath(REPO_ROOT, relPath);
+
+      if (!existsSync(full)) {
+        dead.push(`${rule.id} → ${relPath} (file does not exist)`);
+        continue;
+      }
+      if (rule.onlyExt && !rule.onlyExt.includes(engineExt(relPath))) {
+        dead.push(`${rule.id} → ${relPath} (unreachable: "${engineExt(relPath)}" is outside onlyExt [${rule.onlyExt.join(', ')}])`);
+        continue;
+      }
+      const matches = readFileSync(full, 'utf8')
+        .split('\n')
+        .some((line) => rule.pattern.test(line));
+      if (!matches) dead.push(`${rule.id} → ${relPath} (file matches nothing — the exemption protects nothing)`);
+    }
+  }
+
+  // globalExempt is the more dangerous of the two mechanisms: it exempts EVERY
+  // rule, and it matches by PREFIX (check-refs.mjs: `file === p || file.startsWith(p)`),
+  // so a stale entry can silently blind whole subtrees. A prefix is alive if the
+  // path exists at all — file or directory.
+  for (const relPath of globalExempt ?? []) {
+    inspectedGlobal++;
+    const full = joinPath(REPO_ROOT, relPath);
+    if (!existsSync(full)) {
+      dead.push(`globalExempt → ${relPath} (nothing exists at that path — it exempts nothing)`);
+      continue;
+    }
+    if (!relPath.endsWith('/') && statSync(full).isFile()) {
+      const anyRuleCouldRead = prohibitedRefs.some((r) => !r.onlyExt || r.onlyExt.includes(engineExt(relPath)));
+      if (!anyRuleCouldRead) {
+        dead.push(`globalExempt → ${relPath} (no rule can read that extension — the entry is unreachable)`);
+      }
+    }
+  }
+
+  // Evidence floor derived from the data, never a magic minimum. A hardcoded
+  // count would go red the day someone removes three dead exemptions —
+  // punishing exactly the cleanup this test encourages — and `brain/scripts/**`
+  // ships to consumer repos whose rules file is explicitly meant to be edited.
+  // Deriving it also closes the hole a count leaves: iterating nothing at all
+  // still satisfies "more than zero" as long as some OTHER list was read.
+  const declaredRuleExemptions = prohibitedRefs.reduce((n, r) => n + (r.exempt?.length ?? 0), 0);
+  assert.equal(
+    inspectedRuleExemptions, declaredRuleExemptions,
+    `the sweep inspected ${inspectedRuleExemptions} of ${declaredRuleExemptions} declared rule exemptions`,
+  );
+  assert.equal(
+    inspectedGlobal, (globalExempt ?? []).length,
+    `the sweep inspected ${inspectedGlobal} of ${(globalExempt ?? []).length} globalExempt entries`,
+  );
+
+  assert.deepEqual(
+    dead,
+    [],
+    `dead exemptions found:\n  ${dead.join('\n  ')}\n` +
+      'Remove the entry, or fix the rule so it can actually read that path.',
+  );
+});
