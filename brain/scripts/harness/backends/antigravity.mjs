@@ -22,6 +22,8 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, posix as posixPath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { compileSettingsHooksJson } from './settings-hooks.mjs';
+
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 // ---------------------------------------------------------------------------
@@ -46,40 +48,10 @@ export const GEMINI_SETTINGS_EMIT_PATH = '.gemini/settings.json';
 
 const REGENERATE_HINT = 'AGENT_PLATFORM=antigravity npm run brain:env:init';
 
-/**
- * Compiles .gemini/settings.json content with native workspace hooks.
- * Pure, fs-free.
- *
- * @returns {string} The formatted JSON content.
- */
-export function compileGeminiSettingsJson() {
-  const obj = {
-    hooks: {
-      PreToolUse: [
-        {
-          matcher: 'Bash',
-          hooks: [
-            {
-              type: 'command',
-              command: "node -e \"const cmd = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).tool_input?.command ?? ''; if (/--no-verify/.test(cmd) || /\\bgit commit\\b[^|&\\n]*\\s+-n\\b/.test(cmd)) { process.stderr.write('\\n[brain:hook] BLOCKED: --no-verify / git commit -n bypasses governance hooks.\\nSee ADR-0014 §9. Fix the hook that is causing the false-positive instead.\\n'); process.exit(2); }\"",
-            },
-          ],
-        },
-      ],
-      SessionStart: [
-        {
-          hooks: [
-            {
-              type: 'command',
-              command: 'npm run brain:session:start',
-            },
-          ],
-        },
-      ],
-    },
-  };
-  return JSON.stringify(obj, null, 2) + '\n';
-}
+// The settings-hooks payload itself is NOT antigravity-specific and no longer
+// lives here (issue #315): it was byte-identical to claude's copy, down to the
+// `--no-verify` guard string. What is antigravity-specific is
+// GEMINI_SETTINGS_EMIT_PATH above. See settings-hooks.mjs.
 
 // ---------------------------------------------------------------------------
 // Relative-link rebasing (CP-B2 inaugural-read finding, owner ruling).
@@ -245,7 +217,7 @@ export async function init({
     console.warn(`  harness: antigravity could not write ${AGENTS_EMIT_PATH} — ${err.message}`);
   }
 
-  const settingsContent = compileGeminiSettingsJson();
+  const settingsContent = compileSettingsHooksJson();
   try {
     writeGeminiSettings(GEMINI_SETTINGS_EMIT_PATH, settingsContent);
   } catch (err) {
