@@ -1,6 +1,6 @@
 # ADR-0030 — Distribution moves to a scoped registry package; ADR-0006's premise no longer exists
 
-**Status**: Accepted
+**Status**: Accepted · **amended 13/08/2026** (Amendment 1 — see below)
 **Date**: 2026-08-13 — Cristian Rinaldi
 
 ## Context
@@ -45,6 +45,11 @@ The consumer installs by name:
 
 ```bash
 npm install --save-dev @csrinaldi/brain
+
+# Amended by Amendment 1 (#629): this reaches whatever `npm config get registry`
+# points at, and only if that registry carries the scope. Where it does not, the
+# git URL installs the SAME allowlisted bytes — a supported fallback, measured
+# in Amendment 1, not a retired one.
 ```
 
 No token, no repository access, no git ref. That is the whole point: ADR-0006's
@@ -88,6 +93,8 @@ and it must be re-derived against registry semantics rather than translated:
 - the downgrade guard (#398), which compares versions to refuse a backwards move;
 - `npx brain init`'s tag resolution (#400);
 - `day-start.mjs`'s check-and-notify, which reads `highestTag`.
+  **[Amendment 1 (#629): and which must report "could not reach the registry" as
+  a verdict distinct from "no network" and from "up to date" — see #627.]**
 
 A git tag and a registry version are not the same object: tags can be moved and
 deleted, published versions cannot; `dist-tags` exist and refs do not; and a
@@ -120,6 +127,14 @@ private-repo premise that chose it.
   the line until the scope and the workflow exist.
 - **Never translate a git-ref version check into a registry one without
   re-deriving it.** See Decision 3.
+- **Never report an unreachable registry as "no network" or as silence.**
+  Amendment 1 (#629). A consumer behind a mirror or an allow-list has a working
+  network and an unreachable host; collapsing the two is the
+  `evidence-reader-empty-on-failure` shape, and it points them at the wrong
+  problem.
+- **Never document the registry as the only way in.** Amendment 1 (#629). The
+  git URL still installs the same bytes and is the fallback for anyone who
+  cannot reach the registry.
 - **Never auto-update.** A registry does not change the anti-pattern.
 - **Never treat repository visibility and package publication as one act.**
 
@@ -128,6 +143,9 @@ private-repo premise that chose it.
 **Positive:** a consumer installs with no credential and no repository access —
 the friction ADR-0006 accepted as its cost. `npx` resolves the bin under a scope
 that cannot be squatted, which is the shape of the `#400` edge folded into #435.
+**[Amended by Amendment 1 (#629) — incomplete as written. They install with
+REGISTRY access, which the git-URL path did not require. Amendment 1 names that
+cost rather than leaving it as an absence.]**
 
 **Positive:** publishing is a deliberate, versioned act with an immutable
 artifact. A git tag can be moved; a published version cannot.
@@ -190,3 +208,86 @@ name. It removes the token and keeps every other cost.
 - `brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md`
 - #435 (the mechanism) · #617 (this record) · #607 (`files` + licence) · #610 (pre-flight) · #398 · #400
 - #590 — why the decision is written before the mechanism this time
+
+## Amendment 1 — reachability: a registry name is not a git URL (issue #629)
+
+**Signed**: 13/08/2026 — Cristian Rinaldi
+
+### What this does NOT change
+
+Stated first, because an amendment to a distribution decision invites the wrong
+reading. **The registry remains the distribution mechanism.** Decision 1, the
+scope, the separation of visibility from publication, the `files` allowlist
+ordering, and every item under *"What ADR-0006 decided that SURVIVES"* stand
+unchanged. Nothing here reopens ADR-0006.
+
+What this adds is a **cost this record did not name**, and a **path it left
+readable as retired**.
+
+### The unnamed cost
+
+ADR-0030's Consequences read:
+
+> a consumer installs with no credential and no repository access
+
+True, and incomplete. They install with **registry access**. ADR-0006's
+mechanism had a property nobody chose and nobody wrote down: a git URL reaches
+**any host that serves git** — github.com, an internal mirror, a self-hosted
+GitLab, a `file://` path. A package name reaches whatever `npm config get
+registry` resolves to, and only if that registry carries `@csrinaldi/brain`.
+
+Measured on the signed record: **zero mentions** of `mirror`, `firewall`,
+`air-gap`, `proxy`, `offline` or `registry access`. The cost is not weighed and
+rejected there; it is absent.
+
+### The path that survives, measured
+
+The git-URL install is **not** retired by the rename. Measured by installing this
+repository's HEAD into a clean fixture over `git+file://` with `--ignore-scripts`:
+
+| | measured |
+|---|---|
+| result | `added 1 package in 5s` |
+| contents | **433 files, 5.5 MB** |
+| `.memory/` · `openspec/` · `test/` · `docs/` · `.brain-source` · `.git` | **all absent** |
+| top level | `brain/` `.github/` `.gitlab/` `.claude/` `.gemini/` `.gitattributes` `LICENSE` `package.json` `README.md` |
+
+Three consequences, none of which the record states:
+
+1. **A git install honours `files`.** It delivers the same allowlisted tree the
+   tarball carries, so #607's guarantee is not bypassed by this path. (`README.md`
+   is npm's always-included set, not a leak.)
+2. **It works under `private: true`.** `private` blocks *publishing*, not
+   installing from git — so this path is available today, before the publish, and
+   remains available after it.
+3. **It lands under the `name` in `package.json`.** After the rename, a git-URL
+   install and a registry install resolve to the *same* directory. That is the
+   same mechanic #625 traced when it found the mid-upgrade break, and it is why
+   one resolver serves both paths.
+
+So the fallback is not a degraded mode. It is the same bytes at the same path,
+reached over a different transport.
+
+### What follows for any version check
+
+A check that resolves "is there a newer version" must distinguish three verdicts,
+not two:
+
+- up to date;
+- a newer version exists;
+- **the registry could not be reached.**
+
+Collapsing the third into "no network" — which is what `day-start.mjs` does today
+for GitHub, and would do for the registry if translated one-for-one (#627) — is
+the `evidence-reader-empty-on-failure` shape: it makes *"there is nothing new"*
+indistinguishable from *"I could not look"*, and points a mirrored consumer at a
+network that is working fine.
+
+### Why an amendment and not a note in the ticket
+
+Two independent findings landed on the same absence — #627's air-gap failure mode
+and #625's tracing of where a git install actually lands. A property that two
+unrelated pieces of work rediscover is doctrine, not a preference belonging to
+whichever ticket noticed it second. Leaving it in #435 means the next reader of
+ADR-0030 finds a record that answers "how do bytes reach the consumer" without
+mentioning that some consumers cannot reach the answer.
