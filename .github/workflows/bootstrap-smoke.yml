@@ -1,0 +1,77 @@
+# bootstrap-smoke.yml — the three verbs every adopter runs, executed cold (#458).
+#
+# #446: an i18n catalog key with a hyphen made `brain:env:init` die at exit 127
+# mid-bootstrap. `main` was broken for every fresh adopter and CI was green,
+# because no job anywhere executes the bootstrap verbs. #449 guarded that
+# catalog — the symptom. This job covers the class: `brain:env:init`,
+# `brain:session:start` and `brain:day:start`, in that order, in a fresh
+# consumer fixture.
+#
+# With #435 (public repo) on the roadmap the cost profile flips: today a broken
+# bootstrap costs the maintainer twenty minutes; after #435 it costs first-time
+# adopters at first contact.
+#
+# ── Why its OWN workflow, and not a job inside governance.yml ────────────────
+#
+# The same two reasons `m4-danger-paths` is separate — and the same distinction
+# ADR-0018 draws for the GitLab fragment, which is why #590 was resolved first:
+#
+#   1. `governance.yml`'s job set is a RATIFIED contract (ADR-0015). Every job
+#      there is a governance gate with a tier-resolved exit policy, and the
+#      drift-guards assert the YAML job names equal GOVERNANCE_JOBS exactly.
+#      This is a maintainer e2e test, not a gate; registering it there would
+#      mean declaring a tier policy for something tiering has no opinion about.
+#
+#   2. `governance.yml` is a MANAGED path, vendored into every consumer repo. A
+#      job that only ever runs in the brain source repo does not belong in a
+#      file every consumer carries. ADR-0018 makes the same cut from the other
+#      side: brain ships the GitLab fragment to consumers and runs it nowhere
+#      itself, precisely because "what brain ships" and "what brain checks about
+#      itself" are two surfaces. This workflow is the second kind and is NOT a
+#      managed path.
+#
+# NOT a required status context, and it cannot become one through
+# `brain:protect` (which derives contexts from GOVERNANCE_JOBS, a set this
+# suite deliberately does not belong to). A red run here does not block a
+# merge — it tells a human the bootstrap is broken before an adopter finds out.
+
+name: bootstrap-smoke
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'brain/scripts/**'
+      - 'test/bootstrap-smoke/**'
+      - '.github/workflows/bootstrap-smoke.yml'
+      - 'package.json'
+  # Also on main: nothing here is a required context, so a green PR run is not a
+  # guarantee the merge commit is still green — and "is the bootstrap working"
+  # is a question about main, not about a branch.
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap-smoke:
+    name: bootstrap-smoke
+    runs-on: ubuntu-latest
+    # Measured locally at well under a minute for the three verbs plus the
+    # second idempotency run. The ceiling exists so a hung npm/network call
+    # cannot sit on the runner's 6-hour default (#441 F5).
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Belt and braces with this file not being a managed path: if the workflow
+      # ever DOES reach a consumer, it must not run brain's own suite there. The
+      # same `.brain-source` gate `m4-danger-paths` uses.
+      - name: env:init → session:start → day:start, cold and idempotent
+        if: ${{ hashFiles('.brain-source') != '' }}
+        # `node <path>`, not an npm alias: `package.json` is outside this
+        # change's file claim. It is also the spelling `auditWorkflowAuth`'s
+        # step reader can classify — `bash` is not on its inert list, so a
+        # `bash …/run.sh` step reads as reaching the server with no credential
+        # declared, and the drift-guard fails the workflow. Measured.
+        run: node test/bootstrap-smoke/smoke.mjs
