@@ -140,6 +140,28 @@ export async function gatherColdBoot({ project, number, provider, reviewerHandle
   // approval that predates a commit.
   const priorDecisions = reviews.map(r => parseDecision(r)).filter(Boolean);
 
+  // #477, second half of the maintainer ruling — three states, not two: clean,
+  // has-findings, and UNREADABLE. `parseVerdict` records the fields it could
+  // not read on each verdict's `malformed`; carrying that through
+  // `priorVerdicts` is necessary and not sufficient, because nothing walks the
+  // list asking the question. A verdict whose findings list was garbage sits in
+  // `priorVerdicts` looking exactly like one that found nothing, which is the
+  // conflation the ticket exists to end, moved one layer up.
+  //
+  // `priorVerdicts` itself is deliberately NOT filtered. An unreadable verdict
+  // is still a review iteration: it must keep counting toward §7's rev bound
+  // and the anti-loop lock, or posting an unreadable block would become a way
+  // to reset them.
+  const unreadableVerdicts = priorVerdicts
+    .filter(v => Array.isArray(v?.malformed) && v.malformed.length > 0)
+    .map(v => ({ head_sha: v.head_sha, author: v.author, malformed: v.malformed }));
+
   // worktreePath: the isolated detached worktree (H1-2 evaluators operate inside it).
-  return { abstain: false, headSha, worktreePath: clone?.worktreePath, prView, doctrine: { records, priorVerdicts, priorDecisions } };
+  return {
+    abstain: false,
+    headSha,
+    worktreePath: clone?.worktreePath,
+    prView,
+    doctrine: { records, priorVerdicts, priorDecisions, unreadableVerdicts },
+  };
 }

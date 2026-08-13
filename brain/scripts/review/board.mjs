@@ -49,22 +49,64 @@ function inBoardNamespace(label) {
  * (protocol §9). Only labels within those two namespaces are ever touched;
  * anything else present on the PR (`decision`, `status:approved`, ...) is
  * left alone even when it is not part of the "desired" set.
+ *
+ * #477, second half of the maintainer ruling — an UNREADABLE field is not an
+ * empty one. `parseVerdict` reports what it could not read on `malformed`; a
+ * consumer that ignores it turns the parser's honesty back into the defect,
+ * which is why the ruling made this half binding rather than optional.
+ *
+ * `sequencing` is the field that matters here, and it is the one member of the
+ * family with a DESTRUCTIVE reader: this function used to read
+ * `latestVerdict.sequencing ?? []`, so an unreadable value produced an empty
+ * desired set and every real `seq:*` label on the PR was scheduled for
+ * deletion — by name, off evidence nobody could read. Protocol §10 forbids
+ * concluding on uncomputable evidence; deleting on it is the same inversion
+ * with a write at the end.
+ *
+ * So `seq:*` becomes UNCOMPUTABLE, not empty: no add, no remove, and the fact
+ * is returned rather than left to be inferred from an absence. `reviewed:*` is
+ * deliberately NOT frozen with it — it derives from `verdict:`, which is
+ * mandatory and readable (`parseVerdict` answers `null` for a block missing
+ * it), so freezing it would refuse work that IS computable.
+ *
  * @param {{ latestVerdict: object|null, currentLabels?: string[] }} [args]
- * @returns {{ toAdd: string[], toRemove: string[] }}
+ * @returns {{ toAdd: string[], toRemove: string[], unreadable: string[] }}
+ *   `unreadable` names every field the verdict carried and the parser could not
+ *   read — including fields this function does not consume, so the state is
+ *   reported rather than silently folded into "nothing to do".
  */
 export function reconcileBoardLabels({ latestVerdict, currentLabels = [] } = {}) {
-  if (!latestVerdict) return { toAdd: [], toRemove: [] };
+  if (!latestVerdict) return { toAdd: [], toRemove: [], unreadable: [] };
+
+  const unreadable = Array.isArray(latestVerdict.malformed) ? latestVerdict.malformed : [];
+  const sequencingUnreadable = unreadable.includes('sequencing');
 
   const desired = new Set();
   const reviewedLabel = reviewedLabelForVerdict(latestVerdict.verdict);
   if (reviewedLabel) desired.add(reviewedLabel);
-  for (const seqLabel of latestVerdict.sequencing ?? []) desired.add(seqLabel);
+  // The flag WINS over any value present beside it. `parseVerdict` never emits
+  // both (an unreadable field is omitted), so this branch is unreachable from
+  // that producer — but this function is exported and pure, and a caller
+  // assembling a verdict by hand must not be able to reintroduce the defect by
+  // supplying a half-read value. Pinned by test rather than left as an
+  // unexercised belt: the first mutation run proved the filter below already
+  // carried the parser-driven case alone.
+  if (!sequencingUnreadable) {
+    for (const seqLabel of latestVerdict.sequencing ?? []) desired.add(seqLabel);
+  }
 
-  const currentInNamespace = currentLabels.filter(inBoardNamespace);
+  // Held OUT of the reconciliation entirely when their input was unreadable —
+  // not compared against an empty desired set, which is what produced the
+  // deletions. Absent from both `toAdd` and `toRemove` means "the board did not
+  // form an opinion", the only honest answer available here.
+  const currentInNamespace = currentLabels
+    .filter(inBoardNamespace)
+    .filter(label => !(sequencingUnreadable && label.startsWith('seq:')));
+
   const toAdd = [...desired].filter(label => !currentInNamespace.includes(label));
   const toRemove = currentInNamespace.filter(label => !desired.has(label));
 
-  return { toAdd, toRemove };
+  return { toAdd, toRemove, unreadable };
 }
 
 function defaultListOpenPrs({ getVcs: getVcsFn = getVcs } = {}) {
@@ -104,13 +146,17 @@ export async function reconcileOnePr({ project, number, provider, deps = {} } = 
   const verdicts = reviews.map(r => parseVerdict(r)).filter(Boolean);
   const latestVerdict = verdicts.length > 0 ? verdicts[verdicts.length - 1] : null;
 
-  const { toAdd, toRemove } = reconcileBoardLabels({ latestVerdict, currentLabels: prView.labels ?? [] });
-  if (toAdd.length === 0 && toRemove.length === 0) return { number, toAdd, toRemove };
+  const { toAdd, toRemove, unreadable } = reconcileBoardLabels({ latestVerdict, currentLabels: prView.labels ?? [] });
+  // `unreadable` rides the zero-write path too (#477). An unreadable verdict
+  // usually HAS nothing to write — that is the whole point of freezing the
+  // namespace — so dropping the report here would put the silence back exactly
+  // where the ruling took it out.
+  if (toAdd.length === 0 && toRemove.length === 0) return { number, toAdd, toRemove, unreadable };
 
   const vcs = await getVcsFn({ provider });
   if (toAdd.length > 0) await guardedLabelAdd(vcs, { project, number, labels: toAdd });
   if (toRemove.length > 0) await guardedLabelRemove(vcs, { project, number, labels: toRemove });
-  return { number, toAdd, toRemove };
+  return { number, toAdd, toRemove, unreadable };
 }
 
 /**
