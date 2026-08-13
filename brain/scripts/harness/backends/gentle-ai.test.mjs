@@ -328,3 +328,10 @@ test('init: engram context notice (checkSddContext) still fires after refactor',
     `expected SDD context notice to still fire after checkSddContext() refactor; got: ${JSON.stringify(logs)}`,
   );
 });
+
+test('gentle-ai declares the runtime seam explicitly (issue #123)', async () => {
+  const { AGENT_RUNTIME } = await import('./gentle-ai.mjs');
+  // Must EXIST, so "nobody added the export" is not indistinguishable from
+  // "this backend deliberately declares nothing" — the whole point of the seam.
+  assert.equal(AGENT_RUNTIME, null);
+});

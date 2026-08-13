@@ -17,6 +17,7 @@ import { detectPM } from './lib/pm.mjs';
 import { t } from './i18n/t.mjs';
 import { currentBranch } from './lib/git-branch.mjs';
 import { restoreManifestChurn } from './lib/memory-manifest.mjs';
+import { agentRuntimeReport, platformEnvVars, platformConfig } from './harness/backends/agent-runtime.mjs';
 
 const ROOT = process.cwd();
 const NODE = process.execPath;
@@ -270,6 +271,37 @@ sep(await t('day.brain.section'));
       }
     }
   }
+}
+
+// ── 4b. AI agent runtime — a sub-step of the version block above ─────────────
+// Check-and-notify, mirroring the brain-tag check above (ADR-0006 and
+// brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md): this
+// NEVER runs an update command.
+//
+// Harness-agnostic by construction (ADR-0005): it asks whichever platform the
+// repo declares (AGENT_PLATFORM / SDD_HARNESS / brain.config.json's optional
+// `harness` — the ADR-0024 axes, resolved by harness/cli.mjs's resolvePlatform,
+// which this entrypoint used to bypass) for its own AGENT_RUNTIME descriptor.
+// Nothing here names a vendor; a backend declaring no runtime says so, and a
+// probe that could not read one says THAT instead of reporting silence.
+//
+// Deliberately NOT its own sep() step: test/bootstrap-smoke/smoke.mjs asserts
+// day:start reaches the literal `6/6`, so a seventh step turns that smoke test
+// red (measured on PR #594). Renumbering would be a one-word edit in a file
+// outside this change's claim; a sub-step needs none and reads the same.
+//
+// Strings are English literals, not `t()` keys: the catalogs under
+// brain/scripts/i18n/** are outside this change's file claim (see the PR).
+{
+  console.log(`\n  ${C.bold}AI agent runtime${C.reset}`);
+  const { platform, notice } = await agentRuntimeReport({
+    env: process.env,
+    envVars: platformEnvVars(readEnvVar),
+    config: platformConfig(config),
+  });
+  console.log(`  ${C.dim}harness: ${platform}${C.reset}`);
+  ({ ok, warn, info }[notice.level] ?? info)(notice.message);
+  if (notice.hint) console.log(`       ${C.dim}${notice.hint}${C.reset}`);
 }
 
 // ── 5. Team memory ───────────────────────────────────────────────────────────

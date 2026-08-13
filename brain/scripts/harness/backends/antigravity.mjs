@@ -44,6 +44,18 @@ export const AGENTS_EMIT_PATH = 'AGENTS.md';
 /** Repo-root-relative path for Antigravity native settings hooks (issue #305). */
 export const GEMINI_SETTINGS_EMIT_PATH = '.gemini/settings.json';
 
+/**
+ * No agent runtime to version-check (issue #123).
+ *
+ * Antigravity is an IDE: it reads AGENTS.md and .gemini/settings.json, and this
+ * repo installs no antigravity CLI (`install-tools.sh` installs `claude` and
+ * `gentle-ai`, nothing else). Declaring `null` says "there is nothing to probe"
+ * — which day-start reports as exactly that, distinct from "the probe failed".
+ * The export exists so the seam is uniform across backends: the day a queryable
+ * CLI ships, this becomes a descriptor literal, not a new mechanism.
+ */
+export const AGENT_RUNTIME = null;
+
 const REGENERATE_HINT = 'AGENT_PLATFORM=antigravity npm run brain:env:init';
 
 /**
