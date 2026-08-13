@@ -83,6 +83,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0027](brain/project/decisions/adr-0027-upgrade-rollback-is-restorable-not-atomic.md) — `brain:upgrade` rollback is restorable, not atomic: restates #396's exit criterion from whole-tree byte-identity to restorability of the managed-path copy, names each residual gap instead of implying coverage, and (Decision #3, amended 03/08/2026) refuses only what cannot be rolled back — writes resolving outside the repo — rather than every symlink
 - [ADR-0028](brain/project/decisions/adr-0028-brain-promote-read-confirm-stage.md) — `brain:promote` is read-confirm-stage: the mechanics are automated, the signature is not (**Amendment 1, 12/08/2026** — `brain:promote` also performs §1c's in-place amendment cascade; the four locks and the human signature are unchanged, #509)
 - [ADR-0029](brain/project/decisions/adr-0029-two-sources-one-graph.md) — Two sources feed one graph: the union is taken, the divergence is reported
+- [ADR-0018](brain/project/decisions/adr-0018-gitlab-governance-fragment.md) — The GitLab governance surface is an opt-in fragment, not a pipeline
 
 ### Project-specific rules
 
