@@ -1658,17 +1658,143 @@ export function resolveInstallUrl(url) {
  * @returns {string}
  */
 export function installSpec(root, tag) {
+  const detail = installSpecDetail(root, tag);
+  if (detail.spec === null) throw new Error(`install spec unresolved — ${detail.why}`);
+  return detail.spec;
+}
+
+/**
+ * `installSpec` with the reasoning attached (issue #644).
+ *
+ * Reads `name` and `repository.url` from the installed manifest and hands both
+ * to `resolveInstallSpec`. Prefer this over `installSpec` at any call site that
+ * can print: `source` tells a fallback from a manifest-derived answer, and `why`
+ * is already written for a human.
+ *
+ * An absent or unparseable manifest is not swallowed into a bare string here —
+ * it reaches the caller as `source: 'fallback'` with a reason. "The manifest
+ * said this" and "I guessed" must not look identical.
+ *
+ * @param {string} root Consumer repo root.
+ * @param {string} tag  Git tag or version.
+ * @returns {{kind:'registry'|'git'|'unresolved', spec:string|null, source:'manifest'|'fallback', why:string}}
+ */
+export function installSpecDetail(root, tag) {
   const pkgPath = installedPackageRoot(root, 'package.json');
+  let name;
+  let repoUrl;
   try {
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-    const repoUrl = pkg?.repository?.url ?? (typeof pkg?.repository === 'string' ? pkg.repository : undefined);
-    if (repoUrl && typeof repoUrl === 'string') {
-      return `${resolveInstallUrl(repoUrl)}#${tag}`;
-    }
+    if (typeof pkg?.name === 'string') name = pkg.name;
+    const declared = pkg?.repository?.url ?? (typeof pkg?.repository === 'string' ? pkg.repository : undefined);
+    if (typeof declared === 'string') repoUrl = declared;
   } catch {
-    // File absent or unparseable — fall through to constant fallback.
+    // Absent or unparseable — reported as `source: 'fallback'`, never silently.
   }
-  return `${BRAIN_REPO_HTTPS}#${tag}`;
+  return resolveInstallSpec({ name, version: tag, repoUrl });
+}
+
+/**
+ * The bare semver inside a git tag or a registry version — `v1.2.0` and `1.2.0`
+ * name the same release, and only one of the two forms exists on a registry.
+ *
+ * THE BOUNDARY IS DECIDED ONCE, HERE (issue #644). Stripping the `v` at each
+ * call site is how `@scope/name@v1.2.0` gets built: a spec npm resolves to
+ * nothing, reported as "not found" rather than as "wrong shape".
+ *
+ * Returns null rather than guessing. `latest`, `main` and `''` are not versions,
+ * and a caller that receives null can say so; a caller handed `'latest'` as if
+ * it were a version installs something nobody pinned.
+ *
+ * @param {unknown} tagOrVersion
+ * @returns {string|null}
+ */
+export function specVersion(tagOrVersion) {
+  if (typeof tagOrVersion !== 'string') return null;
+  const m = tagOrVersion.trim().match(/^v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/);
+  return m ? m[1] : null;
+}
+
+/** A scoped npm name — `@scope/name`. The scope is what makes it a registry install. */
+const SCOPED_NAME_RE = /^@[^/]+\/.+/;
+
+/**
+ * Resolves how brain should be installed, from what the installed manifest says
+ * about itself (issue #644, ADR-0030 Decision 3).
+ *
+ * TWO SHAPES, NOT ONE TRANSLATED INTO THE OTHER:
+ *
+ * - a **scoped** name → a registry spec, `@scope/name@1.2.0`, with the `v`
+ *   stripped because a published version has none;
+ * - anything else → the git URL form, `git+https://…#v1.2.0`, with the ref kept
+ *   **verbatim** because a git ref is a NAME and not a number — `#1.2.0` is a
+ *   different ref, and usually a missing one.
+ *
+ * The git form is not a leftover. ADR-0030 Amendment 1 (#629) records it as a
+ * supported fallback for anyone who can reach a git host but not the registry,
+ * measured equivalent: it honours `files` and lands at the same install path.
+ *
+ * `source` distinguishes a manifest-derived spec from the constant fallback, so
+ * a caller can SAY which it used. A fallback that looks identical to a real
+ * answer is the #601 shape.
+ *
+ * @param {object} o
+ * @param {string} [o.name]     the installed package's `name`
+ * @param {string} [o.version]  a tag or a version
+ * @param {string} [o.repoUrl]  the installed package's `repository.url`
+ * @returns {{kind:'registry'|'git'|'unresolved', spec:string|null, source:'manifest'|'fallback', why:string}}
+ */
+export function resolveInstallSpec({ name, version, repoUrl } = {}) {
+  if (typeof name === 'string' && SCOPED_NAME_RE.test(name)) {
+    const v = specVersion(version);
+    if (!v) {
+      return {
+        kind: 'unresolved',
+        spec: null,
+        source: 'manifest',
+        why: `"${version}" is not a version, and ${name} installs by version — pass a semver, not a ref.`,
+      };
+    }
+    return { kind: 'registry', spec: `${name}@${v}`, source: 'manifest', why: `${name} is scoped; installing by version.` };
+  }
+  const source = repoUrl ? 'manifest' : 'fallback';
+  return {
+    kind: 'git',
+    spec: `${resolveInstallUrl(repoUrl)}#${version}`,
+    source,
+    why: source === 'manifest'
+      ? 'the installed name is unscoped; installing from the git URL it declares.'
+      : `the installed manifest declared no repository URL; falling back to ${BRAIN_REPO_HTTPS}.`,
+  };
+}
+
+/**
+ * The highest RELEASE in a registry version list.
+ *
+ * Prereleases are excluded deliberately, and this is a re-derivation rather than
+ * a port (ADR-0030's *"never translate … without re-deriving it"*). Two reasons,
+ * both measured:
+ *
+ * 1. `compareSemver` reads only major.minor.patch, so `1.0.0-rc.1` and `1.0.0`
+ *    compare EQUAL. A plain `.sort(compareSemver).at(-1)` therefore returns
+ *    whichever the registry listed last — an answer that depends on input order.
+ * 2. This feeds check-and-notify, which must never tell an operator to install
+ *    an rc.
+ *
+ * Null means "no published release", not "could not read" — the caller still
+ * holds the list and can tell them apart. That distinction is doctrine as of
+ * ADR-0030 Amendment 1 (#629).
+ *
+ * @param {string[]|null|undefined} versions
+ * @returns {string|null}
+ */
+export function highestVersion(versions) {
+  if (!Array.isArray(versions)) return null;
+  const releases = versions
+    .map((v) => specVersion(v))
+    .filter((v) => v !== null && !/[-+]/.test(v));
+  if (releases.length === 0) return null;
+  return releases.sort(compareSemver).at(-1);
 }
 
 // ── Update check (for day:start) ───────────────────────────────────────────────
