@@ -309,27 +309,46 @@ test('antigravity declares no agent runtime probe — it ships no version-querya
 
 // ── No test may write a tracked file (issue #616) ────────────────────────────
 
-test('2.6: dispatch("antigravity", "init") writes NOTHING to the tracked emit paths', async () => {
-  // 2.4 injected `_writeAgents` only, so the default `_writeGeminiSettings`
-  // fired against the real repo root and rewrote the tracked
-  // .gemini/settings.json on every run. It went unnoticed because the bytes it
-  // wrote were identical — `git status` stayed clean while the file was being
-  // rewritten, and a mutated compiler therefore silently repaired the evidence
-  // the drift-guard judges. mtime is what makes the write observable.
-  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
-  const tracked = [AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH].map((rel) => join(repoRoot, rel));
-  const before = tracked.map((p) => statSync(p).mtimeMs);
+test('2.6: no test in this file can reach the REAL emit paths', () => {
+  // The previous version of this test took an mtime snapshot and injected both
+  // seams itself, so it could not observe a write by construction — and node:test
+  // runs top-level tests in order, so 2.4 had already written before the snapshot
+  // was taken. It passed while the tracked file was being rewritten (measured:
+  // 23/23 green, mtime moved, `git status` clean). A test that cannot fail for
+  // the reason it names is worse than no test.
+  //
+  // The property is checked at the source level instead, the same way
+  // brain-upgrade.test.mjs pins its merge targets: every test that reaches
+  // init() must either point it at a fake root or inject BOTH write seams.
+  // Deleting an injection now fails HERE, not only inside the test that owns it.
+  const source = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const blocks = source.split(/\ntest\(/).slice(1);
+  assert.ok(blocks.length >= 10, `expected the test blocks, found ${blocks.length} — the split is wrong`);
 
-  const writes = [];
-  await dispatch('antigravity', 'init', [{
-    _writeAgents: (relPath, content) => writes.push({ relPath, content }),
-    _writeGeminiSettings: (relPath, content) => writes.push({ relPath, content }),
-  }]);
+  const offenders = [];
+  let reaching = 0;
+  for (const block of blocks) {
+    const title = block.slice(0, block.indexOf("'", 1) + 1);
+    // Body only — scanning the title too made a test whose NAME says "init()"
+    // read as a call site (measured: 2.5 flagged while calling nothing).
+    const arrow = block.indexOf('=> {');
+    const body = arrow === -1 ? '' : block.slice(arrow, block.indexOf('\n});'));
+    const callsInit = /\binit\(|dispatch\(\s*'antigravity',\s*'init'/.test(body);
+    if (!callsInit) continue;
+    if (title.includes('2.6:')) continue;               // this test reads source, never calls init
+    reaching++;
+    const fakeRoot = /_repoRoot:\s*'\/fake/.test(body);
+    const bothSeams = body.includes('_writeAgents') && body.includes('_writeGeminiSettings');
+    if (!fakeRoot && !bothSeams) offenders.push(title);
+  }
 
-  // Both seams captured — a future edit dropping either one puts the default
-  // writer back on the real path.
-  assert.deepEqual(writes.map((w) => w.relPath).sort(), [AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH].sort());
-
-  const after = tracked.map((p) => statSync(p).mtimeMs);
-  assert.deepEqual(after, before, 'init() touched a tracked file — every write path must be injected in tests');
+  // Evidence floor: a scan that matched no init() call site would report no
+  // offenders and pass while proving nothing.
+  assert.ok(reaching >= 3, `only ${reaching} test(s) reach init() — the scan is not finding them`);
+  assert.deepEqual(
+    offenders,
+    [],
+    `these tests call init() against the REAL repo root without injecting both write seams, ` +
+      `so the default writer lands on the tracked emit paths (#616): ${offenders.join(', ')}`,
+  );
 });
