@@ -20,10 +20,31 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { checkContexts, diffArmedChecks } from './vcs/governance-checks.mjs';
-import { resolveTier } from './vcs/governance-tiers.mjs';
+import { resolveTier, tierParams } from './vcs/governance-tiers.mjs';
 import { t } from './i18n/t.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The protection this repo's DECLARED TIER warrants. Pure — no I/O, no network.
+ *
+ * `checks` was already tier-derived (REQ-TIER-9). `requiredReviews` was not: the
+ * call site omitted it and `github.mjs`'s `branchProtect` defaults the parameter
+ * to 1, so the value armed on the platform came from a function signature rather
+ * than from doctrine (#94). Both now come from one resolution, so a run cannot
+ * produce a protection state the tier table contradicts.
+ *
+ * Returning `tier` alongside them is deliberate: the caller PRINTS it. The defect
+ * this closes was never a wrong number — it was a number nobody could see the
+ * origin of.
+ *
+ * @param {object} config  Parsed `brain.config.json`.
+ * @returns {{ tier: string, checks: string[], requiredReviews: number }}
+ */
+export function protectionFor(config) {
+  const tier = resolveTier(config);
+  return { tier, checks: checkContexts(tier), requiredReviews: tierParams(tier).requiredReviews };
+}
 
 /**
  * Best-effort post-arm verification (issue #203, design.md §3 — arm-and-verify).
@@ -84,14 +105,21 @@ export async function verifyAfterArm({ checks, project, branch, provider, provid
  * Activate branch protection on main via the configured VCS provider.
  * Side-effecting (network) — only ever called from the CLI guard below.
  */
-export async function activateProtection() {
+export async function activateProtection({ _config = null, _providerModule = null } = {}) {
+  // `_config`/`_providerModule` are TEST SEAMS, mirroring the `listCheckRuns`
+  // injection above — they exist so a test can observe what this function ARMS
+  // without spawning `gh`. #94's defect lived exactly here: the arguments sent to
+  // `branchProtect`. A source-scan assertion would be blind by spelling, so the
+  // call itself has to be observable.
   const configPath = resolve(__dirname, '..', '..', 'brain.config.json');
-  let config;
-  try {
-    config = JSON.parse(readFileSync(configPath, 'utf8'));
-  } catch (e) {
-    console.error(`brain:protect: cannot read brain.config.json — ${e.message}`);
-    process.exit(1);
+  let config = _config;
+  if (!config) {
+    try {
+      config = JSON.parse(readFileSync(configPath, 'utf8'));
+    } catch (e) {
+      console.error(`brain:protect: cannot read brain.config.json — ${e.message}`);
+      process.exit(1);
+    }
   }
 
   const provider = config?.vcs?.provider;
@@ -106,9 +134,9 @@ export async function activateProtection() {
     process.exit(1);
   }
 
-  let providerModule;
+  let providerModule = _providerModule;
   try {
-    providerModule = await import(`./vcs/providers/${provider}.mjs`);
+    if (!providerModule) providerModule = await import(`./vcs/providers/${provider}.mjs`);
   } catch (e) {
     console.error(`brain:protect: cannot load provider "${provider}" — ${e.message}`);
     process.exit(1);
@@ -123,7 +151,7 @@ export async function activateProtection() {
   // required-context list from the SAME governance-tiers.mjs resolution
   // run-check.mjs's exit-policy mapping uses — arming a stricter/looser set
   // never drifts from what actually blocks merge at this repo's declared tier.
-  const checks = checkContexts(resolveTier(config));
+  const { tier, checks, requiredReviews } = protectionFor(config);
   // Single-sourced (issue #203 review fix F5): branchProtect and verifyAfterArm
   // must agree on the armed branch by construction, not by coincidence — both
   // are passed this same variable explicitly rather than each hardcoding 'main'
@@ -131,10 +159,13 @@ export async function activateProtection() {
   const branch = 'main';
   console.log(`Activating branch protection on ${project} (provider: ${provider})`);
   console.log(`  Required checks: ${checks.join(', ')}`);
+  // #94: the armed review count and the tier that produced it, on the same
+  // surface as the checks. The old failure was silent, not wrong.
+  console.log(`  Required reviews: ${requiredReviews} (from declared tier "${tier}")`);
 
   let result;
   try {
-    result = await providerModule.branchProtect({ project, checks, branch });
+    result = await providerModule.branchProtect({ project, checks, branch, requiredReviews });
   } catch (e) {
     // branchProtect should not throw in the v2 adapter, but guard against
     // unexpected runtime errors (e.g. network timeout, unhandled edge case).

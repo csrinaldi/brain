@@ -136,3 +136,94 @@ test('verifyAfterArm: provider WITH checkRuns still runs run-based verification 
   assert.equal(logs.length, 1);
   assert.match(logs[0], /unverifiable|no check-runs/i);
 });
+
+// ── #94: requiredReviews is tier-derived, never the provider's default ──────
+//
+// `brain:protect` derived `checks` from `requiredJobs(tier)` and left the review
+// count to the provider, whose signature defaults it to 1. So the value armed on
+// the platform did not come from the repo's declared tier at all — and at n=1,
+// `required_approving_review_count: 1` is unsatisfiable (GitHub forbids a PR
+// author approving their own PR), so a run of an idempotent verb left `main`
+// in a state its only maintainer could not merge through, silently.
+//
+// Measured 2026-08-13 before the fix: the live value was 0 and correct, held by
+// nobody having run the verb since 2026-08-05 rather than by anything in code.
+
+import { protectionFor, activateProtection } from './brain-protect.mjs';
+
+const CONFIG = (tier) => ({
+  vcs: { provider: 'github' },
+  project: { slug: 'acme/widgets' },
+  governance: { tier },
+});
+
+/** A provider spy that records every branchProtect call verbatim. */
+function spyProvider() {
+  const calls = [];
+  return {
+    calls,
+    branchProtect: async (args) => { calls.push(args); return { enforced: true }; },
+    // verifyAfterArm dispatches on this being absent — keep it absent so the
+    // test exercises the arming path only.
+  };
+}
+
+test('#94: protectionFor derives the review count from the tier, for every tier', () => {
+  assert.equal(protectionFor(CONFIG('lite')).requiredReviews, 0,
+    'lite: REQ-L6-1′ — a human author suffices for a brain/core write, so no second review is required');
+  assert.equal(protectionFor(CONFIG('standard')).requiredReviews, 1,
+    'standard: L6 wants a non-author human approver');
+  assert.equal(protectionFor(CONFIG('regulated')).requiredReviews, 1,
+    'regulated: the same L6 requirement — the "panel >= 2" tier parameter is the reviewer verdict mode, not an approval count');
+});
+
+test('#94: activateProtection PASSES the derived count — the provider default is never relied on', async () => {
+  for (const [tier, expected] of [['lite', 0], ['standard', 1], ['regulated', 1]]) {
+    const provider = spyProvider();
+    await activateProtection({ _config: CONFIG(tier), _providerModule: provider });
+
+    assert.equal(provider.calls.length, 1, `${tier}: branchProtect called exactly once`);
+    const args = provider.calls[0];
+    assert.ok('requiredReviews' in args,
+      `${tier}: requiredReviews must be PRESENT in the call — omitting it hands the decision to ` +
+      `the provider's parameter default (github.mjs defaults it to 1), which is the defect`);
+    assert.equal(args.requiredReviews, expected, `${tier}: armed the tier's value`);
+  }
+});
+
+test('#94: two consecutive runs send byte-identical protection — the verb is idempotent in what it arms', async () => {
+  // The test the whole ticket exists for. Before the fix the second run changed
+  // required_approving_review_count from 0 to 1 while reporting nothing, so
+  // "idempotent" was true of the verb's intent and false of its effect.
+  const provider = spyProvider();
+  const config = CONFIG('lite');
+
+  await activateProtection({ _config: config, _providerModule: provider });
+  await activateProtection({ _config: config, _providerModule: provider });
+
+  assert.equal(provider.calls.length, 2);
+  assert.deepEqual(provider.calls[0], provider.calls[1],
+    `two runs of an idempotent verb must send the same protection. Got:\n` +
+    `  run 1: ${JSON.stringify(provider.calls[0])}\n  run 2: ${JSON.stringify(provider.calls[1])}`);
+});
+
+test('#94: the run REPORTS the armed count and the tier that produced it', async () => {
+  // Found by the mutation sweep, not by design: deleting the log line left every
+  // other test green. That line is not decoration — the defect this ticket closes
+  // was a value nobody could see the origin of, so an unreported count is the
+  // original failure with a different number in it.
+  const provider = spyProvider();
+  const lines = [];
+  const realLog = console.log;
+  console.log = (...a) => lines.push(a.join(' '));
+  try {
+    await activateProtection({ _config: CONFIG('lite'), _providerModule: provider });
+  } finally {
+    console.log = realLog;
+  }
+
+  const reported = lines.find(l => /Required reviews/i.test(l));
+  assert.ok(reported, `no line reported the review count. Got:\n${lines.join('\n')}`);
+  assert.match(reported, /\b0\b/, 'the armed value must appear');
+  assert.match(reported, /lite/, 'and the tier it came from — a number with no origin is what this ticket closes');
+});

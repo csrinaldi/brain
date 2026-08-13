@@ -203,6 +203,12 @@ export const GATE_MATRIX = Object.freeze({
 const TIER_PARAMS = Object.freeze({
   lite: Object.freeze({
     diffBudget: 1000,
+    // #94: the platform's `required_approving_review_count`. ZERO at lite is not
+    // laxity — `brain-writes-reviewed` already rules that a human author suffices
+    // for a brain/core write here (REQ-L6-1'), so arming 1 would impose a
+    // `standard` posture on a repo that declares `lite`. It is also unsatisfiable
+    // at n=1: GitHub forbids a PR author approving their own PR.
+    requiredReviews: 0,
     artefacts: Object.freeze(['spec']),
     honorSizeException: true,
     honorOverride: true,
@@ -213,6 +219,9 @@ const TIER_PARAMS = Object.freeze({
   }),
   standard: Object.freeze({
     diffBudget: 400,
+    // L6's human approver is `approvers.find(a => a !== author && !botAllowlist
+    // .includes(a))` — a non-author human is the point of this tier.
+    requiredReviews: 1,
     artefacts: Object.freeze(['proposal', 'spec', 'design', 'tasks']),
     honorSizeException: true,
     honorOverride: true,
@@ -225,6 +234,10 @@ const TIER_PARAMS = Object.freeze({
   }),
   regulated: Object.freeze({
     diffBudget: 200,
+    // ONE, deliberately not two. ADR-0026's "panel >= 2, consensus-gated" row is
+    // the REVIEWER VERDICT MODE, not the human approval count; reading it as an
+    // approval count would be inventing doctrine (reviewer-protocol.md §5).
+    requiredReviews: 1,
     artefacts: Object.freeze(['proposal', 'spec', 'design', 'tasks', 'verification']),
     honorSizeException: false,
     honorOverride: false,
