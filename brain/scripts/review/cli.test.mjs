@@ -331,6 +331,88 @@ test('main: --mode checkpoint local run (no ci-context) feeds boot.prView.baseRe
   assert.equal(reversionBaseSha, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', 'the checkpoint reversion must receive the port-resolved baseSha, not null — the wiring that takes §10.4 live');
 });
 
+// ── #555: the tier reaches the checkpoint's artifact set ────────────────────
+//
+// `cli.mjs` resolves the tier ONCE and threads it into `gatherCheckpointInputs`,
+// which otherwise defaults to `standard`. Round 3 of the #555 review measured
+// that thread: deleting `tier,` from the checkpoint call left the whole suite
+// green, so every real PR would have been judged against `standard`'s artefact
+// set no matter what tier the repo declares — silent, and undetectable from the
+// tests. The two cases below are the two directions that mutation moves the
+// verdict in, and both are asserted on the RENDERED block, which is what a human
+// reads.
+//
+// `lite` is the tier used here on purpose: it is the tier brain itself declares,
+// and its artefact set (`['spec']`) differs from `standard`'s in both directions —
+// artefacts standard demands that lite does not, and a `missing:` line whose tier
+// name is part of the evidence.
+const TIER_CHANGE_ID = 'issue-999-tier-thread';
+const TIER_CHANGE_DIR = `openspec/changes/${TIER_CHANGE_ID}`;
+
+/** A checkpoint fixture whose change dir contains exactly `present`. */
+function checkpointFixture(present) {
+  const there = new Set(present.map(f => `${TIER_CHANGE_DIR}/${f}`));
+  return {
+    baseSha: 'BASE',
+    exists: (p) => there.has(p),
+    listDir: () => [],
+    readFile: (p) => {
+      // A tasks.md that IS executed — this fixture is about the artefact set,
+      // not about Rule C's separate "zero checked items" blocker.
+      if (p === `${TIER_CHANGE_DIR}/tasks.md` && there.has(p)) return '- [x] done\n';
+      throw new Error(`no ${p} in this fixture`);
+    },
+    runReversion: async () => ({ uncomputable: false, command: 'cmd', vacuousTests: [] }),
+    runAudit: () => '',
+    runGovernanceStatus: () => '',
+    trancheDeps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '10\t5\tfoo.mjs\n', readIgnoreList: () => [] },
+  };
+}
+
+function checkpointDeps(vcs, tier, present) {
+  const deps = readyDeps({ vcs });
+  deps.tier = tier;
+  deps.getChangedFiles = () => [`${TIER_CHANGE_DIR}/checkpoint-report.md`];
+  deps.checkpointDeps = checkpointFixture(present);
+  return deps;
+}
+
+test('#555: --mode checkpoint measures the artifact set at the RESOLVED tier — the blocker names lite, never the `standard` default', async () => {
+  const vcs = spyVcs();
+  const lines = [];
+  // Nothing but tasks.md: `lite` requires spec.md alone, `standard` requires
+  // proposal/spec/design as well. The two produce different evidence text.
+  const code = await main({
+    argv: ['--pr', '42', '--mode', 'checkpoint', '--dry-run'],
+    log: (s) => lines.push(s),
+    ...checkpointDeps(vcs, 'lite', ['tasks.md']),
+  });
+  assert.equal(code, 0);
+  const out = lines.join('\n');
+  // `\"` in the pattern: renderVerdict emits the evidence as a quoted YAML
+  // scalar, so the tier name arrives escaped inside the block.
+  assert.match(out, /requiredArtifactsFor\(\\"lite\\"\) missing: spec\.md/,
+    'cli.mjs must thread its resolved tier into gatherCheckpointInputs — without it the set silently reverts to `standard`');
+  assert.doesNotMatch(out, /requiredArtifactsFor\(\\"standard\\"\)/,
+    'and the evaluator default must never be what a real review measures against');
+});
+
+test('#555: at lite, a change carrying only what lite requires produces NO artifact blocker (the thread cuts both ways)', async () => {
+  const vcs = spyVcs();
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42', '--mode', 'checkpoint', '--dry-run'],
+    log: (s) => lines.push(s),
+    ...checkpointDeps(vcs, 'lite', ['spec.md', 'tasks.md']),
+  });
+  assert.equal(code, 0);
+  const out = lines.join('\n');
+  assert.doesNotMatch(out, /requiredArtifactsFor/,
+    'lite requires spec.md and it is there — a lost tier would demand proposal.md/design.md a lite change never owed');
+  assert.doesNotMatch(out, /tasks-absent|zero "- \[x\]"/,
+    'and an executed tasks.md is neither absent nor unstarted');
+});
+
 // ── escalation inbox wiring (H1-5b): cli passes verdict.escalate through ───
 // to the poster, which applies needs-decision on escalate:'human'. ─────────
 
@@ -397,6 +479,73 @@ test('main("board"): dispatches to board.mjs\'s runBoard, reconciles the open PR
   });
   assert.equal(code, 0);
   assert.deepEqual(labelAddCalls, [['reviewed:approved']], 'board must actually reconcile via the real reconcileOnePr/guardedLabelAdd path');
+});
+
+// #477, second half of the maintainer ruling: "an unreadable verdict is
+// REPORTED, never silently folded into either of the other two."
+//
+// The board's own reporting made that impossible to satisfy by itself. It logs
+// a line only when a PR has labels to add or remove — and an unreadable verdict
+// has neither, because freezing the namespace is precisely what stops the
+// writes. So the case the ruling is about was the one case that printed
+// nothing: the operator saw "reconciled N open PR(s)" and no more. A flag that
+// reaches no human is the "flag nobody reads" the ruling refused.
+test('main("board"): a PR whose verdict could not be read is REPORTED, even though it produces no label writes (#477)', async () => {
+  const lines = [];
+  const code = await main({
+    argv: ['board'],
+    log: (m) => lines.push(m),
+    project: 'csrinaldi/brain',
+    provider: 'github',
+    boardDeps: {
+      listOpenPrs: async () => [{ number: 9 }],
+      fetchPr: async () => ({ number: 9, labels: ['seq:after-411', 'reviewed:approved'] }),
+      fetchReviews: async () => [{
+        state: 'COMMENTED',
+        author: 'brain-reviewer',
+        body: '```yaml\nprotocol: brain-review/2\nverdict: APPROVE\nhead_sha: a\nrev: 0\nsequencing: not-valid-json\n```',
+      }],
+      getVcs: async () => ({
+        labelAdd: async () => { throw new Error('must not write off an unreadable verdict'); },
+        labelRemove: async () => { throw new Error('must not write off an unreadable verdict'); },
+      }),
+    },
+  });
+  assert.equal(code, 0);
+  const reported = lines.filter(l => /unreadable/i.test(l));
+  assert.equal(reported.length, 1, `expected exactly one unreadable report, got: ${JSON.stringify(lines)}`);
+  assert.match(reported[0], /#9/, 'the report must name the PR');
+  assert.match(reported[0], /sequencing/, 'and name the field that could not be read');
+});
+
+// Review finding: the report was hardcoded. It appended "not counted as clean;
+// seq:* left untouched" to ANY non-empty `unreadable` — so a verdict with an
+// unreadable `findings` and a perfectly readable `sequencing` printed the label
+// moves it had just made and then claimed, on the next line, that seq:* was left
+// untouched. Both halves false. A report that overstates its own caution is
+// worse than no report: it is the same fail-open direction as the defect.
+test('main("board"): the unreadable report does not claim a seq:* freeze that did not happen (#477)', async () => {
+  const lines = [];
+  const body = ['```yaml', 'protocol: brain-review/2', 'head_sha: a', 'verdict: APPROVE',
+    'findings: [{"id"', 'sequencing: "[\\"seq:after-411\\"]"', '```'].join('\n');
+  const code = await main({
+    argv: ['board'],
+    log: (m) => lines.push(m),
+    project: 'csrinaldi/brain',
+    provider: 'github',
+    boardDeps: {
+      listOpenPrs: async () => [{ number: 9 }],
+      fetchPr: async () => ({ number: 9, labels: ['seq:stale'] }),
+      fetchReviews: async () => [{ state: 'COMMENTED', author: 'brain-reviewer', body }],
+      getVcs: async () => ({ labelAdd: async () => ({ ok: true }), labelRemove: async () => ({ ok: true }) }),
+    },
+  });
+  assert.equal(code, 0);
+  const reported = lines.filter(l => /unreadable/i.test(l));
+  assert.equal(reported.length, 1, `expected one unreadable report, got: ${JSON.stringify(lines)}`);
+  assert.match(reported[0], /findings/, 'it must name the field that was actually unreadable');
+  assert.doesNotMatch(reported[0], /left untouched/,
+    'seq:* was reconciled in this run — claiming otherwise misreports what the board just did');
 });
 
 test('main: an ordinary run (--pr flag, no subcommand) is UNAFFECTED by the queue/board dispatch check', () => {
@@ -753,4 +902,41 @@ test('#501: the CLI binds the VERIFIED token to the port it hands cold-boot and 
     'the poster must WRITE through the bound port — the absence of this line is what made the reviewer ' +
       'verify as csrinaldibot and post as csrinaldi (PR #500, review 4887057484)',
   );
+});
+
+// Review finding: `doctrine.unreadableVerdicts` had NO production consumer.
+// cli.mjs read only `records`/`priorVerdicts`/`priorDecisions`, poster.mjs only
+// `priorVerdicts` — so at runtime an unreadable prior verdict behaved exactly as
+// before and only a test asserted the field existed. That is precisely the
+// "flag nobody reads" the #477 ruling refused as insufficient. The reviewer's
+// own run is where it has to surface: the operator reading this output is the
+// one deciding whether to trust the thread it just derived a rev count from.
+test('main: a prior verdict the parser could not read is REPORTED on the reviewer run (#477)', async () => {
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.coldBootDeps.fetchReviews = async () => [
+    { state: 'COMMENTED', author: 'brain-reviewer',
+      body: '```yaml\nprotocol: brain-review/2\nverdict: APPROVE\nhead_sha: OLD\nrev: 0\nfindings: [{"id"\n```' },
+  ];
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), ...deps });
+  assert.equal(code, 0);
+
+  const reported = lines.filter(l => /unreadable/i.test(l));
+  assert.equal(reported.length, 1, `expected the unreadable prior verdict to be reported, got: ${JSON.stringify(lines)}`);
+  assert.match(reported[0], /findings/, 'it must name the field that could not be read');
+  assert.match(reported[0], /OLD/, 'and the head the unreadable verdict was bound to');
+});
+
+test('main: a thread of readable prior verdicts reports nothing unreadable — the control', async () => {
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.coldBootDeps.fetchReviews = async () => [
+    { state: 'COMMENTED', author: 'brain-reviewer',
+      body: '```yaml\nprotocol: brain-review/1\nverdict: REVISE\nhead_sha: OLD\nrev: 0\n```' },
+  ];
+  const lines = [];
+  await main({ argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), ...deps });
+  assert.equal(lines.filter(l => /unreadable/i.test(l)).length, 0,
+    'a false positive here would teach the operator to ignore the line within a week');
 });

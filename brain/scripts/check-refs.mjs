@@ -20,6 +20,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { CHANGES_ROOT, missingRequiredArtifacts, isGrandfathered } from './lib/sdd-layout.mjs';
+import { resolveTier, requiredArtifactsFor } from './vcs/governance-tiers.mjs';
 
 const ROOT = process.cwd();
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -96,7 +97,7 @@ for (const file of files) {
 const structViolations = [];
 
 // S-1: every active, non-grandfathered change in openspec/changes/ must carry
-// all REQUIRED_ARTIFACTS (proposal.md, spec.md, design.md, tasks.md) — the B0
+// the artifacts ITS DECLARED TIER requires — the B0
 // contract (sdd-layout.mjs), enforced here (#595 pin 1). Behavior-preserving
 // over the frozen corpus + B0-contract enforcement going forward — NEVER
 // "pure wiring": every frozen dir already carries all 4 artifacts (see
@@ -108,17 +109,62 @@ if (existsSync(changesDir)) {
     exists: (p) => existsSync(join(ROOT, p)),
     listDir: (p) => readdirSync(join(ROOT, p)),
   };
+  // #555 — DECISION, recorded because the ticket demands it rather than assumed.
+  // This check runs inside `local-checks`, which knows no tier in its current form,
+  // so a choice had to be made: tier it, or leave it fixed and declare the
+  // divergence. IT IS TIERED, and not for symmetry — leaving it fixed only RELOCATES
+  // the defect. `phase-order` is tiered (#358 Q5), so at `lite` a change carrying
+  // only `spec.md` would pass that gate and fail this one, which is the exact
+  // "same change passes one gate and blocks on another" this fix exists to remove.
+  // The maintainer ruled REQ-L4-2′'s "the tier scopes what the gate demands" reads
+  // generally, so no amendment is owed.
+  //
+  // Three states, three answers. The first cut collapsed them into one `catch` and
+  // a typo'd tier silently became `standard` — LOOSER than a `regulated` declarant
+  // asked for, fail-open in a gate `NEVER_TIERED` lists as required at every tier.
+  //
+  //   absent      → `standard` (REQ-TIER-10 — declaring nothing keeps the strict set)
+  //   unparseable → refuse; unreadable config is not "no config"
+  //   unknown tier→ refuse; `resolveTier` throws by design (REQ-TIER-1: "a typo in
+  //                 governance.tier must never quietly downgrade a repo's doctrine")
+  //
+  // `review/cli.mjs` already refuses on this exact throw. This gate now agrees with
+  // it instead of being the only tier reader that degrades.
+  const configPath = join(ROOT, 'brain.config.json');
+  let declaredTier = 'standard';
+  if (existsSync(configPath)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+    } catch (err) {
+      console.error(`✗ brain.config.json is present but unreadable — ${err.message}`);
+      console.error('  The required-artefact set is tier-scoped, so an unreadable tier is uncomputable.');
+      process.exit(1);
+    }
+    try {
+      declaredTier = resolveTier(parsed);
+    } catch (err) {
+      // REFUSED, not degraded — the distinction B2 turned on. This catch exists
+      // only to replace a V8 stack trace with an operator-readable refusal; it
+      // re-raises the outcome by exiting non-zero, never by falling back.
+      console.error(`✗ ${err.message}`);
+      console.error('  The required-artefact set is tier-scoped, so an unrecognized tier is uncomputable.');
+      console.error('  Fix governance.tier in brain.config.json (REQ-TIER-1).');
+      process.exit(1);
+    }
+  }
+  const declaredArtefacts = requiredArtifactsFor(declaredTier);
   for (const entry of readdirSync(changesDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name === 'archive') continue;
     if (isGrandfathered(entry.name)) continue;
-    const missing = missingRequiredArtifacts(entry.name, fsSeam);
+    const missing = missingRequiredArtifacts(entry.name, { artefacts: declaredArtefacts, ...fsSeam });
     if (missing.length > 0) {
       structViolations.push({
         path: `${CHANGES_ROOT}/${entry.name}`,
         rule: 'openspec-incomplete',
         reason:
-          `Active change missing ${missing.join(', ')} — required by the SDD workflow ` +
-          '(see brain/core/methodology/sdd-layout.md).',
+          `Active change missing ${missing.join(', ')} — required at the declared ` +
+          `"${declaredTier}" tier (ADR-0026; layout in brain/core/methodology/sdd-layout.md).`,
       });
     }
   }

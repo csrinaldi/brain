@@ -5,6 +5,20 @@
     "brain": "brain/scripts/cli-entry.mjs"
   },
   "private": true,
+  "license": "MIT",
+  "_files_note": "Derived from `managed` in brain/core/managed-paths.mjs — every path whose strategy needs BRAIN'S BYTES at install time. Verified against a real `npm pack` by test/publish-allowlist.e2e.test.mjs, never against this array alone. AGENTS.md is deliberately absent: it is `regenerate`, compiled in the consumer from SOURCE_DOCS, and shipping brain's own would be a file describing the wrong repository (#397).",
+  "files": [
+    "brain/core",
+    "brain/scripts",
+    ".gitattributes",
+    ".claude/settings.json",
+    ".gemini/settings.json",
+    ".github/CODEOWNERS",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/workflows/governance.yml",
+    ".github/workflows/governance-postmerge.yml",
+    ".github/workflows/release.yml"
+  ],
   "description": "Generic AI-assisted development harness — knowledge base, SDD scaffolding, and team memory.",
   "repository": {
     "type": "git",

@@ -608,3 +608,60 @@ test('#506: a ruling does NOT clear the unknown-causality escalation — two que
   assert.equal(v.verdict, 'STOP');
   assert.equal(v.escalate, 'human');
 });
+
+// ── #477: an UNREADABLE prior verdict is named, not folded ──────────────────
+//
+// The maintainer ruling on #477 (2026-08-12), second half: `cold-boot` must
+// distinguish THREE states — clean, has-findings, and unreadable — and "an
+// unreadable verdict is reported, never silently folded into either of the
+// other two."
+//
+// `parseVerdict` now records what it could not read on `result.malformed`
+// (#477's first half). Carrying that field through `priorVerdicts` is necessary
+// and is not sufficient: nothing downstream walks the list looking for it, so a
+// verdict whose findings list was garbage sits in `doctrine.priorVerdicts`
+// looking exactly like one that found nothing. `unreadableVerdicts` is the
+// named surface a reader can act on without re-deriving the question.
+//
+// `priorVerdicts` itself is NOT filtered. An unreadable verdict is still a
+// review iteration — it must keep counting toward the §7 rev bound and the
+// anti-loop lock, or refusing to read one would become a way to reset them.
+
+test('#477: an unreadable prior verdict is named in doctrine.unreadableVerdicts', async () => {
+  const reviews = [
+    { state: 'COMMENTED', author: 'brain-reviewer', body: '```yaml\nprotocol: brain-review/1\nverdict: APPROVE\nhead_sha: aaa\nrev: 0\nfindings: []\n```' },
+    // Truncated findings list — the shape a clipped comment body produces.
+    { state: 'COMMENTED', author: 'brain-reviewer', body: '```yaml\nprotocol: brain-review/2\nverdict: APPROVE\nhead_sha: bbb\nrev: 1\nfindings: [{"id": "F-1"\n```' },
+  ];
+
+  const result = await gatherColdBoot({
+    ...PR,
+    reviewerHandle: 'brain-reviewer',
+    deps: baseDeps({ fetchReviews: async () => reviews }),
+  });
+
+  assert.equal(result.doctrine.priorVerdicts.length, 2,
+    'an unreadable verdict is still an iteration — it must not be dropped from the rev count');
+  assert.deepEqual(result.doctrine.unreadableVerdicts, [
+    { head_sha: 'bbb', author: 'brain-reviewer', malformed: ['findings'] },
+  ], 'the corrupt verdict must be nameable without re-parsing — it read as "found nothing" before');
+
+  // The property the ruling is actually about, stated as a consumer would ask it.
+  const clean = v => (v.findings ?? []).length === 0 && (v.malformed ?? []).length === 0;
+  assert.equal(clean(result.doctrine.priorVerdicts[0]), true, 'the APPROVE with findings: [] is genuinely clean');
+  assert.equal(clean(result.doctrine.priorVerdicts[1]), false, 'the corrupt one must not count as clean');
+});
+
+test('#477: a thread of fully readable verdicts reports nothing unreadable — the control', async () => {
+  const reviews = [
+    { state: 'COMMENTED', author: 'brain-reviewer', body: '```yaml\nprotocol: brain-review/1\nverdict: REVISE\nhead_sha: aaa\nrev: 0\n```' },
+    { state: 'COMMENTED', author: 'bob', body: 'just a plain human comment' },
+  ];
+  const result = await gatherColdBoot({
+    ...PR,
+    reviewerHandle: 'brain-reviewer',
+    deps: baseDeps({ fetchReviews: async () => reviews }),
+  });
+  assert.deepEqual(result.doctrine.unreadableVerdicts, [],
+    'a false positive here would teach every reader to ignore the field inside a week');
+});
