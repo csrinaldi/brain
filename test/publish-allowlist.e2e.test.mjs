@@ -6,11 +6,14 @@
 // `openspec/`, the whole test tree. An over-broad first publish cannot be
 // cleanly unpublished, and `private: true` was the only thing preventing it.
 //
-// WHY IT MEASURES `npm pack` RATHER THAN THE `files` ARRAY. Reading the array
-// back would only prove the array says what it says. npm applies its own rules
-// on top — always-included files, always-excluded ones, and its handling of
-// dot-directories, which is the half most likely to surprise. The evidence has
-// to be the tarball listing, so what is asserted is what would actually ship.
+// WHY IT READS THE TARBALL AND NOT THE `files` ARRAY. Reading the array back
+// would only prove the array says what it says. npm applies its own rules on
+// top — always-included files, always-excluded ones, and its handling of
+// dot-directories, which is the half most likely to surprise.
+//
+// And not npm's `--json` REPORT of the tarball either: that shape is not stable
+// across npm versions (see `packedContents`). The evidence is the extracted
+// artifact, which is what would actually reach a consumer.
 //
 // THE RULE. `managed` in brain/core/managed-paths.mjs is the authoritative list
 // of what brain installs into a consumer. A path whose strategy needs BRAIN'S
@@ -23,6 +26,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -55,21 +60,56 @@ const MUST_NOT_SHIP = Object.freeze([
 const SIZE_CANARY_MB = 8;
 
 /**
- * The real packed listing. Throws rather than returning `[]`: an empty file
- * list would satisfy every "must not ship" assertion below and prove nothing —
- * "the pack failed" and "the tarball is clean" must not share a verdict.
+ * The real packed contents — read from the ACTUAL tarball, not from npm's
+ * report of it.
+ *
+ * The first version parsed `npm pack --dry-run --json` and read its `files[]`.
+ * That field is present on npm 10.9.7 and **absent on npm 11 / Node 24**, so the
+ * suite threw "npm pack reported no files" on a perfectly good tree — and CI
+ * never saw it, because the runner's npm still had the field. A check whose
+ * verdict depends on the shape of a tool's JSON is testing the tool.
+ *
+ * So: pack for real, extract, walk the result. The evidence is the artifact that
+ * would ship, and no npm version can change what a tarball contains.
+ *
+ * Throws rather than returning `[]`: an empty list would satisfy every
+ * "must not ship" assertion below and prove nothing — "the pack failed" and
+ * "the tarball is clean" must never share a verdict.
  *
  * @returns {{files: string[], unpackedSize: number, entryCount: number}}
  */
 function packedContents() {
-  const out = execFileSync('npm', ['pack', '--dry-run', '--json'], {
-    cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-  });
-  const parsed = JSON.parse(out);
-  const entry = Array.isArray(parsed) ? parsed[0] : parsed;
-  const files = (entry?.files ?? []).map((f) => f.path);
-  if (files.length === 0) throw new Error('npm pack reported no files — the pack failed, the tarball is not empty');
-  return { files, unpackedSize: entry.unpackedSize, entryCount: entry.entryCount };
+  const work = mkdtempSync(join(tmpdir(), 'brain-pack-'));
+  try {
+    execFileSync('npm', ['pack', '--pack-destination', work], {
+      cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const tarballs = readdirSync(work).filter((f) => f.endsWith('.tgz'));
+    if (tarballs.length !== 1) {
+      throw new Error(`npm pack produced ${tarballs.length} tarballs in ${work}, expected exactly 1`);
+    }
+    const unpacked = join(work, 'x');
+    mkdirSync(unpacked);
+    execFileSync('tar', ['-xzf', join(work, tarballs[0]), '-C', unpacked]);
+
+    // npm wraps everything under `package/`. Strip it so paths read like the
+    // repo-relative ones `managed` uses.
+    const root = join(unpacked, 'package');
+    const files = [];
+    let unpackedSize = 0;
+    const walk = (rel) => {
+      for (const e of readdirSync(join(root, rel || '.'), { withFileTypes: true })) {
+        const r = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) walk(r);
+        else { files.push(r); unpackedSize += statSync(join(root, r)).size; }
+      }
+    };
+    walk('');
+    if (files.length === 0) throw new Error('the packed tarball extracted to nothing — the pack failed, the tarball is not empty');
+    return { files, unpackedSize, entryCount: files.length };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }
 
 /** Is `managedPath` (a literal or a `**` glob) represented in the packed list? */
