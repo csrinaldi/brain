@@ -28,7 +28,10 @@ export const prohibitedRefs = [
     pattern: /(?:password|secret|api_key|token)\s*[=:]\s*["'][^"'$({]{8,}["']/i,
     reason: 'Hardcoded secret detected — use environment variables instead.',
     onlyExt: ['.js', '.mjs', '.ts', '.sh', '.yaml', '.yml', '.json'],
-    exempt: ['.env.example'],
+    // No exemptions: `.env.example` used to be listed, but `.example` is not in
+    // onlyExt, so this rule never read that file and the entry protected
+    // nothing (#616). If `.example` is ever added above, the exemption comes
+    // back as a deliberate act — with a violation to justify it.
   },
   {
     id: 'todo-without-ticket',
@@ -37,7 +40,8 @@ export const prohibitedRefs = [
     pattern: /\/\/\s*TODO(?!\s*[:(]\s*#\d)/,
     reason: 'TODO without a ticket reference — add a ticket number, e.g. // TODO(#42): description.',
     onlyExt: ['.js', '.mjs', '.ts'],
-    exempt: ['brain/project/check-refs-rules.mjs'],
+    // No exemptions: this file carried one for itself, matching zero lines
+    // (#616). A dead exemption is not inert — it blinds the rule for that path.
   },
   {
     id: 'no-verify-bypass',

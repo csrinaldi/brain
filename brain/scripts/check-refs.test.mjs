@@ -270,3 +270,54 @@ test('#555: a present-but-unparseable config REFUSES — unreadable is not "abse
   assert.match(`${r.stdout}${r.stderr}`, /unreadable/i,
     'and the refusal must say WHY, or it is indistinguishable from an artefact failure');
 });
+
+// ── Dead-exemption sweep (issue #616) ────────────────────────────────────────
+//
+// An exemption whose file no longer matches its rule is not inert: it blinds
+// that rule for that path forever, silently. #315 and #616 each had to run this
+// check by hand against one rule; this is its general form, so dead entries
+// cannot accumulate again.
+//
+// "Dead" has three shapes, and all three are caught here: the file is gone, the
+// rule can never read it (its extension is outside `onlyExt`), or it is read and
+// nothing in it matches.
+
+test('every exemption is load-bearing — no rule exempts a path it would not flag', async () => {
+  const { prohibitedRefs } = await import('../project/check-refs-rules.mjs');
+  const { readFileSync, existsSync } = await import('node:fs');
+  const { extname, join: joinPath } = await import('node:path');
+
+  const dead = [];
+  let inspected = 0;
+
+  for (const rule of prohibitedRefs) {
+    for (const relPath of rule.exempt ?? []) {
+      inspected++;
+      const full = joinPath(REPO_ROOT, relPath);
+
+      if (!existsSync(full)) {
+        dead.push(`${rule.id} → ${relPath} (file does not exist)`);
+        continue;
+      }
+      if (rule.onlyExt && !rule.onlyExt.includes(extname(relPath))) {
+        dead.push(`${rule.id} → ${relPath} (unreachable: "${extname(relPath)}" is outside onlyExt [${rule.onlyExt.join(', ')}])`);
+        continue;
+      }
+      const matches = readFileSync(full, 'utf8')
+        .split('\n')
+        .some((line) => rule.pattern.test(line));
+      if (!matches) dead.push(`${rule.id} → ${relPath} (file matches nothing — the exemption protects nothing)`);
+    }
+  }
+
+  // Evidence floor: a sweep that inspected nothing would report no dead entries
+  // and pass while proving nothing at all.
+  assert.ok(inspected >= 5, `the sweep inspected ${inspected} exemptions — it is not reading the rules`);
+
+  assert.deepEqual(
+    dead,
+    [],
+    `dead exemptions found:\n  ${dead.join('\n  ')}\n` +
+      'Remove the entry, or fix the rule so it can actually read that path.',
+  );
+});
