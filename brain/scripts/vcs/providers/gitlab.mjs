@@ -26,8 +26,10 @@ export const PROVIDER = 'gitlab';
 // template called `Default` to every new merge request, exactly as GitHub
 // auto-applies `PULL_REQUEST_TEMPLATE.md`. Any other filename ships a template
 // that a contributor must know to select — i.e. a scaffold that does not scaffold.
-// It is REFUSE-classified for the same reason its GitHub sibling is: a consumer
-// who rewrote it must be named, never clobbered.
+// It is REFUSE-classified for the same reason its GitHub sibling is — with the
+// first-ship caveat spelled out in managed-paths.mjs: on the release that
+// introduces the path, a consumer who already owns that filename is overwritten,
+// because the refusal needs a previously-shipped copy to compare against.
 export const CONTRIBUTOR_SCAFFOLD = Object.freeze({
   provider: PROVIDER,
   path: '.gitlab/merge_request_templates/Default.md',

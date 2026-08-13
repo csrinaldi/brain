@@ -10,9 +10,9 @@ and fails closed without one.
   · Targeting any other branch (a chained slice): "Part of #N" is accepted too.
     It is NOT accepted on the default branch — the integration PR must close.
 
-The referenced issue MUST carry the approved label (`status:approved`; scoped
-providers use their own separator). An unapproved issue fails the gate exactly as a
-missing reference does.
+The referenced issue MUST carry the approved label — `status:approved` unless this
+repo sets `governance.approvedLabel`, which the gate honors and this text cannot see.
+An unapproved issue fails the gate exactly as a missing reference does.
 -->
 
 Closes #
@@ -22,9 +22,9 @@ Closes #
 <!--
 Check exactly ONE box and add the matching `type:*` label.
 
-This list IS the vocabulary — a `type:*` value outside it is not a label on this
-repository, so checking a box for one leaves the "exactly one `type:*` label" item
-unsatisfiable. Verify with your provider's label list before adding a new value here.
+This is the set brain ships. It is NOT read from your project — check it against your
+own labels, because a `type:*` value your project does not define cannot satisfy the
+"exactly one `type:*` label" item no matter which box is ticked.
 -->
 
 - [ ] New feature (`type:feature`)
@@ -95,23 +95,29 @@ outside the machine.
 ## What the gates check
 
 <!--
-The governance jobs that run on this pull request. Which of them BLOCK the merge depends
-on the tier this repo declares and on what the platform can enforce — run
-`npm run brain:governance-status` to see the resolved set.
+The governance jobs that run on this pull request. Which of them BLOCK the merge is a
+property of YOUR pipeline, not of this list: the tier this repo declares and what the
+platform can enforce both feed it, and a pipeline may simply run every job as
+blocking regardless of tier. `npm run brain:governance-status` prints the
+tier-resolved set — compare it against your pipeline definition rather than assuming
+they agree.
 -->
 
 | Gate | What it verifies |
 |------|------------------|
 | `issue-link` | The pull request description references an issue carrying the approved label. Fails closed. |
 | `diff-size` | Changed lines are within the declared tier's budget, excluding the configured ignore list. |
-| `local-checks` | The repo-local checks (`npm test`, reference check, navigation check) run in CI too. |
-| `memory-gate` | This repository has EVER recorded a session summary under `.memory/records/`. It is repo-scoped, not per-change. |
+| `local-checks` | The structural repo checks — reference check, navigation check — run in CI too, not only in your local hook. |
+| `memory-gate` | Session memory was captured. WHEN the pipeline hands this gate the pull request description (some do, some do not), it requires a memory record scoped to the linked issue; otherwise it degrades to "this repository has ever recorded a session summary". |
 | `decision-gate` | An ADDED ADR is indexed in `brain/HOME.md`, and `brain/HOME.md` is not touched without an ADR. Reads no labels. |
 | `phase-order` | The change's SDD artifacts progressed in order. Detection-only at the lightest tier. |
 | `actor-check` | The approval evidence comes from an act distinct from the authoring one. |
-| `brain-writes-reviewed` | Writes to the knowledge half were not authored by an agent identity. |
+| `brain-writes-reviewed` | Writes to the knowledge half are not agent-authored. Above the lightest tier they must also carry an approving review from someone other than the author. |
 
 ## Test plan
+
+<!-- Run these locally. Do not assume CI repeats all of them: which checks a
+     consumer's pipeline actually executes varies — see the gate table above. -->
 
 - [ ] `npm test` passes (all unit tests green)
 - [ ] `npm run brain:repo:check` passes
@@ -124,10 +130,10 @@ on the tier this repo declares and on what the platform can enforce — run
 - [ ] Exactly one `type:*` label added, from the list above
 - [ ] Diff size within the tier's budget (or `size:exception` labelled and justified)
 - [ ] Conventional commit format (`type(scope): description`, no AI-attribution trailers)
-- [ ] Anything worth keeping was captured with `npm run memory:share`. Note that
-      `memory-gate` does not check this pull request: it asks only whether the repository
-      has ever recorded a session summary, and `skip:memory-gate` is named in the
-      docs but no code reads it — applying it changes nothing.
+- [ ] Session memory captured with `npm run memory:share`, and the record carries the
+      linked issue number. Where the pipeline hands `memory-gate` this description,
+      an unscoped record does NOT satisfy it. `skip:memory-gate` is named in the docs
+      but no gate reads it — applying it exempts nothing.
 
 <!-- Emitted from brain/scripts/vcs/contributor-scaffold.mjs — edit the source, not
      .github/PULL_REQUEST_TEMPLATE.md. A hand-edit here is refused by contributor-scaffold.test.mjs. -->

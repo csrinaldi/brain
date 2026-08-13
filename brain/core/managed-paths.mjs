@@ -115,10 +115,17 @@ export const managedStrategy = Object.freeze({
   // Prose a team rewrites wholesale.
   '.github/PULL_REQUEST_TEMPLATE.md': STRATEGY.REFUSE,
   // The GitLab sibling of the row above (issue #570). Same artifact, same class,
-  // therefore the same strategy — a consumer who rewrote their contributor
-  // scaffold is named, never clobbered. Classified by extension of an already
-  // ratified row rather than as a new class; it is a NEW path, so no signed row
-  // changes value.
+  // therefore the same strategy. Classified by extension of an already ratified row
+  // rather than as a new class; it is a NEW path, so no signed row changes value.
+  //
+  // WHAT THIS ROW DOES NOT DO, ON THE RELEASE THAT INTRODUCES IT: refuse. The gate
+  // fires only for a path the PREVIOUSLY INSTALLED package shipped (`outgoing` in
+  // installer.mjs), and a first-ship path is in no prior release — so a consumer who
+  // already owns `.gitlab/merge_request_templates/Default.md` gets it OVERWRITTEN,
+  // reported as a collision, unless they ran with `--abort-on-collision`. Measured,
+  // not assumed: `contributor-scaffold.test.mjs` pins it. The protection is real from
+  // the next release onward; saying otherwise here would be the same class of
+  // comfortable falsehood #570 is about.
   '.gitlab/merge_request_templates/Default.md': STRATEGY.REFUSE,
   // A consumer who pinned a runner version or added a job loses it silently
   // today. Merging YAML semantically is neither cheap nor safe.
