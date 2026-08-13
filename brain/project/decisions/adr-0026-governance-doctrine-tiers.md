@@ -1,6 +1,6 @@
 # ADR-0026 — Governance Doctrine Tiers: A Declared Axis Orthogonal to the Detected Substrate Ladder
 
-**Status**: Accepted · **amended 11/08/2026** (Amendments 1-4 — see below) · **Amendment 5 (#581) PENDING SIGNATURE**  
+**Status**: Accepted · **amended 12/08/2026** (Amendments 1-5 — see below)  
 **Date**: 31/07/2026 — Cristian Rinaldi
 
 ## Context
@@ -83,7 +83,7 @@ permanently red — it blocks, on evidence a solo maintainer can actually produc
 | `local-checks` | `repo:check` + `brain:nav` + `npm test` | same | same |
 | `decision-gate` | ADR ⇔ `brain/HOME.md` co-occurrence **[Amended by Amendment 4 (#516) — only in the ADDED direction: an added ADR requires a `HOME.md` change, and a `HOME.md` change requires some ADR to be touched, but a MODIFIED ADR alone passes (#510). See Amendment 4.]** | + the `decision`-label step hard — **not implemented; the gate reads no labels at any tier (Amendment 4)** | + the ADR carries a recorded human signature |
 | `diff-size` | ≤ 1000, `size:exception` honored | ≤ 400, honored | ≤ 200, **not honored** |
-| `actor-check` | **distinct act over foreign commits** (Amendment 1, #418) — the approval event is strictly later than the latest *foreign* commit: one authored by anyone other than the approver or a registered `governance.reviewActors` identity. Commits by the approver or a verified reviewer identity never re-arm an existing approval. An author that cannot be resolved to an account counts as **foreign** (fail closed). With no foreign commit on the branch, any approval event satisfies the evidence. **[Amended by Amendment 2 (#473) — a `brain-decision/1 APPROVE` review comment, anchored on the PR's head SHA and posted via `brain:approve`, is ALSO sufficient `lite` evidence, OR'd with the distinct-act check above; see Amendment 2.]** **[Amended by Amendment 3 (#454) — the exempt set also includes identities registered in `governance.agentActors`: an agent acting inside the approved loop under the approver's instruction does not re-arm the approval; see Amendment 3.]** **[Amended by Amendment 5 (#581), PENDING SIGNATURE — `governance.reviewActors` is REMOVED from the exempt set: a read-only identity has no commits to exempt, so a commit under one re-arms like any other foreign commit; see Amendment 5.]** | distinct act **+ distinct actor** — unchanged: the approval postdates the head-commit push | + the approver authored no commit on the branch — unchanged |
+| `actor-check` | **distinct act over foreign commits** (Amendment 1, #418) — the approval event is strictly later than the latest *foreign* commit: one authored by anyone other than the approver or a registered `governance.reviewActors` identity. Commits by the approver or a verified reviewer identity never re-arm an existing approval. An author that cannot be resolved to an account counts as **foreign** (fail closed). With no foreign commit on the branch, any approval event satisfies the evidence. **[Amended by Amendment 2 (#473) — a `brain-decision/1 APPROVE` review comment, anchored on the PR's head SHA and posted via `brain:approve`, is ALSO sufficient `lite` evidence, OR'd with the distinct-act check above; see Amendment 2.]** **[Amended by Amendment 3 (#454) — the exempt set also includes identities registered in `governance.agentActors`: an agent acting inside the approved loop under the approver's instruction does not re-arm the approval; see Amendment 3.]** **[Amended by Amendment 5 (#581) — `governance.reviewActors` is REMOVED from the exempt set: a read-only identity has no commits to exempt, so a commit under one re-arms like any other foreign commit; see Amendment 5.]** | distinct act **+ distinct actor** — unchanged: the approval postdates the head-commit push | + the approver authored no commit on the branch — unchanged |
 | `brain-writes-reviewed` | **agent-authorship exclusion** — no `governance.reviewActors` identity authored the `brain/**` change | non-author, non-bot **human** APPROVED review | + CODEOWNERS armed at rung 1 where the substrate allows |
 
 The reviewer's `event: COMMENT` constraint (ADR-0020) is likewise never-tiered: **no
@@ -600,9 +600,7 @@ ahead of it, which is exactly what that row is.
 
 ## Amendment 5 — a read-only review identity has no commits to exempt (issue #581)
 
-**Status**: PENDING SIGNATURE — drafted 12/08/2026 on the maintainer's ruling of the same
-date. Not in force until signed. The code change it records is in the same pull request; if
-this amendment is refused, that change goes with it.
+**Signed**: 12/08/2026 — Cristian Rinaldi
 
 ### What changed
 
