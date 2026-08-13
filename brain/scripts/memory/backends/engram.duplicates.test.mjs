@@ -85,6 +85,10 @@ test('pullMemory: reindexes BETWEEN git pull and hydration, and reports what the
 });
 
 test('pullMemory: a store the merge left unindexable REFUSES before engram is hydrated from it', async () => {
+  // The throw stubbed here is the TAMPER refusal, which is the only refusal
+  // rebuildIndex still has. A duplicate — divergent or not — never throws
+  // (#574): it is reported. Using a message the code no longer emits would
+  // make this test teach a rule that does not exist.
   let imported = false;
 
   await assert.rejects(
@@ -93,13 +97,17 @@ test('pullMemory: a store the merge left unindexable REFUSES before engram is hy
         root: '/fake/root',
         _isManifestDirty: () => false,
         _gitPull: () => {},
-        _rebuildIndex: () => { throw new Error("rebuildIndex: divergent duplicate at 2026-07.jsonl:9 — id 'rec-a' …"); },
+        _rebuildIndex: () => {
+          throw new Error(
+            "rebuildIndex: id mismatch at 2026-07.jsonl:9 — stored id 'rec-a' does not match the recomputed id 'rec-b' (tampered or stale record)",
+          );
+        },
         _import: () => { imported = true; },
       }),
-    /divergent duplicate/,
+    /id mismatch/,
   );
 
-  assert.equal(imported, false, 'hydration must not run on a store the rule refuses — ordering is the guarantee');
+  assert.equal(imported, false, 'hydration must not run on a store the gate refuses — ordering is the guarantee');
 });
 
 // ── import ───────────────────────────────────────────────────────────────────
