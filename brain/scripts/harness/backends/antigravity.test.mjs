@@ -29,7 +29,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // RED: fails until antigravity.mjs exists and exports these.
-import { SOURCE_DOCS, AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH, compileAgentsMd, compileGeminiSettingsJson, init } from './antigravity.mjs';
+import { SOURCE_DOCS, AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH, compileAgentsMd, init } from './antigravity.mjs';
+import { compileSettingsHooksJson } from './settings-hooks.mjs';
 import { dispatch } from '../cli.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
@@ -240,8 +241,8 @@ test('GEMINI_SETTINGS_EMIT_PATH === ".gemini/settings.json"', () => {
   assert.equal(GEMINI_SETTINGS_EMIT_PATH, '.gemini/settings.json');
 });
 
-test('compileGeminiSettingsJson() emits valid JSON with SessionStart and PreToolUse hooks', () => {
-  const jsonStr = compileGeminiSettingsJson();
+test('compileSettingsHooksJson() emits valid JSON with SessionStart and PreToolUse hooks', () => {
+  const jsonStr = compileSettingsHooksJson();
   const parsed = JSON.parse(jsonStr);
 
   assert.ok(parsed.hooks);
@@ -284,4 +285,15 @@ test('REQ-509-6: the old fail-open would have produced a plausible file — proo
   assert.match(gutted, /generated from/);
   assert.equal(gutted.split('<!-- source: ').length, good.split('<!-- source: ').length);
   assert.ok(gutted.length < good.length);
+});
+
+test('antigravity declares no agent runtime probe — it ships no version-queryable CLI (issue #123)', async () => {
+  const { AGENT_RUNTIME } = await import('./antigravity.mjs');
+  const { probeAgentRuntime } = await import('./agent-runtime.mjs');
+
+  // Deliberately null, and asserted so: the export must EXIST so the seam is
+  // uniform across backends, and a future antigravity CLI turns this into a
+  // one-line descriptor rather than a new mechanism.
+  assert.equal(AGENT_RUNTIME, null);
+  assert.equal(probeAgentRuntime(AGENT_RUNTIME).state, 'not-declared');
 });

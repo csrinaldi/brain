@@ -193,3 +193,80 @@ test('repo:check S-1 (Phase 6.1 synthetic): a dir with no artifacts at all lists
     assert.ok(r.stderr.includes(artifact), `expected '${artifact}' named as missing in:\n${r.stderr}`);
   }
 });
+
+// ── #555: the tier-resolved S-1 set ─────────────────────────────────────────
+//
+// Added after a cold review found the whole tiering path untested (C2): every
+// existing fixture is built by `makeMinimalRepo` with NO brain.config.json, so
+// all of them exercised only the absent-config → `standard` fallback. The
+// config-PRESENT paths — including a swallowed refusal that turned a typo'd
+// `regulated` into a green `standard` — had no coverage at all.
+
+function writeTierConfig(git, dir, tier) {
+  addTrackedFile(git, dir, 'brain.config.json', JSON.stringify({ governance: { tier } }, null, 2));
+}
+
+test('#555: at a declared `lite`, a change carrying only spec.md is accepted (config-present path)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'refs-s1-lite-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeMinimalRepo(dir);
+  copyRulesFile(dir);
+  writeTierConfig(git, dir, 'lite');
+  makeChangeDir(dir, 'issue-1-lite', { 'spec.md': '' });
+  git('add', '-A');
+  git('commit', '-m', 'seed');
+
+  const r = runCheckRefs(dir);
+  assert.equal(r.status, 0,
+    `lite requires spec.md only (ADR-0026); expected exit 0, got ${r.status}\n${r.stderr}`);
+});
+
+test('#555: a TYPO in governance.tier REFUSES — it never silently degrades to standard', (t) => {
+  // The blocker this test exists for: a bare `catch` around `resolveTier` turned
+  // `regulatedd` into `standard`, green and silent — LOOSER than the operator
+  // declared, in a gate `NEVER_TIERED` lists as required at every tier.
+  // `review/cli.mjs` already refuses on this same throw; this gate now agrees.
+  const dir = mkdtempSync(join(tmpdir(), 'refs-s1-typo-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeMinimalRepo(dir);
+  copyRulesFile(dir);
+  writeTierConfig(git, dir, 'regulatedd');
+  makeChangeDir(dir, 'issue-1-typo', { 'spec.md': '' });
+  git('add', '-A');
+  git('commit', '-m', 'seed');
+
+  const r = runCheckRefs(dir);
+  assert.notEqual(r.status, 0,
+    `an unrecognized tier must fail closed (REQ-TIER-1), got exit ${r.status}\n${r.stdout}\n${r.stderr}`);
+  const out = `${r.stdout}${r.stderr}`;
+  assert.match(out, /regulatedd/,
+    `the refusal must name the offending value so it is actionable, got:\n${out}`);
+});
+
+test('#555: a present-but-unparseable config REFUSES — unreadable is not "absent"', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'refs-s1-badjson-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = makeMinimalRepo(dir);
+  copyRulesFile(dir);
+  addTrackedFile(git, dir, 'brain.config.json', '{ not json');
+  // The change dir carries the FULL standard set on purpose. The first version of
+  // this test gave it only spec.md, so the buggy path — swallow the parse error,
+  // fall back to `standard` — ALSO exited non-zero, on missing artefacts. The test
+  // passed with the defect reintroduced and pinned nothing (cold review, R2-B3).
+  // With every standard artefact present, the fallback exits 0 and only a real
+  // refusal can fail this.
+  makeChangeDir(dir, 'issue-1-bad', {
+    'proposal.md': '', 'spec.md': '', 'design.md': '', 'tasks.md': '',
+  });
+  git('add', '-A');
+  git('commit', '-m', 'seed');
+
+  const r = runCheckRefs(dir);
+  assert.notEqual(r.status, 0,
+    `an unreadable tier is uncomputable, not "no config" — expected refusal, got ${r.status}`);
+  assert.match(`${r.stdout}${r.stderr}`, /unreadable/i,
+    'and the refusal must say WHY, or it is indistinguishable from an artefact failure');
+});

@@ -18,7 +18,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SOURCE_DOCS, AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH, compileAgentsMd, compileGeminiSettingsJson } from './antigravity.mjs';
+import { SOURCE_DOCS, AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH, compileAgentsMd } from './antigravity.mjs';
+import { compileSettingsHooksJson } from './settings-hooks.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
@@ -63,8 +64,8 @@ test('drift-guard proof: a mutated copy of a fresh compile is NOT byte-equal to 
   );
 });
 
-test('drift-guard: compileGeminiSettingsJson() is valid JSON and byte-equal to .gemini/settings.json if present', () => {
-  const fresh = compileGeminiSettingsJson();
+test('drift-guard: compileSettingsHooksJson() is valid JSON and byte-equal to .gemini/settings.json if present', () => {
+  const fresh = compileSettingsHooksJson();
   assert.doesNotThrow(() => JSON.parse(fresh));
 
   const path = join(REPO_ROOT, GEMINI_SETTINGS_EMIT_PATH);
