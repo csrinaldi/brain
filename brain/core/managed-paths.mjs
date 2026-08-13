@@ -49,6 +49,15 @@ export const managed = [
   '.github/workflows/release.yml',      // L2 rung-2/rung-3 enforcement travels with brain (issue #176)
   '.github/workflows/governance-postmerge.yml', // L2 rung-2/rung-3 enforcement travels with brain (issue #176)
   '.github/PULL_REQUEST_TEMPLATE.md',   // the Closes/Fixes scaffold the gate parses (ADR-0014)
+  '.gitlab/merge_request_templates/Default.md', // the SAME scaffold, emitted for GitLab (issue #570).
+                                             // Both files are rendered from ONE neutral source
+                                             // (brain/scripts/vcs/contributor-scaffold.mjs) — only the
+                                             // DELIVERY is provider-specific. Shipping the GitHub one
+                                             // alone left a GitLab consumer with `issue-link` as a
+                                             // REQUIRED job parsing MR descriptions for a closing
+                                             // reference and no scaffold telling anyone to write one.
+                                             // LITERAL, never `.gitlab/**`: the consumer's other merge
+                                             // request templates are theirs.
   '.github/CODEOWNERS',                 // L6 rung-1 enhancement, optional (REQ-L6-1, design §6.2)
   '.claude/settings.json',              // Claude Code harness hook — no-verify policy (ADR-0014 §9)
   '.gemini/settings.json',              // Antigravity harness hook — SessionStart & PreToolUse (issue #305)
@@ -105,6 +114,12 @@ export const managedStrategy = Object.freeze({
   '.github/CODEOWNERS': STRATEGY.REFUSE,
   // Prose a team rewrites wholesale.
   '.github/PULL_REQUEST_TEMPLATE.md': STRATEGY.REFUSE,
+  // The GitLab sibling of the row above (issue #570). Same artifact, same class,
+  // therefore the same strategy — a consumer who rewrote their contributor
+  // scaffold is named, never clobbered. Classified by extension of an already
+  // ratified row rather than as a new class; it is a NEW path, so no signed row
+  // changes value.
+  '.gitlab/merge_request_templates/Default.md': STRATEGY.REFUSE,
   // A consumer who pinned a runner version or added a job loses it silently
   // today. Merging YAML semantically is neither cheap nor safe.
   '.github/workflows/governance.yml': STRATEGY.REFUSE,

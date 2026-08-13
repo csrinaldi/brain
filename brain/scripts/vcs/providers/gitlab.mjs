@@ -15,6 +15,27 @@ import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
 
 export const PROVIDER = 'gitlab';
 
+// ── Contributor-scaffold DELIVERY (issue #570) ─────────────────────────────────
+//
+// The GitLab sibling of github.mjs's record, and the half that did not exist: a
+// GitLab consumer opting into `brain/scripts/ci/gitlab-governance.yml` received
+// `issue-link` as a REQUIRED job parsing merge-request descriptions for a closing
+// reference, and no scaffold telling a contributor to write one.
+//
+// `Default.md` is load-bearing, not a name: GitLab auto-applies the description
+// template called `Default` to every new merge request, exactly as GitHub
+// auto-applies `PULL_REQUEST_TEMPLATE.md`. Any other filename ships a template
+// that a contributor must know to select — i.e. a scaffold that does not scaffold.
+// It is REFUSE-classified for the same reason its GitHub sibling is: a consumer
+// who rewrote it must be named, never clobbered.
+export const CONTRIBUTOR_SCAFFOLD = Object.freeze({
+  provider: PROVIDER,
+  path: '.gitlab/merge_request_templates/Default.md',
+  noun: 'merge request',
+  nounTitle: 'Merge request',
+  abbr: 'MR',
+});
+
 // The single credential resolver (issue #501). Thirteen verbs resolved
 // `token ?? vcsToken(PROVIDER)` inline. The parameter was correct and the
 // reviewer still wrote with the wrong credential, because poster.mjs never passed

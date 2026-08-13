@@ -1,14 +1,14 @@
 ## Linked issue (required)
 
 <!--
-Every pull request must reference an approved issue — `issue-link` is a required gate
+Every merge request must reference an approved issue — `issue-link` is a required gate
 and fails closed without one.
 
   · Targeting the default branch: use a CLOSING reference, followed by the issue
     number — the line below is already in that form.
     Accepted closing keywords (case-insensitive): `Close`, `Closed`, `Closes`, `Fix`, `Fixed`, `Fixes`, `Resolve`, `Resolved`, `Resolves`.
   · Targeting any other branch (a chained slice): "Part of #N" is accepted too.
-    It is NOT accepted on the default branch — the integration PR must close.
+    It is NOT accepted on the default branch — the integration MR must close.
 
 The referenced issue MUST carry the approved label (`status:approved`; scoped
 providers use their own separator). An unapproved issue fails the gate exactly as a
@@ -17,7 +17,7 @@ missing reference does.
 
 Closes #
 
-## Pull request type
+## Merge request type
 
 <!--
 Check exactly ONE box and add the matching `type:*` label.
@@ -36,7 +36,7 @@ unsatisfiable. Verify with your provider's label list before adding a new value 
 
 ## Summary
 
-<!-- 1–3 bullet points describing what this pull request does. -->
+<!-- 1–3 bullet points describing what this merge request does. -->
 
 -
 
@@ -55,7 +55,7 @@ Additions + deletions, excluding whatever `governance.ignoreList` in this repo's
 brain.config.json lists (test files, fixtures and lock files are the usual
 entries — the list varies per repo, so read it rather than assuming).
 
-If this pull request exceeds the budget, add the `size:exception` label and explain why
+If this merge request exceeds the budget, add the `size:exception` label and explain why
 splitting was not feasible. CI will block merges over budget without it.
 
 `regulated` does NOT honor `size:exception` — at that tier the label is refused
@@ -79,7 +79,7 @@ in exactly two cases —
 Everything else passes, including MODIFYING an existing ADR on its own: correcting a
 line in an ADR from months ago does not force a re-index.
 
-So if this pull request introduces an architectural or process decision:
+So if this merge request introduces an architectural or process decision:
   1. Add an `adr-NNNN-<slug>.md` under `brain/project/decisions/`
   2. Index it in `brain/HOME.md` — this is the half the gate checks
   3. Add the `decision` label
@@ -95,14 +95,14 @@ outside the machine.
 ## What the gates check
 
 <!--
-The governance jobs that run on this pull request. Which of them BLOCK the merge depends
+The governance jobs that run on this merge request. Which of them BLOCK the merge depends
 on the tier this repo declares and on what the platform can enforce — run
 `npm run brain:governance-status` to see the resolved set.
 -->
 
 | Gate | What it verifies |
 |------|------------------|
-| `issue-link` | The pull request description references an issue carrying the approved label. Fails closed. |
+| `issue-link` | The merge request description references an issue carrying the approved label. Fails closed. |
 | `diff-size` | Changed lines are within the declared tier's budget, excluding the configured ignore list. |
 | `local-checks` | The repo-local checks (`npm test`, reference check, navigation check) run in CI too. |
 | `memory-gate` | This repository has EVER recorded a session summary under `.memory/records/`. It is repo-scoped, not per-change. |
@@ -125,9 +125,9 @@ on the tier this repo declares and on what the platform can enforce — run
 - [ ] Diff size within the tier's budget (or `size:exception` labelled and justified)
 - [ ] Conventional commit format (`type(scope): description`, no AI-attribution trailers)
 - [ ] Anything worth keeping was captured with `npm run memory:share`. Note that
-      `memory-gate` does not check this pull request: it asks only whether the repository
+      `memory-gate` does not check this merge request: it asks only whether the repository
       has ever recorded a session summary, and `skip:memory-gate` is named in the
       docs but no code reads it — applying it changes nothing.
 
 <!-- Emitted from brain/scripts/vcs/contributor-scaffold.mjs — edit the source, not
-     .github/PULL_REQUEST_TEMPLATE.md. A hand-edit here is refused by contributor-scaffold.test.mjs. -->
+     .gitlab/merge_request_templates/Default.md. A hand-edit here is refused by contributor-scaffold.test.mjs. -->
