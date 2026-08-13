@@ -18,7 +18,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { MANAGED_SCRIPT_KEYS } from '../../core/managed-paths.mjs';
-import { mergePackageJsonScripts } from './installer.mjs';
+import { mergePackageJsonScripts, installedPackageRoot } from './installer.mjs';
 
 /** The one alias `brain:upgrade` can never inject into a consumer — see the header. */
 export const BOOTSTRAP_SCRIPT_KEY = 'brain:upgrade';
@@ -40,7 +40,7 @@ export const BOOTSTRAP_SCRIPT_VALUE = 'node node_modules/brain/brain/scripts/bra
  * @returns {string|null} e.g. `v1.0.0`
  */
 export function resolveInstalledTag({ root, readFile = (p) => readFileSync(p, 'utf8'), exists = existsSync } = {}) {
-  const pkgPath = join(root, 'node_modules', 'brain', 'package.json');
+  const pkgPath = installedPackageRoot(root, 'package.json');
   if (!exists(pkgPath)) return null;
   try {
     const version = JSON.parse(readFile(pkgPath))?.version;

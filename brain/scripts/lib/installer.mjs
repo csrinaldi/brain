@@ -1466,6 +1466,35 @@ export function migrateConfig(config, migrations, targetVersion) {
 export const BRAIN_REPO_HTTPS = 'git+https://github.com/csrinaldi/brain.git';
 
 /**
+ * The published package name — the directory npm installs brain into.
+ *
+ * ONE source, on purpose (issue #623). Measured before extracting it: this path
+ * was resolved by literal in nine executable places across six modules, so a
+ * scoped rename (`@scope/brain`, ADR-0030) had nine independent chances to miss
+ * one. A missed one does not fail at rename time; it fails on the release that
+ * first needs that path, inside `brain:upgrade` — the verb a consumer runs to
+ * recover. That is #601's shape.
+ *
+ * `installed-package-root.test.mjs` fails if a second literal reappears
+ * anywhere under `brain/scripts/**`, so the rename is now one constant.
+ */
+export const PACKAGE_NAME = 'brain';
+
+/**
+ * Where an installed brain lives inside a consumer repo.
+ *
+ * Handles a scoped name without the caller knowing: npm splits `@scope/name`
+ * into two directory segments, so this must never be a single `join` argument.
+ *
+ * @param {string} repoRoot  the consumer repo root
+ * @param {...string} rest   further segments inside the package
+ * @returns {string}
+ */
+export function installedPackageRoot(repoRoot, ...rest) {
+  return join(repoRoot, 'node_modules', ...PACKAGE_NAME.split('/'), ...rest);
+}
+
+/**
  * Normalizes any git repository URL to an npm-installable `git+https://` form.
  *
  * Accepted input forms and their canonical output:
@@ -1537,7 +1566,7 @@ export function resolveInstallUrl(url) {
  * @returns {string}
  */
 export function installSpec(root, tag) {
-  const pkgPath = join(root, 'node_modules', 'brain', 'package.json');
+  const pkgPath = installedPackageRoot(root, 'package.json');
   try {
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
     const repoUrl = pkg?.repository?.url ?? (typeof pkg?.repository === 'string' ? pkg.repository : undefined);
@@ -1581,7 +1610,7 @@ export function highestTag(lsRemoteStdout) {
  */
 export function readInstalledVersion(repoRoot) {
   const candidates = [
-    join(repoRoot, 'node_modules', 'brain', 'package.json'),
+    installedPackageRoot(repoRoot, 'package.json'),
     join(repoRoot, 'package.json'),
   ];
   for (const path of candidates) {
