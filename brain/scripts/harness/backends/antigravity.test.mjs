@@ -29,7 +29,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // RED: fails until antigravity.mjs exists and exports these.
-import { SOURCE_DOCS, AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH, compileAgentsMd, compileGeminiSettingsJson, init } from './antigravity.mjs';
+import { SOURCE_DOCS, AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH, compileAgentsMd, init } from './antigravity.mjs';
+import { compileSettingsHooksJson } from './settings-hooks.mjs';
 import { dispatch } from '../cli.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
@@ -240,8 +241,8 @@ test('GEMINI_SETTINGS_EMIT_PATH === ".gemini/settings.json"', () => {
   assert.equal(GEMINI_SETTINGS_EMIT_PATH, '.gemini/settings.json');
 });
 
-test('compileGeminiSettingsJson() emits valid JSON with SessionStart and PreToolUse hooks', () => {
-  const jsonStr = compileGeminiSettingsJson();
+test('compileSettingsHooksJson() emits valid JSON with SessionStart and PreToolUse hooks', () => {
+  const jsonStr = compileSettingsHooksJson();
   const parsed = JSON.parse(jsonStr);
 
   assert.ok(parsed.hooks);

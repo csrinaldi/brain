@@ -3,14 +3,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { CLAUDE_SETTINGS_EMIT_PATH, compileClaudeSettingsJson, init } from './claude.mjs';
+import { CLAUDE_SETTINGS_EMIT_PATH, init } from './claude.mjs';
+import { compileSettingsHooksJson } from './settings-hooks.mjs';
 
 test('CLAUDE_SETTINGS_EMIT_PATH === ".claude/settings.json"', () => {
   assert.equal(CLAUDE_SETTINGS_EMIT_PATH, '.claude/settings.json');
 });
 
-test('compileClaudeSettingsJson() emits valid JSON with SessionStart and PreToolUse hooks', () => {
-  const jsonStr = compileClaudeSettingsJson();
+test('compileSettingsHooksJson() emits valid JSON with SessionStart and PreToolUse hooks', () => {
+  const jsonStr = compileSettingsHooksJson();
   const parsed = JSON.parse(jsonStr);
 
   assert.ok(parsed.hooks);
@@ -32,7 +33,7 @@ test('init() calls _writeClaudeSettings with CLAUDE_SETTINGS_EMIT_PATH and valid
 
   assert.equal(writeCalls.length, 1);
   assert.equal(writeCalls[0].relPath, CLAUDE_SETTINGS_EMIT_PATH);
-  assert.equal(writeCalls[0].content, compileClaudeSettingsJson());
+  assert.equal(writeCalls[0].content, compileSettingsHooksJson());
 });
 
 // ── agent runtime descriptor (issue #123) ────────────────────────────────────
