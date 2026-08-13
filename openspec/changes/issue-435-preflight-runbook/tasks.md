@@ -12,7 +12,12 @@ issue: 435
 - [x] Measure the §2b surface (2070 of 2177 human session summaries)
 - [x] Inventory the internal references with file counts
 - [x] Record why the agent's own pass does not satisfy §1 (shallow clone)
-- [ ] **HUMAN**: execute the runbook on a full clone and post the §4.1 block to #435
+- [x] Deepen the clone (`git fetch --unshallow`) — 218 → 1170 reachable, 1114 on main
+- [x] Execute §1.1 (gitleaks, all history): 853 commits, 19 findings, 17 fixtures + 2 false positives
+- [x] Execute §1.3 (commit messages, deleted blobs, `.env`): clean
+- [x] Execute §2a: 4 records (not 10 — regex corrected), all clean; zero full-form tokens in `.memory/` history
+- [x] Record in §4.0 that two of the three claimed blockers were false
+- [ ] **HUMAN**: §1.2 `--only-verified`, the §2b decision, and the §4.1 signature
 
 ## Out of scope
 

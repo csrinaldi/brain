@@ -1,11 +1,15 @@
 # #435 Pre-flight — runbook
 
-> **The agent prepared this; the maintainer executes it.** Every command runs on
-> a **full clone**, on the maintainer's machine. Nothing here can be run from a
-> Claude Code cloud container (see §0), and nothing here should be run by an
-> agent: the output is credential material.
+> **§1 and §2a have been EXECUTED — results inline below.** The first draft of
+> this runbook handed the whole thing to the maintainer on the grounds that an
+> agent could not run it. Two of the three stated blockers were false, and the
+> corrections are recorded in §4.0 rather than quietly fixed.
 >
-> **Fill in:** `<FULL_CLONE_PATH>`.
+> **What remains is genuinely the maintainer's**, and §4.2 says why for each:
+> live-credential verification, rotation, the §2b judgment call, and the
+> signature.
+>
+> Every command below is reproducible on a full clone. **Fill in:** `<FULL_CLONE_PATH>`.
 
 ---
 
@@ -57,11 +61,13 @@ git rev-parse --is-shallow-repository     # MUST print: false
 git rev-list --count --all                # record this number
 ```
 
-**STOP if it prints `true`.** Re-clone: `git clone https://github.com/csrinaldi/brain.git`.
+If it prints `true`, **deepen rather than re-clone** — `git fetch --unshallow`
+works and is far cheaper. Measured 2026-08-13: the container's clone printed
+`true` at 218 commits; after `--unshallow`, **1170 reachable, 1114 on `main`**.
 
-> This is not hypothetical. The agent-side pass reported in §4.0 ran in a
-> container where this printed `true` and only 218 commits were reachable —
-> which is exactly why that pass does not count as this step.
+> **#435's own figure is stale.** It says *"all 534 commits on `main`"*; `main`
+> carries 1114 today. Anyone scoping the audit from that number is scoping half
+> of it.
 
 ### 0.2 Tools
 
@@ -85,7 +91,7 @@ means "clean" network results there say nothing about your machine.
 
 ## §1 — History credential scan
 
-### 1.1 gitleaks over all history
+### 1.1 gitleaks over all history — **EXECUTED 2026-08-13, 19 findings, all benign**
 
 ```bash
 gitleaks detect --source . --log-opts="--all" --redact --report-path /tmp/gitleaks.json
@@ -94,6 +100,14 @@ echo "findings: $(jq 'length' /tmp/gitleaks.json)"
 
 `--redact` keeps the secret itself out of the report file. Read findings by
 `RuleID`, `File`, `Commit`, `Date`.
+
+**Result — 853 commits scanned, 19 findings, every one accounted for:**
+
+| count | rule @ file | verdict |
+|---|---|---|
+| 12 | `gitlab-pat` ×9, `generic-api-key` ×2, `aws-access-token` ×1 @ `secret-scrub.test.mjs` | fixture (§1.4) |
+| 5 | `github-pat` ×2, `aws-access-token` ×2, `generic-api-key` ×1 @ `engram.share.test.mjs` | fixture (§1.4) |
+| 2 | `generic-api-key` @ `vcs/ci-context.mjs` | **false positive** — the matched line is `apiBase: env.CI_API_V4_URL ?? 'https://gitlab.com/api/v4'`. A public URL; the rule fires on the variable name |
 
 ### 1.2 trufflehog, verified-only then everything
 
@@ -106,7 +120,7 @@ trufflehog git file://. --json > /tmp/th-all.json
 Those are the ones that matter: a live key is an incident, an expired one is
 hygiene.
 
-### 1.3 Targeted passes the scanners are weakest at
+### 1.3 Targeted passes the scanners are weakest at — **EXECUTED, clean**
 
 Commit **messages** and deleted files — both are places a pasted token survives
 a later cleanup.
@@ -124,6 +138,13 @@ git log --all -p -S'BEGIN RSA PRIVATE KEY' --oneline || echo "clean"
 git log --all --diff-filter=A --name-only --format='%H' -- '.env' | head || echo "never added"
 ```
 
+**Results:** commit messages **clean**. `.env` **never versioned**, across all
+history. The `-S` passes found token shapes in 16 / 9 / 2 / 2 commits
+respectively — and every file they touch is the scrubber (`secret-scrub.mjs`),
+its tests, its pattern definitions (`config-migrations.mjs`), openspec documents
+*about* the scrubber, or this runbook. One exception was worth chasing:
+`.memory/records/2026-07.jsonl`, resolved in §2a.
+
 ### 1.4 Expected benign hits — anything else is a finding
 
 The working tree has four files that legitimately contain credential-shaped
@@ -134,8 +155,11 @@ strings, because they are the fixtures that test the scrubber:
 | `brain/scripts/memory/lib/secret-scrub.test.mjs` | GitLab PAT ×9, AWS key ×1, private-key block ×1 |
 | `brain/scripts/memory/backends/engram.share.test.mjs` | GitHub PAT ×2, AWS key ×2 |
 
+Plus **two `generic-api-key` false positives** in `brain/scripts/vcs/ci-context.mjs`,
+both on `apiBase … 'https://gitlab.com/api/v4'`.
+
 Confirm each hit resolves to one of those. **Every other hit stops the run** and
-goes to §3.
+goes to §1.5.
 
 ### 1.5 If something is found
 
@@ -155,7 +179,7 @@ every git history by construction.
 
 ## §2 — `.memory/` (8.6 MB, 2177 records)
 
-### 2a — The records the scrub never ran on
+### 2a — The records the scrub never ran on — **EXECUTED, clean**
 
 `secret-scrub` is wired into the memory **backends** (`engram.mjs`,
 `plainfiles.mjs`); `format.mjs` explicitly disclaims it. The records written in
@@ -174,9 +198,30 @@ for (const f of fs.readdirSync(".memory/records")) {
 }'
 ```
 
-Measured on `main` @ `b2a6b37`: **10 records**, all `@legacy` / `session_summary`.
-Read all ten in full — they are architecture prose and very unlikely to carry a
-secret, but "unlikely" is what the scrub existed to stop being the argument.
+**Result: 4 records**, all `@legacy` / `session_summary`, 2229–3185 chars each,
+**all clean** against full-form PAT / GitLab-PAT / AWS-key / private-key /
+long-Bearer / `password=` patterns.
+
+> An earlier count in this runbook said 10. That was a looser regex (`#41\b`)
+> catching unrelated ticket numbers. The corrected figure is 4.
+
+The one thing worth reading anyway, because it is the shape §1.3 chased into
+this file: `.memory/records/2026-07.jsonl` contains **5 occurrences of `ghp_`**,
+and every one is *narrative with the token elided* — e.g. *"the reviewer token
+got written as a KEY NAME (`ghp_...=`) instead of `BRAIN_REVIEWER_TOKEN=`"*, and
+*"a 40-char `ghp_` PAT, in BOTH the main checkout and the …"*.
+
+Verified: **zero full-form tokens across the entire history of `.memory/`.**
+
+```bash
+git log --all -p -- .memory/ | grep -coE 'ghp_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|github_pat_[A-Za-z0-9_]{22,}'
+# → 0
+```
+
+Those records are clean, and they are also a fair illustration of §2b: a session
+summary narrating a credential-handling incident does not leak the credential,
+but it does tell a reader that a 40-char PAT once sat in `.env` in two
+checkouts.
 
 ```bash
 node -e '
@@ -242,15 +287,27 @@ a self-hosted instance are the ones worth a second look; a product name is not.
 
 ## §4 — The record
 
-### 4.0 What was already run, and why it does not count
+### 4.0 What the agent got wrong, and then ran
 
-An agent ran a pattern pass on 2026-08-13 over the **1011 tracked files of the
-working tree**: the only credential-shaped hits were the §1.4 fixtures, and
-`.memory/` was clean.
+The first draft of this runbook handed everything to the maintainer, on three
+stated blockers. **Two were false**, and finding that out is why §1 and §2a are
+now executed rather than pending:
 
-**It does not satisfy §1.** That clone was shallow — 218 commits of ~534
-reachable — so it audited the tree, not the history. Treat it as a smoke test
-that found nothing, not as evidence.
+| claimed blocker | reality |
+|---|---|
+| "the clone is shallow and cannot be deepened" | `git fetch --unshallow` worked. 218 → **1170 reachable, 1114 on `main`** |
+| "gitleaks/trufflehog are not installed" | the gitleaks release tarball downloads and runs |
+| "verification uses live credentials" | **true** — see §4.2 |
+
+So §1.1, §1.3 and §2a were executed from the container, and their results are
+inline above. What that does *not* cover is §1.2's `--only-verified` pass, which
+is the one genuine blocker.
+
+**Read the executed sections as a scan, not as an audit.** gitleaks' rule set is
+broad but finite; a credential in an unusual shape passes it, which is the whole
+reason #435 says automated scanning is *necessary and not sufficient*. The
+maintainer's re-run is still worth its time — it costs about a minute now that
+the commands and their expected output are written down.
 
 ### 4.1 The block to sign
 
@@ -276,7 +333,25 @@ Outcome:          [ ] nothing exposed — record and move on
 Signed: <name>, <date>
 ```
 
-### 4.2 What unblocks on the back of it
+### 4.2 What is the maintainer's, and why
+
+Four things, and none of them for ceremony:
+
+1. **`trufflehog --only-verified` (§1.2).** Verification means *sending each
+   candidate credential to its provider* to ask whether it is live. That is the
+   one step where auditing and exercising someone's credential are the same
+   action — and from this container it would go through a proxy that rewrites
+   identity (#604), so a "clean" result would mean nothing.
+2. **Rotation (§1.5).** Provider consoles, the maintainer's accounts. Nothing
+   found so far needs it.
+3. **The §2b decision.** Whether 2070 human session summaries stay public is a
+   values call about the maintainer's own working record, not a technical
+   finding. An agent picking it would be the omission all over again, with a
+   different author.
+4. **The signature (§4.1).** Same class as `brain:promote`: the mechanics are
+   automatable, the attestation is not.
+
+### 4.3 What unblocks on the back of it
 
 With §4.1 posted, the rest of #435 is ordinary work: the scoped package name,
 `private: false` in `package.json`, the install-spec move off the git URL, the
