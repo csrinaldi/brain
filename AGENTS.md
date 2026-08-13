@@ -84,6 +84,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0028](brain/project/decisions/adr-0028-brain-promote-read-confirm-stage.md) — `brain:promote` is read-confirm-stage: the mechanics are automated, the signature is not (**Amendment 1, 12/08/2026** — `brain:promote` also performs §1c's in-place amendment cascade; the four locks and the human signature are unchanged, #509)
 - [ADR-0029](brain/project/decisions/adr-0029-two-sources-one-graph.md) — Two sources feed one graph: the union is taken, the divergence is reported
 - [ADR-0018](brain/project/decisions/adr-0018-gitlab-governance-fragment.md) — The GitLab governance surface is an opt-in fragment, not a pipeline
+- [ADR-0030](brain/project/decisions/adr-0030-distribution-scoped-registry-package.md) — Distribution moves to a scoped registry package; ADR-0006's premise no longer exists
 
 ### Project-specific rules
 
