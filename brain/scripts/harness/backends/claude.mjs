@@ -4,9 +4,11 @@
 // Implements the harness verb contract for Claude Code platform backend.
 // Emits .claude/settings.json deterministically with workspace hooks.
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { compileSettingsHooksJson } from './settings-hooks.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -28,40 +30,10 @@ export const AGENT_RUNTIME = Object.freeze({
   updateHint: 'npm install -g @anthropic-ai/claude-code@latest',
 });
 
-/**
- * Compiles .claude/settings.json content with native workspace hooks.
- * Pure, fs-free.
- *
- * @returns {string} The formatted JSON content.
- */
-export function compileClaudeSettingsJson() {
-  const obj = {
-    hooks: {
-      PreToolUse: [
-        {
-          matcher: 'Bash',
-          hooks: [
-            {
-              type: 'command',
-              command: "node -e \"const cmd = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).tool_input?.command ?? ''; if (/--no-verify/.test(cmd) || /\\bgit commit\\b[^|&\\n]*\\s+-n\\b/.test(cmd)) { process.stderr.write('\\n[brain:hook] BLOCKED: --no-verify / git commit -n bypasses governance hooks.\\nSee ADR-0014 §9. Fix the hook that is causing the false-positive instead.\\n'); process.exit(2); }\"",
-            },
-          ],
-        },
-      ],
-      SessionStart: [
-        {
-          hooks: [
-            {
-              type: 'command',
-              command: 'npm run brain:session:start',
-            },
-          ],
-        },
-      ],
-    },
-  };
-  return JSON.stringify(obj, null, 2) + '\n';
-}
+// The settings-hooks payload itself is NOT claude-specific and no longer lives
+// here (issue #315): it was byte-identical to antigravity's copy. What is
+// claude-specific is CLAUDE_SETTINGS_EMIT_PATH above — the only thing that ever
+// differed. See settings-hooks.mjs.
 
 function _defaultWriteFile(relPath, content, root) {
   const fullPath = join(root, relPath);
@@ -84,7 +56,7 @@ export async function init({
 } = {}) {
   const writeClaudeSettings = _writeClaudeSettings ?? ((relPath, content) => _defaultWriteFile(relPath, content, _repoRoot));
 
-  const settingsContent = compileClaudeSettingsJson();
+  const settingsContent = compileSettingsHooksJson();
   try {
     writeClaudeSettings(CLAUDE_SETTINGS_EMIT_PATH, settingsContent);
   } catch (err) {
