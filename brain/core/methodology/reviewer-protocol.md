@@ -39,8 +39,8 @@ Three independent locks. **Any one holds if the other two fail.** Removing any o
 the other two standing.
 
 > **Citations here name symbols, never line numbers.** An earlier revision of this section
-> cited `brain-writes-reviewed.mjs:99` for lock 1; within one release cycle line 99 had become
-> an unrelated JSDoc block while the mechanism moved to line 167. A doctrine that points at a
+> cited a source line number in `brain-writes-reviewed.mjs` for lock 1; within one release
+> cycle that line had become an unrelated JSDoc block while the mechanism moved elsewhere. A doctrine that points at a
 > moving target sends its own verifier to the wrong text (#580).
 
 **Lock 1 — COMMENT-state verdicts.** Every verdict posts as a COMMENT-state review. L6's
@@ -73,16 +73,34 @@ only one thing to agree about:
   (`evaluateBrainWritesReviewed`), reading the key through `defaultReadBotAllowlist`.
 
 `governance.approvalActors` is a **separate key with a separate meaning**: a *human-trust
-grant*. It too is cashed at two gates — it authorizes applying `status:approved` at L5, and it
-whitelists the `override:*` label strings honored at L6 — through a `defaultReadApprovalActors`
-that exists in both `actor-check.mjs` and `brain-writes-reviewed.mjs`. One meaning, two grants,
-which is the same shape as `reviewActors` above and equally permitted by R2.
+grant*. It is read at **both** gates and cashed as **three** grants — at L5 it authorizes
+applying `status:approved` **and** whitelists which `override:*` labels are honored; at L6 it
+whitelists `override:*` there too.
 
-What L6 does **not** do is read `approvalActors` as its **`botAllowlist`**. That reader,
-`defaultReadBotAllowlist`, takes `reviewActors` alone and says so in its own JSDoc — unioning
-the two there is the dual-semantics coupling ADR-0020's R2 exists to dissolve, because it would
-make one registration both exclude an identity from the human count and authorize it to apply
-the label.
+Its readers are named in a way that will mislead anyone grepping, so the table is the citation:
+
+| file | function | key it actually reads |
+|---|---|---|
+| `actor-check.mjs` | `defaultReadBotAllowlist` | **`approvalActors`** |
+| `brain-writes-reviewed.mjs` | `defaultReadBotAllowlist` | **`reviewActors`** |
+| `brain-writes-reviewed.mjs` | `defaultReadApprovalActors` | **`approvalActors`** |
+
+**One function name, two different keys, depending on which file you are in.** That is the
+single most confusing thing in this subsystem and it is not a defect — the two `botAllowlist`s
+answer different questions — but a reader who greps one name and assumes the other file matches
+will get the split exactly backwards.
+
+What L6 does **not** do is read `approvalActors` as **its** `botAllowlist`. That reader takes
+`reviewActors` alone — unioning the two there is the dual-semantics coupling ADR-0020's R2
+exists to dissolve, because it would make one registration both exclude an identity from the
+human count and authorize it to apply the label.
+
+The authority for `approvalActors` being read at two gates is **not** R2, which says the
+opposite in ADR-0020's own text (*"Read only by L5"*, *"No key feeds two gates"*). It is the
+**H0-b rev-1 ruling P272-OVERRIDE-KEY**: `override:*` and `status:approved` are both
+human-trust grants keyed on `approvalActors`, and the reviewer handle is in neither. The code
+records the same thing in the same terms — it calls R2 *knowingly excepted* here, not
+satisfied.
 
 **The reviewer handle is in neither key.** Both effects require both registrations, explicitly,
 never implicitly.
@@ -123,7 +141,8 @@ never implicitly.
 semantics**:
 
 - **L5 — permissive. Still true today.** `actor-check.mjs` reads `governance.approvalActors`
-  through `defaultReadApprovalActors` into `botAllowlist`; when the approving actor is in it,
+  through `defaultReadBotAllowlist` (which in THIS file reads `approvalActors` — see §2's
+  table) into `botAllowlist`; when the approving actor is in it,
   `evaluateActor` returns `{ level: 'pass', reason: 'the approved label was applied by
   allow-listed automation identity "…" ' }`. Being in the list **authorizes** you to apply
   `status:approved`.
@@ -153,19 +172,21 @@ Two mandatory tests make this executable and ship with the implementation slice 
 `t1` — the reviewer identity does NOT pass `actor-check` when applying `status:approved`;
 `t2` — the reviewer identity IS excluded from the L6 human-approver count.
 
-> **Live-tree note for the promoter.** `governance.approvalActors` is **not currently
-> populated** in `brain.config.json` (only `governance.ignoreList` exists,
-> `brain.config.json:16`). Both L5 and L6 read it defensively and default to `[]` when
-> absent. The split still holds — `reviewActors` is genuinely new and `approvalActors` is
-> genuinely L5-only *in code* — but formalizing both keys in the shipped config is part of
-> H0-b, not an existing given. Do not assume `approvalActors` is set.
+> **Live-tree note.** `governance.approvalActors` is **not currently populated** in this
+> repo's `brain.config.json`; `governance` there carries `auditBaseline`, `tier`,
+> `ignoreList`, `reviewActors` and `agentActors`. Both gates read `approvalActors`
+> defensively and default to `[]` when absent, so nothing depends on it being set. The split
+> holds because `reviewActors` is a distinct key that L6's `botAllowlist` reads alone — **not**
+> because `approvalActors` is L5-only, which it is not (§2). Do not assume `approvalActors` is
+> set, and do not read its absence as the split being unfinished.
 
 ---
 
 ## 4. The four COMMENT-only port verbs
 
-`brain`'s VCS port has 16 verbs today (`VERBS` in `brain/scripts/vcs/cli.mjs`) and **none of them
-writes to the review/comment/label surface**. H0 adds four, on both providers
+`brain`'s VCS port is `VERBS` in `brain/scripts/vcs/cli.mjs`. It had 16 verbs when this section
+was written, **none of which wrote to the review/comment/label surface**; H0 added the four
+below and `VERBS` now carries 26. They are shipped, on both providers
 (`brain/scripts/vcs/providers/{github,gitlab}.mjs`), each incapable of approving. Normalized
 returns match the port's existing `{ url } | { url: null, error }` / never-throws discipline
 (`brain/core/methodology/vcs-contract.md`).
@@ -404,15 +425,16 @@ sequencing namespace would have put one typo between the reviewer and self-appro
 
 ## 11. The reviewer handle — mechanism now, identity later
 
-This protocol specifies the `governance.reviewActors` **mechanism**, not a concrete handle. **No
-dedicated reviewer identity exists yet.** Interim provenance for a reviewer run is the human token
-that invokes it; minting a real, dedicated reviewer identity is a later deliverable (H0-b or
-beyond).
+This protocol specified the `governance.reviewActors` **mechanism** before any concrete handle
+existed. **The identity has since been minted**: `brain.config.json` carries
+`reviewer: { handle: "csrinaldibot", tokenEnv: "BRAIN_REVIEWER_TOKEN", protocol: "brain-review/2" }`
+and registers `csrinaldibot` in `governance.reviewActors`. It has posted verdicts. What follows
+is therefore a live arrangement, not a plan.
 
-When that identity is minted, it is registered in `governance.reviewActors` (the L6-only key) and
-**never** in `governance.approvalActors` (the L5-only key). Until then, `reviewActors` may be empty;
-the split is real in code the moment L6 reads the new key, independent of whether a handle occupies
-it yet. **Do not register any reviewer handle in `governance.approvalActors` — ever.** That single
+It is registered in `governance.reviewActors` — the key L6's `botAllowlist` reads — and **never**
+in `governance.approvalActors`. Note that `approvalActors` is not "the L5-only key": both gates
+read it (§2). What makes the split hold is that `reviewActors` is the *only* thing L6's
+`botAllowlist` takes, and the reviewer handle is absent from `approvalActors` entirely. **Do not register any reviewer handle in `governance.approvalActors` — ever.** That single
 line is the dual-semantics hazard §3 exists to close.
 
 ---
