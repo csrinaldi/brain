@@ -160,7 +160,7 @@ function checkArtifactCompleteness({ missing = [], hasCheckedTask, tier = 'stand
       id: 'tasks-no-progress',
       severity: 'blocker',
       evidence: 'tasks.md has zero "- [x]" entries',
-      cites: 'sdd-layout.mjs requiredArtifactsFor (tasks.md)',
+      cites: 'sdd-layout.mjs REQUIRED_ARTIFACTS (tasks.md)',
     });
   }
   return findings;

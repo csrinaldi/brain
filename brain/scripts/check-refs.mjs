@@ -116,30 +116,20 @@ if (existsSync(changesDir)) {
   // the defect. `phase-order` is tiered (#358 Q5), so at `lite` a change carrying
   // only `spec.md` would pass that gate and fail this one, which is the exact
   // "same change passes one gate and blocks on another" this fix exists to remove.
+  // The maintainer ruled REQ-L4-2′'s "the tier scopes what the gate demands" reads
+  // generally, so no amendment is owed.
   //
-  // The tier comes from the same `resolveTier(loadBrainConfig())` every other
-  // consumer uses, and `resolveTier` returns `standard` when `governance.tier` is
-  // absent (REQ-TIER-10) — so a repo that declares nothing keeps today's stricter
-  // behaviour byte for byte. The loosening only reaches a repo that ASKED for it.
-  // The tier of the repo UNDER CHECK, read from ROOT — not `loadBrainConfig()`,
-  // which resolves its path from its own module location. In a consumer install
-  // those coincide; here they do not, and the first cut of this fix read THIS
-  // repo's tier while validating a different tree. A fixture caught it.
-  //
-  // Absent or unreadable config falls back to `standard`, matching `resolveTier`'s
-  // own default (REQ-TIER-10): a repo that declares nothing keeps the stricter set,
-  // so the loosening only ever reaches a repo that asked for it.
-  // Three states, three answers — the first cut collapsed them into one `catch`
-  // and a typo'd tier silently became `standard`, which is LOOSER than a
-  // `regulated` declarant asked for. Fail-open in a NEVER_TIERED required gate.
+  // Three states, three answers. The first cut collapsed them into one `catch` and
+  // a typo'd tier silently became `standard` — LOOSER than a `regulated` declarant
+  // asked for, fail-open in a gate `NEVER_TIERED` lists as required at every tier.
   //
   //   absent      → `standard` (REQ-TIER-10 — declaring nothing keeps the strict set)
   //   unparseable → refuse; unreadable config is not "no config"
   //   unknown tier→ refuse; `resolveTier` throws by design (REQ-TIER-1: "a typo in
   //                 governance.tier must never quietly downgrade a repo's doctrine")
   //
-  // `review/cli.mjs` already handles this exact throw by refusing the run. This
-  // gate now agrees with it instead of being the only tier reader that degrades.
+  // `review/cli.mjs` already refuses on this exact throw. This gate now agrees with
+  // it instead of being the only tier reader that degrades.
   const configPath = join(ROOT, 'brain.config.json');
   let declaredTier = 'standard';
   if (existsSync(configPath)) {
@@ -151,7 +141,17 @@ if (existsSync(changesDir)) {
       console.error('  The required-artefact set is tier-scoped, so an unreadable tier is uncomputable.');
       process.exit(1);
     }
-    declaredTier = resolveTier(parsed);   // throws on an unrecognized tier — deliberately uncaught
+    try {
+      declaredTier = resolveTier(parsed);
+    } catch (err) {
+      // REFUSED, not degraded — the distinction B2 turned on. This catch exists
+      // only to replace a V8 stack trace with an operator-readable refusal; it
+      // re-raises the outcome by exiting non-zero, never by falling back.
+      console.error(`✗ ${err.message}`);
+      console.error('  The required-artefact set is tier-scoped, so an unrecognized tier is uncomputable.');
+      console.error('  Fix governance.tier in brain.config.json (REQ-TIER-1).');
+      process.exit(1);
+    }
   }
   const declaredArtefacts = requiredArtifactsFor(declaredTier);
   for (const entry of readdirSync(changesDir, { withFileTypes: true })) {

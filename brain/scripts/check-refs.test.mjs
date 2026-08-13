@@ -252,11 +252,21 @@ test('#555: a present-but-unparseable config REFUSES — unreadable is not "abse
   const git = makeMinimalRepo(dir);
   copyRulesFile(dir);
   addTrackedFile(git, dir, 'brain.config.json', '{ not json');
-  makeChangeDir(dir, 'issue-1-bad', { 'spec.md': '' });
+  // The change dir carries the FULL standard set on purpose. The first version of
+  // this test gave it only spec.md, so the buggy path — swallow the parse error,
+  // fall back to `standard` — ALSO exited non-zero, on missing artefacts. The test
+  // passed with the defect reintroduced and pinned nothing (cold review, R2-B3).
+  // With every standard artefact present, the fallback exits 0 and only a real
+  // refusal can fail this.
+  makeChangeDir(dir, 'issue-1-bad', {
+    'proposal.md': '', 'spec.md': '', 'design.md': '', 'tasks.md': '',
+  });
   git('add', '-A');
   git('commit', '-m', 'seed');
 
   const r = runCheckRefs(dir);
   assert.notEqual(r.status, 0,
     `an unreadable tier is uncomputable, not "no config" — expected refusal, got ${r.status}`);
+  assert.match(`${r.stdout}${r.stderr}`, /unreadable/i,
+    'and the refusal must say WHY, or it is indistinguishable from an artefact failure');
 });

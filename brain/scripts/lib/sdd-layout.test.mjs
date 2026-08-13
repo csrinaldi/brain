@@ -36,10 +36,13 @@ test('1.2: OPERATIONAL_ARTIFACTS / CHANGES_ROOT / LEGACY_GRANDFATHERED are froze
   assert.ok(Object.isFrozen(CHANGES_ROOT));
   assert.ok(Object.isFrozen(LEGACY_GRANDFATHERED));
   assert.equal(LEGACY_GRANDFATHERED.length, 12);
-  // #555: `REQUIRED_ARTIFACTS` was here and is gone. The canonical four are now
-  // the `standard` tier's set, resolved — one list in the system rather than a
-  // frozen copy that could disagree with it, which is exactly what it did.
+  // #555: `REQUIRED_ARTIFACTS` stays, as the SCAFFOLD set (REQ-L4-2′ — "the tier
+  // scopes what the gate demands, never what the scaffold produces"). What is
+  // tier-resolved is what the GATES require, which is `requiredArtifactsFor`.
+  // Both are asserted, because the whole defect was treating them as one thing.
+  assert.deepEqual(REQUIRED_ARTIFACTS, ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
   assert.deepEqual(requiredArtifactsFor('standard'), ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
+  assert.deepEqual(requiredArtifactsFor('lite'), ['spec.md']);
 });
 
 // ── Task 1.3: changeDir — rehearses new-change.mjs:48-110, engram.mjs:804-805 &
@@ -483,26 +486,23 @@ test('#555: requiredArtifactsFor resolves from the tier table, with the extensio
     ['proposal.md', 'spec.md', 'design.md', 'tasks.md', 'verify-report.md']);
 });
 
-test('#555: the resolver adds nothing and drops nothing — one entry in, one file out, per tier', () => {
-  // REPLACED after a cold review (C5): the first version asserted
-  // `requiredArtifactsFor(tier)` equalled `artefacts.map(n => n + '.md')` — which
-  // was character-for-character the function's own body. It asserted the function
-  // equals itself, and it agreed with the `verification.md` bug rather than
-  // catching it. A guard written from the implementation cannot see the
-  // implementation's mistake.
-  //
-  // This one checks a property the body does not state: cardinality and
-  // membership against the MAP, which is a separate declaration.
-  for (const tier of ALL_TIERS) {
-    const names = tierParamsFor(tier).artefacts;
-    const files = requiredArtifactsFor(tier);
-    assert.equal(files.length, names.length, `${tier}: one file per declared artefact, no more, no fewer`);
-    for (const f of files) {
-      assert.ok(Object.values(ARTEFACT_FILE).includes(f),
-        `${tier}: "${f}" is not a file any artefact name declares — a filename was invented`);
-    }
-  }
-});
+// #555 round 2 — a guard was REMOVED here, twice over, and the reason is worth
+// more than the guard was.
+//
+// v1 asserted `requiredArtifactsFor(tier)` equalled `artefacts.map(n => n + '.md')`
+// — character-for-character the function's body. It agreed with the
+// `verification.md` bug instead of catching it.
+//
+// v2 replaced it with cardinality + membership against ARTEFACT_FILE. Also a
+// theorem of the implementation: `.map()` preserves length, and every value it can
+// return is by construction a value of the map. Proven inert by a cold review —
+// with `spec` remapped to `design.md`, a filename WAS invented and the guard whose
+// failure message read "a filename was invented" passed.
+//
+// Both were written FROM the implementation, which is the one place a guard cannot
+// see a mistake. What actually catches an invented filename is the literal
+// expectation in the test above, because those literals are an independent
+// declaration of the answer. Two tautologies are not worth a third attempt.
 
 test('#555: at `lite` a change carrying only spec.md is COMPLETE — the tier brain declares for itself', () => {
   // Before the fix this returned ["proposal.md","design.md","tasks.md"] and the
