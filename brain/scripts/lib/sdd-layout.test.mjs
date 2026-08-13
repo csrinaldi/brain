@@ -14,7 +14,6 @@ import { fileURLToPath } from 'node:url';
 
 // Task 1.1 (RED): fails with "module not found" until sdd-layout.mjs exists.
 import {
-  REQUIRED_ARTIFACTS,
   OPERATIONAL_ARTIFACTS,
   CHANGES_ROOT,
   LEGACY_GRANDFATHERED,
@@ -31,13 +30,15 @@ const SCRIPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // ── Task 1.2: the four frozen constants ──────────────────────────────────────
 
-test('1.2: REQUIRED_ARTIFACTS / OPERATIONAL_ARTIFACTS / CHANGES_ROOT / LEGACY_GRANDFATHERED are frozen', () => {
-  assert.ok(Object.isFrozen(REQUIRED_ARTIFACTS));
+test('1.2: OPERATIONAL_ARTIFACTS / CHANGES_ROOT / LEGACY_GRANDFATHERED are frozen', () => {
   assert.ok(Object.isFrozen(OPERATIONAL_ARTIFACTS));
   assert.ok(Object.isFrozen(CHANGES_ROOT));
   assert.ok(Object.isFrozen(LEGACY_GRANDFATHERED));
-  assert.deepEqual(REQUIRED_ARTIFACTS, ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
   assert.equal(LEGACY_GRANDFATHERED.length, 12);
+  // #555: `REQUIRED_ARTIFACTS` was here and is gone. The canonical four are now
+  // the `standard` tier's set, resolved — one list in the system rather than a
+  // frozen copy that could disagree with it, which is exactly what it did.
+  assert.deepEqual(requiredArtifactsFor('standard'), ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
 });
 
 // ── Task 1.3: changeDir — rehearses new-change.mjs:48-110, engram.mjs:804-805 &
@@ -164,12 +165,12 @@ test('1.9: missingRequiredArtifacts — a NEW dir missing spec.md and design.md 
     'openspec/changes/issue-999-x/proposal.md': true,
     'openspec/changes/issue-999-x/tasks.md': true,
   });
-  assert.deepEqual(missingRequiredArtifacts('issue-999-x', fs), ['spec.md', 'design.md']);
+  assert.deepEqual(missingRequiredArtifacts('issue-999-x', { artefacts: STANDARD, ...fs }), ['spec.md', 'design.md']);
 });
 
 test('1.9: missingRequiredArtifacts — a grandfathered dir missing everything short-circuits to [] ("the past is recorded, not edited")', () => {
   const fs = fakeFs({});
-  assert.deepEqual(missingRequiredArtifacts('vcs-adapter', fs), []);
+  assert.deepEqual(missingRequiredArtifacts('vcs-adapter', { artefacts: STANDARD, ...fs }), []);
 });
 
 test('1.9: missingRequiredArtifacts — spec slot delegates to hasSpec (nested spec counts as present)', () => {
@@ -180,15 +181,20 @@ test('1.9: missingRequiredArtifacts — spec slot delegates to hasSpec (nested s
     'openspec/changes/issue-999-x/specs': ['cap'],
     'openspec/changes/issue-999-x/specs/cap/spec.md': true,
   });
-  assert.deepEqual(missingRequiredArtifacts('issue-999-x', fs), []);
+  assert.deepEqual(missingRequiredArtifacts('issue-999-x', { artefacts: STANDARD, ...fs }), []);
 });
 
 // ── Task 1.10: OPERATIONAL_ARTIFACTS — rehearses feature-resolution.mjs:79-84
 // (existsSync(join(changesDir, candidate, 'resume.md'))) + engram.mjs:805/926 ──
 
-test('1.10: OPERATIONAL_ARTIFACTS includes resume.md, and it is excluded from REQUIRED_ARTIFACTS', () => {
+test('1.10: OPERATIONAL_ARTIFACTS includes resume.md, and no tier ever requires it', () => {
   assert.ok(OPERATIONAL_ARTIFACTS.includes('resume.md'));
-  assert.equal(REQUIRED_ARTIFACTS.includes('resume.md'), false);
+  // Widened by #555: driven over EVERY tier, not one constant. `resume.md` is
+  // machine-written and discardable, so a tier that required it would be a gate
+  // on a file the tooling rewrites.
+  for (const tier of ALL_TIERS) {
+    assert.equal(requiredArtifactsFor(tier).includes('resume.md'), false, tier);
+  }
 });
 
 test('1.10: resume.md is never consulted by missingRequiredArtifacts (feature-resolution.mjs:79-84 shape)', () => {
@@ -199,7 +205,7 @@ test('1.10: resume.md is never consulted by missingRequiredArtifacts (feature-re
     'openspec/changes/issue-999-x/tasks.md': true,
     // resume.md deliberately absent — must not affect the result.
   });
-  assert.deepEqual(missingRequiredArtifacts('issue-999-x', fs), []);
+  assert.deepEqual(missingRequiredArtifacts('issue-999-x', { artefacts: STANDARD, ...fs }), []);
 });
 
 // Task 1.11 (stop-condition, owner ruling #587 item 2): every helper above
@@ -443,4 +449,79 @@ test('A3 negative case: a hypothetical site re-declaring its own artifact-name a
 test('A3 (task 4.5): scanning the six real wired sites reports zero offenders', () => {
   const sites = CONSUMING_SITES.map((s) => ({ ...s, content: readFileSync(s.abs, 'utf8') }));
   assert.deepEqual(scanSitesForA3(sites), []);
+});
+
+// ── #555: ONE artifact set, resolved by tier ────────────────────────────────
+//
+// Two sets coexisted and disagreed in three ways at once — contents (1 vs 4 vs 5),
+// extension (`spec` vs `spec.md`), and one being fixed while the other tiered:
+//
+//   REQUIRED_ARTIFACTS (fixed)      ["proposal.md","spec.md","design.md","tasks.md"]
+//   tierParams('lite').artefacts    ["spec"]
+//
+// `phase-order` was tiered by #358 Q5. `missingRequiredArtifacts` and its two
+// consumers were not, so at the tier brain declares for ITSELF, doctrine said
+// `spec` suffices while `local-checks` and the reviewer's checkpoint demanded all
+// four. The same change passed one gate and blocked on another — this repository's
+// own configuration, not a laboratory case.
+//
+// #312 is why it stopped being decoration: the artifact set became the primary key
+// of the executor contract, and a contract keyed on an ambiguous set inherits the
+// ambiguity.
+
+import { requiredArtifactsFor } from '../vcs/governance-tiers.mjs';
+import { tierParams as tierParamsFor, TIERS as ALL_TIERS } from '../vcs/governance-tiers.mjs';
+
+/** #555: these tests measured against the fixed four; they now name the set explicitly. */
+const STANDARD = requiredArtifactsFor('standard');
+
+test('#555: requiredArtifactsFor resolves from the tier table, with the extension normalised in ONE place', () => {
+  assert.deepEqual(requiredArtifactsFor('lite'), ['spec.md']);
+  assert.deepEqual(requiredArtifactsFor('standard'), ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
+  assert.deepEqual(requiredArtifactsFor('regulated'),
+    ['proposal.md', 'spec.md', 'design.md', 'tasks.md', 'verification.md']);
+});
+
+test('#555: the tier table is the ONLY source — every tier round-trips through one normaliser', () => {
+  // The guard the ticket asks for: a consumer that goes back to its own list
+  // fails here. Driven over every tier that exists rather than the three spelled
+  // above, so a new tier cannot be added without this test seeing it.
+  for (const tier of ALL_TIERS) {
+    const raw = tierParamsFor(tier).artefacts;
+    assert.deepEqual(requiredArtifactsFor(tier), raw.map(n => `${n}.md`),
+      `${tier}: the resolved set must be the tier table's own list plus the layout's extension, ` +
+      `nothing added, nothing dropped, and no second list anywhere`);
+  }
+});
+
+test('#555: at `lite` a change carrying only spec.md is COMPLETE — the tier brain declares for itself', () => {
+  // Before the fix this returned ["proposal.md","design.md","tasks.md"] and the
+  // reviewer emitted an `artifacts-missing` BLOCKER over a change doctrine calls
+  // finished.
+  const seam = {
+    exists: (p) => p.endsWith('/spec.md'),
+    listDir: () => ['spec.md'],
+  };
+  assert.deepEqual(missingRequiredArtifacts('issue-999-only-spec', { artefacts: requiredArtifactsFor('lite'), ...seam }), []);
+});
+
+test('#555: and at `standard` the same change is still incomplete — the fix is not a blanket loosening', () => {
+  const seam = {
+    exists: (p) => p.endsWith('/spec.md'),
+    listDir: () => ['spec.md'],
+  };
+  assert.deepEqual(
+    missingRequiredArtifacts('issue-999-only-spec', { artefacts: requiredArtifactsFor('standard'), ...seam }),
+    ['proposal.md', 'design.md', 'tasks.md']);
+});
+
+test('#555: omitting the set THROWS — a consumer cannot silently fall back to its own list', () => {
+  // The guard the ticket asks for, and it is structural rather than textual: there
+  // is no default to drift because there is no default at all. A consumer that
+  // "goes back to reading its own list" has to pass it explicitly, which is visible
+  // in the diff instead of hiding in a parameter default.
+  assert.throws(
+    () => missingRequiredArtifacts('issue-999-x', { exists: () => false, listDir: () => [] }),
+    /artefacts` is required/,
+    'an absent set must refuse, not quietly assume the four');
 });

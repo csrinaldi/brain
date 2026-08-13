@@ -20,6 +20,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { CHANGES_ROOT, missingRequiredArtifacts, isGrandfathered } from './lib/sdd-layout.mjs';
+import { resolveTier, requiredArtifactsFor } from './vcs/governance-tiers.mjs';
 
 const ROOT = process.cwd();
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -96,7 +97,7 @@ for (const file of files) {
 const structViolations = [];
 
 // S-1: every active, non-grandfathered change in openspec/changes/ must carry
-// all REQUIRED_ARTIFACTS (proposal.md, spec.md, design.md, tasks.md) — the B0
+// the artifacts ITS DECLARED TIER requires — the B0
 // contract (sdd-layout.mjs), enforced here (#595 pin 1). Behavior-preserving
 // over the frozen corpus + B0-contract enforcement going forward — NEVER
 // "pure wiring": every frozen dir already carries all 4 artifacts (see
@@ -108,10 +109,35 @@ if (existsSync(changesDir)) {
     exists: (p) => existsSync(join(ROOT, p)),
     listDir: (p) => readdirSync(join(ROOT, p)),
   };
+  // #555 — DECISION, recorded because the ticket demands it rather than assumed.
+  // This check runs inside `local-checks`, which knows no tier in its current form,
+  // so a choice had to be made: tier it, or leave it fixed and declare the
+  // divergence. IT IS TIERED, and not for symmetry — leaving it fixed only RELOCATES
+  // the defect. `phase-order` is tiered (#358 Q5), so at `lite` a change carrying
+  // only `spec.md` would pass that gate and fail this one, which is the exact
+  // "same change passes one gate and blocks on another" this fix exists to remove.
+  //
+  // The tier comes from the same `resolveTier(loadBrainConfig())` every other
+  // consumer uses, and `resolveTier` returns `standard` when `governance.tier` is
+  // absent (REQ-TIER-10) — so a repo that declares nothing keeps today's stricter
+  // behaviour byte for byte. The loosening only reaches a repo that ASKED for it.
+  // The tier of the repo UNDER CHECK, read from ROOT — not `loadBrainConfig()`,
+  // which resolves its path from its own module location. In a consumer install
+  // those coincide; here they do not, and the first cut of this fix read THIS
+  // repo's tier while validating a different tree. A fixture caught it.
+  //
+  // Absent or unreadable config falls back to `standard`, matching `resolveTier`'s
+  // own default (REQ-TIER-10): a repo that declares nothing keeps the stricter set,
+  // so the loosening only ever reaches a repo that asked for it.
+  let declaredTier = 'standard';
+  try {
+    declaredTier = resolveTier(JSON.parse(readFileSync(join(ROOT, 'brain.config.json'), 'utf8')));
+  } catch { /* absent or malformed — the stricter default stands */ }
+  const declaredArtefacts = requiredArtifactsFor(declaredTier);
   for (const entry of readdirSync(changesDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name === 'archive') continue;
     if (isGrandfathered(entry.name)) continue;
-    const missing = missingRequiredArtifacts(entry.name, fsSeam);
+    const missing = missingRequiredArtifacts(entry.name, { artefacts: declaredArtefacts, ...fsSeam });
     if (missing.length > 0) {
       structViolations.push({
         path: `${CHANGES_ROOT}/${entry.name}`,

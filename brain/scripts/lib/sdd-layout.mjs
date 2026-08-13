@@ -7,8 +7,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** The four artifacts a NEW change dir carries at its root (flat). Source of truth. */
-export const REQUIRED_ARTIFACTS = Object.freeze(['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
+
 
 /** Machine-written, never required, staleness expected & discardable. NEVER a gate condition. */
 export const OPERATIONAL_ARTIFACTS = Object.freeze(['resume.md']);
@@ -94,16 +93,30 @@ export function hasSpec(changeId, { exists = defaultExists, listDir = defaultLis
 }
 
 /**
- * The missing REQUIRED_ARTIFACTS for `changeId`. Grandfathered dirs
+ * The missing artifacts for `changeId`, against the set PASSED IN. Grandfathered dirs
  * short-circuit to `[]` — "the past is recorded, not edited." The spec slot
  * delegates to `hasSpec` so a nested spec still counts as present.
  * @returns {string[]}
  */
-export function missingRequiredArtifacts(changeId, { exists = defaultExists, listDir = defaultListDir } = {}) {
+export function missingRequiredArtifacts(
+  changeId,
+  { artefacts, exists = defaultExists, listDir = defaultListDir } = {},
+) {
+  // #555: the required set is RECEIVED, never held here. `requiredArtifactsFor`
+  // (governance-tiers.mjs) resolves it from the declared tier; this module keeps
+  // no list of its own, so there is exactly one in the system and no second copy
+  // to drift. `artefacts` is mandatory on purpose — a default would be that
+  // second list wearing a different name.
+  if (!Array.isArray(artefacts)) {
+    throw new TypeError(
+      'missingRequiredArtifacts: `artefacts` is required — pass requiredArtifactsFor(tier). ' +
+      'A default here would reintroduce the two-set divergence #555 removed.',
+    );
+  }
   if (isGrandfathered(changeId)) return [];
   const dir = changeDir(changeId);
   const missing = [];
-  for (const artifact of REQUIRED_ARTIFACTS) {
+  for (const artifact of artefacts) {
     const present = artifact === 'spec.md' ? hasSpec(changeId, { exists, listDir }) : exists(`${dir}/${artifact}`);
     if (!present) missing.push(artifact);
   }

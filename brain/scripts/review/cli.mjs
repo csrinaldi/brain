@@ -260,6 +260,7 @@ export async function main(deps = {}) {
       changedFiles,
       prBody: boot.prView.body,
       labels: boot.prView.labels ?? [],
+      tier,   // #555: the artifact set is tier-resolved; cli.mjs already has it
       worktreePath: boot.worktreePath,
       doctrineRecords: boot.doctrine.records,
       // The resolved baseSha (ci-context → port prView.baseRefOid, ADR-0022) feeds

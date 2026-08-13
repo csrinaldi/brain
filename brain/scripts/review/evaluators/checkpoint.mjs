@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { evaluateTranche, gatherTrancheInputs } from './tranche.mjs';
-import { TIERS, tierParams } from '../../vcs/governance-tiers.mjs';
+import { TIERS, tierParams, requiredArtifactsFor } from '../../vcs/governance-tiers.mjs';
 import { changeDir, missingRequiredArtifacts } from '../../lib/sdd-layout.mjs';
 
 // A budget claim is `N/M` where M is a budget SOME tier declares — derived from
@@ -142,14 +142,17 @@ function checkReportDrift(claims = []) {
 }
 
 // ── §10.2 artifact completeness ─────────────────────────────────────────────
-function checkArtifactCompleteness({ missing = [], hasCheckedTask } = {}) {
+function checkArtifactCompleteness({ missing = [], hasCheckedTask, tier = 'standard' } = {}) {
   const findings = [];
   if (missing.length > 0) {
     findings.push({
+      // #555: the set is tier-resolved, so the evidence names the tier it was
+      // measured against. Citing a fixed constant made a blocker unfalsifiable —
+      // a reader could not tell whether the finding held at THIS repo's tier.
       id: 'artifacts-missing',
       severity: 'blocker',
-      evidence: `sdd-layout REQUIRED_ARTIFACTS missing: ${missing.join(', ')}`,
-      cites: 'sdd-layout.mjs REQUIRED_ARTIFACTS',
+      evidence: `sdd-layout requiredArtifactsFor("${tier}") missing: ${missing.join(', ')}`,
+      cites: `sdd-layout.mjs requiredArtifactsFor (tier "${tier}", ADR-0026)`,
     });
   }
   if (hasCheckedTask === false) {
@@ -157,7 +160,7 @@ function checkArtifactCompleteness({ missing = [], hasCheckedTask } = {}) {
       id: 'tasks-no-progress',
       severity: 'blocker',
       evidence: 'tasks.md has zero "- [x]" entries',
-      cites: 'sdd-layout.mjs REQUIRED_ARTIFACTS (tasks.md)',
+      cites: 'sdd-layout.mjs requiredArtifactsFor (tasks.md)',
     });
   }
   return findings;
@@ -369,6 +372,7 @@ export async function gatherCheckpointInputs({
   labels = [],
   worktreePath,
   doctrineRecords = [],
+  tier = 'standard',
   deps = {},
 } = {}) {
   const baseSha = deps.baseSha ?? null; // fed by cli.mjs (ci-context → prView.baseRefOid, ADR-0022); tests inject directly
@@ -383,15 +387,15 @@ export async function gatherCheckpointInputs({
   const readFile = deps.readFile ?? ((p) => readFileSync(join(root, p), 'utf8'));
 
   const changeId = deps.changeId ?? resolveChangeId(changedFiles);
-  let artifacts = { missing: [], hasCheckedTask: null };
+  let artifacts = { missing: [], hasCheckedTask: null, tier };
   let reportClaims = [];
   if (changeId) {
-    const missing = missingRequiredArtifacts(changeId, { exists, listDir });
+    const missing = missingRequiredArtifacts(changeId, { artefacts: requiredArtifactsFor(tier), exists, listDir });
     let hasCheckedTask = null;
     if (!missing.includes('tasks.md')) {
       try { hasCheckedTask = /^- \[x\]/im.test(readFile(`${changeDir(changeId)}/tasks.md`)); } catch { hasCheckedTask = false; }
     }
-    artifacts = { missing, hasCheckedTask };
+    artifacts = { missing, hasCheckedTask, tier };
 
     if (!missing.includes('checkpoint-report.md')) {
       try {

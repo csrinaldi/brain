@@ -358,6 +358,33 @@ export function resolveGateEvidence(gate, tier) {
  * @param {'lite'|'standard'|'regulated'} tier
  * @returns {{ diffBudget: number, artefacts: string[], honorSizeException: boolean, honorOverride: boolean, honorSkipMemoryGate: boolean, memoryAssertion: string, reviewProtocol: 'brain-review/1'|'brain-review/2' }}
  */
+/**
+ * The artifact FILENAMES a change dir must carry at `tier` — the single
+ * resolution, and the only place the `.md` extension is applied (#555).
+ *
+ * There were two sets before this. This table honoured ADR-0026 and `phase-order`
+ * read it (#358 Q5); a fixed `REQUIRED_ARTIFACTS` lived in `lib/sdd-layout.mjs`,
+ * and its two consumers — `local-checks` via `check-refs.mjs` and the reviewer's
+ * checkpoint — demanded all four at every tier. They differed in three ways at
+ * once: contents, extension (`spec` vs `spec.md`), and fixed-versus-tiered. At
+ * `lite`, the tier brain declares for ITSELF, doctrine said `spec` suffices and
+ * two gates blocked. The same change passed one gate and failed the other.
+ *
+ * WHY HERE and not in `sdd-layout.mjs`, where the `.md` convention arguably
+ * belongs: that module advertises "Pure ESM, no side effects at import" and a
+ * fixture copies it ALONE into a tmp dir. Importing this module from there drags
+ * in `brain-config` → `repo.mjs` + `installer.mjs` + `config-migrations.mjs` —
+ * four modules into one that promises none. The first attempt at #555 did exactly
+ * that and the fixture caught it. The tier table owns the resolution; `sdd-layout`
+ * receives the answer.
+ *
+ * @param {string} tier  `lite` | `standard` | `regulated`.
+ * @returns {string[]}   e.g. `['spec.md']` at `lite`.
+ */
+export function requiredArtifactsFor(tier) {
+  return tierParams(tier).artefacts.map(name => `${name}.md`);
+}
+
 export function tierParams(tier) {
   const params = TIER_PARAMS[tier];
   if (!params) {
