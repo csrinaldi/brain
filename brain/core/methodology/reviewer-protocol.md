@@ -22,9 +22,9 @@ verification, the ruling, or the sequencing.
 
 The reviewer becomes a merge authorizer only if it can produce the one thing L6 counts
 as *the* human review of a `brain/**` write: a non-author, non-allow-listed review with
-`state === 'APPROVED'` (`brain/scripts/vcs/brain-writes-reviewed.mjs:99,111`). That same
+`state === 'APPROVED'` (`evaluateBrainWritesReviewed`). That same
 review also satisfies `main`'s `required_approving_review_count: 1`
-(`brain/scripts/vcs/providers/github.mjs:62`). A reviewer running `gh pr review --approve`
+(set by the `branchProtect` verb in `providers/github.mjs`). A reviewer running `gh pr review --approve`
 would satisfy branch protection **and** the brain-writes gate in one call.
 
 That asymmetry cannot be a rule the agent remembers. If it depends on the model choosing
@@ -72,11 +72,25 @@ only one thing to agree about:
 - **L6 — as exclusion.** Such an identity does not count toward the human-approver tally
   (`evaluateBrainWritesReviewed`), reading the key through `defaultReadBotAllowlist`.
 
-`governance.approvalActors` is a **separate key with a separate meaning** — "these identities
-may apply `status:approved`" — read only at L5. The reviewer handle is never in it. L6
-deliberately does not read it: `defaultReadBotAllowlist` reads `reviewActors` alone and says
-so, because unioning them would be the dual-semantics coupling ADR-0020's ruling R2 exists to
-dissolve. Both effects require both registrations, explicitly, never implicitly.
+`governance.approvalActors` is a **separate key with a separate meaning**: a *human-trust
+grant*. It too is cashed at two gates — it authorizes applying `status:approved` at L5, and it
+whitelists the `override:*` label strings honored at L6 — through a `defaultReadApprovalActors`
+that exists in both `actor-check.mjs` and `brain-writes-reviewed.mjs`. One meaning, two grants,
+which is the same shape as `reviewActors` above and equally permitted by R2.
+
+What L6 does **not** do is read `approvalActors` as its **`botAllowlist`**. That reader,
+`defaultReadBotAllowlist`, takes `reviewActors` alone and says so in its own JSDoc — unioning
+the two there is the dual-semantics coupling ADR-0020's R2 exists to dissolve, because it would
+make one registration both exclude an identity from the human count and authorize it to apply
+the label.
+
+**The reviewer handle is in neither key.** Both effects require both registrations, explicitly,
+never implicitly.
+
+> An earlier revision of this paragraph (#580) said `approvalActors` was *"read only at L5."*
+> That was false — L6's `defaultReadApprovalActors` reads it for the override whitelist — and it
+> was signed in that state. Corrected by #586. The claim it was reaching for survives and is
+> stated above: what is L5-only is the **authority to apply the label**, not the key.
 
 > **What R2 forbids, precisely.** R2 forbids **one key carrying two meanings**, not two gates
 > reading the same fact. Denial at L5 and exclusion at L6 are one fact — *not a human
@@ -99,19 +113,25 @@ dissolve. Both effects require both registrations, explicitly, never implicitly.
 
 ### The hazard — verified in the tree, not inferred
 
-`governance.approvalActors` is read as the `botAllowlist` by **both** gates, with
-**opposite semantics**:
+> **Only half of this is still current (#586).** The L5 half below describes behaviour that
+> holds today; the L6 half is the **pre-split** state, which is what motivated the split and is
+> no longer true — `defaultReadBotAllowlist` reads `reviewActors` alone (§2). The tenses differ
+> deliberately. Kept because a resolution whose hazard is not written down reads as an arbitrary
+> two-key complication, and the next person tempted to simplify it needs to know what it cost.
 
-- **L5 — permissive.** `actor-check.mjs` reads `governance.approvalActors`
-  (`actor-check.mjs:227`) into `botAllowlist`; when the approving actor is in it,
+`governance.approvalActors` was read as the `botAllowlist` by **both** gates, with **opposite
+semantics**:
+
+- **L5 — permissive. Still true today.** `actor-check.mjs` reads `governance.approvalActors`
+  through `defaultReadApprovalActors` into `botAllowlist`; when the approving actor is in it,
   `evaluateActor` returns `{ level: 'pass', reason: 'the approved label was applied by
-  allow-listed automation identity "…" ' }` (`actor-check.mjs:90-93`). Being in the list
-  **authorizes** you to apply `status:approved`.
-- **L6 — restrictive.** `brain-writes-reviewed.mjs` reads the same
-  `governance.approvalActors` (`brain-writes-reviewed.mjs:169`) into `botAllowlist`; the
-  human approver is `approvers.find(a => a !== author && !botAllowlist.includes(a))`
-  (`brain-writes-reviewed.mjs:111`). Being in the list **excludes** you from counting as
-  the human reviewer.
+  allow-listed automation identity "…" ' }`. Being in the list **authorizes** you to apply
+  `status:approved`.
+- **L6 — restrictive. NO LONGER TRUE — this is the pre-split state.**
+  `brain-writes-reviewed.mjs` read the same `governance.approvalActors` into `botAllowlist`; the
+  human approver was `approvers.find(a => a !== author && !botAllowlist.includes(a))`
+  (`evaluateBrainWritesReviewed`). Being in the list **excluded** you from counting as the human
+  reviewer. Today that reader takes `reviewActors`.
 
 One key, two opposite effects. A single registration of the reviewer in
 `governance.approvalActors` would simultaneously **de-authorize it at L6** (correct — we
@@ -144,7 +164,7 @@ Two mandatory tests make this executable and ship with the implementation slice 
 
 ## 4. The four COMMENT-only port verbs
 
-`brain`'s VCS port has 16 verbs today (`brain/scripts/vcs/cli.mjs:22`) and **none of them
+`brain`'s VCS port has 16 verbs today (`VERBS` in `brain/scripts/vcs/cli.mjs`) and **none of them
 writes to the review/comment/label surface**. H0 adds four, on both providers
 (`brain/scripts/vcs/providers/{github,gitlab}.mjs`), each incapable of approving. Normalized
 returns match the port's existing `{ url } | { url: null, error }` / never-throws discipline
@@ -157,7 +177,7 @@ returns match the port's existing `{ url } | { url: null, error }` / never-throw
 | `labelAdd` | `({ project, number, labels })` | **caller** enforces the deny-set (§9), not the verb |
 | `labelRemove` | `({ project, number, labels })` | monotonic-tightening removals only |
 
-The four names are added to `VERBS` (`cli.mjs:22`) and to the `vcs-contract.md` required-verbs
+The four names are added to `VERBS` (`cli.mjs`) and to the `vcs-contract.md` required-verbs
 table. The parameterized contract suite (`providers/vcs.contract.test.mjs`) runs one assertion
 set over `['github', 'gitlab']` and turns red until both providers implement all four with the
 normalized shapes.
@@ -271,11 +291,11 @@ follow_ups:                # present only when non-empty
   this diff), `base-only` (exists only on the base, not touched by this diff), or `unknown`.
 - **The admission rule.** A finding with `causal_disposition: pre-existing` or `base-only` is
   **not** a blocker against this change — it is routed to `follow_ups[]` instead
-  (`verdict.mjs:46-56`). Only `introduced`/`behavior-activated`/`worsened`/`unknown` findings
+  (`buildVerdict`'s routing loop). Only `introduced`/`behavior-activated`/`worsened`/`unknown` findings
   remain in `findings[]` and can block.
 - **`causal_disposition: unknown` forces escalation.** Any finding whose causality could not be
   determined forces `verdict: STOP` and `escalate: human` regardless of the evaluator's
-  conclusion (`verdict.mjs:48-49,63-64`) — uncertainty about causality is never silently
+  conclusion (`buildVerdict`) — uncertainty about causality is never silently
   admitted (treated as blocking without being sure) or silently dropped (routed to
   `follow_ups[]` without being sure it's safe to defer).
 - **The schema gate — an unreadable causal claim is annotated, never resolved** (issue #483).
@@ -288,10 +308,10 @@ follow_ups:                # present only when non-empty
   made: a finding carrying neither field (every `/1` finding) is untouched.
 - **REVISE-to-APPROVE softening.** If every finding that exists was routed out of the
   blocking set (all `pre-existing`/`base-only`) and the evaluator's conclusion was `REVISE`,
-  the verdict becomes `APPROVE` (`verdict.mjs:65-66`) — findings existed, but nothing causal to
+  the verdict becomes `APPROVE` (`buildVerdict`) — findings existed, but nothing causal to
   this change blocks it.
 - **Rendering.** `evidence_class` and `causal_disposition` are rendered per-finding when
-  present, and a `follow_ups:` block is rendered when non-empty (`verdict.mjs:108-123`); a `/1`
+  present, and a `follow_ups:` block is rendered when non-empty (`renderVerdict`); a `/1`
   verdict simply never has these keys.
 
 ### Compatibility — both protocols coexist by construction
@@ -353,7 +373,7 @@ or **unlock** (`status:approved`). Labels only ever tighten; a reviewer never be
 is human-only.
 
 **Defense in depth.** `actor-check` independently rejects a misapplied `status:approved` from any
-identity not in `governance.approvalActors` (`actor-check.mjs:90`) — and the reviewer is never in
+identity not in `governance.approvalActors` (`evaluateActor`) — and the reviewer is never in
 `governance.approvalActors` (§3) — so even a deny-set bug is still caught at L5. The actor-check is
 the independent backstop; the deny-set is the first line.
 
