@@ -110,9 +110,9 @@ they agree.
 | `local-checks` | The structural repo checks — reference check, navigation check — run in CI too, not only in your local hook. |
 | `memory-gate` | Session memory was captured. WHEN the pipeline hands this gate the merge request description (some do, some do not), it requires a memory record scoped to the linked issue; otherwise it degrades to "this repository has ever recorded a session summary". |
 | `decision-gate` | An ADDED ADR is indexed in `brain/HOME.md`, and `brain/HOME.md` is not touched without an ADR. Reads no labels. |
-| `phase-order` | The change's SDD artifacts progressed in order. Detection-only at the lightest tier. |
-| `actor-check` | The approval evidence comes from an act distinct from the authoring one. |
-| `brain-writes-reviewed` | Writes to the knowledge half are not agent-authored. Above the lightest tier they must also carry an approving review from someone other than the author. |
+| `phase-order` | The change's SDD artifacts progressed in order. A real violation fails at every tier; only an UNCOMPUTABLE diff is downgraded to a warning at the lightest one. |
+| `actor-check` | The approval is not self-approval. At the lightest tier that means a distinct ACT (approving after your own last commit is enough); above it, a distinct ACTOR — approving your own merge request or your own issue fails — and at the strictest tier the approver must also have authored no commit on the branch. |
+| `brain-writes-reviewed` | Writes to the knowledge half are not agent-authored — that half never tiers. Above the lightest tier an approving review from someone other than the author is also required, though a merge request with NO reviews yet warns and passes rather than failing on absent evidence. |
 
 ## Test plan
 

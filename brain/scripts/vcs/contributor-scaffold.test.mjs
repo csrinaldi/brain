@@ -34,6 +34,9 @@ import {
   approvedLabelFor,
 } from './contributor-scaffold.mjs';
 import { GOVERNANCE_JOBS } from './governance-checks.mjs';
+import { evaluateActor } from './actor-check.mjs';
+import { evaluateBrainWritesReviewed } from './brain-writes-reviewed.mjs';
+import { runPhaseOrderCheck, evaluatePhaseOrder } from './phase-order-check.mjs';
 import { issueLink } from '../governance/checks/issue-link.mjs';
 import { runCheck } from '../governance/run-check.mjs';
 import { managed, local, managedStrategy, STRATEGY } from '../../core/managed-paths.mjs';
@@ -284,27 +287,104 @@ test('the memory-gate row describes BOTH pipeline wirings, because the gate has 
   }
 });
 
-test('the local-checks row does not promise a step a consumer\'s CI skips (#570)', () => {
-  // governance.yml runs the internal unit suite only `if hashFiles('.brain-source')`,
-  // and the marker is never a managed path — so `npm test` does NOT run in a
-  // consumer's governance pipeline. If that condition is ever removed, this test
-  // goes red and the row may (and should) be widened again.
+test('the local-checks row is read against BOTH pipelines, not the one the author happened to open (#570)', () => {
+  // The first version of this guard read `.github/workflows/governance.yml` alone and
+  // stated its finding as universal: "npm test does NOT run in a consumer's governance
+  // pipeline." True on GitHub, where the step is gated on the `.brain-source` marker
+  // (never a managed path, so never vendored). FALSE on GitLab, where local-checks runs
+  // `npm test` unconditionally in a REQUIRED job — measured at 152 failures in a real
+  // consumer tree (#603). Reading one pipeline and generalising is the very error #570
+  // is about, committed inside #570's own guard.
   if (!IS_BRAIN_SOURCE) return;
-  const workflow = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'governance.yml'), 'utf8');
-  const testStep = workflow.slice(workflow.indexOf('run: npm test') - 400, workflow.indexOf('run: npm test'));
-  assert.match(testStep, /hashFiles\('\.brain-source'\)/,
-    'sanity: the row below is written for a workflow that gates npm test on .brain-source');
+  const github = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'governance.yml'), 'utf8');
+  const gitlab = readFileSync(join(REPO_ROOT, 'brain', 'scripts', 'ci', 'gitlab-governance.yml'), 'utf8');
+
+  const ghTestStep = github.slice(github.indexOf('run: npm test') - 400, github.indexOf('run: npm test'));
+  assert.match(ghTestStep, /hashFiles\('\.brain-source'\)/,
+    'GitHub gates the unit suite on .brain-source — a consumer skips it');
+  assert.match(gitlab, /npm test/,
+    'GitLab runs the unit suite in local-checks, unconditionally (#603) — if that changes, widen the row');
+
+  // The pipelines DISAGREE, so the row may claim only what is true on both.
   assert.doesNotMatch(GATE_SUMMARY['local-checks'], /npm test/,
-    'the local-checks row must not claim the unit suite runs in CI — a consumer pipeline skips it');
+    'the row must claim only the part both pipelines actually run');
+  assert.match(GATE_SUMMARY['local-checks'], /reference check|navigation check/i);
 });
 
-test('the brain-writes-reviewed row states the tier condition, not only the lightest form (#570)', () => {
-  // At `lite` the whole evidence form is "the author is not an agent identity"; at
-  // standard/regulated an approving review by a distinct human is ALSO required, and
-  // `resolveTier({})` is `standard` — the default consumer. A row describing only
-  // `lite` understates the gate for most readers.
-  assert.match(GATE_SUMMARY['brain-writes-reviewed'], /lightest tier/i);
-  assert.match(GATE_SUMMARY['brain-writes-reviewed'], /review/i);
+test('the brain-writes-reviewed row is TIER-CONDITIONAL because the gate is — driven, not asserted by substring (#570)', () => {
+  // The first version asserted the row contained "lightest tier" and "review". An
+  // INVERTED row — "an approving review is recommended but never required" — contains
+  // both and stayed green. A guard that accepts its own inversion is not a guard (#499).
+  // So drive the evaluator: ONE input, TWO tiers, verdicts differing in the direction
+  // the row claims.
+  const input = {
+    changedFiles: ['brain/core/methodology/workflow-governance.md'],
+    author: 'alice',
+    reviews: [{ state: 'APPROVED', author: 'alice' }],   // self-approved, no distinct human
+    botAllowlist: [],
+  };
+  assert.notEqual(evaluateBrainWritesReviewed({ ...input, tier: 'lite' }).level, 'fail',
+    'lite: agent-authorship exclusion is the whole evidence form — a self-approved human write passes');
+  assert.equal(evaluateBrainWritesReviewed({ ...input, tier: 'standard' }).level, 'fail',
+    'standard: a review by someone OTHER than the author is required');
+  assert.match(GATE_SUMMARY['brain-writes-reviewed'], /required/i,
+    'the row must say REQUIRED above the lightest tier — which is what the verdicts above establish');
+
+  // The row also claims the gate WARNS rather than fails on absent evidence.
+  assert.notEqual(evaluateBrainWritesReviewed({ ...input, reviews: [], tier: 'standard' }).level, 'fail',
+    'zero reviews is missing evidence, not disproof — the row says so and the gate must agree');
+});
+
+test('the actor-check row is TIER-CONDITIONAL because the gate is — driven at three tiers (#570)', () => {
+  // The row stated `lite`'s evidence form as if it were the gate. `evaluateDistinctAct`
+  // is reached ONLY inside `if (tier === 'lite')`; above it the gate compares the ACTOR
+  // against the PR author and the issue author, and at the strictest tier additionally
+  // requires the approver to have authored no commit on the branch. `resolveTier({})`
+  // is `standard`, so the row was wrong for the default consumer in BOTH directions.
+  const selfApproval = {
+    author: 'alice',
+    issueAuthor: 'alice',
+    labeledEvents: [{ actor: { login: 'alice' }, at: '2026-08-13T12:00:00Z' }],
+    commits: [{ sha: 'abc', login: 'alice', at: '2026-08-13T10:00:00Z' }],
+    decisions: null,
+    headSha: 'abc',
+  };
+  assert.notEqual(evaluateActor({ ...selfApproval, tier: 'lite' }).level, 'fail',
+    'lite: approving after your own last commit is a DISTINCT ACT and passes');
+  assert.equal(evaluateActor({ ...selfApproval, tier: 'standard' }).level, 'fail',
+    'standard: the same act is self-approval — a distinct ACTOR is required');
+
+  const distinctApprover = {
+    ...selfApproval,
+    labeledEvents: [{ actor: { login: 'bob' }, at: '2026-08-13T12:00:00Z' }],
+    commits: [{ sha: 'abc', login: 'bob', at: '2026-08-13T10:00:00Z' }],
+  };
+  assert.notEqual(evaluateActor({ ...distinctApprover, tier: 'standard' }).level, 'fail',
+    'standard: a distinct actor is enough, even one who committed');
+  assert.equal(evaluateActor({ ...distinctApprover, tier: 'regulated' }).level, 'fail',
+    'regulated: the approver must additionally have authored no commit on the branch');
+
+  const row = GATE_SUMMARY['actor-check'];
+  assert.match(row, /distinct ACT/i, 'the row must name the lightest tier\'s act-based form');
+  assert.match(row, /distinct ACTOR/i, 'and the actor-based form the DEFAULT tier applies');
+  assert.match(row, /no commit on the branch/i, 'and the strictest tier\'s extra requirement');
+});
+
+test('the phase-order row distinguishes a real violation from an uncomputable diff — the checker does (#570)', () => {
+  // "Detection-only at the lightest tier" is not what the checker does: `main()`
+  // returns 1 on any `level: 'fail'` with no tier term. The ONLY tier downgrade lives
+  // in `uncomputableVerdict()` — it applies to a diff that could not be computed, not
+  // to a violation that was found.
+  assert.equal(runPhaseOrderCheck({ baseSha: null, headSha: null, tier: 'lite', readConfig: () => ({}) }).level, 'warn',
+    'lite + uncomputable diff is the downgraded path the row describes');
+  assert.equal(evaluatePhaseOrder({
+    changedFiles: ['src/index.js', 'openspec/changes/issue-1-x/tasks.md'],
+    changeDirs: [{ name: 'issue-1-x', checkedTasks: 0 }],
+  }).level, 'fail', 'a REAL violation is a fail — no tier term reaches this verdict');
+
+  assert.match(GATE_SUMMARY['phase-order'], /UNCOMPUTABLE/i, 'the row must name what is actually downgraded');
+  assert.doesNotMatch(GATE_SUMMARY['phase-order'], /detection-only at the lightest tier/i,
+    'the old wording claimed the violation itself was downgraded');
 });
 
 // ── the emitted files on disk ───────────────────────────────────────────────
@@ -407,7 +487,19 @@ const DECISION_LABEL_ENFORCEMENT_CLAIM = new RegExp(
     // The label need not be NAMED for the claim to be made: "decision-gate becomes
     // hard", "decision-gate is two-step". This alternative is what catches the
     // anaphoric form, which defeated every label-keyed pattern above.
-    '`?decision-gate`?[^.\\n]{0,90}\\b(?:hard|two-step|step 2|heuristic|stricter|label-conditional|conditional on)\\b',
+    // Hyphenation tolerated on both sides (`step-2`, `label-conditional`) — a detector
+    // a hyphen defeats is a detector for one author's typing habits.
+    '`?decision-gate`?[^.\\n]{0,90}\\b(?:hard|two[- ]step|step[- ]2|heuristic|stricter|label[- ]conditional|conditional on)\\b',
+    // The same claim with the behaviour word FIRST. Proximity to `decision` is
+    // load-bearing: "step 2" unanchored matches every numbered instruction in the repo,
+    // and a detector that fires on docs/adoption.md teaches people to add exemptions
+    // instead of fixing claims.
+    '\\b(?:two[- ]step|step[- ]2|label[- ]conditional)\\b[^.\\n]{0,90}`?decision',
+    // The evidence token in the ratified gate matrix — specific enough to stand alone.
+    'decision[- ]label[- ]hard',
+    // "Without the label the gate does not …" / "adding it turns X on" — the
+    // conditional framing, which names no behaviour word at all.
+    '\\b(?:without|with|adding|applying)\\b[^.\\n]{0,40}`?decision`?(?:\\s+label)?[^.\\n]{0,60}\\b(?:does not|turns|switches|selects|escalat\\w*|binding|advisory)\\b',
     // "labels that make a gate stricter (`decision`, …)" — the label as a member of
     // a list, with the behaviour claim ahead of it and no "label" word adjacent.
     '\\b(?:stricter|tighten\\w*)\\b[^.\\n]{0,80}`decision`',
@@ -435,6 +527,14 @@ const KNOWN_CLAIM_SURVIVORS = Object.freeze({
   'openspec/specs/governance-v3/spec.md': 'living spec: same model',
   'openspec/specs/governance-metrics/spec.md': 'living spec: same model, in the metrics requirements',
   'brain/scripts/review/deny-set.mjs': 'the CODE side of reviewer-protocol §9 — classifies `decision` as a "tightening" label; the wording follows the doctrine above, so it moves when that amendment does',
+  // Found by a second cold review; invisible to the first detector. The first two
+  // matter most — they are CODE and ratified DATA, not prose.
+  'brain/scripts/vcs/governance-tiers.mjs': 'the repealed model encoded as ratified doctrine: GATE_MATRIX carries `evidence: adr-home-cooccurrence+decision-label-hard`, which resolveGateEvidence and brain:governance-status read',
+  'brain/scripts/review/evaluators/checkpoint.mjs': 'live code: short-circuits on hasDecisionLabel and emits a severity:blocker finding citing "Invariant 4 step 2 (decision-gate)" — a step 2 the doctrine deleted',
+  // Live, UNARCHIVED change dirs whose spec deltas carry the claim — the pipeline that
+  // fed reviewer-protocol §9, not a record of history. Trailing slash = directory prefix.
+  'openspec/changes/issue-266-h0a-reviewer-protocol-doctrine/': 'the unpromoted spec delta behind §9\'s "tightening (`decision`)" list',
+  'openspec/changes/issue-266-h1-brain-review/': 'same delta set, brain:review half',
 });
 
 /**
@@ -450,7 +550,30 @@ const KNOWN_CLAIM_SURVIVORS = Object.freeze({
 const DETECTOR_EXEMPT = Object.freeze({
   'brain/scripts/lib/metrics-aggregate.mjs': 'describes brain:metrics COUNTING, which is genuinely label-conditional',
   'brain/project/decisions/adr-0026-governance-doctrine-tiers.md': 'Amendment 4 quotes the pre-#516 wording in the act of repealing it',
+  // Trailing slash = directory prefix.
+  'openspec/changes/issue-516-doctrine-gate-claim/': 'the change that REPEALED the claim — its proposal, spec, design and drafts have to quote what they remove',
 });
+
+/**
+ * Files a HUMAN read and found carrying the claim, that the detector does NOT see.
+ * Their own list on purpose: putting them among the survivors would break that map's
+ * staleness test (which requires an entry to still MATCH), and widening the regex
+ * until it caught them is how an earlier pass came to fire on docs/adoption.md and
+ * every numbered instruction in the tree.
+ *
+ * This is the detector's confession. The invariant below is two-way: an entry must
+ * still exist AND still be invisible — the day the pattern learns to see one, the
+ * test says so and it moves to KNOWN_CLAIM_SURVIVORS.
+ */
+const UNDETECTED_SURVIVORS = Object.freeze({
+  'brain/core/anti-patterns/evidence-reader-empty-on-failure.md': 'presents decision-gate as label-triggered ("A failed label fetch made `decision-gate` see \'no `decision` label\'") — the claim spans two lines and every pattern here is line-bounded',
+  'brain/project/decisions/adr-0021-reviewer-port-head-and-rollup.md': '"a decision that needs this ADR + a `decision` label + L6 human review" — the label listed as a requirement, with no behaviour word to key on',
+});
+
+/** Exact path, or a listed key ending in `/` treated as a directory prefix. */
+function listed(map, file) {
+  return Object.keys(map).some(key => (key.endsWith('/') ? file.startsWith(key) : file === key));
+}
 
 /**
  * SDD change artifacts: proposals, designs and drafts record what a change PROPOSED,
@@ -459,7 +582,7 @@ const DETECTOR_EXEMPT = Object.freeze({
  * description of the system. `openspec/specs/**` is NOT here: those are living specs
  * and are held to the same standard as doctrine.
  */
-const HISTORICAL_PATHS = /^openspec\/changes\//;
+const HISTORICAL_PATHS = /^openspec\/changes\/archive\//;
 
 /** Tracked files that carry the claim, minus fixtures, history and detector exemptions. */
 function sweepTree() {
@@ -470,7 +593,7 @@ function sweepTree() {
     .filter(f => !/\.test\.mjs$/.test(f))
     .filter(f => !f.startsWith('.memory/'))
     .filter(f => !HISTORICAL_PATHS.test(f))
-    .filter(f => !Object.hasOwn(DETECTOR_EXEMPT, f));
+    .filter(f => !listed(DETECTOR_EXEMPT, f));
 
   assert.ok(tracked.length > 300, 'sanity: the sweep must actually be reading the whole tree');
   return tracked.filter(f => {
@@ -487,7 +610,7 @@ test('no file outside the KNOWN survivors claims the `decision` label changes a 
   if (!IS_BRAIN_SOURCE) return;
   const offenders = sweepTree();
   assert.deepEqual(
-    offenders.filter(f => !Object.hasOwn(KNOWN_CLAIM_SURVIVORS, f)),
+    offenders.filter(f => !listed(KNOWN_CLAIM_SURVIVORS, f)),
     [],
     'the `decision` label is a human signal — decision-gate reads no labels (ADR-0026 Amendment 4)',
   );
@@ -495,13 +618,30 @@ test('no file outside the KNOWN survivors claims the `decision` label changes a 
 
 test('the KNOWN survivors list is current — an entry that no longer matches must be deleted (#570)', () => {
   if (!IS_BRAIN_SOURCE) return;
-  const stale = Object.keys(KNOWN_CLAIM_SURVIVORS).filter(f => {
+  const offenders = sweepTree();
+  const stale = Object.keys(KNOWN_CLAIM_SURVIVORS).filter(key => {
+    // A directory prefix is current while ANY file under it still carries the claim.
+    if (key.endsWith('/')) return !offenders.some(f => f.startsWith(key));
     let src;
-    try { src = readFileSync(join(REPO_ROOT, f), 'utf8'); } catch { return true; }
+    try { src = readFileSync(join(REPO_ROOT, key), 'utf8'); } catch { return true; }
     return !DECISION_LABEL_ENFORCEMENT_CLAIM.test(src);
   });
   assert.deepEqual(stale, [],
     'these files were fixed (or moved) — drop them from KNOWN_CLAIM_SURVIVORS so the sweep tightens');
+});
+
+test('the UNDETECTED survivors are still present, and still undetected (#570)', () => {
+  // Two-way, so neither half can rot: a file that vanished (renamed, fixed) must leave
+  // the list, and a file the pattern LEARNED to see must move to the survivors map,
+  // where staleness is tracked.
+  if (!IS_BRAIN_SOURCE) return;
+  for (const [file, why] of Object.entries(UNDETECTED_SURVIVORS)) {
+    let src;
+    try { src = readFileSync(join(REPO_ROOT, file), 'utf8'); } catch { src = null; }
+    assert.ok(src !== null, `${file} is gone — drop it from UNDETECTED_SURVIVORS (${why})`);
+    assert.doesNotMatch(src, DECISION_LABEL_ENFORCEMENT_CLAIM,
+      `the detector now SEES ${file} — move it to KNOWN_CLAIM_SURVIVORS`);
+  }
 });
 
 test('the sweep detects the MEANING, not one wording (#570)', () => {
