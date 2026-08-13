@@ -39,8 +39,18 @@ name: bootstrap-smoke
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    # Every path a change to which can break a bootstrap verb. `brain/core/**`
+    # is here on review finding F1 and is not decoration: `bootstrap.sh` runs
+    # `brain/scripts/lib/brain-config.mjs ensure`, which imports
+    # `../../core/config-migrations.mjs`. Measured — breaking that module turns
+    # 11 of the suite's assertions red, and without this line a PR touching only
+    # it would never have started the job. That is #446's failure mode one level
+    # up: a real break in the bootstrap path, shipping green.
+    #
+    # `workflow-triggers.e2e.test.mjs` fails if any of these is removed.
     paths:
       - 'brain/scripts/**'
+      - 'brain/core/**'
       - 'test/bootstrap-smoke/**'
       - '.github/workflows/bootstrap-smoke.yml'
       - 'package.json'

@@ -45,7 +45,7 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -67,6 +67,31 @@ const info = (msg) => console.log(`  · ${msg}`);
 const check = (cond, msg) => (cond ? ok(msg) : fail(msg));
 
 /**
+ * Credentials and proxy settings STRIPPED from the fixture's environment.
+ *
+ * Review finding F3: `{ ...process.env }` inherits the parent wholesale, and
+ * `GH_TOKEN`, `GITHUB_TOKEN` and `HTTPS_PROXY` were measured present in the
+ * shell that runs this. That made "no token, no network" a property of the
+ * MACHINE rather than of the suite: on a runner that carries a token, the verbs
+ * take their authenticated branches — different code from the offline paths
+ * this claims to exercise — and inherit that runner's rate limits and flakiness.
+ *
+ * Stripped here so the claim is true by construction. `envHygiene` below is
+ * what stops this list becoming decorative.
+ */
+const STRIPPED_ENV = Object.freeze([
+  'VCS_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_ACTIONS', 'BRAIN_REVIEWER_TOKEN',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy',
+]);
+
+/** The environment every fixture command sees. Pure, so a test can read it. */
+function fixtureEnv(home) {
+  const env = { ...process.env, HOME: home, CI: '1' };
+  for (const k of STRIPPED_ENV) delete env[k];
+  return env;
+}
+
+/**
  * Runs a command in the fixture. NEVER swallows a failure into a default: a
  * spawn that could not start returns status `null`, and reporting that as 0
  * would turn "the verb never ran" into "the verb passed" — the exact shape of
@@ -78,7 +103,7 @@ function run(cmd, args, { cwd, home }) {
   const r = spawnSync(cmd, args, {
     cwd,
     encoding: 'utf8',
-    env: { ...process.env, HOME: home, CI: '1', NO_COLOR: '1' },
+    env: fixtureEnv(home),
     timeout: 10 * 60 * 1000,
   });
   if (r.error && r.error.code === 'ETIMEDOUT') return { status: 124, out: 'TIMED OUT' };
@@ -100,7 +125,11 @@ function manifest(root) {
   const walk = (rel) => {
     for (const e of readdirSync(join(root, rel || '.'), { withFileTypes: true })) {
       const r = rel ? `${rel}/${e.name}` : e.name;
-      if (r === '.git' || r === 'node_modules') continue;
+      // F5: by NAME, at any depth. `r` is the root-relative PATH, so the
+      // previous `r === '.git'` excluded these only at the root and walked
+      // any nested one — hashing a whole install into an assertion about
+      // idempotency. Latent when found; a bug in the comparison regardless.
+      if (e.name === '.git' || e.name === 'node_modules') continue;
       if (e.isDirectory()) walk(r);
       else if (e.isFile()) out.set(r, createHash('sha256').update(readFileSync(join(root, r))).digest('hex'));
       else out.set(r, `<${e.isSymbolicLink() ? 'symlink' : 'special'}>`);
@@ -180,10 +209,54 @@ execFileSync('git', ['-C', consumer, 'add', '-A']);
 execFileSync('git', ['-C', consumer, 'commit', '-qm', 'consumer baseline']);
 
 // A fresh adopter has none of these — env:init is what creates them.
-for (const f of ['brain.config.json', 'AGENTS.md', '.env']) rmSync(join(consumer, f), { force: true });
+//
+// `brain/HOME.md` joined the list on review finding F2. It was NOT deleted
+// before, so the fixture's copy satisfied its post-condition and the check
+// proved nothing: removing the `home-scaffold.mjs ensure` call from
+// bootstrap.sh entirely left this suite fully GREEN. A check that survives
+// the deletion of what it checks is not a check.
+for (const f of ['brain.config.json', 'AGENTS.md', '.env', 'brain/HOME.md']) {
+  rmSync(join(consumer, f), { force: true });
+}
 
-const seeded = manifest(consumer).size;
+// A nested `node_modules` the walker must skip by NAME (F5). Cheap, and it
+// makes the exclusion a measured property rather than a claim in a comment.
+mkdirSync(join(consumer, 'brain', 'node_modules'), { recursive: true });
+writeFileSync(join(consumer, 'brain', 'node_modules', 'PROBE'), 'must never reach the manifest\n');
+
+const seededManifest = manifest(consumer);
+check(![...seededManifest.keys()].some((p) => p.split('/').includes('node_modules')),
+  'the manifest walker skips a NESTED node_modules, not just a root one');
+const seeded = seededManifest.size;
 check(seeded > 200, `fixture seeded by copy — ${seeded} files (a thin fixture would pass vacuously)`);
+
+// ── 0. Environment hygiene ──────────────────────────────────────────────────
+//
+// F3: without this, STRIPPED_ENV is a list nothing reads back, and deleting an
+// entry from it would be invisible. Ask a CHILD what it actually received
+// rather than trusting the parent's own copy of the map.
+
+step('0. the fixture sees no credential and no proxy');
+const probe = run('node', ['-e',
+  'const want = JSON.parse(process.argv[1]);'
+  + 'console.log(JSON.stringify({ leaked: want.filter((k) => process.env[k] !== undefined), home: process.env.HOME }));',
+  JSON.stringify([...STRIPPED_ENV]),
+], { cwd: consumer, home });
+
+if (probe.status !== 0) {
+  fail(`the environment probe did not run (exit ${probe.status}) — hygiene is UNKNOWN, not clean`);
+} else {
+  let seen;
+  try { seen = JSON.parse(probe.out.trim().split('\n').pop()); } catch { seen = null; }
+  // An unparseable probe is a failure, never a pass: "we could not look" and
+  // "we looked and it was clean" must not produce the same verdict.
+  if (seen === null) fail(`the environment probe returned unparseable output: ${probe.out.trim().slice(0, 200)}`);
+  else {
+    check(seen.leaked.length === 0,
+      `no credential or proxy reaches the fixture (leaked: ${seen.leaked.join(', ') || 'none'})`);
+    check(seen.home === home, `HOME is redirected into the scratch dir (got ${seen.home})`);
+  }
+}
 
 // ── 1. brain:env:init exits 0 and leaves a COMPLETE tree ────────────────────
 
@@ -234,8 +307,12 @@ if (day.status !== 0) console.log(day.out.split('\n').slice(-25).map((l) => `   
 
 // It must reach its END, not merely exit 0 having skipped everything. The verb
 // announces 6 steps; a run that stops after two would still exit 0 today.
-check(/6\/6|\b6 \/ 6\b/.test(day.out) || /brain:ticket:start/.test(day.out),
-  'brain:day:start reached its final step (the board), not just an early exit');
+//
+// F4: the `|| /brain:ticket:start/` fallback this used to carry is gone.
+// Measured — day:start prints every marker `1/6`..`6/6`, so the strong test
+// always matched and the fallback could only ever let a regression through.
+check(/\b6\/6\b/.test(day.out),
+  'brain:day:start reached its final step 6/6, not just an early exit');
 
 // ── 4. Idempotency ──────────────────────────────────────────────────────────
 
