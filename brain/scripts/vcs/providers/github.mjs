@@ -13,6 +13,26 @@ import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
 
 export const PROVIDER = 'github';
 
+// ── Contributor-scaffold DELIVERY (issue #570) ─────────────────────────────────
+//
+// The contributor-facing gate scaffold has exactly one provider-specific half:
+// where the platform reads it from, and what the platform calls the thing. GitHub
+// auto-applies `.github/PULL_REQUEST_TEMPLATE.md` to every new pull request. The
+// TEXT is neutral and lives in ONE place — `vcs/contributor-scaffold.mjs` — which
+// substitutes this vocabulary at emission (#340: one source, per-provider
+// emission, never two hand-maintained copies).
+//
+// A DATA constant, deliberately not a function: `verb-contract-drift-guard.test.mjs`
+// treats any FUNCTION exported by both providers as a contract verb, and delivery
+// data is not a verb.
+export const CONTRIBUTOR_SCAFFOLD = Object.freeze({
+  provider: PROVIDER,
+  path: '.github/PULL_REQUEST_TEMPLATE.md',
+  noun: 'pull request',
+  nounTitle: 'Pull request',
+  abbr: 'PR',
+});
+
 // ── the single chokepoint for `gh` (issue #501) ────────────────────────────────
 //
 // Every verb reaches the network through `gh` / `ghJson` and nothing else, so the

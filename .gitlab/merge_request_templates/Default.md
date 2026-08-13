@@ -1,23 +1,23 @@
 ## Linked issue (required)
 
 <!--
-Every pull request must reference an approved issue — `issue-link` is a required gate
+Every merge request must reference an approved issue — `issue-link` is a required gate
 and fails closed without one.
 
   · Targeting the default branch: use a CLOSING reference, followed by the issue
     number — the line below is already in that form.
     Accepted closing keywords (case-insensitive): `Close`, `Closed`, `Closes`, `Fix`, `Fixed`, `Fixes`, `Resolve`, `Resolved`, `Resolves`.
   · Targeting any other branch (a chained slice): "Part of #N" is accepted too.
-    It is NOT accepted on the default branch — the integration PR must close.
+    It is NOT accepted on the default branch — the integration MR must close.
 
-The referenced issue MUST carry the approved label — `status:approved` unless this
+The referenced issue MUST carry the approved label — `status::approved` unless this
 repo sets `governance.approvedLabel`, which the gate honors and this text cannot see.
 An unapproved issue fails the gate exactly as a missing reference does.
 -->
 
 Closes #
 
-## Pull request type
+## Merge request type
 
 <!--
 Check exactly ONE box and add the matching `type:*` label.
@@ -36,7 +36,7 @@ own labels, because a `type:*` value your project does not define cannot satisfy
 
 ## Summary
 
-<!-- 1–3 bullet points describing what this pull request does. -->
+<!-- 1–3 bullet points describing what this merge request does. -->
 
 -
 
@@ -55,7 +55,7 @@ Additions + deletions, excluding whatever `governance.ignoreList` in this repo's
 brain.config.json lists (test files, fixtures and lock files are the usual
 entries — the list varies per repo, so read it rather than assuming).
 
-If this pull request exceeds the budget, add the `size:exception` label and explain why
+If this merge request exceeds the budget, add the `size:exception` label and explain why
 splitting was not feasible. CI will block merges over budget without it.
 
 `regulated` does NOT honor `size:exception` — at that tier the label is refused
@@ -79,7 +79,7 @@ in exactly two cases —
 Everything else passes, including MODIFYING an existing ADR on its own: correcting a
 line in an ADR from months ago does not force a re-index.
 
-So if this pull request introduces an architectural or process decision:
+So if this merge request introduces an architectural or process decision:
   1. Add an `adr-NNNN-<slug>.md` under `brain/project/decisions/`
   2. Index it in `brain/HOME.md` — this is the half the gate checks
   3. Add the `decision` label
@@ -95,7 +95,7 @@ outside the machine.
 ## What the gates check
 
 <!--
-The governance jobs that run on this pull request. Which of them BLOCK the merge is a
+The governance jobs that run on this merge request. Which of them BLOCK the merge is a
 property of YOUR pipeline, not of this list: the tier this repo declares and what the
 platform can enforce both feed it, and a pipeline may simply run every job as
 blocking regardless of tier. `npm run brain:governance-status` prints the
@@ -105,14 +105,14 @@ they agree.
 
 | Gate | What it verifies |
 |------|------------------|
-| `issue-link` | The pull request description references an issue carrying the approved label. Fails closed. |
+| `issue-link` | The merge request description references an issue carrying the approved label. Fails closed. |
 | `diff-size` | Changed lines are within the declared tier's budget, excluding the configured ignore list. |
 | `local-checks` | The structural repo checks — reference check, navigation check — run in CI too, not only in your local hook. |
-| `memory-gate` | Session memory was captured. WHEN the pipeline hands this gate the pull request description (some do, some do not), it requires a memory record scoped to the linked issue; otherwise it degrades to "this repository has ever recorded a session summary". |
+| `memory-gate` | Session memory was captured. WHEN the pipeline hands this gate the merge request description (some do, some do not), it requires a memory record scoped to the linked issue; otherwise it degrades to "this repository has ever recorded a session summary". |
 | `decision-gate` | An ADDED ADR is indexed in `brain/HOME.md`, and `brain/HOME.md` is not touched without an ADR. Reads no labels. |
 | `phase-order` | The change's SDD artifacts progressed in order. A real violation fails at every tier; only an UNCOMPUTABLE diff is downgraded to a warning at the lightest one. |
-| `actor-check` | The approval is not self-approval. At the lightest tier that means a distinct ACT (approving after your own last commit is enough); above it, a distinct ACTOR — approving your own pull request or your own issue fails — and at the strictest tier the approver must also have authored no commit on the branch. |
-| `brain-writes-reviewed` | Writes to the knowledge half are not agent-authored — that half never tiers. Above the lightest tier an approving review from someone other than the author is also required, though a pull request with NO reviews yet warns and passes rather than failing on absent evidence. |
+| `actor-check` | The approval is not self-approval. At the lightest tier that means a distinct ACT (approving after your own last commit is enough); above it, a distinct ACTOR — approving your own merge request or your own issue fails — and at the strictest tier the approver must also have authored no commit on the branch. |
+| `brain-writes-reviewed` | Writes to the knowledge half are not agent-authored — that half never tiers. Above the lightest tier an approving review from someone other than the author is also required, though a merge request with NO reviews yet warns and passes rather than failing on absent evidence. |
 
 ## Test plan
 
@@ -136,4 +136,4 @@ they agree.
       but no gate reads it — applying it exempts nothing.
 
 <!-- Emitted from brain/scripts/vcs/contributor-scaffold.mjs — edit the source, not
-     .github/PULL_REQUEST_TEMPLATE.md. A hand-edit here is refused by contributor-scaffold.test.mjs. -->
+     .gitlab/merge_request_templates/Default.md. A hand-edit here is refused by contributor-scaffold.test.mjs. -->
