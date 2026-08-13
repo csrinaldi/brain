@@ -21,7 +21,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -47,10 +47,34 @@ const ADR_FILE_RE = /^adr-(\d{4})-[a-z0-9][a-z0-9-]*\.md$/;
  *                   — that IS a draft. #590's own draft lives here.
  *   `brain-drafts/` the same shape at the repo root.
  *
- * Everything else is scanned: `brain/core`, `brain/project`, `brain/scripts`,
- * `.github/`, the root `.gitlab-ci.yml`, `test/`, `docs/`, `AGENTS.md`.
+ * Everything else is scanned — and `REQUIRED_ROOTS` is what makes that
+ * sentence true rather than aspirational.
  */
 const UNSCANNED_ROOTS = Object.freeze(['.memory/', 'openspec/', 'brain-drafts/']);
+
+/**
+ * Roots that MUST contribute scanned files, each with why it carries pointers
+ * a reader follows.
+ *
+ * Review finding G1. Before this existed, the scan surface was undefended: on a
+ * green tree, adding `brain/core/` and `.github/` to `UNSCANNED_ROOTS` removed
+ * two whole doctrine-bearing surfaces and left the suite **7/7 green**. Nothing
+ * noticed, and the comment above went on claiming they were scanned.
+ *
+ * The vacuity guards below did not cover it and could not: they are absolute
+ * counts, and excluding the whole of `brain/scripts/**` — where 3 of the 5
+ * ADR-0018 citation sites live — still leaves 114 files and 393 citations, both
+ * over their thresholds. Narrowing the scan must now DELETE a named entry here,
+ * which is a visible act rather than one word added to a list.
+ */
+const REQUIRED_ROOTS = Object.freeze([
+  { root: 'brain/core/', why: 'generic doctrine, STRATEGY.COPY into every consumer' },
+  { root: 'brain/project/', why: 'the ADRs themselves, which cite each other' },
+  { root: 'brain/scripts/', why: 'the code that cites decisions in its own reasoning — 3 of #590\'s 5 sites' },
+  { root: '.github/', why: 'the workflows that implement the gates the ADRs decide' },
+  { root: 'test/', why: 'suites that cite the doctrine they pin' },
+  { root: 'docs/', why: 'adoption and planning documents readers actually follow' },
+]);
 
 /**
  * This file, and only this file, is excluded from its own scan.
@@ -82,9 +106,18 @@ const FIXTURE_CITATIONS = Object.freeze([
 ]);
 
 /**
- * Real rot this ticket does not repair. This list may only SHRINK: every entry
- * names the ticket that owns it, and a stale entry fails below rather than
- * silently outliving the defect.
+ * Real rot this ticket does not repair.
+ *
+ * Every entry MUST name the issue that owns it, and that is enforced below
+ * rather than asked for. Review finding G3: this comment used to claim the
+ * ticket reference and neither entry carried one — "own ticket owed" and "as
+ * above" — while the test asserted only that the string was non-empty. A
+ * registry of accepted rot whose justifications nobody checks is how the rot
+ * becomes permanent.
+ *
+ * Entries do not need removing by hand when the defect dies: the staleness
+ * guard fails an entry that no longer matches an unresolved citation. Adding
+ * one costs an issue number.
  *
  * `ADR-0018` is deliberately ABSENT. It is #590's subject, and baselining it
  * here would record the defect instead of fixing it. Until the human runs
@@ -93,9 +126,9 @@ const FIXTURE_CITATIONS = Object.freeze([
  */
 const KNOWN_GAPS = Object.freeze([
   { file: 'docs/inbox/MASTER-PLAN-1.0.md', number: '0023',
-    why: 'ADR-0023 (SDD role port) drafted at brain-drafts/adr-0023-sdd-role-port.md, never promoted — same class as #590, own ticket owed' },
+    why: 'ADR-0023 (SDD role port) drafted at brain-drafts/adr-0023-sdd-role-port.md, never promoted — owned by #599' },
   { file: 'docs/inbox/brain-v2-epic-plan.md', number: '0023',
-    why: 'as above — the second citation of the same unpromoted draft' },
+    why: 'the second citation of the same unpromoted draft — owned by #599' },
 ]);
 
 // ── Readers. Every one of them throws rather than returning empty ────────────
@@ -138,25 +171,25 @@ function signedAdrNumbers(dir = DECISIONS_DIR) {
  * than being folded into "no matches".
  *
  * @param {string[]} files
- * @returns {{citations: {file:string, line:number, number:string, text:string}[], scanned:number, binary:number}}
+ * @returns {{citations: {file:string, line:number, number:string, text:string}[], scannedPaths:string[], scanned:number, binary:number}}
  */
 function collectCitations(files) {
   const citations = [];
-  let scanned = 0;
+  const scannedPaths = [];
   let binary = 0;
   for (const file of files) {
     if (file === SELF) continue;
     if (UNSCANNED_ROOTS.some((root) => file.startsWith(root))) continue;
     const buf = readFileSync(join(REPO_ROOT, file)); // throws — never a silent skip
     if (buf.includes(0)) { binary++; continue; }
-    scanned++;
+    scannedPaths.push(file);
     buf.toString('utf8').split('\n').forEach((text, i) => {
       for (const m of text.matchAll(CITATION_RE)) {
         citations.push({ file, line: i + 1, number: m[1], text: text.trim() });
       }
     });
   }
-  return { citations, scanned, binary };
+  return { citations, scannedPaths, scanned: scannedPaths.length, binary };
 }
 
 /** True when `entry` names this exact citation site. */
@@ -166,7 +199,7 @@ const covers = (entry, c) => entry.file === c.file && entry.number === c.number;
 
 const files = trackedFiles();
 const signed = signedAdrNumbers();
-const { citations, scanned, binary } = collectCitations(files);
+const { citations, scannedPaths, scanned, binary } = collectCitations(files);
 const unresolved = citations.filter((c) => !signed.has(c.number));
 const registry = [...FIXTURE_CITATIONS, ...KNOWN_GAPS];
 
@@ -203,6 +236,17 @@ test('adr-citations: the self-exclusion covers exactly this file and nothing els
   assert.equal(files.includes(SELF), true, `${SELF} is not tracked — the exclusion exempts nothing`);
 });
 
+test('adr-citations: every root that must be scanned actually was (G1 — the surface cannot be narrowed in silence)', () => {
+  const silent = REQUIRED_ROOTS.filter((r) => !scannedPaths.some((p) => p.startsWith(r.root)));
+  assert.deepEqual(
+    silent.map((r) => r.root), [],
+    'these roots contributed NOTHING to the scan — either they were added to UNSCANNED_ROOTS or they no longer exist:\n'
+      + silent.map((r) => `  ${r.root} — ${r.why}`).join('\n')
+      + '\n\n  Measured before this guard: excluding brain/core/ and .github/ on a green tree left the suite 7/7.'
+      + '\n  Narrowing the scan is a decision. Delete the entry here and say why, or do not narrow it.',
+  );
+});
+
 test('adr-citations: a citation that DOES resolve is reached by the scan (the check can say yes)', () => {
   // ADR-0016 is cited from the same GitLab fragment ADR-0018 is, and it exists.
   // If this stops holding, the scan stopped reaching the surface #590 is about.
@@ -230,6 +274,45 @@ test('adr-citations: every cited ADR-NNNN resolves to a file in brain/project/de
   );
 });
 
+// ── Drafts: the links a promotion is about to make live ─────────────────────
+//
+// Review finding G4. A draft's sibling links (`](adr-0016-….md)`) are written
+// relative to `brain/project/decisions/` — where `brain:promote` puts the file
+// — not to the `brain-drafts/` dir they sit in. Nothing checked them there, and
+// `brain:nav` only reads `brain/`, so a wrong link would go red on the HUMAN's
+// signing commit rather than on the agent's. The failure belongs on the side
+// that wrote it.
+
+const DRAFT_LINK_RE = /\]\((adr-\d{4}-[a-z0-9][a-z0-9-]*\.md)\)/g;
+
+const adrDrafts = files.filter((f) => /(?:^|\/)brain-drafts\/adr-\d{4}-[a-z0-9-]+\.md$/.test(f));
+
+test('adr-citations: every sibling link in an ADR draft resolves at the path it will be promoted to (G4)', () => {
+  const broken = [];
+  for (const draft of adrDrafts) {
+    const text = readFileSync(join(REPO_ROOT, draft), 'utf8'); // throws — never a silent skip
+    for (const m of text.matchAll(DRAFT_LINK_RE)) {
+      if (!existsSync(join(REPO_ROOT, DECISIONS_DIR, m[1]))) broken.push(`${draft} → ${m[1]}`);
+    }
+  }
+  assert.deepEqual(
+    broken, [],
+    'these draft links will not resolve once the draft is promoted to '
+      + `${DECISIONS_DIR}/ — and the red would land on the signing commit, not on the draft:\n`
+      + broken.map((b) => `  ${b}`).join('\n'),
+  );
+});
+
+test('adr-citations: the draft-link check is looking at real drafts (a vacuous pass is a failure)', () => {
+  // With no draft in the tree the check above passes trivially. That is fine —
+  // but it must be VISIBLY fine, not indistinguishable from a broken glob.
+  const linked = adrDrafts.reduce(
+    (n, d) => n + [...readFileSync(join(REPO_ROOT, d), 'utf8').matchAll(DRAFT_LINK_RE)].length, 0,
+  );
+  console.log(`      # ${adrDrafts.length} ADR draft(s) carrying ${linked} sibling link(s)`);
+  assert.ok(adrDrafts.every((d) => d.includes('brain-drafts/')), 'the draft glob matched something outside brain-drafts/');
+});
+
 test('adr-citations: no registry entry outlives the citation it exempts', () => {
   const stale = registry.filter((e) => !unresolved.some((c) => covers(e, c)));
   assert.equal(
@@ -246,7 +329,13 @@ test('adr-citations: KNOWN_GAPS only shrinks — ADR-0018 is never baselined (#5
     'ADR-0018 was added to KNOWN_GAPS. #590 is the ticket to WRITE it or re-point its ' +
       'citations — baselining it records the rot as acceptable.',
   );
+  // G3: the comment claimed "every entry names the ticket that owns it" while
+  // the assertion checked only that the string was non-empty, and neither entry
+  // named one. Enforced now — adding accepted rot costs an issue number.
   for (const e of KNOWN_GAPS) {
-    assert.match(e.why, /\S/, `KNOWN_GAPS entry for ${e.file} carries no reason`);
+    assert.match(
+      e.why, /#\d+/,
+      `KNOWN_GAPS entry for ${e.file} (ADR-${e.number}) names no issue. Accepted rot needs a ticket that owns it:\n  ${e.why}`,
+    );
   }
 });

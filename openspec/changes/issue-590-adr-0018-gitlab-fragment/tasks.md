@@ -22,6 +22,23 @@ issue: 590
 
 Ver `design.md` — se consolidaron ahí durante el vuelo.
 
+## Ronda de review fría (autor, etiquetada como tal)
+
+- [x] G1 — la superficie de escaneo era indefendible: sobre árbol verde, agregar
+      `brain/core/` y `.github/` a `UNSCANNED_ROOTS` dejaba el suite **7/7 verde**.
+      `REQUIRED_ROOTS` lo cierra; la misma mutación ahora es roja.
+- [x] G2 — el ADR decía que el literal managed está *encima* del glob
+      `brain/scripts/**` y atribuía el comportamiento a la posición. Medido:
+      está *debajo* (líneas 41 vs 44), y `strategyFor()` resuelve por lookup
+      exacto antes de iterar globs. Corregido en el draft.
+- [x] G3 — `KNOWN_GAPS` afirmaba "every entry names the ticket that owns it" y
+      ninguna lo hacía; el test sólo exigía no-vacío. Ahora exige `/#\d+/`, y
+      las dos entradas apuntan a #599.
+- [x] G4 — los links relativos del draft sólo se verificaban tras la firma
+      humana (`brain:nav` mira `brain/`). El check nuevo cubre los 16 drafts
+      del árbol y sus 18 links.
+- [x] Ticket #599 abierto para ADR-0023, que es lo que permite cerrar G3.
+
 ## Fuera de alcance, reportado
 
 - `.gitlab-ci.yml:1` dice que `phase-order`, `actor-check` y `brain-writes-reviewed`
@@ -29,4 +46,4 @@ Ver `design.md` — se consolidaron ahí durante el vuelo.
   (las 3 ocurrencias son comentario). El comentario del root quedó viejo tras la
   promoción de #358 Phase 5. Archivo fuera del reclamo.
 - ADR-0023: citado por dos archivos en `docs/inbox/**`, draft sin promover en
-  `brain-drafts/adr-0023-sdd-role-port.md`. Misma clase que #590. Ticket propio.
+  `brain-drafts/adr-0023-sdd-role-port.md`. Misma clase que #590. **Ticket #599.**

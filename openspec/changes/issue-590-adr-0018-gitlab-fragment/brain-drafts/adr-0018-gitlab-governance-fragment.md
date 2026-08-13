@@ -45,9 +45,13 @@ include:
 ```
 
 The fragment is registered in `brain/core/managed-paths.mjs` as an **exact literal** with
-`STRATEGY.REFUSE`, sitting deliberately above the `brain/scripts/**` COPY glob — the resolver
-must give the literal priority or that row is dead text. The consumer's root `.gitlab-ci.yml`
-is not managed at all, at any strategy.
+`STRATEGY.REFUSE`. It sits *under* the `brain/scripts/**` COPY glob, and what keeps that row
+alive is not its position: `strategyFor()` looks the exact path up as a key first and only then
+iterates the globs, so an exact literal beats an overlapping glob **by construction, whatever
+the order**. Stated precisely because the first draft of this ADR got it backwards and said the
+literal sat above the glob — if position were the mechanism, a future reordering would silently
+turn a signed REFUSE row into a COPY, which is the "wired but never fires" shape #397 exists to
+remove. The consumer's root `.gitlab-ci.yml` is not managed at all, at any strategy.
 
 This is the asymmetry with GitHub, where `.github/workflows/governance.yml` is a
 brain-owned managed file: GitHub has a per-workflow directory, GitLab has one root.
