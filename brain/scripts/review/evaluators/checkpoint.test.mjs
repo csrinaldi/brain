@@ -280,7 +280,7 @@ test('evaluateCheckpoint: report claim matches the recomputation → no drift fi
 
 // ── §10.2 artifact completeness ─────────────────────────────────────────────
 
-test('evaluateCheckpoint: missing REQUIRED_ARTIFACTS → blocker citing sdd-layout', () => {
+test('evaluateCheckpoint: a missing tier-required artefact → blocker citing governance-tiers', () => {
   const result = evaluateCheckpoint({
     trancheInputs: greenTrancheInputs(),
     artifacts: { missing: ['design.md'], hasCheckedTask: true },
@@ -585,6 +585,12 @@ function gatherAtTier({ tier, reportText, numstat = '10\t5\ta.mjs\n' }) {
     provider: 'github',
     headSha: 'HEAD',
     changedFiles: [`openspec/changes/${changeId}/checkpoint-report.md`],
+    // #555 round 2: the TOP-LEVEL tier, which drives requiredArtifactsFor. It was
+    // passed only into trancheDeps, so every checkpoint test ran the artefact
+    // resolution at the 'standard' default — the consumer was blind along the very
+    // axis #555 introduced, and a cold review measured that neither of the PR's own
+    // mutations moved a single checkpoint test.
+    tier,
     deps: {
       baseSha: 'BASE',
       exists: (p) => p in files,
@@ -903,4 +909,77 @@ test('REVERSION-CRASHSAFE (real default): an unexpected git failure (bogus head 
   }, 'an unexpected git failure must not escape the reversion runner');
   assert.equal(result.uncomputable, true);
   assert.equal(result.command, null);
+});
+
+// ── #555 round 2: the checkpoint consumer MOVES with the tier ────────────────
+
+/** Like gatherAtTier, but the caller chooses which artefact files exist. */
+function gatherWithArtefacts({ tier, present }) {
+  const changeId = 'issue-999-artefacts';
+  const files = Object.fromEntries(
+    present.map(f => [`openspec/changes/${changeId}/${f}`, f === 'tasks.md' ? '- [x] done\n' : 'x']));
+  files[`openspec/changes/${changeId}/checkpoint-report.md`] = 'Counted diff re-derived cold = **10/1000**.';
+  return gatherCheckpointInputs({
+    project: 'csrinaldi/brain', number: 42, provider: 'github', headSha: 'HEAD',
+    changedFiles: [`openspec/changes/${changeId}/checkpoint-report.md`],
+    tier,
+    deps: {
+      baseSha: 'BASE',
+      exists: (p) => p in files,
+      listDir: () => [],
+      readFile: (p) => files[p] ?? '',
+      runReversion: async () => ({ uncomputable: false, command: 'cmd', vacuousTests: [] }),
+      trancheDeps: { tier, fetchRollup: async () => greenRollup(), diffNumstat: () => '1\t0\ta.mjs\n', readIgnoreList: () => [] },
+      runAudit: () => '', runGovernanceStatus: () => '',
+    },
+  });
+}
+
+test('#555: at LITE the artefact SET is spec.md alone — but the SDD must still be executed', async () => {
+  // REWRITTEN in round 3. The first version asserted only `artifacts.missing` and
+  // never called `evaluateCheckpoint`, so it could not see that the blocker had
+  // been RENAMED rather than removed: with tasks.md out of the tier's set, an
+  // absent tasks.md read as "present with zero checked" and `tasks-no-progress`
+  // fired in `artifacts-missing`'s place. A test that measures the thing you
+  // changed instead of the outcome that matters cannot see that.
+  const inputs = await gatherWithArtefacts({ tier: 'lite', present: ['spec.md'] });
+  assert.deepEqual(inputs.artifacts.missing, [],
+    'lite requires spec.md alone for Rule A (ADR-0026)');
+
+  const blockers = evaluateCheckpoint(inputs).findings.filter(f => f.severity === 'blocker').map(f => f.id);
+  assert.deepEqual(blockers, ['tasks-absent'],
+    'and exactly ONE blocker — the SDD-execution one (maintainer ruling 2026-08-13: "por más que ' +
+    'sea lite, el SDD debe ser ejecutado"), never a no-progress finding over a file that is not there');
+});
+
+test('#555: at LITE, spec.md + a tasks.md with one checked item passes clean', async () => {
+  const inputs = await gatherWithArtefacts({ tier: 'lite', present: ['spec.md', 'tasks.md'] });
+  const blockers = evaluateCheckpoint(inputs).findings.filter(f => f.severity === 'blocker').map(f => f.id);
+  assert.deepEqual(blockers, [],
+    'the shape REQ-L4-2′s own lite scenario describes must not block');
+});
+
+test('#555: a tasks.md with NO checked item is a different finding from an absent one', async () => {
+  // "You never wrote one" and "you wrote one and completed nothing" are different
+  // things to tell an author, and collapsing them is what produced round 3's blocker.
+  const inputs = await gatherWithArtefacts({ tier: 'lite', present: ['spec.md', 'tasks-empty.md'] });
+  const ids = evaluateCheckpoint(inputs).findings.filter(f => f.severity === 'blocker').map(f => f.id);
+  assert.ok(ids.includes('tasks-absent'), `absent tasks.md must say so: ${JSON.stringify(ids)}`);
+  assert.ok(!ids.includes('tasks-no-progress'), 'and must not claim zero progress on a file it never read');
+});
+
+test('#555: at REGULATED the same change is missing four, named by their REAL filenames', async () => {
+  const inputs = await gatherWithArtefacts({ tier: 'regulated', present: ['spec.md'] });
+  assert.deepEqual(inputs.artifacts.missing,
+    ['proposal.md', 'design.md', 'tasks.md', 'verify-report.md'],
+    'and the verification artefact is verify-report.md, never the invented verification.md');
+});
+
+test('#555: at REGULATED, verify-report.md present completes the set', async () => {
+  const inputs = await gatherWithArtefacts({
+    tier: 'regulated',
+    present: ['proposal.md', 'spec.md', 'design.md', 'tasks.md', 'verify-report.md'],
+  });
+  assert.deepEqual(inputs.artifacts.missing, [],
+    'a regulated change carrying the five REAL artefacts is complete — the blocker B1 fixed');
 });
