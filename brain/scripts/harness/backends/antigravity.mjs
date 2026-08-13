@@ -52,7 +52,8 @@ export const GEMINI_SETTINGS_EMIT_PATH = '.gemini/settings.json';
  * `gentle-ai`, nothing else). Declaring `null` says "there is nothing to probe"
  * — which day-start reports as exactly that, distinct from "the probe failed".
  * The export exists so the seam is uniform across backends: the day a queryable
- * CLI ships, this becomes a descriptor literal, not a new mechanism.
+ * CLI ships, this becomes a descriptor literal, not a new mechanism. A backend
+ * that omits the export entirely reports `seam-missing`, not this state (#614).
  */
 export const AGENT_RUNTIME = null;
 
