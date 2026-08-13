@@ -22,6 +22,7 @@ import {
   resolveInstalledTag,
   writeBootstrapAlias,
 } from './lib/init.mjs';
+import { installedPackageRoot } from './lib/installer.mjs';
 
 /**
  * `init` — write the bootstrap alias, then delegate to the real upgrade.
@@ -72,7 +73,7 @@ export function runInit({
   log(`brain init: copying managed paths at ${tag} …`);
   const r = spawn(
     process.execPath,
-    [join(root, 'node_modules', 'brain', 'brain', 'scripts', 'brain-upgrade.mjs'), tag],
+    [installedPackageRoot(root, 'brain', 'scripts', 'brain-upgrade.mjs'), tag],
     { cwd: root, stdio: 'inherit' },
   );
   // Exit honestly (REQ-400-8): a scripted adoption must not report success over a

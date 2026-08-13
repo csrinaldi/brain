@@ -14,8 +14,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { SOURCE_DOCS, AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH, compileAgentsMd } from './antigravity.mjs';
@@ -64,14 +66,116 @@ test('drift-guard proof: a mutated copy of a fresh compile is NOT byte-equal to 
   );
 });
 
-test('drift-guard: compileSettingsHooksJson() is valid JSON and byte-equal to .gemini/settings.json if present', () => {
+/**
+ * The COMMITTED bytes of the emitted settings file, read from git rather than
+ * from the working tree (#616). Returns null ONLY when the path is genuinely
+ * not tracked — never as a way of swallowing a git failure, which would make
+ * "the file is not under version control" indistinguishable from "I could not
+ * read it" and turn this guard into a silent pass.
+ */
+export function committedBytes(relPath, root = REPO_ROOT) {
+  // `null` means ONE thing: git ran, answered, and said the path is not tracked.
+  // Every other failure throws. Returning null for "git is missing" or "this is
+  // not a repository" would make "there is nothing committed" indistinguishable
+  // from "I could not look" — the evidence-reader-empty-on-failure class this
+  // very guard exists to defeat. Measured on the previous revision: deleting
+  // .git, or running without a git binary, turned this guard GREEN.
+  const inRepo = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: root, encoding: 'utf8' });
+  if (inRepo.error || inRepo.status !== 0) {
+    throw new Error(
+      `cannot judge ${relPath}: git is unusable here (${inRepo.error?.code ?? inRepo.stderr?.trim() ?? `exit ${inRepo.status}`}). ` +
+        'Refusing to pass on evidence that was never read.',
+    );
+  }
+
+  const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', relPath], { cwd: root, encoding: 'utf8' });
+  if (tracked.error) throw new Error(`cannot judge ${relPath}: ${tracked.error.message}`);
+  if (tracked.status === 1) return null; // git answered: genuinely untracked
+  if (tracked.status !== 0) {
+    throw new Error(`cannot judge ${relPath}: git ls-files exited ${tracked.status} — ${tracked.stderr?.trim()}`);
+  }
+
+  const show = spawnSync('git', ['show', `HEAD:${relPath}`], { cwd: root, encoding: 'utf8' });
+  if (show.error || show.status !== 0) {
+    throw new Error(
+      `${relPath} is tracked but its committed copy could not be read — ` +
+        `refusing to pass on unread evidence: ${show.stderr?.trim() || show.error?.message}`,
+    );
+  }
+  return show.stdout;
+}
+
+const committedSettings = () => committedBytes(GEMINI_SETTINGS_EMIT_PATH);
+
+test('drift-guard: compileSettingsHooksJson() is valid JSON and byte-equal to the committed .gemini/settings.json', () => {
   const fresh = compileSettingsHooksJson();
   assert.doesNotThrow(() => JSON.parse(fresh));
 
-  const path = join(REPO_ROOT, GEMINI_SETTINGS_EMIT_PATH);
-  if (existsSync(path)) {
-    const committed = readFileSync(path, 'utf8');
-    assert.equal(fresh, committed);
+  const committed = committedSettings();
+  if (committed !== null) {
+    assert.equal(
+      fresh, committed,
+      `${GEMINI_SETTINGS_EMIT_PATH} has drifted from the compiler. If you just regenerated it, ` +
+        'COMMIT the regenerated file — this guard reads the committed bytes (#616), so a ' +
+        'regenerated-but-uncommitted file reads as drift until you commit it.',
+    );
   }
 });
 
+// Why AGENTS.md above is still judged against the WORKING TREE while the
+// settings file is judged against HEAD (#616): the self-heal needs a test that
+// writes the tracked file, and only the settings path ever had one. 2.4/2.6 in
+// antigravity.test.mjs now make that impossible for both paths, so AGENTS.md
+// has no vector to close and keeps the friendlier regenerate-then-test flow.
+// If a writer for AGENTS.md ever appears, the same treatment applies here.
+
+
+// ── The guard must survive a dirty working tree (issue #616) ─────────────────
+//
+// It used to compare against the working-tree copy of a TRACKED file, and a
+// sibling test rewrote that same file by running init() against the real repo
+// root. Measured then: with the compiler mutated, run 1 was red, runs 2 and 3
+// were green — the guard repaired the evidence it judges. A guard you cannot
+// re-run is not a guard.
+
+test('drift-guard: the reader returns the COMMITTED bytes even when the working copy differs', () => {
+  // The previous version of this test computed a `dirtied` string and never
+  // used it — its final assertion was byte-identical to the one above it, so it
+  // passed with the property removed (measured: swapping the reader back to a
+  // working-tree readFileSync left all four drift tests green). This builds a
+  // real repository where the two genuinely differ.
+  const scratch = mkdtempSync(join(tmpdir(), 'brain-616-'));
+  try {
+    const git = (...args) => {
+      const r = spawnSync('git', args, { cwd: scratch, encoding: 'utf8' });
+      assert.equal(r.status, 0, `git ${args.join(' ')} failed: ${r.stderr}`);
+    };
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'test');
+    writeFileSync(join(scratch, 'f.json'), 'COMMITTED\n', 'utf8');
+    git('add', 'f.json');
+    git('commit', '-qm', 'seed');
+
+    writeFileSync(join(scratch, 'f.json'), 'DIRTY\n', 'utf8');
+
+    assert.equal(readFileSync(join(scratch, 'f.json'), 'utf8'), 'DIRTY\n', 'the working copy must really differ');
+    assert.equal(committedBytes('f.json', scratch), 'COMMITTED\n', 'the reader must ignore the working copy');
+    assert.equal(committedBytes('untracked.json', scratch), null, 'an untracked path reads as null, not as an error');
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('drift-guard: the reader REFUSES rather than passing when git cannot answer', () => {
+  const notARepo = mkdtempSync(join(tmpdir(), 'brain-616-norepo-'));
+  try {
+    assert.throws(
+      () => committedBytes('anything.json', notARepo),
+      /git is unusable here/,
+      'outside a repository the reader must throw — returning null would read as "nothing is committed"',
+    );
+  } finally {
+    rmSync(notARepo, { recursive: true, force: true });
+  }
+});
