@@ -24,7 +24,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -218,7 +218,16 @@ test('2.4: dispatch("antigravity", "init", [opts]) resolves through the REAL cli
   const scratchWrites = [];
   const _writeAgents = (relPath, content) => scratchWrites.push({ relPath, content });
 
-  await assert.doesNotReject(dispatch('antigravity', 'init', [{ _writeAgents }]));
+  const settingsWrites = [];
+  const _writeGeminiSettings = (relPath, content) => settingsWrites.push({ relPath, content });
+
+  await assert.doesNotReject(dispatch('antigravity', 'init', [{ _writeAgents, _writeGeminiSettings }]));
+
+  // Injected too: without it the default writer lands on the REAL tracked
+  // .gemini/settings.json (#616), which is what let a mutated compiler repair
+  // the file the drift-guard compares against.
+  assert.equal(settingsWrites.length, 1);
+  assert.equal(settingsWrites[0].relPath, GEMINI_SETTINGS_EMIT_PATH);
 
   assert.equal(scratchWrites.length, 1, '_writeAgents must be called exactly once');
   assert.equal(scratchWrites[0].relPath, AGENTS_EMIT_PATH);
@@ -296,4 +305,31 @@ test('antigravity declares no agent runtime probe — it ships no version-querya
   // one-line descriptor rather than a new mechanism.
   assert.equal(AGENT_RUNTIME, null);
   assert.equal(probeAgentRuntime(AGENT_RUNTIME).state, 'not-declared');
+});
+
+// ── No test may write a tracked file (issue #616) ────────────────────────────
+
+test('2.6: dispatch("antigravity", "init") writes NOTHING to the tracked emit paths', async () => {
+  // 2.4 injected `_writeAgents` only, so the default `_writeGeminiSettings`
+  // fired against the real repo root and rewrote the tracked
+  // .gemini/settings.json on every run. It went unnoticed because the bytes it
+  // wrote were identical — `git status` stayed clean while the file was being
+  // rewritten, and a mutated compiler therefore silently repaired the evidence
+  // the drift-guard judges. mtime is what makes the write observable.
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+  const tracked = [AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH].map((rel) => join(repoRoot, rel));
+  const before = tracked.map((p) => statSync(p).mtimeMs);
+
+  const writes = [];
+  await dispatch('antigravity', 'init', [{
+    _writeAgents: (relPath, content) => writes.push({ relPath, content }),
+    _writeGeminiSettings: (relPath, content) => writes.push({ relPath, content }),
+  }]);
+
+  // Both seams captured — a future edit dropping either one puts the default
+  // writer back on the real path.
+  assert.deepEqual(writes.map((w) => w.relPath).sort(), [AGENTS_EMIT_PATH, GEMINI_SETTINGS_EMIT_PATH].sort());
+
+  const after = tracked.map((p) => statSync(p).mtimeMs);
+  assert.deepEqual(after, before, 'init() touched a tracked file — every write path must be injected in tests');
 });

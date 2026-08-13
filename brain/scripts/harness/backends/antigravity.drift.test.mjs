@@ -15,6 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -64,14 +65,57 @@ test('drift-guard proof: a mutated copy of a fresh compile is NOT byte-equal to 
   );
 });
 
-test('drift-guard: compileSettingsHooksJson() is valid JSON and byte-equal to .gemini/settings.json if present', () => {
+/**
+ * The COMMITTED bytes of the emitted settings file, read from git rather than
+ * from the working tree (#616). Returns null ONLY when the path is genuinely
+ * not tracked — never as a way of swallowing a git failure, which would make
+ * "the file is not under version control" indistinguishable from "I could not
+ * read it" and turn this guard into a silent pass.
+ */
+function committedSettings() {
+  const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', GEMINI_SETTINGS_EMIT_PATH], {
+    cwd: REPO_ROOT, encoding: 'utf8',
+  });
+  if (tracked.status !== 0) return null; // genuinely untracked
+
+  const show = spawnSync('git', ['show', `HEAD:${GEMINI_SETTINGS_EMIT_PATH}`], {
+    cwd: REPO_ROOT, encoding: 'utf8',
+  });
+  if (show.status !== 0) {
+    throw new Error(
+      `${GEMINI_SETTINGS_EMIT_PATH} is tracked but its committed copy could not be read — ` +
+        `refusing to pass on unread evidence: ${show.stderr?.trim() || show.error?.message}`,
+    );
+  }
+  return show.stdout;
+}
+
+test('drift-guard: compileSettingsHooksJson() is valid JSON and byte-equal to the committed .gemini/settings.json', () => {
   const fresh = compileSettingsHooksJson();
   assert.doesNotThrow(() => JSON.parse(fresh));
 
-  const path = join(REPO_ROOT, GEMINI_SETTINGS_EMIT_PATH);
-  if (existsSync(path)) {
-    const committed = readFileSync(path, 'utf8');
-    assert.equal(fresh, committed);
-  }
+  const committed = committedSettings();
+  if (committed !== null) assert.equal(fresh, committed);
 });
 
+
+// ── The guard must survive a dirty working tree (issue #616) ─────────────────
+//
+// It used to compare against the working-tree copy of a TRACKED file, and a
+// sibling test rewrote that same file by running init() against the real repo
+// root. Measured then: with the compiler mutated, run 1 was red, runs 2 and 3
+// were green — the guard repaired the evidence it judges. A guard you cannot
+// re-run is not a guard.
+
+test('drift-guard: settings drift is judged against the COMMITTED file, not the working-tree copy', () => {
+  const committed = committedSettings();
+  assert.ok(committed !== null, 'the committed copy must be readable — see the empty-on-failure note in committedSettings()');
+  assert.equal(compileSettingsHooksJson(), committed);
+
+  // Teeth: a dirtied working-tree copy must NOT change this verdict. Simulated
+  // in memory — this test never writes the tracked file, which is the very
+  // defect it exists to pin.
+  const dirtied = committed.replace('brain:session:start', 'echo pwned');
+  assert.notEqual(dirtied, committed, 'the simulated dirtying must actually differ, or this proves nothing');
+  assert.equal(compileSettingsHooksJson(), committed, 'the verdict must come from the committed bytes alone');
+});
