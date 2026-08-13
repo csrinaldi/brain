@@ -21,6 +21,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { rebuildIndex } from './store.mjs';
+import { normalizeDuplicates } from './duplicates.mjs';
 
 export const INDEX_REPO_PATH = '.memory/index.jsonl';
 
@@ -51,7 +52,10 @@ export function conflictedRecordFiles({ recordsDir, deps = {} }) {
  * when — git still considers the path unmerged.
  *
  * @param {{repoRoot: string, deps?: object}} args
- * @returns {{count: number, staged: boolean}}
+ * @returns {{count: number, staged: boolean, duplicates: object}}
+ *   `duplicates` (#574) is the union-merge residual the regenerated index just
+ *   collapsed — passed straight through from `rebuildIndex` so cli.mjs prints
+ *   it. This helper runs on exactly the event that mints those lines.
  */
 export function resolveIndex({ repoRoot, deps = {} }) {
   const runGit = deps.runGit
@@ -79,13 +83,14 @@ export function resolveIndex({ repoRoot, deps = {} }) {
     .map((l) => l.trim())
     .includes(INDEX_REPO_PATH);
 
-  const { count } = reindex({ recordsDir, indexPath });
+  const { count, duplicates: rawDuplicates } = reindex({ recordsDir, indexPath });
+  const duplicates = normalizeDuplicates(rawDuplicates);
 
-  if (!wasUnmerged) return { count, staged: false };
+  if (!wasUnmerged) return { count, staged: false, duplicates };
 
   const added = runGit(['add', '--', INDEX_REPO_PATH]);
   if (added.status !== 0) {
     throw new Error(`git add ${INDEX_REPO_PATH} failed: ${String(added.stderr ?? '').trim()}`);
   }
-  return { count, staged: true };
+  return { count, staged: true, duplicates };
 }
