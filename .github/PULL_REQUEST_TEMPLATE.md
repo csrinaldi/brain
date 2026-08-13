@@ -37,8 +37,9 @@ Closes #
 <!--
 The budget is resolved from the repo's declared governance tier, NOT a flat number
 (#496): 1000 changed lines at `lite`, 400 at `standard`, 200 at `regulated`.
-Additions + deletions, excluding:
-  .memory/**, openspec/changes/**, package-lock.json, pnpm-lock.yaml, yarn.lock
+Additions + deletions, excluding whatever `governance.ignoreList` in this repo's
+brain.config.json lists (test files, fixtures and lock files are the usual
+entries — the list varies per repo, so read it rather than assuming).
 
 If this PR exceeds the budget, add the `size:exception` label and explain why
 splitting was not feasible. CI will block merges over budget without it.

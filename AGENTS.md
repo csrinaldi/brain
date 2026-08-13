@@ -366,7 +366,7 @@ Job names are **load-bearing**: they form the check context strings
 | # | Invariant | CI job (`name:`) | Skip label | Character |
 |---|-----------|-----------------|------------|-----------|
 | 1 | Every PR links an approved ticket | `issue-link` | _(none — not skippable)_ | Hard |
-| 2 | PR diff ≤ the declared tier's budget — **1000** `lite` · **400** `standard` · **200** `regulated` | `diff-size` | `size:exception` — **refused at `regulated`** | Hard with override |
+| 2 | PR diff ≤ the declared tier's budget — **1000** `lite` · **400** `standard` · **200** `regulated` | `diff-size` | `size:exception` — **refused at `regulated`** | Hard with override — **none at `regulated`** |
 | 3 | `.memory/` has EVER held a session summary (repo-scoped) | `memory-gate` _(S4)_ | _(none — `skip:memory-gate` is named but unimplemented)_ | Soft — see below |
 | 4 | An ADDED ADR co-occurs with a `brain/HOME.md` entry | `decision-gate` _(S4)_ | _(none — the gate reads no labels)_ | Hard, in one direction — see below |
 
@@ -375,9 +375,14 @@ Job names are **load-bearing**: they form the check context strings
 > `honorSizeException` per tier. Doctrine restating a value the code owns is a drift risk
 > accepted deliberately here rather than left implicit: a reader needs the numbers in front of
 > them, and the alternative — a pointer with no values — is what let this row say a flat `400`
-> for as long as it did. **brain itself declares `lite`**, so a checkpoint report written in
-> this repo cites `N/1000`, not `N/400`; a report quoting the wrong budget is itself a blocking
-> finding (`parseBudgetClaim`, #472).
+> for as long as it did. **Whichever tier YOUR repo declares is the denominator** a checkpoint
+> report must cite — `npm run brain:governance-status` prints it. A report quoting a budget the
+> repo does not operate under is itself a blocking finding (`parseBudgetClaim`, #472).
+>
+> Stated conditionally on purpose: this file is `STRATEGY.COPY` into every consumer, while
+> `brain.config.json` is not managed at all. A sentence naming *this* repo's tier would travel
+> and be false on arrival — the defect that got `AGENTS.md` removed from the managed set in
+> #397, "a file describing the wrong repository".
 
 ### Invariant 3 scope — what `memory-gate` does and does not check
 
