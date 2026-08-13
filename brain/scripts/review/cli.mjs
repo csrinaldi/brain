@@ -74,6 +74,16 @@ async function runBoardCommand(deps, log) {
     if (r.toAdd.length > 0 || r.toRemove.length > 0) {
       log(`brain:review:board — #${r.number}: +[${r.toAdd.join(', ')}] -[${r.toRemove.join(', ')}]`);
     }
+    // #477 — the report the ruling requires. An unreadable verdict normally has
+    // NOTHING to add or remove (freezing the namespace is what stops the writes),
+    // so it was the one case that printed nothing at all: the operator read
+    // "reconciled N open PR(s)" and never learned a verdict was garbage. Emitted
+    // separately from the line above, and unconditionally, because "no label
+    // movement" and "no readable verdict" are different facts.
+    if (r.unreadable?.length > 0) {
+      log(`brain:review:board — #${r.number}: UNREADABLE verdict fields [${r.unreadable.join(', ')}] — ` +
+        'not counted as clean; seq:* left untouched (protocol §10: never conclude on uncomputable evidence)');
+    }
   }
   log(`brain:review:board — reconciled ${results.length} open PR(s).`);
 

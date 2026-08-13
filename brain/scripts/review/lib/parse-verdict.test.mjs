@@ -788,32 +788,30 @@ test('#477 consumer-level: a corrupt findings list no longer counts as a clean v
     'protocol §10 forbids exactly this direction of failure');
 });
 
-test('#477 consumer-level: board.mjs STILL reconciles from an unreadable sequencing — pinned, NOT fixed here', () => {
-  // The honest edge of this change. `reconcileBoardLabels` reads
-  // `latestVerdict.sequencing ?? []`, so an unreadable sequencing produces an
-  // empty desired set and every real `seq:*` label on the PR lands in toRemove —
-  // a destructive write driven by a value nobody could read. Fixing it means
-  // editing board.mjs, which is outside this change's file claim.
+test('#477 consumer-level: an unreadable sequencing never deletes a real `seq:*` label', () => {
+  // This test was first written as a PINNED DEFECT: board.mjs read
+  // `latestVerdict.sequencing ?? []`, so an unreadable value produced an empty
+  // desired set and this asserted `toRemove == ['seq:after-411']` — a real label
+  // scheduled for deletion off evidence nobody could read — with a note saying
+  // the fix lived in board.mjs, outside that change's file claim.
   //
-  // Two things ARE new and both are asserted: the verdict now carries the flag
-  // board needs, and board no longer THROWS on a non-array sequencing (on main
-  // `sequencing: 3` reached `for…of 3` and killed the whole board run, every PR
-  // with it).
-  //
-  // When #477's second half lands, this test goes red and names what to change.
+  // The claim was extended and the fix landed, so the test went red exactly as
+  // designed and is now the assertion it was standing in for. Kept here, at the
+  // parser's own test file, because the parser is what must keep FEEDING the
+  // consumer the flag: if `malformed` ever stops being reported, this fails here
+  // as well as in board.test.mjs.
   const parsed = parseVerdict({ body: blockWith(['sequencing: not-valid-json']) });
-  assert.deepEqual(parsed.malformed, ['sequencing'], 'board now has the flag it needs to refuse');
+  assert.deepEqual(parsed.malformed, ['sequencing'], 'the parser reports what it could not read');
 
-  // `reviewed:approved` matches this block's APPROVE verdict, so the only
-  // movement below is the damage the unreadable `sequencing` causes.
-  const { toAdd, toRemove } = reconcileBoardLabels({
+  // `reviewed:approved` matches this block's APPROVE verdict, so any movement
+  // below would be damage the unreadable `sequencing` caused.
+  const { toAdd, toRemove, unreadable } = reconcileBoardLabels({
     latestVerdict: parsed,
     currentLabels: ['seq:after-411', 'reviewed:approved'],
   });
+  assert.deepEqual(toRemove, [], 'MEASURED before the consumer fix: ["seq:after-411"]');
   assert.deepEqual(toAdd, []);
-  assert.deepEqual(toRemove, ['seq:after-411'],
-    'PINNED DEFECT, not an endorsement: a real label is still scheduled for deletion off an ' +
-    'unreadable verdict. The fix is board.mjs reading `malformed` — #477 second half, out of claim here');
+  assert.deepEqual(unreadable, ['sequencing'], 'and the board reports the namespace as uncomputable');
 
   const nonArray = parseVerdict({ body: blockWith(['sequencing: 3']) });
   assert.doesNotThrow(

@@ -399,6 +399,43 @@ test('main("board"): dispatches to board.mjs\'s runBoard, reconciles the open PR
   assert.deepEqual(labelAddCalls, [['reviewed:approved']], 'board must actually reconcile via the real reconcileOnePr/guardedLabelAdd path');
 });
 
+// #477, second half of the maintainer ruling: "an unreadable verdict is
+// REPORTED, never silently folded into either of the other two."
+//
+// The board's own reporting made that impossible to satisfy by itself. It logs
+// a line only when a PR has labels to add or remove — and an unreadable verdict
+// has neither, because freezing the namespace is precisely what stops the
+// writes. So the case the ruling is about was the one case that printed
+// nothing: the operator saw "reconciled N open PR(s)" and no more. A flag that
+// reaches no human is the "flag nobody reads" the ruling refused.
+test('main("board"): a PR whose verdict could not be read is REPORTED, even though it produces no label writes (#477)', async () => {
+  const lines = [];
+  const code = await main({
+    argv: ['board'],
+    log: (m) => lines.push(m),
+    project: 'csrinaldi/brain',
+    provider: 'github',
+    boardDeps: {
+      listOpenPrs: async () => [{ number: 9 }],
+      fetchPr: async () => ({ number: 9, labels: ['seq:after-411', 'reviewed:approved'] }),
+      fetchReviews: async () => [{
+        state: 'COMMENTED',
+        author: 'brain-reviewer',
+        body: '```yaml\nprotocol: brain-review/2\nverdict: APPROVE\nhead_sha: a\nrev: 0\nsequencing: not-valid-json\n```',
+      }],
+      getVcs: async () => ({
+        labelAdd: async () => { throw new Error('must not write off an unreadable verdict'); },
+        labelRemove: async () => { throw new Error('must not write off an unreadable verdict'); },
+      }),
+    },
+  });
+  assert.equal(code, 0);
+  const reported = lines.filter(l => /unreadable/i.test(l));
+  assert.equal(reported.length, 1, `expected exactly one unreadable report, got: ${JSON.stringify(lines)}`);
+  assert.match(reported[0], /#9/, 'the report must name the PR');
+  assert.match(reported[0], /sequencing/, 'and name the field that could not be read');
+});
+
 test('main: an ordinary run (--pr flag, no subcommand) is UNAFFECTED by the queue/board dispatch check', () => {
   assert.deepEqual(parseArgs(['--pr', '42']), { pr: 42, mode: 'auto', dryRun: false });
 });
