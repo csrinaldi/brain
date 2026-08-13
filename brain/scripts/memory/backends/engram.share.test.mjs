@@ -409,9 +409,16 @@ test('share(): records write is UNCONDITIONAL — runs even with NO memory.dualW
     _changedChunkFiles: () => { callLog.push('changedChunkFiles'); return []; },
     _loadConfig: () => ({}), // no memory key at all — must NOT gate the write
     _scrubChunk: () => null,
+    // #574: `share` ends with a self-check reindex on the zero-observation
+    // path. Stubbed because this test is about ORDER, and the unstubbed seam
+    // would run the REAL rebuildIndex against the literal '/fake/root' —
+    // silently creating it when the suite runs as root, and failing with
+    // EACCES when it does not. That asymmetry is what turned three of these
+    // into CI-only failures.
+    _rebuildIndex: () => { callLog.push('rebuildIndex'); return { count: 0 }; },
   });
   // record-write runs unconditionally: order requireEngram → export → scrub(chunks) → write(records)
-  assert.deepEqual(callLog, ['requireEngram', 'export', 'changedChunkFiles', 'readObservations']);
+  assert.deepEqual(callLog, ['requireEngram', 'export', 'changedChunkFiles', 'readObservations', 'rebuildIndex']);
 });
 
 test('share(): records write is UNCONDITIONAL — a leftover memory.dualWrite value in config does not change the order or outcome (the key is retired; no runtime code reads it)', async () => {
@@ -424,8 +431,9 @@ test('share(): records write is UNCONDITIONAL — a leftover memory.dualWrite va
     _changedChunkFiles: () => { callLog.push('changedChunkFiles'); return []; },
     _loadConfig: () => ({ memory: { dualWrite: false } }), // leftover value, if any — irrelevant now
     _scrubChunk: () => null,
+    _rebuildIndex: () => { callLog.push('rebuildIndex'); return { count: 0 }; },
   });
-  assert.deepEqual(callLog, ['requireEngram', 'export', 'changedChunkFiles', 'readObservations']);
+  assert.deepEqual(callLog, ['requireEngram', 'export', 'changedChunkFiles', 'readObservations', 'rebuildIndex']);
 });
 
 test('share(): a secret in a candidate record aborts before any records/ append (the scan-then-write guard holds unconditionally, independent of any config)', async () => {
@@ -818,6 +826,7 @@ test('share(): the chunk backstop (C1b) still runs when there are no observation
     _changedChunkFiles: () => { callLog.push('scrubbedChunks'); return []; },
     _loadConfig: () => ({}),
     _scrubChunk: () => null,
+    _rebuildIndex: () => ({ count: 0 }), // #574 self-check — stubbed off the real filesystem (see the order test above)
   });
   assert.deepEqual(callLog, ['scrubbedChunks']);
 });
