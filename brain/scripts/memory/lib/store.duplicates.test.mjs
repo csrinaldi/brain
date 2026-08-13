@@ -1,11 +1,17 @@
 // store.duplicates.test.mjs — issue #574. The duplicate-line RULE:
 //
-//   a repeated `id` whose lines AGREE    → deduplicated AND reported
-//   a repeated `id` whose lines DISAGREE → refused, naming both lines
+//   a repeated `id` → deduplicated AND reported, first-wins, never refused
+//   lines that DISAGREE → counted separately as `divergent`, same resolution
 //
 // The tamper path (a line whose bytes do not hash to its id) has been refused
 // since #214 and has its own tests in store.test.mjs. These pin the OTHER
 // failure mode, which used to be answered by silence.
+//
+// The divergence tests below are load-bearing in a specific way: an earlier
+// draft of this rule REFUSED a disagreeing pair, and `roundtrip-divergence`
+// (bottom of this file) is the case that killed it — brain's own
+// export→import→export widens `source`, which is hash-excluded, so the refusal
+// fired on records brain itself writes.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,6 +20,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { buildRecord, serializeRecord } from './format.mjs';
+import { importRecord } from './engram-import.mjs';
+import { exportObservation } from './engram-export.mjs';
 import { rebuildIndex, readRecords, readRecordObservations } from './store.mjs';
 
 const base = {
@@ -43,7 +51,7 @@ test('rebuildIndex: a clean store reports zero duplicates (the accounting is alw
   const { count, duplicates } = rebuildIndex({ recordsDir, indexPath });
 
   assert.equal(count, 2);
-  assert.deepEqual(duplicates, { ids: 0, lines: 0, groups: [] });
+  assert.deepEqual(duplicates, { ids: 0, lines: 0, divergent: 0, groups: [] });
 });
 
 test('rebuildIndex: an identical repeated line is COLLAPSED, not refused — the index stays one entry per id', (t) => {
@@ -71,7 +79,7 @@ test('rebuildIndex: the collapse is REPORTED — ids, excess lines, and every lo
   assert.equal(duplicates.ids, 1, 'one id repeats');
   assert.equal(duplicates.lines, 2, 'the store is 2 physical lines longer than the index');
   assert.deepEqual(duplicates.groups, [
-    { id: a.id, occurrences: ['2026-07.jsonl:1', '2026-07.jsonl:3', '2026-07.jsonl:4'] },
+    { id: a.id, occurrences: ['2026-07.jsonl:1', '2026-07.jsonl:3', '2026-07.jsonl:4'], divergent: false },
   ]);
 });
 
@@ -110,46 +118,86 @@ test('rebuildIndex: key order is not divergence — the same record serialized d
   assert.equal(duplicates.lines, 1, 'collapsed and counted, never refused — the bytes differ, the record does not');
 });
 
-// ── the refused half ─────────────────────────────────────────────────────────
+// ── the divergent half: reported, resolved first-wins, NEVER refused ─────────
 
-test('rebuildIndex: two lines sharing an id but DISAGREEING are REFUSED — `source` is not hashed', (t) => {
+test('rebuildIndex: two lines sharing an id but DISAGREEING are REPORTED as divergent, not refused', (t) => {
   // Both lines pass the id-integrity check on their own: `source` is excluded
   // from the hash (format.mjs#computeRecordId), so this is reachable with no
-  // tampering at all — and the old Map-keyed collapse resolved it last-wins.
+  // tampering at all — and the old Map-keyed collapse resolved it last-wins,
+  // silently.
   const a = buildRecord({ ...base, content: 'A', source: 'issue #574' });
   const b = { ...a, source: 'issue #999' };
   const { recordsDir, indexPath } = fixture(t, [serializeRecord(a), serializeRecord(b)]);
 
-  assert.throws(
-    () => rebuildIndex({ recordsDir, indexPath }),
-    (err) => {
-      assert.match(err.message, /divergent duplicate at 2026-07\.jsonl:2/, 'names the offending line');
-      assert.match(err.message, /already read at 2026-07\.jsonl:1/, 'names the line it disagrees with');
-      assert.match(err.message, new RegExp(a.id), 'names the id');
-      return true;
-    },
-  );
+  const { count, duplicates } = rebuildIndex({ recordsDir, indexPath });
+
+  assert.equal(count, 1);
+  assert.equal(duplicates.divergent, 1, 'counted on its own channel — a different fact than a plain repeat');
+  assert.equal(duplicates.groups[0].divergent, true);
+  assert.deepEqual(duplicates.groups[0].occurrences, ['2026-07.jsonl:1', '2026-07.jsonl:2']);
 });
 
-test('rebuildIndex: a divergent duplicate fails CLOSED — same posture as the tamper path', (t) => {
-  const a = buildRecord({ ...base, content: 'A', source: 'issue #574' });
-  const b = { ...a, source: 'issue #999' };
-  const { recordsDir, indexPath } = fixture(t, [serializeRecord(a), serializeRecord(b)]);
+test('rebuildIndex: a divergent duplicate resolves FIRST-WINS, and the index is still written', (t) => {
+  // Cross-month, so the winner is observable in the index's `file` field —
+  // within one file the projection drops `source` and both entries are equal.
+  const a = buildRecord({ ...base, content: 'A', source: 'first' });
+  const b = { ...a, source: 'second' };
+  const { recordsDir, indexPath } = fixture(t, [serializeRecord(a)], '2026-06.jsonl');
+  writeFileSync(join(recordsDir, '2026-07.jsonl'), serializeRecord(b) + '\n', 'utf8');
 
-  assert.throws(() => rebuildIndex({ recordsDir, indexPath }));
-  assert.throws(
-    () => readFileSync(indexPath, 'utf8'),
-    /ENOENT/,
-    'no index is written from a store the rule refuses',
-  );
+  const { duplicates } = rebuildIndex({ recordsDir, indexPath });
+
+  assert.equal(duplicates.divergent, 1);
+  assert.deepEqual(duplicates.groups[0].occurrences, ['2026-06.jsonl:1', '2026-07.jsonl:1']);
+  const entry = JSON.parse(readFileSync(indexPath, 'utf8').split('\n').filter(Boolean)[0]);
+  assert.equal(entry.file, '2026-06.jsonl', 'the earliest month wins — the same line readRecords keeps');
+  assert.equal(readRecords({ recordsDir }).records[0].source, 'first', 'and the reader agrees, by construction');
 });
 
-test('rebuildIndex: an unknown extra key on one of two same-id lines is divergence too', (t) => {
+test('rebuildIndex: an unknown extra key on one of two same-id lines is divergence — still not a refusal', (t) => {
+  // `validateRecord` accepts unknown keys on purpose (forward compatibility in
+  // a consumer-owned format). A fork or a newer brain adding a field on one
+  // branch must not brick the store on merge.
   const a = buildRecord({ ...base, content: 'A' });
   const b = { ...a, note: 'hand-edited' };
   const { recordsDir, indexPath } = fixture(t, [serializeRecord(a), serializeRecord(b)]);
 
-  assert.throws(() => rebuildIndex({ recordsDir, indexPath }), /divergent duplicate/);
+  const { count, duplicates } = rebuildIndex({ recordsDir, indexPath });
+
+  assert.equal(count, 1);
+  assert.equal(duplicates.divergent, 1);
+});
+
+test('rebuildIndex: an identical repeat is NOT flagged divergent — the two channels stay distinct', (t) => {
+  const a = buildRecord({ ...base, content: 'A', source: 'issue #574' });
+  const { recordsDir, indexPath } = fixture(t, [serializeRecord(a), serializeRecord(a)]);
+
+  const { duplicates } = rebuildIndex({ recordsDir, indexPath });
+
+  assert.equal(duplicates.ids, 1);
+  assert.equal(duplicates.divergent, 0);
+  assert.equal(duplicates.groups[0].divergent, false);
+});
+
+test('roundtrip-divergence: brain\'s OWN export→import→export widens `source`, so refusing this pair would refuse brain', (t) => {
+  // The case that overturned the first draft of this rule. `renderFuente`
+  // prepends `issue #N` to a `source` that does not already cite the issue —
+  // documented as free BECAUSE `source` is hash-excluded. So a record that
+  // round-trips through engram comes back with the same id and different bytes,
+  // and a union merge can land both copies. This must never brick the store.
+  const original = buildRecord({ ...base, issue: 405, source: 'PR #405', content: 'A decision.' });
+  const roundTripped = exportObservation({
+    ...importRecord(original), created_at: '2026-07-04 12:00:00', scope: 'project',
+  }).record;
+
+  assert.equal(roundTripped.id, original.id, 'same id — `issue` is hashed and survives');
+  assert.notEqual(roundTripped.source, original.source, 'different bytes — `source` is not hashed and widens');
+
+  const { recordsDir, indexPath } = fixture(t, [serializeRecord(original), serializeRecord(roundTripped)]);
+  const { count, duplicates } = rebuildIndex({ recordsDir, indexPath });
+
+  assert.equal(count, 1, 'indexed, not refused');
+  assert.equal(duplicates.divergent, 1, 'and reported, so nobody has to discover it by reading 2000 records');
 });
 
 // ── the reader half (the hydration path) ─────────────────────────────────────
@@ -166,10 +214,9 @@ test('readRecords: an identical repeat is collapsed and reported — one record,
   assert.equal(duplicates.lines, 1);
 });
 
-test('readRecords: a DIVERGENT duplicate keeps the first line and never throws (fail-open reader contract)', (t) => {
-  // Deliberately unlike rebuildIndex: this reader is documented best-effort and
-  // feeds the memory-gate and engram hydration. rebuildIndex remains the
-  // fail-closed gate and refuses the very same pair on its next run.
+test('readRecords: a DIVERGENT duplicate keeps the first line, counts it, and never throws', (t) => {
+  // The reader and rebuildIndex resolve this IDENTICALLY — that agreement is
+  // the point of first-wins, and it is why neither of them refuses.
   const a = buildRecord({ ...base, content: 'A', source: 'first' });
   const b = { ...a, source: 'second' };
   const { recordsDir, indexPath } = fixture(t, [serializeRecord(a), serializeRecord(b)]);
@@ -179,7 +226,8 @@ test('readRecords: a DIVERGENT duplicate keeps the first line and never throws (
   assert.equal(records.length, 1);
   assert.equal(records[0].source, 'first');
   assert.equal(duplicates.lines, 1);
-  assert.throws(() => rebuildIndex({ recordsDir, indexPath }), /divergent duplicate/);
+  assert.equal(duplicates.divergent, 1);
+  assert.equal(rebuildIndex({ recordsDir, indexPath }).duplicates.divergent, 1, 'the gate agrees, and indexes it');
 });
 
 test('readRecords: a corrupt line is still skipped, and an id-less line still passes through', (t) => {
@@ -194,7 +242,7 @@ test('readRecords: a corrupt line is still skipped, and an id-less line still pa
 test('readRecords: absent records/ → empty result, no throw', () => {
   const { records, duplicates } = readRecords({ recordsDir: join(tmpdir(), 'brain-memory-dup-absent-xyz') });
   assert.deepEqual(records, []);
-  assert.deepEqual(duplicates, { ids: 0, lines: 0, groups: [] });
+  assert.deepEqual(duplicates, { ids: 0, lines: 0, divergent: 0, groups: [] });
 });
 
 test('readRecordObservations: the legacy array reader is now deduped by id (it wraps readRecords)', (t) => {

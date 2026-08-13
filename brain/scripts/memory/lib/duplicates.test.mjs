@@ -12,12 +12,12 @@ import {
 } from './duplicates.mjs';
 
 test('emptyDuplicates: the zero accounting', () => {
-  assert.deepEqual(emptyDuplicates(), { ids: 0, lines: 0, groups: [] });
+  assert.deepEqual(emptyDuplicates(), { ids: 0, lines: 0, divergent: 0, groups: [] });
 });
 
 test('summarizeDuplicates: an id seen once is not a duplicate', () => {
   const summary = summarizeDuplicates(new Map([['rec-a', ['2026-07.jsonl:1']]]));
-  assert.deepEqual(summary, { ids: 0, lines: 0, groups: [] });
+  assert.deepEqual(summary, { ids: 0, lines: 0, divergent: 0, groups: [] });
 });
 
 test('summarizeDuplicates: `lines` counts EXCESS lines, not occurrences', () => {
@@ -57,9 +57,9 @@ test('summarizeDuplicates: reproduces the measurement that opened #574', () => {
 });
 
 test('normalizeDuplicates: a seam that returns no accounting reports zero, never crashes', () => {
-  assert.deepEqual(normalizeDuplicates(undefined), { ids: 0, lines: 0, groups: [] });
-  assert.deepEqual(normalizeDuplicates(null), { ids: 0, lines: 0, groups: [] });
-  assert.deepEqual(normalizeDuplicates({}), { ids: 0, lines: 0, groups: [] });
+  assert.deepEqual(normalizeDuplicates(undefined), { ids: 0, lines: 0, divergent: 0, groups: [] });
+  assert.deepEqual(normalizeDuplicates(null), { ids: 0, lines: 0, divergent: 0, groups: [] });
+  assert.deepEqual(normalizeDuplicates({}), { ids: 0, lines: 0, divergent: 0, groups: [] });
 });
 
 test('normalizeDuplicates: derives the counts from groups when only groups are given', () => {
@@ -99,6 +99,44 @@ test('formatDuplicateReport: caps the evidence so the summary is never buried', 
 
   assert.equal(report.filter((l) => /^ {2}rec-/.test(l)).length, 10, 'at most 10 ids are listed');
   assert.ok(report.at(-1).includes('+39 more duplicated id(s)'), 'and the remainder is counted, not dropped');
+});
+
+// ── the divergent channel ────────────────────────────────────────────────────
+
+test('summarizeDuplicates: divergent ids are counted separately and marked on their group', () => {
+  const summary = summarizeDuplicates(
+    new Map([['rec-a', ['f:1', 'f:2']], ['rec-b', ['f:3', 'f:4']]]),
+    new Set(['rec-b']),
+  );
+  assert.equal(summary.ids, 2);
+  assert.equal(summary.divergent, 1, 'a subset of the repeats, not a separate population');
+  assert.deepEqual(summary.groups.map((g) => g.divergent), [false, true]);
+});
+
+test('formatDuplicateReport: a divergent group gets its own line AND an inline mark', () => {
+  const report = formatDuplicateReport(
+    summarizeDuplicates(new Map([['rec-a', ['2026-06.jsonl:1', '2026-07.jsonl:4']]]), new Set(['rec-a'])),
+  );
+  const body = report.join('\n');
+  assert.match(body, /1 of them DISAGREE outside the hashed fields/);
+  assert.match(body, /`source` is not hashed/, 'says WHY two copies of one record can differ');
+  assert.match(body, /first-wins/, 'and states the resolution rather than leaving it implicit');
+  assert.match(body, /rec-a ×2 \[divergent\]/, 'marked inline, so it is findable in a capped list');
+});
+
+test('formatDuplicateReport: no divergence → no divergence line (the channels stay separate)', () => {
+  const report = formatDuplicateReport(summarizeDuplicates(new Map([['rec-a', ['f:1', 'f:2']]])));
+  assert.equal(/DISAGREE/.test(report.join('\n')), false);
+  assert.equal(/\[divergent\]/.test(report.join('\n')), false);
+});
+
+test('formatDuplicateReport: a real accounting is never silenced by a malformed `ids`', () => {
+  // Gated on `ids === 0 && lines === 0`, not on `ids` alone: a seam returning a
+  // non-integer `ids` would otherwise normalize to 0 and swallow a real
+  // 139-line report.
+  const report = formatDuplicateReport({ ids: '49', lines: 139, groups: [] });
+  assert.ok(report.length > 0, 'the excess-line count alone is enough to speak');
+  assert.match(report[0], /139 excess physical line/);
 });
 
 test('formatDuplicateReport: caps the per-id locations too, counting the rest', () => {

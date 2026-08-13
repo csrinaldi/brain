@@ -142,7 +142,15 @@ export async function save(
   // #574: every op that reindexes carries the duplicate accounting out to the
   // CLI, which prints it. `save` included — it is the verb most likely to be
   // the first thing run after a `git pull` that union-merged a duplicate in.
-  return { id: candidate.id, file, written: true, duplicates: normalizeDuplicates(reindex?.duplicates) };
+  // `indexCount` travels too, so the report can state the store/index gap
+  // rather than making the reader compute it.
+  return {
+    id: candidate.id,
+    file,
+    written: true,
+    indexCount: reindex?.count,
+    duplicates: normalizeDuplicates(reindex?.duplicates),
+  };
 }
 
 /** Default seam: `which rg` — never throws. */

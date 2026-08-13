@@ -16,7 +16,7 @@ const baseRecordFields = {
 
 test('share: RETURNS the accounting — it used to return undefined, so nothing it measured could be printed', async () => {
   const recA = buildRecord({ ...baseRecordFields, content: 'A' });
-  const duplicates = { ids: 3, lines: 7, groups: [{ id: 'rec-a', occurrences: ['2026-07.jsonl:4', '2026-07.jsonl:8'] }] };
+  const duplicates = { ids: 3, lines: 7, divergent: 0, groups: [{ id: 'rec-a', occurrences: ['2026-07.jsonl:4', '2026-07.jsonl:8'] }] };
 
   const result = await share({
     root: '/fake/root',
@@ -41,7 +41,7 @@ test('share: RETURNS the accounting — it used to return undefined, so nothing 
 
 test('dualWriteRecords: a steady-state run with nothing new STILL reindexes, so a merged-in duplicate is still seen', async () => {
   const recA = buildRecord({ ...baseRecordFields, content: 'A' });
-  const duplicates = { ids: 1, lines: 1, groups: [{ id: recA.id, occurrences: ['2026-07.jsonl:1', '2026-07.jsonl:5'] }] };
+  const duplicates = { ids: 1, lines: 1, divergent: 0, groups: [{ id: recA.id, occurrences: ['2026-07.jsonl:1', '2026-07.jsonl:5'] }] };
   let reindexCalled = false;
 
   const result = await dualWriteRecords('/fake/root', {
@@ -63,7 +63,7 @@ test('dualWriteRecords: a steady-state run with nothing new STILL reindexes, so 
 
 test('pullMemory: reindexes BETWEEN git pull and hydration, and reports what the merge duplicated', async () => {
   const order = [];
-  const duplicates = { ids: 1, lines: 1, groups: [{ id: 'rec-a', occurrences: ['2026-07.jsonl:2', '2026-07.jsonl:9'] }] };
+  const duplicates = { ids: 1, lines: 1, divergent: 0, groups: [{ id: 'rec-a', occurrences: ['2026-07.jsonl:2', '2026-07.jsonl:9'] }] };
 
   const result = await pullMemory({
     root: '/fake/root',

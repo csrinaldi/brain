@@ -55,9 +55,17 @@ test('#574: two branches holding the SAME record union-merge into a duplicate li
   // it is what makes the duplicate recognizable rather than invisible). Nothing
   // fixes the APPEND ORDER, though: engram's export order, a migration and a
   // manual capture all produce their own. Union has no way to align two hunks
-  // that hold the same lines in different orders, so it keeps both — which is
-  // the shape the 49 repeated ids on `main` actually have (a block reappearing
-  // further down the file, never an adjacent twin).
+  // that hold the same lines in different orders, so it keeps both.
+  //
+  // Honest about where `main`'s 139 lines came from, because a rationale should
+  // not overclaim its own evidence: measured, they sit 50 in `2026-06.jsonl` and
+  // 89 in `2026-07.jsonl`, ZERO in `2026-08.jsonl` (the only month written after
+  // the chunks→records migration), and NO group spans two files — a block
+  // reappearing further down the same file. That is a re-run of the migration or
+  // export from before #221 added the `readRecordIds` dedup, NOT a union merge.
+  // So this test proves the mechanism the rule must survive going FORWARD; the
+  // corpus proves a different producer reached the same physical shape. Which is
+  // precisely why the rule is written about the shape and not about the cause.
   const recP = buildRecord({ ...base, content: 'Decision P, captured on both branches.' });
   const recQ = buildRecord({ ...base, content: 'Decision Q, captured on both branches.' });
 

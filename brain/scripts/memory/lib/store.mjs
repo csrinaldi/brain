@@ -10,8 +10,9 @@
 //       Never touches a sibling `.memory/chunks/*.jsonl.gz` (legacy transport).
 //   (b) a corrupt/invalid physical line → FAILS CLOSED, throwing with the
 //       file name and 1-based line number in the message. Never a silent skip.
-//   (c) a repeated `id` (issue #574) → DEDUPLICATED AND REPORTED when the
-//       repeated lines agree; REFUSED, naming both lines, when they disagree.
+//   (c) a repeated `id` (issue #574) → DEDUPLICATED AND REPORTED, never
+//       refused. Repeated lines that DISAGREE are reported separately and
+//       resolved first-wins, the same way the fail-open reader resolves them.
 //       The rule and its justification live in ./duplicates.mjs.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, appendFileSync, writeFileSync } from 'node:fs';
@@ -63,23 +64,26 @@ export function appendRecord(record, { recordsDir }) {
  * answers BOTH failure modes of a content-addressed log instead of one:
  *
  *   * a line whose bytes do not hash to its `id`  → REFUSED (tamper, #214).
- *   * the same `id` on lines that AGREE           → collapsed, and RETURNED in
- *     `duplicates` so every caller can say so out loud (#574).
- *   * the same `id` on lines that DISAGREE        → REFUSED, naming both lines.
- *     `id` does not hash `source`, so this is reachable without tampering, and
- *     the old Map-keyed collapse resolved it last-wins in silence.
+ *   * the same `id` on more than one line         → collapsed FIRST-WINS, and
+ *     RETURNED in `duplicates` so every caller can say so out loud (#574).
+ *     Lines that DISAGREE (only possible outside the hashed fields — `source`
+ *     is not hashed) are counted separately in `duplicates.divergent`, not
+ *     refused: brain's own export→import→export widens `source`, so refusing
+ *     would reject records brain itself writes. See ./duplicates.mjs.
  *
- * See ./duplicates.mjs for why a merge-born duplicate is reported rather than
- * refused, while a disagreeing one is refused rather than reported.
+ * First-wins, not the old Map's last-wins: month files are read in sorted order
+ * and lines in order, so the winner is deterministic AND identical to the one
+ * readRecords() hands the hydration path. Index and reader agree by
+ * construction rather than by coincidence.
  *
  * @param {{recordsDir: string, indexPath: string}} opts
  * @returns {{count: number, duplicates: {ids: number, lines: number,
- *   groups: Array<{id: string, occurrences: string[]}>}}}
+ *   divergent: number, groups: Array<{id: string, occurrences: string[], divergent: boolean}>}}}
  *   `count` is unique ids (the index length); `duplicates.lines` is how many
  *   physical lines longer than the index the store is.
- * @throws {Error} on a corrupt/invalid physical line, an id mismatch, or a
- *   disagreeing duplicate — every message includes `<filename>:<1-based line
- *   number>` so the failure is locatable.
+ * @throws {Error} on a corrupt/invalid physical line or an id mismatch — the
+ *   message includes `<filename>:<1-based line number>` so it is locatable. A
+ *   duplicate NEVER throws.
  */
 export function rebuildIndex({ recordsDir, indexPath }) {
   const entries = new Map();
@@ -87,6 +91,8 @@ export function rebuildIndex({ recordsDir, indexPath }) {
   const occurrences = new Map();
   /** id → the canonical bytes of the FIRST line carrying it (divergence check). */
   const firstSeen = new Map();
+  /** ids whose repeated lines disagree outside the hashed fields. */
+  const divergentIds = new Set();
   const filenames = existsSync(recordsDir)
     ? readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl')).sort()
     : [];
@@ -120,35 +126,33 @@ export function rebuildIndex({ recordsDir, indexPath }) {
 
       // Duplicate handling (issue #574). Compared as RFC 8785 canonical bytes,
       // not as the raw line: two lines that differ only in key order or
-      // whitespace ARE the same record, and calling those a divergence would
-      // refuse a store a different-but-conformant writer produced.
+      // whitespace ARE the same record, and calling those divergent would
+      // mis-report a store a different-but-conformant writer produced.
       const canonical = canonicalJson(record);
       const prior = firstSeen.get(record.id);
       if (prior === undefined) {
         firstSeen.set(record.id, { canonical, at });
         occurrences.set(record.id, [at]);
+        // FIRST WINS: set once, never overwrite. Only `file` can actually
+        // differ between two same-id index entries (the projection drops
+        // `source`), but pinning the winner keeps this identical to what
+        // readRecords() returns rather than merely usually identical.
+        entries.set(record.id, buildIndexEntry(record, filename));
       } else {
-        if (prior.canonical !== canonical) {
-          // The tamper answer, for the same reason: two lines claim one id and
-          // the store cannot know which is true. Only fields OUTSIDE the hash
-          // can differ here (`source`, or an unknown extra key) — a difference
-          // in any hashed field would have failed the id-integrity check above.
-          throw new Error(
-            `rebuildIndex: divergent duplicate at ${at} — id '${record.id}' was already read at ${prior.at} `
-            + 'with different bytes. Two lines share one id but disagree outside the hashed fields '
-            + '(`source` is not hashed), so collapsing them would silently drop one. Refusing to guess '
-            + 'which is true — delete the wrong line, or keep both by giving one a distinct hashed field.',
-          );
-        }
         occurrences.get(record.id).push(at);
+        // Only fields OUTSIDE the hash can differ here — a difference in any
+        // hashed field would have failed the id-integrity check above. Counted,
+        // not refused: `source` is hash-excluded precisely so two writers citing
+        // it differently do not split one record in two, and brain's own
+        // renderFuente widens it on every export→import→export.
+        if (prior.canonical !== canonical) divergentIds.add(record.id);
       }
-      entries.set(record.id, buildIndexEntry(record, filename));
     }
   }
 
   mkdirSync(dirname(indexPath), { recursive: true });
   writeFileSync(indexPath, serializeIndex(entries), 'utf8');
-  return { count: entries.size, duplicates: summarizeDuplicates(occurrences) };
+  return { count: entries.size, duplicates: summarizeDuplicates(occurrences, divergentIds) };
 }
 
 /**
@@ -205,10 +209,7 @@ export function readRecordIds({ recordsDir }) {
  * duplicated physical line used to reach `importMemory()`'s payload TWICE (its
  * delta filters on what engram already holds, not on what the batch repeats),
  * and `engram import` INSERTS — so a union-merged duplicate propagated into the
- * live layer permanently, by that function's own measured note. Divergence is
- * NOT refused here: this reader's contract is best-effort and never-throws, so
- * it keeps the first line and leaves the refusal to `rebuildIndex()`, which
- * fails closed on the exact same pair the next time it runs.
+ * live layer permanently, by that function's own measured note.
  *
  * Retire this once the chunks-path is fully decommissioned (tracked for
  * C4/D1); until then both `.memory/records/` and `.memory/chunks/` are
@@ -228,14 +229,21 @@ export function readRecordObservations({ recordsDir }) {
  * Same best-effort contract: never throws, absent/unreadable `records/` yields
  * an empty result.
  *
+ * FIRST WINS on a repeat, and "first" is well-defined rather than incidental:
+ * the `.sort()` below fixes month-file order, so the winner is the earliest
+ * line of the earliest month — the SAME line `rebuildIndex()` indexes. A
+ * divergent pair (equal id, unequal canonical bytes) is resolved the same way
+ * and counted in `duplicates.divergent`; neither function refuses one.
+ *
  * @param {{recordsDir: string}} opts
  * @returns {{records: Array<{[key: string]: unknown}>, duplicates: {ids: number,
- *   lines: number, groups: Array<{id: string, occurrences: string[]}>}}}
+ *   lines: number, divergent: number, groups: object[]}}}
  */
 export function readRecords({ recordsDir }) {
   const records = [];
   const occurrences = new Map();
-  const seen = new Set();
+  const firstSeen = new Map();
+  const divergentIds = new Set();
   let filenames;
   try {
     filenames = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl')).sort();
@@ -267,11 +275,34 @@ export function readRecords({ recordsDir }) {
         records.push(record);
         continue;
       }
-      occurrences.set(id, [...(occurrences.get(id) ?? []), `${filename}:${i + 1}`]);
-      if (seen.has(id)) continue; // repeat — first line wins, accounting keeps the location
-      seen.add(id);
-      records.push(record);
+      const at = `${filename}:${i + 1}`;
+      const prior = firstSeen.get(id);
+      if (prior === undefined) {
+        firstSeen.set(id, canonicalOrNull(record));
+        occurrences.set(id, [at]);
+        records.push(record);
+        continue;
+      }
+      // Repeat — first line wins, and the accounting keeps every location.
+      occurrences.get(id).push(at);
+      const canonical = canonicalOrNull(record);
+      if (prior === null || canonical === null || prior !== canonical) divergentIds.add(id);
     }
   }
-  return { records, duplicates: summarizeDuplicates(occurrences) };
+  return { records, duplicates: summarizeDuplicates(occurrences, divergentIds) };
+}
+
+/**
+ * canonicalJson() over a record that this best-effort reader has NOT validated,
+ * so a shape canonicalJson refuses (an array value, a non-finite number) yields
+ * `null` instead of throwing. Two nulls compare as divergent, which is the safe
+ * direction here: it over-reports on a shape `rebuildIndex()` refuses anyway,
+ * rather than claiming two unreadable lines agree.
+ */
+function canonicalOrNull(record) {
+  try {
+    return canonicalJson(record);
+  } catch {
+    return null;
+  }
 }

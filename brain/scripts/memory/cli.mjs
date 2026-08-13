@@ -63,9 +63,19 @@ const MEMORY_BACKEND = process.env.MEMORY_BACKEND ?? envVars.MEMORY_BACKEND ?? "
 // Printed for ANY op whose result carries the accounting, rather than
 // per-verb: a rule that only speaks on the verbs someone remembered to wire up
 // is the silence this ticket is about.
+//
+// To STDERR, not stdout, for the reason importMemory already states about its
+// own skip notice: the automated callers discard stdout. `brain/scripts/hooks/
+// post-merge` runs `cli.mjs import >/dev/null || true` — deliberately keeping
+// stderr — and post-merge is the exact moment a union merge mints a duplicate.
+// A report on stdout would be written to /dev/null on every pull, which is the
+// same outage in a different pipe. (`pre-push`'s `share` and post-merge's
+// `resolve-index` still use `2>&1 >/dev/null` and swallow both; those hook
+// files are outside this ticket's file claim — flagged, not silently worked
+// around.)
 // ---------------------------------------------------------------------------
-function reportDuplicates(duplicates, { indexCount } = {}) {
-  for (const line of formatDuplicateReport(duplicates, { indexCount })) console.log(line);
+function reportDuplicates(duplicates, { indexCount, surface } = {}) {
+  for (const line of formatDuplicateReport(duplicates, { indexCount, surface })) console.error(line);
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +342,7 @@ if (op === "save") {
   try {
     const result = await backend.save(title, content, opts, seams);
     console.log(`memory/cli: ${await t("memory.plainfiles.save.done", { id: result?.id, file: result?.file })}`);
-    reportDuplicates(result?.duplicates);
+    reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${MEMORY_BACKEND}.save() failed — ${err.message}`);
@@ -355,7 +365,8 @@ if (op === "search") {
     }
     // A duplicated record used to come back as two identical hits and inflate
     // the count printed above (#574) — it is collapsed now, and said so.
-    reportDuplicates(result?.duplicates);
+    // `search` never touches the index, so it does not claim it did.
+    reportDuplicates(result?.duplicates, { surface: 'the result set' });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${MEMORY_BACKEND}.search() failed — ${err.message}`);
@@ -363,9 +374,22 @@ if (op === "search") {
   }
 }
 
+// BRAIN_MEMORY_TEST_ROOT for the store-wide ops too (#574). `share`, `pull`,
+// `import` and `setup` all take an options object whose first field is `root`,
+// and without this they resolve the REAL `.memory/` no matter what the seam
+// says — which is how the end-to-end test for `share`'s duplicate report first
+// ran against this repository's own store. Restricted to those four by name:
+// `feature-checkpoint`/`feature-resume` take a positional [feature], and
+// passing them an options object would silently become a feature named
+// "[object Object]".
+const ROOTED_OPS = new Set(["share", "pull", "import", "setup"]);
+
 try {
   // Forward positional args (e.g., [feature]) to the backend function.
-  const result = await backend[fn](...process.argv.slice(3));
+  const forwarded = memoryTestRoot && ROOTED_OPS.has(op)
+    ? [{ root: memoryTestRoot }]
+    : process.argv.slice(3);
+  const result = await backend[fn](...forwarded);
 
   // `share` returns an accounting and nothing ever printed it, so every number it
   // measured — including the one added for #541 — died in the return value. The

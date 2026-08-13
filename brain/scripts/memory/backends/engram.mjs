@@ -191,7 +191,25 @@ export async function share({
   // dispatch tail happened to see the value, and it never saw one from `share`
   // because `share` returned undefined. The duplicate accounting would have
   // died the same way.
-  return dualWriteRecords(root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig });
+  const accounting = await dualWriteRecords(
+    root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig },
+  );
+
+  // The self-check, for the one path dualWriteRecords returns from before it
+  // ever reads `records/`: engram exported nothing project-scoped, so there
+  // were no candidates. That run still SHARES a store, and the store may have
+  // been union-merged since — leaving `share` silent there would reproduce this
+  // ticket's bug on the quietest path there is. Mirrors plainfiles.share(),
+  // which has always been a bare rebuildIndex() self-check.
+  if (accounting.indexCount === undefined) {
+    const { count, duplicates } = _rebuildIndex({
+      recordsDir: join(root, ".memory", "records"),
+      indexPath: join(root, ".memory", "index.jsonl"),
+    });
+    accounting.indexCount = count;
+    accounting.duplicates = normalizeDuplicates(duplicates);
+  }
+  return accounting;
 }
 
 /**
@@ -245,7 +263,11 @@ export function _defaultReadObservations(root) {
  * @param {(root: string) => object} [opts._loadConfig]
  * @returns {Promise<{written: number, deduped: number, errored: number, rejected: number,
  *   skippedPersonal: number, unprovenanced: number, unparseableChunks: number,
- *   emptyObservationsChunks: number, indexCount?: number}>}
+ *   emptyObservationsChunks: number, indexCount?: number,
+ *   duplicates: {ids: number, lines: number, divergent: number, groups: object[]}}>}
+ *   `duplicates` (#574) is the union-merge residual already sitting in
+ *   `records/`, distinct from `deduped` (candidates THIS run declined to
+ *   append). Zero on the early return, which measured nothing.
  */
 export async function dualWriteRecords(
   root,
@@ -356,9 +378,10 @@ export async function dualWriteRecords(
   // duplicates a `git pull` had merged in since. The guard bought nothing it
   // was meant to: `rebuildIndex` is deterministic, so re-running it over an
   // unchanged store rewrites byte-identical content and `git diff` stays empty
-  // — the churn rule is about the DIFF, not the write. The two early returns
-  // above still short-circuit before this, so a run that read no observations
-  // at all still touches nothing.
+  // — the churn rule is about the DIFF, not the write (measured: rebuilding
+  // over this repo's 2038-record store reproduces the committed index
+  // byte-for-byte). The zero-candidate early return above still short-circuits
+  // before this; `share()` covers that path with its own self-check.
   const { count, duplicates } = _rebuildIndex({ recordsDir, indexPath });
   accounting.indexCount = count;
   accounting.duplicates = normalizeDuplicates(duplicates);
@@ -638,17 +661,23 @@ function _defaultGitPull(root) {
 
 /**
  * Default seam: read every record currently in `.memory/records/`, ONE per
- * `id`. Deduped at the reader since #574 — `engram import` INSERTS, so a
- * union-merged duplicate physical line that reaches the payload twice becomes
- * two observations in the live layer, permanently (importMemory's own measured
- * note below). The dedup that used to happen only at index time now also
- * happens on the hydration path.
+ * `id`, WITH the duplicate accounting. Deduped at the reader since #574 —
+ * `engram import` INSERTS, so a union-merged duplicate physical line that
+ * reaches the payload twice becomes two observations in the live layer,
+ * permanently (importMemory's own measured note below). The dedup that used to
+ * happen only at index time now also happens on the hydration path.
+ *
+ * Returns the `{records, duplicates}` pair rather than a bare array so the
+ * `import` verb can REPORT what it collapsed. That matters more here than
+ * anywhere else: `import` is what the post-merge hook runs, i.e. the moment
+ * right after the merge that mints the duplicate, and it is the one automated
+ * call site that keeps stderr.
  *
  * @param {string} root
- * @returns {object[]}
+ * @returns {{records: object[], duplicates: object}}
  */
 export function _defaultReadRecordObservations(root) {
-  return readRecords({ recordsDir: join(root, ".memory", "records") }).records;
+  return readRecords({ recordsDir: join(root, ".memory", "records") });
 }
 
 /**
@@ -657,7 +686,7 @@ export function _defaultReadRecordObservations(root) {
  * thin `engram sync --import` chunk wrapper — the chunks path is retired,
  * `records/` is the sole read+write truth (REQ-C4-2).
  *
- * Read `.memory/records/*.jsonl` via readRecordObservations → transform each
+ * Read `.memory/records/*.jsonl` via readRecords → transform each
  * record via importRecord() → write per-record via `engram save` (the exact
  * per-observation verb already used by _defaultEngramSave()). No bulk verb
  * exists, so per-record with progress reporting is the honest primitive for
@@ -682,8 +711,9 @@ export function _defaultReadRecordObservations(root) {
  * @param {string} [opts.root]  Repo root (defaults to this package's root).
  * @param {() => string} [opts._requireEngram]
  *   Resolves the engram binary; throws a friendly error if absent.
- * @param {(root: string) => object[]} [opts._readRecords]
- *   Returns every record observation under `.memory/records/`.
+ * @param {(root: string) => {records: object[], duplicates?: object}} [opts._readRecords]
+ *   Returns every record observation under `.memory/records/` (one per `id`),
+ *   plus the duplicate accounting it collapsed getting there (#574).
  * @param {(record: object) => object} [opts._importRecord]
  *   Transforms one record into an engram-observation shape.
  * @param {(title: string, content: string, opts: object) => void} [opts._engramSave]
@@ -783,12 +813,12 @@ export async function importMemory({
 } = {}) {
   _requireEngram();
 
-  const records = _readRecords(root);
+  const { records, duplicates } = _readRecords(root);
   const total = records.length;
 
   if (total === 0) {
     _log(await t("memory.import.empty"));
-    return { written: 0 };
+    return { written: 0, duplicates: normalizeDuplicates(duplicates) };
   }
 
   // Reading what engram already holds is the delta's only input, and it runs
@@ -833,7 +863,7 @@ export async function importMemory({
     // as the duplication it replaced — better, but still invisible. `|| true` in
     // the hook keeps this from ever blocking a merge.
     _warn(await t("memory.import.stateUnreadable", { reason: unreadable }));
-    return { written: 0, skipped: 0, deferred: true };
+    return { written: 0, skipped: 0, deferred: true, duplicates: normalizeDuplicates(duplicates) };
   }
 
   const { payload, written, skipped } = buildImportPayload({
@@ -846,7 +876,10 @@ export async function importMemory({
   if (payload) _engramImport(payload);
 
   _log(await t("memory.import.done", { written, total }));
-  return { written, skipped };
+  // `total` is unique RECORDS, not physical lines — it always was the length of
+  // what this function imports, and since #574 the reader collapses repeats, so
+  // the two stopped being the same number. The gap is what `duplicates` states.
+  return { written, skipped, duplicates: normalizeDuplicates(duplicates) };
 }
 
 /**
