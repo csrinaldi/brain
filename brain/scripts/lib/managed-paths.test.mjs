@@ -224,10 +224,6 @@ const RATIFIED_STRATEGY = Object.freeze({
   'package.json': 'merge',
   '.github/CODEOWNERS': 'refuse',
   '.github/PULL_REQUEST_TEMPLATE.md': 'refuse',
-  // Issue #570 — the GitLab emission of the SAME scaffold. A new path, not a
-  // changed row: the signed 04/08/2026 classification is untouched and this one
-  // extends it to the sibling artifact.
-  '.gitlab/merge_request_templates/Default.md': 'refuse',
   '.github/workflows/governance.yml': 'refuse',
   '.github/workflows/release.yml': 'refuse',
   '.github/workflows/governance-postmerge.yml': 'refuse',
