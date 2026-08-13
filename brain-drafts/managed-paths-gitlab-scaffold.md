@@ -1,6 +1,13 @@
 # Draft — ship the GitLab contributor scaffold as a managed path (issue #570)
 
-> **status:** Tier 2 draft. NOT promoted. An agent may not write `brain/core/**`
+> **status: APPLIED.** Signed and committed by Cristian Rinaldi as `813f522`,
+> *"chore(governance): ship the GitLab contributor scaffold as a managed path (#570)"*.
+> Kept as the record of what was signed, the way `adr-0026-amendment-6.draft.md` is.
+> It is no longer load-bearing for any test: the two guards that accepted "declared in
+> this draft" while the hunk was pending now assert delivery only, so this file cannot
+> stand in for the manifest.
+>
+> **Original status:** Tier 2 draft. NOT promoted. An agent may not write `brain/core/**`
 > (`brain/core/methodology/agent-authorities.md` §Tier 3) and may not sign doctrine.
 > This file states the change; a **human** applies it.
 >

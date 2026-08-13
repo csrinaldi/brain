@@ -419,24 +419,19 @@ test('each provider\'s emitted file on disk is byte-identical to what the one so
 // ── delivery: a consumer on EITHER provider receives a scaffold ─────────────
 
 /**
- * The manifest lives in `brain/core/**`, which an agent may not write
- * (`agent-authorities.md`, Tier 3) — so a path can be in one of exactly two honest
- * states, and both are asserted. NEITHER branch is a free pass: the delivered branch
- * runs the real installer, and the pending branch requires a draft that names the
- * exact literal and the exact strategy, so an empty or vague draft fails too.
+ * These two tests carried a second branch while the manifest hunk was pending a human
+ * act: a path was accepted as either DELIVERED or formally declared in
+ * `brain-drafts/managed-paths-gitlab-scaffold.md`. That hunk was signed and applied
+ * (commit `813f522`), so the branch is gone — deliberately, and not merely as tidying.
  *
- * When a human applies the draft, every path moves to the delivered branch on its own
- * and the pending branch stops being reachable. A path in NEITHER state is red.
+ * A dead branch here would be a BYPASS: with the draft still on disk, deleting the
+ * manifest row would fall through to "well, it is declared in the draft" and stay
+ * green while every GitLab consumer received nothing. The draft is kept as the record
+ * of what was signed, the way `brain-drafts/adr-0026-amendment-6.draft.md` is; what is
+ * removed is its power to satisfy a test.
  */
-const PENDING_DRAFT = 'brain-drafts/managed-paths-gitlab-scaffold.md';
 
-function draftDeclares(path) {
-  let draft;
-  try { draft = readFileSync(join(REPO_ROOT, PENDING_DRAFT), 'utf8'); } catch { return false; }
-  return draft.includes(`'${path}',`) && draft.includes(`'${path}': STRATEGY.REFUSE`);
-}
-
-test('the REAL installer, over the REAL manifest, delivers every scaffold the manifest carries (#570)', () => {
+test('the REAL installer, over the REAL manifest, delivers a scaffold for EVERY provider (#570)', () => {
   // BRAIN SOURCE ONLY, same reason as the on-disk test above: this copies THIS tree
   // as if it were the package being installed, so in a consumer it would assert that
   // the consumer's own (legitimately rewritten) scaffold equals brain's bytes.
@@ -446,31 +441,19 @@ test('the REAL installer, over the REAL manifest, delivers every scaffold the ma
 
   for (const provider of SCAFFOLD_PROVIDERS) {
     const { path } = scaffoldDelivery(provider);
-    if (managed.includes(path)) {
-      assert.ok(copied.includes(path),
-        `${path} is a managed literal but brain:upgrade did not ship it — a ${provider} consumer gets no scaffold`);
-      assert.equal(readFileSync(join(dest, path), 'utf8'), renderScaffold(provider),
-        `the ${provider} consumer received something other than the emitted scaffold`);
-      continue;
-    }
-    assert.ok(draftDeclares(path),
-      `${path} is neither shipped by the manifest nor declared in ${PENDING_DRAFT} — ` +
-      `a ${provider} consumer receives NO scaffold and nothing is pending to fix it`);
-    assert.ok(!copied.includes(path),
-      'sanity: a path absent from the manifest cannot have been copied');
+    assert.ok(copied.includes(path),
+      `brain:upgrade does not ship ${path} — a ${provider} consumer gets no scaffold`);
+    assert.equal(readFileSync(join(dest, path), 'utf8'), renderScaffold(provider),
+      `the ${provider} consumer received something other than the emitted scaffold`);
   }
 });
 
-test('every provider\'s scaffold is REFUSE-classified — or formally pending a human act (design question (c), #570)', () => {
+test('every provider\'s scaffold is a managed literal, REFUSE-classified (design question (c), #570)', () => {
   for (const provider of SCAFFOLD_PROVIDERS) {
     const { path } = scaffoldDelivery(provider);
-    if (managed.includes(path)) {
-      assert.equal(strategyFor(path, managedStrategy), STRATEGY.REFUSE,
-        `${path} is prose a team rewrites wholesale — it must refuse, never clobber`);
-      continue;
-    }
-    assert.ok(draftDeclares(path),
-      `${path} is unmanaged and undeclared — the Tier-2 draft must state the literal AND the REFUSE row`);
+    assert.ok(managed.includes(path), `${path} must be a managed literal`);
+    assert.equal(strategyFor(path, managedStrategy), STRATEGY.REFUSE,
+      `${path} is prose a team rewrites wholesale — it must refuse, never clobber`);
   }
 });
 
