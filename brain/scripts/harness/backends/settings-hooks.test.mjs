@@ -161,3 +161,19 @@ test('both backends emit the SAME content to DIFFERENT paths', async () => {
   assert.equal(settings[0].content, settings[1].content);
   assert.equal(settings[0].content, compileSettingsHooksJson());
 });
+
+test('settings-hooks.mjs can DEFINE the guard but cannot run anything', () => {
+  // Two blind spots overlap on exactly this file: it is exempt from the
+  // `no-verify-bypass` rule (it defines the guard string) and it is excluded
+  // from the copy scan above (it IS the one copy). So the property that has to
+  // hold here is narrower and checkable: a bypass needs EXECUTION, and this
+  // module must have no way to execute anything. It is a pure, fs-free
+  // compiler — that is what keeps the exemption from being a hiding place.
+  const src = readFileSync(join(HERE, 'settings-hooks.mjs'), 'utf8');
+
+  for (const api of ['child_process', 'execSync', 'execFile', 'spawnSync', 'spawn(', 'node:fs', 'writeFileSync', 'readFileSync(join']) {
+    assert.ok(!src.includes(api), `settings-hooks.mjs must stay a pure compiler — found "${api}"`);
+  }
+  // Its only imports are none at all: the payload is a literal.
+  assert.doesNotMatch(src, /^import\s/m, 'the compiler imports nothing — it has no dependency to subvert');
+});
