@@ -19,6 +19,13 @@ const MANUAL_FLOW_STEPS = [
 ];
 
 /**
+ * No agent runtime to version-check (issue #123): `plain` is the zero-AI
+ * backend by definition, so day-start reports "nothing declared" rather than
+ * probing for a binary that is not part of this flow.
+ */
+export const AGENT_RUNTIME = null;
+
+/**
  * plain backend init: emit the manual-flow manifest. Zero AI provider, zero
  * network, zero tool beyond the repo's own npm verbs.
  * @param {{ _emit?: (line: string) => void }} [opts] Injectable sink (default console.log).
