@@ -649,3 +649,174 @@ test('#487: with TWO fenced blocks in one body, the first is still the one read'
   assert.equal(parsed.head_sha, 'aaa111',
     'the single-fence read is the documented rule — a stale block quoted above a fresh one is not addressed here');
 });
+
+// ── #477: a CORRUPT list is not an ABSENT list ──────────────────────────────
+//
+// #452 taught the BLOCK encoding to separate "genuinely empty" from the other
+// two states. It left `null` carrying BOTH remaining meanings — "the key is not
+// here" and "the key is here and I could not read it" — and `parseVerdict`'s
+// `if (x !== null)` guard erases the difference by dropping the field either
+// way. The INLINE encoding never separated anything: `parseJsonScalar` answers
+// `null` for every value it cannot read.
+//
+// Measured on `main` @ 51bbcaa, the state this ticket exists to end:
+//
+//   findings INLINE []           | 'findings' in result: true  | value: []
+//   findings INLINE unparseable  | 'findings' in result: false | value: undefined
+//   findings key OMITTED         | 'findings' in result: false | value: undefined
+//
+// Rows 2 and 3 are the same answer, and the direction they agree on is the
+// reassuring one: a truncated or hand-mangled verdict reads as a reviewer who
+// found nothing. That is `evidence-reader-empty-on-failure` sitting in the
+// reader that feeds §10's evaluators, and it is the inversion §6.1 already
+// forbids one layer up — "'no findings' and 'findings discarded' must never
+// look identical to the reader" (#483).
+//
+// Maintainer ruling on this ticket (2026-08-12): option 3 — `null` stays, the
+// unreadable field is recorded on the result as `malformed: [...]`, and
+// `parseJsonScalar`'s never-throws guarantee is preserved. The ruling's second
+// half — board.mjs and cold-boot.mjs treating an unreadable verdict as NOT
+// clean — is NOT delivered here; it is outside this change's file claim
+// (`brain/scripts/review/lib/**`). The two tests at the end of this block pin
+// exactly what that leaves standing, so the gap is asserted rather than implied.
+
+test('#477: the three INLINE states of `findings` are three distinct answers', () => {
+  const empty = parseVerdict({ body: blockWith(['findings: []']) });
+  assert.deepEqual(empty.findings, [], 'present and empty → []');
+  assert.equal('malformed' in empty, false, 'a readable block carries no malformed key');
+
+  // A truncated JSON scalar — the shape a clipped comment body or a bad hand-edit
+  // produces. `scalar()` reads the line, `parseJsonScalar` cannot read the value.
+  const corrupt = parseVerdict({ body: blockWith(['findings: [{"id": "F-1"']) });
+  assert.equal('findings' in corrupt, false,
+    'an unreadable list must never be presented as a list — the field stays off the result');
+  assert.deepEqual(corrupt.malformed, ['findings'],
+    'and the reader must SAY it could not read it: this is the whole difference from the row below');
+
+  const absent = parseVerdict({ body: blockWith([]) });
+  assert.equal('findings' in absent, false, 'absent → the field is off the result');
+  assert.equal('malformed' in absent, false,
+    'nothing was unreadable — a block that never mentioned findings must not be reported as corrupt');
+});
+
+test('#477: the BLOCK encoding separates absent from unreadable too — #452 stopped one state short', () => {
+  // #452 fixed `[]` vs the rest. Both survivors still answered `null`, so the
+  // 0-indent foreign list below — a real shape, what `yaml.dump` emits — was
+  // indistinguishable from a block that never carried findings at all.
+  const unreadable = parseVerdict({ body: blockWith(['findings:', '- id: F-1', '  severity: blocker']) });
+  assert.equal('findings' in unreadable, false, '#452\'s guarantee is unchanged: never [] here');
+  assert.deepEqual(unreadable.malformed, ['findings'],
+    'this block CARRIES two findings this parser cannot read — it must not read as a block that carried none');
+
+  assert.equal('malformed' in parseVerdict({ body: blockWith(['findings:']) }), false,
+    'the genuinely-empty case is not corrupt');
+  assert.equal('malformed' in parseVerdict({ body: blockWith(['findings:', '  - id: "F-1"']) }), false,
+    'the readable case is not corrupt');
+});
+
+test('#477: an inline value that is not a LIST is unreadable — a list field has no scalar reading', () => {
+  // `findings: 3` parses as JSON and is not a findings list. Before this change
+  // it was assigned verbatim, so `result.findings` could be a number that every
+  // consumer treats as an array.
+  for (const raw of ['3', '"a string"', '{"id": "F-1"}', 'null']) {
+    const parsed = parseVerdict({ body: blockWith([`findings: ${raw}`]) });
+    assert.equal('findings' in parsed, false, `findings: ${raw} must not land on the result`);
+    assert.deepEqual(parsed.malformed, ['findings'], `findings: ${raw} must be reported unreadable`);
+  }
+});
+
+test('#477: `follow_ups` and `sequencing` are covered by the same rule — all three are named', () => {
+  const parsed = parseVerdict({
+    body: blockWith(['sequencing: not-valid-json', 'findings: [{"id"', 'follow_ups: [{"id"']),
+  });
+  assert.deepEqual(parsed.malformed, ['sequencing', 'findings', 'follow_ups'],
+    'every unreadable field is named, in the order parseVerdict reads them');
+  assert.equal('sequencing' in parsed, false);
+  assert.equal('findings' in parsed, false);
+  assert.equal('follow_ups' in parsed, false);
+});
+
+test('#477: a verdict from the REAL renderer never reports itself corrupt', () => {
+  // The false-positive guard. If `malformed` fired on brain's own output, every
+  // consumer that adopts it would stop trusting it inside a week.
+  const built = buildVerdict({
+    headSha: 'abc123',
+    conclusion: 'REVISE',
+    findings: [{ id: 'F-1', severity: 'blocker', evidence: 'line one\nline two', cites: 'ADR-0020' }],
+    conditions: ['c'],
+  });
+  built.sequencing = ['seq:after-411'];
+  const parsed = parseVerdict({ body: renderVerdict(built) });
+  assert.equal('malformed' in parsed, false, `renderVerdict output reported corrupt: ${JSON.stringify(parsed.malformed)}`);
+  assert.equal(parsed.findings.length, 1);
+  assert.deepEqual(parsed.sequencing, ['seq:after-411']);
+
+  const emptyish = parseVerdict({ body: renderVerdict(buildVerdict({ headSha: 'abc123', conclusion: 'APPROVE', findings: [] })) });
+  assert.equal('malformed' in emptyish, false, 'an APPROVE with no findings is clean, not corrupt');
+});
+
+test('#477: the never-throws guarantee is preserved — no input makes parseVerdict raise', () => {
+  for (const shape of ['findings: [{"id"', 'sequencing: {', 'findings:', 'findings: ', 'follow_ups: ]']) {
+    assert.doesNotThrow(() => parseVerdict({ body: blockWith([shape]) }), `threw on ${JSON.stringify(shape)}`);
+  }
+});
+
+// ── #477, consumer level ────────────────────────────────────────────────────
+//
+// The ruling: "the consumers that count findings must treat an unreadable field
+// as NOT clean… a flag nobody reads is the downside the ticket itself names."
+// The predicate below is what a counting consumer has to use; the two live
+// consumers adopting it is the ruling's second half and is outside this file
+// claim. What this change owes, and what these two tests measure, is that the
+// predicate is now DERIVABLE — on `main` it was not, because nothing on the
+// result distinguished the two verdicts.
+
+/** What "clean" has to mean once a verdict can be unreadable. */
+const countsAsClean = v => (v.findings ?? []).length === 0 && (v.malformed ?? []).length === 0;
+
+test('#477 consumer-level: a corrupt findings list no longer counts as a clean verdict', () => {
+  const clean = parseVerdict({ body: blockWith(['findings: []']) });
+  const corrupt = parseVerdict({ body: blockWith(['findings: [{"id": "F-1"']) });
+
+  // Measured on `main` @ 51bbcaa: the corrupt verdict and a verdict that never
+  // mentioned findings serialised to the SAME object, byte for byte —
+  //   {"head_sha":"abc123","rev":null,"verdict":"APPROVE","author":null,"protocol":"brain-review/2"}
+  // — so a consumer counting findings read the corrupt one as zero.
+  assert.equal(countsAsClean(clean), true, 'an APPROVE with an empty findings list is genuinely clean');
+  assert.equal(countsAsClean(corrupt), false,
+    'a verdict whose findings list could not be read is not a verdict that found nothing — ' +
+    'protocol §10 forbids exactly this direction of failure');
+});
+
+test('#477 consumer-level: board.mjs STILL reconciles from an unreadable sequencing — pinned, NOT fixed here', () => {
+  // The honest edge of this change. `reconcileBoardLabels` reads
+  // `latestVerdict.sequencing ?? []`, so an unreadable sequencing produces an
+  // empty desired set and every real `seq:*` label on the PR lands in toRemove —
+  // a destructive write driven by a value nobody could read. Fixing it means
+  // editing board.mjs, which is outside this change's file claim.
+  //
+  // Two things ARE new and both are asserted: the verdict now carries the flag
+  // board needs, and board no longer THROWS on a non-array sequencing (on main
+  // `sequencing: 3` reached `for…of 3` and killed the whole board run, every PR
+  // with it).
+  //
+  // When #477's second half lands, this test goes red and names what to change.
+  const parsed = parseVerdict({ body: blockWith(['sequencing: not-valid-json']) });
+  assert.deepEqual(parsed.malformed, ['sequencing'], 'board now has the flag it needs to refuse');
+
+  // `reviewed:approved` matches this block's APPROVE verdict, so the only
+  // movement below is the damage the unreadable `sequencing` causes.
+  const { toAdd, toRemove } = reconcileBoardLabels({
+    latestVerdict: parsed,
+    currentLabels: ['seq:after-411', 'reviewed:approved'],
+  });
+  assert.deepEqual(toAdd, []);
+  assert.deepEqual(toRemove, ['seq:after-411'],
+    'PINNED DEFECT, not an endorsement: a real label is still scheduled for deletion off an ' +
+    'unreadable verdict. The fix is board.mjs reading `malformed` — #477 second half, out of claim here');
+
+  const nonArray = parseVerdict({ body: blockWith(['sequencing: 3']) });
+  assert.doesNotThrow(
+    () => reconcileBoardLabels({ latestVerdict: nonArray, currentLabels: ['seq:after-411'] }),
+    'a non-array sequencing used to reach `for…of 3` in board.mjs and take down the entire board run');
+});
