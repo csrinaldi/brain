@@ -12,6 +12,18 @@
 //   init() — ecosystem setup (doctor / install / skill-registry refresh)
 //             + SDD project context check (engram search sdd-init/<project>).
 
+/**
+ * No agent runtime to version-check here (issue #123).
+ *
+ * gentle-ai is the SDD ENGINE axis (ADR-0024), not an agent platform:
+ * `resolvePlatform` never returns it, and day:start already checks its version
+ * in the ecosystem step. The export exists so every backend answers the same
+ * question. A backend that omits it entirely reports `seam-missing` and a
+ * registry test fails, so "someone forgot" cannot pass for "declares nothing"
+ * (#614 — until then the two were byte-identical outcomes).
+ */
+export const AGENT_RUNTIME = null;
+
 import { spawnSync } from 'node:child_process';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';

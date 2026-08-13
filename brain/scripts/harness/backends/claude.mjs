@@ -15,6 +15,21 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 /** Repo-root-relative path for Claude Code native settings hooks (issue #305). */
 export const CLAUDE_SETTINGS_EMIT_PATH = '.claude/settings.json';
 
+/**
+ * The AI agent runtime this platform needs, as data (issue #123).
+ *
+ * `brain:day:start` reads whatever the CONFIGURED platform declares here and
+ * NOTIFIES — it never runs `updateHint`. Keeping the runtime as a descriptor is
+ * what keeps ADR-0005 intact: day-start knows the shape, never the vendor.
+ */
+export const AGENT_RUNTIME = Object.freeze({
+  name: 'claude',
+  bin: 'claude',
+  versionArgs: ['--version'],
+  latest: Object.freeze({ cmd: 'npm', args: ['view', '@anthropic-ai/claude-code', 'version'] }),
+  updateHint: 'npm install -g @anthropic-ai/claude-code@latest',
+});
+
 // The settings-hooks payload itself is NOT claude-specific and no longer lives
 // here (issue #315): it was byte-identical to antigravity's copy. What is
 // claude-specific is CLAUDE_SETTINGS_EMIT_PATH above — the only thing that ever

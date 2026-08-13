@@ -66,3 +66,12 @@ test('3.4: n=2 — both gentle-ai and plain resolve through dispatch() to a real
   assert.equal(typeof gentleAi.init, 'function');
   assert.equal(typeof plain.init, 'function');
 });
+
+test('plain declares no agent runtime — there is no AI to check (issue #123)', async () => {
+  const { AGENT_RUNTIME } = await import('./plain.mjs');
+  const { probeAgentRuntime } = await import('./agent-runtime.mjs');
+
+  assert.equal(AGENT_RUNTIME, null);
+  assert.equal(probeAgentRuntime(AGENT_RUNTIME, { _run: () => { throw new Error('must not run'); } }).state,
+    'not-declared');
+});
