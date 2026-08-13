@@ -366,9 +366,18 @@ Job names are **load-bearing**: they form the check context strings
 | # | Invariant | CI job (`name:`) | Skip label | Character |
 |---|-----------|-----------------|------------|-----------|
 | 1 | Every PR links an approved ticket | `issue-link` | _(none — not skippable)_ | Hard |
-| 2 | PR diff ≤ 400 changed lines | `diff-size` | `size:exception` | Hard with override |
+| 2 | PR diff ≤ the declared tier's budget — **1000** `lite` · **400** `standard` · **200** `regulated` | `diff-size` | `size:exception` — **refused at `regulated`** | Hard with override |
 | 3 | `.memory/` has EVER held a session summary (repo-scoped) | `memory-gate` _(S4)_ | _(none — `skip:memory-gate` is named but unimplemented)_ | Soft — see below |
 | 4 | An ADDED ADR co-occurs with a `brain/HOME.md` entry | `decision-gate` _(S4)_ | _(none — the gate reads no labels)_ | Hard, in one direction — see below |
+
+> **Invariant 2 is tier-resolved, and this text restates the numbers by hand** (#496). The
+> authority is `TIER_PARAMS` in `brain/scripts/vcs/governance-tiers.mjs` — `diffBudget` and
+> `honorSizeException` per tier. Doctrine restating a value the code owns is a drift risk
+> accepted deliberately here rather than left implicit: a reader needs the numbers in front of
+> them, and the alternative — a pointer with no values — is what let this row say a flat `400`
+> for as long as it did. **brain itself declares `lite`**, so a checkpoint report written in
+> this repo cites `N/1000`, not `N/400`; a report quoting the wrong budget is itself a blocking
+> finding (`parseBudgetClaim`, #472).
 
 ### Invariant 3 scope — what `memory-gate` does and does not check
 
@@ -439,7 +448,7 @@ L1 enforces **observable outputs** of each invariant. It does NOT enforce judgme
 | What L1 enforces | What L1 does NOT enforce |
 |-----------------|--------------------------|
 | A ticket link exists and has `status:approved` | Whether the ticket describes the right work |
-| PR diff ≤ 400 lines (excluding ignore-list) | Whether the PR is sliced coherently |
+| PR diff ≤ the tier's budget (excluding ignore-list) | Whether the PR is sliced coherently |
 | `.memory/` changed (memory-gate proxy) | Capture quality or session completeness |
 | An added ADR is indexed in `brain/HOME.md` | Whether the PR actually made a new decision |
 
