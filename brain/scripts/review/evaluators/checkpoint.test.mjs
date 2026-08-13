@@ -14,12 +14,12 @@ import { fileURLToPath } from 'node:url';
 import {
   evaluateCheckpoint,
   gatherCheckpointInputs,
-  parseBudgetClaim,
   resolveChangeId,
   defaultRunReversion,
 } from './checkpoint.mjs';
 import { REQUIRED_JOBS, DETECTION_JOBS } from '../../vcs/governance-checks.mjs';
 import { TIERS, tierParams } from '../../vcs/governance-tiers.mjs';
+import { renderCheckpointClaim } from '../lib/checkpoint-block.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const VACUOUS_FIXTURE = join(__dirname, '..', 'fixtures', 'vacuous.test.mjs');
@@ -35,147 +35,145 @@ function greenTrancheInputs(overrides = {}) {
   return { requiredGates: greenRollup(), changedFiles: [], budget: { lines: 10, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' }, prBody: '', ...overrides };
 }
 
-// ── §10.1 report-vs-tree drift (parseBudgetClaim + evaluateCheckpoint) ──────
+/** A checkpoint report in the DECLARED form (#495) — the only shape read. */
+function declared(countedLines, diffBudget) {
+  return `# Checkpoint report\n\n${renderCheckpointClaim({ countedLines, diffBudget })}\n`;
+}
 
-test('parseBudgetClaim: extracts "NNN/400" from report text', () => {
-  assert.deepEqual(
-    parseBudgetClaim('Counted diff re-derived cold = **372/400** — under budget.', 400),
-    { claimed: 372, declaredBudget: 400, matchesTierBudget: true },
-  );
-});
+// ── §10.1 report-vs-tree drift ──────────────────────────────────────────────
+//
+// THE PARSER THESE TESTS SPECIFIED IS GONE (#495). `parseBudgetClaim` scanned
+// the whole report for any `N/M` whose `M` was a budget some tier declares; the
+// maintainer ruled that prose is not narrowed but NOT READ, and the claim is now
+// declared in a `brain-checkpoint/1` block (`review/lib/checkpoint-block.mjs`).
+//
+// RETIREMENT LEDGER — one line per case that went with it, so a reader can see
+// which property died and which merely moved:
+//
+//   · "extracts NNN/400"                 → moved: checkpoint-block, the happy path
+//   · "no claim present → null"          → INVERTED: null was the defect. Now
+//                                          `{ok:false, absent:true}` with a reason
+//   · "parses at EVERY tier"             → moved: the per-tier gather case below
+//   · "wrong budget parsed and FLAGGED"  → moved: the budget case below, now a
+//                                          comparison of two DECLARED numbers
+//   · "selection by value, not position" ┐
+//   · "several candidates, tier wins"    ├ DIED. There is nothing to select from:
+//   · "prefers the tier denominator"     ┘ one block, or an error naming the count
+//   · "the spaced form is a claim"       ┐
+//   · "a table row is still a claim"     ├ DIED WITH THE PROSE SCAN. These were the
+//   · "a denominator no tier declares"   ┘ narrowing the ruling replaced outright
+//   · "omitted-budget default resolved   → DIED: there is no budget PARAMETER any
+//      from tierParams" (×2)               more; the report declares its own
+//
+// What did NOT die is the REQ-TIER-9 literal scan, which was never about the
+// parser — it is about this module, and it is kept below under its own name.
 
-test('parseBudgetClaim: no claim present → null', () => {
-  assert.equal(parseBudgetClaim('No budget claim here.', 400), null);
-});
-
-// Issue #472: the denominator is the TIER's diff budget (ADR-0026: lite 1000 ·
-// standard 400 · regulated 200), not a constant. The literal `400` predated Q5
-// and matched `standard` by accident, so at the other two tiers the parser
-// returned null, `reportClaims` stayed `[]`, and §10.1 checked NOTHING while
-// reporting no finding — "no claim was parseable" indistinguishable from "the
-// report matched the tree". `evidence-reader-empty-on-failure`, in the drift
-// check whose entire job is catching a report that overstates.
-test('parseBudgetClaim: parses an honest report at EVERY tier, not only at standard', () => {
-  for (const [tier, budget, claimed] of [['lite', 1000, 372], ['standard', 400, 372], ['regulated', 200, 150]]) {
-    const text = `Counted diff re-derived cold = **${claimed}/${budget}** — under budget.`;
-    assert.deepEqual(
-      parseBudgetClaim(text, budget),
-      { claimed, declaredBudget: budget, matchesTierBudget: true },
-      `${tier}: an honest report at this tier must yield a checkable claim`,
-    );
+test('#495: a declared claim reaches the drift check, at EVERY tier', async () => {
+  // REQ-495-6, and the successor to "parses at EVERY tier". The block's content
+  // does not depend on the reader's tier — what depends on the tier is whether
+  // the DECLARED budget matches the one this repo resolves, which is the next
+  // case. Asserted per tier rather than at one of them, because a reader
+  // calibrated to a single tier is exactly what #472 and #443 both were.
+  for (const tier of TIERS) {
+    const budget = tierParams(tier).diffBudget;
+    const inputs = await gatherCheckpointInputs({
+      changedFiles: ['openspec/changes/issue-1-x/checkpoint-report.md'],
+      deps: {
+        baseSha: 'BASE',
+        exists: () => true,
+        listDir: () => [],
+        readFile: (p) => (p.endsWith('checkpoint-report.md')
+          ? `# R\n\n\`\`\`brain-checkpoint/1\ncounted_lines: 213\ndiff_budget: ${budget}\n\`\`\`\n`
+          : '- [x] done\n'),
+        runReversion: async () => ({ uncomputable: false, command: 'cmd', vacuousTests: [] }),
+        runAudit: () => '', runGovernanceStatus: () => '',
+        trancheDeps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '', readIgnoreList: () => [], tier },
+      },
+    });
+    assert.equal(inputs.reportClaims.length, 1, `${tier}: the declared block must be read`);
+    assert.equal(inputs.reportClaims[0].claimed, 213, `${tier}: and read exactly`);
+    assert.equal(inputs.reportClaims[0].matchesTierBudget, true,
+      `${tier}: a report declaring THIS tier's budget agrees with it`);
+    assert.deepEqual(inputs.uncomputable, [], `${tier}: nothing was uncomputable`);
   }
 });
 
-test('parseBudgetClaim: a report quoting a budget the repo does not operate under is parsed and FLAGGED, never silently dropped', () => {
-  // Policy (issue #472, option 2): a checkpoint report citing the wrong tier's
-  // budget is itself report drift — §10.1's subject. Returning null here would
-  // turn a doctrine error back into the silence this issue exists to remove.
-  assert.deepEqual(
-    parseBudgetClaim('Counted diff re-derived cold = **372/400** — under budget.', 200),
-    { claimed: 372, declaredBudget: 400, matchesTierBudget: false },
+test('#495: a report declaring a budget this repo does not resolve is flagged, not dropped', async () => {
+  // The successor to "parsed and FLAGGED, never silently dropped" (#472 option
+  // 2). What changed is the epistemics, not the verdict: the 400 below is now
+  // the report's OWN declared value rather than a number inferred from its prose,
+  // so the finding's `evidence:` quotes something the report actually said.
+  const inputs = await gatherCheckpointInputs({
+    changedFiles: ['openspec/changes/issue-1-x/checkpoint-report.md'],
+    deps: {
+      baseSha: 'BASE',
+      exists: () => true,
+      listDir: () => [],
+      readFile: (p) => (p.endsWith('checkpoint-report.md')
+        ? '# R\n\n```brain-checkpoint/1\ncounted_lines: 213\ndiff_budget: 400\n```\n'
+        : '- [x] done\n'),
+      runReversion: async () => ({ uncomputable: false, command: 'cmd', vacuousTests: [] }),
+      runAudit: () => '', runGovernanceStatus: () => '',
+      trancheDeps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '', readIgnoreList: () => [], tier: 'lite' },
+    },
+  });
+  assert.equal(inputs.reportClaims[0].matchesTierBudget, false);
+  const result = evaluateCheckpoint(inputs);
+  const finding = result.findings.find((f) => f.id === 'drift:counted-lines-budget');
+  assert.ok(finding, 'a report judged under the wrong ceiling is drift in its own right');
+  assert.equal(finding.severity, 'blocker');
+  assert.match(finding.evidence, /400/);
+  assert.match(finding.evidence, /1000/, 'and the evidence names what this repo actually resolves');
+});
+
+test('#495: a report with NO declared block is UNCOMPUTABLE and says so — never silent, never a fabricated claim', async () => {
+  // The ruling's point 2, at the layer that matters. The report below contains
+  // the sentence verbatim from this repo's own governance-tiers.test.mjs — the
+  // shape a report DISCUSSING the tier table writes, and the one that used to
+  // produce a `drift:counted-lines-budget` blocker quoting a claim nobody made.
+  const inputs = await gatherCheckpointInputs({
+    changedFiles: ['openspec/changes/issue-1-x/checkpoint-report.md'],
+    deps: {
+      baseSha: 'BASE',
+      exists: () => true,
+      listDir: () => [],
+      readFile: (p) => (p.endsWith('checkpoint-report.md')
+        ? '# R\n\ndiffBudget matches design §2.C (1000/400/200).\n'
+        : '- [x] done\n'),
+      runReversion: async () => ({ uncomputable: false, command: 'cmd', vacuousTests: [] }),
+      runAudit: () => '', runGovernanceStatus: () => '',
+      trancheDeps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '', readIgnoreList: () => [], tier: 'lite' },
+    },
+  });
+  assert.deepEqual(inputs.reportClaims, [], 'prose produces no claim at all');
+  assert.equal(inputs.uncomputable.length, 1);
+
+  const result = evaluateCheckpoint(inputs);
+  assert.equal(result.conclusion, 'REVISE', 'never APPROVE on uncomputable evidence (protocol §10)');
+  assert.ok(
+    result.conditions.some((c) => /evidence uncomputable: report budget claim/.test(c)),
+    'and the reason is STATED — an unreadable report must not look like a report with nothing to say',
+  );
+  assert.ok(
+    !result.findings.some((f) => f.id.startsWith('drift:')),
+    'and no drift finding is invented from a sentence the report never meant as a claim',
   );
 });
 
-test('parseBudgetClaim: with SEVERAL wrong-budget claims, selection is by value and not by position', () => {
-  // The mismatch path needs its own multi-candidate case: every other
-  // wrong-denominator case carries exactly one candidate, so which one the
-  // fallback picks is unobservable there and a position-based pick survives.
-  // Same fail-closed rule as the matching path — lowest numerator, both orders.
-  for (const [label, text] of [
-    ['lowest last', 'Slice A **372/400**. Slice B **150/200**.'],
-    ['lowest first', 'Slice B **150/200**. Slice A **372/400**.'],
-  ]) {
-    assert.deepEqual(
-      parseBudgetClaim(text, 1000),
-      { claimed: 150, declaredBudget: 200, matchesTierBudget: false },
-      `${label}: the wrong-budget claim reported must be chosen by value, not by where it appears`,
-    );
-  }
-});
-
-test('parseBudgetClaim: the omitted-budget default is RESOLVED from tierParams, never written as a literal', () => {
-  // Blind-axis cover (SPELLING): every other case passes `diffBudget`
-  // explicitly, so a literal reintroduced as the parameter's default would
-  // survive all of them. This is the only case that drives the default, and it
-  // compares against the resolver rather than against a typed-in number — a
-  // number here would just be the same literal in a second place.
-  const standardBudget = tierParams('standard').diffBudget;
-  assert.deepEqual(
-    parseBudgetClaim(`Counted diff re-derived cold = **372/${standardBudget}** — under budget.`),
-    { claimed: 372, declaredBudget: standardBudget, matchesTierBudget: true },
-  );
-});
-
-test('parseBudgetClaim: the omitted-budget default is written as a RESOLUTION, not as a number', () => {
-  // No behavioural assertion can catch this: `standard`'s budget IS 400, so a
-  // literal `400` default and the resolved one are indistinguishable at runtime
-  // until the tier table changes — the same trap #468 hit with the 48h
-  // staleness label. Asserting the source is the only form that distinguishes
-  // them, and the untiered literal is precisely this issue's defect.
-  const src = readFileSync(fileURLToPath(new URL('./checkpoint.mjs', import.meta.url)), 'utf8');
-  assert.match(
-    src,
-    /diffBudget = tierParams\(DEFAULT_TIER\)\.diffBudget/,
-    'the default must resolve through tierParams — a numeric literal here is the same defect this issue removes, in a second place',
-  );
-});
-
-// Issue #472, second review round. The first implementation admitted ANY bold
-// fraction as a claim, which made the drift check assert things reports never
-// said — a false blocker carrying invented evidence, strictly worse than the
-// silence this issue set out to remove. These cases pin the narrowing, and the
-// SELECTION axis (which of several candidates wins) that nothing else varied.
-
-test('parseBudgetClaim: the spaced form is a claim — 6 real reports state theirs only that way', () => {
-  // SPELLING axis on the parser's own regex. `\s*` around the slash is
-  // load-bearing: archive/205, 214, 219, 221, 222 and 229 write
-  // `**330 / 400**` and nothing else, so deleting the tolerance sends all six
-  // back to `null` — the round-2 blocker class (a real report newly silenced)
-  // along an axis no case drove.
-  for (const text of ['Counted diff **372 / 1000**.', 'Counted diff **372/1000**.', 'Counted diff **372 /1000**.']) {
-    assert.deepEqual(
-      parseBudgetClaim(text, 1000),
-      { claimed: 372, declaredBudget: 1000, matchesTierBudget: true },
-      `whitespace around the slash is formatting, never meaning: ${text}`,
-    );
-  }
-});
-
-test('parseBudgetClaim: a claim stated INSIDE a markdown table row is still a claim', () => {
-  // Verbatim shape from openspec/changes/archive/193: this repo states the
-  // diff-size gate verdict in a table, and for a report whose prose total
-  // carries no denominator that row is its only machine-readable compliance
-  // claim. An earlier round excluded rows wholesale and sent exactly this
-  // report back to `null` — reintroducing, at `standard`, the silence this
-  // issue removes. Structure is not what makes something a claim; the
-  // denominator being a declared budget is.
-  const text = [
-    '| gate | level | verdict | note |',
-    '| `diff-size` | REQUIRED | **PASS (conditional)** | 1/400 — provided the split lands |',
-  ].join('\n');
-  assert.deepEqual(
-    parseBudgetClaim(text, 400),
-    { claimed: 1, declaredBudget: 400, matchesTierBudget: true },
-  );
-});
-
-test('parseBudgetClaim: a denominator no tier declares is not a budget claim (test counts, slice counts)', () => {
-  // `npm test: **1269/1269**` is the shape that produced a fabricated
-  // wrong-denominator blocker on archive/246.
-  assert.equal(parseBudgetClaim('- `npm test`: **1269/1269** green.', 1000), null);
-  assert.equal(parseBudgetClaim('Reverted **1/2** of the slices.', 1000), null);
-  assert.equal(parseBudgetClaim('Tests: **2579/2579** green. No budget line.', 1000), null);
-
-  // VALUE CLASS: the fixtures above are all irregular numbers, so a predicate
-  // relaxed to "looks budget-ish" (any round hundred) rejects every one of them
-  // and survives. Round denominators that no tier declares are the class that
-  // catches it — the anti-pattern's rule 4, a partially-relaxed predicate.
-  for (const notABudget of [100, 300, 500, 800, 2000]) {
-    assert.equal(
-      parseBudgetClaim(`Counted diff **250/${notABudget}**.`, 1000), null,
-      `${notABudget} is round but is not a budget any tier declares — only the tier table decides`,
-    );
-  }
+test('#495: BOTH uncomputable reasons reach conditions together — the list is a list', () => {
+  // A list with one member proves nothing about a list. The reversion was the
+  // only uncomputable thing before #495 and its handling was written in place;
+  // this pins that generalising it did not turn two reasons into one sentence.
+  const result = evaluateCheckpoint({
+    trancheInputs: greenTrancheInputs(),
+    uncomputable: ['report budget claim — no block'],
+    reversion: { uncomputable: true, command: null },
+  });
+  assert.equal(result.conclusion, 'REVISE');
+  const stated = result.conditions.filter((c) => c.startsWith('evidence uncomputable:'));
+  assert.equal(stated.length, 2, `both reasons must be stated, got: ${JSON.stringify(stated)}`);
+  assert.ok(stated.some((c) => /report budget claim/.test(c)));
+  assert.ok(stated.some((c) => /TDD-RED reversion/.test(c)));
 });
 
 test('evaluateCheckpoint: a claim carrying no matchesTierBudget produces NO budget finding — the check is strictly === false', () => {
@@ -193,34 +191,7 @@ test('evaluateCheckpoint: a claim carrying no matchesTierBudget produces NO budg
   );
 });
 
-test('parseBudgetClaim: with several candidates, the one stated against THIS tier wins regardless of position', () => {
-  // SELECTION axis. Asserted from BOTH orders so that neither "take the first"
-  // nor "take the last" can satisfy it — a single-order case is satisfied by
-  // whichever accident put the right candidate at that end.
-  const firstWins = 'Earlier slice ran **150/200**. Counted diff re-derived cold = **372/400**.';
-  const lastWins = 'Counted diff re-derived cold = **372/400**. Earlier slice ran **150/200**.';
-  for (const [label, text] of [['tier claim last', firstWins], ['tier claim first', lastWins]]) {
-    assert.deepEqual(
-      parseBudgetClaim(text, 400),
-      { claimed: 372, declaredBudget: 400, matchesTierBudget: true },
-      `${label}: position must not decide which claim is read`,
-    );
-  }
-
-  // Two claims against the SAME (tier) budget — the case that actually forces a
-  // choice. A single-denominator pair is what a first-vs-last selection can be
-  // caught by; the pair above cannot catch it, because only one candidate ever
-  // matched. The smallest numerator wins in BOTH orders: fail-closed, and a
-  // property of the claim rather than of where the author typed it.
-  for (const [label, text] of [
-    ['larger stated last', 'Counted diff **372/400**. After the fixup: **500/400**.'],
-    ['larger stated first', 'After the fixup: **500/400**. Counted diff **372/400**.'],
-  ]) {
-    assert.equal(parseBudgetClaim(text, 400).claimed, 372, `${label}: the drift check must read the claim most likely to surface drift`);
-  }
-});
-
-test('parseBudgetClaim: no budget literal survives anywhere in the module, not only in the parameter default', () => {
+test('#443/#472: no budget literal survives anywhere in checkpoint.mjs, not only in a parameter default', () => {
   // Widened from a single-string source scan: the literal can come back at the
   // CALL SITE (`trancheInputs.diffBudget ?? 400`) or inside the function body,
   // and a scan for one exact spelling sees neither. Comments are stripped first
@@ -246,14 +217,6 @@ test('parseBudgetClaim: no budget literal survives anywhere in the module, not o
   assert.deepEqual(
     offenders, [],
     `a tier budget is written as a numeric literal in executable code (${offenders.join(', ')}) — resolve it through tierParams instead (REQ-TIER-9)`,
-  );
-});
-
-test('parseBudgetClaim: prefers the claim whose denominator IS the tier budget over an unrelated fraction', () => {
-  const text = 'Reverted 1/2 of the slices. Counted diff re-derived cold = **372/1000** — under budget.';
-  assert.deepEqual(
-    parseBudgetClaim(text, 1000),
-    { claimed: 372, declaredBudget: 1000, matchesTierBudget: true },
   );
 });
 
@@ -538,7 +501,7 @@ test('gatherCheckpointInputs: resolves artifacts + report claim from an injected
     [`openspec/changes/${changeId}/spec.md`]: 'x',
     [`openspec/changes/${changeId}/design.md`]: 'x',
     [`openspec/changes/${changeId}/tasks.md`]: '- [x] done\n- [ ] pending\n',
-    [`openspec/changes/${changeId}/checkpoint-report.md`]: 'Counted diff = **372/400**.',
+    [`openspec/changes/${changeId}/checkpoint-report.md`]: declared(372, 400),
   };
   const inputs = await gatherCheckpointInputs({
     project: 'csrinaldi/brain',
@@ -562,12 +525,13 @@ test('gatherCheckpointInputs: resolves artifacts + report claim from an injected
   assert.equal(inputs.reportClaims[0].recomputed, 15);
 });
 
-// Issue #472 — the integration cases. The unit tests above pass `diffBudget`
-// explicitly, so they are blind along the PATH axis: reverting the CALL SITE to
-// `parseBudgetClaim(reportText)` restores the whole defect (the parameter falls
-// back to the `standard` default) while every unit test stays green. These
-// drive the gather seam, which is the only place that binding is observable.
-// (brain/core/anti-patterns/red-proof-blind-along-an-unvaried-axis.md)
+// Issue #472 — the integration cases, kept through #495 with their reports
+// rewritten into the declared form. What they pin is unchanged and is not a
+// property of the parser: that the TIER reaches the resolution, and that an
+// understated report blocks at every tier rather than only at the one the
+// fixtures happen to sit on. The unit cases above are blind along the PATH axis
+// on their own; these drive the gather seam, which is the only place the binding
+// is observable. (brain/core/anti-patterns/red-proof-blind-along-an-unvaried-axis.md)
 
 /** Builds the injected fs + tranche seams for a checkpoint gather at a given tier. */
 function gatherAtTier({ tier, reportText, numstat = '10\t5\ta.mjs\n' }) {
@@ -609,7 +573,7 @@ test('gatherCheckpointInputs → evaluateCheckpoint: at LITE, an understated rep
   // returned no finding — silence indistinguishable from a matching report.
   const inputs = await gatherAtTier({
     tier: 'lite',
-    reportText: 'Counted diff re-derived cold = **372/1000** — under budget.',
+    reportText: declared(372, 1000),
     numstat: '300\t100\ta.mjs\n',
   });
 
@@ -630,7 +594,7 @@ test('gatherCheckpointInputs → evaluateCheckpoint: at LITE, an understated rep
 test('gatherCheckpointInputs → evaluateCheckpoint: at REGULATED, an understated report produces the drift blocker', async () => {
   const inputs = await gatherAtTier({
     tier: 'regulated',
-    reportText: 'Counted diff re-derived cold = **150/200** — under budget.',
+    reportText: declared(150, 200),
     numstat: '200\t100\ta.mjs\n',
   });
 
@@ -647,7 +611,7 @@ test('gatherCheckpointInputs: at STANDARD the behaviour is unchanged — the no-
   // that only ever misbehaved at the other two tiers.
   const inputs = await gatherAtTier({
     tier: 'standard',
-    reportText: 'Counted diff re-derived cold = **372/400** — under budget.',
+    reportText: declared(372, 400),
     numstat: '10\t5\ta.mjs\n',
   });
 
@@ -665,7 +629,7 @@ test('gatherCheckpointInputs → evaluateCheckpoint: a report quoting the WRONG 
   // does not apply here. Silence would be the pre-#472 behaviour by another route.
   const inputs = await gatherAtTier({
     tier: 'regulated',
-    reportText: 'Counted diff re-derived cold = **150/400** — under budget.',
+    reportText: declared(150, 400),
     numstat: '10\t5\ta.mjs\n',
   });
 
