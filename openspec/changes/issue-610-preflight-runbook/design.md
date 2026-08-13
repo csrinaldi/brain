@@ -1,9 +1,9 @@
 ---
 status: draft
-issue: 435
+issue: 610
 ---
 
-# Design — preflight-runbook (issue 435)
+# Design — preflight-runbook (issue 610)
 
 ## D1 — A runbook, not a script
 

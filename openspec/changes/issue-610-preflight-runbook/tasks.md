@@ -1,9 +1,9 @@
 ---
 status: draft
-issue: 435
+issue: 610
 ---
 
-# Tasks — preflight-runbook (issue 435)
+# Tasks — preflight-runbook (issue 610)
 
 - [x] Measure the actual state: repo public, no pre-flight artifact anywhere
 - [x] Establish the reframing: gate already passed → rotation, not authorisation

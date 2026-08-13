@@ -1,9 +1,9 @@
 ---
 status: draft
-issue: 435
+issue: 610
 ---
 
-# Proposal — preflight-runbook (issue 435)
+# Proposal — preflight-runbook (issue 610)
 
 ## What
 
@@ -20,6 +20,12 @@ draft.
 
 So the audit is owed, and its purpose has changed. It is no longer authorisation;
 it is finding out what is exposed and rotating it.
+
+> Delivery ticket **#610**, split out of **#435** so this can close on its own.
+> #435 stays open for the scoped name, `private: false`, the install-spec move
+> and the ADR-0006 supersession. The `issue-link` gate refuses `Part of #N` on a
+> PR targeting the default branch — correctly: a PR to `main` that closes
+> nothing lets a ticket accumulate merges and never close.
 
 ## Scope
 
