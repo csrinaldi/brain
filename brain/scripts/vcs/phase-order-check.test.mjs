@@ -193,7 +193,11 @@ test('Rule A (REQ-L4-2′): regulated artefact set additionally requires a recor
   });
   const ruleAFinding = result.findings.find(f => f.rule === 'A');
   assert.ok(ruleAFinding, 'regulated tier must fail Rule A when the verification artefact is missing');
-  assert.match(ruleAFinding.message, /verification\.md/);
+  // #555: `verify-report.md`, not `verification.md`. This assertion pinned the
+  // message's INVENTED name — the gate has always probed `verify-report.md`
+  // (`buildChangeDir`), so the finding named a file the operator could create and
+  // still fail. The message now reads from the one name→file map.
+  assert.match(ruleAFinding.message, /verify-report\.md/);
 });
 
 test('Rule A (REQ-L4-2′): regulated artefact set passes when all five artefacts (incl. verification) are present', () => {
@@ -715,7 +719,7 @@ test('wrapper: regulated artefact set fails Rule A naming the missing verificati
   const result = runPhaseOrderCheck({ ...deps, tier: 'regulated' });
   const ruleAFinding = result.findings.find(f => f.rule === 'A');
   assert.ok(ruleAFinding, 'regulated tier must fail Rule A when verify-report.md is absent');
-  assert.match(ruleAFinding.message, /verification\.md/);
+  assert.match(ruleAFinding.message, /verify-report\.md/);
 });
 
 test('neutrality (REQ-NEUTRALITY-1): identical verdict with vs. without SKILL.md/.claude/** files present', () => {

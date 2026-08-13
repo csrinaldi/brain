@@ -59,14 +59,26 @@ export const prohibitedRefs = [
     //   • check-refs.test.mjs  — holds fixture strings testing the rule itself
     //   • installer.test.mjs   — fixture mirrors brain's settings.json hook that
     //                            DETECTS --no-verify (the guard, not a bypass)
+    //   • settings-hooks.mjs   — since #315, the ONE definition of that guard
+    //                            string; settings-hooks.test.mjs EXECUTES it to
+    //                            prove it still blocks (a regex match would pass
+    //                            on a guard that no longer refuses anything)
+    //
+    // An exemption whose file no longer contains the pattern is not inert: it
+    // blinds this rule for that path forever, silently. Both backend ENTRY
+    // points lost theirs when #315 moved the payload out, measured with this
+    // rule's own regex rather than assumed: claude.mjs matched nothing, and
+    // antigravity.mjs matched exactly one line — a comment naming the flag,
+    // which was reworded rather than kept as grounds for an exemption. Their
+    // TEST files still assert on the literal and stay exempt.
     exempt: [
       'brain/project/check-refs-rules.mjs',
       'brain/scripts/check-refs.test.mjs',
       'brain/scripts/lib/installer.test.mjs',
-      'brain/scripts/harness/backends/antigravity.mjs',
       'brain/scripts/harness/backends/antigravity.test.mjs',
-      'brain/scripts/harness/backends/claude.mjs',
       'brain/scripts/harness/backends/claude.test.mjs',
+      'brain/scripts/harness/backends/settings-hooks.mjs',
+      'brain/scripts/harness/backends/settings-hooks.test.mjs',
     ],
   },
 ];
