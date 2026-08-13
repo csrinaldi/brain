@@ -3,35 +3,35 @@ status: draft
 issue: 458
 ---
 
-# Propuesta — bootstrap-smoke (issue 458)
+# Proposal — bootstrap-smoke (issue 458)
 
-## Qué
+## What
 
-Un job de CI que corre en frío los tres verbos que todo adoptante ejecuta —
-`brain:env:init`, `brain:session:start`, `brain:day:start`— sobre un fixture de
-consumer fresco, más idempotencia del primero.
+A CI job that runs the three verbs every adopter runs — `brain:env:init`,
+`brain:session:start`, `brain:day:start` — cold, in a fresh consumer fixture,
+plus idempotency of the first.
 
-## Por qué
+## Why
 
-#446: una clave de catálogo i18n con guión hizo abortar `brain:env:init` en exit
-127 a mitad del bootstrap. `main` estuvo roto para todo adoptante fresco y CI
-verde: ningún job ejecuta esos verbos. #449 puso dos guards sobre *ese catálogo*
-—el síntoma—. Con #435 (repo público) el costo se corre del mantenedor al
-adoptante en su primer contacto.
+#446: an i18n catalog key with a hyphen made `brain:env:init` abort at exit 127
+mid-bootstrap. `main` was broken for every fresh adopter and CI was green: no
+job executes those verbs. #449 added two guards over *that catalog* — the
+symptom. With #435 (public repo) the cost moves from the maintainer to the
+adopter, at first contact.
 
-## Alcance
+## Scope
 
-- Incluye: el harness, el workflow propio, y el registro de lo que se midió.
-- No incluye: reparar la no-idempotencia de `.env` que el propio suite encontró
-  (la escribe `brain/scripts/bootstrap.sh`, fuera del reclamo); agregar un flag
-  offline a `day-start.mjs` (no hizo falta: ya degrada); un alias en
-  `package.json` (fuera del reclamo).
+- **In:** the harness, its own workflow, and a record of what was measured.
+- **Out:** repairing the `.env` non-idempotency the suite itself found (written
+  by `brain/scripts/bootstrap.sh`, outside the claim); adding an offline flag to
+  `day-start.mjs` (not needed — measured, it already degrades); an alias in
+  `package.json` (outside the claim).
 
-## El marco que dio #590
+## The frame #590 provided
 
-La pregunta de #458 —¿el smoke es red propia de brain o parte del producto?— es
-la que ADR-0018 contesta desde el otro lado: brain *envía* el fragmento GitLab a
-los consumers y no lo corre en su propio CI, porque "lo que brain distribuye" y
-"lo que brain chequea sobre sí mismo" son dos superficies. El smoke es la
-segunda. De ahí: workflow propio, NO `governance.yml`, NO managed path, NO
-contexto requerido.
+#458's open question — is this smoke brain's own net or part of the product? —
+is the one ADR-0018 answers from the other side: brain *ships* the GitLab
+fragment to consumers and runs it in its own CI nowhere, because "what brain
+distributes" and "what brain checks about itself" are two surfaces. The smoke is
+the second. Hence: its own workflow, NOT `governance.yml`, NOT a managed path,
+NOT a required context.
