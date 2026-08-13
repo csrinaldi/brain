@@ -142,7 +142,7 @@ function checkReportDrift(claims = []) {
 }
 
 // ── §10.2 artifact completeness ─────────────────────────────────────────────
-function checkArtifactCompleteness({ missing = [], hasCheckedTask, tier = 'standard' } = {}) {
+function checkArtifactCompleteness({ missing = [], hasCheckedTask, tasksAbsent = false, tier = 'standard' } = {}) {
   const findings = [];
   if (missing.length > 0) {
     findings.push({
@@ -153,6 +153,20 @@ function checkArtifactCompleteness({ missing = [], hasCheckedTask, tier = 'stand
       severity: 'blocker',
       evidence: `governance-tiers requiredArtifactsFor("${tier}") missing: ${missing.join(', ')}`,
       cites: `governance-tiers.mjs requiredArtifactsFor (tier "${tier}", ADR-0026)`,
+    });
+  }
+  // #555 round 3, on the maintainer's ruling: the SDD must be EXECUTED at every
+  // tier, `lite` included. That is Rule C's question, not Rule A's, so it does not
+  // ride on the tier's artefact set — an absent tasks.md blocks here even where the
+  // tier does not list it among the required artefacts. Reported as its own finding
+  // rather than folded into `tasks-no-progress`, because "you never wrote one" and
+  // "you wrote one and completed nothing" are different things to tell an author.
+  if (tasksAbsent) {
+    findings.push({
+      id: 'tasks-absent',
+      severity: 'blocker',
+      evidence: 'no tasks.md in the change dir — the SDD leaves no record of having been executed',
+      cites: 'phase-order-check.mjs evaluateRuleC (code without completed phases; not tier-scoped)',
     });
   }
   if (hasCheckedTask === false) {
@@ -387,15 +401,37 @@ export async function gatherCheckpointInputs({
   const readFile = deps.readFile ?? ((p) => readFileSync(join(root, p), 'utf8'));
 
   const changeId = deps.changeId ?? resolveChangeId(changedFiles);
-  let artifacts = { missing: [], hasCheckedTask: null, tier };
+  let artifacts = { missing: [], hasCheckedTask: null, tasksAbsent: false, tier };
   let reportClaims = [];
   if (changeId) {
     const missing = missingRequiredArtifacts(changeId, { artefacts: requiredArtifactsFor(tier), exists, listDir });
+    // #555 round 3: guarded on the file EXISTING, not on the artefact set.
+    //
+    // `!missing.includes('tasks.md')` was a proxy for "tasks.md is there", and it
+    // held only while every tier required it. At `lite` the set is ['spec'], so
+    // tasks.md is never in `missing`, the read always ran, and an ABSENT file read
+    // as "present with zero checked items" — the `artifacts-missing` blocker was
+    // renamed to `tasks-no-progress`, not removed. A cold review caught it; the
+    // test written for that case asserted only `artifacts.missing` and never called
+    // `evaluateCheckpoint`, so it could not see the blocker its own title denied.
+    //
+    // The two questions are separate and the repo already separates them:
+    // Rule A asks WHICH ARTEFACTS a tier requires (tiered); Rule C asks whether the
+    // SDD was EXECUTED — code without completed phases — and is not tiered. The
+    // maintainer ruled 2026-08-13 that the second holds at `lite` too: "por más que
+    // sea lite, el SDD debe ser ejecutado."
+    //
+    // So: absent → `null`, uncomputable, reported as its own finding. Present with
+    // no `- [x]` → `false`, the real no-progress blocker. Never conflated.
+    const tasksPath = `${changeDir(changeId)}/tasks.md`;
     let hasCheckedTask = null;
-    if (!missing.includes('tasks.md')) {
-      try { hasCheckedTask = /^- \[x\]/im.test(readFile(`${changeDir(changeId)}/tasks.md`)); } catch { hasCheckedTask = false; }
+    let tasksAbsent = false;
+    if (exists(tasksPath)) {
+      try { hasCheckedTask = /^- \[x\]/im.test(readFile(tasksPath)); } catch { hasCheckedTask = false; }
+    } else {
+      tasksAbsent = true;
     }
-    artifacts = { missing, hasCheckedTask, tier };
+    artifacts = { missing, hasCheckedTask, tasksAbsent, tier };
 
     if (!missing.includes('checkpoint-report.md')) {
       try {

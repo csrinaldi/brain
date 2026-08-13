@@ -331,6 +331,88 @@ test('main: --mode checkpoint local run (no ci-context) feeds boot.prView.baseRe
   assert.equal(reversionBaseSha, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', 'the checkpoint reversion must receive the port-resolved baseSha, not null — the wiring that takes §10.4 live');
 });
 
+// ── #555: the tier reaches the checkpoint's artifact set ────────────────────
+//
+// `cli.mjs` resolves the tier ONCE and threads it into `gatherCheckpointInputs`,
+// which otherwise defaults to `standard`. Round 3 of the #555 review measured
+// that thread: deleting `tier,` from the checkpoint call left the whole suite
+// green, so every real PR would have been judged against `standard`'s artefact
+// set no matter what tier the repo declares — silent, and undetectable from the
+// tests. The two cases below are the two directions that mutation moves the
+// verdict in, and both are asserted on the RENDERED block, which is what a human
+// reads.
+//
+// `lite` is the tier used here on purpose: it is the tier brain itself declares,
+// and its artefact set (`['spec']`) differs from `standard`'s in both directions —
+// artefacts standard demands that lite does not, and a `missing:` line whose tier
+// name is part of the evidence.
+const TIER_CHANGE_ID = 'issue-999-tier-thread';
+const TIER_CHANGE_DIR = `openspec/changes/${TIER_CHANGE_ID}`;
+
+/** A checkpoint fixture whose change dir contains exactly `present`. */
+function checkpointFixture(present) {
+  const there = new Set(present.map(f => `${TIER_CHANGE_DIR}/${f}`));
+  return {
+    baseSha: 'BASE',
+    exists: (p) => there.has(p),
+    listDir: () => [],
+    readFile: (p) => {
+      // A tasks.md that IS executed — this fixture is about the artefact set,
+      // not about Rule C's separate "zero checked items" blocker.
+      if (p === `${TIER_CHANGE_DIR}/tasks.md` && there.has(p)) return '- [x] done\n';
+      throw new Error(`no ${p} in this fixture`);
+    },
+    runReversion: async () => ({ uncomputable: false, command: 'cmd', vacuousTests: [] }),
+    runAudit: () => '',
+    runGovernanceStatus: () => '',
+    trancheDeps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '10\t5\tfoo.mjs\n', readIgnoreList: () => [] },
+  };
+}
+
+function checkpointDeps(vcs, tier, present) {
+  const deps = readyDeps({ vcs });
+  deps.tier = tier;
+  deps.getChangedFiles = () => [`${TIER_CHANGE_DIR}/checkpoint-report.md`];
+  deps.checkpointDeps = checkpointFixture(present);
+  return deps;
+}
+
+test('#555: --mode checkpoint measures the artifact set at the RESOLVED tier — the blocker names lite, never the `standard` default', async () => {
+  const vcs = spyVcs();
+  const lines = [];
+  // Nothing but tasks.md: `lite` requires spec.md alone, `standard` requires
+  // proposal/spec/design as well. The two produce different evidence text.
+  const code = await main({
+    argv: ['--pr', '42', '--mode', 'checkpoint', '--dry-run'],
+    log: (s) => lines.push(s),
+    ...checkpointDeps(vcs, 'lite', ['tasks.md']),
+  });
+  assert.equal(code, 0);
+  const out = lines.join('\n');
+  // `\"` in the pattern: renderVerdict emits the evidence as a quoted YAML
+  // scalar, so the tier name arrives escaped inside the block.
+  assert.match(out, /requiredArtifactsFor\(\\"lite\\"\) missing: spec\.md/,
+    'cli.mjs must thread its resolved tier into gatherCheckpointInputs — without it the set silently reverts to `standard`');
+  assert.doesNotMatch(out, /requiredArtifactsFor\(\\"standard\\"\)/,
+    'and the evaluator default must never be what a real review measures against');
+});
+
+test('#555: at lite, a change carrying only what lite requires produces NO artifact blocker (the thread cuts both ways)', async () => {
+  const vcs = spyVcs();
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42', '--mode', 'checkpoint', '--dry-run'],
+    log: (s) => lines.push(s),
+    ...checkpointDeps(vcs, 'lite', ['spec.md', 'tasks.md']),
+  });
+  assert.equal(code, 0);
+  const out = lines.join('\n');
+  assert.doesNotMatch(out, /requiredArtifactsFor/,
+    'lite requires spec.md and it is there — a lost tier would demand proposal.md/design.md a lite change never owed');
+  assert.doesNotMatch(out, /tasks-absent|zero "- \[x\]"/,
+    'and an executed tasks.md is neither absent nor unstarted');
+});
+
 // ── escalation inbox wiring (H1-5b): cli passes verdict.escalate through ───
 // to the poster, which applies needs-decision on escalate:'human'. ─────────
 

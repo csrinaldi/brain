@@ -935,10 +935,37 @@ function gatherWithArtefacts({ tier, present }) {
   });
 }
 
-test('#555: at LITE the checkpoint accepts a change carrying only spec.md', async () => {
+test('#555: at LITE the artefact SET is spec.md alone — but the SDD must still be executed', async () => {
+  // REWRITTEN in round 3. The first version asserted only `artifacts.missing` and
+  // never called `evaluateCheckpoint`, so it could not see that the blocker had
+  // been RENAMED rather than removed: with tasks.md out of the tier's set, an
+  // absent tasks.md read as "present with zero checked" and `tasks-no-progress`
+  // fired in `artifacts-missing`'s place. A test that measures the thing you
+  // changed instead of the outcome that matters cannot see that.
   const inputs = await gatherWithArtefacts({ tier: 'lite', present: ['spec.md'] });
   assert.deepEqual(inputs.artifacts.missing, [],
-    'lite requires spec.md alone (ADR-0026); the reviewer must not block on the other three');
+    'lite requires spec.md alone for Rule A (ADR-0026)');
+
+  const blockers = evaluateCheckpoint(inputs).findings.filter(f => f.severity === 'blocker').map(f => f.id);
+  assert.deepEqual(blockers, ['tasks-absent'],
+    'and exactly ONE blocker — the SDD-execution one (maintainer ruling 2026-08-13: "por más que ' +
+    'sea lite, el SDD debe ser ejecutado"), never a no-progress finding over a file that is not there');
+});
+
+test('#555: at LITE, spec.md + a tasks.md with one checked item passes clean', async () => {
+  const inputs = await gatherWithArtefacts({ tier: 'lite', present: ['spec.md', 'tasks.md'] });
+  const blockers = evaluateCheckpoint(inputs).findings.filter(f => f.severity === 'blocker').map(f => f.id);
+  assert.deepEqual(blockers, [],
+    'the shape REQ-L4-2′s own lite scenario describes must not block');
+});
+
+test('#555: a tasks.md with NO checked item is a different finding from an absent one', async () => {
+  // "You never wrote one" and "you wrote one and completed nothing" are different
+  // things to tell an author, and collapsing them is what produced round 3's blocker.
+  const inputs = await gatherWithArtefacts({ tier: 'lite', present: ['spec.md', 'tasks-empty.md'] });
+  const ids = evaluateCheckpoint(inputs).findings.filter(f => f.severity === 'blocker').map(f => f.id);
+  assert.ok(ids.includes('tasks-absent'), `absent tasks.md must say so: ${JSON.stringify(ids)}`);
+  assert.ok(!ids.includes('tasks-no-progress'), 'and must not claim zero progress on a file it never read');
 });
 
 test('#555: at REGULATED the same change is missing four, named by their REAL filenames', async () => {
