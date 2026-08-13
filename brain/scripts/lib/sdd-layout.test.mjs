@@ -31,13 +31,18 @@ const SCRIPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // ── Task 1.2: the four frozen constants ──────────────────────────────────────
 
-test('1.2: REQUIRED_ARTIFACTS / OPERATIONAL_ARTIFACTS / CHANGES_ROOT / LEGACY_GRANDFATHERED are frozen', () => {
-  assert.ok(Object.isFrozen(REQUIRED_ARTIFACTS));
+test('1.2: OPERATIONAL_ARTIFACTS / CHANGES_ROOT / LEGACY_GRANDFATHERED are frozen', () => {
   assert.ok(Object.isFrozen(OPERATIONAL_ARTIFACTS));
   assert.ok(Object.isFrozen(CHANGES_ROOT));
   assert.ok(Object.isFrozen(LEGACY_GRANDFATHERED));
-  assert.deepEqual(REQUIRED_ARTIFACTS, ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
   assert.equal(LEGACY_GRANDFATHERED.length, 12);
+  // #555: `REQUIRED_ARTIFACTS` stays, as the SCAFFOLD set (REQ-L4-2′ — "the tier
+  // scopes what the gate demands, never what the scaffold produces"). What is
+  // tier-resolved is what the GATES require, which is `requiredArtifactsFor`.
+  // Both are asserted, because the whole defect was treating them as one thing.
+  assert.deepEqual(REQUIRED_ARTIFACTS, ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
+  assert.deepEqual(requiredArtifactsFor('standard'), ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
+  assert.deepEqual(requiredArtifactsFor('lite'), ['spec.md']);
 });
 
 // ── Task 1.3: changeDir — rehearses new-change.mjs:48-110, engram.mjs:804-805 &
@@ -164,12 +169,12 @@ test('1.9: missingRequiredArtifacts — a NEW dir missing spec.md and design.md 
     'openspec/changes/issue-999-x/proposal.md': true,
     'openspec/changes/issue-999-x/tasks.md': true,
   });
-  assert.deepEqual(missingRequiredArtifacts('issue-999-x', fs), ['spec.md', 'design.md']);
+  assert.deepEqual(missingRequiredArtifacts('issue-999-x', { artefacts: STANDARD, ...fs }), ['spec.md', 'design.md']);
 });
 
 test('1.9: missingRequiredArtifacts — a grandfathered dir missing everything short-circuits to [] ("the past is recorded, not edited")', () => {
   const fs = fakeFs({});
-  assert.deepEqual(missingRequiredArtifacts('vcs-adapter', fs), []);
+  assert.deepEqual(missingRequiredArtifacts('vcs-adapter', { artefacts: STANDARD, ...fs }), []);
 });
 
 test('1.9: missingRequiredArtifacts — spec slot delegates to hasSpec (nested spec counts as present)', () => {
@@ -180,15 +185,20 @@ test('1.9: missingRequiredArtifacts — spec slot delegates to hasSpec (nested s
     'openspec/changes/issue-999-x/specs': ['cap'],
     'openspec/changes/issue-999-x/specs/cap/spec.md': true,
   });
-  assert.deepEqual(missingRequiredArtifacts('issue-999-x', fs), []);
+  assert.deepEqual(missingRequiredArtifacts('issue-999-x', { artefacts: STANDARD, ...fs }), []);
 });
 
 // ── Task 1.10: OPERATIONAL_ARTIFACTS — rehearses feature-resolution.mjs:79-84
 // (existsSync(join(changesDir, candidate, 'resume.md'))) + engram.mjs:805/926 ──
 
-test('1.10: OPERATIONAL_ARTIFACTS includes resume.md, and it is excluded from REQUIRED_ARTIFACTS', () => {
+test('1.10: OPERATIONAL_ARTIFACTS includes resume.md, and no tier ever requires it', () => {
   assert.ok(OPERATIONAL_ARTIFACTS.includes('resume.md'));
-  assert.equal(REQUIRED_ARTIFACTS.includes('resume.md'), false);
+  // Widened by #555: driven over EVERY tier, not one constant. `resume.md` is
+  // machine-written and discardable, so a tier that required it would be a gate
+  // on a file the tooling rewrites.
+  for (const tier of ALL_TIERS) {
+    assert.equal(requiredArtifactsFor(tier).includes('resume.md'), false, tier);
+  }
 });
 
 test('1.10: resume.md is never consulted by missingRequiredArtifacts (feature-resolution.mjs:79-84 shape)', () => {
@@ -199,7 +209,7 @@ test('1.10: resume.md is never consulted by missingRequiredArtifacts (feature-re
     'openspec/changes/issue-999-x/tasks.md': true,
     // resume.md deliberately absent — must not affect the result.
   });
-  assert.deepEqual(missingRequiredArtifacts('issue-999-x', fs), []);
+  assert.deepEqual(missingRequiredArtifacts('issue-999-x', { artefacts: STANDARD, ...fs }), []);
 });
 
 // Task 1.11 (stop-condition, owner ruling #587 item 2): every helper above
@@ -443,4 +453,148 @@ test('A3 negative case: a hypothetical site re-declaring its own artifact-name a
 test('A3 (task 4.5): scanning the six real wired sites reports zero offenders', () => {
   const sites = CONSUMING_SITES.map((s) => ({ ...s, content: readFileSync(s.abs, 'utf8') }));
   assert.deepEqual(scanSitesForA3(sites), []);
+});
+
+// ── #555: ONE artifact set, resolved by tier ────────────────────────────────
+//
+// Two sets coexisted and disagreed in three ways at once — contents (1 vs 4 vs 5),
+// extension (`spec` vs `spec.md`), and one being fixed while the other tiered:
+//
+//   REQUIRED_ARTIFACTS (fixed)      ["proposal.md","spec.md","design.md","tasks.md"]
+//   tierParams('lite').artefacts    ["spec"]
+//
+// `phase-order` was tiered by #358 Q5. `missingRequiredArtifacts` and its two
+// consumers were not, so at the tier brain declares for ITSELF, doctrine said
+// `spec` suffices while `local-checks` and the reviewer's checkpoint demanded all
+// four. The same change passed one gate and blocked on another — this repository's
+// own configuration, not a laboratory case.
+//
+// #312 is why it stopped being decoration: the artifact set became the primary key
+// of the executor contract, and a contract keyed on an ambiguous set inherits the
+// ambiguity.
+
+import { requiredArtifactsFor } from '../vcs/governance-tiers.mjs';
+import { tierParams as tierParamsFor, TIERS as ALL_TIERS } from '../vcs/governance-tiers.mjs';
+
+/** #555: these tests measured against the fixed four; they now name the set explicitly. */
+const STANDARD = requiredArtifactsFor('standard');
+
+test('#555: requiredArtifactsFor resolves from the tier table, with the extension normalised in ONE place', () => {
+  assert.deepEqual(requiredArtifactsFor('lite'), ['spec.md']);
+  assert.deepEqual(requiredArtifactsFor('standard'), ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
+  assert.deepEqual(requiredArtifactsFor('regulated'),
+    ['proposal.md', 'spec.md', 'design.md', 'tasks.md', 'verify-report.md']);
+});
+
+// #555 round 2 — a guard was REMOVED here, twice over, and the reason is worth
+// more than the guard was.
+//
+// v1 asserted `requiredArtifactsFor(tier)` equalled `artefacts.map(n => n + '.md')`
+// — character-for-character the function's body. It agreed with the
+// `verification.md` bug instead of catching it.
+//
+// v2 replaced it with cardinality + membership against ARTEFACT_FILE. Also a
+// theorem of the implementation: `.map()` preserves length, and every value it can
+// return is by construction a value of the map. Proven inert by a cold review —
+// with `spec` remapped to `design.md`, a filename WAS invented and the guard whose
+// failure message read "a filename was invented" passed.
+//
+// Both were written FROM the implementation, which is the one place a guard cannot
+// see a mistake. What actually catches an invented filename is the literal
+// expectation in the test above, because those literals are an independent
+// declaration of the answer. Two tautologies are not worth a third attempt.
+
+test('#555: at `lite` a change carrying only spec.md is COMPLETE — the tier brain declares for itself', () => {
+  // Before the fix this returned ["proposal.md","design.md","tasks.md"] and the
+  // reviewer emitted an `artifacts-missing` BLOCKER over a change doctrine calls
+  // finished.
+  const seam = {
+    exists: (p) => p.endsWith('/spec.md'),
+    listDir: () => ['spec.md'],
+  };
+  assert.deepEqual(missingRequiredArtifacts('issue-999-only-spec', { artefacts: requiredArtifactsFor('lite'), ...seam }), []);
+});
+
+test('#555: and at `standard` the same change is still incomplete — the fix is not a blanket loosening', () => {
+  const seam = {
+    exists: (p) => p.endsWith('/spec.md'),
+    listDir: () => ['spec.md'],
+  };
+  assert.deepEqual(
+    missingRequiredArtifacts('issue-999-only-spec', { artefacts: requiredArtifactsFor('standard'), ...seam }),
+    ['proposal.md', 'design.md', 'tasks.md']);
+});
+
+test('#555: omitting the set THROWS — a consumer cannot silently fall back to its own list', () => {
+  // The guard the ticket asks for, and it is structural rather than textual: there
+  // is no default to drift because there is no default at all. A consumer that
+  // "goes back to reading its own list" has to pass it explicitly, which is visible
+  // in the diff instead of hiding in a parameter default.
+  assert.throws(
+    () => missingRequiredArtifacts('issue-999-x', { exists: () => false, listDir: () => [] }),
+    /artefacts` is required/,
+    'an absent set must refuse, not quietly assume the four');
+});
+
+// ── #555 round 2: the name→file map, found by a cold review ─────────────────
+//
+// The first cut derived filenames by appending `.md` to the tier table's bare
+// names. That is not the convention: `verification` is `verify-report.md`
+// (phase-order-check.mjs's `buildChangeDir`). So `regulated` demanded a file that
+// exists nowhere, and a change carrying all five REAL artefacts passed
+// `phase-order` and failed `check-refs` — #555's own complaint, relocated from
+// `lite` to `regulated`.
+//
+// The root cause was that the mapping existed TWICE and disagreed. It is one map
+// now, and `phase-order`'s message reads from it too — that message had the same
+// defect already, naming `verification.md` for a probe of `verify-report.md`.
+
+import { ARTEFACT_FILE, artefactFiles } from './sdd-layout.mjs';
+
+test('#555: the artefact name→file map is NOT a suffix rule — verification is verify-report.md', () => {
+  assert.equal(ARTEFACT_FILE.verification, 'verify-report.md',
+    'the one name that breaks the `.md` rule is the whole reason this map exists');
+  assert.deepEqual(artefactFiles(['proposal', 'spec', 'design', 'tasks']),
+    ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
+  assert.deepEqual(artefactFiles(['verification']), ['verify-report.md']);
+});
+
+test('#555: an unmapped artefact name REFUSES — it is never guessed at with .md', () => {
+  // Guessing is what produced the blocker. A name the map does not know is a
+  // config error, and inventing a filename for it hides that error until a
+  // consumer at that tier cannot satisfy a gate.
+  assert.throws(() => artefactFiles(['whatever']), /unknown artefact name/i);
+});
+
+test('#555: every tier the table declares resolves to files the repo actually writes', () => {
+  // Driven over EVERY tier rather than the three spelled out, so a tier added
+  // later cannot introduce a name with no file behind it.
+  for (const tier of ALL_TIERS) {
+    for (const name of tierParamsFor(tier).artefacts) {
+      assert.ok(ARTEFACT_FILE[name], `${tier} declares "${name}" and the map has no file for it`);
+    }
+  }
+});
+
+test('#555: at `regulated`, a change carrying the five REAL artefacts is complete', () => {
+  // The blocker, driven end to end. Before the fix this returned
+  // ['verification.md'] over a dir that had everything the repo's own convention
+  // writes.
+  const present = new Set(['proposal.md', 'spec.md', 'design.md', 'tasks.md', 'verify-report.md']);
+  const seam = {
+    exists: (p) => present.has(p.split('/').pop()),
+    listDir: () => [...present],
+  };
+  assert.deepEqual(
+    missingRequiredArtifacts('issue-999-reg', { artefacts: requiredArtifactsFor('regulated'), ...seam }),
+    []);
+});
+
+test('#555: REQUIRED_ARTIFACTS is restored as the SCAFFOLD set — four, at every tier', () => {
+  // REQ-L4-2′: "REQUIRED_ARTIFACTS in sdd-layout.mjs stays the canonical scaffold
+  // set at every tier — the tier scopes what the GATE demands, never what the
+  // SCAFFOLD produces." The first cut deleted it to fix the gate question, which
+  // collapsed two things the spec deliberately separates.
+  assert.deepEqual(REQUIRED_ARTIFACTS, ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
+  assert.ok(Object.isFrozen(REQUIRED_ARTIFACTS));
 });

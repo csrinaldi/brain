@@ -28,6 +28,14 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CHANGES_ROOT, changeDir, missingRequiredArtifacts, OPERATIONAL_ARTIFACTS } from './sdd-layout.mjs';
+import { requiredArtifactsFor } from '../vcs/governance-tiers.mjs';
+
+// #555: the golden corpus was frozen when the required set was a fixed four. It is
+// now tier-resolved, and these fixtures pin the `standard` set deliberately — the
+// question they answer is "did the B1 wiring change any verdict", which must stay
+// measured against the SAME set it was frozen with. A tier-varying golden would be
+// answering a different question with the same name.
+const GOLDEN_ARTEFACTS = requiredArtifactsFor('standard');
 import { evaluatePhaseOrder, applyBaselineExemption } from '../vcs/phase-order-check.mjs';
 import { deriveChangeFromBranch } from '../session-start.mjs';
 
@@ -109,7 +117,7 @@ function oldCheckRefsMissing(facts) {
 
 /** The site's NEW (B1-wired) verdict, recomputed from the frozen facts. */
 function newCheckRefsMissing(name, facts) {
-  return missingRequiredArtifacts(name, fakeFsFromFacts(name, facts));
+  return missingRequiredArtifacts(name, { artefacts: GOLDEN_ARTEFACTS, ...fakeFsFromFacts(name, facts) });
 }
 
 // ── phase-order-check verdict — a synthetic single-dir-touched scenario ────

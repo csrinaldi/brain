@@ -74,6 +74,22 @@ async function runBoardCommand(deps, log) {
     if (r.toAdd.length > 0 || r.toRemove.length > 0) {
       log(`brain:review:board — #${r.number}: +[${r.toAdd.join(', ')}] -[${r.toRemove.join(', ')}]`);
     }
+    // #477 — the report the ruling requires. An unreadable verdict normally has
+    // NOTHING to add or remove (freezing the namespace is what stops the writes),
+    // so it was the one case that printed nothing at all: the operator read
+    // "reconciled N open PR(s)" and never learned a verdict was garbage. Emitted
+    // separately from the line above, and unconditionally, because "no label
+    // movement" and "no readable verdict" are different facts.
+    if (r.unreadable?.length > 0) {
+      // The freeze clause is CONDITIONAL. It used to be appended to every
+      // report, so a verdict with an unreadable `findings` and a readable
+      // `sequencing` printed its label moves and then claimed seq:* had been
+      // left untouched — a report overstating its own caution, which fails in
+      // the same reassuring direction as the defect this change exists to close.
+      const froze = r.unreadable.includes('sequencing') ? ' — seq:* left untouched' : '';
+      log(`brain:review:board — #${r.number}: UNREADABLE verdict fields [${r.unreadable.join(', ')}]` +
+        `${froze} (protocol §10: never conclude on uncomputable evidence)`);
+    }
   }
   log(`brain:review:board — reconciled ${results.length} open PR(s).`);
 
@@ -219,6 +235,18 @@ export async function main(deps = {}) {
     return 0;
   }
 
+  // #477 — the consumer of `doctrine.unreadableVerdicts`. Without this the field
+  // was a name with no reader: an unreadable prior verdict behaved at runtime
+  // exactly as before, which is the "flag nobody reads" outcome the ruling
+  // refused. This run derives its rev count and its anti-loop decision from that
+  // thread, so the operator reading this output is the one who needs to know a
+  // member of it could not be read. Reported, never acted on automatically —
+  // the verdict still counts as an iteration (see cold-boot.mjs).
+  for (const v of boot.doctrine.unreadableVerdicts ?? []) {
+    log(`brain:review: UNREADABLE prior verdict at head ${v.head_sha} by ${v.author ?? 'unknown'} — ` +
+      `fields [${v.malformed.join(', ')}] could not be read; it still counts toward the §7 rev bound`);
+  }
+
   // Mode is derived from repo state, NEVER declared (R6) — an explicit
   // --mode pins it for a manual run; changedFiles feeds both the derivation
   // (checkpoint-report.md detection) and the tranche evaluator's budget/
@@ -260,6 +288,7 @@ export async function main(deps = {}) {
       changedFiles,
       prBody: boot.prView.body,
       labels: boot.prView.labels ?? [],
+      tier,   // #555: the artifact set is tier-resolved; cli.mjs already has it
       worktreePath: boot.worktreePath,
       doctrineRecords: boot.doctrine.records,
       // The resolved baseSha (ci-context → port prView.baseRefOid, ADR-0022) feeds
