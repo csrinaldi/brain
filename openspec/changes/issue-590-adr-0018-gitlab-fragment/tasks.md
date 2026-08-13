@@ -3,47 +3,41 @@ status: draft
 issue: 590
 ---
 
-# Tareas — adr-0018-gitlab-fragment (issue 590)
+# Tasks — adr-0018-gitlab-fragment (issue 590)
 
-- [x] Medir el estado en `main` @ `51bbcaa`: 5 sitios citan ADR-0018, no existe
-- [x] Decidir escribir vs renumerar → escribir (proposal.md)
-- [x] RED FIRST: el check de resolución de citas, rojo antes de cualquier arreglo
-- [x] Corregir el check: auto-exclusión + lectores que fallan fuerte
-- [x] Prueba por mutación: 6 mutaciones, cada una roja, cada diff impreso y
-      revertido byte a byte
-- [x] Probe de dos vías: con el ADR en disco el suite queda 7/7 verde
-- [x] Escribir el draft ADR-0018 re-derivado del árbol
-- [x] Verificar que `brain:promote` lo transforma (destino, header, commit cmd)
-- [ ] **HUMANO**: `npm run brain:promote -- openspec/changes/issue-590-adr-0018-gitlab-fragment/brain-drafts/adr-0018-gitlab-governance-fragment.md`
-      y commitear la firma en esta rama. Hasta entonces `npm test` está rojo por
-      construcción.
+- [x] Measure the state on `main` @ `51bbcaa`: 5 sites cite ADR-0018, it does not exist
+- [x] Decide write vs renumber → write (`proposal.md`)
+- [x] RED FIRST: the citation-resolution check, red before any fix
+- [x] Correct the check: self-exclusion + readers that fail loudly
+- [x] Mutation proof: 6 mutations, each red, each diff printed and reverted byte-identically
+- [x] Two-way probe: with the ADR on disk the suite is fully green
+- [x] Write the ADR-0018 draft, re-derived from the tree
+- [x] Verify `brain:promote` transforms it (destination, header, commit command)
+- [x] Review round: G1 (undefended scan surface), G2 (the ADR misdescribed the
+      managed-path mechanism), G3 (`KNOWN_GAPS` overclaimed), G4 (draft links
+      unverified until after the signature) — each fixed, each re-proven
+- [x] Second review round: H1 (artifacts in the wrong language, ADR-0009),
+      H2 (this spec described a surface two commits stale), H3/H4 (untracked
+      blind spot and case sensitivity — declared, not fixed)
+- [x] Open #599 (ADR-0023) and #605 (the scaffold's hardcoded language)
+- [ ] **HUMAN**: `npm run brain:promote -- openspec/changes/issue-590-adr-0018-gitlab-fragment/brain-drafts/adr-0018-gitlab-governance-fragment.md`
+      and commit the signature on this branch. Until then `npm test` is red by
+      construction.
 
-## Micro-decisiones en caliente
+## Hot micro-decisions
 
-Ver `design.md` — se consolidaron ahí durante el vuelo.
+See `design.md` — consolidated there during the flight.
 
-## Ronda de review fría (autor, etiquetada como tal)
+## Out of scope, reported
 
-- [x] G1 — la superficie de escaneo era indefendible: sobre árbol verde, agregar
-      `brain/core/` y `.github/` a `UNSCANNED_ROOTS` dejaba el suite **7/7 verde**.
-      `REQUIRED_ROOTS` lo cierra; la misma mutación ahora es roja.
-- [x] G2 — el ADR decía que el literal managed está *encima* del glob
-      `brain/scripts/**` y atribuía el comportamiento a la posición. Medido:
-      está *debajo* (líneas 41 vs 44), y `strategyFor()` resuelve por lookup
-      exacto antes de iterar globs. Corregido en el draft.
-- [x] G3 — `KNOWN_GAPS` afirmaba "every entry names the ticket that owns it" y
-      ninguna lo hacía; el test sólo exigía no-vacío. Ahora exige `/#\d+/`, y
-      las dos entradas apuntan a #599.
-- [x] G4 — los links relativos del draft sólo se verificaban tras la firma
-      humana (`brain:nav` mira `brain/`). El check nuevo cubre los 16 drafts
-      del árbol y sus 18 links.
-- [x] Ticket #599 abierto para ADR-0023, que es lo que permite cerrar G3.
-
-## Fuera de alcance, reportado
-
-- `.gitlab-ci.yml:1` dice que `phase-order`, `actor-check` y `brain-writes-reviewed`
-  son DETECTION vía `allow_failure`. El fragmento no tiene ningún `allow_failure`
-  (las 3 ocurrencias son comentario). El comentario del root quedó viejo tras la
-  promoción de #358 Phase 5. Archivo fuera del reclamo.
-- ADR-0023: citado por dos archivos en `docs/inbox/**`, draft sin promover en
-  `brain-drafts/adr-0023-sdd-role-port.md`. Misma clase que #590. **Ticket #599.**
+- `.gitlab-ci.yml:1` states that `phase-order`, `actor-check` and
+  `brain-writes-reviewed` are DETECTION via `allow_failure`. The fragment
+  carries no `allow_failure` at all (all 3 occurrences are comments). The root
+  comment went stale after #358 Phase 5. File outside the claim.
+- ADR-0023: cited by two files under `docs/inbox/**`, draft unpromoted at
+  `brain-drafts/adr-0023-sdd-role-port.md`. Same class as #590. **Ticket #599.**
+- The reviewer's coldness is not verifiable (`whoami` resolves the ambient
+  identity behind a credential-injecting proxy; §10 abstention compares
+  identity, not provenance). **Ticket #604.**
+- `brain:project:feature` scaffolds in Spanish and never reads `docs.language`.
+  **Ticket #605.**

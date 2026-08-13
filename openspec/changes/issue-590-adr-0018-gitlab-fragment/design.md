@@ -3,46 +3,70 @@ status: draft
 issue: 590
 ---
 
-# Diseño — adr-0018-gitlab-fragment (issue 590)
+# Design — adr-0018-gitlab-fragment (issue 590)
 
-## D1 — Escribir el ADR, no renumerar
+## D1 — Write the ADR, do not renumber
 
-Ver `proposal.md`. ADR-0016 es la normalización del contexto CI; el fragmento
-GitLab es otra decisión.
+See `proposal.md`. ADR-0016 is the CI-context normalisation; the GitLab
+fragment is a different decision.
 
-## D2 — El check vive en `test/**`, no en `check-refs-rules.mjs`
+## D2 — The check lives in `test/**`, not in `check-refs-rules.mjs`
 
-`repo:check` valida *referencias prohibidas*; esto es una resolución. Además
-`brain/project/check-refs-rules.mjs` queda fuera del reclamo de archivos de esta
-línea de trabajo.
+`repo:check` validates *prohibited references*; this is a *resolution*. And
+`brain/project/check-refs-rules.mjs` is outside this line of work's file claim.
 
-## D3 — El check se excluye a sí mismo
+## D3 — The check excludes itself
 
-Medido: escaneándose a sí mismo produjo 8 hallazgos de 13, todos sobre su propio
-texto (los registros deben *nombrar* los números que eximen). La exclusión es de
-un único path, anclado a `import.meta.url` por un guard, para que no pueda
-re-apuntarse a un segundo archivo. Costo declarado: un puntero podrido en los
-comentarios de ese archivo no se detecta.
+Measured: scanning itself produced 8 of 13 findings, all about its own prose
+(the registries must *name* the numbers they exempt). The exclusion is a single
+path, anchored to `import.meta.url` by a guard so it cannot be re-pointed at a
+second file. Stated cost: a rotted pointer in that file's own comments is not
+caught.
 
-## D4 — Dos registros con semánticas distintas
+## D4 — Two registries with different meanings
 
-`FIXTURE_CITATIONS` (números falsos deliberados en material de test — nunca
-resuelven) y `KNOWN_GAPS` (podredumbre real que este ticket no repara, cada
-entrada con su motivo). Ambos con guard de caducidad.
+`FIXTURE_CITATIONS` (deliberate fakes in test material — never resolve) and
+`KNOWN_GAPS` (real rot this ticket does not repair, each naming the issue that
+owns it). Both staleness-guarded.
 
-## D5 — El PR queda ROJO hasta la firma
+## D5 — The PR stays RED until the signature
 
-El check pasa cuando el ADR existe en `brain/project/decisions/`, y el agente no
-puede ponerlo ahí (ADR-0028: el commit es la firma; `brain:promote` se niega en
-non-TTY). Es deliberado: un PR verde significaría que el ADR se escribió a mano
-o que la cita se excusó, y ambas cosas son el defecto.
+The check passes once the ADR exists in `brain/project/decisions/`, and the
+agent cannot put it there (ADR-0028: the commit is the signature;
+`brain:promote` refuses on a non-TTY). This is deliberate: a green PR would
+mean the ADR was hand-written or the citation was excused, and both are the
+defect.
 
-## Micro-decisiones en caliente
+## D6 — What the review round changed
 
-- El probe de que el check pone verde con el ADR presente se hizo creando el
-  archivo destino, corriendo, y borrándolo — nunca commiteado. Un nombre en
-  mayúsculas no matchea `ADR_FILE_RE`, lo que confirmó de paso que la forma del
-  nombre está anclada igual que en `brain:promote`.
-- La brecha ADR-0023 (`docs/inbox/**`, draft sin promover en `brain-drafts/`)
-  apareció al medir. Queda en `KNOWN_GAPS` con motivo, no reparada: los archivos
-  están fuera del reclamo y es otro ticket.
+A cold read of this change against itself, by the author and labelled as such.
+
+- **G1 — the scan surface was undefended.** On a green tree, adding
+  `brain/core/` and `.github/` to `UNSCANNED_ROOTS` left the suite 7/7 green.
+  The vacuity guards could not cover it: they are absolute counts, and
+  excluding all of `brain/scripts/**` still leaves 114 files and 393 citations.
+  `REQUIRED_ROOTS` closes it.
+- **G2 — the ADR misdescribed the mechanism it documents.** It claimed the
+  managed literal sits *above* the `brain/scripts/**` COPY glob, attributing
+  the guarantee to position. Measured: it sits *below* (lines 41 vs 44), and
+  `strategyFor()` resolves by exact-key lookup before iterating globs.
+- **G3 — `KNOWN_GAPS` overclaimed.** It said every entry named its ticket; none
+  did, and the test only checked for a non-empty string. Enforced now.
+- **G4 — draft links were unverified until after the signature.**
+- **H1/H2 — these artifacts were in the wrong language and this spec described
+  a surface that had not been current since the second commit.** Both are the
+  same class as the ticket itself: an artifact saying something other than what
+  is there.
+
+## Hot micro-decisions
+
+- The probe proving the check goes green with the ADR present was done by
+  creating the destination file, running, and deleting it — never committed. An
+  uppercase name did not match `ADR_FILE_RE`, which incidentally confirmed the
+  filename shape is anchored exactly as `brain:promote` writes it.
+- The ADR-0023 gap surfaced while measuring. It is in `KNOWN_GAPS` with its
+  reason and is now owned by #599 — not repaired here: the files are outside
+  the claim, and the decision needs measurement first.
+- The scaffold emits these templates in Spanish and never reads
+  `docs.language`, which is how H1 happened. That is #605; it explains the
+  defect without excusing it, since 85 of 91 change dirs were rewritten by hand.

@@ -17,6 +17,24 @@
 // (file, number) pairs, never patterns, and both are checked for staleness —
 // an entry that no longer matches a real citation FAILS this suite instead of
 // rotting in place. A number is exempt at ONE path, not everywhere.
+//
+// ── THREE LIMITS, DECLARED RATHER THAN DISCOVERED ───────────────────────────
+//
+// 1. UNTRACKED FILES ARE INVISIBLE. The reader is `git ls-files`, so locally a
+//    rotted citation in a file nobody staged yet passes. Measured: a
+//    `brain/core/ROT-PROBE.md` citing ADR-7777, left unstaged, produced zero
+//    findings. CI is unaffected — everything in a checkout is committed. The
+//    alternative reader is a filesystem walk that re-implements `.gitignore`,
+//    which is a worse reader, so this stands as a limit rather than a defect.
+//
+// 2. RESOLUTION, NEVER CORRECTNESS. A citation aimed at the WRONG ADR resolves
+//    and passes. This proves a reader lands somewhere, never that they land
+//    where the citing line claims.
+//
+// 3. CASE-SENSITIVE. `adr-0018` written in prose is not matched. Folding case
+//    would fire on every `adr-….md` path in every link and reference list, so
+//    the canonical `ADR-NNNN` form is what this reads — and a lowercase prose
+//    citation is a miss it will not report.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
