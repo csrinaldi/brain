@@ -1481,6 +1481,13 @@ export const BRAIN_REPO_HTTPS = 'git+https://github.com/csrinaldi/brain.git';
 export const PACKAGE_NAME = 'brain';
 
 /**
+ * Where releases BEFORE the scoped rename installed. Kept as its own constant
+ * rather than a literal inside the resolver, so the day `PACKAGE_NAME` becomes
+ * `@scope/brain` this still names the directory a consumer's older tree holds.
+ */
+export const LEGACY_PACKAGE_DIR = 'brain';
+
+/**
  * Where an installed brain lives inside a consumer repo.
  *
  * Handles a scoped name without the caller knowing: npm splits `@scope/name`
@@ -1491,7 +1498,92 @@ export const PACKAGE_NAME = 'brain';
  * @returns {string}
  */
 export function installedPackageRoot(repoRoot, ...rest) {
-  return join(repoRoot, 'node_modules', ...PACKAGE_NAME.split('/'), ...rest);
+  return resolveInstalledPackageRoot({ repoRoot, rest });
+}
+
+/**
+ * Resolves where brain ACTUALLY is, preferring the canonical path and falling
+ * back to a pre-rename install (issue #625).
+ *
+ * WHAT THIS DOES NOT FIX, so the scope is not mistaken: a consumer running
+ * their OLD vendored `brain-upgrade.mjs` when the scoped release lands still
+ * dies. That code resolves `node_modules/brain`, `installSpec` installs from the
+ * git URL, npm reads the new package.json and lands the tree under the scope,
+ * and the old code finds nothing. It is already in their tree; nothing here
+ * reaches it. The rename therefore belongs with the publish, where a consumer
+ * changes their install line anyway.
+ *
+ * What this DOES fix is the mirror case — new code, old install — which is real
+ * after any recovery and previously read as "not installed".
+ *
+ * With neither present it returns the CANONICAL path, so an error names the
+ * location a reader should create rather than the one that happens to be older.
+ *
+ * @param {object}   o
+ * @param {string}   o.repoRoot
+ * @param {string[]} [o.rest]         segments inside the package
+ * @param {string}   [o.packageName]  injectable so the scoped behaviour is testable before the rename
+ * @param {string}   [o.legacyDir]
+ * @param {(p:string)=>boolean} [o.exists]
+ * @returns {string}
+ */
+export function resolveInstalledPackageRoot({
+  repoRoot,
+  rest = [],
+  packageName = PACKAGE_NAME,
+  legacyDir = LEGACY_PACKAGE_DIR,
+  exists = existsSync,
+} = {}) {
+  const canonical = join(repoRoot, 'node_modules', ...packageName.split('/'));
+  // Before the rename the two coincide; no probing, no behaviour change.
+  if (canonical === join(repoRoot, 'node_modules', legacyDir)) return join(canonical, ...rest);
+  if (exists(canonical)) return join(canonical, ...rest);
+  const legacy = join(repoRoot, 'node_modules', legacyDir);
+  if (exists(legacy)) return join(legacy, ...rest);
+  return join(canonical, ...rest);
+}
+
+/**
+ * Every place `resolveInstalledPackageRoot` probes, in the order it probes them,
+ * as repo-relative POSIX paths for humans to read.
+ *
+ * Deliberately built from the SAME two constants the resolver uses, so a message
+ * can never name a path the code did not search. Before the rename the two
+ * coincide and this returns one entry — a message that invents a second location
+ * sends the reader to look twice at one directory.
+ *
+ * @param {object} [o]
+ * @param {string} [o.packageName]
+ * @param {string} [o.legacyDir]
+ * @returns {string[]}
+ */
+export function installedPackageSearchPaths({
+  packageName = PACKAGE_NAME,
+  legacyDir = LEGACY_PACKAGE_DIR,
+} = {}) {
+  const canonical = ['node_modules', ...packageName.split('/')].join('/');
+  const legacy = ['node_modules', legacyDir].join('/');
+  return canonical === legacy ? [canonical] : [canonical, legacy];
+}
+
+/**
+ * The searched locations rendered for an error message.
+ *
+ * `brain:upgrade` is the verb a consumer runs to RECOVER, so the text it dies
+ * with is the last thing they get before they are on their own. Naming one path
+ * while having searched two is worse than not falling back at all: it sends them
+ * to inspect a directory the code never looked at (issue #625).
+ *
+ * @param {object}   [o]
+ * @param {string[]} [o.rest]  segments inside the package, e.g. `['package.json']`
+ * @param {string}   [o.packageName]
+ * @param {string}   [o.legacyDir]
+ * @returns {string}
+ */
+export function describeInstalledPackageSearch({ rest = [], ...o } = {}) {
+  const tail = rest.length ? `/${rest.join('/')}` : '';
+  const [canonical, legacy] = installedPackageSearchPaths(o).map((p) => `${p}${tail}`);
+  return legacy ? `${canonical} (nor the pre-rename ${legacy})` : canonical;
 }
 
 /**
