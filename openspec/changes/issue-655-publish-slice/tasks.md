@@ -66,3 +66,29 @@ once you have read why it is red.
 `test/fresh-install` dropping `VCS_TOKEN` — ADR-0030's acceptance criterion,
 unverifiable until something is published. Its stated reason (*"the brain repo
 is private"*) is already stale on its own.
+
+## Follow-up landed in this change — the #644 × #655 interaction
+
+The M4 danger-paths suite went red on the merge, and neither PR could see it
+alone: #644 was inert while the name was unscoped, and #655 activated it.
+
+- [x] Danger-paths seed: derive the installed-package dir instead of the literal
+      `node_modules/brain` (434 files seeded vs 0, measured on a real install)
+- [x] `install-provenance.mjs`: classify the consumer's install source from npm's
+      hidden lockfile; every failure a STATED `unknown`
+- [x] `resolveInstallSpec`: provenance outranks the scoped name for git/file
+- [x] `brain-upgrade.mjs`: one retry over the git route when a guessed registry
+      spec fails; both specs named if both fail
+- [x] 16 tests; full suite 3612 pass / 0 fail
+- [x] Mutation proof ×3, each reverted byte-identical:
+      M1 classifier blind to git → 2 red · M2 provenance ignored → 4 red ·
+      M3 fallback dropped → 2 red
+
+### Measured, not assumed
+
+| install route | npm `resolved` | classified |
+|---|---|---|
+| registry | `https://registry.npmjs.org/…/is-7.0.1.tgz` | registry |
+| git | `git+ssh://git@github.com/…#e0976457` | git |
+| git, local remote (the harness) | `git+file:///…/remote.git#1a33dc2` | git |
+| tarball | `file:../../logikas-brain-1.1.0.tgz` | file |

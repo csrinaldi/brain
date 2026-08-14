@@ -421,8 +421,30 @@ if (!noInstall) {
       console.error(`\n  ${C.red}✗${C.reset} Install interrupted by ${r.signal} — no managed path was written.`);
       process.exit(r.signal === 'SIGTERM' ? 143 : 130);
     }
-    if (r.status !== 0) die(`${pm.name} install failed — check repo access and that the tag exists.`);
-    ok('Package installed.');
+    // The git fallback (#655 × #644). A registry spec is only ever a BEST GUESS
+    // when the consumer's install source could not be read — pnpm/yarn/bun write
+    // no npm hidden lockfile, and a hoisted or workspace install may put it out
+    // of reach. Rather than make that guess terminal, try the route ADR-0030
+    // Amendment 1 names as the fallback for anyone who cannot reach the registry.
+    //
+    // Only ONE retry, and only to a DIFFERENT route: a second failure is a real
+    // failure, and repeating the first spec would just be slower.
+    if (r.status !== 0 && specDetail.fallbackSpec) {
+      info(`${pm.name} could not install ${spec} — retrying with ${specDetail.fallbackSpec}`);
+      info(`  (the install source was ${specDetail.provenance}: ${specDetail.provenanceWhy ?? 'no reason recorded'})`);
+      const rf = spawnSync(pm.installArgs[0], [...pm.installArgs.slice(1), specDetail.fallbackSpec], { stdio: 'inherit', cwd: ROOT });
+      if (rf.signal) {
+        console.error(`\n  ${C.red}✗${C.reset} Install interrupted by ${rf.signal} — no managed path was written.`);
+        process.exit(rf.signal === 'SIGTERM' ? 143 : 130);
+      }
+      if (rf.status !== 0) {
+        die(`${pm.name} install failed for BOTH ${spec} and ${specDetail.fallbackSpec} — check registry/repo access and that the version exists.`);
+      }
+      ok(`Package installed from the git fallback (${specDetail.fallbackSpec}).`);
+    } else {
+      if (r.status !== 0) die(`${pm.name} install failed — check repo access and that the tag exists.`);
+      ok('Package installed.');
+    }
   }
 }
 

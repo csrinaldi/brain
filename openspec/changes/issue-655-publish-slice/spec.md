@@ -62,3 +62,30 @@ written for.
 The README installs by name and keeps the git URL as a documented fallback; the
 CHANGELOG carries the two-command migration and the explicit instruction not to
 cross the rename with `brain:upgrade`.
+
+## REQ-655-11 — Upgrade follows the route this consumer installed BY
+
+The scoped name says what the package IS, not where a given consumer got it.
+`resolveInstallSpec` therefore takes a measured `provenance`, and `git`/`file`
+keep the git form even for a scoped name.
+
+Without this, ADR-0030's invariant *"never document the registry as the only way
+in"* held for the first install and failed for every upgrade after it: a
+consumer who installed by git URL because they cannot reach the registry was
+sent to the registry on every `brain:upgrade`, with no route home.
+
+## REQ-655-12 — Provenance is CLASSIFIED, never reused as a spec
+
+The reader answers which KIND of source, and the caller keeps building the spec
+from `repository.url` plus the requested tag. Measured: npm records a
+`git+https://…#v7.0.1` request as `git+ssh://…#<sha>` — protocol rewritten (ssh,
+for consumers explicitly documented as possibly having no key) and the tag
+replaced by a commit. `resolved` is evidence of origin, not a reusable input.
+
+## REQ-655-13 — Unreadable provenance is stated, and recoverable
+
+The hidden lockfile is npm-only while pnpm, yarn and bun are supported, so
+`unknown` is an ordinary answer and never an error. It preserves the pre-existing
+behaviour and attaches `fallbackSpec`, so an install that fails on a guessed
+registry spec retries once over git — a different route, exactly once — and a
+failure of both names both specs.

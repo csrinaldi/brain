@@ -27,6 +27,7 @@ import {
 } from 'node:fs';
 import { basename, join, dirname, relative, sep } from 'node:path';
 import { MANAGED_SCRIPT_KEYS } from '../../core/managed-paths.mjs';
+import { readInstallProvenance } from './install-provenance.mjs';
 
 // ── Glob matching ────────────────────────────────────────────────────────────
 // Minimal glob → RegExp for the manifest syntax: `*` (no separator) and `**`
@@ -1679,7 +1680,7 @@ export function installSpec(root, tag) {
  * @param {string} tag  Git tag or version.
  * @returns {{kind:'registry'|'git'|'unresolved', spec:string|null, source:'manifest'|'fallback', why:string}}
  */
-export function installSpecDetail(root, tag) {
+export function installSpecDetail(root, tag, { readProvenance } = {}) {
   const pkgPath = installedPackageRoot(root, 'package.json');
   let name;
   let repoUrl;
@@ -1691,7 +1692,23 @@ export function installSpecDetail(root, tag) {
   } catch {
     // Absent or unparseable — reported as `source: 'fallback'`, never silently.
   }
-  return resolveInstallSpec({ name, version: tag, repoUrl });
+  // Injectable so the resolution can be exercised without a real `node_modules`
+  // on disk. The search paths come from HERE, so the provenance read and the
+  // package the upgrade will actually use can never describe different targets.
+  const read = readProvenance
+    ?? ((repoRoot) => readInstallProvenance({ repoRoot, searchPaths: installedPackageSearchPaths() }));
+  let provenance = 'unknown';
+  let provenanceWhy = null;
+  try {
+    const p = read(root);
+    provenance = p?.source ?? 'unknown';
+    provenanceWhy = p?.why ?? null;
+  } catch {
+    // A provenance read must never be what stops an upgrade: `unknown` keeps the
+    // pre-existing behaviour and the git fallback stays attached.
+  }
+  const detail = resolveInstallSpec({ name, version: tag, repoUrl, provenance });
+  return { ...detail, provenance, provenanceWhy };
 }
 
 /**
@@ -1738,14 +1755,44 @@ const SCOPED_NAME_RE = /^@[^/]+\/.+/;
  * a caller can SAY which it used. A fallback that looks identical to a real
  * answer is the #601 shape.
  *
+ * PROVENANCE OUTRANKS THE NAME (ADR-0030 Amendment 1's invariant). The scoped
+ * name says what the package IS; it does not say where THIS consumer got it.
+ * A consumer who installed from a git URL — the documented path for anyone who
+ * cannot reach the registry — carries the same scoped name on disk, so deciding
+ * by name alone sent them to the registry on every upgrade and made the git
+ * fallback unreachable for anything but a first install. `provenance: 'git'`
+ * therefore keeps the git form even for a scoped name.
+ *
+ * `provenance` is optional and `'unknown'` is a first-class answer: the reader
+ * is npm-only (`lib/install-provenance.mjs`), and pnpm/yarn/bun consumers are
+ * supported. With no provenance the pre-existing behaviour stands unchanged —
+ * and `fallbackSpec` carries the git form so a wrong guess is recoverable
+ * rather than terminal.
+ *
  * @param {object} o
  * @param {string} [o.name]     the installed package's `name`
  * @param {string} [o.version]  a tag or a version
  * @param {string} [o.repoUrl]  the installed package's `repository.url`
- * @returns {{kind:'registry'|'git'|'unresolved', spec:string|null, source:'manifest'|'fallback', why:string}}
+ * @param {'registry'|'git'|'file'|'unknown'} [o.provenance]  where this consumer installed FROM
+ * @returns {{kind:'registry'|'git'|'unresolved', spec:string|null, source:'manifest'|'fallback', why:string, fallbackSpec:string|null}}
  */
-export function resolveInstallSpec({ name, version, repoUrl } = {}) {
-  if (typeof name === 'string' && SCOPED_NAME_RE.test(name)) {
+export function resolveInstallSpec({ name, version, repoUrl, provenance } = {}) {
+  const gitSpec = () => `${resolveInstallUrl(repoUrl)}#${version}`;
+  const scoped = typeof name === 'string' && SCOPED_NAME_RE.test(name);
+
+  // Measured provenance wins. `file:` resolves to git too: a local tarball or a
+  // linked checkout is not a registry, and the git URL is the reachable form.
+  if (scoped && (provenance === 'git' || provenance === 'file')) {
+    return {
+      kind: 'git',
+      spec: gitSpec(),
+      source: repoUrl ? 'manifest' : 'fallback',
+      why: `${name} is scoped, but this consumer installed from ${provenance} — upgrading by the same route.`,
+      fallbackSpec: null,
+    };
+  }
+
+  if (scoped) {
     const v = specVersion(version);
     if (!v) {
       return {
@@ -1753,18 +1800,31 @@ export function resolveInstallSpec({ name, version, repoUrl } = {}) {
         spec: null,
         source: 'manifest',
         why: `"${version}" is not a version, and ${name} installs by version — pass a semver, not a ref.`,
+        fallbackSpec: null,
       };
     }
-    return { kind: 'registry', spec: `${name}@${v}`, source: 'manifest', why: `${name} is scoped; installing by version.` };
+    // The git form rides along as a recovery route. It is what makes a wrong
+    // guess survivable on the paths provenance cannot be read from.
+    return {
+      kind: 'registry',
+      spec: `${name}@${v}`,
+      source: 'manifest',
+      why: provenance === 'registry'
+        ? `${name} was installed from the registry; upgrading by version.`
+        : `${name} is scoped and this consumer's install source could not be read; installing by version.`,
+      fallbackSpec: gitSpec(),
+    };
   }
   const source = repoUrl ? 'manifest' : 'fallback';
   return {
     kind: 'git',
-    spec: `${resolveInstallUrl(repoUrl)}#${version}`,
+    spec: gitSpec(),
     source,
     why: source === 'manifest'
       ? 'the installed name is unscoped; installing from the git URL it declares.'
       : `the installed manifest declared no repository URL; falling back to ${BRAIN_REPO_HTTPS}.`,
+    // Already the git form — there is no second route to fall back TO.
+    fallbackSpec: null,
   };
 }
 
