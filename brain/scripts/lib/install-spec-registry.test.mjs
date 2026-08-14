@@ -130,12 +130,15 @@ test('#644: highestTag on REGISTRY output returns nothing — proof the two are 
   assert.equal(highestVersion(['1.0.0', '1.10.0']), '1.10.0');
 });
 
-// ── Nothing changes today ───────────────────────────────────────────────────
+// ── The rename is live (#655) ───────────────────────────────────────────────
 
-test('#644: unscoped today — installSpec still returns exactly what it returned before', () => {
-  assert.equal(PACKAGE_NAME, 'brain',
-    'PACKAGE_NAME has been scoped — this test pins the pre-rename contract and should be revisited with it');
-  // No node_modules/brain in the brain source repo, so this exercises the
-  // documented fallback path, which is what a consumer hits on a fresh adopt.
+test('#644: scoped now — a consumer with no installed manifest still gets the git fallback', () => {
+  // The revision the pre-rename pin's own failure message asked for: #655
+  // scoped PACKAGE_NAME, so the pinned value moves with it.
+  assert.equal(PACKAGE_NAME, '@logikas/brain',
+    'PACKAGE_NAME changed again — decide which spec shape the fresh-adopt fallback should produce and pin it here');
+  // No installed manifest at all, so `name` is unknown and the registry branch
+  // cannot apply: the git-URL fallback of ADR-0030 Amendment 1, byte-identical
+  // to the pre-rename output — what a consumer hits on a fresh adopt.
   assert.equal(installSpec('/nonexistent-consumer', 'v1.2.0'), `${BRAIN_REPO_HTTPS}#v1.2.0`);
 });
