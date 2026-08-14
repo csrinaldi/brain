@@ -35,7 +35,7 @@
 //     GitLab fixtures are authored (DERIVED) from the documented GitLab REST
 //     API v4 response shapes (resource_label_events, merge_requests show,
 //     merge_requests create). CP-A3b (live GitLab round-trip) is deferred to
-//     the SCIT phase — see tasks.md Open Questions. When a live mirror is
+//     the self-hosted phase — see tasks.md Open Questions. When a live mirror is
 //     available, extend this script with a `gitlab` case here rather than
 //     hand-authoring a new "recorded" gitlab-*.json.
 //
