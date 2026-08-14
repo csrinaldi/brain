@@ -49,8 +49,8 @@ export default {
   'day.ecosystem.skillRegistry':   'Skill registry actualizado.',
 
   'day.brain.unknownInstalled': 'No se pudo determinar la versión instalada de brain — skipping check.',
-  'day.brain.noNetwork':        'No se pudo consultar tags remotos (sin red o sin acceso) — skipping check.',
-  'day.brain.noTags':           'El remoto de brain no tiene tags de versión todavía.',
+  'day.brain.registryUnreachable': 'No se pudo alcanzar el registry para consultar {pkg} — el chequeo se SALTEÓ, no pasó.',
+  'day.brain.notPublished':     '{pkg} todavía no tiene ninguna versión publicada.',
   'day.brain.newVersion':       'Hay una versión nueva de brain: {installed} → {latest}',
   'day.brain.upgrade':          'Actualizá a conciencia: {pm} run brain:upgrade -- {latest}',
   'day.brain.noAutoApply':      '(no se auto-aplica — revisá el changelog del tag antes)',
