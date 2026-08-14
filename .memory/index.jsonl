@@ -1099,6 +1099,7 @@
 {"id":"rec-86dc7e3a06e81d47","ts":"2026-07-29T14:28:21Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-8702c92ca6989d6c","ts":"2026-07-29T14:27:02Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-8705c30f47d5a096","ts":"2026-07-25T00:48:35Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-8722b996df6cf934","ts":"2026-08-13T19:14:51Z","actor":"docs/issue-629-adr-0030-reachability","type":"decision","project":"brain","file":"2026-08.jsonl"}
 {"id":"rec-8778a89981ef02bf","ts":"2026-07-25T00:48:51Z","actor":"fix/issue-259-d2-pr3c-a10-modify-channel","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-877b1dc4eb6eec21","ts":"2026-07-25T21:51:08Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-8786c595eed1362d","ts":"2026-07-29T14:27:58Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
