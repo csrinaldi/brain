@@ -1467,6 +1467,7 @@
 {"id":"rec-b51f969cc931c07a","ts":"2026-07-25T00:47:43Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-b568dce7e83a204b","ts":"2026-07-25T00:48:16Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-b5a0d402162ac5a2","ts":"2026-07-25T21:50:24Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-b5d556321434dc78","ts":"2026-08-13T22:27:53Z","actor":"feat/issue-644-install-spec-registry","type":"architecture","project":"brain","file":"2026-08.jsonl"}
 {"id":"rec-b5d5943e730ae4b7","ts":"2026-07-25T21:51:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-b5f9585c1f633e52","ts":"2026-07-25T00:47:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-b600b2c06a4968be","ts":"2026-07-25T21:50:22Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
