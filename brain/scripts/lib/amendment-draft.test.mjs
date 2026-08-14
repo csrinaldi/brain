@@ -19,7 +19,6 @@ import {
   extractBody,
   assessEdit,
   countOccurrences,
-  fencedBlocks,
   formatStampDate,
   spliceLine,
   parseAmendmentDraft,
@@ -50,30 +49,10 @@ function draft({
 }
 
 // ── the fence scanner ────────────────────────────────────────────────────────
-
-test('fencedBlocks: reads the info string and the verbatim content of each block', () => {
-  const { blocks } = fencedBlocks('text\n```one\na\nb\n```\nmore\n```two\nc\n```\n');
-  assert.deepEqual(
-    blocks.map((b) => [b.tag, b.content]),
-    [
-      ['one', 'a\nb'],
-      ['two', 'c'],
-    ],
-  );
-});
-
-test('fencedBlocks: a shorter fence inside a longer one is CONTENT, not a block', () => {
-  const { blocks } = fencedBlocks('````outer\n```inner\nx\n```\n````\n');
-  assert.equal(blocks.length, 1);
-  assert.equal(blocks[0].tag, 'outer');
-  assert.equal(blocks[0].content, '```inner\nx\n```');
-});
-
-test('fencedBlocks: an unterminated fence yields no block, and REPORTS the line it opened on', () => {
-  const { blocks, unterminated } = fencedBlocks('x\n```one\na\n');
-  assert.deepEqual(blocks, []);
-  assert.deepEqual(unterminated, { tag: 'one', line: 2 });
-});
+// `fencedBlocks` moved to `lib/fenced-blocks.mjs` (#495 design D2); its three
+// cases moved with it, verbatim. What stays here is what belongs to THIS
+// module: how the amendment contract behaves when the scanner reports an
+// unterminated fence.
 
 test('parseAmendmentDraft: an unterminated contract fence is MALFORMED, not "no contract block"', () => {
   const r = parseAmendmentDraft(`# d\n\n\`\`\`${CONTRACT_TAG}\ntarget: brain/x.md\n`);
