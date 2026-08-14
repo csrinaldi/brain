@@ -1918,6 +1918,7 @@
 {"id":"rec-ef52a85cf6b87ddc","ts":"2026-07-29T14:27:38Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-ef74a7d1ed0a0ed3","ts":"2026-07-25T00:46:29Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-efa21ce954ae5128","ts":"2026-07-13T00:22:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-efa8ae12d5dab10d","ts":"2026-08-14T10:37:23Z","actor":"docs/issue-651-own-the-public-record","type":"decision","project":"brain","file":"2026-08.jsonl"}
 {"id":"rec-efe37c0767a28071","ts":"2026-07-25T00:48:04Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-efe45d2be9ee71f5","ts":"2026-07-11T00:49:11Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f016f82cdf6bc593","ts":"2026-07-03T01:59:47Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
