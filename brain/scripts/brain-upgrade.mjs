@@ -191,6 +191,13 @@ if (existsSync(sourceMarkerPath) && !force) {
 // package.json and may have clobbered a consumer's "name" field to "brain"
 // (also version/description/license). Recovery-awareness only — never
 // blocks the upgrade. See brain/core/anti-patterns/ for the full writeup.
+//
+// THE LITERAL BELOW IS NOT `PACKAGE_NAME`, AND MUST NOT BECOME IT (#655).
+// It is the fingerprint of a specific historical bug: the value a pre-v0.8.0
+// clobber left on disk. Those clobbers already happened and their victims still
+// carry `"name": "brain"`. Swapping this for the current package name would drop
+// the warning for exactly the population it was written for, on a rename that
+// has nothing to do with them.
 const ownPkgPath = join(ROOT, 'package.json');
 if (existsSync(ownPkgPath) && !existsSync(sourceMarkerPath)) {
   try {

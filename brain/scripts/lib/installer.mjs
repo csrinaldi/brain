@@ -1478,7 +1478,7 @@ export const BRAIN_REPO_HTTPS = 'git+https://github.com/csrinaldi/brain.git';
  * `installed-package-root.test.mjs` fails if a second literal reappears
  * anywhere under `brain/scripts/**`, so the rename is now one constant.
  */
-export const PACKAGE_NAME = 'brain';
+export const PACKAGE_NAME = '@logikas/brain';
 
 /**
  * Where releases BEFORE the scoped rename installed. Kept as its own constant

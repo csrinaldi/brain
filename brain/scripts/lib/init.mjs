@@ -18,11 +18,36 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { MANAGED_SCRIPT_KEYS } from '../../core/managed-paths.mjs';
-import { mergePackageJsonScripts, installedPackageRoot } from './installer.mjs';
+import { mergePackageJsonScripts, installedPackageRoot, PACKAGE_NAME } from './installer.mjs';
 
 /** The one alias `brain:upgrade` can never inject into a consumer — see the header. */
 export const BOOTSTRAP_SCRIPT_KEY = 'brain:upgrade';
-export const BOOTSTRAP_SCRIPT_VALUE = 'node node_modules/brain/brain/scripts/brain-upgrade.mjs';
+
+/**
+ * Derived from `PACKAGE_NAME`, never spelled out (issue #628).
+ *
+ * This string is written into the CONSUMER's package.json, so a stale literal
+ * here does not break brain — it breaks somebody else's repository, on the day
+ * they run the verb they run to recover.
+ */
+export const BOOTSTRAP_SCRIPT_VALUE = `node node_modules/${PACKAGE_NAME}/brain/scripts/brain-upgrade.mjs`;
+
+/**
+ * Values brain ITSELF wrote as this alias in earlier releases.
+ *
+ * `writeBootstrapAlias` keeps a consumer-set value, which is the right rule in
+ * general and exactly the wrong one for these: they are brain's own previous
+ * output, and after the scoped rename they point at a directory npm no longer
+ * creates. So a value byte-identical to one of these is migrated; anything else
+ * is the consumer's and is kept.
+ *
+ * A LIST OF LITERALS, NOT A PATTERN, on purpose. A pattern loose enough to catch
+ * the next variant is a pattern that will eventually overwrite something a
+ * consumer wrote deliberately.
+ */
+export const LEGACY_BOOTSTRAP_VALUES = Object.freeze([
+  'node node_modules/brain/brain/scripts/brain-upgrade.mjs',
+]);
 
 /**
  * Resolves the tag to upgrade to from the INSTALLED package (REQ-400-4).
@@ -127,13 +152,29 @@ export function helpText() {
  */
 export function writeBootstrapAlias({ pkgPath, readFile = (p) => readFileSync(p, 'utf8'), writeFile }) {
   const before = readFile(pkgPath);
-  const alreadyPresent = (() => {
+  const current = (() => {
     try {
-      return JSON.parse(before)?.scripts?.[BOOTSTRAP_SCRIPT_KEY] !== undefined;
+      return JSON.parse(before)?.scripts?.[BOOTSTRAP_SCRIPT_KEY];
     } catch {
-      return false; // unparseable — let the merge raise the real error below
+      return undefined; // unparseable — let the merge raise the real error below
     }
   })();
+  const alreadyPresent = current !== undefined;
+
+  // A stale alias brain itself wrote (issue #628). Rewritten rather than kept,
+  // because "keeping your value" protects a CONSUMER's choice, and this is not
+  // one — it is brain's own previous output, pointing at a directory npm stopped
+  // creating at the scoped rename.
+  const isStale = typeof current === 'string'
+    && LEGACY_BOOTSTRAP_VALUES.includes(current)
+    && current !== BOOTSTRAP_SCRIPT_VALUE;
+
+  if (isStale) {
+    const parsed = JSON.parse(before);
+    parsed.scripts[BOOTSTRAP_SCRIPT_KEY] = BOOTSTRAP_SCRIPT_VALUE;
+    writeFile(pkgPath, `${JSON.stringify(parsed, null, 2)}\n`);
+    return { written: true, alreadyPresent, migrated: true, previous: current };
+  }
 
   const after = mergePackageJsonScripts(
     before,
@@ -141,7 +182,7 @@ export function writeBootstrapAlias({ pkgPath, readFile = (p) => readFileSync(p,
     pkgPath,
   );
 
-  if (after === before) return { written: false, alreadyPresent };
+  if (after === before) return { written: false, alreadyPresent, migrated: false };
   writeFile(pkgPath, after);
-  return { written: true, alreadyPresent };
+  return { written: true, alreadyPresent, migrated: false };
 }
