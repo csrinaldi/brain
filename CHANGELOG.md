@@ -1,9 +1,52 @@
 # Changelog
 
-All notable changes to brain. Distributed via git tags (ADR-0006); consumers
-upgrade with `npm run brain:upgrade -- <tag>`. Read this file for **renames /
-breaking changes** before upgrading — additive `brain.config.json` migrations
-apply automatically, but renames need manual action.
+All notable changes to brain. Distributed as **`@logikas/brain`** on the npm
+registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
+`npm run brain:upgrade -- <tag>`. Read this file for **renames / breaking
+changes** before upgrading — additive `brain.config.json` migrations apply
+automatically, but renames need manual action.
+
+## v1.1.0 — BREAKING: the package is now `@logikas/brain` (#655)
+
+**If brain is already installed in your repo, do not upgrade with
+`brain:upgrade`.** Reinstall by hand. This is a one-time step and it is the
+only way across.
+
+### Why the usual verb cannot do it
+
+Your checkout carries brain's **previous** `brain-upgrade.mjs`, and that code
+resolves `node_modules/brain`. It installs the new version, npm reads the new
+`package.json`, the tree lands in `node_modules/@logikas/brain`, and the old
+code then finds nothing and stops. Nothing written today reaches code that is
+already in your repository (#625).
+
+**Nothing is damaged if you try it.** Measured: the stop happens 19 lines before
+any managed path is written, and the lock is released on exit. Your `package.json`,
+lockfile and `node_modules` are updated; no brain file in your tree is touched.
+You land exactly where the two commands below start.
+
+### The migration
+
+```bash
+npm i -D @logikas/brain@<version>
+node node_modules/@logikas/brain/brain/scripts/brain-upgrade.mjs <version> --no-install
+```
+
+The second command runs the **new** upgrader from its new location, and it
+migrates your `brain:upgrade` alias — which points at the old path and would
+otherwise stay broken, because brain never overwrites a script value you set.
+If you customised that alias yourself, it is kept and you update it by hand.
+
+`npm uninstall brain` afterwards, if you want the old directory gone.
+
+### Behind a mirror or an air-gapped registry
+
+The git URL still installs the same allowlisted bytes into the same directory,
+and is a supported fallback rather than a retired path (ADR-0030 Amendment 1):
+
+```bash
+npm i -D "git+https://github.com/csrinaldi/brain.git#<tag>"
+```
 
 ## v1.0.0 — first stable (controlled pilot) (#319)
 

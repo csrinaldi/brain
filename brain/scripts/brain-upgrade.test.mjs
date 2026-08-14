@@ -20,6 +20,14 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { describeInstalledPackageSearch } from './lib/installer.mjs';
+
+// Derived, never spelled out (#625, #655). This message names every path the
+// resolver probed, so it CHANGES with the package name — and a test that pins
+// the old literal fails on the rename for a reason that has nothing to do with
+// what it is testing.
+const NOT_FOUND = new RegExp(`${describeInstalledPackageSearch().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} not found`);
+
 const BRAIN_UPGRADE_SCRIPT = new URL('./brain-upgrade.mjs', import.meta.url).pathname;
 const BRAIN_UPGRADE_SOURCE = fileURLToPath(new URL('./brain-upgrade.mjs', import.meta.url));
 
@@ -61,8 +69,8 @@ test('brain:upgrade: --force overrides the .brain-source marker guard', (t) => {
   // (no node_modules/brain fixture in this minimal test dir).
   assert.doesNotMatch(r.stderr, /SOURCE repo/i,
     `--force must bypass the .brain-source guard; the source-repo die message must be absent:\n${r.stderr}`);
-  assert.match(r.stderr, /node_modules\/brain not found/,
-    `expected the script to get past the guard and fail at the node_modules\\/brain check:\n${r.stderr}`);
+  assert.match(r.stderr, NOT_FOUND,
+    `expected the script to get past the guard and fail at the installed-root check:\n${r.stderr}`);
 });
 
 // ── Soft warning: package.json name === 'brain' without a .brain-source marker ──
@@ -90,8 +98,8 @@ test('brain:upgrade: package.json name === "brain" without a marker is a soft wa
 
   // It must have proceeded PAST the guard — failing later (no node_modules/brain
   // fixture in this minimal test dir) is fine and proves it got past the guard.
-  assert.match(r.stderr, /node_modules\/brain not found/,
-    `expected the script to proceed past the guard and fail at the node_modules\\/brain check:\n${r.stderr}`);
+  assert.match(r.stderr, NOT_FOUND,
+    `expected the script to proceed past the guard and fail at the installed-root check:\n${r.stderr}`);
 });
 
 test('brain:upgrade: no warning printed when package.json name is not "brain"', (t) => {
