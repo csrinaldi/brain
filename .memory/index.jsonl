@@ -1640,6 +1640,7 @@
 {"id":"rec-ccdb437b83cf52bb","ts":"2026-07-25T00:46:56Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-cd9a9d61ff389d06","ts":"2026-07-25T00:47:26Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-cdd75ff82270721d","ts":"2026-07-11T12:34:02Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-cdf5ccee9aa38f10","ts":"2026-08-14T12:25:40Z","actor":"docs/issue-653-adr-0030-org-scope","type":"decision","project":"brain","file":"2026-08.jsonl"}
 {"id":"rec-ce5cf1182176d7ab","ts":"2026-07-25T16:12:37Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-ce70f0080bff5d1c","ts":"2026-07-25T00:47:03Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-ce79edb64bb3b080","ts":"2026-07-25T21:50:45Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
