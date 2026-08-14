@@ -137,7 +137,34 @@ export async function save(
   const indexPath = join(root, ".memory", "index.jsonl");
 
   const { file } = _appendRecord(candidate, { recordsDir });
-  const reindex = _rebuildIndex({ recordsDir, indexPath });
+
+  // THE APPEND IS ALREADY DONE (issue #637), and it cannot be ordered otherwise:
+  // `rebuildIndex` reads the WHOLE store, so it can only run after the line it
+  // has to see. Every other write in this codebase scans before it writes —
+  // `dualWriteRecords` aborts "before the append-only log is ever touched",
+  // `share()` runs the chunk backstop first for the same reason — and `save` is
+  // the one verb that cannot follow the rule.
+  //
+  // So this failure is NOT "the save was refused". The record is durable. It is
+  // "the save landed, and this store cannot be indexed — almost certainly for a
+  // reason that predates this run". Those are two different situations and the
+  // old bare `plainfiles.save() failed — …` reported them identically, which
+  // sent the operator to the one action that makes it worse: running `save`
+  // again.
+  //
+  // The original error is ANNOTATED AND RETHROWN rather than wrapped: every
+  // caller keeps the fail-closed throw it already had, `err.message` still
+  // carries `rebuildIndex`'s precise `file:line` diagnosis, and the stack still
+  // points at the real origin. Only cli.mjs reads the annotations.
+  let reindex;
+  try {
+    reindex = _rebuildIndex({ recordsDir, indexPath });
+  } catch (err) {
+    err.indexFailed = true;
+    err.recordId = candidate.id;
+    err.recordFile = file;
+    throw err;
+  }
 
   // #574: every op that reindexes carries the duplicate accounting out to the
   // CLI, which prints it. `save` included — it is the verb most likely to be

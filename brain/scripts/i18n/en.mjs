@@ -335,6 +335,10 @@ export default {
   'memory.plainfiles.save.issueInvalid': '--issue must be an issue NUMBER; got {value}. It is stored as an integer so a record can be tied to its ticket.',
   'memory.plainfiles.save.typeRequired': '--type is required and has no safe default — it is a choice, not a fact the tool can derive. One of: {types}.',
   'memory.plainfiles.save.done':    "✓ saved {id} → {file}",
+  // #637 — the index rebuild is the ONE gate that cannot run before the append,
+  // so its failure is never a refusal: the record is already durable. Saying
+  // "save() failed" sent the operator to the single action that makes it worse.
+  'memory.plainfiles.save.indexFailed': 'the record WAS written — {id} → {file}. What failed is the INDEX rebuild, which reads the whole store, so the cause is almost certainly a record that was already broken before this run: {message}\n  Do NOT run memory:save again — the record is already on disk, and a retry mints a SECOND record with a later `ts`, hence a different id, which no deduplication will ever collapse.\n  Repair the store, then rebuild the index with `npm run memory:reindex`.',
   'memory.plainfiles.save.secretFound': 'Secret detected in the candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
   'memory.save.plainfilesIgnoredOpts': 'ignored option(s) {opts} — the plainfiles record format has no field for them (scope/topic are engram-only concepts); the record was still written normally.',
   'memory.plainfiles.search.empty': 'ℹ no matching records found.',
