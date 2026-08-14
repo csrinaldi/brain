@@ -1028,6 +1028,12 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
   const toMerge = []; // rel paths for specialMerge
   // #397: the two facts the single dest-vs-incoming diff used to conflate.
   const consumerModified = [];
+  // REFUSE-classified paths brain is shipping for the FIRST time that already
+  // exist in the consumer's tree (#601). Kept separate from consumerModified:
+  // the evidence is different (no prior ship, so the bytes are wholly theirs)
+  // and a caller reporting "you modified this" about a file brain never shipped
+  // would be stating something it cannot know.
+  const firstShipOwned = [];
   const brainChanged = [];
   // With no outgoing package there is only one tree, so consumer modification
   // cannot be ESTABLISHED. Reported explicitly because an empty
@@ -1062,6 +1068,28 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
       try {
         if (!readFileSync(join(srcRoot, rel)).equals(outBytes)) brainChanged.push(rel);
       } catch { /* unreadable incoming — the copy below will report the real failure */ }
+    } else if (outgoing !== null && matchesAny(rel, refusePaths) && existsSync(join(destRoot, rel))) {
+      // FIRST SHIP OF A REFUSE PATH (#601). brain never shipped this path, and a
+      // file is sitting at it in the consumer's tree. Those bytes cannot be
+      // brain's — nothing of brain's was ever there — so they are the
+      // consumer's, entirely. That is a STRONGER claim than "modified", and it
+      // used to produce a weaker outcome: absent from `outgoing`, the path was
+      // never consumerModified, so the REFUSE gate never saw it; it was reported
+      // as a collision, and `--abort-on-collision` is opt-in, so the default run
+      // printed "Proceeding" and overwrote them.
+      //
+      // The classification exists to prevent exactly this, and it was inert on
+      // the one release where the risk is highest: the release that introduces
+      // the path. Measured in #596 against a GitLab consumer's own
+      // `.gitlab/merge_request_templates/Default.md` — the single most likely
+      // file for them to own, since it is the one GitLab auto-applies.
+      //
+      // Guarded on `outgoing !== null`: under `--no-install` there IS no
+      // outgoing tree, and treating that as "brain never shipped this" would
+      // refuse every REFUSE path on every degraded run. Unknown-because-degraded
+      // and unknown-because-new are different facts, and only the second one is
+      // evidence about the consumer's file.
+      firstShipOwned.push(rel);
     }
 
     if (Object.prototype.hasOwnProperty.call(specialMerge, rel)) {
@@ -1094,6 +1122,12 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
   const forced = [];
   for (const rel of consumerModified) {
     if (!matchesAny(rel, refusePaths)) continue;
+    (forceManaged.includes(rel) ? forced : refused).push(rel);
+  }
+  // First-ship REFUSE paths take the same gate: named, and overridable by the
+  // same per-path `--force-managed`. They are already REFUSE-classified by
+  // construction, so no second membership test is needed.
+  for (const rel of firstShipOwned) {
     (forceManaged.includes(rel) ? forced : refused).push(rel);
   }
 
