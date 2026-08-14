@@ -84,14 +84,37 @@ test('scrubMaterializedChunks: a secret hit fails closed and names the pattern +
 // report `!! .memory/chunks/` — the DIRECTORY — which the old suffix-only filter
 // dropped, leaving the scan at zero. Hence the isFile() case below.
 
+/**
+ * Temp root shaped like a checked-out tree: `.memory/chunks/` present, `.engram`
+ * absent — which is also exactly what a fresh git worktree looks like.
+ *
+ * Cleanup follows the callback's COMPLETION, not its return (issue #657). An
+ * async callback returns a pending promise at its first `await`, so the plain
+ * `try/finally` this replaces deleted the directory right there — every
+ * filesystem assertion after an await ran against a path that no longer existed,
+ * and a test could only pass by not looking. Sync callbacks keep their original
+ * behaviour: cleanup still runs before the helper returns, so sync callers need
+ * no `await` and none was added.
+ */
 const withChunkDir = (fn) => {
   const root = mkdtempSync(join(tmpdir(), 'brain-469-'));
+  const cleanup = () => rmSync(root, { recursive: true, force: true });
+  let result;
   try {
     mkdirSync(join(root, '.memory', 'chunks'), { recursive: true });
-    return fn(root);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+    result = fn(root);
+  } catch (err) {
+    cleanup();
+    throw err;
   }
+  if (result && typeof result.then === 'function') {
+    return result.then(
+      (value) => { cleanup(); return value; },
+      (err) => { cleanup(); throw err; },
+    );
+  }
+  cleanup();
+  return result;
 };
 
 test('#469 _defaultChangedChunkFiles: returns the chunks that EXIST on disk, whatever git thinks (REQ-469-1)', () => {
@@ -292,23 +315,6 @@ test('#469 scrubMaterializedChunks: a directory of clean chunks resolves (REQ-46
   });
 });
 
-/**
- * Async-safe sibling of `withChunkDir`, which returns `fn(root)` inside a
- * `try/finally` and so tears the directory down at the callback's FIRST await
- * rather than at its completion. The worktree test below asserts on the
- * filesystem after an await, so it needs the teardown to actually wait.
- */
-const withWorktreeRoot = async (fn) => {
-  const root = mkdtempSync(join(tmpdir(), 'brain-657-'));
-  try {
-    // A fresh worktree: `.memory/` is tracked and checked out, `.engram` is not.
-    mkdirSync(join(root, '.memory', 'chunks'), { recursive: true });
-    return await fn(root);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-};
-
 // ── issue #657: the export must be anchored to `root`, and the .engram → .memory
 //    binding must hold in a WORKTREE, where `setup()` never ran ────────────────
 //
@@ -374,7 +380,7 @@ test('#657 share(): a FRESH WORKTREE (.memory/ present, .engram absent) self-hea
   // The end-to-end scenario, with the REAL ensureMemorySymlink. Before the fix
   // this root reached `engram sync --export` with no binding at all, so engram
   // created a real .engram/ and every chunk it wrote was invisible to the readers.
-  await withWorktreeRoot(async (root) => {
+  await withChunkDir(async (root) => {
     assert.ok(!existsSync(join(root, '.engram')), 'precondition: a fresh worktree has no .engram');
 
     await assert.doesNotReject(() =>
