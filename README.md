@@ -31,6 +31,38 @@ upstream-first parts. `brain/project/` is yours to own.
 
 ---
 
+## The session record in `.memory/` is public on purpose
+
+**2,180 records** as of the 2026-08-13 audit, about **2,070** of them session
+summaries written by the people and agents that built brain. They are in this
+repository, they are readable, and that is a decision rather than an oversight.
+
+**What is in them.** Decisions and the reasoning behind them, the measurements
+those decisions rested on, and a running account of what went wrong: reviews that
+caught real defects, tests that passed for the wrong reason, a release that
+merged the paperwork and left the fix behind. brain's method is that a claim
+without a measurement is not a claim, and this is where the measurements live —
+including the ones that make the project look bad. A memory that kept only the
+wins would be advertising, and useless to the next person debugging the same
+thing.
+
+**Why they are public.** Because the method is the product. A harness that tells
+you to write the failing test first is worth more accompanied by the log of the
+times somebody didn't.
+
+**What is not in them.** They were audited across the full published history
+before this repository was made public: two independent secret scanners, every
+finding characterised one by one, **zero credentials**. That is a measurement,
+and it has a record — the pre-flight comment on
+[issue #435](https://github.com/csrinaldi/brain/issues/435).
+
+**They do not ship.** `.memory/` is excluded from the published package
+([#607](https://github.com/csrinaldi/brain/issues/607)): a consumer installs the
+harness, not this project's history. Your own `.memory/` is yours, and nothing
+here decides whether you publish it.
+
+---
+
 ## How to adopt brain
 
 brain installs from the npm registry as **`@logikas/brain`**

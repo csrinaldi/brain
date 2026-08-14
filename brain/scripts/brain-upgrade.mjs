@@ -18,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { copyManaged, readOutgoing, strategyFor, mergeClaudeSettings, mergePackageJson, migrateConfig, installSpec, compareSemver, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets, semverOrNull, keysAheadOfTarget, installedPackageRoot, describeInstalledPackageSearch } from './lib/installer.mjs';
+import { copyManaged, readOutgoing, strategyFor, mergeClaudeSettings, mergePackageJson, migrateConfig, compareSemver, recoverFromJournal, acquireLock, inspectRestorePoint, preflightMergeTargets, semverOrNull, keysAheadOfTarget, installedPackageRoot, describeInstalledPackageSearch, installSpecDetail } from './lib/installer.mjs';
 import { detectPM } from './lib/pm.mjs';
 import { managedStrategy, STRATEGY } from '../core/managed-paths.mjs';
 import { detectAgentsClobber } from './lib/agents-clobber.mjs';
@@ -397,8 +397,14 @@ const outgoing = noInstall
 // Derive the install specifier from the currently installed brain's package.json
 // repository.url (always normalized to git+https://…) so HTTPS-only consumers
 // (CI, containers without an SSH key) can install the private repo reliably.
-// Falls back to the canonical constant when the file/field is absent.
-const spec = installSpec(ROOT, tag);
+// Falls back to the canonical constant when the file/field is absent — and SAYS
+// so (#644): "the manifest declared this" and "I guessed" used to produce the
+// same line, which is the only difference that matters when an install resolves
+// to something the operator did not expect.
+const specDetail = installSpecDetail(ROOT, tag);
+if (specDetail.spec === null) die(specDetail.why);
+if (specDetail.source === 'fallback') info(`Install spec: ${specDetail.why}`);
+const spec = specDetail.spec;
 const pm = detectPM(ROOT);
 if (!noInstall) {
   if (dryRun) {
