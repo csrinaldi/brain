@@ -228,6 +228,28 @@ export async function search(
  * The self-check now has something to say (#574): `duplicates` travels out to
  * cli.mjs, which prints it. A `share` that silently indexes 139 fewer lines
  * than the store holds is not a self-check.
+ *
+ * SIDE EFFECT ON A REPO WITH NO RECORD STORE (issue #634). Measured:
+ *
+ *   before: <repo>/                       (nothing)
+ *   after:  <repo>/.memory/index.jsonl    (empty)
+ *
+ * `rebuildIndex` creates `.memory/` and writes an empty index rather than doing
+ * nothing, so this verb — a no-op on such a repo before #598's zero-candidate
+ * self-check — now creates state. DOCUMENTED rather than gated, deliberately:
+ *
+ *   - #598's intent is that a share which READ the store leaves a canonical
+ *     index behind, and an empty store is still a store that was read.
+ *   - the ambiguity this could create — "zero records" vs "no store at all" —
+ *     is already answered where it could mislead: `computeMemoryCoverage`
+ *     resolves it from `existsSync(records/)`, never from the index, and
+ *     reports `available: false` for the second case.
+ *   - gating on `records/` existing would change this verb's contract to fix a
+ *     misreading that nothing currently makes.
+ *
+ * If a consumer ever starts inferring "this repo has no memory" from an ABSENT
+ * index rather than an absent `records/`, that inference is the defect — but
+ * this note is here so it cannot be a surprise.
  */
 export async function share({ root = repoRoot } = {}, { _rebuildIndex = rebuildIndex } = {}) {
   const recordsDir = join(root, ".memory", "records");
