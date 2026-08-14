@@ -670,6 +670,7 @@
 {"id":"rec-54cbb916245fb627","ts":"2026-07-29T14:28:31Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-54f01ac1b35ad5d8","ts":"2026-07-25T21:51:59Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-54f1a5c45fd9a25d","ts":"2026-07-16T02:34:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-553ca047582b3aee","ts":"2026-08-14T21:51:56Z","actor":"claude/brain-memory-636-reconcile-to-zero","type":"decision","project":"brain","issue":636,"file":"2026-08.jsonl"}
 {"id":"rec-554a1b2a5fff13b5","ts":"2026-07-25T21:51:07Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-5550966f13dca72d","ts":"2026-07-13T00:21:58Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-5564446145bd0d84","ts":"2026-07-29T14:25:49Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
