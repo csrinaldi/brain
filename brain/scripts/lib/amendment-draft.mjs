@@ -33,6 +33,13 @@
 // editing something adjacent. That property is preserved verbatim, and so is
 // idempotence.
 
+// #495 design D2: the fence splitter is shared with `lib/checkpoint-block.mjs`
+// and lives in its own module. It was extracted from here as a pure move, not
+// copied — a second implementation of "which fenced blocks does this document
+// have" is the shape `brain/core/anti-patterns/one-rule-two-implementations.md`
+// records.
+import { fencedBlocks } from './fenced-blocks.mjs';
+
 /** The fence info-string that marks a draft as an amendment draft. */
 export const CONTRACT_TAG = 'brain-amendment/1';
 
@@ -49,37 +56,6 @@ export const ADR_TARGET_RE = /^brain\/project\/decisions\/adr-(\d{4})-[a-z0-9][a
 const KNOWN_KEYS = Object.freeze(['target', 'amendment', 'issue', 'home-summary', 'body', 'body-end']);
 
 const err = (error) => ({ ok: false, error });
-
-/**
- * Splits Markdown into its fenced blocks. Sequential — once inside a fence only
- * the matching closer is looked for, so a fence quoted inside another is content.
- *
- * @param {string} text
- * @returns {{tag:string, content:string, line:number}[]}
- */
-export function fencedBlocks(text) {
-  const lines = text.split(/\r?\n/);
-  const blocks = [];
-  let open = null;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (open === null) {
-      const m = line.match(/^(`{3,})\s*([^`]*?)\s*$/);
-      if (m) open = { run: m[1], tag: m[2], line: i + 1, body: [] };
-      continue;
-    }
-    if (line.trimEnd() === open.run) {
-      blocks.push({ tag: open.tag, content: open.body.join('\n'), line: open.line });
-      open = null;
-      continue;
-    }
-    open.body.push(line);
-  }
-  // An unterminated fence is reported, never silently dropped: a contract block
-  // whose closing fence is missing used to read as "this draft carries no
-  // contract at all", which sends the human looking for the wrong mistake.
-  return { blocks, unterminated: open === null ? null : { tag: open.tag, line: open.line } };
-}
 
 /**
  * Parses the `key: value` scalars inside a contract block. An unknown key is a

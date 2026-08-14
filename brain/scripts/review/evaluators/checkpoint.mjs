@@ -19,84 +19,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { evaluateTranche, gatherTrancheInputs } from './tranche.mjs';
-import { TIERS, tierParams, requiredArtifactsFor } from '../../vcs/governance-tiers.mjs';
+import { requiredArtifactsFor } from '../../vcs/governance-tiers.mjs';
 import { changeDir, missingRequiredArtifacts } from '../../lib/sdd-layout.mjs';
-
-// A budget claim is `N/M` where M is a budget SOME tier declares — derived from
-// the tier table, never written as a literal (ADR-0026: lite 1000 · standard
-// 400 · regulated 200). The `400` this replaced matched `standard` by accident
-// and returned null at the other two tiers, leaving §10.1 checking nothing
-// while reporting nothing (issue #472, the second untiered literal after #443).
-const CLAIM_PAIR_RE = /(\d+)\s*\/\s*(\d+)\b/g;
-const DEFAULT_TIER = 'standard';
-
-/** The set of denominators that are a declared tier budget. Resolved from the
- * tier table so a new tier needs no edit here, and so no budget number is ever
- * written twice (REQ-TIER-9). */
-function declaredBudgets() {
-  return new Set(TIERS.map((t) => tierParams(t).diffBudget));
-}
+import { parseCheckpointClaim } from '../lib/checkpoint-block.mjs';
 
 const CHECKPOINT_REPORT_RE = /(?:^|\/)openspec\/changes\/([^/]+)\/checkpoint-report\.md$/;
 // Mirrors workflow-governance.md Invariant 4 step 2's scanned surfaces.
 const ARCHITECTURAL_SURFACE_RE = [/providers\//, /^brain\/core\//, /config-migrations\.mjs$/, /^package\.json$/];
-
-/** Extracts the ONE canonical machine-checkable claim this repo's checkpoint
- * reports state in a consistent form: the counted-lines budget (e.g. H1-2c's
- * own "372/400"). `evaluateCheckpoint`'s `reportClaims` input already accepts
- * an array of `{key, claimed, recomputed}` — more parsers can be added
- * without changing the contract; this is deliberately not a generic
- * arbitrary-number parser. */
-export function parseBudgetClaim(reportText, diffBudget = tierParams(DEFAULT_TIER).diffBudget) {
-  const budgets = declaredBudgets();
-  const candidates = [];
-  // Deliberately NOT filtered by markdown structure. An earlier round excluded
-  // table rows on the theory that a row is always a per-file component — but
-  // this repo's reports state the diff-size GATE verdict in a table
-  // (`| diff-size | REQUIRED | PASS | 1/400 — … |`), and for a report whose
-  // prose total carries no denominator that row is the only machine-readable
-  // compliance claim it has. Excluding rows sent such a report back to `null`,
-  // which is the very silence this issue removes, introduced at `standard`.
-  // Measured against this repo's 17 real reports: with the exclusion removed,
-  // exactly one differs from the pre-#472 parser at `standard` — archive/217,
-  // 476 → 251, where 251 is the MR's real figure and 476 was a pre-split total
-  // the old first-match regex reached first. A correction, not a regression.
-  for (const line of (reportText ?? '').split('\n')) {
-    for (const m of line.matchAll(CLAIM_PAIR_RE)) {
-      const declaredBudget = Number(m[2]);
-      // A denominator no tier declares is not a budget claim — it is a test
-      // count (`npm test: **1269/1269**`), a slice count, a version. Admitting
-      // those would let the drift check fabricate evidence from ordinary prose,
-      // which is strictly worse than the silence this issue removes.
-      if (!budgets.has(declaredBudget)) continue;
-      candidates.push({ claimed: Number(m[1]), declaredBudget });
-    }
-  }
-  if (candidates.length === 0) return null;
-
-  // Prefer claims stated against THIS tier's budget — the same specificity the
-  // hardcoded regex had, so an honest report at any tier parses exactly.
-  //
-  // When more than one survives, take the SMALLEST numerator rather than the
-  // first or the last. Position is not a property of the claim: a report that
-  // states its count twice would otherwise be read differently depending on
-  // where the author put each sentence, and a drift check must not be softened
-  // by a second, larger number appearing elsewhere. Smallest is the
-  // fail-closed choice — it is the one most likely to fall below the cold
-  // recomputation and surface the drift.
-  const matching = candidates.filter((c) => c.declaredBudget === diffBudget);
-  if (matching.length > 0) {
-    return { claimed: Math.min(...matching.map((c) => c.claimed)), declaredBudget: diffBudget, matchesTierBudget: true };
-  }
-
-  // Every candidate quotes a budget some tier declares, but none quotes THIS
-  // repo's. The report asserts compliance against doctrine that does not apply
-  // here, and its numerator was judged under the wrong ceiling — report drift in
-  // its own right (issue #472, option 2). Returning null would convert a
-  // doctrine error back into the silence this change removes.
-  const lowest = candidates.reduce((a, c) => (c.claimed < a.claimed ? c : a));
-  return { ...lowest, matchesTierBudget: false };
-}
 
 /** Finds the change id from a `checkpoint-report.md` path in `changedFiles`. */
 export function resolveChangeId(changedFiles = []) {
@@ -259,6 +188,7 @@ export function evaluateCheckpoint({
   artifacts = {},
   pins = [],
   reversion = null,
+  uncomputable = [],
   auditOutput = '',
   governanceStatusOutput = '',
   changedFiles = [],
@@ -273,18 +203,27 @@ export function evaluateCheckpoint({
   findings.push(...checkArtifactCompleteness(artifacts));
   findings.push(...checkPriorPins(pins, exists));
 
+  // #495 D4: "could not be computed" is a LIST of reasons, not a property of the
+  // reversion. The reversion was the first thing that could be uncomputable and
+  // its handling was written in place; the declared budget claim is the second,
+  // and a second `if` here would be two implementations of §10's one rule
+  // ("never APPROVE on uncomputable evidence"). One list, one sentence, one
+  // effect on the conclusion.
+  const uncomputableReasons = [...uncomputable];
   const rev = checkReversion(reversion);
   if (rev.uncomputable) {
-    conditions.push(`evidence uncomputable: TDD-RED reversion (${rev.command ?? 'base sha unresolvable'})`);
+    uncomputableReasons.push(`TDD-RED reversion (${rev.command ?? 'base sha unresolvable'})`);
   } else {
     findings.push(...rev.findings);
   }
+  for (const reason of uncomputableReasons) conditions.push(`evidence uncomputable: ${reason}`);
 
   findings.push(...checkAuditGovernance({ auditOutput, governanceStatusOutput }));
   findings.push(...checkDecisionSurface({ changedFiles, hasDecisionLabel }));
 
   const anyBlocker = findings.some((f) => f.severity === 'blocker');
-  const conclusion = tranche.conclusion === 'REVISE' || anyBlocker || rev.uncomputable ? 'REVISE' : 'APPROVE';
+  const conclusion =
+    tranche.conclusion === 'REVISE' || anyBlocker || uncomputableReasons.length > 0 ? 'REVISE' : 'APPROVE';
 
   return { conclusion, gates: tranche.gates, findings, conditions };
 }
@@ -403,6 +342,10 @@ export async function gatherCheckpointInputs({
   const changeId = deps.changeId ?? resolveChangeId(changedFiles);
   let artifacts = { missing: [], hasCheckedTask: null, tasksAbsent: false, tier };
   let reportClaims = [];
+  // Evidence this run could not compute, each entry a REASON rather than a flag
+  // (#495 design D4). `evaluateCheckpoint` turns them into `conditions:` and
+  // REVISE, under §10's general rule "never APPROVE on uncomputable evidence".
+  const uncomputable = [];
   if (changeId) {
     const missing = missingRequiredArtifacts(changeId, { artefacts: requiredArtifactsFor(tier), exists, listDir });
     // #555 round 3: guarded on the file EXISTING, not on the artefact set.
@@ -433,25 +376,37 @@ export async function gatherCheckpointInputs({
     }
     artifacts = { missing, hasCheckedTask, tasksAbsent, tier };
 
-    if (!missing.includes('checkpoint-report.md')) {
-      try {
-        const reportText = readFile(`${changeDir(changeId)}/checkpoint-report.md`);
-        // The tier's budget rides the SAME resolution the job sets and the
-        // tranche budget use — `gatherTrancheInputs` already returns it, so
-        // there is exactly one place a tier becomes a number (issue #472/#443).
-        const claim = parseBudgetClaim(reportText, trancheInputs.diffBudget);
-        if (claim !== null) {
-          reportClaims = [{
-            key: 'counted-lines',
-            claimed: claim.claimed,
-            recomputed: trancheInputs.budget?.lines ?? null,
-            declaredBudget: claim.declaredBudget,
-            matchesTierBudget: claim.matchesTierBudget,
-            tierBudget: trancheInputs.diffBudget ?? null,
-            tier: trancheInputs.tier ?? null,
-          }];
-        }
-      } catch { /* report absent — no drift claim to check */ }
+    // #495: the claim is DECLARED, and read from the declared block alone. The
+    // guard this replaced was `!missing.includes('checkpoint-report.md')` —
+    // always true, since no tier lists the report among its artefacts — wrapped
+    // in a bare `catch` that made an unreadable report indistinguishable from a
+    // report with nothing to say. Both silences are gone: every path below ends
+    // in either a claim or a STATED reason.
+    let reportText = null;
+    const reportPath = `${changeDir(changeId)}/checkpoint-report.md`;
+    if (exists(reportPath)) {
+      try { reportText = readFile(reportPath); } catch { reportText = null; }
+    }
+    const claim = parseCheckpointClaim(reportText);
+    if (claim.ok) {
+      reportClaims = [{
+        key: 'counted-lines',
+        claimed: claim.countedLines,
+        recomputed: trancheInputs.budget?.lines ?? null,
+        // The report DECLARES the budget it judged itself against; this repo
+        // resolves its own through the one tier→number path `gatherTrancheInputs`
+        // owns (#472/#443). A disagreement is report drift in its own right, and
+        // it is now a comparison of two declared values rather than an inference.
+        declaredBudget: claim.diffBudget,
+        matchesTierBudget: claim.diffBudget === (trancheInputs.diffBudget ?? null),
+        tierBudget: trancheInputs.diffBudget ?? null,
+        tier: trancheInputs.tier ?? null,
+      }];
+    } else {
+      // Ruling point 2: unparseable must SAY SO. `null` here would be
+      // indistinguishable from "the report made no claim", which is this
+      // ticket's own defect reproduced inside its fix.
+      uncomputable.push(`report budget claim — ${claim.error}`);
     }
   }
 
@@ -476,6 +431,7 @@ export async function gatherCheckpointInputs({
     artifacts,
     pins,
     reversion,
+    uncomputable,
     auditOutput: runAudit(),
     governanceStatusOutput: runGovernanceStatus(),
     changedFiles,
