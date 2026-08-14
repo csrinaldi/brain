@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync, readFileSync, lstatSync, readlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,6 +21,7 @@ import {
   assertExportDestinationIsRead,
   _defaultChangedChunkFiles,
   _defaultReadObservations,
+  _defaultShareExport,
 } from './engram.mjs';
 import { DEFAULT_SECRET_PATTERNS, scrubChunkFile } from '../lib/secret-scrub.mjs';
 import { buildRecord } from '../lib/format.mjs';
@@ -83,14 +84,37 @@ test('scrubMaterializedChunks: a secret hit fails closed and names the pattern +
 // report `!! .memory/chunks/` — the DIRECTORY — which the old suffix-only filter
 // dropped, leaving the scan at zero. Hence the isFile() case below.
 
+/**
+ * Temp root shaped like a checked-out tree: `.memory/chunks/` present, `.engram`
+ * absent — which is also exactly what a fresh git worktree looks like.
+ *
+ * Cleanup follows the callback's COMPLETION, not its return (issue #657). An
+ * async callback returns a pending promise at its first `await`, so the plain
+ * `try/finally` this replaces deleted the directory right there — every
+ * filesystem assertion after an await ran against a path that no longer existed,
+ * and a test could only pass by not looking. Sync callbacks keep their original
+ * behaviour: cleanup still runs before the helper returns, so sync callers need
+ * no `await` and none was added.
+ */
 const withChunkDir = (fn) => {
   const root = mkdtempSync(join(tmpdir(), 'brain-469-'));
+  const cleanup = () => rmSync(root, { recursive: true, force: true });
+  let result;
   try {
     mkdirSync(join(root, '.memory', 'chunks'), { recursive: true });
-    return fn(root);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+    result = fn(root);
+  } catch (err) {
+    cleanup();
+    throw err;
   }
+  if (result && typeof result.then === 'function') {
+    return result.then(
+      (value) => { cleanup(); return value; },
+      (err) => { cleanup(); throw err; },
+    );
+  }
+  cleanup();
+  return result;
 };
 
 test('#469 _defaultChangedChunkFiles: returns the chunks that EXIST on disk, whatever git thinks (REQ-469-1)', () => {
@@ -268,6 +292,7 @@ test('#469 share: a planted secret aborts BEFORE records/ is appended (REQ-469-1
         share({
           root,
           _requireEngram: () => 'engram',
+          _ensureSymlink: () => {},
           _export: () => {},
           _loadConfig: () => ({}),
           _scrubChunk: scrubChunkFile,
@@ -287,6 +312,96 @@ test('#469 scrubMaterializedChunks: a directory of clean chunks resolves (REQ-46
     await assert.doesNotReject(() =>
       scrubMaterializedChunks(root, { _loadConfig: () => ({}), _scrubChunk: scrubChunkFile }),
     );
+  });
+});
+
+// ── issue #657: the export must be anchored to `root`, and the .engram → .memory
+//    binding must hold in a WORKTREE, where `setup()` never ran ────────────────
+//
+// The binding is local and gitignored (.gitignore:68), so a worktree created
+// after `memory:setup` has `.memory/` checked out and NO `.engram`. Since
+// AGENTS.md:212 makes worktree-per-task mandatory, that is the ordinary case.
+// These tests pin the two halves of the fix: ensure-before-export, and an export
+// anchored to `root` rather than to whatever cwd git handed the hook.
+
+test('#657 _defaultShareExport: anchors the export to `root` via an explicit cwd (never the ambient cwd)', () => {
+  const calls = [];
+  _defaultShareExport('engram', '/main/repo', { _exec: (...args) => calls.push(args) });
+
+  assert.equal(calls.length, 1, 'the export must run exactly once');
+  const [bin, argv, opts] = calls[0];
+  assert.equal(bin, 'engram');
+  assert.deepStrictEqual(argv, ['sync', '--export']);
+  assert.equal(
+    opts.cwd,
+    '/main/repo',
+    'cwd must be the resolved root — inheriting the process cwd is the defect: git runs hooks ' +
+      'with cwd set to the invoking worktree, which is how memory landed in the wrong tree',
+  );
+});
+
+test('#657 share(): ensures the .engram → .memory binding BEFORE exporting, not after', async () => {
+  // Ordering is the claim: ensuring the binding after the export would leave the
+  // export itself writing into a real .engram/ — the failure being fixed.
+  const called = [];
+  await share({
+    root: '/fake/root',
+    _requireEngram: () => 'engram',
+    _ensureSymlink: () => called.push('ensureSymlink'),
+    _export: () => called.push('export'),
+    _readObservations: () => ({ observations: [] }),
+    _changedChunkFiles: () => [],
+    _loadConfig: () => ({}),
+    _scrubChunk: () => null,
+    _rebuildIndex: () => ({ count: 0 }),
+  });
+
+  assert.deepStrictEqual(called, ['ensureSymlink', 'export']);
+});
+
+test('#657 share(): passes the resolved root to the export seam, so the export can anchor to it', async () => {
+  const exportArgs = [];
+  await share({
+    root: '/main/repo',
+    _requireEngram: () => 'engram',
+    _ensureSymlink: () => {},
+    _export: (...args) => exportArgs.push(args),
+    _readObservations: () => ({ observations: [] }),
+    _changedChunkFiles: () => [],
+    _loadConfig: () => ({}),
+    _scrubChunk: () => null,
+    _rebuildIndex: () => ({ count: 0 }),
+  });
+
+  assert.deepStrictEqual(exportArgs, [['engram', '/main/repo']]);
+});
+
+test('#657 share(): a FRESH WORKTREE (.memory/ present, .engram absent) self-heals the binding and the destination check passes', async () => {
+  // The end-to-end scenario, with the REAL ensureMemorySymlink. Before the fix
+  // this root reached `engram sync --export` with no binding at all, so engram
+  // created a real .engram/ and every chunk it wrote was invisible to the readers.
+  await withChunkDir(async (root) => {
+    assert.ok(!existsSync(join(root, '.engram')), 'precondition: a fresh worktree has no .engram');
+
+    await assert.doesNotReject(() =>
+      share({
+        root,
+        _requireEngram: () => 'engram',
+        // _ensureSymlink intentionally NOT injected — the real one is under test.
+        _export: () => {},
+        _readObservations: () => ({ observations: [] }),
+        _changedChunkFiles: () => [],
+        _loadConfig: () => ({}),
+        _scrubChunk: () => null,
+        _rebuildIndex: () => ({ count: 0 }),
+      }),
+    );
+
+    const stat = lstatSync(join(root, '.engram'));
+    assert.ok(stat.isSymbolicLink(), 'share() must leave .engram a symlink, never a real directory');
+    assert.equal(readlinkSync(join(root, '.engram')), '.memory');
+    // The binding is what makes the #469 destination check pass on this tree.
+    assert.doesNotThrow(() => assertExportDestinationIsRead(root));
   });
 });
 
@@ -333,6 +448,7 @@ test('#469 share: the destination check runs BEFORE the scrub, and stops the run
       share({
         root: '/fake/root',
         _requireEngram: () => 'engram',
+        _ensureSymlink: () => {},
         _export: () => called.push('export'),
         _resolveDir: (p) => (p.endsWith('.engram') ? '/elsewhere' : '/fake/root/.memory'),
         _changedChunkFiles: () => {
@@ -404,6 +520,7 @@ test('share(): records write is UNCONDITIONAL — runs even with NO memory.dualW
   await share({
     root: '/fake/root',
     _requireEngram: () => { callLog.push('requireEngram'); return 'engram'; },
+    _ensureSymlink: () => { callLog.push('ensureSymlink'); },
     _export: () => { callLog.push('export'); },
     _readObservations: () => { callLog.push('readObservations'); return { observations: [] }; },
     _changedChunkFiles: () => { callLog.push('changedChunkFiles'); return []; },
@@ -417,8 +534,8 @@ test('share(): records write is UNCONDITIONAL — runs even with NO memory.dualW
     // into CI-only failures.
     _rebuildIndex: () => { callLog.push('rebuildIndex'); return { count: 0 }; },
   });
-  // record-write runs unconditionally: order requireEngram → export → scrub(chunks) → write(records)
-  assert.deepEqual(callLog, ['requireEngram', 'export', 'changedChunkFiles', 'readObservations', 'rebuildIndex']);
+  // record-write runs unconditionally: order requireEngram → ensureSymlink → export → scrub(chunks) → write(records)
+  assert.deepEqual(callLog, ['requireEngram', 'ensureSymlink', 'export', 'changedChunkFiles', 'readObservations', 'rebuildIndex']);
 });
 
 test('share(): records write is UNCONDITIONAL — a leftover memory.dualWrite value in config does not change the order or outcome (the key is retired; no runtime code reads it)', async () => {
@@ -426,6 +543,7 @@ test('share(): records write is UNCONDITIONAL — a leftover memory.dualWrite va
   await share({
     root: '/fake/root',
     _requireEngram: () => { callLog.push('requireEngram'); return 'engram'; },
+    _ensureSymlink: () => { callLog.push('ensureSymlink'); },
     _export: () => { callLog.push('export'); },
     _readObservations: () => { callLog.push('readObservations'); return { observations: [] }; },
     _changedChunkFiles: () => { callLog.push('changedChunkFiles'); return []; },
@@ -433,7 +551,7 @@ test('share(): records write is UNCONDITIONAL — a leftover memory.dualWrite va
     _scrubChunk: () => null,
     _rebuildIndex: () => { callLog.push('rebuildIndex'); return { count: 0 }; },
   });
-  assert.deepEqual(callLog, ['requireEngram', 'export', 'changedChunkFiles', 'readObservations', 'rebuildIndex']);
+  assert.deepEqual(callLog, ['requireEngram', 'ensureSymlink', 'export', 'changedChunkFiles', 'readObservations', 'rebuildIndex']);
 });
 
 test('share(): a secret in a candidate record aborts before any records/ append (the scan-then-write guard holds unconditionally, independent of any config)', async () => {
@@ -444,6 +562,7 @@ test('share(): a secret in a candidate record aborts before any records/ append 
       share({
         root: '/fake/root',
         _requireEngram: () => 'engram',
+        _ensureSymlink: () => {},
         _export: () => {},
         _changedChunkFiles: () => [],
         _readObservations: () => ({ observations: [{ id: 1, sync_id: 'obs-1', type: 'decision', title: 'T', content: 'ghp_AAAAAAAAAAAAAAAAAAAA', project: 'brain', scope: 'project', created_at: '2026-07-01 01:19:12' }] }),
@@ -461,6 +580,7 @@ test('share(): a secret hit in a materialized chunk fails closed (non-zero — t
       share({
         root: '/fake/root',
         _requireEngram: () => 'engram',
+        _ensureSymlink: () => {},
         _export: () => {},
         _changedChunkFiles: () => ['/fake/root/.memory/chunks/leaked.jsonl.gz'],
         _loadConfig: () => ({}),
@@ -482,6 +602,7 @@ test('share(): there is no --no-scrub style bypass parameter — the allowlist i
       share({
         root: '/fake/root',
         _requireEngram: () => 'engram',
+        _ensureSymlink: () => {},
         _export: () => {},
         _changedChunkFiles: () => ['/fake/root/.memory/chunks/leaked.jsonl.gz'],
         _loadConfig: () => ({}),

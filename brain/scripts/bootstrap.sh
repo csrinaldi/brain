@@ -7,7 +7,19 @@
 # Idempotent: running again only completes what is missing.
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+# The MAIN worktree, not whichever worktree invoked this (issue #657).
+# `--show-toplevel` answers "the current worktree", which for env:init is the
+# wrong tree: `.env` is gitignored (.gitignore:79), so it exists ONLY in the main
+# checkout, and the credential helper in §4 sources it on every push. Bootstrapping
+# from a worktree would write a second `.env` that helper never reads — and
+# AGENTS.md:212 makes worktrees the normal way to work here, so that is the
+# ordinary path, not an edge case.
+#
+# `--git-common-dir` is the one path every worktree shares; its parent is the main
+# tree. `--path-format=absolute` is REQUIRED, not decoration: the bare form returns
+# a relative `.git` from the main tree and an absolute path from a worktree, so
+# `dirname` on it would yield `.` in the very case that already worked.
+REPO_ROOT="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
 cd "$REPO_ROOT"
 
 # Bootstrap brain.config.json before resolving identity.
@@ -222,8 +234,14 @@ fi
 # SSH is blocked at the infra level: only HTTPS works, with username=$VCS_CRED_USER
 # and the PAT as password. The helper reads the token from .env on every use —
 # nothing is hardcoded in the git config.
+#
+# The .env path resolves through `--git-common-dir` for the reason given at the top
+# of this file (issue #657): git config --local is shared by every worktree, so this
+# ONE helper string runs from all of them, while `.env` exists in the main tree
+# alone. With `--show-toplevel` a push from any worktree sourced a file that was not
+# there, got an empty token, and failed the push with no useful signal.
 say "$I18N_BOOTSTRAP_CRED_SECTION"
-HELPER='!f() { . "$(git rev-parse --show-toplevel)/.env" 2>/dev/null; [ -n "${'"$VCS_TOKEN_VAR"':-}" ] || { echo "env:init: '"$VCS_TOKEN_VAR"' vacío en .env" >&2; exit 1; }; echo username='"$VCS_CRED_USER"'; printf "password=%s\n" "${'"$VCS_TOKEN_VAR"'}"; }; f'
+HELPER='!f() { . "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.env" 2>/dev/null; [ -n "${'"$VCS_TOKEN_VAR"':-}" ] || { echo "env:init: '"$VCS_TOKEN_VAR"' vacío en .env" >&2; exit 1; }; echo username='"$VCS_CRED_USER"'; printf "password=%s\n" "${'"$VCS_TOKEN_VAR"'}"; }; f'
 git config --local "credential.https://${VCS_HOST}.helper" "$HELPER"
 ok "$I18N_BOOTSTRAP_CRED_OK"
 

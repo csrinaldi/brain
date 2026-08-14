@@ -162,6 +162,7 @@ function requireEngram() {
 export async function share({
   root = repoRoot,
   _requireEngram = requireEngram,
+  _ensureSymlink = ensureMemorySymlink,
   _export = _defaultShareExport,
   _readObservations = _defaultReadObservations,
   _exportObservation = exportObservation,
@@ -173,7 +174,19 @@ export async function share({
   _resolveDir = _defaultResolveDir,
 } = {}) {
   const engram = _requireEngram();
-  _export(engram);
+  // BEFORE the export (issue #657): the `.engram → .memory` binding is LOCAL and
+  // gitignored (.gitignore:68), so it exists only in the tree where `setup()` ran.
+  // Every worktree created afterwards has `.memory/` checked out and NO binding —
+  // and `AGENTS.md:212` makes worktree-per-task mandatory, so that is the common
+  // case, not the exotic one. Without the binding `engram sync --export` (no --dir
+  // flag, ADR-0002 §21) creates a REAL `.engram/` beside the worktree's `.memory/`
+  // and every chunk it writes is invisible to the readers below.
+  //
+  // Ensuring it HERE makes the binding a precondition of the export instead of a
+  // side effect of setup. Idempotent and non-clobbering by construction (see
+  // ensureMemorySymlink cases 1-4), so this is a no-op wherever setup already ran.
+  _ensureSymlink(root);
+  _export(engram, root);
   // BEFORE the scrub, not after (issue #469, REQ-469-3): if the export wrote
   // somewhere this process does not read, the scrub would scan an unrelated
   // directory and pass, which is the failure being caught. Ordering the check
@@ -388,8 +401,13 @@ export async function dualWriteRecords(
   return accounting;
 }
 
-function _defaultShareExport(engram) {
-  execFileSync(engram, ["sync", "--export"], { stdio: "inherit" });
+export function _defaultShareExport(engram, root, { _exec = execFileSync } = {}) {
+  // `cwd` is EXPLICIT (issue #657). engram resolves `.engram/` relative to the
+  // process cwd, and git runs its hooks with cwd set to the worktree that invoked
+  // them — so inheriting it is precisely what let a push from one worktree
+  // materialize memory into that worktree instead of the root `share()` reads.
+  // Anchoring the export to `root` keeps the writer and the readers on one tree.
+  _exec(engram, ["sync", "--export"], { stdio: "inherit", cwd: root });
 }
 
 /**
