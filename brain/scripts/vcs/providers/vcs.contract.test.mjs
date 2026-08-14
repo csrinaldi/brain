@@ -15,7 +15,7 @@
 // fixtures/record-fixtures.mjs), DERIVED
 // (hand-authored from the documented API shape) everywhere else (all
 // gitlab-*.json — no live GitLab mirror reachable from this environment,
-// deferred to CP-A3b/SCIT; every github-*-failure.json and
+// deferred to CP-A3b / the self-hosted phase; every github-*-failure.json and
 // github-mrCreate-happy.json — forced-failure/mutating-write cases that
 // cannot be recorded). `_provenance.recorded`/`_provenance.derived` is always
 // present and never both true (lesson #12).
