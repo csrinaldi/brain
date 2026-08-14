@@ -22,6 +22,48 @@ import { gitlabApiConfig } from '../vcs/ci-context.mjs';
 export const DEFAULT_TOKEN_ENV = 'BRAIN_REVIEWER_TOKEN';
 export const DEFAULT_SETUP_DOC_PATH = 'docs/reviewer-setup.md';
 
+// ── The negative control (#604 half 1) ──────────────────────────────────────
+//
+// #413 made the handle VERIFIED rather than claimed. #604 measured that the
+// verification itself can be ambient: behind a proxy that injects credentials
+// into every `api.github.com` call, an invented token, an empty token and NO
+// credential all resolve to the same authenticated login (HTTP 200,
+// `csrinaldi`), reproduced in this repo's own cloud container. `whoami({ token })`
+// then reports an identity the token did not establish, and a `reviewer.handle`
+// set to that ambient login makes the check PASS on a credential never used.
+//
+// The control is a probe, not a fix: resolve identity with a token that is
+// deliberately invalid FIRST. In an environment that honours credentials the
+// probe is rejected; where it RESOLVES, the environment is answering for the
+// caller and no token-scoped read from it can be trusted. Two API calls.
+//
+// It cannot be defeated by rotating a token, because it never uses a real one.
+// It does not — and cannot — prove the reviewer is cold (that is §10/half 2);
+// it proves only that the identity evidence is the token's own.
+export const NEGATIVE_CONTROL_SENTINEL = 'ghp_brainNegativeControl0000NotARealToken';
+
+// Only a RECOGNISED authentication rejection clears the control. An
+// unrecognised failure is `unusable`, never `rejected`: a probe that cannot
+// run to a verdict has established nothing, and scoring it as clean would
+// rebuild the very defect this control exists to catch — a reader that on
+// failure returns something indistinguishable from "nothing to report".
+const AUTH_REJECTION = /\b401\b|bad credentials|unauthorized|requires authentication/i;
+
+/** Pure core of the #604 control. Classifies one probe outcome:
+ *  - `resolved` — an invalid token produced an identity → credentials are
+ *    injected upstream; every token-scoped read here is ambient. REFUSE.
+ *  - `rejected` — the provider refused the invalid token → the environment
+ *    honours credentials. The control PASSES.
+ *  - `unusable` — the probe failed for some other reason (binary missing,
+ *    network, unparsed error). REFUSE, with its own message. */
+export function evaluateNegativeControl({ resolved = null, error = null } = {}) {
+  if (resolved) return { control: 'resolved', ambientAs: resolved };
+  if (!error) return { control: 'unusable', reason: 'the probe returned no identity and no error' };
+  return AUTH_REJECTION.test(error)
+    ? { control: 'rejected' }
+    : { control: 'unusable', reason: error };
+}
+
 const PROVIDER_SCOPES = { github: ['repo'], gitlab: ['api'] }; // for the "get a token" link
 
 /** Pure core: resolves identity from config + env, or reports exactly why it
@@ -88,6 +130,25 @@ export async function gatherIdentity({ deps = {} } = {}) {
   // handle is cli.mjs's #382 refusal, not a verification question.
   if (!identity.handle) return identity;
 
+  // #604 negative control — runs BEFORE the real verification, because its
+  // question is whether the verification's ANSWER can mean anything. Ordered
+  // first so a proxy-injected environment is named as such rather than
+  // surfacing as a `mismatch`, which sent the maintainer through three token
+  // rotations chasing a refusal no rotation could have fixed.
+  let control;
+  try {
+    const { username } = await whoami({ token: NEGATIVE_CONTROL_SENTINEL });
+    control = evaluateNegativeControl({ resolved: username ?? null });
+  } catch (err) {
+    control = evaluateNegativeControl({ error: err.message });
+  }
+  if (control.control === 'resolved') {
+    return { ok: false, ambientIdentity: control.ambientAs, tokenEnv, setupDocPath };
+  }
+  if (control.control === 'unusable') {
+    return { ok: false, controlError: control.reason, tokenEnv, setupDocPath };
+  }
+
   let actual;
   try {
     ({ username: actual } = await whoami({ token: identity.token }));
@@ -110,6 +171,15 @@ export async function main(deps = {}) {
       console.error(`brain:review: refusing to run — env var "${result.missingVar}" is not set.`);
       console.error(`  Get a token: ${result.patSetupUrl}`);
       console.error(`  Setup doc: ${result.setupDocPath}`);
+    } else if (result.ambientIdentity) {
+      console.error(`brain:review: refusing to run — this environment resolved a deliberately INVALID token to "${result.ambientIdentity}".`);
+      console.error('  Credentials are being injected upstream (a proxy, or an ambient CLI session), so a');
+      console.error(`  token-scoped identity read cannot establish who ${result.tokenEnv} belongs to (issue #604).`);
+      console.error('  Rotating the token cannot fix this — the token is never what answers.');
+      console.error('  Run brain:review where credentials are not injected: the maintainer machine, or CI with the PAT as a secret.');
+    } else if (result.controlError) {
+      console.error(`brain:review: refusing to run — could not establish whether this environment honours the reviewer token: ${result.controlError}`);
+      console.error('  The negative control did not reach a verdict, and "could not establish" is not "established clean" (issue #604).');
     } else if (result.mismatch) {
       console.error(`brain:review: refusing to run — the reviewer token belongs to "${result.mismatch.actual}", but reviewer.handle claims "${result.mismatch.claimed}".`);
       console.error('  §10 abstention and the anti-loop lock would compare a claimed identity, not a real one (issue #413).');

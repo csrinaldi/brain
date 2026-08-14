@@ -169,6 +169,22 @@ export async function main(deps = {}) {
       error(`brain:review: refusing to run — env var "${identity.missingVar}" is not set.`);
       error(`  Get a token: ${identity.patSetupUrl}`);
       error(`  Setup doc: ${identity.setupDocPath}`);
+    } else if (identity.ambientIdentity) {
+      // #604 half 1: the negative control resolved. An invalid token produced
+      // an identity, so credentials are injected upstream and `whoami({token})`
+      // reports the ENVIRONMENT's login rather than the token's. Refused here
+      // rather than as a `mismatch`, which is the shape that cost three token
+      // rotations — the message must name the environment, not the token.
+      error(`brain:review: refusing to run — this environment resolved a deliberately INVALID token to "${identity.ambientIdentity}".`);
+      error('  Credentials are being injected upstream (a proxy, or an ambient CLI session), so a');
+      error(`  token-scoped identity read cannot establish who ${identity.tokenEnv} belongs to (issue #604).`);
+      error('  Rotating the token cannot fix this — the token is never what answers.');
+      error('  Run brain:review where credentials are not injected: the maintainer machine, or CI with the PAT as a secret.');
+    } else if (identity.controlError) {
+      // #604: the control could not reach a verdict. Scoring that as "clean"
+      // would be the reader-empty-on-failure defect the control exists to avoid.
+      error(`brain:review: refusing to run — could not establish whether this environment honours the reviewer token: ${identity.controlError}`);
+      error('  The negative control did not reach a verdict, and "could not establish" is not "established clean" (issue #604).');
     } else if (identity.mismatch) {
       // #413: the token's REAL login disagrees with the configured handle —
       // proceeding would run the §10 abstention and the anti-loop lock

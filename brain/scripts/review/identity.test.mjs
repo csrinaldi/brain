@@ -4,8 +4,24 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
-import { evaluateIdentity, evaluateVerifiedIdentity, gatherIdentity, main, DEFAULT_TOKEN_ENV } from './identity.mjs';
+import {
+  evaluateIdentity, evaluateVerifiedIdentity, evaluateNegativeControl,
+  gatherIdentity, main, DEFAULT_TOKEN_ENV, NEGATIVE_CONTROL_SENTINEL,
+} from './identity.mjs';
+
+// A `whoami` double for an environment that HONOURS credentials: known tokens
+// resolve, everything else is rejected the way the provider rejects a bad one.
+//
+// Before #604 the doubles here returned a fixed login whatever token they were
+// handed — which is precisely the credential-injecting environment the negative
+// control exists to detect, so the control (correctly) refused all of them. A
+// double that ignores its token cannot model a healthy environment.
+const honestWhoami = (logins) => async ({ token }) => {
+  if (Object.hasOwn(logins, token)) return { username: logins[token] };
+  throw new Error('gh: Bad credentials (HTTP 401)');
+};
 
 // ── Pure core — evaluateIdentity ────────────────────────────────────────────
 
@@ -90,7 +106,11 @@ test('gatherIdentity: token + matching handle verifies and resolves ok, never ca
       readConfig: () => ({ handle: 'brain-reviewer', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
       readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'shh' }),
       getPatUrl: async () => { getPatUrlCalls++; return 'unused'; },
-      whoami: async ({ token }) => { whoamiToken = token; return { username: 'brain-reviewer' }; },
+      whoami: async ({ token }) => {
+        if (token === NEGATIVE_CONTROL_SENTINEL) throw new Error('gh: Bad credentials (HTTP 401)');
+        whoamiToken = token;
+        return { username: 'brain-reviewer' };
+      },
     },
   });
   assert.deepEqual(result, { ok: true, handle: 'brain-reviewer', token: 'shh', verifiedAs: 'brain-reviewer' });
@@ -103,7 +123,7 @@ test('gatherIdentity: token whose real login disagrees with the handle refuses (
     deps: {
       readConfig: () => ({ handle: 'csrinaldibot', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
       readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'shh' }), // the author's own token
-      whoami: async () => ({ username: 'csrinaldi' }),
+      whoami: honestWhoami({ shh: 'csrinaldi' }),
     },
   });
   assert.equal(result.ok, false);
@@ -115,7 +135,12 @@ test('gatherIdentity: whoami rejection refuses with the underlying error (#413)'
     deps: {
       readConfig: () => ({ handle: 'brain-reviewer', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
       readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'shh' }),
-      whoami: async () => { throw new Error('api unreachable'); },
+      // The control must CLEAR (the invalid token is rejected) so this test
+      // still exercises the #413 verify path rather than #604's control path.
+      whoami: async ({ token }) => {
+        if (token === NEGATIVE_CONTROL_SENTINEL) throw new Error('gh: Bad credentials (HTTP 401)');
+        throw new Error('api unreachable');
+      },
     },
   });
   assert.equal(result.ok, false);
@@ -150,7 +175,7 @@ test('main: exit code 0 when the token is present and verifies (#413)', async ()
   const code = await main({
     readConfig: () => ({ handle: 'brain-reviewer', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
     readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'shh' }),
-    whoami: async () => ({ username: 'brain-reviewer' }),
+    whoami: honestWhoami({ shh: 'brain-reviewer' }),
   });
   assert.equal(code, 0);
 });
@@ -159,7 +184,103 @@ test('main: exit code 1 on an identity mismatch (#413)', async () => {
   const code = await main({
     readConfig: () => ({ handle: 'csrinaldibot', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
     readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'shh' }),
-    whoami: async () => ({ username: 'csrinaldi' }),
+    whoami: honestWhoami({ shh: 'csrinaldi' }),
   });
   assert.equal(code, 1);
+});
+
+// ── The negative control (#604 half 1) ───────────────────────────────────────
+
+test('evaluateNegativeControl: an invalid token that RESOLVES means credentials are injected', () => {
+  assert.deepEqual(
+    evaluateNegativeControl({ resolved: 'csrinaldi' }),
+    { control: 'resolved', ambientAs: 'csrinaldi' },
+  );
+});
+
+test('evaluateNegativeControl: a recognised auth rejection clears the control', () => {
+  for (const msg of [
+    'gh: Bad credentials (HTTP 401)',
+    'HTTP 401: Bad credentials',
+    'GraphQL: Requires authentication',
+    '401 Unauthorized',
+  ]) {
+    assert.equal(evaluateNegativeControl({ error: msg }).control, 'rejected', msg);
+  }
+});
+
+test('evaluateNegativeControl: an UNRECOGNISED failure is unusable, never rejected (#604)', () => {
+  // The reader-empty-on-failure guard: a probe that could not run to a verdict
+  // has established nothing. Scoring it `rejected` would rebuild the defect the
+  // control exists to catch — measured, `gh` absent yields exactly this shape.
+  const result = evaluateNegativeControl({ error: 'gh api /user failed (status null): gh: spawnSync gh ENOENT' });
+  assert.equal(result.control, 'unusable');
+  assert.match(result.reason, /ENOENT/, 'the reason must survive — "could not" is not "there is none"');
+});
+
+test('evaluateNegativeControl: neither an identity nor an error is unusable, not clean', () => {
+  assert.equal(evaluateNegativeControl({}).control, 'unusable');
+});
+
+test('gatherIdentity: an environment that resolves the INVALID token refuses, naming the ambient identity (#604)', async () => {
+  // Reproduces the measured cloud container: every token resolves to the same
+  // login, so `reviewer.handle: csrinaldi` would otherwise VERIFY on a
+  // credential that was never used.
+  const result = await gatherIdentity({
+    deps: {
+      readConfig: () => ({ handle: 'csrinaldi', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
+      readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'inert' }),
+      whoami: async () => ({ username: 'csrinaldi' }), // ignores the token, like the proxy
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ambientIdentity, 'csrinaldi');
+  assert.equal(result.mismatch, undefined, 'must NOT surface as a mismatch — that shape cost three token rotations');
+});
+
+test('gatherIdentity: the control runs BEFORE the real verification, and with the sentinel token (#604)', async () => {
+  const ordered = [];
+  const result = await gatherIdentity({
+    deps: {
+      readConfig: () => ({ handle: 'csrinaldibot', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
+      readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'realpat' }),
+      whoami: async ({ token }) => {
+        ordered.push(token);
+        if (token === NEGATIVE_CONTROL_SENTINEL) throw new Error('gh: Bad credentials (HTTP 401)');
+        return { username: 'csrinaldibot' };
+      },
+    },
+  });
+  assert.deepEqual(ordered, [NEGATIVE_CONTROL_SENTINEL, 'realpat']);
+  assert.equal(result.ok, true);
+  assert.equal(result.verifiedAs, 'csrinaldibot');
+});
+
+test('gatherIdentity: an unusable control refuses distinctly from a mismatch (#604)', async () => {
+  const result = await gatherIdentity({
+    deps: {
+      readConfig: () => ({ handle: 'csrinaldibot', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
+      readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'realpat' }),
+      whoami: async () => { throw new Error('gh: spawnSync gh ENOENT'); },
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.controlError, /ENOENT/);
+  assert.equal(result.verifyError, undefined);
+  assert.equal(result.mismatch, undefined);
+});
+
+test('main: exit code 1 when the environment resolves an invalid token (#604)', async () => {
+  const code = await main({
+    readConfig: () => ({ handle: 'csrinaldi', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
+    readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'inert' }),
+    whoami: async () => ({ username: 'csrinaldi' }),
+  });
+  assert.equal(code, 1, 'a handle matching the ambient identity must NOT verify');
+});
+
+test('the sentinel token is not a credential and is never read from config or env', () => {
+  assert.match(NEGATIVE_CONTROL_SENTINEL, /NotARealToken/);
+  const src = readFileSync(new URL('./identity.mjs', import.meta.url), 'utf8');
+  assert.equal(src.includes('process.env[NEGATIVE_CONTROL_SENTINEL]'), false);
 });
