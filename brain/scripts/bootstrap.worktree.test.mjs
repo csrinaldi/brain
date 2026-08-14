@@ -42,8 +42,25 @@ function helperAssignment() {
   return line;
 }
 
+/**
+ * The child environment is EXPLICIT, with the token variable stripped.
+ *
+ * The helper reads `${VCS_TOKEN_VAR:-}` AFTER sourcing `.env`, so an exported
+ * `$VCS_TOKEN` in the calling shell satisfies it even when `.env` was never read.
+ * Anyone who has run `env:init` in their shell has one — so inheriting the
+ * environment made the missing-token case unreachable on a real machine while it
+ * passed on a clean one, which is the only reason this suite went green here and
+ * red on the maintainer's box.
+ *
+ * Stripping it also makes the happy path prove more than it did: with no ambient
+ * token to fall back on, a token in the output can only have come from the `.env`
+ * these tests write into the main worktree.
+ */
+const CLEAN_ENV = { ...process.env };
+delete CLEAN_ENV.VCS_TOKEN;
+
 const sh = (script, cwd) =>
-  execFileSync('bash', ['-c', script], { cwd, encoding: 'utf8' }).trim();
+  execFileSync('bash', ['-c', script], { cwd, encoding: 'utf8', env: CLEAN_ENV }).trim();
 
 /**
  * A real repo with a real linked worktree. `.env` is written ONLY to the main
@@ -124,7 +141,7 @@ test('#657 bootstrap.sh: the helper FAILS LOUDLY when the token really is absent
     // Non-zero + a message, from the worktree too — not a silent empty password,
     // which is what the caller could not distinguish before.
     assert.throws(
-      () => execFileSync('bash', ['-c', helper], { cwd: wt, encoding: 'utf8', stdio: 'pipe' }),
+      () => execFileSync('bash', ['-c', helper], { cwd: wt, encoding: 'utf8', stdio: 'pipe', env: CLEAN_ENV }),
       (err) => {
         assert.equal(err.status, 1, 'a missing token must exit non-zero');
         assert.match(String(err.stderr), /VCS_TOKEN/);
