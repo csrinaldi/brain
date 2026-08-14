@@ -15,6 +15,20 @@ REMOTE=/srv/brain-remote.git
 FROM=v9.0.0
 TO=v9.0.1
 
+# The directory npm installs the package into is DERIVED from the manifest this
+# harness builds its remote from — never spelled here. `@logikas/brain` lands in
+# `node_modules/@logikas/brain`; the pre-rename `brain` landed in
+# `node_modules/brain`.
+#
+# A literal here is the #623 class (the installed-package root as a hardcoded
+# string), and this harness was its site in shell — out of reach of a refactor
+# that swept the .mjs modules. When #655 scoped the name, every seed below copied
+# from a path that no longer existed and all four danger paths reported ZERO
+# seeded files. Nothing asserted a wrong answer: the seed's own vacuity guard
+# refused to let empty trees be compared, which is the only reason this surfaced
+# as a red instead of four green comparisons of nothing against nothing.
+PKG_NAME=$(node -pe "require('/brain-src/package.json').name")
+
 # ── Build a two-tag git remote from the working tree ─────────────────────────
 # FROM and TO are the SAME tree except for a marker: TO adds a managed file and
 # changes an already-managed one. That difference is what gives the upgrade
@@ -72,7 +86,7 @@ new_consumer() {
   "
   npm i -D "git+file://${REMOTE}#${tag}" >/dev/null 2>&1 || { fail "install ${tag}"; return 1; }
 
-  local pkg=node_modules/brain
+  local pkg="node_modules/${PKG_NAME}"
   mkdir -p .github/workflows .claude .gemini brain
   cp -r "$pkg/brain/core" brain/core
   cp -r "$pkg/brain/scripts" brain/scripts
