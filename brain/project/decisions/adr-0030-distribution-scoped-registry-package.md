@@ -1,6 +1,6 @@
 # ADR-0030 — Distribution moves to a scoped registry package; ADR-0006's premise no longer exists
 
-**Status**: Accepted · **amended 13/08/2026** (Amendment 1 — see below)
+**Status**: Accepted · **amended 14/08/2026** (Amendments 1-2 — see below)
 **Date**: 2026-08-13 — Cristian Rinaldi
 
 ## Context
@@ -36,6 +36,9 @@ Two constraints were measured before choosing a name:
   by asking. **A scope is mandatory**, not a preference.
 - **`@csrinaldi/brain` is free** — `404` on the registry, a user scope requiring
   no organisation.
+  **[Amended by Amendment 2 (#653) — still true and no longer the choice. Measured
+  again: `@logikas/brain` is also `404`, and the organisation now exists. Nothing
+  was ever published under `@csrinaldi/brain`, so the change costs nothing.]**
 
 ## Decision
 
@@ -44,7 +47,11 @@ Two constraints were measured before choosing a name:
 The consumer installs by name:
 
 ```bash
-npm install --save-dev @csrinaldi/brain
+npm install --save-dev @logikas/brain
+
+# Amended by Amendment 2 (#653): the scope is @logikas. The line below is what
+# Decision 1 originally read.
+#   npm install --save-dev @csrinaldi/brain
 
 # Amended by Amendment 1 (#629): this reaches whatever `npm config get registry`
 # points at, and only if that registry carries the scope. Where it does not, the
@@ -62,6 +69,12 @@ and that is the acceptance criterion, not a side effect.
 An organisation scope was considered and rejected for now: it buys a transferable
 identity brain does not yet need, at the cost of a decision that is easy to make
 later and awkward to unmake early.
+
+**[Amended by Amendment 2 (#653) — SUPERSEDED. The scope is `@logikas`. This
+paragraph deferred the organisation scope and named the condition for revisiting
+it; that condition now holds. Read the deferral as satisfied, not overruled. A
+scoped package also publishes `restricted` unless `publishConfig.access` says
+otherwise — see Amendment 2.]**
 
 ### 2. Repository visibility and package publication are two decisions, not one.
 
@@ -194,6 +207,9 @@ the registry.
 
 **An organisation scope.** Deferred, not rejected. Easy later, awkward to unmake
 now.
+**[Amendment 2 (#653): the deferral ended. "Easy later" was the correct
+prediction — before a first publish it is one constant and four passages. After
+one it would have been an unpublishable rename.]**
 
 **Keep git tags and simply make the repo public.** Rejected: a public repo with
 git-tag installs still requires the consumer to resolve a git ref and gives no
@@ -234,7 +250,8 @@ True, and incomplete. They install with **registry access**. ADR-0006's
 mechanism had a property nobody chose and nobody wrote down: a git URL reaches
 **any host that serves git** — github.com, an internal mirror, a self-hosted
 GitLab, a `file://` path. A package name reaches whatever `npm config get
-registry` resolves to, and only if that registry carries `@csrinaldi/brain`.
+registry` resolves to, and only if that registry carries `@logikas/brain`
+(`@csrinaldi/brain` when Amendment 1 was written — see Amendment 2).
 
 Measured on the signed record: **zero mentions** of `mirror`, `firewall`,
 `air-gap`, `proxy`, `offline` or `registry access`. The cost is not weighed and
@@ -291,3 +308,64 @@ unrelated pieces of work rediscover is doctrine, not a preference belonging to
 whichever ticket noticed it second. Leaving it in #435 means the next reader of
 ADR-0030 finds a record that answers "how do bytes reach the consumer" without
 mentioning that some consumers cannot reach the answer.
+
+## Amendment 2 — the deferred organisation scope is no longer deferred (issue #653)
+
+**Signed**: 14/08/2026 — Cristian Rinaldi
+
+### The ADR is being followed, not overruled
+
+Stated first because an amendment that changes the package name reads like a
+reversal. It is not.
+
+ADR-0030 did not reject an organisation scope. It **deferred** one, and named the
+condition:
+
+> **An organisation scope.** Deferred, not rejected. Easy later, awkward to unmake
+> now.
+
+The organisation now exists and owns the publishing credential. The condition
+holds, so the deferral ends. Everything else in ADR-0030 — the registry as the
+mechanism, the visibility/publication split, the `files` ordering, Amendment 1's
+reachability cost and the git-URL fallback — stands unchanged.
+
+### The measurement
+
+| name | result |
+|---|---|
+| `@logikas/brain` | **404 — free** |
+| `@csrinaldi/brain` | `404` — still free, never published |
+| `brain` | `200` — the deprecated placeholder |
+
+Zero packages published under `@logikas`. Because **nothing was ever published
+under `@csrinaldi/brain`**, this costs nothing: no unpublish, no deprecation, no
+redirect, no consumer to migrate twice. It is one constant in `installer.mjs`
+(#623 made it exactly one) and five passages in this record.
+
+"Easy later" was the right prediction, and this is the last moment it is true.
+
+### What an organisation scope changes beyond the string
+
+Three things, none of which a rename alone handles:
+
+1. **A scoped package publishes `restricted` by default.** `npm publish` without
+   `--access public` fails asking for a paid plan, or publishes private. It
+   belongs in `publishConfig.access` in `package.json` **and** in the workflow's
+   flag — the flag alone leaves a manual publish from a laptop doing the wrong
+   thing, which is the failure that looks like success.
+2. **The token must be scoped to `@logikas/*`, not to a package.** The package
+   does not exist yet, so a granular token limited to selected packages cannot
+   cover its first publish.
+3. **The publishing identity becomes transferable.** That is precisely the
+   property Decision 1 called one "brain does not yet need". It needs it now, and
+   that is the whole content of this amendment.
+
+### What this does NOT change
+
+- The registry remains the distribution mechanism.
+- **Amendment 1 stands in full**: reachability is still a named cost, and the
+  git-URL install is still a supported, measured-equivalent fallback. Only the
+  scope inside its sentence moves.
+- ADR-0006 stays superseded.
+- The `files` allowlist ordering in *Never do* is untouched: the pre-flight and
+  the allowlist still land before `private: false`.
