@@ -89,3 +89,21 @@ The hidden lockfile is npm-only while pnpm, yarn and bun are supported, so
 behaviour and attaches `fallbackSpec`, so an install that fails on a guessed
 registry spec retries once over git — a different route, exactly once — and a
 failure of both names both specs.
+
+## REQ-655-14 — Provenance survives the deletions that actually happen
+
+Deleting `package-lock.json`, or `node_modules` wholesale, are ordinary repair
+moves. Provenance is therefore read from the DURABLE source first — the
+consumer's own `package.json` dependency spec, a committed file every package
+manager writes — and from npm's hidden lockfile second.
+
+Measured on a consumer installed from a local git remote: deleting
+`package-lock.json` leaves provenance readable (the hidden lockfile lives inside
+`node_modules`); deleting `node_modules` removes both it and the installed
+manifest, and without the declared read the upgrade silently redirected to the
+canonical GitHub URL — the wrong host for the mirror/air-gap consumer the git
+route exists to serve. With it, all three states resolve to the same remote.
+
+The declared spec also keeps the ref AS WRITTEN, where the lockfile substitutes
+a commit SHA — so when no installed manifest remains, its base URL stands in for
+`repository.url`, with the ref replaced by the tag being installed.

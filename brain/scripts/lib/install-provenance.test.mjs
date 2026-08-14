@@ -12,6 +12,8 @@ import assert from 'node:assert/strict';
 
 import {
   classifyResolved,
+  classifyDependencySpec,
+  evaluateDeclaredProvenance,
   evaluateProvenance,
   readInstallProvenance,
   HIDDEN_LOCKFILE,
@@ -153,4 +155,59 @@ test('#655: provenance cannot rescue a non-version for a registry install', () =
 
 test('#655: HIDDEN_LOCKFILE is the npm path, not a guess at one', () => {
   assert.match(HIDDEN_LOCKFILE, /node_modules[/\\]\.package-lock\.json$/);
+});
+
+// ── the durable source: the consumer's own package.json ─────────────────────
+// Deleting `package-lock.json`, or `node_modules` wholesale, are ordinary
+// events. The values below were measured by really installing each way.
+
+test('#655: a declared spec classifies by route, keeping the TAG not a SHA', () => {
+  assert.equal(classifyDependencySpec('^7.0.1'), 'registry');
+  assert.equal(classifyDependencySpec('1.1.0'), 'registry');
+  assert.equal(classifyDependencySpec('latest'), 'registry');
+  assert.equal(classifyDependencySpec('npm:@scope/x@^1.0.0'), 'registry');
+  assert.equal(classifyDependencySpec('github:sindresorhus/is#v7.0.1'), 'git');
+  assert.equal(classifyDependencySpec('git+file:///srv/remote.git#v9.0.0'), 'git');
+  assert.equal(classifyDependencySpec('git@github.com:o/r.git'), 'git');
+  assert.equal(classifyDependencySpec('file:../../logikas-brain-1.1.0.tgz'), 'file');
+  assert.equal(classifyDependencySpec('who-knows'), null);
+});
+
+test('#655: devDependencies is read first, dependencies still honoured', () => {
+  const name = '@logikas/brain';
+  const dev = evaluateDeclaredProvenance({ pkg: { devDependencies: { [name]: 'git+file:///srv/r.git#v9' } }, packageName: name });
+  assert.equal(dev.source, 'git');
+  const prod = evaluateDeclaredProvenance({ pkg: { dependencies: { [name]: '^1.1.0' } }, packageName: name });
+  assert.equal(prod.source, 'registry');
+});
+
+test('#655: an undeclared package says so rather than guessing', () => {
+  const p = evaluateDeclaredProvenance({ pkg: { devDependencies: {} }, packageName: '@logikas/brain' });
+  assert.equal(p.source, 'unknown');
+  assert.match(p.why, /not declared/);
+});
+
+test('#655: the declared spec survives a deleted node_modules — the air-gap case', () => {
+  // No hidden lockfile AND no installed manifest: the package.json read is the
+  // only thing standing between a mirror consumer and a redirect to a host they
+  // cannot reach.
+  const name = '@logikas/brain';
+  const p = readInstallProvenance({
+    repoRoot: '/consumer',
+    searchPaths: PATHS,
+    packageName: name,
+    exists: (f) => f.endsWith('package.json') && !f.includes('node_modules'),
+    readFile: () => JSON.stringify({ devDependencies: { [name]: 'git+file:///srv/remote.git#v9.0.0' } }),
+  });
+  assert.equal(p.source, 'git');
+  assert.equal(p.resolved, 'git+file:///srv/remote.git#v9.0.0');
+});
+
+test('#655: with both sources unreadable, the reason names BOTH', () => {
+  const p = readInstallProvenance({
+    repoRoot: '/c', searchPaths: PATHS, packageName: '@logikas/brain', exists: () => false,
+  });
+  assert.equal(p.source, 'unknown');
+  assert.match(p.why, /package.json is absent/);
+  assert.match(p.why, /\.package-lock\.json is absent/);
 });

@@ -1696,13 +1696,31 @@ export function installSpecDetail(root, tag, { readProvenance } = {}) {
   // on disk. The search paths come from HERE, so the provenance read and the
   // package the upgrade will actually use can never describe different targets.
   const read = readProvenance
-    ?? ((repoRoot) => readInstallProvenance({ repoRoot, searchPaths: installedPackageSearchPaths() }));
+    ?? ((repoRoot) => readInstallProvenance({
+      repoRoot,
+      searchPaths: installedPackageSearchPaths(),
+      // The name to look up is the one this code ships as, not the one the
+      // installed tree happens to carry: with `node_modules` deleted there IS
+      // no installed tree, and that is exactly the case the declared-dependency
+      // read exists to answer.
+      packageName: PACKAGE_NAME,
+    }));
   let provenance = 'unknown';
   let provenanceWhy = null;
   try {
     const p = read(root);
     provenance = p?.source ?? 'unknown';
     provenanceWhy = p?.why ?? null;
+    // With `node_modules` deleted there is no installed manifest to declare a
+    // repository, and the canonical constant would send a mirror/air-gap
+    // consumer to a host they cannot reach — the one population the git route
+    // exists for. The DECLARED dependency spec carries their URL, so it stands
+    // in. Only for `git`: a `file:` tarball path is not a repository, and only
+    // the base — the ref is replaced by the tag being installed.
+    if (!repoUrl && provenance === 'git' && typeof p?.resolved === 'string') {
+      const base = p.resolved.split('#')[0].trim();
+      if (base) repoUrl = base;
+    }
   } catch {
     // A provenance read must never be what stops an upgrade: `unknown` keeps the
     // pre-existing behaviour and the git fallback stays attached.

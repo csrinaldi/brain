@@ -56,6 +56,72 @@ export function classifyResolved(resolved) {
 }
 
 /**
+ * The kind of source a DECLARED dependency spec names — the value npm, pnpm,
+ * yarn and bun all write into the consumer's own `package.json`.
+ *
+ * This is the more durable of the two records, and the measurements say so:
+ *
+ * | route           | declared spec                        |
+ * |-----------------|--------------------------------------|
+ * | registry        | `^7.0.1`                             |
+ * | git (shorthand) | `github:sindresorhus/is#v7.0.1`      |
+ * | git (url)       | `git+file:///srv/remote.git#v9.0.0`  |
+ * | tarball         | `file:../../logikas-brain-1.1.0.tgz` |
+ *
+ * Three properties the hidden lockfile does not have: it lives in a file the
+ * consumer COMMITS, so it survives `rm -rf node_modules`; every package manager
+ * writes it, so pnpm/yarn/bun consumers are covered; and it keeps the ref AS
+ * WRITTEN (`#v9.0.0`) where the lockfile substitutes a commit SHA.
+ *
+ * A semver range or a dist-tag means the registry. Anything unrecognised is
+ * `null` — the caller then keeps looking, and finally says it could not tell.
+ *
+ * @param {unknown} spec
+ * @returns {'registry'|'git'|'file'|null}
+ */
+export function classifyDependencySpec(spec) {
+  if (typeof spec !== 'string') return null;
+  const s = spec.trim();
+  if (!s) return null;
+  if (/^(git\+|git:\/\/|ssh:\/\/|git@)/.test(s)) return 'git';
+  if (/^(github|gitlab|bitbucket|gist):/.test(s)) return 'git';
+  if (/^(file:|link:|portal:)/.test(s)) return 'file';
+  // `npm:@scope/name@^1.0.0` — an alias install, still by name from a registry.
+  if (/^npm:/.test(s)) return 'registry';
+  // A semver range, an exact version, `*`, or a dist-tag like `latest`/`next`.
+  if (/^([\^~><=v]|\d|\*$|latest$|next$)/.test(s)) return 'registry';
+  return null;
+}
+
+/**
+ * Reads provenance from the consumer's own manifest — the durable half.
+ *
+ * Checks `devDependencies` before `dependencies` because that is where
+ * `brain:upgrade` installs itself (`npm install -D`), but honours either: a
+ * consumer who moved it is not wrong, only unusual.
+ *
+ * @param {object} o
+ * @param {any}    o.pkg          parsed consumer `package.json`
+ * @param {string} o.packageName
+ * @returns {{source:'registry'|'git'|'file'|'unknown', resolved:string|null, why:string}}
+ */
+export function evaluateDeclaredProvenance({ pkg, packageName } = {}) {
+  const unknown = (why) => ({ source: 'unknown', resolved: null, why });
+  if (!pkg || typeof pkg !== 'object') return unknown('the consumer package.json could not be read.');
+
+  for (const field of ['devDependencies', 'dependencies', 'optionalDependencies']) {
+    const spec = pkg[field]?.[packageName];
+    if (typeof spec !== 'string') continue;
+    const source = classifyDependencySpec(spec);
+    if (source === null) {
+      return unknown(`package.json ${field}.${packageName} is "${spec}", which names no route this reader knows.`);
+    }
+    return { source, resolved: spec, why: `package.json ${field} declares ${packageName} as "${spec}" (${source}).` };
+  }
+  return unknown(`${packageName} is not declared in the consumer package.json — it may have been installed without being saved.`);
+}
+
+/**
  * Pure core: reads the provenance of the package at one of `searchPaths` out of
  * an already-parsed hidden-lockfile document.
  *
@@ -123,22 +189,58 @@ export function evaluateProvenance({ doc, searchPaths = [] } = {}) {
 export function readInstallProvenance({
   repoRoot,
   searchPaths = [],
+  packageName = null,
   readFile = (p) => readFileSync(p, 'utf8'),
   exists = existsSync,
 } = {}) {
+  // TWO SOURCES, DURABLE ONE FIRST.
+  //
+  // The consumer's own package.json is a COMMITTED file: it survives
+  // `rm -rf node_modules` and a deleted package-lock.json, both of which are
+  // ordinary events, and every package manager writes it. The hidden lockfile
+  // is npm-only and lives inside the directory people delete to fix things.
+  //
+  // Measured, on a consumer installed from a local git remote: delete
+  // `package-lock.json` and provenance still reads `git` (the hidden lockfile
+  // is inside node_modules, so it survives). Delete `node_modules` and BOTH the
+  // hidden lockfile and the installed manifest are gone — without this first
+  // source the upgrade silently redirected to the canonical GitHub URL, which
+  // is precisely the wrong answer for the mirror/air-gap consumer the git route
+  // exists to serve.
+  const reasons = [];
+  if (packageName) {
+    const pkgPath = join(repoRoot, 'package.json');
+    if (exists(pkgPath)) {
+      let pkg = null;
+      try {
+        pkg = JSON.parse(readFile(pkgPath));
+      } catch (e) {
+        reasons.push(`consumer package.json could not be parsed (${e.message})`);
+      }
+      if (pkg) {
+        const declared = evaluateDeclaredProvenance({ pkg, packageName });
+        if (declared.source !== 'unknown') return declared;
+        reasons.push(declared.why);
+      }
+    } else {
+      reasons.push('the consumer package.json is absent');
+    }
+  }
+
   const lockPath = join(repoRoot, HIDDEN_LOCKFILE);
   if (!exists(lockPath)) {
-    return {
-      source: 'unknown',
-      resolved: null,
-      why: `${HIDDEN_LOCKFILE} is absent — it is written by npm >= 7, and this consumer may use pnpm, yarn or bun.`,
-    };
+    reasons.push(`${HIDDEN_LOCKFILE} is absent — it is written by npm >= 7, and this consumer may use pnpm, yarn or bun`);
+    return { source: 'unknown', resolved: null, why: `${reasons.join('; ')}.` };
   }
   let doc;
   try {
     doc = JSON.parse(readFile(lockPath));
   } catch (e) {
-    return { source: 'unknown', resolved: null, why: `${HIDDEN_LOCKFILE} could not be parsed (${e.message}).` };
+    reasons.push(`${HIDDEN_LOCKFILE} could not be parsed (${e.message})`);
+    return { source: 'unknown', resolved: null, why: `${reasons.join('; ')}.` };
   }
-  return evaluateProvenance({ doc, searchPaths });
+  const fromLock = evaluateProvenance({ doc, searchPaths });
+  if (fromLock.source !== 'unknown') return fromLock;
+  reasons.push(fromLock.why);
+  return { source: 'unknown', resolved: null, why: reasons.join('; ') };
 }
