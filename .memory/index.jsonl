@@ -1983,6 +1983,7 @@
 {"id":"rec-f796172bd5f5cde2","ts":"2026-07-25T00:47:11Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f7a8ce498391bb23","ts":"2026-07-13T00:22:11Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f7b4851324ac7d77","ts":"2026-07-25T21:51:05Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-f7f560bdaa4ad9a7","ts":"2026-08-14T18:11:48Z","actor":"claude/brain-memory-backend-i5kp8b","type":"decision","project":"brain","issue":641,"file":"2026-08.jsonl"}
 {"id":"rec-f855f5eeef85984e","ts":"2026-07-29T14:29:01Z","actor":"fix/issue-259-d2-pr3c-a10-modify-channel","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f8c0e3145803199d","ts":"2026-07-25T00:48:20Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f97d14936cea7b50","ts":"2026-07-13T00:21:30Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
