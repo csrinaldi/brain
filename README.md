@@ -65,22 +65,16 @@ here decides whether you publish it.
 
 ## How to adopt brain
 
-brain installs into a consumer repo from a git **tag** — no registry, works with
-private repos ([ADR-0006](brain/project/decisions/adr-0006-distribucion-installer-versionado.md)).
-Every step below is validated end-to-end by `npm run test:fresh-install` (a
-clean-container integration test).
-
-> **Before you start** — authenticate to GitHub so git can fetch the (private)
-> brain repo over HTTPS: `gh auth login && gh auth setup-git`, or configure a PAT
-> credential helper. The `github:` npm shorthand resolves to **SSH**; the
-> commands below use **HTTPS** (`git+https`) so they work without an SSH key.
+brain installs from the npm registry as **`@logikas/brain`**
+([ADR-0030](brain/project/decisions/adr-0030-distribution-scoped-registry-package.md),
+which supersedes ADR-0006's git-tag mechanism). No token, no repository access.
 
 ```bash
 # 0. If your repo has no package.json yet:
 npm init -y
 
-# 1. Install brain at a pinned tag (HTTPS):
-npm i -D "git+https://github.com/csrinaldi/brain.git#v1.0.0"
+# 1. Install brain:
+npm i -D @logikas/brain
 
 # 2. Write the bootstrap alias and copy the managed paths in one step:
 npx brain init
@@ -88,6 +82,15 @@ npx brain init
 # 3. Initialize the environment (interactive):
 npm run brain:env:init
 ```
+
+> **Behind a mirror, a firewall, or an air-gapped registry?** The git URL
+> installs the **same allowlisted bytes** into the **same directory**, and is a
+> supported fallback rather than a retired path
+> ([ADR-0030 Amendment 1](brain/project/decisions/adr-0030-distribution-scoped-registry-package.md)):
+>
+> ```bash
+> npm i -D "git+https://github.com/csrinaldi/brain.git#v1.1.0"
+> ```
 
 `npx brain init` needs no aliases to exist first — it is a `bin` entry, which is
 exactly what lets it write the one alias `brain:upgrade` cannot inject into a
@@ -100,15 +103,15 @@ you already defined, and is safe to re-run. `npx brain --help` lists the verb su
 > the upgrade directly — the outcome is identical:
 >
 > ```bash
-> #      "brain:upgrade": "node node_modules/brain/brain/scripts/brain-upgrade.mjs"
-> npm run brain:upgrade -- v1.0.0
+> #      "brain:upgrade": "node node_modules/@logikas/brain/brain/scripts/brain-upgrade.mjs"
+> npm run brain:upgrade -- v1.1.0
 > ```
 
 > **Using pnpm / yarn / bun?** brain is **package-manager-agnostic** — it detects your
 > PM and runs through it. Use your PM's verbs throughout:
 >
 > ```bash
-> pnpm add -D "git+https://github.com/csrinaldi/brain.git#v1.0.0"
+> pnpm add -D @logikas/brain
 > pnpm dlx brain init                  # or: npx brain init
 > pnpm run brain:env:init
 > pnpm run brain:day:start
@@ -150,8 +153,8 @@ Then:
 ### Updating brain
 
 ```bash
-npm run brain:upgrade -- v1.0.0             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v1.0.0 --dry-run   # preview what would change
+npm run brain:upgrade -- v1.1.0             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v1.1.0 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](CHANGELOG.md) before upgrading — **renames / breaking

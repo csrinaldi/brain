@@ -1,0 +1,97 @@
+# publish.yml — publishes @logikas/brain to the npm registry (ADR-0030, #655).
+#
+# MANUAL ONLY, and that is the decision. Publishing is irreversible in a way
+# tagging is not: an over-broad or wrong tarball cannot be cleanly unpublished
+# (ADR-0030, Consequences). So there is no push or tag trigger — a human types
+# the version.
+#
+# NOT MERGED INTO release.yml. That workflow is the rung-2 release GATE: it runs
+# brain-audit and blocks. This one performs an irreversible outward-facing act.
+# One refuses, the other publishes; giving them the same trigger would mean the
+# audit's schedule decides when bytes reach strangers.
+#
+# THE DRY-RUN IS NOT CEREMONY. The token must be scoped to `@logikas/*`, not to a
+# package — `@logikas/brain` does not exist until the first publish, so a granular
+# token limited to selected packages cannot cover it. A rehearsal turns that into
+# a red step before anything is uploaded, instead of an auth error half-way.
+#
+# `--access public` appears here AND in package.json's publishConfig. A scoped
+# package publishes `restricted` by default: npm SUCCEEDS, the version is burned,
+# and nobody can install it. Belt and braces, because the flag alone does not
+# cover a manual `npm publish` from a laptop (ADR-0030 Amendment 2, #653).
+#
+# This workflow is deliberately NOT in package.json's `files`: a consumer needs
+# the governance workflows, not brain's release machinery (#607).
+
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version being published (must match package.json, e.g. 1.1.0)'
+        required: true
+        type: string
+
+# The minimum: read the tree, publish from it. No writes to the repository.
+permissions: { contents: read }
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      # The declared version and the manifest must agree. Typing the wrong one
+      # here would publish a version nobody reviewed, under a number nobody
+      # expects — and it cannot be taken back.
+      - name: The input matches package.json
+        run: |
+          declared="$(node -p "require('./package.json').version")"
+          if [ "$declared" != "${{ inputs.version }}" ]; then
+            echo "::error::package.json says $declared, the run was dispatched for ${{ inputs.version }}"
+            exit 1
+          fi
+          echo "publishing $declared"
+
+      # A version number that already names a DIFFERENT tree is the one mistake
+      # here that cannot be taken back. `v1.0.0` was cut against the git-tag
+      # mechanism and hundreds of commits ago; publishing `1.0.0` from today's
+      # tree would put those bytes behind a number that already means something
+      # else, and npm versions are immutable.
+      #
+      # So: if a tag for this version exists and is not this commit, refuse.
+      # No tag at all is fine — that is a normal pre-tag publish.
+      - name: This version does not already name a different tree
+        run: |
+          v="${{ inputs.version }}"
+          if git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
+            tagged="$(git rev-parse "refs/tags/v$v^{commit}")"
+            head="$(git rev-parse HEAD)"
+            if [ "$tagged" != "$head" ]; then
+              echo "::error::tag v$v points at $tagged but HEAD is $head — publishing $v from here would put different bytes behind a version that already exists. Bump the version."
+              exit 1
+            fi
+          fi
+
+      - run: npm ci
+
+      # The tarball's contents are decided by test/publish-allowlist.e2e.test.mjs,
+      # which packs for real and walks what comes out. Running the suite before an
+      # irreversible act is cheap; discovering it afterwards is not possible.
+      - run: npm test
+
+      - name: Rehearse the publish
+        run: npm publish --dry-run --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BRAIN_TOKEN }}
+
+      - name: Publish
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BRAIN_TOKEN }}
