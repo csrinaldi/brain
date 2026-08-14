@@ -259,7 +259,7 @@ verdict.
 
 [**unit-testable**: the malformed-response and multi-page behavior are covered by the
 contract test's spawn/fetch call assertions (`gitlabPrReviewsCallArgs` URL-dispatch glue) —
-no live pagination is exercised in the fixture suite (deferred to CP-A3b/SCIT live smoke), but
+no live pagination is exercised in the fixture suite (deferred to CP-A3b self-hosted live smoke), but
 the request construction is asserted to include the pagination parameters.]
 
 #### Scenario: A long verdict thread's request includes pagination parameters

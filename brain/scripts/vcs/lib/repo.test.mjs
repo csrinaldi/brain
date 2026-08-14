@@ -20,8 +20,11 @@ test('parseRemote: SSH', () => {
 });
 
 test('parseRemote: GitLab subgroups', () => {
-  assert.deepEqual(parseRemote('https://git.santafe.gov.ar/scit/grupo/sub/repo.git'),
-    { host: 'git.santafe.gov.ar', project: 'scit/grupo/sub/repo' });
+  // A reserved name (RFC 2606), like every sibling assertion here. The path keeps
+  // four segments because that is what this test is FOR — nested groups, which
+  // GitHub does not have and GitLab does.
+  assert.deepEqual(parseRemote('https://git.example.com/org/group/sub/repo.git'),
+    { host: 'git.example.com', project: 'org/group/sub/repo' });
 });
 
 test('parseRemote: custom HTTPS port is dropped from host, slug stays clean', () => {
