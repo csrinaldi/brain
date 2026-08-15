@@ -73,6 +73,28 @@ export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir(
   };
 }
 
+/**
+ * RULING (issue #634): the reviewer reads the DEDUPED records and deliberately
+ * does NOT carry the duplicate accounting into its verdict. Recorded here as a
+ * decision rather than left as an omission — which is what #634 asks for.
+ *
+ * The reasoning is about what a verdict is ABOUT. These records are doctrine
+ * (`DOCTRINE_TYPES`), loaded to inform a judgement on someone's pull request.
+ * How many physical lines the store spends on that doctrine is a fact about
+ * repository HYGIENE — a `merge=union` residual (ADR-0017, REQ-MF-3) arriving
+ * from unrelated branches. Surfacing it here would let it colour a verdict it
+ * has no bearing on, and the PR author could do nothing about it.
+ *
+ * Deduping is not merely acceptable here, it is REQUIRED: a doctrine record
+ * appearing twice would otherwise be weighed twice, purely because two branches
+ * both appended to the month file it happens to live in.
+ *
+ * So this silence is deliberate — and it is not the silence #634 is about. The
+ * store's duplicates ARE reported, on the surfaces that own store hygiene:
+ * every `memory/cli.mjs` op that reads the store (#574), and `brain:metrics`'
+ * coverage line (#634). If that ever stops being true, this ruling is wrong and
+ * should be revisited rather than quietly inherited.
+ */
 function defaultReadRecords({ cwd = process.cwd() } = {}) {
   return () => readRecordObservations({ recordsDir: join(cwd, '.memory', 'records') });
 }

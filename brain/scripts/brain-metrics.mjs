@@ -293,6 +293,27 @@ export function renderMarkdown({
       `- memory records coverage: ${memCoverage.tagged}/${memCoverage.total} tagged with \`issue\` `
       + `(${fmtPct(memCoverage.coveragePct)}) — adoption pending`,
     );
+    // #634 — the denominator above is the DEDUPED record count, and it dropped
+    // by 139 on this repo's corpus when #598 changed the reader from one-per-
+    // line to one-per-`id`. The new number is the right one; what was missing
+    // was any way for an operator watching this figure to find out why it moved.
+    // One line, and only when there is something to say — the same discipline
+    // memory/cli.mjs applies, not a warning banner.
+    const dup = memCoverage.duplicates;
+    if (dup?.lines > 0) {
+      // Phrased as an ACCOUNTING of the lines the reader resolved, never as a
+      // claim about the file. `readRecords` silently skips unparseable lines, so
+      // "the store holds N physical line(s)" — the first wording here — asserts
+      // a number it never measured: with one corrupt line it reports 2 where
+      // `wc -l` says 3. Measured, and corrected. Stating the sum keeps the
+      // reconciliation the reader wants without inventing a total.
+      lines.push(
+        `  - ${memCoverage.total} indexed + ${dup.lines} repeated = ${memCoverage.total + dup.lines} `
+        + `record line(s) read; the ${dup.lines} repeats cover ${dup.ids} id(s) and are collapsed into `
+        + 'the count above. Normal for `merge=union` (ADR-0017, REQ-MF-3) — run '
+        + '`npm run memory:reindex` for the per-id locations.',
+      );
+    }
   }
   lines.push('');
   lines.push('Caveats: lead time is an ISSUE-APPROVAL proxy (last `status:approved` label-add '
@@ -311,6 +332,24 @@ export function renderMarkdown({
  * the flat-array contract with a wrapping object.
  */
 export function renderJson({ rows, memGate, memCoverage }) {
+  // #634 — the duplicate accounting travels into JSON as COUNTS ONLY. The
+  // `groups` array carries every repeated id with its file:line occurrences,
+  // and `memoryRecordsCoverage` is denormalized onto every row, so passing it
+  // through whole was measured at 6871 bytes per row against 111 without — 62×,
+  // and ~79 KiB of byte-identical repetition on a 12-period run. The locations
+  // have a home already: `npm run memory:reindex` prints them once.
+  //
+  // Projected explicitly rather than by deleting a key, so a field added to
+  // `duplicates` later cannot silently start bloating this output again.
+  const { duplicates } = memCoverage;
+  const coverage = {
+    ...memCoverage,
+    duplicates: {
+      ids: duplicates?.ids ?? 0,
+      lines: duplicates?.lines ?? 0,
+      divergent: duplicates?.divergent ?? 0,
+    },
+  };
   return JSON.stringify(
     rows.map((row) => ({
       period: row.period,
@@ -322,7 +361,7 @@ export function renderJson({ rows, memGate, memCoverage }) {
       detection: row.detection,
       uncomputable: row.uncomputable,
       memoryGatePassAtHead: memGate.pass,
-      memoryRecordsCoverage: memCoverage,
+      memoryRecordsCoverage: coverage,
     })),
     null,
     2,

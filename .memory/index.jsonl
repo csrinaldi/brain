@@ -1975,6 +1975,7 @@
 {"id":"rec-f5bcbdbdee8873d6","ts":"2026-07-29T14:27:27Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f5cd1fc641cc02d2","ts":"2026-07-25T21:50:10Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f5fd5332bfd263f2","ts":"2026-07-13T00:21:56Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-f63a700be2283f2e","ts":"2026-08-14T19:57:29Z","actor":"claude/brain-memory-634-readers-report-the-collapse","type":"decision","project":"brain","issue":634,"file":"2026-08.jsonl"}
 {"id":"rec-f63e5b80cc6347f8","ts":"2026-07-13T00:21:59Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f651948cdb32c033","ts":"2026-07-21T02:38:34Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f6d55db07867cb9b","ts":"2026-07-13T00:21:54Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
