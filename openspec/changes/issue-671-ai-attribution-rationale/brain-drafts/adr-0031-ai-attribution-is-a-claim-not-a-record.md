@@ -105,14 +105,33 @@ is per-clone, so the server half is the one that always runs). One shared corpus
 pins the two hooks and `tranche.mjs` together, closing the one-rule-three-
 implementations hazard before it produces its first drift.
 
-**Vendor-neutral by construction.** brain ships into other people's
-repositories, and the doctrine says *"AI attribution"*, not one vendor's. A hook
-that only recognised the agent this repository happens to use would enforce the
-rule here and **silently exempt every consumer using another** — a confident
-check over a narrow subject, which is the defect family this repository keeps
-closing. The pattern therefore carries an agent list (`claude`, `copilot`,
-`chatgpt`, `gpt`, `gemini`, `cursor`, `devin`, `codex`, `aider`, `windsurf`)
-rather than a single name.
+**Platform-agnostic, which is stronger than multi-vendor.** brain ships into
+other people's repositories, and the doctrine says *"AI attribution"*, not one
+vendor's. A hook recognising only the agent this repository happens to use would
+enforce the rule here and **silently exempt every consumer using another**.
+
+Broadening the baked list fixes that badly: a list is a snapshot, and today's
+agents are not next year's. `opencode`, `antigravity` and whatever follows are
+not in it, and a consumer would have to wait for a **brain release** before they
+could enforce their own rule against their own tooling. That is the wrong
+dependency for a governance rule to have.
+
+So the vocabulary is **configuration**, and the baked list is only a fallback:
+
+```
+git config brain.aiAgents 'claude|opencode|antigravity'
+```
+
+`git config` is the channel because git is the one dependency both hooks already
+have. `pre-receive` is installed into a bare repository as a **single
+self-contained file** — `brain-protect-server.mjs` copies exactly one — so a
+sibling data file never reaches the server, and `brain.config.json` is not there
+to read. A git config key travels with the repository it governs.
+
+The key **replaces** the default rather than extending it: an operator who sets
+it owns the vocabulary completely. That is a decision, not an accident, and it
+is pinned by test — the opposite reading (a floor that cannot be narrowed) is
+equally plausible from the code alone.
 
 > **The doctrine text is still vendor-flavoured.** `agent-authorities.md`
 > reads *"Add AI attribution in commits (`Co-Authored-By: Claude...`)"*. The
@@ -120,9 +139,11 @@ rather than a single name.
 > line is a Tier-2 edit and therefore the maintainer's, not the agent's —
 > flagged here rather than done.
 
-**Negative, stated plainly.** The pattern is a list of observed spellings, not a
-general detector of AI attribution — no such list can be complete. It will catch
-the forms actually in circulation and miss a novel one until that form is added.
+**Negative, stated plainly.** Even configured, the pattern is a list of
+spellings rather than a general detector of AI attribution — no such list can be
+complete, and the shipped default will always trail the tooling. What
+configuration buys is that a consumer can close their own gap in one command
+instead of waiting for someone else to ship it.
 A guard that claimed completeness would be the apparent protection
 `cites-resolve.test.mjs` exists to refuse (#499).
 

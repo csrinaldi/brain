@@ -47,3 +47,26 @@ filename resolves trivially, and this is the fourth instance of the class.
 `tranche.mjs`'s `ai-attribution` finding cites doctrine that exists, names the
 surface it actually reads (the PR body), and points at the hooks for the commit
 surface it does not read.
+
+## REQ-671-6 — The agent vocabulary is configuration, not a shipped constant
+
+Both hooks read `git config brain.aiAgents`, falling back to a baked default.
+The configured value **replaces** the default; an operator who sets the key owns
+the vocabulary.
+
+A baked list is a snapshot: today's agents are not next year's, and a consumer
+whose tooling is absent from it would otherwise wait for a **brain release**
+before enforcing their own rule. `git config` is the channel because git is the
+only dependency `pre-receive` has — it installs into a bare repository as a
+single self-contained file, so no sibling data file and no `brain.config.json`
+is reachable from the server.
+
+## REQ-671-7 — The corpus measures the shipped default, not the machine running it
+
+The hook resolves `git config` against global and system scope when run outside
+a repository. Tests neutralise both, and a positive control asserts the default
+catches an attributed message with no configuration present.
+
+Without this the suite would measure whoever ran it — green on one machine, red
+on another, asserting the shipped behaviour on neither. Same hazard #657 closed
+for an ambient token.

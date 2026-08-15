@@ -56,7 +56,24 @@ fi
 # be complete, and one claiming to be would be apparent protection (#499). The
 # `generated` shape requires the bracket of a markdown link so ordinary prose
 # ("generated with cursor pagination") is not caught — pinned by the corpus.
-AI_AGENTS='claude|copilot|chatgpt|gpt|gemini|cursor|devin|codex|aider|windsurf'
+# PLATFORM-AGNOSTIC, not merely multi-vendor. A baked list — however broad —
+# always lags: today's agents are not next year's, and for a package that ships
+# into other people's repositories it would mean waiting for a brain RELEASE
+# before a consumer can enforce their own rule against their own tooling.
+#
+# `git config brain.aiAgents` is the override, because git is the one dependency
+# both hooks already have. `pre-receive` is installed into a bare repo as a
+# SINGLE self-contained file (brain-protect-server.mjs copies exactly one), so a
+# sibling data file would never reach the server and brain.config.json is not
+# there to read. A git config key travels with the repository it governs.
+#
+#   git config brain.aiAgents 'claude|opencode|antigravity'
+#
+# The baked default is the fallback, never a floor: an operator who sets the key
+# owns the list completely. Read identically in pre-receive — pinned by
+# hooks.attribution-parity.test.mjs.
+AI_AGENTS=$(git config --get brain.aiAgents 2>/dev/null)
+[ -z "$AI_AGENTS" ] && AI_AGENTS='claude|copilot|chatgpt|gpt|gemini|cursor|devin|codex|aider|windsurf'
 AI_ATTRIBUTION_RE="co-authored-by:[[:space:]]*($AI_AGENTS)|($AI_AGENTS)-session:|generated[[:space:]]+(with|by)[[:space:]]*\[($AI_AGENTS)|🤖"
 if echo "$msg" | grep -qiE "$AI_ATTRIBUTION_RE"; then
   echo ""

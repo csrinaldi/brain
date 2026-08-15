@@ -47,9 +47,22 @@ Broadening it created a second risk the corpus now pins: `cursor`, `codex` and
 `"generated with cursor pagination"` and a human co-author surnamed
 `Copilotti`. A gate that fires on innocent input teaches people to bypass it.
 
+Then a second, sharper correction: **a broadened list is still not agnostic.**
+`opencode` and `antigravity` are not in it, and a consumer would have to wait
+for a brain release to enforce their own rule against their own tooling. The
+vocabulary moved to `git config brain.aiAgents`, with the baked list demoted to
+a fallback — `git config` because it is the only dependency `pre-receive` has,
+installed as it is into a bare repo as one self-contained file.
+
 Also corrected: the parity test originally **scraped** `tranche.mjs`'s source
 for its regex. A guard that parses the file it guards fails open the moment the
 declaration is reformatted. The pattern is now exported and imported.
+
+And the config read introduced its own hazard, caught before it shipped: outside
+a repository `git config` resolves against GLOBAL scope, so the corpus would
+have measured the developer's machine. Neutralised, with a positive control
+asserting the shipped default fires with no configuration at all — verified by
+setting a decoy global key and re-running green (#657's shape).
 
 ## Evidence — mutation testing
 
@@ -59,7 +72,8 @@ then grep-confirmed), to turn the suite **red**, and to revert **byte-identical*
 | # | mutation | result |
 |---|---|---|
 | 1 | restore the dead `CLAUDE.md` citation | the `.md` guard names the exact file and line |
-| 2 | narrow the hooks' agent list back to one vendor | the parity corpus goes red on the other vendors |
+| 2 | narrow the hooks' agent list back to one vendor | 3 tests red |
+| 3 | drop the `git config` read from one hook | the same-key parity test goes red |
 
 Suite and checks reported in the PR.
 

@@ -80,10 +80,16 @@ while IFS=' ' read -r oldrev newrev refname; do
     #
     # BYTE-IDENTICAL to commit-msg's pattern, pinned by
     # hooks.attribution-parity.test.mjs (#130, #340, #555).
-    # Vendor-neutral: brain ships into other people's repositories, and a hook
-    # that only knew one agent would silently exempt every consumer using
-    # another. Observed spellings, not a complete detector (#499).
-    AI_AGENTS='claude|copilot|chatgpt|gpt|gemini|cursor|devin|codex|aider|windsurf'
+    # Platform-agnostic: a baked list always lags, and this file is installed
+    # into a BARE repo as a single self-contained copy — no sibling data file
+    # reaches the server and brain.config.json is not there to read. `git config`
+    # is the one channel that travels with the repository it governs:
+    #
+    #   git config brain.aiAgents 'claude|opencode|antigravity'
+    #
+    # Same key, same fallback, same expansion as commit-msg — pinned.
+    AI_AGENTS=$(git config --get brain.aiAgents 2>/dev/null)
+    [ -z "$AI_AGENTS" ] && AI_AGENTS='claude|copilot|chatgpt|gpt|gemini|cursor|devin|codex|aider|windsurf'
     AI_ATTRIBUTION_RE="co-authored-by:[[:space:]]*($AI_AGENTS)|($AI_AGENTS)-session:|generated[[:space:]]+(with|by)[[:space:]]*\[($AI_AGENTS)|🤖"
     if printf '%s\n' "$msg" | grep -qiE "$AI_ATTRIBUTION_RE"; then
       printf '\n'

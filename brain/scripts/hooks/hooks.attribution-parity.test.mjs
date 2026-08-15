@@ -83,12 +83,28 @@ const MUST_ACCEPT = [
     'fix(x): thing (#1)\n\nCo-Authored-By: Marie Copilotti <marie@example.com>'],
 ];
 
-function runCommitMsg(message) {
+/** Runs the hook with the developer's own git configuration NEUTRALISED.
+ *
+ * The hook reads `git config --get brain.aiAgents`, and outside a repository
+ * that resolves against GLOBAL and SYSTEM config. Without this the corpus would
+ * measure whoever is running it — green on one machine, red on another, and
+ * asserting the default on neither. Same hazard #657 closed for an ambient
+ * token: a test must measure the thing, not the shell it was launched from. */
+function runCommitMsg(message, env = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'attr-parity-'));
   try {
     const file = join(dir, 'COMMIT_EDITMSG');
     writeFileSync(file, message);
-    return spawnSync('sh', [COMMIT_MSG_HOOK, file], { encoding: 'utf8' });
+    return spawnSync('sh', [COMMIT_MSG_HOOK, file], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_SYSTEM: '/dev/null',
+        GIT_CONFIG_NOSYSTEM: '1',
+        ...env,
+      },
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -99,7 +115,7 @@ function runCommitMsg(message) {
  * not a JS approximation of it. */
 function shPattern(path) {
   const text = readFileSync(path, 'utf8');
-  const agents = text.match(/AI_AGENTS='([^']+)'/);
+  const agents = text.match(/AI_AGENTS='([^']+)'/);   // the baked fallback
   const pattern = text.match(/AI_ATTRIBUTION_RE="([^"]+)"/);
   assert.ok(agents, `${path} does not define AI_AGENTS`);
   assert.ok(pattern, `${path} does not define AI_ATTRIBUTION_RE`);
@@ -140,6 +156,17 @@ test('commit-msg ACCEPTS legitimate messages, including a human co-author (#671)
   }
 });
 
+test('the corpus measures the DEFAULT, not the machine running it (#671)', () => {
+  // The positive control for the isolation above. If a developer had
+  // `brain.aiAgents` set globally, the corpus would silently exercise their
+  // list instead of the shipped default and prove nothing about what ships.
+  const r = runCommitMsg(
+    'fix(x): thing (#1)\n\nCo-Authored-By: Claude <x@example.invalid>',
+    { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+  );
+  assert.equal(r.status, 1, 'the shipped default must catch this with no configuration at all');
+});
+
 test('commit-msg checks attribution BEFORE the ticket-ref exemptions (#671)', () => {
   // `chore(release)` and `chore(memory)` are exempt from the ticket rule. If the
   // attribution check sat after that exemption, those two commit types would
@@ -172,6 +199,53 @@ test('both shell patterns give the same answer on every corpus entry (#671)', ()
     assert.equal(grepMatches(client, message), false, `client must not match: ${label}`);
     assert.equal(grepMatches(server, message), false, `server must not match: ${label}`);
   }
+});
+
+// ── The list is configurable, so the rule outlives today's tooling ──────────
+//
+// A baked list always lags. brain ships into other people's repositories, and a
+// consumer whose agent is not in the default must be able to enforce their own
+// rule without waiting for a brain release. `git config brain.aiAgents` is the
+// channel because git is the only dependency `pre-receive` has — it is installed
+// into a bare repo as one self-contained file, so no sibling data file and no
+// brain.config.json is reachable from there.
+
+test('commit-msg honours git config brain.aiAgents — tomorrow\'s agent needs no release (#671)', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'attr-cfg-'));
+  try {
+    spawnSync('git', ['init', '-q', repo]);
+    // An agent that does NOT exist in the baked default.
+    spawnSync('git', ['-C', repo, 'config', 'brain.aiAgents', 'opencode|antigravity']);
+
+    const file = join(repo, 'COMMIT_EDITMSG');
+    const attributed = 'fix(x): thing (#1)\n\nCo-Authored-By: OpenCode <bot@example.invalid>';
+    writeFileSync(file, attributed);
+    const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
+    const blocked = spawnSync('sh', [COMMIT_MSG_HOOK, file], { cwd: repo, encoding: 'utf8', env: gitEnv });
+    assert.equal(blocked.status, 1, 'a configured agent must be enforced');
+    assert.match(blocked.stdout, /AI attribution is prohibited/);
+
+    // And the override REPLACES the default rather than extending it — an
+    // operator who sets the key owns the list. Stated as a test because the
+    // opposite (a floor) is the other plausible reading.
+    writeFileSync(file, 'fix(x): thing (#1)\n\nCo-Authored-By: Claude <x@example.invalid>');
+    const allowed = spawnSync('sh', [COMMIT_MSG_HOOK, file], { cwd: repo, encoding: 'utf8', env: gitEnv });
+    assert.equal(allowed.status, 0,
+      'the configured list replaces the default — the key is the whole vocabulary, not an addition to it');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('both hooks read the SAME config key, with the same fallback (#671)', () => {
+  const client = readFileSync(COMMIT_MSG_HOOK, 'utf8');
+  const server = readFileSync(PRE_RECEIVE_HOOK, 'utf8');
+  for (const [name, text] of [['commit-msg', client], ['pre-receive', server]]) {
+    assert.match(text, /git config --get brain\.aiAgents/,
+      `${name} must read the override, or a consumer's configuration silently applies to only half the gate`);
+  }
+  assert.equal(shPattern(COMMIT_MSG_HOOK).agents, shPattern(PRE_RECEIVE_HOOK).agents,
+    'and the baked fallbacks must not drift either');
 });
 
 // ── The reviewer's regex agrees with the hooks ──────────────────────────────
