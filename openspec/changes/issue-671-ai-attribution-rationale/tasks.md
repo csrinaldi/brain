@@ -95,8 +95,35 @@ each measured:
 The wording is now the *only* vendor-specific part left: the enforcement reads
 `git config brain.aiAgents` and is agnostic.
 
-Applying it also owes the **`AGENTS.md` regeneration** — `brain-promote.mjs`
-treats that as its own act because a previous change lost it on the human's side.
+### Both drafts are consumed by `brain:promote`, not moved by hand
+
+Corrected after the maintainer pointed out the verb exists. The first cut said
+*"the maintainer moves it"* — which would skip §1d's cascade, including the
+`brain/HOME.md` index entry `decision-gate` checks and the `AGENTS.md`
+regeneration. A hand-rolled promoter lost precisely that step once before; the
+verb exists because of it.
+
+```
+npm run brain:promote -- .../brain-drafts/adr-0031-ai-attribution-is-a-claim-not-a-record.md
+npm run brain:promote -- .../brain-drafts/agent-authorities.draft.md
+```
+
+The amendment draft also had to be **rewritten to a shape the verb accepts**: it
+was prose with a decorative diff, and `brain:promote` requires a `.draft.md`
+basename plus a `brain-amendment/1` contract with ordered
+`amend-find`/`amend-replace` pairs. Prose plus line references is exactly what
+that contract exists to refuse — a draft a human applies by hand.
+
+**Validated rather than handed over on faith**, since the whole change is about
+not shipping unverified claims:
+
+| check | result |
+|---|---|
+| ADR basename / H1 vs `DRAFT_BASENAME_RE` | valid |
+| amendment contract parses | valid — non-ADR target, 3 edits |
+| every `amend-find` anchor occurs in the target | exactly once each |
+| `planAmendment` against the real file | applies clean, 3 acts pending |
+| resulting text | `JARs`, `backend:deploy` and the vendor-specific trailer gone; the three replacements present |
 
 ## The mechanism blocked the commit that documents it
 

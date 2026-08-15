@@ -3,11 +3,25 @@
 **Status**: Proposed — pending human signature
 **Date**: 2026-08-15 — drafted by agent, per `agent-authorities.md` Tier 2
 
-> **Draft location.** `brain/project/decisions/**` is Tier 3 for the agent —
-> prohibited, even if explicitly asked. This file is written to
-> `openspec/changes/issue-671-ai-attribution-rationale/brain-drafts/` and is for
-> the maintainer to move, review and sign. Moving it into `brain/` also owes
-> `brain/HOME.md` an index entry, which `decision-gate` checks.
+> **Promote with the verb, do not move the file.**
+>
+> ```
+> npm run brain:promote -- openspec/changes/issue-671-ai-attribution-rationale/brain-drafts/adr-0031-ai-attribution-is-a-claim-not-a-record.md
+> ```
+>
+> `brain/project/decisions/**` is Tier 3 for the agent — prohibited, even if
+> explicitly asked — and `brain:promote` is the sanctioned path (ADR-0028): it
+> renders this draft in full, shows every act with its before and after,
+> requires the typed word `PROMOTE`, then **stages and stops**. Running the
+> commit command it prints is the human signature.
+>
+> Copying the file by hand instead would skip §1d's cascade — including the
+> `brain/HOME.md` index entry `decision-gate` checks and the `AGENTS.md`
+> regeneration. A hand-rolled promoter lost exactly that step once before, which
+> is why the verb exists.
+>
+> Verified against the verb's own contract rather than assumed: the basename
+> satisfies `DRAFT_BASENAME_RE` and the H1 satisfies its `ADR-NNNN — title` shape.
 
 ## Context
 
