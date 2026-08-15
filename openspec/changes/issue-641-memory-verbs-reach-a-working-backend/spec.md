@@ -21,11 +21,22 @@ When `MEMORY_BACKEND` is set explicitly — in the environment **or** in `.env` 
 MUST run that backend, even when its binary is absent, and the run MUST still fail. The failure
 MUST additionally name the records-only route that does work.
 
-## REQ-641-4 — the substitution is bounded to ops the fallback serves natively
-Only `share`, `pull`, `setup`, `save` and `search` MAY be substituted. `index`, `import`,
-`feature-checkpoint` and `feature-resume` project into engram's own store and MUST keep engram's
-error, which names the actual fix. A substitution MUST NOT replace a message that names a
-remedy with one that names a backend the caller never chose.
+## REQ-641-4 — the substitution is bounded to ops that the missing binary actually BLOCKS
+Only `share` and `pull` MAY be substituted — the ops measured to fail with "engram binary not
+found". Every other op MUST keep engram's behaviour:
+
+- `setup` and `index` exit 0 with no binary installed. `engram.setup()` in particular creates the
+  `.engram → .memory` symlink and registers the `merge=union` driver for `.memory/manifest.json`
+  (ADR-0002), and `plainfiles.setup()` does NEITHER — substituting silently drops the merge driver
+  that ADR-0017's union safety rests on.
+- `save`/`search` are refused by design (C3 Decision 5), and the refusal already names the
+  records-only route (#530). Substituting would make that signpost unreachable.
+- `import` is genuinely blocked, but `plainfiles` has no `importMemory`, so substituting trades a
+  message naming the actual fix for one naming a backend the caller never chose.
+
+A fallback MAY only replace a FAILURE. Where the op does not fail on the binary, a substitution is
+not a fallback but a silent behaviour change, and is prohibited. The covered set MUST be derived
+from measured behaviour, not from which ops the fallback backend happens to implement.
 
 ## REQ-641-5 — presence is measured, never inferred from a failure
 The decision MUST be driven by a direct probe of the binary, never by inspecting a thrown

@@ -42,19 +42,42 @@ export const FALLBACK_BACKEND = "plainfiles";
 export const ENGRAM_BIN = "engram";
 
 /**
- * The ops the fallback covers — the ops that are ABOUT the brain-owned durable
- * format (ADR-0017), which is exactly the set `plainfiles` serves natively.
+ * The ops the fallback covers: EXACTLY the ops that fail BECAUSE the binary is
+ * missing. Measured on a machine with no `engram`, not reasoned about — the
+ * first version of this list was reasoned about, and three of its five entries
+ * were wrong:
  *
- * The exclusions are deliberate, not an oversight. `index` projects `brain/`
- * docs into engram's own store and `feature-checkpoint`/`feature-resume`
- * project into engram namespaces (ADR-0004); `import` hydrates engram from
- * `records/`. Those ops exist to serve engram, so substituting `plainfiles`
- * would only trade "engram binary not found" — which names the actual fix,
- * installing it — for "op is not supported by the 'plainfiles' backend", which
- * names a backend the caller never asked for. A fallback that degrades the
- * message is not a fallback, so they keep engram's error.
+ *   share   → engram binary not found            ← genuinely blocked, covered
+ *   pull    → engram binary not found            ← genuinely blocked, covered
+ *   import  → engram binary not found            ← blocked, but see below
+ *   setup   → ✓ merge driver registered, EXIT 0  ← never needed the binary
+ *   save    → 'save' is not a cli verb for engram ← a deliberate refusal
+ *   search  → 'search' is not a cli verb for engram ← a deliberate refusal
+ *   index   → "0 documentos indexados", EXIT 0    ← never calls requireEngram
+ *
+ * A fallback may only replace a FAILURE. Where there is none it is not a
+ * fallback, it is a silent behaviour change:
+ *
+ *   - `setup` was the regression. `engram.setup()` creates the `.engram →
+ *     .memory` symlink and registers the `merge=union` driver for
+ *     `.memory/manifest.json` (ADR-0002), and needs no binary to do either.
+ *     Substituting `plainfiles.setup()` — which deliberately does NEITHER —
+ *     silently dropped the merge driver on every machine without engram, which
+ *     is the very mechanism ADR-0017's union safety rests on.
+ *   - `save`/`search` are not blocked either: engram REFUSES them by design
+ *     (C3 Decision 5), and its refusal already names the records-only route
+ *     (#530's `memory.save.engramUnsupported`). Substituting would make that
+ *     signpost unreachable on the default backend — replacing a designed
+ *     refusal with different behaviour rather than repairing a failure.
+ *
+ * `import` IS genuinely blocked, and is still excluded — but on its own ground:
+ * `plainfiles` has no `importMemory` at all, so substituting would trade
+ * "engram binary not found", which names the actual fix, for "backend
+ * 'plainfiles' does not implement op 'import'", which names a backend the
+ * caller never chose. `index` and `feature-*` project into engram's own store
+ * and are excluded for the same reason plus never failing on the binary.
  */
-export const FALLBACK_OPS = Object.freeze(["share", "pull", "setup", "save", "search"]);
+export const FALLBACK_OPS = Object.freeze(["share", "pull"]);
 
 /**
  * Reasons `selectBackend` can return. Exported so callers branch on a value

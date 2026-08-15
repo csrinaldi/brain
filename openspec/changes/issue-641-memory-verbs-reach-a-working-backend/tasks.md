@@ -45,9 +45,35 @@ issue: 641
       because the runner is root and cannot make a chmod-based cleanup fail).
 - [x] **T12** Acceptance proved by running the shipped verb here, not by reading the code:
       `npm run memory:share` → exit 0, substitution announced, `.memory/` unchanged.
-- [ ] **T13** *(filed, not done)* `memory:index` with no engram exits **0** and reports
+- [x] **T13** **Cold review of this PR caught a regression I had introduced.** The first
+      `FALLBACK_OPS` was `["share","pull","setup","save","search"]`, derived by reasoning ("the ops
+      plainfiles serves natively") and never measured against what actually fails without the
+      binary. Measured afterwards, three of the five were wrong:
+
+      | op | with no engram, BEFORE #641 | verdict |
+      |---|---|---|
+      | `share` | `engram binary not found` | genuinely blocked — covered |
+      | `pull` | `engram binary not found` | genuinely blocked — covered |
+      | `setup` | `✓ merge driver registered`, **exit 0** | **REGRESSION** — removed |
+      | `save` | `'save' is not a cli verb for engram` | designed refusal — removed |
+      | `search` | `'search' is not a cli verb for engram` | designed refusal — removed |
+      | `index` | `0 documentos indexados`, exit 0 | never blocked — stays out |
+
+      `setup` was the real defect: `engram.setup()` needs no binary and is what creates the
+      `.engram → .memory` symlink and registers the `merge=union` driver for
+      `.memory/manifest.json` (ADR-0002). `plainfiles.setup()` does neither, so the substitution
+      silently dropped the merge driver on every machine without engram — the mechanism ADR-0017's
+      union safety depends on. `FALLBACK_OPS` is now `["share","pull"]`, and the rule is stated as
+      "a fallback may only replace a FAILURE".
+- [x] **T14** Same review caught a fragile assertion: `doesNotMatch(/not installed here/)` collided
+      with #530's `memory.save.engramUnsupported`, which contains the words "If engram is not
+      installed here (the agent environment)". Every guard on a non-substituted op could trip on an
+      unrelated message, and every positive match could in principle have been satisfied by one.
+      Anchored on a phrase unique to the notice instead.
+- [x] **T15** Re-proved: the old list restored as a mutation fails 5 tests; suite 3650, 0 failures.
+- [ ] **T16** *(filed, not done)* `memory:index` with no engram exits **0** and reports
       `0 documentos indexados` after failing on every document — a total failure that reads as a
       healthy zero. `brain-to-engram.mjs`, out of this ticket's file claim.
-- [ ] **T14** *(filed, not done)* `requireEngram`'s two remaining messages are hardcoded English.
+- [ ] **T17** *(filed, not done)* `requireEngram`'s two remaining messages are hardcoded English.
       That is #638's territory (catalogs, not call sites); the new strings added here all went to
       the catalogs.

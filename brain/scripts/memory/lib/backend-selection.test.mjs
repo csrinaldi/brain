@@ -102,15 +102,28 @@ test('#641 selectBackend: PRECONDITION 2 removed — engram PRESENT means engram
   assert.equal(r.reason, REASON.AVAILABLE);
 });
 
-test('#641 selectBackend: PRECONDITION 3 removed — an op the fallback does not serve keeps engram', () => {
-  // `index` projects brain/ docs into engram's OWN store; substituting plainfiles
-  // would replace "install engram" with "plainfiles does not do index", which
-  // names a backend the caller never asked for.
-  for (const op of ['index', 'import', 'feature-checkpoint', 'feature-resume']) {
+test('#641 selectBackend: PRECONDITION 3 removed — an op that is not BLOCKED by the binary keeps engram', () => {
+  // Measured, not reasoned about. `setup` and `index` exit 0 with no engram
+  // installed; `save`/`search` are refused by design and their refusal already
+  // names the records-only route. Only a genuine binary-not-found failure may be
+  // replaced — see FALLBACK_OPS for the full measurement.
+  for (const op of ['setup', 'save', 'search', 'index', 'import', 'feature-checkpoint', 'feature-resume']) {
     const r = selectBackend({ requested: DEFAULT_BACKEND, stated: false, op, probe: ABSENT });
     assert.equal(r.substituted, false, `${op} must not be substituted`);
     assert.equal(r.reason, REASON.OP_NOT_COVERED);
     assert.equal(r.backend, DEFAULT_BACKEND);
+  }
+});
+
+test('#641 FALLBACK_OPS covers ONLY the ops that engram cannot run without its binary', () => {
+  // The regression this pins: `setup` was in the list, and `engram.setup()`
+  // needs no binary — it creates the `.engram → .memory` symlink and registers
+  // the `merge=union` driver (ADR-0002). Substituting `plainfiles.setup()`,
+  // which does neither, silently dropped the merge driver on every machine
+  // without engram.
+  assert.deepStrictEqual([...FALLBACK_OPS], ['share', 'pull']);
+  for (const op of ['setup', 'save', 'search', 'index']) {
+    assert.ok(!FALLBACK_OPS.includes(op), `'${op}' exits without the binary — there is no failure to replace`);
   }
 });
 
@@ -142,19 +155,30 @@ test('#641 selectBackend: a non-default backend is passed through untouched', ()
   assert.equal(r.reason, REASON.NOT_DEFAULT);
 });
 
-// ── the covered set is exactly what plainfiles serves NATIVELY ───────────────
+// ── the covered ops must actually be servable by the fallback ────────────────
 
-test('#641 FALLBACK_OPS: every covered op is implemented by the fallback backend, and no deferred op is covered', async () => {
-  // Measured against the real module, not a list copied here — a second copy is
-  // the drift this repo already names (#340). `index`/`featureCheckpoint`/
-  // `featureResume` ARE exported functions on plainfiles, so `typeof === function`
-  // cannot distinguish them; they defer via unsupportedOp, so the distinction is
-  // BEHAVIOURAL and is measured by calling them.
+test('#641 FALLBACK_OPS: every covered op is really implemented by the fallback, and does not merely defer', async () => {
+  // Necessary but NOT sufficient — being implemented is why a substitution CAN
+  // work, never why it is warranted. What warrants it is that engram cannot run
+  // the op at all without its binary, which the test above pins.
+  //
+  // Measured against the real module rather than a list copied here (#340).
+  // `index`/`featureCheckpoint`/`featureResume` ARE exported functions on
+  // plainfiles, so `typeof === function` cannot tell them apart from real ones;
+  // they defer via unsupportedOp, so the distinction is BEHAVIOURAL.
   const plainfiles = await import('../backends/plainfiles.mjs');
   const verbExport = (op) => ({ import: 'importMemory' })[op] ?? op.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
   for (const op of FALLBACK_OPS) {
     assert.equal(typeof plainfiles[verbExport(op)], 'function', `plainfiles must implement '${op}'`);
+    // And it must be a REAL implementation, not a loud deferral wearing one.
+    await assert.doesNotReject(
+      () => plainfiles[verbExport(op)]({ root: '/nonexistent-root-for-shape-check' }, {
+        _rebuildIndex: () => ({ count: 0 }),
+        _gitPull: () => {},
+      }),
+      `'${op}' must be a real plainfiles op — a deferral here would make the fallback a worse message`,
+    );
   }
 
   for (const op of ['index', 'feature-checkpoint', 'feature-resume']) {
