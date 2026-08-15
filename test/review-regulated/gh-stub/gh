@@ -37,7 +37,35 @@ const serve = (name) => {
 const line = argv.join(' ');
 
 // ── identity (whoami — GH_TOKEN-scoped since #413) ──────────────────────────
-if (line === 'api /user') serve('user.json');
+//
+// #604: this endpoint HONOURS the credential. Until then the stub served
+// `user.json` for any `GH_TOKEN` at all, which — without anyone intending it —
+// modelled precisely the credential-injecting environment #604 measured: an
+// invented token, an empty one and no token resolving to the same login. An
+// e2e that fakes the identity endpoint that way cannot observe the defect,
+// and the negative control (which sends a token it KNOWS is invalid) would
+// have been refused by the harness rather than by a real environment.
+//
+// `GH_STUB_VALID_TOKEN` is the one credential this stub accepts. Unset, the
+// stub refuses to guess — same fail-closed rule as `GH_STUB_DIR` above.
+if (line === 'api /user') {
+  const valid = process.env.GH_STUB_VALID_TOKEN;
+  if (!valid) {
+    process.stderr.write('gh-stub: GH_STUB_VALID_TOKEN is not set — refusing to guess which credential is real.\n');
+    process.exit(2);
+  }
+  // GH_STUB_INJECT_CREDENTIALS (#604): reproduce the credential-injecting
+  // proxy measured in the cloud container — EVERY token, including one the
+  // caller knows to be invalid, resolves to the same authenticated login.
+  // This is the environment the negative control exists to detect, so the
+  // e2e needs to be able to stand it up on purpose.
+  if (process.env.GH_STUB_INJECT_CREDENTIALS === '1') serve('user.json');
+  if (process.env.GH_TOKEN !== valid) {
+    process.stderr.write('gh: Bad credentials (HTTP 401)\n');
+    process.exit(1);
+  }
+  serve('user.json');
+}
 
 // ── prView: the PR itself + base sha ────────────────────────────────────────
 if (argv[0] === 'pr' && argv[1] === 'view' && line.includes('number,labels,body,author,headRefOid')) serve('prview.json');

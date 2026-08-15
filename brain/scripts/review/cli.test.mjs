@@ -12,6 +12,15 @@ import { parseArgs, main } from './cli.mjs';
 import { postVerdict } from './poster.mjs';
 import { buildVerdict, renderVerdict } from './verdict.mjs';
 import { REQUIRED_JOBS } from '../vcs/governance-checks.mjs';
+import { NEGATIVE_CONTROL_SENTINEL } from './identity.mjs';
+
+// A `whoami` double for an environment that HONOURS credentials (#604): known
+// tokens resolve, anything else — the negative control's sentinel above all —
+// is rejected the way a provider rejects a bad credential.
+const honestWhoami = (logins) => async ({ token }) => {
+  if (Object.hasOwn(logins, token)) return { username: logins[token] };
+  throw new Error('gh: Bad credentials (HTTP 401)');
+};
 
 const HEAD = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
 
@@ -41,7 +50,10 @@ function readyDeps({ vcs, labels = [] } = {}) {
       readConfig: () => ({ handle: 'brain-reviewer', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
       readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'shh' }),
       // #413: the token resolves to the configured handle — verification passes.
-      whoami: async () => ({ username: 'brain-reviewer' }),
+      // #604: the double HONOURS the token. One that returns a fixed login for
+      // any credential models the credential-injecting environment the negative
+      // control refuses, so it can no longer stand in for a healthy one.
+      whoami: honestWhoami({ shh: 'brain-reviewer' }),
     },
     coldBootDeps: {
       fetchPr: async () => ({ number: 42, author: 'alice', labels, body: '', headRefOid: HEAD }),
@@ -610,7 +622,7 @@ test('main: a token whose real login disagrees with reviewer.handle refuses at b
   const vcs = spyVcs();
   const deps = readyDeps({ vcs });
   // The #413 reproduction: config claims the bot, the token is the author's.
-  deps.identityDeps.whoami = async () => ({ username: 'csrinaldi' });
+  deps.identityDeps.whoami = honestWhoami({ shh: 'csrinaldi' });
   const code = await main({ argv: ['--pr', '42', '--dry-run'], log: () => {}, error: (s) => errors.push(s), ...deps });
   assert.equal(code, 1, 'a mismatched token identity must refuse the run, not proceed');
   assert.ok(
@@ -620,11 +632,32 @@ test('main: a token whose real login disagrees with reviewer.handle refuses at b
   assert.equal(vcs.calls.prReviewComment, 0, 'refusing at boot must post no verdict');
 });
 
+test('main: an environment that resolves the INVALID token refuses at boot, posting nothing (#604)', async () => {
+  const errors = [];
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  // The credential-injecting environment: every token resolves to the same
+  // login. With `reviewer.handle` set to that login the #413 comparison AGREES,
+  // so nothing below the control can notice the token was never read.
+  deps.identityDeps.readConfig = () => ({ handle: 'brain-reviewer', tokenEnv: 'BRAIN_REVIEWER_TOKEN' });
+  deps.identityDeps.whoami = async () => ({ username: 'brain-reviewer' });
+  const code = await main({ argv: ['--pr', '42', '--dry-run'], log: () => {}, error: (s) => errors.push(s), ...deps });
+  assert.equal(code, 1, 'identity evidence the token did not establish must refuse the run');
+  assert.ok(errors.some(l => /INVALID token/i.test(l)), 'the refusal must name the control');
+  assert.ok(errors.some(l => /Rotating the token cannot fix this/.test(l)),
+    'and must say rotation is not the remedy — chasing that cost three rotations (#604)');
+  assert.equal(vcs.calls.prReviewComment, 0, 'refusing at boot must post no verdict');
+});
+
 test('main: whoami rejection refuses at boot — never proceed on an unverified identity (#413)', async () => {
   const errors = [];
   const vcs = spyVcs();
   const deps = readyDeps({ vcs });
-  deps.identityDeps.whoami = async () => { throw new Error('api unreachable'); };
+  // The control must CLEAR so this case still exercises the #413 verify path.
+  deps.identityDeps.whoami = async ({ token }) => {
+    if (token === NEGATIVE_CONTROL_SENTINEL) throw new Error('gh: Bad credentials (HTTP 401)');
+    throw new Error('api unreachable');
+  };
   const code = await main({ argv: ['--pr', '42', '--dry-run'], log: () => {}, error: (s) => errors.push(s), ...deps });
   assert.equal(code, 1, 'an unverifiable identity must refuse, mirroring §10 uncomputable-evidence');
   assert.ok(
@@ -637,7 +670,7 @@ test('main: whoami rejection refuses at boot — never proceed on an unverified 
 test('main: whoami matching the handle case-insensitively proceeds — logins are case-insensitive (#413)', async () => {
   const vcs = spyVcs();
   const deps = readyDeps({ vcs });
-  deps.identityDeps.whoami = async () => ({ username: 'Brain-Reviewer' });
+  deps.identityDeps.whoami = honestWhoami({ shh: 'Brain-Reviewer' });
   const lines = [];
   const code = await main({ argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), ...deps });
   assert.equal(code, 0, 'a case-different login for the SAME account must not be refused as a forgery');
