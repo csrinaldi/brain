@@ -77,6 +77,27 @@ then grep-confirmed), to turn the suite **red**, and to revert **byte-identical*
 
 Suite and checks reported in the PR.
 
+## Doctrine draft — `agent-authorities.md` generalisation
+
+Requested by the maintainer after the mechanism landed, and drafted rather than
+applied: `brain/core/**` is Tier 3, prohibited **even if explicitly asked**, and
+the request does not move that boundary.
+
+`brain-drafts/agent-authorities.tier-lists.amendment.md` proposes three repairs,
+each measured:
+
+| defect | evidence |
+|---|---|
+| Tier 3 names ONE vendor | `harness/backends/` ships `antigravity`, `claude`, `gentle-ai`, `plain`; this session runs `antigravity`. The doctrine is compiled **verbatim** into every consumer's `AGENTS.md` (`SOURCE_DOCS`, "Tier table VERBATIM"), so consumers read a rule naming a tool they do not use. |
+| Tier 3 says "Publish **JARs**" | `@logikas/brain` is an npm package; `JAR` is a Java artefact. |
+| Tier 2 cites `npm run backend:deploy` | **zero occurrences** in `package.json` — a citation that reads as verified and resolves to nothing, the same shape as `CLAUDE.md`. |
+
+The wording is now the *only* vendor-specific part left: the enforcement reads
+`git config brain.aiAgents` and is agnostic.
+
+Applying it also owes the **`AGENTS.md` regeneration** — `brain-promote.mjs`
+treats that as its own act because a previous change lost it on the human's side.
+
 ## Not done, deliberately
 
 - [ ] **The 28 commits on `main`.** Rewriting published history is the Tier-3
