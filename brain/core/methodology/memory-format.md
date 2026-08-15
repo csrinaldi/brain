@@ -152,10 +152,21 @@ ADR-0002 manifest problem. It is resolved structurally:
    both sides' appended lines with no conflict markers and never produces a half-record.
 2. **Content-hash `id`** (above) makes the same record identical across branches.
 3. **Dedup at reindex.** Union's one failure mode is a duplicated physical line when both
-   branches wrote the same record. Those lines are byte-identical and share an `id`, so
-   `index.jsonl` (keyed by `id`) collapses them losslessly. The JSONL stays **strictly
-   append-only** — never rewritten — which preserves union safety and a clean
-   `git log .memory/records/`. The index, not the log, is the dedup authority.
+   branches wrote the same record. Repeated lines share an `id`, so `index.jsonl` (keyed by
+   `id`) collapses them — **first-wins**, the earliest line of the earliest month file, which is
+   what the read path already resolved to — and the collapse is **REPORTED**, never silent
+   (#574/#598).
+
+   They are **not necessarily byte-identical**. `id` hashes the record's meaning and excludes
+   `source` as incidental provenance, so brain's own export→import→export returns the same `id`
+   with widened bytes. Such a pair is **divergent**: counted on its own channel and resolved
+   first-wins, never refused — refusing it would refuse records brain itself writes. See
+   `store.duplicates.test.mjs::roundtrip-divergence`.
+
+   Refusal is reserved for a line whose bytes do not hash to its own `id` (tampered or stale);
+   that gate is unchanged and fail-closed. The JSONL stays **strictly append-only** — never
+   rewritten — which preserves union safety and a clean `git log .memory/records/`. The index,
+   not the log, is the dedup authority.
 
 > A rare duplicate physical line survives in the JSONL until the next reindex. This is
 > deliberate: queries read through the index (deduped), and rewriting the log to remove a
