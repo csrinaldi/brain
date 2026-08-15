@@ -46,6 +46,7 @@ import { emptyDuplicates, normalizeDuplicates } from "../lib/duplicates.mjs";
 import { serializeRecord } from "../lib/format.mjs";
 import { collectChunkObservations } from "../lib/migrate-v1.mjs";
 import { unsupportedOp } from "../lib/unsupported-op.mjs";
+import { ENGRAM_BIN, probeBinary } from "../lib/backend-selection.mjs";
 import { t } from "../../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -107,13 +108,27 @@ export function ensureMemorySymlink(root = repoRoot) {
 
 /**
  * Resolve the `engram` binary. Throws if not found.
+ *
+ * Resolution runs through `probeBinary` (issue #641) rather than a local
+ * `spawnSync("which", …)`, so the dispatcher's fallback decision and this
+ * refusal read the SAME expression. Two copies is the #340 shape: the dispatcher
+ * could conclude "absent, substitute" while this one concluded "present, run" on
+ * a rule that had drifted, and the mismatch would surface as a backend nobody
+ * chose.
+ *
+ * The absent-message is unchanged, byte for byte. What is NEW is the third
+ * branch: `which` failing to RUN used to land in `status !== 0` and be reported
+ * as "engram binary not found" — a probe outage wearing the costume of a
+ * confident answer, which is `evidence-reader-empty-on-failure` exactly. "I
+ * could not check" now says so and names why.
  */
 function requireEngram() {
-  const result = spawnSync("which", ["engram"], { encoding: "utf8" });
-  if (result.status !== 0) {
+  const probe = probeBinary(ENGRAM_BIN);
+  if (probe.available === true) return ENGRAM_BIN;
+  if (probe.available === false) {
     throw new Error("engram binary not found. Install via: gentle-ai install");
   }
-  return "engram";
+  throw new Error(`engram binary could not be resolved — ${probe.reason}`);
 }
 
 /**
@@ -1092,8 +1107,11 @@ export function _getGitBranch(root, opts = {}) {
  */
 function _engramEnrich(feature, frontmatter) {
   try {
-    const whichResult = spawnSync("which", ["engram"], { encoding: "utf8" });
-    if (whichResult.status !== 0) return;
+    // Through the shared probe (issue #641) so no copy of the resolution rule is
+    // left to drift. Behaviour is unchanged: only a confident `true` proceeds,
+    // which is what `status !== 0 → return` already meant — and correctly so
+    // here, since this path is best-effort enrichment that must never throw.
+    if (probeBinary(ENGRAM_BIN).available !== true) return;
 
     const searchResult = spawnSync(
       "engram",
@@ -1380,8 +1398,11 @@ export async function featureResume(
 // ---------------------------------------------------------------------------
 
 function _defaultCheckEngram() {
-  const r = spawnSync("which", ["engram"], { encoding: "utf8" });
-  return r.status === 0;
+  // Same shared probe as `requireEngram` (issue #641). Boolean by contract, so
+  // an undetermined probe collapses to `false` here — acceptable because every
+  // caller of this seam treats `false` as "skip the engram step", never as a
+  // claim that engram is absent.
+  return probeBinary(ENGRAM_BIN).available === true;
 }
 
 // NOTE (C4 review): `engram save` accepts --type/--project/--scope/--topic but
