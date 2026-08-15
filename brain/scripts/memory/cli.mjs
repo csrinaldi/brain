@@ -432,7 +432,24 @@ if (op === "save") {
     reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });
     process.exit(0);
   } catch (err) {
-    console.error(`memory/cli: ${BACKEND}.save() failed — ${err.message}`);
+    // #637 — the index rebuild is the ONE gate that cannot run before the
+    // append, so its failure must not be reported as "the save failed". The
+    // record is on disk; a bare `save() failed` sends the operator to the one
+    // action that makes it worse, which is to run `save` again.
+    if (err?.indexFailed) {
+      console.error(
+        `memory/cli: ${await t("memory.plainfiles.save.indexFailed", {
+          id: err.recordId,
+          file: err.recordFile,
+          message: err.message,
+        })}`,
+      );
+    } else {
+      // `BACKEND`, not `MEMORY_BACKEND` (#641, merged first): the message must
+      // name the backend that actually RAN, which after the fallback is not
+      // necessarily the one the selector resolved to.
+      console.error(`memory/cli: ${BACKEND}.save() failed — ${err.message}`);
+    }
     process.exit(1);
   }
 }
