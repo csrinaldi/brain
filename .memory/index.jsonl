@@ -93,6 +93,7 @@
 {"id":"rec-0b34bc7e0431ea8f","ts":"2026-07-25T21:50:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-0b69c0c848d1ac49","ts":"2026-07-12T22:51:24Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-0bf2a7684735e6c6","ts":"2026-07-25T21:51:18Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-0bfc768d0e531079","ts":"2026-08-15T18:21:58Z","actor":"claude/brain-memory-635-doctrine-catches-up","type":"decision","project":"brain","issue":635,"file":"2026-08.jsonl"}
 {"id":"rec-0c2f7b3192d51f94","ts":"2026-07-25T21:50:32Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-0c455065a370b100","ts":"2026-07-25T21:50:52Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-0c4f5534cd917159","ts":"2026-07-11T12:33:49Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
