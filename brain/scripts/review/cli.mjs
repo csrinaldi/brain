@@ -33,13 +33,121 @@ import { postVerdict } from './poster.mjs';
 import { gatherQueue } from './queue.mjs';
 import { runBoard } from './board.mjs';
 
-/** @returns {{ pr: number|null, mode: string, dryRun: boolean }} */
+/**
+ * `--pr <n>` OR a bare positional `<n>` — both, because `brain:approve` takes
+ * the number positionally (`brain:approve -- 640`) and this verb did not, so
+ * the same operator hitting both learned two opposite conventions. Measured:
+ * `brain:review -- 665` parsed to `pr: null`, which travelled six layers down
+ * into `git fetch origin null` and surfaced as a raw Node stack trace reading
+ * `fatal: couldn't find remote ref null`. Nothing in it said "you omitted the
+ * PR number", so a missing argument was indistinguishable from a broken remote.
+ *
+ * `error` is set — never thrown — for every input that cannot name a PR:
+ * absent, non-numeric (`--pr abc` → NaN), a `--pr` with no value after it
+ * (also NaN), zero/negative, or more than one positional. `main` refuses on it
+ * before any network or git call.
+ *
+ * `queue`/`board` never reach here: `main` dispatches those off `rawArgv[0]`
+ * and returns first, so a positional token at this point is a PR number or a
+ * mistake, and both are answerable.
+ *
+ * @returns {{ pr: number|null, mode: string, dryRun: boolean, error: string|null }}
+ */
+/**
+ * The `--mode` values this CLI dispatches, plus `auto` (derive from repo state).
+ *
+ * MUST match the dispatch chain in `main` — pinned by a test that drives every
+ * entry and asserts none reaches the "not yet implemented" stub. Two lists that
+ * can disagree is the shape this repo keeps closing (#130, #340, #555); this one
+ * is small enough to pin rather than to derive.
+ */
+export const REVIEW_MODES = Object.freeze(['auto', 'tranche', 'checkpoint', 'ruling']);
+
 export function parseArgs(argv) {
-  const args = { pr: null, mode: 'auto', dryRun: false };
+  const args = { pr: null, mode: 'auto', dryRun: false, error: null };
+
+  // Every PR number the argv names, from EITHER syntax, collected in one list.
+  //
+  // Collecting them together rather than tracking "did a flag win over a
+  // positional" is what makes the ambiguity rule single: more than one number
+  // is refused, whichever way each was written. The first cut of this function
+  // refused `665 666` and then silently preferred the flag in `665 --pr 666` —
+  // the same silently-chosen winner it had just rejected, in another syntax.
+  const given = [];
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--pr') args.pr = Number(argv[++i]);
+    if (argv[i] === '--pr') given.push(argv[++i] ?? '(nothing)');
     else if (argv[i] === '--mode') args.mode = argv[++i];
     else if (argv[i] === '--dry-run') args.dryRun = true;
+    else if (argv[i].startsWith('-')) {
+      // An unrecognised option is REFUSED, never ignored — the strict half of
+      // `brain:approve`'s parser, which this verb had cited as its model while
+      // copying only the positional half.
+      //
+      // Silently discarding these was the worst thing in the first cut of this
+      // change: `--dry-run=true`, `--dryrun` and `-n` all parsed clean with
+      // `dryRun: false`, so an operator asking for a REHEARSAL got a real run
+      // that POSTED a verdict to the pull request. The safety flag disarmed
+      // itself and said nothing. Same defect as this ticket's, one axis over:
+      // an unrecognised input must not be quietly dropped.
+      // `--flag=value` is the near-miss worth naming, and the hint has to know
+      // which flags take a value: suggesting `--dry-run true` for
+      // `--dry-run=true` would send the operator to a second refusal, since
+      // `--dry-run` is a boolean and `true` would parse as a PR number.
+      const eq = argv[i].indexOf('=');
+      const stem = eq > 0 ? argv[i].slice(0, eq) : null;
+      if (stem === '--pr' || stem === '--mode') {
+        args.error = `unknown option "${argv[i]}" — a value is a separate argument, so write "${stem} ${argv[i].slice(eq + 1)}"`;
+      } else if (stem === '--dry-run') {
+        args.error = `unknown option "${argv[i]}" — "--dry-run" is a flag and takes no value`;
+      } else {
+        args.error = `unknown option "${argv[i]}"`;
+      }
+      return args;
+    }
+    else given.push(argv[i]);
+  }
+
+  // `--mode`, validated HERE rather than at the dispatch chain (self-review G3).
+  //
+  // An unusable mode used to pass this parser clean and refuse only after
+  // cold-boot had cloned and fetched — a full network round trip spent on an
+  // argv that could never finish. REQ-669-2 says nothing may be fetched for a
+  // run that cannot name its PR; the same holds for one that cannot name its
+  // mode, and the requirement was only ever scoped narrowly.
+  //
+  // It also refused with `mode "undefined" is not yet implemented`, which names
+  // the coercion instead of the input and mis-describes a typo as an unbuilt
+  // feature — both of which REQ-669-3 forbids one flag over.
+  if (!REVIEW_MODES.includes(args.mode)) {
+    args.error = args.mode === undefined
+      ? '"--mode" was given with no value after it'
+      : `"${args.mode}" is not a review mode — expected one of: ${REVIEW_MODES.join(', ')}`;
+    return args;
+  }
+
+  if (given.length > 1) {
+    args.error = `expected one PR number, got ${given.length}: ${given.join(', ')}`;
+    return args;
+  }
+  if (given.length === 0) {
+    args.error = 'no PR number given';
+    return args;
+  }
+
+  // The RAW token is carried, never re-derived from argv afterwards. Re-deriving
+  // it with `indexOf('--pr')` reported the FIRST `--pr`'s value while `pr` held
+  // the last one's, so `--pr 665 --pr abc` blamed "665" — a number that is
+  // perfectly valid. Naming the wrong input is the very defect this ticket
+  // exists to remove, and it had been rebuilt inside the fix for it.
+  // Digits only, then a range check. `Number()` alone accepts spellings no
+  // human typed on purpose and turns them into a DIFFERENT, valid-looking PR:
+  // `0x10` became 16, `1e3` became 1000, and `" 665 "` was silently trimmed.
+  // A reviewer pointed at the wrong pull request is worse than one that refuses.
+  const [typed] = given;
+  args.pr = /^\d+$/.test(typed) ? Number(typed) : NaN;
+  if (!Number.isInteger(args.pr) || args.pr <= 0) {
+    // "NaN" names the coercion, not the mistake — report what was typed.
+    args.error = `"${typed}" is not a PR number`;
   }
   return args;
 }
@@ -135,6 +243,17 @@ export async function main(deps = {}) {
   if (rawArgv[0] === 'board') return runBoardCommand(deps, log);
 
   const args = parseArgs(rawArgv);
+  // Refuse BEFORE any git or network call. Without this the unusable value
+  // reached `git fetch origin <value>` and threw an unhandled execFileSync
+  // error — a stack trace whose top line was about a remote ref, for a mistake
+  // made in the argv.
+  if (args.error) {
+    error(`brain:review: refusing to run — ${args.error}.`);
+    error('  Usage: npm run brain:review -- <pr-number>   (or --pr <pr-number>)');
+    error('         npm run brain:review -- queue | board');
+    return 2;
+  }
+
   const config = loadBrainConfig();
   const project = deps.project ?? config.project?.slug;
   // Reviewer protocol version (issue #391 T2.3 §3, issue #394 M3): the TIER sets
@@ -169,6 +288,35 @@ export async function main(deps = {}) {
       error(`brain:review: refusing to run — env var "${identity.missingVar}" is not set.`);
       error(`  Get a token: ${identity.patSetupUrl}`);
       error(`  Setup doc: ${identity.setupDocPath}`);
+    } else if (identity.ambientIdentity) {
+      // #604 half 1: the negative control resolved. An invalid token produced
+      // an identity, so credentials are injected upstream and `whoami({token})`
+      // reports the ENVIRONMENT's login rather than the token's. Refused here
+      // rather than as a `mismatch`, which is the shape that cost three token
+      // rotations — the message must name the environment, not the token.
+      error(`brain:review: refusing to run — this environment resolved a deliberately INVALID token to "${identity.ambientIdentity}".`);
+      error('  Credentials are being injected upstream (a proxy, or an ambient CLI session), so a');
+      error(`  token-scoped identity read cannot establish who ${identity.tokenEnv} belongs to (issue #604).`);
+      error('  Rotating the token cannot fix this — the token is never what answers.');
+      error('  Run brain:review where credentials are not injected: the maintainer machine, or CI with the PAT as a secret.');
+    } else if (identity.controlLockout) {
+      // #604 self-review F1: the control sends one invalid credential per run,
+      // and a burst of those is exactly what providers throttle — GitHub with
+      // `403 Maximum number of login attempts exceeded`, which then rejects
+      // VALID credentials too. Folded into `controlError` this read as "could
+      // not establish whether this environment honours the token", sending the
+      // operator after a proxy that is not there: the same mis-diagnosis that
+      // cost three token rotations, caused by the fix for it.
+      error(`brain:review: refusing to run — the provider is temporarily refusing authentication attempts: ${identity.controlLockout}`);
+      error('  This check sends one deliberately-invalid credential per run, and repeated invalid');
+      error('  attempts are what trigger that lockout — so it may have caused this itself (issue #604).');
+      error('  Wait for the window to expire and re-run. Do NOT rotate the token, and do not read');
+      error('  this as a credential-injecting environment — neither is what happened.');
+    } else if (identity.controlError) {
+      // #604: the control could not reach a verdict. Scoring that as "clean"
+      // would be the reader-empty-on-failure defect the control exists to avoid.
+      error(`brain:review: refusing to run — could not establish whether this environment honours the reviewer token: ${identity.controlError}`);
+      error('  The negative control did not reach a verdict, and "could not establish" is not "established clean" (issue #604).');
     } else if (identity.mismatch) {
       // #413: the token's REAL login disagrees with the configured handle —
       // proceeding would run the §10 abstention and the anti-loop lock

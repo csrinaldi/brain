@@ -40,8 +40,7 @@ The agent proposes and waits for explicit human approval:
 - **Delete branches or committed files** — irreversible destructive actions
 - **Resolve semantic conflicts of type `architecture`/`decision`** in Engram
   (see `consolidation-protocol.md §4`)
-- **Deploy to the Package Registry** (`npm run backend:deploy`) — affects artifacts
-  shared by all consumers
+- **Publish to the package registry** — affects artefacts shared by all consumers
 
 ### Tier 3 — Prohibited
 
@@ -52,8 +51,14 @@ The agent must never do this, even if explicitly asked:
 - Approve or merge its own MR
 - Modify git history (`--force`, `--amend` of published commits,
   `rebase` of branches others use)
-- Add AI attribution in commits (`Co-Authored-By: Claude...`)
-- Publish JARs to the Package Registry without explicit human instruction
+- Add AI attribution to commits — an agent co-author trailer, a session URL or a
+  "generated with" footer, whatever the tool is called. Provenance is not
+  authorship: it is evidence when a runner attests to it, and a claim when the
+  producer asserts it about itself (ADR-0031). Enforced by `hooks/commit-msg`
+  and `hooks/pre-receive`; the agent vocabulary is `git config brain.aiAgents`,
+  so a consumer governs their own tooling without waiting for a brain release
+- Publish release artefacts to the package registry without explicit human
+  instruction — whatever the ecosystem's artefact is
 - Escalate decisions to other agents without the human's knowledge
 
 ---
