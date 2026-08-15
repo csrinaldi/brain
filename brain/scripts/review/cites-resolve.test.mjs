@@ -18,10 +18,18 @@
 // resolve. It reads the evaluator sources rather than running them, because the
 // strings are template literals whose values depend on a live review.
 //
-// SCOPE, stated rather than implied: this checks the `file.mjs symbol` shape only.
-// A `cites:` naming an ADR, a REQ id or a protocol section is not verified here —
-// those have no single mechanical resolution, and a guard that pretended to check
-// them would be the apparent protection this file exists to prevent (#499).
+// SCOPE, stated rather than implied: this checks two mechanically-resolvable
+// shapes — `file.mjs symbol`, and a `*.md` doctrine FILENAME. A `cites:` naming
+// an ADR, a REQ id or a protocol SECTION (`§10`) is not verified here — those
+// have no single mechanical resolution, and a guard that pretended to check them
+// would be the apparent protection this file exists to prevent (#499).
+//
+// The `.md` half was added by #671, after a fourth instance: `tranche.mjs`'s
+// ai-attribution finding cited `CLAUDE.md`, a file that does not exist in this
+// repository at all. The `.mjs symbol` guard could not see it — by design, since
+// it was never a module — so the citation read as verified while pointing at no
+// text whatsoever. Worse than the wrong line, which is what #580 and #586 were.
+// Resolving a filename is trivial, and the four instances say it is worth doing.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,6 +64,43 @@ function evaluatorSources() {
 // `foo.mjs bar` — a module basename followed by an identifier. The identifier may
 // be followed by `(`, `.`, whitespace or the end of the citation.
 const FILE_SYMBOL_RE = /([A-Za-z0-9_-]+\.mjs)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
+
+// `foo.md` — a doctrine filename appearing in a citation.
+const DOC_FILE_RE = /([A-Za-z0-9_-]+\.md)\b/g;
+
+/** Every `.md` under the repo root, indexed by basename. */
+function indexDocs(dir, acc = new Map()) {
+  for (const entry of readdirSync(dir)) {
+    if (entry === 'node_modules' || entry === '.git') continue;
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) indexDocs(full, acc);
+    else if (entry.endsWith('.md') && !acc.has(entry)) acc.set(entry, full);
+  }
+  return acc;
+}
+
+test('#671: every `*.md` a shipped cites: names is a file that exists', () => {
+  // The fourth instance of the class, and the first that named nothing at all:
+  // `CLAUDE.md — never add AI attribution to commits` cited a file this repo
+  // does not contain. A reader following it finds no document to disagree with,
+  // which is how an unfounded finding passes for a verified one.
+  const docs = indexDocs(join(scriptsRoot, '..', '..'));
+  const offenders = [];
+
+  for (const src of evaluatorSources()) {
+    src.text.split(/\r?\n/).forEach((line, i) => {
+      if (!/\bcites:/.test(line)) return;
+      for (const [, file] of line.matchAll(DOC_FILE_RE)) {
+        if (!docs.has(file)) {
+          offenders.push(`${src.name}:${i + 1} cites "${file}", which is not a markdown file in this repository`);
+        }
+      }
+    });
+  }
+
+  assert.deepEqual(offenders, [],
+    `a cites: naming a document that does not exist reads as verified and is not:\n  ${offenders.join('\n  ')}`);
+});
 
 test('#555: every `<file>.mjs <symbol>` a shipped cites: names actually resolves', () => {
   const modules = indexModules(scriptsRoot);
