@@ -990,8 +990,30 @@ test('parseArgs: zero and negative are refused — they are not PR numbers', () 
 
 test('parseArgs: more than one positional is refused rather than silently picking one', () => {
   const args = parseArgs(['665', '666']);
-  assert.match(args.error, /at most one/i);
+  assert.match(args.error, /one PR number/i);
   assert.match(args.error, /665, 666/, 'the refusal must show both, so the operator sees the ambiguity');
+});
+
+test('parseArgs: a positional CONFLICTING with --pr is refused too, not silently resolved', () => {
+  // The first cut refused `665 666` and then silently preferred the flag here —
+  // the same silently-chosen winner it had just rejected, in another syntax.
+  // The ambiguity is the same fact whichever way each number was written.
+  const args = parseArgs(['665', '--pr', '666']);
+  assert.ok(args.error, 'two PR numbers is two PR numbers, whatever the syntax');
+  assert.match(args.error, /665, 666/);
+  assert.equal(args.pr, null, 'and nothing may be resolved from an ambiguous argv');
+});
+
+test('parseArgs: a repeated --pr blames the RIGHT input, never a valid one', () => {
+  // `--pr 665 --pr abc` used to report `"665" is not a PR number`. 665 is
+  // perfectly valid; the bad token is `abc`. The message re-derived the raw
+  // value with indexOf('--pr'), which finds the FIRST flag while `pr` held the
+  // LAST one's value — naming the wrong input, which is the exact defect this
+  // ticket exists to remove, rebuilt inside its own fix.
+  const args = parseArgs(['--pr', '665', '--pr', 'abc']);
+  assert.ok(args.error);
+  assert.match(args.error, /abc/, 'the offending token must appear');
+  assert.doesNotMatch(args.error, /"665" is not/, 'a valid number must never be blamed');
 });
 
 test('main: an unusable PR argument refuses BEFORE any git or network call', async () => {

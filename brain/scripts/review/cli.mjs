@@ -55,31 +55,40 @@ import { runBoard } from './board.mjs';
  */
 export function parseArgs(argv) {
   const args = { pr: null, mode: 'auto', dryRun: false, error: null };
-  const positionals = [];
-  let sawPrFlag = false;
 
+  // Every PR number the argv names, from EITHER syntax, collected in one list.
+  //
+  // Collecting them together rather than tracking "did a flag win over a
+  // positional" is what makes the ambiguity rule single: more than one number
+  // is refused, whichever way each was written. The first cut of this function
+  // refused `665 666` and then silently preferred the flag in `665 --pr 666` —
+  // the same silently-chosen winner it had just rejected, in another syntax.
+  const given = [];
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--pr') { sawPrFlag = true; args.pr = Number(argv[++i]); }
+    if (argv[i] === '--pr') given.push(argv[++i] ?? '(nothing)');
     else if (argv[i] === '--mode') args.mode = argv[++i];
     else if (argv[i] === '--dry-run') args.dryRun = true;
-    else if (!argv[i].startsWith('-')) positionals.push(argv[i]);
+    else if (!argv[i].startsWith('-')) given.push(argv[i]);
   }
 
-  if (positionals.length > 1) {
-    args.error = `expected at most one PR number, got ${positionals.length}: ${positionals.join(', ')}`;
+  if (given.length > 1) {
+    args.error = `expected one PR number, got ${given.length}: ${given.join(', ')}`;
     return args;
   }
-  if (!sawPrFlag && positionals.length === 1) args.pr = Number(positionals[0]);
-
-  if (args.pr === null) {
+  if (given.length === 0) {
     args.error = 'no PR number given';
     return args;
   }
+
+  // The RAW token is carried, never re-derived from argv afterwards. Re-deriving
+  // it with `indexOf('--pr')` reported the FIRST `--pr`'s value while `pr` held
+  // the last one's, so `--pr 665 --pr abc` blamed "665" — a number that is
+  // perfectly valid. Naming the wrong input is the very defect this ticket
+  // exists to remove, and it had been rebuilt inside the fix for it.
+  const [typed] = given;
+  args.pr = Number(typed);
   if (!Number.isInteger(args.pr) || args.pr <= 0) {
-    // `--pr abc` and a trailing `--pr` both land here as NaN. Report what was
-    // actually typed rather than "NaN", which names the coercion and not the
-    // mistake.
-    const typed = sawPrFlag ? (argv[argv.indexOf('--pr') + 1] ?? '(nothing)') : positionals[0];
+    // "NaN" names the coercion, not the mistake — report what was typed.
     args.error = `"${typed}" is not a PR number`;
   }
   return args;

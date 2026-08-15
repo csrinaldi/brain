@@ -32,5 +32,16 @@ The message names the offending input as the operator wrote it — never `NaN`,
 which names the coercion rather than the mistake — and prints the usage,
 including both accepted forms and the `queue`/`board` subcommands.
 
-More than one positional reports **both**, so the operator sees the ambiguity
-rather than a silently-chosen winner.
+## REQ-669-4 — Two PR numbers are refused, whatever syntax each was written in
+
+`665 666`, `--pr 665 --pr 666` and `665 --pr 666` are the same ambiguity and
+refuse identically, showing **every** number given. A rule that refused only
+one of those spellings would leave a silently-chosen winner in the others —
+which is the defect this ticket exists to close, in a different syntax.
+
+## REQ-669-5 — The refusal never blames a valid input
+
+The raw token is carried from the point it was read, never re-derived from
+`argv` afterwards. Re-deriving it located the *first* `--pr` while the parsed
+value came from the *last*, so `--pr 665 --pr abc` blamed `665` — a perfectly
+valid PR number. Naming the wrong input is the same failure as naming no input.
