@@ -262,13 +262,18 @@ test('e2e: a missing token refuses at boot — nothing posted (REQ-409-5c)', (t)
 //
 // The two e2e cases at the bottom of this file are where the flip actually happens.
 //
-// The REFUTER half below is unchanged and is now the ONLY half tracking something
-// unlanded: no evaluator emits `evidence_class: 'inferential'`, and #408
-// deliberately did not build one. A base re-run answers a question about CAUSALITY
-// by observing; `inferential` is a claim about how a finding was ESTABLISHED —
-// reasoned rather than observed — and every evaluator brain has is deterministic by
-// construction. Inventing a reasoner so a fork can fire is the error
-// `causal-admission.mjs` already refuses one level down.
+// The REFUTER half below is still the ONLY half tracking something unlanded, and
+// #552 has now RULED on it rather than leaving it open. A base re-run answers a
+// question about CAUSALITY by observing; `inferential` is a claim about how a
+// finding was ESTABLISHED — reasoned rather than observed — and every evaluator
+// brain has is deterministic by construction.
+//
+// The ruling is **(a), sequenced**: a reasoning evaluator is worth building, and
+// it may not ship before the refuter can actually run. When #552 was ruled the
+// refuter FAILED OPEN — `cli.mjs` passes `runner: deps.refuterRunner ?? null`
+// and that dep is a test-side injection, so a reasoned blocker and one the
+// refuter had corroborated rendered byte-identically. That half is fixed
+// (`refuter.mjs`, `causal-admission.mjs`); the producer is not built.
 
 test('e2e: a finding OUTSIDE the base-reproducible set never reaches follow_ups, and the refuter stays silent (REQ-409-6, boundary redrawn by #408)', (t) => {
   // `redJob` here is not incidental (review finding, cold review of PR #471): when
@@ -302,10 +307,18 @@ test('e2e: a finding OUTSIDE the base-reproducible set never reaches follow_ups,
     'BASE_REPRODUCIBLE_GATES) or the render/parse contract changed — check WHICH before moving this.');
   assert.doesNotMatch(body, /^follow_ups:/m,
     'and the posted body carries no follow_ups block — the wire-level half of the same pin');
-  // No evaluator emits evidence_class: inferential (#408): the refuter must not have run.
+  // No evaluator emits evidence_class: inferential: the refuter must not have run.
+  //
+  // #552 RULED on this rather than leaving it pending. The ruling is (a) — a
+  // reasoning evaluator IS worth building, the reason arrived after this pin was
+  // written — but SEQUENCED behind a refuter that can actually run. So a red here
+  // now means one specific thing: a producer landed. Check, in this order, that
+  // `refuterRunner` is wired in production (it was null at every call site when
+  // #552 was ruled) and that the verdict distinguishes challenged from
+  // unchallenged. Then move this pin onto the new behaviour — do not delete it.
   assert.ok(verdict.findings.every(f => f.evidence_class !== 'inferential'),
-    'an inferential finding appeared — the refuter fork is live. #408 deliberately did NOT build ' +
-    'an inferential producer (see the header), so this is the pin for whoever does.');
+    'an inferential finding appeared — the refuter fork is live. #552 ruled that a judgment ' +
+    'producer ships only behind a runnable refuter; verify that landed too, then move this pin.');
   // And the gate-shaped source is genuinely live end to end (see the fixture note
   // above) — without this, `redJob` could be silently broken and nothing would say so.
   assert.ok(verdict.findings.find(f => f.id === 'gate:phase-order'),
