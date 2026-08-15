@@ -22,6 +22,11 @@
 // so the guard would reintroduce the word into the tarball it exists to keep it
 // out of. Hostnames are checkable by SHAPE, which is why that half is enforced
 // and the other half is not.
+//
+// THE RULE MOVED, THE SCAN DID NOT (#674). The classifier now lives in
+// `shipped-hostnames.mjs` so `brain:promote` can ask it about the file it is
+// ABOUT to write — a draft is not under `brain/**`, so this walk could not see
+// it until after a human had signed. What stayed here is the walk itself.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,73 +34,17 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import {
+  ALLOWED_REAL,
+  TEXT,
+  hostsIn,
+  isReserved,
+  isNotAHostname,
+  foreignHostsIn,
+} from './shipped-hostnames.mjs';
+
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const SCAN_ROOT = join(REPO_ROOT, 'brain');
-
-/**
- * Real hosts brain legitimately names, each with the reason it is here.
- *
- * The list is short on purpose. Adding an entry is a deliberate act — that is
- * the whole protection, since a hostname is otherwise indistinguishable from
- * any other string.
- */
-const ALLOWED_REAL = Object.freeze({
-  'github.com': 'the forge brain integrates with',
-  'api.github.com': 'GitHub REST',
-  'docs.github.com': 'cited in provider docs',
-  'raw.githubusercontent.com': 'raw fetches in install docs',
-  'avatars.githubusercontent.com': 'appears inside recorded API fixtures',
-  'gitlab.com': 'the second forge brain integrates with (ADR-0018)',
-  'docs.gitlab.com': 'cited as the source shape for hand-authored fixtures',
-  'registry.npmjs.org': 'the registry ADR-0030 publishes to',
-});
-
-/** RFC 2606 / RFC 6761 names, reserved precisely so fixtures can use them. */
-const RESERVED = Object.freeze([
-  /(^|\.)example\.(com|net|org)$/,
-  /(^|\.)example$/,
-  /\.test$/,
-  /\.invalid$/,
-  /\.localhost$/,
-  /^localhost$/,
-  /^127\.0\.0\.1$/,
-  /^0\.0\.0\.0$/,
-]);
-
-/** Files whose bytes are text worth scanning. */
-const TEXT = /\.(mjs|js|json|md|ya?ml|sh|txt)$/;
-
-/**
- * Every `scheme://host` in a file, with userinfo and port stripped.
- *
- * Userinfo matters: `https://oauth2:tok@gl.example.com` must be read as the
- * host `gl.example.com`, not as `oauth2`. A parser that skips that step reports
- * a pile of fake "hosts" and buries the one real offender among them —
- * measured, on the first version of this file.
- */
-function hostsIn(text) {
-  const out = [];
-  for (const m of text.matchAll(/https?:\/\/([^/\s'"`)\\<>]+)/g)) {
-    let h = m[1];
-    if (h.includes('@')) h = h.slice(h.lastIndexOf('@') + 1);
-    h = h.replace(/:\d+$/, '').toLowerCase();
-    if (h) out.push(h);
-  }
-  return out;
-}
-
-const isReserved = (h) => RESERVED.some((re) => re.test(h));
-
-/**
- * A hostname is `[a-z0-9.-]` with at least one dot, and nothing else.
- *
- * Checked positively rather than by excluding known junk. The first version
- * asked `!h.includes('.')`, which let `…#v1.0.0` — an ellipsis-truncated URL in
- * a doc comment — through as a "foreign host", because the version number
- * supplied the dot. A rule written as a blocklist of the shapes you happened to
- * see is a rule that reports the next shape as a finding.
- */
-const isNotAHostname = (h) => !/^[a-z0-9][a-z0-9.-]*$/.test(h) || !h.includes('.');
 
 /** Walks brain/** and returns [{file, host}] for every host that is neither reserved nor allowed. */
 function foreignHosts() {
@@ -109,10 +58,7 @@ function foreignHosts() {
       if (statSync(p).size > 2 * 1024 * 1024) continue;
       scanned++;
       const rel = relative(REPO_ROOT, p);
-      for (const h of hostsIn(readFileSync(p, 'utf8'))) {
-        if (isNotAHostname(h) || isReserved(h) || h in ALLOWED_REAL) continue;
-        found.push({ file: rel, host: h });
-      }
+      for (const h of foreignHostsIn(readFileSync(p, 'utf8'))) found.push({ file: rel, host: h });
     }
   };
   walk(SCAN_ROOT);
@@ -158,4 +104,14 @@ test('#648: a foreign host WOULD be caught — the classifier is not permissive'
   assert.equal(isReserved(h), false, 'a real host must not classify as reserved');
   assert.equal(isNotAHostname(h), false);
   assert.equal(h in ALLOWED_REAL, false);
+
+  // …and the composed classifier — the one brain:promote calls — reaches the
+  // same verdict. Asserted separately: the parts agreeing proves nothing about
+  // the whole if `foreignHostsIn` ever stops calling one of them.
+  assert.deepEqual(foreignHostsIn(probe), ['git.somewhere.gov.ar']);
+});
+
+test('#674: foreignHostsIn does not deduplicate — the callers group, the classifier reports', () => {
+  const twice = `${'https://'}a.${'gov.ar'}/x ${'https://'}a.${'gov.ar'}/y ${'https://'}github.com/z`;
+  assert.deepEqual(foreignHostsIn(twice), ['a.gov.ar', 'a.gov.ar']);
 });

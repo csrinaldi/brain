@@ -317,6 +317,32 @@ export function amendStatusLine(line, { amendment, date }) {
 }
 
 /**
+ * §1c act 1's invariant, on its own: a signed artefact carries **exactly one**
+ * `**Status**:` line.
+ *
+ * Extracted from `applyStatusAct` as a pure move (#675) rather than copied.
+ * `brain-promote`'s ADR path needs the same question answered about the file it
+ * is ABOUT TO WRITE, and it had no answer at all: it produced a signed ADR with
+ * two Status lines, staged it, and printed a commit command. The amendment path
+ * then refused to touch the result — the two halves of one verb disagreeing
+ * about whether that artefact may exist. A second implementation of this rule
+ * would be the #130/#340/#555 shape inside a single verb, so `brain-promote`
+ * calls THIS function rather than re-deriving it.
+ *
+ * @param {string} text
+ * @returns {{ok:true, index:number}|{ok:false, count:number, error:string}}
+ */
+export function checkSingleStatusLine(text) {
+  const idx = lineIndices(text, (l) => l.startsWith('**Status**:'));
+  if (idx.length === 1) return { ok: true, index: idx[0] };
+  return {
+    ok: false,
+    count: idx.length,
+    error: `${idx.length} \`**Status**:\` line(s), expected exactly 1 (§1c act 1).`,
+  };
+}
+
+/**
  * Locates and rewrites the single `**Status**:` line. Refuses on ≠ 1 matches —
  * the same anchor discipline the edits use.
  *
@@ -325,10 +351,9 @@ export function amendStatusLine(line, { amendment, date }) {
  * @returns {{ok:true, text:string, before:string, after:string, state:string}|{ok:false, error:string}}
  */
 export function applyStatusAct(targetText, ctx) {
-  const idx = lineIndices(targetText, (l) => l.startsWith('**Status**:'));
-  if (idx.length !== 1) {
-    return err(`the target has ${idx.length} \`**Status**:\` lines, expected exactly 1 (§1c act 1).`);
-  }
+  const single = checkSingleStatusLine(targetText);
+  if (!single.ok) return err(`the target has ${single.error}`);
+  const idx = [single.index];
   const before = targetText.split('\n')[idx[0]].replace(/\r$/, '');
   const rewritten = amendStatusLine(before, ctx);
   if (!rewritten.ok) return rewritten;
