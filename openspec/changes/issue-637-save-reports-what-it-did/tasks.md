@@ -39,7 +39,15 @@ issue: 637
 
 - [x] **T10** Full suite: **3634 tests, 0 failures**, 1 pre-existing skip (`copyManaged`, skipped
       because the runner is root).
-- [ ] **T11** *(filed, not done)* the residual: a hand retry still lands a second record. Only a
+- [x] **T11** **Cold review of this PR caught the annotation destroying the diagnosis it exists to
+      preserve.** `err.indexFailed = true` on a non-object throw raises
+      `TypeError: Cannot create property 'indexFailed' on string 'boom'` — module code is always
+      strict — replacing the real failure with an internal one and losing the record's id and file
+      with it. Measured, not imagined. A primitive is now wrapped, keeping its text as the message.
+      `rebuildIndex` throws Errors today, so this is not reachable in production; it is about not
+      making a future seam's mistake unreadable, in a fix whose entire subject is preserving the
+      diagnosis. Red-proved: the naive assignment restored as a mutation fails the new test.
+- [ ] **T12** *(filed, not done)* the residual: a hand retry still lands a second record. Only a
       refusal (option 2/3) could prevent it, and this ticket ruled against refusing. The message
       is the mitigation; whether that trade is right is the maintainer's call, not something to
       settle inside the fix.

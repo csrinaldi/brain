@@ -160,10 +160,21 @@ export async function save(
   try {
     reindex = _rebuildIndex({ recordsDir, indexPath });
   } catch (err) {
-    err.indexFailed = true;
-    err.recordId = candidate.id;
-    err.recordFile = file;
-    throw err;
+    // Annotating a NON-OBJECT throw is itself a way to destroy the diagnosis:
+    // `throw 'boom'` is legal JS, module code is always strict, and assigning a
+    // property to a primitive there raises `TypeError: Cannot create property
+    // 'indexFailed' on string 'boom'` — replacing the real failure with an
+    // internal one and losing the record's id and file with it. Measured, not
+    // imagined. So a primitive is wrapped instead, keeping its text as the
+    // message. `rebuildIndex` throws Errors today; this is about not making a
+    // future seam's mistake unreadable.
+    const annotated = (err !== null && (typeof err === 'object' || typeof err === 'function'))
+      ? err
+      : new Error(String(err));
+    annotated.indexFailed = true;
+    annotated.recordId = candidate.id;
+    annotated.recordFile = file;
+    throw annotated;
   }
 
   // #574: every op that reindexes carries the duplicate accounting out to the

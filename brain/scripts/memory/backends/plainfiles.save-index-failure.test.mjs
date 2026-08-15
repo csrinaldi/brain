@@ -105,6 +105,30 @@ test('#637 save(): the ORIGINAL error is rethrown, not wrapped — the diagnosis
   );
 });
 
+test('#637 save(): a PRIMITIVE throw is still reported accurately, not replaced by a TypeError', async (t) => {
+  // `throw 'boom'` is legal JS and module code is always strict, so assigning a
+  // property to it raises `TypeError: Cannot create property 'indexFailed' on
+  // string 'boom'` — the annotation destroying the very diagnosis this ticket
+  // exists to preserve, and taking the record's id and file with it. Measured
+  // against the first version of this fix, which did exactly that.
+  const { root, recordsDir } = store(t);
+
+  await assert.rejects(
+    () => save('T', 'C', { type: 'discovery', project: 'brain' }, {
+      root,
+      _rebuildIndex: () => { throw 'boom'; },
+    }),
+    (err) => {
+      assert.equal(err.indexFailed, true, 'the CLI must still tell this apart from a refusal');
+      assert.match(err.message, /boom/, "the original failure's text must survive");
+      assert.doesNotMatch(err.message, /Cannot create property/, 'the annotation must not BECOME the failure');
+      assert.match(err.recordFile, /2026-08\.jsonl$/, 'and the record location must still travel');
+      return true;
+    },
+  );
+  assert.equal(augustLines(recordsDir).length, 1, 'the record is durable, exactly as the message will claim');
+});
+
 test('#637 save(): a HEALTHY store is untouched — no annotation, no behaviour change', async (t) => {
   const { root, recordsDir } = store(t);
   const result = await save('T', 'C', { type: 'discovery', project: 'brain' }, { root });
