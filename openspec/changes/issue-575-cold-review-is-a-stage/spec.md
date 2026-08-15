@@ -58,8 +58,8 @@ Two properties make the verdict the artefact and disqualify a file:
    neither the identity nor the coldness the verdict exists to record. A review
    artefact the author can write is not a review.
 
-**And `phase-order` does not have to learn to read the server**, which #575
-raises as the alternative cost. The index already exists: `reviewed:approved` /
+**The gate does not have to learn to parse verdict comments** — which is the
+alternative cost #575 raises. The index already exists: `reviewed:approved` /
 `reviewed:revised` / `reviewed:stopped` / `reviewed:stale` are labels
 reconciled from the verdict comments by `brain:review:board` (protocol §9), with
 `deny-set.mjs` restricting the reviewer's label writes to `seq:*` and
@@ -67,6 +67,29 @@ reconciled from the verdict comments by `brain:review:board` (protocol §9), wit
 
 So the layering is: **the verdict is the authority, the label is the derived
 index, the gate reads the index.** Three layers, one authority.
+
+**Reading a label is still reading the server**, and an earlier draft of this
+ruling claimed otherwise. Correcting it changes where the gate goes, so the
+distinction is worth stating exactly — measured on `main`:
+
+| gate | reads labels today |
+|---|---|
+| `actor-check` | **yes** — `fetchIssue` returns `{ labels, author }`; `status:approved` and `override:*` are read from it |
+| `phase-order-check` | **no** — zero occurrences; its inputs are `changedFiles` and `changeDirs` |
+
+So for the gate layer as a whole this is **not** a new capability, and for
+`phase-order` specifically it **is** — a whole new class of input.
+
+**Consequence, which the corrected claim forces:** the skip-detection gate of
+Ruling 5 is **not** `phase-order`. Its natural home is the label-reading layer
+where `actor-check` already lives. Putting it in `phase-order` would hand a
+file-shaped checker a server-shaped input, for no reason other than that
+"stage" and "phase-order" sound related.
+
+What is genuinely cheaper is only this: the gate reads a label, as one gate
+already does, instead of fetching a comment thread and running `parseVerdict`
+over it. That is the whole saving, and it is smaller than the earlier draft
+implied.
 
 **Cost:** the index can lag the verdict — a label desync is the failure mode
 §9 already names, and `brain:review:board` is the repair. A gate reading a stale
@@ -143,6 +166,10 @@ promote it from an accident to a design.
 ---
 
 ## Ruling 5 — Skipping is DETECTED at `lite` and `standard`, REQUIRED at `regulated`
+
+**The gate is a label-reading gate, not `phase-order`** (Ruling 2's corrected
+claim). `phase-order` reads zero labels today; `actor-check` already reads them.
+The check belongs where the input shape already fits.
 
 **The gate distinguishes three states, never two.**
 

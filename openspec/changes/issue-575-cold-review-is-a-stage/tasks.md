@@ -10,6 +10,11 @@ issue: 575
 - [x] **R0** — Re-measure #575's stated dependencies rather than trusting the
       body. Two were stale: `reviewer-protocol.md` is **signed** (#580), #555 is
       **closed** (PR #597). #552 and #456 are **open** and still block.
+- [x] **F6** — Self-review correction: Ruling 2 claimed the label index spared
+      `phase-order` from reading the server. False — a label read IS a server
+      read; what it spares is *parsing verdict comments*. Measured: `actor-check`
+      reads labels, `phase-order-check` reads none. The correction moves Ruling
+      5's gate to the label-reading layer.
 - [x] **R1..R5** — The five rulings, in `spec.md`:
       1. a **loop on a rung**, not a fifth rung — Rule B's monotonicity holds;
       2. the artefact is the **posted verdict**; the change folder gains nothing;
@@ -55,8 +60,9 @@ Each entry names what makes it *possible*, not merely what makes it tidy.
       `inferential` producer. The REQ-409-6 pin moves **with** it rather than
       being deleted — the instruction #408 was left and honoured.
 
-- [ ] **T6 — the gate.** Ruling 5's three-state check. Lands with or after T4;
-      before it there is nothing to detect.
+- [ ] **T6 — the gate.** Ruling 5's three-state check, in a **label-reading**
+      gate — not `phase-order`, which reads zero labels today (self-review F6).
+      Lands with or after T4; before it there is nothing to detect.
 
 - [ ] **T7 — the doctrine amendment.** `reviewer-protocol.md` §6 (if provenance
       lands), §10 (a skipped-stage row), and the stage's input contract.

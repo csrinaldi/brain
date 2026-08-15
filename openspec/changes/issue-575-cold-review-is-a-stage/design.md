@@ -66,6 +66,17 @@ reports only backwards movement. Two consequences shape Ruling 1:
 Ruling 2 leans on `reviewed:*` labels as the gate-readable index. Its limits,
 stated rather than discovered later:
 
+- **A label read is a server read.** An earlier draft claimed the index spared
+  `phase-order` from "learning to read the server". It does not — it spares the
+  gate from *parsing verdict comments*, which is a different and smaller
+  saving. Measured on `main`: `actor-check` reads labels (`fetchIssue` →
+  `{ labels, author }`), `phase-order-check` reads none at all (its inputs are
+  `changedFiles` and `changeDirs`).
+  That correction is why Ruling 5 names a label-reading gate rather than
+  `phase-order`: the latter would need a new class of input, and the only
+  argument for putting it there was that "stage" and "phase-order" sound
+  related. The tiering in Ruling 5 is unaffected — only the host moves.
+
 - **The index can lag.** §9 already names label desync as a failure mode and
   `brain:review:board` as the repair. A gate reading a stale label reads a stale
   index, never a wrong verdict — the verdict comment remains the authority.
