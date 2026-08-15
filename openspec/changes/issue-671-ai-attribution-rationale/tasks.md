@@ -141,6 +141,33 @@ draft asks for anyway.
 Recorded here and in the ADR's Consequences rather than only in a commit
 message, because the next person to hit it will search the change folder.
 
+## The guard caught this ADR the moment it stopped being a draft
+
+`local-checks` went red on #672 after promotion, on `shipped-hostnames.test.mjs`
+(#648):
+
+```
+these name a host that is neither reserved nor on the allowlist, in files that SHIP:
+  claude.ai  @ brain/project/decisions/adr-0031-ai-attribution-is-a-claim-not-a-record.md
+```
+
+The ADR quoted a session URL verbatim as evidence. **An ADR arguing that a
+vendor's dead URLs do not belong in shipped artefacts, embedding one.** The
+guard was right; the text is reworded to make the point without naming the host,
+which loses nothing — the URL was illustrative, never load-bearing.
+
+### The gap it exposes, which is not this ADR's fault
+
+`brain-drafts/**` lives under `openspec/changes/**`, which does **not** ship, so
+the guard's surface excludes it. A draft therefore passes every local check and
+breaks a shipped-file guard **at the moment `brain:promote` moves it** — the
+check's surface does not include the thing the file is about to become.
+
+Nothing catches that today, and the same hole applies to any other shipped-file
+guard. Worth its own ticket: `brain:promote` could run the shipped-file checks
+against the DESTINATION path before staging, so a draft is refused where it is
+cheap to fix rather than after it is signed.
+
 ## Not done, deliberately
 
 - [ ] **The 28 commits on `main`.** Rewriting published history is the Tier-3

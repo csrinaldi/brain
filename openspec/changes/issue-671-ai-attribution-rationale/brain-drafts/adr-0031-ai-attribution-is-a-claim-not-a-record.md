@@ -76,9 +76,16 @@ one layer down: nothing establishes the claim, and the medium is immutable.
 Three concrete costs, each measured rather than argued:
 
 1. **Dead internal URLs in public history.** `@logikas/brain` is
-   `private: false`, `access: public`. The 28 `Claude-Session:` trailers point at
-   `https://claude.ai/code/session_…`, which resolves for nobody outside the
-   machine that wrote it — permanently, in a published package's history.
+   `private: false`, `access: public`. The 28 session trailers point at a URL on
+   the agent vendor's own domain, which resolves for nobody outside the machine
+   that wrote it — permanently, in a published package's history.
+
+   > Written without naming that domain, deliberately. `brain/project/decisions/**`
+   > **ships**, and `shipped-hostnames.test.mjs` (#648) refuses a real third-party
+   > host in a shipped file. The first cut of this ADR quoted the URL verbatim and
+   > tripped that guard the moment `brain:promote` moved it out of
+   > `openspec/changes/**` — an ADR about not embedding a vendor's dead URLs in
+   > shipped artefacts, embedding one. The guard was right.
 2. **A model name pinned into immutable history.** `Claude Opus 5` in a trailer
    is exactly what #580/#586 ruled against for citations: do not name a thing
    that ages, in a place that cannot be corrected.
