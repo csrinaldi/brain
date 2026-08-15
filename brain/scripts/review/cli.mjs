@@ -33,13 +33,54 @@ import { postVerdict } from './poster.mjs';
 import { gatherQueue } from './queue.mjs';
 import { runBoard } from './board.mjs';
 
-/** @returns {{ pr: number|null, mode: string, dryRun: boolean }} */
+/**
+ * `--pr <n>` OR a bare positional `<n>` — both, because `brain:approve` takes
+ * the number positionally (`brain:approve -- 640`) and this verb did not, so
+ * the same operator hitting both learned two opposite conventions. Measured:
+ * `brain:review -- 665` parsed to `pr: null`, which travelled six layers down
+ * into `git fetch origin null` and surfaced as a raw Node stack trace reading
+ * `fatal: couldn't find remote ref null`. Nothing in it said "you omitted the
+ * PR number", so a missing argument was indistinguishable from a broken remote.
+ *
+ * `error` is set — never thrown — for every input that cannot name a PR:
+ * absent, non-numeric (`--pr abc` → NaN), a `--pr` with no value after it
+ * (also NaN), zero/negative, or more than one positional. `main` refuses on it
+ * before any network or git call.
+ *
+ * `queue`/`board` never reach here: `main` dispatches those off `rawArgv[0]`
+ * and returns first, so a positional token at this point is a PR number or a
+ * mistake, and both are answerable.
+ *
+ * @returns {{ pr: number|null, mode: string, dryRun: boolean, error: string|null }}
+ */
 export function parseArgs(argv) {
-  const args = { pr: null, mode: 'auto', dryRun: false };
+  const args = { pr: null, mode: 'auto', dryRun: false, error: null };
+  const positionals = [];
+  let sawPrFlag = false;
+
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--pr') args.pr = Number(argv[++i]);
+    if (argv[i] === '--pr') { sawPrFlag = true; args.pr = Number(argv[++i]); }
     else if (argv[i] === '--mode') args.mode = argv[++i];
     else if (argv[i] === '--dry-run') args.dryRun = true;
+    else if (!argv[i].startsWith('-')) positionals.push(argv[i]);
+  }
+
+  if (positionals.length > 1) {
+    args.error = `expected at most one PR number, got ${positionals.length}: ${positionals.join(', ')}`;
+    return args;
+  }
+  if (!sawPrFlag && positionals.length === 1) args.pr = Number(positionals[0]);
+
+  if (args.pr === null) {
+    args.error = 'no PR number given';
+    return args;
+  }
+  if (!Number.isInteger(args.pr) || args.pr <= 0) {
+    // `--pr abc` and a trailing `--pr` both land here as NaN. Report what was
+    // actually typed rather than "NaN", which names the coercion and not the
+    // mistake.
+    const typed = sawPrFlag ? (argv[argv.indexOf('--pr') + 1] ?? '(nothing)') : positionals[0];
+    args.error = `"${typed}" is not a PR number`;
   }
   return args;
 }
@@ -135,6 +176,17 @@ export async function main(deps = {}) {
   if (rawArgv[0] === 'board') return runBoardCommand(deps, log);
 
   const args = parseArgs(rawArgv);
+  // Refuse BEFORE any git or network call. Without this the unusable value
+  // reached `git fetch origin <value>` and threw an unhandled execFileSync
+  // error — a stack trace whose top line was about a remote ref, for a mistake
+  // made in the argv.
+  if (args.error) {
+    error(`brain:review: refusing to run — ${args.error}.`);
+    error('  Usage: npm run brain:review -- <pr-number>   (or --pr <pr-number>)');
+    error('         npm run brain:review -- queue | board');
+    return 2;
+  }
+
   const config = loadBrainConfig();
   const project = deps.project ?? config.project?.slug;
   // Reviewer protocol version (issue #391 T2.3 §3, issue #394 M3): the TIER sets

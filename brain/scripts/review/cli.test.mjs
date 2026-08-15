@@ -71,12 +71,12 @@ function readyDeps({ vcs, labels = [] } = {}) {
 
 test('parseArgs: --pr, --mode, --dry-run', () => {
   assert.deepEqual(parseArgs(['--pr', '42', '--mode', 'tranche', '--dry-run']), {
-    pr: 42, mode: 'tranche', dryRun: true,
+    pr: 42, mode: 'tranche', dryRun: true, error: null,
   });
 });
 
 test('parseArgs: defaults mode to auto, dryRun to false', () => {
-  assert.deepEqual(parseArgs(['--pr', '7']), { pr: 7, mode: 'auto', dryRun: false });
+  assert.deepEqual(parseArgs(['--pr', '7']), { pr: 7, mode: 'auto', dryRun: false, error: null });
 });
 
 // ── --dry-run: computes the real verdict, posts nothing ─────────────────────
@@ -549,7 +549,7 @@ test('main("board"): the unreadable report does not claim a seq:* freeze that di
 });
 
 test('main: an ordinary run (--pr flag, no subcommand) is UNAFFECTED by the queue/board dispatch check', () => {
-  assert.deepEqual(parseArgs(['--pr', '42']), { pr: 42, mode: 'auto', dryRun: false });
+  assert.deepEqual(parseArgs(['--pr', '42']), { pr: 42, mode: 'auto', dryRun: false, error: null });
 });
 
 // ── absent token: fail-closed (wires Phase 2) ───────────────────────────────
@@ -939,4 +939,88 @@ test('main: a thread of readable prior verdicts reports nothing unreadable — t
   await main({ argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), ...deps });
   assert.equal(lines.filter(l => /unreadable/i.test(l)).length, 0,
     'a false positive here would teach the operator to ignore the line within a week');
+});
+
+// ── parseArgs: the PR number is required, and answerable when it is wrong ────
+//
+// Measured on main: `brain:review -- 665` (no `--pr`) parsed to `pr: null`,
+// which reached `git fetch origin null` and surfaced as an unhandled Node
+// stack trace — `fatal: couldn't find remote ref null`. Nothing in it said the
+// PR number was missing, so a typo in the argv read as a broken remote.
+
+test('parseArgs: a BARE positional PR number is accepted — brain:approve takes one', () => {
+  // The two verbs disagreed: `brain:approve -- 640` works, `brain:review -- 665`
+  // silently did not. Same repo, same operator, opposite conventions.
+  const args = parseArgs(['665']);
+  assert.equal(args.pr, 665);
+  assert.equal(args.error, null);
+});
+
+test('parseArgs: the positional and the flag agree', () => {
+  assert.deepEqual(parseArgs(['665']).pr, parseArgs(['--pr', '665']).pr);
+});
+
+test('parseArgs: a positional composes with the other flags', () => {
+  const args = parseArgs(['665', '--dry-run', '--mode', 'tranche']);
+  assert.deepEqual(args, { pr: 665, mode: 'tranche', dryRun: true, error: null });
+});
+
+test('parseArgs: no PR number is an ERROR, never a null that travels', () => {
+  const args = parseArgs([]);
+  assert.equal(args.pr, null);
+  assert.match(args.error, /no PR number/i);
+});
+
+test('parseArgs: a non-numeric PR number reports what was TYPED, not "NaN"', () => {
+  // "NaN" names the coercion; the operator needs to see their own mistake.
+  assert.match(parseArgs(['--pr', 'abc']).error, /"abc"/);
+  assert.match(parseArgs(['nonsense']).error, /"nonsense"/);
+});
+
+test('parseArgs: a trailing --pr with no value is an error, not NaN in flight', () => {
+  const args = parseArgs(['--pr']);
+  assert.ok(args.error, 'a flag with nothing after it must not reach the network as NaN');
+  assert.match(args.error, /nothing/i);
+});
+
+test('parseArgs: zero and negative are refused — they are not PR numbers', () => {
+  assert.ok(parseArgs(['--pr', '0']).error);
+  assert.ok(parseArgs(['--pr', '-3']).error);
+});
+
+test('parseArgs: more than one positional is refused rather than silently picking one', () => {
+  const args = parseArgs(['665', '666']);
+  assert.match(args.error, /at most one/i);
+  assert.match(args.error, /665, 666/, 'the refusal must show both, so the operator sees the ambiguity');
+});
+
+test('main: an unusable PR argument refuses BEFORE any git or network call', async () => {
+  const errors = [];
+  const vcs = spyVcs();
+  let coldBootCalls = 0;
+  const deps = readyDeps({ vcs });
+  deps.coldBootDeps = new Proxy({}, { get: () => { coldBootCalls++; throw new Error('cold-boot must not run'); } });
+  const code = await main({ argv: [], log: () => {}, error: (s) => errors.push(s), ...deps });
+  assert.equal(code, 2, 'a usage error exits 2 — distinct from a governance refusal');
+  assert.equal(coldBootCalls, 0, 'nothing may be fetched for a run that cannot name its PR');
+  assert.equal(vcs.calls.prReviewComment, 0);
+  assert.ok(errors.some(l => /no PR number/i.test(l)));
+  assert.ok(errors.some(l => /Usage:/.test(l)), 'the refusal must show how to call it correctly');
+});
+
+test('main: the usage refusal names BOTH accepted forms and the subcommands', async () => {
+  const errors = [];
+  await main({ argv: [], log: () => {}, error: (s) => errors.push(s), ...readyDeps({ vcs: spyVcs() }) });
+  const text = errors.join('\n');
+  assert.match(text, /<pr-number>/);
+  assert.match(text, /--pr/);
+  assert.match(text, /queue \| board/, 'the subcommands are the other legal argv shape');
+});
+
+test('main: a bare positional PR number reaches a verdict, same as --pr', async () => {
+  const vcs = spyVcs();
+  const lines = [];
+  const code = await main({ argv: ['42', '--dry-run'], log: (s) => lines.push(s), ...readyDeps({ vcs }) });
+  assert.equal(code, 0, 'the positional form must be a real path, not merely parsed');
+  assert.ok(lines.some(l => /verdict:/.test(l)));
 });
