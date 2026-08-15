@@ -227,6 +227,28 @@ export function readRecordIds({ recordsDir }) {
  * and `engram import` INSERTS — so a union-merged duplicate propagated into the
  * live layer permanently, by that function's own measured note.
  *
+ * WHO READS THROUGH HERE, AND WHICH OF THEM SAY SO (issue #634). Recorded at
+ * the one chokepoint all of them share, so the next person to ask does not
+ * re-derive it from six files:
+ *
+ *   governance/run-check.mjs   memory-gate     — existence only, silent
+ *   brain-check.mjs            brain:check     — existence only, silent
+ *   brain-audit.mjs            brain:audit     — existence only, silent
+ *   lib/memory-coverage.mjs    coverage total  — REPORTS (reads `readRecords`)
+ *   brain-metrics.mjs          brain:metrics   — REPORTS, via that snapshot
+ *   review/cold-boot.mjs       reviewer        — deliberately silent; see there
+ *
+ * The three existence-only consumers need no output, and that is a PROOF rather
+ * than a judgement call: all three end in `memoryPresence`, which is
+ * `obs.some(o => o?.type === 'session_summary')`. Dedup keeps the FIRST copy of
+ * every repeated `id`, so every record present among the physical lines is still
+ * present in the deduped list — `.some()` over one equals `.some()` over the
+ * other, for ANY predicate. Their verdicts cannot move, so a report would be
+ * noise, and noise on a gate is how gates get ignored.
+ *
+ * A consumer that starts COUNTING rather than testing must switch to
+ * `readRecords` and say what it collapsed. That is the whole of #634.
+ *
  * Retire this once the chunks-path is fully decommissioned (tracked for
  * C4/D1); until then both `.memory/records/` and `.memory/chunks/` are
  * legitimate observation sources for the memory-gate.
