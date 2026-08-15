@@ -25,14 +25,32 @@ import { fileURLToPath } from "node:url";
 
 import { t } from "../i18n/t.mjs";
 import { formatDuplicateReport } from "./lib/duplicates.mjs";
+import {
+  DEFAULT_BACKEND,
+  ENGRAM_BIN,
+  FALLBACK_BACKEND,
+  REASON,
+  probeBinary,
+  selectBackend,
+} from "./lib/backend-selection.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 // ---------------------------------------------------------------------------
 // Read MEMORY_BACKEND: env var > .env file > default "engram"
 // ---------------------------------------------------------------------------
+// BRAIN_MEMORY_ENV_FILE (test-only seam, mirroring BRAIN_MEMORY_TEST_ROOT and
+// BRAIN_MIGRATE_V1_TEST_ROOT below): when set, `.env` is read from that path
+// instead of `<repoRoot>/.env`. NEVER set this outside tests.
+//
+// It exists because the STATED-vs-DEFAULTED distinction added for #641 is read
+// partly OUT OF `.env`, and `.env` is gitignored — so whether a maintainer's
+// machine happens to carry `MEMORY_BACKEND=engram` decided the outcome of the
+// very branch under test. That is the ambient-state trap #657's suite already
+// hit with `$VCS_TOKEN`: green here, red on the maintainer's box, for reasons
+// having nothing to do with the code.
 function readEnvFile() {
-  const envPath = join(repoRoot, ".env");
+  const envPath = process.env.BRAIN_MEMORY_ENV_FILE ?? join(repoRoot, ".env");
   if (!existsSync(envPath)) return {};
   const vars = {};
   for (const line of readFileSync(envPath, "utf8").split("\n")) {
@@ -46,7 +64,12 @@ function readEnvFile() {
 }
 
 const envVars = readEnvFile();
-const MEMORY_BACKEND = process.env.MEMORY_BACKEND ?? envVars.MEMORY_BACKEND ?? "engram";
+// STATED vs DEFAULTED (issue #641). The resolved value alone cannot tell the two
+// apart — `MEMORY_BACKEND=engram` in `.env` and no `.env` at all both come out
+// "engram" — and the fallback further down turns on exactly that distinction: an
+// unstated default may be filled in, an operator's stated selector may not.
+const STATED_BACKEND = process.env.MEMORY_BACKEND ?? envVars.MEMORY_BACKEND;
+const MEMORY_BACKEND = STATED_BACKEND ?? DEFAULT_BACKEND;
 
 // ---------------------------------------------------------------------------
 // Duplicate reporting (issue #574) — the ONE printer, used by every op.
@@ -280,21 +303,85 @@ const VERB_TO_EXPORT = { import: "importMemory" };
 const fn = VERB_TO_EXPORT[op] ?? op.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
 // ---------------------------------------------------------------------------
+// Which backend actually runs (issue #641).
+//
+// Placed HERE, below the backend-agnostic ops: `reindex`, `resolve-index` and
+// `migrate-v1` have already exited, because the durable format is brain-owned
+// (ADR-0017) and they never consult a backend at all. Only the ops that do get
+// this far, so nothing above pays for a probe it does not need.
+//
+// The decision itself is in lib/backend-selection.mjs, with the reasoning. What
+// belongs here is the half the ticket is actually about: SAYING SO. Every
+// outcome other than "the default was available" or "you named a backend"
+// prints, because the failure #641 reports is not that the fallback was
+// missing — `MEMORY_BACKEND=plainfiles` worked all along — it is that no
+// message ever said so, and four PRs' worth of capture was skipped on the
+// strength of an error that read as "capture is impossible here".
+//
+// To STDERR, for the same reason the duplicate report above uses it: the
+// automated callers (`brain/scripts/hooks/pre-push`, `post-merge`) discard
+// stdout, and a substitution notice on stdout would be discarded exactly where
+// the substitution is most likely to happen. (#633 covers those two hooks
+// swallowing stderr as well — flagged there, not worked around here.)
+// ---------------------------------------------------------------------------
+const selection = selectBackend({
+  requested: MEMORY_BACKEND,
+  stated: STATED_BACKEND !== undefined,
+  op,
+  probe: MEMORY_BACKEND === DEFAULT_BACKEND ? probeBinary(ENGRAM_BIN) : { available: true },
+});
+
+if (selection.reason === REASON.SUBSTITUTED) {
+  console.error(
+    `memory/cli: ${await t("memory.backend.substituted", {
+      op,
+      from: selection.from,
+      fallback: selection.backend,
+    })}`,
+  );
+} else if (selection.reason === REASON.STATED_BUT_ABSENT) {
+  // Not a substitution and not fatal on its own — the dispatch below still
+  // fails exactly as it does today. This adds the signpost that was missing:
+  // the old message named only `gentle-ai install`, so the working alternative
+  // was invisible to a reader who had no way to install anything.
+  console.error(
+    `memory/cli: ${await t("memory.backend.statedButAbsent", {
+      op,
+      backend: MEMORY_BACKEND,
+      fallback: FALLBACK_BACKEND,
+    })}`,
+  );
+} else if (selection.reason === REASON.PROBE_FAILED) {
+  // "I could not check" is reported as itself, never as "engram is missing" —
+  // the `evidence-reader-empty-on-failure` distinction. Nothing is switched on
+  // an answer this weak, so the run continues on the default.
+  console.error(
+    `memory/cli: ${await t("memory.backend.probeFailed", {
+      op,
+      backend: MEMORY_BACKEND,
+      fallback: FALLBACK_BACKEND,
+      reason: selection.detail,
+    })}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Load backend and dispatch
 // ---------------------------------------------------------------------------
-const backendPath = new URL(`./backends/${MEMORY_BACKEND}.mjs`, import.meta.url);
+const BACKEND = selection.backend;
+const backendPath = new URL(`./backends/${BACKEND}.mjs`, import.meta.url);
 
 let backend;
 try {
   backend = await import(backendPath);
 } catch (err) {
-  console.error(`memory/cli: backend '${MEMORY_BACKEND}' not found at ${backendPath.pathname}`);
+  console.error(`memory/cli: backend '${BACKEND}' not found at ${backendPath.pathname}`);
   console.error(`  Cause: ${err.message}`);
   process.exit(1);
 }
 
 if (typeof backend[fn] !== "function") {
-  console.error(`memory/cli: backend '${MEMORY_BACKEND}' does not implement op '${op}'`);
+  console.error(`memory/cli: backend '${BACKEND}' does not implement op '${op}'`);
   process.exit(1);
 }
 
@@ -345,7 +432,7 @@ if (op === "save") {
     reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });
     process.exit(0);
   } catch (err) {
-    console.error(`memory/cli: ${MEMORY_BACKEND}.save() failed — ${err.message}`);
+    console.error(`memory/cli: ${BACKEND}.save() failed — ${err.message}`);
     process.exit(1);
   }
 }
@@ -374,7 +461,7 @@ if (op === "search") {
     reportDuplicates(result?.duplicates, { surface: 'the records read', brief: true });
     process.exit(0);
   } catch (err) {
-    console.error(`memory/cli: ${MEMORY_BACKEND}.search() failed — ${err.message}`);
+    console.error(`memory/cli: ${BACKEND}.search() failed — ${err.message}`);
     process.exit(1);
   }
 }
@@ -427,6 +514,6 @@ try {
     surface: op === "import" ? "the records read" : undefined,
   });
 } catch (err) {
-  console.error(`memory/cli: ${MEMORY_BACKEND}.${fn}() failed — ${err.message}`);
+  console.error(`memory/cli: ${BACKEND}.${fn}() failed — ${err.message}`);
   process.exit(1);
 }
