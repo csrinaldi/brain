@@ -63,7 +63,8 @@ test('#675: the artefact brain:promote actually produced is REFUSED', () => {
   // shows the house shape, which otherwise lives only in transformDraft's
   // docstring — a function the draft's author never reads (#675 req 4).
   assert.match(text, /> \*\*status:\*\*/, 'the refusal must show the preamble blockquote shape');
-  assert.match(text, /Nothing was written and nothing was staged\./);
+  assert.match(text, /Nothing was written and nothing was staged/);
+  assert.match(text, /every applicable guard reported/);
 });
 
 test('#675: ZERO status lines is refused too — malformed is not only "too many"', () => {
@@ -180,10 +181,74 @@ test('#675/#674: every guard names the module that owns its rule', () => {
   }
 });
 
-test('#675/#674: the FIRST failing guard stops the run — it does not write half the artefact', () => {
+test('#675/#674: EVERY applicable guard reports — one promote cycle, not one per defect', () => {
   // Both defects on one file, the shape the ADR-0031 promotion actually had.
+  // Stopping at the first would send the maintainer through the loop #674 was
+  // filed to remove: fix, re-run, discover the second, fix, re-run.
   const bad = `${TWO_STATUS_LINES}\nsee ${'https://'}${FOREIGN_HOST}/x\n`;
   const r = checkShippedContent({ writes: [{ relPath: ADR_DEST, text: bad }] });
   assert.equal(r.ok, false);
-  assert.match(r.lines.join('\n'), /single-status-line/, 'guards run in registry order');
+  assert.equal(r.findings, 2);
+  const out = r.lines.join('\n');
+  assert.match(out, /single-status-line/);
+  assert.match(out, /shipped-hostnames/);
+  assert.match(out, /2 finding\(s\), every applicable guard reported/);
+});
+
+test('#674: with a guard unreadable, the report does NOT claim to be complete', () => {
+  // The completeness claim is the same evidence rule one level up: a list that
+  // says "every applicable guard reported" when one of them could not run is
+  // exactly the "could not check" ≡ "checked clean" inversion.
+  const mixed = [
+    guardNamed('single-status-line'),
+    { name: 'explodes', applies: () => true, check() { throw new Error('boom'); } },
+  ];
+  const r = checkShippedContent({ writes: [{ relPath: ADR_DEST, text: TWO_STATUS_LINES }], guards: mixed });
+  assert.equal(r.ok, false);
+  assert.equal(r.findings, 2, 'the readable guard still reported — an unreadable one must not silence it');
+  const out = r.lines.join('\n');
+  assert.match(out, /1 guard\(s\) could not run, so this list may be incomplete/);
+  assert.equal(/every applicable guard reported/.test(out), false, 'completeness must not be claimed here');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The refusal may not assume which path produced the file
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('#675: a duplicate in the PREAMBLE gets the draft-blockquote guidance', () => {
+  const out = checkShippedContent({ writes: [{ relPath: ADR_DEST, text: TWO_STATUS_LINES }] }).lines.join('\n');
+  assert.match(out, /line 3 \(preamble\)/);
+  assert.match(out, /line 6 \(preamble\)/);
+  assert.match(out, /More than one in the PREAMBLE/);
+  assert.match(out, /> \*\*status:\*\*/);
+  assert.equal(/In the BODY/.test(out), false, 'body guidance has no place here');
+});
+
+test('#675: a duplicate in the BODY does NOT get told to fix a preamble it does not have', () => {
+  // Measured on the amendment path: an amendment whose appended section quotes
+  // the line it changes produces two, and the first cut of this message told the
+  // reader the verb "prepends the signature header" — which it does not do there.
+  const amended = `# ADR-0026 — T
+
+**Status**: Accepted — Amendment 1
+**Date**: 2026-01-01 — H
+
+## Amendment 1
+
+The line this amendment changes reads:
+
+**Status**: Proposed
+`;
+  const out = checkShippedContent({ writes: [{ relPath: ADR_DEST, text: amended }] }).lines.join('\n');
+  assert.match(out, /line 10 \(body\)/);
+  assert.match(out, /In the BODY/);
+  assert.match(out, /matched at LINE START/);
+  assert.equal(/More than one in the PREAMBLE/.test(out), false);
+  assert.equal(/> \*\*status:\*\*/.test(out), false, 'an amendment draft has no preamble blockquote to fix');
+});
+
+test('#675: ZERO status lines says the artefact has none — not that it has too many', () => {
+  const out = checkShippedContent({ writes: [{ relPath: ADR_DEST, text: '# ADR-0031 — T\n\n## C\n' }] }).lines.join('\n');
+  assert.match(out, /carries NO `\*\*Status\*\*:` line at all/);
+  assert.equal(/found at:/.test(out), false, 'there is nothing to locate');
 });

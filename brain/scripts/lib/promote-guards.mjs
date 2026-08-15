@@ -36,6 +36,66 @@ import { TEXT, foreignHostsIn } from './shipped-hostnames.mjs';
 export const SHIPPED_PREFIX = 'brain/';
 
 /**
+ * Names WHERE the offending `**Status**:` lines are, and gives the guidance that
+ * fits each position — never guidance for a shape the artefact does not have.
+ *
+ * THE MESSAGE MAY NOT ASSUME WHICH PATH PRODUCED THE FILE. The first cut of this
+ * guard was written for the new-ADR path alone: it told the reader the verb
+ * "prepends the signature header itself" and to fix "the preamble blockquote".
+ * Measured, the guard also fires on the AMENDMENT path — an amendment whose
+ * appended body carries a line starting with `**Status**:` produces two — and
+ * there the message described a header the verb never writes and a blockquote
+ * an amendment draft does not have. A refusal with a correct verdict and an
+ * invented cause is the shape that cost #604 three token rotations.
+ *
+ * So the diagnosis is derived from the TEXT: a duplicate above the first `## `
+ * heading is the preamble that survived the header rewrite; one below it is
+ * ordinary prose at line start. Both, neither, or one — whatever is true.
+ *
+ * @param {string} text
+ * @param {number[]} indices  0-based line indices, from checkSingleStatusLine
+ * @returns {string[]}
+ */
+export function locateStatusLines(text, indices = []) {
+  const lines = text.split('\n');
+  if (indices.length === 0) {
+    return [
+      '',
+      '  The artefact carries NO `**Status**:` line at all. A signed ADR opens with one',
+      '  (§1c act 1 rewrites it on every amendment, and refuses when it cannot find it).',
+    ];
+  }
+  const firstHeading = lines.findIndex((l) => /^##\s/.test(l));
+  const inPreamble = indices.filter((i) => firstHeading === -1 || i < firstHeading);
+  const inBody = indices.filter((i) => firstHeading !== -1 && i >= firstHeading);
+
+  const out = ['', '  found at:'];
+  for (const i of indices) {
+    const where = firstHeading === -1 || i < firstHeading ? 'preamble' : 'body';
+    out.push(`    line ${i + 1} (${where})  ${lines[i].replace(/\r$/, '').slice(0, 72)}`);
+  }
+  if (inPreamble.length > 1) {
+    out.push(
+      '',
+      '  More than one in the PREAMBLE. brain:promote writes the signature header itself,',
+      '  so a draft must not carry a `**Status**:` line of its own as ordinary text — the',
+      '  house shape puts it in the blockquote this verb strips:',
+      '',
+      '      > **status:** proposed — pending human promotion | **date:** <date> | **owner:** <handle>',
+    );
+  }
+  if (inBody.length > 0) {
+    out.push(
+      '',
+      '  In the BODY. The marker is matched at LINE START, so prose that quotes it — an',
+      '  amendment section describing the line it changes, for instance — reads as a second',
+      '  status. Indent it, inline it, or write it generically (`**Status**` without the colon).',
+    );
+  }
+  return out;
+}
+
+/**
  * The guards, in the order they run. Each declares WHICH destination paths it
  * is about — a rule that applied to every write would fire `single-status-line`
  * on `brain/HOME.md`, which correctly has none.
@@ -55,15 +115,10 @@ export const GUARDS = Object.freeze([
       return {
         ok: false,
         lines: [
-          `✗ single-status-line — the artefact this run would write is malformed:`,
+          '✗ single-status-line — the artefact this run would write is malformed:',
           `    ${relPath}`,
           `    ${single.error}`,
-          '',
-          '  brain:promote prepends the signature header itself (`**Status**: Accepted`),',
-          '  so the DRAFT must not carry a `**Status**:` line of its own as ordinary text.',
-          '  The house shape puts it in the preamble blockquote, which this verb strips:',
-          '',
-          '      > **status:** proposed — pending human promotion | **date:** <date> | **owner:** <handle>',
+          ...locateStatusLines(text, single.indices),
           '',
           '  The amendment path already refuses to touch a file with two of them, so a',
           '  promote that produced one could not be repaired by the sanctioned route —',
@@ -118,6 +173,9 @@ export const GUARDS = Object.freeze([
  */
 export function checkShippedContent({ writes, guards = GUARDS }) {
   const ran = [];
+  const findings = [];
+  let unreadable = 0;
+
   for (const { relPath, text } of writes) {
     for (const guard of guards) {
       if (!guard.applies(relPath)) continue;
@@ -125,24 +183,61 @@ export function checkShippedContent({ writes, guards = GUARDS }) {
       try {
         verdict = guard.check(text, relPath);
       } catch (error) {
-        return {
-          ok: false,
-          lines: [
-            `✗ the ${guard.name} guard FAILED to run against ${relPath}:`,
-            `    ${error.message}`,
-            '',
-            '  Refusing rather than proceeding. A guard that could not answer has not',
-            '  answered "clean", and this run would sign the file it could not read.',
-          ],
-        };
+        // Recorded and kept going, not returned. A guard that could not answer
+        // is its own finding, and stopping here would hide the ones that CAN.
+        unreadable += 1;
+        findings.push([
+          `✗ the ${guard.name} guard FAILED to run against ${relPath}:`,
+          `    ${error.message}`,
+          '',
+          '  Refusing rather than proceeding. A guard that could not answer has not',
+          '  answered "clean", and this run would sign the file it could not read.',
+        ]);
+        continue;
       }
       if (!verdict.ok) {
-        return { ok: false, lines: [...verdict.lines, '', '  Nothing was written and nothing was staged.'] };
+        findings.push(verdict.lines);
+        continue;
       }
       ran.push({ guard: guard.name, relPath });
     }
   }
+
+  if (findings.length > 0) return { ok: false, lines: renderFindings(findings, unreadable), findings: findings.length };
   return { ok: true, ran, summary: renderGuardSummary(ran, writes.length) };
+}
+
+/**
+ * EVERY applicable guard reports, not just the first to fail.
+ *
+ * Stopping at the first finding costs a whole promote cycle per defect, and the
+ * artefact that motivated both tickets had TWO — so the first cut of this
+ * function would have sent the maintainer through exactly the loop #674 was
+ * filed to remove: fix, re-run, discover the second, fix, re-run.
+ *
+ * The completeness claim is qualified rather than assumed. When a guard could
+ * not run, the list is explicitly NOT stated to be everything — the same rule
+ * that makes an unreadable guard a refusal in the first place.
+ *
+ * @param {string[][]} findings
+ * @param {number} unreadable
+ * @returns {string[]}
+ */
+export function renderFindings(findings, unreadable) {
+  const lines = [];
+  for (const [i, f] of findings.entries()) {
+    if (i > 0) lines.push('');
+    lines.push(...f);
+  }
+  lines.push('');
+  lines.push(
+    unreadable > 0
+      ? `  Nothing was written and nothing was staged — ${findings.length} finding(s), and ` +
+        `${unreadable} guard(s) could not run, so this list may be incomplete.`
+      : `  Nothing was written and nothing was staged — ${findings.length} finding(s), ` +
+        'every applicable guard reported.',
+  );
+  return lines;
 }
 
 /**

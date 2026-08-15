@@ -329,8 +329,14 @@ export function amendStatusLine(line, { amendment, date }) {
  * would be the #130/#340/#555 shape inside a single verb, so `brain-promote`
  * calls THIS function rather than re-deriving it.
  *
+ * `indices` is returned on the failure branch as well as the count. A refusal
+ * that says only "2, expected 1" makes the reader search a signed document for
+ * the second one — and the two paths into this state put it in different places
+ * (a draft preamble the header rewrite kept, or a body line that happens to
+ * start with the marker). Naming WHERE is what lets one caller diagnose both.
+ *
  * @param {string} text
- * @returns {{ok:true, index:number}|{ok:false, count:number, error:string}}
+ * @returns {{ok:true, index:number}|{ok:false, count:number, indices:number[], error:string}}
  */
 export function checkSingleStatusLine(text) {
   const idx = lineIndices(text, (l) => l.startsWith('**Status**:'));
@@ -338,6 +344,7 @@ export function checkSingleStatusLine(text) {
   return {
     ok: false,
     count: idx.length,
+    indices: idx,
     error: `${idx.length} \`**Status**:\` line(s), expected exactly 1 (§1c act 1).`,
   };
 }

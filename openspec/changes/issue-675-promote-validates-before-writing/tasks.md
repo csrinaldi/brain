@@ -22,6 +22,14 @@ issue: 675
       verb's own modules, keyed on resolved paths (REQ-675-5).
 - [x] **T6** — end-to-end reproductions of both tickets through the real verb,
       with a `readLineFn` that throws.
+- [x] **T7** — the refusal locates the offending lines and derives its guidance
+      from where they are (REQ-675-2). Found by cold review of this change, and
+      **measured**: the guard fires on the amendment path too, where the first
+      message described a header the verb never writes.
+- [x] **T8** — every applicable guard reports, with a completeness claim that is
+      withdrawn when a guard could not run (REQ-674-3). Also found by cold
+      review: the artefact that motivated both tickets carried both defects, so
+      the first cut would have cost two promote cycles to clear.
 
 ## What the mutation proof measured
 
@@ -35,6 +43,9 @@ reverted byte-identical (`diff -q`).
 | M3 | the guard call moved to AFTER the confirmation | **8 red** |
 | M4 | a throwing guard scored as a pass (`continue`) | **1 red** |
 | M5 | `foreignHostsIn` → `[]` | **4 red**, across all three suites |
+| M6 | stop at the first finding again | **3 red** |
+| M7 | drop the body-position guidance | **1 red** |
+| M8 | claim completeness over a guard that threw | **1 red** |
 
 **M1's first attempt did not land, and the suite stayed green.** The mutation
 inserted `applies: () => false` as an *earlier* key in the object literal, where
@@ -60,6 +71,30 @@ answers one question about one line shape; `shipped-hostnames` matches
 `scheme://host` and nothing else. They catch the two defects that actually
 occurred. A guard advertising more than it checks is the apparent protection
 `cites-resolve.test.mjs` exists to refuse (#499).
+
+## The corruption is already on `main`, and it is not a one-off
+
+Running the new guards over every signed ADR on disk, before changing anything:
+
+```
+30 signed ADRs on disk, 1 would be refused by the new guards.
+WOULD REFUSE: brain/project/decisions/adr-0029-two-sources-one-graph.md
+    2 `**Status**:` line(s), expected exactly 1
+```
+
+`ADR-0029` carries the identical shape — the draft's `**Status**: Proposed` /
+`**Date**: draft for …` pair surviving under the signed header — and has since
+it was signed on 2026-08-11. **The incidence is 2 of 30, not 1.**
+
+Measured, not inferred: `applyStatusAct` **already** refuses that file today,
+without this change. ADR-0029 has therefore been unamendable by the sanctioned
+route since the day it was signed — #675's trap, live, in `main`.
+
+This change neither introduces nor worsens that; it makes it visible. Repairing
+it is a `brain/project/decisions/**` edit, Tier 3 for the agent, and the
+amendment path is precisely what cannot run on it. Filed separately, with the
+CI-level gap it exposes: **nothing measures this invariant anywhere**, which is
+why three months passed unnoticed.
 
 ## Found on the way, NOT fixed here
 

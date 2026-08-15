@@ -16,19 +16,28 @@ The check is `checkSingleStatusLine`, called — not copied — from
 path refuses to *touch* a file with two Status lines; the promote path is what
 created one. One rule, one implementation, two callers.
 
-## REQ-675-2 — The refusal names the DRAFT's defect and the shape expected
+## REQ-675-2 — The refusal locates the defect, and never assumes which path produced it
 
-The message states the count, the destination, and that the verb prepends the
-signature header itself — so a `**Status**:` line in the draft body is the
-cause. It then shows the preamble blockquote the house drafts use:
+The message states the count, the destination, and **which lines** carry the
+marker, each labelled `preamble` or `body`. The guidance is then derived from
+those positions, not from an assumption about the caller:
 
-```
-> **status:** proposed — pending human promotion | **date:** <date> | **owner:** <handle>
-```
+- more than one in the **preamble** → the draft's own `**Status**:` line survived
+  the header rewrite; the message shows the blockquote shape the house drafts
+  use, which today exists only in `transformDraft`'s docstring — a function the
+  draft's author never reads;
+- any in the **body** → the marker is matched at line start, so prose quoting it
+  reads as a second status; indent, inline or write it generically.
 
-That convention exists today only in `transformDraft`'s docstring — a function
-the draft's author never reads. A refusal that named the symptom alone would
-leave the fix to be rediscovered.
+Measured, the guard fires on the **amendment** path too: an amendment whose
+appended section quotes the line it changes produces two. The first cut of this
+message was written for the new-ADR path alone and told that reader the verb
+"prepends the signature header itself" — which it does not do there — and to
+fix a preamble blockquote an amendment draft does not have.
+
+**A correct verdict with an invented cause is the failure this repository has
+paid for before**: #604's mismatch message sent the maintainer through three
+token rotations chasing an environment problem.
 
 ## REQ-674-1 — Shipped-file guards run against the DESTINATION path
 
@@ -66,6 +75,19 @@ Two consequences, both deliberate, both from the
 - The plan states which guard/file pairs actually ran — and when the answer is
   **none**, says so in those words. A silent clean run and a run where nothing
   was applicable must not look the same to the human about to sign.
+
+## REQ-674-3 — Every applicable guard reports, and the report says whether it is complete
+
+A refusal carries **all** the findings, not the first. Stopping at one costs a
+whole promote cycle per defect, and the artefact that motivated both tickets had
+two — so a first-failure refusal would have produced exactly the loop #674 was
+filed to remove: fix, re-run, discover the second, fix, re-run.
+
+A guard that could not run does not silence the guards that could: it is
+recorded as its own finding and the run continues. The closing line is then
+qualified — `N finding(s), and M guard(s) could not run, so this list may be
+incomplete` — because *"every applicable guard reported"* is itself a claim, and
+claiming it over a guard that threw is the same inversion REQ-674-2 refuses.
 
 ## REQ-675-4 — Each guard declares which destinations it is about
 
