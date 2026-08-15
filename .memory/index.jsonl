@@ -1244,6 +1244,7 @@
 {"id":"rec-99871bf6d093e6a6","ts":"2026-07-25T21:50:39Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-9992a4548c4d5ebd","ts":"2026-07-13T00:21:51Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-999bf78718e856c2","ts":"2026-07-25T21:50:30Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-99ed65a49a2204e5","ts":"2026-08-14T19:47:06Z","actor":"claude/brain-memory-637-save-reports-what-it-did","type":"decision","project":"brain","issue":637,"file":"2026-08.jsonl"}
 {"id":"rec-99fdcfc11f81c6f8","ts":"2026-07-22T00:15:26Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-9a05572d017a08cc","ts":"2026-07-25T21:50:42Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-9a117b83fa64fe46","ts":"2026-07-25T21:50:18Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}

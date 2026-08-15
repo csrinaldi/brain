@@ -310,6 +310,7 @@ export default {
   'memory.plainfiles.save.issueInvalid': '--issue tiene que ser un NÚMERO de issue; llegó {value}. Se guarda como entero para que el registro quede atado a su ticket.',
   'memory.plainfiles.save.typeRequired': '--type es obligatorio y no tiene default seguro — es una elección, no un dato que la herramienta pueda derivar. Uno de: {types}.',
   'memory.plainfiles.save.done':    '✓ guardado {id} → {file}',
+  'memory.plainfiles.save.indexFailed': 'el registro SÍ se escribió — {id} → {file}. Lo que falló es la reconstrucción del ÍNDICE, que lee el store entero, así que la causa casi seguro es un registro que ya estaba roto antes de esta corrida: {message}\n  NO vuelvas a correr memory:save — el registro ya está en disco, y reintentar acuña un SEGUNDO registro con un `ts` posterior, y por lo tanto otro id, que ninguna deduplicación va a colapsar jamás.\n  Repará el store y después reconstruí el índice con `npm run memory:reindex`.',
   'memory.plainfiles.save.secretFound': 'Se detectó un secreto en el registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
   'memory.save.plainfilesIgnoredOpts': 'se ignoraron la(s) opción(es) {opts} — el formato de registro de plainfiles no tiene un campo para ellas (scope/topic son conceptos exclusivos de engram); el registro se guardó igualmente.',
   'memory.plainfiles.search.empty': 'ℹ no se encontraron registros coincidentes.',
