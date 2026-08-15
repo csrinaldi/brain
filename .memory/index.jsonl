@@ -1009,6 +1009,7 @@
 {"id":"rec-7d038cd605b8d709","ts":"2026-07-25T21:50:45Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-7d092e8d9e673954","ts":"2026-07-11T12:33:41Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-7d2d316cfe29a6e9","ts":"2026-07-25T21:51:26Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-7d37e5ff546e8417","ts":"2026-08-15T18:11:47Z","actor":"claude/brain-memory-633-hooks-keep-stderr","type":"decision","project":"brain","issue":633,"file":"2026-08.jsonl"}
 {"id":"rec-7d51c607242fd5a2","ts":"2026-06-26T22:29:51Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-7d64af8820259416","ts":"2026-07-12T19:30:16Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-7da322c6e3d6f0fd","ts":"2026-07-25T21:50:46Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07.jsonl"}
