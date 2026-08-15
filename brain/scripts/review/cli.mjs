@@ -68,7 +68,33 @@ export function parseArgs(argv) {
     if (argv[i] === '--pr') given.push(argv[++i] ?? '(nothing)');
     else if (argv[i] === '--mode') args.mode = argv[++i];
     else if (argv[i] === '--dry-run') args.dryRun = true;
-    else if (!argv[i].startsWith('-')) given.push(argv[i]);
+    else if (argv[i].startsWith('-')) {
+      // An unrecognised option is REFUSED, never ignored — the strict half of
+      // `brain:approve`'s parser, which this verb had cited as its model while
+      // copying only the positional half.
+      //
+      // Silently discarding these was the worst thing in the first cut of this
+      // change: `--dry-run=true`, `--dryrun` and `-n` all parsed clean with
+      // `dryRun: false`, so an operator asking for a REHEARSAL got a real run
+      // that POSTED a verdict to the pull request. The safety flag disarmed
+      // itself and said nothing. Same defect as this ticket's, one axis over:
+      // an unrecognised input must not be quietly dropped.
+      // `--flag=value` is the near-miss worth naming, and the hint has to know
+      // which flags take a value: suggesting `--dry-run true` for
+      // `--dry-run=true` would send the operator to a second refusal, since
+      // `--dry-run` is a boolean and `true` would parse as a PR number.
+      const eq = argv[i].indexOf('=');
+      const stem = eq > 0 ? argv[i].slice(0, eq) : null;
+      if (stem === '--pr' || stem === '--mode') {
+        args.error = `unknown option "${argv[i]}" — a value is a separate argument, so write "${stem} ${argv[i].slice(eq + 1)}"`;
+      } else if (stem === '--dry-run') {
+        args.error = `unknown option "${argv[i]}" — "--dry-run" is a flag and takes no value`;
+      } else {
+        args.error = `unknown option "${argv[i]}"`;
+      }
+      return args;
+    }
+    else given.push(argv[i]);
   }
 
   if (given.length > 1) {
@@ -85,8 +111,12 @@ export function parseArgs(argv) {
   // the last one's, so `--pr 665 --pr abc` blamed "665" — a number that is
   // perfectly valid. Naming the wrong input is the very defect this ticket
   // exists to remove, and it had been rebuilt inside the fix for it.
+  // Digits only, then a range check. `Number()` alone accepts spellings no
+  // human typed on purpose and turns them into a DIFFERENT, valid-looking PR:
+  // `0x10` became 16, `1e3` became 1000, and `" 665 "` was silently trimmed.
+  // A reviewer pointed at the wrong pull request is worse than one that refuses.
   const [typed] = given;
-  args.pr = Number(typed);
+  args.pr = /^\d+$/.test(typed) ? Number(typed) : NaN;
   if (!Number.isInteger(args.pr) || args.pr <= 0) {
     // "NaN" names the coercion, not the mistake — report what was typed.
     args.error = `"${typed}" is not a PR number`;

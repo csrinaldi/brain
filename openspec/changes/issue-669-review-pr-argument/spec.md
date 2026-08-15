@@ -45,3 +45,28 @@ The raw token is carried from the point it was read, never re-derived from
 `argv` afterwards. Re-deriving it located the *first* `--pr` while the parsed
 value came from the *last*, so `--pr 665 --pr abc` blamed `665` — a perfectly
 valid PR number. Naming the wrong input is the same failure as naming no input.
+
+## REQ-669-6 — An unrecognised option is refused, never ignored
+
+Any token starting with `-` that is not `--pr`, `--mode` or `--dry-run` refuses
+the run, quoting what was typed. A `--flag=value` near-miss additionally names
+the correct spelling, and knows which flags take a value — suggesting
+`--dry-run true` for `--dry-run=true` would send the operator straight into a
+second refusal, since `--dry-run` is a boolean and `true` would then parse as a
+PR number.
+
+This is the strict half of `brain:approve`'s parser, which this verb cited as
+its model while copying only the positional half.
+
+The cost of not having it was the worst thing in the first cut: `--dry-run=true`,
+`--dryrun` and `-n` all parsed clean with `dryRun: false`, so an operator asking
+for a **rehearsal** got a real run that **posted a verdict to the pull request**.
+The safety flag disarmed itself silently.
+
+## REQ-669-7 — A PR number is digits, not whatever `Number()` will swallow
+
+The token must match `/^\d+$/` before the range check. `Number()` alone
+accepted spellings no human typed on purpose and resolved them to a
+**different, valid-looking** PR: `0x10` → 16, `1e3` → 1000, `" 665 "` → 665.
+
+A reviewer aimed at the wrong pull request is worse than one that refuses.

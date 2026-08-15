@@ -1016,6 +1016,77 @@ test('parseArgs: a repeated --pr blames the RIGHT input, never a valid one', () 
   assert.doesNotMatch(args.error, /"665" is not/, 'a valid number must never be blamed');
 });
 
+// ── Unrecognised options (self-review G1) ───────────────────────────────────
+//
+// The axis the first cut left open, and the one the regression tests above did
+// not cover: they all probe the PR-NUMBER axis, which is why this survived both
+// the fix and the self-review that caught two other defects in it. An
+// unrecognised option was silently discarded, so a misspelt `--dry-run` left
+// `dryRun: false` and the run POSTED a verdict when a rehearsal was asked for.
+
+test('parseArgs: --dry-run=true is REFUSED, never silently ignored (G1)', () => {
+  // The dangerous one. `=` is a plausible spelling, and dropping it silently
+  // turns a rehearsal into a real write to the pull request.
+  const args = parseArgs(['665', '--dry-run=true']);
+  assert.ok(args.error, 'a misspelt safety flag must refuse, not disarm itself');
+  assert.match(args.error, /--dry-run=true/, 'the refusal must quote what was typed');
+  assert.match(args.error, /takes no value/, 'and must not suggest "--dry-run true", which would refuse again');
+});
+
+test('parseArgs: every misspelling of the safety flag refuses (G1)', () => {
+  for (const spelling of ['--dryrun', '-n', '--dry_run', '--DRY-RUN']) {
+    const args = parseArgs(['665', spelling]);
+    assert.ok(args.error, `${spelling} must refuse`);
+    assert.equal(args.dryRun, false);
+  }
+});
+
+test('parseArgs: an unknown option refuses even when the PR number is fine (G1)', () => {
+  // The PR number parsing correctly is not a licence to ignore the rest of the
+  // argv — the operator asked for something the verb does not do.
+  const args = parseArgs(['665', '--verbose']);
+  assert.match(args.error, /unknown option "--verbose"/);
+  assert.equal(args.pr, null, 'nothing may be resolved from an argv that was not understood');
+});
+
+test('parseArgs: --pr=665 and --mode=x are refused WITH the correct spelling (G2)', () => {
+  assert.match(parseArgs(['--pr=665']).error, /write "--pr 665"/);
+  assert.match(parseArgs(['665', '--mode=tranche']).error, /write "--mode tranche"/);
+});
+
+test('parseArgs: the flags that DO exist still work, in both orders', () => {
+  // The positive control: refusing unknown options must not refuse known ones.
+  assert.deepEqual(parseArgs(['665', '--dry-run', '--mode', 'tranche']),
+    { pr: 665, mode: 'tranche', dryRun: true, error: null });
+  assert.deepEqual(parseArgs(['--dry-run', '--mode', 'tranche', '--pr', '665']),
+    { pr: 665, mode: 'tranche', dryRun: true, error: null });
+});
+
+test('main: an unknown option refuses before any git or network call (G1)', async () => {
+  const errors = [];
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.coldBootDeps = new Proxy({}, { get: () => { throw new Error('cold-boot must not run'); } });
+  const code = await main({ argv: ['665', '--dry-run=true'], log: () => {}, error: (s) => errors.push(s), ...deps });
+  assert.equal(code, 2);
+  assert.equal(vcs.calls.prReviewComment, 0, 'a misspelt --dry-run must never reach the poster');
+  assert.ok(errors.some(l => /--dry-run=true/.test(l)));
+});
+
+// ── The PR number is digits, not whatever Number() will swallow (G4) ─────────
+
+test('parseArgs: a PR number is digits only — no hex, exponent or padding (G4)', () => {
+  // `Number()` alone turned these into DIFFERENT, valid-looking PRs: 0x10 → 16,
+  // 1e3 → 1000. A reviewer aimed at the wrong pull request is worse than one
+  // that refuses.
+  for (const [typed, wouldHaveBeen] of [['0x10', 16], ['1e3', 1000], [' 665 ', 665], ['66.5', 66.5]]) {
+    const args = parseArgs(['--pr', typed]);
+    assert.ok(args.error, `${typed} must refuse rather than resolve to ${wouldHaveBeen}`);
+    assert.match(args.error, /is not a PR number/);
+    assert.notEqual(args.pr, wouldHaveBeen, 'and must not silently review a different PR');
+  }
+});
+
 test('main: an unusable PR argument refuses BEFORE any git or network call', async () => {
   const errors = [];
   const vcs = spyVcs();

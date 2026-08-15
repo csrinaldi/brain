@@ -28,6 +28,21 @@ issue: 669
       whatever the syntax, and carrying the raw token instead of re-deriving
       it. Neither was caught by the suite, the mutation runs, or the reviewer
       protocol — only by re-reading the diff adversarially.
+- [x] **T6** — Second self-review pass, after the PR was open. Three more:
+      · **G1** — an unrecognised option was silently discarded, so
+        `--dry-run=true`, `--dryrun` and `-n` all left `dryRun: false` and the
+        run POSTED a verdict when a rehearsal was asked for. The safety flag
+        disarmed itself. Now refused (REQ-669-6).
+      · **G4** — `Number()` resolved `0x10` to PR 16 and `1e3` to PR 1000.
+        Now digits-only (REQ-669-7).
+      · **G5** — every regression test written so far probed the PR-NUMBER
+        axis, which is exactly why G1 survived the fix AND the self-review that
+        caught two other defects in it. The suite had the shape of the author's
+        hypothesis, not of the input space. Covered now.
+      Mutation note: the first attempt at the G4 mutation did NOT land (a bad
+      shell escape) and the suite stayed green. A green run under a mutation
+      that never applied is not evidence — redone until the mutated line was
+      grep-confirmed, then 1 test red.
 
 ## Evidence — mutation testing
 
@@ -39,8 +54,10 @@ Each shown to **land**, to turn the suite **red**, and to revert
 | 1 | `if (false && args.error)` — the guard stops firing | 2 tests red |
 | 2 | drop the positional assignment | 5 tests red |
 | 3 | stop refusing two PR numbers (restore the silent winner) | 3 tests red |
+| 4 | ignore unrecognised options again (G1) | 3 tests red |
+| 5 | restore the lenient `Number()` coercion (G4) | 1 test red |
 
-Suite: **3638 tests, 3637 pass, 0 fail, 1 skipped**. `brain:repo:check` clean.
+Suite: **3645 tests, 3644 pass, 0 fail, 1 skipped**. `brain:repo:check` clean.
 
 ## Verified by hand
 
