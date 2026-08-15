@@ -70,3 +70,25 @@ accepted spellings no human typed on purpose and resolved them to a
 **different, valid-looking** PR: `0x10` → 16, `1e3` → 1000, `" 665 "` → 665.
 
 A reviewer aimed at the wrong pull request is worse than one that refuses.
+
+## REQ-669-8 — `--mode` is validated at parse time, not after a clone
+
+`--mode` accepts exactly `REVIEW_MODES` (`auto`, `tranche`, `checkpoint`,
+`ruling`). A missing value or an unknown one refuses **before** cold-boot,
+naming the flag or the token and listing the real modes.
+
+It used to pass the parser clean as `mode: undefined`, survive to the dispatch
+chain, and refuse only after a full clone and fetch — a network round trip
+spent on an argv that could never finish. REQ-669-2 forbids exactly that, and
+was only ever scoped to the PR number.
+
+Its message there read `mode "undefined" is not yet implemented`, which names
+the coercion rather than the input (REQ-669-3, one flag over) and calls a typo
+an unbuilt feature.
+
+`REVIEW_MODES` and the dispatch chain in `main` are pinned together by a test
+that drives every entry and asserts none reaches the "not yet implemented"
+stub. Two lists that can disagree is the shape #130, #340 and #555 each closed;
+this one is small enough to pin rather than derive. The stub stays as the
+fail-closed backstop for a mode `deriveMode` might grow that the chain does not
+handle — it is simply no longer reachable from the CLI.

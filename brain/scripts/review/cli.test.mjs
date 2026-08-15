@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { parseArgs, main } from './cli.mjs';
+import { parseArgs, main, REVIEW_MODES } from './cli.mjs';
 import { postVerdict } from './poster.mjs';
 import { buildVerdict, renderVerdict } from './verdict.mjs';
 import { REQUIRED_JOBS } from '../vcs/governance-checks.mjs';
@@ -1071,6 +1071,95 @@ test('main: an unknown option refuses before any git or network call (G1)', asyn
   assert.equal(code, 2);
   assert.equal(vcs.calls.prReviewComment, 0, 'a misspelt --dry-run must never reach the poster');
   assert.ok(errors.some(l => /--dry-run=true/.test(l)));
+});
+
+// ── --mode is validated at parse time, not after a clone (self-review G3) ───
+
+test('parseArgs: --mode with no value after it refuses, naming the flag not "undefined" (G3)', () => {
+  // It used to pass this parser clean as `mode: undefined`, survive to the
+  // dispatch chain, and refuse only AFTER cold-boot had cloned and fetched —
+  // a full network round trip for an argv that could never finish. The message
+  // there read `mode "undefined" is not yet implemented`, which names the
+  // coercion instead of the input and calls a typo an unbuilt feature.
+  const args = parseArgs(['665', '--mode']);
+  assert.ok(args.error);
+  assert.match(args.error, /--mode/);
+  assert.doesNotMatch(args.error, /undefined/, '"undefined" names the coercion, not the mistake');
+  assert.doesNotMatch(args.error, /not yet implemented/, 'a missing value is not an unbuilt feature');
+});
+
+test('parseArgs: an unknown --mode lists the real ones (G3)', () => {
+  const args = parseArgs(['665', '--mode', 'trance']);
+  assert.match(args.error, /"trance" is not a review mode/);
+  for (const mode of REVIEW_MODES) assert.match(args.error, new RegExp(mode));
+});
+
+test('parseArgs: --mode swallowing the PR number is reported as a MODE error (G3)', () => {
+  // `--mode 665` used to report "no PR number given", which is true and
+  // useless — the number is right there, eaten by the flag before it.
+  assert.match(parseArgs(['--mode', '665']).error, /"665" is not a review mode/);
+});
+
+test('parseArgs: every REVIEW_MODES entry is accepted', () => {
+  for (const mode of REVIEW_MODES) {
+    assert.equal(parseArgs(['665', '--mode', mode]).error, null, mode);
+  }
+});
+
+test('main: an unusable --mode refuses before any git or network call (G3)', async () => {
+  const errors = [];
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.coldBootDeps = new Proxy({}, { get: () => { throw new Error('cold-boot must not run'); } });
+  const code = await main({ argv: ['665', '--mode', 'trance'], log: () => {}, error: (s) => errors.push(s), ...deps });
+  assert.equal(code, 2);
+  assert.equal(vcs.calls.prReviewComment, 0);
+  assert.ok(errors.some(l => /not a review mode/.test(l)), 'and it must not have cloned to find that out');
+});
+
+test('main: every REVIEW_MODES entry actually DISPATCHES — none reaches the stub', async () => {
+  // The pin that keeps REVIEW_MODES and the dispatch chain from drifting. A
+  // mode accepted by the parser and unhandled below would refuse AFTER
+  // cold-boot with "not yet implemented" — reintroducing G3 through the other
+  // list. Two lists that can disagree is the shape #130/#340/#555 all closed.
+  //
+  // SCOPED DELIBERATELY to that one claim. A dispatch gap is a printed stub
+  // message and `return 1` — never a throw — so downstream exceptions are
+  // caught and ignored here: `checkpoint` and `ruling` reach evaluators this
+  // fixture does not wire (gatherCheckpointInputs forwards `checkpointDeps`,
+  // which readyDeps leaves empty, into gatherTrancheInputs, which then shells
+  // out to real git). Asserting exit 0 for those would be asserting fixture
+  // depth, not dispatch, and would fail for a reason this test is not about.
+  for (const mode of REVIEW_MODES) {
+    const errors = [];
+    let code = null;
+    try {
+      code = await main({
+        argv: ['42', '--mode', mode, '--dry-run'],
+        log: () => {}, error: (s) => errors.push(s),
+        ...readyDeps({ vcs: spyVcs() }),
+      });
+    } catch { /* fixture depth, not dispatch — see above */ }
+    assert.ok(!errors.some(l => /not yet implemented/.test(l)),
+      `mode "${mode}" is accepted by parseArgs but not dispatched by main`);
+    assert.notEqual(code, 2, `mode "${mode}" must survive its own parser`);
+  }
+});
+
+test('main: the modes this fixture fully wires reach a verdict', async () => {
+  // The positive control for the pin above, over the subset it can honestly
+  // drive end to end. Without it, "no stub message" would also be satisfied by
+  // a mode that never ran at all.
+  for (const mode of ['auto', 'tranche']) {
+    const lines = [];
+    const code = await main({
+      argv: ['42', '--mode', mode, '--dry-run'],
+      log: (s) => lines.push(s), error: () => {},
+      ...readyDeps({ vcs: spyVcs() }),
+    });
+    assert.equal(code, 0, mode);
+    assert.ok(lines.some(l => /verdict:/.test(l)), `mode "${mode}" reached no verdict`);
+  }
 });
 
 // ── The PR number is digits, not whatever Number() will swallow (G4) ─────────

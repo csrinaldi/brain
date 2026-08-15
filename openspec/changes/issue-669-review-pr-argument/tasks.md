@@ -42,7 +42,19 @@ issue: 669
       Mutation note: the first attempt at the G4 mutation did NOT land (a bad
       shell escape) and the suite stayed green. A green run under a mutation
       that never applied is not evidence — redone until the mutated line was
-      grep-confirmed, then 1 test red.
+      grep-confirmed, then 1 test red. Every mutation since asserts its anchor
+      matched exactly once before writing, so a silent no-op cannot recur.
+- [x] **T7** — **G3**: `--mode` validated at parse time (REQ-669-8). An unusable
+      mode used to cost a full clone and fetch before refusing, with a message
+      naming the coercion (`"undefined"`) and calling a typo an unbuilt feature.
+      `REVIEW_MODES` is pinned to the dispatch chain by a test.
+      The pin's first version asserted exit 0 for every mode and failed on
+      `checkpoint` — because `gatherCheckpointInputs` forwards the empty
+      `checkpointDeps` into `gatherTrancheInputs`, which then shells out to real
+      git. That is fixture depth, not dispatch. The pin was narrowed to its
+      actual claim (the stub is never reached) with a separate positive control
+      over the modes the fixture can honestly drive, rather than left asserting
+      something it could not observe.
 
 ## Evidence — mutation testing
 
@@ -56,8 +68,10 @@ Each shown to **land**, to turn the suite **red**, and to revert
 | 3 | stop refusing two PR numbers (restore the silent winner) | 3 tests red |
 | 4 | ignore unrecognised options again (G1) | 3 tests red |
 | 5 | restore the lenient `Number()` coercion (G4) | 1 test red |
+| 6 | drop the `--mode` validation (G3) | 4 tests red |
+| 7 | add a mode to `REVIEW_MODES` that nothing dispatches | the pin, red |
 
-Suite: **3645 tests, 3644 pass, 0 fail, 1 skipped**. `brain:repo:check` clean.
+Suite: **3652 tests, 3651 pass, 0 fail, 1 skipped**. `brain:repo:check` clean.
 
 ## Verified by hand
 

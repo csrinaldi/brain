@@ -53,6 +53,16 @@ import { runBoard } from './board.mjs';
  *
  * @returns {{ pr: number|null, mode: string, dryRun: boolean, error: string|null }}
  */
+/**
+ * The `--mode` values this CLI dispatches, plus `auto` (derive from repo state).
+ *
+ * MUST match the dispatch chain in `main` — pinned by a test that drives every
+ * entry and asserts none reaches the "not yet implemented" stub. Two lists that
+ * can disagree is the shape this repo keeps closing (#130, #340, #555); this one
+ * is small enough to pin rather than to derive.
+ */
+export const REVIEW_MODES = Object.freeze(['auto', 'tranche', 'checkpoint', 'ruling']);
+
 export function parseArgs(argv) {
   const args = { pr: null, mode: 'auto', dryRun: false, error: null };
 
@@ -95,6 +105,24 @@ export function parseArgs(argv) {
       return args;
     }
     else given.push(argv[i]);
+  }
+
+  // `--mode`, validated HERE rather than at the dispatch chain (self-review G3).
+  //
+  // An unusable mode used to pass this parser clean and refuse only after
+  // cold-boot had cloned and fetched — a full network round trip spent on an
+  // argv that could never finish. REQ-669-2 says nothing may be fetched for a
+  // run that cannot name its PR; the same holds for one that cannot name its
+  // mode, and the requirement was only ever scoped narrowly.
+  //
+  // It also refused with `mode "undefined" is not yet implemented`, which names
+  // the coercion instead of the input and mis-describes a typo as an unbuilt
+  // feature — both of which REQ-669-3 forbids one flag over.
+  if (!REVIEW_MODES.includes(args.mode)) {
+    args.error = args.mode === undefined
+      ? '"--mode" was given with no value after it'
+      : `"${args.mode}" is not a review mode — expected one of: ${REVIEW_MODES.join(', ')}`;
+    return args;
   }
 
   if (given.length > 1) {
