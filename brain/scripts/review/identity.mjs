@@ -49,16 +49,43 @@ export const NEGATIVE_CONTROL_SENTINEL = 'ghp_brainNegativeControl0000NotARealTo
 // failure returns something indistinguishable from "nothing to report".
 const AUTH_REJECTION = /\b401\b|bad credentials|unauthorized|requires authentication/i;
 
+// The control's own blast radius, classified separately (#604 self-review F1).
+//
+// This control sends ONE deliberately-invalid credential per run, and repeated
+// invalid attempts are exactly what providers throttle: GitHub answers a burst
+// of them with `403 Maximum number of login attempts exceeded`, which then
+// rejects VALID credentials too until the window expires.
+//
+// So the control can cause the condition that stops it working. Left inside
+// `unusable`, that surfaced as "could not establish whether this environment
+// honours the reviewer token" — which sends the operator hunting for a proxy
+// that is not there. That is the same mis-diagnosis shape that cost three
+// token rotations, re-introduced by the fix that exists to prevent it.
+//
+// It stays a REFUSAL: a lockout is not evidence the environment honours
+// credentials. (It is suggestive — a credential-injecting proxy would never
+// produce one, because the sentinel never reaches the provider AS an invalid
+// credential — but inferring a clearance from a failure is precisely the
+// inversion this control was built to remove.) What changes is that the
+// operator is told what happened and what not to do about it.
+const PROVIDER_LOCKOUT = /maximum number of login attempts|rate limit/i;
+
 /** Pure core of the #604 control. Classifies one probe outcome:
  *  - `resolved` — an invalid token produced an identity → credentials are
  *    injected upstream; every token-scoped read here is ambient. REFUSE.
  *  - `rejected` — the provider refused the invalid token → the environment
  *    honours credentials. The control PASSES.
+ *  - `lockout` — the provider is throttling authentication attempts, possibly
+ *    because of this control. REFUSE, with its own message and remedy.
  *  - `unusable` — the probe failed for some other reason (binary missing,
- *    network, unparsed error). REFUSE, with its own message. */
+ *    network, unparsed error). REFUSE, with its own message.
+ *
+ * `lockout` is tested BEFORE `rejected` so a message carrying both a status
+ * code and throttling text can never be read as a plain auth rejection. */
 export function evaluateNegativeControl({ resolved = null, error = null } = {}) {
   if (resolved) return { control: 'resolved', ambientAs: resolved };
   if (!error) return { control: 'unusable', reason: 'the probe returned no identity and no error' };
+  if (PROVIDER_LOCKOUT.test(error)) return { control: 'lockout', reason: error };
   return AUTH_REJECTION.test(error)
     ? { control: 'rejected' }
     : { control: 'unusable', reason: error };
@@ -145,6 +172,9 @@ export async function gatherIdentity({ deps = {} } = {}) {
   if (control.control === 'resolved') {
     return { ok: false, ambientIdentity: control.ambientAs, tokenEnv, setupDocPath };
   }
+  if (control.control === 'lockout') {
+    return { ok: false, controlLockout: control.reason, tokenEnv, setupDocPath };
+  }
   if (control.control === 'unusable') {
     return { ok: false, controlError: control.reason, tokenEnv, setupDocPath };
   }
@@ -177,6 +207,12 @@ export async function main(deps = {}) {
       console.error(`  token-scoped identity read cannot establish who ${result.tokenEnv} belongs to (issue #604).`);
       console.error('  Rotating the token cannot fix this — the token is never what answers.');
       console.error('  Run brain:review where credentials are not injected: the maintainer machine, or CI with the PAT as a secret.');
+    } else if (result.controlLockout) {
+      console.error(`brain:review: refusing to run — the provider is temporarily refusing authentication attempts: ${result.controlLockout}`);
+      console.error('  This check sends one deliberately-invalid credential per run, and repeated invalid');
+      console.error('  attempts are what trigger that lockout — so it may have caused this itself (issue #604).');
+      console.error('  Wait for the window to expire and re-run. Do NOT rotate the token, and do not read');
+      console.error('  this as a credential-injecting environment — neither is what happened.');
     } else if (result.controlError) {
       console.error(`brain:review: refusing to run — could not establish whether this environment honours the reviewer token: ${result.controlError}`);
       console.error('  The negative control did not reach a verdict, and "could not establish" is not "established clean" (issue #604).');

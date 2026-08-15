@@ -27,6 +27,29 @@ control exists to catch: a reader that on failure returns something
 indistinguishable from "nothing to report". "Could not establish" is not
 "established clean".
 
+## REQ-604-6 — A provider lockout is named as such, and never blamed on the token
+
+The control sends one deliberately-invalid credential per run. Repeated invalid
+attempts are exactly what providers throttle — GitHub answers a burst with
+`403 Maximum number of login attempts exceeded`, which then rejects **valid**
+credentials too until the window expires. **The control can cause the condition
+that stops it working.**
+
+That outcome is its own state, `lockout`, with its own message: it names the
+throttling, says the control may have caused it, and tells the operator to
+**wait** — explicitly not to rotate the token, and not to read it as a
+credential-injecting environment.
+
+It remains a **refusal**. A lockout is suggestive that credentials are honoured
+— a proxy would never produce one, because the sentinel never reaches the
+provider *as* an invalid credential — but inferring a clearance from a failure
+is the exact inversion this control exists to remove.
+
+Left inside `unusable`, this surfaced as *"could not establish whether this
+environment honours the reviewer token"*, sending the operator after a proxy
+that is not there: the same mis-diagnosis shape that cost three token
+rotations, re-introduced by the fix that exists to prevent it.
+
 ## REQ-604-3 — The control does not fire in an environment that honours credentials
 
 Where the provider rejects the sentinel, the run proceeds unchanged and the

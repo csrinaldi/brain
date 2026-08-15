@@ -22,6 +22,12 @@ issue: 604
 - [x] **T6** — e2e proof through the real verb: the injected-credential
       environment refuses and posts nothing; the healthy one still posts.
 - [x] **T7** — Measure whether `brain:approve` inherits half 1 (Ruling 4).
+- [x] **T12** — Self-review finding **F1**: the control can cause a provider
+      auth lockout and then mis-diagnose it. Split `lockout` out of `unusable`
+      (REQ-604-6) with its own message — wait, do not rotate, this is not a
+      proxy. Found by adversarially re-reading the change after it was already
+      green: mutation testing and a passing suite did not surface it, because
+      no test asked what happens when the probe's own side effect fires.
 
 ## Evidence — mutation testing
 
@@ -33,8 +39,9 @@ suite **red**, and to revert **byte-identical** (`diff -q`).
 | 1 | `unusable` → `rejected` (fold the failure into a clean bill) | 2 tests red |
 | 2 | `if (false && control.control === 'resolved')` — skip the control | 2 tests red |
 | 3 | `run()` drops `launchFailure` again | 2 tests red; the empty `(status null): ` reason returns verbatim |
+| 4 | remove the `lockout` classification (F1's fix) | 4 tests red |
 
-Suite: **3641 tests, 3640 pass, 0 fail, 1 skipped**. The 3 failures present on
+Suite: **3646 tests, 3645 pass, 0 fail, 1 skipped**. The 3 failures present on
 the untouched baseline did not reproduce on a second baseline run — flaky, not
 caused here, and not silently absorbed either.
 

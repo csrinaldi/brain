@@ -180,6 +180,19 @@ export async function main(deps = {}) {
       error(`  token-scoped identity read cannot establish who ${identity.tokenEnv} belongs to (issue #604).`);
       error('  Rotating the token cannot fix this — the token is never what answers.');
       error('  Run brain:review where credentials are not injected: the maintainer machine, or CI with the PAT as a secret.');
+    } else if (identity.controlLockout) {
+      // #604 self-review F1: the control sends one invalid credential per run,
+      // and a burst of those is exactly what providers throttle — GitHub with
+      // `403 Maximum number of login attempts exceeded`, which then rejects
+      // VALID credentials too. Folded into `controlError` this read as "could
+      // not establish whether this environment honours the token", sending the
+      // operator after a proxy that is not there: the same mis-diagnosis that
+      // cost three token rotations, caused by the fix for it.
+      error(`brain:review: refusing to run — the provider is temporarily refusing authentication attempts: ${identity.controlLockout}`);
+      error('  This check sends one deliberately-invalid credential per run, and repeated invalid');
+      error('  attempts are what trigger that lockout — so it may have caused this itself (issue #604).');
+      error('  Wait for the window to expire and re-run. Do NOT rotate the token, and do not read');
+      error('  this as a credential-injecting environment — neither is what happened.');
     } else if (identity.controlError) {
       // #604: the control could not reach a verdict. Scoring that as "clean"
       // would be the reader-empty-on-failure defect the control exists to avoid.

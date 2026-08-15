@@ -284,3 +284,76 @@ test('the sentinel token is not a credential and is never read from config or en
   const src = readFileSync(new URL('./identity.mjs', import.meta.url), 'utf8');
   assert.equal(src.includes('process.env[NEGATIVE_CONTROL_SENTINEL]'), false);
 });
+
+// ── The control's own blast radius (#604 self-review F1) ─────────────────────
+
+test('evaluateNegativeControl: a provider auth lockout is its OWN state, not unusable (#604 F1)', () => {
+  // The control sends one invalid credential per run; a burst of those is what
+  // providers throttle. Folded into `unusable` this read as "could not
+  // establish whether this environment honours the token" — sending the
+  // operator after a proxy that is not there, which is the mis-diagnosis that
+  // cost three token rotations, caused by the fix for it.
+  for (const msg of [
+    'gh: Maximum number of login attempts exceeded. Please try again later. (HTTP 403)',
+    'gh: API rate limit exceeded (HTTP 403)',
+    'GitLab API failed: 429 (/user) rate limit',
+  ]) {
+    const result = evaluateNegativeControl({ error: msg });
+    assert.equal(result.control, 'lockout', msg);
+    assert.equal(result.reason, msg, 'the provider\'s own words must survive to the operator');
+  }
+});
+
+test('evaluateNegativeControl: a lockout never CLEARS the control (#604 F1)', () => {
+  // A lockout is suggestive that credentials are honoured — a proxy would never
+  // produce one — but inferring a clearance from a failure is the exact
+  // inversion this control removes. It must refuse.
+  const result = evaluateNegativeControl({ error: 'Maximum number of login attempts exceeded' });
+  assert.notEqual(result.control, 'rejected');
+  assert.notEqual(result.control, 'resolved');
+});
+
+test('evaluateNegativeControl: lockout is tested BEFORE the auth-rejection match (#604 F1)', () => {
+  // A message carrying BOTH a status code and throttling text must not be read
+  // as a plain 401 — the remedy differs (wait, vs. the environment is fine).
+  const both = 'HTTP 401 — and then: Maximum number of login attempts exceeded';
+  assert.equal(evaluateNegativeControl({ error: both }).control, 'lockout');
+});
+
+test('gatherIdentity: a lockout refuses distinctly from unusable AND from a mismatch (#604 F1)', () => {
+  return gatherIdentity({
+    deps: {
+      readConfig: () => ({ handle: 'csrinaldibot', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
+      readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'realpat' }),
+      whoami: async () => { throw new Error('gh: Maximum number of login attempts exceeded (HTTP 403)'); },
+    },
+  }).then((result) => {
+    assert.equal(result.ok, false);
+    assert.match(result.controlLockout, /Maximum number of login attempts/);
+    assert.equal(result.controlError, undefined, 'a lockout is not an unusable probe');
+    assert.equal(result.mismatch, undefined);
+    assert.equal(result.ambientIdentity, undefined);
+  });
+});
+
+test('main: a lockout tells the operator to WAIT, never to rotate the token (#604 F1)', async () => {
+  const errors = [];
+  const realError = console.error;
+  console.error = (s) => errors.push(String(s));
+  try {
+    const code = await main({
+      readConfig: () => ({ handle: 'csrinaldibot', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
+      readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'realpat' }),
+      whoami: async () => { throw new Error('gh: Maximum number of login attempts exceeded (HTTP 403)'); },
+    });
+    assert.equal(code, 1);
+  } finally {
+    console.error = realError;
+  }
+  const text = errors.join('\n');
+  assert.match(text, /temporarily refusing authentication/i);
+  assert.match(text, /may have caused this itself/i, 'the control must own its contribution');
+  assert.match(text, /Do NOT rotate the token/i);
+  assert.doesNotMatch(text, /could not establish whether this environment honours/i,
+    'the unusable wording would send the operator after a proxy that is not there');
+});

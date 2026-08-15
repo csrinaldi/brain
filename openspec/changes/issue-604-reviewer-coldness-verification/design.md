@@ -24,6 +24,7 @@ cost three token rotations. Pinned by
 |---|---|---|
 | `resolved` | an invalid token produced an identity | refuse — credentials are injected |
 | `rejected` | a **recognised** auth rejection | control clears |
+| `lockout` | the provider is throttling auth attempts | refuse — and say the control may have caused it |
 | `unusable` | anything else | refuse — nothing was established |
 
 A boolean would have to fold `unusable` into one of the other two. Folding it
@@ -31,6 +32,23 @@ into `rejected` is the `evidence-reader-empty-on-failure` defect this repo has
 found five times: a probe that could not run would report as a clean bill of
 health. Folding it into `resolved` would refuse every offline run for the wrong
 stated reason.
+
+`lockout` was split out of `unusable` by this change's own self-review
+(REQ-604-6). It is the one failure mode **this control can cause**: one invalid
+credential per run, and a burst of those is what providers throttle. Inside
+`unusable` it printed *"could not establish whether this environment honours the
+reviewer token"* — accurate, and exactly the wrong thing to act on. Tested
+**before** `rejected`, so a message carrying both a status code and throttling
+text can never be read as a plain 401, where the remedy is the opposite (nothing
+is wrong; proceed).
+
+The residual cost is stated rather than engineered away: the control still
+sends one failed authentication per run, which is not equivalent to a normal
+call for rate-limiting or for audit telemetry. A repo with authentication
+logging will see a steady trickle of failed attempts from the reviewer. The
+mitigation that would remove it — caching the control's verdict per environment
+— is deliberately **not** taken: a cached clearance is exactly the stale false
+evidence this ticket exists to delete.
 
 Measured: `gh` absent yields precisely the `unusable` shape, and it is a state
 the operator must be able to tell apart from a proxy.
