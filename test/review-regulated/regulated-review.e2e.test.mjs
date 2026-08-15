@@ -35,7 +35,7 @@ function withFixture(t, opts) {
 }
 
 /** Spawns the fixture's own vendored brain:review against its PR. */
-function runReview(fx, { token = 'tok-e2e', extraArgs = [] } = {}) {
+function runReview(fx, { token = 'tok-e2e', validToken = null, injectCredentials = false, extraArgs = [] } = {}) {
   const r = spawnSync(
     process.execPath,
     [join(fx.repoDir, 'brain', 'scripts', 'review', 'cli.mjs'), '--pr', String(fx.prNumber), ...extraArgs],
@@ -46,6 +46,12 @@ function runReview(fx, { token = 'tok-e2e', extraArgs = [] } = {}) {
         ...process.env,
         PATH: `${STUB_BIN}${delimiter}${process.env.PATH}`,
         GH_STUB_DIR: fx.stubDir,
+        // #604: the stub's `/user` now honours the credential, so it needs to
+        // know which one is real. `validToken` defaults to the token under
+        // test — the healthy case — and a test that wants a
+        // credential-injecting environment sets them apart.
+        GH_STUB_VALID_TOKEN: validToken ?? token ?? 'tok-e2e',
+        ...(injectCredentials ? { GH_STUB_INJECT_CREDENTIALS: '1' } : {}),
         ...(token === null ? { BRAIN_REVIEWER_TOKEN: '' } : { BRAIN_REVIEWER_TOKEN: token }),
       },
     },
@@ -189,6 +195,50 @@ test('e2e: a token whose real login differs from the handle refuses at boot — 
   assert.notEqual(r.status, 0, 'a mismatched identity must refuse');
   assert.match(r.stderr, /the-bot|someone-else/, 'the refusal must name the identities');
   assert.equal(postedBodies(fx).length, 0, 'nothing may be posted under an unverified identity');
+});
+
+// ── REQ-604-1: the negative control, end to end ──────────────────────────────
+
+test('e2e: an environment that resolves an INVALID token refuses at boot — nothing posted (REQ-604-1)', (t) => {
+  // Reproduces the environment measured in #604: behind a credential-injecting
+  // proxy, `api /user` answers for the CALLER, so an invented token, an empty
+  // one and no token at all resolve to the same authenticated login. The
+  // reviewer's identity evidence is then the environment's, not the token's.
+  //
+  // The handle is set to the login the environment injects — the dangerous
+  // direction of the two in #604's table. Before the negative control this
+  // combination VERIFIED and PROCEEDED, satisfying the check with a credential
+  // that was never used; #413's mismatch never fires because the two agree.
+  const fx = withFixture(t, { tier: 'regulated', handle: 'ambient-operator' });
+  writeFileSync(join(fx.stubDir, 'user.json'), JSON.stringify({ login: 'ambient-operator' }) + '\n');
+
+  const r = runReview(fx, { token: 'unread', injectCredentials: true });
+
+  assert.notEqual(r.status, 0, 'a verification the environment can satisfy without the token must refuse');
+  assert.match(r.stderr, /INVALID token/i, 'the refusal must name the control, not a mismatch');
+  assert.match(r.stderr, /ambient-operator/, 'and the ambient identity it resolved to');
+  assert.doesNotMatch(r.stderr, /reviewer\.handle claims/,
+    'must NOT surface as a #413 mismatch — that shape sent the maintainer through three token rotations');
+  assert.equal(postedBodies(fx).length, 0, 'nothing may be posted on identity evidence the token did not establish');
+});
+
+test('e2e: the healthy environment still proceeds — the control is not a blanket refusal (REQ-604-2)', (t) => {
+  // The other direction, and the one that would make this control worthless if
+  // it failed: where credentials ARE honoured, the run is unaffected.
+  const fx = withFixture(t, { tier: 'regulated' });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(postedBodies(fx).length, 1, 'the verdict still posts in an environment that honours the token');
+});
+
+test('e2e: the control probes with a token that is NOT the reviewer credential (REQ-604-3)', (t) => {
+  // The probe must never be satisfiable by the real token, or it proves nothing.
+  const fx = withFixture(t, { tier: 'regulated' });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, r.stderr);
+  const userCalls = stubCalls(fx).filter(c => c.argv.join(' ') === 'api /user');
+  assert.ok(userCalls.length >= 2,
+    'the identity endpoint must be hit twice: once with the deliberately invalid token, once with the real one');
 });
 
 test('e2e: a missing token refuses at boot — nothing posted (REQ-409-5c)', (t) => {

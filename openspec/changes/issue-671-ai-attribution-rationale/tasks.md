@@ -1,0 +1,213 @@
+---
+status: draft
+issue: 671
+---
+
+# Tasks — issue 671
+
+## Done
+
+- [x] **T1** — Measure before deciding: 28/264 commits on `main` carry the
+      trailer; `CLAUDE.md` does not exist; `tranche.mjs` reads `prBody` for a
+      rule about commits.
+- [x] **T2** — ADR draft (`brain-drafts/adr-0031-…`), carrying the reason, the
+      counter-argument, and the provenance-is-not-authorship distinction.
+      **Not moved into `brain/`** — Tier 3 for the agent; the maintainer moves,
+      reviews and signs it, and owes `brain/HOME.md` an index entry
+      (`decision-gate`).
+- [x] **T3** — The check in `hooks/commit-msg` and `hooks/pre-receive`
+      (REQ-671-1/2), before the ticket-ref exemptions.
+- [x] **T4** — `hooks.attribution-parity.test.mjs`: one corpus, three
+      implementations (REQ-671-3).
+- [x] **T5** — `cites-resolve.test.mjs` extended to `*.md` filenames (REQ-671-4).
+- [x] **T6** — `tranche.mjs` repaired (REQ-671-5).
+
+## What the parity guard caught — twice, both times on this change's own work
+
+**First run:** `Claude-Session:` was added to both hooks and **not** to
+`tranche.mjs`, so the reviewer would have reported clean on a form the hook
+rejects.
+
+**Second run:** after the pattern was made vendor-neutral, the hooks recognised
+Copilot, Cursor, Gemini and the rest while `tranche.mjs` still knew only one
+vendor. Same drift, one axis over.
+
+Both were caught before the change was pushed rather than by a reader months
+later, which is the whole argument for the guard existing.
+
+## The vendor-neutrality correction
+
+The first cut hardcoded a single vendor. **brain ships into other people's
+repositories**: a hook that only knew the agent this repo happens to use would
+enforce the rule here and silently exempt every consumer using another — the
+rule is stated generically and would have been implemented specifically.
+
+Broadening it created a second risk the corpus now pins: `cursor`, `codex` and
+`gpt` are ordinary words. Three near-misses are **must-accept**, including
+`"generated with cursor pagination"` and a human co-author surnamed
+`Copilotti`. A gate that fires on innocent input teaches people to bypass it.
+
+Then a second, sharper correction: **a broadened list is still not agnostic.**
+`opencode` and `antigravity` are not in it, and a consumer would have to wait
+for a brain release to enforce their own rule against their own tooling. The
+vocabulary moved to `git config brain.aiAgents`, with the baked list demoted to
+a fallback — `git config` because it is the only dependency `pre-receive` has,
+installed as it is into a bare repo as one self-contained file.
+
+Also corrected: the parity test originally **scraped** `tranche.mjs`'s source
+for its regex. A guard that parses the file it guards fails open the moment the
+declaration is reformatted. The pattern is now exported and imported.
+
+And the config read introduced its own hazard, caught before it shipped: outside
+a repository `git config` resolves against GLOBAL scope, so the corpus would
+have measured the developer's machine. Neutralised, with a positive control
+asserting the shipped default fires with no configuration at all — verified by
+setting a decoy global key and re-running green (#657's shape).
+
+## Evidence — mutation testing
+
+Each shown to **land** (anchor asserted to match exactly once before writing,
+then grep-confirmed), to turn the suite **red**, and to revert **byte-identical**.
+
+| # | mutation | result |
+|---|---|---|
+| 1 | restore the dead `CLAUDE.md` citation | the `.md` guard names the exact file and line |
+| 2 | narrow the hooks' agent list back to one vendor | 3 tests red |
+| 3 | drop the `git config` read from one hook | the same-key parity test goes red |
+
+Suite and checks reported in the PR.
+
+## Doctrine draft — `agent-authorities.md` generalisation
+
+Requested by the maintainer after the mechanism landed, and drafted rather than
+applied: `brain/core/**` is Tier 3, prohibited **even if explicitly asked**, and
+the request does not move that boundary.
+
+`brain-drafts/agent-authorities.tier-lists.amendment.md` proposes three repairs,
+each measured:
+
+| defect | evidence |
+|---|---|
+| Tier 3 names ONE vendor | `harness/backends/` ships `antigravity`, `claude`, `gentle-ai`, `plain`; this session runs `antigravity`. The doctrine is compiled **verbatim** into every consumer's `AGENTS.md` (`SOURCE_DOCS`, "Tier table VERBATIM"), so consumers read a rule naming a tool they do not use. |
+| Tier 3 says "Publish **JARs**" | `@logikas/brain` is an npm package; `JAR` is a Java artefact. |
+| Tier 2 cites `npm run backend:deploy` | **zero occurrences** in `package.json` — a citation that reads as verified and resolves to nothing, the same shape as `CLAUDE.md`. |
+
+The wording is now the *only* vendor-specific part left: the enforcement reads
+`git config brain.aiAgents` and is agnostic.
+
+### Both drafts are consumed by `brain:promote`, not moved by hand
+
+Corrected after the maintainer pointed out the verb exists. The first cut said
+*"the maintainer moves it"* — which would skip §1d's cascade, including the
+`brain/HOME.md` index entry `decision-gate` checks and the `AGENTS.md`
+regeneration. A hand-rolled promoter lost precisely that step once before; the
+verb exists because of it.
+
+```
+npm run brain:promote -- .../brain-drafts/adr-0031-ai-attribution-is-a-claim-not-a-record.md
+npm run brain:promote -- .../brain-drafts/agent-authorities.draft.md
+```
+
+The amendment draft also had to be **rewritten to a shape the verb accepts**: it
+was prose with a decorative diff, and `brain:promote` requires a `.draft.md`
+basename plus a `brain-amendment/1` contract with ordered
+`amend-find`/`amend-replace` pairs. Prose plus line references is exactly what
+that contract exists to refuse — a draft a human applies by hand.
+
+**Validated rather than handed over on faith**, since the whole change is about
+not shipping unverified claims:
+
+| check | result |
+|---|---|
+| ADR basename / H1 vs `DRAFT_BASENAME_RE` | valid |
+| amendment contract parses | valid — non-ADR target, 3 edits |
+| every `amend-find` anchor occurs in the target | exactly once each |
+| `planAmendment` against the real file | applies clean, 3 acts pending |
+| resulting text | `JARs`, `backend:deploy` and the vendor-specific trailer gone; the three replacements present |
+
+## The mechanism blocked the commit that documents it
+
+Not a hypothetical: the first attempt at the doctrine-draft commit was **rejected
+by the hook this ticket added**, because the message quoted the prohibited
+trailer verbatim while explaining the rule.
+
+It is a real limitation of a lexical gate, and the people most likely to hit it
+are the ones working on governance. **No exemption was added.** "A message that
+merely discusses the rule" is not a distinction `grep` can draw, and a gate that
+can be talked out of firing by context is the hole that swallows the gate.
+Quoting the form generically passes, costs nothing, and is what the doctrine
+draft asks for anyway.
+
+Recorded here and in the ADR's Consequences rather than only in a commit
+message, because the next person to hit it will search the change folder.
+
+## The guard caught this ADR the moment it stopped being a draft
+
+`local-checks` went red on #672 after promotion, on `shipped-hostnames.test.mjs`
+(#648):
+
+```
+these name a host that is neither reserved nor on the allowlist, in files that SHIP:
+  claude.ai  @ brain/project/decisions/adr-0031-ai-attribution-is-a-claim-not-a-record.md
+```
+
+The ADR quoted a session URL verbatim as evidence. **An ADR arguing that a
+vendor's dead URLs do not belong in shipped artefacts, embedding one.** The
+guard was right; the text is reworded to make the point without naming the host,
+which loses nothing — the URL was illustrative, never load-bearing.
+
+### The gap it exposes, which is not this ADR's fault
+
+`brain-drafts/**` lives under `openspec/changes/**`, which does **not** ship, so
+the guard's surface excludes it. A draft therefore passes every local check and
+breaks a shipped-file guard **at the moment `brain:promote` moves it** — the
+check's surface does not include the thing the file is about to become.
+
+Nothing catches that today, and the same hole applies to any other shipped-file
+guard. Worth its own ticket: `brain:promote` could run the shipped-file checks
+against the DESTINATION path before staging, so a draft is refused where it is
+cheap to fix rather than after it is signed.
+
+## The promoted ADR is malformed, and the amendment path cannot repair it
+
+Two defects in the signed file, found when trying to amend it.
+
+**1. Mine — the draft's header was not in the house shape.** `transformDraft`
+strips only preamble lines starting with `>`; the docstring says so and names
+where the status belongs (*"the drafts' `> **status:**` line"*). This draft used
+bare `**Status**:` / `**Date**:` lines, so the verb kept them and prepended its
+own. The signed ADR carries **two** `**Status**:` lines. Existing drafts
+(ADR-0025) show the shape; this one now follows it.
+
+**2. Not mine — `brain:promote` produced that file and staged it.** A signed
+ADR with two Status lines is structurally invalid, and the verb never checked.
+Its sibling path already knows the rule: `stampSigned` refuses more than one,
+and `planAmendment` refuses a target carrying two. The promote path enforces
+neither, in a verb whose stated purpose is refusing to leave a half-applied
+signed artefact.
+
+### Why this forces revert-and-re-promote rather than an amendment
+
+The maintainer's ruling is right and stands: an ADR is signed source of truth,
+and a correction that leaves no block means anyone can edit it. The verb encodes
+that — `stampSigned(..., { required: contract.isAdr })` demands a `**Signed**:`
+line for ADR targets and not for methodology ones. An earlier recommendation
+here proposed a direct edit citing #586; that precedent was **inapt**, because
+#586 corrected a *methodology* file with no Status line to number.
+
+But the amendment path **cannot run on this file**: it refuses with *"the target
+has 2 `**Status**:` lines, expected exactly 1"*. So the sequence is to withdraw
+the signature rather than amend around a malformed artefact — `git revert` of
+the promote commit (a forward commit, not history modification), then re-promote
+from the corrected draft. Neither defect was ever decided content; recording
+them as *"Amendment 1 — fixed a URL and a duplicate header"* would put promotion
+artefacts into the decision record.
+
+## Not done, deliberately
+
+- [ ] **The 28 commits on `main`.** Rewriting published history is the Tier-3
+      prohibition three bullets above this rule. The cost — dead session URLs in
+      a public package's history — is already paid, and the rule binds forward.
+- [ ] **A general AI-attribution detector.** The pattern is a list of observed
+      spellings. No such list is complete, and one claiming to be would be the
+      apparent protection #499 refuses. Stated in the ADR's Consequences.

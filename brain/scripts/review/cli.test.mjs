@@ -8,10 +8,19 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { parseArgs, main } from './cli.mjs';
+import { parseArgs, main, REVIEW_MODES } from './cli.mjs';
 import { postVerdict } from './poster.mjs';
 import { buildVerdict, renderVerdict } from './verdict.mjs';
 import { REQUIRED_JOBS } from '../vcs/governance-checks.mjs';
+import { NEGATIVE_CONTROL_SENTINEL } from './identity.mjs';
+
+// A `whoami` double for an environment that HONOURS credentials (#604): known
+// tokens resolve, anything else — the negative control's sentinel above all —
+// is rejected the way a provider rejects a bad credential.
+const honestWhoami = (logins) => async ({ token }) => {
+  if (Object.hasOwn(logins, token)) return { username: logins[token] };
+  throw new Error('gh: Bad credentials (HTTP 401)');
+};
 
 const HEAD = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
 
@@ -41,7 +50,10 @@ function readyDeps({ vcs, labels = [] } = {}) {
       readConfig: () => ({ handle: 'brain-reviewer', tokenEnv: 'BRAIN_REVIEWER_TOKEN' }),
       readEnv: () => ({ BRAIN_REVIEWER_TOKEN: 'shh' }),
       // #413: the token resolves to the configured handle — verification passes.
-      whoami: async () => ({ username: 'brain-reviewer' }),
+      // #604: the double HONOURS the token. One that returns a fixed login for
+      // any credential models the credential-injecting environment the negative
+      // control refuses, so it can no longer stand in for a healthy one.
+      whoami: honestWhoami({ shh: 'brain-reviewer' }),
     },
     coldBootDeps: {
       fetchPr: async () => ({ number: 42, author: 'alice', labels, body: '', headRefOid: HEAD }),
@@ -71,12 +83,12 @@ function readyDeps({ vcs, labels = [] } = {}) {
 
 test('parseArgs: --pr, --mode, --dry-run', () => {
   assert.deepEqual(parseArgs(['--pr', '42', '--mode', 'tranche', '--dry-run']), {
-    pr: 42, mode: 'tranche', dryRun: true,
+    pr: 42, mode: 'tranche', dryRun: true, error: null,
   });
 });
 
 test('parseArgs: defaults mode to auto, dryRun to false', () => {
-  assert.deepEqual(parseArgs(['--pr', '7']), { pr: 7, mode: 'auto', dryRun: false });
+  assert.deepEqual(parseArgs(['--pr', '7']), { pr: 7, mode: 'auto', dryRun: false, error: null });
 });
 
 // ── --dry-run: computes the real verdict, posts nothing ─────────────────────
@@ -549,7 +561,7 @@ test('main("board"): the unreadable report does not claim a seq:* freeze that di
 });
 
 test('main: an ordinary run (--pr flag, no subcommand) is UNAFFECTED by the queue/board dispatch check', () => {
-  assert.deepEqual(parseArgs(['--pr', '42']), { pr: 42, mode: 'auto', dryRun: false });
+  assert.deepEqual(parseArgs(['--pr', '42']), { pr: 42, mode: 'auto', dryRun: false, error: null });
 });
 
 // ── absent token: fail-closed (wires Phase 2) ───────────────────────────────
@@ -610,7 +622,7 @@ test('main: a token whose real login disagrees with reviewer.handle refuses at b
   const vcs = spyVcs();
   const deps = readyDeps({ vcs });
   // The #413 reproduction: config claims the bot, the token is the author's.
-  deps.identityDeps.whoami = async () => ({ username: 'csrinaldi' });
+  deps.identityDeps.whoami = honestWhoami({ shh: 'csrinaldi' });
   const code = await main({ argv: ['--pr', '42', '--dry-run'], log: () => {}, error: (s) => errors.push(s), ...deps });
   assert.equal(code, 1, 'a mismatched token identity must refuse the run, not proceed');
   assert.ok(
@@ -620,11 +632,32 @@ test('main: a token whose real login disagrees with reviewer.handle refuses at b
   assert.equal(vcs.calls.prReviewComment, 0, 'refusing at boot must post no verdict');
 });
 
+test('main: an environment that resolves the INVALID token refuses at boot, posting nothing (#604)', async () => {
+  const errors = [];
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  // The credential-injecting environment: every token resolves to the same
+  // login. With `reviewer.handle` set to that login the #413 comparison AGREES,
+  // so nothing below the control can notice the token was never read.
+  deps.identityDeps.readConfig = () => ({ handle: 'brain-reviewer', tokenEnv: 'BRAIN_REVIEWER_TOKEN' });
+  deps.identityDeps.whoami = async () => ({ username: 'brain-reviewer' });
+  const code = await main({ argv: ['--pr', '42', '--dry-run'], log: () => {}, error: (s) => errors.push(s), ...deps });
+  assert.equal(code, 1, 'identity evidence the token did not establish must refuse the run');
+  assert.ok(errors.some(l => /INVALID token/i.test(l)), 'the refusal must name the control');
+  assert.ok(errors.some(l => /Rotating the token cannot fix this/.test(l)),
+    'and must say rotation is not the remedy — chasing that cost three rotations (#604)');
+  assert.equal(vcs.calls.prReviewComment, 0, 'refusing at boot must post no verdict');
+});
+
 test('main: whoami rejection refuses at boot — never proceed on an unverified identity (#413)', async () => {
   const errors = [];
   const vcs = spyVcs();
   const deps = readyDeps({ vcs });
-  deps.identityDeps.whoami = async () => { throw new Error('api unreachable'); };
+  // The control must CLEAR so this case still exercises the #413 verify path.
+  deps.identityDeps.whoami = async ({ token }) => {
+    if (token === NEGATIVE_CONTROL_SENTINEL) throw new Error('gh: Bad credentials (HTTP 401)');
+    throw new Error('api unreachable');
+  };
   const code = await main({ argv: ['--pr', '42', '--dry-run'], log: () => {}, error: (s) => errors.push(s), ...deps });
   assert.equal(code, 1, 'an unverifiable identity must refuse, mirroring §10 uncomputable-evidence');
   assert.ok(
@@ -637,7 +670,7 @@ test('main: whoami rejection refuses at boot — never proceed on an unverified 
 test('main: whoami matching the handle case-insensitively proceeds — logins are case-insensitive (#413)', async () => {
   const vcs = spyVcs();
   const deps = readyDeps({ vcs });
-  deps.identityDeps.whoami = async () => ({ username: 'Brain-Reviewer' });
+  deps.identityDeps.whoami = honestWhoami({ shh: 'Brain-Reviewer' });
   const lines = [];
   const code = await main({ argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), ...deps });
   assert.equal(code, 0, 'a case-different login for the SAME account must not be refused as a forgery');
@@ -939,4 +972,270 @@ test('main: a thread of readable prior verdicts reports nothing unreadable — t
   await main({ argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), ...deps });
   assert.equal(lines.filter(l => /unreadable/i.test(l)).length, 0,
     'a false positive here would teach the operator to ignore the line within a week');
+});
+
+// ── parseArgs: the PR number is required, and answerable when it is wrong ────
+//
+// Measured on main: `brain:review -- 665` (no `--pr`) parsed to `pr: null`,
+// which reached `git fetch origin null` and surfaced as an unhandled Node
+// stack trace — `fatal: couldn't find remote ref null`. Nothing in it said the
+// PR number was missing, so a typo in the argv read as a broken remote.
+
+test('parseArgs: a BARE positional PR number is accepted — brain:approve takes one', () => {
+  // The two verbs disagreed: `brain:approve -- 640` works, `brain:review -- 665`
+  // silently did not. Same repo, same operator, opposite conventions.
+  const args = parseArgs(['665']);
+  assert.equal(args.pr, 665);
+  assert.equal(args.error, null);
+});
+
+test('parseArgs: the positional and the flag agree', () => {
+  assert.deepEqual(parseArgs(['665']).pr, parseArgs(['--pr', '665']).pr);
+});
+
+test('parseArgs: a positional composes with the other flags', () => {
+  const args = parseArgs(['665', '--dry-run', '--mode', 'tranche']);
+  assert.deepEqual(args, { pr: 665, mode: 'tranche', dryRun: true, error: null });
+});
+
+test('parseArgs: no PR number is an ERROR, never a null that travels', () => {
+  const args = parseArgs([]);
+  assert.equal(args.pr, null);
+  assert.match(args.error, /no PR number/i);
+});
+
+test('parseArgs: a non-numeric PR number reports what was TYPED, not "NaN"', () => {
+  // "NaN" names the coercion; the operator needs to see their own mistake.
+  assert.match(parseArgs(['--pr', 'abc']).error, /"abc"/);
+  assert.match(parseArgs(['nonsense']).error, /"nonsense"/);
+});
+
+test('parseArgs: a trailing --pr with no value is an error, not NaN in flight', () => {
+  const args = parseArgs(['--pr']);
+  assert.ok(args.error, 'a flag with nothing after it must not reach the network as NaN');
+  assert.match(args.error, /nothing/i);
+});
+
+test('parseArgs: zero and negative are refused — they are not PR numbers', () => {
+  assert.ok(parseArgs(['--pr', '0']).error);
+  assert.ok(parseArgs(['--pr', '-3']).error);
+});
+
+test('parseArgs: more than one positional is refused rather than silently picking one', () => {
+  const args = parseArgs(['665', '666']);
+  assert.match(args.error, /one PR number/i);
+  assert.match(args.error, /665, 666/, 'the refusal must show both, so the operator sees the ambiguity');
+});
+
+test('parseArgs: a positional CONFLICTING with --pr is refused too, not silently resolved', () => {
+  // The first cut refused `665 666` and then silently preferred the flag here —
+  // the same silently-chosen winner it had just rejected, in another syntax.
+  // The ambiguity is the same fact whichever way each number was written.
+  const args = parseArgs(['665', '--pr', '666']);
+  assert.ok(args.error, 'two PR numbers is two PR numbers, whatever the syntax');
+  assert.match(args.error, /665, 666/);
+  assert.equal(args.pr, null, 'and nothing may be resolved from an ambiguous argv');
+});
+
+test('parseArgs: a repeated --pr blames the RIGHT input, never a valid one', () => {
+  // `--pr 665 --pr abc` used to report `"665" is not a PR number`. 665 is
+  // perfectly valid; the bad token is `abc`. The message re-derived the raw
+  // value with indexOf('--pr'), which finds the FIRST flag while `pr` held the
+  // LAST one's value — naming the wrong input, which is the exact defect this
+  // ticket exists to remove, rebuilt inside its own fix.
+  const args = parseArgs(['--pr', '665', '--pr', 'abc']);
+  assert.ok(args.error);
+  assert.match(args.error, /abc/, 'the offending token must appear');
+  assert.doesNotMatch(args.error, /"665" is not/, 'a valid number must never be blamed');
+});
+
+// ── Unrecognised options (self-review G1) ───────────────────────────────────
+//
+// The axis the first cut left open, and the one the regression tests above did
+// not cover: they all probe the PR-NUMBER axis, which is why this survived both
+// the fix and the self-review that caught two other defects in it. An
+// unrecognised option was silently discarded, so a misspelt `--dry-run` left
+// `dryRun: false` and the run POSTED a verdict when a rehearsal was asked for.
+
+test('parseArgs: --dry-run=true is REFUSED, never silently ignored (G1)', () => {
+  // The dangerous one. `=` is a plausible spelling, and dropping it silently
+  // turns a rehearsal into a real write to the pull request.
+  const args = parseArgs(['665', '--dry-run=true']);
+  assert.ok(args.error, 'a misspelt safety flag must refuse, not disarm itself');
+  assert.match(args.error, /--dry-run=true/, 'the refusal must quote what was typed');
+  assert.match(args.error, /takes no value/, 'and must not suggest "--dry-run true", which would refuse again');
+});
+
+test('parseArgs: every misspelling of the safety flag refuses (G1)', () => {
+  for (const spelling of ['--dryrun', '-n', '--dry_run', '--DRY-RUN']) {
+    const args = parseArgs(['665', spelling]);
+    assert.ok(args.error, `${spelling} must refuse`);
+    assert.equal(args.dryRun, false);
+  }
+});
+
+test('parseArgs: an unknown option refuses even when the PR number is fine (G1)', () => {
+  // The PR number parsing correctly is not a licence to ignore the rest of the
+  // argv — the operator asked for something the verb does not do.
+  const args = parseArgs(['665', '--verbose']);
+  assert.match(args.error, /unknown option "--verbose"/);
+  assert.equal(args.pr, null, 'nothing may be resolved from an argv that was not understood');
+});
+
+test('parseArgs: --pr=665 and --mode=x are refused WITH the correct spelling (G2)', () => {
+  assert.match(parseArgs(['--pr=665']).error, /write "--pr 665"/);
+  assert.match(parseArgs(['665', '--mode=tranche']).error, /write "--mode tranche"/);
+});
+
+test('parseArgs: the flags that DO exist still work, in both orders', () => {
+  // The positive control: refusing unknown options must not refuse known ones.
+  assert.deepEqual(parseArgs(['665', '--dry-run', '--mode', 'tranche']),
+    { pr: 665, mode: 'tranche', dryRun: true, error: null });
+  assert.deepEqual(parseArgs(['--dry-run', '--mode', 'tranche', '--pr', '665']),
+    { pr: 665, mode: 'tranche', dryRun: true, error: null });
+});
+
+test('main: an unknown option refuses before any git or network call (G1)', async () => {
+  const errors = [];
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.coldBootDeps = new Proxy({}, { get: () => { throw new Error('cold-boot must not run'); } });
+  const code = await main({ argv: ['665', '--dry-run=true'], log: () => {}, error: (s) => errors.push(s), ...deps });
+  assert.equal(code, 2);
+  assert.equal(vcs.calls.prReviewComment, 0, 'a misspelt --dry-run must never reach the poster');
+  assert.ok(errors.some(l => /--dry-run=true/.test(l)));
+});
+
+// ── --mode is validated at parse time, not after a clone (self-review G3) ───
+
+test('parseArgs: --mode with no value after it refuses, naming the flag not "undefined" (G3)', () => {
+  // It used to pass this parser clean as `mode: undefined`, survive to the
+  // dispatch chain, and refuse only AFTER cold-boot had cloned and fetched —
+  // a full network round trip for an argv that could never finish. The message
+  // there read `mode "undefined" is not yet implemented`, which names the
+  // coercion instead of the input and calls a typo an unbuilt feature.
+  const args = parseArgs(['665', '--mode']);
+  assert.ok(args.error);
+  assert.match(args.error, /--mode/);
+  assert.doesNotMatch(args.error, /undefined/, '"undefined" names the coercion, not the mistake');
+  assert.doesNotMatch(args.error, /not yet implemented/, 'a missing value is not an unbuilt feature');
+});
+
+test('parseArgs: an unknown --mode lists the real ones (G3)', () => {
+  const args = parseArgs(['665', '--mode', 'trance']);
+  assert.match(args.error, /"trance" is not a review mode/);
+  for (const mode of REVIEW_MODES) assert.match(args.error, new RegExp(mode));
+});
+
+test('parseArgs: --mode swallowing the PR number is reported as a MODE error (G3)', () => {
+  // `--mode 665` used to report "no PR number given", which is true and
+  // useless — the number is right there, eaten by the flag before it.
+  assert.match(parseArgs(['--mode', '665']).error, /"665" is not a review mode/);
+});
+
+test('parseArgs: every REVIEW_MODES entry is accepted', () => {
+  for (const mode of REVIEW_MODES) {
+    assert.equal(parseArgs(['665', '--mode', mode]).error, null, mode);
+  }
+});
+
+test('main: an unusable --mode refuses before any git or network call (G3)', async () => {
+  const errors = [];
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  deps.coldBootDeps = new Proxy({}, { get: () => { throw new Error('cold-boot must not run'); } });
+  const code = await main({ argv: ['665', '--mode', 'trance'], log: () => {}, error: (s) => errors.push(s), ...deps });
+  assert.equal(code, 2);
+  assert.equal(vcs.calls.prReviewComment, 0);
+  assert.ok(errors.some(l => /not a review mode/.test(l)), 'and it must not have cloned to find that out');
+});
+
+test('main: every REVIEW_MODES entry actually DISPATCHES — none reaches the stub', async () => {
+  // The pin that keeps REVIEW_MODES and the dispatch chain from drifting. A
+  // mode accepted by the parser and unhandled below would refuse AFTER
+  // cold-boot with "not yet implemented" — reintroducing G3 through the other
+  // list. Two lists that can disagree is the shape #130/#340/#555 all closed.
+  //
+  // SCOPED DELIBERATELY to that one claim. A dispatch gap is a printed stub
+  // message and `return 1` — never a throw — so downstream exceptions are
+  // caught and ignored here: `checkpoint` and `ruling` reach evaluators this
+  // fixture does not wire (gatherCheckpointInputs forwards `checkpointDeps`,
+  // which readyDeps leaves empty, into gatherTrancheInputs, which then shells
+  // out to real git). Asserting exit 0 for those would be asserting fixture
+  // depth, not dispatch, and would fail for a reason this test is not about.
+  for (const mode of REVIEW_MODES) {
+    const errors = [];
+    let code = null;
+    try {
+      code = await main({
+        argv: ['42', '--mode', mode, '--dry-run'],
+        log: () => {}, error: (s) => errors.push(s),
+        ...readyDeps({ vcs: spyVcs() }),
+      });
+    } catch { /* fixture depth, not dispatch — see above */ }
+    assert.ok(!errors.some(l => /not yet implemented/.test(l)),
+      `mode "${mode}" is accepted by parseArgs but not dispatched by main`);
+    assert.notEqual(code, 2, `mode "${mode}" must survive its own parser`);
+  }
+});
+
+test('main: the modes this fixture fully wires reach a verdict', async () => {
+  // The positive control for the pin above, over the subset it can honestly
+  // drive end to end. Without it, "no stub message" would also be satisfied by
+  // a mode that never ran at all.
+  for (const mode of ['auto', 'tranche']) {
+    const lines = [];
+    const code = await main({
+      argv: ['42', '--mode', mode, '--dry-run'],
+      log: (s) => lines.push(s), error: () => {},
+      ...readyDeps({ vcs: spyVcs() }),
+    });
+    assert.equal(code, 0, mode);
+    assert.ok(lines.some(l => /verdict:/.test(l)), `mode "${mode}" reached no verdict`);
+  }
+});
+
+// ── The PR number is digits, not whatever Number() will swallow (G4) ─────────
+
+test('parseArgs: a PR number is digits only — no hex, exponent or padding (G4)', () => {
+  // `Number()` alone turned these into DIFFERENT, valid-looking PRs: 0x10 → 16,
+  // 1e3 → 1000. A reviewer aimed at the wrong pull request is worse than one
+  // that refuses.
+  for (const [typed, wouldHaveBeen] of [['0x10', 16], ['1e3', 1000], [' 665 ', 665], ['66.5', 66.5]]) {
+    const args = parseArgs(['--pr', typed]);
+    assert.ok(args.error, `${typed} must refuse rather than resolve to ${wouldHaveBeen}`);
+    assert.match(args.error, /is not a PR number/);
+    assert.notEqual(args.pr, wouldHaveBeen, 'and must not silently review a different PR');
+  }
+});
+
+test('main: an unusable PR argument refuses BEFORE any git or network call', async () => {
+  const errors = [];
+  const vcs = spyVcs();
+  let coldBootCalls = 0;
+  const deps = readyDeps({ vcs });
+  deps.coldBootDeps = new Proxy({}, { get: () => { coldBootCalls++; throw new Error('cold-boot must not run'); } });
+  const code = await main({ argv: [], log: () => {}, error: (s) => errors.push(s), ...deps });
+  assert.equal(code, 2, 'a usage error exits 2 — distinct from a governance refusal');
+  assert.equal(coldBootCalls, 0, 'nothing may be fetched for a run that cannot name its PR');
+  assert.equal(vcs.calls.prReviewComment, 0);
+  assert.ok(errors.some(l => /no PR number/i.test(l)));
+  assert.ok(errors.some(l => /Usage:/.test(l)), 'the refusal must show how to call it correctly');
+});
+
+test('main: the usage refusal names BOTH accepted forms and the subcommands', async () => {
+  const errors = [];
+  await main({ argv: [], log: () => {}, error: (s) => errors.push(s), ...readyDeps({ vcs: spyVcs() }) });
+  const text = errors.join('\n');
+  assert.match(text, /<pr-number>/);
+  assert.match(text, /--pr/);
+  assert.match(text, /queue \| board/, 'the subcommands are the other legal argv shape');
+});
+
+test('main: a bare positional PR number reaches a verdict, same as --pr', async () => {
+  const vcs = spyVcs();
+  const lines = [];
+  const code = await main({ argv: ['42', '--dry-run'], log: (s) => lines.push(s), ...readyDeps({ vcs }) });
+  assert.equal(code, 0, 'the positional form must be a real path, not merely parsed');
+  assert.ok(lines.some(l => /verdict:/.test(l)));
 });
