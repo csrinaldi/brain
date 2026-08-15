@@ -94,10 +94,32 @@ test('#634 computeMemoryCoverage: an UNAVAILABLE store still returns a normalize
 test('#634 renderMarkdown: a store WITH duplicates states the gap and how to locate them', (t) => {
   const out = renderMarkdown(metricsArgs(computeMemoryCoverage(storeWith(t, { copies: 3 }))));
 
-  assert.match(out, /the store holds 3 physical line\(s\)/, 'the physical count the reader cannot otherwise get');
-  assert.match(out, /2 of them repeat 1 id\(s\)/);
-  assert.match(out, /collapsed into the 1 above/, 'and the link back to the number it printed');
+  assert.match(out, /1 indexed \+ 2 repeated = 3 record line\(s\) read/, 'the reconciliation the reader cannot otherwise do');
+  assert.match(out, /repeats cover 1 id\(s\)/);
+  assert.match(out, /collapsed into the count above/, 'and the link back to the number it printed');
   assert.match(out, /memory:reindex/, 'and where the per-id locations live');
+});
+
+test('#634 renderMarkdown: the line accounts for what was READ, never claiming the file\'s line count', (t) => {
+  // `readRecords` silently skips unparseable lines. The first wording said "the
+  // store holds N physical line(s)", which asserts a number it never measured:
+  // with one corrupt line it reported 2 where `wc -l` says 3. A message in a
+  // ticket about readers that misreport must not misreport.
+  const dir = mkdtempSync(join(tmpdir(), 'brain-634-corrupt-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const recordsDir = join(dir, '.memory', 'records');
+  mkdirSync(recordsDir, { recursive: true });
+  const rec = buildRecord({
+    ts: '2026-07-01T10:00:00Z', actor: '@x', actorKind: 'human',
+    type: 'session_summary', project: 'brain', content: 'twice, plus a corrupt neighbour',
+  });
+  const line = serializeRecord(rec);
+  writeFileSync(join(recordsDir, '2026-07.jsonl'), `${line}\n${line}\n{ not json\n`, 'utf8');
+
+  const out = renderMarkdown(metricsArgs(computeMemoryCoverage(dir)));
+
+  assert.match(out, /1 indexed \+ 1 repeated = 2 record line\(s\) read/, 'it may only speak for what it resolved');
+  assert.doesNotMatch(out, /the store holds/, 'and must never assert a total for the file itself');
 });
 
 test('#634 renderMarkdown: a CLEAN store says nothing — a line that always fires informs nobody', (t) => {

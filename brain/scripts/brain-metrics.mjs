@@ -301,10 +301,17 @@ export function renderMarkdown({
     // memory/cli.mjs applies, not a warning banner.
     const dup = memCoverage.duplicates;
     if (dup?.lines > 0) {
+      // Phrased as an ACCOUNTING of the lines the reader resolved, never as a
+      // claim about the file. `readRecords` silently skips unparseable lines, so
+      // "the store holds N physical line(s)" — the first wording here — asserts
+      // a number it never measured: with one corrupt line it reports 2 where
+      // `wc -l` says 3. Measured, and corrected. Stating the sum keeps the
+      // reconciliation the reader wants without inventing a total.
       lines.push(
-        `  - the store holds ${memCoverage.total + dup.lines} physical line(s); ${dup.lines} of them `
-        + `repeat ${dup.ids} id(s) and are collapsed into the ${memCoverage.total} above. Normal for `
-        + '`merge=union` (ADR-0017, REQ-MF-3) — run `npm run memory:reindex` for the per-id locations.',
+        `  - ${memCoverage.total} indexed + ${dup.lines} repeated = ${memCoverage.total + dup.lines} `
+        + `record line(s) read; the ${dup.lines} repeats cover ${dup.ids} id(s) and are collapsed into `
+        + 'the count above. Normal for `merge=union` (ADR-0017, REQ-MF-3) — run '
+        + '`npm run memory:reindex` for the per-id locations.',
       );
     }
   }

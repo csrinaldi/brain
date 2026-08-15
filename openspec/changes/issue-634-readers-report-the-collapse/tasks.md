@@ -40,7 +40,14 @@ issue: 634
       | M7 | unavailable returns `undefined` duplicates | 1 test |
 
 - [x] **T11** Full suite: **3634 tests, 0 failures**, 1 pre-existing skip (`copyManaged`; root).
-- [ ] **T12** *(recorded, not done)* the PR template describes an issue-scoped `memory-gate` that
+- [x] **T12** **Cold review caught the new line asserting a total it never measured.** The first
+      wording was "the store holds N physical line(s)", with N derived as `total + duplicates.lines`
+      — but `readRecords` silently skips unparseable lines, so with one corrupt line it reported 2
+      where `wc -l` says 3. A message in a ticket about readers that misreport must not misreport.
+      Reworded as an accounting of what was READ (`X indexed + Y repeated = Z record line(s) read`),
+      which keeps the reconciliation without inventing a file total. Pinned by a test with a real
+      corrupt line.
+- [ ] **T13** *(recorded, not done)* the PR template describes an issue-scoped `memory-gate` that
       does not exist in `brain/scripts/governance/`. Does not change this ticket's conclusion —
       an issue-scoped `.some()` is invariant under dedup too — but the template and the
       implementation disagree, and someone should reconcile them.
