@@ -18,6 +18,23 @@
 #   - Mirrors the defensive style of the pre-push hook.
 #
 # Installed via `core.hooksPath = brain/scripts/hooks` (bootstrap.sh §7 / npm run env:init).
+#
+# ── STREAM DISCIPLINE FOR HOOKS (issue #633) ────────────────────────────────
+#
+#   stdout is PROGRESS. stderr is SOMETHING A HUMAN NEEDS.
+#   A hook discards the first and NEVER the second.
+#
+# So `>/dev/null` is right and `2>&1` / `2>/dev/null` are wrong, on every
+# invocation, without exception. The `import` line below already stated this
+# reasoning for itself; `resolve-index` carried `2>&1` anyway, which is how a
+# rule that lives in one comment decays.
+#
+# `|| true` / `|| exit 0` are a SEPARATE decision and they stay: a tooling
+# problem must not block a merge. But once the exit code is thrown away, stderr
+# is the only channel left — discarding both leaves nothing at all.
+#
+# Enforced, not merely written down: hooks.stream-discipline.test.mjs scans
+# every hook for `cli.mjs` invocations and fails on any that discards stderr.
 
 # Without node there is nothing to do — do not block.
 command -v node >/dev/null 2>&1 || exit 0
@@ -40,6 +57,13 @@ node "$repo_root/brain/scripts/memory/cli.mjs" import >/dev/null || true
 # `npm run memory:resolve-index` by hand. Here nothing is unmerged, so the
 # command only regenerates and stages nothing.
 # || true: index hygiene is informational, never a merge blocker.
-node "$repo_root/brain/scripts/memory/cli.mjs" resolve-index >/dev/null 2>&1 || true
+#
+# STREAM DISCIPLINE (issue #633) — see the header rule. This line carried `2>&1`
+# while the one above did not, and it is the worse of the two places to be
+# silent: `resolve-index` exists BECAUSE two branches merged, and `merge=union`
+# mints duplicate lines at exactly that moment. It was the one command in the
+# repository least able to afford being unable to say what the merge had just
+# duplicated.
+node "$repo_root/brain/scripts/memory/cli.mjs" resolve-index >/dev/null || true
 
 exit 0

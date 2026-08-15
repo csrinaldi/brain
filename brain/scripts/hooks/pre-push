@@ -14,6 +14,27 @@
 #
 # Instalado vía `core.hooksPath = brain/scripts/hooks` en bootstrap.sh §7 / npm run env:init.
 #
+# ── STREAM DISCIPLINE FOR HOOKS (issue #633) ────────────────────────────────
+#
+#   stdout is PROGRESS. stderr is SOMETHING A HUMAN NEEDS.
+#   A hook discards the first and NEVER the second.
+#
+# So `>/dev/null` is right and `2>&1` / `2>/dev/null` are wrong, on every
+# invocation, without exception. The reason is not tidiness: hooks are the
+# automated callers, and `memory/cli.mjs` puts its reports on stderr precisely
+# so those callers keep them (#598, and post-merge's `import` line says so in
+# its own comment). A hook that adds `2>&1` silently opts out of every warning
+# the tool was designed to give it.
+#
+# `|| true` / `|| exit 0` are a SEPARATE decision and they stay: a tooling
+# problem must not block a push or a merge. But once the exit code is thrown
+# away, stderr is the only channel left — discarding both leaves nothing at all.
+#
+# Enforced, not merely written down: hooks.stream-discipline.test.mjs scans
+# every hook for `cli.mjs` invocations and fails on any that discards stderr,
+# so a line added later follows the rule by failing a test rather than by
+# whoever wrote it having read this comment.
+#
 # Nota de arquitectura: engram escribe a .engram/ (su convención interna); ese path
 # es un symlink → .memory/ (el dir canónico versionado en git). ADR-0002 describe
 # el modelo; este hook inspecciona .memory/ directamente para evitar ambigüedad.
@@ -36,7 +57,17 @@ repo_root=$(git rev-parse --show-toplevel)
 
 # Materializar la memoria local en .memory/ vía dispatcher (backend-agnóstico).
 # Si el export falla, no bloquear el push por un problema de tooling.
-node "$repo_root/brain/scripts/memory/cli.mjs" share >/dev/null 2>&1 || exit 0
+#
+# STREAM DISCIPLINE (issue #633) — see the header rule. `>/dev/null` and NOT
+# `2>&1`: this is the last command before the store leaves the machine, and the
+# duplicate report (#574/#598) is deliberately on stderr so automated callers
+# keep it. `2>&1` discarded it on every single `git push`.
+#
+# `|| exit 0` stays: a tooling problem must never block a push. But the exit
+# code was the ONLY signal left, and it is thrown away one character later — so
+# a tampered record, the one refusal `rebuildIndex` still has, was reported to
+# nobody and blocked nothing. Not blocking is the decision; being silent was not.
+node "$repo_root/brain/scripts/memory/cli.mjs" share >/dev/null || exit 0
 
 # Checkpoint the active feature's resume.md so the latest context travels
 # with the branch on every push (REQ-S4-1).
@@ -46,7 +77,17 @@ node "$repo_root/brain/scripts/memory/cli.mjs" share >/dev/null 2>&1 || exit 0
 # exits non-zero ("ambiguous"); || true swallows it and the push continues
 # unaffected.  The committed resume.md remains the primary context-travel
 # mechanism in that case.
-node "$repo_root/brain/scripts/memory/cli.mjs" feature-checkpoint 2>/dev/null || true
+#
+# STREAM DISCIPLINE (issue #633) — this line was `2>/dev/null`, exactly backwards,
+# and it mattered more here than anywhere else. MEASURED on this repo:
+# `feature-checkpoint` writes 0 lines to stdout and 2 to stderr, so `2>/dev/null`
+# discarded the ONLY stream it uses. The message it silenced is the A2 limitation
+# above announcing itself —
+#   ℹ memory: feature-resolution: ambiguous active feature … — skipping checkpoint
+# — i.e. the documented failure mode was invisible in practice, and the `|| true`
+# meant the exit code said nothing either. A skip nobody can see is the same
+# outage as a skip that never reports.
+node "$repo_root/brain/scripts/memory/cli.mjs" feature-checkpoint >/dev/null || true
 
 # ── repo:check (hard — no false positives) ──────────────────────────────────
 node "$repo_root/brain/scripts/check-refs.mjs" || exit 1

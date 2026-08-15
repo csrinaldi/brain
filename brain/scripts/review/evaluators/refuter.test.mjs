@@ -87,3 +87,58 @@ test('evaluateRefuter: skips non-inferential or non-blocker findings (lazy execu
   assert.equal(runnerCalled, false);
   assert.equal(result.refutedCount, 0);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #552 — the fail-open the ruling turns on
+//
+// `cli.mjs` passes `runner: deps.refuterRunner ?? null` and `refuterRunner` is a
+// test-side injection, so PRODUCTION always runs with `runner === null`. Before
+// this, that state and "there was nothing to challenge" were the same return.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const inferentialBlocker = (id = 'design:coupling') => ({
+  id,
+  severity: 'blocker',
+  evidence_class: 'inferential',
+  causal_disposition: 'introduced',
+  evidence: 'x reaches into y',
+});
+
+test('#552: inferential blockers with NO runner are marked unchallenged and escalate — not silently passed', async () => {
+  const r = await evaluateRefuter({ findings: [inferentialBlocker()], runner: null });
+  assert.equal(r.unchallenged, 1);
+  assert.equal(r.escalate, 'human', 'no challenge available is weaker evidence than an inconclusive challenge, which already escalates');
+  assert.equal(r.adjustedFindings[0].refuter_outcome, 'unchallenged');
+  assert.equal(r.adjustedFindings[0].severity, 'blocker', 'the finding still blocks — this marks the evidence, it does not soften it');
+});
+
+test('#552: "nothing to challenge" stays silent — the two states must not collapse back together', async () => {
+  const deterministic = { id: 'gate:x', severity: 'blocker', evidence_class: 'deterministic', evidence: 'FAILURE' };
+  const r = await evaluateRefuter({ findings: [deterministic], runner: null });
+  assert.equal(r.unchallenged, 0);
+  assert.equal(r.escalate, null, 'every verdict brain posts today is this state — it must not start escalating');
+  assert.deepEqual(r.adjustedFindings, [deterministic]);
+  assert.equal('refuter_outcome' in r.adjustedFindings[0], false);
+});
+
+test('#552: only the inferential blockers are marked — a deterministic sibling is untouched', async () => {
+  const deterministic = { id: 'gate:x', severity: 'blocker', evidence_class: 'deterministic', evidence: 'FAILURE' };
+  const r = await evaluateRefuter({ findings: [deterministic, inferentialBlocker()], runner: null });
+  assert.equal(r.unchallenged, 1);
+  assert.equal('refuter_outcome' in r.adjustedFindings[0], false, 'a mechanical finding needs no challenger');
+  assert.equal(r.adjustedFindings[1].refuter_outcome, 'unchallenged');
+});
+
+test('#552: a non-blocker inferential finding is not marked — the refuter forks on BLOCKERS', async () => {
+  const editorial = { id: 'style:x', severity: 'editorial', evidence_class: 'inferential', evidence: 'reads oddly' };
+  const r = await evaluateRefuter({ findings: [editorial], runner: null });
+  assert.equal(r.unchallenged, 0);
+  assert.equal(r.escalate, null);
+});
+
+test('#552: a runner that RAN reports unchallenged: 0 — the count means "not challenged", never "not refuted"', async () => {
+  const runner = async (fs) => ({ outcomes: fs.map((f) => ({ id: f.id, outcome: 'corroborated', rationale: 'holds' })) });
+  const r = await evaluateRefuter({ findings: [inferentialBlocker()], runner });
+  assert.equal(r.unchallenged, 0);
+  assert.equal(r.adjustedFindings[0].refuter_outcome, 'corroborated');
+});
