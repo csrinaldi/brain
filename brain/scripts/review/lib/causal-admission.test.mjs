@@ -73,3 +73,68 @@ test('applyCausalAdmission: an "inconclusive" refuter outcome forces escalate:hu
   const result = await applyCausalAdmission({ findings, runner, escalate: null });
   assert.equal(result.escalate, 'human');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #552 — an unchallenged reasoned blocker is visible ON THE WIRE
+//
+// The property, stated as the thing that was false: a reader of a posted verdict
+// must be able to tell a judgment finding that was CHALLENGED from one that was
+// never challenged at all. Before this, they rendered byte-identically.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const INFERENTIAL = Object.freeze({
+  id: 'design:coupling',
+  severity: 'blocker',
+  evidence: 'x reaches into y',
+  cites: 'judgment',
+  evidence_class: 'inferential',
+  causal_disposition: 'introduced',
+});
+
+const CORROBORATING = async (fs) => ({
+  outcomes: fs.map((f) => ({ id: f.id, outcome: 'corroborated', rationale: 're-derived it independently' })),
+});
+
+test('#552: with no runner, the verdict carries a condition and escalates to a human', async () => {
+  const r = await applyCausalAdmission({ findings: [{ ...INFERENTIAL }], escalate: null, runner: null });
+  assert.equal(r.escalate, 'human');
+  assert.equal(r.conditions.length, 1);
+  assert.match(r.conditions[0], /1 inferential blocker\(s\) were NOT challenged/);
+  assert.match(r.conditions[0], /no refuter runner is configured/);
+});
+
+test('#552: with a runner that corroborated, there is no such condition — the condition means "not asked", not "asked and answered"', async () => {
+  const r = await applyCausalAdmission({ findings: [{ ...INFERENTIAL }], escalate: null, runner: CORROBORATING });
+  assert.deepEqual(r.conditions, []);
+  assert.equal(r.escalate, null);
+});
+
+test('#552: the two states render DIFFERENTLY — they used to be byte-identical', async () => {
+  const { buildVerdict, renderVerdict } = await import('../verdict.mjs');
+  const render = async (runner) => {
+    const r = await applyCausalAdmission({ findings: [{ ...INFERENTIAL }], escalate: null, runner });
+    return renderVerdict(buildVerdict({
+      headSha: 'abc123', gates: { required: [], detection: [] }, protocol: 'brain-review/2',
+      findings: r.findings, escalate: r.escalate, conditions: r.conditions,
+    }));
+  };
+  const never = await render(null);
+  const checked = await render(CORROBORATING);
+
+  assert.notEqual(never, checked, 'a reasoned blocker nobody challenged must not read like one that was');
+  assert.match(never, /refuter_outcome: unchallenged/);
+  assert.match(never, /escalate: human/);
+  assert.match(checked, /refuter_outcome: corroborated/);
+  assert.match(checked, /refuter_rationale: "re-derived it independently"/,
+    'the REASON for the outcome is rendered too — a marker whose justification only the code can see is the same defect one field over');
+});
+
+test('#552: a deterministic-only verdict is UNCHANGED — every verdict brain posts today takes this path', async () => {
+  const before = await applyCausalAdmission({
+    findings: [{ id: 'gate:x', severity: 'blocker', evidence: 'FAILURE', cites: 'y' }],
+    escalate: null, runner: null,
+  });
+  assert.deepEqual(before.conditions, []);
+  assert.equal(before.escalate, null);
+  assert.equal('refuter_outcome' in before.findings[0], false);
+});
