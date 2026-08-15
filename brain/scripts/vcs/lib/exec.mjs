@@ -19,7 +19,17 @@ export function setSpawn(fn) { _spawn = fn; }
  */
 export function run(cmd, args = [], opts = {}) {
   const r = _spawn(cmd, args, { encoding: 'utf8', ...opts });
-  return { ok: r.status === 0, stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
+  // A FAILURE TO LAUNCH (ENOENT — the binary is not installed) arrives in
+  // `r.error`, with `status: null` and `stdout`/`stderr` both null. Dropping
+  // it made "gh is not installed" indistinguishable from "gh ran and printed
+  // nothing to stderr" — the reader-empty-on-failure shape this repo keeps
+  // finding. Measured on #604: `brain:review` in a container without `gh`
+  // refused with `gh api /user failed (status null): ` and no reason at all,
+  // so the operator could not tell a missing binary from a silent rejection.
+  // "Could not run" and "ran and said nothing" are DIFFERENT answers.
+  const launchFailure = r.error ? `${cmd}: ${r.error.message}` : '';
+  const stderr = (r.stderr ?? '') || launchFailure;
+  return { ok: r.status === 0, stdout: r.stdout ?? '', stderr, status: r.status, error: r.error ?? null };
 }
 
 /**
