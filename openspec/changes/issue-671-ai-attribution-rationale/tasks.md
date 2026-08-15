@@ -168,6 +168,41 @@ guard. Worth its own ticket: `brain:promote` could run the shipped-file checks
 against the DESTINATION path before staging, so a draft is refused where it is
 cheap to fix rather than after it is signed.
 
+## The promoted ADR is malformed, and the amendment path cannot repair it
+
+Two defects in the signed file, found when trying to amend it.
+
+**1. Mine — the draft's header was not in the house shape.** `transformDraft`
+strips only preamble lines starting with `>`; the docstring says so and names
+where the status belongs (*"the drafts' `> **status:**` line"*). This draft used
+bare `**Status**:` / `**Date**:` lines, so the verb kept them and prepended its
+own. The signed ADR carries **two** `**Status**:` lines. Existing drafts
+(ADR-0025) show the shape; this one now follows it.
+
+**2. Not mine — `brain:promote` produced that file and staged it.** A signed
+ADR with two Status lines is structurally invalid, and the verb never checked.
+Its sibling path already knows the rule: `stampSigned` refuses more than one,
+and `planAmendment` refuses a target carrying two. The promote path enforces
+neither, in a verb whose stated purpose is refusing to leave a half-applied
+signed artefact.
+
+### Why this forces revert-and-re-promote rather than an amendment
+
+The maintainer's ruling is right and stands: an ADR is signed source of truth,
+and a correction that leaves no block means anyone can edit it. The verb encodes
+that — `stampSigned(..., { required: contract.isAdr })` demands a `**Signed**:`
+line for ADR targets and not for methodology ones. An earlier recommendation
+here proposed a direct edit citing #586; that precedent was **inapt**, because
+#586 corrected a *methodology* file with no Status line to number.
+
+But the amendment path **cannot run on this file**: it refuses with *"the target
+has 2 `**Status**:` lines, expected exactly 1"*. So the sequence is to withdraw
+the signature rather than amend around a malformed artefact — `git revert` of
+the promote commit (a forward commit, not history modification), then re-promote
+from the corrected draft. Neither defect was ever decided content; recording
+them as *"Amendment 1 — fixed a URL and a duplicate header"* would put promotion
+artefacts into the decision record.
+
 ## Not done, deliberately
 
 - [ ] **The 28 commits on `main`.** Rewriting published history is the Tier-3

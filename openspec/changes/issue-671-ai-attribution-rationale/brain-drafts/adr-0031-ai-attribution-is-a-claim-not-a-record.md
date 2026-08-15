@@ -1,7 +1,7 @@
 # ADR-0031 — AI attribution in commits is an unverifiable claim, not a provenance record
 
-**Status**: Proposed — pending human signature
-**Date**: 2026-08-15 — drafted by agent, per `agent-authorities.md` Tier 2
+> **status:** proposed — pending human promotion | **date:** 2026-08-15 | **owner:** @crinaldi
+> **amends:** nothing | **supersedes:** nothing
 
 > **Promote with the verb, do not move the file.**
 >
@@ -82,10 +82,10 @@ Three concrete costs, each measured rather than argued:
 
    > Written without naming that domain, deliberately. `brain/project/decisions/**`
    > **ships**, and `shipped-hostnames.test.mjs` (#648) refuses a real third-party
-   > host in a shipped file. The first cut of this ADR quoted the URL verbatim and
-   > tripped that guard the moment `brain:promote` moved it out of
-   > `openspec/changes/**` — an ADR about not embedding a vendor's dead URLs in
-   > shipped artefacts, embedding one. The guard was right.
+   > host in a shipped file. The first cut quoted the URL verbatim and tripped that
+   > guard the moment `brain:promote` moved it out of `openspec/changes/**` — an
+   > ADR about not embedding a vendor's dead URLs in shipped artefacts, embedding
+   > one. The guard was right.
 2. **A model name pinned into immutable history.** `Claude Opus 5` in a trailer
    is exactly what #580/#586 ruled against for citations: do not name a thing
    that ages, in a place that cannot be corrected.
