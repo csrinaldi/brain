@@ -33,7 +33,47 @@ if ! echo "$msg" | grep -qE \
   exit 1
 fi
 
-# ── 2. Ticket reference ──────────────────────────────────────────────────────
+# ── 2. AI attribution (#671) ─────────────────────────────────────────────────
+# agent-authorities.md Tier 3: "Add AI attribution in commits" — the agent must
+# never do this, EVEN IF EXPLICITLY ASKED. Checked before the ticket ref so a
+# Merge/Revert exemption never buys an exemption from this one (those exit
+# above; nothing below may become a bypass).
+#
+# Mechanised because memory did not hold it: 28 of 264 commits on main carried
+# the trailer before anyone looked. A rule nothing enforces decays (#575).
+#
+# The pattern is BYTE-IDENTICAL to pre-receive's, pinned by
+# hooks.attribution-parity.test.mjs — one rule, and the two implementations may
+# not drift (#130, #340, #555).
+#
+# VENDOR-NEUTRAL by construction. brain ships into other people's repositories,
+# and the doctrine says "AI attribution", not "one vendor's attribution". A hook
+# that only knew `claude` would enforce the rule for this repo and silently
+# exempt a consumer using any other agent — a confident check over a narrow
+# subject, which is the defect family this repo keeps closing.
+#
+# The agent list is OBSERVED SPELLINGS, not a complete detector; no such list can
+# be complete, and one claiming to be would be apparent protection (#499). The
+# `generated` shape requires the bracket of a markdown link so ordinary prose
+# ("generated with cursor pagination") is not caught — pinned by the corpus.
+AI_AGENTS='claude|copilot|chatgpt|gpt|gemini|cursor|devin|codex|aider|windsurf'
+AI_ATTRIBUTION_RE="co-authored-by:[[:space:]]*($AI_AGENTS)|($AI_AGENTS)-session:|generated[[:space:]]+(with|by)[[:space:]]*\[($AI_AGENTS)|🤖"
+if echo "$msg" | grep -qiE "$AI_ATTRIBUTION_RE"; then
+  echo ""
+  echo "✗ commit-msg: AI attribution is prohibited in commits."
+  echo "  agent-authorities.md Tier 3 — never, even if explicitly asked."
+  echo ""
+  echo "  A 'Co-Authored-By:' trailer is an unverifiable identity claim written"
+  echo "  into permanent history, and a session URL is a dead link for every"
+  echo "  reader outside this machine. Provenance is not authorship: record it"
+  echo "  where a runner can attest to it, not where the author asserts it."
+  echo ""
+  echo "  Remove the trailer(s) and commit again."
+  echo ""
+  exit 1
+fi
+
+# ── 3. Ticket reference ──────────────────────────────────────────────────────
 # Release commits (chore(release), cut by the release flow) and memory syncs
 # (chore(memory), written by brain:save) are machine-generated and carry no
 # ticket — exempt them from the ref requirement. Format is still enforced above.

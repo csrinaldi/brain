@@ -68,7 +68,34 @@ while IFS=' ' read -r oldrev newrev refname; do
       continue
     fi
 
-    # ── 2. Ticket reference ───────────────────────────────────────────────────
+    # ── 2. AI attribution (#671) ─────────────────────────────────────────────
+    # agent-authorities.md Tier 3 — never, even if explicitly asked. Checked
+    # BEFORE the chore(release)/chore(memory) exemption below, so no exemption
+    # from the ticket rule ever becomes an exemption from this one.
+    #
+    # This is the bypass-proof half: `--no-verify` is a client-only flag, so a
+    # commit that slipped past the local hook is still rejected here. That
+    # matters because `core.hooksPath` is per-clone and not committed — a fresh
+    # clone that never ran env:init has no client hook at all.
+    #
+    # BYTE-IDENTICAL to commit-msg's pattern, pinned by
+    # hooks.attribution-parity.test.mjs (#130, #340, #555).
+    # Vendor-neutral: brain ships into other people's repositories, and a hook
+    # that only knew one agent would silently exempt every consumer using
+    # another. Observed spellings, not a complete detector (#499).
+    AI_AGENTS='claude|copilot|chatgpt|gpt|gemini|cursor|devin|codex|aider|windsurf'
+    AI_ATTRIBUTION_RE="co-authored-by:[[:space:]]*($AI_AGENTS)|($AI_AGENTS)-session:|generated[[:space:]]+(with|by)[[:space:]]*\[($AI_AGENTS)|🤖"
+    if printf '%s\n' "$msg" | grep -qiE "$AI_ATTRIBUTION_RE"; then
+      printf '\n'
+      printf '✗ pre-receive: %s — AI attribution is prohibited in commits.\n' "$sha7"
+      printf '  agent-authorities.md Tier 3 — never, even if explicitly asked.\n'
+      printf '  A trailer is an unverifiable identity claim in permanent history, and a\n'
+      printf '  session URL is a dead link for every reader outside the machine that wrote it.\n'
+      failed=1
+      continue
+    fi
+
+    # ── 3. Ticket reference ───────────────────────────────────────────────────
     # Machine-generated commits (release cuts and memory syncs) carry no ticket —
     # exempt them from the ref requirement. Format is still enforced above.
     case "$msg" in
