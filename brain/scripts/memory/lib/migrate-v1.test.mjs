@@ -251,9 +251,12 @@ test('runMigration: writes accepted records, moves chunks to legacy, persists th
   assert.equal(summary.rejected, 1);
   assert.equal(summary.skipped, 1);
 
-  const recordsFile = join(recordsDir, '2026-07.jsonl');
-  assert.ok(existsSync(recordsFile), 'accepted record must land in records/2026-07.jsonl');
-  assert.equal(readFileSync(recordsFile, 'utf8').trim().split('\n').length, 1);
+  // #677 — one record, one file (`<yyyy-mm>-<id>.jsonl`). The assertion is the
+  // one it always was: the accepted record landed, on exactly one line.
+  const written = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl'));
+  assert.equal(written.length, 1, 'exactly one accepted record must land in records/');
+  assert.match(written[0], /^2026-07-rec-[0-9a-f]{16}\.jsonl$/);
+  assert.equal(readFileSync(join(recordsDir, written[0]), 'utf8').trim().split('\n').length, 1);
 
   assert.ok(existsSync(join(legacyDir, 'chunk1.jsonl.gz')), 'original chunk must be moved to legacy/');
   assert.ok(!existsSync(join(chunksDir, 'chunk1.jsonl.gz')), 'chunk must not remain in chunks/');

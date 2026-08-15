@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -65,7 +65,13 @@ test('migrate-v1 without --dry-run executes runMigration against the fixture roo
 
   assert.equal(result.status, 0, `expected exit 0, got ${result.status}. stderr: ${result.stderr}`);
   const memoryRoot = join(root, '.memory');
-  assert.ok(existsSync(join(memoryRoot, 'records', '2026-07.jsonl')), 'records/ must be written');
+  // #677 — one record per file, so the assertion names the shape rather than a
+  // month log: the migrated record landed under its own content-addressed name.
+  assert.deepEqual(
+    readdirSync(join(memoryRoot, 'records')).filter((f) => f.endsWith('.jsonl')).map((f) => f.replace(/rec-[0-9a-f]{16}/, 'rec-<id>')),
+    ['2026-07-rec-<id>.jsonl'],
+    'records/ must be written',
+  );
   assert.ok(existsSync(join(memoryRoot, 'legacy', 'chunk1.jsonl.gz')), 'chunk must be moved to legacy/');
   assert.ok(existsSync(join(memoryRoot, 'legacy', 'migration-rejected.json')), 'the rejection report must be persisted');
   assert.ok(existsSync(join(memoryRoot, 'index.jsonl')), 'the index must be rebuilt');

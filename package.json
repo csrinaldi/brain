@@ -64,6 +64,7 @@
     "memory:pull": "node ./brain/scripts/memory/cli.mjs pull",
     "memory:reindex": "node ./brain/scripts/memory/cli.mjs reindex",
     "memory:resolve-index": "node ./brain/scripts/memory/cli.mjs resolve-index",
+    "memory:split-records": "node ./brain/scripts/memory/cli.mjs split-records",
     "memory:migrate-v1": "node ./brain/scripts/memory/cli.mjs migrate-v1",
     "feature:checkpoint": "node ./brain/scripts/memory/cli.mjs feature-checkpoint",
     "feature:resume": "node ./brain/scripts/memory/cli.mjs feature-resume",
