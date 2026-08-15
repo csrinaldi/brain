@@ -155,6 +155,18 @@ therefore requires a markdown-link bracket, and the shared corpus pins three
 such near-misses as **must-accept** — including a human co-author whose surname
 merely contains an agent word.
 
+**A lexical gate blocks meta-discussion, and that is not escaped.** Found by
+using the mechanism: the commit documenting this rule was rejected by it,
+because the message quoted the prohibited trailer verbatim while explaining it.
+The people most likely to hit this are the ones working on governance.
+
+No exemption is added. "A message that merely discusses the rule" is not a
+distinction `grep` can draw, and a gate that can be talked out of firing by
+context is the hole that swallows the gate — the same reason
+`cites-resolve.test.mjs` refuses to pretend it can resolve a protocol section.
+Quoting the form generically (`Co-Authored-By: <agent>`) costs nothing, passes,
+and is exactly what the accompanying draft asks of the doctrine's own wording.
+
 **Accepted cost.** The 28 commits already on `main` are **not** rewritten.
 Rewriting published history is the Tier-3 prohibition three bullets above this
 one, and the cost of those 28 is already paid. The rule binds forward.

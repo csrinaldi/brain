@@ -98,6 +98,22 @@ The wording is now the *only* vendor-specific part left: the enforcement reads
 Applying it also owes the **`AGENTS.md` regeneration** — `brain-promote.mjs`
 treats that as its own act because a previous change lost it on the human's side.
 
+## The mechanism blocked the commit that documents it
+
+Not a hypothetical: the first attempt at the doctrine-draft commit was **rejected
+by the hook this ticket added**, because the message quoted the prohibited
+trailer verbatim while explaining the rule.
+
+It is a real limitation of a lexical gate, and the people most likely to hit it
+are the ones working on governance. **No exemption was added.** "A message that
+merely discusses the rule" is not a distinction `grep` can draw, and a gate that
+can be talked out of firing by context is the hole that swallows the gate.
+Quoting the form generically passes, costs nothing, and is what the doctrine
+draft asks for anyway.
+
+Recorded here and in the ADR's Consequences rather than only in a commit
+message, because the next person to hit it will search the change folder.
+
 ## Not done, deliberately
 
 - [ ] **The 28 commits on `main`.** Rewriting published history is the Tier-3
