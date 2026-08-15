@@ -86,10 +86,25 @@ issue: 677
       (Act 4), and both artefacts close the anti-custom-driver passage by pointing at the
       built-in union driver as the friction-free alternative (Act 5 / Act 7). Added rather than
       left for the next reader.
-- [ ] **T14** **The forge-side half of the acceptance.** What is proven so far is that git merges
-      the new layout cleanly with no driver in effect. What is NOT yet observed is GitHub
-      reporting `mergeable` for a second memory-capturing branch in the new layout. Recorded here
-      with what was actually run, in the PR description, once measured — and stated as unproven
-      until then.
+- [x] **T14** **The forge-side half of the acceptance, run as a controlled experiment on the
+      forge itself.** Local git proves local git; #677 exists because that is not the merge that
+      lands work. So: four throwaway branches, the SAME two records in both arms, same day, same
+      repository, `merge=union` declared in `.gitattributes` on every one of them. Two draft PRs,
+      each pairing a "second capture" against a "first capture" base — the exact shape of a
+      second memory PR after the first has merged:
+
+      | probe | layout | GitHub `mergeable_state` |
+      |---|---|---|
+      | #686 (control) | both records appended to `2026-08.jsonl` | **`dirty`** — conflicts |
+      | #685 | one file per record | **`unstable`** — mergeable, checks pending |
+
+      `dirty` is GitHub's not-mergeable-because-conflicts state; `unstable` is mergeable with
+      checks not green (the probe branches run no CI worth passing). The only variable between
+      the two arms is the layout.
+
+      Both PRs were closed immediately, unmerged. **Their four `probe/677-*` branches could NOT
+      be deleted from here** — `git push --delete` returns HTTP 403 through this session's proxy,
+      and no branch-delete tool is available. They are dead branches awaiting a manual delete;
+      recorded rather than left for someone to find.
 - [ ] **T15** *(requires the maintainer)* `npm run brain:promote` on both drafts, in the same
       sitting. The verb needs a TTY and a typed confirmation; an agent cannot and must not run it.

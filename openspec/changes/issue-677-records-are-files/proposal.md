@@ -109,8 +109,10 @@ call.
 - [x] A hand-resolution can no longer silently lose records it did not touch — the blast radius
       of any records conflict is now exactly one record.
 - [x] `.memory/manifest.json` is addressed explicitly, with the reason for deferring it.
-- [ ] **The forge-side half**: `mergeable` reported clean by GitHub for a second memory-capturing
-      branch in the new layout. Recorded in `tasks.md` with what was actually observed.
+- [x] **The forge-side half**, run on the forge as a controlled experiment (`tasks.md` T14):
+      same two records, same day, `merge=union` declared in both arms — the month layout reports
+      `mergeable_state: dirty`, the per-record layout reports `unstable` (mergeable, checks
+      pending). Both probe PRs closed unmerged.
 
 ## Links
 

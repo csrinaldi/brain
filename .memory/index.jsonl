@@ -748,6 +748,7 @@
 {"id":"rec-5f365859dd521f4b","ts":"2026-07-25T00:48:54Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-5f365859dd521f4b.jsonl"}
 {"id":"rec-5f448f2935b406bd","ts":"2026-07-29T14:26:04Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-5f448f2935b406bd.jsonl"}
 {"id":"rec-5f671366c5f2f0ba","ts":"2026-07-25T00:47:07Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-5f671366c5f2f0ba.jsonl"}
+{"id":"rec-5fa77ddc50de57c8","ts":"2026-08-15T21:56:58Z","actor":"claude/brain-memory-677-records-are-files","type":"architecture","project":"brain","issue":677,"file":"2026-08-rec-5fa77ddc50de57c8.jsonl"}
 {"id":"rec-5fb458cea40b0f7e","ts":"2026-07-13T00:22:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-5fb458cea40b0f7e.jsonl"}
 {"id":"rec-5fbf25e2af05c71d","ts":"2026-07-22T00:05:00Z","actor":"docs/p289-stack-merge-order-record","type":"pattern","project":"brain","file":"2026-07-rec-5fbf25e2af05c71d.jsonl"}
 {"id":"rec-5fd1915bc780bf75","ts":"2026-07-01T01:19:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-5fd1915bc780bf75.jsonl"}
