@@ -15,7 +15,7 @@
 //       resolved first-wins, the same way the fail-open reader resolves them.
 //       The rule and its justification live in ./duplicates.mjs.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, appendFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import {
@@ -29,10 +29,78 @@ import {
 } from './format.mjs';
 import { summarizeDuplicates } from './duplicates.mjs';
 
+/** A record `id` is `rec-` + 16 lowercase hex (REQ-MF-2, computeRecordId). */
+const RECORD_ID_RE = /^rec-[0-9a-f]{16}$/;
+/** The month prefix a record filename carries, derived from a canonical `ts`. */
+const RECORD_MONTH_RE = /^\d{4}-\d{2}$/;
+
 /**
- * appendRecord() — validate, then append one record as exactly one physical
- * JSONL line to `records/<yyyy-mm>.jsonl` (month derived from `record.ts`).
+ * recordFilename() — the ONE place that maps a record to its file, so the
+ * layout is stated once and every reader/writer/migration agrees by
+ * construction rather than by three copies of a template string.
+ *
+ * `records/<yyyy-mm>-<id>.jsonl` — ONE record per file, and the `id` IS the
+ * filename (issue #677). The month prefix is kept so the log still sorts and
+ * greps by month (`git log .memory/records/2026-08-*`), and so a directory
+ * listing still reads chronologically at the granularity anyone actually uses.
+ *
+ * The `id` becomes a PATH here, so its shape is checked rather than trusted:
+ * every in-tree producer mints it through `computeRecordId`, but a hand-written
+ * or hostile record reaching this function must not be able to name a file
+ * outside `recordsDir`. Fails closed — nothing is written.
+ *
+ * @param {object} record
+ * @returns {string}
+ */
+export function recordFilename(record) {
+  const id = record?.id;
+  const month = typeof record?.ts === 'string' ? record.ts.slice(0, 7) : '';
+  if (typeof id !== 'string' || !RECORD_ID_RE.test(id)) {
+    throw new Error(`recordFilename: refusing to name a file from id ${JSON.stringify(id)} — expected rec-<16 hex>`);
+  }
+  if (!RECORD_MONTH_RE.test(month)) {
+    throw new Error(`recordFilename: refusing to name a file from ts ${JSON.stringify(record?.ts)} — expected YYYY-MM-DDTHH:MM:SSZ`);
+  }
+  return `${month}-${id}.jsonl`;
+}
+
+/**
+ * appendRecord() — validate, then write one record as exactly one physical
+ * JSONL line to its OWN file, `records/<yyyy-mm>-<id>.jsonl` (issue #677).
  * Fails closed: an invalid record throws and nothing is written.
+ *
+ * WHY ONE FILE PER RECORD, and not the `<yyyy-mm>.jsonl` log this used to
+ * append to. ADR-0017 made the log conflict-free by declaring `merge=union` in
+ * `.gitattributes`. That driver is a LOCAL git mechanism, and the merge that
+ * actually lands work in this repository is the forge's merge button, which
+ * does not apply it — so the first memory-capturing PR merged clean and every
+ * subsequent one conflicted, on the one file where a hand-resolution can drop a
+ * durable record silently (#677). Measured driver-free, same two records, same
+ * base:
+ *
+ *   one month file  → CONFLICT (3 stages on `2026-08.jsonl`)
+ *   one file each   → clean, both records present
+ *
+ * The layout removes the conflict instead of asking a driver to survive it: two
+ * different records are two different filenames, and git merges distinct added
+ * paths without consulting any driver. Two copies of the SAME record are the
+ * same filename with the same bytes, which merges clean as well. The only
+ * residual conflict is a same-`id` pair whose bytes DIVERGE (the `source`
+ * round-trip of ADR-0017 Amendment 1) — and that conflict is confined to one
+ * file holding one record, both sides of which are the same record by
+ * construction, rather than to a file holding two thousand of them.
+ *
+ * IDEMPOTENT, and first-wins like every other path in this store: if the file
+ * already exists it is NOT overwritten and `written: false` is returned. The
+ * caller is told, never left to infer it from silence — a record that was
+ * already there and a record that was just written are different facts.
+ *
+ * Reading is unchanged and needs no migration: every reader here globs
+ * `*.jsonl` under `records/` and parses line by line, so a month-file store, a
+ * per-record store, and a half-migrated store all read identically. Splitting
+ * an existing store is `memory:split-records`, which a repository runs when it
+ * wants the conflict-free property — brain never rewrites a consumer's
+ * `.memory/**` on upgrade.
  *
  * Validates with `validateWritableRecord()`, not `validateRecord()`: this is
  * the ONE chokepoint through which every in-tree producer creates a record
@@ -43,16 +111,17 @@ import { summarizeDuplicates } from './duplicates.mjs';
  *
  * @param {object} record
  * @param {{recordsDir: string}} opts
- * @returns {{file: string, filename: string}}
+ * @returns {{file: string, filename: string, written: boolean}}
  */
 export function appendRecord(record, { recordsDir }) {
   const { valid, errors } = validateWritableRecord(record);
   if (!valid) throw new Error(`appendRecord: invalid record — ${errors.join('; ')}`);
-  const filename = `${record.ts.slice(0, 7)}.jsonl`;
+  const filename = recordFilename(record);
   const file = join(recordsDir, filename);
   mkdirSync(recordsDir, { recursive: true });
-  appendFileSync(file, serializeRecord(record) + '\n', 'utf8');
-  return { file, filename };
+  if (existsSync(file)) return { file, filename, written: false };
+  writeFileSync(file, serializeRecord(record) + '\n', 'utf8');
+  return { file, filename, written: true };
 }
 
 /**

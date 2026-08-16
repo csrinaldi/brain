@@ -20,7 +20,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -137,7 +137,11 @@ test('resolveIndex: refuses when a records file carries conflict markers, and do
   t.after(() => rmSync(repo, { recursive: true, force: true }));
 
   const before = readFileSync(indexPath, 'utf8');
-  const victim = join(recordsDir, '2026-07.jsonl');
+  // #677 — one record per file, so the victim is whichever record file the
+  // fixture wrote rather than a month log this test can name in advance.
+  const victimName = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl')).sort()[0];
+  assert.ok(victimName, 'the fixture must have written at least one record file');
+  const victim = join(recordsDir, victimName);
   writeFileSync(victim, `<<<<<<< HEAD\n${readFileSync(victim, 'utf8')}=======\n>>>>>>> branch-x\n`, 'utf8');
 
   // The index is derived FROM records. Regenerating from a conflicted log

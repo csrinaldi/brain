@@ -19,7 +19,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,10 +58,16 @@ const runCli = (root, ...args) =>
     env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: root, MEMORY_BACKEND: 'plainfiles' },
   });
 
+// #677 — one record per file, so "the August lines" is a question about the
+// August RECORDS, not about a month log. The tampered fixture above deliberately
+// stays a `2026-07.jsonl` month file: the read path accepts both layouts, and a
+// broken store predating the split is exactly the store this message is for.
 const augustLines = (recordsDir) => {
-  const f = join(recordsDir, '2026-08.jsonl');
-  if (!existsSync(f)) return [];
-  return readFileSync(f, 'utf8').trim().split('\n').filter(Boolean);
+  if (!existsSync(recordsDir)) return [];
+  return readdirSync(recordsDir)
+    .filter((f) => f.startsWith('2026-08') && f.endsWith('.jsonl'))
+    .sort()
+    .flatMap((f) => readFileSync(join(recordsDir, f), 'utf8').trim().split('\n').filter(Boolean));
 };
 
 // ── the backend function ────────────────────────────────────────────────────
@@ -78,7 +84,7 @@ test('#637 save(): a reindex failure REJECTS, but the record is on disk and the 
     (err) => {
       assert.equal(err.indexFailed, true, 'the CLI needs to tell this apart from a refusal');
       assert.match(err.recordId, /^rec-[0-9a-f]{16}$/, 'the id of the record that DID land');
-      assert.match(err.recordFile, /2026-08\.jsonl$/, 'and the file it landed in');
+      assert.match(err.recordFile, /2026-08-rec-[0-9a-f]{16}\.jsonl$/, 'and the file it landed in');
       return true;
     },
   );
@@ -122,7 +128,7 @@ test('#637 save(): a PRIMITIVE throw is still reported accurately, not replaced 
       assert.equal(err.indexFailed, true, 'the CLI must still tell this apart from a refusal');
       assert.match(err.message, /boom/, "the original failure's text must survive");
       assert.doesNotMatch(err.message, /Cannot create property/, 'the annotation must not BECOME the failure');
-      assert.match(err.recordFile, /2026-08\.jsonl$/, 'and the record location must still travel');
+      assert.match(err.recordFile, /2026-08-rec-[0-9a-f]{16}\.jsonl$/, 'and the record location must still travel');
       return true;
     },
   );
@@ -135,7 +141,7 @@ test('#637 save(): a HEALTHY store is untouched — no annotation, no behaviour 
 
   assert.equal(result.written, true);
   assert.match(result.id, /^rec-[0-9a-f]{16}$/);
-  assert.match(result.file, /2026-08\.jsonl$/);
+  assert.match(result.file, /2026-08-rec-[0-9a-f]{16}\.jsonl$/);
   assert.equal(result.indexFailed, undefined, 'nothing failed, so nothing may be marked as failed');
   assert.equal(augustLines(recordsDir).length, 1);
 });
@@ -165,7 +171,7 @@ test('#637 CLI on a broken store: states the record survived, names the file, an
 
   assert.equal(r.status, 1, 'the run did not fully succeed, so the exit code must say so');
   assert.match(r.stderr, /record WAS written/, 'the fact the old message denied');
-  assert.match(r.stderr, /2026-08\.jsonl/, 'and WHERE, so it can be found');
+  assert.match(r.stderr, /2026-08-rec-[0-9a-f]{16}\.jsonl/, 'and WHERE, so it can be found');
   assert.match(r.stderr, /memory:reindex/, 'and what to run instead');
   assert.match(r.stderr, /Do NOT run memory:save again/, 'and the action that would make it worse');
   assert.match(r.stderr, /id mismatch at 2026-07\.jsonl:1/, "rebuildIndex's own diagnosis must survive");
@@ -212,7 +218,7 @@ test('#637 CLI on a healthy store: stdout is byte-identical to the pre-#637 form
   const id = JSON.parse(augustLines(recordsDir)[0]).id;
   assert.equal(
     r.stdout,
-    `memory/cli: ✓ saved ${id} → ${join(recordsDir, '2026-08.jsonl')}\n`,
+    `memory/cli: ✓ saved ${id} → ${join(recordsDir, `2026-08-${id}.jsonl`)}\n`,
     'the clean path must not move by so much as a character',
   );
 });
