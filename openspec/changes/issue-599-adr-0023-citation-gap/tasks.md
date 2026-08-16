@@ -62,4 +62,4 @@ governance-ignored. Nowhere close to either the 400-line default or the
 - [x] 5.3 Run `npm run brain:repo:check`; must pass before push.
 - [x] 5.4 Run `npm run memory:share`; `git add .memory/` if it produced changes, and include in the same or a follow-up commit before push per repo convention.
 - [x] 5.5 Push branch `feat/issue-599-docsadr-adr-0023-is-cited-by-two-plannin`.
-- [ ] 5.6 Open PR with body including `Closes #599`. This is the final task — the orchestrator runs cold/fresh review per session protocol before or after PR creation, not this executor.
+- [x] 5.6 Open PR with body including `Closes #599`. This is the final task — the orchestrator runs cold/fresh review per session protocol before or after PR creation, not this executor. (PR #711, cold review APPROVE before creation.)
