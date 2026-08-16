@@ -83,15 +83,28 @@ export function evaluateStagedRecords({ staged = [], upstream } = {}) {
  * directions (cold review of #707):
  *
  *   - A byte-identical restage was ALLOWED whenever git paired it as a rename
- *     with an unrelated record deletion in the same commit — i.e. exactly the
- *     blanket `git add .memory/` this gate exists to catch. `byPath` was
- *     consulted at the SOURCE path, which is not the path being written, so no
- *     upstream blob matched and the record sailed through.
+ *     with a record deletion in the same commit. `byPath` was consulted at the
+ *     SOURCE path, which is not the path being written, so no upstream blob
+ *     matched and the record sailed through.
  *   - A legitimate `git mv` of a record was REFUSED, and the printed remedy
  *     named the file being DELETED.
  *
- * Rename detection is on by default and two records from one session are
- * highly similar, so the pairing is not exotic.
+ * Rename detection IS on by default in this command form — a `git mv` of a
+ * record reports `R100` with no `-M` flag.
+ *
+ * An earlier version of this comment justified the first case with "two records
+ * from one session are highly similar, so the pairing is not exotic". That does
+ * not reproduce (measured on real git, cold review of #708): two REAL records
+ * from one session are single-line JSON blobs of a few KB sharing almost no
+ * content, and git leaves them as `A` + `D` at every threshold tried — default,
+ * `-M`, `-M50%`, `-M10%`, `-C`, `diff.renames=copies`.
+ *
+ * What pairs is BYTE similarity, not record kinship. An exact-blob move (a
+ * `git mv`, or the same bytes staged at a second path) reports `R100`; a
+ * near-duplicate — the same record re-serialized under a new id — reports
+ * `R095` even by default. Those are exactly the identical/near-identical
+ * writes this gate exists to judge, which is why reading the DESTINATION is
+ * what makes the verdict independent of how git chose to frame the pair.
  *
  * @param {string} text
  * @returns {Array<{path: string, dstOid: string, status: string}>}

@@ -111,8 +111,10 @@ test('parseStagedDiff: a deleted file (dst is the zero oid)', () => {
 // the code under it was backwards: it kept the SOURCE and discarded the
 // destination, calling the destination "the old path". Found by cold review of
 // #707, and it broke the gate in BOTH directions — a byte-identical restage was
-// allowed whenever git paired it with an unrelated record deletion, and a
-// legitimate `git mv` was refused while naming the file being deleted.
+// allowed whenever git paired it with a record deletion, and a legitimate
+// `git mv` was refused while naming the file being deleted. (Not "an UNRELATED
+// deletion": git pairs on byte similarity, and two real same-session records
+// are measurably not similar enough to pair — see the module's own note.)
 //
 // The axis these tests add is STATUS: every fixture above is A/M/D, none is
 // R or C, so nothing distinguished "took the right token" from "took a token".
