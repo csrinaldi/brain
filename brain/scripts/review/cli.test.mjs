@@ -1260,12 +1260,26 @@ test('main: a bare positional PR number reaches a verdict, same as --pr', async 
 // the measurement that made this case necessary, and it is why it exists.
 
 test('#683: cli refuses rather than posting a verdict whose declaration is false', () => {
+  // #690 F3 — anchored on the two facts this pin OWNS, not on prose. The first
+  // version matched a multi-line source pattern including the text of the error
+  // message, so a reformat or a reworded message broke it for a cosmetic reason —
+  // and the natural repair to a test that fails for the wrong reason is to loosen
+  // it until it asserts nothing.
   const src = readFileSync(new URL('./cli.mjs', import.meta.url), 'utf8');
-  const call = src.match(/const covered = checkControlsCoverFindings\(controls, findings\);\s*\n\s*if \(!covered\.ok\) \{\s*\n\s*error\([^\n]*covered\.error[^\n]*\);\s*\n\s*return 1;/);
-  assert.ok(call, 'cli.mjs must call checkControlsCoverFindings and return non-zero on a violation');
 
+  const guardAt = src.indexOf('checkControlsCoverFindings(controls, findings)');
+  assert.ok(guardAt > 0, 'cli.mjs must call checkControlsCoverFindings over the run\'s controls and findings');
+
+  // Fact 1: a violation ends the run. Asserted as a `return` inside the guard's
+  // block rather than as a specific message — WHAT it prints is free to change,
+  // THAT it stops is not.
+  const block = src.slice(guardAt, guardAt + 400);
+  assert.match(block, /if\s*\(!covered\.ok\)[\s\S]{0,200}return 1;/,
+    'a failed coverage check must return non-zero, so nothing is posted');
+
+  // Fact 2: it runs BEFORE the verdict exists. Refusing after it is built would
+  // already have made the claim this guard exists to prevent.
   const buildAt = src.indexOf('const verdict = buildVerdict({');
-  assert.ok(buildAt > 0);
-  assert.ok(src.indexOf('const covered = checkControlsCoverFindings') < buildAt,
-    'the check must run BEFORE the verdict is built — refusing after it is rendered would already have made the claim');
+  assert.ok(buildAt > 0, 'buildVerdict call site not found — this pin is measuring the wrong file');
+  assert.ok(guardAt < buildAt, 'the coverage check must precede buildVerdict');
 });

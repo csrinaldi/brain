@@ -796,3 +796,30 @@ test('#683: a verdict with findings and one without declare the SAME controls', 
   const declared = (b) => b.split('\n').find((l) => l.startsWith('controls:'));
   assert.equal(declared(green), declared(red));
 });
+
+test('#690: the verdict states what did NOT run, so absence carries no meaning', () => {
+  const body = buildRendered({ controls: ['deterministic'] });
+  assert.match(body, /^controls: \["deterministic"\]$/m);
+  assert.match(body, /^controls_not_applied: \["inferential"\]$/m);
+  const parsed = parseVerdict({ body });
+  assert.deepEqual(parsed.controls, ['deterministic']);
+  assert.deepEqual(parsed.controls_not_applied, ['inferential']);
+  assert.equal(parsed.malformed, undefined);
+});
+
+test('#690: the complement is rendered even when EMPTY — same rule as controls itself', () => {
+  const body = buildRendered({ controls: ['deterministic', 'inferential'] });
+  assert.match(body, /^controls_not_applied: \[\]$/m,
+    'omitting it once everything ran would make its absence mean "nothing was skipped" — silence again');
+});
+
+test('#690: an unknown member of the complement is UNREADABLE, exactly as it is for controls', () => {
+  const body = [
+    '```yaml', 'protocol: brain-review/2', 'verdict: APPROVE', 'head_sha: abc123', 'rev: 1',
+    'controls: ["deterministic"]', 'controls_not_applied: ["telepathy"]', 'escalate: null', '```',
+  ].join('\n');
+  const parsed = parseVerdict({ body });
+  assert.deepEqual(parsed.controls, ['deterministic'], 'the readable half still reads');
+  assert.equal(parsed.controls_not_applied, undefined);
+  assert.deepEqual(parsed.malformed, ['controls_not_applied']);
+});

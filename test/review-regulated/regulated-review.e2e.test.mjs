@@ -615,3 +615,29 @@ test('e2e #683: the declaration is derived from the EVALUATOR, not from the find
     'a clean run and a run with findings ran the same controls and must say so identically');
   assert.deepEqual(declared(green), ['deterministic']);
 });
+
+// ── #690 F2: brain-review/1 — the protocol MOST consumers actually get ───────
+//
+// #683's e2e cases were all `regulated` → /2. `/1` is what `lite` and
+// `standard` post by DEFAULT, its findings carry no `evidence_class` at all, and
+// it had no end-to-end coverage — so the declaration was proven exactly where it
+// mattered least. It worked; nothing asserted that it keeps working.
+
+test('e2e #690: a real brain-review/1 run declares BOTH halves of what ran', (t) => {
+  const fx = withFixture(t, { tier: 'lite', diffLines: 1001 });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, r.stderr);
+  const body = postedBodies(fx)[0].body;
+
+  assert.match(body, /^protocol: brain-review\/1$/m, 'lite must still default to /1 — this case is worthless at /2');
+  assert.match(body, /^controls: \["deterministic"\]$/m);
+  assert.match(body, /^controls_not_applied: \["inferential"\]$/m,
+    'the run must state that judgment did NOT run — a reader may not be required to infer it from an absence');
+
+  const verdict = parseVerdict({ body });
+  assert.deepEqual(verdict.controls, ['deterministic']);
+  assert.deepEqual(verdict.controls_not_applied, ['inferential']);
+  assert.ok(!verdict.malformed, 'both halves must round-trip');
+  assert.ok(verdict.findings.every((f) => !f.evidence_class),
+    'a /1 finding carries no evidence_class — which is precisely why the run-level declaration is what carries the fact here');
+});
