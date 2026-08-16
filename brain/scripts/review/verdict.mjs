@@ -146,6 +146,7 @@ export function buildVerdict({
   headSha,
   conclusion,
   protocol = 'brain-review/1',
+  controls = [],
   priorRevCount = 0,
   findings = [],
   gates = {},
@@ -224,6 +225,7 @@ export function buildVerdict({
 
   return {
     protocol,
+    controls,
     verdict: finalVerdict,
     head_sha: headSha,
     rev: priorRevCount + 1,
@@ -330,6 +332,18 @@ export function renderVerdict(v) {
   }
 
   lines.push(`conditions: [${(v.conditions ?? []).map(yamlScalar).join(', ')}]`);
+  // #683 — WHICH CLASSES OF CONTROL RAN, always emitted, `[]` included.
+  //
+  // Never omitted when empty: an absent key is the silence this field exists to
+  // break, and `controls: []` reads as "nothing declared that it ran" — loud,
+  // and true of a verdict built without a declaration.
+  //
+  // JSON-encoded rather than through `yamlScalar`, and that is not cosmetic:
+  // `yamlScalar('deterministic')` renders it BARE, and a bare word is not JSON,
+  // so `parseEntryList`'s inline branch would answer UNREADABLE and the field
+  // could not round-trip. Measured, not assumed — the same shape `pin` and
+  // `sequencing` already use for the same reason.
+  lines.push(`controls: [${(v.controls ?? []).map((c) => JSON.stringify(c)).join(', ')}]`);
   if (v.pin) lines.push(`pin: ${yamlScalar(JSON.stringify(v.pin))}`);
   if (v.sequencing) lines.push(`sequencing: ${yamlScalar(JSON.stringify(v.sequencing))}`);
   lines.push(`escalate: ${v.escalate ?? 'null'}`, '```');

@@ -23,10 +23,11 @@ import { gatherIdentity } from './identity.mjs';
 import { gatherColdBoot } from './cold-boot.mjs';
 import { buildVerdict, renderVerdict } from './verdict.mjs';
 import { deriveMode } from './mode.mjs';
-import { evaluateTranche, gatherTrancheInputs } from './evaluators/tranche.mjs';
-import { evaluateCheckpoint, gatherCheckpointInputs } from './evaluators/checkpoint.mjs';
-import { evaluateRuling, gatherRulingInputs } from './evaluators/ruling.mjs';
+import { evaluateTranche, gatherTrancheInputs, PRODUCES as TRANCHE_PRODUCES } from './evaluators/tranche.mjs';
+import { evaluateCheckpoint, gatherCheckpointInputs, PRODUCES as CHECKPOINT_PRODUCES } from './evaluators/checkpoint.mjs';
+import { evaluateRuling, gatherRulingInputs, PRODUCES as RULING_PRODUCES } from './evaluators/ruling.mjs';
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
+import { unionControls, checkControlsCoverFindings } from './lib/controls.mjs';
 import { needsBaseProbe, probeBase, BASE_REPRODUCIBLE_GATES } from './lib/base-comparison.mjs';
 import { verdictsAtHead } from './lib/parse-verdict.mjs';
 import { postVerdict } from './poster.mjs';
@@ -415,6 +416,13 @@ export async function main(deps = {}) {
   const mode = args.mode !== 'auto' ? args.mode : deriveMode({ labels: boot.prView.labels ?? [], changedFiles });
 
   let evalResult;
+  // #683 — the verdict declares WHICH CLASSES OF CONTROL ran, and it is derived
+  // from the evaluator that actually ran rather than from the findings it
+  // produced. A clean mechanical run has NO findings, so a findings-derived list
+  // would be empty and "no control ran" would render identically to "controls ran
+  // and found nothing" — the very defect the field exists to remove, on exactly
+  // the verdicts where it would be least visible.
+  let controls = [];
   if (mode === 'tranche') {
     const trancheInputs = await gatherTrancheInputs({
       project,
@@ -427,6 +435,7 @@ export async function main(deps = {}) {
       deps: deps.trancheDeps ?? {},
     });
     evalResult = evaluateTranche(trancheInputs);
+    controls = unionControls([TRANCHE_PRODUCES]);
   } else if (mode === 'checkpoint') {
     const checkpointInputs = await gatherCheckpointInputs({
       project,
@@ -444,6 +453,7 @@ export async function main(deps = {}) {
       deps: { baseSha, ...(deps.checkpointDeps ?? {}) },
     });
     evalResult = evaluateCheckpoint(checkpointInputs);
+    controls = unionControls([CHECKPOINT_PRODUCES]);
   } else if (mode === 'ruling') {
     // ruling (H1-4, REQ-H1-11, Option (B) — issue #266 comment 5009584044):
     // the evaluator NEVER auto-rules; a well-formed ## FORK always
@@ -456,6 +466,7 @@ export async function main(deps = {}) {
       deps: deps.rulingDeps ?? {},
     });
     evalResult = evaluateRuling(rulingInputs);
+    controls = unionControls([RULING_PRODUCES]);
   } else {
     // Any other derived/explicit mode is not (yet) implemented. Explicit
     // stub — never a silent no-op or a guessed verdict.
@@ -502,6 +513,18 @@ export async function main(deps = {}) {
     }));
   }
 
+  // #683 — the declaration must not be able to become a lie. If an evaluator
+  // emits a class it did not declare, this run REFUSES and posts nothing: a
+  // verdict whose self-description is false is the exact artefact this field
+  // exists to prevent, and silence is strictly better than a believed false
+  // claim. Unreachable while every evaluator is deterministic, which is why it
+  // is wired now rather than after a producer makes it reachable.
+  const covered = checkControlsCoverFindings(controls, findings);
+  if (!covered.ok) {
+    error(`brain:review: ${covered.error}`);
+    return 1;
+  }
+
   const verdict = buildVerdict({
     headSha: boot.headSha,
     conclusion: evalResult.conclusion,
@@ -511,6 +534,7 @@ export async function main(deps = {}) {
     priorRevCount: verdictsAtHead(boot.doctrine.priorVerdicts, boot.headSha).length,
     rulingAtHead: (boot.doctrine.priorDecisions ?? []).some(d => d?.head_sha === boot.headSha),
     gates: evalResult.gates,
+    controls,
     findings,
     // #408 — the base probe's own inability to run is a condition of THIS verdict,
     // appended to the evaluator's rather than replacing it: two different things

@@ -1239,3 +1239,33 @@ test('main: a bare positional PR number reaches a verdict, same as --pr', async 
   assert.equal(code, 0, 'the positional form must be a real path, not merely parsed');
   assert.ok(lines.some(l => /verdict:/.test(l)));
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #683 — the anti-drift guard is WIRED, proven structurally
+//
+// Structural and not behavioural, with the reason stated rather than glossed:
+// making a finding carry an undeclared `evidence_class` requires an evaluator
+// that emits one, and the three evaluators are not injectable — `main` takes
+// `trancheDeps`/`checkpointDeps`/`rulingDeps`, which steer an evaluator's INPUTS,
+// never its output classification. So the branch cannot be reached from a test
+// today, and inventing a `deps.evaluatorFindings` seam purely to reach it would
+// add a production override that exists for the test.
+//
+// The rule itself IS proven behaviourally, in lib/controls.test.mjs. What this
+// pins is that cli.mjs calls it and REFUSES on a violation — the half a source
+// scan can honestly assert, the same split brain-promote.locks.test.mjs uses for
+// the properties its own behavioural proof cannot reach.
+//
+// Deleting the guard leaves every other test in this repository green. That is
+// the measurement that made this case necessary, and it is why it exists.
+
+test('#683: cli refuses rather than posting a verdict whose declaration is false', () => {
+  const src = readFileSync(new URL('./cli.mjs', import.meta.url), 'utf8');
+  const call = src.match(/const covered = checkControlsCoverFindings\(controls, findings\);\s*\n\s*if \(!covered\.ok\) \{\s*\n\s*error\([^\n]*covered\.error[^\n]*\);\s*\n\s*return 1;/);
+  assert.ok(call, 'cli.mjs must call checkControlsCoverFindings and return non-zero on a violation');
+
+  const buildAt = src.indexOf('const verdict = buildVerdict({');
+  assert.ok(buildAt > 0);
+  assert.ok(src.indexOf('const covered = checkControlsCoverFindings') < buildAt,
+    'the check must run BEFORE the verdict is built — refusing after it is rendered would already have made the claim');
+});

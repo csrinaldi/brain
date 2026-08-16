@@ -570,3 +570,48 @@ test('e2e #442: an UNKNOWN protocol refuses at boot and posts nothing', (t) => {
   assert.match(r.stderr, /brain-review\/3/, 'the refusal must name the value it rejected');
   assert.equal(postedBodies(fx).length, 0, 'nothing may be posted on a refused boot');
 });
+
+// ── #683: the verdict declares which classes of control actually ran ─────────
+//
+// Through the REAL verb, because the field's whole point is what a reader of a
+// posted body sees. An in-process assertion on renderVerdict would pass with the
+// cli never passing `controls` at all — which is precisely how this could ship
+// as a field that exists and is never populated.
+
+test('e2e #683: a posted verdict states the control classes that ran, and they round-trip', (t) => {
+  const fx = withFixture(t, { tier: 'regulated', diffLines: 1001 });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, r.stderr);
+  const body = postedBodies(fx)[0].body;
+
+  assert.match(body, /^controls: \["deterministic"\]$/m,
+    'the wire must carry the declaration — a run whose controls were never passed would omit it or render []');
+
+  const verdict = parseVerdict({ body });
+  assert.deepEqual(verdict.controls, ['deterministic']);
+  assert.ok(!verdict.malformed, 'the field must round-trip, not land in malformed');
+});
+
+test('e2e #683: the declaration is derived from the EVALUATOR, not from the findings', (t) => {
+  // The trap this design exists to avoid, proven on a real run: a verdict with
+  // findings and a verdict without must make the SAME claim about what ran.
+  // Deriving from `findings[].evidence_class` would leave the clean run saying
+  // nothing — "no control ran" rendered identically to "controls ran, found
+  // nothing", on exactly the verdicts where it would be least noticed.
+  const withFindings = withFixture(t, { tier: 'regulated', diffLines: 1001 });
+  assert.equal(runReview(withFindings).status, 0);
+  const dirty = postedBodies(withFindings)[0].body;
+
+  const clean = withFixture(t, { tier: 'regulated', diffLines: 10 });
+  assert.equal(runReview(clean).status, 0);
+  const green = postedBodies(clean)[0].body;
+
+  const declared = (body) => parseVerdict({ body }).controls;
+  assert.ok(parseVerdict({ body: dirty }).findings.length > 0, 'the dirty fixture must actually carry findings');
+  // 10 lines is under `regulated`'s 200-line budget — measured, because the
+  // fixture DEFAULTS to 250 and the first cut of this case called that "clean".
+  assert.deepEqual(parseVerdict({ body: green }).findings ?? [], [], 'the clean fixture must actually carry none');
+  assert.deepEqual(declared(green), declared(dirty),
+    'a clean run and a run with findings ran the same controls and must say so identically');
+  assert.deepEqual(declared(green), ['deterministic']);
+});
