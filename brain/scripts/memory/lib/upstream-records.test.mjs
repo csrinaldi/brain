@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -312,6 +312,40 @@ test('upstreamRecordEntries: _loadConfig is injectable at the layer production c
   assert.equal(r.ok, true);
   assert.equal(r.ref, 'origin/injected');
   assert.equal(r.stated, true);
+});
+
+// ---------------------------------------------------------------------------
+// An UNPARSEABLE brain.config.json is "could not look", not "found nothing"
+// (`evidence-reader-empty-on-failure`, cold review of #708).
+// ---------------------------------------------------------------------------
+
+test('upstreamRecordEntries: a malformed brain.config.json is surfaced — never silently downgraded to a derived ref', () => {
+  const root = tmpRoot('{ "memory": { "upstreamRef": "origin/x" ');
+  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD', 'origin/main']) });
+  assert.equal(r.ok, false, 'a config that could not be parsed must not become origin/HEAD with stated:false');
+  assert.equal(r.stated, true);
+  assert.equal(r.ref, 'brain.config.json#memory.upstreamRef');
+  assert.match(r.reason, /is not valid JSON/);
+});
+
+test('upstreamRecordEntries: a brain.config.json that cannot be READ (a directory) is surfaced too', () => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-upstream-records-'));
+  mkdirSync(join(root, 'brain.config.json'));
+  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD', 'origin/main']) });
+  assert.equal(r.ok, false);
+  assert.equal(r.stated, true);
+  assert.match(r.reason, /could not be read/);
+});
+
+test('upstreamRecordEntries: a malformed brain.config.json does NOT disable the env escape hatch', () => {
+  const root = tmpRoot('}}} not json');
+  const r = upstreamRecordEntries({
+    root,
+    env: { BRAIN_MEMORY_UPSTREAM_REF: 'origin/from-env' },
+    _spawn: fakeGit(['origin/from-env']),
+  });
+  assert.equal(r.ok, true, 'the env level is read before the config, so a broken config cannot block the workaround');
+  assert.equal(r.ref, 'origin/from-env');
 });
 
 test('resolveUpstreamRef: an explicit `{}` config still means "no stated ref" — it does not trigger a read', () => {

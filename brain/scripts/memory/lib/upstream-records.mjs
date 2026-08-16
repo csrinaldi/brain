@@ -21,6 +21,14 @@ import { join } from 'node:path';
 const RECORD_NAME_RE = /^\d{4}-\d{2}-(rec-[0-9a-f]{16})\.jsonl$/;
 
 /**
+ * The `ref` reported when `brain.config.json` itself could not be read, so the
+ * ref it might have named is unknown. Resolution stopped at the config LEVEL,
+ * not at a ref, and this string says which key was being read rather than
+ * inventing a ref value or printing `null` into an operator-facing message.
+ */
+const UNREADABLE_CONFIG_REF = 'brain.config.json#memory.upstreamRef';
+
+/**
  * refResolves() — `git rev-parse --verify --quiet <ref>^{tree}`, true only on
  * a clean zero exit. No git binary, a non-git directory, and an unresolvable
  * ref all collapse to `false` here — the caller does not need to tell them
@@ -37,18 +45,38 @@ const RECORD_NAME_RE = /^\d{4}-\d{2}-(rec-[0-9a-f]{16})\.jsonl$/;
  * `lib/brain-config.mjs`'s `loadBrainConfig()` resolves its path from the
  * MODULE's own location and takes no argument, so it cannot answer "the config
  * of this root" — which is what a seam-injectable, root-parameterised lookup
- * needs, and what the tests drive against a tmpdir. Missing or malformed reads
- * as `{}`: a config that cannot be parsed must not be an error path here, it
- * means "no stated ref", and the derived candidates take over.
+ * needs, and what the tests drive against a tmpdir.
+ *
+ * ABSENT and UNPARSEABLE are not the same answer (cold review of #708). An
+ * absent file means "no stated ref" and the derived candidates correctly take
+ * over — that is `{}`. A file that is present but cannot be read or parsed
+ * means "could not look", and collapsing that to `{}` is exactly the
+ * `evidence-reader-empty-on-failure` failure this module cites below: an
+ * operator who states `memory.upstreamRef` and then breaks the JSON would
+ * silently get `origin/HEAD` with `stated: false`. So it THROWS, mirroring
+ * `lib/brain-config.mjs#loadBrainConfig`'s own "is not valid JSON" refusal, and
+ * `resolveUpstreamRef` turns that throw into a named, stated-but-unresolved
+ * result rather than a fall-through.
  *
  * @param {string} root
  * @returns {object}
+ * @throws {Error} when `brain.config.json` exists but cannot be read or parsed
  */
 function loadBrainConfigAt(root) {
+  const path = join(root, 'brain.config.json');
+  let raw;
   try {
-    return JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
-  } catch {
-    return {};
+    raw = readFileSync(path, 'utf8');
+  } catch (err) {
+    // ENOENT is the ONE "there is nothing to read" case. Every other read
+    // failure (a directory, a permission error) is "could not look".
+    if (err?.code === 'ENOENT') return {};
+    throw new Error(`brain.config.json at ${root} could not be read: ${err.message}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`brain.config.json at ${root} is not valid JSON: ${err.message}`);
   }
 }
 
@@ -89,13 +117,21 @@ function refResolves(ref, root, _spawn) {
  * UNDEFAULTED: an intervening `config = {}` is not nullish, so it would defeat
  * the `??` and leave level 2 dead exactly as it was before the default existed.
  *
+ * An UNREADABLE `brain.config.json` (present, but unparseable) stops resolution
+ * with `stated: true`, `resolved: false` and a named `reason` — never a
+ * fall-through to a derived ref, which is the same STATED guarantee above. The
+ * env level is read FIRST for that reason too: a broken config must not disable
+ * `BRAIN_MEMORY_UPSTREAM_REF`, the escape hatch an operator would reach for to
+ * work around it.
+ *
  * @param {object} args
  * @param {string} args.root
  * @param {object} [args.env]     Defaults to `process.env`; a plain object in tests.
  * @param {object} [args.config]  Parsed `brain.config.json`. Omitted → read from `root`.
  * @param {typeof spawnSync} [args._spawn]
  * @param {(root: string) => object} [args._loadConfig]  Omitted → `loadBrainConfigAt`.
- * @returns {{ref: string, stated: boolean, resolved: boolean}}
+ * @returns {{ref: string, stated: boolean, resolved: boolean, reason?: string}}
+ *   `reason` is present ONLY when the config itself could not be read.
  */
 export function resolveUpstreamRef({
   root,
@@ -104,8 +140,19 @@ export function resolveUpstreamRef({
   _spawn = spawnSync,
   _loadConfig = loadBrainConfigAt,
 }) {
-  const cfg = config ?? _loadConfig(root);
-  const statedRef = env?.BRAIN_MEMORY_UPSTREAM_REF || cfg?.memory?.upstreamRef;
+  const envRef = env?.BRAIN_MEMORY_UPSTREAM_REF;
+  if (envRef) {
+    return { ref: envRef, stated: true, resolved: refResolves(envRef, root, _spawn) };
+  }
+
+  let cfg;
+  try {
+    cfg = config ?? _loadConfig(root);
+  } catch (err) {
+    return { ref: UNREADABLE_CONFIG_REF, stated: true, resolved: false, reason: err.message };
+  }
+
+  const statedRef = cfg?.memory?.upstreamRef;
   if (statedRef) {
     return { ref: statedRef, stated: true, resolved: refResolves(statedRef, root, _spawn) };
   }
@@ -189,11 +236,13 @@ export function upstreamRecordEntries({
   _spawn = spawnSync,
   _loadConfig = loadBrainConfigAt,
 } = {}) {
-  const { ref, stated, resolved } = resolveUpstreamRef({ root, env, config, _spawn, _loadConfig });
+  const { ref, stated, resolved, reason: refReason } = resolveUpstreamRef({ root, env, config, _spawn, _loadConfig });
   if (!resolved) {
-    const reason = stated
-      ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef) — writing every candidate this run (pre-#701 behaviour)`
-      : `no upstream ref resolved (tried origin/HEAD, origin/main) — writing every candidate this run (pre-#701 behaviour)`;
+    const reason = refReason
+      ? `${refReason} — writing every candidate this run (pre-#701 behaviour)`
+      : stated
+        ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef) — writing every candidate this run (pre-#701 behaviour)`
+        : `no upstream ref resolved (tried origin/HEAD, origin/main) — writing every candidate this run (pre-#701 behaviour)`;
     return { ok: false, ref, stated, reason };
   }
 
