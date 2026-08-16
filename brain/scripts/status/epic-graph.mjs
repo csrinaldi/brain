@@ -34,13 +34,37 @@
 // and wrong here (#639): an issue body is written by a human and routinely opens
 // with a snippet, a command, or a log excerpt. The first fence was then handed to
 // the protocol check, which answered `null`, and the node read as UNCLASSIFIED
-// while declaring a complete block further down. The selector is now the
-// `protocol:` scalar, not the position.
+// while declaring a complete block further down. The selector is the `protocol:`
+// scalar, not the position.
+//
+// THE SELECTOR IS THE PROTOCOL *AND* THE TAG (#702). Dropping position without
+// putting anything in its place widened the reader from "the first fence" to "any
+// fence", and a cold review of #639 measured what that buys: a pasted ```console
+// transcript containing a `protocol:` line drew two `declared` edges into the
+// graph. #639 traded a class of OMITTED edges for a class of FABRICATED ones, and
+// `brain/core/methodology/vcs-contract.md` had already ruled that direction on
+// `foreignRelations` — a fabricated dependency is worse than an omitted one,
+// because an omission delays a ticket and a fabrication licenses the wrong order.
+//
+// So the eligible tags are the two the old `FENCE_RE` accepted, ` ``` ` and
+// ```` ```yaml ````, and nothing else. That keeps #639's real fix — position no
+// longer selects — while restoring the discipline #639 removed by accident rather
+// than by argument. Moving to a tagged ```` ```brain-graph/1 ```` info-string
+// would be stronger still and stays rejected for the reason #495 design D1
+// records: an issue body IS rendered for a human, and an unknown info-string
+// renders as plain text.
 
 import { fencedBlocks } from '../lib/fenced-blocks.mjs';
 import { scalar, parseJsonScalar } from '../review/lib/yaml-block.mjs';
 
 export const GRAPH_PROTOCOL = 'brain-graph/1';
+
+/**
+ * The fence info-strings a graph block may carry — exactly the two the old
+ * `FENCE_RE` locator opened on (#702). A `js`, `console`, `text` or `diff` fence
+ * is a human showing something, never a machine declaring something.
+ */
+export const GRAPH_FENCE_TAGS = Object.freeze(['', 'yaml']);
 
 /** Node states, in the order a reader cares about them. */
 export const READY = 'ready';
@@ -58,12 +82,21 @@ export const UNCLASSIFIED = 'unclassified';
  * node that disappears because it lacks metadata is the same class as a commit the
  * audit never enumerates (#518): the map would report a graph it had not read.
  *
- * MALFORMED IS NOT ABSENT (#639). More than one `brain-graph/1` block in one body
- * is ambiguity, and the answer is `{ ok: false, error }` naming the count — never a
- * silent pick of one of them, the same rule `parseAmendmentDraft` and
- * `parseCheckpointClaim` hold. `buildGraph` carries it out in `blocksUnreadable`
- * and `renderSummary` prints it, exactly as it already does for a native read it
- * could not perform: "could not read what it declared" is not "declared nothing".
+ * MALFORMED IS NOT ABSENT (#639, completed by #702). Two shapes answer
+ * `{ ok: false, error }` rather than `null`:
+ *
+ *   · more than one `brain-graph/1` block — ambiguity, and the error names the
+ *     count, never a silent pick of one of them, the same rule
+ *     `parseAmendmentDraft` and `parseCheckpointClaim` hold;
+ *   · an UNTERMINATED fence whose partial content carries the protocol — the most
+ *     ordinary malformation a human produces, and the one #639 shipped answering
+ *     `null`. `null` is defined right above as "no block was declared", so the
+ *     absent-is-not-empty conflation this function exists to remove was live
+ *     inside its own fix until #702.
+ *
+ * `buildGraph` carries both out in `blocksUnreadable` and `renderSummary` prints
+ * them, exactly as it already does for a native read it could not perform: "could
+ * not read what it declared" is not "declared nothing".
  *
  * Success keeps the bare object rather than growing an `ok: true` envelope, because
  * `null`-means-absent is load-bearing here and already distinguishes the case the
@@ -77,20 +110,34 @@ export const UNCLASSIFIED = 'unclassified';
 export function parseGraphBlock(body) {
   if (typeof body !== 'string' || !body.includes(GRAPH_PROTOCOL)) return null;
 
-  // Every fence is read and the block is selected by its `protocol:` scalar. The
-  // shape stays ```yaml — an issue body IS rendered for a human, and an unknown
-  // info-string renders as plain text (#495 design D1) — so the tag cannot be the
-  // selector the way it is for `brain-checkpoint/1`.
-  const declared = fencedBlocks(body).blocks
-    .filter(b => scalar(b.content, 'protocol') === GRAPH_PROTOCOL);
+  // Every fence is read, and a block qualifies on TWO facts: an eligible tag and
+  // the `protocol:` scalar. Position selects nothing (#639); the tag is not
+  // decoration (#702). `isGraphFence` is the one place both live.
+  const isGraphFence = (b) =>
+    GRAPH_FENCE_TAGS.includes(b.tag) && scalar(b.content, 'protocol') === GRAPH_PROTOCOL;
 
-  if (declared.length === 0) return null;
+  const { blocks, unterminated } = fencedBlocks(body);
+  const declared = blocks.filter(isGraphFence);
+
   if (declared.length > 1) {
     return {
       ok: false,
       error: `${declared.length} \`${GRAPH_PROTOCOL}\` blocks found (body lines ${declared.map(b => b.line).join(', ')}) — an issue declares its graph exactly once.`,
     };
   }
+
+  // A fence that never closes swallows its own block. Attributed on the SAME two
+  // facts as a closed one, from the partial content `fencedBlocks` now reports
+  // (#702) — guessing from the tag alone is impossible here, because `yaml` says
+  // nothing about which protocol was being written.
+  if (declared.length === 0 && unterminated && isGraphFence(unterminated)) {
+    return {
+      ok: false,
+      error: `the \`${GRAPH_PROTOCOL}\` block opened at body line ${unterminated.line} is never closed.`,
+    };
+  }
+
+  if (declared.length === 0) return null;
 
   const block = declared[0].content;
 

@@ -27,7 +27,7 @@
  * the matching closer is looked for, so a fence quoted inside another is content.
  *
  * @param {string} text
- * @returns {{blocks: {tag:string, content:string, line:number}[], unterminated: {tag:string, line:number}|null}}
+ * @returns {{blocks: {tag:string, content:string, line:number}[], unterminated: {tag:string, content:string, line:number}|null}}
  */
 export function fencedBlocks(text) {
   const lines = text.split(/\r?\n/);
@@ -50,5 +50,16 @@ export function fencedBlocks(text) {
   // An unterminated fence is reported, never silently dropped: a contract block
   // whose closing fence is missing used to read as "this draft carries no
   // contract at all", which sends the human looking for the wrong mistake.
-  return { blocks, unterminated: open === null ? null : { tag: open.tag, line: open.line } };
+  //
+  // It reports its `content` too (#702). A consumer whose tag is distinctive can
+  // attribute the open fence from the tag alone — `brain-checkpoint/1` does. A
+  // consumer whose blocks are ```yaml cannot: `yaml` says nothing about WHICH
+  // protocol was being written. Without the partial content those consumers must
+  // either guess or stay silent, and staying silent is the "declared nothing"
+  // conflation this return value exists to prevent. The lines are already
+  // accumulated in `open.body`; withholding them only moved the guessing.
+  return {
+    blocks,
+    unterminated: open === null ? null : { tag: open.tag, content: open.body.join('\n'), line: open.line },
+  };
 }

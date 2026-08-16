@@ -36,5 +36,17 @@ test('fencedBlocks: a shorter fence inside a longer one is CONTENT, not a block'
 test('fencedBlocks: an unterminated fence yields no block, and REPORTS the line it opened on', () => {
   const { blocks, unterminated } = fencedBlocks('x\n```one\na\n');
   assert.deepEqual(blocks, []);
-  assert.deepEqual(unterminated, { tag: 'one', line: 2 });
+  assert.deepEqual(unterminated, { tag: 'one', content: 'a\n', line: 2 });
+});
+
+test('#702: the unterminated fence reports its CONTENT, so a consumer can attribute it', () => {
+  // A consumer whose blocks are ```yaml cannot attribute an open fence from the
+  // tag alone — `yaml` says nothing about which protocol was being written. With
+  // the partial content it reads the same key it would have read had the fence
+  // closed, and stops having to choose between guessing and staying silent.
+  const { unterminated } = fencedBlocks('intro\n\n```yaml\nprotocol: brain-graph/1\ntrack: C\n');
+  assert.equal(unterminated.tag, 'yaml');
+  assert.equal(unterminated.line, 3);
+  assert.match(unterminated.content, /^protocol: brain-graph\/1$/m);
+  assert.match(unterminated.content, /^track: C$/m);
 });

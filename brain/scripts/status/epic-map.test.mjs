@@ -92,6 +92,76 @@ test('#639: a ```js snippet above the block still parses — pinned, and it was 
   assert.deepEqual(parseGraphBlock(body), { track: 'A', needs: [], blocks: [435, 94], files: [] });
 });
 
+// ── the tag axis: a human SHOWING is not a machine DECLARING (#702) ──────────
+//
+// #639 dropped position as the selector and put nothing in its place, widening
+// the reader from "the first fence" to "ANY fence". A cold review measured the
+// price: a pasted terminal transcript drew two `declared` edges. That trades a
+// class of omitted edges for a class of FABRICATED ones, and
+// `brain/core/methodology/vcs-contract.md` had already ruled the direction on
+// `foreignRelations` — a fabrication is worse than an omission, because an
+// omission delays a ticket and a fabrication licenses the wrong order.
+//
+// Nothing pinned the axis: mutating the filter to require a `yaml`/untagged
+// fence left all 49 of #639's tests green. These vary it in both directions.
+
+test('#702: a ```console transcript carrying the protocol declares NOTHING — no fabricated edges', () => {
+  const body = ['```console', '$ gh issue view 42', 'protocol: brain-graph/1',
+    'track: Z', 'blocks: [1, 2]', '```'].join('\n');
+  assert.equal(parseGraphBlock(body), null);
+
+  const g = buildGraph([{ number: 20, title: 'transcript', labels: [], state: 'open', body }]);
+  assert.deepEqual(g.edges, [], 'a transcript must not draw dependency edges');
+  assert.deepEqual(g.blocksUnreadable, [], 'and it is not an unreadable declaration either — it is prose');
+  assert.equal(g.nodes[0].status, UNCLASSIFIED);
+});
+
+test('#702: every foreign info-string is refused, not just the ones someone thought of', () => {
+  for (const tag of ['js', 'bash', 'text', 'json', 'diff', 'console', 'sh', 'markdown']) {
+    const body = ['```' + tag, 'protocol: brain-graph/1', 'track: Z', 'blocks: [9]', '```'].join('\n');
+    assert.equal(parseGraphBlock(body), null, `a \`\`\`${tag} fence must not declare a graph block`);
+  }
+});
+
+test('#702: the two eligible tags still declare — the fix does not undo #639', () => {
+  for (const tag of ['', 'yaml']) {
+    const body = ['```' + tag, 'protocol: brain-graph/1', 'track: A', 'blocks: [7]', '```'].join('\n');
+    assert.deepEqual(parseGraphBlock(body), { track: 'A', needs: [], blocks: [7], files: [] },
+      `a \`\`\`${tag || '(untagged)'} fence declares`);
+  }
+});
+
+// ── the unterminated fence: the malformation a human actually produces (#702) ─
+
+test('#702: a graph block whose fence never closes is UNREADABLE, not absent', () => {
+  // #639 shipped this answering `null`, which its own spec defines as "no block
+  // was declared" — the absent-is-not-empty conflation the ticket existed to
+  // remove, live inside its own fix.
+  const body = ['A note.', '', '```yaml', 'protocol: brain-graph/1', 'track: C', 'needs: [5]'].join('\n');
+  const r = parseGraphBlock(body);
+
+  assert.equal(r.ok, false);
+  assert.match(r.error, /never closed/);
+  assert.match(r.error, /line 3/);
+
+  const g = buildGraph([{ number: 30, title: 'sin cerrar', labels: [], state: 'open', body }]);
+  assert.deepEqual(g.blocksUnreadable.map(b => b.number), [30]);
+  assert.deepEqual(g.edges, [], 'a block nobody could read declares no edge — needs: [5] is not salvaged');
+});
+
+test('#702: an unterminated FOREIGN fence is not attributed to the graph protocol', () => {
+  // The tag alone cannot attribute an open fence — `yaml` says nothing about
+  // which protocol was being written — so attribution reads the same two facts a
+  // closed block is read on. A ```js fence is a human showing something, open or
+  // closed, and reporting it as a broken declaration would be a fabricated defect.
+  const body = ['```js', 'protocol: brain-graph/1', 'track: C'].join('\n');
+  assert.equal(parseGraphBlock(body), null);
+});
+
+test('#702: a prose mention with no fence at all stays ABSENT', () => {
+  assert.equal(parseGraphBlock('we should adopt brain-graph/1 someday'), null);
+});
+
 test('#639: TWO graph blocks is an error naming the count, never a silent pick of one', () => {
   // The rule `parseAmendmentDraft` and `parseCheckpointClaim` already hold. The old
   // locator answered with the FIRST one and said nothing — two values for one key is
@@ -111,7 +181,15 @@ test('#639: an unreadable block is carried out and named — it is not an issue 
   assert.match(g.blocksUnreadable[0].error, /2 `brain-graph\/1` blocks found/);
   assert.equal(n9.status, UNCLASSIFIED, 'no source placed it — that part is honest');
   assert.equal(n9.declared, false);
-  assert.equal(g.edges.length, 0, 'an unreadable block asserts nothing; it is not half a declaration to salvage');
+
+  // WHAT THIS PINS, named rather than implied (#702). The first of the two blocks
+  // declares `needs: [1]`, so a reader that silently picked it would draw the edge
+  // 1→9; and #9's own `blocks`/`needs` are the only edges either fixture could
+  // produce, since `issue(1)` declares none. A bare `edges.length === 0` with no
+  // fixture carrying an edge reads 0 under every mutation and pins nothing — the
+  // state this assertion was in when a cold review found it.
+  assert.deepEqual(g.edges, [], 'a silent pick of the first block would draw 1→9 out of it');
+  assert.ok(!g.edges.some(e => e.from === 1 && e.to === 9));
 });
 
 test('#639: the summary prints the unreadable blocks, distinct from the ones that never declared', () => {
