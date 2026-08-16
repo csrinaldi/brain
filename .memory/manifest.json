@@ -266,11 +266,11 @@
       "prompts": 0
     },
     {
-      "id": "3f965625",
+      "id": "dd86415a",
       "created_by": "gandalf",
-      "created_at": "2026-08-16T15:47:41Z",
+      "created_at": "2026-08-16T15:06:17Z",
       "sessions": 2,
-      "memories": 50,
+      "memories": 41,
       "prompts": 0
     },
     {
@@ -287,6 +287,14 @@
       "created_at": "2026-08-16T14:19:26Z",
       "sessions": 2,
       "memories": 32,
+      "prompts": 0
+    },
+    {
+      "id": "3f965625",
+      "created_by": "gandalf",
+      "created_at": "2026-08-16T15:47:41Z",
+      "sessions": 2,
+      "memories": 50,
       "prompts": 0
     }
   ]

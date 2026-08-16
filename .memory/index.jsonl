@@ -180,6 +180,7 @@
 {"id":"rec-15d0fb1ed4ba89c3","ts":"2026-07-29T14:28:50Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-15d0fb1ed4ba89c3.jsonl"}
 {"id":"rec-1602e2a35fc473c8","ts":"2026-07-25T21:50:17Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-1602e2a35fc473c8.jsonl"}
 {"id":"rec-165ef2872588f840","ts":"2026-07-25T21:51:16Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-165ef2872588f840.jsonl"}
+{"id":"rec-167af9d18efd2ead","ts":"2026-08-16T15:06:11Z","actor":"fix/issue-612-fixreview-a-trailing-space-on-a-key-line","type":"bugfix","project":"brain","issue":612,"file":"2026-08-rec-167af9d18efd2ead.jsonl"}
 {"id":"rec-169ea2465fc98105","ts":"2026-07-29T14:27:24Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-169ea2465fc98105.jsonl"}
 {"id":"rec-16a7804c99b6b405","ts":"2026-07-25T21:50:50Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-16a7804c99b6b405.jsonl"}
 {"id":"rec-16b2cd4891da66ba","ts":"2026-07-29T14:27:38Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-16b2cd4891da66ba.jsonl"}

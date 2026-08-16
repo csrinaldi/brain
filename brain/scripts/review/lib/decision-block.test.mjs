@@ -131,6 +131,38 @@ test('parseDecision: rule 12 — actor field absent', () => {
   assert.equal(parseDecision({ body }), null);
 });
 
+// ── #612: whitespace-only refuses exactly like absent, not like an empty value ──
+
+test('parseDecision: #612 — decision: (whitespace-only, no value) refuses, same as absent', () => {
+  const body = blockBody([
+    'protocol: brain-decision/1',
+    'decision: ',
+    `head_sha: ${HEAD_SHA}`,
+    'actor: alice',
+  ]);
+  assert.equal(parseDecision({ body }), null);
+});
+
+test('parseDecision: #612 — head_sha: (whitespace-only, no value) refuses, same as absent', () => {
+  const body = blockBody([
+    'protocol: brain-decision/1',
+    'decision: APPROVE',
+    'head_sha: ',
+    'actor: alice',
+  ]);
+  assert.equal(parseDecision({ body }), null);
+});
+
+test('parseDecision: #612 — actor: (whitespace-only, no value) refuses, same as absent', () => {
+  const body = blockBody([
+    'protocol: brain-decision/1',
+    'decision: APPROVE',
+    `head_sha: ${HEAD_SHA}`,
+    'actor: ',
+  ]);
+  assert.equal(parseDecision({ body }), null);
+});
+
 test('parseDecision: rule 17 — only the FIRST fence in a body is read', () => {
   const first = blockBody([
     'protocol: brain-decision/1',

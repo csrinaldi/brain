@@ -124,17 +124,6 @@ const CONTROLS_NOT_APPLIED_KEY_RE = /^controls_not_applied:/m;
  * treats as an array — `board.mjs`'s `for (… of latestVerdict.sequencing ?? [])`
  * reached `for … of 3` and threw, taking down the whole board run.
  *
- * NOT covered by the table above: a trailing space on the key line routes the
- * key into the INLINE branch below (`scalar`'s `(.+)` captures the space), so it
- * answers `UNREADABLE` even with entries under it — `null` until #477, which is
- * the improvement: the caller now learns the field was there and unreadable
- * instead of being told nothing was said about it. The trailing space itself is
- * still not repaired. Pre-existing and pinned by test.
- * Deferred to #477 on SCOPE — `scalar`'s contract for whitespace-only values
- * belongs with the sentinel policy being settled there. Measured, not assumed:
- * applying the candidate repair (`(.+)` → `(\S.*)`) fails exactly one test in
- * the whole suite, the pin that documents this defect.
- *
  * Until #452 the last line collapsed the middle state into `null`, so
  * `parseVerdict`'s `!== null` guard dropped the field and a consumer could not
  * tell "the block said nothing about this" from "the block said: nothing" —

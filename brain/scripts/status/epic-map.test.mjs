@@ -40,6 +40,27 @@ test('#459: a fenced block of a DIFFERENT protocol is not read as a graph block'
   assert.equal(parseGraphBlock(other), null, 'three protocols share the fence primitives; only one owns this shape');
 });
 
+test('#612: track: (whitespace-only) reads as null, not the empty string', () => {
+  const g = parseGraphBlock(['```yaml', 'protocol: brain-graph/1', 'track: ', 'needs: []', 'blocks: []', 'files: []', '```'].join('\n'));
+  assert.equal(g.track, null);
+});
+
+test('#612: blocks: (whitespace-only) reads as [] — same as an empty declared list', () => {
+  const g = parseGraphBlock(['```yaml', 'protocol: brain-graph/1', 'track: A', 'needs: []', 'blocks: ', 'files: []', '```'].join('\n'));
+  assert.deepEqual(g.blocks, []);
+});
+
+test('#612: a node with track: (whitespace-only) groups under the SAME tracks-map key ("?") as an undeclared node, not its own "" group', () => {
+  const withBlankTrack = issue(1, { body: ['```yaml', 'protocol: brain-graph/1', 'track: ', 'needs: []', 'blocks: []', 'files: []', '```'].join('\n') });
+  const undeclared = issue(2, { body: 'just prose, no block at all' });
+  const { tracks, nodes } = buildGraph([withBlankTrack, undeclared]);
+  assert.equal(nodes[0].track, null);
+  assert.equal(nodes[1].track, null);
+  assert.ok(tracks.has('?'));
+  assert.equal(tracks.get('?').length, 2, 'both nodes land in the SAME fallback group');
+  assert.equal(tracks.has(''), false, 'the pre-repair "" group no longer exists');
+});
+
 // ── the locator: the `protocol:` scalar, not the position (#639) ────────────
 //
 // WHAT WAS MEASURED, because the ticket's stated repro is not the defect. Its
