@@ -325,6 +325,16 @@ export default {
   // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
   'memory.share.secretFoundRecords': 'Secret detected in a candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
 
+  // ── memory/backends/engram.mjs — dualWriteRecords() upstream-base export scope (issue #701) ──
+  'memory.share.upstreamUnavailable': 'could not check the upstream base ({ref}) — {reason}. This run wrote every candidate (the pre-#701 behaviour); nothing was scoped.',
+  'memory.share.upstreamUnnamed': '{count} file(s) under .memory/records/ at the upstream base do not match the per-record filename shape and are invisible to the export-scope check. Run `npm run memory:split-records` to fix.',
+  'memory.share.dedupedUpstream': '{count} record(s) already present on the upstream base ({ref}) were not re-exported.',
+
+  // ── memory/staged-records-check.mjs — pre-commit gate (issue #701) ───────────
+  'memory.stagedRecordsCheck.refused': 'refusing — {count} staged .memory/records/ file(s) are byte-identical to a copy already on the trunk. This adds nothing and is what re-triggers this ticket. The remedy is lossless — the bytes are already durable upstream:',
+  'memory.stagedRecordsCheck.remedy': '  git restore --staged {paths}\n  (then `rm` any of those paths that `git status` now shows as untracked — same bytes, already on the trunk)',
+  'memory.stagedRecordsCheck.unavailable': 'could not check the upstream base — {note}. Nothing was refused; this run could not ask the question.',
+
   // ── memory/backends/engram.mjs — importMemory() records-only pull (D2/C4, issue #229) ──
   'memory.import.empty':    'ℹ no records found in .memory/records/ — nothing to import.',
   'memory.import.progress': '  ✓ {written}/{total} records imported',

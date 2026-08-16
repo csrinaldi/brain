@@ -291,6 +291,16 @@ export default {
   // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
   'memory.share.secretFoundRecords': 'Se detectó un secreto en un registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
 
+  // ── memory/backends/engram.mjs — dualWriteRecords() alcance del export contra la base upstream (issue #701) ──
+  'memory.share.upstreamUnavailable': 'no se pudo consultar la base upstream ({ref}) — {reason}. Esta corrida escribió todos los candidatos (comportamiento pre-#701); no se acotó nada.',
+  'memory.share.upstreamUnnamed': '{count} archivo(s) bajo .memory/records/ en la base upstream no coinciden con el formato de nombre por registro y son invisibles para el chequeo de alcance del export. Corré `npm run memory:split-records` para arreglarlo.',
+  'memory.share.dedupedUpstream': '{count} registro(s) ya presentes en la base upstream ({ref}) no se re-exportaron.',
+
+  // ── memory/staged-records-check.mjs — gate de pre-commit (issue #701) ────────
+  'memory.stagedRecordsCheck.refused': 'rechazado — {count} archivo(s) de .memory/records/ en stage son byte-idénticos a una copia que ya está en el trunk. Esto no agrega nada y es lo que re-dispara este ticket. La solución no pierde información — los bytes ya son durables upstream:',
+  'memory.stagedRecordsCheck.remedy': '  git restore --staged {paths}\n  (después hacé `rm` de las rutas que `git status` ahora muestre como sin trackear — mismos bytes, ya están en el trunk)',
+  'memory.stagedRecordsCheck.unavailable': 'no se pudo consultar la base upstream — {note}. No se rechazó nada; esta corrida no pudo hacer la pregunta.',
+
   // ── memory/backends/engram.mjs — importMemory() pull solo-records (D2/C4, issue #229) ──
   'memory.import.empty':    'ℹ no se encontraron registros en .memory/records/ — nada para importar.',
   'memory.import.progress': '  ✓ {written}/{total} registros importados',
