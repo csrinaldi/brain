@@ -39,7 +39,8 @@ const ENTRY_CONT_RE = /^ {4}([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/;
 // verdict and asserts every column-0 key it emits is accepted here.
 const TOP_LEVEL_KEYS = [
   'protocol', 'verdict', 'head_sha', 'rev', 'gates',
-  'findings', 'follow_ups', 'conditions', 'controls', 'pin', 'sequencing', 'escalate',
+  'findings', 'follow_ups', 'conditions', 'controls', 'controls_not_applied',
+  'pin', 'sequencing', 'escalate',
 ];
 const TOP_LEVEL_KEY_RE = new RegExp(`^(?:${TOP_LEVEL_KEYS.join('|')}):`);
 
@@ -73,6 +74,7 @@ const UNREADABLE = Symbol('brain-review: field present but unreadable');
 // whose inline value it could not capture).
 const SEQUENCING_KEY_RE = /^sequencing:/m;
 const CONTROLS_KEY_RE = /^controls:/m;
+const CONTROLS_NOT_APPLIED_KEY_RE = /^controls_not_applied:/m;
 
 /**
  * Parses a findings-shaped key in EITHER encoding (issue #381):
@@ -319,15 +321,21 @@ export function parseVerdict({ body, author = null } = {}) {
   // A member outside the known vocabulary is UNREADABLE, not a value. This field
   // is a CLAIM about what was checked, and a verdict claiming a control that does
   // not exist would be believed — strictly worse than the silence #683 replaces.
-  if (CONTROLS_KEY_RE.test(block)) {
-    const raw = scalar(block, 'controls');
+  const readControlList = (key, keyRe) => {
+    if (!keyRe.test(block)) return;
+    const raw = scalar(block, key);
     const parsed = raw !== null ? parseJsonScalar(raw) : null;
     if (Array.isArray(parsed) && parsed.every(c => typeof c === 'string' && CONTROL_CLASSES.includes(c))) {
-      result.controls = parsed;
+      result[key] = parsed;
     } else {
-      malformed.push('controls');
+      malformed.push(key);
     }
-  }
+  };
+  readControlList('controls', CONTROLS_KEY_RE);
+  // #690 — the complement rides the SAME reader. Two call sites of one rule, not
+  // two implementations of it: the vocabulary check and the three-state answer
+  // must stay identical across both halves of one declaration.
+  readControlList('controls_not_applied', CONTROLS_NOT_APPLIED_KEY_RE);
 
   if (malformed.length > 0) result.malformed = malformed;
 
