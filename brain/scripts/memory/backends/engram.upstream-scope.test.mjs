@@ -254,6 +254,23 @@ function withoutEnv(t, name) {
   });
 }
 
+test('withoutEnv: the variable is restored exactly — a helper that only neutralises leaks into every later test', async (t) => {
+  process.env.BRAIN_MEMORY_UPSTREAM_REF = 'sentinel-set-by-this-test';
+  await t.test('inner scope where the variable is neutralised', (inner) => {
+    withoutEnv(inner, 'BRAIN_MEMORY_UPSTREAM_REF');
+    assert.equal(process.env.BRAIN_MEMORY_UPSTREAM_REF, undefined, 'neutralised inside');
+  });
+  assert.equal(process.env.BRAIN_MEMORY_UPSTREAM_REF, 'sentinel-set-by-this-test',
+    'restored after — the half of the contract a neutralise-only helper silently drops');
+
+  delete process.env.BRAIN_MEMORY_UPSTREAM_REF;
+  await t.test('inner scope where the variable was already unset', (inner) => {
+    withoutEnv(inner, 'BRAIN_MEMORY_UPSTREAM_REF');
+  });
+  assert.equal('BRAIN_MEMORY_UPSTREAM_REF' in process.env, false,
+    'an originally-unset variable must come back UNSET, never as an empty string');
+});
+
 test('dualWriteRecords: a memory.upstreamRef stated at root reaches the real predicate — not overridden by a derived ref', async (t) => {
   withoutEnv(t, 'BRAIN_MEMORY_UPSTREAM_REF');
   const root = tmpRoot(t, 'brain-engram-upstream-');
