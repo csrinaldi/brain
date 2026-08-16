@@ -57,8 +57,8 @@ export default {
 
   // brain version
   'day.brain.unknownInstalled': 'Could not determine installed brain version — skipping check.',
-  'day.brain.noNetwork':        'Could not query remote tags (no network or access) — skipping check.',
-  'day.brain.noTags':           'The brain remote has no version tags yet.',
+  'day.brain.registryUnreachable': 'Could not reach the registry to check {pkg} — the check was SKIPPED, not passed.',
+  'day.brain.notPublished':     '{pkg} has no published release yet.',
   'day.brain.newVersion':       'New brain version available: {installed} → {latest}',
   'day.brain.upgrade':          'Upgrade consciously: {pm} run brain:upgrade -- {latest}',
   'day.brain.noAutoApply':      '(not auto-applied — review the tag changelog first)',

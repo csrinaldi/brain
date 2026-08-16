@@ -94,8 +94,22 @@ export const STRATEGY = Object.freeze({
   // Consumer content survives; brain's block is applied underneath.
   MERGE: 'merge',
   // No meaningful merge exists — these are policies and prose a team rewrites
-  // wholesale. If the CONSUMER modified it, abort and name it; overwriting takes
-  // a deliberate, per-path `--force-managed <path>`.
+  // wholesale. If the file in the consumer's tree is THEIRS, abort and name it;
+  // overwriting takes a deliberate, per-path `--force-managed <path>`.
+  //
+  // "Theirs" covers two cases, and it only covered the first until #601:
+  //   · they modified what a previous release shipped, and
+  //   · brain is shipping this path for the FIRST time and a file is already
+  //     there — nothing of brain's was ever at that path, so those bytes cannot
+  //     be anything but the consumer's.
+  // The second case used to fall through to a plain collision, which the default
+  // run prints and proceeds past. The guarantee therefore started one release
+  // late, missing precisely the release where the risk is highest.
+  //
+  // Untouched paths still copy like anything else: REFUSE is not "always ask".
+  // Asking on every release is how a real warning becomes the thing everyone
+  // clicks through. A run with no outgoing tree (`--no-install`) refuses
+  // nothing on this basis — unknown-because-degraded is not evidence.
   REFUSE: 'refuse',
   // Not a file to copy at all: a build output whose inputs straddle the ownership
   // line. Copying it hands every consumer brain's own artifact, describing the
