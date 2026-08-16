@@ -69,9 +69,29 @@ export function evaluateStagedRecords({ staged = [], upstream } = {}) {
 /**
  * parseStagedDiff() — PURE. Parses `git diff --cached --raw -z --no-abbrev`
  * output: `:<srcmode> <dstmode> <srcoid> <dstoid> <status>` NUL, `<path>` NUL
- * per entry (a rename/copy carries a SECOND path token, consumed and
- * discarded — `.memory/records/*.jsonl` is never renamed by any in-tree
- * producer, so only the destination path is relevant here).
+ * per entry.
+ *
+ * A rename/copy carries TWO path tokens, and git emits them SOURCE FIRST,
+ * DESTINATION SECOND:
+ *
+ *   :100644 100644 5ce1eb9 5ce1eb9 R100
+ *   d/a.txt      <- source
+ *   d/b.txt      <- destination, and the only one `dstOid` describes
+ *
+ * The earlier version took the FIRST token and discarded the second, calling
+ * the second "the old path". That is backwards, and it broke the gate in BOTH
+ * directions (cold review of #707):
+ *
+ *   - A byte-identical restage was ALLOWED whenever git paired it as a rename
+ *     with an unrelated record deletion in the same commit — i.e. exactly the
+ *     blanket `git add .memory/` this gate exists to catch. `byPath` was
+ *     consulted at the SOURCE path, which is not the path being written, so no
+ *     upstream blob matched and the record sailed through.
+ *   - A legitimate `git mv` of a record was REFUSED, and the printed remedy
+ *     named the file being DELETED.
+ *
+ * Rename detection is on by default and two records from one session are
+ * highly similar, so the pairing is not exotic.
  *
  * @param {string} text
  * @returns {Array<{path: string, dstOid: string, status: string}>}
@@ -89,9 +109,12 @@ export function parseStagedDiff(text) {
     if (parts.length < 5) continue;
     const dstOid = parts[3];
     const status = parts[4];
-    const path = tokens[i++];
+    const first = tokens[i++];
+    if (first === undefined) break;
+    // R/C: `first` is the SOURCE. The destination is the next token, and it is
+    // the one `dstOid` describes.
+    const path = /^[RC]/.test(status) ? tokens[i++] : first;
     if (path === undefined) break;
-    if (/^[RC]/.test(status)) i++; // rename/copy carries a second (old) path — discard it
     out.push({ path, dstOid, status });
   }
   return out;
