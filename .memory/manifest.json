@@ -264,6 +264,14 @@
       "sessions": 0,
       "memories": 20,
       "prompts": 0
+    },
+    {
+      "id": "8c631ed1",
+      "created_by": "gandalf",
+      "created_at": "2026-08-16T14:19:26Z",
+      "sessions": 2,
+      "memories": 32,
+      "prompts": 0
     }
   ]
 }
