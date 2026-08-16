@@ -374,6 +374,117 @@ export function evaluateSignedDecision({ decisions, headSha, denyActors = [] } =
 export const LITE_SIGNED_EVIDENCE_SOURCES = Object.freeze([evaluateSignedDecision]);
 
 /**
+ * The scope note the deny branch appends: WHAT signed evidence it did not look
+ * at (issue #673). It reports; it never votes.
+ *
+ * The deny branch returns before the tier branch — deliberately, and the
+ * ordering does not change here (issue #358 Q5: a denied identity must not slip
+ * through `lite`'s narrower evidence either). The defect was that its refusal
+ * therefore could not mention a signature even in principle, so
+ * *"your signed decision was read and is not sufficient"* and *"your signed
+ * decision was never read at all"* came out byte-identical. It is always the
+ * second, and the operator had no way to know.
+ *
+ * FOUR states, kept distinct on purpose:
+ *
+ *   1. The review list is UNCOMPUTABLE (`decisions === null`) → say the
+ *      existence of a block is UNKNOWN. This branch exists because the first
+ *      version of this function did not have it, and a cold review caught what
+ *      that cost: `null` fell through to state 3 and was rendered as "a block
+ *      is present but is NOT admissible", telling an operator who may never
+ *      have signed anything to go correct a block that may not exist. That is
+ *      `evidence-reader-empty-on-failure` — the exact family this function was
+ *      written to close — reintroduced one state to the left. `null` is not a
+ *      determinate value and must never be reported as one (#604: "could not
+ *      establish" is not "established clean"). It is reachable by construction,
+ *      not only on failure: `gatherActorCheckInputs` threads `null` whenever
+ *      `prNumber` does not resolve.
+ *   2. An admissible block exists → say it was NOT EVALUATED (never "not
+ *      sufficient" — that is the confusion this exists to end) and name the
+ *      remedy that actually works: re-apply the label as a human.
+ *   3. A block addressed to this reader exists but is not admissible → say
+ *      that, carrying the source's own note, and stop there. Promising it "will
+ *      be read" would be false; so is a universal "correct the block", because
+ *      in three of the source's own refusal rules there is nothing about the
+ *      block to correct — the head is unresolvable (rule 11), the review's
+ *      author metadata is (rule 13), or the block is structurally perfect and
+ *      signed by a review identity, whose only remedy is a DIFFERENT signer
+ *      (rule 15). The source's note already states the specific remedy where
+ *      one exists; this sentence defers to it instead of overriding it.
+ *   4. Nothing addressed to this reader → RETURN EMPTY. A message implying an
+ *      ignored signature where none exists is the same defect pointed the other
+ *      way, and `decisions === undefined` (a legacy caller that never threaded
+ *      the field) lands here too, so those callers' reason strings stay
+ *      byte-for-byte what they were.
+ *
+ * Silent outside `lite` for the same honesty reason: no other tier consults
+ * `signedEvidenceSources` at all, so at `standard`/`regulated` a signature is
+ * not evidence that was skipped — it is not evidence. "Re-apply as a human and
+ * this will be read" would be a confident answer about the wrong subject.
+ *
+ * Reads through the SAME `signedEvidenceSources` list the `lite` branch uses,
+ * so a source added tomorrow is described here without a second edit, and this
+ * note can never describe an admissibility rule the evidence branch no longer
+ * applies.
+ *
+ * @param {object} input
+ * @param {'lite'|'standard'|'regulated'} input.tier
+ * @param {Array<{state?:string, author?:string|null, body?:string}>|null} [input.decisions]
+ * @param {string|null} [input.headSha]
+ * @param {string[]} [input.denyActors]
+ * @param {Function[]} [input.signedEvidenceSources]
+ * @returns {string}  A note to append to the deny reason, or `''` for silence.
+ */
+export function describeUnevaluatedSignedEvidence({
+  tier,
+  decisions,
+  headSha = null,
+  denyActors = [],
+  signedEvidenceSources = LITE_SIGNED_EVIDENCE_SOURCES,
+} = {}) {
+  if (tier !== 'lite') return '';
+
+  // State 1 — an unreadable review list is not evidence of anything, in either
+  // direction. Answered before the sources are consulted because this is a fact
+  // about the INPUT, not a verdict any source returns.
+  if (decisions === null) {
+    return (
+      ' Whether a signed brain-decision/1 block exists on this PR is UNKNOWN — the PR review list could not ' +
+      'be read, so this refusal weighs it neither way. The deny above precedes the tier\'s evidence forms ' +
+      'regardless (#358 Q5).'
+    );
+  }
+
+  // A non-array `denyActors` (a scalar where a list was configured) reached
+  // `.some()` here and THREW, on a path that returned a clean `fail` before
+  // this function existed — a reporting helper must not be able to convert a
+  // verdict into a crash. `defaultReadDenyActors` already guards the shipped
+  // path; this keeps the guarantee for every other caller.
+  const denies = Array.isArray(denyActors) ? denyActors : [];
+
+  const notes = [];
+  for (const source of signedEvidenceSources) {
+    const signed = source({ decisions, headSha, denyActors: denies });
+    if (signed?.admitted) {
+      return (
+        ' A signed brain-decision/1 block IS present on this PR and was NOT evaluated: the deny-set is a ' +
+        'tier-agnostic identity gate and precedes the tier\'s evidence forms (#358 Q5). Re-apply the label ' +
+        'as a human and this signature will be read.'
+      );
+    }
+    if (signed?.note) notes.push(signed.note);
+  }
+
+  if (notes.length === 0) return '';
+
+  return (
+    ' A brain-decision/1 block is present on this PR but is NOT admissible as it stands, and the deny above ' +
+    `precedes the tier's evidence forms in any case (#358 Q5): ${notes.join(' ')} Re-apply the label as a ` +
+    'human; the note above is what the block itself would need for it to be read.'
+  );
+}
+
+/**
  * `regulated`'s additional REQ-L5-1' evidence beyond `standard`'s distinct
  * actor: the approver must have authored NO commit on the branch. Returns
  * `null` when the evidence is satisfied (no additional verdict — the caller
@@ -431,7 +542,10 @@ function evaluateNoCommitOnBranch({ actor, commits }) {
  *      reviewer-protocol.md §9), at ANY tier. Evaluated BEFORE the allow-list
  *      so a contradictory config resolves fail-closed, and BEFORE the tier
  *      branch below so `lite`'s narrower distinct-act evidence can never
- *      admit a denied identity either.
+ *      admit a denied identity either. The refusal NAMES the signed evidence
+ *      that ordering skipped (issue #673,
+ *      `describeUnevaluatedSignedEvidence`) — a scope note on the reason, not
+ *      a change to the verdict.
  *   4. Actor in `botAllowlist` (e.g. automation acting on a human's explicit
  *      instruction) → pass.
  *   5. `lite`: distinct-act ONLY (`evaluateDistinctAct`) — self-approval is
@@ -489,7 +603,9 @@ function evaluateNoCommitOnBranch({ actor, commits }) {
  *   uncomputable — this DOES annotate the fallback verdict (rule 1).
  *   `undefined`/omitted means the caller never threaded the field at all
  *   (a legacy caller) and stays silent, no annotation — PR #503 cold-review
- *   round 1, finding 3. Consumed by `lite`'s signed-evidence sources only.
+ *   round 1, finding 3. Consumed by `lite`'s signed-evidence sources, and by
+ *   the deny branch's scope note (issue #673), which reads through the same
+ *   sources and likewise stays silent when the field was never threaded.
  * @param {string|null} [input.headSha]  The PR's current head SHA
  *   (`resolveHeadSha(commits)`, issue #473) — a signed decision block binds
  *   to this.
@@ -570,12 +686,20 @@ export function evaluateActor({
   // never slip through `lite`'s narrower distinct-act evidence either — the
   // deny-set is a tier-agnostic identity gate, not part of REQ-L5-1's
   // evidence form.
+  //
+  // The refusal STATES ITS SCOPE (issue #673). The verdict is unchanged and
+  // correct — `describeUnevaluatedSignedEvidence` reports, it never votes — but
+  // a deny that cannot mention the signature reads identically whether the
+  // signature was weighed and found wanting or never read at all. It is always
+  // the latter, and on PR #665 that cost the maintainer a debugging loop on the
+  // one act the three-lock architecture reserves for humans.
   if (actor && denyActors.includes(actor)) {
     return withRefusalNote({
       level: 'fail',
       reason:
         `the approved label was applied by "${actor}", which is registered in governance.reviewActors ` +
-        '— a review identity may never apply the approved label (reviewer-protocol.md §9; that label is human-only).',
+        '— a review identity may never apply the approved label (reviewer-protocol.md §9; that label is human-only).' +
+        describeUnevaluatedSignedEvidence({ tier, decisions, headSha, denyActors, signedEvidenceSources }),
     });
   }
 

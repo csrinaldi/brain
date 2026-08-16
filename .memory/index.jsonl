@@ -539,6 +539,7 @@
 {"id":"rec-4467d09acb11fab7","ts":"2026-07-25T21:51:21Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-4467d09acb11fab7.jsonl"}
 {"id":"rec-44a306727ea7148b","ts":"2026-07-25T00:46:46Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-44a306727ea7148b.jsonl"}
 {"id":"rec-4518a127c81c0469","ts":"2026-08-16T15:36:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-4518a127c81c0469.jsonl"}
+{"id":"rec-4520bce767ad25ed","ts":"2026-08-16T14:02:54Z","actor":"fix/issue-639-fixstatus-parsegraphblock-reads-the-firs","type":"decision","project":"brain","issue":639,"file":"2026-08-rec-4520bce767ad25ed.jsonl"}
 {"id":"rec-453e45bf696ad01d","ts":"2026-07-13T00:21:35Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-453e45bf696ad01d.jsonl"}
 {"id":"rec-456f8d6951de6a4c","ts":"2026-07-29T14:29:08Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-456f8d6951de6a4c.jsonl"}
 {"id":"rec-45c3c2765cf0c8c1","ts":"2026-07-29T14:26:15Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-45c3c2765cf0c8c1.jsonl"}
@@ -1419,6 +1420,7 @@
 {"id":"rec-aaf20d94e57f169b","ts":"2026-07-25T00:47:41Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-aaf20d94e57f169b.jsonl"}
 {"id":"rec-aafac352703634c1","ts":"2026-07-29T14:27:45Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-aafac352703634c1.jsonl"}
 {"id":"rec-ab1a3e36e1ecd5a0","ts":"2026-07-12T04:20:26Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ab1a3e36e1ecd5a0.jsonl"}
+{"id":"rec-ab1e3353350427cd","ts":"2026-08-16T14:02:09Z","actor":"fix/issue-673-actor-checks-deny-branch-cannot-report-t","type":"discovery","project":"brain","issue":673,"file":"2026-08-rec-ab1e3353350427cd.jsonl"}
 {"id":"rec-ab3b3befd66e585a","ts":"2026-07-29T14:27:08Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-ab3b3befd66e585a.jsonl"}
 {"id":"rec-ab480d941337d4cb","ts":"2026-07-25T21:51:14Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ab480d941337d4cb.jsonl"}
 {"id":"rec-ab57f21a66d10234","ts":"2026-07-25T21:51:56Z","actor":"fix/issue-259-d2-pr3c-a10-modify-channel","type":"decision","project":"brain","file":"2026-07-rec-ab57f21a66d10234.jsonl"}

@@ -24,12 +24,21 @@
 // is just issue text, and the two are not exclusive: when the relations land, they
 // become a second source feeding the same builder.
 //
-// It reuses `yaml-block.mjs`'s primitives rather than growing a third fenced reader.
-// That module's header anticipates exactly this ("shared by every fenced-YAML reader
-// in this repo") and its `FENCE_RE` was just hardened so a fence inside a value
-// cannot truncate a block (#487). A second parser would be the defect #340 records.
+// It reuses the two readers this repo already has rather than growing a third
+// (the defect #340 records): `fenced-blocks.mjs` LOCATES the block and
+// `yaml-block.mjs`'s `scalar` / `parseJsonScalar` READ it. That is the same split
+// `checkpoint-block.mjs` uses, and it is a split by SHAPE OF INPUT.
+//
+// It used to locate through `extractFencedBlock`, which reads the FIRST fence.
+// That is right for a VCS comment our own emitter wrote — one body, one block —
+// and wrong here (#639): an issue body is written by a human and routinely opens
+// with a snippet, a command, or a log excerpt. The first fence was then handed to
+// the protocol check, which answered `null`, and the node read as UNCLASSIFIED
+// while declaring a complete block further down. The selector is now the
+// `protocol:` scalar, not the position.
 
-import { extractFencedBlock, scalar, parseJsonScalar } from '../review/lib/yaml-block.mjs';
+import { fencedBlocks } from '../lib/fenced-blocks.mjs';
+import { scalar, parseJsonScalar } from '../review/lib/yaml-block.mjs';
 
 export const GRAPH_PROTOCOL = 'brain-graph/1';
 
@@ -42,19 +51,48 @@ export const UNCLASSIFIED = 'unclassified';
 /**
  * Reads the declared graph block from an issue body.
  *
+ * THREE ANSWERS, and each is a different sentence for the reader.
+ *
  * ABSENT IS NOT EMPTY. An issue with no block yields `null`, and the builder marks
  * it UNCLASSIFIED rather than dropping it or treating it as a free-standing leaf. A
  * node that disappears because it lacks metadata is the same class as a commit the
  * audit never enumerates (#518): the map would report a graph it had not read.
  *
+ * MALFORMED IS NOT ABSENT (#639). More than one `brain-graph/1` block in one body
+ * is ambiguity, and the answer is `{ ok: false, error }` naming the count — never a
+ * silent pick of one of them, the same rule `parseAmendmentDraft` and
+ * `parseCheckpointClaim` hold. `buildGraph` carries it out in `blocksUnreadable`
+ * and `renderSummary` prints it, exactly as it already does for a native read it
+ * could not perform: "could not read what it declared" is not "declared nothing".
+ *
+ * Success keeps the bare object rather than growing an `ok: true` envelope, because
+ * `null`-means-absent is load-bearing here and already distinguishes the case the
+ * envelope exists to distinguish elsewhere.
+ *
  * @param {string} body
- * @returns {{ track: string|null, blocks: number[], needs: number[], files: string[] }|null}
+ * @returns {{ track: string|null, blocks: number[], needs: number[], files: string[] }
+ *          |{ ok: false, error: string }
+ *          |null}
  */
 export function parseGraphBlock(body) {
   if (typeof body !== 'string' || !body.includes(GRAPH_PROTOCOL)) return null;
-  const block = extractFencedBlock(body);
-  if (!block) return null;
-  if (scalar(block, 'protocol') !== GRAPH_PROTOCOL) return null;
+
+  // Every fence is read and the block is selected by its `protocol:` scalar. The
+  // shape stays ```yaml — an issue body IS rendered for a human, and an unknown
+  // info-string renders as plain text (#495 design D1) — so the tag cannot be the
+  // selector the way it is for `brain-checkpoint/1`.
+  const declared = fencedBlocks(body).blocks
+    .filter(b => scalar(b.content, 'protocol') === GRAPH_PROTOCOL);
+
+  if (declared.length === 0) return null;
+  if (declared.length > 1) {
+    return {
+      ok: false,
+      error: `${declared.length} \`${GRAPH_PROTOCOL}\` blocks found (body lines ${declared.map(b => b.line).join(', ')}) — an issue declares its graph exactly once.`,
+    };
+  }
+
+  const block = declared[0].content;
 
   const nums = (key) => {
     const raw = scalar(block, key);
@@ -138,11 +176,16 @@ export const SRC_NATIVE = 'native';
  * issue — and it is carried through to `relationsUnreadable` rather than being read as
  * "no native relations". `undefined` means the caller did not ask for them at all.
  *
+ * The DECLARED side has the same distinction (#639): a body whose graph block could
+ * not be read lands in `blocksUnreadable` with the reason, and its node stays
+ * UNCLASSIFIED — the honest status, since no source placed it — instead of being
+ * counted among the issues that simply never declared one.
+ *
  * An edge to an issue that is CLOSED or absent from the set does not block — the work
  * is done or out of scope. An edge to an OPEN issue does.
  *
  * @param {Array<{number:number,title:string,labels:string[],state:string,body?:string,assignees?:string[]|null,relations?:{blocks:number[],needs:number[],foreign?:number}|null}>} issues
- * @returns {{ nodes: Array, edges: Array<{from:number,to:number,sources:string[]}>, tracks: Map, divergences: Array, relationsUnreadable: number[], foreignRelations: number }}
+ * @returns {{ nodes: Array, edges: Array<{from:number,to:number,sources:string[]}>, tracks: Map, divergences: Array, relationsUnreadable: number[], blocksUnreadable: Array<{number:number,error:string}>, foreignRelations: number }}
  */
 export function buildGraph(issues = []) {
   const byNumber = new Map(issues.map(i => [i.number, i]));
@@ -154,10 +197,16 @@ export function buildGraph(issues = []) {
     edgeSources.get(key).add(source);
   };
   const relationsUnreadable = [];
+  const blocksUnreadable = [];
   let foreignRelations = 0;
 
   for (const issue of issues) {
-    const g = parseGraphBlock(issue.body ?? '');
+    const parsed = parseGraphBlock(issue.body ?? '');
+    if (parsed?.ok === false) blocksUnreadable.push({ number: issue.number, error: parsed.error });
+    // An unreadable block asserts NOTHING — it is not half a declaration to be
+    // salvaged. It places no node and draws no edge; `blocksUnreadable` is what
+    // keeps that from reading as "this issue declared nothing".
+    const g = parsed?.ok === false ? null : parsed;
     // `needs` → an edge INTO this node. `blocks` → an edge OUT of it. Same relation,
     // two ends; declaring either is enough.
     for (const n of g?.needs ?? []) addEdge(`${n}->${issue.number}`, SRC_DECLARED);
@@ -254,5 +303,5 @@ export function buildGraph(issues = []) {
     }
   }
 
-  return { nodes, edges, tracks, divergences, relationsUnreadable, foreignRelations };
+  return { nodes, edges, tracks, divergences, relationsUnreadable, blocksUnreadable, foreignRelations };
 }
