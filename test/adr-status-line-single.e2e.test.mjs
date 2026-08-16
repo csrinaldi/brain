@@ -169,11 +169,22 @@ function renderOffenders(offenders) {
 // ── Vacuity guard — an empty enumeration must FAIL, never pass quietly ─────
 
 test('adr-status-line-single: an empty decisions dir FAILS the reader, it never returns [] (evidence-reader-empty-on-failure)', () => {
-  assert.throws(
-    () => readSignedAdrs('test/fixtures'),
-    /holds no ADR/,
-    'readSignedAdrs returned an empty set instead of throwing — an empty enumeration would let the sweep go green vacuously',
-  );
+  // A dir this test OWNS, not a borrowed one. Pointing the guard at an
+  // unrelated real directory (`test/fixtures`, the package-manager fixtures)
+  // makes this assertion depend on that directory's contents: every failure
+  // mode is red rather than silently green, but it would go red for a reason
+  // that has nothing to do with the invariant, which is its own kind of
+  // unreadable refusal.
+  const empty = mkdtempSync(join(tmpdir(), 'adr-status-empty-'));
+  try {
+    assert.throws(
+      () => readSignedAdrs(empty),
+      /holds no ADR/,
+      'readSignedAdrs returned an empty set instead of throwing — an empty enumeration would let the sweep go green vacuously',
+    );
+  } finally {
+    rmSync(empty, { recursive: true, force: true });
+  }
 });
 
 // ── Arm A — a synthetic fixture dir proves enumerate -> check -> render ────
