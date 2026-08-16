@@ -385,16 +385,33 @@ export const LITE_SIGNED_EVIDENCE_SOURCES = Object.freeze([evaluateSignedDecisio
  * decision was never read at all"* came out byte-identical. It is always the
  * second, and the operator had no way to know.
  *
- * Three states, kept distinct on purpose:
+ * FOUR states, kept distinct on purpose:
  *
- *   1. An admissible block exists → say it was NOT EVALUATED (never "not
+ *   1. The review list is UNCOMPUTABLE (`decisions === null`) → say the
+ *      existence of a block is UNKNOWN. This branch exists because the first
+ *      version of this function did not have it, and a cold review caught what
+ *      that cost: `null` fell through to state 3 and was rendered as "a block
+ *      is present but is NOT admissible", telling an operator who may never
+ *      have signed anything to go correct a block that may not exist. That is
+ *      `evidence-reader-empty-on-failure` — the exact family this function was
+ *      written to close — reintroduced one state to the left. `null` is not a
+ *      determinate value and must never be reported as one (#604: "could not
+ *      establish" is not "established clean"). It is reachable by construction,
+ *      not only on failure: `gatherActorCheckInputs` threads `null` whenever
+ *      `prNumber` does not resolve.
+ *   2. An admissible block exists → say it was NOT EVALUATED (never "not
  *      sufficient" — that is the confusion this exists to end) and name the
  *      remedy that actually works: re-apply the label as a human.
- *   2. A block addressed to this reader exists but is not admissible → say
- *      that, carrying the source's own note. Promising it "will be read" would
- *      be false: re-labeling as a human admits nothing while the block is
- *      broken.
- *   3. Nothing addressed to this reader → RETURN EMPTY. A message implying an
+ *   3. A block addressed to this reader exists but is not admissible → say
+ *      that, carrying the source's own note, and stop there. Promising it "will
+ *      be read" would be false; so is a universal "correct the block", because
+ *      in three of the source's own refusal rules there is nothing about the
+ *      block to correct — the head is unresolvable (rule 11), the review's
+ *      author metadata is (rule 13), or the block is structurally perfect and
+ *      signed by a review identity, whose only remedy is a DIFFERENT signer
+ *      (rule 15). The source's note already states the specific remedy where
+ *      one exists; this sentence defers to it instead of overriding it.
+ *   4. Nothing addressed to this reader → RETURN EMPTY. A message implying an
  *      ignored signature where none exists is the same defect pointed the other
  *      way, and `decisions === undefined` (a legacy caller that never threaded
  *      the field) lands here too, so those callers' reason strings stay
@@ -427,9 +444,27 @@ export function describeUnevaluatedSignedEvidence({
 } = {}) {
   if (tier !== 'lite') return '';
 
+  // State 1 — an unreadable review list is not evidence of anything, in either
+  // direction. Answered before the sources are consulted because this is a fact
+  // about the INPUT, not a verdict any source returns.
+  if (decisions === null) {
+    return (
+      ' Whether a signed brain-decision/1 block exists on this PR is UNKNOWN — the PR review list could not ' +
+      'be read, so this refusal weighs it neither way. The deny above precedes the tier\'s evidence forms ' +
+      'regardless (#358 Q5).'
+    );
+  }
+
+  // A non-array `denyActors` (a scalar where a list was configured) reached
+  // `.some()` here and THREW, on a path that returned a clean `fail` before
+  // this function existed — a reporting helper must not be able to convert a
+  // verdict into a crash. `defaultReadDenyActors` already guards the shipped
+  // path; this keeps the guarantee for every other caller.
+  const denies = Array.isArray(denyActors) ? denyActors : [];
+
   const notes = [];
   for (const source of signedEvidenceSources) {
-    const signed = source({ decisions, headSha, denyActors });
+    const signed = source({ decisions, headSha, denyActors: denies });
     if (signed?.admitted) {
       return (
         ' A signed brain-decision/1 block IS present on this PR and was NOT evaluated: the deny-set is a ' +
@@ -445,7 +480,7 @@ export function describeUnevaluatedSignedEvidence({
   return (
     ' A brain-decision/1 block is present on this PR but is NOT admissible as it stands, and the deny above ' +
     `precedes the tier's evidence forms in any case (#358 Q5): ${notes.join(' ')} Re-apply the label as a ` +
-    'human AND correct the block.'
+    'human; the note above is what the block itself would need for it to be read.'
   );
 }
 

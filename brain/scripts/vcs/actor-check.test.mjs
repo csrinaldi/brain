@@ -1776,6 +1776,68 @@ test('#673: deny + a NON-ADMISSIBLE signed block — says present-but-not-admiss
     'promising admission on a broken block sends the operator back around the same loop');
 });
 
+// The value axis the first round of these tests did NOT vary, found by cold
+// review: `{admissible, stale, [], undefined}` omits `null` — and `null` is the
+// ONLY value production ever supplies from `gatherActorCheckInputs` when
+// `prNumber` does not resolve. The four-axis mutation round stayed green
+// through the defect for exactly that reason (`red-proof-blind-along-an-unvaried-axis`).
+
+test('#673: deny + an UNCOMPUTABLE review list — reports UNKNOWN, never fabricates a block that may not exist', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: DENIED_LABEL_EVENT,
+    denyActors: ['csrinaldibot'],
+    tier: 'lite',
+    decisions: null, // gatherActorCheckInputs threads this whenever prNumber does not resolve
+    headSha: null,
+  });
+
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /UNKNOWN/, '`null` is not a determinate value and must not be reported as one');
+  // The regression this pins: an operator who never signed anything was told
+  // their block "is present … NOT admissible" and sent to go correct it.
+  assert.doesNotMatch(result.reason, /is present on this PR/,
+    'an unreadable review list is not evidence that a block exists (#604: "could not establish" is not "established clean")');
+  assert.doesNotMatch(result.reason, /correct the block/);
+});
+
+test('#673: the non-admissible branch does NOT prescribe a universal remedy — rules 11, 13 and 15 have nothing to correct', () => {
+  // Rule 15: the block is structurally perfect and honestly signed; its only
+  // defect is WHO signed it. "Correct the block" sends the operator around a
+  // second loop — the exact cost #673 was filed to remove.
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: DENIED_LABEL_EVENT,
+    denyActors: ['csrinaldibot'],
+    tier: 'lite',
+    headSha: HEAD_SHA,
+    decisions: [decisionReview({ head_sha: HEAD_SHA, author: 'csrinaldibot', actor: 'csrinaldibot' })],
+  });
+
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /may never sign an approval/, 'the source\'s own diagnosis is carried');
+  assert.doesNotMatch(result.reason, /correct the block/,
+    'there is nothing about this block to correct — the remedy is a different signer');
+  assert.match(result.reason, /the note above is what the block itself would need/,
+    'the sentence defers to the source note instead of overriding it');
+});
+
+test('#673: a non-array denyActors still returns a verdict — a reporting helper may never turn a fail into a throw', () => {
+  // Pre-#673 this returned a clean `fail` via String#includes. Threading the
+  // value into `evaluateSignedDecision`'s `.some()` made it throw, and
+  // `evaluateActor` sits OUTSIDE runActorCheck's try/catch.
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: DENIED_LABEL_EVENT,
+    denyActors: 'csrinaldibot', // a scalar where a list was configured
+    tier: 'lite',
+    headSha: HEAD_SHA,
+    decisions: [decisionReview({ head_sha: HEAD_SHA, author: 'csrinaldi', actor: 'csrinaldi' })],
+  });
+
+  assert.equal(result.level, 'fail', 'the docblock promises this never throws');
+});
+
 test('#673: deny at standard/regulated — silent about signatures, because no signature is evidence there', () => {
   for (const tier of ['standard', 'regulated']) {
     const result = evaluateActor({
