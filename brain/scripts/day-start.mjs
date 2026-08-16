@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadBrainConfig } from './lib/brain-config.mjs';
-import { highestTag, readInstalledVersion, compareSemver } from './lib/installer.mjs';
+import { highestVersion, readInstalledVersion, compareSemver, PACKAGE_NAME } from './lib/installer.mjs';
 import { getVcs, resolveProviderName } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';
 import { vcsToken } from './vcs/lib/token.mjs';
@@ -245,23 +245,55 @@ if (gaCheck.status !== 0) {
 }
 
 // ── 4. brain (core) version ──────────────────────────────────────────────────
-// Check-and-notify (ADR-0006): detects if there is a new core version and WARNS.
-// Does NOT auto-update — respects brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md.
-// Upgrade is always a conscious decision: npm run brain:upgrade -- <tag>.
+// Check-and-notify: detects if there is a new core version and WARNS. Does NOT
+// auto-update — respects brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md.
+// Upgrade is always a conscious decision.
+//
+// THE SOURCE IS THE REGISTRY (ADR-0030, issue #627). This asked
+// `git ls-remote --tags` against a hardcoded github.com URL, which was the
+// authoritative answer under ADR-0006 — there, the tag WAS the artifact. Under
+// ADR-0030 the version a consumer can install is what the registry publishes,
+// and the two sets differ: a tag can exist unpublished, and a published version
+// can be deprecated while its tag remains.
+//
+// Check-and-notify itself is NOT superseded — ADR-0006 Amendment 1 lists it
+// under "what is NOT superseded", and notes a registry makes auto-update easier
+// to reach for, which makes the anti-pattern MORE load-bearing here, not less.
+// What changed is which source is asked and what is recommended.
+//
+// Three outcomes, never collapsed into two: up to date, a new version, or
+// COULD NOT CHECK — each said in its own words. The old code reported an
+// unreachable host as "no network", which is the wrong problem to hand someone
+// whose registry is a mirror they can reach perfectly well.
 sep(await t('day.brain.section'));
 {
-  const BRAIN_REMOTE = 'https://github.com/csrinaldi/brain.git';
   const installed = readInstalledVersion(ROOT);
   if (!installed) {
     info(await t('day.brain.unknownInstalled'));
   } else {
-    const ls = capture('git', ['ls-remote', '--tags', BRAIN_REMOTE]);
-    if (ls.status !== 0) {
-      info(await t('day.brain.noNetwork'));
+    // `npm view` rather than a hand-rolled fetch: it honours the consumer's own
+    // registry, scope mapping, proxy and auth from their .npmrc. A mirrored or
+    // air-gapped consumer is a supported configuration, and asking npm is how
+    // this check inherits their configuration instead of contradicting it.
+    const view = capture('npm', ['view', PACKAGE_NAME, 'versions', '--json']);
+    if (view.status !== 0) {
+      info(await t('day.brain.registryUnreachable', { pkg: PACKAGE_NAME }));
     } else {
-      const latest = highestTag(ls.stdout);
+      let versions = null;
+      try {
+        const parsed = JSON.parse(view.stdout);
+        // npm prints a bare string when exactly one version exists.
+        versions = Array.isArray(parsed) ? parsed : [parsed];
+      } catch {
+        versions = null;
+      }
+      // `highestVersion` excludes prereleases BY RULE (#644): `compareSemver`
+      // reads only major.minor.patch, so an rc compares equal to its release and
+      // a plain sort would return whichever the registry happened to list last.
+      // This path must never tell an operator to install an rc.
+      const latest = versions === null ? null : highestVersion(versions);
       if (!latest) {
-        info(await t('day.brain.noTags'));
+        info(await t('day.brain.notPublished', { pkg: PACKAGE_NAME }));
       } else if (compareSemver(latest, installed) > 0) {
         warn(await t('day.brain.newVersion', { installed, latest }));
         console.log(`       ${await t('day.brain.upgrade', { latest, pm: PM })}`);
