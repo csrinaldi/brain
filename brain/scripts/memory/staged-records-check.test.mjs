@@ -8,8 +8,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { evaluateStagedRecords, parseStagedDiff } from './staged-records-check.mjs';
+import { evaluateStagedRecords, parseStagedDiff, runStagedRecordsCheck } from './staged-records-check.mjs';
 
 const ZERO = '0'.repeat(40);
 const OID_A = 'a'.repeat(40);
@@ -159,4 +162,49 @@ test('parseStagedDiff: empty text yields no entries', () => {
 
 test('parseStagedDiff: garbage never throws', () => {
   assert.doesNotThrow(() => parseStagedDiff('garbage\0more garbage\0'));
+});
+
+// ---------------------------------------------------------------------------
+// runStagedRecordsCheck — the config LEVEL reaches the upstream lookup.
+//
+// This is the SECOND of the two entry points that defaulted `config = {}` and
+// so killed `upstream-records.mjs`'s "omitted → read from root" contract (cold
+// review of #708). It is exercised with the REAL `upstreamRecordEntries`
+// (only git and the staged diff are faked), because a stubbed
+// `_upstreamRecordEntries` would prove the argument was passed and nothing
+// about whether it is honored.
+// ---------------------------------------------------------------------------
+
+test('runStagedRecordsCheck: memory.upstreamRef is read from root when config is omitted', () => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-staged-records-'));
+  writeFileSync(join(root, 'brain.config.json'), JSON.stringify({ memory: { upstreamRef: 'origin/stated-by-config' } }));
+
+  const r = runStagedRecordsCheck({
+    root,
+    env: {},
+    // origin/HEAD WOULD resolve — a stated ref must not fall through to it.
+    _spawn: (bin, args) => {
+      if (args[0] === 'rev-parse') {
+        const ref = args[3]?.replace(/\^\{tree\}$/, '');
+        return { status: ['origin/HEAD', 'origin/main'].includes(ref) ? 0 : 1 };
+      }
+      return { status: 0, stdout: '' };
+    },
+    _stagedRecordDiff: () => ({ ok: true, staged: [] }),
+  });
+
+  assert.equal(r.level, 'pass', 'an unresolvable upstream never blocks — the gate degrades open');
+  assert.match(r.note, /origin\/stated-by-config/, 'the config-stated ref must reach the upstream lookup');
+});
+
+test('runStagedRecordsCheck: _loadConfig is injectable through the wrapper', () => {
+  const r = runStagedRecordsCheck({
+    root: '/fake',
+    env: {},
+    _loadConfig: () => ({ memory: { upstreamRef: 'origin/injected-by-seam' } }),
+    _spawn: () => ({ status: 1 }),
+    _stagedRecordDiff: () => ({ ok: true, staged: [] }),
+  });
+  assert.equal(r.level, 'pass');
+  assert.match(r.note, /origin\/injected-by-seam/);
 });

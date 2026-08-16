@@ -1,10 +1,15 @@
 // engram.upstream-scope.test.mjs — issue #701: dualWriteRecords()/share() decline
 // a candidate whose id is already durable at the upstream base, IN ADDITION to
-// the existing own-records dedup. Seam-injected (`_upstreamRecordIds`) — no test
-// spawns git; `upstream-records.test.mjs` covers the real predicate.
+// the existing own-records dedup. Seam-injected (`_upstreamRecordIds`) —
+// `upstream-records.test.mjs` covers the real predicate. The ONE exception is
+// the last test in this file, which uses the real predicate on purpose to pin
+// the exporter's call shape; it says so where it sits.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { share, dualWriteRecords } from './engram.mjs';
 import { buildRecord } from '../lib/format.mjs';
@@ -156,4 +161,41 @@ test('share: threads _upstreamRecordIds through to dualWriteRecords — the seam
   assert.equal(upstreamSeamCalled, true, 'share() must thread its own _upstreamRecordIds seam into dualWriteRecords()');
   assert.equal(result.written, 0);
   assert.equal(result.dedupedUpstream, 1);
+});
+
+// ---------------------------------------------------------------------------
+// The exporter's own CALL SHAPE honors memory.upstreamRef (cold review of #708)
+//
+// Every test above stubs `_upstreamRecordIds`, so none of them can see what
+// `dualWriteRecords` actually passes it. That is the blind spot that let
+// `_upstreamRecordIds({ root })` look correct while `upstreamRecordEntries`
+// defaulted `config = {}` and threw the stated ref away.
+//
+// This one deliberately uses the REAL predicate against a real tmpdir holding a
+// real `brain.config.json` — the only spawns in this file, and the only way the
+// assertion is about behaviour rather than about argument shape. The tmpdir is
+// not a git repo, so the stated ref cannot resolve: the point is WHICH ref the
+// exporter reports it tried.
+// ---------------------------------------------------------------------------
+
+test('dualWriteRecords: a memory.upstreamRef stated at root reaches the real predicate — not overridden by a derived ref', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-engram-upstream-'));
+  writeFileSync(join(root, 'brain.config.json'), JSON.stringify({ memory: { upstreamRef: 'origin/stated-at-root' } }));
+
+  const rec = buildRecord({ ...baseRecordFields, content: 'config level, real predicate' });
+  const result = await dualWriteRecords(root, {
+    _readObservations: () => ({ observations: [{ id: 1 }] }),
+    _exportObservation: () => ({ record: rec, recovered: true }),
+    _appendRecord: () => {},
+    _readRecordIds: () => new Set(),
+    // `_upstreamRecordIds` is NOT stubbed — the real `upstreamRecordEntries` runs.
+    _rebuildIndex: () => ({ count: 0, duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] } }),
+    _loadConfig: () => ({}),
+  });
+
+  assert.equal(result.upstreamScope.ref, 'origin/stated-at-root',
+    'the stated ref must be the one the exporter reports — origin/HEAD/origin/main here would mean the config never arrived');
+  assert.equal(result.upstreamScope.stated, true);
+  assert.equal(result.upstreamScope.applied, false, 'it cannot resolve in a non-repo tmpdir — and the run still writes everything');
+  assert.equal(result.written, 1, 'fail-open is unchanged: an unresolvable upstream never withholds a record');
 });

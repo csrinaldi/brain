@@ -157,10 +157,16 @@ export function stagedRecordDiff({ root, _spawn = spawnSync }) {
  * module) to the staged-side diff, and evaluates. Seam-injectable for tests;
  * production defaults call the real git binary.
  *
+ * `config` and `_loadConfig` are pass-throughs, both **undefaulted on purpose**:
+ * `upstream-records.mjs` owns the `memory.upstreamRef` key and reads it from
+ * `root` when `config` is omitted, and a `config = {}` here is not nullish, so
+ * it would defeat that read and leave the config level dead at this call site.
+ *
  * @param {object} [opts]
  * @param {string} [opts.root]
  * @param {object} [opts.env]
- * @param {object} [opts.config]
+ * @param {object} [opts.config]  Parsed `brain.config.json`. Omitted → read from `root`.
+ * @param {(root: string) => object} [opts._loadConfig]  Forwarded to the upstream lookup.
  * @param {typeof spawnSync} [opts._spawn]
  * @param {typeof upstreamRecordEntries} [opts._upstreamRecordEntries]
  * @param {typeof stagedRecordDiff} [opts._stagedRecordDiff]
@@ -169,12 +175,13 @@ export function stagedRecordDiff({ root, _spawn = spawnSync }) {
 export function runStagedRecordsCheck({
   root = process.cwd(),
   env = process.env,
-  config = {},
+  config,
   _spawn = spawnSync,
+  _loadConfig,
   _upstreamRecordEntries = upstreamRecordEntries,
   _stagedRecordDiff = stagedRecordDiff,
 } = {}) {
-  const upstream = _upstreamRecordEntries({ root, env, config, _spawn });
+  const upstream = _upstreamRecordEntries({ root, env, config, _spawn, _loadConfig });
   const diff = _stagedRecordDiff({ root, _spawn });
   if (!diff.ok) {
     // Symmetric with the upstream-unavailable branch: a question the gate

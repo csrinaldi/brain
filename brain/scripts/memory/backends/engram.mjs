@@ -411,6 +411,12 @@ export async function dualWriteRecords(
   // scope below — never treated as "found nothing" for the write decision
   // (Decision 3): the accounting still records `applied: false` so the report
   // can tell "checked, empty" from "could not check" apart.
+  //
+  // `config` is DELIBERATELY not passed: `upstream-records.mjs` owns the
+  // `memory.upstreamRef` key and reads it from `root` when `config` is omitted.
+  // Passing `{}` here (or defaulting it anywhere in that chain) is not nullish
+  // and would silently kill the config level — the defect cold review of #708
+  // found, where every layer defaulted `config = {}` and the read never fired.
   const upstream = _upstreamRecordIds({ root });
   accounting.upstreamScope = {
     applied: upstream.ok === true,

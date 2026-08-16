@@ -85,13 +85,16 @@ function refResolves(ref, root, _spawn) {
  * owns the key, so one definition serves every call site and a future one
  * cannot forget to pass it. Tests still inject `config` explicitly, and passing
  * `{}` still means "no stated ref" — only `undefined`/omitted triggers the read.
+ * Every wrapper in this module's call chain therefore leaves `config`
+ * UNDEFAULTED: an intervening `config = {}` is not nullish, so it would defeat
+ * the `??` and leave level 2 dead exactly as it was before the default existed.
  *
  * @param {object} args
  * @param {string} args.root
  * @param {object} [args.env]     Defaults to `process.env`; a plain object in tests.
  * @param {object} [args.config]  Parsed `brain.config.json`. Omitted → read from `root`.
  * @param {typeof spawnSync} [args._spawn]
- * @param {(root: string) => object} [args._loadConfig]
+ * @param {(root: string) => object} [args._loadConfig]  Omitted → `loadBrainConfigAt`.
  * @returns {{ref: string, stated: boolean, resolved: boolean}}
  */
 export function resolveUpstreamRef({
@@ -170,13 +173,23 @@ export function parseLsTree(text) {
  * @param {object} args
  * @param {string} args.root
  * @param {object} [args.env]
- * @param {object} [args.config]
+ * @param {object} [args.config]  Parsed `brain.config.json`. **Deliberately undefaulted**:
+ *   omitted → `resolveUpstreamRef` reads it from `root`, and a `= {}` here would be
+ *   non-nullish, defeating that read and leaving `memory.upstreamRef` dead in production.
  * @param {typeof spawnSync} [args._spawn]
+ * @param {(root: string) => object} [args._loadConfig]  Forwarded to `resolveUpstreamRef`
+ *   so the config read is injectable at the layer production actually calls.
  * @returns {{ok:true, ref:string, stated:boolean, byId:Map<string,string>, byPath:Map<string,string>, unnamed:string[]}
  *          |{ok:false, ref:string, stated:boolean, reason:string}}
  */
-export function upstreamRecordEntries({ root, env = process.env, config = {}, _spawn = spawnSync } = {}) {
-  const { ref, stated, resolved } = resolveUpstreamRef({ root, env, config, _spawn });
+export function upstreamRecordEntries({
+  root,
+  env = process.env,
+  config,
+  _spawn = spawnSync,
+  _loadConfig = loadBrainConfigAt,
+} = {}) {
+  const { ref, stated, resolved } = resolveUpstreamRef({ root, env, config, _spawn, _loadConfig });
   if (!resolved) {
     const reason = stated
       ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef) — writing every candidate this run (pre-#701 behaviour)`

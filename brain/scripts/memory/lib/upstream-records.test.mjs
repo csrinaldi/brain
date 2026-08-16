@@ -5,6 +5,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { parseLsTree, resolveUpstreamRef, upstreamRecordEntries } from './upstream-records.mjs';
 
@@ -206,4 +209,118 @@ test('upstreamRecordEntries: resolves and ls-tree succeeds → ok:true with pars
   assert.equal(r.ok, true);
   assert.equal(r.ref, 'origin/HEAD');
   assert.equal(r.byId.get('rec-abcdefabcdefabcd'), 'dead');
+});
+
+// ---------------------------------------------------------------------------
+// The config LEVEL, driven through the PRODUCTION entry point (cold review of
+// #708).
+//
+// Every test above passes `config` EXPLICITLY, so all of them exercise the
+// non-default branch and none of them can see whether the config is ever read
+// from disk. That is how `upstreamRecordEntries`'s own `config = {}` default
+// survived: `{}` is not nullish, so `config ?? _loadConfig(root)` never fired
+// from any production caller and `memory.upstreamRef` stayed dead while the
+// module's refusal text kept naming it.
+//
+// These tests therefore OMIT `config` and drive `upstreamRecordEntries` — the
+// function `engram.mjs#dualWriteRecords` and `staged-records-check.mjs` both
+// call — against a real tmpdir holding a real `brain.config.json`.
+// ---------------------------------------------------------------------------
+
+function tmpRoot(configText) {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-upstream-records-'));
+  if (configText !== undefined) writeFileSync(join(dir, 'brain.config.json'), configText);
+  return dir;
+}
+
+/** Resolves the named refs; answers `ls-tree` with one record entry. */
+function fakeGit(resolvesFor, lsTreeSeen = []) {
+  return (bin, args) => {
+    if (args[0] === 'rev-parse') {
+      const ref = args[3]?.replace(/\^\{tree\}$/, '');
+      return { status: resolvesFor.includes(ref) ? 0 : 1 };
+    }
+    lsTreeSeen.push(args[4]); // `ls-tree -r -z --full-tree <ref> -- <path>`
+    return { status: 0, stdout: entry('100644', 'dead', '.memory/records/2026-08-rec-abcdefabcdefabcd.jsonl') + '\0' };
+  };
+}
+
+test('upstreamRecordEntries: memory.upstreamRef is read from root when config is OMITTED — and a stated ref that does not resolve never falls through', () => {
+  const root = tmpRoot(JSON.stringify({ memory: { upstreamRef: 'origin/does-not-exist' } }));
+  const r = upstreamRecordEntries({
+    root,
+    env: {},
+    // no `config` — the production call shape (`_upstreamRecordIds({ root })`)
+    _spawn: fakeGit(['origin/HEAD', 'origin/main']),
+  });
+  assert.equal(r.ok, false, 'a stated ref that does not resolve must stop resolution, not derive origin/HEAD');
+  assert.equal(r.ref, 'origin/does-not-exist');
+  assert.equal(r.stated, true);
+  assert.match(r.reason, /the stated upstream ref 'origin\/does-not-exist' does not resolve/);
+});
+
+test('upstreamRecordEntries: a resolvable memory.upstreamRef read from root is the ref ls-tree is actually asked about', () => {
+  const root = tmpRoot(JSON.stringify({ memory: { upstreamRef: 'origin/feature/x' } }));
+  const lsTreeSeen = [];
+  const r = upstreamRecordEntries({
+    root,
+    env: {},
+    _spawn: fakeGit(['origin/feature/x', 'origin/HEAD', 'origin/main'], lsTreeSeen),
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.ref, 'origin/feature/x');
+  assert.equal(r.stated, true);
+  // The over-refusal axis: honoring the config must not stop at the REPORT —
+  // the stated ref has to be the one the id set is read from.
+  assert.deepEqual(lsTreeSeen, ['origin/feature/x']);
+});
+
+test('upstreamRecordEntries: no brain.config.json at root — the derived candidates still take over', () => {
+  const root = tmpRoot(undefined);
+  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD', 'origin/main']) });
+  assert.equal(r.ok, true);
+  assert.equal(r.ref, 'origin/HEAD');
+  assert.equal(r.stated, false);
+});
+
+test('upstreamRecordEntries: a brain.config.json with no memory.upstreamRef — the derived candidates still take over', () => {
+  const root = tmpRoot(JSON.stringify({ project: { slug: 'brain' } }));
+  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD', 'origin/main']) });
+  assert.equal(r.ok, true);
+  assert.equal(r.ref, 'origin/HEAD');
+  assert.equal(r.stated, false);
+});
+
+test('upstreamRecordEntries: env still wins over a config read from root', () => {
+  const root = tmpRoot(JSON.stringify({ memory: { upstreamRef: 'origin/from-config' } }));
+  const r = upstreamRecordEntries({
+    root,
+    env: { BRAIN_MEMORY_UPSTREAM_REF: 'origin/from-env' },
+    _spawn: fakeGit(['origin/from-env', 'origin/from-config', 'origin/HEAD']),
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.ref, 'origin/from-env');
+});
+
+test('upstreamRecordEntries: _loadConfig is injectable at the layer production calls', () => {
+  const r = upstreamRecordEntries({
+    root: '/fake',
+    env: {},
+    _loadConfig: () => ({ memory: { upstreamRef: 'origin/injected' } }),
+    _spawn: fakeGit(['origin/injected', 'origin/HEAD']),
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.ref, 'origin/injected');
+  assert.equal(r.stated, true);
+});
+
+test('resolveUpstreamRef: an explicit `{}` config still means "no stated ref" — it does not trigger a read', () => {
+  const root = tmpRoot(JSON.stringify({ memory: { upstreamRef: 'origin/from-config' } }));
+  const r = resolveUpstreamRef({
+    root,
+    env: {},
+    config: {},
+    _spawn: fakeSpawn(['origin/HEAD', 'origin/main']),
+  });
+  assert.deepEqual(r, { ref: 'origin/HEAD', stated: false, resolved: true });
 });
