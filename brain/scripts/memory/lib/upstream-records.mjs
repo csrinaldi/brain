@@ -14,6 +14,8 @@
 //   parseLsTree()          — PURE: `-z` ls-tree text → {byId, byPath, unnamed}
 
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** The filename grammar `store.mjs#recordFilename` writes (issue #677). */
 const RECORD_NAME_RE = /^\d{4}-\d{2}-(rec-[0-9a-f]{16})\.jsonl$/;
@@ -29,6 +31,27 @@ const RECORD_NAME_RE = /^\d{4}-\d{2}-(rec-[0-9a-f]{16})\.jsonl$/;
  * @param {typeof spawnSync} _spawn
  * @returns {boolean}
  */
+/**
+ * loadBrainConfigAt() — reads `brain.config.json` relative to a given root.
+ *
+ * `lib/brain-config.mjs`'s `loadBrainConfig()` resolves its path from the
+ * MODULE's own location and takes no argument, so it cannot answer "the config
+ * of this root" — which is what a seam-injectable, root-parameterised lookup
+ * needs, and what the tests drive against a tmpdir. Missing or malformed reads
+ * as `{}`: a config that cannot be parsed must not be an error path here, it
+ * means "no stated ref", and the derived candidates take over.
+ *
+ * @param {string} root
+ * @returns {object}
+ */
+function loadBrainConfigAt(root) {
+  try {
+    return JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
 function refResolves(ref, root, _spawn) {
   try {
     const r = _spawn('git', ['rev-parse', '--verify', '--quiet', `${ref}^{tree}`], { cwd: root, encoding: 'utf8' });
@@ -50,15 +73,36 @@ function refResolves(ref, root, _spawn) {
  * resolve, resolution stops there and reports `resolved: false` against THAT
  * ref. A derived ref may fall through to the next derived candidate.
  *
+ * `config` DEFAULTS TO READING `brain.config.json` from `root`, and that
+ * default is the fix for a real defect (cold review of #705/#706): level 2 was
+ * documented here, named in this module's own refusal text, and **dead in
+ * production** — neither call site passed a `config`, so `memory.upstreamRef`
+ * resolved to `undefined` and fell through to `origin/HEAD`, silently
+ * overriding a stated ref, which is exactly what the paragraph above promises
+ * never happens.
+ *
+ * It is read HERE rather than threaded from each caller on purpose: this module
+ * owns the key, so one definition serves every call site and a future one
+ * cannot forget to pass it. Tests still inject `config` explicitly, and passing
+ * `{}` still means "no stated ref" — only `undefined`/omitted triggers the read.
+ *
  * @param {object} args
  * @param {string} args.root
  * @param {object} [args.env]     Defaults to `process.env`; a plain object in tests.
- * @param {object} [args.config]  Parsed `brain.config.json`, or `{}`.
+ * @param {object} [args.config]  Parsed `brain.config.json`. Omitted → read from `root`.
  * @param {typeof spawnSync} [args._spawn]
+ * @param {(root: string) => object} [args._loadConfig]
  * @returns {{ref: string, stated: boolean, resolved: boolean}}
  */
-export function resolveUpstreamRef({ root, env = process.env, config = {}, _spawn = spawnSync }) {
-  const statedRef = env?.BRAIN_MEMORY_UPSTREAM_REF || config?.memory?.upstreamRef;
+export function resolveUpstreamRef({
+  root,
+  env = process.env,
+  config,
+  _spawn = spawnSync,
+  _loadConfig = loadBrainConfigAt,
+}) {
+  const cfg = config ?? _loadConfig(root);
+  const statedRef = env?.BRAIN_MEMORY_UPSTREAM_REF || cfg?.memory?.upstreamRef;
   if (statedRef) {
     return { ref: statedRef, stated: true, resolved: refResolves(statedRef, root, _spawn) };
   }

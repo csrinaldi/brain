@@ -102,6 +102,57 @@ test('parseStagedDiff: a deleted file (dst is the zero oid)', () => {
   assert.equal(r[0].dstOid, ZERO);
 });
 
+// ── R/C: git emits SOURCE first, DESTINATION second ─────────────────────────
+//
+// The branch that consumes a rename's second path token had ZERO coverage, and
+// the code under it was backwards: it kept the SOURCE and discarded the
+// destination, calling the destination "the old path". Found by cold review of
+// #707, and it broke the gate in BOTH directions — a byte-identical restage was
+// allowed whenever git paired it with an unrelated record deletion, and a
+// legitimate `git mv` was refused while naming the file being deleted.
+//
+// The axis these tests add is STATUS: every fixture above is A/M/D, none is
+// R or C, so nothing distinguished "took the right token" from "took a token".
+
+test('parseStagedDiff: a rename yields the DESTINATION path, which is the one dstOid describes', () => {
+  const text =
+    `:100644 100644 ${OID_A} ${OID_B} R083\0` +
+    '.memory/records/2026-08-rec-1111111111111111.jsonl\0' + // source
+    '.memory/records/2026-08-rec-2222222222222222.jsonl\0';  // destination
+  const r = parseStagedDiff(text);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].path, '.memory/records/2026-08-rec-2222222222222222.jsonl',
+    'the source path is not the one being written — pairing it with dstOid is what let a restage through');
+  assert.equal(r[0].dstOid, OID_B);
+});
+
+test('parseStagedDiff: a copy behaves like a rename — the destination wins', () => {
+  const text =
+    `:100644 100644 ${OID_A} ${OID_B} C100\0` +
+    '.memory/records/2026-08-rec-1111111111111111.jsonl\0' +
+    '.memory/records/2026-08-rec-3333333333333333.jsonl\0';
+  assert.equal(parseStagedDiff(text)[0].path, '.memory/records/2026-08-rec-3333333333333333.jsonl');
+});
+
+test('parseStagedDiff: the SAME write parses identically whether git pairs it as a rename or not', () => {
+  // The verdict must not depend on whether an unrelated deletion happened to
+  // sit in the same commit — that is the accident that made the gate silent.
+  const target = '.memory/records/2026-08-rec-2222222222222222.jsonl';
+  const asAdd = `:000000 100644 ${ZERO} ${OID_B} A\0${target}\0`;
+  const asRename =
+    `:100644 100644 ${OID_A} ${OID_B} R083\0.memory/records/2026-08-rec-1111111111111111.jsonl\0${target}\0`;
+
+  const a = parseStagedDiff(asAdd)[0];
+  const b = parseStagedDiff(asRename)[0];
+  assert.equal(a.path, b.path, 'same file, same path, regardless of how git framed it');
+  assert.equal(a.dstOid, b.dstOid, 'and the same blob is what the gate compares');
+});
+
+test('parseStagedDiff: a rename with its destination token missing does not fabricate one', () => {
+  const truncated = `:100644 100644 ${OID_A} ${OID_B} R083\0.memory/records/2026-08-rec-1111111111111111.jsonl\0`;
+  assert.deepEqual(parseStagedDiff(truncated), [], 'a truncated entry is dropped, never guessed at');
+});
+
 test('parseStagedDiff: empty text yields no entries', () => {
   assert.deepEqual(parseStagedDiff(''), []);
 });
