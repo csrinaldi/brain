@@ -1668,6 +1668,30 @@ test('#612 governance invariance: a whitespace-only `head_sha` refuses, never ad
   assert.notEqual(result?.admitted, true);
 });
 
+test('#612: the ONE conceded direction — an NBSP-led value stops being admissible, and that is the safe direction', () => {
+  // The invariance claim above is "no block becomes admissible that was not,
+  // and none stops being". The second half is NOT universal, and the carve-out
+  // belongs in a test rather than only in design prose.
+  //
+  // `protocol: <U+00A0>brain-decision/1` WAS admissible before the repair —
+  // JS `.trim()` strips NBSP, so `(.+)` captured it and trim cleaned it up.
+  // `(\S.*)` excludes NBSP and `[ \t]*` cannot consume it, so no start position
+  // exists and `scalar` answers null. The block goes ADMITTED -> SILENT.
+  //
+  // That is the direction this repo requires when it is unsure: refusal. A
+  // block that stops being admissible costs a re-sign; one that starts being
+  // admissible is a forged approval. Pinned so a future "let's also accept
+  // unicode whitespace" change has to argue with a test.
+  const NBSP = ' ';
+  const body = decisionBodyWith({ protocol: `${NBSP}brain-decision/1` });
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body }],
+    headSha: HEAD_SHA,
+  });
+  assert.notEqual(result?.admitted, true, 'an NBSP-led protocol must never be admitted');
+  assert.equal(result, null, 'and it is silent — not addressed to this reader at all');
+});
+
 test('#612 governance invariance: a whitespace-only `actor` refuses, never admits', () => {
   const body = decisionBodyWith({ actor: ' ' });
   const result = evaluateSignedDecision({

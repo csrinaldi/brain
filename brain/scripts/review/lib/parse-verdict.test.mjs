@@ -344,6 +344,26 @@ test('#452/#478-F2: a trailing space on the key line no longer routes to the INL
   assert.deepEqual(clean.findings, [{ id: 'F-1' }], 'the control: the two forms now agree byte for byte');
 });
 
+test('#612: a whitespace-only `rev:` is ABSENT (null), never revision zero', () => {
+  // Found by the verify pass, not by the design: `rev`'s ternary is
+  // `revRaw !== null ? Number(revRaw) : null`, so under the old regex a
+  // whitespace-only `rev: ` produced `Number('') === 0` — a revision number
+  // fabricated out of an empty string. The repair makes it `null`, which is
+  // what the field's own JSDoc has always declared (`rev: number|null`).
+  //
+  // The repair is right and the old behaviour was wrong, but it was a SILENT
+  // divergence with no test on either side of it, which is how it nearly
+  // shipped unrecorded. `rev` is only re-rendered today (`verdict.mjs`) and
+  // never used arithmetically, so the blast radius was low — low is not a
+  // reason to leave a behaviour change unpinned.
+  const withSpace = parseVerdict({ body: blockWith(['rev: ']) });
+  assert.equal(withSpace.rev, null, 'a whitespace-only rev is absent, not 0');
+  assert.equal(parseVerdict({ body: blockWith(['rev:']) }).rev, null,
+    'the control: the clean form already answered absent, and the two now agree');
+  assert.equal(parseVerdict({ body: blockWith(['rev: 3']) }).rev, 3,
+    'the negative control — a real revision still parses, so this is not a blanket null');
+});
+
 test('#612: findings with a trailing space and NOTHING under it is [], the same as the byte-equivalent clean form', () => {
   // The nothing-follows half of axis 6 (design.md §D-F): a fix that only
   // repairs the block-scan branch's entry-reading, without repairing
