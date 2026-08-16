@@ -7,12 +7,23 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { share, dualWriteRecords } from './engram.mjs';
 import { buildRecord } from '../lib/format.mjs';
+
+/**
+ * A tmpdir that is REMOVED when the test ends — the convention
+ * `upstream-records.integration.test.mjs:37-43` already follows. Without it this
+ * file leaks one directory per run (cold review round 2 of #701).
+ */
+function tmpRoot(t, prefix) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
 
 const baseRecordFields = {
   ts: '2026-07-04T12:00:00Z', actor: '@crinaldi', actorKind: 'human', type: 'decision', project: 'brain',
@@ -176,10 +187,33 @@ test('share: threads _upstreamRecordIds through to dualWriteRecords — the seam
 // assertion is about behaviour rather than about argument shape. The tmpdir is
 // not a git repo, so the stated ref cannot resolve: the point is WHICH ref the
 // exporter reports it tried.
+//
+// It is also the ONE test here that cannot pass `env: {}`, because
+// `dualWriteRecords` calls `_upstreamRecordIds({ root })` with neither `env` nor
+// `config` (deliberately — `upstream-records.mjs` owns both keys), so the real
+// predicate falls back to `process.env`. An exported `BRAIN_MEMORY_UPSTREAM_REF`
+// — exactly the variable an operator debugging this feature would set — is
+// level 1 and wins over the config, turning this red on a developer machine
+// (cold review round 2 of #701). It is neutralised for the test and restored
+// after, rather than widening the production signature with an `env` parameter
+// that exists only for a test: the seam this file needs is already there
+// (`_upstreamRecordIds`), and this test is precisely the one that must NOT use
+// it.
 // ---------------------------------------------------------------------------
 
-test('dualWriteRecords: a memory.upstreamRef stated at root reaches the real predicate — not overridden by a derived ref', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'brain-engram-upstream-'));
+/** Removes an env var for one test and restores it exactly, unset included. */
+function withoutEnv(t, name) {
+  const prior = process.env[name];
+  delete process.env[name];
+  t.after(() => {
+    if (prior === undefined) delete process.env[name];
+    else process.env[name] = prior;
+  });
+}
+
+test('dualWriteRecords: a memory.upstreamRef stated at root reaches the real predicate — not overridden by a derived ref', async (t) => {
+  withoutEnv(t, 'BRAIN_MEMORY_UPSTREAM_REF');
+  const root = tmpRoot(t, 'brain-engram-upstream-');
   writeFileSync(join(root, 'brain.config.json'), JSON.stringify({ memory: { upstreamRef: 'origin/stated-at-root' } }));
 
   const rec = buildRecord({ ...baseRecordFields, content: 'config level, real predicate' });

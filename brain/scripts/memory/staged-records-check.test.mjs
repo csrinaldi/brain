@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -177,9 +177,20 @@ test('parseStagedDiff: garbage never throws', () => {
 // about whether it is honored.
 // ---------------------------------------------------------------------------
 
-test('runStagedRecordsCheck: memory.upstreamRef is read from root when config is omitted', () => {
-  const root = mkdtempSync(join(tmpdir(), 'brain-staged-records-'));
-  writeFileSync(join(root, 'brain.config.json'), JSON.stringify({ memory: { upstreamRef: 'origin/stated-by-config' } }));
+/**
+ * A tmpdir removed when the test ends — the convention
+ * `staged-records-check.integration.test.mjs:35-43` already follows. Without it
+ * this file leaks one directory per run (cold review round 2 of #701).
+ */
+function tmpRoot(t, configText) {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-staged-records-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  if (configText !== undefined) writeFileSync(join(dir, 'brain.config.json'), configText);
+  return dir;
+}
+
+test('runStagedRecordsCheck: memory.upstreamRef is read from root when config is omitted', (t) => {
+  const root = tmpRoot(t, JSON.stringify({ memory: { upstreamRef: 'origin/stated-by-config' } }));
 
   const r = runStagedRecordsCheck({
     root,
