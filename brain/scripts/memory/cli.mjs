@@ -604,6 +604,14 @@ try {
   // the kind of silent-degradation notice that must survive that discard.
   if (op === "share" && result?.upstreamScope) {
     const scope = result.upstreamScope;
+    // Independent of `applied`: an unreadable `brain.config.json` falls THROUGH
+    // to the derived candidates rather than stopping resolution, so the scope
+    // can be applied while a stated ref went unread. Both facts get a line.
+    if (scope.configError) {
+      console.error(
+        `memory/cli: ${await t("memory.share.upstreamConfigUnreadable", { error: scope.configError, ref: scope.ref })}`,
+      );
+    }
     if (scope.applied === false) {
       console.error(
         `memory/cli: ${await t("memory.share.upstreamUnavailable", { ref: scope.ref, reason: scope.reason })}`,

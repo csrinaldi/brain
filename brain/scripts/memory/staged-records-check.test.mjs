@@ -221,3 +221,74 @@ test('runStagedRecordsCheck: _loadConfig is injectable through the wrapper', () 
   assert.equal(r.level, 'pass');
   assert.match(r.note, /origin\/injected-by-seam/);
 });
+
+// ---------------------------------------------------------------------------
+// A CORRUPT brain.config.json must not disarm the gate (cold review round 2 of
+// #701). The window this lands in is the worst one: conflict markers in
+// `brain.config.json` mean you are mid-merge, and committing merged
+// `.memory/records/` mid-merge is exactly when this gate earns its keep. The
+// scenario is the COMMON one — a config that never stated `memory.upstreamRef`
+// at all, because the key is an optional escape hatch.
+// ---------------------------------------------------------------------------
+
+const IDENTICAL_OID = 'a'.repeat(40);
+const RECORD_PATH = '.memory/records/2026-08-rec-0123456789abcdef.jsonl';
+
+/** Resolves the named refs; answers ls-tree with one record already upstream. */
+function gitWithUpstreamRecord(resolvesFor) {
+  return (bin, args) => {
+    if (args[0] === 'rev-parse') {
+      const ref = args[3]?.replace(/\^\{tree\}$/, '');
+      return { status: resolvesFor.includes(ref) ? 0 : 1 };
+    }
+    return { status: 0, stdout: `100644 blob ${IDENTICAL_OID}\t${RECORD_PATH}\0` };
+  };
+}
+
+test('runStagedRecordsCheck: a CORRUPT brain.config.json that never stated a ref still REFUSES a byte-identical restage', (t) => {
+  const root = tmpRoot(t, '<<<<<<< HEAD\n{"project":{"slug":"brain"}}\n=======');
+
+  const r = runStagedRecordsCheck({
+    root,
+    env: {},
+    _spawn: gitWithUpstreamRecord(['origin/HEAD', 'origin/main']),
+    _stagedRecordDiff: () => ({ ok: true, staged: [{ path: RECORD_PATH, dstOid: IDENTICAL_OID, status: 'A' }] }),
+  });
+
+  assert.equal(r.level, 'fail', 'origin/HEAD is still perfectly answerable — a broken config must not cost the gate its scope');
+  assert.deepEqual(r.offending, [RECORD_PATH]);
+});
+
+test('runStagedRecordsCheck: the corrupt config is still REPORTED alongside that refusal — configError is a separate channel from note', (t) => {
+  const root = tmpRoot(t, '<<<<<<< HEAD\n{"project":{"slug":"brain"}}\n=======');
+
+  const r = runStagedRecordsCheck({
+    root,
+    env: {},
+    _spawn: gitWithUpstreamRecord(['origin/HEAD', 'origin/main']),
+    _stagedRecordDiff: () => ({ ok: true, staged: [{ path: RECORD_PATH, dstOid: IDENTICAL_OID, status: 'A' }] }),
+  });
+
+  assert.match(r.configError, /could not be parsed/, 'the operator must learn the config was skipped');
+  assert.equal(r.ref, 'origin/HEAD', 'and which ref answered instead');
+  assert.equal(r.note, undefined, '`note` says "nothing was judged" — printing it over a real refusal would be a lie');
+});
+
+test('evaluateStagedRecords: configError travels on the ok:false arm too — it is not tied to a successful lookup', () => {
+  const r = evaluateStagedRecords({
+    staged: [{ path: RECORD_PATH, dstOid: IDENTICAL_OID, status: 'A' }],
+    upstream: { ok: false, ref: 'origin/main', stated: false, reason: 'nothing resolved', configError: 'config broke' },
+  });
+  assert.equal(r.level, 'pass');
+  assert.equal(r.configError, 'config broke');
+  assert.equal(r.ref, 'origin/main');
+});
+
+test('evaluateStagedRecords: a healthy upstream carries no configError — the field is evidence, not decoration', () => {
+  const r = evaluateStagedRecords({
+    staged: [],
+    upstream: { ok: true, ref: 'origin/HEAD', stated: false, byPath: new Map() },
+  });
+  assert.equal(r.configError, undefined);
+  assert.equal(r.ref, undefined);
+});

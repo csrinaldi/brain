@@ -43,17 +43,31 @@ const ZERO_OID = '0'.repeat(40);
  *     Decision 1 makes for the exporter.
  *   - anything else (new path, divergent bytes at a known path) → ALLOW.
  *
+ * `configError` is a SEPARATE channel from `note`, on purpose. `note` means "the
+ * gate could not ask the question, so nothing was judged"; `configError` means
+ * "`brain.config.json` could not be read, so a ref stated THERE was not honored —
+ * but the derived ref answered and the verdict below is real". Folding the second
+ * into the first would print "nothing was refused" over a genuine refusal.
+ *
  * @param {object} args
  * @param {Array<{path: string, dstOid: string, status: string}>} args.staged
- * @param {{ok:true, byPath:Map<string,string>}|{ok:false, reason:string}} args.upstream
- * @returns {{level: 'pass'|'fail', offending: string[], note?: string}}
+ * @param {{ok:true, byPath:Map<string,string>, ref:string, configError?:string}
+ *        |{ok:false, reason:string, configError?:string}} args.upstream
+ * @returns {{level: 'pass'|'fail', offending: string[], note?: string, configError?: string, ref?: string}}
  */
 export function evaluateStagedRecords({ staged = [], upstream } = {}) {
+  // Carried on BOTH arms: an unreadable config no longer stops the lookup
+  // (`upstream-records.mjs`), so it can co-occur with a perfectly good verdict.
+  const carry = upstream?.configError === undefined
+    ? {}
+    : { configError: upstream.configError, ref: upstream.ref };
+
   if (!upstream || upstream.ok !== true) {
     return {
       level: 'pass',
       offending: [],
       note: upstream?.reason ?? 'upstream lookup unavailable — nothing was checked',
+      ...carry,
     };
   }
 
@@ -63,7 +77,7 @@ export function evaluateStagedRecords({ staged = [], upstream } = {}) {
     if (entry.dstOid === ZERO_OID) continue; // a deletion — allow
     if (upstream.byPath.get(entry.path) === entry.dstOid) offending.push(entry.path);
   }
-  return { level: offending.length > 0 ? 'fail' : 'pass', offending };
+  return { level: offending.length > 0 ? 'fail' : 'pass', offending, ...carry };
 }
 
 /**
@@ -236,6 +250,15 @@ export function runStagedRecordsCheck({
  */
 export async function main(deps = {}) {
   const result = runStagedRecordsCheck(deps);
+
+  // Printed BEFORE the verdict and independently of it: the operator has to
+  // learn the config was skipped whether the gate then passed or refused.
+  if (result.configError) {
+    console.log(`staged-records-check: ${await t('memory.stagedRecordsCheck.configUnreadable', {
+      error: result.configError,
+      ref: result.ref,
+    })}`);
+  }
 
   if (result.note) {
     console.log(`staged-records-check: ${await t('memory.stagedRecordsCheck.unavailable', { note: result.note })}`);

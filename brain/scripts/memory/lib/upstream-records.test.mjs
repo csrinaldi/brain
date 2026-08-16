@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -227,8 +227,14 @@ test('upstreamRecordEntries: resolves and ls-tree succeeds → ok:true with pars
 // call — against a real tmpdir holding a real `brain.config.json`.
 // ---------------------------------------------------------------------------
 
-function tmpRoot(configText) {
+/**
+ * Takes the test's `t` and registers its own cleanup — the convention
+ * `upstream-records.integration.test.mjs:37-43` already follows. Without it these
+ * tests leaked one directory per run, forever (cold review round 2 of #701).
+ */
+function tmpRoot(t, configText) {
   const dir = mkdtempSync(join(tmpdir(), 'brain-upstream-records-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   if (configText !== undefined) writeFileSync(join(dir, 'brain.config.json'), configText);
   return dir;
 }
@@ -245,8 +251,8 @@ function fakeGit(resolvesFor, lsTreeSeen = []) {
   };
 }
 
-test('upstreamRecordEntries: memory.upstreamRef is read from root when config is OMITTED — and a stated ref that does not resolve never falls through', () => {
-  const root = tmpRoot(JSON.stringify({ memory: { upstreamRef: 'origin/does-not-exist' } }));
+test('upstreamRecordEntries: memory.upstreamRef is read from root when config is OMITTED — and a stated ref that does not resolve never falls through', (t) => {
+  const root = tmpRoot(t, JSON.stringify({ memory: { upstreamRef: 'origin/does-not-exist' } }));
   const r = upstreamRecordEntries({
     root,
     env: {},
@@ -259,8 +265,8 @@ test('upstreamRecordEntries: memory.upstreamRef is read from root when config is
   assert.match(r.reason, /the stated upstream ref 'origin\/does-not-exist' does not resolve/);
 });
 
-test('upstreamRecordEntries: a resolvable memory.upstreamRef read from root is the ref ls-tree is actually asked about', () => {
-  const root = tmpRoot(JSON.stringify({ memory: { upstreamRef: 'origin/feature/x' } }));
+test('upstreamRecordEntries: a resolvable memory.upstreamRef read from root is the ref ls-tree is actually asked about', (t) => {
+  const root = tmpRoot(t, JSON.stringify({ memory: { upstreamRef: 'origin/feature/x' } }));
   const lsTreeSeen = [];
   const r = upstreamRecordEntries({
     root,
@@ -275,24 +281,24 @@ test('upstreamRecordEntries: a resolvable memory.upstreamRef read from root is t
   assert.deepEqual(lsTreeSeen, ['origin/feature/x']);
 });
 
-test('upstreamRecordEntries: no brain.config.json at root — the derived candidates still take over', () => {
-  const root = tmpRoot(undefined);
+test('upstreamRecordEntries: no brain.config.json at root — the derived candidates still take over', (t) => {
+  const root = tmpRoot(t, undefined);
   const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD', 'origin/main']) });
   assert.equal(r.ok, true);
   assert.equal(r.ref, 'origin/HEAD');
   assert.equal(r.stated, false);
 });
 
-test('upstreamRecordEntries: a brain.config.json with no memory.upstreamRef — the derived candidates still take over', () => {
-  const root = tmpRoot(JSON.stringify({ project: { slug: 'brain' } }));
+test('upstreamRecordEntries: a brain.config.json with no memory.upstreamRef — the derived candidates still take over', (t) => {
+  const root = tmpRoot(t, JSON.stringify({ project: { slug: 'brain' } }));
   const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD', 'origin/main']) });
   assert.equal(r.ok, true);
   assert.equal(r.ref, 'origin/HEAD');
   assert.equal(r.stated, false);
 });
 
-test('upstreamRecordEntries: env still wins over a config read from root', () => {
-  const root = tmpRoot(JSON.stringify({ memory: { upstreamRef: 'origin/from-config' } }));
+test('upstreamRecordEntries: env still wins over a config read from root', (t) => {
+  const root = tmpRoot(t, JSON.stringify({ memory: { upstreamRef: 'origin/from-config' } }));
   const r = upstreamRecordEntries({
     root,
     env: { BRAIN_MEMORY_UPSTREAM_REF: 'origin/from-env' },
@@ -315,30 +321,75 @@ test('upstreamRecordEntries: _loadConfig is injectable at the layer production c
 });
 
 // ---------------------------------------------------------------------------
-// An UNPARSEABLE brain.config.json is "could not look", not "found nothing"
-// (`evidence-reader-empty-on-failure`, cold review of #708).
+// An UNPARSEABLE brain.config.json is REPORTED and RESOLUTION CONTINUES
+// (`evidence-reader-empty-on-failure` kept by the report, cold review round 2
+// of #701). The first attempt stopped at level 2 against a pseudo-ref, which
+// cost every repo with a corrupt config its upstream scoping — including the
+// common case where the config never stated `memory.upstreamRef` at all.
 // ---------------------------------------------------------------------------
 
-test('upstreamRecordEntries: a malformed brain.config.json is surfaced — never silently downgraded to a derived ref', () => {
-  const root = tmpRoot('{ "memory": { "upstreamRef": "origin/x" ');
+test('upstreamRecordEntries: a malformed brain.config.json still falls through to the derived candidates — the scope is not lost', (t) => {
+  const root = tmpRoot(t, '{ "memory": { "upstreamRef": "origin/x" ');
   const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD', 'origin/main']) });
-  assert.equal(r.ok, false, 'a config that could not be parsed must not become origin/HEAD with stated:false');
-  assert.equal(r.stated, true);
-  assert.equal(r.ref, 'brain.config.json#memory.upstreamRef');
-  assert.match(r.reason, /is not valid JSON/);
+  assert.equal(r.ok, true, 'levels 3-4 stay answerable when the config is broken — stopping here loses the gate entirely');
+  assert.equal(r.ref, 'origin/HEAD');
+  assert.equal(r.stated, false, 'the ref actually used IS derived — claiming stated:true would misreport which level answered');
+  assert.equal(r.byId.size, 1, 'the id set must really be read, not an empty scope wearing ok:true');
 });
 
-test('upstreamRecordEntries: a brain.config.json that cannot be READ (a directory) is surfaced too', () => {
-  const root = mkdtempSync(join(tmpdir(), 'brain-upstream-records-'));
+test('upstreamRecordEntries: a malformed brain.config.json is REPORTED — configError rides on the ok:true result', (t) => {
+  const root = tmpRoot(t, '{ "memory": { "upstreamRef": "origin/x" ');
+  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD', 'origin/main']) });
+  assert.ok(r.configError, 'a fall-through that is not reported is the silent override the STATED split exists to prevent');
+  assert.match(r.configError, /could not be parsed/);
+  assert.match(r.configError, /brain\.config\.json/);
+});
+
+test('upstreamRecordEntries: the config parse failure is not doubled — "is not valid JSON" appears once, from JSON.parse itself', (t) => {
+  const root = tmpRoot(t, '<<<<<<< HEAD\n{}');
+  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD']) });
+  const hits = r.configError.match(/is not valid JSON/g) ?? [];
+  assert.equal(hits.length, 1, `the wrapper must not restate what JSON.parse already said: ${r.configError}`);
+});
+
+test('upstreamRecordEntries: a brain.config.json that cannot be READ (a directory) falls through and is reported too', (t) => {
+  const root = tmpRoot(t);
   mkdirSync(join(root, 'brain.config.json'));
   const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD', 'origin/main']) });
-  assert.equal(r.ok, false);
-  assert.equal(r.stated, true);
-  assert.match(r.reason, /could not be read/);
+  assert.equal(r.ok, true);
+  assert.equal(r.ref, 'origin/HEAD');
+  assert.match(r.configError, /could not be read/);
 });
 
-test('upstreamRecordEntries: a malformed brain.config.json does NOT disable the env escape hatch', () => {
-  const root = tmpRoot('}}} not json');
+test('upstreamRecordEntries: an unreadable config AND no derived ref → ok:false, and the reason names BOTH failures', (t) => {
+  const root = tmpRoot(t, '}}} not json');
+  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit([]) });
+  assert.equal(r.ok, false);
+  assert.equal(r.ref, 'origin/main');
+  assert.equal(r.stated, false);
+  assert.match(r.reason, /could not be parsed/, 'the config failure must not be dropped when the derived refs also fail');
+  assert.match(r.reason, /no upstream ref resolved/);
+  assert.match(r.configError, /could not be parsed/);
+});
+
+test('upstreamRecordEntries: a READABLE config stating an unresolvable ref STILL stops at that ref — unchanged, and not the same case', (t) => {
+  const root = tmpRoot(t, JSON.stringify({ memory: { upstreamRef: 'origin/nope' } }));
+  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD', 'origin/main']) });
+  assert.equal(r.ok, false, 'an operator ref that was honored and failed is a different fact from a config that could not be read');
+  assert.equal(r.ref, 'origin/nope');
+  assert.equal(r.stated, true);
+  assert.equal(r.configError, undefined, 'nothing failed to be read here');
+});
+
+test('upstreamRecordEntries: a HEALTHY config carries no configError — the field is evidence, not decoration', (t) => {
+  const root = tmpRoot(t, JSON.stringify({ project: { slug: 'brain' } }));
+  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD']) });
+  assert.equal(r.ok, true);
+  assert.equal(r.configError, undefined);
+});
+
+test('upstreamRecordEntries: a malformed brain.config.json does NOT disable the env escape hatch', (t) => {
+  const root = tmpRoot(t, '}}} not json');
   const r = upstreamRecordEntries({
     root,
     env: { BRAIN_MEMORY_UPSTREAM_REF: 'origin/from-env' },
@@ -348,8 +399,8 @@ test('upstreamRecordEntries: a malformed brain.config.json does NOT disable the 
   assert.equal(r.ref, 'origin/from-env');
 });
 
-test('resolveUpstreamRef: an explicit `{}` config still means "no stated ref" — it does not trigger a read', () => {
-  const root = tmpRoot(JSON.stringify({ memory: { upstreamRef: 'origin/from-config' } }));
+test('resolveUpstreamRef: an explicit `{}` config still means "no stated ref" — it does not trigger a read', (t) => {
+  const root = tmpRoot(t, JSON.stringify({ memory: { upstreamRef: 'origin/from-config' } }));
   const r = resolveUpstreamRef({
     root,
     env: {},

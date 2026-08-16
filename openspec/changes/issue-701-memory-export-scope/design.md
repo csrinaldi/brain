@@ -85,6 +85,41 @@ resolution test. Levels 3-4 exist so a fork, a `master` trunk, or a consumer who
 default is not `main` works without configuration. Levels 1-2 exist as the escape hatch for
 the case named below.
 
+**The levels are read strictly in order, and level 1 is read BEFORE level 2 — that ordering
+is load-bearing on its own**, not merely a consequence of "first one that resolves wins".
+A `brain.config.json` that cannot be read must not disable `BRAIN_MEMORY_UPSTREAM_REF`,
+because the env var is precisely the escape hatch an operator reaches for to work around a
+broken config. Reading the config first would put the workaround behind the thing it works
+around.
+
+**Every outcome, including the ones no stated ref covers:**
+
+| situation | ref reported | `stated` | result | what the operator is told |
+|---|---|---|---|---|
+| a stated ref (level 1 or 2) resolves | that ref | `true` | `ok: true` | nothing — it worked |
+| a stated ref does **not** resolve | that ref | `true` | `ok: false` | the ref they named, and that resolution STOPPED there |
+| no stated ref; a derived ref resolves | `origin/HEAD` or `origin/main` | `false` | `ok: true` | nothing — it worked |
+| no stated ref; nothing resolves | `origin/main` | `false` | `ok: false` | which refs were tried |
+| `brain.config.json` present but **unreadable/unparseable** | the DERIVED ref that answered | `false` | `ok: true` — `ok: false` only if the derived refs also fail | a `configError` naming the read failure, **plus** which derived ref was used instead |
+
+**The unreadable-config row is the one that needed correcting** (cold review round 2 of
+#701). A stated ref that does not resolve stops resolution — that is the STATED guarantee,
+and an operator's own ref is never silently swapped for another. An unreadable config is
+**not that case**: nothing was stated, because nothing could be read, and levels 3-4 remain
+perfectly answerable. Stopping there was measured to cost every repo with a corrupt config
+its entire upstream scoping — including the common case where `memory.upstreamRef` was never
+set at all, since the key is optional. The #701 pre-commit gate stopped refusing
+byte-identical restages in exactly the mid-merge window (conflict markers in
+`brain.config.json`) where it matters most.
+
+So resolution **continues**, and the `evidence-reader-empty-on-failure` guarantee of
+Decision 3 is kept by the REPORT rather than by the stop: "could not look at the config" is
+never collapsed into "the config stated nothing". A `configError` string rides on the result
+— on the `ok: true` arm too — and both consumers surface it whatever the verdict is:
+`memory:share` via `upstreamScope.configError`, and the pre-commit gate via its own
+`configError` channel, deliberately separate from `note` so a "nothing was refused" notice is
+never printed over a genuine refusal.
+
 **The merge-base is refused, and this is the load-bearing part.** `git merge-base HEAD
 origin/main` is the branch point, and *records that landed on `main` after the branch point*
 are precisely the 22 the measurement found. Scoping to the merge-base would reproduce the bug
@@ -115,9 +150,13 @@ accident is the 95.7%. The real durability mechanisms are the host-global engram
 The seam returns a discriminated result, never a bare `Set`:
 
 ```
-{ ok: true,  ref, stated, byId: Map<id, oid>, unnamed: string[] }
-{ ok: false, ref, stated, reason: string }
+{ ok: true,  ref, stated, byId: Map<id, oid>, unnamed: string[], configError?: string }
+{ ok: false, ref, stated, reason: string,                        configError?: string }
 ```
+
+`configError` rides on BOTH arms — see Decision 2's unreadable-config row. It is not a
+failure of the lookup; it is a failure to read `brain.config.json` that the lookup survived
+by falling through to a derived ref, and it must still reach the operator.
 
 `ok: false` covers every way the lookup can fail to happen: no git binary, not a git
 directory (a vendored `brain` inside a consumer repo, a test temp dir), no remote, a fresh

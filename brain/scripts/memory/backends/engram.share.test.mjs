@@ -731,6 +731,10 @@ test('dualWriteRecords: skipped/rejected/errored observations are ALL accounted 
       ref: 'origin/main',
       stated: false,
       reason: 'no upstream ref resolved (tried origin/HEAD, origin/main) — writing every candidate this run (pre-#701 behaviour)',
+      // `null`, not absent: `brain.config.json` was ABSENT here, which is a
+      // clean "no stated ref", not a failed read. The field is only a string
+      // when the config existed and could not be read (cold review round 2).
+      configError: null,
       entries: 0,
       unnamed: 0,
     },

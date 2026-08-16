@@ -133,6 +133,49 @@ test('dualWriteRecords: upstream lookup available with a partial-scope file → 
   assert.equal(result.upstreamScope.unnamed, 1);
 });
 
+// ---------------------------------------------------------------------------
+// An unreadable brain.config.json no longer STOPS the lookup (cold review round
+// 2 of #701), so the scope can be APPLIED while a ref stated in that config went
+// unread. `configError` is what tells the operator that happened, and it must
+// survive the accounting — `cli.mjs` prints it from `upstreamScope.configError`.
+// ---------------------------------------------------------------------------
+
+test('dualWriteRecords: upstream applied AND the config was unreadable → both facts reach upstreamScope', async () => {
+  const rec = buildRecord({ ...baseRecordFields, content: 'config broke, scope still applied' });
+  const result = await dualWriteRecords('/fake/root', {
+    _readObservations: () => ({ observations: [{ id: 1 }] }),
+    _exportObservation: () => ({ record: rec, recovered: true }),
+    _appendRecord: () => { throw new Error('must not append an upstream-present record'); },
+    _readRecordIds: () => new Set(),
+    _upstreamRecordIds: () => ({
+      ok: true, ref: 'origin/HEAD', stated: false,
+      byId: new Map([[rec.id, 'deadbeef']]), byPath: new Map(), unnamed: [],
+      configError: 'brain.config.json at /fake/root could not be parsed: boom',
+    }),
+    _rebuildIndex: () => ({ count: 0, duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] } }),
+    _loadConfig: () => ({}),
+  });
+
+  assert.equal(result.upstreamScope.applied, true, 'the derived ref answered — the scope is real');
+  assert.equal(result.dedupedUpstream, 1, 'and it was actually used, not merely reported');
+  assert.match(result.upstreamScope.configError, /could not be parsed/,
+    'a fall-through the operator is never told about is the silent override the STATED split exists to prevent');
+});
+
+test('dualWriteRecords: a readable config leaves upstreamScope.configError null — the field is evidence, not decoration', async () => {
+  const rec = buildRecord({ ...baseRecordFields, content: 'healthy config' });
+  const result = await dualWriteRecords('/fake/root', {
+    _readObservations: () => ({ observations: [{ id: 1 }] }),
+    _exportObservation: () => ({ record: rec, recovered: true }),
+    _appendRecord: () => {},
+    _readRecordIds: () => new Set(),
+    _upstreamRecordIds: () => ({ ok: true, ref: 'origin/HEAD', stated: false, byId: new Map(), byPath: new Map(), unnamed: [] }),
+    _rebuildIndex: () => ({ count: 1, duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] } }),
+    _loadConfig: () => ({}),
+  });
+  assert.equal(result.upstreamScope.configError, null);
+});
+
 test('dualWriteRecords: zero candidates never calls the upstream seam — no git spawn on a steady-state share with nothing to export', async () => {
   const result = await dualWriteRecords('/fake/root', {
     _readObservations: () => ({ observations: [] }),

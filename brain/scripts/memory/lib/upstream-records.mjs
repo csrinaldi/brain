@@ -21,14 +21,6 @@ import { join } from 'node:path';
 const RECORD_NAME_RE = /^\d{4}-\d{2}-(rec-[0-9a-f]{16})\.jsonl$/;
 
 /**
- * The `ref` reported when `brain.config.json` itself could not be read, so the
- * ref it might have named is unknown. Resolution stopped at the config LEVEL,
- * not at a ref, and this string says which key was being read rather than
- * inventing a ref value or printing `null` into an operator-facing message.
- */
-const UNREADABLE_CONFIG_REF = 'brain.config.json#memory.upstreamRef';
-
-/**
  * refResolves() — `git rev-parse --verify --quiet <ref>^{tree}`, true only on
  * a clean zero exit. No git binary, a non-git directory, and an unresolvable
  * ref all collapse to `false` here — the caller does not need to tell them
@@ -53,10 +45,14 @@ const UNREADABLE_CONFIG_REF = 'brain.config.json#memory.upstreamRef';
  * means "could not look", and collapsing that to `{}` is exactly the
  * `evidence-reader-empty-on-failure` failure this module cites below: an
  * operator who states `memory.upstreamRef` and then breaks the JSON would
- * silently get `origin/HEAD` with `stated: false`. So it THROWS, mirroring
- * `lib/brain-config.mjs#loadBrainConfig`'s own "is not valid JSON" refusal, and
- * `resolveUpstreamRef` turns that throw into a named, stated-but-unresolved
- * result rather than a fall-through.
+ * SILENTLY get `origin/HEAD` with `stated: false`. So it THROWS, mirroring
+ * `lib/brain-config.mjs#loadBrainConfig`'s own parse refusal, and
+ * `resolveUpstreamRef` turns that throw into a NAMED `configError` carried on
+ * the result — loud, never silent, and never a stop (see `resolveUpstreamRef`).
+ *
+ * The parse wrapper says "could not be parsed", not "is not valid JSON": the
+ * `JSON.parse` message it wraps already ENDS in "is not valid JSON", and the
+ * operator read the phrase twice in one line (cold review round 2 of #701).
  *
  * @param {string} root
  * @returns {object}
@@ -76,7 +72,7 @@ function loadBrainConfigAt(root) {
   try {
     return JSON.parse(raw);
   } catch (err) {
-    throw new Error(`brain.config.json at ${root} is not valid JSON: ${err.message}`);
+    throw new Error(`brain.config.json at ${root} could not be parsed: ${err.message}`);
   }
 }
 
@@ -117,12 +113,34 @@ function refResolves(ref, root, _spawn) {
  * UNDEFAULTED: an intervening `config = {}` is not nullish, so it would defeat
  * the `??` and leave level 2 dead exactly as it was before the default existed.
  *
- * An UNREADABLE `brain.config.json` (present, but unparseable) stops resolution
- * with `stated: true`, `resolved: false` and a named `reason` — never a
- * fall-through to a derived ref, which is the same STATED guarantee above. The
- * env level is read FIRST for that reason too: a broken config must not disable
- * `BRAIN_MEMORY_UPSTREAM_REF`, the escape hatch an operator would reach for to
- * work around it.
+ * An UNREADABLE `brain.config.json` (present, but unparseable, or a directory)
+ * is REPORTED — a `configError` string travels on every result derived past it,
+ * all the way to the operator — and resolution then CONTINUES to levels 3-4.
+ * It does not stop.
+ *
+ * That is a deliberate correction of the first attempt (cold review round 2 of
+ * #701), which stopped at level 2 with `stated: true, resolved: false` against a
+ * pseudo-ref. The config is ONE of four levels, and levels 3-4 stay perfectly
+ * answerable when it is broken. Stopping meant a repo whose config is corrupt
+ * and **never stated `memory.upstreamRef` at all** — the common case, since the
+ * key is an optional escape hatch — lost upstream scoping entirely: the #701
+ * pre-commit gate stopped refusing byte-identical restages, and the exporter
+ * re-wrote every candidate. Measured end to end against real git: a conflict-
+ * markered `brain.config.json` with no `memory` key at all turned the gate's
+ * `exit=1` into `exit=0`. The window that lands in is the worst one — conflict
+ * markers mean you are mid-merge, which is exactly when the dedup gate earns
+ * its keep.
+ *
+ * The `evidence-reader-empty-on-failure` guarantee the first attempt was reaching
+ * for is kept by the REPORT, not by the stop: "could not look at the config" is
+ * never collapsed to "the config stated nothing". A stated ref that IS readable
+ * and does NOT resolve still stops at `stated: true, resolved: false` — that is
+ * a different fact (the operator's own ref was honored and failed) and is
+ * unchanged.
+ *
+ * The env level is read FIRST, BEFORE the config, and that order is load-bearing
+ * on its own: a broken config must not disable `BRAIN_MEMORY_UPSTREAM_REF`, the
+ * escape hatch an operator would reach for to work around it.
  *
  * @param {object} args
  * @param {string} args.root
@@ -130,8 +148,9 @@ function refResolves(ref, root, _spawn) {
  * @param {object} [args.config]  Parsed `brain.config.json`. Omitted → read from `root`.
  * @param {typeof spawnSync} [args._spawn]
  * @param {(root: string) => object} [args._loadConfig]  Omitted → `loadBrainConfigAt`.
- * @returns {{ref: string, stated: boolean, resolved: boolean, reason?: string}}
- *   `reason` is present ONLY when the config itself could not be read.
+ * @returns {{ref: string, stated: boolean, resolved: boolean, configError?: string}}
+ *   `configError` is present ONLY when `brain.config.json` could not be read, and
+ *   the ref reported alongside it is the DERIVED one resolution fell through to.
  */
 export function resolveUpstreamRef({
   root,
@@ -146,20 +165,24 @@ export function resolveUpstreamRef({
   }
 
   let cfg;
+  let configError;
   try {
     cfg = config ?? _loadConfig(root);
   } catch (err) {
-    return { ref: UNREADABLE_CONFIG_REF, stated: true, resolved: false, reason: err.message };
+    // `cfg` stays undefined, so `statedRef` below is undefined and the derived
+    // candidates take over — carrying the named failure with them.
+    configError = err.message;
   }
 
   const statedRef = cfg?.memory?.upstreamRef;
   if (statedRef) {
     return { ref: statedRef, stated: true, resolved: refResolves(statedRef, root, _spawn) };
   }
+  const carry = configError === undefined ? {} : { configError };
   for (const ref of ['origin/HEAD', 'origin/main']) {
-    if (refResolves(ref, root, _spawn)) return { ref, stated: false, resolved: true };
+    if (refResolves(ref, root, _spawn)) return { ref, stated: false, resolved: true, ...carry };
   }
-  return { ref: 'origin/main', stated: false, resolved: false };
+  return { ref: 'origin/main', stated: false, resolved: false, ...carry };
 }
 
 /**
@@ -226,8 +249,13 @@ export function parseLsTree(text) {
  * @param {typeof spawnSync} [args._spawn]
  * @param {(root: string) => object} [args._loadConfig]  Forwarded to `resolveUpstreamRef`
  *   so the config read is injectable at the layer production actually calls.
- * @returns {{ok:true, ref:string, stated:boolean, byId:Map<string,string>, byPath:Map<string,string>, unnamed:string[]}
- *          |{ok:false, ref:string, stated:boolean, reason:string}}
+ * @returns {{ok:true, ref:string, stated:boolean, byId:Map<string,string>, byPath:Map<string,string>, unnamed:string[], configError?:string}
+ *          |{ok:false, ref:string, stated:boolean, reason:string, configError?:string}}
+ *   `configError` rides on BOTH arms: an unreadable `brain.config.json` no longer
+ *   stops resolution (see `resolveUpstreamRef`), so the lookup can succeed against
+ *   a derived ref while the operator still has to be told the config was skipped.
+ *   Callers MUST surface it — a fall-through that is not reported is the silent
+ *   override the STATED split exists to prevent.
  */
 export function upstreamRecordEntries({
   root,
@@ -236,14 +264,16 @@ export function upstreamRecordEntries({
   _spawn = spawnSync,
   _loadConfig = loadBrainConfigAt,
 } = {}) {
-  const { ref, stated, resolved, reason: refReason } = resolveUpstreamRef({ root, env, config, _spawn, _loadConfig });
+  const { ref, stated, resolved, configError } = resolveUpstreamRef({ root, env, config, _spawn, _loadConfig });
+  const carry = configError === undefined ? {} : { configError };
+  // The config failure PREFIXES the reason rather than replacing it: both facts
+  // are true at once here, and the ref that actually failed is the derived one.
+  const prefix = configError === undefined ? '' : `${configError}; `;
   if (!resolved) {
-    const reason = refReason
-      ? `${refReason} — writing every candidate this run (pre-#701 behaviour)`
-      : stated
-        ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef) — writing every candidate this run (pre-#701 behaviour)`
-        : `no upstream ref resolved (tried origin/HEAD, origin/main) — writing every candidate this run (pre-#701 behaviour)`;
-    return { ok: false, ref, stated, reason };
+    const reason = stated
+      ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef) — writing every candidate this run (pre-#701 behaviour)`
+      : `no upstream ref resolved (tried origin/HEAD, origin/main) — writing every candidate this run (pre-#701 behaviour)`;
+    return { ok: false, ref, stated, reason: `${prefix}${reason}`, ...carry };
   }
 
   let result;
@@ -254,16 +284,16 @@ export function upstreamRecordEntries({
       maxBuffer: 1e9,
     });
   } catch (err) {
-    return { ok: false, ref, stated, reason: `git ls-tree threw — ${err.message}` };
+    return { ok: false, ref, stated, reason: `${prefix}git ls-tree threw — ${err.message}`, ...carry };
   }
   if (result?.error) {
-    return { ok: false, ref, stated, reason: `git ls-tree could not run — ${result.error.message}` };
+    return { ok: false, ref, stated, reason: `${prefix}git ls-tree could not run — ${result.error.message}`, ...carry };
   }
   if (typeof result?.status !== 'number' || result.status !== 0) {
     const detail = result?.stderr ? ` — ${String(result.stderr).trim()}` : '';
-    return { ok: false, ref, stated, reason: `git ls-tree exited ${result?.status ?? 'with no status'}${detail}` };
+    return { ok: false, ref, stated, reason: `${prefix}git ls-tree exited ${result?.status ?? 'with no status'}${detail}`, ...carry };
   }
 
   const { byId, byPath, unnamed } = parseLsTree(result.stdout ?? '');
-  return { ok: true, ref, stated, byId, byPath, unnamed };
+  return { ok: true, ref, stated, byId, byPath, unnamed, ...carry };
 }
