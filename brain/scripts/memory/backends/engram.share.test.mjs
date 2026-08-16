@@ -26,6 +26,21 @@ import {
 import { DEFAULT_SECRET_PATTERNS, scrubChunkFile } from '../lib/secret-scrub.mjs';
 import { buildRecord } from '../lib/format.mjs';
 
+// #677 — records live one per file (`<yyyy-mm>-<id>.jsonl`), so "how many
+// physical lines did this share append" is a question about the STORE, not
+// about a month file. Counting across `records/` keeps these assertions
+// measuring what they always meant instead of what the old layout happened to
+// make convenient.
+function physicalRecordLines(dir) {
+  const recordsDir = join(dir, '.memory', 'records');
+  if (!existsSync(recordsDir)) return [];
+  return readdirSync(recordsDir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .sort()
+    .flatMap((f) => readFileSync(join(recordsDir, f), 'utf8').split('\n').filter(Boolean));
+}
+
+
 // ---------------------------------------------------------------------------
 // scrubMaterializedChunks — the testable core, independent of requireEngram()
 // ---------------------------------------------------------------------------
@@ -808,7 +823,7 @@ test('dualWriteRecords: a clean run against the REAL appendRecord/rebuildIndex w
       _loadConfig: () => ({}),
     });
     assert.equal(result.written, 1);
-    assert.equal(existsSync(join(dir, '.memory', 'records', '2026-07.jsonl')), true);
+    assert.equal(existsSync(join(dir, '.memory', 'records', `2026-07-${recA.id}.jsonl`)), true);
     assert.equal(existsSync(join(dir, '.memory', 'index.jsonl')), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -844,9 +859,7 @@ test('dualWriteRecords: id-dedup — a second identical share appends 0 new phys
     assert.equal(second.written, 0);
     assert.equal(second.deduped, 1);
 
-    const lines = readFileSync(join(dir, '.memory', 'records', '2026-07.jsonl'), 'utf8')
-      .split('\n')
-      .filter(Boolean);
+    const lines = physicalRecordLines(dir);
     assert.equal(lines.length, 1, 'the same observation must never produce a second physical line');
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -880,9 +893,7 @@ test('dualWriteRecords: id-dedup — a share with one already-recorded + one NEW
     assert.equal(second.written, 1);
     assert.equal(second.deduped, 1);
 
-    const lines = readFileSync(join(dir, '.memory', 'records', '2026-07.jsonl'), 'utf8')
-      .split('\n')
-      .filter(Boolean);
+    const lines = physicalRecordLines(dir);
     assert.equal(lines.length, 2);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -904,9 +915,7 @@ test('dualWriteRecords: id-dedup — two identical observations in the SAME batc
     });
     assert.equal(result.written, 1);
     assert.equal(result.deduped, 1);
-    const lines = readFileSync(join(dir, '.memory', 'records', '2026-07.jsonl'), 'utf8')
-      .split('\n')
-      .filter(Boolean);
+    const lines = physicalRecordLines(dir);
     assert.equal(lines.length, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -99,6 +99,20 @@ export function parseFork(prBody = '') {
 }
 
 /**
+ * The control classes this evaluator is capable of producing (#683).
+ *
+ * Every check it runs is mechanical — a fetched gate-status rollup, a
+ * `git diff --numstat`, a regex over a body, an `existsSync`, a base-sha
+ * reversion — so `deterministic` is the whole of it, for the reason
+ * `lib/causal-admission.mjs` already states about the same three evaluators.
+ *
+ * Declared HERE rather than inferred at the call site: this is the file that
+ * would change if the answer ever changed, and a declaration that lives next to
+ * the code it describes is the one that gets updated with it.
+ */
+export const PRODUCES = Object.freeze(['deterministic']);
+
+/**
  * Pure core (design.md §5 style). NEVER returns a ruled conclusion — only
  * `REVISE` (malformed fork) or `STOP` (valid fork, always escalated).
  *

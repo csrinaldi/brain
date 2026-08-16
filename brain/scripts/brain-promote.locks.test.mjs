@@ -26,7 +26,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, existsSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, relative } from 'node:path';
 
 import {
   CONFIRMATION_WORD,
@@ -52,33 +52,52 @@ const SOURCE = readFileSync(MODULE_PATH, 'utf8');
 // shared library code with their own suites and are deliberately out of scope;
 // they are named here so adding a new import fails this test until someone
 // decides which side of that line it is on.
-const OWN_IMPORTS = ['./lib/amendment-draft.mjs'];
-const SHARED_IMPORTS = ['./lib/home-index.mjs', './harness/backends/antigravity.mjs'];
+//
+// CLOSED OVER THE VERB'S OWN HALF (#675). The classification used to read only
+// brain-promote.mjs's direct imports, so a module reachable one hop further —
+// through an OWN module — was neither scanned nor named, which is the #509 gap
+// re-opened one level down. `promote-guards.mjs` arrived through exactly that
+// door: it decides whether the verb REFUSES, so an env read or a bypass flag in
+// it would be a lock-2 hole. The walk below is transitive over OWN_IMPORTS, and
+// classifies by RESOLVED repo-relative path rather than by import specifier:
+// `lib/` modules import their siblings as `./x.mjs` while the entry point says
+// `./lib/x.mjs`, and a list keyed on the raw string reads one module as two.
+const OWN_IMPORTS = ['brain/scripts/lib/amendment-draft.mjs', 'brain/scripts/lib/promote-guards.mjs'];
+const SHARED_IMPORTS = [
+  'brain/scripts/lib/home-index.mjs',
+  'brain/scripts/harness/backends/antigravity.mjs',
+  'brain/scripts/lib/shipped-hostnames.mjs',
+  'brain/scripts/lib/fenced-blocks.mjs',
+];
 
-const relativeImportsOf = (src) =>
-  [...src.matchAll(/^\s*(?:import|export)[\s\S]*?from\s+'(\.[^']+)';/gm)].map((m) => m[1]);
+const importsOf = (file) =>
+  [...readFileSync(file, 'utf8').matchAll(/^\s*(?:import|export)[\s\S]*?from\s+'(\.[^']+)';/gm)]
+    .map((m) => relative(REPO_ROOT, join(dirname(file), m[1])));
 
-const VERB_MODULES = [MODULE_PATH, ...OWN_IMPORTS.map((rel) => join(REPO_ROOT, 'brain/scripts', rel.slice(2)))];
+const VERB_MODULES = [MODULE_PATH, ...OWN_IMPORTS.map((rel) => join(REPO_ROOT, rel))];
 const CODE = VERB_MODULES.map((f) => stripComments(readFileSync(f, 'utf8'))).join('\n');
 
 const count = (haystack, needle) => haystack.split(needle).length - 1;
 
 test('REQ-378-2 harness proof: the scanned module set IS the verb — every relative import is classified', () => {
-  const found = relativeImportsOf(SOURCE).sort();
+  // Every import of every scanned module, not just the entry point's: a module
+  // the verb reaches through one of its own is still the verb.
+  const found = [...new Set(VERB_MODULES.flatMap(importsOf))].sort();
   assert.deepEqual(
     found,
     [...OWN_IMPORTS, ...SHARED_IMPORTS].sort(),
-    'brain-promote.mjs imported a module this guard does not know about — classify it as the verb\'s own ' +
+    'the verb imported a module this guard does not know about — classify it as the verb\'s own ' +
       '(scanned for env reads and bypass flags) or as shared library code, then update OWN_IMPORTS/SHARED_IMPORTS.',
   );
-  assert.equal(VERB_MODULES.length, 2, 'the verb spans two modules; both must be scanned');
+  assert.equal(VERB_MODULES.length, 3, 'the verb spans three modules; all three must be scanned');
 });
 
-test('REQ-378-2 harness proof: the concatenated CODE really contains BOTH modules', () => {
-  // Without this, a broken path would produce an empty second half and every
+test('REQ-378-2 harness proof: the concatenated CODE really contains EVERY scanned module', () => {
+  // Without this, a broken path would produce an empty half and every
   // occurrence-count assertion below would pass by reading nothing.
-  assert.ok(count(CODE, 'export async function runPromote') === 1, 'brain-promote.mjs must be in the scan');
-  assert.ok(count(CODE, 'export function assessEdit') === 1, 'amendment-draft.mjs must be in the scan');
+  assert.equal(count(CODE, 'export async function runPromote'), 1, 'brain-promote.mjs must be in the scan');
+  assert.equal(count(CODE, 'export function assessEdit'), 1, 'amendment-draft.mjs must be in the scan');
+  assert.equal(count(CODE, 'export function checkShippedContent'), 1, 'promote-guards.mjs must be in the scan');
 });
 
 function cleanup(root) {

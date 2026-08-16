@@ -72,7 +72,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0014](brain/project/decisions/adr-0014-workflow-governance.md) — Workflow governance: enforce load-bearing invariants server-side
 - [ADR-0015](brain/project/decisions/adr-0015-governance-v3-substrate-ladder.md) — Governance v3: six-level fail-closed gate ladder over observable evidence (L1–L6 + substrate rung ladder)
 - [ADR-0016](brain/project/decisions/adr-0016-ci-context-normalization.md) — CI Context Normalization: One Seam Over Provider-Specific Pipeline Evidence
-- [ADR-0017](brain/project/decisions/adr-0017-memory-format-owned-by-brain.md) — The Durable Memory Record Format Is Owned By Brain, Not By Engram
+- [ADR-0017](brain/project/decisions/adr-0017-memory-format-owned-by-brain.md) — The Durable Memory Record Format Is Owned By Brain, Not By Engram (**Amendment 1, 15/08/2026** — duplicate lines are not necessarily byte-identical — brain's own round-trip widens the unhashed `source`, so a divergent pair is reported and resolved first-wins, never refused; and the churn rule governs the diff, not the write, with the cross-file caveat named, #635; **Amendment 2, 16/08/2026** — the durable log holds ONE RECORD PER FILE (`records/<yyyy-mm>-<id>.jsonl`) — `merge=union` was a local git mechanism the forge that performs the merge does not apply, so the log was conflict-free only where the driver ran; two different records are now two different paths and there is nothing to union, #677)
 - [ADR-0019](brain/project/decisions/adr-0019-harness-port.md) — The SDD_HARNESS port: four environment surfaces, artifacts neutral by design
 - [ADR-0020](brain/project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md) — External-reviewer VCS port verbs + the reviewActors/approvalActors two-key split (**Amendment 1, 06/08/2026; Amendment 2, 07/08/2026** — `prReviewComment` carries optional inline `comments[]`; at most ONE payload the provider accepts carries the verdict, but GitLab needs N+1 calls — verb count and lock 2 unchanged, #405)
 - [ADR-0021](brain/project/decisions/adr-0021-reviewer-port-head-and-rollup.md) — Widen the VCS port for the cold reviewer: headRefOid on prView + a prStatusRollup read verb; retire the H1-1 cold-boot seam
@@ -85,6 +85,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0029](brain/project/decisions/adr-0029-two-sources-one-graph.md) — Two sources feed one graph: the union is taken, the divergence is reported
 - [ADR-0018](brain/project/decisions/adr-0018-gitlab-governance-fragment.md) — The GitLab governance surface is an opt-in fragment, not a pipeline
 - [ADR-0030](brain/project/decisions/adr-0030-distribution-scoped-registry-package.md) — Distribution moves to a scoped registry package; ADR-0006's premise no longer exists (**Amendment 1, 13/08/2026** — reachability is a named cost — a registry name needs a registry, where a git URL reached any host; the git-URL install survives as a measured, equivalent escape hatch, #629; **Amendment 2, 14/08/2026** — the deferred organisation scope is no longer deferred — the package is `@logikas/brain`, and a scoped package must declare `access: public` or publish private, #653)
+- [ADR-0031](brain/project/decisions/adr-0031-ai-attribution-is-a-claim-not-a-record.md) — AI attribution in commits is an unverifiable claim, not a provenance record
 
 ### Project-specific rules
 
@@ -143,8 +144,7 @@ The agent proposes and waits for explicit human approval:
 - **Delete branches or committed files** — irreversible destructive actions
 - **Resolve semantic conflicts of type `architecture`/`decision`** in Engram
   (see `consolidation-protocol.md §4`)
-- **Deploy to the Package Registry** (`npm run backend:deploy`) — affects artifacts
-  shared by all consumers
+- **Publish to the package registry** — affects artefacts shared by all consumers
 
 ### Tier 3 — Prohibited
 
@@ -155,8 +155,14 @@ The agent must never do this, even if explicitly asked:
 - Approve or merge its own MR
 - Modify git history (`--force`, `--amend` of published commits,
   `rebase` of branches others use)
-- Add AI attribution in commits (`Co-Authored-By: Claude...`)
-- Publish JARs to the Package Registry without explicit human instruction
+- Add AI attribution to commits — an agent co-author trailer, a session URL or a
+  "generated with" footer, whatever the tool is called. Provenance is not
+  authorship: it is evidence when a runner attests to it, and a claim when the
+  producer asserts it about itself (ADR-0031). Enforced by `hooks/commit-msg`
+  and `hooks/pre-receive`; the agent vocabulary is `git config brain.aiAgents`,
+  so a consumer governs their own tooling without waiting for a brain release
+- Publish release artefacts to the package registry without explicit human
+  instruction — whatever the ecosystem's artefact is
 - Escalate decisions to other agents without the human's knowledge
 
 ---

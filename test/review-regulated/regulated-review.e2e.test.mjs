@@ -35,7 +35,7 @@ function withFixture(t, opts) {
 }
 
 /** Spawns the fixture's own vendored brain:review against its PR. */
-function runReview(fx, { token = 'tok-e2e', extraArgs = [] } = {}) {
+function runReview(fx, { token = 'tok-e2e', validToken = null, injectCredentials = false, extraArgs = [] } = {}) {
   const r = spawnSync(
     process.execPath,
     [join(fx.repoDir, 'brain', 'scripts', 'review', 'cli.mjs'), '--pr', String(fx.prNumber), ...extraArgs],
@@ -46,6 +46,12 @@ function runReview(fx, { token = 'tok-e2e', extraArgs = [] } = {}) {
         ...process.env,
         PATH: `${STUB_BIN}${delimiter}${process.env.PATH}`,
         GH_STUB_DIR: fx.stubDir,
+        // #604: the stub's `/user` now honours the credential, so it needs to
+        // know which one is real. `validToken` defaults to the token under
+        // test — the healthy case — and a test that wants a
+        // credential-injecting environment sets them apart.
+        GH_STUB_VALID_TOKEN: validToken ?? token ?? 'tok-e2e',
+        ...(injectCredentials ? { GH_STUB_INJECT_CREDENTIALS: '1' } : {}),
         ...(token === null ? { BRAIN_REVIEWER_TOKEN: '' } : { BRAIN_REVIEWER_TOKEN: token }),
       },
     },
@@ -191,6 +197,50 @@ test('e2e: a token whose real login differs from the handle refuses at boot — 
   assert.equal(postedBodies(fx).length, 0, 'nothing may be posted under an unverified identity');
 });
 
+// ── REQ-604-1: the negative control, end to end ──────────────────────────────
+
+test('e2e: an environment that resolves an INVALID token refuses at boot — nothing posted (REQ-604-1)', (t) => {
+  // Reproduces the environment measured in #604: behind a credential-injecting
+  // proxy, `api /user` answers for the CALLER, so an invented token, an empty
+  // one and no token at all resolve to the same authenticated login. The
+  // reviewer's identity evidence is then the environment's, not the token's.
+  //
+  // The handle is set to the login the environment injects — the dangerous
+  // direction of the two in #604's table. Before the negative control this
+  // combination VERIFIED and PROCEEDED, satisfying the check with a credential
+  // that was never used; #413's mismatch never fires because the two agree.
+  const fx = withFixture(t, { tier: 'regulated', handle: 'ambient-operator' });
+  writeFileSync(join(fx.stubDir, 'user.json'), JSON.stringify({ login: 'ambient-operator' }) + '\n');
+
+  const r = runReview(fx, { token: 'unread', injectCredentials: true });
+
+  assert.notEqual(r.status, 0, 'a verification the environment can satisfy without the token must refuse');
+  assert.match(r.stderr, /INVALID token/i, 'the refusal must name the control, not a mismatch');
+  assert.match(r.stderr, /ambient-operator/, 'and the ambient identity it resolved to');
+  assert.doesNotMatch(r.stderr, /reviewer\.handle claims/,
+    'must NOT surface as a #413 mismatch — that shape sent the maintainer through three token rotations');
+  assert.equal(postedBodies(fx).length, 0, 'nothing may be posted on identity evidence the token did not establish');
+});
+
+test('e2e: the healthy environment still proceeds — the control is not a blanket refusal (REQ-604-2)', (t) => {
+  // The other direction, and the one that would make this control worthless if
+  // it failed: where credentials ARE honoured, the run is unaffected.
+  const fx = withFixture(t, { tier: 'regulated' });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(postedBodies(fx).length, 1, 'the verdict still posts in an environment that honours the token');
+});
+
+test('e2e: the control probes with a token that is NOT the reviewer credential (REQ-604-3)', (t) => {
+  // The probe must never be satisfiable by the real token, or it proves nothing.
+  const fx = withFixture(t, { tier: 'regulated' });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, r.stderr);
+  const userCalls = stubCalls(fx).filter(c => c.argv.join(' ') === 'api /user');
+  assert.ok(userCalls.length >= 2,
+    'the identity endpoint must be hit twice: once with the deliberately invalid token, once with the real one');
+});
+
 test('e2e: a missing token refuses at boot — nothing posted (REQ-409-5c)', (t) => {
   const fx = withFixture(t, { tier: 'regulated' });
   const r = runReview(fx, { token: null });
@@ -212,13 +262,18 @@ test('e2e: a missing token refuses at boot — nothing posted (REQ-409-5c)', (t)
 //
 // The two e2e cases at the bottom of this file are where the flip actually happens.
 //
-// The REFUTER half below is unchanged and is now the ONLY half tracking something
-// unlanded: no evaluator emits `evidence_class: 'inferential'`, and #408
-// deliberately did not build one. A base re-run answers a question about CAUSALITY
-// by observing; `inferential` is a claim about how a finding was ESTABLISHED —
-// reasoned rather than observed — and every evaluator brain has is deterministic by
-// construction. Inventing a reasoner so a fork can fire is the error
-// `causal-admission.mjs` already refuses one level down.
+// The REFUTER half below is still the ONLY half tracking something unlanded, and
+// #552 has now RULED on it rather than leaving it open. A base re-run answers a
+// question about CAUSALITY by observing; `inferential` is a claim about how a
+// finding was ESTABLISHED — reasoned rather than observed — and every evaluator
+// brain has is deterministic by construction.
+//
+// The ruling is **(a), sequenced**: a reasoning evaluator is worth building, and
+// it may not ship before the refuter can actually run. When #552 was ruled the
+// refuter FAILED OPEN — `cli.mjs` passes `runner: deps.refuterRunner ?? null`
+// and that dep is a test-side injection, so a reasoned blocker and one the
+// refuter had corroborated rendered byte-identically. That half is fixed
+// (`refuter.mjs`, `causal-admission.mjs`); the producer is not built.
 
 test('e2e: a finding OUTSIDE the base-reproducible set never reaches follow_ups, and the refuter stays silent (REQ-409-6, boundary redrawn by #408)', (t) => {
   // `redJob` here is not incidental (review finding, cold review of PR #471): when
@@ -252,10 +307,18 @@ test('e2e: a finding OUTSIDE the base-reproducible set never reaches follow_ups,
     'BASE_REPRODUCIBLE_GATES) or the render/parse contract changed — check WHICH before moving this.');
   assert.doesNotMatch(body, /^follow_ups:/m,
     'and the posted body carries no follow_ups block — the wire-level half of the same pin');
-  // No evaluator emits evidence_class: inferential (#408): the refuter must not have run.
+  // No evaluator emits evidence_class: inferential: the refuter must not have run.
+  //
+  // #552 RULED on this rather than leaving it pending. The ruling is (a) — a
+  // reasoning evaluator IS worth building, the reason arrived after this pin was
+  // written — but SEQUENCED behind a refuter that can actually run. So a red here
+  // now means one specific thing: a producer landed. Check, in this order, that
+  // `refuterRunner` is wired in production (it was null at every call site when
+  // #552 was ruled) and that the verdict distinguishes challenged from
+  // unchallenged. Then move this pin onto the new behaviour — do not delete it.
   assert.ok(verdict.findings.every(f => f.evidence_class !== 'inferential'),
-    'an inferential finding appeared — the refuter fork is live. #408 deliberately did NOT build ' +
-    'an inferential producer (see the header), so this is the pin for whoever does.');
+    'an inferential finding appeared — the refuter fork is live. #552 ruled that a judgment ' +
+    'producer ships only behind a runnable refuter; verify that landed too, then move this pin.');
   // And the gate-shaped source is genuinely live end to end (see the fixture note
   // above) — without this, `redJob` could be silently broken and nothing would say so.
   assert.ok(verdict.findings.find(f => f.id === 'gate:phase-order'),
@@ -506,4 +569,49 @@ test('e2e #442: an UNKNOWN protocol refuses at boot and posts nothing', (t) => {
   assert.match(r.stderr, /refusing to run/);
   assert.match(r.stderr, /brain-review\/3/, 'the refusal must name the value it rejected');
   assert.equal(postedBodies(fx).length, 0, 'nothing may be posted on a refused boot');
+});
+
+// ── #683: the verdict declares which classes of control actually ran ─────────
+//
+// Through the REAL verb, because the field's whole point is what a reader of a
+// posted body sees. An in-process assertion on renderVerdict would pass with the
+// cli never passing `controls` at all — which is precisely how this could ship
+// as a field that exists and is never populated.
+
+test('e2e #683: a posted verdict states the control classes that ran, and they round-trip', (t) => {
+  const fx = withFixture(t, { tier: 'regulated', diffLines: 1001 });
+  const r = runReview(fx);
+  assert.equal(r.status, 0, r.stderr);
+  const body = postedBodies(fx)[0].body;
+
+  assert.match(body, /^controls: \["deterministic"\]$/m,
+    'the wire must carry the declaration — a run whose controls were never passed would omit it or render []');
+
+  const verdict = parseVerdict({ body });
+  assert.deepEqual(verdict.controls, ['deterministic']);
+  assert.ok(!verdict.malformed, 'the field must round-trip, not land in malformed');
+});
+
+test('e2e #683: the declaration is derived from the EVALUATOR, not from the findings', (t) => {
+  // The trap this design exists to avoid, proven on a real run: a verdict with
+  // findings and a verdict without must make the SAME claim about what ran.
+  // Deriving from `findings[].evidence_class` would leave the clean run saying
+  // nothing — "no control ran" rendered identically to "controls ran, found
+  // nothing", on exactly the verdicts where it would be least noticed.
+  const withFindings = withFixture(t, { tier: 'regulated', diffLines: 1001 });
+  assert.equal(runReview(withFindings).status, 0);
+  const dirty = postedBodies(withFindings)[0].body;
+
+  const clean = withFixture(t, { tier: 'regulated', diffLines: 10 });
+  assert.equal(runReview(clean).status, 0);
+  const green = postedBodies(clean)[0].body;
+
+  const declared = (body) => parseVerdict({ body }).controls;
+  assert.ok(parseVerdict({ body: dirty }).findings.length > 0, 'the dirty fixture must actually carry findings');
+  // 10 lines is under `regulated`'s 200-line budget — measured, because the
+  // fixture DEFAULTS to 250 and the first cut of this case called that "clean".
+  assert.deepEqual(parseVerdict({ body: green }).findings ?? [], [], 'the clean fixture must actually carry none');
+  assert.deepEqual(declared(green), declared(dirty),
+    'a clean run and a run with findings ran the same controls and must say so identically');
+  assert.deepEqual(declared(green), ['deterministic']);
 });

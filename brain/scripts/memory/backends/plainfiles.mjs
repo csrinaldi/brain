@@ -137,7 +137,45 @@ export async function save(
   const indexPath = join(root, ".memory", "index.jsonl");
 
   const { file } = _appendRecord(candidate, { recordsDir });
-  const reindex = _rebuildIndex({ recordsDir, indexPath });
+
+  // THE APPEND IS ALREADY DONE (issue #637), and it cannot be ordered otherwise:
+  // `rebuildIndex` reads the WHOLE store, so it can only run after the line it
+  // has to see. Every other write in this codebase scans before it writes —
+  // `dualWriteRecords` aborts "before the append-only log is ever touched",
+  // `share()` runs the chunk backstop first for the same reason — and `save` is
+  // the one verb that cannot follow the rule.
+  //
+  // So this failure is NOT "the save was refused". The record is durable. It is
+  // "the save landed, and this store cannot be indexed — almost certainly for a
+  // reason that predates this run". Those are two different situations and the
+  // old bare `plainfiles.save() failed — …` reported them identically, which
+  // sent the operator to the one action that makes it worse: running `save`
+  // again.
+  //
+  // The original error is ANNOTATED AND RETHROWN rather than wrapped: every
+  // caller keeps the fail-closed throw it already had, `err.message` still
+  // carries `rebuildIndex`'s precise `file:line` diagnosis, and the stack still
+  // points at the real origin. Only cli.mjs reads the annotations.
+  let reindex;
+  try {
+    reindex = _rebuildIndex({ recordsDir, indexPath });
+  } catch (err) {
+    // Annotating a NON-OBJECT throw is itself a way to destroy the diagnosis:
+    // `throw 'boom'` is legal JS, module code is always strict, and assigning a
+    // property to a primitive there raises `TypeError: Cannot create property
+    // 'indexFailed' on string 'boom'` — replacing the real failure with an
+    // internal one and losing the record's id and file with it. Measured, not
+    // imagined. So a primitive is wrapped instead, keeping its text as the
+    // message. `rebuildIndex` throws Errors today; this is about not making a
+    // future seam's mistake unreadable.
+    const annotated = (err !== null && (typeof err === 'object' || typeof err === 'function'))
+      ? err
+      : new Error(String(err));
+    annotated.indexFailed = true;
+    annotated.recordId = candidate.id;
+    annotated.recordFile = file;
+    throw annotated;
+  }
 
   // #574: every op that reindexes carries the duplicate accounting out to the
   // CLI, which prints it. `save` included — it is the verb most likely to be
@@ -228,6 +266,28 @@ export async function search(
  * The self-check now has something to say (#574): `duplicates` travels out to
  * cli.mjs, which prints it. A `share` that silently indexes 139 fewer lines
  * than the store holds is not a self-check.
+ *
+ * SIDE EFFECT ON A REPO WITH NO RECORD STORE (issue #634). Measured:
+ *
+ *   before: <repo>/                       (nothing)
+ *   after:  <repo>/.memory/index.jsonl    (empty)
+ *
+ * `rebuildIndex` creates `.memory/` and writes an empty index rather than doing
+ * nothing, so this verb — a no-op on such a repo before #598's zero-candidate
+ * self-check — now creates state. DOCUMENTED rather than gated, deliberately:
+ *
+ *   - #598's intent is that a share which READ the store leaves a canonical
+ *     index behind, and an empty store is still a store that was read.
+ *   - the ambiguity this could create — "zero records" vs "no store at all" —
+ *     is already answered where it could mislead: `computeMemoryCoverage`
+ *     resolves it from `existsSync(records/)`, never from the index, and
+ *     reports `available: false` for the second case.
+ *   - gating on `records/` existing would change this verb's contract to fix a
+ *     misreading that nothing currently makes.
+ *
+ * If a consumer ever starts inferring "this repo has no memory" from an ABSENT
+ * index rather than an absent `records/`, that inference is the defect — but
+ * this note is here so it cannot be a surprise.
  */
 export async function share({ root = repoRoot } = {}, { _rebuildIndex = rebuildIndex } = {}) {
   const recordsDir = join(root, ".memory", "records");

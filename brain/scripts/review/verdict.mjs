@@ -146,6 +146,7 @@ export function buildVerdict({
   headSha,
   conclusion,
   protocol = 'brain-review/1',
+  controls = [],
   priorRevCount = 0,
   findings = [],
   gates = {},
@@ -224,6 +225,7 @@ export function buildVerdict({
 
   return {
     protocol,
+    controls,
     verdict: finalVerdict,
     head_sha: headSha,
     rev: priorRevCount + 1,
@@ -271,6 +273,22 @@ export function renderVerdict(v) {
       // gate itself and can never reach `follow_ups[]`, so emitting it there
       // would be render code no input can reach.
       if (f.schema_invalid) lines.push(`    schema_invalid: ${yamlScalar(f.schema_invalid)}`);
+      // #552, applying #483 ruling point 3 to the marker it missed: a marker only
+      // the code can see does not exist. Measured before this landed — a reasoned
+      // blocker the refuter had CORROBORATED and one no refuter ever saw rendered
+      // BYTE-IDENTICALLY, because `refuter_outcome` was set on the finding and
+      // never emitted. The severity downgrade on `refuted` was visible; the reason
+      // for it was not, which is the same defect one field over.
+      //
+      // Emitted in BOTH loops, unlike `schema_invalid` above, and that asymmetry is
+      // measured rather than assumed: `classifyAgainstBase` runs BEFORE the refuter
+      // and only sets `causal_disposition`, so a finding can be an inferential
+      // blocker, be reclassified `pre-existing`, be refuted, and then be routed to
+      // `follow_ups[]` by buildVerdict. Rendering it in one loop only would drop the
+      // marker exactly where the finding was weakest.
+      if (f.refuter_outcome) lines.push(`    refuter_outcome: ${yamlScalar(f.refuter_outcome)}`);
+      if (f.refuted) lines.push(`    refuted: ${yamlScalar(f.refuted)}`);
+      if (f.refuter_rationale) lines.push(`    refuter_rationale: ${yamlScalar(f.refuter_rationale)}`);
       // The inline-comment anchor (issue #405, REQ-405-2). BOTH optional, and
       // emitted only when the pair is USABLE — see `hasUsableAnchor`. Not "when
       // present": a finding carrying `line: 0` or `line: 'abc'` has them and gets
@@ -294,6 +312,11 @@ export function renderVerdict(v) {
       if (f.cites) lines.push(`    cites: ${yamlScalar(f.cites)}`);
       if (f.evidence_class) lines.push(`    evidence_class: ${yamlScalar(f.evidence_class)}`);
       if (f.causal_disposition) lines.push(`    causal_disposition: ${yamlScalar(f.causal_disposition)}`);
+      // #552 — same marker, same reason. See the findings loop above for why this
+      // one is NOT the `schema_invalid` case: a refuted finding CAN reach here.
+      if (f.refuter_outcome) lines.push(`    refuter_outcome: ${yamlScalar(f.refuter_outcome)}`);
+      if (f.refuted) lines.push(`    refuted: ${yamlScalar(f.refuted)}`);
+      if (f.refuter_rationale) lines.push(`    refuter_rationale: ${yamlScalar(f.refuter_rationale)}`);
       // The inline-comment anchor (issue #405, REQ-405-2). BOTH optional, and
       // emitted only when the pair is USABLE — see `hasUsableAnchor`. Not "when
       // present": a finding carrying `line: 0` or `line: 'abc'` has them and gets
@@ -309,6 +332,18 @@ export function renderVerdict(v) {
   }
 
   lines.push(`conditions: [${(v.conditions ?? []).map(yamlScalar).join(', ')}]`);
+  // #683 — WHICH CLASSES OF CONTROL RAN, always emitted, `[]` included.
+  //
+  // Never omitted when empty: an absent key is the silence this field exists to
+  // break, and `controls: []` reads as "nothing declared that it ran" — loud,
+  // and true of a verdict built without a declaration.
+  //
+  // JSON-encoded rather than through `yamlScalar`, and that is not cosmetic:
+  // `yamlScalar('deterministic')` renders it BARE, and a bare word is not JSON,
+  // so `parseEntryList`'s inline branch would answer UNREADABLE and the field
+  // could not round-trip. Measured, not assumed — the same shape `pin` and
+  // `sequencing` already use for the same reason.
+  lines.push(`controls: [${(v.controls ?? []).map((c) => JSON.stringify(c)).join(', ')}]`);
   if (v.pin) lines.push(`pin: ${yamlScalar(JSON.stringify(v.pin))}`);
   if (v.sequencing) lines.push(`sequencing: ${yamlScalar(JSON.stringify(v.sequencing))}`);
   lines.push(`escalate: ${v.escalate ?? 'null'}`, '```');

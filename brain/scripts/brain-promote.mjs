@@ -55,6 +55,7 @@ import {
   parseAmendmentDraft,
   planAmendment,
 } from './lib/amendment-draft.mjs';
+import { checkShippedContent } from './lib/promote-guards.mjs';
 
 // ── Frozen contract ──────────────────────────────────────────────────────────
 
@@ -470,6 +471,19 @@ export async function runPromote({
     return done(1);
   }
 
+  // ── Content guards — the same slot, one step further in (#675, #674) ───────
+  // checkWritePreconditions asks whether the verb may write these paths. This
+  // asks whether what it would write into them is well formed — a question the
+  // verb did not ask at all, and answered wrong twice on one promotion:
+  // a signed ADR with two `**Status**:` lines, and a shipped file naming a host
+  // no consumer can resolve. Read-only, before the plan, before the typed word,
+  // so a refusal costs the human nothing and leaves nothing staged.
+  const content = checkShippedContent({ writes: planned.writes });
+  if (!content.ok) {
+    for (const line of content.lines) say(line);
+    return done(1);
+  }
+
   // ── Step 1: the human reads what they are signing ─────────────────────────
   say('');
   say(`─── DRAFT: ${draftPath} ─────────────────────────────────────────────`);
@@ -478,6 +492,9 @@ export async function runPromote({
 
   // ── Step 2: the exact plan ────────────────────────────────────────────────
   say(planned.planText.replace(/\n$/, ''));
+  // Reported, never inferred from silence: which questions were asked about the
+  // bytes, and — when the answer is none — that none were (#674 req 5).
+  say(content.summary.replace(/\n$/, ''));
   if (guard.dirty.length > 0) {
     say('  ⚠ these files ALREADY differ from HEAD, and staging takes the whole file —');
     say('    the change below is not all that will be in the commit:');

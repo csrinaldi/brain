@@ -1932,13 +1932,26 @@ export function highestTag(lsRemoteStdout) {
 }
 
 /**
- * Reads the installed brain version. In a consumer, that's the version field
- * of node_modules/brain/package.json. In the brain repo itself (self-host),
- * it's the repo's own package.json. Returns null if neither is found.
+ * Reads the installed brain version. In a consumer, that is the `version` of
+ * the installed package's manifest; in the brain repo itself (self-host), the
+ * repo's own `package.json`. Returns null if neither is found.
+ *
+ * The name is matched against `PACKAGE_NAME` **and** the pre-rename `brain`
+ * (issue #627). It was a bare `=== 'brain'` literal, which the scope broke in
+ * both directions at once — measured on `main` @ `982f544`: null for a consumer
+ * with `@logikas/brain` installed, and null for brain's own repo. `day:start`
+ * step 4 reads this first, so the whole version check was already inert,
+ * reporting "could not determine installed version" rather than failing.
+ *
+ * The legacy name stays deliberately: a consumer who has not upgraded across
+ * the rename still carries `"name": "brain"` on disk, and telling THEM a new
+ * version exists is the entire point of the check.
+ *
  * @param {string} repoRoot
  * @returns {string|null}
  */
 export function readInstalledVersion(repoRoot) {
+  const names = new Set([PACKAGE_NAME, LEGACY_PACKAGE_DIR]);
   const candidates = [
     installedPackageRoot(repoRoot, 'package.json'),
     join(repoRoot, 'package.json'),
@@ -1946,7 +1959,7 @@ export function readInstalledVersion(repoRoot) {
   for (const path of candidates) {
     try {
       const pkg = JSON.parse(readFileSync(path, 'utf8'));
-      if (pkg.name === 'brain' && pkg.version) return pkg.version;
+      if (names.has(pkg.name) && pkg.version) return pkg.version;
     } catch {
       // try next candidate
     }
