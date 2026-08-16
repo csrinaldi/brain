@@ -66,14 +66,25 @@ lost.
   now yields those entries (not `null`/absent)
 - AND the test's comment still references `#452` and `#478-F2`
 
-### Requirement: `brain-decision/1` governance admission is unchanged (both directions)
+### Requirement: `brain-decision/1` governance admission never WIDENS, and narrows in exactly one named case
 
-The repair to `scalar` MUST NOT change whether any `brain-decision/1` block
-is admissible under `actor-check.mjs`'s `lite` path (ADR-0026 Amendment 2,
-#473). A test MUST pin, for each of the six governance keys
-(`protocol`, `decision`, `head_sha`, `actor`, `at`, `in_reply_to`), that a
-whitespace-only value produces the identical admission/refusal outcome
-before and after the repair.
+The repair to `scalar` MUST NOT make any `brain-decision/1` block admissible
+under `actor-check.mjs`'s `lite` path (ADR-0026 Amendment 2, #473) that was
+not admissible before. That direction is absolute: a block that starts being
+admissible is a forged approval.
+
+The other direction is **not** universal, and the carve-out is named here
+rather than left in design prose. An **NBSP-led value** (`protocol:
+<U+00A0>brain-decision/1`) WAS admissible before the repair — JS `.trim()`
+strips U+00A0 while `\S` excludes it — and is silent after. That is a
+narrowing, it is accepted, and it is the safe direction: a block that stops
+being admissible costs a re-sign. It MUST be pinned by a test at the
+governance layer, not only at `scalar`'s.
+
+For the whitespace-only class, admission is unchanged in both directions. A
+test MUST pin, for each of the six governance keys (`protocol`, `decision`,
+`head_sha`, `actor`, `at`, `in_reply_to`), that a whitespace-only value
+produces the identical admission/refusal outcome before and after the repair.
 
 #### Scenario: gating keys stay refused when whitespace-only
 

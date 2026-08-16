@@ -110,7 +110,15 @@ of the value-side contract, so the omission is deliberate on the record rather t
 | # | Axis | Mutant | Must go red in |
 |---|---|---|---|
 | 1 | trailing space vs none | `(\S.*)` → `(.+)` (full revert) | `parse-verdict.test.mjs` F2 pin **and** `yaml-block.test.mjs` boundary rows **and** `checkpoint-block.test.mjs` **and** `epic-map.test.mjs` — 4 files, or coverage is thinner than it looks |
-| 2 | leading exotic whitespace | `(\S.*)` → `(.*)` | only the NBSP row in `yaml-block.test.mjs` (this is the D1 divergence; without that row `(.*)`+trim is a surviving mutant) |
+| 2 | leading exotic whitespace | `(\S.*)` → `(.*)` | **7 rows in `yaml-block.test.mjs`** — bare-key, single trailing space, tab, mixed whitespace, NBSP, CRLF and the `/m`-leak row |
+
+> **Corrected after implementation, by the verify pass.** This row originally read
+> *"only the NBSP row … without that row `(.*)`+trim is a surviving mutant"*. That was
+> measured wrong: six other rows kill this mutant independently, so it was never a
+> surviving mutant and the NBSP row is not the sole detector. The coverage is better than
+> the design credited, but the CAUSAL STORY was false — and a design that explains why a
+> suite is safe with a wrong reason teaches the next editor to protect the wrong row. Kept
+> visible rather than silently rewritten, because the correction is the useful part.
 | 3 | prefix class crosses lines | `[ \t]*` → `\s*` | the F2 pin and the `findings:` + entries control (inline branch would swallow `- id:`) |
 | 4 | prefix class exists | drop `[ \t]*` | virtually every existing test (`key: value`) — the cheap kill, keep it as the sanity axis |
 | 5 | trailing trim | remove `.trim()` | a `head_sha: <sha>  ` row (`HEAD_SHA_RE` fails) — **new row required**, otherwise a live mutant |
