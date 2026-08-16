@@ -3,9 +3,6 @@
 **Status**: Accepted
 **Date**: 2026-08-11 — Cristian Rinaldi
 
-**Status**: Proposed
-**Date**: 2026-08-11 — draft for Cristian Rinaldi
-
 ## Context
 
 `brain:epic:map` (#459, slice 1) derives an execution graph from issue bodies: a declared
