@@ -470,6 +470,7 @@
 {"id":"rec-3c8cd16387365dfa","ts":"2026-08-14T01:14:59Z","actor":"chore/memory-linea-e-capture","type":"session_summary","project":"brain","issue":123,"file":"2026-08-rec-3c8cd16387365dfa.jsonl"}
 {"id":"rec-3cab4c0712ebb9a6","ts":"2026-07-13T00:21:16Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-3cab4c0712ebb9a6.jsonl"}
 {"id":"rec-3cac76eccce2d1de","ts":"2026-06-27T22:18:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-3cac76eccce2d1de.jsonl"}
+{"id":"rec-3cb44050a41a9ae0","ts":"2026-08-16T14:06:19Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-3cb44050a41a9ae0.jsonl"}
 {"id":"rec-3cbd8673faa1017b","ts":"2026-07-25T00:48:27Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-3cbd8673faa1017b.jsonl"}
 {"id":"rec-3cf4a161237c3dc2","ts":"2026-07-13T00:21:42Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-3cf4a161237c3dc2.jsonl"}
 {"id":"rec-3cf614ace064d679","ts":"2026-06-27T16:50:48Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-3cf614ace064d679.jsonl"}
@@ -575,6 +576,7 @@
 {"id":"rec-48b95460c5ea81f5","ts":"2026-07-29T14:28:23Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-48b95460c5ea81f5.jsonl"}
 {"id":"rec-48d0b74d337da255","ts":"2026-07-13T00:21:39Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-48d0b74d337da255.jsonl"}
 {"id":"rec-48f0b4763c6e687a","ts":"2026-07-25T00:48:20Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-48f0b4763c6e687a.jsonl"}
+{"id":"rec-48fa9bf3f44c8d8a","ts":"2026-08-16T15:51:00Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-08-rec-48fa9bf3f44c8d8a.jsonl"}
 {"id":"rec-48fdac81fa39c673","ts":"2026-07-25T21:51:27Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-48fdac81fa39c673.jsonl"}
 {"id":"rec-49196671fca14c3b","ts":"2026-07-10T00:10:31Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-49196671fca14c3b.jsonl"}
 {"id":"rec-492669f7138f1d59","ts":"2026-07-11T12:33:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-492669f7138f1d59.jsonl"}
@@ -1371,6 +1373,7 @@
 {"id":"rec-a4e42cc99a3096a3","ts":"2026-07-25T21:51:22Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-a4e42cc99a3096a3.jsonl"}
 {"id":"rec-a53b6a41e70ae7bc","ts":"2026-07-11T12:33:16Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-a53b6a41e70ae7bc.jsonl"}
 {"id":"rec-a58dc5a6e9d14b18","ts":"2026-08-16T14:59:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-a58dc5a6e9d14b18.jsonl"}
+{"id":"rec-a5d4abcd947cc9bd","ts":"2026-08-16T14:19:19Z","actor":"fix/issue-676-adr-0029-carries-675s-corruption-too-sig","type":"decision","project":"brain","issue":676,"file":"2026-08-rec-a5d4abcd947cc9bd.jsonl"}
 {"id":"rec-a5e7f3df0240dd91","ts":"2026-07-25T00:48:30Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-a5e7f3df0240dd91.jsonl"}
 {"id":"rec-a5fd551eecb70e2c","ts":"2026-07-13T00:22:12Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-a5fd551eecb70e2c.jsonl"}
 {"id":"rec-a6089a36262a0575","ts":"2026-07-11T12:33:17Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-a6089a36262a0575.jsonl"}
