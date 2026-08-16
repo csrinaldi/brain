@@ -23,6 +23,7 @@ import {
   runActorCheck,
   compareTimestamps,
   evaluateSignedDecision,
+  describeUnevaluatedSignedEvidence,
   LITE_SIGNED_EVIDENCE_SOURCES,
   resolveHeadSha,
   main,
@@ -1698,6 +1699,162 @@ test('evaluateActor: lite — a non-admissible decision block does NOT turn an o
   });
   assert.equal(result.level, 'fail');
   assert.match(result.reason, new RegExp(OTHER_SHA));
+});
+
+// ── issue #673 — the deny branch STATES ITS SCOPE ───────────────────────────
+//
+// The verdict is correct and none of these tests argue with it. What they pin
+// is that the refusal can tell "your signed decision was read and is not
+// sufficient" apart from "your signed decision was never read at all". It is
+// always the second, and before #673 the deny branch returned before
+// `signedNotes` existed, so it could not say so even in principle.
+//
+// The axes varied, because a note that fires unconditionally would satisfy the
+// positive test alone and be a worse defect than the one it replaces:
+//   STATE  — admissible block · non-admissible block · no block at all
+//   TIER   — lite (reads signatures) vs standard/regulated (never does)
+//   CALLER — `decisions` threaded vs a legacy caller that omits it
+//   VERDICT— every case above must still be `fail`
+
+// The measured PR #665 shape: the maintainer signs as themself, the label lands
+// from the review identity.
+const DENIED_LABEL_EVENT = [{ actor: { login: 'csrinaldibot' }, at: '2026-08-15T14:50:00Z' }];
+
+test('#673: deny + an ADMISSIBLE signed block — the refusal says the signature was NOT EVALUATED, and names the remedy', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: DENIED_LABEL_EVENT,
+    denyActors: ['csrinaldibot'],
+    tier: 'lite',
+    headSha: HEAD_SHA,
+    decisions: [decisionReview({ head_sha: HEAD_SHA, author: 'csrinaldi', actor: 'csrinaldi' })],
+  });
+
+  assert.equal(result.level, 'fail', 'the deny is correct and #673 changes nothing about it');
+  assert.match(result.reason, /governance\.reviewActors/, 'the original refusal survives intact');
+  assert.match(result.reason, /NOT evaluated/, 'it must say the signature went unread');
+  assert.match(result.reason, /#358 Q5/, 'and why: the deny-set precedes the tier evidence forms');
+  assert.match(result.reason, /Re-apply the label as a human/, 'the remedy that actually works (requirement 3)');
+  assert.doesNotMatch(result.reason, /not sufficient/i,
+    'requirement 2: "not evaluated" and "not sufficient" are the two states this ticket exists to separate');
+});
+
+test('#673: deny + NO signed block — the refusal must NOT imply a signature was ignored (negative control)', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: DENIED_LABEL_EVENT,
+    denyActors: ['csrinaldibot'],
+    tier: 'lite',
+    headSha: HEAD_SHA,
+    decisions: [],
+  });
+
+  assert.equal(result.level, 'fail');
+  // Requirement 4. Without this the whole change could be an unconditional
+  // string append — which passes the test above and is the same defect pointed
+  // the other way.
+  assert.doesNotMatch(result.reason, /brain-decision/i, 'no block exists; claiming one was skipped is a fresh lie');
+  assert.doesNotMatch(result.reason, /Re-apply the label as a human/);
+});
+
+test('#673: deny + a NON-ADMISSIBLE signed block — says present-but-not-admissible, never promises it will be read', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: DENIED_LABEL_EVENT,
+    denyActors: ['csrinaldibot'],
+    tier: 'lite',
+    headSha: HEAD_SHA,
+    // signed against a stale head — the block exists and is addressed to this
+    // reader, but re-labeling as a human would admit nothing.
+    decisions: [decisionReview({ head_sha: OTHER_SHA, author: 'csrinaldi', actor: 'csrinaldi' })],
+  });
+
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /NOT admissible as it stands/);
+  assert.match(result.reason, /re-sign the current head/, 'it carries the source\'s own diagnosis, not a re-derived one');
+  assert.doesNotMatch(result.reason, /this signature will be read/,
+    'promising admission on a broken block sends the operator back around the same loop');
+});
+
+test('#673: deny at standard/regulated — silent about signatures, because no signature is evidence there', () => {
+  for (const tier of ['standard', 'regulated']) {
+    const result = evaluateActor({
+      author: 'alice',
+      labeledEvents: DENIED_LABEL_EVENT,
+      denyActors: ['csrinaldibot'],
+      tier,
+      headSha: HEAD_SHA,
+      decisions: [decisionReview({ head_sha: HEAD_SHA, author: 'csrinaldi', actor: 'csrinaldi' })],
+    });
+
+    assert.equal(result.level, 'fail', `${tier}: verdict unchanged`);
+    // "Re-apply as a human and this will be read" is FALSE at these tiers —
+    // `signedEvidenceSources` is never consulted outside `lite`. A confident
+    // answer about the wrong subject is the #669 shape, not a fix for #673.
+    assert.doesNotMatch(result.reason, /brain-decision/i, `${tier}: must not describe evidence this tier never reads`);
+  }
+});
+
+test('#673: a legacy caller that never threads `decisions` gets a byte-identical refusal', () => {
+  const base = {
+    author: 'alice',
+    labeledEvents: DENIED_LABEL_EVENT,
+    denyActors: ['csrinaldibot'],
+    tier: 'lite',
+  };
+  const legacy = evaluateActor(base); // `decisions` omitted entirely
+  const expected =
+    'the approved label was applied by "csrinaldibot", which is registered in governance.reviewActors ' +
+    '— a review identity may never apply the approved label (reviewer-protocol.md §9; that label is human-only).';
+
+  assert.equal(legacy.level, 'fail');
+  assert.equal(legacy.reason, expected, 'silence for a caller that never threaded the field (PR #503 finding 3)');
+});
+
+test('#673: the scope note reads through the INJECTED sources list, never a hardcoded call', () => {
+  const calls = [];
+  const admitting = () => { calls.push('injected'); return { admitted: true, reason: 'injected source admits' }; };
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: DENIED_LABEL_EVENT,
+    denyActors: ['csrinaldibot'],
+    tier: 'lite',
+    decisions: [],
+    signedEvidenceSources: [admitting],
+  });
+
+  // Same (b)-swap boundary the `lite` branch honors (design §C2). A source
+  // added tomorrow is described by the deny branch without a second edit.
+  assert.deepEqual(calls, ['injected'], 'the deny branch must consult the injected list');
+  assert.equal(result.level, 'fail', 'an ADMITTING source still never rescues a denied identity');
+  assert.match(result.reason, /NOT evaluated/);
+});
+
+test('#673: describeUnevaluatedSignedEvidence is silent on every non-lite tier and on empty evidence', () => {
+  const admissible = [decisionReview({ head_sha: HEAD_SHA, author: 'csrinaldi', actor: 'csrinaldi' })];
+
+  assert.equal(describeUnevaluatedSignedEvidence({ tier: 'standard', decisions: admissible, headSha: HEAD_SHA }), '');
+  assert.equal(describeUnevaluatedSignedEvidence({ tier: 'regulated', decisions: admissible, headSha: HEAD_SHA }), '');
+  assert.equal(describeUnevaluatedSignedEvidence({ tier: 'lite', decisions: [], headSha: HEAD_SHA }), '');
+  assert.equal(describeUnevaluatedSignedEvidence({ tier: 'lite', headSha: HEAD_SHA }), '', 'decisions undefined → silent');
+  assert.notEqual(describeUnevaluatedSignedEvidence({ tier: 'lite', decisions: admissible, headSha: HEAD_SHA }), '',
+    'positive control — the silence above is a decision, not a broken probe');
+});
+
+test('#673: the override:* refusal note still lands, and lands last', () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: DENIED_LABEL_EVENT,
+    denyActors: ['csrinaldibot'],
+    tier: 'lite',
+    headSha: HEAD_SHA,
+    decisions: [decisionReview({ head_sha: HEAD_SHA, author: 'csrinaldi', actor: 'csrinaldi' })],
+    overrideRefused: true,
+  });
+
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /NOT evaluated/);
+  assert.match(result.reason, /REQ-TIER-6\.\)$/, 'withRefusalNote appends after the scope note, not into the middle of it');
 });
 
 // ── design §C5 property 1 — the label stays a required precondition ─────────
