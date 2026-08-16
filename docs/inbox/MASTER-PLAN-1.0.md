@@ -69,7 +69,7 @@ Full plan: [`brain-v2-epic-plan.md`](./brain-v2-epic-plan.md). Epic tracking iss
 | M2 | Decoupling reaches the user | #123, #315 (hook dedup), #316 (.env unify) |
 | M3 | Reviewer = real code-review (the moat) | #284, **#317** (CRITICAL), inline per-line comments |
 | M4 | Distribution + self-update to product bar | npx init, registry, adopt S2, upgrade-safety (rollback/clobber/lockout) |
-| M5 | Role-as-port (C) | #312 + ADR-0023 (draft in `brain-drafts/`) |
+| M5 | Role-as-port (C) | #312 — owns the decision record; `0023` reserved, unpromoted draft at `brain-drafts/adr-0023-sdd-role-port.md` |
 | M6 | Provider parity | #130, #124, #131, #129 |
 | M7 | Backlog & scope | #268, #280, #263, #256, #247, #117 (close/defer), test brain-to-engram |
 | M8 | Per-stage SDD engine routing | **no ticket yet** — amends/supersedes ADR-0019; depends on M5 |
@@ -90,7 +90,8 @@ measurement window.
 
 1. **Role-as-port then reference roles (C→B).** brain owns a role *contract* (a port), gentle-ai +
    plain implement it with a parity test; a first-party reference role set (B) is a later third
-   implementer, not a replacement. #312 · ADR-0023 (draft).
+   implementer, not a replacement. #312 · number `0023` reserved for it; the only artifact today is
+   the unpromoted draft `brain-drafts/adr-0023-sdd-role-port.md`.
 2. **Per-stage engine routing (M8).** A configurable `stage → engine` map (e.g. `sdd-new →
    gentle-ai`, `sdd-verify → brain-sdd`). This is the alternative ADR-0019 rejected → needs a new
    ADR consciously superseding it. Artifact contract stays fixed.
