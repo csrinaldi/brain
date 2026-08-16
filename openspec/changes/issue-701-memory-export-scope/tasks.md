@@ -59,15 +59,15 @@ Chain strategy: feature-branch-chain
 
 ## Phase 3: Staged-record gate (PR 3, base = PR 2)
 
-- [ ] 3.1 `staged-records-check.mjs`: pure `evaluateStagedRecords({staged, upstream})` → `{level, offending}`.
-- [ ] 3.2 I/O wrapper: `git diff --cached --raw -z -- .memory/records`; reuse `upstreamRecordEntries`'s `byPath` oids (no second git call).
-- [ ] 3.3 Rule: `dstOid === upstream.byPath.get(path)` → refuse; zero-oid deletion and divergent bytes → allow; `ok:false` → PASS + stderr notice.
-- [ ] 3.4 **Operator message task**: on refusal, print the lossless remedy verbatim (`git restore --staged <paths>`, `rm` if untracked) — loud, mechanical, never silent.
-- [ ] 3.5 Wire into `brain/scripts/hooks/pre-commit`, between the main/master block and `check-refs.mjs`.
-- [ ] 3.6 i18n keys for gate messages (`en.mjs`, `es.mjs`).
-- [ ] 3.7 Test `evaluateStagedRecords`: identical→refuse; divergent/new/deleted/empty-upstream→allow.
-- [ ] 3.8 Mutation M6 (gate compares path, not OID) — must redden "divergent content allowed" case.
-- [ ] 3.9 Mutation M7 (`ok:false` branch fails) — must redden lookup-unavailable-must-PASS case.
+- [x] 3.1 `staged-records-check.mjs`: pure `evaluateStagedRecords({staged, upstream})` → `{level, offending}`.
+- [x] 3.2 I/O wrapper: `git diff --cached --raw -z -- .memory/records`; reuse `upstreamRecordEntries`'s `byPath` oids (no second git call).
+- [x] 3.3 Rule: `dstOid === upstream.byPath.get(path)` → refuse; zero-oid deletion and divergent bytes → allow; `ok:false` → PASS + stderr notice.
+- [x] 3.4 **Operator message task**: on refusal, print the lossless remedy verbatim (`git restore --staged <paths>`, `rm` if untracked) — loud, mechanical, never silent.
+- [x] 3.5 Wire into `brain/scripts/hooks/pre-commit`, between the main/master block and `check-refs.mjs`.
+- [x] 3.6 i18n keys for gate messages (`en.mjs`, `es.mjs`).
+- [x] 3.7 Test `evaluateStagedRecords`: identical→refuse; divergent/new/deleted/empty-upstream→allow.
+- [x] 3.8 Mutation M6 (gate compares path, not OID) — must redden "divergent content allowed" case. VERIFIED: redded the divergent-bytes case + the multi-path case's non-offending entries.
+- [x] 3.9 Mutation M7 (`ok:false` branch fails) — must redden lookup-unavailable-must-PASS case. VERIFIED: redded exactly that test.
 
 ## Phase 4: Docs and follow-ups
 
