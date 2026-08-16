@@ -1950,6 +1950,7 @@
 {"id":"rec-f2148a7a63abf15e","ts":"2026-07-13T00:21:43Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-f2148a7a63abf15e.jsonl"}
 {"id":"rec-f218021964de11ed","ts":"2026-06-27T18:51:16Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-f218021964de11ed.jsonl"}
 {"id":"rec-f221a7dde1702960","ts":"2026-07-10T00:10:49Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-f221a7dde1702960.jsonl"}
+{"id":"rec-f23dbf2b22bd3575","ts":"2026-08-16T00:57:56Z","actor":"claude/update-prioritization-doc-ugwv9g","type":"session_summary","project":"brain","issue":688,"file":"2026-08-rec-f23dbf2b22bd3575.jsonl"}
 {"id":"rec-f2506e9dd6292250","ts":"2026-07-25T00:46:32Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-f2506e9dd6292250.jsonl"}
 {"id":"rec-f25a38b6170bd14f","ts":"2026-07-25T21:51:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-f25a38b6170bd14f.jsonl"}
 {"id":"rec-f261e5cc12fedae8","ts":"2026-07-25T21:50:50Z","actor":"@legacy","type":"config","project":"brain","file":"2026-07-rec-f261e5cc12fedae8.jsonl"}
