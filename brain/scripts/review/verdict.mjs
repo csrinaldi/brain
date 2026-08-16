@@ -7,6 +7,7 @@ import {
   ALLOWED_EVIDENCE_CLASSES,
   ALLOWED_CAUSAL_DISPOSITIONS,
 } from './lib/schema-v2.mjs';
+import { complementControls } from './lib/controls.mjs';
 
 const YAML_SCALAR_SAFE_RE = /^[A-Za-z0-9._\-/:]+$/;
 
@@ -344,6 +345,16 @@ export function renderVerdict(v) {
   // could not round-trip. Measured, not assumed — the same shape `pin` and
   // `sequencing` already use for the same reason.
   lines.push(`controls: [${(v.controls ?? []).map((c) => JSON.stringify(c)).join(', ')}]`);
+  // #690 — the other half, and the half that closes #575 Ruling 3's word "only".
+  //
+  // The line above says what ran. On its own it needs the reader to know the
+  // vocabulary is closed, know which member is missing, and notice the absence —
+  // absence carrying the meaning, which is what this whole field exists to stop.
+  //
+  // DERIVED from the same closed list, never a second one: a hand-maintained
+  // "did not run" list drifts from CONTROL_CLASSES the first time either changes.
+  // It shrinks to [] by itself the day #682's evaluator runs.
+  lines.push(`controls_not_applied: [${complementControls(v.controls ?? []).map((c) => JSON.stringify(c)).join(', ')}]`);
   if (v.pin) lines.push(`pin: ${yamlScalar(JSON.stringify(v.pin))}`);
   if (v.sequencing) lines.push(`sequencing: ${yamlScalar(JSON.stringify(v.sequencing))}`);
   lines.push(`escalate: ${v.escalate ?? 'null'}`, '```');

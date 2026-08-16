@@ -88,6 +88,39 @@ export function unionControls(declarations = []) {
 }
 
 /**
+ * The other half of the declaration: the control classes that did NOT run.
+ *
+ * WHY A COMPLEMENT AND NOT AN INFERENCE (#690). `controls: ["deterministic"]`
+ * declares what ran. It does not declare that judgment did not — to get there a
+ * reader has to know the vocabulary is closed, know `inferential` is the other
+ * member, and NOTICE it is missing. That is absence carrying the meaning again,
+ * which is the exact thing #683 exists to stop, one notch weaker.
+ *
+ * #575 Ruling 3 says a mechanical-only review must declare it ran mechanical
+ * checks **only**, and "only" is the word a positive list alone cannot say.
+ * Because `CONTROL_CLASSES` is closed and small, the complement is finite,
+ * known, and costs one line.
+ *
+ * NOT a `conditions` entry, and that was measured rather than assumed:
+ * `conditions` is inert with respect to the conclusion (`buildVerdict` only
+ * appends to it), so putting it there would have been SAFE — but `conditions`
+ * is where a reader looks for something wrong with THIS verdict's evidence, and
+ * a constant that fires on every verdict until #682 lands turns that channel
+ * into wallpaper. A permanent entry in the alarm channel is worse than an
+ * informational field next to the thing it completes.
+ *
+ * Derived from the same list rather than declared separately: a hand-maintained
+ * "not run" list would drift from `CONTROL_CLASSES` the first time either
+ * changed, which is #683's own rule applied one field over.
+ *
+ * @param {string[]} controls  what DID run
+ * @returns {string[]}
+ */
+export function complementControls(controls = []) {
+  return CONTROL_CLASSES.filter((c) => !controls.includes(c));
+}
+
+/**
  * The anti-drift invariant: every finding's `evidence_class` must be covered by
  * the declared controls.
  *

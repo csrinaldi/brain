@@ -9,7 +9,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { CONTROL_CLASSES, NOT_A_CONTROL, unionControls, checkControlsCoverFindings } from './controls.mjs';
+import {
+  CONTROL_CLASSES, NOT_A_CONTROL, unionControls, complementControls, checkControlsCoverFindings,
+} from './controls.mjs';
 import { ALLOWED_EVIDENCE_CLASSES } from './schema-v2.mjs';
 import { PRODUCES as TRANCHE } from '../evaluators/tranche.mjs';
 import { PRODUCES as CHECKPOINT } from '../evaluators/checkpoint.mjs';
@@ -82,4 +84,41 @@ test('#683: NO findings is not a violation — that is the case the whole design
   // report no controls at all — "nothing ran" and "ran, found nothing" collapsed
   // back into one answer, on the verdicts where nobody would look.
   assert.equal(checkControlsCoverFindings(['deterministic'], []).ok, true);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #690 — the complement: closing #575 Ruling 3's word "only"
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('#690: the complement is DERIVED from the same closed list, never a second one', () => {
+  assert.deepEqual(complementControls(['deterministic']), ['inferential']);
+  assert.deepEqual(complementControls(['inferential']), ['deterministic']);
+  assert.deepEqual(complementControls([]), [...CONTROL_CLASSES]);
+});
+
+test('#690: the two halves partition the vocabulary — for every possible applied set', () => {
+  // The property, not three examples of it. A hand-maintained "did not run" list
+  // would satisfy the cases above and drift on the first added class; this cannot.
+  const subsets = [[], ['deterministic'], ['inferential'], ['deterministic', 'inferential']];
+  for (const applied of subsets) {
+    const notApplied = complementControls(applied);
+    assert.deepEqual(
+      [...applied, ...notApplied].sort(),
+      [...CONTROL_CLASSES].sort(),
+      `applied ${JSON.stringify(applied)} + not-applied ${JSON.stringify(notApplied)} must cover the vocabulary exactly`,
+    );
+    assert.equal(applied.some((c) => notApplied.includes(c)), false, 'and the halves must be disjoint');
+  }
+});
+
+test('#690: when #682 lands, the complement empties itself — no edit required', () => {
+  // The reason this is derived rather than declared: the day a judgment
+  // evaluator declares `inferential`, the "did not run" half goes to [] on its
+  // own. A hardcoded list would keep asserting a falsehood until someone
+  // remembered it, which is the stale-honesty-marker failure #683 named.
+  assert.deepEqual(complementControls(unionControls([['deterministic'], ['inferential']])), []);
+});
+
+test('#690: `insufficient` is not in either half — it is not a control at all', () => {
+  assert.equal(complementControls([]).includes('insufficient'), false);
 });
