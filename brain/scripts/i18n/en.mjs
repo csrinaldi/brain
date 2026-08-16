@@ -325,6 +325,11 @@ export default {
   // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
   'memory.share.secretFoundRecords': 'Secret detected in a candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
 
+  // ── memory/backends/engram.mjs — dualWriteRecords() upstream-base export scope (issue #701) ──
+  'memory.share.upstreamUnavailable': 'could not check the upstream base ({ref}) — {reason}. This run wrote every candidate (the pre-#701 behaviour); nothing was scoped.',
+  'memory.share.upstreamUnnamed': '{count} file(s) under .memory/records/ at the upstream base do not match the per-record filename shape and are invisible to the export-scope check. Run `npm run memory:split-records` to fix.',
+  'memory.share.dedupedUpstream': '{count} record(s) already present on the upstream base ({ref}) were not re-exported.',
+
   // ── memory/backends/engram.mjs — importMemory() records-only pull (D2/C4, issue #229) ──
   'memory.import.empty':    'ℹ no records found in .memory/records/ — nothing to import.',
   'memory.import.progress': '  ✓ {written}/{total} records imported',

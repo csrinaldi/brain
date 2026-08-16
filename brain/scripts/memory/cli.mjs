@@ -592,6 +592,35 @@ try {
     console.log(`memory/cli: ${await t("memory.share.unprovenanced", { count: result.unprovenanced })}`);
   }
 
+  // issue #701 — the upstream-base export scope. `upstreamScope` is absent on
+  // the zero-candidate early return (nothing was measured — see
+  // dualWriteRecords()'s own docs), so every branch below is keyed on its
+  // PRESENCE, mirroring `indexCount`'s "undefined means never measured" reading
+  // just above.
+  //
+  // `applied: false` is printed to STDERR for the same reason #641's backend
+  // substitution notice is: the automated callers (`pre-push`) discard stdout,
+  // and "this run wrote every candidate — the pre-#701 behaviour" is exactly
+  // the kind of silent-degradation notice that must survive that discard.
+  if (op === "share" && result?.upstreamScope) {
+    const scope = result.upstreamScope;
+    if (scope.applied === false) {
+      console.error(
+        `memory/cli: ${await t("memory.share.upstreamUnavailable", { ref: scope.ref, reason: scope.reason })}`,
+      );
+    } else if (scope.unnamed > 0) {
+      console.error(`memory/cli: ${await t("memory.share.upstreamUnnamed", { count: scope.unnamed })}`);
+    }
+  }
+  // `dedupedUpstream` is the success number (records already durable on the
+  // trunk, correctly not re-exported) — printed to stdout like progress, never
+  // to stderr like a warning.
+  if (op === "share" && typeof result?.dedupedUpstream === "number" && result.dedupedUpstream > 0) {
+    console.log(
+      `memory/cli: ${await t("memory.share.dedupedUpstream", { count: result.dedupedUpstream, ref: result.upstreamScope?.ref })}`,
+    );
+  }
+
   // #574 — the duplicate accounting, for every op that produced one (`share`,
   // `pull`, `setup`, `import`, and anything added later that reads the store).
   // Keyed on the result carrying it, not on a list of verbs: the failure this

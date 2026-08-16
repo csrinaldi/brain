@@ -291,6 +291,11 @@ export default {
   // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
   'memory.share.secretFoundRecords': 'Se detectó un secreto en un registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
 
+  // ── memory/backends/engram.mjs — dualWriteRecords() alcance del export contra la base upstream (issue #701) ──
+  'memory.share.upstreamUnavailable': 'no se pudo consultar la base upstream ({ref}) — {reason}. Esta corrida escribió todos los candidatos (comportamiento pre-#701); no se acotó nada.',
+  'memory.share.upstreamUnnamed': '{count} archivo(s) bajo .memory/records/ en la base upstream no coinciden con el formato de nombre por registro y son invisibles para el chequeo de alcance del export. Corré `npm run memory:split-records` para arreglarlo.',
+  'memory.share.dedupedUpstream': '{count} registro(s) ya presentes en la base upstream ({ref}) no se re-exportaron.',
+
   // ── memory/backends/engram.mjs — importMemory() pull solo-records (D2/C4, issue #229) ──
   'memory.import.empty':    'ℹ no se encontraron registros en .memory/records/ — nada para importar.',
   'memory.import.progress': '  ✓ {written}/{total} registros importados',

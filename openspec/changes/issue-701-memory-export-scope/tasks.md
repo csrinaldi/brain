@@ -39,23 +39,23 @@ Chain strategy: feature-branch-chain
 
 ## Phase 2: Dedup wiring (PR 2, base = PR 1)
 
-- [ ] 2.1 `engram.mjs#dualWriteRecords`: add `_upstreamRecordIds = upstreamRecordEntries`, call after secret scan / before dedup loop.
-- [ ] 2.2 Widen decline: `existingIds.has(id) || seenInBatch.has(id) || upstream.byId.has(id)`.
-- [ ] 2.3 Add `accounting.dedupedUpstream` (own bucket) + `accounting.upstreamScope = {applied, ref, stated, reason, entries, unnamed}`.
-- [ ] 2.4 `engram.mjs#share`: add `_upstreamRecordIds` opt, thread into its `dualWriteRecords(...)` call.
-- [ ] 2.5 `cli.mjs`: `applied:false`→stderr (ref+reason); `unnamed.length>0`→stderr (`memory:split-records`); `dedupedUpstream>0`→stdout.
-- [ ] 2.6 i18n keys under `memory.share.*` (`en.mjs`, `es.mjs`) for the three messages.
-- [ ] 2.7 **Deliberate** test: inject `_upstreamRecordIds: () => ({ok:false, reason:'no remote'})`; assert every candidate written AND `upstreamScope.applied===false` with non-empty reason (not the incidental `/fake/root` pass).
-- [ ] 2.8 Test spec scenarios: upstream-present deduped, own-record dedup unchanged, genuinely-new (`issue=545`) still written.
-- [ ] 2.9 Test `share`: seam-injected, asserts `_upstreamRecordIds` is actually threaded through.
-- [ ] 2.10 Integration test (real git, temp repo): seed trunk record, branch, `share`, assert nothing untracked; `git merge`, assert record readable (Req. 5).
-- [ ] 2.11 Mutation M1 (predicate inverted) — must redden new-record + re-export cases.
-- [ ] 2.12 Mutation M2a (drop `ok:false` fallback) — must redden 2.7's write-everything assertion.
-- [ ] 2.13 Mutation M2b (report `applied:true` on `ok:false`) — must redden 2.7's `applied===false` assertion only.
-- [ ] 2.14 Mutation M3 (dedup narrowed to own records) — must redden every upstream-decline case.
-- [ ] 2.15 **Mutation M4** (decline also unlinks local file) — must redden 2.10's reachability assertion; proves "stopped writing" ≠ "lost".
-- [ ] 2.16 Mutation M5 (any `*.jsonl` accepted, id from suffix strip) — must redden the month-file case (1.4).
-- [ ] 2.17 Mutation M8 (negative control: revert the filter) — `store.duplicates.test.mjs` + `resolve-index.integration.test.mjs` must stay green (0 red), proving they're orthogonal.
+- [x] 2.1 `engram.mjs#dualWriteRecords`: add `_upstreamRecordIds = upstreamRecordEntries`, call after secret scan / before dedup loop.
+- [x] 2.2 Widen decline: `existingIds.has(id) || seenInBatch.has(id) || upstream.byId.has(id)`.
+- [x] 2.3 Add `accounting.dedupedUpstream` (own bucket) + `accounting.upstreamScope = {applied, ref, stated, reason, entries, unnamed}`.
+- [x] 2.4 `engram.mjs#share`: add `_upstreamRecordIds` opt, thread into its `dualWriteRecords(...)` call.
+- [x] 2.5 `cli.mjs`: `applied:false`→stderr (ref+reason); `unnamed.length>0`→stderr (`memory:split-records`); `dedupedUpstream>0`→stdout.
+- [x] 2.6 i18n keys under `memory.share.*` (`en.mjs`, `es.mjs`) for the three messages.
+- [x] 2.7 **Deliberate** test: inject `_upstreamRecordIds: () => ({ok:false, reason:'no remote'})`; assert every candidate written AND `upstreamScope.applied===false` with non-empty reason (not the incidental `/fake/root` pass).
+- [x] 2.8 Test spec scenarios: upstream-present deduped, own-record dedup unchanged, genuinely-new (`issue=545`) still written.
+- [x] 2.9 Test `share`: seam-injected, asserts `_upstreamRecordIds` is actually threaded through.
+- [x] 2.10 Integration test (real git, temp repo): seed trunk record, branch, `share`, assert nothing untracked; `git merge`, assert record readable (Req. 5).
+- [x] 2.11 Mutation M1 (predicate inverted) — must redden new-record + re-export cases. VERIFIED: redded scenario 1 + scenario 3 + share-threading + integration test.
+- [x] 2.12 Mutation M2a (drop `ok:false` fallback) — must redden 2.7's write-everything assertion. VERIFIED: redded (throws on the real `{ok:false}` shape with no `byId` key).
+- [x] 2.13 Mutation M2b (report `applied:true` on `ok:false`) — must redden 2.7's `applied===false` assertion only. VERIFIED: redded exactly the `applied` assertion line; the write-everything assertions above it still passed.
+- [x] 2.14 Mutation M3 (dedup narrowed to own records) — must redden every upstream-decline case. VERIFIED: redded scenario 1 + share-threading + integration test.
+- [x] 2.15 **Mutation M4** (decline also unlinks local file) — must redden 2.10's reachability assertion; proves "stopped writing" ≠ "lost". VERIFIED: redded the post-merge second-run reachability assertion (added to the integration test permanently — it strengthens Req. 5 regardless of mutation testing).
+- [x] 2.16 Mutation M5 (any `*.jsonl` accepted, id from suffix strip) — must redden the month-file case (1.4). VERIFIED: redded 5 `parseLsTree` tests including the month-file case.
+- [x] 2.17 Mutation M8 (negative control: revert the filter) — `store.duplicates.test.mjs` + `resolve-index.integration.test.mjs` must stay green (0 red), proving they're orthogonal. VERIFIED: 22/22 pass, 0 red, with engram.mjs/cli.mjs/i18n stashed back to pre-#701.
 
 ## Phase 3: Staged-record gate (PR 3, base = PR 2)
 
