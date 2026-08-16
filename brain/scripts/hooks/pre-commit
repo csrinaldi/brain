@@ -1,9 +1,16 @@
 #!/usr/bin/env sh
-# pre-commit — block direct commits to main/master + run repo:check.
+# pre-commit — block direct commits to main/master + refuse a byte-identical
+# .memory/records/ restage + run repo:check.
 #
 # Hard checks (locally unambiguous — no false positives):
 #   1. Block direct commit to main or master (PRs only).
-#   2. repo:check — validates references and prohibited patterns.
+#   2. staged-records-check.mjs (issue #701) — refuses a staged
+#      .memory/records/ file whose blob is byte-identical to a copy already
+#      on the upstream trunk. Placed BEFORE repo:check (design.md Decision 6):
+#      it is a fast, targeted refusal on the exact accident this ticket is
+#      about, and it degrades to a silent pass (never a block) when the
+#      upstream base cannot be checked.
+#   3. repo:check — validates references and prohibited patterns.
 #
 # No-node guard: exits 0 if node is not available.
 # Installed via core.hooksPath = brain/scripts/hooks.
@@ -21,7 +28,15 @@ if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
   exit 1
 fi
 
-# ── 2. repo:check ──────────────────────────────────────────────────────────
 repo_root=$(git rev-parse --show-toplevel)
+
+# ── 2. staged-records-check ─────────────────────────────────────────────────
+node "$repo_root/brain/scripts/memory/staged-records-check.mjs"
+staged_records_status=$?
+if [ "$staged_records_status" -ne 0 ]; then
+  exit $staged_records_status
+fi
+
+# ── 3. repo:check ──────────────────────────────────────────────────────────
 node "$repo_root/brain/scripts/check-refs.mjs"
 exit $?

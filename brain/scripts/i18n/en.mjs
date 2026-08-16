@@ -330,6 +330,11 @@ export default {
   'memory.share.upstreamUnnamed': '{count} file(s) under .memory/records/ at the upstream base do not match the per-record filename shape and are invisible to the export-scope check. Run `npm run memory:split-records` to fix.',
   'memory.share.dedupedUpstream': '{count} record(s) already present on the upstream base ({ref}) were not re-exported.',
 
+  // ── memory/staged-records-check.mjs — pre-commit gate (issue #701) ───────────
+  'memory.stagedRecordsCheck.refused': 'refusing — {count} staged .memory/records/ file(s) are byte-identical to a copy already on the trunk. This adds nothing and is what re-triggers this ticket. The remedy is lossless — the bytes are already durable upstream:',
+  'memory.stagedRecordsCheck.remedy': '  git restore --staged {paths}\n  (then `rm` any of those paths that `git status` now shows as untracked — same bytes, already on the trunk)',
+  'memory.stagedRecordsCheck.unavailable': 'could not check the upstream base — {note}. Nothing was refused; this run could not ask the question.',
+
   // ── memory/backends/engram.mjs — importMemory() records-only pull (D2/C4, issue #229) ──
   'memory.import.empty':    'ℹ no records found in .memory/records/ — nothing to import.',
   'memory.import.progress': '  ✓ {written}/{total} records imported',
