@@ -93,6 +93,7 @@
 {"id":"rec-0b34bc7e0431ea8f","ts":"2026-07-25T21:50:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-0b69c0c848d1ac49","ts":"2026-07-12T22:51:24Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-0bf2a7684735e6c6","ts":"2026-07-25T21:51:18Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-0bfc768d0e531079","ts":"2026-08-15T18:21:58Z","actor":"claude/brain-memory-635-doctrine-catches-up","type":"decision","project":"brain","issue":635,"file":"2026-08.jsonl"}
 {"id":"rec-0c2f7b3192d51f94","ts":"2026-07-25T21:50:32Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-0c455065a370b100","ts":"2026-07-25T21:50:52Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-0c4f5534cd917159","ts":"2026-07-11T12:33:49Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
@@ -670,6 +671,7 @@
 {"id":"rec-54cbb916245fb627","ts":"2026-07-29T14:28:31Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-54f01ac1b35ad5d8","ts":"2026-07-25T21:51:59Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-54f1a5c45fd9a25d","ts":"2026-07-16T02:34:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-553ca047582b3aee","ts":"2026-08-14T21:51:56Z","actor":"claude/brain-memory-636-reconcile-to-zero","type":"decision","project":"brain","issue":636,"file":"2026-08.jsonl"}
 {"id":"rec-554a1b2a5fff13b5","ts":"2026-07-25T21:51:07Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-5550966f13dca72d","ts":"2026-07-13T00:21:58Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-5564446145bd0d84","ts":"2026-07-29T14:25:49Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
@@ -1008,6 +1010,7 @@
 {"id":"rec-7d038cd605b8d709","ts":"2026-07-25T21:50:45Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-7d092e8d9e673954","ts":"2026-07-11T12:33:41Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-7d2d316cfe29a6e9","ts":"2026-07-25T21:51:26Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-7d37e5ff546e8417","ts":"2026-08-15T18:11:47Z","actor":"claude/brain-memory-633-hooks-keep-stderr","type":"decision","project":"brain","issue":633,"file":"2026-08.jsonl"}
 {"id":"rec-7d51c607242fd5a2","ts":"2026-06-26T22:29:51Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-06.jsonl"}
 {"id":"rec-7d64af8820259416","ts":"2026-07-12T19:30:16Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-7da322c6e3d6f0fd","ts":"2026-07-25T21:50:46Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07.jsonl"}
@@ -1244,6 +1247,7 @@
 {"id":"rec-99871bf6d093e6a6","ts":"2026-07-25T21:50:39Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-9992a4548c4d5ebd","ts":"2026-07-13T00:21:51Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-999bf78718e856c2","ts":"2026-07-25T21:50:30Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-99ed65a49a2204e5","ts":"2026-08-14T19:47:06Z","actor":"claude/brain-memory-637-save-reports-what-it-did","type":"decision","project":"brain","issue":637,"file":"2026-08.jsonl"}
 {"id":"rec-99fdcfc11f81c6f8","ts":"2026-07-22T00:15:26Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-9a05572d017a08cc","ts":"2026-07-25T21:50:42Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-9a117b83fa64fe46","ts":"2026-07-25T21:50:18Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
@@ -1974,6 +1978,7 @@
 {"id":"rec-f5bcbdbdee8873d6","ts":"2026-07-29T14:27:27Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f5cd1fc641cc02d2","ts":"2026-07-25T21:50:10Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f5fd5332bfd263f2","ts":"2026-07-13T00:21:56Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-f63a700be2283f2e","ts":"2026-08-14T19:57:29Z","actor":"claude/brain-memory-634-readers-report-the-collapse","type":"decision","project":"brain","issue":634,"file":"2026-08.jsonl"}
 {"id":"rec-f63e5b80cc6347f8","ts":"2026-07-13T00:21:59Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f651948cdb32c033","ts":"2026-07-21T02:38:34Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f6d55db07867cb9b","ts":"2026-07-13T00:21:54Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07.jsonl"}
@@ -1983,6 +1988,7 @@
 {"id":"rec-f796172bd5f5cde2","ts":"2026-07-25T00:47:11Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f7a8ce498391bb23","ts":"2026-07-13T00:22:11Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f7b4851324ac7d77","ts":"2026-07-25T21:51:05Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
+{"id":"rec-f7f560bdaa4ad9a7","ts":"2026-08-14T18:11:48Z","actor":"claude/brain-memory-backend-i5kp8b","type":"decision","project":"brain","issue":641,"file":"2026-08.jsonl"}
 {"id":"rec-f855f5eeef85984e","ts":"2026-07-29T14:29:01Z","actor":"fix/issue-259-d2-pr3c-a10-modify-channel","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f8c0e3145803199d","ts":"2026-07-25T00:48:20Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07.jsonl"}
 {"id":"rec-f97d14936cea7b50","ts":"2026-07-13T00:21:30Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07.jsonl"}

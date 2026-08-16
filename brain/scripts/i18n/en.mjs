@@ -302,6 +302,15 @@ export default {
   'memory.resolveIndex.staged': '✓ index conflict resolved — {count} record(s) regenerated from records/ and staged. Finish the merge with `git commit`.',
   'memory.resolveIndex.failed': '✗ resolve-index failed — {message}',
 
+  // ── memory/cli.mjs — which backend actually ran (issue #641) ─────────────────
+  // Each of these is a case where the backend that ran is not the one a reader
+  // would assume. Silence is the whole defect: `MEMORY_BACKEND=plainfiles`
+  // worked all along, and because nothing ever said so, the engram-only error
+  // read as "capture is impossible here".
+  'memory.backend.substituted': 'the `{from}` binary is not installed here, so `{op}` ran on the records-only `{fallback}` backend instead — same records, same validation, no backend required (ADR-0017). MEMORY_BACKEND was not set, so no stated choice was overridden; set it to pin either backend explicitly.',
+  'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} is set explicitly, but the `{backend}` binary is not on PATH here — a stated selector is never overridden (ADR-0004), so this run will fail. Records-only capture needs no backend: `MEMORY_BACKEND={fallback} npm run memory:{op}`.',
+  'memory.backend.probeFailed': 'could not determine whether the `{backend}` binary is present — {reason}. That is the CHECK failing, not the binary being absent, so nothing was substituted and `{op}` continues on `{backend}`. If it fails, the records-only route is `MEMORY_BACKEND={fallback} npm run memory:{op}`.',
+
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.unprovenanced': '{count} observation(s) arrived with no provenance block, so they materialised as `@legacy` with no `issue` — nothing emits the block on the capture path yet (#541). Counted, not refused: refusing would reject the store that already exists.',
   'memory.share.secretFound': 'Secret detected in {file}:{line} — pattern "{pattern}" matched. Redact the secret, or add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive. Run `gunzip -c {file} | jq .` to inspect (the line number is against that pretty-printed view).',
@@ -335,6 +344,10 @@ export default {
   'memory.plainfiles.save.issueInvalid': '--issue must be an issue NUMBER; got {value}. It is stored as an integer so a record can be tied to its ticket.',
   'memory.plainfiles.save.typeRequired': '--type is required and has no safe default — it is a choice, not a fact the tool can derive. One of: {types}.',
   'memory.plainfiles.save.done':    "✓ saved {id} → {file}",
+  // #637 — the index rebuild is the ONE gate that cannot run before the append,
+  // so its failure is never a refusal: the record is already durable. Saying
+  // "save() failed" sent the operator to the single action that makes it worse.
+  'memory.plainfiles.save.indexFailed': 'the record WAS written — {id} → {file}. What failed is the INDEX rebuild, which reads the whole store, so the cause is almost certainly a record that was already broken before this run: {message}\n  Do NOT run memory:save again — the record is already on disk, and a retry mints a SECOND record with a later `ts`, hence a different id, which no deduplication will ever collapse.\n  Repair the store, then rebuild the index with `npm run memory:reindex`.',
   'memory.plainfiles.save.secretFound': 'Secret detected in the candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
   'memory.save.plainfilesIgnoredOpts': 'ignored option(s) {opts} — the plainfiles record format has no field for them (scope/topic are engram-only concepts); the record was still written normally.',
   'memory.plainfiles.search.empty': 'ℹ no matching records found.',
