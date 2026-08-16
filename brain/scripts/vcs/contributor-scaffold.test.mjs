@@ -457,18 +457,17 @@ test('every provider\'s scaffold is a managed literal, REFUSE-classified (design
   }
 });
 
-test('MEASURED: REFUSE does not protect a path on the release that FIRST ships it (#570)', () => {
+test('#601: REFUSE protects a path on the release that FIRST ships it', () => {
   // The classification above is a table lookup. What the upgrade DOES with it is
-  // this, and the two are not the same thing on a first ship: `copyManaged` only
-  // classifies a path as consumer-modified when the PREVIOUSLY INSTALLED package
-  // shipped it (`outgoing.has(rel)`), and a brand-new path is in no prior release.
-  // So the guarantee starts one release late, and a GitLab team that already owns
-  // `Default.md` — the single most likely filename for them to own — is overwritten
-  // rather than named.
+  // this, and until #601 the two disagreed on a first ship: `copyManaged` only
+  // classified a path as consumer-modified when the PREVIOUSLY INSTALLED package
+  // shipped it (`outgoing.has(rel)`), and a brand-new path is in no prior
+  // release. The guarantee started one release late — on the release where the
+  // risk is highest — and a GitLab team that already owns `Default.md`, the one
+  // file GitLab auto-applies, was overwritten rather than named.
   //
-  // This test pins the REAL behaviour rather than the wished one, so the day it is
-  // fixed this goes red and the manifest comment gets corrected with it.
-  const tmp = mkdtempSync(join(tmpdir(), 'brain-570-firstship-'));
+  // This replaces the characterization test that pinned the defect (#570).
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-601-firstship-'));
   const src = join(tmp, 'src');
   const dest = join(tmp, 'dest');
   const rel = scaffoldDelivery('gitlab').path;
@@ -486,10 +485,80 @@ test('MEASURED: REFUSE does not protect a path on the release that FIRST ships i
     outgoing: new Map(),   // exactly what readOutgoing returns for a first ship
   });
 
-  assert.deepEqual(result.refused, [], 'first ship: nothing is refused, because nothing is known to be modified');
-  assert.ok(result.collisions.includes(rel), 'it is reported as a collision — the only signal the operator gets');
-  assert.equal(readFileSync(join(dest, rel), 'utf8'), 'BRAIN VERSION\n',
-    'and the consumer bytes are gone unless the operator passed --abort-on-collision');
+  assert.ok(result.refused.includes(rel),
+    'brain never shipped this path, so the bytes there are the consumer\'s — it must be NAMED');
+  assert.equal(readFileSync(join(dest, rel), 'utf8'), 'THE CONSUMER OWN TEMPLATE\n',
+    'and their file must survive');
+  assert.ok(!result.copied.includes(rel), 'nothing was written over it');
+});
+
+test('#601: --force-managed still overrides a first-ship refusal, per path', () => {
+  // Fail-closed must not mean fail-stuck. The escape hatch is the same one the
+  // modified-path case uses, and it names exactly one path (signed decision 3).
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-601-forced-'));
+  const src = join(tmp, 'src');
+  const dest = join(tmp, 'dest');
+  const rel = scaffoldDelivery('gitlab').path;
+  mkdirSync(dirname(join(src, rel)), { recursive: true });
+  mkdirSync(dirname(join(dest, rel)), { recursive: true });
+  writeFileSync(join(src, rel), 'BRAIN VERSION\n');
+  writeFileSync(join(dest, rel), 'THE CONSUMER OWN TEMPLATE\n');
+
+  const result = copyManaged({
+    srcRoot: src,
+    destRoot: dest,
+    managed: [rel],
+    local: [],
+    refusePaths: [rel],
+    outgoing: new Map(),
+    forceManaged: [rel],
+  });
+
+  assert.ok(result.forced.includes(rel));
+  assert.deepEqual(result.refused, []);
+  assert.equal(readFileSync(join(dest, rel), 'utf8'), 'BRAIN VERSION\n');
+});
+
+test('#601: a first-ship REFUSE path the consumer does NOT have copies silently', () => {
+  // The gate must not become "ask on every new path". With no file there, there
+  // is nothing of theirs to protect.
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-601-absent-'));
+  const src = join(tmp, 'src');
+  const dest = join(tmp, 'dest');
+  const rel = scaffoldDelivery('gitlab').path;
+  mkdirSync(dirname(join(src, rel)), { recursive: true });
+  mkdirSync(dest, { recursive: true });
+  writeFileSync(join(src, rel), 'BRAIN VERSION\n');
+
+  const result = copyManaged({
+    srcRoot: src, destRoot: dest, managed: [rel], local: [], refusePaths: [rel],
+    outgoing: new Map(),
+  });
+
+  assert.deepEqual(result.refused, []);
+  assert.ok(result.copied.includes(rel));
+});
+
+test('#601: a DEGRADED run (--no-install) does not refuse everything', () => {
+  // `outgoing: null` means the outgoing tree was unavailable, not that brain
+  // never shipped the path. Unknown-because-degraded and unknown-because-new are
+  // different facts, and only the second is evidence about the consumer's file.
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-601-degraded-'));
+  const src = join(tmp, 'src');
+  const dest = join(tmp, 'dest');
+  const rel = scaffoldDelivery('gitlab').path;
+  mkdirSync(dirname(join(src, rel)), { recursive: true });
+  mkdirSync(dirname(join(dest, rel)), { recursive: true });
+  writeFileSync(join(src, rel), 'BRAIN VERSION\n');
+  writeFileSync(join(dest, rel), 'THE CONSUMER OWN TEMPLATE\n');
+
+  const result = copyManaged({
+    srcRoot: src, destRoot: dest, managed: [rel], local: [], refusePaths: [rel],
+    outgoing: null,
+  });
+
+  assert.deepEqual(result.refused, [], 'a degraded run must not manufacture refusals');
+  assert.equal(result.modificationDetection, 'degraded');
 });
 
 // ── the sweep: no brain-owned file re-states the false claim ────────────────
