@@ -272,6 +272,13 @@ export default {
   'memory.resolveIndex.staged': '✓ conflicto del índice resuelto — {count} registro(s) regenerados desde records/ y agregados al stage. Completá el merge con `git commit`.',
   'memory.resolveIndex.failed': '✗ resolve-index falló — {message}',
 
+  // ── memory/cli.mjs — split-records (issue #677) ──────────────────────────────
+  'memory.splitRecords.plan':    'plan — {lines} línea(s) de registro en {months} archivo(s) mensual(es) pasan a ser {writes} archivo(s) por registro. NO se escribió nada. Volvé a correrlo con --apply para ejecutarlo.',
+  'memory.splitRecords.done':    '✓ split completo — {written} archivo(s) de registro escritos, {alreadyPresent} ya presentes, {months} archivo(s) mensual(es) borrados después de verificar que cada registro se relee.',
+  'memory.splitRecords.nothing': 'nada que dividir — no hay archivo mensual <yyyy-mm>.jsonl en .memory/records/ ({alreadySplit} archivo(s) por registro ya presentes).',
+  'memory.splitRecords.repeats': '{count} línea(s) repetida(s) colapsadas gana-la-primera ({divergent} divergentes — mismo id, bytes distintos). La ganadora es la línea que los lectores ya resolvían.',
+  'memory.splitRecords.failed':  '✗ split-records falló — {message}',
+
   // ── memory/cli.mjs — qué backend corrió realmente (issue #641) ───────────────
   'memory.backend.substituted': 'el binario `{from}` no está instalado acá, así que `{op}` corrió sobre el backend `{fallback}` (solo registros) — mismos registros, misma validación, sin backend requerido (ADR-0017). MEMORY_BACKEND no estaba seteado, así que no se pisó ninguna elección explícita; seteálo para fijar cualquiera de los dos backends.',
   'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} está seteado explícitamente, pero el binario `{backend}` no está en PATH acá — un selector explícito nunca se pisa (ADR-0004), así que esta corrida va a fallar. La captura solo-registros no necesita backend: `MEMORY_BACKEND={fallback} npm run memory:{op}`.',

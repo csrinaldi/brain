@@ -26,25 +26,64 @@ const base = {
 
 // ── appendRecord ──────────────────────────────────────────────────────────────
 
-test('appendRecord: writes exactly one physical JSONL line to the month file', () => {
+test('appendRecord: writes exactly one physical JSONL line to the record\'s OWN file (#677)', () => {
   const { recordsDir } = tmpMemoryDir();
   const rec = buildRecord({ ...base, content: 'first record' });
-  const { file, filename } = appendRecord(rec, { recordsDir });
-  assert.equal(filename, '2026-07.jsonl');
+  const { file, filename, written } = appendRecord(rec, { recordsDir });
+  assert.equal(filename, `2026-07-${rec.id}.jsonl`, 'the id IS the filename');
+  assert.equal(written, true);
   const raw = readFileSync(file, 'utf8');
   const lines = raw.split('\n').filter(Boolean);
   assert.equal(lines.length, 1);
   assert.deepEqual(JSON.parse(lines[0]), rec);
 });
 
-test('appendRecord: a second append to the same month appends a second line (append-only)', () => {
+test('appendRecord: a second record of the same month gets its own file — two files, one line each (#677)', () => {
   const { recordsDir } = tmpMemoryDir();
   const recA = buildRecord({ ...base, content: 'A' });
   const recB = buildRecord({ ...base, content: 'B' });
-  const { file } = appendRecord(recA, { recordsDir });
-  appendRecord(recB, { recordsDir });
-  const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
-  assert.equal(lines.length, 2);
+  const a = appendRecord(recA, { recordsDir });
+  const b = appendRecord(recB, { recordsDir });
+  assert.notEqual(a.filename, b.filename);
+  for (const { file } of [a, b]) {
+    assert.equal(readFileSync(file, 'utf8').split('\n').filter(Boolean).length, 1);
+  }
+  assert.equal(existsSync(join(recordsDir, '2026-07.jsonl')), false, 'no month log is created any more');
+});
+
+test('appendRecord: re-appending the SAME record is idempotent and SAYS so — written:false, bytes untouched', () => {
+  // Silence here would be `evidence-reader-empty-on-failure` in miniature: "the
+  // record is present" and "I just wrote it" are different facts and the caller
+  // must be able to tell them apart.
+  const { recordsDir } = tmpMemoryDir();
+  const rec = buildRecord({ ...base, content: 'said once' });
+  const first = appendRecord(rec, { recordsDir });
+  const bytes = readFileSync(first.file, 'utf8');
+
+  const second = appendRecord(rec, { recordsDir });
+  assert.equal(second.written, false);
+  assert.equal(second.file, first.file);
+  assert.equal(readFileSync(first.file, 'utf8'), bytes, 'byte-identical — never rewritten');
+});
+
+test('appendRecord: an existing file with DIVERGENT bytes is never overwritten — first-wins, as the readers resolve it', () => {
+  const { recordsDir } = tmpMemoryDir();
+  const rec = buildRecord({ ...base, content: 'round-tripped', source: 'PR #405' });
+  const widened = { ...rec, source: 'issue #405 / PR #405' }; // `source` is not hashed — same id
+  appendRecord(widened, { recordsDir });
+
+  const out = appendRecord(rec, { recordsDir });
+  assert.equal(out.written, false);
+  assert.equal(JSON.parse(readFileSync(out.file, 'utf8')).source, 'issue #405 / PR #405');
+});
+
+test('appendRecord: refuses to build a path out of an id it did not recognise (fails closed, writes nothing)', () => {
+  const { recordsDir } = tmpMemoryDir();
+  const rec = buildRecord({ ...base, content: 'x' });
+  for (const id of ['../../escape', 'rec-NOTHEX0000000', 'rec-short', '']) {
+    assert.throws(() => appendRecord({ ...rec, id }, { recordsDir }), /recordFilename: refusing/, `id ${JSON.stringify(id)}`);
+  }
+  assert.equal(existsSync(recordsDir), false, 'and nothing was created on the way');
 });
 
 test('appendRecord: rejects an invalid record (fails closed, does not write)', () => {

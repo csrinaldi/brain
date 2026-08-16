@@ -111,6 +111,7 @@ const VALID_OPS = [
   "index",
   "reindex",
   "resolve-index",
+  "split-records",
   "migrate-v1",
   "setup",
   "feature-checkpoint",
@@ -176,6 +177,79 @@ if (op === "resolve-index") {
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.resolveIndex.failed", { message: err.message })}`);
+    process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// "split-records" — move an existing store from the `<yyyy-mm>.jsonl` month log
+// to one file per record (issue #677). Backend-agnostic for the same reason as
+// "reindex" above: the durable layout is brain-owned, not a MEMORY_BACKEND
+// concern.
+//
+// REPORT-ONLY BY DEFAULT. `--apply` is required to write anything, and the
+// month files are deleted only after every record has been read back out of the
+// new layout. The inverse of migrate-v1's default, deliberately: this one
+// rewrites the durable log of a store brain does not own, so the default must
+// be the harmless half.
+//
+// BRAIN_MEMORY_TEST_ROOT — honoured, like "reindex" and unlike "resolve-index"
+// (whose missing seam #633/T11 recorded). A verb that deletes month files must
+// be drivable end-to-end against a fixture, or its destructive branch is only
+// ever exercised on somebody's real store.
+// ---------------------------------------------------------------------------
+if (op === "split-records") {
+  const { runSplit } = await import("./lib/split-records.mjs");
+  const apply = process.argv.includes("--apply");
+  const memoryRoot = process.env.BRAIN_MEMORY_TEST_ROOT ?? repoRoot;
+  const recordsDir = join(memoryRoot, ".memory", "records");
+  try {
+    const r = runSplit({ recordsDir, apply });
+    if (r.monthFiles.length === 0) {
+      console.log(`memory/cli: ${await t("memory.splitRecords.nothing", { alreadySplit: r.alreadySplit })}`);
+      process.exit(0);
+    }
+    // The repeats are reported on BOTH paths — a dry run that stayed quiet
+    // about what it was going to collapse would hide exactly the fact the
+    // operator needs before typing --apply (#574).
+    if (r.duplicates.length > 0) {
+      console.error(
+        `memory/cli: ${await t("memory.splitRecords.repeats", {
+          count: r.duplicates.length,
+          divergent: r.duplicates.filter((d) => d.divergent).length,
+        })}`,
+      );
+      for (const d of r.duplicates) {
+        console.error(`  ${d.id} — ${d.at} collapsed into ${d.firstAt}${d.divergent ? " (divergent)" : ""}`);
+      }
+    }
+    if (!apply) {
+      console.log(
+        `memory/cli: ${await t("memory.splitRecords.plan", {
+          lines: r.lines,
+          months: r.monthFiles.length,
+          writes: r.lines - r.duplicates.length,
+        })}`,
+      );
+      process.exit(0);
+    }
+    console.log(
+      `memory/cli: ${await t("memory.splitRecords.done", {
+        written: r.written,
+        alreadyPresent: r.alreadyPresent,
+        months: r.monthFiles.length,
+      })}`,
+    );
+    const { rebuildIndex } = await import("./lib/store.mjs");
+    const { count, duplicates } = rebuildIndex({
+      recordsDir,
+      indexPath: join(memoryRoot, ".memory", "index.jsonl"),
+    });
+    console.log(`memory/cli: ${await t("memory.reindex.done", { count })}`);
+    reportDuplicates(duplicates, { indexCount: count });
+    process.exit(0);
+  } catch (err) {
+    console.error(`memory/cli: ${await t("memory.splitRecords.failed", { message: err.message })}`);
     process.exit(1);
   }
 }

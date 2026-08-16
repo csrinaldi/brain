@@ -22,6 +22,7 @@ import {
   renderPlan,
   runPromote,
 } from './brain-promote.mjs';
+import { GUARDS } from './lib/promote-guards.mjs';
 import { compileAgentsMd, SOURCE_DOCS } from './harness/backends/antigravity.mjs';
 import { makeFixtureRepo, statusOf, SAMPLE_DRAFT } from './__fixtures__/promote-repo.mjs';
 
@@ -346,3 +347,119 @@ for (const argv of [[], ['a.md', 'b.md'], ['a.md', 'b.md', 'c.md']]) {
     assert.equal(parseArgs(argv).ok, false);
   });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #675 / #674 — the content guards, end to end through the real verb
+//
+// Both reproductions run against a REAL fixture repo and assert three things
+// the exit code alone is blind to: nothing written, nothing staged, and the
+// confirmation NEVER ASKED. The third is the requirement — a refusal that
+// arrives after the human has typed PROMOTE has already cost them the signature
+// both tickets are about.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** A draft in the shape that produced the corrupt ADR-0031: bare, not blockquoted. */
+const BARE_STATUS_DRAFT = `# ADR-0028 — A sample decision for the promote fixture
+
+**Status**: Proposed — pending human signature
+**Date**: 2026-08-15 — drafted by agent
+
+## Context
+
+Something happened.
+`;
+
+/** Assembled, never a literal URL — this file is under brain/** and is scanned. */
+const FOREIGN = ['session', 'somewhere', 'gov', 'ar'].join('.');
+
+const FOREIGN_HOST_DRAFT = `# ADR-0028 — A sample decision for the promote fixture
+
+> **status:** proposed — pending human promotion | **date:** 2026-08-15 | **owner:** @crinaldi
+
+## Context
+
+Evidence: ${'https://'}${FOREIGN}/session/abc
+`;
+
+async function refuseBeforePrompt(root, draftRel) {
+  return runPromote({
+    argv: [draftRel],
+    isTTY: true,
+    root,
+    // The assertion, not a stub: if the verb reaches the confirmation the run
+    // rejects. A guard that fires after this point is the defect, not the fix.
+    readLineFn: async () => { throw new Error('the confirmation was reached — the guard ran too late'); },
+    todayFn: () => '2026-08-07',
+    write: () => {},
+  });
+}
+
+test('#675: a draft with a bare **Status** line is REFUSED — nothing written, nothing staged, never asked', async () => {
+  const fx = makeFixtureRepo({ draftBody: BARE_STATUS_DRAFT });
+  try {
+    const res = await refuseBeforePrompt(fx.root, fx.draftRel);
+    assert.notEqual(res.exitCode, 0);
+    assert.match(res.output, /single-status-line/);
+    assert.match(res.output, /2 `\*\*Status\*\*:` line\(s\), expected exactly 1/);
+    assert.match(res.output, /> \*\*status:\*\*/, 'the refusal must show the shape the draft should have used');
+    assert.deepEqual(res.wrote, []);
+    assert.deepEqual(res.staged, []);
+    assert.equal(statusOf(fx.root), '', 'nothing may be written or staged');
+    assert.equal(existsSync(join(fx.root, fx.destRel)), false, 'the corrupt ADR must not exist');
+  } finally {
+    cleanup(fx.root);
+  }
+});
+
+test('#675: the corrupt artefact is what the verb WOULD have produced — the fixture is not a straw man', () => {
+  // Without this, the test above could pass because the draft is malformed in
+  // some other way. transformDraft is run directly: two Status lines, exactly
+  // as the ADR-0031 promotion produced them.
+  const r = transformDraft(BARE_STATUS_DRAFT, { gitUserName: 'Fixture Human', today: '2026-08-07' });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.text.split('**Status**:').length - 1, 2, 'the header rewrite keeps the draft\'s own Status line');
+});
+
+test('#674: a foreign host reaching a SHIPPED destination is REFUSED before the signature', async () => {
+  const fx = makeFixtureRepo({ draftBody: FOREIGN_HOST_DRAFT });
+  try {
+    const res = await refuseBeforePrompt(fx.root, fx.draftRel);
+    assert.notEqual(res.exitCode, 0);
+    assert.match(res.output, /shipped-hostnames/);
+    assert.match(res.output, new RegExp(FOREIGN.replace(/\./g, '\\.')));
+    assert.match(res.output, /brain\/project\/decisions\/adr-0028-sample-decision\.md/);
+    assert.deepEqual(res.wrote, []);
+    assert.equal(statusOf(fx.root), '');
+  } finally {
+    cleanup(fx.root);
+  }
+});
+
+test('#674: the same bytes at the DRAFT path are green — which is why nothing caught it before', () => {
+  // The defect stated as a property rather than as prose: the guard's verdict
+  // depends only on where the file is going. This is what made ADR-0031 pass
+  // `npm test`, `brain:repo:check` and CI, and go red on the signing commit.
+  const g = GUARDS.find((x) => x.name === 'shipped-hostnames');
+  assert.equal(g.applies('openspec/changes/issue-671-x/brain-drafts/adr-0031-x.md'), false);
+  assert.equal(g.applies('brain/project/decisions/adr-0031-x.md'), true);
+});
+
+test('#675/#674: a clean promotion still happens, and REPORTS which guards ran', async () => {
+  const fx = makeFixtureRepo();
+  const chunks = [];
+  try {
+    const res = await runPromote({
+      argv: [fx.draftRel], isTTY: true, root: fx.root,
+      readLineFn: async () => CONFIRMATION_WORD, todayFn: () => '2026-08-07',
+      write: (s) => chunks.push(s),
+    });
+    assert.equal(res.exitCode, 0, res.output);
+    const out = chunks.join('');
+    assert.match(out, /guards — ran against the DESTINATION content/);
+    assert.match(out, /single-status-line/);
+    assert.match(out, /shipped-hostnames/);
+    assert.equal(res.wrote.length, 3, 'the three-file cascade is unchanged');
+  } finally {
+    cleanup(fx.root);
+  }
+});
