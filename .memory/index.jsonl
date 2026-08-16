@@ -528,6 +528,7 @@
 {"id":"rec-444f162c91171ef9","ts":"2026-08-04T11:19:15Z","actor":"claude/brain-architecture-review-qe5bo2","type":"architecture","project":"brain","file":"2026-08-rec-444f162c91171ef9.jsonl"}
 {"id":"rec-4467d09acb11fab7","ts":"2026-07-25T21:51:21Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-4467d09acb11fab7.jsonl"}
 {"id":"rec-44a306727ea7148b","ts":"2026-07-25T00:46:46Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-44a306727ea7148b.jsonl"}
+{"id":"rec-4520bce767ad25ed","ts":"2026-08-16T14:02:54Z","actor":"fix/issue-639-fixstatus-parsegraphblock-reads-the-firs","type":"decision","project":"brain","issue":639,"file":"2026-08-rec-4520bce767ad25ed.jsonl"}
 {"id":"rec-453e45bf696ad01d","ts":"2026-07-13T00:21:35Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-453e45bf696ad01d.jsonl"}
 {"id":"rec-456f8d6951de6a4c","ts":"2026-07-29T14:29:08Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-456f8d6951de6a4c.jsonl"}
 {"id":"rec-45c3c2765cf0c8c1","ts":"2026-07-29T14:26:15Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-45c3c2765cf0c8c1.jsonl"}
