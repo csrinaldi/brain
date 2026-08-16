@@ -204,6 +204,7 @@
 {"id":"rec-189a4e67b3bd5b17","ts":"2026-07-13T00:21:49Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-189a4e67b3bd5b17.jsonl"}
 {"id":"rec-18ae6534a0ef842f","ts":"2026-08-16T22:41:23Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-18ae6534a0ef842f.jsonl"}
 {"id":"rec-18f7e346e29a0f3e","ts":"2026-07-11T12:33:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-18f7e346e29a0f3e.jsonl"}
+{"id":"rec-198840913f76d505","ts":"2026-08-16T22:57:43Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-198840913f76d505.jsonl"}
 {"id":"rec-19885cd2434e0125","ts":"2026-07-25T21:51:47Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-19885cd2434e0125.jsonl"}
 {"id":"rec-19bbbceca2db63e6","ts":"2026-07-25T00:47:16Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-19bbbceca2db63e6.jsonl"}
 {"id":"rec-19e15952641e2334","ts":"2026-07-16T02:16:23Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-19e15952641e2334.jsonl"}
@@ -519,6 +520,7 @@
 {"id":"rec-412090a5dca98581","ts":"2026-07-13T00:22:09Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-412090a5dca98581.jsonl"}
 {"id":"rec-4132d3aef25706fb","ts":"2026-07-11T12:32:48Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4132d3aef25706fb.jsonl"}
 {"id":"rec-41391c8a925c8802","ts":"2026-07-25T00:48:50Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-41391c8a925c8802.jsonl"}
+{"id":"rec-41a9177be7ac20aa","ts":"2026-08-16T23:03:32Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-41a9177be7ac20aa.jsonl"}
 {"id":"rec-41b08f413ac54474","ts":"2026-07-11T12:33:49Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-41b08f413ac54474.jsonl"}
 {"id":"rec-41b124772db8079f","ts":"2026-07-25T00:47:00Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-41b124772db8079f.jsonl"}
 {"id":"rec-41c0bc7cd3e962c5","ts":"2026-07-13T00:22:13Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-41c0bc7cd3e962c5.jsonl"}
