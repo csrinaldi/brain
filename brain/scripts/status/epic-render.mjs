@@ -84,7 +84,7 @@ export function renderMermaid({ nodes = [], edges = [] } = {}) {
  */
 export function renderSummary({
   nodes = [], tracks = new Map(),
-  divergences = [], relationsUnreadable = [], foreignRelations = 0,
+  divergences = [], relationsUnreadable = [], blocksUnreadable = [], foreignRelations = 0,
 } = {}) {
   const by = (s) => nodes.filter(n => n.status === s).sort((a, b) => a.number - b.number);
   const ref = (ns) => (ns.length ? ns.map(n => `#${n.number}`).join(' ') : '—');
@@ -118,6 +118,12 @@ export function renderSummary({
   }
   if (relationsUnreadable.length) {
     lines.push(`**Relaciones nativas ilegibles** en ${relationsUnreadable.length}: ${relationsUnreadable.map(n => `#${n}`).join(' ')} — no es «no tienen», es «no se pudieron leer».`);
+  }
+  // Same distinction on the declared side (#639): un bloque que no se pudo leer no
+  // es un issue que no declaró nada, y sin esta línea los dos terminan juntos en
+  // «Sin ubicar», indistinguibles.
+  if (blocksUnreadable.length) {
+    lines.push(`**Bloques \`brain-graph/1\` ilegibles** en ${blocksUnreadable.length}: ${blocksUnreadable.map(b => `#${b.number} (${b.error})`).join(' · ')} — declararon un bloque que no se pudo leer, no es «no declararon».`);
   }
   if (foreignRelations > 0) {
     lines.push(`**Relaciones cross-repo omitidas:** ${foreignRelations}. Los números son por repositorio, así que dibujarlas afirmaría una arista contra el \`#N\` de ESTE repo.`);
