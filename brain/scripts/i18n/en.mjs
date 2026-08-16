@@ -302,6 +302,13 @@ export default {
   'memory.resolveIndex.staged': '✓ index conflict resolved — {count} record(s) regenerated from records/ and staged. Finish the merge with `git commit`.',
   'memory.resolveIndex.failed': '✗ resolve-index failed — {message}',
 
+  // ── memory/cli.mjs — split-records (issue #677) ──────────────────────────────
+  'memory.splitRecords.plan':    'plan — {lines} record line(s) across {months} month file(s) become {writes} per-record file(s). NOTHING was written. Re-run with --apply to perform it.',
+  'memory.splitRecords.done':    '✓ split complete — {written} record file(s) written, {alreadyPresent} already present, {months} month file(s) removed after verifying every record reads back.',
+  'memory.splitRecords.nothing': 'nothing to split — no <yyyy-mm>.jsonl month file under .memory/records/ ({alreadySplit} per-record file(s) already there).',
+  'memory.splitRecords.repeats': '{count} repeated line(s) collapsed first-wins ({divergent} divergent — same id, different bytes). The winner is the line the readers already resolved to.',
+  'memory.splitRecords.failed':  '✗ split-records failed — {message}',
+
   // ── memory/cli.mjs — which backend actually ran (issue #641) ─────────────────
   // Each of these is a case where the backend that ran is not the one a reader
   // would assume. Silence is the whole defect: `MEMORY_BACKEND=plainfiles`
