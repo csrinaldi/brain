@@ -1218,6 +1218,7 @@
 {"id":"rec-95ccb970773778f6","ts":"2026-07-25T00:48:21Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-95ccb970773778f6.jsonl"}
 {"id":"rec-95fe92c6021ab4c7","ts":"2026-07-18T01:48:34Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-95fe92c6021ab4c7.jsonl"}
 {"id":"rec-96206b9b58f2d136","ts":"2026-07-30T00:26:24Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-96206b9b58f2d136.jsonl"}
+{"id":"rec-962b4037de8c9ef9","ts":"2026-08-16T15:47:33Z","actor":"fix/issue-606-fixvcs-prstatusrollup-swallows-the-cause","type":"architecture","project":"brain","issue":606,"file":"2026-08-rec-962b4037de8c9ef9.jsonl"}
 {"id":"rec-962ba66a96f1a5f0","ts":"2026-07-25T00:48:37Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-962ba66a96f1a5f0.jsonl"}
 {"id":"rec-964735d2098984cf","ts":"2026-07-02T12:39:42Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-964735d2098984cf.jsonl"}
 {"id":"rec-9657ff805e2bdf1d","ts":"2026-07-11T12:33:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-9657ff805e2bdf1d.jsonl"}

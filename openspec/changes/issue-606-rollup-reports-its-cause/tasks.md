@@ -320,7 +320,7 @@ and verify can trace back without re-deriving intent.
 
 ## Phase 9 — the follow-up ticket for the 13 remaining sites (filed, never fixed here)
 
-- [ ] 9.1 File a new GitHub issue listing every remaining cause-discarding site by
+- [x] 9.1 File a new GitHub issue listing every remaining cause-discarding site by
       file:line, exactly as measured in proposal.md: `github.mjs:204 :309 :402 :524
       :587 :630` and `gitlab.mjs:230 :307 :360 :393 :493 :554 :672 :1010`.
       `github.mjs:309` (`checkRuns`) MUST be named specifically and prioritized first
