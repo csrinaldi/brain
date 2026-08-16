@@ -100,11 +100,24 @@ export function evaluateStagedRecords({ staged = [], upstream } = {}) {
  * `-M`, `-M50%`, `-M10%`, `-C`, `diff.renames=copies`.
  *
  * What pairs is BYTE similarity, not record kinship. An exact-blob move (a
- * `git mv`, or the same bytes staged at a second path) reports `R100`; a
- * near-duplicate — the same record re-serialized under a new id — reports
- * `R095` even by default. Those are exactly the identical/near-identical
- * writes this gate exists to judge, which is why reading the DESTINATION is
- * what makes the verdict independent of how git chose to frame the pair.
+ * `git mv`, or the same bytes staged at a second path) reports `R100`. A
+ * near-duplicate — the same record re-serialized under a new id — pairs too,
+ * but at NO fixed index: measured on this repo's own 2091 records (git 2.51.0,
+ * the command form above), 40 size-stratified samples spanned `R090`–`R099` and
+ * a 60-record uniform random sample spanned `R095`–`R098`.
+ *
+ * The index RISES MONOTONICALLY WITH RECORD SIZE, and that is the whole
+ * mechanism: an id swap edits 16 hex characters, so the smaller the blob the
+ * larger the share of it that changed. `R090` was the 671-byte minimum; `R099`
+ * every record above ~6.5 KB. Do not restate this as one number — an earlier
+ * version of this comment said "`R095` even by default", and `R095` turned up in
+ * 2 of 40 samples, in a 1.3–1.5 KB band below the 25th percentile of 2121 B.
+ *
+ * The point survives the spread intact, because it never depended on the value:
+ * every one of those indices is a PAIR, and a pair is what makes the token order
+ * load-bearing. Those are exactly the identical/near-identical writes this gate
+ * exists to judge, which is why reading the DESTINATION is what makes the
+ * verdict independent of how git chose to frame them.
  *
  * @param {string} text
  * @returns {Array<{path: string, dstOid: string, status: string}>}
