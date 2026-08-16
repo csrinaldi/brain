@@ -67,7 +67,14 @@ const BINARY_MISSING_RE = /\bENOENT\b|command not found|no such file or director
 const RATE_LIMITED_RE = /rate limit|maximum number of login attempts|abuse detection|too many requests|retry-after/i;
 const UNAUTHENTICATED_RE = /bad credentials|unauthorized|requires authentication|authentication (?:required|failed)|must be logged in|auth login|insufficient_scope|invalid[_ ]token/i;
 const NOT_FOUND_RE = /\bnot found\b|could not resolve to a|no such (?:pull request|merge request|repository|project)/i;
-const NETWORK_RE = /\bENOTFOUND\b|\bECONNREFUSED\b|\bECONNRESET\b|\bETIMEDOUT\b|\bEAI_AGAIN\b|fetch failed|socket hang up|network is unreachable|dial tcp|tls handshake/i;
+// `error connecting to` is `gh`'s OWN real wrapper text for a DNS/connect
+// failure (verified in this session against a real `gh` 2.46.0 binary
+// talking to an unreachable host — `gh` does not surface a raw Go
+// `dial tcp`/`ENOTFOUND` error, it wraps it) — added alongside the raw
+// transport-error spellings `fetch failed` (Node's global `fetch`, what
+// `gitlabApiFetch` throws verbatim on a DNS failure) and the OS-level
+// `ENOTFOUND`/`ECONNREFUSED`/etc. codes a raw Node error can carry.
+const NETWORK_RE = /\bENOTFOUND\b|\bECONNREFUSED\b|\bECONNRESET\b|\bETIMEDOUT\b|\bEAI_AGAIN\b|fetch failed|error connecting to|socket hang up|network is unreachable|dial tcp|tls handshake/i;
 
 /**
  * Labels a failure's text with a `reason` from `UNCOMPUTABLE_REASONS`

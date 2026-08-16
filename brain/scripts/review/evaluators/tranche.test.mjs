@@ -91,10 +91,10 @@ test('evaluateTranche: an unclassified-cause uncomputable rollup still quotes th
 test("evaluateTranche: a classifier that recognises NOTHING still leaves the operator the provider's words (#606 ruling 3, M3b)", () => {
   const ROTTABLE_CORPUS = [
     'gh: API rate limit exceeded (HTTP 403)',
-    'gh: Bad credentials (HTTP 401)',
-    'gh: Could not resolve to a PullRequest with the number of 9999.',
-    'glab: command not found',
-    'TypeError: fetch failed',
+    'gh pr view 1 --repo octocat/Hello-World --json statusCheckRollup failed (status 1): HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login\n',
+    'gh pr view 999999999 --repo octocat/Hello-World --json statusCheckRollup failed (status 1): GraphQL: Could not resolve to a PullRequest with the number of 999999999. (repository.pullRequest)\n',
+    'glab api /user failed (status null): glab: spawnSync glab ENOENT',
+    'fetch failed',
     'GitLab API failed: 503 (projects/x%2Fy/merge_requests/1)',
   ];
   for (const message of ROTTABLE_CORPUS) {

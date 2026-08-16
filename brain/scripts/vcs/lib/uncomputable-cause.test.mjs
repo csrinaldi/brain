@@ -19,30 +19,75 @@ const UNCOMPUTABLE_REASON_VALUES = Object.values(UNCOMPUTABLE_REASONS);
 
 // ── 1. The pinned corpus (identity.test.mjs:296-304's pattern) ─────────────
 //
-// Every row is sourced from real `gh`/`glab` output actually observed, or
-// from an existing pinned message already in this repo — never invented
-// from memory of what a CLI "usually says" (design §10, risk 3).
+// Every row is sourced from real `gh`/`glab` output ACTUALLY OBSERVED in
+// this session (real `gh` 2.46.0 binary, real `octocat/Hello-World` public
+// repo, real ENOENT from a genuinely-absent binary), or from an existing
+// pinned message already in this repo — never invented from memory of what
+// a CLI "usually says" (design §10, risk 3; the hard constraint this task
+// enforces).
 //
 // Sources:
-//   - `review/identity.test.mjs:296-304` (three rows, unchanged verbatim).
+//   - `review/identity.test.mjs:296-304` (three rate-limited rows, unchanged
+//     verbatim — the fourth candidate row, an invented "secondary rate
+//     limit" message, was DROPPED rather than pinned unverified).
 //   - `vcs/gitlab-api.mjs:65` — `GitLab API failed: ${status} (${path})` is
-//     the ONLY template GitLab ever emits; every GitLab row here matches it.
-//   - `vcs/lib/exec.mjs:30` / `vcs.contract.test.mjs`'s `failSpawn` fixture —
-//     the exact `runJson` wrapper shape and the ENOENT launch-failure shape.
+//     the ONLY template GitLab ever emits; every GitLab row here matches it
+//     (the specific status number is a standard HTTP code, not a claim
+//     about a specific observed response body).
+//   - Live `gh api`/`gh pr view` calls run in THIS session against a real
+//     `gh` binary (verified `gh version 2.46.0`), captured through the
+//     real `runJson` wrapper (`vcs/lib/exec.mjs`) so the pinned text is
+//     exactly what `detail` would hold in production — not a hand-typed
+//     approximation. Unauthenticated: an invalid `GH_TOKEN` override (never
+//     touches the real gh session) and an empty `GH_CONFIG_DIR`. Not-found:
+//     a PR number (999999999) that cannot exist. Binary-missing: `gh` run
+//     with an empty `PATH`, and `glab`, which is genuinely absent on this
+//     machine — both via the real `runJson`/`spawnSync` path, producing
+//     `spawnSync <cmd> ENOENT` (NOT the `spawn <cmd> ENOENT` this module's
+//     comments once assumed by analogy to `exec.mjs`'s prose — spawnSync's
+//     own error text carries "Sync"; corrected here against the real
+//     output, not `exec.mjs`'s comment).
+//   - `TypeError`'s real `.message` for a rejected global `fetch()` against
+//     an unresolvable host is the bare string `fetch failed` (verified
+//     directly) — never `TypeError: fetch failed`; `gitlab.mjs`'s catch
+//     passes `err.message` alone, so the `TypeError:` prefix a naive
+//     transcription would add is never actually in `detail`.
+//   - `gh`'s own real network-failure wrapper text, `error connecting to
+//     <host>` (verified against an unreachable `GH_HOST`), is NOT a raw Go
+//     `dial tcp`/`ENOTFOUND` error — `gh` wraps it. `NETWORK_RE` gained this
+//     pattern specifically because the row exists.
+//   - `vcs.contract.test.mjs`'s `failSpawn` fixture text, run through the
+//     real `runJson` wrapper shape.
 const CORPUS = [
   ['gh: API rate limit exceeded (HTTP 403)', UNCOMPUTABLE_REASONS.RATE_LIMITED],
   ['gh: Maximum number of login attempts exceeded. Please try again later. (HTTP 403)', UNCOMPUTABLE_REASONS.RATE_LIMITED],
   ['GitLab API failed: 429 (/user) rate limit', UNCOMPUTABLE_REASONS.RATE_LIMITED],
-  ['gh api repos/x/y/pulls failed (status 1): You have exceeded a secondary rate limit', UNCOMPUTABLE_REASONS.RATE_LIMITED],
-  ['gh: Bad credentials (HTTP 401)', UNCOMPUTABLE_REASONS.UNAUTHENTICATED],
-  ['gh: To get started with GitHub CLI, please run: gh auth login', UNCOMPUTABLE_REASONS.UNAUTHENTICATED],
+  [
+    'gh pr view 1 --repo octocat/Hello-World --json statusCheckRollup failed (status 1): HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login\n',
+    UNCOMPUTABLE_REASONS.UNAUTHENTICATED,
+  ],
+  [
+    'gh pr view 1 --repo octocat/Hello-World --json statusCheckRollup failed (status 4): To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n',
+    UNCOMPUTABLE_REASONS.UNAUTHENTICATED,
+  ],
   ['GitLab API failed: 401 (projects/x%2Fy/merge_requests/1)', UNCOMPUTABLE_REASONS.UNAUTHENTICATED],
-  ['gh: Could not resolve to a PullRequest with the number of 9999.', UNCOMPUTABLE_REASONS.NOT_FOUND],
+  [
+    'gh pr view 999999999 --repo octocat/Hello-World --json statusCheckRollup failed (status 1): GraphQL: Could not resolve to a PullRequest with the number of 999999999. (repository.pullRequest)\n',
+    UNCOMPUTABLE_REASONS.NOT_FOUND,
+  ],
   ['GitLab API failed: 404 (projects/x%2Fy/repository/commits/abc/statuses)', UNCOMPUTABLE_REASONS.NOT_FOUND],
-  ['gh pr view 1 --json statusCheckRollup failed (status null): gh: spawn gh ENOENT', UNCOMPUTABLE_REASONS.BINARY_MISSING],
-  ['glab: command not found', UNCOMPUTABLE_REASONS.BINARY_MISSING],
-  ['TypeError: fetch failed', UNCOMPUTABLE_REASONS.NETWORK],
-  ['gh: dial tcp: lookup api.github.com: ENOTFOUND', UNCOMPUTABLE_REASONS.NETWORK],
+  ['gh pr view 1 --json statusCheckRollup failed (status null): gh: spawnSync gh ENOENT', UNCOMPUTABLE_REASONS.BINARY_MISSING],
+  ['glab api /user failed (status null): glab: spawnSync glab ENOENT', UNCOMPUTABLE_REASONS.BINARY_MISSING],
+  ['fetch failed', UNCOMPUTABLE_REASONS.NETWORK],
+  [
+    // Trimmed of `gh`'s own trailing "check your internet connection or
+    // [GitHub's status-page URL]" line — real, verified, but that second
+    // sentence is not load-bearing for classification and shipping a live
+    // third-party hostname in test fixtures trips this repo's own
+    // shipped-hostnames guard (#648) for no benefit to this test.
+    'gh api /user failed (status 1): error connecting to this-host-does-not-exist-verification.invalid',
+    UNCOMPUTABLE_REASONS.NETWORK,
+  ],
   ['GitLab API failed: 503 (projects/x%2Fy/merge_requests/1)', UNCOMPUTABLE_REASONS.NETWORK],
   ['gh pr view 1 --json statusCheckRollup failed (status 1): fixture: simulated failure', UNCOMPUTABLE_REASONS.UNCLASSIFIED],
   ['gh: the flurb subsystem declined to enumerate the rollup (HTTP 418)', UNCOMPUTABLE_REASONS.UNCLASSIFIED],
@@ -61,6 +106,15 @@ for (const [message, expectedReason] of CORPUS) {
 }
 
 // ── 2. Ordering (identity.test.mjs:316-321's pattern) ──────────────────────
+//
+// Ordering tests construct a COMBINED-SIGNAL input to prove rule
+// PRECEDENCE — `identity.test.mjs`'s own ordering test does the same
+// ('HTTP 401 — and then: Maximum number of login attempts exceeded' is not
+// claimed as one single message any real provider emitted verbatim; it
+// combines two real fragments to prove `lockout` beats `rejected`). This is
+// a DIFFERENT discipline from §1's corpus table, which pins only fully
+// real-observed messages — a constructed precedence probe is not a claim
+// that any provider emits it as-is.
 
 test('classifyUncomputableCause: rate-limit language + an HTTP 403 marker classifies rate-limited, NOT unauthenticated (#606, the three-token-rotation incident identity.mjs:52-70 records)', () => {
   assert.equal(
@@ -70,6 +124,14 @@ test('classifyUncomputableCause: rate-limit language + an HTTP 403 marker classi
 });
 
 test('classifyUncomputableCause: binary-missing language + "not found" language classifies binary-missing, NOT not-found (#606)', () => {
+  // Constructed precedence probe (see block comment above) — this exact
+  // machine's real `gh`/`glab` ENOENT text never contains "not found"
+  // (verified in this session: it is `spawnSync <cmd> ENOENT`), so no fully
+  // real-observed message from THIS codebase's actual execution path
+  // exercises the collision rule 1 is ordered to prevent. `BINARY_MISSING_RE`
+  // also matches `command not found` for portability (a shelled-out
+  // invocation on another OS/shell can produce it) — this probe proves that,
+  // WERE such a message ever seen, it would not be misread as `not-found`.
   assert.equal(
     classifyUncomputableCause('gh: command not found'),
     UNCOMPUTABLE_REASONS.BINARY_MISSING,
