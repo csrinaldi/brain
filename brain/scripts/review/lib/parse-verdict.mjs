@@ -15,6 +15,7 @@
 // header comment for why it did not move too).
 
 import { extractFencedBlock, scalar, unyamlScalar, parseJsonScalar } from './yaml-block.mjs';
+import { CONTROL_CLASSES } from './controls.mjs';
 
 // Matches the two line shapes renderVerdict emits inside a findings /
 // follow_ups list: `  - key: value` opens an entry, `    key: value` extends
@@ -38,7 +39,7 @@ const ENTRY_CONT_RE = /^ {4}([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*)$/;
 // verdict and asserts every column-0 key it emits is accepted here.
 const TOP_LEVEL_KEYS = [
   'protocol', 'verdict', 'head_sha', 'rev', 'gates',
-  'findings', 'follow_ups', 'conditions', 'pin', 'sequencing', 'escalate',
+  'findings', 'follow_ups', 'conditions', 'controls', 'pin', 'sequencing', 'escalate',
 ];
 const TOP_LEVEL_KEY_RE = new RegExp(`^(?:${TOP_LEVEL_KEYS.join('|')}):`);
 
@@ -71,6 +72,7 @@ const UNREADABLE = Symbol('brain-review: field present but unreadable');
 // `scalar()` collapses them (it answers `null` for both a missing key and a key
 // whose inline value it could not capture).
 const SEQUENCING_KEY_RE = /^sequencing:/m;
+const CONTROLS_KEY_RE = /^controls:/m;
 
 /**
  * Parses a findings-shaped key in EITHER encoding (issue #381):
@@ -305,6 +307,27 @@ export function parseVerdict({ body, author = null } = {}) {
   // by renderVerdict; `follow_ups` was never parsed at all before #381.
   readList('findings');
   readList('follow_ups');
+
+  // #683 — `controls` is a FLAT LIST OF STRINGS, so it gets `sequencing`'s
+  // treatment and NOT `readList`. Same reason, written next door: `parseEntryList`
+  // is the inverse of the findings/follow_ups ENTRY emitter, and pointing it at a
+  // flat list parsed `  - deterministic` into `[{...}]` — accepted as readable,
+  // then handed to a consumer that reasons over strings. It happens to work today
+  // only because this field is always emitted inline; relying on the emitter never
+  // using the other encoding is the assumption that produced the sequencing bug.
+  //
+  // A member outside the known vocabulary is UNREADABLE, not a value. This field
+  // is a CLAIM about what was checked, and a verdict claiming a control that does
+  // not exist would be believed — strictly worse than the silence #683 replaces.
+  if (CONTROLS_KEY_RE.test(block)) {
+    const raw = scalar(block, 'controls');
+    const parsed = raw !== null ? parseJsonScalar(raw) : null;
+    if (Array.isArray(parsed) && parsed.every(c => typeof c === 'string' && CONTROL_CLASSES.includes(c))) {
+      result.controls = parsed;
+    } else {
+      malformed.push('controls');
+    }
+  }
 
   if (malformed.length > 0) result.malformed = malformed;
 

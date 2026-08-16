@@ -40,7 +40,29 @@ import { resolveTier, tierParams } from '../../vcs/governance-tiers.mjs';
 const DEFAULT_TIER = 'standard';
 
 const TIER2_PREFIXES = ['brain/core/', 'brain/project/'];
-const AI_ATTRIBUTION_RE = /co-authored-by:\s*claude|generated with \[?claude|🤖/i;
+// #671 — the third implementation of the AI-attribution rule, and the only one
+// in JS. EXPORTED so hooks/hooks.attribution-parity.test.mjs can drive the real
+// value through the shared corpus instead of scraping this source; a guard that
+// parses the file it guards fails open the moment the declaration is reformatted.
+//
+// VENDOR-NEUTRAL, and structured to mirror the two shell hooks line for line.
+// brain ships into other people's repositories and the doctrine says "AI
+// attribution", not one vendor's: a pattern that only knew `claude` would
+// enforce the rule here and silently exempt every consumer using another agent.
+//
+// OBSERVED SPELLINGS, never a complete detector — no such list can be complete,
+// and one claiming to be would be the apparent protection #499 refuses. The
+// `generated` shape requires a markdown-link bracket so ordinary prose
+// ("generated with cursor pagination") is not caught; the corpus pins both
+// directions.
+const AI_AGENTS = 'claude|copilot|chatgpt|gpt|gemini|cursor|devin|codex|aider|windsurf';
+export const AI_ATTRIBUTION_RE = new RegExp(
+  `co-authored-by:\\s*(${AI_AGENTS})` +
+  `|(${AI_AGENTS})-session:` +
+  `|generated\\s+(with|by)\\s*\\[(${AI_AGENTS})` +
+  '|🤖',
+  'i',
+);
 
 function isGateGreen({ status, conclusion } = {}) {
   const c = (conclusion ?? '').toLowerCase();
@@ -53,6 +75,20 @@ function quoteGate(name, gate) {
     ? `prStatusRollup: ${name} status=${gate.status ?? 'null'} conclusion=${gate.conclusion ?? 'null'}`
     : `prStatusRollup: ${name} — not present in rollup`;
 }
+
+/**
+ * The control classes this evaluator is capable of producing (#683).
+ *
+ * Every check it runs is mechanical — a fetched gate-status rollup, a
+ * `git diff --numstat`, a regex over a body, an `existsSync`, a base-sha
+ * reversion — so `deterministic` is the whole of it, for the reason
+ * `lib/causal-admission.mjs` already states about the same three evaluators.
+ *
+ * Declared HERE rather than inferred at the call site: this is the file that
+ * would change if the answer ever changed, and a declaration that lives next to
+ * the code it describes is the one that gets updated with it.
+ */
+export const PRODUCES = Object.freeze(['deterministic']);
 
 /**
  * Pure core (design.md §5 style — no seams). Takes the already-fetched rollup
@@ -167,12 +203,23 @@ export function evaluateTranche({
     });
   }
 
+  // #671: this reads the PR BODY and nothing else. It used to cite
+  // "CLAUDE.md — never add AI attribution to commits", which was wrong twice
+  // over: `CLAUDE.md` does not exist in this repository, and the rule it named
+  // is about COMMITS, a surface this evaluator never sees. A finding that
+  // claims to enforce a rule it does not measure reads as verified and is not —
+  // #580/#586's lesson in its extreme form, sending the reader to no text at
+  // all rather than merely to the wrong line.
+  //
+  // The commit surface is now covered where it can be enforced rather than
+  // detected: hooks/commit-msg (client) and hooks/pre-receive (server,
+  // bypass-proof). This check keeps the body, and now says so.
   if (AI_ATTRIBUTION_RE.test(prBody ?? '')) {
     findings.push({
       id: 'ai-attribution',
       severity: 'editorial',
-      evidence: 'PR body matches an AI-attribution pattern (co-authored-by / generated with / 🤖)',
-      cites: 'CLAUDE.md — never add AI attribution to commits',
+      evidence: 'PR body matches an AI-attribution pattern (co-authored-by / claude-session / generated with / 🤖)',
+      cites: 'agent-authorities.md Tier 3 — AI attribution is prohibited; commits are gated by hooks/pre-receive, this finding covers the PR body',
     });
   }
 

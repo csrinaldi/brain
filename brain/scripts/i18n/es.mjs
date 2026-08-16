@@ -272,6 +272,18 @@ export default {
   'memory.resolveIndex.staged': '✓ conflicto del índice resuelto — {count} registro(s) regenerados desde records/ y agregados al stage. Completá el merge con `git commit`.',
   'memory.resolveIndex.failed': '✗ resolve-index falló — {message}',
 
+  // ── memory/cli.mjs — split-records (issue #677) ──────────────────────────────
+  'memory.splitRecords.plan':    'plan — {lines} línea(s) de registro en {months} archivo(s) mensual(es) pasan a ser {writes} archivo(s) por registro. NO se escribió nada. Volvé a correrlo con --apply para ejecutarlo.',
+  'memory.splitRecords.done':    '✓ split completo — {written} archivo(s) de registro escritos, {alreadyPresent} ya presentes, {months} archivo(s) mensual(es) borrados después de verificar que cada registro se relee.',
+  'memory.splitRecords.nothing': 'nada que dividir — no hay archivo mensual <yyyy-mm>.jsonl en .memory/records/ ({alreadySplit} archivo(s) por registro ya presentes).',
+  'memory.splitRecords.repeats': '{count} línea(s) repetida(s) colapsadas gana-la-primera ({divergent} divergentes — mismo id, bytes distintos). La ganadora es la línea que los lectores ya resolvían.',
+  'memory.splitRecords.failed':  '✗ split-records falló — {message}',
+
+  // ── memory/cli.mjs — qué backend corrió realmente (issue #641) ───────────────
+  'memory.backend.substituted': 'el binario `{from}` no está instalado acá, así que `{op}` corrió sobre el backend `{fallback}` (solo registros) — mismos registros, misma validación, sin backend requerido (ADR-0017). MEMORY_BACKEND no estaba seteado, así que no se pisó ninguna elección explícita; seteálo para fijar cualquiera de los dos backends.',
+  'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} está seteado explícitamente, pero el binario `{backend}` no está en PATH acá — un selector explícito nunca se pisa (ADR-0004), así que esta corrida va a fallar. La captura solo-registros no necesita backend: `MEMORY_BACKEND={fallback} npm run memory:{op}`.',
+  'memory.backend.probeFailed': 'no se pudo determinar si el binario `{backend}` está presente — {reason}. Eso es la VERIFICACIÓN fallando, no el binario faltando, así que no se sustituyó nada y `{op}` sigue sobre `{backend}`. Si falla, la ruta solo-registros es `MEMORY_BACKEND={fallback} npm run memory:{op}`.',
+
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.unprovenanced': '{count} observación(es) llegaron sin bloque de provenance, así que se materializaron como `@legacy` y sin `issue` — todavía nada emite el bloque en el camino de captura (#541). Contadas, no rechazadas: rechazarlas voltearía el store que ya existe.',
   'memory.share.secretFound': 'Se detectó un secreto en {file}:{line} — coincide con el patrón "{pattern}". Eliminá el secreto o agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo. Ejecutá `gunzip -c {file} | jq .` para inspeccionar (el número de línea corresponde a esa vista formateada).',
@@ -305,6 +317,7 @@ export default {
   'memory.plainfiles.save.issueInvalid': '--issue tiene que ser un NÚMERO de issue; llegó {value}. Se guarda como entero para que el registro quede atado a su ticket.',
   'memory.plainfiles.save.typeRequired': '--type es obligatorio y no tiene default seguro — es una elección, no un dato que la herramienta pueda derivar. Uno de: {types}.',
   'memory.plainfiles.save.done':    '✓ guardado {id} → {file}',
+  'memory.plainfiles.save.indexFailed': 'el registro SÍ se escribió — {id} → {file}. Lo que falló es la reconstrucción del ÍNDICE, que lee el store entero, así que la causa casi seguro es un registro que ya estaba roto antes de esta corrida: {message}\n  NO vuelvas a correr memory:save — el registro ya está en disco, y reintentar acuña un SEGUNDO registro con un `ts` posterior, y por lo tanto otro id, que ninguna deduplicación va a colapsar jamás.\n  Repará el store y después reconstruí el índice con `npm run memory:reindex`.',
   'memory.plainfiles.save.secretFound': 'Se detectó un secreto en el registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
   'memory.save.plainfilesIgnoredOpts': 'se ignoraron la(s) opción(es) {opts} — el formato de registro de plainfiles no tiene un campo para ellas (scope/topic son conceptos exclusivos de engram); el registro se guardó igualmente.',
   'memory.plainfiles.search.empty': 'ℹ no se encontraron registros coincidentes.',

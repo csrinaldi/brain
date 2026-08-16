@@ -21,25 +21,35 @@ C1–C4); this document is the contract they implement.
 ```
 .memory/
   records/
-    2026-07.jsonl        # append-only, plaintext, one record per line
-    2026-06.jsonl
+    2026-07-rec-0004371da1717b3d.jsonl   # one record, one file, one line
+    2026-07-rec-00599b20655216d6.jsonl
+    2026-06-rec-02301d83082c52e8.jsonl
   index.jsonl            # derived, regenerable, committed — a query accelerator, never authoritative
 ```
 
-- **`records/<yyyy-mm>.jsonl`** — the **source of truth**. Append-only: a record is never
-  edited or deleted in place; corrections are new records with `supersedes`. One complete JSON
-  record per line (JSONL) — the per-line integrity is what makes union merge safe (below). A
-  record MUST occupy **exactly one physical line**: because `content` is Markdown and may contain
-  newlines, those newlines MUST be escaped (`\n`). This is a hard requirement — `merge=union` is
-  line-based, so a record spanning multiple physical lines could be split by a union merge; the
-  validator rejects any multi-line record.
+- **`records/<yyyy-mm>-<id>.jsonl`** — the **source of truth**. **One record per file** since
+  #677: the content-addressed `id` IS the filename, with the month kept as a prefix so the log
+  still sorts and greps by month. Append-only: a record is never edited or deleted in place;
+  corrections are new records with `supersedes`. A record MUST occupy **exactly one physical
+  line**: because `content` is Markdown and may contain newlines, those newlines MUST be escaped
+  (`\n`). This is a hard requirement — it is what keeps a record recoverable line-by-line, and
+  what keeps the union driver safe on the one case it still resolves; the validator rejects any
+  multi-line record.
+
+  **Readers accept both layouts, and always have.** Every reader globs `*.jsonl` under
+  `records/` and parses line by line, so a store still holding `<yyyy-mm>.jsonl` month files, a
+  store split into per-record files, and any mixture of the two read identically. `.memory/**`
+  is consumer-owned, so brain never rewrites it on upgrade: a repository moves to the new layout
+  by running `memory:split-records`, and one that does not keeps working exactly as before —
+  it just keeps the merge conflict the split removes.
 - **`index.jsonl`** — **derived** from the records and regenerable via a future `memory:reindex`.
   It is committed for zero-tool querying and as the materialized dedup surface, but it is never
   the truth. If it is lost, deleted, or conflicts, it is rebuilt from `records/`.
 
 ## The record schema (normative)
 
-Each line of a `records/<yyyy-mm>.jsonl` file is exactly one JSON object:
+Each line of a `records/<yyyy-mm>-<id>.jsonl` file — one line, since #677 — is exactly one JSON
+object:
 
 | Field | Type | Req | Meaning |
 |-------|------|-----|---------|
@@ -143,19 +153,45 @@ multi-line one is cut to its first line) — free, because `source` is hash-excl
 
 ## Concurrent-append merge policy
 
-Two branches (or two actors) appending to the same `records/<yyyy-mm>.jsonl` collide on the
-file's trailing region — a textual conflict on every merge. This is the reincarnation of the
-ADR-0002 manifest problem. It is resolved structurally:
+Two branches (or two actors) capturing memory in parallel used to collide on the trailing region
+of the same `records/<yyyy-mm>.jsonl` — a textual conflict on every merge after the first, and
+the reincarnation of the ADR-0002 manifest problem. It is resolved structurally, and since #677
+by the LAYOUT rather than by a merge driver:
 
-1. **Union merge.** `records/*.jsonl` uses git's built-in `merge=union` (declared via
-   `.gitattributes` in slice C1). Because each line is one complete record, union concatenates
-   both sides' appended lines with no conflict markers and never produces a half-record.
+1. **One record per file** (#677). A record is written to `records/<yyyy-mm>-<id>.jsonl`, so two
+   branches capturing different records write two different paths and git merges them with no
+   driver, no attribute and no configuration. There is nothing to union.
+
+   `records/*.jsonl` still carries git's built-in `merge=union` in `.gitattributes`, **demoted
+   to a convenience**: a `.gitattributes` merge driver is a LOCAL mechanism, and the merge that
+   lands work in this repository is performed by the forge's merge button, which does not apply
+   it. The old policy was therefore conflict-free everywhere except where it was needed. What
+   the attribute still earns is the one residual case below — a same-`id` pair whose bytes
+   diverge — which it turns into a two-line file the reindex deduplicates and reports instead of
+   a conflict. It must not be cited as making the log conflict-free.
+
+   **The residual conflict, named:** two branches writing the same `id` with divergent bytes are
+   the same filename with different content, and that conflicts where the driver is absent. It
+   is confined to one file holding one record, and both sides of it are the same record by
+   construction — `id` hashes the meaning. The month layout put every record in the file at the
+   mercy of the same resolution.
 2. **Content-hash `id`** (above) makes the same record identical across branches.
 3. **Dedup at reindex.** Union's one failure mode is a duplicated physical line when both
-   branches wrote the same record. Those lines are byte-identical and share an `id`, so
-   `index.jsonl` (keyed by `id`) collapses them losslessly. The JSONL stays **strictly
-   append-only** — never rewritten — which preserves union safety and a clean
-   `git log .memory/records/`. The index, not the log, is the dedup authority.
+   branches wrote the same record. Repeated lines share an `id`, so `index.jsonl` (keyed by
+   `id`) collapses them — **first-wins**, the earliest line of the earliest month file, which is
+   what the read path already resolved to — and the collapse is **REPORTED**, never silent
+   (#574/#598).
+
+   They are **not necessarily byte-identical**. `id` hashes the record's meaning and excludes
+   `source` as incidental provenance, so brain's own export→import→export returns the same `id`
+   with widened bytes. Such a pair is **divergent**: counted on its own channel and resolved
+   first-wins, never refused — refusing it would refuse records brain itself writes. See
+   `store.duplicates.test.mjs::roundtrip-divergence`.
+
+   Refusal is reserved for a line whose bytes do not hash to its own `id` (tampered or stale);
+   that gate is unchanged and fail-closed. The JSONL stays **strictly append-only** — never
+   rewritten — which preserves union safety and a clean `git log .memory/records/`. The index,
+   not the log, is the dedup authority.
 
 > A rare duplicate physical line survives in the JSONL until the next reindex. This is
 > deliberate: queries read through the index (deduped), and rewriting the log to remove a
@@ -166,14 +202,19 @@ ADR-0002 manifest problem. It is resolved structurally:
 distinct-actor conflicts but fragments the layout, complicates reindex/query with a merge-sort,
 still conflicts on same-actor-two-branches, and leaks actor identities into filenames (a
 public-repo concern). *Manual conflict resolution* reintroduces the ADR-0002 pain on a
-machine-generated log and does not scale to parallel agents. See
-ADR-0017 for the full
-comparison.
+machine-generated log and does not scale to parallel agents.
+
+**Adopted instead (#677):** *one file per record* — the shape sharding was reaching for, keyed
+by the content hash rather than by the actor. It answers every objection above: the filename is
+a hash, so no identity leaks; no merge-sort is needed, because the ids ARE the filenames and the
+index is already stable-ordered by `id`; and same-actor-two-branches does not conflict, because
+two different records are two different files. See ADR-0017 Amendment 2 for the full comparison
+and the measurements.
 
 ## `index.jsonl` — derived, regenerable, low-churn
 
 `index.jsonl` maps each `id` to its lookup metadata (`ts`, `actor`, `type`, `project`, `issue`,
-`supersedes`, and the `records/<yyyy-mm>.jsonl` file it lives in). It is:
+`supersedes`, and the `records/<yyyy-mm>-<id>.jsonl` file it lives in). It is:
 
 - **Derived** — the inverse of ADR-0002's *authoritative* manifest. The records are the truth;
   the index is rebuilt from them by `memory:reindex`. Losing or conflicting on the index is a
@@ -186,8 +227,11 @@ comparison.
   merge, making the discard+reindex fallback routine rather than rare. The conflict ergonomics
   MAY be a helper or a post-merge hook, but MUST NOT require a **custom merge driver for
   `index.jsonl`** (a per-clone `.git/config` registration — the engram-driver friction this format
-  eliminates); `records/*.jsonl` keeps the built-in `merge=union`, which needs no per-clone
-  registration. That helper is **`npm run memory:resolve-index`** (issue #330), and it is layered
+  eliminates). `records/*.jsonl` still declares the built-in `merge=union` and it needs no
+  per-clone registration — but since #677 that is not why the records log is safe: a merge
+  driver, built-in or custom, is applied by the git that performs the merge, and the forge's
+  merge button applies neither. The answer for `index.jsonl` is regeneration; the answer for
+  `records/` is the layout. That helper is **`npm run memory:resolve-index`** (issue #330), and it is layered
   in exactly that order: the command is the unit of truth and works in every clone with **zero
   installation**, while the `post-merge` hook is a thin, non-blocking caller of the same command
   and holds no resolution logic of its own.
@@ -209,12 +253,20 @@ comparison.
   It fails **closed**: if any `records/*.jsonl` carries conflict markers it refuses and leaves the
   index untouched, because the index is derived from that log and regenerating over a conflicted
   one would bake the markers in and report success.
-- **Low-churn** — `memory:reindex` / `memory:share` **MUST NOT rewrite the whole index every
-  run**. Entries are stable-ordered by `id`; a reindex adds/updates only entries for newly
+- **Low-churn** — `memory:reindex` / `memory:share` **MUST NOT produce whole-file churn in the
+  index**. Entries are stable-ordered by `id`; a reindex adds/updates only entries for newly
   appended records and leaves every other entry byte-identical, so `git diff index.jsonl` is
   proportional to the new records, not to the store size. This is the direct lesson of the
   ADR-0002 manifest churn that rewrote the full file each `memory:share` and blocked a raw
   `git pull`.
+
+  **The rule is about the DIFF, not the write.** `rebuildIndex` regenerates the whole file from
+  `records/` rather than patching it, and always has, so a literal reading of "rewrite" was never
+  satisfied by any implementation. What stays proportional is what `git diff` shows — and it
+  does, because the regenerated bytes are identical wherever the records are. The proportionality
+  holds while duplicate groups are *intra-file*: a duplicate spanning two month files moves the
+  winning entry's `file` field and produces exactly the churn this rule forbids, on a `share`
+  that appended nothing. See ADR-0017, Amendment 1 (#635).
 
 ## Public-repo exposure — stance
 

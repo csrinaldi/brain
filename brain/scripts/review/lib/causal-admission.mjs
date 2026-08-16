@@ -95,9 +95,20 @@ export async function applyCausalAdmission({
   const annotated = annotateDeterministicFindings(findings);
   const classified = classifyAgainstBase({ findings: annotated, baseProbe, probeAttempted });
   const refuterResult = await evaluateRefuter({ findings: classified.findings, runner });
+  // #552: a reasoned blocker nobody challenged is stated on the verdict, not
+  // only annotated on the finding. `conditions` is the field protocol §10 already
+  // uses for "the evidence behind this verdict is weaker than it looks", and this
+  // is that exactly — the finding-level `refuter_outcome` says WHICH one, the
+  // condition says the run as a whole had no challenger available.
+  const conditions = [...classified.conditions];
+  if (refuterResult.unchallenged > 0) {
+    conditions.push(
+      `${refuterResult.unchallenged} inferential blocker(s) were NOT challenged — no refuter runner is configured`,
+    );
+  }
   return {
     findings: refuterResult.adjustedFindings,
     escalate: refuterResult.escalate ?? escalate,
-    conditions: classified.conditions,
+    conditions,
   };
 }

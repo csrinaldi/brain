@@ -737,3 +737,62 @@ test('#483: REVISE does NOT soften to APPROVE when every finding was dropped as 
   assert.ok(v.conditions.some(c => /inadmissible/.test(c) && /2/.test(c)),
     `and the reader is told two findings vanished: ${JSON.stringify(v.conditions)}`);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #683 — the verdict declares which control classes ran
+// ═══════════════════════════════════════════════════════════════════════════
+
+const buildRendered = (over = {}) => renderVerdict(buildVerdict({
+  headSha: 'abc123', conclusion: 'APPROVE', gates: { required: [], detection: [] },
+  findings: [], ...over,
+}));
+
+test('#683: the declaration is emitted even when EMPTY — an absent key is the silence this replaces', () => {
+  const body = buildRendered({ controls: [] });
+  assert.match(body, /^controls: \[\]$/m,
+    '`controls: []` reads as "nothing declared that it ran", which is true and loud; omitting the key is neither');
+});
+
+test('#683: the declaration round-trips — bare words would not', () => {
+  // JSON-encoded on purpose: `yamlScalar('deterministic')` renders it BARE, and a
+  // bare word is not JSON, so the parser would answer UNREADABLE and the field
+  // could not survive a render→parse cycle. Measured, not reasoned about.
+  const body = buildRendered({ controls: ['deterministic', 'inferential'] });
+  assert.match(body, /^controls: \["deterministic", "inferential"\]$/m);
+  const parsed = parseVerdict({ body });
+  assert.deepEqual(parsed.controls, ['deterministic', 'inferential']);
+  assert.equal(parsed.malformed, undefined);
+});
+
+test('#683: a control class outside the vocabulary is UNREADABLE, never a value', () => {
+  // A verdict claiming a control that does not exist would be BELIEVED — strictly
+  // worse than the silence this field replaces, so it is refused at the reader too.
+  const body = [
+    '```yaml', 'protocol: brain-review/2', 'verdict: APPROVE', 'head_sha: abc123', 'rev: 1',
+    'controls: ["telepathy"]', 'escalate: null', '```',
+  ].join('\n');
+  const parsed = parseVerdict({ body });
+  assert.equal(parsed.controls, undefined);
+  assert.deepEqual(parsed.malformed, ['controls']);
+});
+
+test('#683: the declaration survives brain-review/1 — the tier that needs it MOST', () => {
+  // `/1` is what `lite` and `standard` post by default, and its findings carry no
+  // `evidence_class` at all. The statement is about the RUN, not about a finding,
+  // so it is true at both protocols and uses the one vocabulary.
+  const body = buildRendered({ protocol: 'brain-review/1', controls: ['deterministic'] });
+  assert.match(body, /^protocol: brain-review\/1$/m);
+  assert.match(body, /^controls: \["deterministic"\]$/m);
+  assert.deepEqual(parseVerdict({ body }).controls, ['deterministic']);
+});
+
+test('#683: a verdict with findings and one without declare the SAME controls', () => {
+  // The property the design exists for, at the render layer.
+  const green = buildRendered({ controls: ['deterministic'] });
+  const red = buildRendered({
+    controls: ['deterministic'], conclusion: 'REVISE',
+    findings: [{ id: 'budget', severity: 'blocker', evidence: 'over', cites: 'x' }],
+  });
+  const declared = (b) => b.split('\n').find((l) => l.startsWith('controls:'));
+  assert.equal(declared(green), declared(red));
+});
