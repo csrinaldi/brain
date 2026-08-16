@@ -38,6 +38,9 @@ import { parseVerdict } from '../../review/lib/parse-verdict.mjs';
 
 import * as github from './github.mjs';
 import * as gitlab from './gitlab.mjs';
+import { UNCOMPUTABLE_REASONS } from '../lib/uncomputable-cause.mjs';
+
+const UNCOMPUTABLE_REASON_VALUES = Object.values(UNCOMPUTABLE_REASONS);
 
 afterEach(() => setSpawn(spawnSync));
 
@@ -1195,6 +1198,12 @@ const ROLLUP_PROVIDERS = {
     module: github,
     ok: (checks) => { setSpawn(jsonSpawn({ statusCheckRollup: checks })); return {}; },
     fail: () => { setSpawn(failSpawn('fixture: simulated failure')); return {}; },
+    // A SUCCESSFUL exit (status 0) whose `statusCheckRollup` field is not an
+    // array — the structural (non-text) MALFORMED_RESPONSE cause (design
+    // §4.3). `null` here is deliberately FALSY: this is what M11 (design §7)
+    // targets — a mutation from `!Array.isArray(rollup)` to `!rollup` would
+    // fabricate `[]` for exactly this payload instead of naming the cause.
+    malformed: () => { setSpawn(jsonSpawn({ statusCheckRollup: null })); return {}; },
   },
   gitlab: {
     module: gitlab,
@@ -1206,11 +1215,20 @@ const ROLLUP_PROVIDERS = {
       ),
     }),
     fail: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
+    // A SUCCESSFUL fetch whose statuses payload is not an array — the
+    // structural (non-text) MALFORMED_RESPONSE cause (design §4.3).
+    malformed: () => ({
+      fetchImpl: async (url) => (
+        url.includes('/merge_requests/')
+          ? { ok: true, json: async () => ({ sha: 'cafef00dcafef00dcafef00dcafef00dcafef00d' }) }
+          : { ok: true, json: async () => ({ not: 'an array' }) }
+      ),
+    }),
   },
 };
 
 for (const providerName of Object.keys(ROLLUP_PROVIDERS)) {
-  const { module: vcs, ok, fail } = ROLLUP_PROVIDERS[providerName];
+  const { module: vcs, ok, fail, malformed } = ROLLUP_PROVIDERS[providerName];
 
   test(`${providerName}.prStatusRollup (contract): normalizes to [{ name, status, conclusion }], one entry per check`, async () => {
     const checks = [
@@ -1228,9 +1246,36 @@ for (const providerName of Object.keys(ROLLUP_PROVIDERS)) {
     }
   });
 
-  test(`${providerName}.prStatusRollup (contract): a fetch failure yields null, never a fabricated []`, async () => {
+  test(`${providerName}.prStatusRollup (contract): a fetch failure yields {uncomputable, reason, detail}, never null and never []`, async () => {
+    // issue #606 — the two fixtures legitimately classify DIFFERENTLY
+    // (github's invented `fixture: simulated failure` text matches no rule
+    // -> `unclassified`; gitlab's `{ok:false, status:500}` ->
+    // `GitLab API failed: 500 (...)` -> `network`), so this asserts SHAPE
+    // and VERBATIM WORDS only, never a shared `reason` value (design §3.2c).
+    const FAILURE_TEXT = { github: 'fixture: simulated failure', gitlab: 'GitLab API failed: 500' };
     const result = await vcs.prStatusRollup({ project: 'x/y', number: 1, ...fail() });
-    assert.equal(result, null, 'an uncomputable prStatusRollup fetch must return null, never []');
+    assert.equal(Array.isArray(result), false, 'a failure must never be a fabricated []');
+    assert.notEqual(result, null, 'the cause must not be discarded (#606)');
+    assert.equal(result.uncomputable, true);
+    assert.ok(Object.isFrozen(result), 'the cause object is frozen');
+    assert.ok(UNCOMPUTABLE_REASON_VALUES.includes(result.reason), `reason must be in the enum, got ${result.reason}`);
+    assert.ok(result.detail.length > 0, 'detail must never be empty');
+    assert.ok(result.detail.includes(FAILURE_TEXT[providerName]),
+      "the provider's own words must survive verbatim into detail");
+  });
+
+  test(`${providerName}.prStatusRollup (contract): a SUCCESSFUL fetch with a non-array rollup field yields {uncomputable, reason:'malformed-response'}, never a fabricated [] (#606, M11)`, async () => {
+    // Distinguishes a genuinely-empty successful rollup ([]) from a
+    // successful fetch that could not be READ as a rollup at all — the two
+    // must never collapse into the same [] (design §4.3, "the fifth fused
+    // cause").
+    const result = await vcs.prStatusRollup({ project: 'x/y', number: 1, ...malformed() });
+    assert.equal(Array.isArray(result), false, 'a malformed response must never be a fabricated []');
+    assert.notEqual(result, null);
+    assert.equal(result.uncomputable, true);
+    assert.equal(result.reason, 'malformed-response');
+    assert.ok(Object.isFrozen(result));
+    assert.ok(result.detail.length > 0, 'detail must never be empty');
   });
 
   test(`${providerName}.prStatusRollup (contract): is READ-only — no write-verb call is reachable from its source`, () => {
