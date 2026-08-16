@@ -40,6 +40,76 @@ test('#459: a fenced block of a DIFFERENT protocol is not read as a graph block'
   assert.equal(parseGraphBlock(other), null, 'three protocols share the fence primitives; only one owns this shape');
 });
 
+// ── the locator: the `protocol:` scalar, not the position (#639) ────────────
+//
+// WHAT WAS MEASURED, because the ticket's stated repro is not the defect. Its
+// headline fixture — a ```js snippet above the block — was ALREADY GREEN, and by
+// accident rather than by design: `FENCE_RE` only opens on ``` or ```yaml, so it
+// skips the tagged foreign OPENER, latches onto that block's CLOSING fence, and
+// swallows through to the graph block, where `scalar`'s `^protocol:` anchor still
+// finds the key. It is pinned below so that accident cannot silently become a
+// regression, and it is labelled as what it is.
+//
+// The shapes that were RED are the ones the locator cannot skip: an UNTAGGED
+// fence (a log excerpt — the most ordinary thing an issue body opens with) and a
+// ```yaml fence carrying another protocol.
+
+test('#639: an UNTAGGED fence above the block does not hide it — the locator reads the protocol, not the position', () => {
+  const body = ['```', 'some log excerpt', '```', '', block({ track: 'C' })].join('\n');
+  assert.deepEqual(parseGraphBlock(body), { track: 'C', needs: [], blocks: [], files: [] });
+});
+
+test('#639: a ```yaml fence of ANOTHER protocol above the block does not hide it', () => {
+  const other = '```yaml\nprotocol: brain-review/2\nverdict: APPROVE\n```';
+  const body = [other, '', block({ track: 'D', needs: [7] })].join('\n');
+  assert.deepEqual(parseGraphBlock(body), { track: 'D', needs: [7], blocks: [], files: [] });
+});
+
+test('#639: a ```js snippet above the block still parses — pinned, and it was already green', () => {
+  const body = ['Here is the failing call:', '', '```js', "requiredArtifactsFor('lite')", '```', '',
+    block({ track: 'A', blocks: [435, 94] })].join('\n');
+  assert.deepEqual(parseGraphBlock(body), { track: 'A', needs: [], blocks: [435, 94], files: [] });
+});
+
+test('#639: TWO graph blocks is an error naming the count, never a silent pick of one', () => {
+  // The rule `parseAmendmentDraft` and `parseCheckpointClaim` already hold. The old
+  // locator answered with the FIRST one and said nothing — two values for one key is
+  // ambiguity, and the reader must stop picking.
+  const r = parseGraphBlock([block({ track: 'A' }), '', 'and again', '', block({ track: 'Z' })].join('\n'));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /2 `brain-graph\/1` blocks found/);
+  assert.match(r.error, /exactly once/);
+});
+
+test('#639: an unreadable block is carried out and named — it is not an issue that declared nothing', () => {
+  const dupes = [block({ track: 'A', needs: [1] }), '', block({ track: 'Z' })].join('\n');
+  const g = buildGraph([issue(1), { number: 9, title: 'dos bloques', labels: ['status:approved'], state: 'open', body: dupes }]);
+  const n9 = g.nodes.find(n => n.number === 9);
+
+  assert.deepEqual(g.blocksUnreadable.map(b => b.number), [9]);
+  assert.match(g.blocksUnreadable[0].error, /2 `brain-graph\/1` blocks found/);
+  assert.equal(n9.status, UNCLASSIFIED, 'no source placed it — that part is honest');
+  assert.equal(n9.declared, false);
+  assert.equal(g.edges.length, 0, 'an unreadable block asserts nothing; it is not half a declaration to salvage');
+});
+
+test('#639: the summary prints the unreadable blocks, distinct from the ones that never declared', () => {
+  const dupes = [block({ track: 'A' }), '', block({ track: 'Z' })].join('\n');
+  const g = buildGraph([
+    { number: 9, title: 'dos bloques', labels: [], state: 'open', body: dupes },
+    { number: 8, title: 'sin bloque', labels: [], state: 'open', body: 'prosa' },
+  ]);
+  const out = renderSummary(g);
+
+  const ilegibles = out.match(/^.*ilegibles.*$/m)[0];
+  // Both nodes are UNCLASSIFIED, and that is right — no source placed either. What
+  // the map must not do is let "could not read what it declared" and "declared
+  // nothing" read as the same fact, so only #9 appears on this line.
+  assert.ok(ilegibles.includes('#9'));
+  assert.ok(!ilegibles.includes('#8'));
+  assert.match(out.match(/^.*Sin ubicar.*$/m)[0], /#8/);
+});
+
 // ── the classification ──────────────────────────────────────────────────────
 
 test('#459: an undeclared issue is UNCLASSIFIED, never dropped and never a free leaf', () => {
