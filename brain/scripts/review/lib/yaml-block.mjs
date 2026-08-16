@@ -53,8 +53,17 @@ export function extractFencedBlock(body) {
   return m ? m[1] : null;
 }
 
+/** Reads `key: value` from a fenced-YAML block. Three states, three
+ * answers (#612): a real value returns the trimmed capture; a bare key
+ * (`key:`) or a key line carrying ONLY whitespace after the colon
+ * (`key: `, `key:\t`) returns `null` — whitespace-only is the ABSENT
+ * state, never an empty-string value. The capture is anchored on `\S` so
+ * no leading-whitespace start position exists for it to backtrack into;
+ * `[ \t]*` (horizontal-only, NOT `\s*`) is what lets the capture skip
+ * ordinary indentation without also eating the `\n` that would otherwise
+ * let it bleed into the next line under the `m` flag (design.md §D-B). */
 export function scalar(block, key) {
-  const m = block.match(new RegExp(`^${key}:[ \\t]*(.+)$`, 'm'));
+  const m = block.match(new RegExp(`^${key}:[ \\t]*(\\S.*)$`, 'm'));
   return m ? m[1].trim() : null;
 }
 
