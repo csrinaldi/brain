@@ -25,6 +25,7 @@ import { loadBrainConfig } from '../../lib/brain-config.mjs';
 import { parseDiffNumstat } from '../../vcs/diff-size-count.mjs';
 import { REQUIRED_JOBS, DETECTION_JOBS, resolveJobSets } from '../../vcs/governance-checks.mjs';
 import { resolveTier, tierParams } from '../../vcs/governance-tiers.mjs';
+import { isUncomputable } from '../../vcs/lib/uncomputable-cause.mjs';
 
 // The diff budget is TIERED (ADR-0026 §2.C: lite 1000 · standard 400 ·
 // regulated 200) and lives in exactly one place — `tierParams(tier).diffBudget`
@@ -120,6 +121,26 @@ export const PRODUCES = Object.freeze(['deterministic']);
  *   callers that never passed it, and the finding degrades to omitting the suffix.
  * @returns {{ conclusion: 'APPROVE'|'REVISE', gates: {required:string[],detection:string[]}, findings: object[], conditions: string[] }}
  */
+// #606: the rollup now reports WHY it could not be read. This renders that
+// cause; it never decides anything. The evaluator stays provider-agnostic —
+// it knows the SHAPE (`vcs/lib/uncomputable-cause.mjs`) and not one word of
+// `gh`'s or `glab`'s vocabulary, which is ruling 2's layering: the port
+// carries, the classifier labels, this renders.
+//
+// `detail` is interpolated WHOLE and last — no truncation (design §5.5,
+// D9). Truncating it here would rebuild, in the renderer, the silence the
+// port just stopped producing — and `verdict.mjs`'s `yamlScalar` already
+// escapes newlines (#481), so a multi-line stderr cannot break the block.
+//
+// A rollup that is neither an Array nor an Uncomputable (a bare `null` from
+// one of the 13 readers still discarding its cause) keeps the ORIGINAL
+// string exactly: there is no cause to report, and inventing a
+// parenthetical would claim otherwise.
+function rollupUncomputableCondition(rollup) {
+  if (!isUncomputable(rollup)) return 'evidence uncomputable';
+  return `evidence uncomputable: required gate rollup (${rollup.reason}) — ${rollup.detail}`;
+}
+
 export function evaluateTranche({
   requiredGates = null,
   changedFiles = [],
@@ -131,14 +152,16 @@ export function evaluateTranche({
   tier = null,
 } = {}) {
   if (!Array.isArray(requiredGates)) {
-    // Uncomputable evidence (`gh` down, or the rollup fetch failed) — never
-    // APPROVE on it (protocol §10, REQ-H1-8 scenario "uncomputable evidence
-    // never approves").
+    // Uncomputable evidence — never APPROVE on it (protocol §10, REQ-H1-8
+    // scenario "uncomputable evidence never approves"). The GUARD is
+    // unchanged and stays `Array.isArray`: #606's cause object is TRUTHY,
+    // so a `!requiredGates` check would fall through into
+    // `requiredGates.map` and throw.
     return {
       conclusion: 'REVISE',
       gates: { required: [], detection: [] },
       findings: [],
-      conditions: ['evidence uncomputable'],
+      conditions: [rollupUncomputableCondition(requiredGates)],
     };
   }
 

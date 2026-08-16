@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 
 import { evaluateTranche, gatherTrancheInputs } from './tranche.mjs';
 import { REQUIRED_JOBS, DETECTION_JOBS } from '../../vcs/governance-checks.mjs';
+import { uncomputable } from '../../vcs/lib/uncomputable-cause.mjs';
 
 function greenRollup() {
   return [
@@ -55,6 +56,70 @@ test('evaluateTranche: null (uncomputable) rollup → REVISE, conditions include
   assert.equal(result.conclusion, 'REVISE');
   assert.ok(result.conditions.includes('evidence uncomputable'));
   assert.deepEqual(result.findings, []);
+});
+
+// ── #606: the rollup names its cause without moving the verdict ────────────
+
+test('evaluateTranche: a recognized-cause uncomputable rollup names the cause and quotes detail verbatim (#606)', () => {
+  const rollup = uncomputable({ detail: 'gh: API rate limit exceeded (HTTP 403)' });
+  const result = evaluateTranche({ requiredGates: rollup, changedFiles: [], budget: { lines: 0, uncomputable: false } });
+  assert.equal(result.conclusion, 'REVISE');
+  assert.equal(result.conditions.includes('evidence uncomputable'), false,
+    'the bare unexplained string must no longer appear once a cause is available');
+  assert.ok(
+    result.conditions.some(c => c.includes('rate-limited') && c.includes('gh: API rate limit exceeded (HTTP 403)')),
+    `expected a condition naming the cause and quoting the detail, got: ${JSON.stringify(result.conditions)}`,
+  );
+});
+
+test('evaluateTranche: an unclassified-cause uncomputable rollup still quotes the provider\'s words verbatim (#606)', () => {
+  const message = 'gh: the flurb subsystem declined to enumerate the rollup (HTTP 418)';
+  const rollup = uncomputable({ detail: message });
+  const result = evaluateTranche({ requiredGates: rollup, changedFiles: [], budget: { lines: 0, uncomputable: false } });
+  assert.equal(result.conclusion, 'REVISE');
+  assert.ok(
+    result.conditions.some(c => c.includes('unclassified') && c.includes(message)),
+    `expected a condition naming 'unclassified' and quoting the message, got: ${JSON.stringify(result.conditions)}`,
+  );
+});
+
+// M3b (design.md §3.2b, §7): the mutation that deletes ` — ${rollup.detail}`
+// from tranche.mjs's condition template leaves the classifier and the
+// factory perfect and STILL robs the operator of the words — the loss
+// happens in THIS renderer. This is the ONLY test that catches it; a design
+// tested only at the factory (uncomputable-cause.test.mjs) survives it.
+test("evaluateTranche: a classifier that recognises NOTHING still leaves the operator the provider's words (#606 ruling 3, M3b)", () => {
+  const ROTTABLE_CORPUS = [
+    'gh: API rate limit exceeded (HTTP 403)',
+    'gh: Bad credentials (HTTP 401)',
+    'gh: Could not resolve to a PullRequest with the number of 9999.',
+    'glab: command not found',
+    'TypeError: fetch failed',
+    'GitLab API failed: 503 (projects/x%2Fy/merge_requests/1)',
+  ];
+  for (const message of ROTTABLE_CORPUS) {
+    // A rotted classifier's ENTIRE blast radius is `reason: 'unclassified'`
+    // (design §3.1) — constructed directly here, with real corpus messages.
+    const rotted = Object.freeze({ uncomputable: true, reason: 'unclassified', detail: message });
+    const result = evaluateTranche({ requiredGates: rotted, changedFiles: [], budget: { lines: 0, uncomputable: false } });
+    assert.equal(result.conclusion, 'REVISE', 'a rotted classifier must not move the verdict');
+    assert.ok(
+      result.conditions.some(c => c.includes(message)),
+      `the provider's words must reach conditions verbatim: ${message}`,
+    );
+  }
+});
+
+// M5a (design.md §7): the guard MUST stay `Array.isArray`, never a
+// truthiness check — the #606 cause object is TRUTHY, so `!requiredGates`
+// would fall through into `requiredGates.map` and throw.
+test('evaluateTranche: a truthy non-array requiredGates never falls through to .map and throws (#606, M5a)', () => {
+  const rollup = uncomputable({ detail: 'gh: API rate limit exceeded (HTTP 403)' });
+  assert.ok(rollup, 'sanity: the uncomputable object is truthy');
+  assert.doesNotThrow(() => {
+    const result = evaluateTranche({ requiredGates: rollup, changedFiles: [], budget: { lines: 0, uncomputable: false } });
+    assert.equal(result.conclusion, 'REVISE');
+  });
 });
 
 test('evaluateTranche: budget uncomputable (no baseSha resolvable) → fail-closed REVISE, never APPROVE', () => {
