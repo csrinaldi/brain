@@ -2,6 +2,7 @@
 {"id":"rec-002eae5011281baf","ts":"2026-07-12T14:37:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-002eae5011281baf.jsonl"}
 {"id":"rec-00599b20655216d6","ts":"2026-08-11T13:58:34Z","actor":"fix/issue-516-doctrine-gate-claim","type":"discovery","project":"brain","issue":516,"file":"2026-08-rec-00599b20655216d6.jsonl"}
 {"id":"rec-005c72ebb6aad152","ts":"2026-07-25T00:48:18Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-005c72ebb6aad152.jsonl"}
+{"id":"rec-008194e8c343dfe2","ts":"2026-08-16T19:43:11Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-008194e8c343dfe2.jsonl"}
 {"id":"rec-0081ba204e97783f","ts":"2026-07-29T14:25:38Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-0081ba204e97783f.jsonl"}
 {"id":"rec-00a13d8e8c95220e","ts":"2026-07-25T21:51:00Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-00a13d8e8c95220e.jsonl"}
 {"id":"rec-00b90d3d53ebffac","ts":"2026-07-29T14:27:06Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-00b90d3d53ebffac.jsonl"}
@@ -532,6 +533,7 @@
 {"id":"rec-432a76f08d5a78b7","ts":"2026-07-12T17:47:59Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-432a76f08d5a78b7.jsonl"}
 {"id":"rec-43375f552c2036de","ts":"2026-07-29T14:26:05Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-43375f552c2036de.jsonl"}
 {"id":"rec-433aee52e4eb4e02","ts":"2026-07-25T00:45:14Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-433aee52e4eb4e02.jsonl"}
+{"id":"rec-434c02baafb6f869","ts":"2026-08-16T19:55:54Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-434c02baafb6f869.jsonl"}
 {"id":"rec-435b35ddf6a9dfea","ts":"2026-07-02T20:05:24Z","actor":"@legacy","type":"config","project":"brain","file":"2026-07-rec-435b35ddf6a9dfea.jsonl"}
 {"id":"rec-43b275e6eaa54876","ts":"2026-07-29T14:26:33Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-43b275e6eaa54876.jsonl"}
 {"id":"rec-43b543780ed5bc77","ts":"2026-07-03T13:39:57Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-43b543780ed5bc77.jsonl"}
@@ -1182,6 +1184,7 @@
 {"id":"rec-8e64016868c3b3e0","ts":"2026-07-13T00:22:03Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-8e64016868c3b3e0.jsonl"}
 {"id":"rec-8e820890dbf928b5","ts":"2026-07-29T13:59:36Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-8e820890dbf928b5.jsonl"}
 {"id":"rec-8eb12c66cd86c16b","ts":"2026-07-11T12:33:34Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-8eb12c66cd86c16b.jsonl"}
+{"id":"rec-8ec1ae9f04393fdc","ts":"2026-08-16T19:58:27Z","actor":"fix/issue-702-fixstatus-639s-locator-trades-omitted-ed","type":"decision","project":"brain","issue":702,"file":"2026-08-rec-8ec1ae9f04393fdc.jsonl"}
 {"id":"rec-8f016e9907e2ee93","ts":"2026-07-29T14:26:54Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-8f016e9907e2ee93.jsonl"}
 {"id":"rec-8f19ff4e6bc436b9","ts":"2026-07-11T12:33:54Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-8f19ff4e6bc436b9.jsonl"}
 {"id":"rec-8f1cff44b24ac322","ts":"2026-07-11T12:33:47Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-8f1cff44b24ac322.jsonl"}
@@ -1379,6 +1382,7 @@
 {"id":"rec-a5fd551eecb70e2c","ts":"2026-07-13T00:22:12Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-a5fd551eecb70e2c.jsonl"}
 {"id":"rec-a6089a36262a0575","ts":"2026-07-11T12:33:17Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-a6089a36262a0575.jsonl"}
 {"id":"rec-a6215bd92580f06e","ts":"2026-08-16T14:26:21Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-a6215bd92580f06e.jsonl"}
+{"id":"rec-a632c381ade19608","ts":"2026-08-16T19:32:05Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-a632c381ade19608.jsonl"}
 {"id":"rec-a677de8b875f475f","ts":"2026-07-18T15:58:20Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-a677de8b875f475f.jsonl"}
 {"id":"rec-a6931b7c38e911ab","ts":"2026-07-13T00:21:40Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-a6931b7c38e911ab.jsonl"}
 {"id":"rec-a6a059dc3e797474","ts":"2026-07-29T17:02:44Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-a6a059dc3e797474.jsonl"}
