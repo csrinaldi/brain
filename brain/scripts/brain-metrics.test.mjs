@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import {
   parseArgs, renderMarkdown, renderJson, detectionConclusion, extractIssueNumber, runMetrics,
 } from './brain-metrics.mjs';
+import { uncomputable } from './vcs/lib/uncomputable-cause.mjs';
 
 const METRICS_SCRIPT = new URL('./brain-metrics.mjs', import.meta.url).pathname;
 const REPO_ROOT = dirname(dirname(fileURLToPath(new URL('.', import.meta.url))));
@@ -102,6 +103,14 @@ test('detectionConclusion: maps success/failure (real-shaped UPPERCASE GraphQL e
   assert.equal(detectionConclusion(rollup, 'brain-writes-reviewed'), null);
   assert.equal(detectionConclusion(rollup, 'not-present'), null);
   assert.equal(detectionConclusion(null, 'phase-order'), null);
+});
+
+test('detectionConclusion: the #606 uncomputable rollup shape is treated exactly like the old bare null — never a truthy fall-through (no-regression guarantee)', () => {
+  // detectionConclusion() itself is NOT modified by #606 — this is a
+  // guarantee test, not a code change. `{uncomputable, reason, detail}` is
+  // truthy but !Array.isArray, so it must still return null, identical to
+  // what this returned for `rollup === null` before this change.
+  assert.equal(detectionConclusion(uncomputable({ detail: 'x' }), 'memory-gate'), null);
 });
 
 test('detectionConclusion: also accepts lowercase conclusions (defensive — some providers/fixtures may already be lowercase)', () => {

@@ -10,6 +10,7 @@ import { normalizeCommitStatus, providerState, assigneeParams, normalizeAssignee
 import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
 import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
+import { uncomputable, UNCOMPUTABLE_REASONS } from '../lib/uncomputable-cause.mjs';
 
 export const PROVIDER = 'github';
 
@@ -461,21 +462,35 @@ export async function commitStatus({ project, sha }) {
  * collapsed single status.
  *
  * Never throws: a fetch failure, or a response with no computable rollup,
- * normalizes to `null` (uncomputable) — never a fabricated `[]`, matching
- * `prReviews`/`labelEvents`.
+ * normalizes to the frozen shape `uncomputable()` builds — `reason` +
+ * `detail`, flagged (issue #606) — never bare `null` and never a fabricated
+ * `[]`. `detail` carries `gh`'s own words verbatim; `reason` is the shared
+ * classifier's advisory label (`vcs/lib/uncomputable-cause.mjs`). This file
+ * never constructs the flagged shape by hand and never writes a `reason`
+ * literal — `uncomputable()` is the sole constructor (enforced by a source
+ * guard, `uncomputable-cause.test.mjs`).
  *
  * @param {{ project?: string, number: number }} opts
- * @returns {Promise<Array<{ name: string, status: string|null, conclusion: string|null }>|null>}
+ * @returns {Promise<Array<{ name: string, status: string|null, conclusion: string|null }>|ReturnType<typeof import('../lib/uncomputable-cause.mjs').uncomputable>>}
  */
 export async function prStatusRollup({ project, number } = {}) {
   let data;
   try {
     data = ghJson(['pr', 'view', String(number), '--json', 'statusCheckRollup']);
-  } catch {
-    return null;
+  } catch (err) {
+    return uncomputable({ detail: err.message });
   }
   const rollup = data.statusCheckRollup;
-  if (!Array.isArray(rollup)) return null;
+  if (!Array.isArray(rollup)) {
+    // The fifth fused cause: the fetch SUCCEEDED and the field is not a
+    // rollup. No provider text describes this, so the reason is passed
+    // explicitly and the detail is this file's own sentence — still the
+    // words of whoever knows (design §4.3).
+    return uncomputable({
+      reason: UNCOMPUTABLE_REASONS.MALFORMED_RESPONSE,
+      detail: `gh pr view --json statusCheckRollup returned ${typeof rollup} for PR ${number}, not an array`,
+    });
+  }
   return rollup.map(c => ({
     name: c.name ?? c.context ?? null,
     status: c.status ?? c.state ?? null,

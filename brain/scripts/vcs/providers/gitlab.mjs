@@ -12,6 +12,7 @@ import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
 import { gitlabApiFetch } from '../gitlab-api.mjs';
 import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
+import { uncomputable, UNCOMPUTABLE_REASONS } from '../lib/uncomputable-cause.mjs';
 
 export const PROVIDER = 'gitlab';
 
@@ -328,11 +329,17 @@ export async function prView({ project, number, apiBase, token, proxyUrl, fetchI
  * `{ apiBase, token, proxyUrl }` are threaded in as PARAMETERS from the
  * caller, same discipline as `prView` — this file is a GATE_FILE and never
  * reads pipeline env directly. Never throws: a fetch failure, or an
- * unresolvable head sha, normalizes to `null` (uncomputable) — never a
- * fabricated `[]`.
+ * unresolvable head sha, normalizes to the frozen shape `uncomputable()`
+ * builds — `reason` + `detail`, flagged (issue #606) — never bare `null`
+ * and never a fabricated `[]`. `detail` carries the provider's own words (or
+ * this file's own sentence for a structural refusal) verbatim; `reason` is
+ * the shared classifier's advisory label (`vcs/lib/uncomputable-cause.mjs`).
+ * This file never constructs the flagged shape by hand and never writes a
+ * `reason` literal — `uncomputable()` is the sole constructor (enforced by
+ * a source guard, `uncomputable-cause.test.mjs`).
  *
  * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
- * @returns {Promise<Array<{ name: string, status: string|null, conclusion: null }>|null>}
+ * @returns {Promise<Array<{ name: string, status: string|null, conclusion: null }>|ReturnType<typeof import('../lib/uncomputable-cause.mjs').uncomputable>>}
  */
 export async function prStatusRollup({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
@@ -347,7 +354,12 @@ export async function prStatusRollup({ project, number, apiBase, token, proxyUrl
       fetchImpl,
     });
     const sha = mr.sha ?? mr.diff_refs?.head_sha ?? null;
-    if (!sha) return null;
+    if (!sha) {
+      return uncomputable({
+        reason: UNCOMPUTABLE_REASONS.MALFORMED_RESPONSE,
+        detail: `the MR ${number} payload carried neither \`sha\` nor \`diff_refs.head_sha\``,
+      });
+    }
     const statuses = await gitlabApiFetch({
       apiBase: base,
       token: tok,
@@ -355,10 +367,15 @@ export async function prStatusRollup({ project, number, apiBase, token, proxyUrl
       path: `projects/${encoded}/repository/commits/${sha}/statuses`,
       fetchImpl,
     });
-    if (!Array.isArray(statuses)) return null;
+    if (!Array.isArray(statuses)) {
+      return uncomputable({
+        reason: UNCOMPUTABLE_REASONS.MALFORMED_RESPONSE,
+        detail: `GET projects/:id/repository/commits/${sha}/statuses returned ${typeof statuses}, not an array`,
+      });
+    }
     return statuses.map(s => ({ name: s.name ?? null, status: s.status ?? null, conclusion: null }));
-  } catch {
-    return null;
+  } catch (err) {
+    return uncomputable({ detail: err.message });
   }
 }
 
