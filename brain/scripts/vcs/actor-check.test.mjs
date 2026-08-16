@@ -1601,6 +1601,100 @@ test('evaluateSignedDecision: FIELD — an unknown extra field (e.g. a future di
   assert.equal(result.admitted, true);
 });
 
+// ── #612 governance-invariance — a whitespace-only value on any of the six ──
+// `brain-decision/1` keys must not change admission, before or after the
+// `scalar()` repair (design.md §D-C, ADR-0026 Amendment 2, issue #473).
+//
+// This guard is colocated HERE, with the consumer, not in `yaml-block`'s
+// own tests: the durable risk is not "someone edits `scalar`" (the full
+// suite already catches that everywhere) — it is "someone edits ONE of
+// these gates into a form that distinguishes `''` from `null`" (`at ?? ''`,
+// a `typeof === 'string'` check that treats `''` as present). A guard
+// placed in `yaml-block`'s own tests never runs in that editor's field of
+// view; a guard next to the gates it protects does.
+//
+// `protocol`, `decision`, `head_sha`, `actor` GATE admission: a
+// whitespace-only value on any of them must never let the block admit.
+// `at`, `in_reply_to` are audit-only: a whitespace-only value must be
+// omitted (never surfaces as an empty-string value) and must never affect
+// admission either way.
+
+function decisionBodyWith(overrides) {
+  const fields = {
+    protocol: 'brain-decision/1',
+    decision: 'APPROVE',
+    head_sha: HEAD_SHA,
+    actor: 'alice',
+    at: '2026-08-07T00:00:00Z',
+    ...overrides,
+  };
+  const lines = ['```yaml'];
+  for (const key of ['protocol', 'decision', 'head_sha', 'actor', 'at', 'in_reply_to']) {
+    if (key in fields) lines.push(`${key}: ${fields[key]}`);
+  }
+  lines.push('```');
+  return lines.join('\n');
+}
+
+test('#612 governance invariance: a whitespace-only `protocol` is not addressed to this reader — silent (null), never admitted', () => {
+  // The direct pin for "sniffDecisionProtocol('protocol: ') -> null, never
+  // addressed": `sniffDecisionProtocol` is private, so this exercises it
+  // through its one caller. Before the repair `scalar` returned `''` here,
+  // which also failed `DECISION_PROTOCOL_PREFIX_RE` — same silent outcome,
+  // by a different route.
+  const body = decisionBodyWith({ protocol: ' ' });
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body }],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result, null, 'not addressed — a block with no readable protocol contributes nothing, not even a refusal note');
+});
+
+test('#612 governance invariance: a whitespace-only `decision` refuses, never admits', () => {
+  const body = decisionBodyWith({ decision: ' ' });
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body }],
+    headSha: HEAD_SHA,
+  });
+  assert.notEqual(result?.admitted, true);
+});
+
+test('#612 governance invariance: a whitespace-only `head_sha` refuses, never admits', () => {
+  const body = decisionBodyWith({ head_sha: ' ' });
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body }],
+    headSha: HEAD_SHA,
+  });
+  assert.notEqual(result?.admitted, true);
+});
+
+test('#612 governance invariance: a whitespace-only `actor` refuses, never admits', () => {
+  const body = decisionBodyWith({ actor: ' ' });
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body }],
+    headSha: HEAD_SHA,
+  });
+  assert.notEqual(result?.admitted, true);
+});
+
+test('#612 governance invariance: a whitespace-only `at` is audit-only — omitted, and admission proceeds unaffected', () => {
+  const body = decisionBodyWith({ at: ' ' });
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body }],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, true, 'a whitespace-only audit field never blocks an otherwise-valid signature');
+});
+
+test('#612 governance invariance: a whitespace-only `in_reply_to` is audit-only — omitted, and admission proceeds unaffected', () => {
+  const body = decisionBodyWith({ in_reply_to: ' ' });
+  const result = evaluateSignedDecision({
+    decisions: [{ state: 'COMMENTED', author: 'alice', body }],
+    headSha: HEAD_SHA,
+  });
+  assert.equal(result.admitted, true, 'a whitespace-only audit field never blocks an otherwise-valid signature');
+});
+
 // ── LITE_SIGNED_EVIDENCE_SOURCES — the pluggable list (design §C2) ──────────
 
 test('LITE_SIGNED_EVIDENCE_SOURCES: frozen, and its sole default member is evaluateSignedDecision', () => {

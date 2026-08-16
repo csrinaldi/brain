@@ -91,6 +91,17 @@ test('#495: a non-integer value is malformed, not absent', () => {
   assert.match(r.error, /counted_lines/);
 });
 
+test('#612: counted_lines: (whitespace-only, no value) reads as the MISSING-key error, not "got \'\'"', () => {
+  // Before #612, `scalar` captured the trailing space, so this fell through
+  // to the "must be a non-negative integer, got ''" branch below — a claim
+  // that read as malformed-but-present. `scalar` now answers `null` for a
+  // whitespace-only key line, so this is the ABSENT branch: same error text
+  // a truly missing `counted_lines:` line would produce.
+  const r = parseCheckpointClaim(report({ claim: 'counted_lines: \ndiff_budget: 400' }));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /missing the required `counted_lines:` key/);
+});
+
 test('#495: a missing key is malformed, not absent', () => {
   const r = parseCheckpointClaim(report({ claim: 'counted_lines: 213' }));
   assert.equal(r.ok, false);

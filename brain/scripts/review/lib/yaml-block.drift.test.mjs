@@ -17,6 +17,12 @@
 // value's format would exercise each protocol's own (intentionally
 // different) field validation, not the shared reading primitive this guard
 // protects.
+//
+// The value-side contract (a real value vs. a whitespace-only key line,
+// #612) lives in `yaml-block.test.mjs`, not here — every gate this file's
+// rows probe refuses `''` and `null` identically, so a trailing-space row
+// added here would pass unchanged before and after that repair and prove
+// nothing (design.md §D-E).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

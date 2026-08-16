@@ -328,20 +328,55 @@ test('#452/#478-F1: a genuinely empty list is still [] — the fix must not swal
     'key at the end of the block — genuinely empty');
 });
 
-test('#452/#478-F2: a trailing space on the key line routes to the INLINE branch — a known boundary, pinned not claimed', () => {
-  // Cold review finding 2: `scalar()`'s `^key:[ \t]*(.+)$` backtracks so `(.+)`
-  // captures the trailing space, `inline` becomes '' (non-null), the block branch
-  // is never reached, and parseJsonScalar('') throws -> null. So a key line with a
-  // trailing space returns null EVEN WITH ENTRIES under it.
-  //
-  // Pre-existing on main and NOT fixed here (the candidate repair is `(.+)` ->
-  // `(\S.*)` in `scalar`, which touches every scalar read in the block — its own
-  // change). Pinned so the state table in spec.md and the JSDoc cannot claim a
-  // completeness this parser does not have.
+test('#452/#478-F2: a trailing space on the key line no longer routes to the INLINE branch (#612)', () => {
+  // WAS a pinned defect: `scalar()`'s `^key:[ \t]*(.+)$` backtracked so `(.+)`
+  // captured the trailing space, `inline` became '' (non-null), the block branch
+  // never ran, and `findings: ` with real entries came back as malformed — two
+  // readable findings read as none. #477 deferred the repair on scope; #612
+  // landed it as `(\S.*)`, so the whitespace-only key line is now the ABSENT
+  // state and the block branch runs.
+  // This assertion is INVERTED from its original form on purpose. The direction of the
+  // change is the record; do not delete the id.
   const withSpace = parseVerdict({ body: blockWith(['findings: ', '  - id: "F-1"']) });
-  assert.equal('findings' in withSpace, false, 'documents the boundary — see #477');
+  assert.deepEqual(withSpace.findings, [{ id: 'F-1' }], 'the trailing space is now insignificant');
+  assert.equal('malformed' in withSpace, false, 'and it is not reported unreadable either');
   const clean = parseVerdict({ body: blockWith(['findings:', '  - id: "F-1"']) });
-  assert.deepEqual(clean.findings, [{ id: 'F-1' }], 'the control: without the trailing space the entries parse');
+  assert.deepEqual(clean.findings, [{ id: 'F-1' }], 'the control: the two forms now agree byte for byte');
+});
+
+test('#612: findings with a trailing space and NOTHING under it is [], the same as the byte-equivalent clean form', () => {
+  // The nothing-follows half of axis 6 (design.md §D-F): a fix that only
+  // repairs the block-scan branch's entry-reading, without repairing
+  // `scalar` itself, would pass the F2 pin above (entries present) but
+  // fail this one (no entries) — trailing whitespace is not significant
+  // in YAML, and the clean and trailing-space forms of an empty list must
+  // now agree.
+  const withSpace = parseVerdict({ body: blockWith(['findings: ']) });
+  assert.deepEqual(withSpace.findings, [], 'trailing space, no entries — genuinely empty, not unreadable');
+  assert.equal('malformed' in withSpace, false);
+});
+
+test('#612: sequencing/controls/controls_not_applied stay malformed on a whitespace-only value, unchanged by the repair', () => {
+  // Axis 11 (design.md §D-F), the negative/invariant axis: these three
+  // fields are read through `readControlList`/the inline `sequencing`
+  // reader, not through `readList`'s block-scan fallback. Their `KEY_RE`
+  // probe fires on the bare `key:` prefix regardless of what follows, and
+  // `raw !== null ? parseJsonScalar(raw) : null` already treated `''` and
+  // `null` identically (neither parses to a valid array) before this
+  // repair touched `scalar`. Pinned so a future "simplification" that
+  // drops that probe, or that special-cases whitespace-only differently,
+  // is caught here rather than silently reaching a gate.
+  const parsed = parseVerdict({
+    body: blockWith(['sequencing: ', 'controls: ', 'controls_not_applied: ']),
+  });
+  assert.deepEqual(
+    parsed.malformed?.slice().sort(),
+    ['controls', 'controls_not_applied', 'sequencing'],
+    'all three stay malformed, exactly as before the repair',
+  );
+  assert.equal('sequencing' in parsed && Array.isArray(parsed.sequencing), false);
+  assert.equal('controls' in parsed && Array.isArray(parsed.controls), false);
+  assert.equal('controls_not_applied' in parsed && Array.isArray(parsed.controls_not_applied), false);
 });
 
 // ── #478 second cold review, F1: a PARTIAL read is uncomputable too ─────────
