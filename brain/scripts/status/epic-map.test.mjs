@@ -181,15 +181,36 @@ test('#639: an unreadable block is carried out and named — it is not an issue 
   assert.match(g.blocksUnreadable[0].error, /2 `brain-graph\/1` blocks found/);
   assert.equal(n9.status, UNCLASSIFIED, 'no source placed it — that part is honest');
   assert.equal(n9.declared, false);
+});
 
-  // WHAT THIS PINS, named rather than implied (#702). The first of the two blocks
-  // declares `needs: [1]`, so a reader that silently picked it would draw the edge
-  // 1→9; and #9's own `blocks`/`needs` are the only edges either fixture could
-  // produce, since `issue(1)` declares none. A bare `edges.length === 0` with no
-  // fixture carrying an edge reads 0 under every mutation and pins nothing — the
-  // state this assertion was in when a cold review found it.
-  assert.deepEqual(g.edges, [], 'a silent pick of the first block would draw 1→9 out of it');
-  assert.ok(!g.edges.some(e => e.from === 1 && e.to === 9));
+// THE NO-SILENT-PICK PROPERTY GETS ITS OWN TEST, and that is the whole point.
+//
+// It used to ride along at the end of the test above, after an assertion on
+// `blocksUnreadable`. A cold review measured that it therefore never executed: the
+// earlier assertion threw first under every mutation that could have salvaged an
+// edge, so deleting the line changed no outcome. An assertion that cannot be the
+// failing one pins nothing, and its message told the next reader the axis was
+// guarded. Alone in a test, with `edges` as the only assertion, it fails on itself.
+test('#702: a duplicate declaration draws NO edge — a silent pick of the first would draw 1→9', () => {
+  const dupes = [block({ track: 'A', needs: [1] }), '', block({ track: 'Z' })].join('\n');
+  const g = buildGraph([issue(1), { number: 9, title: 'dos bloques', labels: ['status:approved'], state: 'open', body: dupes }]);
+
+  assert.deepEqual(g.edges, []);
+});
+
+test('#702: an open fence beside a closed one is AMBIGUITY, not a silent preference for the closed one', () => {
+  // Forgetting one backtick line must not turn a loud error into a mute answer.
+  const body = [block({ track: 'A', needs: [1] }), '', 'Revised:', '',
+    '```yaml', 'protocol: brain-graph/1', 'track: B', 'needs: [999]'].join('\n');
+  const r = parseGraphBlock(body);
+
+  assert.equal(r.ok, false);
+  assert.match(r.error, /2 `brain-graph\/1` blocks found/);
+  assert.match(r.error, /never closed/);
+
+  const g = buildGraph([issue(1), { number: 40, title: 'uno abierto', labels: ['status:approved'], state: 'open', body }]);
+  assert.deepEqual(g.edges, [], 'neither candidate is salvaged — not the closed one, not the open one');
+  assert.deepEqual(g.blocksUnreadable.map(b => b.number), [40]);
 });
 
 test('#639: the summary prints the unreadable blocks, distinct from the ones that never declared', () => {

@@ -119,25 +119,36 @@ export function parseGraphBlock(body) {
   const { blocks, unterminated } = fencedBlocks(body);
   const declared = blocks.filter(isGraphFence);
 
-  if (declared.length > 1) {
+  // A fence that never closes swallows its own block. It is attributed on the SAME
+  // two facts as a closed one, from the partial content `fencedBlocks` reports —
+  // guessing from the tag alone is impossible here, because `yaml` says nothing
+  // about which protocol was being written.
+  const open = unterminated && isGraphFence(unterminated) ? unterminated : null;
+
+  // COUNT BOTH KINDS TOGETHER. Gating the open fence on `declared.length === 0`
+  // made one closed block plus one open one prefer the closed one IN SILENCE —
+  // the same silent pick the ambiguity branch below exists to refuse, reached by
+  // the most ordinary human error there is. Forgetting one backtick line must not
+  // convert a loud error into a mute answer, so an open qualifying fence is a
+  // candidate like any other.
+  const candidates = open ? [...declared, open] : declared;
+
+  if (candidates.length > 1) {
     return {
       ok: false,
-      error: `${declared.length} \`${GRAPH_PROTOCOL}\` blocks found (body lines ${declared.map(b => b.line).join(', ')}) — an issue declares its graph exactly once.`,
+      error: `${candidates.length} \`${GRAPH_PROTOCOL}\` blocks found (body lines ${candidates.map(b => b.line).join(', ')}` +
+        `${open ? `; the one at line ${open.line} is never closed` : ''}) — an issue declares its graph exactly once.`,
     };
   }
 
-  // A fence that never closes swallows its own block. Attributed on the SAME two
-  // facts as a closed one, from the partial content `fencedBlocks` now reports
-  // (#702) — guessing from the tag alone is impossible here, because `yaml` says
-  // nothing about which protocol was being written.
-  if (declared.length === 0 && unterminated && isGraphFence(unterminated)) {
+  if (candidates.length === 1 && open) {
     return {
       ok: false,
-      error: `the \`${GRAPH_PROTOCOL}\` block opened at body line ${unterminated.line} is never closed.`,
+      error: `the \`${GRAPH_PROTOCOL}\` block opened at body line ${open.line} is never closed.`,
     };
   }
 
-  if (declared.length === 0) return null;
+  if (candidates.length === 0) return null;
 
   const block = declared[0].content;
 
