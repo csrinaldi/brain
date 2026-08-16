@@ -1,113 +1,117 @@
-# Agent Priority Handoff
+# Handoff de prioridades para agentes
 
-**Read this before picking up work on this repo.** It answers three questions a
-cold agent cannot answer from the tree alone: what is already done (so you do not
-redo it), what will *refuse* you before your first commit, and what to pick up
-next and in what order.
+**Leé esto antes de tomar trabajo en este repo.** Responde tres cosas que un agente
+frío no puede deducir del árbol: qué ya está hecho (para que no lo rehagas), qué te
+va a *rechazar* antes del primer commit, y qué tomar y en qué orden.
 
-Snapshot: `main` @ `3eff9af`, 2026-08-16 · **59 open issues · 0 open pull
-requests** · 30 signed ADRs.
+Corte: `main` @ `3eff9af`, 2026-08-16 · **59 issues abiertos · 0 pull requests
+abiertos** · 30 ADR firmados.
 
-> **This document is a snapshot, and it says so on purpose.** Every number below
-> was measured, not assumed, and every one of them can be re-derived by the
-> commands in §1. A guide that cannot tell you it has expired is the same defect
-> class this repo tracks under `evidence-reader-empty-on-failure`: silence read
-> as health. **Re-derive before you trust it.**
+> **Este documento es un snapshot, y lo dice a propósito.** Cada número de acá abajo
+> se midió, no se supuso, y todos se pueden volver a derivar con los comandos de §1.
+> Una guía que no puede avisarte que venció es la misma clase de defecto que este repo
+> rastrea como `evidence-reader-empty-on-failure`: silencio leído como salud.
+> **Re-derivá antes de confiar.**
 
 ---
 
-## 1 · Re-derive the state before trusting this file
+## 1 · Volvé a derivar el estado antes de confiar en este archivo
 
 ```bash
-git fetch origin main && git log --oneline 3eff9af..origin/main   # what landed since
-gh issue list --state open --limit 100                            # or the API
+git fetch origin main && git log --oneline 3eff9af..origin/main   # qué entró desde entonces
+gh issue list --state open --limit 100                            # o la API
 gh pr list --state open
 ```
 
-**This file is stale the moment any of these stops holding:**
+**Este archivo está vencido en cuanto alguna de estas deje de valer:**
 
-| Invariant when written | How to check it |
+| Invariante al escribirlo | Cómo verificarla |
 |---|---|
-| `main` is at `3eff9af` | `git rev-parse --short origin/main` |
-| 59 issues open, 0 PRs open | issue/PR list |
-| `@logikas/brain` unpublished | `curl -so/dev/null -w '%{http_code}' https://registry.npmjs.org/@logikas%2Fbrain` → `404` |
-| Exactly one signed ADR is malformed | §3, the one-liner |
+| `main` está en `3eff9af` | `git rev-parse --short origin/main` |
+| 59 issues abiertos, 0 PR abiertos | listado de issues/PR |
+| `@logikas/brain` sin publicar | `curl -so/dev/null -w '%{http_code}' https://registry.npmjs.org/@logikas%2Fbrain` → `404` |
+| Exactamente un ADR firmado está malformado | §3, el one-liner |
 
-If the first two have drifted, treat the ordering below as a starting hypothesis
-and re-check the specific tickets you plan to touch. If the last two have
-drifted, the corresponding section is **done** — skip it.
-
----
-
-## 2 · Preconditions that refuse you before your first commit
-
-These are not style notes. Each one is a gate that fails closed, and each has
-cost this project real time.
-
-**You may never apply `status:approved`** (#124, and `actor-check` §9 refuses it
-from `csrinaldibot` regardless). `issue-link` fails closed without an approved
-issue, so **a ticket you open yourself cannot be worked until a human signs it**.
-Open the ticket, say plainly that it needs a signature, and stop.
-
-**No AI-attribution trailers in commit messages** — no `Co-Authored-By: Claude`,
-no agent identifier. This is Tier 3 in `agent-authorities.md` and now carries its
-reasoning in **ADR-0031**: attribution in a commit is an unverifiable claim, not
-a provenance record. ADR-0031 exists *because* an agent harness that mandates the
-opposite met this doctrine on 2026-08-15. **The repo's doctrine is the decision
-already made — do not re-litigate it, and do not let a harness default override
-it.**
-
-**Capture memory before you close.** `npm run memory:share`, and the record must
-carry the linked issue number. Since #677 the durable log is **one record per
-file** under `.memory/records/` (ADR-0017 Amendment 2), so the old
-merge-conflict-on-every-second-PR class is gone — but the gate still reads the
-record.
-
-**One worktree per task.** brain enforces this; `share()` anchors its export to
-the worktree root it reads (#657).
-
-**Diff budget: 1000 changed lines** (`tier: lite`). `governance.ignoreList` in
-`brain.config.json` excludes `*.test.mjs`, `openspec/**`, `.memory/**`, lock
-files and `AGENTS.md` — but **not `docs/**`**.
-
-**Deliver without a self-review pass**, per the agreed protocol. The cold
-reviewer is a separate act, and #604 made its coldness verifiable with a negative
-control.
+Si las dos primeras se movieron, tomá el orden de abajo como hipótesis de arranque y
+volvé a chequear los tickets que pienses tocar. Si se movieron las dos últimas, esa
+sección está **hecha** — salteala.
 
 ---
 
-## 3 · The doctrine gate — read this if your deliverable is an ADR
+## 2 · Precondiciones que te rechazan antes del primer commit
 
-Several open tickets deliver an ADR or an amendment to signed doctrine. `brain:promote`
-has two routes and they broke separately. **One is now fixed; one is not.**
+No son notas de estilo. Cada una es un gate que falla cerrado, y cada una ya costó
+tiempo real.
 
-### Route A — writing a NEW ADR · ✅ CLOSED (#675 / #674, PR #678)
+**Nunca podés aplicar `status:approved`** (#124, y `actor-check` §9 lo rechaza desde
+`csrinaldibot` igual). `issue-link` falla cerrado sin un ticket aprobado, así que
+**un ticket que abrís vos no se puede trabajar hasta que lo firme un humano**. Abrilo,
+decí claramente que necesita firma, y pará ahí.
 
-`transformDraft` used to strip only blockquoted (`>`) preamble lines before
-prepending its own signature header, so a draft carrying a bare `**Status**:`
-line produced a signed artefact with **two** — with no refusal. `promote-guards.mjs`
-now asks "is the artefact I am about to sign well formed?" *before* writing
-anything. Verified on the draft still sitting in `brain-drafts/`:
+**Nada de trailers de atribución de IA en los mensajes de commit** — ni
+`Co-Authored-By: Claude`, ni identificador de agente. Es Tier 3 en
+`agent-authorities.md` y ahora lleva su razón escrita en **ADR-0031**: la atribución en
+un commit es un reclamo inverificable, no un registro de procedencia. ADR-0031 existe
+*porque* un harness de agente que manda lo contrario chocó con esta doctrina el
+2026-08-15. **La doctrina del repo es la decisión ya tomada — no la vuelvas a discutir,
+y no dejes que un default del harness la pise.**
+
+**Capturá memoria antes de cerrar.** `npm run memory:save` con el número de issue en el
+record. Desde #677 el log durable es **un record por archivo** bajo `.memory/records/`
+(ADR-0017 Amendment 2), así que la vieja clase de conflicto en cada segundo PR
+desapareció — pero el gate igual lee el record.
+
+**Un worktree por tarea.** brain lo obliga; `share()` ancla su export a la raíz del
+worktree que lee (#657).
+
+**Presupuesto de diff: 1000 líneas cambiadas** (`tier: lite`). El `governance.ignoreList`
+de `brain.config.json` excluye `*.test.mjs`, `openspec/**`, `.memory/**`, los lock files
+y `AGENTS.md` — **pero no `docs/**`**.
+
+**Entregá sin pasada de auto-revisión**, según el protocolo acordado. La revisión fría
+es un acto separado, y #604 la volvió verificable con un control negativo.
+
+**No cites doctrina que no existe.** `test/adr-citation-resolves.e2e.test.mjs` lee cada
+`ADR-NNNN` en forma canónica en todo archivo versionado y exige que resuelva a un
+archivo en `brain/project/decisions/`. Tiene dos registros de excepciones y ambos se
+chequean por obsolescencia. **Agregarte a esa lista para pasar es la protección
+aparente que #499 existe para rechazar** — si tu texto necesita hablar de un ADR que
+todavía no está escrito, apuntá al draft real o al hueco de numeración, no a un puntero
+que no resuelve.
+
+---
+
+## 3 · La puerta de la doctrina — leé esto si tu entregable es un ADR
+
+Varios tickets abiertos entregan un ADR o una enmienda a doctrina firmada.
+`brain:promote` tiene dos rutas y se rompieron por separado. **Una ya está arreglada;
+la otra no.**
+
+### Ruta A — escribir un ADR NUEVO · ✅ CERRADA (#675 / #674, PR #678)
+
+`transformDraft` borraba del preámbulo solo las líneas en blockquote (`>`) antes de
+anteponer su propio header de firma, así que un draft con una línea `**Status**:` plana
+producía un artefacto firmado con **dos** — sin negarse. Ahora `promote-guards.mjs`
+pregunta «¿está bien formado el artefacto que estoy por firmar?» *antes* de escribir
+nada. Verificado contra el draft que sigue en `brain-drafts/`:
 
 ```
-$ # transformDraft output for brain-drafts/adr-0023-sdd-role-port.md
 ✗ single-status-line — the artefact this run would write is malformed:
     brain/project/decisions/adr-0023-sdd-role-port.md
     2 `**Status**:` line(s), expected exactly 1 (§1c act 1).
   Nothing was written and nothing was staged.
 ```
 
-**Consequence for you:** promoting a new ADR is safe again, and the refusal names
-the fix. The house shape puts the draft's status inside a blockquote the verb
-strips. `brain-drafts/adr-0023-sdd-role-port.md` still carries the bad shape and
-**will be refused until its preamble is fixed** — that is correct behaviour, not
-a blocker.
+**Qué significa para vos:** promover un ADR nuevo volvió a ser seguro, y el rechazo
+nombra el arreglo. La forma de la casa pone el status del draft dentro del blockquote
+que el verbo borra. El archivo `brain-drafts/adr-0023-sdd-role-port.md` todavía tiene
+la forma mala y **va a ser rechazado hasta que se le corrija el preámbulo** — eso es
+comportamiento correcto, no un bloqueo.
 
-### Route B — AMENDING signed doctrine · ⚠️ STILL OPEN (#676)
+### Ruta B — ENMENDAR doctrina firmada · ⚠️ SIGUE ABIERTA (#676)
 
-`applyStatusAct` (`brain/scripts/lib/amendment-draft.mjs`) refuses any target
-that does not carry exactly one `**Status**:` line. One signed ADR still fails
-that test:
+`applyStatusAct` (`brain/scripts/lib/amendment-draft.mjs`) rechaza cualquier target que
+no tenga exactamente una línea `**Status**:`. Un ADR firmado sigue fallando esa prueba:
 
 ```bash
 for f in brain/project/decisions/adr-*.md; do
@@ -116,158 +120,155 @@ done
 # 2  brain/project/decisions/adr-0029-two-sources-one-graph.md
 ```
 
-**1 of 30**, not the 2 of 30 #676 measured — ADR-0031 was repaired via
-`revert` + re-promote (`baa55b2` → `2b6142b`). ADR-0029 has been malformed on
-`main` since 2026-08-11 and **ships in the package**. It is unamendable by the
-sanctioned route, because that route is exactly what refuses it.
+**1 de 30**, no los 2 de 30 que midió #676 — el de atribución de IA se reparó con
+`revert` + re-promote (`baa55b2` → `2b6142b`). El de las dos fuentes está malformado en
+`main` desde 2026-08-11 y **shippea en el paquete**. Es inamendable por la vía
+sancionada, porque la vía sancionada es exactamente la que lo rechaza.
 
-**Consequence for you:** amending any *other* ADR works today. Amending ADR-0029
-does not, and **an agent may not repair it** — `brain/project/decisions/**` is
-Tier 3. That half of #676 is the maintainer's.
+**Qué significa para vos:** enmendar cualquier *otro* ADR funciona hoy. Ese no, y
+**un agente no puede repararlo** — `brain/project/decisions/**` es Tier 3. Esa mitad de
+#676 es del mantenedor.
 
-**#676 has an order, and it is not negotiable.** Repair ADR-0029 first, *then*
-add the structural test over all signed ADRs. The test is born red, and shipping
-a guard together with the exemption that makes it pass is the apparent protection
-`cites-resolve.test.mjs` exists to refuse (#499). The test must call
-`checkSingleStatusLine` — it now exists in `amendment-draft.mjs`, so **do not
-re-derive the rule**.
+**#676 tiene un orden, y no se negocia.** Primero la reparación, *después* el test
+estructural sobre todos los ADR firmados. El test nace rojo, y shippear un guard junto
+con la excepción que lo pone verde es la protección aparente que
+`cites-resolve.test.mjs` existe para rechazar (#499). El test tiene que llamar a
+`checkSingleStatusLine` — ya existe en `amendment-draft.mjs`, así que **no re-derives la
+regla**.
 
 ---
 
-## 4 · What just landed — do not redo this
+## 4 · Lo que acaba de entrar — no lo rehagas
 
-Between 2026-08-14 and 2026-08-16, 17 pull requests merged and 16 issues closed.
-The whole memory cluster and the whole review loop went out.
+Entre 2026-08-14 y 2026-08-16 mergearon 17 pull requests y cerraron 16 issues. Salieron
+el cluster de memoria completo y el lazo de revisión completo.
 
-| Area | Closed | What it means for you |
+| Área | Cerrado | Qué significa para vos |
 |---|---|---|
-| Memory sharing | #657 #641 #637 #636 #634 #633 #635 | `.engram/` works from any worktree; readers declare what they collapse; the 139 duplicate lines are reconciled to zero |
-| Memory merge | **#677** | **One record per file.** The `merge=union` driver is no longer load-bearing — the conflict class was removed, not survived (ADR-0017 Amendment 2) |
-| Review loop | #604 #575 #552 | Reviewer coldness is verifiable with a negative control; cold review is a *stage* with a posted outcome; the refuter fails closed |
-| Reviewer output | **#683** | Every verdict declares which classes of control ran — `conditions: []` no longer reads as "reviewed, nothing found" |
-| Promote | **#675 #674** | §3, Route A |
-| Install path | **#627 #601** | `day:start` asks the registry, not git tags; `REFUSE` protects a path on the release that first ships it |
-| Doctrine | #671 (ADR-0031) | §2, the attribution rule |
+| Compartir memoria | #657 #641 #637 #636 #634 #633 #635 | `.engram/` funciona desde cualquier worktree; los lectores declaran lo que colapsan; las 139 líneas duplicadas reconciliadas a cero |
+| Merge de memoria | **#677** | **Un record por archivo.** El driver `merge=union` dejó de ser load-bearing — la clase de conflicto se eliminó, no se sobrevivió (ADR-0017 Amendment 2) |
+| Lazo de revisión | #604 #575 #552 | La frialdad del revisor es verificable con un control negativo; la revisión fría es una *etapa* con salida posteada; el refutador falla cerrado |
+| Salida del revisor | **#683** | Todo veredicto declara qué clases de control corrieron — `conditions: []` ya no se lee como «revisado, nada encontrado» |
+| Promote | **#675 #674** | §3, Ruta A |
+| Camino de instalación | **#627 #601** | `day:start` le pregunta al registry, no a los tags de git; `REFUSE` protege un path en la release que lo estrena |
+| Doctrina | #671 (ADR-0031) | §2, la regla de atribución |
 
 ---
 
-## 5 · The four lines, and what is next in each
+## 5 · Las cuatro líneas, y qué sigue en cada una
 
-The cut is the product's value chain, not the epic's milestones: **install ·
-work · remember · manage.**
+El corte es la cadena de valor del producto, no los milestones del épico:
+**instalar · trabajar · recordar · gestionar.**
 
-### Line 1 · Installation — 10 open · *one step from done*
+### Línea 1 · Instalación — 10 abiertos · *a un paso de cerrar*
 
-The repo **is already public**, the package is `@logikas/brain` with a `files`
-allowlist, and `private` is off. Everything that can be prepared is prepared.
+El repo **ya es público**, el paquete es `@logikas/brain` con su allowlist de `files`, y
+`private` está apagado. Todo lo preparable está preparado.
 
-**#435 is the whole line, and it is not an agent task.** Measured today:
+**#435 es la línea entera, y no es tarea de agente.** Medido hoy:
 
 ```
-publish.yml workflow runs . . . 0
-registry @logikas/brain . . . . 404   (control: express → 200)
+corridas del workflow publish.yml . . . 0
+registry @logikas/brain . . . . . . . . 404   (control: express → 200)
 ```
 
-The dispatch needs `NPM_BRAIN_TOKEN` scoped to `@logikas/*` and a verified real
-install. **Only the maintainer can do it.** Everything else in the line —
-#659 #658 #647 #436 #415 #414 #643 #316 #632 — sits behind or beside it and is
-ordinary work.
+El dispatch necesita `NPM_BRAIN_TOKEN` scopeado a `@logikas/*` y un install real
+verificado. **Solo el mantenedor puede hacerlo.** Todo lo demás de la línea —
+#659 #658 #647 #436 #415 #414 #643 #316 #632 — va al lado y es trabajo ordinario.
 
-### Line 2 · Workflow — 36 open · *the largest and most structural*
+### Línea 2 · Flujo de trabajo — 36 abiertos · *la más grande y estructural*
 
-The review loop closed. What is left is one layer down: **what guarantees that
-what the loop signs is valid.**
+El lazo de revisión cerró. Lo que queda está una capa más abajo: **qué garantiza que lo
+que el lazo firma sea válido.**
 
-- **Doctrine (§3):** #676, #673.
-- **Reviewer:** #682 is the largest item in the reviewer's roadmap and **starts
-  with a ruling, not with code** — the independence axis for the challenger.
-  Its own body says the scoping is the deliverable. Then #631 #612 #606 #284 #611.
-- **SDD chain:** `#599 → #312 → #576 → #323 → #456`. Untouched for three
-  snapshots, still the only lever on the two weakest product axes, still unblocked.
-- **Ticket authority:** #545 #564 #124 #600 #588 #131.
+- **Doctrina (§3):** #676, #673.
+- **Revisor:** #682 es el ítem más grande del roadmap del revisor y **arranca con una
+  ruling, no con código** — el eje de independencia del refutador. Su propio cuerpo dice
+  que el alcance es el entregable. Después #631 #612 #606 #284 #611.
+- **Cadena SDD:** `#599 → #312 → #576 → #323 → #456`. Sin tocar en tres cortes, sigue
+  siendo la única palanca de los dos ejes más débiles del producto, y sigue desbloqueada.
+- **Autoridad de tickets:** #545 #564 #124 #600 #588 #131.
 - **Guards:** #569 #560 #559 #489 #488 #453 #603 #602 #335 #336 #348 #349 #129 #117.
-  Mutually independent — the best parallel-agent material in the repo.
+  Mutuamente independientes — el mejor material del repo para agentes en paralelo.
 
-> **#599 may not need `promote` at all.** Its step 1 says measure before writing:
-> does an SDD role port exist in the tree? **#312, which is that ticket, is still
-> open**, which points at its branch (2) — reword the two `docs/inbox/**`
-> citations or record ADR-0023 as a permanent gap. Measure before queueing it
-> behind anything.
+> **#599 puede no necesitar `promote` en absoluto.** Su paso 1 manda medir antes de
+> escribir: ¿existe un SDD role port en el árbol? **#312, que es ese ticket, sigue
+> abierto**, lo que apunta a su rama (2) — reescribir las dos citas de `docs/inbox/**` o
+> registrar el hueco de numeración como permanente. El draft sin promover vive en
+> `brain-drafts/adr-0023-sdd-role-port.md`. **Medí antes de encolarlo detrás de nada.**
 
-### Line 3 · Memory — 4 open · *the cluster is empty*
+### Línea 3 · Memoria — 4 abiertos · *el cluster quedó vacío*
 
-Seven tickets closed in two days, then #677 removed the merge-conflict class
-entirely. What remains is unrelated to sharing: #247 (→ #256, the C4 migration
-that also unblocks the Antigravity adapter), #461, #361, and #638 (i18n).
+Siete tickets cerrados en dos días, y después #677 eliminó la clase de conflicto de
+merge entera. Lo que queda no tiene que ver con compartir: #247 (→ #256, la migración C4
+que además destraba el adaptador Antigravity), #461, #361, y #638 (i18n).
 
-### Line 4 · Management — 9 open · *untouched across three snapshots*
+### Línea 4 · Management — 9 abiertos · *sin tocar en tres cortes*
 
-- **#639** breaks the instrument this line is made of: `parseGraphBlock` reads
-  the *first* fence, so a code block above the graph hides the whole node from
-  the epic map. The map lies by omission until this lands.
-- #457 (token-cost measurement) gains from an early start — the measurement
-  window only grows. 17 PRs in two days is exactly the window being wasted.
-- #280 #268 #327 · #356/#357 (Q2/Q3) · #313 (this epic) · #642 (i18n).
+- **#639** rompe el instrumento del que está hecha esta línea: `parseGraphBlock` lee la
+  *primera* fence, así que un bloque de código encima del grafo esconde el nodo entero
+  del mapa del épico. Hasta que entre, el mapa miente por omisión.
+- #457 (medición de costo en tokens) gana con arranque temprano — la ventana de medición
+  solo crece. 17 PR en dos días es exactamente la ventana que se está desperdiciando.
+- #280 #268 #327 · #356/#357 (Q2/Q3) · #313 (este épico) · #642 (i18n).
 
 ---
 
-## 6 · Suggested order
+## 6 · Orden sugerido
 
-| # | Work | Why here |
+| # | Trabajo | Por qué acá |
 |---|---|---|
-| **0** | **#435 dispatch** — *human only* | The only item that has not moved in three snapshots, and the only one nobody else can do. Everything around it is paid for |
-| **1** | **#676** — repair ADR-0029 (human), then the structural test (agent) | Malformed signed doctrine ships to consumers today, and it is unamendable by the sanctioned route. §3 |
-| **2** | **#673** | Same family: `actor-check`'s deny branch cannot distinguish "not sufficient" from "never read" — you cannot diagnose a refusal |
-| **3** | **#682 ruling** — *human* | Largest reviewer item. The independence axis must be decided before any code; `escalate: human` already works and is free, which may be the right first slice |
-| **4** | `#599 → #312 → #576 → #323 → #456` | The SDD lever. Unblocked, untouched, and the three ADRs are designed together |
-| **5** | #639 · #612 · #606 · #631 · #545 | Cheap, and each protects an instrument the rest of the work runs on |
-| **6** | #659 #658 #647 · #569 #560 #559 · #605 #642 #638 · #643 #632 | Mutually independent — parallel-agent material. Includes the i18n theme |
-| **7** | #247 → #256 · #280 · #457 · #436 #415 #414 · #335 #336 | Off the critical path; #457 gains from an early start |
+| **0** | **dispatch de #435** — *solo humano* | El único ítem que no se movió en tres cortes, y el único que nadie más puede hacer. Todo a su alrededor ya está pago |
+| **1** | **#676** — reparar el ADR (humano), después el test estructural (agente) | Doctrina firmada malformada que shippea hoy a consumidores, e inamendable por la vía sancionada. §3 |
+| **2** | **#673** | Misma familia: el deny branch de `actor-check` no distingue «no alcanza» de «nunca se leyó» — no podés diagnosticar un rechazo |
+| **3** | **ruling de #682** — *humano* | El ítem más grande del revisor. El eje de independencia va decidido antes de cualquier código; `escalate: human` ya funciona y es gratis, y puede ser el primer slice correcto |
+| **4** | `#599 → #312 → #576 → #323 → #456` | La palanca SDD. Desbloqueada, sin tocar, y las tres ADR se diseñan juntas |
+| **5** | #639 · #612 · #606 · #631 · #545 | Baratos, y cada uno protege un instrumento del que depende el resto del trabajo |
+| **6** | #659 #658 #647 · #569 #560 #559 · #605 #642 #638 · #643 #632 | Mutuamente independientes — material de paralelismo. Incluye el tema i18n |
+| **7** | #247 → #256 · #280 · #457 · #436 #415 #414 · #335 #336 | Fuera del camino crítico; #457 gana con arranque temprano |
 
-**i18n crosses three lines and is half a day total:** #605 (the SDD scaffold
-emits Spanish and never reads `docs.language`, which is `en` here — 85 of 91
-authors rewrote it by hand), #642 (`day:start`), #638 (duplicate-report strings
-live in code instead of the catalogs). All three are visible to anyone adopting
-brain, and none is hard.
-
----
-
-## 7 · What only the human can do
-
-1. **Fire the #435 publish** and close it.
-2. **Repair ADR-0029** by hand (#676 part 1) — Tier 3, and the sanctioned route
-   is the one that refuses the file.
-3. **Rule the independence axis of #682** before any code is written.
-4. **Sign 13 unapproved tickets:** #631 #600 #588 #361 #357 #356 #349 #348 #327
-   #280 #268 #129 #117. (`#588` carries `status:needs-review`, which is not a
-   signature.) Nothing here can start without it, and an agent may never apply
-   the label.
-5. **Rule #117** (Bitbucket) — closing it with the decision recorded is the
-   standing recommendation — and **ratify Q2/Q3** (#356/#357). Q2 is worth more
-   now that the repo is public.
+**i18n cruza tres líneas y es media jornada en total:** #605 (el scaffold del SDD emite
+español y nunca lee `docs.language`, que acá es `en` — 85 de 91 autores lo reescribieron
+a mano), #642 (`day:start`), #638 (los strings del reporte de duplicados viven en el
+código en vez de los catálogos). Los tres son visibles para cualquiera que adopte brain,
+y ninguno es difícil.
 
 ---
 
-## 8 · The pattern worth carrying forward
+## 7 · Lo que solo puede hacer el humano
 
-The seven tickets opened on 2026-08-15 all say one sentence in different words:
-
-> **A rule enforced only on the write path does not measure the artefacts that
-> are already there** — and a check that cannot report *why* it failed reads
-> exactly like a check that passed.
-
-That is #575's own thesis, applied to the machinery #575 left running. #676
-found it in signed ADRs, #674 in a guard whose surface excluded its subject,
-#673 in a deny branch, #683 in a verdict that could not say it was mechanical-only,
-#661 in a version check that had been inert since the package rename.
-
-When you finish a ticket here, the question that has paid off every time is not
-"does my change work?" but **"is this an incident, or a rate?"** — #676 exists
-because someone asked it about #675.
+1. **Disparar el publish de #435** y cerrarlo.
+2. **Reparar a mano el ADR malformado** (#676 parte 1) — Tier 3, y la vía sancionada es
+   la que rechaza el archivo.
+3. **Rulear el eje de independencia de #682** antes de que se escriba código.
+4. **Firmar 13 tickets sin aprobar:** #631 #600 #588 #361 #357 #356 #349 #348 #327
+   #280 #268 #129 #117. (`#588` tiene `status:needs-review`, que no es una firma.)
+   Nada de eso puede arrancar sin la firma, y un agente nunca puede aplicar la etiqueta.
+5. **Rulear #117** (Bitbucket) — cerrarlo con la decisión registrada es la recomendación
+   vigente — y **ratificar Q2/Q3** (#356/#357). Q2 vale más ahora que el repo es público.
 
 ---
 
-**Sources:** this file is derived from the GitHub API (59 issues, 0 PRs), `git log`
-over `982f544..3eff9af`, and live probes of the npm registry, the publish workflow
-and the signed ADRs on disk. Where it conflicts with #313, **#313 wins**; where it
-conflicts with the tree, **the tree wins**.
+## 8 · El patrón que conviene llevarse
+
+Los siete tickets abiertos el 2026-08-15 dicen la misma frase con distintas palabras:
+
+> **Una regla que solo se aplica en el camino de escritura no mide los artefactos que ya
+> están ahí** — y un chequeo que no puede reportar *por qué* falló se lee exactamente
+> igual que un chequeo que pasó.
+
+Es la tesis del propio #575, aplicada a la maquinaria que #575 dejó funcionando. #676 la
+encontró en ADR firmados, #674 en un guard cuya superficie excluía su sujeto, #673 en un
+deny branch, #683 en un veredicto que no podía declararse mecánico, #661 en un chequeo
+de versión inerte desde el rename del paquete.
+
+Cuando termines un ticket acá, la pregunta que rindió todas las veces no es «¿mi cambio
+funciona?» sino **«¿esto es un incidente o una tasa?»** — #676 existe porque alguien se
+la hizo sobre #675.
+
+---
+
+**Fuentes:** este archivo se derivó de la API de GitHub (59 issues, 0 PR), de `git log`
+sobre `982f544..3eff9af`, y de sondas en vivo al registry de npm, al workflow de publish
+y a los ADR firmados en disco. Donde entre en conflicto con #313, **manda #313**; donde
+entre en conflicto con el árbol, **manda el árbol**.
