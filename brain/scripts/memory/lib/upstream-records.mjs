@@ -37,18 +37,42 @@ const RECORD_NAME_RE = /^\d{4}-\d{2}-(rec-[0-9a-f]{16})\.jsonl$/;
  * `lib/brain-config.mjs`'s `loadBrainConfig()` resolves its path from the
  * MODULE's own location and takes no argument, so it cannot answer "the config
  * of this root" — which is what a seam-injectable, root-parameterised lookup
- * needs, and what the tests drive against a tmpdir. Missing or malformed reads
- * as `{}`: a config that cannot be parsed must not be an error path here, it
- * means "no stated ref", and the derived candidates take over.
+ * needs, and what the tests drive against a tmpdir.
+ *
+ * ABSENT and UNPARSEABLE are not the same answer (cold review of #708). An
+ * absent file means "no stated ref" and the derived candidates correctly take
+ * over — that is `{}`. A file that is present but cannot be read or parsed
+ * means "could not look", and collapsing that to `{}` is exactly the
+ * `evidence-reader-empty-on-failure` failure this module cites below: an
+ * operator who states `memory.upstreamRef` and then breaks the JSON would
+ * SILENTLY get `origin/HEAD` with `stated: false`. So it THROWS, mirroring
+ * `lib/brain-config.mjs#loadBrainConfig`'s own parse refusal, and
+ * `resolveUpstreamRef` turns that throw into a NAMED `configError` carried on
+ * the result — loud, never silent, and never a stop (see `resolveUpstreamRef`).
+ *
+ * The parse wrapper says "could not be parsed", not "is not valid JSON": the
+ * `JSON.parse` message it wraps already ENDS in "is not valid JSON", and the
+ * operator read the phrase twice in one line (cold review round 2 of #701).
  *
  * @param {string} root
  * @returns {object}
+ * @throws {Error} when `brain.config.json` exists but cannot be read or parsed
  */
 function loadBrainConfigAt(root) {
+  const path = join(root, 'brain.config.json');
+  let raw;
   try {
-    return JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
-  } catch {
-    return {};
+    raw = readFileSync(path, 'utf8');
+  } catch (err) {
+    // ENOENT is the ONE "there is nothing to read" case. Every other read
+    // failure (a directory, a permission error) is "could not look".
+    if (err?.code === 'ENOENT') return {};
+    throw new Error(`brain.config.json at ${root} could not be read: ${err.message}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`brain.config.json at ${root} could not be parsed: ${err.message}`);
   }
 }
 
@@ -85,14 +109,62 @@ function refResolves(ref, root, _spawn) {
  * owns the key, so one definition serves every call site and a future one
  * cannot forget to pass it. Tests still inject `config` explicitly, and passing
  * `{}` still means "no stated ref" — only `undefined`/omitted triggers the read.
+ * Every wrapper in this module's call chain therefore leaves `config`
+ * UNDEFAULTED: an intervening `config = {}` is not nullish, so it would defeat
+ * the `??` and leave level 2 dead exactly as it was before the default existed.
+ *
+ * An UNREADABLE `brain.config.json` (present, but unparseable, or a directory)
+ * is REPORTED — a `configError` string travels on every result derived past it,
+ * all the way to the operator — and resolution then CONTINUES to levels 3-4.
+ * It does not stop.
+ *
+ * That is a deliberate correction of the first attempt (cold review round 2 of
+ * #701), which stopped at level 2 with `stated: true, resolved: false` against a
+ * pseudo-ref. The config is ONE of four levels, and levels 3-4 stay perfectly
+ * answerable when it is broken. Stopping meant a repo whose config is corrupt
+ * and **never stated `memory.upstreamRef` at all** — the common case, since the
+ * key is an optional escape hatch — lost upstream scoping entirely: the #701
+ * pre-commit gate stopped refusing byte-identical restages, and the exporter
+ * re-wrote every candidate. Measured end to end against real git: a conflict-
+ * markered `brain.config.json` with no `memory` key at all turned the gate's
+ * `exit=1` into `exit=0`. The window that lands in is the worst one — conflict
+ * markers mean you are mid-merge, which is exactly when the dedup gate earns
+ * its keep.
+ *
+ * The `evidence-reader-empty-on-failure` guarantee the first attempt was reaching
+ * for is kept by the REPORT, not by the stop: "could not look at the config" is
+ * never collapsed to "the config stated nothing". A stated ref that IS readable
+ * and does NOT resolve still stops at `stated: true, resolved: false` — that is
+ * a different fact (the operator's own ref was honored and failed) and is
+ * unchanged.
+ *
+ * The env level is read FIRST, BEFORE the config, and that order is load-bearing
+ * on its own: a broken config must not disable `BRAIN_MEMORY_UPSTREAM_REF`, the
+ * escape hatch an operator would reach for to work around it.
  *
  * @param {object} args
  * @param {string} args.root
  * @param {object} [args.env]     Defaults to `process.env`; a plain object in tests.
  * @param {object} [args.config]  Parsed `brain.config.json`. Omitted → read from `root`.
  * @param {typeof spawnSync} [args._spawn]
- * @param {(root: string) => object} [args._loadConfig]
- * @returns {{ref: string, stated: boolean, resolved: boolean}}
+ * @param {(root: string) => object} [args._loadConfig]  Omitted → `loadBrainConfigAt`.
+ * @returns {{ref: string|null, stated: boolean, resolved: boolean, configError?: string}}
+ *   `ref` is the ref that was USED, and it is `null` when none was — the last
+ *   line returns no name rather than inventing one. It USED to return the string
+ *   `'origin/main'` there, and that fabrication is what let the operator be told
+ *   "the upstream base was derived as origin/main instead" on a run where
+ *   nothing had been derived (cold review round 2 of #701) and then needed a
+ *   second field to disambiguate (round 4). `ref == null` IS the discriminator.
+ *
+ *   A STATED ref that does not resolve is still reported BY NAME with
+ *   `resolved: false` — it was honored and it failed, which is a different fact
+ *   from "nothing answered", and the operator needs to see which ref they asked
+ *   for. So `resolved` is not derivable from `ref` and both are returned.
+ *
+ *   `configError` is present ONLY when `brain.config.json` could not be read.
+ *   It only ever co-occurs with `stated: false` (a throw leaves `cfg` undefined,
+ *   so there is no stated ref), which is why `ref == null` reads as "no derived
+ *   candidate answered" on every result that carries one.
  */
 export function resolveUpstreamRef({
   root,
@@ -101,15 +173,31 @@ export function resolveUpstreamRef({
   _spawn = spawnSync,
   _loadConfig = loadBrainConfigAt,
 }) {
-  const cfg = config ?? _loadConfig(root);
-  const statedRef = env?.BRAIN_MEMORY_UPSTREAM_REF || cfg?.memory?.upstreamRef;
+  const envRef = env?.BRAIN_MEMORY_UPSTREAM_REF;
+  if (envRef) {
+    return { ref: envRef, stated: true, resolved: refResolves(envRef, root, _spawn) };
+  }
+
+  let cfg;
+  let configError;
+  try {
+    cfg = config ?? _loadConfig(root);
+  } catch (err) {
+    // `cfg` stays undefined, so `statedRef` below is undefined and the derived
+    // candidates take over — carrying the named failure with them.
+    configError = err.message;
+  }
+
+  const statedRef = cfg?.memory?.upstreamRef;
   if (statedRef) {
     return { ref: statedRef, stated: true, resolved: refResolves(statedRef, root, _spawn) };
   }
+  const carry = configError === undefined ? {} : { configError };
   for (const ref of ['origin/HEAD', 'origin/main']) {
-    if (refResolves(ref, root, _spawn)) return { ref, stated: false, resolved: true };
+    if (refResolves(ref, root, _spawn)) return { ref, stated: false, resolved: true, ...carry };
   }
-  return { ref: 'origin/main', stated: false, resolved: false };
+  // No ref answered, so there is no ref to name. See this function's `@returns`.
+  return { ref: null, stated: false, resolved: false, ...carry };
 }
 
 /**
@@ -170,18 +258,56 @@ export function parseLsTree(text) {
  * @param {object} args
  * @param {string} args.root
  * @param {object} [args.env]
- * @param {object} [args.config]
+ * @param {object} [args.config]  Parsed `brain.config.json`. **Deliberately undefaulted**:
+ *   omitted → `resolveUpstreamRef` reads it from `root`, and a `= {}` here would be
+ *   non-nullish, defeating that read and leaving `memory.upstreamRef` dead in production.
  * @param {typeof spawnSync} [args._spawn]
- * @returns {{ok:true, ref:string, stated:boolean, byId:Map<string,string>, byPath:Map<string,string>, unnamed:string[]}
- *          |{ok:false, ref:string, stated:boolean, reason:string}}
+ * @param {(root: string) => object} [args._loadConfig]  Forwarded to `resolveUpstreamRef`
+ *   so the config read is injectable at the layer production actually calls.
+ * @returns {{ok:true, ref:string, stated:boolean, byId:Map<string,string>, byPath:Map<string,string>, unnamed:string[], configError?:string}
+ *          |{ok:false, ref:string|null, stated:boolean, reason:string, configError?:string}}
+ *   `ref` is non-null on the `ok:true` arm by construction (the `ls-tree` below
+ *   only runs against a ref that resolved). On `ok:false` it is `null` exactly
+ *   when no ref answered — `resolveUpstreamRef`'s discriminator, forwarded, and
+ *   the reason no extra "did a ref resolve" field is needed here.
+ *
+ *   `configError` rides on BOTH arms: an unreadable `brain.config.json` no longer
+ *   stops resolution (see `resolveUpstreamRef`), so the lookup can succeed against
+ *   a derived ref while the operator still has to be told the config was skipped.
+ *   Callers MUST surface it — a fall-through that is not reported is the silent
+ *   override the STATED split exists to prevent.
+ *
+ *   `reason` NAMES THE REF whenever one is involved, because the consumers'
+ *   catalog wrappers no longer interpolate it: on a run where nothing resolved
+ *   there is no ref to interpolate, and a wrapper that names one anyway is the
+ *   round-3 falsehood. It does NOT restate `configError` — it used to prefix it,
+ *   which printed the identical sentence to the operator twice, once from the
+ *   dedicated `configError` line every consumer already emits and once inside
+ *   this one (cold review round 2 of #701).
  */
-export function upstreamRecordEntries({ root, env = process.env, config = {}, _spawn = spawnSync } = {}) {
-  const { ref, stated, resolved } = resolveUpstreamRef({ root, env, config, _spawn });
+export function upstreamRecordEntries({
+  root,
+  env = process.env,
+  config,
+  _spawn = spawnSync,
+  _loadConfig = loadBrainConfigAt,
+} = {}) {
+  const { ref, stated, resolved, configError } = resolveUpstreamRef({ root, env, config, _spawn, _loadConfig });
+  const carry = configError === undefined ? {} : { configError };
   if (!resolved) {
+    // No "— writing every candidate this run (pre-#701 behaviour)" tail. That
+    // clause described the EXPORTER's degradation, and `reason` is read by two
+    // consumers: `memory:share`, whose own catalog wrapper already says "This
+    // run wrote every candidate (the pre-#701 behaviour); nothing was scoped."
+    // immediately after — the identical sentence twice, consecutively, in one
+    // printed line — and the pre-commit gate, which WRITES NOTHING, so the
+    // clause was outright false there and its wrapper contradicted it one clause
+    // later: "Nothing was refused; this run could not ask the question."
+    // Each consumer states its own degradation; `reason` states the fact.
     const reason = stated
-      ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef) — writing every candidate this run (pre-#701 behaviour)`
-      : `no upstream ref resolved (tried origin/HEAD, origin/main) — writing every candidate this run (pre-#701 behaviour)`;
-    return { ok: false, ref, stated, reason };
+      ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef)`
+      : `no upstream ref resolved (tried origin/HEAD, origin/main)`;
+    return { ok: false, ref, stated, reason, ...carry };
   }
 
   let result;
@@ -192,16 +318,16 @@ export function upstreamRecordEntries({ root, env = process.env, config = {}, _s
       maxBuffer: 1e9,
     });
   } catch (err) {
-    return { ok: false, ref, stated, reason: `git ls-tree threw — ${err.message}` };
+    return { ok: false, ref, stated, reason: `git ls-tree against '${ref}' threw — ${err.message}`, ...carry };
   }
   if (result?.error) {
-    return { ok: false, ref, stated, reason: `git ls-tree could not run — ${result.error.message}` };
+    return { ok: false, ref, stated, reason: `git ls-tree against '${ref}' could not run — ${result.error.message}`, ...carry };
   }
   if (typeof result?.status !== 'number' || result.status !== 0) {
     const detail = result?.stderr ? ` — ${String(result.stderr).trim()}` : '';
-    return { ok: false, ref, stated, reason: `git ls-tree exited ${result?.status ?? 'with no status'}${detail}` };
+    return { ok: false, ref, stated, reason: `git ls-tree against '${ref}' exited ${result?.status ?? 'with no status'}${detail}`, ...carry };
   }
 
   const { byId, byPath, unnamed } = parseLsTree(result.stdout ?? '');
-  return { ok: true, ref, stated, byId, byPath, unnamed };
+  return { ok: true, ref, stated, byId, byPath, unnamed, ...carry };
 }

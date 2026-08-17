@@ -8,8 +8,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { evaluateStagedRecords, parseStagedDiff } from './staged-records-check.mjs';
+import { evaluateStagedRecords, parseStagedDiff, runStagedRecordsCheck } from './staged-records-check.mjs';
 
 const ZERO = '0'.repeat(40);
 const OID_A = 'a'.repeat(40);
@@ -108,8 +111,10 @@ test('parseStagedDiff: a deleted file (dst is the zero oid)', () => {
 // the code under it was backwards: it kept the SOURCE and discarded the
 // destination, calling the destination "the old path". Found by cold review of
 // #707, and it broke the gate in BOTH directions — a byte-identical restage was
-// allowed whenever git paired it with an unrelated record deletion, and a
-// legitimate `git mv` was refused while naming the file being deleted.
+// allowed whenever git paired it with a record deletion, and a legitimate
+// `git mv` was refused while naming the file being deleted. (Not "an UNRELATED
+// deletion": git pairs on byte similarity, and two real same-session records
+// are measurably not similar enough to pair — see the module's own note.)
 //
 // The axis these tests add is STATUS: every fixture above is A/M/D, none is
 // R or C, so nothing distinguished "took the right token" from "took a token".
@@ -159,4 +164,143 @@ test('parseStagedDiff: empty text yields no entries', () => {
 
 test('parseStagedDiff: garbage never throws', () => {
   assert.doesNotThrow(() => parseStagedDiff('garbage\0more garbage\0'));
+});
+
+// ---------------------------------------------------------------------------
+// runStagedRecordsCheck — the config LEVEL reaches the upstream lookup.
+//
+// This is the SECOND of the two entry points that defaulted `config = {}` and
+// so killed `upstream-records.mjs`'s "omitted → read from root" contract (cold
+// review of #708). It is exercised with the REAL `upstreamRecordEntries`
+// (only git and the staged diff are faked), because a stubbed
+// `_upstreamRecordEntries` would prove the argument was passed and nothing
+// about whether it is honored.
+// ---------------------------------------------------------------------------
+
+/**
+ * A tmpdir removed when the test ends — the convention
+ * `staged-records-check.integration.test.mjs:35-43` already follows. Without it
+ * this file leaks one directory per run (cold review round 2 of #701).
+ */
+function tmpRoot(t, configText) {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-staged-records-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  if (configText !== undefined) writeFileSync(join(dir, 'brain.config.json'), configText);
+  return dir;
+}
+
+test('runStagedRecordsCheck: memory.upstreamRef is read from root when config is omitted', (t) => {
+  const root = tmpRoot(t, JSON.stringify({ memory: { upstreamRef: 'origin/stated-by-config' } }));
+
+  const r = runStagedRecordsCheck({
+    root,
+    env: {},
+    // origin/HEAD WOULD resolve — a stated ref must not fall through to it.
+    _spawn: (bin, args) => {
+      if (args[0] === 'rev-parse') {
+        const ref = args[3]?.replace(/\^\{tree\}$/, '');
+        return { status: ['origin/HEAD', 'origin/main'].includes(ref) ? 0 : 1 };
+      }
+      return { status: 0, stdout: '' };
+    },
+    _stagedRecordDiff: () => ({ ok: true, staged: [] }),
+  });
+
+  assert.equal(r.level, 'pass', 'an unresolvable upstream never blocks — the gate degrades open');
+  assert.match(r.note, /origin\/stated-by-config/, 'the config-stated ref must reach the upstream lookup');
+});
+
+test('runStagedRecordsCheck: _loadConfig is injectable through the wrapper', () => {
+  const r = runStagedRecordsCheck({
+    root: '/fake',
+    env: {},
+    _loadConfig: () => ({ memory: { upstreamRef: 'origin/injected-by-seam' } }),
+    _spawn: () => ({ status: 1 }),
+    _stagedRecordDiff: () => ({ ok: true, staged: [] }),
+  });
+  assert.equal(r.level, 'pass');
+  assert.match(r.note, /origin\/injected-by-seam/);
+});
+
+// ---------------------------------------------------------------------------
+// A CORRUPT brain.config.json must not disarm the gate (cold review round 2 of
+// #701). The window this lands in is the worst one: conflict markers in
+// `brain.config.json` mean you are mid-merge, and committing merged
+// `.memory/records/` mid-merge is exactly when this gate earns its keep. The
+// scenario is the COMMON one — a config that never stated `memory.upstreamRef`
+// at all, because the key is an optional escape hatch.
+// ---------------------------------------------------------------------------
+
+const IDENTICAL_OID = 'a'.repeat(40);
+const RECORD_PATH = '.memory/records/2026-08-rec-0123456789abcdef.jsonl';
+
+/** Resolves the named refs; answers ls-tree with one record already upstream. */
+function gitWithUpstreamRecord(resolvesFor) {
+  return (bin, args) => {
+    if (args[0] === 'rev-parse') {
+      const ref = args[3]?.replace(/\^\{tree\}$/, '');
+      return { status: resolvesFor.includes(ref) ? 0 : 1 };
+    }
+    return { status: 0, stdout: `100644 blob ${IDENTICAL_OID}\t${RECORD_PATH}\0` };
+  };
+}
+
+test('runStagedRecordsCheck: a CORRUPT brain.config.json that never stated a ref still REFUSES a byte-identical restage', (t) => {
+  const root = tmpRoot(t, '<<<<<<< HEAD\n{"project":{"slug":"brain"}}\n=======');
+
+  const r = runStagedRecordsCheck({
+    root,
+    env: {},
+    _spawn: gitWithUpstreamRecord(['origin/HEAD', 'origin/main']),
+    _stagedRecordDiff: () => ({ ok: true, staged: [{ path: RECORD_PATH, dstOid: IDENTICAL_OID, status: 'A' }] }),
+  });
+
+  assert.equal(r.level, 'fail', 'origin/HEAD is still perfectly answerable — a broken config must not cost the gate its scope');
+  assert.deepEqual(r.offending, [RECORD_PATH]);
+});
+
+test('runStagedRecordsCheck: the corrupt config is still REPORTED alongside that refusal — configError is a separate channel from note', (t) => {
+  const root = tmpRoot(t, '<<<<<<< HEAD\n{"project":{"slug":"brain"}}\n=======');
+
+  const r = runStagedRecordsCheck({
+    root,
+    env: {},
+    _spawn: gitWithUpstreamRecord(['origin/HEAD', 'origin/main']),
+    _stagedRecordDiff: () => ({ ok: true, staged: [{ path: RECORD_PATH, dstOid: IDENTICAL_OID, status: 'A' }] }),
+  });
+
+  assert.match(r.configError, /could not be parsed/, 'the operator must learn the config was skipped');
+  assert.equal(r.ref, 'origin/HEAD', 'and which ref answered instead');
+  assert.equal(r.note, undefined, '`note` says "nothing was judged" — printing it over a real refusal would be a lie');
+});
+
+test('evaluateStagedRecords: configError travels on the ok:false arm too — it is not tied to a successful lookup', () => {
+  const r = evaluateStagedRecords({
+    staged: [{ path: RECORD_PATH, dstOid: IDENTICAL_OID, status: 'A' }],
+    // `ref: null` is the real shape of "nothing resolved" (`upstream-records.mjs`
+    // returns no name for a run in which no name was used). It is forwarded as
+    // `null` rather than dropped, because `main()` reads it to choose which of
+    // the two config-unreadable messages is true.
+    upstream: { ok: false, ref: null, stated: false, reason: 'nothing resolved', configError: 'config broke' },
+  });
+  assert.equal(r.level, 'pass');
+  assert.equal(r.configError, 'config broke');
+  assert.equal(r.ref, null);
+});
+
+test('evaluateStagedRecords: a resolved ref on the ok:false arm IS forwarded — ls-tree can fail against a real base', () => {
+  const r = evaluateStagedRecords({
+    staged: [],
+    upstream: { ok: false, ref: 'origin/HEAD', stated: false, reason: 'git ls-tree against \'origin/HEAD\' exited 128', configError: 'config broke' },
+  });
+  assert.equal(r.ref, 'origin/HEAD', 'ok:false does not mean "no ref" — a `null` here would lose the base that was used');
+});
+
+test('evaluateStagedRecords: a healthy upstream carries no configError — the field is evidence, not decoration', () => {
+  const r = evaluateStagedRecords({
+    staged: [],
+    upstream: { ok: true, ref: 'origin/HEAD', stated: false, byPath: new Map() },
+  });
+  assert.equal(r.configError, undefined);
+  assert.equal(r.ref, undefined);
 });

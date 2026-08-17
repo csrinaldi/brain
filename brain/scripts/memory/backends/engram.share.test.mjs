@@ -728,9 +728,20 @@ test('dualWriteRecords: skipped/rejected/errored observations are ALL accounted 
     // `dualWriteRecords.test.mjs`'s deliberate test covers the injected case.
     upstreamScope: {
       applied: false,
-      ref: 'origin/main',
+      // `null`, not `'origin/main'`: nothing resolved on this root, so there is
+      // no ref to report. It USED to be the string, and every consumer that
+      // printed it named a base that had answered nothing (cold review round 3).
+      ref: null,
       stated: false,
-      reason: 'no upstream ref resolved (tried origin/HEAD, origin/main) — writing every candidate this run (pre-#701 behaviour)',
+      // No "— writing every candidate this run (pre-#701 behaviour)" tail: the
+      // cli wrapper for this exact field says the same thing in the same printed
+      // line, and the pre-commit gate — the other consumer — writes nothing at
+      // all, so the clause was false there.
+      reason: 'no upstream ref resolved (tried origin/HEAD, origin/main)',
+      // `null`, not absent: `brain.config.json` was ABSENT here, which is a
+      // clean "no stated ref", not a failed read. The field is only a string
+      // when the config existed and could not be read (cold review round 2).
+      configError: null,
       entries: 0,
       unnamed: 0,
     },

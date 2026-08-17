@@ -85,6 +85,71 @@ resolution test. Levels 3-4 exist so a fork, a `master` trunk, or a consumer who
 default is not `main` works without configuration. Levels 1-2 exist as the escape hatch for
 the case named below.
 
+**The levels are read strictly in order, and level 1 is read BEFORE level 2 — that ordering
+is load-bearing on its own**, not merely a consequence of "first one that resolves wins".
+A `brain.config.json` that cannot be read must not disable `BRAIN_MEMORY_UPSTREAM_REF`,
+because the env var is precisely the escape hatch an operator reaches for to work around a
+broken config. Reading the config first would put the workaround behind the thing it works
+around.
+
+**Every outcome, including the ones no stated ref covers:**
+
+| situation | ref reported | `stated` | result | what the operator is told |
+|---|---|---|---|---|
+| a stated ref (level 1 or 2) resolves&nbsp;† | that ref | `true` | `ok: true` | nothing — it worked |
+| a stated ref does **not** resolve | that ref | `true` | `ok: false` | the ref they named, and that it does not resolve |
+| no stated ref; a derived ref resolves&nbsp;† | `origin/HEAD` or `origin/main` | `false` | `ok: true` | nothing — it worked |
+| no stated ref; nothing resolves | **`null`** | `false` | `ok: false` | which refs were tried |
+| config **unreadable**, a derived ref then answers&nbsp;† | that derived ref | `false` | `ok: true` | a `configError` naming the read failure, **plus** which derived ref was used instead |
+| config **unreadable**, and nothing resolves either | **`null`** | `false` | `ok: false` | a `configError` naming the read failure, and that NO base resolved — no ref is named |
+
+**† Every row where a ref RESOLVES carries the same caveat, and it is stated once here
+rather than on one row.** Resolving is not the lookup succeeding: `ls-tree` runs next,
+against a base that resolved perfectly well, and its three failure arms
+(`lib/upstream-records.mjs`, the `try`/`result.error`/non-zero-`status` returns) hand back
+`ok: false` with that ref named in `reason` — see Decision 3. So `ok: true` on a `†` row
+means *"and `ls-tree` then succeeded"*, and `nothing — it worked` means the same; when it
+does not, the row degrades to the `ok: false` report Decision 3 describes.
+
+**The told-column is what is PRINTED, not what the code knows** — the distinction that
+kept being lost. A stated ref that fails *does* stop resolution (`resolveUpstreamRef`
+returns from the stated branch), but no printed line says so: the operator reads `the
+stated upstream ref 'X' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef)`
+and cannot tell from it whether `origin/HEAD`/`origin/main` were tried afterwards. The
+no-stated-ref row is the asymmetric one — its `reason` does name the candidates it tried.
+The stop is a guarantee of the RESOLVER (restated below); it is not a claim about output.
+
+**`ref` is `null` whenever no ref answered, and that is the discriminator.** It reported the
+string `origin/main` there for one round, which is a name for a run in which no ref was used,
+and the consumers dutifully printed it: the operator was told "the upstream base was derived
+as `origin/main` instead" one line above a line saying nothing had resolved. Because the
+absent case is now absent rather than fabricated, no extra "did a ref resolve" flag is needed
+anywhere in the chain, and the two ref-naming messages per consumer are keyed on `ref` itself.
+A ref reaching git as the literal string `null` is impossible by construction: the `ls-tree`
+call is downstream of a resolved ref, and the one other message that interpolates a ref
+(`dedupedUpstream`) only prints on a non-zero count, which requires `ok: true`.
+
+A **stated** ref that fails is still reported BY NAME with `stated: true`, never `null` — it
+was honored and it failed, and the operator has to see which ref they asked for.
+
+**The unreadable-config row is the one that needed correcting** (cold review round 2 of
+#701). A stated ref that does not resolve stops resolution — that is the STATED guarantee,
+and an operator's own ref is never silently swapped for another. An unreadable config is
+**not that case**: nothing was stated, because nothing could be read, and levels 3-4 remain
+perfectly answerable. Stopping there was measured to cost every repo with a corrupt config
+its entire upstream scoping — including the common case where `memory.upstreamRef` was never
+set at all, since the key is optional. The #701 pre-commit gate stopped refusing
+byte-identical restages in exactly the mid-merge window (conflict markers in
+`brain.config.json`) where it matters most.
+
+So resolution **continues**, and the `evidence-reader-empty-on-failure` guarantee of
+Decision 3 is kept by the REPORT rather than by the stop: "could not look at the config" is
+never collapsed into "the config stated nothing". A `configError` string rides on the result
+— on the `ok: true` arm too — and both consumers surface it whatever the verdict is:
+`memory:share` via `upstreamScope.configError`, and the pre-commit gate via its own
+`configError` channel, deliberately separate from `note` so a "nothing was refused" notice is
+never printed over a genuine refusal.
+
 **The merge-base is refused, and this is the load-bearing part.** `git merge-base HEAD
 origin/main` is the branch point, and *records that landed on `main` after the branch point*
 are precisely the 22 the measurement found. Scoping to the merge-base would reproduce the bug
@@ -115,9 +180,23 @@ accident is the 95.7%. The real durability mechanisms are the host-global engram
 The seam returns a discriminated result, never a bare `Set`:
 
 ```
-{ ok: true,  ref, stated, byId: Map<id, oid>, unnamed: string[] }
-{ ok: false, ref, stated, reason: string }
+{ ok: true,  ref: string,      stated, byId: Map<id, oid>, byPath: Map<path, oid>,
+                                       unnamed: string[],  configError?: string }
+{ ok: false, ref: string|null, stated, reason: string,     configError?: string }
 ```
+
+`configError` rides on BOTH arms — see Decision 2's unreadable-config rows. It is not a
+failure of the lookup; it is a failure to read `brain.config.json` that the lookup survived
+by falling through to a derived ref, and it must still reach the operator.
+
+`ref` is non-null on the `ok: true` arm by construction and is `null` on the `ok: false` arm
+exactly when no ref answered — so `ok: false` alone never means "no ref". `ls-tree` can fail
+against a base that resolved perfectly well, and that base IS named, in `reason`. The
+consumers' catalog wrappers for the unavailable case therefore interpolate no ref at all:
+they fire on every `ok: false`, including the one with nothing to name. `reason` names the ref
+where naming one is true, and it never restates the calling consumer's own degradation —
+"writing every candidate" is the exporter's fact and was flatly false at the gate, which
+writes nothing.
 
 `ok: false` covers every way the lookup can fail to happen: no git binary, not a git
 directory (a vendored `brain` inside a consumer repo, a test temp dir), no remote, a fresh
@@ -293,16 +372,41 @@ folded into a neighbouring counter*:
 ```
 deduped          total declines (unchanged meaning: own-records ∪ in-batch ∪ upstream)
 dedupedUpstream  the new reason — the number `measure-701b.mjs` reads as `re-export`
-upstreamScope    { applied, ref, stated, reason, entries, unnamed }
+upstreamScope    { applied, ref, stated, reason, configError, entries, unnamed }
+                 `ref` is `null` when nothing resolved; `reason` and `configError`
+                 are `null` when there is nothing to report — never a fabricated
+                 value standing in for a fact this run did not observe.
 ```
 
 `cli.mjs` prints, beside the existing `unprovenanced` line:
 
-- `applied: false` → **stderr**, naming the ref tried and the reason ("this run wrote every
-  candidate — the pre-#701 behaviour").
+- `applied: false` → **stderr**, stating `reason` and this consumer's own degradation
+  ("This run wrote every candidate (the pre-#701 behaviour); nothing was scoped."). The
+  wrapper `memory.share.upstreamUnavailable` **interpolates no ref** — it has no `{ref}`
+  slot at all, because it fires on every `ok: false` including the one with nothing to
+  name. `reason` is what names the ref, where a ref was involved (`the stated upstream ref
+  'X' does not resolve …`, `git ls-tree against 'X' exited …`), and names the candidates
+  tried where none was (`no upstream ref resolved (tried origin/HEAD, origin/main)`) —
+  Decision 3's rule, and the reason the wrapper could drop the slot.
+- `configError` present → **stderr**, on either arm, keyed on whether `ref` is non-null:
+  `upstreamConfigUnreadable` names the derived ref that answered instead,
+  `upstreamConfigUnreadableNoRef` names none and defers to the line below it.
 - `applied: true && unnamed.length > 0` → **stderr**, naming the count and
   `npm run memory:split-records`.
 - `dedupedUpstream > 0` → **stdout** (progress; it is the success number, not a warning).
+
+**None of these lines print at all on the zero-candidate run.** `dualWriteRecords` returns
+its accounting early when `candidates.length === 0`, *before* `upstreamScope` is assigned.
+`cli.mjs` guards the first three on `upstreamScope`'s presence — the same "undefined means
+never measured" reading `indexCount` gets — and the fourth needs `dedupedUpstream > 0`,
+which that run cannot reach either. So a store whose observations
+are all `scope: personal` shares nothing and says nothing, **including about a corrupt
+`brain.config.json`**: the whole `configError` channel is silent there. Verified by running
+`memory:share` against exactly that world — a conflict-markered `brain.config.json` and one
+personal-scope observation — which exits 0 with no mention of the config on either stream.
+This is a reachable gap, not a theoretical one, and it is named here rather than papered
+over; closing it means measuring the scope before the early return, which is a change to
+what `upstreamScope: undefined` means and so is deliberately not made inside #701.
 
 New i18n keys in `brain/scripts/i18n/{en,es}.mjs` under the existing `memory.share.*` block.
 

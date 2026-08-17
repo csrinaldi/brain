@@ -1,13 +1,29 @@
 // engram.upstream-scope.test.mjs — issue #701: dualWriteRecords()/share() decline
 // a candidate whose id is already durable at the upstream base, IN ADDITION to
-// the existing own-records dedup. Seam-injected (`_upstreamRecordIds`) — no test
-// spawns git; `upstream-records.test.mjs` covers the real predicate.
+// the existing own-records dedup. Seam-injected (`_upstreamRecordIds`) —
+// `upstream-records.test.mjs` covers the real predicate. The ONE exception is
+// the last test in this file, which uses the real predicate on purpose to pin
+// the exporter's call shape; it says so where it sits.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { share, dualWriteRecords } from './engram.mjs';
 import { buildRecord } from '../lib/format.mjs';
+
+/**
+ * A tmpdir that is REMOVED when the test ends — the convention
+ * `upstream-records.integration.test.mjs:37-43` already follows. Without it this
+ * file leaks one directory per run (cold review round 2 of #701).
+ */
+function tmpRoot(t, prefix) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
 
 const baseRecordFields = {
   ts: '2026-07-04T12:00:00Z', actor: '@crinaldi', actorKind: 'human', type: 'decision', project: 'brain',
@@ -117,6 +133,49 @@ test('dualWriteRecords: upstream lookup available with a partial-scope file → 
   assert.equal(result.upstreamScope.unnamed, 1);
 });
 
+// ---------------------------------------------------------------------------
+// An unreadable brain.config.json no longer STOPS the lookup (cold review round
+// 2 of #701), so the scope can be APPLIED while a ref stated in that config went
+// unread. `configError` is what tells the operator that happened, and it must
+// survive the accounting — `cli.mjs` prints it from `upstreamScope.configError`.
+// ---------------------------------------------------------------------------
+
+test('dualWriteRecords: upstream applied AND the config was unreadable → both facts reach upstreamScope', async () => {
+  const rec = buildRecord({ ...baseRecordFields, content: 'config broke, scope still applied' });
+  const result = await dualWriteRecords('/fake/root', {
+    _readObservations: () => ({ observations: [{ id: 1 }] }),
+    _exportObservation: () => ({ record: rec, recovered: true }),
+    _appendRecord: () => { throw new Error('must not append an upstream-present record'); },
+    _readRecordIds: () => new Set(),
+    _upstreamRecordIds: () => ({
+      ok: true, ref: 'origin/HEAD', stated: false,
+      byId: new Map([[rec.id, 'deadbeef']]), byPath: new Map(), unnamed: [],
+      configError: 'brain.config.json at /fake/root could not be parsed: boom',
+    }),
+    _rebuildIndex: () => ({ count: 0, duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] } }),
+    _loadConfig: () => ({}),
+  });
+
+  assert.equal(result.upstreamScope.applied, true, 'the derived ref answered — the scope is real');
+  assert.equal(result.dedupedUpstream, 1, 'and it was actually used, not merely reported');
+  assert.match(result.upstreamScope.configError, /could not be parsed/,
+    'a fall-through the operator is never told about is the silent override the STATED split exists to prevent');
+});
+
+test('dualWriteRecords: a readable config leaves upstreamScope.configError null — the field is evidence, not decoration', async () => {
+  const rec = buildRecord({ ...baseRecordFields, content: 'healthy config' });
+  const result = await dualWriteRecords('/fake/root', {
+    _readObservations: () => ({ observations: [{ id: 1 }] }),
+    _exportObservation: () => ({ record: rec, recovered: true }),
+    _appendRecord: () => {},
+    _readRecordIds: () => new Set(),
+    _upstreamRecordIds: () => ({ ok: true, ref: 'origin/HEAD', stated: false, byId: new Map(), byPath: new Map(), unnamed: [] }),
+    _rebuildIndex: () => ({ count: 1, duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] } }),
+    _loadConfig: () => ({}),
+  });
+  assert.equal(result.upstreamScope.configError, null);
+});
+
 test('dualWriteRecords: zero candidates never calls the upstream seam — no git spawn on a steady-state share with nothing to export', async () => {
   const result = await dualWriteRecords('/fake/root', {
     _readObservations: () => ({ observations: [] }),
@@ -156,4 +215,81 @@ test('share: threads _upstreamRecordIds through to dualWriteRecords — the seam
   assert.equal(upstreamSeamCalled, true, 'share() must thread its own _upstreamRecordIds seam into dualWriteRecords()');
   assert.equal(result.written, 0);
   assert.equal(result.dedupedUpstream, 1);
+});
+
+// ---------------------------------------------------------------------------
+// The exporter's own CALL SHAPE honors memory.upstreamRef (cold review of #708)
+//
+// Every test above stubs `_upstreamRecordIds`, so none of them can see what
+// `dualWriteRecords` actually passes it. That is the blind spot that let
+// `_upstreamRecordIds({ root })` look correct while `upstreamRecordEntries`
+// defaulted `config = {}` and threw the stated ref away.
+//
+// This one deliberately uses the REAL predicate against a real tmpdir holding a
+// real `brain.config.json` — the only spawns in this file, and the only way the
+// assertion is about behaviour rather than about argument shape. The tmpdir is
+// not a git repo, so the stated ref cannot resolve: the point is WHICH ref the
+// exporter reports it tried.
+//
+// It is also the ONE test here that cannot pass `env: {}`, because
+// `dualWriteRecords` calls `_upstreamRecordIds({ root })` with neither `env` nor
+// `config` (deliberately — `upstream-records.mjs` owns both keys), so the real
+// predicate falls back to `process.env`. An exported `BRAIN_MEMORY_UPSTREAM_REF`
+// — exactly the variable an operator debugging this feature would set — is
+// level 1 and wins over the config, turning this red on a developer machine
+// (cold review round 2 of #701). It is neutralised for the test and restored
+// after, rather than widening the production signature with an `env` parameter
+// that exists only for a test: the seam this file needs is already there
+// (`_upstreamRecordIds`), and this test is precisely the one that must NOT use
+// it.
+// ---------------------------------------------------------------------------
+
+/** Removes an env var for one test and restores it exactly, unset included. */
+function withoutEnv(t, name) {
+  const prior = process.env[name];
+  delete process.env[name];
+  t.after(() => {
+    if (prior === undefined) delete process.env[name];
+    else process.env[name] = prior;
+  });
+}
+
+test('withoutEnv: the variable is restored exactly — a helper that only neutralises leaks into every later test', async (t) => {
+  process.env.BRAIN_MEMORY_UPSTREAM_REF = 'sentinel-set-by-this-test';
+  await t.test('inner scope where the variable is neutralised', (inner) => {
+    withoutEnv(inner, 'BRAIN_MEMORY_UPSTREAM_REF');
+    assert.equal(process.env.BRAIN_MEMORY_UPSTREAM_REF, undefined, 'neutralised inside');
+  });
+  assert.equal(process.env.BRAIN_MEMORY_UPSTREAM_REF, 'sentinel-set-by-this-test',
+    'restored after — the half of the contract a neutralise-only helper silently drops');
+
+  delete process.env.BRAIN_MEMORY_UPSTREAM_REF;
+  await t.test('inner scope where the variable was already unset', (inner) => {
+    withoutEnv(inner, 'BRAIN_MEMORY_UPSTREAM_REF');
+  });
+  assert.equal('BRAIN_MEMORY_UPSTREAM_REF' in process.env, false,
+    'an originally-unset variable must come back UNSET, never as an empty string');
+});
+
+test('dualWriteRecords: a memory.upstreamRef stated at root reaches the real predicate — not overridden by a derived ref', async (t) => {
+  withoutEnv(t, 'BRAIN_MEMORY_UPSTREAM_REF');
+  const root = tmpRoot(t, 'brain-engram-upstream-');
+  writeFileSync(join(root, 'brain.config.json'), JSON.stringify({ memory: { upstreamRef: 'origin/stated-at-root' } }));
+
+  const rec = buildRecord({ ...baseRecordFields, content: 'config level, real predicate' });
+  const result = await dualWriteRecords(root, {
+    _readObservations: () => ({ observations: [{ id: 1 }] }),
+    _exportObservation: () => ({ record: rec, recovered: true }),
+    _appendRecord: () => {},
+    _readRecordIds: () => new Set(),
+    // `_upstreamRecordIds` is NOT stubbed — the real `upstreamRecordEntries` runs.
+    _rebuildIndex: () => ({ count: 0, duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] } }),
+    _loadConfig: () => ({}),
+  });
+
+  assert.equal(result.upstreamScope.ref, 'origin/stated-at-root',
+    'the stated ref must be the one the exporter reports — origin/HEAD/origin/main here would mean the config never arrived');
+  assert.equal(result.upstreamScope.stated, true);
+  assert.equal(result.upstreamScope.applied, false, 'it cannot resolve in a non-repo tmpdir — and the run still writes everything');
+  assert.equal(result.written, 1, 'fail-open is unchanged: an unresolvable upstream never withholds a record');
 });

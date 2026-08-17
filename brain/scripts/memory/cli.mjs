@@ -604,9 +604,30 @@ try {
   // the kind of silent-degradation notice that must survive that discard.
   if (op === "share" && result?.upstreamScope) {
     const scope = result.upstreamScope;
+    // Independent of `applied`: an unreadable `brain.config.json` falls THROUGH
+    // to the derived candidates rather than stopping resolution, so the scope
+    // can be applied while a stated ref went unread. Both facts get a line.
+    //
+    // TWO keys, chosen on whether there IS a ref. Naming the ref the base "was
+    // derived as" is only true when one actually resolved, and `scope.ref` is
+    // `null` when none did. It used to be the string `'origin/main'` even then,
+    // so this line told the operator a ref had answered while the
+    // `applied: false` line directly below it said nothing had (cold review
+    // round 2 of #701).
+    if (scope.configError) {
+      const key = scope.ref
+        ? "memory.share.upstreamConfigUnreadable"
+        : "memory.share.upstreamConfigUnreadableNoRef";
+      console.error(`memory/cli: ${await t(key, { error: scope.configError, ref: scope.ref })}`);
+    }
+    // No `{ref}`: this line fires on every `ok:false`, and on the one where
+    // nothing resolved there is no ref to name. `reason` names the ref itself
+    // wherever one was involved (`upstream-records.mjs#upstreamRecordEntries`),
+    // which is what stopped this line from interpolating the invented
+    // `origin/main` one line under a line saying nothing had resolved.
     if (scope.applied === false) {
       console.error(
-        `memory/cli: ${await t("memory.share.upstreamUnavailable", { ref: scope.ref, reason: scope.reason })}`,
+        `memory/cli: ${await t("memory.share.upstreamUnavailable", { reason: scope.reason })}`,
       );
     } else if (scope.unnamed > 0) {
       console.error(`memory/cli: ${await t("memory.share.upstreamUnnamed", { count: scope.unnamed })}`);

@@ -302,8 +302,11 @@ export function _defaultReadObservations(root) {
  *   rejected: number, skippedPersonal: number, unprovenanced: number, unparseableChunks: number,
  *   emptyObservationsChunks: number, indexCount?: number,
  *   duplicates: {ids: number, lines: number, divergent: number, groups: object[]},
- *   upstreamScope?: {applied: boolean, ref: string, stated: boolean, reason: string|null,
- *   entries: number, unnamed: number}}>}
+ *   upstreamScope?: {applied: boolean, ref: string|null, stated: boolean, reason: string|null,
+ *   configError: string|null, entries: number, unnamed: number}}>}
+ *   `upstreamScope.ref` is `null` when NO ref answered — `upstream-records.mjs`
+ *   returns no name for a run in which no name was used, so nothing downstream
+ *   can print one (issue #701, cold review round 4).
  *   `duplicates` (#574) is the union-merge residual already sitting in
  *   `records/`, distinct from `deduped` (candidates THIS run declined to
  *   append). Zero on the early return, which measured nothing. `dedupedUpstream`
@@ -411,12 +414,22 @@ export async function dualWriteRecords(
   // scope below — never treated as "found nothing" for the write decision
   // (Decision 3): the accounting still records `applied: false` so the report
   // can tell "checked, empty" from "could not check" apart.
+  //
+  // `config` is DELIBERATELY not passed: `upstream-records.mjs` owns the
+  // `memory.upstreamRef` key and reads it from `root` when `config` is omitted.
+  // Passing `{}` here (or defaulting it anywhere in that chain) is not nullish
+  // and would silently kill the config level — the defect cold review of #708
+  // found, where every layer defaulted `config = {}` and the read never fired.
   const upstream = _upstreamRecordIds({ root });
   accounting.upstreamScope = {
     applied: upstream.ok === true,
     ref: upstream.ref,
     stated: upstream.stated,
     reason: upstream.ok ? null : upstream.reason,
+    // Independent of `applied`: an unreadable `brain.config.json` no longer
+    // stops the lookup, so the scope can be APPLIED against a derived ref while
+    // a ref stated in that config went unread. Reported either way.
+    configError: upstream.configError ?? null,
     entries: upstream.ok ? upstream.byId.size : 0,
     unnamed: upstream.ok ? upstream.unnamed.length : 0,
   };
