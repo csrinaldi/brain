@@ -18,7 +18,7 @@
 // config nobody could read is precisely the silent-degradation notice that must
 // survive that discard, so the SINK is asserted and not just the text.
 //
-// ── hermetic by construction ────────────────────────────────────────────────
+// ── what is neutralised, and what is not ────────────────────────────────────
 //
 // The env is BUILT, never inherited (the pattern cli.backend-fallback.test.mjs
 // established): `BRAIN_MEMORY_UPSTREAM_REF` is resolution level 1 and would win
@@ -31,6 +31,23 @@
 // would have written is planted by the test instead, so `share` has real
 // candidates to score without a real engram installation. The tmpdir is not a
 // git repo at all, which is what makes NO ref resolve.
+//
+// The LOCALE is NOT neutralised, and it cannot be from here. This header used to
+// be titled "hermetic by construction" while omitting the one ambient input that
+// governs the strings asserted on: `t()` resolves its locale via `activeLang()`
+// → `loadBrainConfig()`, which reads `brain.config.json` from the MODULE's own
+// location (`lib/brain-config.mjs`), not from the env this test builds and not
+// from the tmpdir. `docs.language: "es"` is a first-class ADR-0009 setting and
+// the maintainer's own language, and there is no env override for it.
+//
+// So the expectations are RESOLVED THROUGH THE CATALOG in the ambient locale
+// instead — the child CLI reads the same `brain.config.json` from the same
+// module path, so the two always agree, in any locale, including one added
+// later. Hard-coded English prose does not: flipping `docs.language` to `"es"`
+// and running this file alone gave `# pass 4  # fail 3` of the 7 tests that then
+// existed, and made every negative assertion vacuous in the same run — a Spanish
+// message matches no English regex either, so `doesNotMatch` passed for the
+// wrong reason. Measured on this branch before this fix.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -41,10 +58,25 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
+// Aliased: every test callback below binds `t` to node:test's TestContext.
+import { t as msg } from '../i18n/t.mjs';
+
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
 
 /** The real `which`, resolved once — the sandbox PATH still needs it to work. */
 const REAL_WHICH = execFileSync('sh', ['-c', 'command -v which'], { encoding: 'utf8' }).trim();
+
+/**
+ * The catalog line for `key`, in the SAME locale the child CLI will resolve.
+ *
+ * `{error}` is blanked: its text is a tmpdir path plus a Node-version-dependent
+ * `JSON.parse` message, and that channel is asserted separately by pattern (it
+ * is built in code, not translated, so it is locale-independent). Everything
+ * after it is the prose these tests are about, and it is compared as an exact
+ * substring — which is what makes both the positive and the NEGATIVE assertions
+ * real in every locale.
+ */
+const catalogLine = (key, params = {}) => msg(key, { error: '', ...params });
 
 const OBSERVATION = {
   id: 1,
@@ -140,7 +172,7 @@ function share({ root, bin }) {
 
 const CORRUPT = '<<<<<<< HEAD\n{ "memory": { "upstreamRef": "origin/feature" } }\n';
 
-test('#701 memory:share REPORTS an unreadable brain.config.json — the print the channel exists for', (t) => {
+test('#701 memory:share REPORTS an unreadable brain.config.json — the print the channel exists for', async (t) => {
   const r = share(world(t, { config: CORRUPT }));
 
   assert.equal(r.status, 0, `an unreadable config must not fail the share; stderr:\n${r.stderr}`);
@@ -148,7 +180,11 @@ test('#701 memory:share REPORTS an unreadable brain.config.json — the print th
     r.stderr, /brain\.config\.json .* could not be parsed/,
     'the operator must be told the config was skipped — every layer below this one was already pinned; this is the one a human reads',
   );
-  assert.match(r.stderr, /NOT honored/, 'and that a ref stated there went unread');
+  // The catalog half, resolved through the catalog rather than re-typed here.
+  assert.ok(
+    r.stderr.includes(await catalogLine('memory.share.upstreamConfigUnreadableNoRef')),
+    `and told a ref stated there went unread; got:\n${r.stderr}`,
+  );
 });
 
 test('#701 the unreadable-config notice goes to STDERR — pre-push discards stdout', (t) => {
@@ -172,36 +208,48 @@ test('#701 the notice is printed ONCE — it is not also prefixed into the unava
   assert.equal(hits.length, 1, `the config failure must be stated once, not once per channel:\n${r.stderr}`);
 });
 
-test('#701 with NO ref resolved the notice does NOT name a derived ref', (t) => {
+test('#701 with NO ref resolved, neither printed line names a ref', async (t) => {
   // The tmpdir is not a git repo, so neither origin/HEAD nor origin/main
-  // resolves and `ref` is the hard-coded `origin/main` `resolveUpstreamRef`
-  // returns when NOTHING answered. The old wording claimed "the upstream base
-  // was derived as origin/main instead" one line above a line saying nothing
-  // had been derived and nothing checked.
+  // resolves and `ref` is `null`. It used to be the string `'origin/main'`, and
+  // BOTH lines then named it: the config notice claimed "the upstream base was
+  // derived as origin/main instead", and `upstreamUnavailable` interpolated the
+  // same invention into "could not check the upstream base (origin/main)" —
+  // directly under a line saying nothing had resolved.
   const r = share(world(t, { config: CORRUPT }));
 
-  assert.match(r.stderr, /no upstream base resolved either/, 'the honest half of the sentence');
-  assert.doesNotMatch(
-    r.stderr, /derived as origin\/main instead/,
-    'no ref answered, so none may be named as the one used instead',
+  assert.ok(
+    r.stderr.includes(await catalogLine('memory.share.upstreamConfigUnreadableNoRef')),
+    `the honest half of the sentence; got:\n${r.stderr}`,
+  );
+  assert.equal(
+    r.stderr.includes(await catalogLine('memory.share.upstreamConfigUnreadable', { ref: 'origin/main' })), false,
+    `no ref answered, so none may be named as the one used instead; got:\n${r.stderr}`,
+  );
+  // `reason` is built in code, so this whole expected line is locale-safe apart
+  // from the wrapper, which comes from the catalog. It has no `{ref}` slot left.
+  assert.ok(
+    r.stderr.includes(await msg('memory.share.upstreamUnavailable', {
+      reason: 'no upstream ref resolved (tried origin/HEAD, origin/main)',
+    })),
+    `and the unavailable line names no ref either; got:\n${r.stderr}`,
   );
 });
 
-test('#701 when a derived ref DOES answer past the broken config, the notice names it', (t) => {
-  // The positive branch of the two-key split, and the reason `refResolved` has
-  // to travel at all. Both catalog entries share "could not be parsed" and "NOT
-  // honored", so without an assertion on the clause that differs, the field
-  // could be dropped from the accounting with this file still green.
+test('#701 when a derived ref DOES answer past the broken config, the notice names it', async (t) => {
+  // The positive branch of the two-key split, and the reason `ref` has to travel
+  // at all. Both catalog entries share the `{error}` text and "NOT honored", so
+  // without an assertion on the clause that differs, the discriminator could be
+  // dropped from the accounting with this file still green.
   const r = share(world(t, { config: CORRUPT, remote: true }));
 
   assert.equal(r.status, 0, `stderr:\n${r.stderr}`);
-  assert.match(
-    r.stderr, /derived as origin\/main instead/,
-    'origin/main really was fetched here, so it really is the base that took over — this is the one case naming it is true',
+  assert.ok(
+    r.stderr.includes(await catalogLine('memory.share.upstreamConfigUnreadable', { ref: 'origin/main' })),
+    `origin/main really was fetched here, so it really is the base that took over — the one case naming it is true; got:\n${r.stderr}`,
   );
-  assert.doesNotMatch(
-    r.stderr, /no upstream base resolved either/,
-    'a ref answered, so the "nothing resolved" wording would be the opposite falsehood',
+  assert.equal(
+    r.stderr.includes(await catalogLine('memory.share.upstreamConfigUnreadableNoRef')), false,
+    `a ref answered, so the "nothing resolved" wording would be the opposite falsehood; got:\n${r.stderr}`,
   );
 });
 

@@ -12,6 +12,25 @@ import { spawnSync } from 'node:child_process';
 import { buildRecord, serializeRecord } from './lib/format.mjs';
 import { appendRecord } from './lib/store.mjs';
 import { runStagedRecordsCheck, main } from './staged-records-check.mjs';
+// Aliased: every test callback below binds `t` to node:test's TestContext.
+import { t as msg } from '../i18n/t.mjs';
+
+/**
+ * The catalog line for `key`, in the SAME locale `main()` resolves.
+ *
+ * `t()` reads its locale from `brain.config.json` at the MODULE's own location
+ * (`lib/brain-config.mjs`), not from this test's tmpdir root — so hard-coded
+ * English prose here is an assertion about the maintainer's checkout, not about
+ * the code. `docs.language: "es"` is a first-class ADR-0009 setting: flipping it
+ * and running this file alone gave `# pass 5  # fail 2` of the 7 tests that then
+ * existed, and made the negative assertions vacuous in the same run. Resolving
+ * the expectation through the catalog holds in every locale.
+ *
+ * `{error}` is blanked — it is a tmpdir path plus a Node-version-dependent
+ * `JSON.parse` message, built in code and never translated, so it is asserted
+ * separately by pattern.
+ */
+const catalogLine = (key, params = {}) => msg(key, { error: '', ...params });
 
 function git(cwd, args, { allowFailure = false } = {}) {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -172,32 +191,30 @@ test('issue #701 gate main(): an unreadable brain.config.json is PRINTED, and th
     /brain\.config\.json .* could not be parsed/.test(printed),
     `the operator must be TOLD the config was skipped; got:\n${printed}`,
   );
+  // The POSITIVE branch of the two-key split. `origin/HEAD` — not `origin/main`
+  // — is the ref that answered: this worktree is a CLONE, so level 3 is set and
+  // answers before level 4 is ever tried. That makes naming it true here, and
+  // this is the only case where naming a ref is true. Without an assertion on
+  // the clause that DIFFERS, both catalog keys satisfy the `{error}` check above
+  // and the discriminator could be dropped with the suite still green.
   assert.ok(
-    /NOT honored/.test(printed),
-    `and told that a ref stated there went unread; got:\n${printed}`,
-  );
-  // The POSITIVE branch of the two-key split. `origin/main` was fetched in this
-  // world, so it genuinely IS the derived ref resolution fell through to and
-  // naming it is true here — which is the only case where naming it is true.
-  // Without this assertion both catalog keys satisfy the two checks above (they
-  // share "could not be parsed" and "NOT honored"), and `refResolved` could be
-  // dropped from the carry with the suite still green.
-  // `origin/HEAD`, not `origin/main`: this worktree is a CLONE, so level 3 is
-  // set and answers before level 4 is ever tried. Naming the ref that actually
-  // answered is the whole point of the clause.
-  assert.ok(
-    /derived as origin\/HEAD instead/.test(printed),
+    printed.includes(await catalogLine('memory.stagedRecordsCheck.configUnreadable', { ref: 'origin/HEAD' })),
     `a ref that DID answer must be named, or the operator cannot tell which base was used; got:\n${printed}`,
   );
-  // The config failure does not disable the gate: origin/main still answered.
+  assert.equal(
+    printed.includes(await catalogLine('memory.stagedRecordsCheck.configUnreadableNoRef')), false,
+    `a ref answered, so the "nothing resolved" wording would be the opposite falsehood; got:\n${printed}`,
+  );
+  // The config failure does not disable the gate: origin/HEAD still answered.
   assert.equal(code, 1, 'a broken config must not turn a refusal into a pass — that is the defect the fall-through exists to avoid');
 });
 
 test('issue #701 gate main(): with NO ref resolved, the printed line does NOT claim a derived ref', async (t) => {
-  // The second half of the sentence-scale doubling: `ref` here is
-  // `resolveUpstreamRef`'s hard-coded `origin/main` placeholder, returned when
-  // NOTHING resolved. Naming it as the base "derived instead" told the operator
-  // a ref had answered, one line before the note said none had.
+  // The second half of the sentence-scale doubling. `ref` used to be the string
+  // `'origin/main'` on this result — a name `resolveUpstreamRef` returned from
+  // its last line, when NOTHING resolved — and naming it as the base "derived
+  // instead" told the operator a ref had answered, one line before the note said
+  // none had. It is `null` now, and that is what picks the key.
   const { worktree } = worldWithTrunkRecord(t);
   git(worktree, ['remote', 'remove', 'origin']); // takes origin/HEAD + origin/main with it
   writeFileSync(join(worktree, 'brain.config.json'), CORRUPT_CONFIG, 'utf8');
@@ -210,12 +227,12 @@ test('issue #701 gate main(): with NO ref resolved, the printed line does NOT cl
     `the config failure is reported whether or not a ref answered; got:\n${printed}`,
   );
   assert.ok(
-    /no upstream base resolved either/.test(printed),
+    printed.includes(await catalogLine('memory.stagedRecordsCheck.configUnreadableNoRef')),
     `the line must say nothing resolved; got:\n${printed}`,
   );
   assert.equal(
-    /derived as origin\/main instead/.test(printed), false,
-    'origin/main here is the placeholder for "nothing resolved", never a ref that answered',
+    printed.includes(await catalogLine('memory.stagedRecordsCheck.configUnreadable', { ref: 'origin/main' })), false,
+    `no ref answered, so none may be named as the one used instead; got:\n${printed}`,
   );
 });
 
