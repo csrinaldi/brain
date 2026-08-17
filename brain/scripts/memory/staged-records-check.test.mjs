@@ -277,11 +277,23 @@ test('runStagedRecordsCheck: the corrupt config is still REPORTED alongside that
 test('evaluateStagedRecords: configError travels on the ok:false arm too — it is not tied to a successful lookup', () => {
   const r = evaluateStagedRecords({
     staged: [{ path: RECORD_PATH, dstOid: IDENTICAL_OID, status: 'A' }],
-    upstream: { ok: false, ref: 'origin/main', stated: false, reason: 'nothing resolved', configError: 'config broke' },
+    // `ref: null` is the real shape of "nothing resolved" (`upstream-records.mjs`
+    // returns no name for a run in which no name was used). It is forwarded as
+    // `null` rather than dropped, because `main()` reads it to choose which of
+    // the two config-unreadable messages is true.
+    upstream: { ok: false, ref: null, stated: false, reason: 'nothing resolved', configError: 'config broke' },
   });
   assert.equal(r.level, 'pass');
   assert.equal(r.configError, 'config broke');
-  assert.equal(r.ref, 'origin/main');
+  assert.equal(r.ref, null);
+});
+
+test('evaluateStagedRecords: a resolved ref on the ok:false arm IS forwarded — ls-tree can fail against a real base', () => {
+  const r = evaluateStagedRecords({
+    staged: [],
+    upstream: { ok: false, ref: 'origin/HEAD', stated: false, reason: 'git ls-tree against \'origin/HEAD\' exited 128', configError: 'config broke' },
+  });
+  assert.equal(r.ref, 'origin/HEAD', 'ok:false does not mean "no ref" — a `null` here would lose the base that was used');
 });
 
 test('evaluateStagedRecords: a healthy upstream carries no configError — the field is evidence, not decoration', () => {

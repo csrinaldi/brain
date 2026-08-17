@@ -49,24 +49,25 @@ const ZERO_OID = '0'.repeat(40);
  * Folding the second into the first would print "nothing was refused" over a
  * genuine refusal.
  *
- * `refResolved` is forwarded beside them because `ref` alone is ambiguous: on a
- * run where nothing resolved it is `resolveUpstreamRef`'s placeholder, not a ref
- * that answered, and `main()` must not name it as the base "derived instead"
+ * `ref` is forwarded beside `configError` and is `null` when no ref answered —
+ * `resolveUpstreamRef` returns no name for a run in which no name was used, so
+ * `main()` reads `ref == null` directly and never has to be told separately
+ * whether the thing it is about to print is real
  * (`upstream-records.mjs#resolveUpstreamRef`'s `@returns`).
  *
  * @param {object} args
  * @param {Array<{path: string, dstOid: string, status: string}>} args.staged
- * @param {{ok:true, byPath:Map<string,string>, ref:string, configError?:string, refResolved?:boolean}
- *        |{ok:false, reason:string, configError?:string, refResolved?:boolean}} args.upstream
+ * @param {{ok:true, byPath:Map<string,string>, ref:string, configError?:string}
+ *        |{ok:false, ref:string|null, reason:string, configError?:string}} args.upstream
  * @returns {{level: 'pass'|'fail', offending: string[], note?: string, configError?: string,
- *           ref?: string, refResolved?: boolean}}
+ *           ref?: string|null}}
  */
 export function evaluateStagedRecords({ staged = [], upstream } = {}) {
   // Carried on BOTH arms: an unreadable config no longer stops the lookup
   // (`upstream-records.mjs`), so it can co-occur with a perfectly good verdict.
   const carry = upstream?.configError === undefined
     ? {}
-    : { configError: upstream.configError, ref: upstream.ref, refResolved: upstream.refResolved === true };
+    : { configError: upstream.configError, ref: upstream.ref ?? null };
 
   if (!upstream || upstream.ok !== true) {
     return {
@@ -228,7 +229,9 @@ export function stagedRecordDiff({ root, _spawn = spawnSync }) {
  * @param {typeof spawnSync} [opts._spawn]
  * @param {typeof upstreamRecordEntries} [opts._upstreamRecordEntries]
  * @param {typeof stagedRecordDiff} [opts._stagedRecordDiff]
- * @returns {{level:'pass'|'fail', offending:string[], note?:string}}
+ * @returns {{level:'pass'|'fail', offending:string[], note?:string, configError?:string,
+ *           ref?:string|null}}  `evaluateStagedRecords`'s shape, verbatim, EXCEPT on the
+ *   `!diff.ok` early return below, which reports only `note` — see its own comment.
  */
 export function runStagedRecordsCheck({
   root = process.cwd(),
@@ -272,13 +275,13 @@ export async function main(deps = {}) {
   // Printed BEFORE the verdict and independently of it: the operator has to
   // learn the config was skipped whether the gate then passed or refused.
   //
-  // TWO keys, chosen on `refResolved`: naming a ref the base "was derived as"
-  // is only true when one actually resolved. On the run where nothing did, the
-  // `ref` field is `resolveUpstreamRef`'s placeholder and the operator was
-  // being told a ref answered while the very next line said none had (cold
-  // review round 2 of #701).
+  // TWO keys, chosen on whether there IS a ref: naming a ref the base "was
+  // derived as" is only true when one actually resolved, and `result.ref` is
+  // `null` when none did. It used to be the string `'origin/main'` even then,
+  // so the operator was told a ref answered while the very next line said none
+  // had (cold review round 2 of #701).
   if (result.configError) {
-    const key = result.refResolved
+    const key = result.ref
       ? 'memory.stagedRecordsCheck.configUnreadable'
       : 'memory.stagedRecordsCheck.configUnreadableNoRef';
     console.log(`staged-records-check: ${await t(key, { error: result.configError, ref: result.ref })}`);

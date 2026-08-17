@@ -134,14 +134,31 @@ test('resolveUpstreamRef: no stated ref — origin/HEAD fails through to origin/
   assert.deepEqual(r, { ref: 'origin/main', stated: false, resolved: true });
 });
 
-test('resolveUpstreamRef: nothing resolves — reports origin/main, unresolved', () => {
+test('resolveUpstreamRef: nothing resolves — reports NO ref at all, not a name nothing used', () => {
+  // The fabrication this pins. It returned the string `'origin/main'` here, and
+  // every consumer that printed `ref` then named a ref that had answered
+  // nothing: round 3 shipped "the upstream base was derived as origin/main
+  // instead" on exactly this result, and round 4 added a second field to tell
+  // the two apart. `null` is the discriminator; there is nothing to add.
   const r = resolveUpstreamRef({
     root: '/fake',
     env: {},
     config: {},
     _spawn: fakeSpawn([]),
   });
-  assert.deepEqual(r, { ref: 'origin/main', stated: false, resolved: false });
+  assert.deepEqual(r, { ref: null, stated: false, resolved: false });
+});
+
+test('resolveUpstreamRef: a STATED ref that fails is still named — `null` is only for "nothing answered"', () => {
+  // The other side: `ref == null` must not creep into the stated-and-failed
+  // case. The operator asked for that ref by name and has to see which one.
+  const r = resolveUpstreamRef({
+    root: '/fake',
+    env: { BRAIN_MEMORY_UPSTREAM_REF: 'origin/nope' },
+    config: {},
+    _spawn: fakeSpawn([]),
+  });
+  assert.deepEqual(r, { ref: 'origin/nope', stated: true, resolved: false });
 });
 
 // ---------------------------------------------------------------------------
@@ -170,7 +187,7 @@ test('upstreamRecordEntries: not a git repo (every rev-parse fails) → ok:false
   assert.equal(r.stated, false);
 });
 
-test('upstreamRecordEntries: no remote (origin/main also fails to resolve) → ok:false, names the ref tried', () => {
+test('upstreamRecordEntries: no remote (origin/main also fails to resolve) → ok:false with NO ref, and the reason names what was tried', () => {
   const r = upstreamRecordEntries({
     root: '/fake',
     env: {},
@@ -178,7 +195,8 @@ test('upstreamRecordEntries: no remote (origin/main also fails to resolve) → o
     _spawn: () => ({ status: 1 }),
   });
   assert.equal(r.ok, false);
-  assert.equal(r.ref, 'origin/main');
+  assert.equal(r.ref, null, 'no ref answered, so no ref is reported — the candidates tried belong in `reason`');
+  assert.match(r.reason, /tried origin\/HEAD, origin\/main/, 'and they are still named, where naming them is true');
 });
 
 test('upstreamRecordEntries: ref resolves but ls-tree exits non-zero → ok:false', () => {
@@ -192,7 +210,13 @@ test('upstreamRecordEntries: ref resolves but ls-tree exits non-zero → ok:fals
     },
   });
   assert.equal(r.ok, false);
-  assert.match(r.reason, /ls-tree exited/);
+  assert.match(r.reason, /ls-tree .* exited 128/);
+  // The ref belongs in `reason` now, not in the consumers' catalog wrapper: the
+  // wrapper fires on EVERY ok:false, including the one where no ref resolved, so
+  // it cannot interpolate one. This arm is the case where a ref DID answer and
+  // `ls-tree` then failed against it — drop the ref here and the operator loses
+  // which base the failing command was pointed at.
+  assert.match(r.reason, /origin\/HEAD/, 'the failing ref must be named where naming it is true');
 });
 
 test('upstreamRecordEntries: resolves and ls-tree succeeds → ok:true with parsed entries', () => {
@@ -365,7 +389,7 @@ test('upstreamRecordEntries: an unreadable config AND no derived ref → ok:fals
   const root = tmpRoot(t, '}}} not json');
   const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit([]) });
   assert.equal(r.ok, false);
-  assert.equal(r.ref, 'origin/main');
+  assert.equal(r.ref, null);
   assert.equal(r.stated, false);
   assert.match(r.configError, /could not be parsed/, 'the config failure must not be dropped when the derived refs also fail');
   assert.match(r.reason, /no upstream ref resolved/);
@@ -379,29 +403,22 @@ test('upstreamRecordEntries: an unreadable config AND no derived ref → ok:fals
   );
 });
 
-test('upstreamRecordEntries: refResolved:false says the reported ref is a PLACEHOLDER, not a ref that answered', (t) => {
-  // The falsehood this pins: with no ref resolved, `ref` is the hard-coded
-  // `origin/main` `resolveUpstreamRef` returns from its last line. The operator
-  // was told "the upstream base was derived as origin/main instead" while the
-  // next line said nothing had been derived and nothing checked.
+test('upstreamRecordEntries: an unreadable config with NOTHING resolved reports no ref — the consumers discriminate on that', (t) => {
+  // `ref == null` is the whole discriminator, and it replaced a `refResolved`
+  // boolean that existed only because `ref` was fabricated. Both consumers pick
+  // their catalog key off this value; put a string back here and each of them
+  // tells the operator a ref answered while the very next line says none did.
   const root = tmpRoot(t, '}}} not json');
   const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit([]) });
-  assert.equal(r.refResolved, false, 'no candidate resolved, so no ref was used for anything');
+  assert.equal(r.ref, null, 'no candidate resolved, so no ref was used for anything');
+  assert.match(r.configError, /could not be parsed/, 'and the config failure still travels beside it');
 });
 
-test('upstreamRecordEntries: refResolved:true when a derived ref DID answer past the broken config', (t) => {
+test('upstreamRecordEntries: an unreadable config with a derived ref that DID answer reports that ref by name', (t) => {
   const root = tmpRoot(t, '}}} not json');
   const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD']) });
   assert.equal(r.ok, true);
-  assert.equal(r.ref, 'origin/HEAD');
-  assert.equal(r.refResolved, true, 'this IS the derived ref resolution fell through to — the one case the wording may name');
-});
-
-test('upstreamRecordEntries: refResolved rides ONLY with configError — evidence, not decoration', (t) => {
-  const root = tmpRoot(t, JSON.stringify({ project: { slug: 'brain' } }));
-  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD']) });
-  assert.equal(r.configError, undefined);
-  assert.equal(r.refResolved, undefined, 'nothing failed to be read, so there is no ambiguity to resolve');
+  assert.equal(r.ref, 'origin/HEAD', 'this IS the derived ref resolution fell through to — the one case the wording may name');
 });
 
 test('upstreamRecordEntries: a READABLE config stating an unresolvable ref STILL stops at that ref — unchanged, and not the same case', (t) => {

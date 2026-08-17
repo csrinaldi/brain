@@ -326,12 +326,17 @@ export default {
   'memory.share.secretFoundRecords': 'Secret detected in a candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
 
   // ── memory/backends/engram.mjs — dualWriteRecords() upstream-base export scope (issue #701) ──
-  'memory.share.upstreamUnavailable': 'could not check the upstream base ({ref}) — {reason}. This run wrote every candidate (the pre-#701 behaviour); nothing was scoped.',
+  // No `{ref}` slot: this fires on every unavailable lookup, including the one
+  // where NO ref resolved and there is therefore no ref to name. `{reason}`
+  // names the ref itself wherever one was involved.
+  'memory.share.upstreamUnavailable': 'could not check the upstream base — {reason}. This run wrote every candidate (the pre-#701 behaviour); nothing was scoped.',
   'memory.share.upstreamConfigUnreadable': '{error}. Any memory.upstreamRef stated there was NOT honored — the upstream base was derived as {ref} instead. Fix brain.config.json (a mid-merge conflict marker is the usual cause) if you meant to scope against a different ref.',
-  // The same fact when NOTHING resolved. The key above names a derived ref, which
-  // is only true when one answered; on this branch `ref` is resolveUpstreamRef's
-  // placeholder, and naming it told the operator a ref was used while the very
-  // next line said none was (cold review round 2 of #701).
+  // The same fact when NOTHING resolved. The key above names a derived ref,
+  // which is only true when one answered; on this branch there is no ref at all
+  // (`upstream-records.mjs` returns `null`), and the key above used to name the
+  // invented `origin/main` one line before the next line said nothing had
+  // resolved (cold review round 2 of #701). The "next line" it points at is
+  // memory.share.upstreamUnavailable, which always follows on this branch.
   'memory.share.upstreamConfigUnreadableNoRef': '{error}. Any memory.upstreamRef stated there was NOT honored, and no upstream base resolved either — see the next line for what was tried. Fix brain.config.json (a mid-merge conflict marker is the usual cause) if you meant to scope against a different ref.',
   'memory.share.upstreamUnnamed': '{count} file(s) under .memory/records/ at the upstream base do not match the per-record filename shape and are invisible to the export-scope check. Run `npm run memory:split-records` to fix.',
   'memory.share.dedupedUpstream': '{count} record(s) already present on the upstream base ({ref}) were not re-exported.',

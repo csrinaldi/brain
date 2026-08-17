@@ -148,15 +148,23 @@ function refResolves(ref, root, _spawn) {
  * @param {object} [args.config]  Parsed `brain.config.json`. Omitted → read from `root`.
  * @param {typeof spawnSync} [args._spawn]
  * @param {(root: string) => object} [args._loadConfig]  Omitted → `loadBrainConfigAt`.
- * @returns {{ref: string, stated: boolean, resolved: boolean, configError?: string}}
+ * @returns {{ref: string|null, stated: boolean, resolved: boolean, configError?: string}}
+ *   `ref` is the ref that was USED, and it is `null` when none was — the last
+ *   line returns no name rather than inventing one. It USED to return the string
+ *   `'origin/main'` there, and that fabrication is what let the operator be told
+ *   "the upstream base was derived as origin/main instead" on a run where
+ *   nothing had been derived (cold review round 2 of #701) and then needed a
+ *   second field to disambiguate (round 4). `ref == null` IS the discriminator.
+ *
+ *   A STATED ref that does not resolve is still reported BY NAME with
+ *   `resolved: false` — it was honored and it failed, which is a different fact
+ *   from "nothing answered", and the operator needs to see which ref they asked
+ *   for. So `resolved` is not derivable from `ref` and both are returned.
+ *
  *   `configError` is present ONLY when `brain.config.json` could not be read.
- *   `resolved` is then what says WHAT `ref` is, and the two must be read together:
- *   `true` — the derived ref that answered, the one resolution fell through to;
- *   `false` — the `origin/main` placeholder this function returns from its last
- *   line when NOTHING resolved, which is not a ref that was used for anything.
- *   Reporting the second as "the base was derived as origin/main instead" is a
- *   falsehood the operator was told for real (cold review round 2 of #701), so
- *   any consumer wording that names the ref MUST branch on `resolved` first.
+ *   It only ever co-occurs with `stated: false` (a throw leaves `cfg` undefined,
+ *   so there is no stated ref), which is why `ref == null` reads as "no derived
+ *   candidate answered" on every result that carries one.
  */
 export function resolveUpstreamRef({
   root,
@@ -188,7 +196,8 @@ export function resolveUpstreamRef({
   for (const ref of ['origin/HEAD', 'origin/main']) {
     if (refResolves(ref, root, _spawn)) return { ref, stated: false, resolved: true, ...carry };
   }
-  return { ref: 'origin/main', stated: false, resolved: false, ...carry };
+  // No ref answered, so there is no ref to name. See this function's `@returns`.
+  return { ref: null, stated: false, resolved: false, ...carry };
 }
 
 /**
@@ -256,25 +265,25 @@ export function parseLsTree(text) {
  * @param {(root: string) => object} [args._loadConfig]  Forwarded to `resolveUpstreamRef`
  *   so the config read is injectable at the layer production actually calls.
  * @returns {{ok:true, ref:string, stated:boolean, byId:Map<string,string>, byPath:Map<string,string>, unnamed:string[], configError?:string}
- *          |{ok:false, ref:string, stated:boolean, reason:string, configError?:string}}
+ *          |{ok:false, ref:string|null, stated:boolean, reason:string, configError?:string}}
+ *   `ref` is non-null on the `ok:true` arm by construction (the `ls-tree` below
+ *   only runs against a ref that resolved). On `ok:false` it is `null` exactly
+ *   when no ref answered — `resolveUpstreamRef`'s discriminator, forwarded, and
+ *   the reason no extra "did a ref resolve" field is needed here.
+ *
  *   `configError` rides on BOTH arms: an unreadable `brain.config.json` no longer
  *   stops resolution (see `resolveUpstreamRef`), so the lookup can succeed against
  *   a derived ref while the operator still has to be told the config was skipped.
  *   Callers MUST surface it — a fall-through that is not reported is the silent
  *   override the STATED split exists to prevent.
  *
- *   `refResolved` rides WITH it, on both arms, and only ever with it. It is
- *   `resolveUpstreamRef`'s `resolved`, forwarded because the pair is what decides
- *   what the operator may be TOLD: config unreadable + `refResolved: true` is "the
- *   base was derived as {ref} instead"; config unreadable + `refResolved: false`
- *   is not — `ref` is then the placeholder, not a ref that answered. It is absent
- *   on a healthy config for the same reason `configError` is: evidence, never
- *   decoration.
- *
- *   `reason` does NOT restate `configError`. It used to prefix it, which printed
- *   the identical sentence to the operator twice — once from the dedicated
- *   `configError` line every consumer already emits, once inside this one (cold
- *   review round 2 of #701).
+ *   `reason` NAMES THE REF whenever one is involved, because the consumers'
+ *   catalog wrappers no longer interpolate it: on a run where nothing resolved
+ *   there is no ref to interpolate, and a wrapper that names one anyway is the
+ *   round-3 falsehood. It does NOT restate `configError` — it used to prefix it,
+ *   which printed the identical sentence to the operator twice, once from the
+ *   dedicated `configError` line every consumer already emits and once inside
+ *   this one (cold review round 2 of #701).
  */
 export function upstreamRecordEntries({
   root,
@@ -284,10 +293,7 @@ export function upstreamRecordEntries({
   _loadConfig = loadBrainConfigAt,
 } = {}) {
   const { ref, stated, resolved, configError } = resolveUpstreamRef({ root, env, config, _spawn, _loadConfig });
-  // `refResolved` travels with `configError` and never without it — see this
-  // function's `@returns`. It is what keeps a consumer from naming a ref that
-  // never answered.
-  const carry = configError === undefined ? {} : { configError, refResolved: resolved };
+  const carry = configError === undefined ? {} : { configError };
   if (!resolved) {
     const reason = stated
       ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef) — writing every candidate this run (pre-#701 behaviour)`
@@ -303,14 +309,14 @@ export function upstreamRecordEntries({
       maxBuffer: 1e9,
     });
   } catch (err) {
-    return { ok: false, ref, stated, reason: `git ls-tree threw — ${err.message}`, ...carry };
+    return { ok: false, ref, stated, reason: `git ls-tree against '${ref}' threw — ${err.message}`, ...carry };
   }
   if (result?.error) {
-    return { ok: false, ref, stated, reason: `git ls-tree could not run — ${result.error.message}`, ...carry };
+    return { ok: false, ref, stated, reason: `git ls-tree against '${ref}' could not run — ${result.error.message}`, ...carry };
   }
   if (typeof result?.status !== 'number' || result.status !== 0) {
     const detail = result?.stderr ? ` — ${String(result.stderr).trim()}` : '';
-    return { ok: false, ref, stated, reason: `git ls-tree exited ${result?.status ?? 'with no status'}${detail}`, ...carry };
+    return { ok: false, ref, stated, reason: `git ls-tree against '${ref}' exited ${result?.status ?? 'with no status'}${detail}`, ...carry };
   }
 
   const { byId, byPath, unnamed } = parseLsTree(result.stdout ?? '');
