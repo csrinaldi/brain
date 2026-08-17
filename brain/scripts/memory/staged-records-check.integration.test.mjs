@@ -176,6 +176,19 @@ test('issue #701 gate main(): an unreadable brain.config.json is PRINTED, and th
     /NOT honored/.test(printed),
     `and told that a ref stated there went unread; got:\n${printed}`,
   );
+  // The POSITIVE branch of the two-key split. `origin/main` was fetched in this
+  // world, so it genuinely IS the derived ref resolution fell through to and
+  // naming it is true here — which is the only case where naming it is true.
+  // Without this assertion both catalog keys satisfy the two checks above (they
+  // share "could not be parsed" and "NOT honored"), and `refResolved` could be
+  // dropped from the carry with the suite still green.
+  // `origin/HEAD`, not `origin/main`: this worktree is a CLONE, so level 3 is
+  // set and answers before level 4 is ever tried. Naming the ref that actually
+  // answered is the whole point of the clause.
+  assert.ok(
+    /derived as origin\/HEAD instead/.test(printed),
+    `a ref that DID answer must be named, or the operator cannot tell which base was used; got:\n${printed}`,
+  );
   // The config failure does not disable the gate: origin/main still answered.
   assert.equal(code, 1, 'a broken config must not turn a refusal into a pass — that is the defect the fall-through exists to avoid');
 });

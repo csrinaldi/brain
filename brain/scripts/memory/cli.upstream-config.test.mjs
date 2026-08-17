@@ -63,15 +63,25 @@ const OBSERVATION = {
   updated_at: '2026-07-02 11:45:38',
 };
 
+function git(cwd, args) {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed:\n${r.stdout}\n${r.stderr}`);
+  return r;
+}
+
 /**
  * A share-able world: one exported chunk (so `dualWriteRecords` has a candidate
  * and therefore produces an `upstreamScope` at all — it is absent on the
  * zero-candidate early return), plus whatever `brain.config.json` the case wants.
  *
  * @param {object} t
- * @param {{config?: string}} opts  `config` omitted → no brain.config.json at all
+ * @param {{config?: string, remote?: boolean}} opts
+ *   config — omitted → no brain.config.json at all
+ *   remote — `true` gives the root a real fetched `origin/main`, so a DERIVED ref
+ *            genuinely resolves past the broken config. Default `false`: the root
+ *            is not a git repo at all, so NOTHING resolves.
  */
-function world(t, { config } = {}) {
+function world(t, { config, remote = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'brain-701-cli-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -82,6 +92,20 @@ function world(t, { config } = {}) {
     gzipSync(Buffer.from(JSON.stringify({ observations: [OBSERVATION] }), 'utf8')),
   );
   if (config !== undefined) writeFileSync(join(root, 'brain.config.json'), config, 'utf8');
+
+  if (remote) {
+    const bare = mkdtempSync(join(tmpdir(), 'brain-701-cli-remote-'));
+    t.after(() => rmSync(bare, { recursive: true, force: true }));
+    git(bare, ['init', '-q', '--bare', '-b', 'main']);
+    git(root, ['init', '-q', '-b', 'main']);
+    git(root, ['config', 'user.email', 'test@example.invalid']);
+    git(root, ['config', 'user.name', 'brain-test']);
+    writeFileSync(join(root, '.gitignore'), '.memory/chunks/\nbin/\ndotenv\n', 'utf8');
+    git(root, ['add', '.gitignore']);
+    git(root, ['commit', '-q', '-m', 'init']);
+    git(root, ['remote', 'add', 'origin', bare]);
+    git(root, ['push', '-q', '-u', 'origin', 'main']);
+  }
 
   const bin = join(root, 'bin');
   mkdirSync(bin);
@@ -101,7 +125,12 @@ function share({ root, bin }) {
     // Deliberately NOT `...process.env` — see the header.
     env: {
       HOME: process.env.HOME,
-      PATH: bin,
+      // `bin` FIRST, so the stub `engram` is the one found no matter what the
+      // machine has installed. The real PATH follows because ref resolution
+      // spawns `git`: with `bin` alone every candidate ref fails to resolve for
+      // the wrong reason (no git binary), which silently turns the
+      // derived-ref case below into the no-ref case and makes it assert nothing.
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
       BRAIN_MEMORY_TEST_ROOT: root,
       BRAIN_MEMORY_ENV_FILE: join(root, 'dotenv'),
       MEMORY_BACKEND: 'engram',
@@ -155,6 +184,24 @@ test('#701 with NO ref resolved the notice does NOT name a derived ref', (t) => 
   assert.doesNotMatch(
     r.stderr, /derived as origin\/main instead/,
     'no ref answered, so none may be named as the one used instead',
+  );
+});
+
+test('#701 when a derived ref DOES answer past the broken config, the notice names it', (t) => {
+  // The positive branch of the two-key split, and the reason `refResolved` has
+  // to travel at all. Both catalog entries share "could not be parsed" and "NOT
+  // honored", so without an assertion on the clause that differs, the field
+  // could be dropped from the accounting with this file still green.
+  const r = share(world(t, { config: CORRUPT, remote: true }));
+
+  assert.equal(r.status, 0, `stderr:\n${r.stderr}`);
+  assert.match(
+    r.stderr, /derived as origin\/main instead/,
+    'origin/main really was fetched here, so it really is the base that took over — this is the one case naming it is true',
+  );
+  assert.doesNotMatch(
+    r.stderr, /no upstream base resolved either/,
+    'a ref answered, so the "nothing resolved" wording would be the opposite falsehood',
   );
 });
 
