@@ -7,7 +7,18 @@ import { parseGraphBlock, buildGraph, filesOverlap, READY, BLOCKED, AWAITING_HUM
 import { renderMermaid, renderSummary, replaceMapRegion, outsideRegion, BEGIN, END } from './epic-render.mjs';
 import { parseArgs, composeMap, main } from './epic-map.mjs';
 
+// #709: the declaration is the fence TAG, not an interior `protocol:` scalar — so
+// the fixture no longer writes one. Every existing test below reuses this builder
+// and therefore exercises the new shape without being individually rewritten.
 const block = ({ track = 'A', needs = [], blocks = [], files = [] } = {}) =>
+  ['```brain-graph/1', `track: ${track}`,
+    `needs: ${JSON.stringify(needs)}`, `blocks: ${JSON.stringify(blocks)}`,
+    `files: ${JSON.stringify(files)}`, '```'].join('\n');
+
+/** The pre-#709 shape: ```yaml + `protocol: brain-graph/1` inside. Used only by
+ * the tests below that specifically pin its refusal (D7) — it must not become the
+ * default fixture, or the suite would stop exercising the tag-based selector. */
+const legacyBlock = ({ track = 'A', needs = [], blocks = [], files = [] } = {}) =>
   ['```yaml', 'protocol: brain-graph/1', `track: ${track}`,
     `needs: ${JSON.stringify(needs)}`, `blocks: ${JSON.stringify(blocks)}`,
     `files: ${JSON.stringify(files)}`, '```'].join('\n');
@@ -41,17 +52,17 @@ test('#459: a fenced block of a DIFFERENT protocol is not read as a graph block'
 });
 
 test('#612: track: (whitespace-only) reads as null, not the empty string', () => {
-  const g = parseGraphBlock(['```yaml', 'protocol: brain-graph/1', 'track: ', 'needs: []', 'blocks: []', 'files: []', '```'].join('\n'));
+  const g = parseGraphBlock(['```brain-graph/1', 'track: ', 'needs: []', 'blocks: []', 'files: []', '```'].join('\n'));
   assert.equal(g.track, null);
 });
 
 test('#612: blocks: (whitespace-only) reads as [] — same as an empty declared list', () => {
-  const g = parseGraphBlock(['```yaml', 'protocol: brain-graph/1', 'track: A', 'needs: []', 'blocks: ', 'files: []', '```'].join('\n'));
+  const g = parseGraphBlock(['```brain-graph/1', 'track: A', 'needs: []', 'blocks: ', 'files: []', '```'].join('\n'));
   assert.deepEqual(g.blocks, []);
 });
 
 test('#612: a node with track: (whitespace-only) groups under the SAME tracks-map key ("?") as an undeclared node, not its own "" group', () => {
-  const withBlankTrack = issue(1, { body: ['```yaml', 'protocol: brain-graph/1', 'track: ', 'needs: []', 'blocks: []', 'files: []', '```'].join('\n') });
+  const withBlankTrack = issue(1, { body: ['```brain-graph/1', 'track: ', 'needs: []', 'blocks: []', 'files: []', '```'].join('\n') });
   const undeclared = issue(2, { body: 'just prose, no block at all' });
   const { tracks, nodes } = buildGraph([withBlankTrack, undeclared]);
   assert.equal(nodes[0].track, null);
@@ -129,6 +140,52 @@ test('#639: the summary prints the unreadable blocks, distinct from the ones tha
   assert.ok(ilegibles.includes('#9'));
   assert.ok(!ilegibles.includes('#8'));
   assert.match(out.match(/^.*Sin ubicar.*$/m)[0], /#8/);
+});
+
+// ── the selector is the fence TAG, not an interior scalar (#709, ADR-0032) ──
+
+test('#709 REQ-639-1 scenario 1: untagged, foreign- and yaml-tagged fences are skipped — none carries the graph tag', () => {
+  const body = ['```', 'log excerpt', '```', '', '```yaml', 'some: config', '```', '',
+    '```console', 'x', '```', '', '```js', 'y', '```'].join('\n');
+  assert.equal(parseGraphBlock(body), null, 'no fence tag equals brain-graph/1, so nothing is selected');
+});
+
+test('#709 D1: the legacy ```yaml + protocol: scalar shape no longer selects the block', () => {
+  assert.equal(parseGraphBlock(legacyBlock({ track: 'Z' })).ok, false,
+    'refused out loud (D7) below — but definitely not the parsed graph');
+});
+
+test('#709 D7: the legacy shape is refused OUT LOUD, naming the retag — never silently read as absent', () => {
+  const r = parseGraphBlock(legacyBlock({ track: 'A' }));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /retag/, 'the reader must be told what to do, not just that reading failed');
+  assert.match(r.error, /brain-graph\/1/);
+});
+
+test('#709 D1/axis 12: BRAIN-GRAPH/1 and Brain-Graph/1 (wrong case) do not declare — exact case only', () => {
+  const upper = '```BRAIN-GRAPH/1\ntrack: A\nneeds: []\nblocks: []\nfiles: []\n```';
+  const mixed = '```Brain-Graph/1\ntrack: A\nneeds: []\nblocks: []\nfiles: []\n```';
+  assert.equal(parseGraphBlock(upper), null, 'no whitelist of near-misses to forgive (D1)');
+  assert.equal(parseGraphBlock(mixed), null);
+});
+
+test('#709 D1/axis 11: trailing attributes after the tag still declare — only the first word is compared', () => {
+  const withAttrs = '```brain-graph/1 title="x"\ntrack: A\nneeds: []\nblocks: []\nfiles: []\n```';
+  assert.deepEqual(parseGraphBlock(withAttrs), { track: 'A', needs: [], blocks: [], files: [] });
+});
+
+test('#709 D1/axis 13: one declared block plus a yaml-tagged illustration of the same protocol is NOT ambiguity', () => {
+  const illustration = '```yaml\nprotocol: brain-graph/1\ntrack: ignored-because-not-declared\n```';
+  const body = [illustration, '', block({ track: 'A', blocks: [5] })].join('\n');
+  assert.deepEqual(parseGraphBlock(body), { track: 'A', needs: [], blocks: [5], files: [] },
+    'the illustration is not a declaration, so the tagged block reads alone');
+});
+
+test('#709 D6: an unterminated brain-graph/1-tagged fence hides the declaration and is reported, never read as absent', () => {
+  const body = 'prose above\n```brain-graph/1\ntrack: A\n';
+  const r = parseGraphBlock(body);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /never closed/);
 });
 
 // ── the classification ──────────────────────────────────────────────────────

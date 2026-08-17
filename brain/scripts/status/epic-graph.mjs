@@ -6,10 +6,10 @@
 // only a derived one cannot lie more than its source.
 //
 // THE DESIGN QUESTION THE TICKET ASKS TO SETTLE FIRST: dependencies must become
-// DATA, not prose. This module answers it with a DECLARED block in the issue body:
+// DATA, not prose. This module answers it with a DECLARED block in the issue body,
+// identified by its fence TAG (issue #709; ADR-0032):
 //
-//   ```yaml
-//   protocol: brain-graph/1
+//   ```brain-graph/1
 //   track:    A
 //   blocks:   [435, 94]
 //   needs:    [479]
@@ -25,22 +25,63 @@
 // become a second source feeding the same builder.
 //
 // It reuses the two readers this repo already has rather than growing a third
-// (the defect #340 records): `fenced-blocks.mjs` LOCATES the block and
-// `yaml-block.mjs`'s `scalar` / `parseJsonScalar` READ it. That is the same split
-// `checkpoint-block.mjs` uses, and it is a split by SHAPE OF INPUT.
+// (the defect #340 records): `fenced-blocks.mjs` LOCATES every fence and
+// `yaml-block.mjs`'s `scalar` / `parseJsonScalar` READ the fields inside the one
+// selected. That is the same split `checkpoint-block.mjs` uses, and it is a split
+// by SHAPE OF INPUT.
 //
 // It used to locate through `extractFencedBlock`, which reads the FIRST fence.
 // That is right for a VCS comment our own emitter wrote — one body, one block —
 // and wrong here (#639): an issue body is written by a human and routinely opens
-// with a snippet, a command, or a log excerpt. The first fence was then handed to
-// the protocol check, which answered `null`, and the node read as UNCLASSIFIED
-// while declaring a complete block further down. The selector is now the
-// `protocol:` scalar, not the position.
+// with a snippet, a command, or a log excerpt. `fenced-blocks.mjs` fixed that by
+// reading every fence rather than only the first.
+//
+// THE SELECTOR IS THE FENCE TAG, NOT AN INTERIOR SCALAR (#709; ADR-0032). Until
+// #709, the selector filtered every fence for `scalar(content, 'protocol') ===
+// 'brain-graph/1'` — a value an author teaching the shape necessarily reproduces
+// verbatim, so a body that ILLUSTRATES the protocol and a body that DECLARES it
+// were byte-identical to the reader: no code path could tell them apart. #709
+// measured the corpus: zero declarations exist anywhere in this repo, and the one
+// column-0 `protocol: brain-graph/1` in the whole tree
+// (`openspec/changes/issue-459-epic-map-derived/proposal.md:38`) is exactly that
+// illustration, sitting in the very proposal that introduced the protocol.
+//
+// The tag `​```brain-graph/1` is now the identity, compared against the FIRST WORD
+// of the fence's info string, exact case — the same rule `brain-amendment/1` and
+// `brain-checkpoint/1` already use for the family they belong to. A `​```yaml`
+// fence carrying `protocol: brain-graph/1` inside no longer declares; it is
+// refused OUT LOUD, naming the retag, never silently read as absent — see
+// `parseGraphBlock` below.
+//
+// `fenced-blocks.mjs` itself is UNTOUCHED by this half of #709, deliberately: it
+// stays backtick-only and column-0-only until the splitter half of #709 lands.
+// That ordering is a correctness constraint, not a preference (design.md D0) —
+// teaching the splitter to see indented or tilde-fenced openers BEFORE the
+// selector stopped trusting the interior scalar would make an indented
+// illustration newly readable and mint a fabricated edge from it. The tag-based
+// selector below is safe under either version of the splitter, because nothing
+// but a fence literally tagged `brain-graph/1` can ever match it.
 
 import { fencedBlocks } from '../lib/fenced-blocks.mjs';
 import { scalar, parseJsonScalar } from '../review/lib/yaml-block.mjs';
 
 export const GRAPH_PROTOCOL = 'brain-graph/1';
+
+/**
+ * The fence's DECLARED identity: the first whitespace-delimited word of its info
+ * string. `fencedBlocks` still returns `tag` as the WHOLE trimmed info string,
+ * unchanged (#495 D1 — `amendment-draft.mjs`/`checkpoint-block.mjs` compare it with
+ * `===`, and redefining it here would silently widen both). This derivation stays
+ * local to the selector rather than moving into `fenced-blocks.mjs` until the
+ * splitter half of #709 lands (D0) — the selector needs nothing from the splitter
+ * that is not already there.
+ *
+ * @param {string} tag
+ * @returns {string}
+ */
+function firstWord(tag) {
+  return tag.split(/\s+/)[0];
+}
 
 /** Node states, in the order a reader cares about them. */
 export const READY = 'ready';
@@ -51,19 +92,43 @@ export const UNCLASSIFIED = 'unclassified';
 /**
  * Reads the declared graph block from an issue body.
  *
- * THREE ANSWERS, and each is a different sentence for the reader.
+ * THE BLOCK IS SELECTED BY ITS FENCE TAG (#709; ADR-0032), never by an interior
+ * scalar and never by position: every fence in the body is read via
+ * `fencedBlocks`, and the one whose info-string's FIRST WORD, compared exact-case,
+ * equals `GRAPH_PROTOCOL` is the declaration. Trailing attributes
+ * (`​```brain-graph/1 title="x"`) do not block a match on the first word, and case
+ * is exact — `BRAIN-GRAPH/1` is not a match; there is no whitelist of near-misses
+ * to forgive.
  *
- * ABSENT IS NOT EMPTY. An issue with no block yields `null`, and the builder marks
- * it UNCLASSIFIED rather than dropping it or treating it as a free-standing leaf. A
+ * FOUR ANSWERS, and each is a different sentence for the reader:
+ *
+ * ABSENT IS NOT EMPTY. A body with no `brain-graph/1`-tagged fence, and no mention
+ * of the protocol at all, yields `null`, and the builder marks the issue
+ * UNCLASSIFIED rather than dropping it or treating it as a free-standing leaf. A
  * node that disappears because it lacks metadata is the same class as a commit the
  * audit never enumerates (#518): the map would report a graph it had not read.
  *
- * MALFORMED IS NOT ABSENT (#639). More than one `brain-graph/1` block in one body
- * is ambiguity, and the answer is `{ ok: false, error }` naming the count — never a
- * silent pick of one of them, the same rule `parseAmendmentDraft` and
+ * MALFORMED IS NOT ABSENT (#639). More than one `brain-graph/1`-tagged fence in one
+ * body is ambiguity, and the answer is `{ ok: false, error }` naming the count —
+ * never a silent pick of one of them, the same rule `parseAmendmentDraft` and
  * `parseCheckpointClaim` hold. `buildGraph` carries it out in `blocksUnreadable`
  * and `renderSummary` prints it, exactly as it already does for a native read it
  * could not perform: "could not read what it declared" is not "declared nothing".
+ *
+ * HIDDEN IS NOT ABSENT (design.md D6). A `brain-graph/1`-tagged fence that never
+ * closes is not a missing declaration — `fencedBlocks` reports it as
+ * `unterminated`, and that is carried out here as `{ ok: false, error }` naming
+ * the line, unconditionally, regardless of any other fence's tag. #710 finding 1's
+ * attribution ambiguity (whose unterminated fence was it?) is deleted by
+ * construction: the caller never asks.
+ *
+ * THE LEGACY SHAPE IS REFUSED OUT LOUD (design.md D7). Zero tagged fences, but some
+ * fence's CONTENT still carries the pre-#709 `protocol: brain-graph/1` scalar — the
+ * shape this module used to teach — returns `{ ok: false, error }` naming the
+ * retag. "No longer declares" must not silently read as "stopped working". A
+ * tagged declaration standing beside a `​```yaml` illustration of the same
+ * protocol is NOT this case, and is not ambiguity either: the illustration is not
+ * a declaration, so it is ignored and the tagged block reads alone.
  *
  * Success keeps the bare object rather than growing an `ok: true` envelope, because
  * `null`-means-absent is load-bearing here and already distinguishes the case the
@@ -77,19 +142,35 @@ export const UNCLASSIFIED = 'unclassified';
 export function parseGraphBlock(body) {
   if (typeof body !== 'string' || !body.includes(GRAPH_PROTOCOL)) return null;
 
-  // Every fence is read and the block is selected by its `protocol:` scalar. The
-  // shape stays ```yaml — an issue body IS rendered for a human, and an unknown
-  // info-string renders as plain text (#495 design D1) — so the tag cannot be the
-  // selector the way it is for `brain-checkpoint/1`.
-  const declared = fencedBlocks(body).blocks
-    .filter(b => scalar(b.content, 'protocol') === GRAPH_PROTOCOL);
+  const { blocks, unterminated } = fencedBlocks(body);
+  const declared = blocks.filter(b => firstWord(b.tag) === GRAPH_PROTOCOL);
 
-  if (declared.length === 0) return null;
   if (declared.length > 1) {
     return {
       ok: false,
       error: `${declared.length} \`${GRAPH_PROTOCOL}\` blocks found (body lines ${declared.map(b => b.line).join(', ')}) — an issue declares its graph exactly once.`,
     };
+  }
+
+  if (declared.length === 0) {
+    // D6: an unterminated fence that WAS tagged for this protocol hides a
+    // declaration — it is not the same fact as "no fence declared one".
+    if (unterminated && firstWord(unterminated.tag) === GRAPH_PROTOCOL) {
+      return {
+        ok: false,
+        error: `a \`${GRAPH_PROTOCOL}\` fence opened at body line ${unterminated.line} is never closed — its declaration cannot be read.`,
+      };
+    }
+    // D7: the pre-#709 shape (```yaml + an interior `protocol:` scalar) is
+    // refused out loud, not read as absent — this is the entire migration net.
+    const legacy = blocks.find(b => scalar(b.content, 'protocol') === GRAPH_PROTOCOL);
+    if (legacy) {
+      return {
+        ok: false,
+        error: `the declaration is the fence tag since #709, not a \`protocol:\` scalar — retag the block at body line ${legacy.line} as \`\`\`${GRAPH_PROTOCOL}\`.`,
+      };
+    }
+    return null;
   }
 
   const block = declared[0].content;
