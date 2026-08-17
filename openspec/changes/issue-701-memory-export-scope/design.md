@@ -99,8 +99,22 @@ around.
 | a stated ref (level 1 or 2) resolves | that ref | `true` | `ok: true` | nothing — it worked |
 | a stated ref does **not** resolve | that ref | `true` | `ok: false` | the ref they named, and that resolution STOPPED there |
 | no stated ref; a derived ref resolves | `origin/HEAD` or `origin/main` | `false` | `ok: true` | nothing — it worked |
-| no stated ref; nothing resolves | `origin/main` | `false` | `ok: false` | which refs were tried |
-| `brain.config.json` present but **unreadable/unparseable** | the DERIVED ref that answered | `false` | `ok: true` — `ok: false` only if the derived refs also fail | a `configError` naming the read failure, **plus** which derived ref was used instead |
+| no stated ref; nothing resolves | **`null`** | `false` | `ok: false` | which refs were tried |
+| config **unreadable**, a derived ref then answers | that derived ref | `false` | `ok: true` (`ok: false` if `ls-tree` then fails) | a `configError` naming the read failure, **plus** which derived ref was used instead |
+| config **unreadable**, and nothing resolves either | **`null`** | `false` | `ok: false` | a `configError` naming the read failure, and that NO base resolved — no ref is named |
+
+**`ref` is `null` whenever no ref answered, and that is the discriminator.** It reported the
+string `origin/main` there for one round, which is a name for a run in which no ref was used,
+and the consumers dutifully printed it: the operator was told "the upstream base was derived
+as `origin/main` instead" one line above a line saying nothing had resolved. Because the
+absent case is now absent rather than fabricated, no extra "did a ref resolve" flag is needed
+anywhere in the chain, and the two ref-naming messages per consumer are keyed on `ref` itself.
+A ref reaching git as the literal string `null` is impossible by construction: the `ls-tree`
+call is downstream of a resolved ref, and the one other message that interpolates a ref
+(`dedupedUpstream`) only prints on a non-zero count, which requires `ok: true`.
+
+A **stated** ref that fails is still reported BY NAME with `stated: true`, never `null` — it
+was honored and it failed, and the operator has to see which ref they asked for.
 
 **The unreadable-config row is the one that needed correcting** (cold review round 2 of
 #701). A stated ref that does not resolve stops resolution — that is the STATED guarantee,
@@ -150,13 +164,23 @@ accident is the 95.7%. The real durability mechanisms are the host-global engram
 The seam returns a discriminated result, never a bare `Set`:
 
 ```
-{ ok: true,  ref, stated, byId: Map<id, oid>, unnamed: string[], configError?: string }
-{ ok: false, ref, stated, reason: string,                        configError?: string }
+{ ok: true,  ref: string,      stated, byId: Map<id, oid>, byPath: Map<path, oid>,
+                                       unnamed: string[],  configError?: string }
+{ ok: false, ref: string|null, stated, reason: string,     configError?: string }
 ```
 
-`configError` rides on BOTH arms — see Decision 2's unreadable-config row. It is not a
+`configError` rides on BOTH arms — see Decision 2's unreadable-config rows. It is not a
 failure of the lookup; it is a failure to read `brain.config.json` that the lookup survived
 by falling through to a derived ref, and it must still reach the operator.
+
+`ref` is non-null on the `ok: true` arm by construction and is `null` on the `ok: false` arm
+exactly when no ref answered — so `ok: false` alone never means "no ref". `ls-tree` can fail
+against a base that resolved perfectly well, and that base IS named, in `reason`. The
+consumers' catalog wrappers for the unavailable case therefore interpolate no ref at all:
+they fire on every `ok: false`, including the one with nothing to name. `reason` names the ref
+where naming one is true, and it never restates the calling consumer's own degradation —
+"writing every candidate" is the exporter's fact and was flatly false at the gate, which
+writes nothing.
 
 `ok: false` covers every way the lookup can fail to happen: no git binary, not a git
 directory (a vendored `brain` inside a consumer repo, a test temp dir), no remote, a fresh
@@ -332,7 +356,10 @@ folded into a neighbouring counter*:
 ```
 deduped          total declines (unchanged meaning: own-records ∪ in-batch ∪ upstream)
 dedupedUpstream  the new reason — the number `measure-701b.mjs` reads as `re-export`
-upstreamScope    { applied, ref, stated, reason, entries, unnamed }
+upstreamScope    { applied, ref, stated, reason, configError, entries, unnamed }
+                 `ref` is `null` when nothing resolved; `reason` and `configError`
+                 are `null` when there is nothing to report — never a fabricated
+                 value standing in for a fact this run did not observe.
 ```
 
 `cli.mjs` prints, beside the existing `unprovenanced` line:
