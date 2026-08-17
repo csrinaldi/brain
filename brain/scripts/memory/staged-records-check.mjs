@@ -129,15 +129,20 @@ export function evaluateStagedRecords({ staged = [], upstream } = {}) {
  * That range is ONE stratified draw's, and it is stated as such. An earlier version
  * of this paragraph added "and a 60-record uniform random sample spanned
  * `R095`–`R098`". That span DOES NOT REPRODUCE, and it is gone rather than
- * re-measured. Five seeded 60-record uniform redraws over the same 2091 records
- * (mulberry32, seeds 12345 / 777 / 20260816 / 4242 / 1) spanned `R090`–`R099`,
- * `R091`–`R099`, `R091`–`R099`, `R092`–`R099` and `R091`–`R099` — every one of
- * them reaching `R099`, none of them stopping at `R098`. It could hardly do
- * otherwise: 11.0% of the records are ≥6400 B and every one of those pairs at
- * `R099`, so a 60-draw missing `R099` entirely is a ~1-in-1000 event. It was a
+ * re-measured: five seeded 60-record uniform redraws each reached `R099` and none
+ * stopped at `R098`. Their PER-SEED spans are deliberately not stated. Naming a
+ * generator and its seeds does not replay a draw without the mapping from draw to
+ * record index, and a re-implementation from the version that did name them got
+ * different spans for four of the five (cold review round 4 of #701).
+ *
+ * The conclusion needs no seed, which is why it is the half kept: it follows from
+ * the size distribution alone. 231 of this repo's 2091 records are ≥6400 B
+ * (11.0%), and every record above ~6.5 KB pairs at `R099`, so a 60-draw missing
+ * `R099` entirely is a ~1-in-1000 event (0.89^60 ≈ 8.9e-4). The deleted span was a
  * property of one draw written as a property of the population — the same error
  * as the "`R095` even by default" sentence just below, one sample size up. Do not
- * put another number here without naming the draw that produced it.
+ * put a number here without naming the draw that produced it, and do not state a
+ * per-draw result without the mapping that replays it.
  *
  * The index RISES MONOTONICALLY WITH RECORD SIZE, and that is the whole
  * mechanism: an id swap edits 16 hex characters, so the smaller the blob the
