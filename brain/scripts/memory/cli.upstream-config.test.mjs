@@ -51,8 +51,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,9 +62,6 @@ import { gzipSync } from 'node:zlib';
 import { t as msg } from '../i18n/t.mjs';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
-
-/** The real `which`, resolved once — the sandbox PATH still needs it to work. */
-const REAL_WHICH = execFileSync('sh', ['-c', 'command -v which'], { encoding: 'utf8' }).trim();
 
 /**
  * The catalog line for `key`, in the SAME locale the child CLI will resolve.
@@ -141,7 +138,21 @@ function world(t, { config, remote = false } = {}) {
 
   const bin = join(root, 'bin');
   mkdirSync(bin);
-  symlinkSync(REAL_WHICH, join(bin, 'which'));
+  // A `which` STUB, not a symlink to the machine's own. `probeBinary` spawns
+  // `which engram` (`lib/backend-selection.mjs`), so an image with no `which` at
+  // all makes the probe UNDETERMINED and the run never reaches
+  // `dualWriteRecords` — measured on this branch by stripping `which` from PATH:
+  // `# pass 3  # fail 5`. `lib/backend-selection.test.mjs:44` documents that
+  // machine class as real ("the real shape on a container with no `which`").
+  //
+  // The previous shape resolved the real `which` with `execFileSync('sh', ['-c',
+  // 'command -v which'])` at module TOP LEVEL and symlinked it in. That was worse
+  // in both directions: `command -v` exits 127 when the binary is absent and
+  // `execFileSync` throws on it (verified: status 127), so on exactly that image
+  // the file died at import reporting ZERO assertions — and on every image that
+  // HAS `which` the symlink was redundant, because `share()` below puts the real
+  // PATH after `bin`. One ambient input fewer, no import-time I/O.
+  writeFileSync(join(bin, 'which'), '#!/bin/sh\ncommand -v "$1"\n', { mode: 0o755 });
   // Exits 0 without exporting — the chunk above is already in place, so the
   // probe answers the way it would on a real machine and the run reaches
   // dualWriteRecords with candidates.
