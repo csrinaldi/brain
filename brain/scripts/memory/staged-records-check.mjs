@@ -138,7 +138,10 @@ export function evaluateStagedRecords({ staged = [], upstream } = {}) {
  * The conclusion needs no seed, which is why it is the half kept: it follows from
  * the size distribution alone. 231 of this repo's 2091 records are ≥6400 B
  * (11.0%), and every record above ~6.5 KB pairs at `R099`, so a 60-draw missing
- * `R099` entirely is a ~1-in-1000 event (0.89^60 ≈ 8.9e-4). The deleted span was a
+ * `R099` entirely is a ~1-in-1100 event ((1 − 231/2091)^60 ≈ 8.9e-4). Write the
+ * expression that produces the figure, not one that rounds near it: `0.89^60` is
+ * 9.2e-4, a different number, and it stood here for a round under a paragraph whose
+ * own closing rule forbids exactly that. The deleted span was a
  * property of one draw written as a property of the population — the same error
  * as the "`R095` even by default" sentence just below, one sample size up. Do not
  * put a number here without naming the draw that produced it, and do not state a
