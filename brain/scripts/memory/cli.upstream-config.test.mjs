@@ -20,17 +20,35 @@
 //
 // ── what is neutralised, and what is not ────────────────────────────────────
 //
-// The env is BUILT, never inherited (the pattern cli.backend-fallback.test.mjs
-// established): `BRAIN_MEMORY_UPSTREAM_REF` is resolution level 1 and would win
-// over the config, so an ambient one makes `configError` unreachable and every
-// assertion below vacuous. `.env` is replaced via BRAIN_MEMORY_ENV_FILE for the
-// same reason it is there — it is gitignored, so `MEMORY_BACKEND` would
-// otherwise be whatever the maintainer's checkout happens to carry.
+// The child env is BUILT key by key, never spread from `process.env` (the pattern
+// cli.backend-fallback.test.mjs established): `BRAIN_MEMORY_UPSTREAM_REF` is
+// resolution level 1 and would win over the config, so an ambient one makes
+// `configError` unreachable and every assertion below vacuous. `.env` is replaced
+// via BRAIN_MEMORY_ENV_FILE for the same reason it is there — it is gitignored, so
+// `MEMORY_BACKEND` would otherwise be whatever the maintainer's checkout happens to
+// carry.
+//
+// BUILT is not the same as hermetic, and two of the five keys `share()` sets are
+// ambient on purpose:
+//
+//   HOME — passed straight through as `process.env.HOME`.
+//   PATH — `${bin}:${process.env.PATH ?? ''}`, the sandbox bin PREPENDED to the
+//          real one, never replacing it. That inherited tail is LOAD-BEARING, not
+//          incidental: ref resolution spawns `git`, and with `bin` alone every
+//          candidate ref failed to resolve for the wrong reason (no git binary),
+//          which silently turned the derived-ref case into a second no-ref case
+//          that asserted nothing. Measured while writing the `remote: true` world
+//          (see that commit); prepending keeps the stub `engram` authoritative by
+//          first-match-wins AND lets git actually run.
 //
 // The `engram` on PATH is a stub that exits 0 without exporting: the chunk it
 // would have written is planted by the test instead, so `share` has real
-// candidates to score without a real engram installation. The tmpdir is not a
-// git repo at all, which is what makes NO ref resolve.
+// candidates to score without a real engram installation. In the DEFAULT world
+// (`remote: false`) the tmpdir is not a git repo at all, which is what makes NO
+// ref resolve there; the `remote: true` world `git init`s the root, pushes to a
+// bare remote, and therefore DOES resolve a derived `origin/main` — that is the
+// positive branch of the two-key split, and `world()`'s own jsdoc states the
+// condition alongside the parameter it belongs to.
 //
 // The LOCALE is NOT neutralised, and it cannot be from here. This header used to
 // be titled "hermetic by construction" while omitting the one ambient input that
