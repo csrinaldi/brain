@@ -328,6 +328,11 @@ export default {
   // ── memory/backends/engram.mjs — dualWriteRecords() upstream-base export scope (issue #701) ──
   'memory.share.upstreamUnavailable': 'could not check the upstream base ({ref}) — {reason}. This run wrote every candidate (the pre-#701 behaviour); nothing was scoped.',
   'memory.share.upstreamConfigUnreadable': '{error}. Any memory.upstreamRef stated there was NOT honored — the upstream base was derived as {ref} instead. Fix brain.config.json (a mid-merge conflict marker is the usual cause) if you meant to scope against a different ref.',
+  // The same fact when NOTHING resolved. The key above names a derived ref, which
+  // is only true when one answered; on this branch `ref` is resolveUpstreamRef's
+  // placeholder, and naming it told the operator a ref was used while the very
+  // next line said none was (cold review round 2 of #701).
+  'memory.share.upstreamConfigUnreadableNoRef': '{error}. Any memory.upstreamRef stated there was NOT honored, and no upstream base resolved either — see the next line for what was tried. Fix brain.config.json (a mid-merge conflict marker is the usual cause) if you meant to scope against a different ref.',
   'memory.share.upstreamUnnamed': '{count} file(s) under .memory/records/ at the upstream base do not match the per-record filename shape and are invisible to the export-scope check. Run `npm run memory:split-records` to fix.',
   'memory.share.dedupedUpstream': '{count} record(s) already present on the upstream base ({ref}) were not re-exported.',
 
@@ -336,6 +341,8 @@ export default {
   'memory.stagedRecordsCheck.remedy': '  git restore --staged {paths}\n  (then `rm` any of those paths that `git status` now shows as untracked — same bytes, already on the trunk)',
   'memory.stagedRecordsCheck.unavailable': 'could not check the upstream base — {note}. Nothing was refused; this run could not ask the question.',
   'memory.stagedRecordsCheck.configUnreadable': '{error}. Any memory.upstreamRef stated there was NOT honored — the upstream base was derived as {ref} instead. Fix brain.config.json (a mid-merge conflict marker is the usual cause) if you meant to scope against a different ref.',
+  // See memory.share.upstreamConfigUnreadableNoRef — the same split, at the gate.
+  'memory.stagedRecordsCheck.configUnreadableNoRef': '{error}. Any memory.upstreamRef stated there was NOT honored, and no upstream base resolved either — see the next line for what was tried. Fix brain.config.json (a mid-merge conflict marker is the usual cause) if you meant to scope against a different ref.',
 
   // ── memory/backends/engram.mjs — importMemory() records-only pull (D2/C4, issue #229) ──
   'memory.import.empty':    'ℹ no records found in .memory/records/ — nothing to import.',

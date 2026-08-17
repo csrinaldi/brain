@@ -361,15 +361,47 @@ test('upstreamRecordEntries: a brain.config.json that cannot be READ (a director
   assert.match(r.configError, /could not be read/);
 });
 
-test('upstreamRecordEntries: an unreadable config AND no derived ref → ok:false, and the reason names BOTH failures', (t) => {
+test('upstreamRecordEntries: an unreadable config AND no derived ref → ok:false, and BOTH failures travel — on their OWN channels', (t) => {
   const root = tmpRoot(t, '}}} not json');
   const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit([]) });
   assert.equal(r.ok, false);
   assert.equal(r.ref, 'origin/main');
   assert.equal(r.stated, false);
-  assert.match(r.reason, /could not be parsed/, 'the config failure must not be dropped when the derived refs also fail');
+  assert.match(r.configError, /could not be parsed/, 'the config failure must not be dropped when the derived refs also fail');
   assert.match(r.reason, /no upstream ref resolved/);
-  assert.match(r.configError, /could not be parsed/);
+  // The reason used to PREFIX `configError`. Both consumers print `configError`
+  // on its own line and then print `reason`, so the operator read the identical
+  // sentence twice (cold review round 2 of #701) — measured through the real
+  // CLI, not argued.
+  assert.doesNotMatch(
+    r.reason, /could not be parsed/,
+    'reason must not restate configError — every consumer prints both, so a prefix doubles the sentence',
+  );
+});
+
+test('upstreamRecordEntries: refResolved:false says the reported ref is a PLACEHOLDER, not a ref that answered', (t) => {
+  // The falsehood this pins: with no ref resolved, `ref` is the hard-coded
+  // `origin/main` `resolveUpstreamRef` returns from its last line. The operator
+  // was told "the upstream base was derived as origin/main instead" while the
+  // next line said nothing had been derived and nothing checked.
+  const root = tmpRoot(t, '}}} not json');
+  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit([]) });
+  assert.equal(r.refResolved, false, 'no candidate resolved, so no ref was used for anything');
+});
+
+test('upstreamRecordEntries: refResolved:true when a derived ref DID answer past the broken config', (t) => {
+  const root = tmpRoot(t, '}}} not json');
+  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD']) });
+  assert.equal(r.ok, true);
+  assert.equal(r.ref, 'origin/HEAD');
+  assert.equal(r.refResolved, true, 'this IS the derived ref resolution fell through to — the one case the wording may name');
+});
+
+test('upstreamRecordEntries: refResolved rides ONLY with configError — evidence, not decoration', (t) => {
+  const root = tmpRoot(t, JSON.stringify({ project: { slug: 'brain' } }));
+  const r = upstreamRecordEntries({ root, env: {}, _spawn: fakeGit(['origin/HEAD']) });
+  assert.equal(r.configError, undefined);
+  assert.equal(r.refResolved, undefined, 'nothing failed to be read, so there is no ambiguity to resolve');
 });
 
 test('upstreamRecordEntries: a READABLE config stating an unresolvable ref STILL stops at that ref — unchanged, and not the same case', (t) => {

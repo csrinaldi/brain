@@ -45,22 +45,28 @@ const ZERO_OID = '0'.repeat(40);
  *
  * `configError` is a SEPARATE channel from `note`, on purpose. `note` means "the
  * gate could not ask the question, so nothing was judged"; `configError` means
- * "`brain.config.json` could not be read, so a ref stated THERE was not honored —
- * but the derived ref answered and the verdict below is real". Folding the second
- * into the first would print "nothing was refused" over a genuine refusal.
+ * "`brain.config.json` could not be read, so a ref stated THERE was not honored".
+ * Folding the second into the first would print "nothing was refused" over a
+ * genuine refusal.
+ *
+ * `refResolved` is forwarded beside them because `ref` alone is ambiguous: on a
+ * run where nothing resolved it is `resolveUpstreamRef`'s placeholder, not a ref
+ * that answered, and `main()` must not name it as the base "derived instead"
+ * (`upstream-records.mjs#resolveUpstreamRef`'s `@returns`).
  *
  * @param {object} args
  * @param {Array<{path: string, dstOid: string, status: string}>} args.staged
- * @param {{ok:true, byPath:Map<string,string>, ref:string, configError?:string}
- *        |{ok:false, reason:string, configError?:string}} args.upstream
- * @returns {{level: 'pass'|'fail', offending: string[], note?: string, configError?: string, ref?: string}}
+ * @param {{ok:true, byPath:Map<string,string>, ref:string, configError?:string, refResolved?:boolean}
+ *        |{ok:false, reason:string, configError?:string, refResolved?:boolean}} args.upstream
+ * @returns {{level: 'pass'|'fail', offending: string[], note?: string, configError?: string,
+ *           ref?: string, refResolved?: boolean}}
  */
 export function evaluateStagedRecords({ staged = [], upstream } = {}) {
   // Carried on BOTH arms: an unreadable config no longer stops the lookup
   // (`upstream-records.mjs`), so it can co-occur with a perfectly good verdict.
   const carry = upstream?.configError === undefined
     ? {}
-    : { configError: upstream.configError, ref: upstream.ref };
+    : { configError: upstream.configError, ref: upstream.ref, refResolved: upstream.refResolved === true };
 
   if (!upstream || upstream.ok !== true) {
     return {
@@ -253,11 +259,17 @@ export async function main(deps = {}) {
 
   // Printed BEFORE the verdict and independently of it: the operator has to
   // learn the config was skipped whether the gate then passed or refused.
+  //
+  // TWO keys, chosen on `refResolved`: naming a ref the base "was derived as"
+  // is only true when one actually resolved. On the run where nothing did, the
+  // `ref` field is `resolveUpstreamRef`'s placeholder and the operator was
+  // being told a ref answered while the very next line said none had (cold
+  // review round 2 of #701).
   if (result.configError) {
-    console.log(`staged-records-check: ${await t('memory.stagedRecordsCheck.configUnreadable', {
-      error: result.configError,
-      ref: result.ref,
-    })}`);
+    const key = result.refResolved
+      ? 'memory.stagedRecordsCheck.configUnreadable'
+      : 'memory.stagedRecordsCheck.configUnreadableNoRef';
+    console.log(`staged-records-check: ${await t(key, { error: result.configError, ref: result.ref })}`);
   }
 
   if (result.note) {

@@ -303,7 +303,7 @@ export function _defaultReadObservations(root) {
  *   emptyObservationsChunks: number, indexCount?: number,
  *   duplicates: {ids: number, lines: number, divergent: number, groups: object[]},
  *   upstreamScope?: {applied: boolean, ref: string, stated: boolean, reason: string|null,
- *   configError: string|null, entries: number, unnamed: number}}>}
+ *   configError: string|null, refResolved: boolean|null, entries: number, unnamed: number}}>}
  *   `duplicates` (#574) is the union-merge residual already sitting in
  *   `records/`, distinct from `deduped` (candidates THIS run declined to
  *   append). Zero on the early return, which measured nothing. `dedupedUpstream`
@@ -427,6 +427,11 @@ export async function dualWriteRecords(
     // stops the lookup, so the scope can be APPLIED against a derived ref while
     // a ref stated in that config went unread. Reported either way.
     configError: upstream.configError ?? null,
+    // Only ever meaningful ALONGSIDE `configError`, and `null` without one. It
+    // is what lets `cli.mjs` tell "the base was derived as {ref} instead" from
+    // "nothing resolved either" — `ref` on the second is a placeholder, not a
+    // ref that answered (`upstream-records.mjs#resolveUpstreamRef`).
+    refResolved: upstream.refResolved ?? null,
     entries: upstream.ok ? upstream.byId.size : 0,
     unnamed: upstream.ok ? upstream.unnamed.length : 0,
   };

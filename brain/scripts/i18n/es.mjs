@@ -294,6 +294,7 @@ export default {
   // ── memory/backends/engram.mjs — dualWriteRecords() alcance del export contra la base upstream (issue #701) ──
   'memory.share.upstreamUnavailable': 'no se pudo consultar la base upstream ({ref}) — {reason}. Esta corrida escribió todos los candidatos (comportamiento pre-#701); no se acotó nada.',
   'memory.share.upstreamConfigUnreadable': '{error}. Cualquier memory.upstreamRef declarado ahí NO fue respetado — la base upstream se derivó como {ref} en su lugar. Arreglá brain.config.json (un marcador de conflicto a medio merge es la causa habitual) si querías apuntar a otro ref.',
+  'memory.share.upstreamConfigUnreadableNoRef': '{error}. Cualquier memory.upstreamRef declarado ahí NO fue respetado, y tampoco resolvió ninguna base upstream — la línea siguiente dice qué se intentó. Arreglá brain.config.json (un marcador de conflicto a medio merge es la causa habitual) si querías apuntar a otro ref.',
   'memory.share.upstreamUnnamed': '{count} archivo(s) bajo .memory/records/ en la base upstream no coinciden con el formato de nombre por registro y son invisibles para el chequeo de alcance del export. Corré `npm run memory:split-records` para arreglarlo.',
   'memory.share.dedupedUpstream': '{count} registro(s) ya presentes en la base upstream ({ref}) no se re-exportaron.',
 
@@ -302,6 +303,7 @@ export default {
   'memory.stagedRecordsCheck.remedy': '  git restore --staged {paths}\n  (después hacé `rm` de las rutas que `git status` ahora muestre como sin trackear — mismos bytes, ya están en el trunk)',
   'memory.stagedRecordsCheck.unavailable': 'no se pudo consultar la base upstream — {note}. No se rechazó nada; esta corrida no pudo hacer la pregunta.',
   'memory.stagedRecordsCheck.configUnreadable': '{error}. Cualquier memory.upstreamRef declarado ahí NO fue respetado — la base upstream se derivó como {ref} en su lugar. Arreglá brain.config.json (un marcador de conflicto a medio merge es la causa habitual) si querías apuntar a otro ref.',
+  'memory.stagedRecordsCheck.configUnreadableNoRef': '{error}. Cualquier memory.upstreamRef declarado ahí NO fue respetado, y tampoco resolvió ninguna base upstream — la línea siguiente dice qué se intentó. Arreglá brain.config.json (un marcador de conflicto a medio merge es la causa habitual) si querías apuntar a otro ref.',
 
   // ── memory/backends/engram.mjs — importMemory() pull solo-records (D2/C4, issue #229) ──
   'memory.import.empty':    'ℹ no se encontraron registros en .memory/records/ — nada para importar.',

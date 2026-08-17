@@ -607,10 +607,17 @@ try {
     // Independent of `applied`: an unreadable `brain.config.json` falls THROUGH
     // to the derived candidates rather than stopping resolution, so the scope
     // can be applied while a stated ref went unread. Both facts get a line.
+    //
+    // TWO keys, chosen on `refResolved`. Naming the ref the base "was derived
+    // as" is only true when one actually resolved; when none did, `scope.ref`
+    // is `resolveUpstreamRef`'s placeholder and this line was telling the
+    // operator a ref had answered while the `applied: false` line directly
+    // below it said nothing had (cold review round 2 of #701).
     if (scope.configError) {
-      console.error(
-        `memory/cli: ${await t("memory.share.upstreamConfigUnreadable", { error: scope.configError, ref: scope.ref })}`,
-      );
+      const key = scope.refResolved
+        ? "memory.share.upstreamConfigUnreadable"
+        : "memory.share.upstreamConfigUnreadableNoRef";
+      console.error(`memory/cli: ${await t(key, { error: scope.configError, ref: scope.ref })}`);
     }
     if (scope.applied === false) {
       console.error(

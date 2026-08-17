@@ -149,8 +149,14 @@ function refResolves(ref, root, _spawn) {
  * @param {typeof spawnSync} [args._spawn]
  * @param {(root: string) => object} [args._loadConfig]  Omitted → `loadBrainConfigAt`.
  * @returns {{ref: string, stated: boolean, resolved: boolean, configError?: string}}
- *   `configError` is present ONLY when `brain.config.json` could not be read, and
- *   the ref reported alongside it is the DERIVED one resolution fell through to.
+ *   `configError` is present ONLY when `brain.config.json` could not be read.
+ *   `resolved` is then what says WHAT `ref` is, and the two must be read together:
+ *   `true` — the derived ref that answered, the one resolution fell through to;
+ *   `false` — the `origin/main` placeholder this function returns from its last
+ *   line when NOTHING resolved, which is not a ref that was used for anything.
+ *   Reporting the second as "the base was derived as origin/main instead" is a
+ *   falsehood the operator was told for real (cold review round 2 of #701), so
+ *   any consumer wording that names the ref MUST branch on `resolved` first.
  */
 export function resolveUpstreamRef({
   root,
@@ -256,6 +262,19 @@ export function parseLsTree(text) {
  *   a derived ref while the operator still has to be told the config was skipped.
  *   Callers MUST surface it — a fall-through that is not reported is the silent
  *   override the STATED split exists to prevent.
+ *
+ *   `refResolved` rides WITH it, on both arms, and only ever with it. It is
+ *   `resolveUpstreamRef`'s `resolved`, forwarded because the pair is what decides
+ *   what the operator may be TOLD: config unreadable + `refResolved: true` is "the
+ *   base was derived as {ref} instead"; config unreadable + `refResolved: false`
+ *   is not — `ref` is then the placeholder, not a ref that answered. It is absent
+ *   on a healthy config for the same reason `configError` is: evidence, never
+ *   decoration.
+ *
+ *   `reason` does NOT restate `configError`. It used to prefix it, which printed
+ *   the identical sentence to the operator twice — once from the dedicated
+ *   `configError` line every consumer already emits, once inside this one (cold
+ *   review round 2 of #701).
  */
 export function upstreamRecordEntries({
   root,
@@ -265,15 +284,15 @@ export function upstreamRecordEntries({
   _loadConfig = loadBrainConfigAt,
 } = {}) {
   const { ref, stated, resolved, configError } = resolveUpstreamRef({ root, env, config, _spawn, _loadConfig });
-  const carry = configError === undefined ? {} : { configError };
-  // The config failure PREFIXES the reason rather than replacing it: both facts
-  // are true at once here, and the ref that actually failed is the derived one.
-  const prefix = configError === undefined ? '' : `${configError}; `;
+  // `refResolved` travels with `configError` and never without it — see this
+  // function's `@returns`. It is what keeps a consumer from naming a ref that
+  // never answered.
+  const carry = configError === undefined ? {} : { configError, refResolved: resolved };
   if (!resolved) {
     const reason = stated
       ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef) — writing every candidate this run (pre-#701 behaviour)`
       : `no upstream ref resolved (tried origin/HEAD, origin/main) — writing every candidate this run (pre-#701 behaviour)`;
-    return { ok: false, ref, stated, reason: `${prefix}${reason}`, ...carry };
+    return { ok: false, ref, stated, reason, ...carry };
   }
 
   let result;
@@ -284,14 +303,14 @@ export function upstreamRecordEntries({
       maxBuffer: 1e9,
     });
   } catch (err) {
-    return { ok: false, ref, stated, reason: `${prefix}git ls-tree threw — ${err.message}`, ...carry };
+    return { ok: false, ref, stated, reason: `git ls-tree threw — ${err.message}`, ...carry };
   }
   if (result?.error) {
-    return { ok: false, ref, stated, reason: `${prefix}git ls-tree could not run — ${result.error.message}`, ...carry };
+    return { ok: false, ref, stated, reason: `git ls-tree could not run — ${result.error.message}`, ...carry };
   }
   if (typeof result?.status !== 'number' || result.status !== 0) {
     const detail = result?.stderr ? ` — ${String(result.stderr).trim()}` : '';
-    return { ok: false, ref, stated, reason: `${prefix}git ls-tree exited ${result?.status ?? 'with no status'}${detail}`, ...carry };
+    return { ok: false, ref, stated, reason: `git ls-tree exited ${result?.status ?? 'with no status'}${detail}`, ...carry };
   }
 
   const { byId, byPath, unnamed } = parseLsTree(result.stdout ?? '');
