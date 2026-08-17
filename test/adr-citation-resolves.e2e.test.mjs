@@ -142,12 +142,7 @@ const FIXTURE_CITATIONS = Object.freeze([
  * `brain:promote` on the draft this branch carries, that citation is what
  * turns this suite red — by construction, not by accident.
  */
-const KNOWN_GAPS = Object.freeze([
-  { file: 'docs/inbox/MASTER-PLAN-1.0.md', number: '0023',
-    why: 'ADR-0023 (SDD role port) drafted at brain-drafts/adr-0023-sdd-role-port.md, never promoted — owned by #599' },
-  { file: 'docs/inbox/brain-v2-epic-plan.md', number: '0023',
-    why: 'the second citation of the same unpromoted draft — owned by #599' },
-]);
+const KNOWN_GAPS = Object.freeze([]);
 
 // ── Readers. Every one of them throws rather than returning empty ────────────
 //

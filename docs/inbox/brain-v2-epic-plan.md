@@ -111,7 +111,9 @@ Auto-update (riesgo mortal):
 - **Salida:** un equipo externo adopta y actualiza sin fricción y sin riesgo de perder su trabajo.
 
 ### M5 — Role-as-port (C) · #312 — la prueba de neutralidad
-- Ratificar **ADR-0023** (promover el draft a `decisions/` + HOME.md).
+- Escribir el ADR del port de roles desde el código ya entregado y promoverlo (`decisions/` +
+  HOME.md): hoy solo existe el draft `brain-drafts/adr-0023-sdd-role-port.md` y el número `0023`
+  queda reservado para este ticket (#312).
 - Módulo `roles/` (contrato) + providers `gentle-ai` y `plain` (real, no stub) + `roles.contract.test`.
 - **Salida:** neutralidad de agente demostrada con n=2 y test de paridad, no asertada.
 
