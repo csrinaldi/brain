@@ -13,8 +13,17 @@ This repo already has **two** fenced-block families and they differ for a reason
 
 | family | shape | why | examples |
 |---|---|---|---|
-| **posted to the VCS** | ` ```yaml ` + `protocol: <name>` | a comment is rendered by GitHub/GitLab; `yaml` gets highlighting, an unknown info-string renders as plain text | `brain-review/1|2`, `brain-decision/1`, `brain-graph/1` |
-| **a file in the repo, read by a verb** | ` ```<name> ` | nothing renders it for a human reviewer of a diff; the tag *is* the selector | `brain-amendment/1`, `amend-find`, `amend-replace` |
+| **posted to the VCS, and never a spoofing target** | ` ```yaml ` + `protocol: <name>` | a comment is rendered by GitHub/GitLab; `yaml` gets highlighting, an unknown info-string renders as plain text — and these protocols are written by brain's own emitter into its own comments, so no human authors a body that merely ILLUSTRATES one | `brain-review/1|2`, `brain-decision/1` |
+| **the tag IS the selector** | ` ```<name> ` | either nothing renders it for a human (a file read by a verb), or it is rendered but human-authored, where an interior scalar is spoofable and the tag is not | `brain-amendment/1`, `amend-find`, `amend-replace`, `brain-graph/1` |
+
+> **Corrected by issue #709 / ADR-0032.** `brain-graph/1` sat in the first row, and
+> the row's criterion — "is it rendered for a human?" — was the wrong discriminator
+> for it. `brain-graph/1` is the one protocol here written by a HUMAN into an issue
+> body, which means an author teaching its shape reproduces `protocol: brain-graph/1`
+> verbatim, and the reader cannot distinguish that illustration from a declaration.
+> Unspoofability outranks the rendered-artifact rule; the rendering cost is cosmetic.
+> The families still differ for a reason — the reason is not the one this table
+> originally stated.
 
 `checkpoint-report.md` is the second kind. It takes the second shape.
 
