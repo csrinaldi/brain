@@ -592,6 +592,56 @@ try {
     console.log(`memory/cli: ${await t("memory.share.unprovenanced", { count: result.unprovenanced })}`);
   }
 
+  // issue #701 — the upstream-base export scope. `upstreamScope` is absent on
+  // the zero-candidate early return (nothing was measured — see
+  // dualWriteRecords()'s own docs), so every branch below is keyed on its
+  // PRESENCE, mirroring `indexCount`'s "undefined means never measured" reading
+  // just above.
+  //
+  // `applied: false` is printed to STDERR for the same reason #641's backend
+  // substitution notice is: the automated callers (`pre-push`) discard stdout,
+  // and "this run wrote every candidate — the pre-#701 behaviour" is exactly
+  // the kind of silent-degradation notice that must survive that discard.
+  if (op === "share" && result?.upstreamScope) {
+    const scope = result.upstreamScope;
+    // Independent of `applied`: an unreadable `brain.config.json` falls THROUGH
+    // to the derived candidates rather than stopping resolution, so the scope
+    // can be applied while a stated ref went unread. Both facts get a line.
+    //
+    // TWO keys, chosen on whether there IS a ref. Naming the ref the base "was
+    // derived as" is only true when one actually resolved, and `scope.ref` is
+    // `null` when none did. It used to be the string `'origin/main'` even then,
+    // so this line told the operator a ref had answered while the
+    // `applied: false` line directly below it said nothing had (cold review
+    // round 2 of #701).
+    if (scope.configError) {
+      const key = scope.ref
+        ? "memory.share.upstreamConfigUnreadable"
+        : "memory.share.upstreamConfigUnreadableNoRef";
+      console.error(`memory/cli: ${await t(key, { error: scope.configError, ref: scope.ref })}`);
+    }
+    // No `{ref}`: this line fires on every `ok:false`, and on the one where
+    // nothing resolved there is no ref to name. `reason` names the ref itself
+    // wherever one was involved (`upstream-records.mjs#upstreamRecordEntries`),
+    // which is what stopped this line from interpolating the invented
+    // `origin/main` one line under a line saying nothing had resolved.
+    if (scope.applied === false) {
+      console.error(
+        `memory/cli: ${await t("memory.share.upstreamUnavailable", { reason: scope.reason })}`,
+      );
+    } else if (scope.unnamed > 0) {
+      console.error(`memory/cli: ${await t("memory.share.upstreamUnnamed", { count: scope.unnamed })}`);
+    }
+  }
+  // `dedupedUpstream` is the success number (records already durable on the
+  // trunk, correctly not re-exported) — printed to stdout like progress, never
+  // to stderr like a warning.
+  if (op === "share" && typeof result?.dedupedUpstream === "number" && result.dedupedUpstream > 0) {
+    console.log(
+      `memory/cli: ${await t("memory.share.dedupedUpstream", { count: result.dedupedUpstream, ref: result.upstreamScope?.ref })}`,
+    );
+  }
+
   // #574 — the duplicate accounting, for every op that produced one (`share`,
   // `pull`, `setup`, `import`, and anything added later that reads the store).
   // Keyed on the result carrying it, not on a list of verbs: the failure this

@@ -42,6 +42,7 @@ import { resolveSecretConfig, compilePatterns, scrubChunkFile, scanTextForSecret
 import { exportObservation } from "../lib/engram-export.mjs";
 import { importRecord } from "../lib/engram-import.mjs";
 import { appendRecord, rebuildIndex, readRecordIds, readRecords } from "../lib/store.mjs";
+import { upstreamRecordEntries } from "../lib/upstream-records.mjs";
 import { emptyDuplicates, normalizeDuplicates } from "../lib/duplicates.mjs";
 import { serializeRecord } from "../lib/format.mjs";
 import { collectChunkObservations } from "../lib/migrate-v1.mjs";
@@ -173,6 +174,8 @@ function requireEngram() {
  * @param {(root: string) => object} [opts._loadConfig]  Reads brain.config.json.
  * @param {(path: string, patterns: RegExp[], allowPatterns: RegExp[]) => object|null} [opts._scrubChunk]
  * @param {(p: string) => string|null} [opts._resolveDir]  Resolves .engram/.memory (issue #469, REQ-469-3).
+ * @param {typeof upstreamRecordEntries} [opts._upstreamRecordIds]  The issue #701 predicate,
+ *   threaded into `dualWriteRecords()`'s own call — see that function's docs.
  */
 export async function share({
   root = repoRoot,
@@ -187,6 +190,7 @@ export async function share({
   _loadConfig = _defaultLoadBrainConfig,
   _scrubChunk = scrubChunkFile,
   _resolveDir = _defaultResolveDir,
+  _upstreamRecordIds = upstreamRecordEntries,
 } = {}) {
   const engram = _requireEngram();
   // BEFORE the export (issue #657): the `.engram → .memory` binding is LOCAL and
@@ -220,7 +224,7 @@ export async function share({
   // because `share` returned undefined. The duplicate accounting would have
   // died the same way.
   const accounting = await dualWriteRecords(
-    root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig },
+    root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig, _upstreamRecordIds },
   );
 
   // The self-check, for the one path dualWriteRecords returns from before it
@@ -289,13 +293,28 @@ export function _defaultReadObservations(root) {
  * @param {typeof rebuildIndex} [opts._rebuildIndex]
  * @param {typeof readRecordIds} [opts._readRecordIds]
  * @param {(root: string) => object} [opts._loadConfig]
- * @returns {Promise<{written: number, deduped: number, errored: number, rejected: number,
- *   skippedPersonal: number, unprovenanced: number, unparseableChunks: number,
+ * @param {typeof upstreamRecordEntries} [opts._upstreamRecordIds]  issue #701 — the id set
+ *   already durable at the upstream base. Defaulted, called AFTER the secret scan and
+ *   BEFORE the dedup loop (design.md Decision 4): the zero-candidate early return above
+ *   still short-circuits before it (no git spawn on a steady-state share), and the scan
+ *   above it still covers every candidate, including the ones this widens the decline to.
+ * @returns {Promise<{written: number, deduped: number, dedupedUpstream: number, errored: number,
+ *   rejected: number, skippedPersonal: number, unprovenanced: number, unparseableChunks: number,
  *   emptyObservationsChunks: number, indexCount?: number,
- *   duplicates: {ids: number, lines: number, divergent: number, groups: object[]}}>}
+ *   duplicates: {ids: number, lines: number, divergent: number, groups: object[]},
+ *   upstreamScope?: {applied: boolean, ref: string|null, stated: boolean, reason: string|null,
+ *   configError: string|null, entries: number, unnamed: number}}>}
+ *   `upstreamScope.ref` is `null` when NO ref answered — `upstream-records.mjs`
+ *   returns no name for a run in which no name was used, so nothing downstream
+ *   can print one (issue #701, cold review round 4).
  *   `duplicates` (#574) is the union-merge residual already sitting in
  *   `records/`, distinct from `deduped` (candidates THIS run declined to
- *   append). Zero on the early return, which measured nothing.
+ *   append). Zero on the early return, which measured nothing. `dedupedUpstream`
+ *   is `deduped`'s own-reason sub-bucket (issue #701) — `deduped` stays the
+ *   TOTAL of every decline (own-records ∪ in-batch ∪ upstream), never folded
+ *   silently. `upstreamScope` is absent (not `{applied:false,...}`) on the
+ *   zero-candidate early return, mirroring `indexCount`'s own "undefined means
+ *   never measured" contract just below.
  */
 export async function dualWriteRecords(
   root,
@@ -306,6 +325,7 @@ export async function dualWriteRecords(
     _rebuildIndex = rebuildIndex,
     _readRecordIds = readRecordIds,
     _loadConfig = _defaultLoadBrainConfig,
+    _upstreamRecordIds = upstreamRecordEntries,
   } = {},
 ) {
   const { observations, unparseable = [], emptyObservations = [] } = _readObservations(root);
@@ -349,6 +369,11 @@ export async function dualWriteRecords(
   const accounting = {
     written: 0,
     deduped: 0,
+    // issue #701 — `deduped`'s own-reason sub-bucket: candidates declined
+    // because their id is already durable at the upstream base, distinct from
+    // an own-worktree or in-batch repeat. `deduped` itself is unchanged in
+    // meaning: the TOTAL of every decline reason.
+    dedupedUpstream: 0,
     errored,
     rejected,
     skippedPersonal,
@@ -384,11 +409,39 @@ export async function dualWriteRecords(
   const indexPath = join(root, ".memory", "index.jsonl");
 
   const existingIds = _readRecordIds({ recordsDir });
+  // issue #701 — the id set already durable at the upstream base, beside
+  // `_readRecordIds` (design.md Decision 4). `ok: false` degrades to an EMPTY
+  // scope below — never treated as "found nothing" for the write decision
+  // (Decision 3): the accounting still records `applied: false` so the report
+  // can tell "checked, empty" from "could not check" apart.
+  //
+  // `config` is DELIBERATELY not passed: `upstream-records.mjs` owns the
+  // `memory.upstreamRef` key and reads it from `root` when `config` is omitted.
+  // Passing `{}` here (or defaulting it anywhere in that chain) is not nullish
+  // and would silently kill the config level — the defect cold review of #708
+  // found, where every layer defaulted `config = {}` and the read never fired.
+  const upstream = _upstreamRecordIds({ root });
+  accounting.upstreamScope = {
+    applied: upstream.ok === true,
+    ref: upstream.ref,
+    stated: upstream.stated,
+    reason: upstream.ok ? null : upstream.reason,
+    // Independent of `applied`: an unreadable `brain.config.json` no longer
+    // stops the lookup, so the scope can be APPLIED against a derived ref while
+    // a ref stated in that config went unread. Reported either way.
+    configError: upstream.configError ?? null,
+    entries: upstream.ok ? upstream.byId.size : 0,
+    unnamed: upstream.ok ? upstream.unnamed.length : 0,
+  };
+
   const seenInBatch = new Set();
   const toAppend = [];
   for (const record of candidates) {
-    if (existingIds.has(record.id) || seenInBatch.has(record.id)) {
+    const dedupedOwn = existingIds.has(record.id) || seenInBatch.has(record.id);
+    const dedupedUp = !dedupedOwn && upstream.ok === true && upstream.byId.has(record.id);
+    if (dedupedOwn || dedupedUp) {
       accounting.deduped += 1;
+      if (dedupedUp) accounting.dedupedUpstream += 1;
       continue;
     }
     seenInBatch.add(record.id);

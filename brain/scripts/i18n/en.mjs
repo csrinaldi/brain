@@ -325,6 +325,30 @@ export default {
   // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
   'memory.share.secretFoundRecords': 'Secret detected in a candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
 
+  // ── memory/backends/engram.mjs — dualWriteRecords() upstream-base export scope (issue #701) ──
+  // No `{ref}` slot: this fires on every unavailable lookup, including the one
+  // where NO ref resolved and there is therefore no ref to name. `{reason}`
+  // names the ref itself wherever one was involved.
+  'memory.share.upstreamUnavailable': 'could not check the upstream base — {reason}. This run wrote every candidate (the pre-#701 behaviour); nothing was scoped.',
+  'memory.share.upstreamConfigUnreadable': '{error}. Any memory.upstreamRef stated there was NOT honored — the upstream base was derived as {ref} instead. Fix brain.config.json (a mid-merge conflict marker is the usual cause) if you meant to scope against a different ref.',
+  // The same fact when NOTHING resolved. The key above names a derived ref,
+  // which is only true when one answered; on this branch there is no ref at all
+  // (`upstream-records.mjs` returns `null`), and the key above used to name the
+  // invented `origin/main` one line before the next line said nothing had
+  // resolved (cold review round 2 of #701). The "next line" it points at is
+  // memory.share.upstreamUnavailable, which always follows on this branch.
+  'memory.share.upstreamConfigUnreadableNoRef': '{error}. Any memory.upstreamRef stated there was NOT honored, and no upstream base resolved either — see the next line for what was tried. Fix brain.config.json (a mid-merge conflict marker is the usual cause) if you meant to scope against a different ref.',
+  'memory.share.upstreamUnnamed': '{count} file(s) under .memory/records/ at the upstream base do not match the per-record filename shape and are invisible to the export-scope check. Run `npm run memory:split-records` to fix.',
+  'memory.share.dedupedUpstream': '{count} record(s) already present on the upstream base ({ref}) were not re-exported.',
+
+  // ── memory/staged-records-check.mjs — pre-commit gate (issue #701) ───────────
+  'memory.stagedRecordsCheck.refused': 'refusing — {count} staged .memory/records/ file(s) are byte-identical to a copy already on the trunk. This adds nothing and is what re-triggers this ticket. The remedy is lossless — the bytes are already durable upstream:',
+  'memory.stagedRecordsCheck.remedy': '  git restore --staged {paths}\n  (then `rm` any of those paths that `git status` now shows as untracked — same bytes, already on the trunk)',
+  'memory.stagedRecordsCheck.unavailable': 'could not check the upstream base — {note}. Nothing was refused; this run could not ask the question.',
+  'memory.stagedRecordsCheck.configUnreadable': '{error}. Any memory.upstreamRef stated there was NOT honored — the upstream base was derived as {ref} instead. Fix brain.config.json (a mid-merge conflict marker is the usual cause) if you meant to scope against a different ref.',
+  // See memory.share.upstreamConfigUnreadableNoRef — the same split, at the gate.
+  'memory.stagedRecordsCheck.configUnreadableNoRef': '{error}. Any memory.upstreamRef stated there was NOT honored, and no upstream base resolved either — see the next line for what was tried. Fix brain.config.json (a mid-merge conflict marker is the usual cause) if you meant to scope against a different ref.',
+
   // ── memory/backends/engram.mjs — importMemory() records-only pull (D2/C4, issue #229) ──
   'memory.import.empty':    'ℹ no records found in .memory/records/ — nothing to import.',
   'memory.import.progress': '  ✓ {written}/{total} records imported',

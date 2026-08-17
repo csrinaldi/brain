@@ -655,6 +655,9 @@ test('dualWriteRecords: no observations → resolves without appending or reinde
   assert.deepEqual(result, {
     written: 0,
     deduped: 0,
+    // issue #701 — no candidates, so the upstream seam was never called
+    // either (same early return); the sub-bucket still reports zero.
+    dedupedUpstream: 0,
     errored: 0,
     rejected: 0,
     skippedPersonal: 0,
@@ -706,6 +709,7 @@ test('dualWriteRecords: skipped/rejected/errored observations are ALL accounted 
   assert.deepEqual(result, {
     written: 1,
     deduped: 0,
+    dedupedUpstream: 0,
     errored: 1,
     rejected: 1,
     skippedPersonal: 1,
@@ -718,6 +722,29 @@ test('dualWriteRecords: skipped/rejected/errored observations are ALL accounted 
     // #574 — an `_rebuildIndex` stub that predates the accounting reports zero,
     // never a fabricated number (normalizeDuplicates).
     duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] },
+    // issue #701 — this test's `root` ('/fake/root') is not a git repo, so the
+    // DEFAULT `_upstreamRecordIds` seam (not stubbed here) genuinely fails to
+    // resolve any ref — the accidental-pass case design.md names explicitly.
+    // `dualWriteRecords.test.mjs`'s deliberate test covers the injected case.
+    upstreamScope: {
+      applied: false,
+      // `null`, not `'origin/main'`: nothing resolved on this root, so there is
+      // no ref to report. It USED to be the string, and every consumer that
+      // printed it named a base that had answered nothing (cold review round 3).
+      ref: null,
+      stated: false,
+      // No "— writing every candidate this run (pre-#701 behaviour)" tail: the
+      // cli wrapper for this exact field says the same thing in the same printed
+      // line, and the pre-commit gate — the other consumer — writes nothing at
+      // all, so the clause was false there.
+      reason: 'no upstream ref resolved (tried origin/HEAD, origin/main)',
+      // `null`, not absent: `brain.config.json` was ABSENT here, which is a
+      // clean "no stated ref", not a failed read. The field is only a string
+      // when the config existed and could not be read (cold review round 2).
+      configError: null,
+      entries: 0,
+      unnamed: 0,
+    },
   });
 });
 
@@ -772,6 +799,7 @@ test('dualWriteRecords: unparseable/empty-observations chunk buckets are surface
   assert.deepEqual(result, {
     written: 0,
     deduped: 0,
+    dedupedUpstream: 0,
     errored: 0,
     rejected: 0,
     skippedPersonal: 0,
