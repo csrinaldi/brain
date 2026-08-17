@@ -295,9 +295,18 @@ export function upstreamRecordEntries({
   const { ref, stated, resolved, configError } = resolveUpstreamRef({ root, env, config, _spawn, _loadConfig });
   const carry = configError === undefined ? {} : { configError };
   if (!resolved) {
+    // No "— writing every candidate this run (pre-#701 behaviour)" tail. That
+    // clause described the EXPORTER's degradation, and `reason` is read by two
+    // consumers: `memory:share`, whose own catalog wrapper already says "This
+    // run wrote every candidate (the pre-#701 behaviour); nothing was scoped."
+    // immediately after — the identical sentence twice, consecutively, in one
+    // printed line — and the pre-commit gate, which WRITES NOTHING, so the
+    // clause was outright false there and its wrapper contradicted it one clause
+    // later: "Nothing was refused; this run could not ask the question."
+    // Each consumer states its own degradation; `reason` states the fact.
     const reason = stated
-      ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef) — writing every candidate this run (pre-#701 behaviour)`
-      : `no upstream ref resolved (tried origin/HEAD, origin/main) — writing every candidate this run (pre-#701 behaviour)`;
+      ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef)`
+      : `no upstream ref resolved (tried origin/HEAD, origin/main)`;
     return { ok: false, ref, stated, reason, ...carry };
   }
 

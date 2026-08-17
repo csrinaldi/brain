@@ -219,6 +219,26 @@ test('issue #701 gate main(): with NO ref resolved, the printed line does NOT cl
   );
 });
 
+test('issue #701 gate main(): the unavailable note never claims records were WRITTEN — this gate writes nothing', async (t) => {
+  // The shared `reason` string ended in "— writing every candidate this run
+  // (pre-#701 behaviour)", which is the EXPORTER's degradation. At this gate it
+  // was flatly false, and the catalog wrapper that follows it in the same
+  // printed line says the opposite: "Nothing was refused; this run could not ask
+  // the question." Asserted on the code-built clause, not on catalog prose, so
+  // it holds in every locale.
+  const { worktree } = worldWithTrunkRecord(t);
+  git(worktree, ['remote', 'remove', 'origin']);
+
+  const { logs } = await mainCapturingLogs({ root: worktree, env: {} });
+  const printed = logs.join('\n');
+
+  assert.ok(/no upstream ref resolved/.test(printed), `the note must still be printed; got:\n${printed}`);
+  assert.equal(
+    /writing every candidate/.test(printed), false,
+    `this gate writes nothing, so it must never say it wrote anything; got:\n${printed}`,
+  );
+});
+
 test('issue #701 gate main(): a READABLE config prints no config line at all', async (t) => {
   // The negative side of the detector: without it, a print site that fired
   // unconditionally would satisfy every assertion above.

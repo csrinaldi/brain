@@ -205,6 +205,20 @@ test('#701 when a derived ref DOES answer past the broken config, the notice nam
   );
 });
 
+test('#701 the "wrote every candidate" degradation is stated ONCE, by the wrapper that owns it', (t) => {
+  // `reason` used to end in "— writing every candidate this run (pre-#701
+  // behaviour)" and the catalog wrapper restates it immediately: "This run wrote
+  // every candidate (the pre-#701 behaviour); nothing was scoped." The same
+  // sentence, twice, consecutively, in one printed line. Asserted on the
+  // code-built clause rather than on catalog prose, so it holds in every locale.
+  const r = share(world(t, { config: CORRUPT }));
+
+  assert.equal(
+    /writing every candidate/.test(r.stderr), false,
+    `the reason must not restate what this consumer's own wrapper says next; got:\n${r.stderr}`,
+  );
+});
+
 test('#701 a READABLE brain.config.json prints no config notice at all', (t) => {
   // The negative side of the detector: a print site that fired unconditionally
   // would satisfy every assertion above.

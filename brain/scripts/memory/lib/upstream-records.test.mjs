@@ -187,6 +187,21 @@ test('upstreamRecordEntries: not a git repo (every rev-parse fails) → ok:false
   assert.equal(r.stated, false);
 });
 
+test('upstreamRecordEntries: `reason` states the FACT and never the consumer\'s own degradation', () => {
+  // The shared-string defect. `reason` is read by two consumers with OPPOSITE
+  // degradations — the exporter writes every candidate, the pre-commit gate
+  // writes nothing — so a clause naming one of them is doubled at that consumer
+  // and FALSE at the other. Both were shipped simultaneously:
+  //   memory/cli:            "… (pre-#701 behaviour). This run wrote every candidate (the pre-#701 behaviour); nothing was scoped."
+  //   staged-records-check:  "… (pre-#701 behaviour). Nothing was refused; this run could not ask the question."
+  for (const env of [{}, { BRAIN_MEMORY_UPSTREAM_REF: 'origin/nope' }]) {
+    const r = upstreamRecordEntries({ root: '/fake', env, config: {}, _spawn: () => ({ status: 1 }) });
+    assert.equal(r.ok, false);
+    assert.doesNotMatch(r.reason, /writing every candidate/, `the write is the exporter's own fact, not this string's: ${r.reason}`);
+    assert.doesNotMatch(r.reason, /pre-#701/, `and neither is the name of the behaviour it degrades to: ${r.reason}`);
+  }
+});
+
 test('upstreamRecordEntries: no remote (origin/main also fails to resolve) → ok:false with NO ref, and the reason names what was tried', () => {
   const r = upstreamRecordEntries({
     root: '/fake',
