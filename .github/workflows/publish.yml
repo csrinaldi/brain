@@ -79,7 +79,16 @@ jobs:
             fi
           fi
 
-      - run: npm ci
+      # `npm install`, NOT `npm ci`. `npm ci` refuses without a lockfile, and this
+      # repository gitignores `package-lock.json` on purpose (.gitignore — zero
+      # dependencies, so the lockfile pins nothing). The first dispatch this
+      # workflow ever had died here with EUSAGE, three steps before the upload,
+      # and every check above it had passed (#725).
+      #
+      # At zero dependencies this is a no-op that succeeds. It stays correct the
+      # day a dependency lands, which deleting the step outright would not —
+      # `npm test` would then run against absent node_modules, silently.
+      - run: npm install --no-audit --no-fund
 
       # The tarball's contents are decided by test/publish-allowlist.e2e.test.mjs,
       # which packs for real and walks what comes out. Running the suite before an

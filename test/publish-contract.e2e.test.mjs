@@ -123,3 +123,81 @@ test('#655: brain\'s own release machinery is not shipped to consumers', () => {
   // The governance workflows DO ship; this is not "no workflows ship".
   assert.ok(P.files.some((f) => f.includes('governance')), 'the governance workflows stopped shipping — that is a different regression');
 });
+
+// ── #725: the steps must be able to RUN, not just say the right things ───────
+//
+// Everything above this line asserts publish SEMANTICS — the credential name,
+// the rehearsal order, `--access public`, the tag guard. All six passed while
+// the workflow's very first dispatch died at `npm ci`, three steps before the
+// upload, because `npm ci` REFUSES without a lockfile and this repo gitignores
+// `package-lock.json` on purpose (zero dependencies, so it pins nothing).
+//
+// The axis nobody varied was reachability. On that axis a green suite said
+// nothing, and `publish.yml` sat at "0 workflow runs" across four handoff cuts
+// read as "nobody dispatched it" — when the truth was that the button was wired
+// to a step that could not pass. Nothing separates "not attempted" from "cannot
+// succeed" until someone attempts it.
+
+/** The `run:` payload of every install step in the workflow, in file order. */
+function installSteps(yml) {
+  return [...yml.matchAll(/^[ \t]*(?:-[ \t]+)?run:[ \t]*(npm[ \t]+(?:ci|install)\b[^\n]*)/gm)]
+    .map((m) => m[1].trim());
+}
+
+/** Tracked and ignored are DISTINCT facts, and `npm ci` only cares about the first. */
+function lockfileState() {
+  const run = (args) => execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const tracked = run(['ls-files', '--', 'package-lock.json']).trim().length > 0;
+  let ignored = false;
+  try {
+    execFileSync('git', ['check-ignore', '-q', '--', 'package-lock.json'], { cwd: REPO_ROOT, stdio: 'ignore' });
+    ignored = true;
+  } catch {
+    ignored = false; // exit 1 = not ignored; treated as the answer, not as a failure
+  }
+  return { tracked, ignored };
+}
+
+test('#725: both probes produced real evidence (a vacuous pass is a failure)', () => {
+  // Without this, every assertion below is satisfiable by a regex that matches
+  // nothing — the same shape the allowlist test guards with its own evidence
+  // check. If the workflow stops installing altogether that is a real change and
+  // this test is where it gets noticed, not a silence the others read as clean.
+  const steps = installSteps(workflow());
+  assert.ok(
+    steps.length > 0,
+    `${WORKFLOW} contains no \`npm ci\`/\`npm install\` step. If that is deliberate, delete this assertion `
+      + 'deliberately — do not let an empty match set make the reachability checks below vacuously true.',
+  );
+});
+
+test('#725: an `npm ci` step requires a lockfile that is actually in the checkout', () => {
+  const { tracked } = lockfileState();
+  for (const step of installSteps(workflow())) {
+    if (!/^npm[ \t]+ci\b/.test(step)) continue;
+    assert.ok(
+      tracked,
+      `${WORKFLOW} runs \`${step}\`, but package-lock.json is not tracked in git, so it is never in the `
+        + 'checkout and `npm ci` exits EUSAGE before any later step runs. Use `npm install` (a no-op at zero '
+        + 'dependencies, still correct if one is ever added), or start versioning the lockfile — but not neither.',
+    );
+  }
+});
+
+test('#725: this repo does not version the lockfile, and a change to that is deliberate', () => {
+  // The pin that makes the check above fail in the OTHER direction too. If the
+  // lockfile ever becomes tracked, `npm ci` turns legal and the assertion above
+  // would go quiet on its own — satisfied by a premise that moved rather than by
+  // a defect that was fixed. This test goes red instead, so the policy change is
+  // read and re-decided rather than silently absorbed.
+  const { tracked, ignored } = lockfileState();
+  const deps = { ...(P.dependencies ?? {}), ...(P.devDependencies ?? {}), ...(P.optionalDependencies ?? {}) };
+  assert.equal(
+    Object.keys(deps).length, 0,
+    'package.json declares dependencies now. The `.gitignore` rule excluding package-lock.json rests on there '
+      + 'being none — re-decide the lockfile policy, then rewrite this test and the workflow\'s install step together.',
+  );
+  assert.ok(ignored && !tracked,
+    'package-lock.json is no longer gitignored-and-untracked. That is a real policy change, not a test failure: '
+      + 're-read .gitignore\'s reasoning, decide what the publish workflow should install with, and update both.');
+});

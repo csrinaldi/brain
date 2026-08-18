@@ -448,6 +448,7 @@
 {"id":"rec-37c08f752a20305f","ts":"2026-07-29T13:59:35Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-37c08f752a20305f.jsonl"}
 {"id":"rec-38246d8c810a8e3d","ts":"2026-07-11T12:33:37Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-38246d8c810a8e3d.jsonl"}
 {"id":"rec-383af27935e494ca","ts":"2026-07-25T00:48:39Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-383af27935e494ca.jsonl"}
+{"id":"rec-386d66d68377313d","ts":"2026-08-18T12:25:39Z","actor":"fix/issue-725-fixci-publishyml-runs-npm-ci-and-the-loc","type":"bugfix","project":"brain","issue":725,"file":"2026-08-rec-386d66d68377313d.jsonl"}
 {"id":"rec-3885ab4baed99517","ts":"2026-07-25T00:47:26Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3885ab4baed99517.jsonl"}
 {"id":"rec-3894518548231d20","ts":"2026-07-11T12:54:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3894518548231d20.jsonl"}
 {"id":"rec-3897d7953710e70d","ts":"2026-07-25T00:47:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3897d7953710e70d.jsonl"}
@@ -1251,6 +1252,7 @@
 {"id":"rec-94364bd9d7e38997","ts":"2026-07-25T00:52:55Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-94364bd9d7e38997.jsonl"}
 {"id":"rec-944a31facd2d7c3d","ts":"2026-07-29T14:27:29Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-944a31facd2d7c3d.jsonl"}
 {"id":"rec-946389c01fbc677c","ts":"2026-07-25T00:46:47Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-946389c01fbc677c.jsonl"}
+{"id":"rec-947e878760b44566","ts":"2026-08-18T12:19:58Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-08-rec-947e878760b44566.jsonl"}
 {"id":"rec-9488c5369f726f46","ts":"2026-07-17T00:18:47Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-9488c5369f726f46.jsonl"}
 {"id":"rec-94ba492f3c297d92","ts":"2026-07-11T12:33:31Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-94ba492f3c297d92.jsonl"}
 {"id":"rec-94ca6fb676c2102f","ts":"2026-07-17T00:26:21Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-94ca6fb676c2102f.jsonl"}
@@ -1419,6 +1421,7 @@
 {"id":"rec-a7834ff179f2b549","ts":"2026-07-29T14:29:05Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-a7834ff179f2b549.jsonl"}
 {"id":"rec-a795768996867730","ts":"2026-07-29T14:27:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-a795768996867730.jsonl"}
 {"id":"rec-a7b745d9540af73a","ts":"2026-07-13T00:22:06Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-a7b745d9540af73a.jsonl"}
+{"id":"rec-a7c589dec394555a","ts":"2026-08-18T11:32:19Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-08-rec-a7c589dec394555a.jsonl"}
 {"id":"rec-a7c6af398353e9e8","ts":"2026-07-25T21:50:39Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-a7c6af398353e9e8.jsonl"}
 {"id":"rec-a7c7d860507a5420","ts":"2026-07-29T14:27:05Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-a7c7d860507a5420.jsonl"}
 {"id":"rec-a85c5e33d7f20369","ts":"2026-07-11T12:33:12Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-a85c5e33d7f20369.jsonl"}
