@@ -1,6 +1,6 @@
 # ADR-0032 — A graph block is declared by its fence tag: unspoofability outranks the rendered-artifact rule, and the tag is only half the fix
 
-**Status**: Accepted
+**Status**: Accepted · **amended 18/08/2026** (Amendment 1 — see below)
 **Date**: 2026-08-18 — Cristian
 
 ## Context
@@ -118,7 +118,8 @@ renderer knows, so the block loses syntax highlighting on both providers.
 unknown info string still renders as a fenced code block on GitHub and GitLab rather
 than as raw text with the fence lines visible.
 
-**That assumption was not verified.** It is written here as an assumption because it
+**That assumption was not verified** *at the time this ADR was drafted.*
+**[Amended by Amendment 1 (#723) — CLOSED BY OBSERVATION on 18/08/2026, both providers. It holds: the block keeps its code-block shape and loses only syntax highlighting. The cost stays at "no colours" and never rises to "five visibly ugly lines". See Amendment 1 for the probe and its control.]** It is written here as an assumption because it
 could not be measured from the environment this ADR was drafted in: no rendered page
 was available. It is stated rather than asserted, because D1's own wording — *"an
 unknown info-string renders as plain text"* — is imprecise in a way that matters, and
@@ -194,7 +195,7 @@ and they carry no `files` claim at all.
 - **A future change that reintroduces the interior-scalar selector, or that accepts
   both shapes, is a doctrine change** and must amend this ADR rather than merely pass
   review.
-- **The rendering assumption above must be closed by observation**, and if it is false
+- **The rendering assumption above must be closed by observation** — ✅ **DONE, Amendment 1 (#723)**: confirmed on GitHub and GitLab, 18/08/2026. The paragraph below is kept as the standing instruction for anyone re-opening the question. If it is false
   the finding belongs in an amendment to this ADR — the decision does not move, the
   record does.
 - **`brain/scripts/review/lib/yaml-block.mjs`'s first-fence contract is untouched.**
@@ -233,3 +234,66 @@ and they carry no `files` claim at all.
 - ADR-0028 — promotion is read-confirm-stage; the commit is the signature
 - ADR-0029 — two sources feed one graph; native relations are a peer, not a replacement
 - ADR-0031 — a self-asserted claim is not a record; the same reason no agent signs this
+
+## Amendment 1 — the assumption is measured, and the half that was never wired (issue #723)
+
+**Signed**: 18/08/2026 — Cristian Rinaldi
+
+This ADR named one claim it could not check and one thing it insisted the tag was
+not. Both are settled here, and they resolve in opposite directions.
+
+### 1 · The rendering assumption holds — measured, on both providers
+
+The claim: an unknown fence info-string still renders as an ordinary code block on
+GitHub and GitLab, losing only syntax highlighting.
+
+**The probe carried a control, and that is the part worth keeping.** Each issue body
+held block **A** (` ```brain-graph/1 `) beside block **B** (` ```yaml `) with
+byte-identical content, plus a trailing line to reveal a swallowed fence. Without
+**B**, *"renders as a code block without highlighting"* and *"renders wrong"* are
+indistinguishable — the observation would have been a feeling.
+
+GitHub via issue #732; GitLab via a matching issue on `gitlab.com/csrinaldi/brain`.
+Reported identical on both.
+
+**So the honest cost stated in this ADR is the real one.** It stays at *no colours*
+and never rises to *five visibly ugly lines in one issue body*. The decision does not
+move — it never depended on this — but the record no longer carries an open obligation
+with nothing recording its discharge.
+
+### 2 · The tag really was only half the fix, and the other half shipped unwired
+
+This ADR's title says the tag is **only half the fix**, and D6 named the other half:
+a declaration that is *hidden* must be refused out loud, never reported absent.
+
+**It was not wired.** `epic-graph.mjs` never destructured the splitter's `skipped`
+channel, so four shapes that hide a complete, well-formed declaration answered `null`
+— the value REQ-639-4 defines as *"nobody declared one"*:
+
+| shape | before #723 |
+|---|---|
+| blockquoted graph fence | `null` |
+| four-space-indented graph fence | `null` |
+| HTML-commented graph fence | `null` |
+| a runaway foreign fence that swallows it | `null` |
+
+That is the exact conflation this ADR was written to end, surviving inside its own
+delivery. The suite was green throughout and said nothing, because no test varied
+that axis.
+
+**Why it escaped is the part that generalises.** D0 sequenced the selector before the
+splitter, deliberately and correctly. Task 2.2 asked for both halves, but `skipped`
+did not exist yet when PR #720 landed — so the box was checked against the half that
+was buildable at the time, and when PR #722 created the field nothing came back.
+
+> **A requirement split across an ordering constraint has no claimant for its second
+> half.** The ordering that makes a change safe is the same ordering that lets half a
+> task look finished. Whoever writes the next D0-style sequence should name the
+> second half's owner in the task itself.
+
+### 3 · What this does not change
+
+The decision. The tag is still the selector, still chosen because unspoofability
+outranks the rendered-artifact rule, and D1's family rule is still not repealed.
+Amendment 1 closes an open question and records a defect in the delivery — neither
+touches what was decided.
