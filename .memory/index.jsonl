@@ -193,6 +193,7 @@
 {"id":"rec-16d8b533a19a6668","ts":"2026-07-25T21:51:23Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-16d8b533a19a6668.jsonl"}
 {"id":"rec-176a8abe6f555137","ts":"2026-07-25T00:48:42Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-176a8abe6f555137.jsonl"}
 {"id":"rec-1785e4161b298457","ts":"2026-07-13T00:22:00Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-1785e4161b298457.jsonl"}
+{"id":"rec-1793ab0b1c408dc3","ts":"2026-08-18T11:01:24Z","actor":"docs/issue-717-docsinbox-agent-priority-handoffmd-has-f","type":"discovery","project":"brain","issue":717,"file":"2026-08-rec-1793ab0b1c408dc3.jsonl"}
 {"id":"rec-17afe2ab8208fd09","ts":"2026-07-29T13:59:48Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-17afe2ab8208fd09.jsonl"}
 {"id":"rec-17efbe0bec8fec94","ts":"2026-07-11T12:33:15Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-17efbe0bec8fec94.jsonl"}
 {"id":"rec-18037b8c082a215a","ts":"2026-07-29T14:26:27Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-18037b8c082a215a.jsonl"}
