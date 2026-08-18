@@ -1,18 +1,30 @@
 #!/usr/bin/env bash
 # in-container.sh — TOTAL fresh-install assertions, run inside a clean container.
 # Inputs (env):
-#   VCS_TOKEN       (required)
-#   TARGET_TAG      (required)
+#   TARGET_VERSION   (optional) — registry version to install; empty = `latest`
+#   VCS_TOKEN        (optional) — github token. NOT needed to install (#435).
+#                    Only widens two side steps: `gh auth login` (informational)
+#                    and the external-repo clone fallback when a fixture is
+#                    missing. The install path under test never reads it.
 #   CONSUMER_FIXTURE (optional) — fixture to use: npm (default), pnpm, yarn, bun
 #                    Falls back to CONSUMER_REPO if fixture is not found.
-#   CONSUMER_REPO   (optional) — git URL of the consumer repo to clone (fallback)
-#   CONSUMER_PM     (optional) — package manager: npm (default), pnpm, yarn, bun
+#   CONSUMER_REPO    (optional) — git URL of the consumer repo to clone (fallback)
+#   CONSUMER_PM      (optional) — package manager: npm (default), pnpm, yarn, bun
 #
 # Workflow:
-#   1. Install brain @ TAG
+#   1. Install @logikas/brain from the REGISTRY, with no credential
 #   2. Make a consumer change (src/index.js)
 #   3. Make a consumer ADR (brain/project/decisions/adr-0001.md)
 #   4. Upgrade brain — verify brain/core updated, brain/project/ NOT touched
+#
+# WHY THIS IS NO LONGER TAG-DRIVEN (#435). Distribution moved from git tags to a
+# published scoped package (ADR-0030), and this harness was the last thing still
+# installing `git+https://…#<tag>` behind a `VCS_TOKEN` it refused to run
+# without — printing "the brain repo is private" at a repo that is public. It
+# was asserting the old mechanism while claiming to prove the new one, and the
+# credential it demanded is precisely the friction #435's exit criteria call for
+# proving GONE. A fixture that requires the friction cannot be the evidence it
+# was removed.
 #
 # brain's own repo scripts remain on npm. Only consumer's scripts use CPM.
 # Exits 0 only if every CRITICAL assertion passes.
@@ -23,9 +35,13 @@ fail() { echo "  ✗ $*"; FAILED=1; }
 info() { echo "  · $*"; }
 line() { echo; echo "═══ $* ═══"; }
 
-[ -z "${VCS_TOKEN:-}" ] && { echo "✗ VCS_TOKEN required"; exit 2; }
-TAG="${TARGET_TAG:?TARGET_TAG required}"
-BRAIN_HTTPS="git+https://github.com/csrinaldi/brain.git"
+# No credential gate. See the header: needing one was the defect, not the setup.
+TOKEN="${VCS_TOKEN:-}"
+VERSION="${TARGET_VERSION:-}"
+PKG="@logikas/brain"
+# Empty version means the registry's `latest`, resolved by npm. Never defaulted
+# to a literal here — a version this script picks is a version nobody chose.
+if [ -n "$VERSION" ]; then SPEC="${PKG}@${VERSION}"; else SPEC="${PKG}"; fi
 
 # Consumer fixture: npm, pnpm, yarn, bun (default: npm)
 FIXTURE="${CONSUMER_FIXTURE:-npm}"
@@ -45,9 +61,13 @@ curl -fsSL https://raw.githubusercontent.com/Gentleman-Programming/gentle-ai/mai
 npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
 info "gh=$(command -v gh>/dev/null&&echo y||echo n) gentle-ai=$(command -v gentle-ai>/dev/null&&echo y||echo n) claude=$(command -v claude>/dev/null&&echo y||echo n)"
 
-line "Auth (HTTPS credential helper + gh login)"
-git config --global credential.helper "!f() { echo username=x-access-token; echo \"password=${VCS_TOKEN}\"; }; f"
-echo "${VCS_TOKEN}" | gh auth login --with-token >/dev/null 2>&1 && info "gh authenticated"
+line "Auth (OPTIONAL — the install path below uses none)"
+if [ -n "$TOKEN" ]; then
+  git config --global credential.helper "!f() { echo username=x-access-token; echo \"password=${TOKEN}\"; }; f"
+  echo "${TOKEN}" | gh auth login --with-token >/dev/null 2>&1 && info "gh authenticated"
+else
+  info "no github token supplied — skipping gh login; the registry install needs none"
+fi
 
 line "Consumer repo + package.json (fixture=${FIXTURE}, PM=${CPM})"
 cd /tmp || exit 2
@@ -78,16 +98,45 @@ case "$CPM" in
   *)    echo "✗ Unsupported CONSUMER_PM: ${CPM}"; exit 2 ;;
 esac
 
-line "[1] Install brain @ ${TAG} over HTTPS using ${CPM}"
+line "[1] Install ${SPEC} from the REGISTRY using ${CPM}, with no credential"
+# The credential-free claim is ENFORCED, not narrated. Every package manager
+# below is pointed at an empty user config, so an auth token cannot reach the
+# registry read even if the ambient environment holds one. Without this the step
+# would pass on a machine that happens to be logged in, and prove nothing about
+# the consumer who is not.
+: > /tmp/empty.npmrc
+export npm_config_userconfig=/tmp/empty.npmrc
+export NPM_CONFIG_USERCONFIG=/tmp/empty.npmrc
+info "user npmrc pinned to an empty file — no credential is in scope for the install"
+
 case "$CPM" in
-  pnpm) pnpm add -D "${BRAIN_HTTPS}#${TAG}" >/dev/null 2>&1 ;;
-  yarn) yarn add "${BRAIN_HTTPS}#${TAG}" >/dev/null 2>&1 ;;
-  bun)  bun add -d "${BRAIN_HTTPS}#${TAG}" >/dev/null 2>&1 ;;
-  *)    npm i -D "${BRAIN_HTTPS}#${TAG}" >/dev/null 2>&1 ;;
+  pnpm) pnpm add -D "${SPEC}" >/dev/null 2>&1 ;;
+  yarn) yarn add "${SPEC}" >/dev/null 2>&1 ;;
+  bun)  bun add -d "${SPEC}" >/dev/null 2>&1 ;;
+  *)    npm i -D "${SPEC}" --no-audit --no-fund >/dev/null 2>&1 ;;
 esac
-if [ -d node_modules/brain ]; then
-  ok "brain installed (v$(node -e "console.log(require('./node_modules/brain/package.json').version)")) via ${CPM}"
-else fail "brain did NOT install from ${TAG} via ${CPM}"; fi
+
+# The CANONICAL scoped path. npm splits `@scope/name` into two directory
+# segments, so `node_modules/brain` is a DIFFERENT location — the pre-rename one
+# (`LEGACY_PACKAGE_DIR`). Asserting the legacy path here would go green on an
+# install that never happened and red on the one that did.
+PKG_DIR="node_modules/@logikas/brain"
+if [ -d "$PKG_DIR" ]; then
+  INSTALLED_VERSION=$(node -e "console.log(require('./${PKG_DIR}/package.json').version)" 2>/dev/null)
+  ok "brain installed (v${INSTALLED_VERSION}) from the registry via ${CPM}, no token"
+else
+  INSTALLED_VERSION=""
+  fail "brain did NOT install ${SPEC} via ${CPM} — ${PKG_DIR} is absent"
+  if [ -d node_modules/brain ]; then
+    fail "  …but node_modules/brain EXISTS — that is the pre-rename layout, so something installed the unscoped package"
+  fi
+fi
+
+# A version was requested and a different one landed is its own failure, and it
+# is silent otherwise: every later step would pass against the wrong tree.
+if [ -n "$VERSION" ] && [ -n "$INSTALLED_VERSION" ] && [ "$VERSION" != "$INSTALLED_VERSION" ]; then
+  fail "asked for ${VERSION}, got ${INSTALLED_VERSION}"
+fi
 
 line "[1.5] Consumer makes a change (ADR + code modification)"
 # Consumer creates their own ADR (READ-ONLY during upgrade)
@@ -121,15 +170,20 @@ info "planted brain:day:start='consumer-custom-day-start' (must survive specialM
 # THE point of #400: no alias is hand-written here. `npx brain init` is reachable with
 # an empty scripts block because it is a `bin` entry, and it writes the one alias the
 # upgrade cannot inject into a consumer (brain:upgrade) before delegating to it.
-npx brain init "${TAG}" >/dev/null 2>&1
+# NO version argument, deliberately. `init` falls back to `resolveInstalledTag`,
+# reading the version out of the package the consumer just installed. That is
+# the real consumer flow under a registry — nobody retypes a version they
+# already pinned in package.json — and passing one here would skip the
+# resolution entirely and leave it untested.
+npx brain init >/dev/null 2>&1
 INIT_STATUS=$?
-if [ "$INIT_STATUS" -eq 0 ]; then ok "npx brain init exited 0"; else fail "npx brain init exited ${INIT_STATUS}"; fi
+if [ "$INIT_STATUS" -eq 0 ]; then ok "npx brain init exited 0 (version derived from the installed package)"; else fail "npx brain init exited ${INIT_STATUS}"; fi
 BOOTSTRAP_ALIAS=$(node -e "const p=require('./package.json');console.log(p.scripts['brain:upgrade']||'')" 2>/dev/null)
 if [ -n "$BOOTSTRAP_ALIAS" ]; then ok "init wrote the brain:upgrade alias"; else fail "brain:upgrade alias NOT written by init"; fi
 if [ -d brain/scripts ] && [ -d brain/core ]; then ok "managed paths copied (brain/scripts + brain/core)"; else fail "managed paths NOT copied"; fi
 # Idempotence (REQ-400-2): a second init must not fail and must not churn the file.
 PKG_BEFORE=$(md5sum package.json | awk '{print $1}')
-npx brain init "${TAG}" >/dev/null 2>&1
+npx brain init >/dev/null 2>&1
 PKG_AFTER=$(md5sum package.json | awk '{print $1}')
 if [ "$PKG_BEFORE" = "$PKG_AFTER" ]; then ok "re-running init is a no-op on package.json"; else fail "init is not idempotent"; fi
 
@@ -227,7 +281,7 @@ fi
 
 # Assert idempotency: re-upgrade must not change package.json.
 PKG_HASH_BEFORE=$(md5sum package.json 2>/dev/null | awk '{print $1}')
-$CPM run brain:upgrade -- "${TAG}" --no-install >/dev/null 2>&1
+$CPM run brain:upgrade -- "${INSTALLED_VERSION}" --no-install >/dev/null 2>&1
 PKG_HASH_AFTER=$(md5sum package.json 2>/dev/null | awk '{print $1}')
 if [ "$PKG_HASH_BEFORE" = "$PKG_HASH_AFTER" ]; then
   ok "package.json unchanged after re-upgrade (specialMerge is idempotent)"
@@ -236,5 +290,5 @@ else
 fi
 
 line "RESULT"
-if [ "$FAILED" = 0 ]; then echo "  ✓✓ TOTAL fresh-install PASSED @ ${TAG}"; exit 0
-else echo "  ✗✗ TOTAL fresh-install FAILED @ ${TAG}"; exit 1; fi
+if [ "$FAILED" = 0 ]; then echo "  ✓✓ TOTAL fresh-install PASSED @ ${PKG}@${INSTALLED_VERSION:-unresolved}"; exit 0
+else echo "  ✗✗ TOTAL fresh-install FAILED @ ${PKG}@${INSTALLED_VERSION:-unresolved}"; exit 1; fi
