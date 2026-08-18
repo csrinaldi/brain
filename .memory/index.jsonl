@@ -7,6 +7,7 @@
 {"id":"rec-00b90d3d53ebffac","ts":"2026-07-29T14:27:06Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-00b90d3d53ebffac.jsonl"}
 {"id":"rec-00d8eb5c80e05c87","ts":"2026-07-02T20:53:50Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-00d8eb5c80e05c87.jsonl"}
 {"id":"rec-00e906acc3d12901","ts":"2026-07-03T00:19:55Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-00e906acc3d12901.jsonl"}
+{"id":"rec-012640413c475e12","ts":"2026-08-18T13:57:35Z","actor":"fix/issue-727-fixci-the-publish-rehearsal-does-not-reh","type":"bugfix","project":"brain","issue":727,"file":"2026-08-rec-012640413c475e12.jsonl"}
 {"id":"rec-013ca76bf459840d","ts":"2026-07-29T14:27:58Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-013ca76bf459840d.jsonl"}
 {"id":"rec-0157c01e667c8054","ts":"2026-07-11T21:15:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-0157c01e667c8054.jsonl"}
 {"id":"rec-016f242470ea4319","ts":"2026-07-16T02:48:39Z","actor":"feat/issue-266-h0a-reviewer-protocol-doctrine","type":"decision","project":"brain","file":"2026-07-rec-016f242470ea4319.jsonl"}

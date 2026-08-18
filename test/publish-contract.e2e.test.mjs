@@ -201,3 +201,105 @@ test('#725: this repo does not version the lockfile, and a change to that is del
     'package-lock.json is no longer gitignored-and-untracked. That is a real policy change, not a test failure: '
       + 're-read .gitignore\'s reasoning, decide what the publish workflow should install with, and update both.');
 });
+
+// ── #727: the rehearsal rehearses the TARBALL, never the credential ──────────
+//
+// `npm publish --dry-run` packs and reports. It does not authenticate. Run
+// 32138680828 measured the consequence: the rehearsal stepped green and the
+// real publish returned E403 immediately after, for a credential reason the
+// rehearsal is structurally incapable of seeing.
+//
+// The workflow's comment claimed otherwise — "a rehearsal turns that into a red
+// step before anything is uploaded, instead of an auth error half-way". So the
+// step everyone reads as the credential gate is a packaging preview, and the
+// first thing that ever exercised NPM_BRAIN_TOKEN was the irreversible act
+// itself. That is the exact ordering every other step in this workflow exists
+// to avoid.
+//
+// The usual shape in this repo is a check that cannot report WHY it failed.
+// This is the inverse: a check reporting SUCCESS on a question it never asked,
+// with a reader taking that silence for coverage.
+
+/**
+ * The `run:` payload of every step, in file order, so ordering can be asserted.
+ *
+ * Handles BLOCK SCALARS (`run: |`), not just inline commands. A first version of
+ * this read only the rest of the `run:` line, so a multi-line step yielded the
+ * literal `|` and the command inside it was invisible — a probe that exists and
+ * a probe that does not would have looked identical to the assertions below.
+ * That is the same reader-blind-to-its-own-input shape this file is here about.
+ */
+function runSteps(yml) {
+  const lines = yml.split('\n');
+  const steps = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^([ \t]*)(?:-[ \t]+)?run:[ \t]*(.*)$/);
+    if (!m) continue;
+    const [, indent, rest] = m;
+    if (!/^[|>][-+]?\d*$/.test(rest.trim())) { steps.push(rest.trim()); continue; }
+    const body = [];
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].trim() === '') { body.push(''); continue; }
+      const lead = lines[j].match(/^[ \t]*/)[0];
+      if (lead.length <= indent.length) break;
+      body.push(lines[j].trim());
+      i = j;
+    }
+    steps.push(body.join('\n').trim());
+  }
+  return steps;
+}
+
+test('#727: a credential probe exists, and it round-trips the token', () => {
+  const steps = runSteps(workflow());
+  const probe = steps.find((s) => /\bnpm\s+whoami\b/.test(s));
+  assert.ok(
+    probe,
+    `${WORKFLOW} has no \`npm whoami\` step. \`npm publish --dry-run\` packs locally and never `
+      + 'contacts the registry for auth, so without a probe that DOES, the first exercise of '
+      + 'NPM_BRAIN_TOKEN is the irreversible publish itself (#727).',
+  );
+});
+
+test('#727: the credential probe precedes the publish, or it rehearses nothing', () => {
+  // Ordered over the STEPS, never over the raw file. A first version of this
+  // searched the text for `npm whoami` — and the header comment says `npm
+  // whoami` twice, so the match landed on line 16 and the comparison passed no
+  // matter where the step actually was. A mutation moving the probe BELOW the
+  // publish survived it.
+  //
+  // That is this ticket's own defect, reproduced inside the test written to
+  // catch it: a check reporting success on a question it never asked, because
+  // it read prose describing the mechanism instead of the mechanism.
+  const steps = runSteps(workflow());
+  const probeAt = steps.findIndex((s) => /\bnpm\s+whoami\b/.test(s));
+  const publishAt = steps.findIndex((s) => /^npm publish --access public\b/.test(s));
+  assert.ok(probeAt !== -1, 'no step runs `npm whoami`');
+  assert.ok(publishAt !== -1, 'no step runs the real `npm publish --access public`');
+  assert.ok(
+    probeAt < publishAt,
+    `the credential probe is step ${probeAt} and the publish is step ${publishAt} — the probe runs AFTER. `
+      + 'A check that reports on a credential already spent is a log line, not a gate.',
+  );
+});
+
+test('#727: the rehearsal does not claim to cover the credential', () => {
+  // The defect was an overclaim, and replacing it with a smaller overclaim fixes
+  // nothing. This pins the correction itself: the file must not tell a reader
+  // that the dry-run turns an auth problem into a pre-upload refusal, and it
+  // must say out loud what the probe it DOES have cannot establish.
+  const yml = workflow();
+  assert.doesNotMatch(
+    yml,
+    /A rehearsal turns that into\s*\n?#?\s*a red step before anything is uploaded/,
+    `${WORKFLOW} still claims the dry-run turns a credential problem into a pre-upload red step. `
+      + 'Measured false in run 32138680828: rehearsal green, E403 at the publish (#727).',
+  );
+  assert.match(
+    yml,
+    /does not prove|cannot establish|does NOT prove/,
+    `${WORKFLOW} names a credential probe but never states its limits. \`npm whoami\` succeeds with a `
+      + 'read-only token, so it proves neither publish rights nor 2FA bypass nor scope coverage. '
+      + 'An unstated limit is how the previous overclaim was read as coverage (#727).',
+  );
+});
