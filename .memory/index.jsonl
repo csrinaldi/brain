@@ -624,6 +624,7 @@
 {"id":"rec-4b4d8c5794e4f902","ts":"2026-07-29T14:29:12Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-4b4d8c5794e4f902.jsonl"}
 {"id":"rec-4b53e3c88d15d071","ts":"2026-07-25T21:50:20Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4b53e3c88d15d071.jsonl"}
 {"id":"rec-4b826594cb1bd888","ts":"2026-07-29T14:28:13Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-4b826594cb1bd888.jsonl"}
+{"id":"rec-4b9c1e4a4206ac61","ts":"2026-08-18T16:43:34Z","actor":"main","type":"pattern","project":"brain","file":"2026-08-rec-4b9c1e4a4206ac61.jsonl"}
 {"id":"rec-4c0ee50f2b59ed57","ts":"2026-07-25T21:50:53Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-4c0ee50f2b59ed57.jsonl"}
 {"id":"rec-4c1d9e799a13ccba","ts":"2026-07-25T21:50:36Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4c1d9e799a13ccba.jsonl"}
 {"id":"rec-4c2619d2853487de","ts":"2026-07-17T23:29:53Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-4c2619d2853487de.jsonl"}
@@ -1750,6 +1751,7 @@
 {"id":"rec-d0c9f0a2847b667f","ts":"2026-06-27T22:30:48Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-06-rec-d0c9f0a2847b667f.jsonl"}
 {"id":"rec-d0cc0ef88b456a96","ts":"2026-07-25T00:47:04Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d0cc0ef88b456a96.jsonl"}
 {"id":"rec-d0e892e6ea05f36f","ts":"2026-07-29T14:25:35Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d0e892e6ea05f36f.jsonl"}
+{"id":"rec-d0eca94f4c0e36af","ts":"2026-08-18T17:40:11Z","actor":"main","type":"architecture","project":"brain","issue":682,"file":"2026-08-rec-d0eca94f4c0e36af.jsonl"}
 {"id":"rec-d0ff884a6344ce51","ts":"2026-07-25T00:46:59Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-d0ff884a6344ce51.jsonl"}
 {"id":"rec-d135d9838749aa79","ts":"2026-07-25T21:51:42Z","actor":"fix/issue-293-coldboot-shallow","type":"decision","project":"brain","file":"2026-07-rec-d135d9838749aa79.jsonl"}
 {"id":"rec-d1420794464e925a","ts":"2026-07-29T14:25:34Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d1420794464e925a.jsonl"}
