@@ -448,6 +448,7 @@
 {"id":"rec-37c08f752a20305f","ts":"2026-07-29T13:59:35Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-37c08f752a20305f.jsonl"}
 {"id":"rec-38246d8c810a8e3d","ts":"2026-07-11T12:33:37Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-38246d8c810a8e3d.jsonl"}
 {"id":"rec-383af27935e494ca","ts":"2026-07-25T00:48:39Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-383af27935e494ca.jsonl"}
+{"id":"rec-386d66d68377313d","ts":"2026-08-18T12:25:39Z","actor":"fix/issue-725-fixci-publishyml-runs-npm-ci-and-the-loc","type":"bugfix","project":"brain","issue":725,"file":"2026-08-rec-386d66d68377313d.jsonl"}
 {"id":"rec-3885ab4baed99517","ts":"2026-07-25T00:47:26Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3885ab4baed99517.jsonl"}
 {"id":"rec-3894518548231d20","ts":"2026-07-11T12:54:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3894518548231d20.jsonl"}
 {"id":"rec-3897d7953710e70d","ts":"2026-07-25T00:47:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3897d7953710e70d.jsonl"}
