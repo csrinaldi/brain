@@ -14,22 +14,52 @@ issue: 709
 | Chained PRs recommended | Yes |
 | Suggested split | PR 1 (selector) → PR 2 (splitter), sequential, PR 2 depends on PR 1 merged |
 | Delivery strategy | ask-on-risk |
-| Chain strategy | stacked-to-main (recommended — see rationale below) |
+| Chain strategy | **feature-branch-chain** (corrected at apply — see below) |
 
 Decision needed before apply: Yes
 Chained PRs recommended: Yes
-Chain strategy: stacked-to-main
+Chain strategy: feature-branch-chain
 400-line budget risk: High
-Terminal PR: none (each PR merges to main)
+Size exception: accepted by @crinaldi for PR 1 (selector + tests + the 235-line promoted ADR)
+Terminal PR: `feature/issue-709` → `main`, carrying `Closes #709`
 
-**Rationale for stacked-to-main over feature-branch-chain**: D0 requires selector-before-splitter as a *code-safety* ordering (landing splitter first opens a measured regression window), not a review-sequencing preference. No tracker/integration branch is named anywhere in proposal/spec/design — both slices are complete, independently revertible units (design's rollback table) that each stand on `main` alone. A tracker branch would add a hop with no offsetting benefit here. Orchestrator: confirm with the user before apply; if they prefer feature-branch-chain instead, add a terminal task opening the tracker PR before either child PR is opened.
+**Why the recommendation below was reversed, measured at apply.** `stacked-to-main` is
+unavailable for this change, not merely less preferred: `issue-link`
+(`.github/workflows/governance.yml:22-43`, delegating to `run-check.mjs issue-link`)
+accepts `Part of #N` **only** when a PR's base is not the repository's default branch.
+Every PR targeting `main` MUST carry a closing keyword. Under `stacked-to-main`, PR 1
+would therefore have to say `Closes #709` and would close the issue on merge with the
+splitter — the load-bearing half, by ADR-0032's own Decision — unbuilt. That is
+precisely the failure open issue #713 describes: a chained delivery that stops halfway
+is invisible, because every gate fires on a PR and the defect is a PR never opened.
+
+D0 is satisfied either way, and slightly better here: with a tracker, both halves reach
+`main` in the same merge, so the window where the splitter exists without the tag
+selector never opens at all.
+
+**Superseded rationale** (kept so the next reader inherits the reason, not just the
+reversal): ~~D0 requires selector-before-splitter as a *code-safety* ordering, not a
+review-sequencing preference. No tracker/integration branch is named anywhere in
+proposal/spec/design — both slices are complete, independently revertible units that
+each stand on `main` alone. A tracker branch would add a hop with no offsetting
+benefit here.~~ The hop is not free-standing overhead; it is what keeps #709 open until
+the change is actually delivered. The tasks phase had no shell and could not read the
+gate.
 
 ### Suggested Work Units
 
-| Unit | Goal | Likely PR | Notes |
-|------|------|-----------|-------|
-| 1 | Selector: `epic-graph.mjs` reads `lang`, not `protocol:` scalar; docs + ADR draft | PR 1 | Base `main` @ `b3c08a5`. MUST merge before Unit 2 (D0). |
-| 2 | Splitter: CommonMark-correct `fenced-blocks.mjs` + 14-axis matrix | PR 2 | Base `main`, rebased onto PR 1's merge commit. MUST NOT open/merge before PR 1 (D0). |
+| Unit | Goal | PR | Base | Notes |
+|------|------|----|------|-------|
+| 1 | Selector: `epic-graph.mjs` reads the fence tag, not the `protocol:` scalar; doctrine + promoted ADR-0032 | PR 1 | `feature/issue-709` | `Part of #709`. MUST merge before Unit 2 (D0). |
+| 2 | Splitter: CommonMark-correct `fenced-blocks.mjs` + 14-axis matrix | PR 2 | PR 1's branch | `Part of #709`. MUST NOT open before PR 1 merges (D0). |
+| T | **Terminal** — lands the chain | PR T | `main` | `Closes #709`. Draft until both children merge. Without it the work is built, not delivered. |
+
+```
+main
+ └── feature/issue-709 ............................ PR T (terminal, Closes #709)
+      └── fix/issue-709-declaring-selector ........ PR 1 📍 (selector)
+           └── (splitter branch) .................. PR 2 (blocked by PR 1 — D0)
+```
 
 ---
 
