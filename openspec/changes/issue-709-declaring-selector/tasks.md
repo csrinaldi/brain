@@ -65,8 +65,8 @@ main
 
 ## Phase 1: Prerequisites
 
-- [ ] 1.1 Confirm PR #703's live state and issue #709/#710 bodies via `gh pr view 703` and `gh issue view 709 710` (no shell was available to spec/design phases — this is unverified, not assumed).
-- [ ] 1.2 **Close PR #703 unmerged** (D10: replace, not rebase). Comment citing: exceeds the 400-line budget alone (411 additions), and 3 of #710's 5 findings are regressions its own diff introduced. Do not resolve conflicts in it.
+- [x] 1.1 Confirm PR #703's live state and issue #709/#710 bodies via `gh pr view 703` and `gh issue view 709 710` (no shell was available to spec/design phases — this is unverified, not assumed). **Verified with a shell**: #703 `CLOSED` with `mergedAt: null` — closed unmerged, 2026-08-17T19:02:39Z. #709 and #710 both OPEN, both carrying `status:approved` + `type:bug` + `priority:high`. The spec's stated gap is closed by measurement now, not inherited.
+- [x] 1.2 **Close PR #703 unmerged** (D10: replace, not rebase). Comment citing: exceeds the 400-line budget alone (411 additions), and 3 of #710's 5 findings are regressions its own diff introduced. Do not resolve conflicts in it. **Done in the prior session**, before this change's branch was cut — confirmed by 1.1's read.
 
 ## Phase 2: Selector — commit 1 / PR 1 (lands FIRST — D0). Do not reorder.
 
@@ -99,59 +99,63 @@ Files: `brain/scripts/status/epic-graph.mjs`, `brain/scripts/status/epic-map.tes
 
 - [x] 2.11 (moved from 7.2) Verify (not construct) that the promotion commit carries `brain/HOME.md`'s new ADR-0032 entry and the regenerated `AGENTS.md` (`brain:promote`'s §1d cascade, `decision-gate`/ADR-0026 Amendment 4). Then re-run full `npm test` — the `adr-citations` e2e must go green. **Verified**: `a4262ec` carries exactly `AGENTS.md` (+1), `brain/HOME.md` (+1) and the 235-line ADR; both index entries link the promoted path. Suite went 4024/4025 → **4025/4025**, the `adr-citations` failure cleared by the promotion and by nothing else.
 - [x] 2.12 PR 1 exceeds the 400-line budget (selector + tests + the 257-line ADR + doctrine corrections). Record `size:exception` — accepted by the maintainer, this session. Splitting the ADR out of PR 1 is NOT the alternative: it reopens the citation gap 2.10 exists to close. **Done**: PR #720 opened against `feature/issue-709`, labelled `type:bug` + `size:exception`. Final budget 1703 additions / 30 deletions.
-- [ ] 2.13 **Open the TERMINAL PR** — `feature/issue-709` → `main`, `Closes #709`, draft. **Attempted and refused at apply time**: GitHub answers `No commits between main and feature/issue-709`, because a freshly-cut tracker is byte-identical to its base. The terminal PR is therefore openable only **after PR #720 merges into the tracker** — it is the first action after that merge, not a later cleanup. Recorded as a task rather than left as an assumption precisely because #713 names the failure: a chain that stops halfway is invisible, since every gate fires on a PR and the defect is a PR nobody opened. Body drafted and ready. **Until this PR exists AND merges, #709 is built, not delivered** — and `feature/issue-709` holding commits `main` lacks is the check that proves which.
+- [x] 2.13 **Open the TERMINAL PR** — `feature/issue-709` → `main`, `Closes #709`, draft. **Attempted and refused at apply time**: GitHub answers `No commits between main and feature/issue-709`, because a freshly-cut tracker is byte-identical to its base. The terminal PR is therefore openable only **after PR #720 merges into the tracker** — it is the first action after that merge, not a later cleanup. Recorded as a task rather than left as an assumption precisely because #713 names the failure: a chain that stops halfway is invisible, since every gate fires on a PR and the defect is a PR nobody opened. Body drafted and ready. **Until this PR exists AND merges, #709 is built, not delivered** — and `feature/issue-709` holding commits `main` lacks is the check that proves which.
+
+  **OPENED after #720 merged (`0c3cd00`): PR #721**, draft, `feature/issue-709` → `main`, `Closes #709`, `type:bug`. It stays draft until the tracker holds BOTH halves. At the time of opening the tracker held 8 commits `main` lacked — the selector alone; that count is the completion check, and it must include the splitter before #721 leaves draft.
 
 ## Phase 3: Splitter core — commit 2 / PR 2 (lands SECOND — D0). MUST NOT open before Phase 2 merges.
 
 File: `brain/scripts/lib/fenced-blocks.mjs`.
 
-- [ ] 3.1 Hand-scanned opener/closer (D8) — no backtracking regex; replaces `` /^(`{3,})\s*([^`]*?)\s*$/ ``.
-- [ ] 3.2 Delimiter+run-length: backtick/tilde are peers, never close each other; closer run ≥ opener's run of the same char closes (axes 2, 4).
-- [ ] 3.3 Indentation: 0–3 space opener legal, content de-indented by opener's indent; 4+ spaces is content, not a fence (axis 5).
-- [ ] 3.4 Blockquote (D3): a `>`-prefixed line in TEXT is not a fence delimiter/content; record in `skipped` with reason `blockquote` (axis 6).
-- [ ] 3.5 HTML comment (D4): COMMENT state on `<!--`…`-->`; unterminated comment reported via its own `unterminatedComment` field, never through `unterminated` (axis 8).
-- [ ] 3.6 List-item nested fence: indented opener under a list bullet declares, content de-indented (axis 7).
-- [ ] 3.7 LF/CRLF: `split(/\r?\n/)` + `trimEnd` on the closer line (axis 9).
-- [ ] 3.8 Unterminated fence (D5): blocks closed above stand; nothing below is a block; report unconditionally regardless of tag — delete #703's `isGraphFence(unterminated)` attribution branch (axis 10).
-- [ ] 3.9 Info string: `tag` keeps its exact present meaning (whole trimmed string, unchanged for `amendment-draft.mjs`/`checkpoint-block.mjs`); add `lang` = first whitespace-delimited word (axes 1, 11, 12).
-- [ ] 3.10 `skipped[]` channel: `{ line, tag, lang, reason: 'blockquote'|'indented-code'|'html-comment' }[]`.
-- [ ] 3.11 Header comment in `fenced-blocks.mjs` stating the loose-direction closer rule and why REQ-487-5's strictness does not transfer from `yaml-block.mjs` (D2).
+- [x] 3.1 Hand-scanned opener/closer (D8) — no backtracking regex; replaces `` /^(`{3,})\s*([^`]*?)\s*$/ ``.
+- [x] 3.2 Delimiter+run-length: backtick/tilde are peers, never close each other; closer run ≥ opener's run of the same char closes (axes 2, 4).
+- [x] 3.3 Indentation: 0–3 space opener legal, content de-indented by opener's indent; 4+ spaces is content, not a fence (axis 5).
+- [x] 3.4 Blockquote (D3): a `>`-prefixed line in TEXT is not a fence delimiter/content; record in `skipped` with reason `blockquote` (axis 6).
+- [x] 3.5 HTML comment (D4): COMMENT state on `<!--`…`-->`; unterminated comment reported via its own `unterminatedComment` field, never through `unterminated` (axis 8).
+- [x] 3.6 List-item nested fence: indented opener under a list bullet declares, content de-indented (axis 7).
+- [x] 3.7 LF/CRLF: `split(/\r?\n/)` + `trimEnd` on the closer line (axis 9).
+- [x] 3.8 Unterminated fence (D5): blocks closed above stand; nothing below is a block; report unconditionally regardless of tag — delete #703's `isGraphFence(unterminated)` attribution branch (axis 10).
+- [x] 3.9 Info string: `tag` keeps its exact present meaning (whole trimmed string, unchanged for `amendment-draft.mjs`/`checkpoint-block.mjs`); add `lang` = first whitespace-delimited word (axes 1, 11, 12).
+- [x] 3.10 `skipped[]` channel: `{ line, tag, lang, reason: 'blockquote'|'indented-code'|'html-comment' }[]`.
+- [x] 3.11 Header comment in `fenced-blocks.mjs` stating the loose-direction closer rule and why REQ-487-5's strictness does not transfer from `yaml-block.mjs` (D2).
 
 ## Phase 4: Splitter 14-axis matrix + 5 non-axis obligations (PR 2)
 
 File: `brain/scripts/lib/fenced-blocks.test.mjs`, appended below the 3 existing verbatim cases (do not touch them — see 5.2).
 
-- [ ] 4.1 Axis 1 — tag none/`yaml`/`yml`/`YAML`/foreign/`brain-graph/1`: only exact `brain-graph/1` sets `lang`.
-- [ ] 4.2 Axis 2 — delimiter backtick vs `~~~`: both open/close; neither leaks into the other.
-- [ ] 4.3 Axis 3 — nesting both directions: inner fence of the other type is content, not a boundary.
-- [ ] 4.4 Axis 4 — closer run shorter/equal/longer: shorter = content, equal/longer close.
-- [ ] 4.5 Axis 5 — indentation 0/1–3/4+: 0–3 opens/closes; 4+ is content.
-- [ ] 4.6 Axis 6 — blockquote nesting: `skipped` reason `blockquote`.
-- [ ] 4.7 Axis 7 — list-item nested fence: declares, de-indented content.
-- [ ] 4.8 Axis 8 — HTML comment wrapping: `skipped` reason `html-comment`.
-- [ ] 4.9 Axis 9 — LF vs CRLF: identical opener/closer/content results.
-- [ ] 4.10 Axis 10 — unterminated fence: reported; blocks above stand; nothing below is a block.
-- [ ] 4.11 Axis 11 — info-string trailing attributes (`yaml title="x"`): first word only compared.
-- [ ] 4.12 Axis 12 — case (`BRAIN-GRAPH/1`, `Brain-Graph/1`): exact-case only, no match.
-- [ ] 4.13 Axis 13 — multiplicity, incl. one declared + one yaml-illustrated: illustration does not count toward REQ-639-3 ambiguity.
-- [ ] 4.14 Axis 14 — position first/last/only: position never selects.
-- [ ] 4.15 Scenario — tilde-nesting attack: `​```yaml`+`protocol: brain-graph/1` nested inside `~~~console…~~~` yields no backtick fence, `parseGraphBlock` returns `null`.
-- [ ] 4.16 Scenario — legally indented closer (2-space run) still closes a column-0 opener; content after is not swallowed.
-- [ ] 4.17 Non-axis — D14 indent-0 byte-identity: content extraction for an indent-0 opener is byte-for-byte unchanged (load-bearing for `amend-find`'s exact-anchor use).
-- [ ] 4.18 Non-axis — `skipped[]` carries the correct reason for each of its 3 values, individually asserted (not just "non-empty").
-- [ ] 4.19 Non-axis — `unterminatedComment` never populates `unterminated`, and vice versa.
-- [ ] 4.20 **Mutation task**: mutate the D5 unconditional-report path (remove the tag-agnostic reporting, reintroduce `isGraphFence`-style attribution) and confirm the axis-10 test FAILS. #710 finding 4 was this exact axis, unpinned, at 139 pass / 0 fail before this change — a green suite here must be shown to die on this specific mutation, not merely be green.
+- [x] 4.1 Axis 1 — tag none/`yaml`/`yml`/`YAML`/foreign/`brain-graph/1`: only exact `brain-graph/1` sets `lang`.
+- [x] 4.2 Axis 2 — delimiter backtick vs `~~~`: both open/close; neither leaks into the other.
+- [x] 4.3 Axis 3 — nesting both directions: inner fence of the other type is content, not a boundary.
+- [x] 4.4 Axis 4 — closer run shorter/equal/longer: shorter = content, equal/longer close.
+- [x] 4.5 Axis 5 — indentation 0/1–3/4+: 0–3 opens/closes; 4+ is content.
+- [x] 4.6 Axis 6 — blockquote nesting: `skipped` reason `blockquote`.
+- [x] 4.7 Axis 7 — list-item nested fence: declares, de-indented content.
+- [x] 4.8 Axis 8 — HTML comment wrapping: `skipped` reason `html-comment`.
+- [x] 4.9 Axis 9 — LF vs CRLF: identical opener/closer/content results.
+- [x] 4.10 Axis 10 — unterminated fence: reported; blocks above stand; nothing below is a block.
+- [x] 4.11 Axis 11 — info-string trailing attributes (`yaml title="x"`): first word only compared.
+- [x] 4.12 Axis 12 — case (`BRAIN-GRAPH/1`, `Brain-Graph/1`): exact-case only, no match.
+- [x] 4.13 Axis 13 — multiplicity, incl. one declared + one yaml-illustrated: illustration does not count toward REQ-639-3 ambiguity.
+- [x] 4.14 Axis 14 — position first/last/only: position never selects.
+- [x] 4.15 Scenario — tilde-nesting attack: `​```yaml`+`protocol: brain-graph/1` nested inside `~~~console…~~~` yields no backtick fence, `parseGraphBlock` returns `null`.
+- [x] 4.16 Scenario — legally indented closer (2-space run) still closes a column-0 opener; content after is not swallowed.
+- [x] 4.17 Non-axis — D14 indent-0 byte-identity: content extraction for an indent-0 opener is byte-for-byte unchanged (load-bearing for `amend-find`'s exact-anchor use).
+- [x] 4.18 Non-axis — `skipped[]` carries the correct reason for each of its 3 values, individually asserted (not just "non-empty").
+- [x] 4.19 Non-axis — `unterminatedComment` never populates `unterminated`, and vice versa.
+- [x] 4.20 **Mutation task**: mutate the D5 unconditional-report path (remove the tag-agnostic reporting, reintroduce `isGraphFence`-style attribution) and confirm the axis-10 test FAILS. #710 finding 4 was this exact axis, unpinned, at 139 pass / 0 fail before this change — a green suite here must be shown to die on this specific mutation, not merely be green.
+
+  **Mutation applied**: `unterminated: open !== null && firstWord(open.tag) === 'brain-graph/1' ? {…} : null` — the attribution branch, restored. **Result: 32 tests → 25 pass / 7 FAIL**, including both axis-10 cases and, notably, the third ORIGINAL verbatim case. The mutation was applied to a *committed* file and restored with `git checkout --`, not from a copy — a snapshot restore silently discards anything done after the snapshot was taken. Post-restore re-verified at 32/32.
 
 ## Phase 5: Regression net & hard-boundary pin
 
-- [ ] 5.1 Run `amendment-draft.test.mjs`, `checkpoint-block.test.mjs`, `brain-promote.amendment.test.mjs`, `brain-promote.golden.test.mjs`, `review/evaluators/checkpoint.test.mjs`, `review/cli.test.mjs` — all pass, `git diff` on these 6 files is empty. **If not empty: STOP, escalate to the maintainer — do not fix up inside this change (REQ-709-4).**
-- [ ] 5.2 Confirm `fenced-blocks.test.mjs`'s 3 original cases (incl. the `` ``` ``-inside-```` `` case at `:29`) are byte-verbatim, only appended to.
-- [ ] 5.3 Confirm `brain/scripts/review/lib/yaml-block.mjs`, `parse-verdict.mjs`, `decision-block.mjs`, `vcs/actor-check.mjs` show a **zero-line diff** (`git diff --stat` scoped to these 4 paths, empty) — D11/REQ-709-5. No `fencedBlocks` import added to any of them.
-- [ ] 5.4 Confirm `yaml-block.drift.test.mjs` (the boundary sentinel) still passes unedited.
+- [x] 5.1 Run `amendment-draft.test.mjs`, `checkpoint-block.test.mjs`, `brain-promote.amendment.test.mjs`, `brain-promote.golden.test.mjs`, `review/evaluators/checkpoint.test.mjs`, `review/cli.test.mjs` — all pass, `git diff` on these 6 files is empty. **If not empty: STOP, escalate to the maintainer — do not fix up inside this change (REQ-709-4).** **242/242 pass across the six plus the drift sentinel; `git diff --stat` against `origin/feature/issue-709` scoped to all seven paths is EMPTY.** No escalation needed.
+- [x] 5.2 Confirm `fenced-blocks.test.mjs`'s 3 original cases (incl. the `` ``` ``-inside-```` `` case at `:29`) are byte-verbatim, only appended to. **This task caught a real defect in my own first pass.** `lang` had been added to `unterminated` for symmetry with `blocks[]`, which forced an edit to the third case — `deepEqual` asserts the WHOLE object, so an extra field there is a breaking change wearing an additive costume, and D14's entire safety argument for the two sibling consumers rests on the contract being genuinely additive. **The field was removed, not the assertion.** All three cases are byte-verbatim; callers derive the first word themselves, as `epic-graph.mjs` already does.
+- [x] 5.3 Confirm `brain/scripts/review/lib/yaml-block.mjs`, `parse-verdict.mjs`, `decision-block.mjs`, `vcs/actor-check.mjs` show a **zero-line diff** (`git diff --stat` scoped to these 4 paths, empty) — D11/REQ-709-5. No `fencedBlocks` import added to any of them. **Both verified**: diff empty, and `rg 'fenced-blocks|fencedBlocks'` over the four returns zero hits.
+- [x] 5.4 Confirm `yaml-block.drift.test.mjs` (the boundary sentinel) still passes unedited. **Passes, zero-line diff.**
 
 ## Phase 6: Dog-fooding hygiene (the tag's half-life starts at merge)
 
-- [ ] 6.1 Audit every illustration of `​```brain-graph/1` written by this change itself (spec.md, design.md, ADR-0032 draft, this tasks.md) — each must render as an inline code span, sit inside a longer outer fence (```` ```` ````), or be 4-space indented, never a bare triple-backtick fence. Fix any that would newly parse as a declaration once Phase 3 lands.
+- [x] 6.1 Audit every illustration of `​```brain-graph/1` written by this change itself (spec.md, design.md, ADR-0032 draft, this tasks.md) — each must render as an inline code span, sit inside a longer outer fence (```` ```` ````), or be 4-space indented, never a bare triple-backtick fence. Fix any that would newly parse as a declaration once Phase 3 lands. **Audited with `rg '^ {0,3}```brain-graph/1'` across this change's artifacts and the promoted ADR: ZERO hits.** Every illustration is an inline code span. Nothing to fix — which is the answer this task wanted, arrived at by looking rather than by assuming.
 
 ## Phase 7: ADR-0032 promotion — MOVED into Phase 2 (tasks 2.10 / 2.11)
 
