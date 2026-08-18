@@ -327,6 +327,7 @@
 {"id":"rec-26e5de1abdd89d10","ts":"2026-07-29T16:54:26Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-26e5de1abdd89d10.jsonl"}
 {"id":"rec-26f26aa5900f8329","ts":"2026-07-21T16:58:28Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-26f26aa5900f8329.jsonl"}
 {"id":"rec-26fd27a6a9a6d1e1","ts":"2026-07-29T14:39:52Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-26fd27a6a9a6d1e1.jsonl"}
+{"id":"rec-27063e6d5a92d4bd","ts":"2026-08-18T15:34:34Z","actor":"fix/issue-709-fixstatus-703s-tag-whitelist-excludes-0","type":"discovery","project":"brain","issue":709,"file":"2026-08-rec-27063e6d5a92d4bd.jsonl"}
 {"id":"rec-2779cb588ec22c44","ts":"2026-07-09T14:22:19Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-2779cb588ec22c44.jsonl"}
 {"id":"rec-277b3a4111d58956","ts":"2026-06-26T16:03:27Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-277b3a4111d58956.jsonl"}
 {"id":"rec-278edf273acc7bb2","ts":"2026-07-11T12:33:03Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-278edf273acc7bb2.jsonl"}
