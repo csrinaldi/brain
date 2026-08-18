@@ -68,6 +68,28 @@ import { scalar, parseJsonScalar } from '../review/lib/yaml-block.mjs';
 export const GRAPH_PROTOCOL = 'brain-graph/1';
 
 /**
+ * The splitter's `skipped.reason` values, rendered for a human (#723).
+ *
+ * The refusal must name the reason, not only the line — D6 row 4 says "naming line
+ * **and** reason", because "cannot be read at line 3" leaves the author guessing
+ * which of three CommonMark rules put it there. Keyed off the splitter's own
+ * vocabulary so a new reason surfaces as itself rather than as a missing case.
+ */
+const REFUSAL_REASON = Object.freeze({
+  blockquote: 'a blockquote',
+  'indented-code': 'an indented code block (four spaces or more)',
+  'html-comment': 'an HTML comment',
+});
+
+/**
+ * A line that OPENS a fence tagged for this protocol, at a CommonMark-legal indent.
+ *
+ * Used only to locate a declaration swallowed by an unterminated foreign fence
+ * (#710 finding 1), where the splitter never sees it as a fence at all.
+ */
+const GRAPH_FENCE_OPENER = new RegExp(`^ {0,3}(\`{3,}|~{3,})\\s*${GRAPH_PROTOCOL.replace('/', '\\/')}(\\s|$)`);
+
+/**
  * The fence's DECLARED identity: the first whitespace-delimited word of its info
  * string. `fencedBlocks` still returns `tag` as the WHOLE trimmed info string,
  * unchanged (#495 D1 — `amendment-draft.mjs`/`checkpoint-block.mjs` compare it with
@@ -142,7 +164,7 @@ export const UNCLASSIFIED = 'unclassified';
 export function parseGraphBlock(body) {
   if (typeof body !== 'string' || !body.includes(GRAPH_PROTOCOL)) return null;
 
-  const { blocks, unterminated } = fencedBlocks(body);
+  const { blocks, unterminated, skipped } = fencedBlocks(body);
   const declared = blocks.filter(b => firstWord(b.tag) === GRAPH_PROTOCOL);
 
   if (declared.length > 1) {
@@ -160,6 +182,65 @@ export function parseGraphBlock(body) {
         ok: false,
         error: `a \`${GRAPH_PROTOCOL}\` fence opened at body line ${unterminated.line} is never closed — its declaration cannot be read.`,
       };
+    }
+
+    // D6 row 4, the half that was never wired (#723). The splitter records every
+    // delimiter-shaped line it deliberately refused; `skipped` is that channel,
+    // and until now nothing read it. A blockquoted, four-space-indented or
+    // HTML-commented graph fence is CONTENT by CommonMark — correctly so — but a
+    // reader that answers `null` about it is saying "nobody declared a graph"
+    // when it means "one is there and I would not read it".
+    //
+    // It shipped half-built because task 2.2 was checked against the half that
+    // existed: PR #720 landed the selector, `skipped` arrived with PR #722, and
+    // D0 sequenced them in that order on purpose. Nothing came back.
+    const hiddenBySkip = skipped.find(s => firstWord(s.tag) === GRAPH_PROTOCOL);
+    if (hiddenBySkip) {
+      return {
+        ok: false,
+        error: `a \`${GRAPH_PROTOCOL}\` fence at body line ${hiddenBySkip.line} is inside ${REFUSAL_REASON[hiddenBySkip.reason] ?? hiddenBySkip.reason}, so it is content and its declaration cannot be read.`,
+      };
+    }
+
+    // D6 row 4, second half (#710 finding 1). A runaway fence of ANOTHER tag
+    // consumes everything below it, so a well-formed graph fence inside that
+    // region never becomes a block at all — and `unterminated.tag` names the
+    // foreign fence, not this protocol, which is why the branch above misses it.
+    //
+    // Keyed on POSITION, not on the protocol appearing anywhere in the body: a
+    // mention above the runaway fence is not hidden by it, and widening this to
+    // "the string is present" would turn every issue that merely discusses the
+    // protocol into an unreadable block — trading a silent omission for a
+    // fabricated defect, the exact trade ADR-0032 exists to refuse.
+    // A runaway fence reaches the reader in THREE shapes, measured — and only the
+    // last two leave `unterminated` set, which is why one detection is not enough:
+    //
+    //   ```console … ```brain-graph/1 … ```   the graph block's OWN closer closes
+    //                                          the foreign fence → one `console`
+    //                                          block, `unterminated: null`, the
+    //                                          declaration sitting in its content
+    //   ```console … ```brain-graph/1         nothing closes it → `unterminated`,
+    //   ~~~console … ```brain-graph/1         `blocks: []`, content never exposed
+    //
+    // Shape 1 is the common one in practice, because an author who forgets a
+    // closer usually has a well-formed block below to donate one.
+    for (const b of blocks) {
+      const at = b.content.split(/\r?\n/).findIndex(l => GRAPH_FENCE_OPENER.test(l));
+      if (at === -1) continue;
+      return {
+        ok: false,
+        error: `a \`${b.tag || 'plain'}\` fence opened at body line ${b.line} swallowed the \`${GRAPH_PROTOCOL}\` fence at body line ${b.line + 1 + at} as its content — the declaration cannot be read. Close the \`${b.tag || 'plain'}\` block above it.`,
+      };
+    }
+    if (unterminated) {
+      const after = body.split(/\r?\n/).slice(unterminated.line);
+      const at = after.findIndex(l => GRAPH_FENCE_OPENER.test(l));
+      if (at !== -1) {
+        return {
+          ok: false,
+          error: `a \`${unterminated.tag || 'plain'}\` fence opened at body line ${unterminated.line} is never closed, so the \`${GRAPH_PROTOCOL}\` fence at body line ${unterminated.line + at + 1} is swallowed as its content and cannot be read.`,
+        };
+      }
     }
     // D7: the pre-#709 shape (```yaml + an interior `protocol:` scalar) is
     // refused out loud, not read as absent — this is the entire migration net.
