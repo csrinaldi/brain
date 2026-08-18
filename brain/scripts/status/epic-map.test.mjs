@@ -664,3 +664,86 @@ test('#533: issueView is the fallback when the LIST endpoint cannot carry assign
   });
   assert.match(lines.join('\n'), /N1\["#1 t · alice"\]/);
 });
+
+// ── #723 / #710: D6 row 4 — a HIDDEN declaration is refused, never reported absent ──
+//
+// `epic-graph.mjs` never destructured `skipped`, so the half of D6 that depends on
+// it was never wired. Four shapes that HIDE a complete, well-formed declaration
+// answered `null` — the value REQ-639-4 defines as "nobody declared one".
+//
+// This is the exact conflation #709 shipped to end, surviving inside #709's own
+// delivery. Task 2.2 asked for it, but PR #720 (selector) landed BEFORE PR #722
+// created `skipped` — D0 sequenced them that way on purpose — and when the field
+// arrived nothing came back to wire it. The box was already checked, against the
+// half that was buildable at the time.
+//
+// The suite was green throughout, and said nothing: no test varied this axis.
+
+const hidden = (...lines) => lines.join('\n');
+const G = '```brain-graph/1';
+
+test('#723: a BLOCKQUOTED graph fence is refused by reason, not reported absent', () => {
+  const r = parseGraphBlock(hidden('> ' + G, '> track: A', '> ```'));
+  assert.equal(r?.ok, false, 'answered absent (null) about a body that declares a graph');
+  assert.match(r.error, /blockquote/, 'the refusal does not name the reason');
+  assert.match(r.error, /line 1\b/, 'the refusal does not name the line');
+});
+
+test('#723: an INDENTED-CODE graph fence is refused by reason, not reported absent', () => {
+  const r = parseGraphBlock(hidden('    ' + G, '    track: A', '    ```'));
+  assert.equal(r?.ok, false);
+  assert.match(r.error, /indented/);
+  assert.match(r.error, /line 1\b/);
+});
+
+test('#723: an HTML-COMMENTED graph fence is refused by reason, not reported absent', () => {
+  const r = parseGraphBlock(hidden('<!--', G, 'track: A', '```', '-->'));
+  assert.equal(r?.ok, false);
+  assert.match(r.error, /comment/);
+  assert.match(r.error, /line 2\b/, 'the refusal names the fence line, not the comment opener');
+});
+
+test('#710 finding 1 / #723: an unterminated FOREIGN fence that swallows a declaration is refused, not reported absent', () => {
+  // The pre-existing branch only fired when the UNTERMINATED fence was itself
+  // graph-tagged. A runaway ```console consumes the declaration below it, so the
+  // graph fence never becomes a block and the unterminated tag is `console`.
+  const r = parseGraphBlock(hidden('```console', '$ gh pr checks', '', G, 'track: A', 'blocks: [7]', '```'));
+  assert.equal(r?.ok, false, 'a runaway foreign fence still hides the declaration silently');
+  assert.match(r.error, /line 1\b/, 'the refusal does not name the fence that swallowed it');
+  assert.match(r.error, /swallow|never closed/i);
+});
+
+test('#710 finding 1 / #723: a runaway fence that is NEVER closed hides it too — the other shape', () => {
+  // Measured: when nothing closes the foreign fence, `unterminated` is set and
+  // `blocks` is EMPTY, so the block-content scan cannot see it. Two shapes, two
+  // detections; one of them alone leaves the other silent.
+  const r = parseGraphBlock(hidden('```console', '$ gh pr checks', '', G, 'track: A'));
+  assert.equal(r?.ok, false);
+  assert.match(r.error, /never closed/i);
+  assert.match(r.error, /line 1\b/);
+});
+
+test('#710 finding 1 / #723: a ~~~ runaway hides it as well — delimiters are peers', () => {
+  const r = parseGraphBlock(hidden('~~~console', '$ x', '', G, 'track: A'));
+  assert.equal(r?.ok, false);
+  assert.match(r.error, /never closed/i);
+});
+
+test('#723: a body that merely MENTIONS the protocol in prose is still absent, not a refusal', () => {
+  // The boundary. Widening row 4 into "any body containing the string" would
+  // turn every issue that discusses the protocol into an unreadable block —
+  // trading a silent omission for a fabricated defect, which is the trade
+  // ADR-0032 exists to refuse.
+  assert.equal(parseGraphBlock('we should adopt brain-graph/1 in the epic bodies'), null);
+});
+
+test('#723: an unterminated foreign fence with the protocol only ABOVE it stays absent', () => {
+  // The mention is not inside the swallowed region, so nothing is hidden. The
+  // refusal must key on position, not on the string appearing anywhere.
+  assert.equal(parseGraphBlock(hidden('brain-graph/1 is the tag', '```console', '$ runaway')), null);
+});
+
+test('#723: a well-formed declaration is untouched by any of this', () => {
+  assert.deepEqual(parseGraphBlock(block({ track: 'B', blocks: [2] })),
+    { track: 'B', blocks: [2], needs: [], files: [] });
+});
