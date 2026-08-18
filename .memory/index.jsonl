@@ -1187,6 +1187,7 @@
 {"id":"rec-8ae531e2d2e4540a","ts":"2026-07-08T01:31:07Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-8ae531e2d2e4540a.jsonl"}
 {"id":"rec-8af459c979757652","ts":"2026-07-13T00:22:03Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-8af459c979757652.jsonl"}
 {"id":"rec-8af5bbfb7b15780a","ts":"2026-08-04T01:36:49Z","actor":"claude/brain-architecture-review-qe5bo2","type":"session_summary","project":"brain","file":"2026-08-rec-8af5bbfb7b15780a.jsonl"}
+{"id":"rec-8b33eb364b5843f5","ts":"2026-08-18T13:36:40Z","actor":"docs/issue-729-docsadr-adr-0006s-amendment-1-names-a-sc","type":"discovery","project":"brain","issue":729,"file":"2026-08-rec-8b33eb364b5843f5.jsonl"}
 {"id":"rec-8b778d64f3aea731","ts":"2026-07-29T17:29:55Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-8b778d64f3aea731.jsonl"}
 {"id":"rec-8ba0a5251a8ea54a","ts":"2026-07-25T00:47:04Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-8ba0a5251a8ea54a.jsonl"}
 {"id":"rec-8bd16c909bf81abf","ts":"2026-07-01T01:19:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-8bd16c909bf81abf.jsonl"}

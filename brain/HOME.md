@@ -53,7 +53,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0003](project/decisions/adr-0003-split-core-project-self-hosting.md) — core/project split and self-hosting
 - [ADR-0004](project/decisions/adr-0004-adapter-memoria-memory-backend.md) — Memory adapter: MEMORY_BACKEND selector
 - [ADR-0005](project/decisions/adr-0005-adapter-harness-sdd-harness.md) — Harness adapter: SDD_HARNESS selector
-- [ADR-0006](project/decisions/adr-0006-distribucion-installer-versionado.md) — Distribution: versioned installer via git tags (**Amendment 1, 13/08/2026** — **SUPERSEDED by ADR-0030** — the private-repo premise that chose git tags no longer exists; distribution moves to a scoped registry package, #617)
+- [ADR-0006](project/decisions/adr-0006-distribucion-installer-versionado.md) — Distribution: versioned installer via git tags (**Amendment 1, 13/08/2026** — **SUPERSEDED by ADR-0030** — the private-repo premise that chose git tags no longer exists; distribution moves to a scoped registry package, #617; **Amendment 2, 18/08/2026** — Amendment 1's own text named `@csrinaldi/brain`, a scope nothing was ever published under, and described a mechanism that has since shipped — the scope is `@logikas/brain` and the accepted loss it recorded is paid, #729)
 - [ADR-0007](project/decisions/adr-0007-config-vcs-agnostica-y-checkrefs.md) — VCS-agnostic config and check-refs engine
 - [ADR-0008](project/decisions/adr-0008-adapter-vcs-provider.md) — VCS adapter: explicit provider + verb contract
 - [ADR-0009](project/decisions/adr-0009-documentation-language-policy.md) — Documentation language policy: core English, project docs configurable
