@@ -7,6 +7,7 @@
 {"id":"rec-00b90d3d53ebffac","ts":"2026-07-29T14:27:06Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-00b90d3d53ebffac.jsonl"}
 {"id":"rec-00d8eb5c80e05c87","ts":"2026-07-02T20:53:50Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-00d8eb5c80e05c87.jsonl"}
 {"id":"rec-00e906acc3d12901","ts":"2026-07-03T00:19:55Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-00e906acc3d12901.jsonl"}
+{"id":"rec-012640413c475e12","ts":"2026-08-18T13:57:35Z","actor":"fix/issue-727-fixci-the-publish-rehearsal-does-not-reh","type":"bugfix","project":"brain","issue":727,"file":"2026-08-rec-012640413c475e12.jsonl"}
 {"id":"rec-013ca76bf459840d","ts":"2026-07-29T14:27:58Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-013ca76bf459840d.jsonl"}
 {"id":"rec-0157c01e667c8054","ts":"2026-07-11T21:15:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-0157c01e667c8054.jsonl"}
 {"id":"rec-016f242470ea4319","ts":"2026-07-16T02:48:39Z","actor":"feat/issue-266-h0a-reviewer-protocol-doctrine","type":"decision","project":"brain","file":"2026-07-rec-016f242470ea4319.jsonl"}
@@ -922,6 +923,7 @@
 {"id":"rec-6f1b0d7a570cff43","ts":"2026-06-26T18:04:56Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-6f1b0d7a570cff43.jsonl"}
 {"id":"rec-6f475d97becf51df","ts":"2026-07-25T00:47:43Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-6f475d97becf51df.jsonl"}
 {"id":"rec-6f643b25a80f568d","ts":"2026-07-13T00:22:22Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-6f643b25a80f568d.jsonl"}
+{"id":"rec-6f80f617f44c9d29","ts":"2026-08-18T13:52:07Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-08-rec-6f80f617f44c9d29.jsonl"}
 {"id":"rec-6f896380e5128c8b","ts":"2026-07-25T00:48:41Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-6f896380e5128c8b.jsonl"}
 {"id":"rec-6f8ec958e7a5f078","ts":"2026-07-29T14:26:38Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-6f8ec958e7a5f078.jsonl"}
 {"id":"rec-6fa84e799164cd49","ts":"2026-07-02T13:50:00Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-6fa84e799164cd49.jsonl"}

@@ -10,10 +10,35 @@
 # One refuses, the other publishes; giving them the same trigger would mean the
 # audit's schedule decides when bytes reach strangers.
 #
-# THE DRY-RUN IS NOT CEREMONY. The token must be scoped to `@logikas/*`, not to a
-# package — `@logikas/brain` does not exist until the first publish, so a granular
-# token limited to selected packages cannot cover it. A rehearsal turns that into
-# a red step before anything is uploaded, instead of an auth error half-way.
+# TWO REHEARSALS, BECAUSE THEY ANSWER DIFFERENT QUESTIONS (#727).
+#
+#   `npm publish --dry-run`  →  "what would this tarball contain?"
+#   `npm whoami`             →  "does this credential authenticate at all?"
+#
+# The dry-run PACKS. It prints the file list, the sizes and the integrity hash,
+# and it never contacts the registry for auth. This comment used to say a
+# rehearsal turns a token problem "into a red step before anything is uploaded".
+# Run 32138680828 measured that false: the rehearsal stepped GREEN and the real
+# publish returned E403 immediately after. The step every reader took for the
+# credential gate was a packaging preview, so the first thing ever to exercise
+# NPM_BRAIN_TOKEN was the irreversible act itself — the exact ordering every
+# other step here exists to avoid.
+#
+# WHAT `npm whoami` DOES NOT PROVE, stated because an unstated limit is how the
+# previous claim came to be read as coverage:
+#   · it succeeds with a READ-ONLY token, so it does not prove publish rights;
+#   · it does not prove the token bypasses 2FA — the E403 above was a 2FA
+#     refusal, and this probe would have passed straight through it;
+#   · it does not prove the token covers the `@logikas` scope.
+# It catches an absent, malformed, expired or wrong-registry credential, and it
+# stops there. That is a smaller claim than the one it replaces, and it is the
+# whole of it.
+#
+# The scope rule is unchanged and still correct: the token must be scoped to
+# `@logikas/*`, not to a package. `@logikas/brain` did not exist until the first
+# publish, so a granular token limited to selected packages had nothing to
+# select. No probe here can verify that — it is a property of the token as
+# configured on the registry, and only the publish itself reports on it.
 #
 # `--access public` appears here AND in package.json's publishConfig. A scoped
 # package publishes `restricted` by default: npm SUCCEEDS, the version is burned,
@@ -95,8 +120,34 @@ jobs:
       # irreversible act is cheap; discovering it afterwards is not possible.
       - run: npm test
 
-      - name: Rehearse the publish
+      # Rehearses the TARBALL. Local only — it never asks the registry anything,
+      # so a credential fault cannot surface here. See the header.
+      - name: Rehearse the tarball
         run: npm publish --dry-run --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BRAIN_TOKEN }}
+
+      # Rehearses the CREDENTIAL. The one step in this workflow before the
+      # publish that actually round-trips NPM_BRAIN_TOKEN to the registry.
+      #
+      # Deliberately narrow: it catches an absent, malformed, expired or
+      # wrong-registry token and nothing else. It does NOT prove publish rights,
+      # 2FA bypass, or `@logikas` scope coverage — the header lists those, and
+      # the publish remains the only step that reports on them.
+      #
+      # A smaller true claim beats a larger false one. The failure this whole
+      # ticket exists for was an overclaim, and replacing it with a quieter
+      # overclaim would repeat it.
+      - name: Rehearse the credential
+        run: |
+          if ! who="$(npm whoami 2>&1)"; then
+            echo "::error::NPM_BRAIN_TOKEN did not authenticate against the registry: ${who}"
+            echo "  Nothing was uploaded. Check the token exists, has not expired, and targets"
+            echo "  https://registry.npmjs.org. Note this probe cannot see publish rights, 2FA"
+            echo "  bypass or scope coverage — a green result here is not a promise of a green publish."
+            exit 1
+          fi
+          echo "authenticated as ${who}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BRAIN_TOKEN }}
 
