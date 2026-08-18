@@ -574,6 +574,7 @@
 {"id":"rec-4680bd580df15265","ts":"2026-07-25T21:50:23Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4680bd580df15265.jsonl"}
 {"id":"rec-46843876d842cf31","ts":"2026-07-25T21:51:35Z","actor":"feat/issue-266-h1-1-review-core-cold-boot","type":"decision","project":"brain","file":"2026-07-rec-46843876d842cf31.jsonl"}
 {"id":"rec-46885f5a0a206a7e","ts":"2026-07-13T00:21:48Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-46885f5a0a206a7e.jsonl"}
+{"id":"rec-469608db17acc78b","ts":"2026-08-18T21:24:25Z","actor":"chore/issue-682-ruling-memory","type":"architecture","project":"brain","issue":682,"supersedes":"rec-aabad0b782f68f7b","file":"2026-08-rec-469608db17acc78b.jsonl"}
 {"id":"rec-469c316c50c572f9","ts":"2026-07-25T00:48:26Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-469c316c50c572f9.jsonl"}
 {"id":"rec-469de0312c9cd4d5","ts":"2026-07-25T00:46:25Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-469de0312c9cd4d5.jsonl"}
 {"id":"rec-46a8f05992dab780","ts":"2026-06-29T01:32:05Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-46a8f05992dab780.jsonl"}
@@ -748,6 +749,7 @@
 {"id":"rec-59d8178f41ca5c34","ts":"2026-06-27T00:21:01Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-06-rec-59d8178f41ca5c34.jsonl"}
 {"id":"rec-59e2fcff3bda93a3","ts":"2026-07-11T12:34:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-59e2fcff3bda93a3.jsonl"}
 {"id":"rec-59f1d40eb83d3851","ts":"2026-07-29T13:59:44Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-59f1d40eb83d3851.jsonl"}
+{"id":"rec-59f843a4c0d460c6","ts":"2026-08-18T21:24:25Z","actor":"chore/issue-682-ruling-memory","type":"architecture","project":"brain","issue":682,"supersedes":"rec-d0eca94f4c0e36af","file":"2026-08-rec-59f843a4c0d460c6.jsonl"}
 {"id":"rec-5a19d22f96b63e22","ts":"2026-07-13T00:21:20Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-5a19d22f96b63e22.jsonl"}
 {"id":"rec-5a308211f4e9f41e","ts":"2026-07-25T00:48:36Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-5a308211f4e9f41e.jsonl"}
 {"id":"rec-5a3bd5cca0ee5ad6","ts":"2026-07-09T23:15:51Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-5a3bd5cca0ee5ad6.jsonl"}
@@ -2080,6 +2082,7 @@
 {"id":"rec-f7f560bdaa4ad9a7","ts":"2026-08-14T18:11:48Z","actor":"claude/brain-memory-backend-i5kp8b","type":"decision","project":"brain","issue":641,"file":"2026-08-rec-f7f560bdaa4ad9a7.jsonl"}
 {"id":"rec-f855f5eeef85984e","ts":"2026-07-29T14:29:01Z","actor":"fix/issue-259-d2-pr3c-a10-modify-channel","type":"decision","project":"brain","file":"2026-07-rec-f855f5eeef85984e.jsonl"}
 {"id":"rec-f8c0e3145803199d","ts":"2026-07-25T00:48:20Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-f8c0e3145803199d.jsonl"}
+{"id":"rec-f8cc2e136145b3c1","ts":"2026-08-18T21:24:25Z","actor":"chore/issue-682-ruling-memory","type":"architecture","project":"brain","issue":682,"supersedes":"rec-8e9cfe2fdf4a8055","file":"2026-08-rec-f8cc2e136145b3c1.jsonl"}
 {"id":"rec-f97d14936cea7b50","ts":"2026-07-13T00:21:30Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-f97d14936cea7b50.jsonl"}
 {"id":"rec-f99967f4234d6489","ts":"2026-07-11T12:33:29Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-f99967f4234d6489.jsonl"}
 {"id":"rec-f99ea5eed4fae9dc","ts":"2026-07-25T00:48:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-f99ea5eed4fae9dc.jsonl"}
