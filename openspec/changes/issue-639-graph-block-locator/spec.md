@@ -7,6 +7,15 @@ issue: 639
 
 ## REQ-639-1 — The block is selected by its `protocol:` scalar, never by position
 
+> **SUPERSEDED by issue #709** (`openspec/changes/issue-709-declaring-selector/spec.md`,
+> REQ-639-1 MODIFIED; ADR-0032). The half of this requirement that killed
+> position-based selection **stands** and is what #709 builds on. The half that made
+> the `protocol:` scalar the selector **does not**: that value is one an author
+> teaching the shape reproduces verbatim, so a body ILLUSTRATING the protocol and a
+> body DECLARING it were byte-identical to the reader, and no code path could tell
+> them apart. The selector is now the fence TAG. REQ-639-2 through REQ-639-5 are
+> untouched by #709.
+
 `parseGraphBlock` reads every fenced block in the body and keeps those whose
 `protocol:` scalar equals `brain-graph/1`. Position selects nothing.
 
@@ -14,10 +23,18 @@ A body whose first fence is an untagged log excerpt, a ` ```yaml ` block of
 another protocol, or a tagged snippet, and whose later fence carries a
 well-formed `brain-graph/1` block, parses to that block.
 
-The ` ```yaml ` + `protocol:` shape is unchanged. Moving to a tagged
+~~The ` ```yaml ` + `protocol:` shape is unchanged. Moving to a tagged
 info-string (` ```brain-graph/1 `) would be cleaner and is wrong here: an issue
 body is rendered for a human, and an unknown info-string renders as plain text
-(#495 design D1). The family split is right; only the locator was wrong.
+(#495 design D1). The family split is right; only the locator was wrong.~~
+
+Reversed by #709 / ADR-0032. The rendering cost is real and believed cosmetic — an
+unknown info-string is expected to still render as a fenced code block, losing only
+highlighting (#709 design D13, **not yet confirmed against a rendered page** — that
+observation is #709's Phase 8.1) — and it is outweighed by the fabricated edges an
+unspoofable selector prevents. The family
+split was not right for this block: `brain-graph/1` belongs with
+`brain-amendment/1` and `brain-checkpoint/1`, where the tag IS the selector.
 
 ## REQ-639-2 — One fence reader, not a third
 
