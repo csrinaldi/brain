@@ -27,7 +27,11 @@ import { evaluateTranche, gatherTrancheInputs, PRODUCES as TRANCHE_PRODUCES } fr
 import { evaluateCheckpoint, gatherCheckpointInputs, PRODUCES as CHECKPOINT_PRODUCES } from './evaluators/checkpoint.mjs';
 import { evaluateRuling, gatherRulingInputs, PRODUCES as RULING_PRODUCES } from './evaluators/ruling.mjs';
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
-import { resolveChallenger } from './lib/resolve-challenger.mjs';
+import { resolveChallenger, resolveAxis } from './lib/resolve-challenger.mjs';
+import {
+  evaluateInferential, gatherInferentialInputs, shouldRun,
+  PRODUCES as INFERENTIAL_PRODUCES,
+} from './evaluators/inferential.mjs';
 import { unionControls, checkControlsCoverFindings } from './lib/controls.mjs';
 import { needsBaseProbe, probeBase, BASE_REPRODUCIBLE_GATES } from './lib/base-comparison.mjs';
 import { verdictsAtHead } from './lib/parse-verdict.mjs';
@@ -473,6 +477,39 @@ export async function main(deps = {}) {
     // stub — never a silent no-op or a guessed verdict.
     error(`brain:review: mode "${mode}" is not yet implemented — refusing to guess a verdict.`);
     return 1;
+  }
+
+  // #682 slice 2 — the judgment half is ADDITIVE, not a fourth mode. Judgment
+  // applies TO a tranche, a checkpoint or a ruling review; it does not replace
+  // one, and #575 Ruling 3 rules that the two halves join rather than alternate.
+  //
+  // `unionControls` has taken an array since #683 and had only ever been handed
+  // one element. That plural signature is the affordance for exactly this, so
+  // the declaration needs no new plumbing: the union grows when the producer
+  // runs, and #690's complement shrinks by itself.
+  //
+  // AND IT ONLY DECLARES WHAT IT RAN. `shouldRun` requires both an enabled tier
+  // and a real generator; with no transport (slice 3) the producer does not run,
+  // `INFERENTIAL_PRODUCES` never joins the union, and the verdict says
+  // `inferential` did not run — which is true. Running it while returning
+  // nothing would claim a control that was never applied, which is the defect
+  // `controls.mjs` exists to remove.
+  const inferentialEnabled = resolveAxis({ config, tier }) !== null;
+  if (shouldRun({ enabled: inferentialEnabled, generate: deps.inferentialDeps?.generate })) {
+    const inferentialInputs = await gatherInferentialInputs({
+      worktreePath: boot.worktreePath,
+      baseSha,
+      headSha: boot.headSha,
+      changedFiles,
+      prBody: boot.prView.body,
+      deps: deps.inferentialDeps ?? {},
+    });
+    const judged = evaluateInferential(inferentialInputs);
+    evalResult = {
+      ...evalResult,
+      findings: [...evalResult.findings, ...judged.findings],
+    };
+    controls = unionControls([controls, INFERENTIAL_PRODUCES]);
   }
 
   // brain-review/2 causal admission (issue #394 M3, completing #284): ONLY at
