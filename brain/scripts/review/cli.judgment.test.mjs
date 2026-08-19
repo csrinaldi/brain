@@ -19,7 +19,7 @@ import { ID_PREFIX } from './evaluators/inferential.mjs';
 import { UNCHALLENGED, ROUTED_HUMAN } from './evaluators/refuter.mjs';
 import { REQUIRED_JOBS } from '../vcs/governance-checks.mjs';
 import { tierParams } from '../vcs/governance-tiers.mjs';
-import { resolveJudgment } from './lib/resolve-challenger.mjs';
+import { resolveJudgment, JUDGMENT_PROTOCOL } from './lib/resolve-challenger.mjs';
 
 /** Every required gate green — the same fixture `cli.test.mjs` uses. An empty
  *  rollup is NOT green: the tranche evaluator reads it as uncomputable evidence
@@ -322,23 +322,51 @@ test('H: a challenger that throws fails CLOSED with a readable refusal, not a st
     'no verdict may be posted when the reasoned findings were never challenged');
 });
 
-test('the tier table cannot produce a producer without a challenger', async () => {
-  // #741 F2: the producer gated on `inferentialEnabled` and the challenger on
-  // the protocol, and `standard` ships `{inferentialEnabled: true,
-  // reviewProtocol: 'brain-review/1'}` — so the producer ran and the refuter was
-  // skipped wholesale, rendering a reasoned blocker with no refuter annotation.
+test('the tier table and the judgment gate cannot contradict each other', async () => {
+  // The first cut of this pin was TAUTOLOGICAL: both assertions sat inside
+  // `if (j.run)` and were entailed by `resolveJudgment`'s postconditions given
+  // the test's own argument (`protocol: params.reviewProtocol`). Two tier-table
+  // mutations left it green — `regulated → /1` (the half dies at every tier and
+  // the loop body is never entered) and `standard → /2` (the half runs on an
+  // unimplemented axis). A pin that passes when `run` is false for every tier
+  // constrains nothing.
   //
-  // The single gate closes it, and this pins the closure as DATA: a future tier
-  // edit that re-opens the pair fails here rather than in a posted verdict.
+  // What is NOT entailed is the relationship between the tier's two fields and
+  // what the operator is told. Asserted over the shipped table, so a tier edit
+  // fails here rather than in a posted verdict.
   for (const tier of ['lite', 'standard', 'regulated']) {
     const params = tierParams(tier);
     const j = resolveJudgment({ config: {}, tier, protocol: params.reviewProtocol });
-    if (j.run) {
-      assert.ok(j.challenger, `tier "${tier}" runs the producer with no challenger`);
-      assert.equal(params.reviewProtocol, 'brain-review/2',
-        `tier "${tier}" runs the judgment half at ${params.reviewProtocol}, which cannot carry it`);
+
+    assert.equal(j.enabled, params.inferentialEnabled,
+      `tier "${tier}": the resolved enabled state must be the tier's own`);
+
+    if (params.inferentialEnabled && params.reviewProtocol === JUDGMENT_PROTOCOL) {
+      assert.equal(j.run, true, `tier "${tier}" enables the half at /2 — it must run`);
+      assert.ok(j.challenger, `tier "${tier}" runs the half with no challenger`);
+      assert.ok(j.axis, `tier "${tier}" runs the half with no declared axis`);
+    }
+
+    if (params.inferentialEnabled && params.reviewProtocol !== JUDGMENT_PROTOCOL) {
+      // The `standard` case, and the one #741 F2 named. It must NOT run, and the
+      // operator must be TOLD — a tier that asks for the half and is refused
+      // cannot render like a tier that never asked.
+      assert.equal(j.run, false, `tier "${tier}" cannot run the half at ${params.reviewProtocol}`);
+      assert.ok(j.reason, `tier "${tier}" is refused silently — no reason to report`);
+      assert.equal(j.enabled, true, 'and it must still read as ASKED, or the refusal is unreportable');
     }
   }
+});
+
+test('at least one shipped tier exercises each side of the gate', () => {
+  // Without this the loop above can pass vacuously on a table where no tier
+  // enables the half at all — which is exactly how the first cut survived the
+  // `regulated → /1` mutation.
+  const tiers = ['lite', 'standard', 'regulated'].map(tierParams);
+  assert.ok(tiers.some(p => p.inferentialEnabled && p.reviewProtocol === JUDGMENT_PROTOCOL),
+    'no tier runs the judgment half — the gate is untested by this table');
+  assert.ok(tiers.some(p => !p.inferentialEnabled),
+    'no tier disables the judgment half — the off path is untested by this table');
 });
 
 test('a runner-reported UNCHALLENGED is COUNTED, not merely marked', async () => {
@@ -356,4 +384,31 @@ test('a runner-reported UNCHALLENGED is COUNTED, not merely marked', async () =>
   assert.match(body, /inferential blocker\(s\) were NOT challenged/,
     'the count is the sole input to the verdict-level condition — marking without counting loses it');
   assert.match(body, /^escalate: human$/m);
+});
+
+test('a repo that ASKED for the judgment half and did not get it is told why', async () => {
+  // `judgment.reason` was computed on every off path and read nowhere, so a
+  // repo that asked and received nothing was told nothing while
+  // `resolveJudgment` knew exactly why.
+  //
+  // THIS TEST WAS WRITTEN ONCE BEFORE AND NEVER REACHED THE COMMIT: it was
+  // appended, verified against a mutation, and then deleted by the
+  // `git checkout --` that restored that same mutation. The PR body claimed it.
+  // Read the commit, not your memory of it.
+  const askedByConfig = await run({
+    tier: 'standard', protocol: 'brain-review/1', config: CFG('human'),
+  });
+  assert.match(askedByConfig.body, /the judgment half did not run — .*requires brain-review\/2/);
+
+  // And asked BY THE TIER, which the first cut could not see: `standard` ships
+  // `inferentialEnabled: true` with `brain-review/1`.
+  const askedByTier = await run({ tier: 'standard', protocol: 'brain-review/1', config: {} });
+  assert.match(askedByTier.body, /the judgment half did not run — .*requires brain-review\/2/,
+    'a tier that enables the half and cannot carry it must say so');
+
+  // A tier that never asked sees no noise — #690's wallpaper rule.
+  const neverAsked = await run({ tier: 'lite', protocol: 'brain-review/1', config: {} });
+  assert.match(neverAsked.body, /^conditions: \[\]$/m);
+  assert.notEqual(askedByTier.body, neverAsked.body,
+    'enabled-by-tier-and-refused must not render like never-enabled');
 });

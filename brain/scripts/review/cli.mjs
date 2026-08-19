@@ -508,8 +508,18 @@ export async function main(deps = {}) {
   // Reported ONLY when the repo asked for the half and did not get it. A tier
   // that never enables it is not withholding anything from anyone, and a
   // constant on every verdict is the wallpaper #690 refused.
-  const askedForJudgment = config?.reviewer?.inferential?.enabled === true;
-  if (!judgment.run && askedForJudgment && judgment.reason) {
+  // Round-2 review — the first cut read `config.reviewer.inferential.enabled`
+  // and so could not see a tier that enables the half. `standard` ships
+  // `{inferentialEnabled: true, reviewProtocol: 'brain-review/1'}`: it ASKS for
+  // the judgment half and the protocol gate refuses it, and that is the exact
+  // tier #741 F2 named. Measured before the fix: `lite` (tier disables) and
+  // `standard` (tier enables, protocol refuses) rendered BYTE-IDENTICAL — the
+  // same fold the sibling condition below exists to unfold, re-created by
+  // reading half of the resolution.
+  //
+  // `resolveJudgment` already computes it, so the answer comes from the ONE
+  // resolution rather than a second reading of the config.
+  if (!judgment.run && judgment.enabled && judgment.reason) {
     judgmentConditions.push(`the judgment half did not run — ${judgment.reason}`);
   }
 

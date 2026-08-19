@@ -383,7 +383,7 @@ function rejectedBodies(fx) {
   return readFileSync(p, 'utf8').trim().split('\n').map(l => JSON.parse(l));
 }
 
-test('e2e: no evaluator RUNS to anchor, so the real CLI posts NO comments key — the tripwire for the first run that does (REQ-405-2/8, moved by #682)', (t) => {
+test('e2e: the producer runs with NO TRANSPORT, so nothing anchors and no comments key is posted — the tripwire for the first run that does (REQ-405-2/8, moved by #682)', (t) => {
   // The additive guarantee, measured at the real process boundary rather than
   // reasoned about: widening the port must leave every shipping evaluator's
   // payload byte-for-byte what it was.
@@ -399,10 +399,17 @@ test('e2e: no evaluator RUNS to anchor, so the real CLI posts NO comments key �
   // predicted: two produced findings, one anchored, the un-anchorable one
   // degrading into the summary block exactly as REQ-405-4 designed.
   //
-  // So the pin moves onto what is true now: the producer does not RUN in this
-  // fixture, because no transport is configured, and therefore nothing anchors
-  // and no `comments` key is posted. The distinction that matters to a reader
-  // is no longer "no evaluator can anchor" but "no evaluator RAN to anchor".
+  // So the pin moves onto what is true now — and the FIRST attempt at this move
+  // got the reason wrong, which is worth leaving visible. It said "the producer
+  // does not RUN in this fixture". It does: `regulated` enables the half and
+  // resolves `brain-review/2`, so `judgment.run` is true, and this fixture's own
+  // posted verdict proves it by carrying the `enabled but no transport`
+  // condition — which is pushed only inside `if (judgment.run)`.
+  //
+  // What is actually missing is the TRANSPORT. The producer runs, has no
+  // generator, emits nothing, and therefore nothing anchors. A pin whose stated
+  // basis is false is worse than a deleted one, because it reads as protection
+  // while guarding a state that does not exist.
   //
   // A red here now means the transport landed and the judgment half is live in
   // a real CLI run. When it does, this pin moves ONCE MORE — onto a posted
@@ -423,7 +430,12 @@ test('e2e: no evaluator RUNS to anchor, so the real CLI posts NO comments key �
   // absence above must be attributable to it not having RUN, never to nothing
   // being able to. If a reasoned finding appears here, the transport landed.
   assert.ok(verdict.findings.every(f => f.evidence_class !== 'inferential'),
-    'the judgment half ran in this fixture — move this pin onto the anchored payload');
+    'the judgment half PRODUCED in this fixture — move this pin onto the anchored payload');
+  // The basis, asserted rather than described: the half IS running, and what is
+  // absent is the transport. If this line ever fails, the pin's reason changed
+  // and its comment above must change with it.
+  assert.ok(posted[0].body.includes('enabled but no transport is configured'),
+    'the fixture must reach the producer with no generator — that is the state this pin describes');
   assert.equal('comments' in posted[0], false,
     `no anchor means no inline request at all — got: ${JSON.stringify(Object.keys(posted[0]))}`);
   assert.equal(posted[0].event, 'COMMENT', 'ADR-0020 lock 2: the event stays COMMENT, unreachable by any parameter');

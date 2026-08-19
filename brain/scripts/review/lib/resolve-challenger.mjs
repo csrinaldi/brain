@@ -117,6 +117,11 @@ function unbuiltRunner(axis) {
  *                    declaration (REQ-682-3). `null` when the half does not run.
  *   - `challenger` — the runner, or `null` when the half does not run.
  *   - `reason`     — why it does not run. Never a silent `false`.
+ *   - `enabled`    — whether the half was ASKED for, by config OR by tier.
+ *                    Separate from `run` because the two answer different
+ *                    questions, and a caller that conflates them cannot tell a
+ *                    repo that never wanted the half from one that wanted it and
+ *                    was refused.
  *
  * Order (REQ-682-1):
  *   1. `reviewer.inferential.enabled`, else the tier's `inferentialEnabled`.
@@ -131,14 +136,14 @@ function unbuiltRunner(axis) {
  * @throws {Error} on an unrecognised axis, an enabled half with no axis, or an unknown tier
  */
 export function resolveJudgment({ config, tier, protocol = JUDGMENT_PROTOCOL } = {}) {
-  const off = (reason) => ({ run: false, axis: null, challenger: null, reason });
+  const off = (reason, enabled = true) => ({ run: false, axis: null, challenger: null, reason, enabled });
 
   const params = tierParams(tier);
   const inferential = config?.reviewer?.inferential ?? {};
 
   const enabled = inferential.enabled ?? params.inferentialEnabled;
   if (!enabled) {
-    return off(`the inferential producer is disabled (tier "${tier}")`);
+    return off(`the inferential producer is disabled (tier "${tier}")`, false);
   }
 
   // The gate that used to live only at the challenger's call site. Reading it
@@ -172,6 +177,7 @@ export function resolveJudgment({ config, tier, protocol = JUDGMENT_PROTOCOL } =
 
   return {
     run: true,
+    enabled: true,
     axis,
     challenger: axis === 'human' ? humanRunner : unbuiltRunner(axis),
     reason: null,

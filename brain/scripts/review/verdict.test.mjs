@@ -824,30 +824,111 @@ test('#690: an unknown member of the complement is UNREADABLE, exactly as it is 
   assert.deepEqual(parsed.malformed, ['controls_not_applied']);
 });
 
-test('#682 A2: a REVISE whose only blocker was REFUTED softens — the fixer is not sent after a disproved claim', () => {
-  // The softening tested `candidateFindings.length === 0`. A refuted finding
-  // stays in the list as a `correction`, so the set is never empty and the old
-  // test could not soften a verdict whose only defect had been disproved. The
-  // PR could never go green on the strength of a claim the challenge had
-  // already shown to be false.
-  const refutedOnly = buildVerdict({
+test('#682: the raise happens BEFORE §7 reads the conclusion', () => {
+  // Round 2's regression, pinned. `boundHit` reads the conclusion, so raising
+  // afterwards meant a fourth REVISE never hit §7's bound.
+  const blocker = [{
+    id: 'judgment:J1', severity: 'blocker', evidence_class: 'inferential',
+    causal_disposition: 'introduced', evidence: 'e', cites: 'c',
+  }];
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'APPROVE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] }, findings: blocker, priorRevCount: 4,
+  });
+  assert.equal(v.verdict, 'STOP', '§7 forbids a fourth REVISE — the raise must be visible to the bound');
+  assert.equal(v.escalate, 'human');
+});
+
+test('#682: the softening does not APPROVE over uncomputable evidence when a blocker survives routing', () => {
+  // NAMED PRECISELY, because the first version of this test was called "never
+  // APPROVEs over uncomputable evidence" and its fixture used
+  // `causal_disposition: 'introduced'` — the one disposition that keeps
+  // `candidateFindings` non-empty, i.e. the single case the softening cannot
+  // reach. A pin asserting "never" while testing the one input that cannot
+  // falsify it is worse than no pin: it reads as closure.
+  //
+  // What this actually pins is the case #682 round 1 broke and round 2 fixed:
+  // widening the guard to `!blockerRemains` let an uncomputable REVISE soften.
+  const v = buildVerdict({
     headSha: 'a'.repeat(40), conclusion: 'REVISE', protocol: 'brain-review/2',
     gates: { required: [], detection: [] },
     findings: [{
-      id: 'judgment:J1', severity: 'correction', refuted: true,
-      evidence_class: 'inferential', causal_disposition: 'introduced', evidence: 'e', cites: 'c',
+      id: 'c1', severity: 'correction', evidence_class: 'deterministic',
+      causal_disposition: 'introduced', evidence: 'e', cites: 'c',
     }],
+    conditions: ['evidence uncomputable: TDD-RED reversion (base sha unresolvable)'],
   });
-  assert.equal(refutedOnly.verdict, 'APPROVE');
+  assert.equal(v.verdict, 'REVISE');
+});
 
-  // And it must NOT soften while a real blocker survives beside the refuted one.
-  const oneSurvives = buildVerdict({
+test('KNOWN GAP: a routed-out blocker still softens an uncomputable REVISE (§10)', () => {
+  // This is NOT closed, and pinning it as a KNOWN state is the honest artefact.
+  // `causal_disposition: 'pre-existing'` empties `candidateFindings`, so #483's
+  // original softening fires — and it fires over a verdict that declares it
+  // could not compute its evidence. §10 says never APPROVE on uncomputable
+  // evidence; this route does.
+  //
+  // It PREDATES this change: the branch is #483's and `main` has the same
+  // condition. It is pinned here rather than fixed because fixing it blind, in
+  // the fourth consecutive round of fixes-on-fixes, is precisely the shape that
+  // produced the two regressions this change exists to repair.
+  //
+  // When it is fixed, this test FAILS — that is the point. Read the assertion
+  // message, do not delete the case.
+  const v = buildVerdict({
     headSha: 'a'.repeat(40), conclusion: 'REVISE', protocol: 'brain-review/2',
     gates: { required: [], detection: [] },
-    findings: [
-      { id: 'judgment:J1', severity: 'correction', refuted: true, evidence_class: 'inferential', causal_disposition: 'introduced', evidence: 'e', cites: 'c' },
-      { id: 'gate:x', severity: 'blocker', evidence_class: 'deterministic', causal_disposition: 'introduced', evidence: 'e', cites: 'c' },
-    ],
+    findings: [{
+      id: 'g1', severity: 'blocker', evidence_class: 'deterministic',
+      causal_disposition: 'pre-existing', evidence: 'e', cites: 'c',
+    }],
+    conditions: ['evidence uncomputable: TDD-RED reversion (base sha unresolvable)'],
   });
-  assert.equal(oneSurvives.verdict, 'REVISE', 'a surviving blocker keeps the verdict blocking');
+  assert.equal(v.verdict, 'APPROVE',
+    'if this now REVISEs, the §10 gap was closed — replace this case with the closure pin, do not delete it');
+});
+
+test('#682: the raise reads the BLOCKING set, not the processed list', () => {
+  // The load-bearing line of the whole "it cannot move to cli.mjs" argument, and
+  // a mutation to it survived the full suite at 4124/4124. `processed` is the
+  // list BEFORE routing; `candidateFindings` is the blocking set after it. A
+  // `base-only` finding is in the first and not the second, so reading the wrong
+  // one raises a conclusion over a finding that was deliberately routed out.
+  const routedOut = [{
+    id: 'g1', severity: 'blocker', evidence_class: 'deterministic',
+    causal_disposition: 'base-only', evidence: 'e', cites: 'c',
+  }];
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'APPROVE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] }, findings: routedOut, priorRevCount: 4,
+  });
+  assert.equal(v.verdict, 'APPROVE',
+    'a base-only blocker is not in the blocking set — raising on it re-blocks what routing excluded');
+  assert.equal(v.escalate, null, 'and it must not trip §7 either');
+});
+
+test('#682 A1: a corroborated reasoned blocker raises the conclusion', () => {
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'APPROVE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [{
+      id: 'judgment:J1', severity: 'blocker', evidence_class: 'inferential',
+      causal_disposition: 'introduced', evidence: 'e', cites: 'c',
+      refuter_outcome: 'corroborated', refuter_rationale: 'r',
+    }],
+  });
+  assert.equal(v.verdict, 'REVISE', 'a blocker that does not block is not a blocker');
+});
+
+test('#682: the original #483 softening still fires — routed-out findings, empty blocking set', () => {
+  // Reverting the widening must not break what the branch was written for.
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'REVISE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [{
+      id: 'g1', severity: 'blocker', evidence_class: 'deterministic',
+      causal_disposition: 'pre-existing', evidence: 'e', cites: 'c',
+    }],
+  });
+  assert.equal(v.verdict, 'APPROVE', 'every finding routed OUT of the blocking set — #483');
 });

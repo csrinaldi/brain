@@ -192,6 +192,30 @@ export function buildVerdict({
     }
   }
 
+  // #682 — THE CONCLUSION IS RAISED BEFORE ANYTHING READS IT, and the ordering
+  // is the whole of the fix. Round 2 measured what the first cut cost:
+  //
+  //   · §7's bound was DISARMED. `boundHit` reads `conclusion`, so raising
+  //     afterwards meant a fourth REVISE never hit the bound: a corroborated
+  //     reasoned blocker at `priorRevCount: 4` rendered `REVISE / escalate:
+  //     null` where the pre-fix placement rendered `STOP / escalate: human`.
+  //     §7 says no infinite revise loop is possible BY CONSTRUCTION — the
+  //     construction was this order.
+  //
+  // It cannot move to `cli.mjs` either, which was the other candidate: the
+  // blocking set does not exist there. Routing by `causal_disposition`, the
+  // cites gate that downgrades an uncited blocker, and the inadmissible drop
+  // all happen below, so a raise upstream would fire on findings these gates
+  // then remove.
+  //
+  // So: here, and FIRST. `candidateFindings` is the set after routing, and
+  // `blockerRemains` is the house rule (`REVISE iff a blocker exists`,
+  // tranche.mjs) evaluated on the state a reader of this verdict will see.
+  const blockerRemains = candidateFindings.some((f) => f.severity === 'blocker');
+  const raisedConclusion = (blockerRemains && conclusion !== 'REVISE' && conclusion !== 'STOP')
+    ? 'REVISE'
+    : conclusion;
+
   // #506 — `priorRevCount` is now the count AT THIS HEAD (see verdictsAtHead), so
   // the bound measures what §7 means: iterations on one disagreement, not how many
   // times the reviewer was invoked over a long-lived PR's life.
@@ -202,39 +226,14 @@ export function buildVerdict({
   // that escalation says "the reviewer cannot determine whether this finding is
   // caused by the diff", which a ruling on iteration count does not answer. Two
   // escalations, two questions, and only one of them is about going around in circles.
-  // #682 round-1 review, findings A1/A2 — THE CONCLUSION IS DERIVED FROM THE
-  // FINAL BLOCKING SET, and it has to be derived HERE because this is the only
-  // place that set exists.
-  //
-  // Two measured defects, one root. The judgment half's conclusion was decided
-  // in `cli.mjs` from the producer's PRE-challenge severities, before
-  // `applyCausalAdmission` ran, and nothing re-derived it afterwards:
-  //
-  //   · a CORROBORATED inferential blocker rendered under `verdict: APPROVE` —
-  //     the judgment half could escalate when it was UNSURE and could not block
-  //     when it was SURE;
-  //   · a REFUTED claim left `verdict: REVISE` with zero blockers in the list —
-  //     the fixing agent was asked to comply with something the challenge had
-  //     already shown to be false, and the PR could never go green.
-  //
-  // `candidateFindings` is the blocking set after routing, so `blockerRemains`
-  // is the house rule (`REVISE iff a blocker exists`, tranche.mjs) evaluated on
-  // the state a reader of this verdict will actually see.
-  const blockerRemains = candidateFindings.some((f) => f.severity === 'blocker');
-
-  const boundHit = priorRevCount >= 3 && conclusion === 'REVISE' && !rulingAtHead;
+  const boundHit = priorRevCount >= 3 && raisedConclusion === 'REVISE' && !rulingAtHead;
   const shouldEscalate = boundHit || unknownCausality;
   const finalEscalate = shouldEscalate ? 'human' : escalate;
   
-  let finalVerdict = conclusion;
+  let finalVerdict = raisedConclusion;
   if (boundHit || unknownCausality) {
     finalVerdict = 'STOP';
-  } else if (blockerRemains && conclusion !== 'REVISE' && conclusion !== 'STOP') {
-    // A blocker that does not block is not a blocker. NOT gated on protocol:
-    // a blocker is a blocker at every version, and this branch is what lets the
-    // judgment half reach the conclusion at all.
-    finalVerdict = 'REVISE';
-  } else if (protocol === 'brain-review/2' && processed.length > 0 && !blockerRemains && conclusion === 'REVISE') {
+  } else if (protocol === 'brain-review/2' && processed.length > 0 && candidateFindings.length === 0 && raisedConclusion === 'REVISE') {
     // #483: `processed.length`, not `findings.length`. The softening means
     // "every finding that exists was routed OUT of the blocking set by the
     // admission rule". Measured against the raw input, a verdict whose
@@ -242,10 +241,18 @@ export function buildVerdict({
     // softens REVISE to APPROVE on the strength of findings nobody ever read —
     // fail-open, from the same silent drop this ticket came to fix.
     //
-    // #682 widened the condition from `candidateFindings.length === 0` to
-    // `!blockerRemains`: a REFUTED claim stays in the list as a `correction`,
-    // so the set is no longer empty, and the old test could never soften a
-    // verdict whose only defect had been disproved.
+    // #682 round 1 widened this to `!blockerRemains` and round 2 REVERTED it,
+    // because the widening was both unnecessary and harmful. `checkpoint.mjs`
+    // derives REVISE from three causes and only one is "a blocker exists"; the
+    // third is §10's uncomputable-evidence rule. Under the widening, a verdict
+    // carrying `conditions: ["evidence uncomputable: …"]` rendered APPROVE —
+    // the verdict approving while declaring it could not compute its evidence,
+    // which is §10 exactly inverted.
+    //
+    // And it was unnecessary: the case it was written for (a REFUTED claim
+    // leaving REVISE) came from the PRE-challenge flip in `cli.mjs`, which is
+    // gone. With the raise computed from the post-challenge set, a refuted
+    // claim never raises in the first place, so there is nothing to soften.
     finalVerdict = 'APPROVE';
   }
 
