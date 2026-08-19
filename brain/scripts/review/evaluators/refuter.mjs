@@ -88,9 +88,33 @@ export async function evaluateRefuter({ findings = [], runner = null } = {}) {
   let refutedCount = 0;
   let escalate = null;
 
+  const pendingIds = new Set(inferentialBlockers.map(f => f.id));
+  const isPendingBlocker = (f) => pendingIds.has(f.id)
+    && f.severity === 'blocker' && f.evidence_class === 'inferential';
+
+  // #682 cold review F3 — a runner that answers for only SOME of the blockers it
+  // was handed used to leave the rest with NO marker and NO condition:
+  // `outcomeMap.get(f.id)` was undefined, the finding returned unchanged, and
+  // `unchallenged` was hardcoded 0 on this path so `causal-admission.mjs` never
+  // added the "were NOT challenged" condition. That is #552's fold, restored by
+  // a partial answer — and a model handed 5 blockers returning 4 outcomes is the
+  // single most likely failure mode of the transport slice 3 introduces.
+  //
+  // Counted here rather than trusted to the runner: the backstop belongs on the
+  // side that knows what it ASKED, not the side that answers.
+  const answered = new Set(outcomes.map(o => o.id));
+  let unansweredCount = 0;
+  for (const f of inferentialBlockers) if (!answered.has(f.id)) unansweredCount++;
+  if (unansweredCount > 0) escalate = 'human';
+
   const adjustedFindings = findings.map(f => {
     const res = outcomeMap.get(f.id);
-    if (!res) return f;
+    if (!res) {
+      // An inferential blocker the runner did not answer for is UNCHALLENGED —
+      // the same state as having had no runner, because for this finding there
+      // effectively was none.
+      return isPendingBlocker(f) ? { ...f, refuter_outcome: UNCHALLENGED } : f;
+    }
 
     if (res.outcome === 'refuted') {
       refutedCount++;
@@ -107,6 +131,18 @@ export async function evaluateRefuter({ findings = [], runner = null } = {}) {
     // person rules. Escalates for the same reason `inconclusive` does — a
     // challenge that has not happened yet is not weaker evidence than one that
     // finished without a conclusion.
+    // A runner may report UNCHALLENGED for itself — an axis this build does not
+    // implement does exactly that, refusing to substitute a weaker challenge.
+    // Without its own branch it falls through to `corroborated`, i.e. "a
+    // challenge upheld this", which is the trap this switch sets for EVERY new
+    // outcome value. Third time: `routed:human`, then this, and the next one
+    // will inherit it too unless the fall-through is read as the hazard it is.
+    if (res.outcome === UNCHALLENGED) {
+      unansweredCount++;
+      escalate = 'human';
+      return { ...f, refuter_outcome: UNCHALLENGED, refuter_rationale: res.rationale };
+    }
+
     if (res.outcome === ROUTED_HUMAN) {
       escalate = 'human';
       return { ...f, refuter_outcome: ROUTED_HUMAN, refuter_rationale: res.rationale };
@@ -118,7 +154,7 @@ export async function evaluateRefuter({ findings = [], runner = null } = {}) {
   return {
     outcomes,
     refutedCount,
-    unchallenged: 0,
+    unchallenged: unansweredCount,
     adjustedFindings,
     escalate,
   };

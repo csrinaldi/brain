@@ -148,6 +148,7 @@ export function buildVerdict({
   conclusion,
   protocol = 'brain-review/1',
   controls = [],
+  judgmentAxis = null,
   priorRevCount = 0,
   findings = [],
   gates = {},
@@ -227,6 +228,7 @@ export function buildVerdict({
   return {
     protocol,
     controls,
+    judgmentAxis,
     verdict: finalVerdict,
     head_sha: headSha,
     rev: priorRevCount + 1,
@@ -355,6 +357,21 @@ export function renderVerdict(v) {
   // "did not run" list drifts from CONTROL_CLASSES the first time either changes.
   // It shrinks to [] by itself the day #682's evaluator runs.
   lines.push(`controls_not_applied: [${complementControls(v.controls ?? []).map((c) => JSON.stringify(c)).join(', ')}]`);
+
+  // REQ-682-3 — the axis that challenged the reasoned findings, on the wire.
+  //
+  // Emitted ONLY when a reasoned finding exists, for #690's reason: a constant
+  // that fires on every verdict turns its channel into wallpaper, and an axis
+  // that challenged nothing is not evidence about this verdict.
+  //
+  // Without it two verdicts render byte-identically when one was challenged by
+  // the same model and the other by a different family — two evidentiary
+  // strengths, one rendering, produced by a configuration option. That is #683's
+  // rule one field over: a same-model-challenged verdict must not read like a
+  // cross-family-challenged one.
+  if (v.judgmentAxis && (v.findings ?? []).some((f) => f.evidence_class === 'inferential')) {
+    lines.push(`challenger_axis: ${yamlScalar(v.judgmentAxis)}`);
+  }
   if (v.pin) lines.push(`pin: ${yamlScalar(JSON.stringify(v.pin))}`);
   if (v.sequencing) lines.push(`sequencing: ${yamlScalar(JSON.stringify(v.sequencing))}`);
   lines.push(`escalate: ${v.escalate ?? 'null'}`, '```');

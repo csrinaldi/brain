@@ -9,12 +9,13 @@ import assert from 'node:assert/strict';
 
 import {
   evaluateInferential, gatherInferentialInputs, shouldRun, sanitiseFinding,
-  PRODUCES, CARRIED_FIELDS,
+  PRODUCES, CARRIED_FIELDS, ID_PREFIX,
 } from './inferential.mjs';
 import { PRODUCES as TRANCHE_PRODUCES } from './tranche.mjs';
 import { unionControls, complementControls } from '../lib/controls.mjs';
 import { evaluateRefuter } from './refuter.mjs';
-import { resolveChallenger } from '../lib/resolve-challenger.mjs';
+import { resolveJudgment, JUDGMENT_PROTOCOL } from '../lib/resolve-challenger.mjs';
+import { renderVerdict } from '../verdict.mjs';
 
 const generated = (extra = {}) => ([{
   id: 'J1', severity: 'blocker', title: 'a reasoned claim',
@@ -53,8 +54,32 @@ test('REQ-682-3: an unrun producer declares NOTHING — the honest half of the s
 });
 
 test('with no generator, gather returns null and produces nothing to declare over', async () => {
-  assert.deepEqual(await gatherInferentialInputs({ deps: {} }), { generated: null });
+  assert.deepEqual(await gatherInferentialInputs({ deps: {} }), { generated: null, failed: false });
   assert.deepEqual(evaluateInferential({ generated: null }).findings, []);
+});
+
+test('C7: a generator that FAILED is not a generator that found nothing (#682 criterion 6)', async () => {
+  // The first cut coerced with `Array.isArray(g) ? g : []`, so a transport that
+  // swallowed its own error and returned undefined produced an empty list — and
+  // the verdict then declared the judgment control APPLIED with nothing found.
+  // "Unreachable" folded into "found nothing", in the file whose header rails
+  // against exactly that.
+  for (const [label, generate] of [
+    ['undefined', async () => undefined],
+    ['a non-array', async () => ({ error: 'unreachable' })],
+    ['a throw', async () => { throw new Error('ECONNREFUSED'); }],
+  ]) {
+    const r = await gatherInferentialInputs({ deps: { generate } });
+    assert.equal(r.failed, true, `${label} must be reported as a FAILURE`);
+    assert.equal(r.generated, null, `${label} must not become an empty finding list`);
+    assert.ok(r.reason, `${label} must name its cause`);
+  }
+});
+
+test('C7: a generator that legitimately found nothing is NOT a failure', async () => {
+  const r = await gatherInferentialInputs({ deps: { generate: async () => [] } });
+  assert.equal(r.failed, false);
+  assert.deepEqual(r.generated, []);
 });
 
 // ── the class is forced, never trusted ───────────────────────────────────────
@@ -64,6 +89,32 @@ test('every emitted finding is forced to `evidence_class: inferential`', () => {
   assert.equal(r.findings[0].evidence_class, 'inferential',
     'a judgment evaluator claiming `deterministic` would put a reasoned claim on the ' +
     'deterministic side of #575 Ruling 3 and skip the refuter entirely');
+});
+
+test('B4: produced ids are namespaced, so a producer cannot address a deterministic finding', async () => {
+  // `evaluateRefuter` keys outcomes by id ALONE and applies them to EVERY
+  // finding carrying it. Before namespacing, a producer emitting
+  // `gate:phase-order` — which an LLM asked to review a PR reaches for
+  // unprompted — meant that refuting the REASONED claim flipped the genuinely
+  // failing required gate to `correction`. Fail-open, on a real gate.
+  const deterministic = {
+    id: 'gate:phase-order', severity: 'blocker', evidence_class: 'deterministic',
+    evidence: 'required check phase-order is FAILURE',
+  };
+  const reasoned = evaluateInferential({
+    generated: [{ id: 'gate:phase-order', severity: 'blocker', evidence: 'a reasoned claim' }],
+  }).findings;
+
+  assert.equal(reasoned[0].id, `${ID_PREFIX}gate:phase-order`);
+
+  const refuteAll = async (blockers) => ({
+    outcomes: blockers.map(f => ({ id: f.id, outcome: 'refuted', rationale: 'not real' })),
+  });
+  const out = await evaluateRefuter({ findings: [deterministic, ...reasoned], runner: refuteAll });
+
+  assert.equal(out.adjustedFindings[0].severity, 'blocker',
+    'the deterministic gate finding must still block — nothing challenged IT');
+  assert.equal(out.adjustedFindings[1].severity, 'correction');
 });
 
 test('the producer never escalates on its own', () => {
@@ -99,13 +150,22 @@ test('REQ-682-4: the carried set is enumerated, so a new generator field cannot 
     'a generator that grows a field does not get to widen the boundary by existing');
 });
 
-test('REQ-682-4: what the challenger receives is a SUBSET of what the verdict would render', async () => {
-  // THE CENTRAL CASE. If the challenger can see something a reader of the verdict
-  // cannot, the boundary has already leaked and `same-model` is self-attestation
-  // with extra steps. Asserted on the arguments the runner actually receives —
-  // a grep over the source would not have caught a value passed at runtime.
+test('REQ-682-4: what the challenger receives is a SUBSET of what the verdict RENDERS', async () => {
+  // THE CENTRAL CASE, rewritten. The first cut asserted `CARRIED_FIELDS
+  // .includes(k)` — comparing the list to itself, which cannot fail for any
+  // member however un-rendered. That is exactly how `title` survived in the
+  // list while `renderVerdict` emitted it nowhere: three fields crossed the
+  // boundary invisibly and the test said the property held.
+  //
+  // The oracle is now the RENDERER. A field reaches the challenger only if a
+  // reader of the posted verdict can see it.
   const emitted = evaluateInferential({
-    generated: generated({ reasoning: 'the producer\'s private chain' }),
+    generated: [{
+      id: 'J1', severity: 'blocker', evidence: 'the semantics are inverted',
+      cites: 'reviewer-protocol.md §6.1', file: 'a.mjs', line: 12,
+      title: 'A TITLE A READER NEVER SEES',
+      reasoning: "the producer's private chain",
+    }],
   }).findings;
 
   let seenByChallenger = null;
@@ -113,18 +173,28 @@ test('REQ-682-4: what the challenger receives is a SUBSET of what the verdict wo
     seenByChallenger = blockers;
     return { outcomes: blockers.map(f => ({ id: f.id, outcome: 'corroborated', rationale: 'r' })) };
   };
+  const out = await evaluateRefuter({ findings: emitted, runner: spy });
 
-  await evaluateRefuter({ findings: emitted, runner: spy });
+  const body = renderVerdict({
+    protocol: 'brain-review/2', verdict: 'REVISE', head_sha: 'a'.repeat(40), rev: 1,
+    gates: { required: ['issue-link'], detection: [] },
+    controls: ['deterministic', 'inferential'], judgmentAxis: 'human',
+    findings: out.adjustedFindings, follow_ups: [], conditions: [], escalate: out.escalate,
+  });
 
   assert.ok(seenByChallenger, 'the runner must have been called');
+  const REFUTER_FIELDS = ['refuter_outcome', 'refuter_rationale', 'causal_disposition'];
   for (const f of seenByChallenger) {
-    for (const k of Object.keys(f)) {
-      assert.ok(
-        CARRIED_FIELDS.includes(k) || k === 'refuter_outcome' || k === 'refuter_rationale',
-        `the challenger saw "${k}", which the verdict does not render — the boundary leaked`,
-      );
+    for (const [k, v] of Object.entries(f)) {
+      if (REFUTER_FIELDS.includes(k)) continue;
+      assert.match(body, new RegExp(`\\b${k}:`),
+        `the challenger saw "${k}" and the rendered verdict never emits it — the boundary leaked`);
+      assert.ok(body.includes(String(v)),
+        `the challenger saw ${k}=${JSON.stringify(v)} and that VALUE is not on the wire`);
     }
   }
+  assert.equal('title' in seenByChallenger[0], false,
+    'title is the free-text field an LLM fills with its own framing — the reasoning channel');
 });
 
 test('REQ-682-4: there is no side channel — the runner receives findings and nothing else', async () => {
@@ -143,9 +213,9 @@ test('REQ-682-4: there is no side channel — the runner receives findings and n
 
 test('a reasoned finding with the human axis is routed, not corroborated', async () => {
   const emitted = evaluateInferential({ generated: generated() }).findings;
-  const runner = resolveChallenger({
+  const { challenger: runner } = resolveJudgment({
     config: { reviewer: { inferential: { enabled: true, challenger: { axis: 'human' } } } },
-    tier: 'standard',
+    tier: 'standard', protocol: JUDGMENT_PROTOCOL,
   });
   const r = await evaluateRefuter({ findings: emitted, runner });
   assert.equal(r.adjustedFindings[0].refuter_outcome, 'routed:human');

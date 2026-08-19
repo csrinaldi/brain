@@ -50,9 +50,20 @@ export const PRODUCES = Object.freeze(['inferential']);
  * chain of thought. Anything a generator adds outside this set is dropped by
  * `sanitiseFinding` below, which is what makes REQ-682-4 testable instead of
  * aspirational.
+ *
+ * `title` WAS in this list and the cold review removed it: `renderVerdict`
+ * emits it nowhere (zero hits across verdict.mjs, parse-verdict.mjs and
+ * schema-v2.mjs), so it crossed to the challenger invisibly — and it is exactly
+ * the free-text field an LLM producer fills with its own framing of the claim,
+ * i.e. the reasoning channel this enumeration exists to close.
+ *
+ * THE MEMBERSHIP TEST IS NOT THIS LIST. A test asserting `CARRIED_FIELDS
+ * .includes(k)` compares the list to itself and cannot fail for any member,
+ * however un-rendered — that was the first cut's assertion and it is why `title`
+ * survived. The test now renders a verdict and asserts against ITS keys.
  */
 export const CARRIED_FIELDS = Object.freeze([
-  'id', 'severity', 'evidence_class', 'title', 'evidence', 'cites', 'file', 'line',
+  'id', 'severity', 'evidence_class', 'evidence', 'cites', 'file', 'line',
 ]);
 
 /**
@@ -89,9 +100,23 @@ export function sanitiseFinding(finding = {}) {
  * @param {{ generated?: Array<object>|null }} input
  * @returns {{conclusion: string|null, gates: {required: string[], detection: string[]}, findings: object[], conditions: string[], escalate: null}}
  */
+export const ID_PREFIX = 'judgment:';
+
 export function evaluateInferential({ generated = null } = {}) {
   const findings = (generated ?? []).map(f => ({
     ...sanitiseFinding(f),
+    // #682 cold review B4 — the producer is the first thing in brain that lets a
+    // NON-DETERMINISTIC source choose finding ids, and `evaluateRefuter` keys
+    // outcomes by id alone and applies them to EVERY finding carrying it. A
+    // producer emitting `gate:phase-order` (which an LLM asked to review a PR
+    // reaches for unprompted) meant that refuting the REASONED claim flipped the
+    // genuinely-failing required gate to `severity: 'correction'`. Fail-open, on
+    // a real gate, from a claim nothing verified.
+    //
+    // Namespaced here rather than validated: a collision check would have to
+    // know every id every evaluator can emit, and that list grows. A reserved
+    // prefix cannot collide by construction.
+    id: `${ID_PREFIX}${f.id}`,
     evidence_class: 'inferential',
   }));
 
@@ -137,9 +162,30 @@ export async function gatherInferentialInputs({
   worktreePath = null, baseSha = null, headSha = null,
   changedFiles = [], prBody = '', deps = {},
 } = {}) {
-  if (typeof deps.generate !== 'function') return { generated: null };
-  const generated = await deps.generate({ worktreePath, baseSha, headSha, changedFiles, prBody });
-  return { generated: Array.isArray(generated) ? generated : [] };
+  if (typeof deps.generate !== 'function') return { generated: null, failed: false };
+
+  // #682 acceptance criterion 6, and the cold review caught it pre-broken HERE.
+  // The first cut coerced with `Array.isArray(generated) ? generated : []`, so a
+  // transport that swallowed its own error and returned `undefined` produced an
+  // empty finding list — and the verdict then declared the judgment control
+  // APPLIED with nothing found. "The model was unreachable" folded into "it
+  // found nothing", in the file whose header rails against exactly that.
+  //
+  // A throw and a non-array are both FAILURES, reported as such. The caller
+  // fails closed on them rather than rendering a green judgment half.
+  let generated;
+  try {
+    generated = await deps.generate({ worktreePath, baseSha, headSha, changedFiles, prBody });
+  } catch (err) {
+    return { generated: null, failed: true, reason: `the generator threw: ${err.message}` };
+  }
+  if (!Array.isArray(generated)) {
+    return {
+      generated: null, failed: true,
+      reason: `the generator returned ${generated === undefined ? 'undefined' : typeof generated}, not an array of findings`,
+    };
+  }
+  return { generated, failed: false };
 }
 
 /**
