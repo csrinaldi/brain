@@ -35,6 +35,26 @@
 export const UNCHALLENGED = 'unchallenged';
 
 /**
+ * `refuter_outcome` for a reasoned blocker routed to a human challenger BY
+ * CONFIGURATION (issue #682, REQ-682-6) — `reviewer.inferential.challenger.axis`
+ * resolved to `human`, so no automated challenge was attempted and none was
+ * expected.
+ *
+ * DISTINCT FROM `UNCHALLENGED`, and that distinction is the requirement.
+ * `unchallenged` means *nothing was available to challenge this*; this means
+ * *a person challenges this, by design*. They are different facts about the
+ * evidence, and the cheap implementation of the `human` axis — returning a
+ * `null` runner — would render them identically. That re-folds the exact pair
+ * #552 unfolded, one layer up, produced this time by a configuration option
+ * rather than by a missing dependency.
+ *
+ * Handled in its OWN branch below rather than falling through: the fall-through
+ * marks a finding `corroborated`, which would claim a challenge upheld the
+ * finding when no challenge occurred.
+ */
+export const ROUTED_HUMAN = 'routed:human';
+
+/**
  * Evaluates inferential blocker findings in a single batch to eliminate false positives.
  * @param {{ findings: Array<object>, runner?: function }} options
  * @returns {Promise<{ outcomes: Array<object>, refutedCount: number, unchallenged: number, adjustedFindings: Array<object>, escalate: string|null }>}
@@ -80,6 +100,16 @@ export async function evaluateRefuter({ findings = [], runner = null } = {}) {
     if (res.outcome === 'inconclusive') {
       escalate = 'human';
       return { ...f, refuter_outcome: 'inconclusive', refuter_rationale: res.rationale };
+    }
+
+    // #682 REQ-682-6. Severity is UNCHANGED: routing a claim to a person is not
+    // a judgment about the claim, so the finding keeps blocking until that
+    // person rules. Escalates for the same reason `inconclusive` does — a
+    // challenge that has not happened yet is not weaker evidence than one that
+    // finished without a conclusion.
+    if (res.outcome === ROUTED_HUMAN) {
+      escalate = 'human';
+      return { ...f, refuter_outcome: ROUTED_HUMAN, refuter_rationale: res.rationale };
     }
 
     return { ...f, refuter_outcome: 'corroborated', refuter_rationale: res.rationale };

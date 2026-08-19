@@ -23,34 +23,34 @@ slices it is split at the slice boundary and each half is tickable on its own.
 
 Delivers REQ-682-1, REQ-682-2, and REQ-682-6.
 
-- [ ] 1.1 Add `challengerAxis` and `inferentialEnabled` to `tierParams()` in
+- [x] 1.1 Add `challengerAxis` and `inferentialEnabled` to `tierParams()` in
       `brain/scripts/vcs/governance-tiers.mjs`: `lite` → producer off, axis
       unused; `standard` → on, `same-model`; `regulated` → on, `cross-family`.
       Pure, tested against the existing tier table.
-- [ ] 1.2 Write `brain/scripts/review/lib/resolve-challenger.mjs` exporting
+- [x] 1.2 Write `brain/scripts/review/lib/resolve-challenger.mjs` exporting
       `resolveChallenger({ config, tier })`. Reads
       `reviewer.inferential.{enabled,challenger.axis}`; `null`/absent resolves
       from tier (REQ-682-1). Returns `null` when the producer is off
       (REQ-682-2).
-- [ ] 1.3 An unrecognised `axis` value makes `resolveChallenger` REFUSE — an
+- [x] 1.3 An unrecognised `axis` value makes `resolveChallenger` REFUSE — an
       explicit error, never a silent fallback to a default. An unknown axis is
       an unknown evidentiary strength, and #683's rule is that a verdict whose
       self-description could be false is not posted.
-- [ ] 1.4 Implement the `human` axis runner: marks each inferential blocker with
+- [x] 1.4 Implement the `human` axis runner: marks each inferential blocker with
       an outcome **distinct from `unchallenged`** and escalates (REQ-682-6).
       Returns a runner, never `null` — the cheap wrong implementation is the one
       that returns `null`, so a test pins it directly.
-- [ ] 1.5 Test: `human`-axis output and no-runner output must NOT be equal.
+- [x] 1.5 Test: `human`-axis output and no-runner output must NOT be equal.
       Assert on the rendered shape, not the internal object — #552's defect was
       invisible until it was rendered.
-- [ ] 1.6 Wire `resolveChallenger` at `cli.mjs`'s existing seam: replace
+- [x] 1.6 Wire `resolveChallenger` at `cli.mjs`'s existing seam: replace
       `runner: deps.refuterRunner ?? null` with
       `runner: deps.refuterRunner ?? resolveChallenger({ config, tier })`. The
       test-side injection keeps winning, so every existing test is unaffected.
-- [ ] 1.7 Mutation: flip the `lite` producer default to on and prove a test
+- [x] 1.7 Mutation: flip the `lite` producer default to on and prove a test
       fails. If none does, REQ-682-2's protection of the credential-free install
       is not actually pinned.
-- [ ] 1.8 Record the boundary debt against **#312** in
+- [x] 1.8 Record the boundary debt against **#312** in
       `brain/scripts/review/lib/resolve-challenger.mjs`'s header: the
       agent/model binding is a provisional inhabitant of #312's port and is
       deleted when the port lands. A comment, not a doc — it must be read by

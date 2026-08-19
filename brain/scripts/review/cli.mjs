@@ -27,6 +27,7 @@ import { evaluateTranche, gatherTrancheInputs, PRODUCES as TRANCHE_PRODUCES } fr
 import { evaluateCheckpoint, gatherCheckpointInputs, PRODUCES as CHECKPOINT_PRODUCES } from './evaluators/checkpoint.mjs';
 import { evaluateRuling, gatherRulingInputs, PRODUCES as RULING_PRODUCES } from './evaluators/ruling.mjs';
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
+import { resolveChallenger } from './lib/resolve-challenger.mjs';
 import { unionControls, checkControlsCoverFindings } from './lib/controls.mjs';
 import { needsBaseProbe, probeBase, BASE_REPRODUCIBLE_GATES } from './lib/base-comparison.mjs';
 import { verdictsAtHead } from './lib/parse-verdict.mjs';
@@ -504,10 +505,27 @@ export async function main(deps = {}) {
         gates: BASE_REPRODUCIBLE_GATES,
       });
     }
+    // #682 REQ-682-1/REQ-682-2: the challenger is CONSTRUCTED here, from config
+    // and tier, at the injection point #552 already left. `deps.refuterRunner`
+    // still wins so every existing test is unaffected — no test injects it
+    // today, and the ones that reason about the null runner do so in prose.
+    //
+    // An unrecognised axis REFUSES the run rather than defaulting: an unknown
+    // axis is an unknown evidentiary strength, and posting a verdict whose
+    // self-description could be false is the thing #683 forbids. Same shape as
+    // the controls-coverage refusal immediately below — error, post nothing,
+    // exit non-zero.
+    let challenger;
+    try {
+      challenger = deps.refuterRunner ?? resolveChallenger({ config, tier });
+    } catch (err) {
+      error(`brain:review: ${err.message}`);
+      return 1;
+    }
     ({ findings, escalate, conditions: baseConditions } = await applyCausalAdmission({
       findings: evalResult.findings,
       escalate: evalResult.escalate,
-      runner: deps.refuterRunner ?? null,
+      runner: challenger,
       baseProbe,
       probeAttempted,
     }));
