@@ -191,25 +191,6 @@ export const GATE_MATRIX = Object.freeze({
  * Never forbids the other version at any tier (T2.3 design §3.4) — this is
  * only the DEFAULT `resolveReviewProtocol` would return, not a ceiling.
  *
- * `inferentialEnabled` / `challengerAxis` (issue #682, REQ-682-1/REQ-682-2):
- * whether the judgment half of the review runs at all, and — when it does —
- * which axis of independence challenges the reasoned findings it produces.
- * ONE pair on purpose: an axis with no producer challenges nothing, and a
- * producer with no axis is the unchallengeable reasoned blocker #552 ruled
- * against. Reading either alone is how the two halves drift apart.
- *
- * `lite` is OFF, and that is load-bearing rather than cautious. A challenger
- * on any axis but `human` needs a model credential, and
- * `test/fresh-install/in-container.sh` enforces that installing and running
- * brain needs NO credential at all (#435's exit criterion, closed 2026-08-18).
- * With no producer there is no reasoned finding; with no reasoned finding
- * there is nothing to challenge; the credential-free claim holds. Turning this
- * on at `lite` falsifies a claim a test asserts — see that file before
- * changing this value.
- *
- * `challengerAxis` is `null` at `lite` because the question does not arise
- * there, never because a default was omitted.
- *
  * @type {Record<'lite'|'standard'|'regulated', {
  *   diffBudget: number,
  *   artefacts: string[],
@@ -218,8 +199,6 @@ export const GATE_MATRIX = Object.freeze({
  *   honorSkipMemoryGate: boolean,
  *   memoryAssertion: string,
  *   reviewProtocol: 'brain-review/1'|'brain-review/2',
- *   inferentialEnabled: boolean,
- *   challengerAxis: 'human'|'same-model'|'cross-family'|'mechanical'|null,
  * }>}
  */
 const TIER_PARAMS = Object.freeze({
@@ -238,11 +217,6 @@ const TIER_PARAMS = Object.freeze({
     honorSkipMemoryGate: false,
     memoryAssertion: 'coverage-report',
     reviewProtocol: 'brain-review/1',
-    // #682 REQ-682-2. OFF, and the docstring above says why: turning this on
-    // here requires a model credential in a fresh install, which
-    // test/fresh-install/in-container.sh asserts is unnecessary.
-    inferentialEnabled: false,
-    challengerAxis: null,
   }),
   standard: Object.freeze({
     diffBudget: 400,
@@ -258,13 +232,6 @@ const TIER_PARAMS = Object.freeze({
     honorSkipMemoryGate: true,
     memoryAssertion: 'issue-linked-record',
     reviewProtocol: 'brain-review/1',
-    // #682. `same-model` is a FRESH CONTEXT of the launching agent's model —
-    // never the same process, never holding the producer's reasoning. That is
-    // the axis #682 lists first, and #552 refuses the same process, not the
-    // same model. Its weakness is correlated errors, which is why the verdict
-    // declares the axis (REQ-682-3) instead of implying it.
-    inferentialEnabled: true,
-    challengerAxis: 'same-model',
   }),
   regulated: Object.freeze({
     diffBudget: 200,
@@ -278,14 +245,6 @@ const TIER_PARAMS = Object.freeze({
     honorSkipMemoryGate: false,
     memoryAssertion: 'issue-linked-session-summary',
     reviewProtocol: 'brain-review/2',
-    // #682. A second model family: the strongest machine independence, and it
-    // costs a second vendor credential and a second per-run price. This tier
-    // is where that is worth paying. NOT IMPLEMENTED YET — resolveChallenger()
-    // refuses it out loud rather than degrading to `same-model`, because a
-    // tier that asked for stronger evidence and silently got weaker is the
-    // defect this whole ticket is about.
-    inferentialEnabled: true,
-    challengerAxis: 'cross-family',
   }),
 });
 

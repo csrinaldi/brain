@@ -70,6 +70,9 @@ function deps({ config, protocol, generate, tier = 'regulated', refuterRunner } 
   return d;
 }
 
+// The judgment half is OFF unless a repo turns it on, at every tier (#743 covers
+// narrowing the rest of tierParams the same way). Every case here opts in
+// explicitly, which is the point: nothing inherits an outbound model call.
 const CFG = (axis) => ({
   reviewer: { inferential: { enabled: true, challenger: axis ? { axis } : undefined } },
 });

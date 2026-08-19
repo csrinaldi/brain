@@ -491,9 +491,15 @@ export async function main(deps = {}) {
   // challenger, so the two can no longer disagree — which they did at `standard`
   // (producer on, protocol `/1`, `applyCausalAdmission` skipped entirely), and
   // that disagreement re-created the state #552 ruled against.
+  //
+  // NO TIER. The judgment half is a capability, not a posture: ADR-0026's
+  // invariant 7 reserves tiering for ceremony and excludes correctness by name,
+  // and a control that finds defects is correctness. It is off unless this
+  // repo's config turns it on. Narrowing the rest of `tierParams` the same way
+  // is #743.
   let judgment;
   try {
-    judgment = resolveJudgment({ config, tier, protocol });
+    judgment = resolveJudgment({ config, protocol });
   } catch (err) {
     error(`brain:review: ${err.message}`);
     return 1;

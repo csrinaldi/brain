@@ -12,12 +12,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import { resolveJudgment, AXES, IMPLEMENTED_AXES, JUDGMENT_PROTOCOL } from './resolve-challenger.mjs';
 import { evaluateRefuter, UNCHALLENGED, ROUTED_HUMAN } from '../evaluators/refuter.mjs';
 import { renderVerdict } from '../verdict.mjs';
 import { parseVerdict } from './parse-verdict.mjs';
-import { tierParams } from '../../vcs/governance-tiers.mjs';
 
 const blocker = (id = 'F1') => ({
   id, severity: 'blocker', evidence_class: 'inferential',
@@ -30,71 +30,83 @@ const human = cfg({ enabled: true, challenger: { axis: 'human' } });
 // ── ONE gate — the correction the cold review forced ─────────────────────────
 
 test('the producer and the challenger read ONE resolution — they cannot disagree', () => {
-  // The defect: the producer gated on `inferentialEnabled` and the challenger on
-  // `protocol === '/2'`, and at `standard` those disagree. The producer ran, the
-  // refuter was skipped entirely, and the verdict declared the judgment control
-  // applied with nothing challenged — #552's ruled-against state.
-  const r = resolveJudgment({ config: {}, tier: 'standard', protocol: 'brain-review/1' });
+  // The defect: the producer gated on a tier param and the challenger on
+  // `protocol === '/2'`, and those disagreed at a shipped tier default. The
+  // producer ran, the refuter was skipped entirely, and the verdict declared the
+  // judgment control applied with nothing challenged — #552's ruled-against state.
+  const r = resolveJudgment({ config: human, protocol: 'brain-review/1' });
   assert.equal(r.run, false, 'a half that cannot be challenged must not be produced either');
   assert.equal(r.challenger, null);
   assert.equal(r.axis, null);
   assert.match(r.reason, /requires brain-review\/2/);
 });
 
-test('the shipped tier defaults no longer contain a disagreeing pair', () => {
-  // Pinned as DATA, so a future tier edit that re-creates the disagreement fails
-  // here rather than in a posted verdict.
-  for (const tier of ['lite', 'standard', 'regulated']) {
-    const p = tierParams(tier);
-    const r = resolveJudgment({ config: {}, tier, protocol: p.reviewProtocol });
-    if (p.inferentialEnabled && p.reviewProtocol !== JUDGMENT_PROTOCOL) {
-      assert.equal(r.run, false,
-        `tier "${tier}" enables the producer at ${p.reviewProtocol}, which cannot carry or ` +
-        'challenge a reasoned finding — the single gate must refuse to run it');
-    }
+test('the judgment half ignores the tier ENTIRELY — ADR-0026 invariant 7', () => {
+  // The tier answers one question: can this team satisfy an approval requirement
+  // (#329). A capability is not an answer to it, and invariant 7 excludes
+  // CORRECTNESS from tiering by name.
+  //
+  // Pinned BEHAVIOURALLY, not by scanning the source. A `rg`-shaped assertion
+  // fails against this file's own explanatory prose — and #569 is the recorded
+  // lesson that a runtime probe beats a source-shape check. So: pass a tier in
+  // every way a caller could, and prove none of them changes the answer.
+  const base = resolveJudgment({ config: human, protocol: JUDGMENT_PROTOCOL });
+  for (const tier of ['lite', 'standard', 'regulated', 'nonsense', undefined]) {
+    const r = resolveJudgment({ config: human, protocol: JUDGMENT_PROTOCOL, tier });
+    assert.equal(r.run, base.run, `tier "${tier}" changed whether the half runs`);
+    assert.equal(r.axis, base.axis, `tier "${tier}" changed the axis`);
+  }
+  // And an unknown tier cannot even refuse the run, which it would if this
+  // function still called tierParams().
+  assert.doesNotThrow(() => resolveJudgment({ config: human, protocol: JUDGMENT_PROTOCOL, tier: 'nonsense' }));
+});
+// ── REQ-682-2 — the producer is off at `lite` ────────────────────────────────
+
+test('the judgment half is OFF unless the repo turns it on — at every tier', () => {
+  // Replaces REQ-682-2's tier-shaped form. The old pin asserted a `lite` tier
+  // value and justified it with a fresh-install story that measurement
+  // falsified: `resolveTier({})` is `standard`, and `test/fresh-install/
+  // in-container.sh` never invokes `brain:review`. The true protection is this
+  // default, and it holds everywhere rather than at one tier.
+  for (const config of [{}, { reviewer: {} }, { reviewer: { inferential: {} } }]) {
+    const r = resolveJudgment({ config, protocol: JUDGMENT_PROTOCOL });
+    assert.equal(r.run, false, 'absent config must never turn on an outbound model call');
+    assert.match(r.reason, /off — set reviewer.inferential.enabled/);
   }
 });
 
-// ── REQ-682-2 — the producer is off at `lite` ────────────────────────────────
-
-test('REQ-682-2: `lite` runs no judgment half', () => {
-  const r = resolveJudgment({ config: {}, tier: 'lite', protocol: JUDGMENT_PROTOCOL });
-  assert.equal(r.run, false);
-  assert.match(r.reason, /disabled/);
-  assert.equal(tierParams('lite').inferentialEnabled, false);
+test('only an explicit `true` turns it on — no truthy coercion', () => {
+  for (const enabled of ['true', 1, {}, 'yes']) {
+    const r = resolveJudgment({ config: cfg({ enabled, challenger: { axis: 'human' } }), protocol: JUDGMENT_PROTOCOL });
+    assert.equal(r.run, false, `${JSON.stringify(enabled)} is not true — a credential-costing capability is chosen, not coerced`);
+  }
 });
 
-test('REQ-682-2: opting in at `lite` without naming an axis REFUSES, and says whose fault it is', () => {
-  // Reachable today: brain's own config is `lite` + `brain-review/2`. The first
-  // cut threw "unrecognised challenger axis null", blaming the operator for a
-  // value the TIER supplied. The message now names the real gap.
+test('enabled with no axis REFUSES — there is no default evidentiary strength', () => {
   assert.throws(
-    () => resolveJudgment({ config: cfg({ enabled: true }), tier: 'lite', protocol: JUDGMENT_PROTOCOL }),
-    /tier "lite" supplies no default challenger axis/,
+    () => resolveJudgment({ config: cfg({ enabled: true }), protocol: JUDGMENT_PROTOCOL }),
+    /enabled but names no challenger axis/,
   );
 });
 
-test('REQ-682-2: opting in at `lite` WITH an axis works', () => {
-  const r = resolveJudgment({ config: human, tier: 'lite', protocol: JUDGMENT_PROTOCOL });
+test('enabling it with an axis works', () => {
+  const r = resolveJudgment({ config: human, protocol: JUDGMENT_PROTOCOL });
   assert.equal(r.run, true);
   assert.equal(r.axis, 'human');
 });
 
 // ── REQ-682-1 — resolution order and the refusal ─────────────────────────────
 
-test('REQ-682-1: absent config resolves the axis from the tier', () => {
-  assert.equal(resolveJudgment({ config: {}, tier: 'regulated', protocol: JUDGMENT_PROTOCOL }).axis, 'cross-family');
-});
-
-test('REQ-682-1: explicit config beats the tier default', () => {
-  assert.equal(resolveJudgment({ config: human, tier: 'regulated', protocol: JUDGMENT_PROTOCOL }).axis, 'human');
+test('REQ-682-1: the axis comes from config, and only from config', () => {
+  assert.equal(resolveJudgment({ config: human, protocol: JUDGMENT_PROTOCOL }).axis, 'human');
+  assert.equal(resolveJudgment({ config: cfg({ enabled: true, challenger: { axis: 'cross-family' } }), protocol: JUDGMENT_PROTOCOL }).axis, 'cross-family');
 });
 
 test('REQ-682-1: an unrecognised axis REFUSES, naming what it would have accepted', () => {
   assert.throws(
     () => resolveJudgment({
       config: cfg({ enabled: true, challenger: { axis: 'same-modle' } }),
-      tier: 'standard', protocol: JUDGMENT_PROTOCOL,
+      protocol: JUDGMENT_PROTOCOL,
     }),
     (err) => {
       assert.match(err.message, /unrecognised challenger axis "same-modle"/);
@@ -111,7 +123,7 @@ test('an unbuilt axis reports UNCHALLENGED and escalates — it does not throw',
   // unhandled rejection with NO verdict posted, replacing #552's honest
   // `unchallenged` + escalate + posted REVISE. Trading a posted fail-closed
   // verdict for a crash leaves the operator with less, not more.
-  const r = resolveJudgment({ config: {}, tier: 'regulated', protocol: JUDGMENT_PROTOCOL });
+  const r = resolveJudgment({ config: cfg({ enabled: true, challenger: { axis: 'cross-family' } }), protocol: JUDGMENT_PROTOCOL });
   assert.equal(r.axis, 'cross-family');
   assert.ok(!IMPLEMENTED_AXES.includes(r.axis));
 
@@ -125,7 +137,7 @@ test('an unbuilt axis reports UNCHALLENGED and escalates — it does not throw',
 // ── REQ-682-6 — routed:human is a state of its own ───────────────────────────
 
 test('REQ-682-6: the human axis marks `routed:human`, keeps the blocker, escalates', async () => {
-  const r = resolveJudgment({ config: human, tier: 'standard', protocol: JUDGMENT_PROTOCOL });
+  const r = resolveJudgment({ config: human, protocol: JUDGMENT_PROTOCOL });
   const out = await evaluateRefuter({ findings: [blocker()], runner: r.challenger });
   assert.equal(out.adjustedFindings[0].refuter_outcome, ROUTED_HUMAN);
   assert.equal(out.adjustedFindings[0].severity, 'blocker');
@@ -134,7 +146,7 @@ test('REQ-682-6: the human axis marks `routed:human`, keeps the blocker, escalat
 });
 
 test('REQ-682-6: the human axis does NOT fall through to `corroborated`', async () => {
-  const r = resolveJudgment({ config: human, tier: 'standard', protocol: JUDGMENT_PROTOCOL });
+  const r = resolveJudgment({ config: human, protocol: JUDGMENT_PROTOCOL });
   const out = await evaluateRefuter({ findings: [blocker()], runner: r.challenger });
   assert.notEqual(out.adjustedFindings[0].refuter_outcome, 'corroborated');
 });
@@ -148,7 +160,7 @@ test('REQ-682-6: `routed:human` and `unchallenged` differ ON THE WIRE and both r
       findings: out.adjustedFindings, follow_ups: [], conditions: [], escalate: out.escalate,
     });
   };
-  const routed = await render(resolveJudgment({ config: human, tier: 'standard', protocol: JUDGMENT_PROTOCOL }).challenger);
+  const routed = await render(resolveJudgment({ config: human, protocol: JUDGMENT_PROTOCOL }).challenger);
   const absent = await render(null);
 
   assert.notEqual(routed, absent);

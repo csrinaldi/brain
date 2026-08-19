@@ -215,7 +215,7 @@ test('a reasoned finding with the human axis is routed, not corroborated', async
   const emitted = evaluateInferential({ generated: generated() }).findings;
   const { challenger: runner } = resolveJudgment({
     config: { reviewer: { inferential: { enabled: true, challenger: { axis: 'human' } } } },
-    tier: 'standard', protocol: JUDGMENT_PROTOCOL,
+    protocol: JUDGMENT_PROTOCOL,
   });
   const r = await evaluateRefuter({ findings: emitted, runner });
   assert.equal(r.adjustedFindings[0].refuter_outcome, 'routed:human');

@@ -34,8 +34,23 @@
 //
 // So there is now ONE resolution and one `run` flag that both halves read. They
 // cannot disagree, because there is nothing left to disagree with.
+//
+// AND THE TIER DOES NOT APPEAR HERE — the second correction, and it undoes
+// something this file's first cut got wrong at the doctrine level.
+//
+// The judgment half was originally resolved from `tierParams(tier)`. That
+// violates ADR-0026's invariant 7 in the ADR's own words: *"position tiering
+// applies only to ceremony, never to CORRECTNESS, traceability, agent
+// containment, or internal consistency."* The judgment half is a control that
+// FINDS DEFECTS. It is correctness, not ceremony, and it does not become more
+// or less worth having because a team grew.
+//
+// The tier answers ONE question — can this team satisfy an approval
+// requirement (#329, a solo maintainer cannot self-approve) — and a capability
+// is not an answer to it. So the judgment half is a plain toggle: OFF unless a
+// repo turns it on, at every tier, deliberately. The narrowing of the tier's
+// scope across the rest of `tierParams` is #743.
 
-import { tierParams } from '../../vcs/governance-tiers.mjs';
 import { ROUTED_HUMAN, UNCHALLENGED } from '../evaluators/refuter.mjs';
 
 /** The axes #682 ruled on. A closed vocabulary — an unrecognised value refuses. */
@@ -119,26 +134,35 @@ function unbuiltRunner(axis) {
  *   - `reason`     — why it does not run. Never a silent `false`.
  *
  * Order (REQ-682-1):
- *   1. `reviewer.inferential.enabled`, else the tier's `inferentialEnabled`.
+ *   1. `reviewer.inferential.enabled` must be exactly `true`. No tier default
+ *      and no truthy coercion — a capability that costs a credential is chosen.
  *   2. The protocol must be `brain-review/2` — see `JUDGMENT_PROTOCOL`.
- *   3. `reviewer.inferential.challenger.axis`, else the tier's `challengerAxis`.
- *   4. An axis outside `AXES` THROWS, and so does an ENABLED half whose tier
- *      supplies no axis. Both are operator-fixable config, and defaulting would
- *      hide an unknown evidentiary strength.
+ *   3. `reviewer.inferential.challenger.axis` must name one. No default.
+ *   4. An axis outside `AXES`, or an enabled half naming none, THROWS. Both are
+ *      operator-fixable config, and defaulting would choose an evidentiary
+ *      strength on the operator's behalf.
  *
- * @param {{config?: object, tier: string, protocol?: string}} args
+ * @param {{config?: object, protocol?: string}} args
  * @returns {{run: boolean, axis: string|null, challenger: Function|null, reason: string|null}}
- * @throws {Error} on an unrecognised axis, an enabled half with no axis, or an unknown tier
+ * @throws {Error} on an unrecognised axis, or an enabled half naming none
  */
-export function resolveJudgment({ config, tier, protocol = JUDGMENT_PROTOCOL } = {}) {
+export function resolveJudgment({ config, protocol = JUDGMENT_PROTOCOL } = {}) {
   const off = (reason) => ({ run: false, axis: null, challenger: null, reason });
 
-  const params = tierParams(tier);
   const inferential = config?.reviewer?.inferential ?? {};
 
-  const enabled = inferential.enabled ?? params.inferentialEnabled;
-  if (!enabled) {
-    return off(`the inferential producer is disabled (tier "${tier}")`);
+  // OFF unless the repo says otherwise, at every tier. The default is a real
+  // decision and not caution: the judgment half is the only control in brain
+  // that needs an outbound model call, and a capability that costs a credential
+  // must be chosen, never inherited. It is also what keeps a fresh install
+  // credential-free (#435) — for a reason that is actually true, unlike the
+  // tier-shaped story this file used to tell.
+  if (inferential.enabled !== true) {
+    return off(
+      'the judgment half is off — set reviewer.inferential.enabled to true to turn it on. ' +
+      'It is off by default at every tier because it is the one control that requires an ' +
+      'outbound model call.'
+    );
   }
 
   // The gate that used to live only at the challenger's call site. Reading it
@@ -152,13 +176,17 @@ export function resolveJudgment({ config, tier, protocol = JUDGMENT_PROTOCOL } =
     );
   }
 
-  const axis = inferential.challenger?.axis ?? params.challengerAxis;
+  const axis = inferential.challenger?.axis;
 
+  // Enabled with no axis REFUSES rather than defaulting. There is no tier to
+  // inherit one from any more, and picking a default here would choose an
+  // evidentiary strength on the operator's behalf — the thing #682 exists to
+  // stop. Turning the half on is a decision; so is how it gets challenged.
   if (axis === null || axis === undefined) {
     throw new Error(
-      `resolve-challenger: the inferential producer is enabled but tier "${tier}" supplies no ` +
-      'default challenger axis, and reviewer.inferential.challenger.axis names none. ' +
-      `Name one of: ${AXES.join(', ')}.`
+      'resolve-challenger: the judgment half is enabled but names no challenger axis. ' +
+      `Set reviewer.inferential.challenger.axis to one of: ${AXES.join(', ')}. ` +
+      'There is no default: an unchallenged reasoned blocker is what #552 ruled against.'
     );
   }
 
