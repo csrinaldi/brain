@@ -383,13 +383,32 @@ function rejectedBodies(fx) {
   return readFileSync(p, 'utf8').trim().split('\n').map(l => JSON.parse(l));
 }
 
-test('e2e: today NO evaluator anchors, so the real CLI posts NO comments key — and this is the tripwire for the first one that does (REQ-405-2/8)', (t) => {
+test('e2e: no evaluator RUNS to anchor, so the real CLI posts NO comments key — the tripwire for the first run that does (REQ-405-2/8, moved by #682)', (t) => {
   // The additive guarantee, measured at the real process boundary rather than
   // reasoned about: widening the port must leave every shipping evaluator's
-  // payload byte-for-byte what it was. When an evaluator starts emitting
-  // `file`/`line` this case goes red — MOVE it to that change, do not delete it;
-  // a red here means inline comments became reachable from the CLI, which is
-  // the event #405 exists to make possible.
+  // payload byte-for-byte what it was.
+  //
+  // MOVED ONCE (#682), and the instruction it carried is honoured rather than
+  // discharged. Its previous form said: "when an evaluator starts emitting
+  // file/line this case goes red — MOVE it to that change, do not delete it".
+  //
+  // That evaluator now EXISTS. `evaluators/inferential.mjs` carries `file` and
+  // `line` in `CARRIED_FIELDS`, and feeding it a generator that emits them
+  // produces real inline comments through `poster.deriveInlineComments` — the
+  // path #405 built end to end and left with zero producers. Measured, not
+  // predicted: two produced findings, one anchored, the un-anchorable one
+  // degrading into the summary block exactly as REQ-405-4 designed.
+  //
+  // So the pin moves onto what is true now: the producer does not RUN in this
+  // fixture, because no transport is configured, and therefore nothing anchors
+  // and no `comments` key is posted. The distinction that matters to a reader
+  // is no longer "no evaluator can anchor" but "no evaluator RAN to anchor".
+  //
+  // A red here now means the transport landed and the judgment half is live in
+  // a real CLI run. When it does, this pin moves ONCE MORE — onto a posted
+  // payload that DOES carry `comments`, with the un-anchorable finding still in
+  // the summary block. Do not delete it. This is the second move; the
+  // instruction has now survived three owners.
   const fx = withFixture(t, { tier: 'regulated' });
   const r = runReview(fx);
   assert.equal(r.status, 0, r.stderr);
@@ -400,6 +419,11 @@ test('e2e: today NO evaluator anchors, so the real CLI posts NO comments key —
     'findings must exist — otherwise "no comments" would be true for the boring reason and this case would observe nothing');
   assert.ok(verdict.findings.every(f => f.file === undefined && f.line === undefined),
     `an evaluator has started anchoring: ${JSON.stringify(verdict.findings)}`);
+  // The half that moved: an evaluator CAPABLE of anchoring now exists, so the
+  // absence above must be attributable to it not having RUN, never to nothing
+  // being able to. If a reasoned finding appears here, the transport landed.
+  assert.ok(verdict.findings.every(f => f.evidence_class !== 'inferential'),
+    'the judgment half ran in this fixture — move this pin onto the anchored payload');
   assert.equal('comments' in posted[0], false,
     `no anchor means no inline request at all — got: ${JSON.stringify(Object.keys(posted[0]))}`);
   assert.equal(posted[0].event, 'COMMENT', 'ADR-0020 lock 2: the event stays COMMENT, unreachable by any parameter');

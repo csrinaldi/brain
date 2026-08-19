@@ -29,7 +29,7 @@ import { evaluateRuling, gatherRulingInputs, PRODUCES as RULING_PRODUCES } from 
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
 import { resolveJudgment } from './lib/resolve-challenger.mjs';
 import {
-  evaluateInferential, gatherInferentialInputs, shouldRun,
+  evaluateInferential, gatherInferentialInputs,
   PRODUCES as INFERENTIAL_PRODUCES,
 } from './evaluators/inferential.mjs';
 import { unionControls, checkControlsCoverFindings } from './lib/controls.mjs';
@@ -498,6 +498,19 @@ export async function main(deps = {}) {
   } catch (err) {
     error(`brain:review: ${err.message}`);
     return 1;
+  }
+
+  // #682 round-1 review — `judgment.reason` had NO CONSUMER. It was computed on
+  // every off path and read nowhere, so a repo that deliberately turned the
+  // judgment half ON and got nothing was told nothing: `resolveJudgment` knew
+  // exactly why and the verdict never said it.
+  //
+  // Reported ONLY when the repo asked for the half and did not get it. A tier
+  // that never enables it is not withholding anything from anyone, and a
+  // constant on every verdict is the wallpaper #690 refused.
+  const askedForJudgment = config?.reviewer?.inferential?.enabled === true;
+  if (!judgment.run && askedForJudgment && judgment.reason) {
+    judgmentConditions.push(`the judgment half did not run — ${judgment.reason}`);
   }
 
   if (judgment.run) {
