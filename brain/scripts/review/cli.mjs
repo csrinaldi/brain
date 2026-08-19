@@ -428,6 +428,7 @@ export async function main(deps = {}) {
   let evalResult;
   // REQ-682-3 — the axis that actually ran, as a VALUE, for the wire.
   let judgmentAxis = null;
+  const judgmentConditions = [];
   // #683 — the verdict declares WHICH CLASSES OF CONTROL ran, and it is derived
   // from the evaluator that actually ran rather than from the findings it
   // produced. A clean mechanical run has NO findings, so a findings-derived list
@@ -519,7 +520,26 @@ export async function main(deps = {}) {
       return 1;
     }
 
-    // An enabled half with no transport does not run and does not declare.
+    // #682 round-1 review, finding G — AN ENABLED HALF WITH NO TRANSPORT IS NOT
+    // THE SAME STATE AS A DISABLED ONE, and until now they rendered
+    // BYTE-IDENTICALLY. Measured: `enabled: false` and `enabled: true` with no
+    // generator produced identical log streams, not merely identical blocks.
+    //
+    // The slice-2 defence was that #690's complement distinguishes them. It does
+    // not: NEITHER case declares `inferential`, so the complement says the same
+    // thing in both. That is #552's fold, re-created one layer up by an
+    // unreachable capability rather than by a missing runner.
+    //
+    // A repo that turned the judgment half ON is told, on the wire, that it did
+    // not run and why. `conditions` is the field protocol §10 already uses for
+    // "the evidence behind this verdict is weaker than it looks".
+    if (inferentialInputs.generated === null) {
+      judgmentConditions.push(
+        'the judgment half is enabled but no transport is configured — no reasoned finding ' +
+        'was produced, and the inferential control was NOT applied to this verdict.'
+      );
+    }
+
     if (inferentialInputs.generated !== null) {
       const judged = evaluateInferential(inferentialInputs);
       evalResult = {
@@ -529,17 +549,6 @@ export async function main(deps = {}) {
       controls = unionControls([controls, INFERENTIAL_PRODUCES]);
       judgmentAxis = judgment.axis;
 
-      // #682 cold review C5 — the merge kept `...evalResult` and replaced only
-      // `findings`, so `evaluateInferential`'s conclusion was discarded and the
-      // mode evaluator's stood. A reasoned blocker, even one the challenger
-      // CORROBORATED, landed in a verdict reading `verdict: APPROVE`.
-      //
-      // The judgment half could escalate when it was UNSURE (inconclusive,
-      // routed:human, unchallenged) and could not block when it was SURE. A
-      // blocker that does not block is not a blocker.
-      if (judged.findings.some((f) => f.severity === 'blocker') && evalResult.conclusion === 'APPROVE') {
-        evalResult = { ...evalResult, conclusion: 'REVISE' };
-      }
     }
   }
 
@@ -587,13 +596,28 @@ export async function main(deps = {}) {
     // than `??`: a test that deliberately passes `null` to exercise the
     // no-runner path must keep getting null, which `??` would have overridden.
     const challenger = 'refuterRunner' in deps ? deps.refuterRunner : judgment.challenger;
-    ({ findings, escalate, conditions: baseConditions } = await applyCausalAdmission({
-      findings: evalResult.findings,
-      escalate: evalResult.escalate,
-      runner: challenger,
-      baseProbe,
-      probeAttempted,
-    }));
+
+    // #682 round-1 review, finding H — the CALL was outside every try block.
+    // `main` has exactly two (the config/tier resolution and the challenger
+    // CONSTRUCTION), and the entry point is `process.exit(await main())` with no
+    // outer catch, so a throw from inside the challenger surfaced as a raw
+    // ERR_UNHANDLED_REJECTION: a Node stack, no `brain:review:` line, and NO
+    // VERDICT POSTED. That is quieter than the fail-closed REVISE the same input
+    // produced before the challenger existed — a regression of #552's fix
+    // wearing the shape of a louder failure.
+    try {
+      ({ findings, escalate, conditions: baseConditions } = await applyCausalAdmission({
+        findings: evalResult.findings,
+        escalate: evalResult.escalate,
+        runner: challenger,
+        baseProbe,
+        probeAttempted,
+      }));
+    } catch (err) {
+      error(`brain:review: the challenger failed — ${err.message}. ` +
+        'Refusing to post a verdict whose reasoned findings were never challenged.');
+      return 1;
+    }
   }
 
   // #683 — the declaration must not be able to become a lie. If an evaluator
@@ -626,7 +650,7 @@ export async function main(deps = {}) {
     // #408 — the base probe's own inability to run is a condition of THIS verdict,
     // appended to the evaluator's rather than replacing it: two different things
     // could not be computed and a reader needs to see both.
-    conditions: [...evalResult.conditions, ...baseConditions],
+    conditions: [...evalResult.conditions, ...baseConditions, ...judgmentConditions],
     // undefined for tranche/checkpoint (they never set these) — buildVerdict's
     // own defaults (`pin` undefined, `escalate` null) apply unchanged, so this
     // is a no-op for those two modes.

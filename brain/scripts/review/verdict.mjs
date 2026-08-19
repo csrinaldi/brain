@@ -202,6 +202,26 @@ export function buildVerdict({
   // that escalation says "the reviewer cannot determine whether this finding is
   // caused by the diff", which a ruling on iteration count does not answer. Two
   // escalations, two questions, and only one of them is about going around in circles.
+  // #682 round-1 review, findings A1/A2 — THE CONCLUSION IS DERIVED FROM THE
+  // FINAL BLOCKING SET, and it has to be derived HERE because this is the only
+  // place that set exists.
+  //
+  // Two measured defects, one root. The judgment half's conclusion was decided
+  // in `cli.mjs` from the producer's PRE-challenge severities, before
+  // `applyCausalAdmission` ran, and nothing re-derived it afterwards:
+  //
+  //   · a CORROBORATED inferential blocker rendered under `verdict: APPROVE` —
+  //     the judgment half could escalate when it was UNSURE and could not block
+  //     when it was SURE;
+  //   · a REFUTED claim left `verdict: REVISE` with zero blockers in the list —
+  //     the fixing agent was asked to comply with something the challenge had
+  //     already shown to be false, and the PR could never go green.
+  //
+  // `candidateFindings` is the blocking set after routing, so `blockerRemains`
+  // is the house rule (`REVISE iff a blocker exists`, tranche.mjs) evaluated on
+  // the state a reader of this verdict will actually see.
+  const blockerRemains = candidateFindings.some((f) => f.severity === 'blocker');
+
   const boundHit = priorRevCount >= 3 && conclusion === 'REVISE' && !rulingAtHead;
   const shouldEscalate = boundHit || unknownCausality;
   const finalEscalate = shouldEscalate ? 'human' : escalate;
@@ -209,13 +229,23 @@ export function buildVerdict({
   let finalVerdict = conclusion;
   if (boundHit || unknownCausality) {
     finalVerdict = 'STOP';
-  } else if (protocol === 'brain-review/2' && processed.length > 0 && candidateFindings.length === 0 && conclusion === 'REVISE') {
+  } else if (blockerRemains && conclusion !== 'REVISE' && conclusion !== 'STOP') {
+    // A blocker that does not block is not a blocker. NOT gated on protocol:
+    // a blocker is a blocker at every version, and this branch is what lets the
+    // judgment half reach the conclusion at all.
+    finalVerdict = 'REVISE';
+  } else if (protocol === 'brain-review/2' && processed.length > 0 && !blockerRemains && conclusion === 'REVISE') {
     // #483: `processed.length`, not `findings.length`. The softening means
     // "every finding that exists was routed OUT of the blocking set by the
     // admission rule". Measured against the raw input, a verdict whose
     // findings were all DROPPED as inadmissible satisfies it vacuously and
     // softens REVISE to APPROVE on the strength of findings nobody ever read —
     // fail-open, from the same silent drop this ticket came to fix.
+    //
+    // #682 widened the condition from `candidateFindings.length === 0` to
+    // `!blockerRemains`: a REFUTED claim stays in the list as a `correction`,
+    // so the set is no longer empty, and the old test could never soften a
+    // verdict whose only defect had been disproved.
     finalVerdict = 'APPROVE';
   }
 

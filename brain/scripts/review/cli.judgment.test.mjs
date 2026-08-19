@@ -219,3 +219,103 @@ test('composition: an explicitly injected null runner still exercises the no-run
   });
   assert.match(body, new RegExp(`refuter_outcome: ${UNCHALLENGED}`));
 });
+
+// ── round 1 of the review loop: the fixes, each pinned where it failed ────────
+//
+// Every test below reproduces a defect that four independent refuters
+// CORROBORATED against the real `main()`. They live here rather than beside
+// their units because all six were invisible to unit tests and visible in
+// composition — the axis both cold reviews named as the one never varied.
+
+test('A1: a CORROBORATED reasoned blocker changes the conclusion', async () => {
+  // The judgment half could escalate when UNSURE and could not block when SURE:
+  // the conclusion was decided from the producer's pre-challenge severities,
+  // before the challenger ran, and nothing re-derived it.
+  const { body } = await run({
+    protocol: 'brain-review/2', config: CFG('human'),
+    generate: async () => reasoned(),
+    refuterRunner: async (bs) => ({ outcomes: bs.map(f => ({ id: f.id, outcome: 'corroborated', rationale: 'r' })) }),
+  });
+  assert.doesNotMatch(body, /^verdict: APPROVE$/m, 'a blocker the challenge UPHELD must block');
+  assert.match(body, /^verdict: REVISE$/m);
+});
+
+test('A2: a REFUTED claim stops blocking — the fixer is not asked to comply with a disproved claim', async () => {
+  // It left `verdict: REVISE` with ZERO blockers in the list, so the PR could
+  // never go green on the strength of a claim the challenge had already shown
+  // to be false.
+  const { body } = await run({
+    protocol: 'brain-review/2', config: CFG('human'),
+    generate: async () => reasoned(),
+    refuterRunner: async (bs) => ({ outcomes: bs.map(f => ({ id: f.id, outcome: 'refuted', rationale: 'not real' })) }),
+  });
+  assert.match(body, /^verdict: APPROVE$/m, 'nothing blocks once the only blocker is refuted');
+  assert.match(body, /refuted: true/);
+  assert.doesNotMatch(body, /severity: blocker/);
+});
+
+test('B: an unrecognised challenger outcome is UNCHALLENGED, never "corroborated"', async () => {
+  // The switch ended in the corroborated return, so eight out-of-vocabulary
+  // values all rendered as "a challenge upheld this finding".
+  for (const outcome of ['REFUTED', 'refute', 'unknown', '', 'partially-refuted', null, undefined]) {
+    const { body } = await run({
+      protocol: 'brain-review/2', config: CFG('human'),
+      generate: async () => reasoned(),
+      refuterRunner: async (bs) => ({ outcomes: bs.map(f => ({ id: f.id, outcome, rationale: 'r' })) }),
+    });
+    assert.match(body, new RegExp(`refuter_outcome: ${UNCHALLENGED}`),
+      `outcome ${JSON.stringify(outcome)} must not read as a challenge that upheld the finding`);
+    assert.match(body, /^escalate: human$/m);
+  }
+});
+
+test('E: two findings sharing an id, and two with none, stay distinguishable', async () => {
+  // Refuting one used to downgrade BOTH, and stamp the second with a rationale
+  // written about the first.
+  const { body, verdict } = await run({
+    protocol: 'brain-review/2', config: CFG('human'),
+    generate: async () => ([
+      { id: 'J1', severity: 'blocker', evidence: 'first', cites: 'c' },
+      { id: 'J1', severity: 'blocker', evidence: 'second', cites: 'c' },
+      { severity: 'blocker', evidence: 'third', cites: 'c' },
+      { severity: 'blocker', evidence: 'fourth', cites: 'c' },
+    ]),
+    refuterRunner: async (bs) => ({ outcomes: [{ id: bs[0].id, outcome: 'refuted', rationale: 'only the first' }] }),
+  });
+  const ids = (verdict?.findings ?? []).map(f => f.id);
+  assert.equal(new Set(ids).size, ids.length, `ids must be unique within a batch — got ${ids.join(', ')}`);
+  assert.equal((body.match(/refuted: true/g) ?? []).length, 1,
+    'refuting one finding must not downgrade its namesake');
+});
+
+test('G: enabled-with-no-transport does not render like disabled', async () => {
+  // #552's fold, re-created one layer up: neither state declares `inferential`,
+  // so #690's complement says the same thing in both.
+  const off = await run({ protocol: 'brain-review/2', config: { reviewer: { inferential: { enabled: false } } } });
+  const on = await run({ protocol: 'brain-review/2', config: CFG('human') });
+
+  assert.notEqual(off.body, on.body, 'a repo that turned the judgment half ON must be told it did not run');
+  assert.match(on.body, /enabled but no transport is configured/);
+  assert.match(off.body, /^conditions: \[\]$/m);
+});
+
+test('H: a challenger that throws fails CLOSED with a readable refusal, not a stack trace', async () => {
+  // The call sat outside every try block and the entry point has no outer
+  // catch, so it surfaced as an unhandled rejection with no verdict — quieter
+  // than the fail-closed REVISE the same input produced before the challenger
+  // existed.
+  const lines = [];
+  const errs = [];
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), error: (s) => errs.push(s),
+    ...deps({
+      protocol: 'brain-review/2', config: CFG('human'),
+      generate: async () => reasoned(),
+      refuterRunner: async () => { throw new Error('ECONNRESET'); },
+    }),
+  });
+  assert.equal(code, 1);
+  assert.match(errs.join('\n'), /brain:review: the challenger failed — ECONNRESET/);
+  assert.doesNotMatch(lines.join('\n'), /protocol: brain-review/,
+    'no verdict may be posted when the reasoned findings were never challenged');
+});

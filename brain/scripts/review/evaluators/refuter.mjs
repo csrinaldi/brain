@@ -55,6 +55,16 @@ export const UNCHALLENGED = 'unchallenged';
 export const ROUTED_HUMAN = 'routed:human';
 
 /**
+ * The closed outcome vocabulary a runner may return, enumerated so the
+ * unrecognised branch can NAME what it would have accepted. `refuted` and
+ * `corroborated` and `inconclusive` are #284's three; `unchallenged` and
+ * `routed:human` are the two this evaluator can also be told directly.
+ */
+export const RECOGNISED_OUTCOMES = Object.freeze([
+  'refuted', 'corroborated', 'inconclusive', UNCHALLENGED, ROUTED_HUMAN,
+]);
+
+/**
  * Evaluates inferential blocker findings in a single batch to eliminate false positives.
  * @param {{ findings: Array<object>, runner?: function }} options
  * @returns {Promise<{ outcomes: Array<object>, refutedCount: number, unchallenged: number, adjustedFindings: Array<object>, escalate: string|null }>}
@@ -148,7 +158,34 @@ export async function evaluateRefuter({ findings = [], runner = null } = {}) {
       return { ...f, refuter_outcome: ROUTED_HUMAN, refuter_rationale: res.rationale };
     }
 
-    return { ...f, refuter_outcome: 'corroborated', refuter_rationale: res.rationale };
+    if (res.outcome === 'corroborated') {
+      return { ...f, refuter_outcome: 'corroborated', refuter_rationale: res.rationale };
+    }
+
+    // #682 round-1 review — THE FALL-THROUGH IS CLOSED, and it is the third
+    // outcome value to have been trapped by it.
+    //
+    // This switch used to END in the `corroborated` return, so ANY value it did
+    // not recognise — `'REFUTED'`, `'refute'`, `'unknown'`, `''`, `null`,
+    // `undefined`, a missing key — rendered as "a challenge upheld this
+    // finding". Measured: all eight of those produced `refuter_outcome:
+    // corroborated`, `severity: blocker`, `escalate: null`, `conditions: []`.
+    // A runner that answered badly was indistinguishable from one that answered
+    // well, which is #552's defect wearing the refuter's own vocabulary.
+    //
+    // An unrecognised outcome is UNCHALLENGED: the runner returned something,
+    // but nothing this evaluator can read as a challenge. It escalates and it is
+    // counted, so the verdict says so rather than claiming a challenge happened.
+    unansweredCount++;
+    escalate = 'human';
+    return {
+      ...f,
+      refuter_outcome: UNCHALLENGED,
+      refuter_rationale:
+        `The challenger returned an outcome this build does not recognise (${JSON.stringify(res.outcome)}). ` +
+        `Recognised outcomes: ${RECOGNISED_OUTCOMES.join(', ')}. ` +
+        'Treating it as unchallenged rather than as a challenge that upheld the finding.',
+    };
   });
 
   return {

@@ -67,6 +67,23 @@ export const CARRIED_FIELDS = Object.freeze([
 ]);
 
 /**
+ * The oracle for REQ-682-4, and it is NOT this list.
+ *
+ * A test asserting membership in `CARRIED_FIELDS` compares the list to itself
+ * and cannot fail for any member, however un-rendered — which is exactly how
+ * `title` survived here while `renderVerdict` emitted it nowhere. Adding
+ * `deliberation_notes` to the list left the whole suite green while the boundary
+ * went live.
+ *
+ * So the property is stated where it can be checked: every carried field must
+ * appear in a rendered verdict. `file`/`line` render only through
+ * `hasUsableAnchor`, so they are listed as ANCHOR fields — carried, and rendered
+ * only as a pair with a usable line.
+ */
+export const RENDERED_ALWAYS = Object.freeze(['id', 'severity', 'evidence_class', 'evidence', 'cites']);
+export const RENDERED_AS_ANCHOR = Object.freeze(['file', 'line']);
+
+/**
  * sanitiseFinding() — PURE. Projects a generated finding onto `CARRIED_FIELDS`.
  *
  * The drop is silent on purpose and it is the safe direction: a field the
@@ -102,7 +119,38 @@ export function sanitiseFinding(finding = {}) {
  */
 export const ID_PREFIX = 'judgment:';
 
+/**
+ * uniqueId() — #682 round-1 review. Namespacing was cross-class only.
+ *
+ * `evaluateRefuter` keys outcomes by id ALONE and applies each to EVERY finding
+ * carrying it. The prefix stops a produced finding from addressing a
+ * deterministic one, and that half holds — no deterministic id can begin
+ * `judgment:`. It does nothing WITHIN the produced set: a generator emitting two
+ * findings under `J1`, or two with no `id` at all, produced `judgment:J1` twice
+ * and `judgment:undefined` twice. Refuting one then downgraded BOTH, and stamped
+ * the second with a rationale written about the first — a genuinely-true blocker
+ * dropped on the strength of a challenge to a different claim.
+ *
+ * A missing id gets an ordinal rather than the string "undefined": `undefined`
+ * is not a name, and two of them are not the same finding.
+ *
+ * @param {unknown} raw     the generator's id, possibly absent or repeated
+ * @param {Set<string>} seen ids already issued in this batch
+ * @returns {string}
+ */
+export function uniqueId(raw, seen) {
+  const stem = (raw === undefined || raw === null || raw === '')
+    ? `unnamed-${seen.size + 1}`
+    : String(raw);
+  let id = `${ID_PREFIX}${stem}`;
+  let n = 2;
+  while (seen.has(id)) id = `${ID_PREFIX}${stem}#${n++}`;
+  seen.add(id);
+  return id;
+}
+
 export function evaluateInferential({ generated = null } = {}) {
+  const seen = new Set();
   const findings = (generated ?? []).map(f => ({
     ...sanitiseFinding(f),
     // #682 cold review B4 — the producer is the first thing in brain that lets a
@@ -116,7 +164,7 @@ export function evaluateInferential({ generated = null } = {}) {
     // Namespaced here rather than validated: a collision check would have to
     // know every id every evaluator can emit, and that list grows. A reserved
     // prefix cannot collide by construction.
-    id: `${ID_PREFIX}${f.id}`,
+    id: uniqueId(f.id, seen),
     evidence_class: 'inferential',
   }));
 

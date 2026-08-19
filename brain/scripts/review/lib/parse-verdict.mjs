@@ -41,6 +41,11 @@ const TOP_LEVEL_KEYS = [
   'protocol', 'verdict', 'head_sha', 'rev', 'gates',
   'findings', 'follow_ups', 'conditions', 'controls', 'controls_not_applied',
   'pin', 'sequencing', 'escalate',
+  // #682 REQ-682-3. Added WITH its reader below, not ahead of it: a key that
+  // terminates a list but is never assigned would stop corrupting the findings
+  // list and still be invisible to every consumer — half a fix that reads as a
+  // whole one.
+  'challenger_axis',
 ];
 const TOP_LEVEL_KEY_RE = new RegExp(`^(?:${TOP_LEVEL_KEYS.join('|')}):`);
 
@@ -249,6 +254,19 @@ export function parseVerdict({ body, author = null } = {}) {
   if (proto === 'brain-review/2') {
     result.protocol = proto;
   }
+
+  // #682 REQ-682-3 — the axis that challenged this verdict's reasoned findings.
+  //
+  // It rendered and did NOT parse back: `parseVerdict` returned it absent and
+  // did not even report it in `malformed`, so the one field that distinguishes a
+  // same-model-challenged verdict from a cross-family-challenged one was
+  // write-only. Worse, it was missing from TOP_LEVEL_KEYS, so a block placing it
+  // after a findings list terminated nothing and the WHOLE LIST was lost.
+  //
+  // This field's neighbours have shipped a render/parse asymmetry once already
+  // (#381); the round trip is asserted rather than assumed.
+  const axisMatch = block.match(/^challenger_axis:\s*(.+)$/m);
+  if (axisMatch) result.challenger_axis = unyamlScalar(axisMatch[1].trim());
 
   // #477 — every field below is a list this parser may fail to read. An
   // unreadable one is named here instead of being silently indistinguishable
