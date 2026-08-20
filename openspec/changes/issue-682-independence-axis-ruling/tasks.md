@@ -61,28 +61,28 @@ Delivers REQ-682-1, REQ-682-2, and REQ-682-6.
 Delivers REQ-682-3 and REQ-682-4. Depends on slice 1: the challenger must exist
 before anything emits a finding for it to challenge.
 
-- [ ] 2.1 Write `brain/scripts/review/evaluators/inferential.mjs` with the
+- [x] 2.1 Write `brain/scripts/review/evaluators/inferential.mjs` with the
       evaluator triple the other three follow — `PRODUCES`,
       `evaluate*`, `gather*Inputs`. `PRODUCES = Object.freeze(['inferential'])`.
-- [ ] 2.2 Wire it as ADDITIVE in `cli.mjs`, not as a fourth mode (Decision 1):
+- [x] 2.2 Wire it as ADDITIVE in `cli.mjs`, not as a fourth mode (Decision 1):
       it runs alongside the mode's evaluator and its findings merge into
       `evalResult.findings`.
-- [ ] 2.3 Pass both `PRODUCES` values to the existing call:
+- [x] 2.3 Pass both `PRODUCES` values to the existing call:
       `unionControls([TRANCHE_PRODUCES, INFERENTIAL_PRODUCES])`. REQ-682-3's
       declaration needs no new plumbing — `controls.mjs` already derives the
       field from the evaluators that ran.
-- [ ] 2.4 Test that `#690`'s complement shrinks by itself when the producer
+- [x] 2.4 Test that `#690`'s complement shrinks by itself when the producer
       runs. `controls.test.mjs:114` already asserts *"when #682 lands, the
       complement empties itself — no edit required"*; make that test go from
       hypothetical to exercised without editing its assertion.
-- [ ] 2.5 REQ-682-4: assert the challenger's input is a subset of what the
+- [x] 2.5 REQ-682-4: assert the challenger's input is a subset of what the
       verdict renders. If the challenger can see something a reader of the
       verdict cannot, the boundary has leaked and `same-model` is
       self-attestation.
-- [ ] 2.6 Verify there is no side channel: no shared context object, no extra
+- [x] 2.6 Verify there is no side channel: no shared context object, no extra
       field, no log the challenger reads. A grep-level test is not enough —
       assert on the arguments the runner actually receives.
-- [ ] 2.7 Move REQ-409-6's pin onto the new behaviour rather than deleting it
+- [x] 2.7 Move REQ-409-6's pin onto the new behaviour rather than deleting it
       (#682 acceptance criterion 4, the instruction its author left, honoured
       twice already).
 

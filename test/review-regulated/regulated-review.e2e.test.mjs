@@ -307,18 +307,30 @@ test('e2e: a finding OUTSIDE the base-reproducible set never reaches follow_ups,
     'BASE_REPRODUCIBLE_GATES) or the render/parse contract changed — check WHICH before moving this.');
   assert.doesNotMatch(body, /^follow_ups:/m,
     'and the posted body carries no follow_ups block — the wire-level half of the same pin');
-  // No evaluator emits evidence_class: inferential: the refuter must not have run.
+  // MOVED, not deleted — #682 acceptance criterion 4, honouring the instruction
+  // its author left for #408 and #552 honoured before this.
   //
-  // #552 RULED on this rather than leaving it pending. The ruling is (a) — a
-  // reasoning evaluator IS worth building, the reason arrived after this pin was
-  // written — but SEQUENCED behind a refuter that can actually run. So a red here
-  // now means one specific thing: a producer landed. Check, in this order, that
-  // `refuterRunner` is wired in production (it was null at every call site when
-  // #552 was ruled) and that the verdict distinguishes challenged from
-  // unchallenged. Then move this pin onto the new behaviour — do not delete it.
+  // Both conditions the previous form told the reader to check have now landed.
+  // `refuterRunner` IS wired in production (`resolve-challenger.mjs`, #682 slice
+  // 1: the challenger is constructed from config and tier at the seam #552 left),
+  // and the verdict DOES distinguish challenged from unchallenged — `routed:human`
+  // and `unchallenged` render differently and both round-trip.
+  //
+  // So the pin moves onto what is true now: an inferential evaluator EXISTS
+  // (`evaluators/inferential.mjs`) and does not run, because `shouldRun` needs a
+  // transport and slice 3 supplies it. The distinction that matters to a reader
+  // is no longer "no producer exists" but "no producer RAN", and #690's
+  // complement is where a verdict says so.
+  //
+  // A red here now means the transport landed. When it does, this pin moves once
+  // more — onto a verdict that carries an inferential finding AND names the axis
+  // that challenged it (REQ-682-3). Do not delete it.
   assert.ok(verdict.findings.every(f => f.evidence_class !== 'inferential'),
-    'an inferential finding appeared — the refuter fork is live. #552 ruled that a judgment ' +
-    'producer ships only behind a runnable refuter; verify that landed too, then move this pin.');
+    'an inferential finding appeared — the judgment producer is live. Verify the axis is ' +
+    'declared on the verdict (REQ-682-3) and that the challenger actually ran, then move this pin.');
+  assert.ok(!(verdict.controls ?? []).includes('inferential'),
+    'the verdict declared the inferential control while no producer ran — a run may only declare ' +
+    'controls it APPLIED (controls.mjs). This is the half a findings-derived declaration would miss.');
   // And the gate-shaped source is genuinely live end to end (see the fixture note
   // above) — without this, `redJob` could be silently broken and nothing would say so.
   assert.ok(verdict.findings.find(f => f.id === 'gate:phase-order'),
