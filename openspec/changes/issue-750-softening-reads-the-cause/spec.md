@@ -87,7 +87,7 @@ isolation — the field must survive the whole pipe from evaluator to renderer.
 from a rendered verdict.
 
 #### Scenarios
-- WHEN `cli.mjs` constructs its single `buildVerdict` call THEN it threads `conclusionCauses: evalResult.conclusionCauses ?? []` unchanged — nothing between the evaluator's return and `buildVerdict`'s input rewrites it.
+- WHEN `cli.mjs` constructs its single `buildVerdict` call THEN it threads `conclusionCauses: evalResult.conclusionCauses` as a PLAIN pass-through, with no `?? []` at the call site — the fail-closed default lives ONLY in `buildVerdict`'s own destructuring (`conclusionCauses = []`), so there is exactly one home for it, not two.
 - WHEN `renderVerdict` emits the rendered verdict text THEN `conclusionCauses` does not appear in the output.
 - WHEN `parse-verdict.mjs` parses a rendered verdict THEN it has no reader for `conclusionCauses` — the field is never round-tripped.
 - WHEN `buildVerdict`'s softening guard evaluates THEN `conclusionCauses` is read at exactly that one site and nowhere else in `buildVerdict`.
