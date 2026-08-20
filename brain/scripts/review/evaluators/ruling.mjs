@@ -135,6 +135,11 @@ export function evaluateRuling({ prBody = '' } = {}) {
       conditions: [],
       pin: undefined,
       escalate: null,
+      // #750: shape only — neither ruling path is reachable by verdict.mjs's
+      // softening (STOP never softens; a malformed REVISE has nothing routed
+      // out of it). Declared anyway (#683's reasoning): a partial declaration
+      // invites meaning from the omission.
+      conclusionCauses: ['blocker'],
     };
   }
 
@@ -148,6 +153,7 @@ export function evaluateRuling({ prBody = '' } = {}) {
       cites: 'reviewer-protocol.md §5',
     }],
     conditions: [],
+    conclusionCauses: [],
     pin: {
       fork: parsed.fork,
       options: parsed.options.map((o) => ({ id: o.id, cost: o.cost, consequence: o.consequence })),
