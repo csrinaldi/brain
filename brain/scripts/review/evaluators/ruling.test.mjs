@@ -141,6 +141,23 @@ test('evaluateRuling: NEVER emits APPROVE or any conclusion other than REVISE/ST
   assert.ok(['REVISE', 'STOP'].includes(valid.conclusion));
 });
 
+// ── #750: conclusionCauses — shape assertions only ──────────────────────────
+//
+// Neither ruling return path is reachable by buildVerdict's softening (STOP
+// never softens, and a malformed REVISE has no candidate for the
+// pre-existing/base-only routing this evaluator never touches) — these pins
+// are weaker than tranche's/checkpoint's, and are labelled as such.
+
+test('evaluateRuling: malformed fork → conclusionCauses is [\'blocker\'] (shape only, unreachable by the softening) (#750)', () => {
+  const result = evaluateRuling({ prBody: 'no fork section here' });
+  assert.deepEqual(result.conclusionCauses, ['blocker']);
+});
+
+test('evaluateRuling: valid fork (STOP) → conclusionCauses is [] (shape only, unreachable by the softening) (#750)', () => {
+  const result = evaluateRuling({ prBody: validForkBody() });
+  assert.deepEqual(result.conclusionCauses, []);
+});
+
 // ── the pin: payload — the durable-record seed (protocol §8) ───────────────
 
 test('evaluateRuling: a valid fork emits a pin: payload with fork/options/recommendation', () => {
