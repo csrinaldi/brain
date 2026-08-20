@@ -146,6 +146,11 @@ function applySchemaGate(findings) {
 export function buildVerdict({
   headSha,
   conclusion,
+  // #750 — fail-closed default. `['blocker']` would be the CONVENIENT
+  // default and is exactly wrong: an evaluator (or legacy caller) that
+  // declares nothing must not be softened, silence fails closed by
+  // construction, not by luck.
+  conclusionCauses = [],
   protocol = 'brain-review/1',
   controls = [],
   judgmentAxis = null,
@@ -249,7 +254,14 @@ export function buildVerdict({
   // both. `unknownCausality` and `boundHit` already force STOP for the same
   // reason; the refuter's escalation had no such rule and needed one.
   const escalatesWithoutBlocking = finalEscalate === 'human';
-  
+
+  // #750 — the length check is HALF the rule, not padding.
+  // `[].every(c => c === 'blocker')` is vacuously `true` in JavaScript, so
+  // without `conclusionCauses.length > 0` a caller that declares NO cause
+  // would soften exactly like one that declared 'blocker' — the same
+  // silent-approve trap #483 came to fix, wearing a new field's name.
+  const causeIsBlockerOnly = conclusionCauses.length > 0 && conclusionCauses.every((c) => c === 'blocker');
+
   let finalVerdict = raisedConclusion;
   if (boundHit || unknownCausality) {
     finalVerdict = 'STOP';
@@ -257,7 +269,7 @@ export function buildVerdict({
     // The coherence rule stated above. It sits BEFORE the softening on purpose:
     // an escalating verdict must not be softened into an APPROVE either.
     finalVerdict = 'REVISE';
-  } else if (protocol === 'brain-review/2' && processed.length > 0 && candidateFindings.length === 0 && raisedConclusion === 'REVISE' && !escalatesWithoutBlocking) {
+  } else if (protocol === 'brain-review/2' && processed.length > 0 && candidateFindings.length === 0 && raisedConclusion === 'REVISE' && !escalatesWithoutBlocking && causeIsBlockerOnly) {
     // #483: `processed.length`, not `findings.length`. The softening means
     // "every finding that exists was routed OUT of the blocking set by the
     // admission rule". Measured against the raw input, a verdict whose

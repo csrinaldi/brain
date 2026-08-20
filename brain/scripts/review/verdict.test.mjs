@@ -172,10 +172,16 @@ test('renderVerdict: emits a fenced yaml block naming protocol, verdict, and hea
 // ── Causal Admission Rules (REQ-H2-3) ──────────────────────────────────────
 
 test('buildVerdict: pre-existing or base-only findings do NOT trigger REVISE and are routed to follow_ups[]', () => {
+  // #750: `conclusionCauses: ['blocker']` is a REQUIRED, deliberate addition —
+  // this fixture's concern is routing (pre-existing/base-only → follow_ups),
+  // not the cause-gated softening, and without a declared cause the new
+  // fail-closed default would flip this to REVISE and read as an unrelated
+  // regression. Same treatment as the :923-area fixture, for the same reason.
   const v = buildVerdict({
     headSha: HEAD_SHA,
     conclusion: 'REVISE',
     protocol: 'brain-review/2',
+    conclusionCauses: ['blocker'],
     findings: [
       {
         id: 'f1',

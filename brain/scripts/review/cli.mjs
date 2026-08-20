@@ -658,6 +658,11 @@ export async function main(deps = {}) {
   const verdict = buildVerdict({
     headSha: boot.headSha,
     conclusion: evalResult.conclusion,
+    // #750 — a plain pass-through, no `?? []`: buildVerdict's own
+    // destructuring default is the ONE fail-closed home for an absent cause.
+    // A second default here would be a second, untested place the same rule
+    // could rot.
+    conclusionCauses: evalResult.conclusionCauses,
     protocol,
     // #506 — at THIS head, not over the PR's lifetime. One definition, shared with
     // the anti-loop lock in poster.mjs.
