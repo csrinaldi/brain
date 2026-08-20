@@ -120,6 +120,18 @@ Delivers REQ-682-5 and Decision 5. Depends on slice 2.
 
 ---
 
+## REQ-682-5 has no task, and that is recorded rather than fixed
+
+`convergence.maxRounds` as a key SEPARATE from `challenger` is REQ-682-5. It
+appears once in `design.md`, in a slice-3 table cell, and no task in any slice
+delivers it. Measured: `rg 'maxRounds|convergence'` finds it in no production
+file.
+
+Assigning it is a planning decision, not a correction, so it is named here
+rather than slipped into a slice. It is the SECOND requirement of six this
+decomposition wrote and left uncovered — the first was REQ-682-3 — and nothing
+in this repo checks that every requirement in `spec.md` has a task.
+
 ## Review workload forecast
 
 | slice | production lines (est.) | budget at `lite` | chained PR |
