@@ -205,16 +205,16 @@ Delivers the audit trail behind REQ-750-1.
       discards any work done after the snapshot was taken).
 - [x] P.3 Run `npm run brain:check` and confirm no new blocker beyond the
       expected `tier2-frontier` correction (5.4).
-- [ ] P.4 Confirm the `decision` label exists (`gh label list`) — touching
+- [x] P.4 Confirm the `decision` label exists (`gh label list`) — touching
       `brain/core/methodology/reviewer-protocol.md` raises
       `decision-surface` unless the PR carries it. Create the label at PR
       creation if `gh label list` doesn't show it.
-- [ ] P.5 Confirm exactly one `type:bug` label is applied at PR creation.
-- [ ] P.6 PR body includes "Part of #682" and "Addresses #750" — base is
+- [x] P.5 Confirm exactly one `type:bug` label is applied at PR creation.
+- [x] P.6 PR body includes "Part of #682" and "Addresses #750" — base is
       `feature/issue-682` (non-default base), so GitHub closing keywords do
       not auto-close #750; the tracker's terminal PR closes it. State this
       explicitly so a reviewer doesn't expect auto-close.
-- [ ] P.7 Run cold review. **Stop rule**: if cold review blocks this change
+- [x] P.7 Run cold review. **Stop rule**: if cold review blocks this change
       twice, STOP and escalate to the maintainer rather than opening a
       third fix round — `convergence.maxRounds: 2`, and #682 already spent
       four rounds of fixes-on-fixes on this exact branch, producing two
