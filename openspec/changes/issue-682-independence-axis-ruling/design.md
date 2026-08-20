@@ -37,8 +37,27 @@ controls = unionControls([TRANCHE_PRODUCES, INFERENTIAL_PRODUCES]);
 `unionControls` already takes an array and has only ever been handed one element.
 That plural signature is the affordance left for this, and `controls.mjs` says so
 in its own header — *"a judgment evaluator declares `inferential`, and the day it
-runs the verdict says so by itself."* REQ-682-3's declaration therefore needs no
-new plumbing: declaring `PRODUCES = ['inferential']` is the whole of it.
+runs the verdict says so by itself."*
+
+**CORRECTED — the first version of this decision said REQ-682-3's declaration
+"needs no new plumbing: declaring `PRODUCES = ['inferential']` is the whole of
+it". That is FALSE, and it was false when written.** A cold review measured it:
+`CONTROL_CLASSES` is frozen to `['deterministic', 'inferential']` and
+`unionControls` THROWS on anything else, so the controls union cannot carry an
+axis name at all. Two verdicts challenged by different axes rendered
+byte-identically — the exact rendering REQ-682-3 forbids.
+
+**`PRODUCES` delivers the CONTROLS declaration (#683's field). The AXIS is a
+separate field and needed its own plumbing**: a `challenger_axis` line in
+`renderVerdict`, a reader and a `TOP_LEVEL_KEYS` entry in `parseVerdict` —
+without the latter it terminated nothing and swallowed the whole findings list
+when placed after it — and a fix to the drift guard's fixture, which was blind
+because it never set `judgmentAxis`.
+
+A control class says WHICH KIND of control ran. The axis says WHAT CHALLENGED
+the reasoned findings. One vocabulary does not carry the other, and reading the
+sentence above as if it did is what shipped REQ-682-3 unimplemented while a PR
+body claimed it delivered.
 
 **Rejected:** a `judgment` mode. It would make judgment exclusive with the
 mechanical review rather than additive, and #575 Ruling 3 rules that the two
@@ -157,7 +176,7 @@ together"* is honoured while the work stays reviewable.
 | slice | contents | lands with |
 |---|---|---|
 | 1 | `resolveChallenger` + tier/config resolution + the `human` axis end to end | REQ-682-1, -2, -6 |
-| 2 | the inferential producer, `PRODUCES = ['inferential']`, additive wiring, the declaration | REQ-682-3, -4 |
+| 2 | the inferential producer, `PRODUCES = ['inferential']`, additive wiring, the controls declaration | REQ-682-4 (and #683's controls union, NOT REQ-682-3) |
 | 3 | the ADR for the model transport, then the `same-model` runner behind it | REQ-682-5 and Decision 5 |
 
 Slice 1 ships a challenger with **no network and no credential** — the `human`
@@ -168,6 +187,25 @@ reasoned finding exist without something to challenge it.
 **The ADR precedes the code that cites it, on the same branch.** The
 `adr-citations` gate refuses code citing a draft, so slice 3 promotes the ADR
 first and cites it second.
+
+## Two requirements this decomposition DROPPED
+
+A cold review found both, and the pattern matters more than either: **a
+requirement can be written into `spec.md` and covered by no task, and nothing in
+this repo checks the correspondence.** Twice out of six.
+
+**REQ-682-3 — the axis on the wire.** Assigned to slice 2 by the table above and
+delivered by nothing: `resolveAxis`'s value was consumed as a boolean and
+discarded. It landed in the correction slice, and the table now says so.
+
+**REQ-682-5 — `convergence.maxRounds` as a key separate from the challenger.**
+It appears exactly once, in a slice-3 table cell, and no decision addresses it.
+Slice 3's tasks touch the ADR, the promotion, the runner, the negative case, the
+e2e and the cross-family refusal — **zero config keys** — while the config work
+belongs to slice 1. Measured: `rg 'maxRounds'` finds it in no production file.
+
+Neither is rehomed here by fiat. Naming them as unassigned is the honest state;
+assigning them is a planning decision.
 
 ## What this design does not decide
 
