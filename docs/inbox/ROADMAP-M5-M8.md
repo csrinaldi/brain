@@ -6,7 +6,7 @@ Cerrar la cadena de #682, abrir M5 (role-as-port) y M8 (router etapa→engine) s
 ninguna decisión quede dispersa en tickets que nadie volverá a leer.
 
 **71** issues abiertos · **60** aprobados · **7** `needs-review` · **5** sin etiqueta
-de estado · **0** PRs abiertos
+de estado · **0** PRs abiertos — medido antes de abrir #755, que es el 72º
 
 > **2026-08-20** · `main @ 46fb991`
 > Fuente de verdad para la línea M5 → M8. Reemplaza a `AGENT-PRIORITY-HANDOFF.md`,
@@ -22,7 +22,7 @@ Este archivo está vencido en cuanto alguna de estas deje de valer.
 | Invariante | Comando | Valor al escribir |
 |---|---|---|
 | `origin/main` es `46fb991` | `git rev-parse --short origin/main` | `46fb991` |
-| Hay 71 issues abiertos | `gh issue list --state open --limit 200 --json number --jq length` | `71` |
+| Hay 72 issues abiertos (los 71 medidos + #755) | `gh issue list --state open --limit 200 --json number --jq length` | `72` |
 | Hay 0 PRs abiertos | `gh pr list --state open --json number --jq length` | `0` |
 | #682 no tiene PR terminal todavía | `gh pr list --state all --head feature/issue-682 --json number --jq length` | `0` |
 | M5 sigue en cero | `fd -t d '^roles$' brain/` | (sin salida) |
@@ -224,10 +224,10 @@ respuesta.
   migración aditiva de `config-migrations.mjs`, porque es exactamente el patrón que el
   schema de M8 necesita. Una vez probado, M8 lo reutiliza en vez de inventarlo.
 - **#456 slice A** — clave `sdd.stages` en `brain.config.json` con default igual a las
-  cuatro de hoy; los **nueve** consumidores de `REQUIRED_ARTIFACTS` pasan a leerla.
+  cuatro de hoy; los **diez** módulos que consumen el stage set a través de `sdd-layout.mjs` (dos de ellos leen la constante directamente) pasan a leerla.
   Comportamiento idéntico, el stage set deja de ser una constante.
 - **#605** — el scaffold lee `docs.language`. Toca `new-change.mjs`, que es uno de los
-  nueve consumidores: después o junto con #456-A, nunca antes.
+  diez consumidores: después o junto con #456-A, nunca antes.
 - Re-medir #312: la medición "n=0 inhabitantes" es del 11/08; antes de diseñar sobre
   ella, confirmar que sigue siendo cierta.
 
@@ -318,7 +318,7 @@ absorbe donde dice la tabla, se construye dos veces.
 
 ## 6 · Lo que corre al costado
 
-Los otros 45 tickets aprobados no bloquean M5/M8 ni son bloqueados por ellos. Van en
+Los otros 55 tickets aprobados no bloquean M5/M8 ni son bloqueados por ellos. Van en
 paralelo, por carril, en worktrees propios — con una regla: **ninguno toca
 `brain.config.json` schema, `sdd-layout.mjs` ni `harness/` sin pasar por el tracker de
 la etapa activa.**
