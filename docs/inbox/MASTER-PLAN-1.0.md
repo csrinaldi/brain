@@ -1,3 +1,5 @@
+> **SUPERSEDED · 2026-08-20** — This document is expired and is kept as a dated archive. The source of truth for status, priority, and the M5 → M8 line is [`ROADMAP-M5-M8.md`](./ROADMAP-M5-M8.md) (#755). Invariant that failed: M9 "no ticket yet" → #324 closed.
+
 # brain — Master Plan (1.0 cut → 1.1 line)
 
 > ## ⚠️ SNAPSHOT — not the source of truth

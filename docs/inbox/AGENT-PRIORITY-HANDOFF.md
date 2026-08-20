@@ -1,3 +1,5 @@
+> **SUPERSEDED · 2026-08-20** — Este documento está vencido y se conserva como archivo fechado. La fuente de verdad para estado, prioridad y la línea M5 → M8 es [`ROADMAP-M5-M8.md`](./ROADMAP-M5-M8.md) (#755). Invariante que falló: "`@logikas/brain` unpublished (404)" → publicado `@logikas/brain@1.1.0` el 18/08.
+
 # Handoff de prioridades para agentes
 
 **Leé esto antes de tomar trabajo en este repo.** Responde tres cosas que un agente

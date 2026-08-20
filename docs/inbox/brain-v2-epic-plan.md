@@ -1,3 +1,5 @@
+> **SUPERSEDED · 2026-08-20** — Este documento está vencido y se conserva como archivo fechado. La fuente de verdad para estado, prioridad y la línea M5 → M8 es [`ROADMAP-M5-M8.md`](./ROADMAP-M5-M8.md) (#755). Invariante que falló: M8 "exige un ADR que supersede ADR-0019" (línea 147) → sigue sin decidir, ver Compuerta 1 del nuevo roadmap.
+
 # EPIC — Terminar brain v2.0.0 (plan de acción sobre `feature/v2.0.0`)
 
 > ## ⚠️ SNAPSHOT — no es la fuente de verdad
