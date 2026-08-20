@@ -327,10 +327,16 @@ follow_ups:                # present only when non-empty
   the same grounds as `unknown` — a disposition the validator cannot read *is* causality that
   could not be determined. The gate fires on a claim that **fails**, never on one that was never
   made: a finding carrying neither field (every `/1` finding) is untouched.
-- **REVISE-to-APPROVE softening.** If every finding that exists was routed out of the
-  blocking set (all `pre-existing`/`base-only`) and the evaluator's conclusion was `REVISE`,
-  the verdict becomes `APPROVE` (`buildVerdict`) — findings existed, but nothing causal to
-  this change blocks it.
+- **REVISE-to-APPROVE softening reads the shape AND the cause (issue #750).** If every
+  finding that exists was routed out of the blocking set (all `pre-existing`/`base-only`)
+  and the evaluator's conclusion was `REVISE`, the verdict becomes `APPROVE` (`buildVerdict`)
+  — but only if the evaluator also declared `conclusionCauses` non-empty and every entry
+  `'blocker'`. A `REVISE` that any uncomputable evidence contributed to is never softened —
+  §10's rule ("never `APPROVE` on uncomputable evidence") restated for the mechanism that
+  decides softening, not only for the evaluators that produce the evidence. An evaluator
+  that declares no cause at all is not softened either: silence fails closed by
+  construction (`conclusionCauses` defaults to `[]`, and `[].every(...)` would otherwise be
+  vacuously true), not by luck.
 - **Rendering.** `evidence_class` and `causal_disposition` are rendered per-finding when
   present, and a `follow_ups:` block is rendered when non-empty (`renderVerdict`); a `/1`
   verdict simply never has these keys.
