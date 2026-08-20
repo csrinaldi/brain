@@ -328,9 +328,15 @@ test('e2e: a finding OUTSIDE the base-reproducible set never reaches follow_ups,
   assert.ok(verdict.findings.every(f => f.evidence_class !== 'inferential'),
     'an inferential finding appeared — the judgment producer is live. Verify the axis is ' +
     'declared on the verdict (REQ-682-3) and that the challenger actually ran, then move this pin.');
-  assert.ok(!(verdict.controls ?? []).includes('inferential'),
-    'the verdict declared the inferential control while no producer ran — a run may only declare ' +
-    'controls it APPLIED (controls.mjs). This is the half a findings-derived declaration would miss.');
+  // deepEqual, not `!(x ?? []).includes(...)`. `parseVerdict` does NOT assign
+  // `controls` when the field fails its vocabulary check — it pushes to
+  // `malformed` — so the `?? []` form passed having observed NOTHING whenever
+  // the field was unreadable. That is the identical shape this test's own F1
+  // comment diagnoses for `follow_ups` twenty lines above, re-created in the
+  // assertion added to fix a different blindness.
+  assert.deepEqual(verdict.controls, ['deterministic'],
+    'the verdict must declare EXACTLY the controls it applied — a run may only declare controls ' +
+    'it APPLIED (controls.mjs), and an unreadable field must fail here rather than read as absent.');
   // And the gate-shaped source is genuinely live end to end (see the fixture note
   // above) — without this, `redJob` could be silently broken and nothing would say so.
   assert.ok(verdict.findings.find(f => f.id === 'gate:phase-order'),

@@ -27,7 +27,7 @@ import { evaluateTranche, gatherTrancheInputs, PRODUCES as TRANCHE_PRODUCES } fr
 import { evaluateCheckpoint, gatherCheckpointInputs, PRODUCES as CHECKPOINT_PRODUCES } from './evaluators/checkpoint.mjs';
 import { evaluateRuling, gatherRulingInputs, PRODUCES as RULING_PRODUCES } from './evaluators/ruling.mjs';
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
-import { resolveChallenger, resolveAxis } from './lib/resolve-challenger.mjs';
+import { resolveJudgment } from './lib/resolve-challenger.mjs';
 import {
   evaluateInferential, gatherInferentialInputs, shouldRun,
   PRODUCES as INFERENTIAL_PRODUCES,
@@ -260,7 +260,12 @@ export async function main(deps = {}) {
     return 2;
   }
 
-  const config = loadBrainConfig();
+  // `deps.config` is a TEST-only override, the same convention `deps.tier`
+  // already declares below. #682's judgment half is resolved FROM config, and
+  // without a seam the only way to exercise it end to end was to mutate the
+  // repo's real `brain.config.json` — which is how the cold review had to prove
+  // the composition defects this file now guards against.
+  const config = deps.config ?? loadBrainConfig();
   const project = deps.project ?? config.project?.slug;
   // Reviewer protocol version (issue #391 T2.3 §3, issue #394 M3): the TIER sets
   // the default, and since #442 `reviewer.protocol` in brain.config.json may
@@ -282,7 +287,7 @@ export async function main(deps = {}) {
   let protocol;
   try {
     tier = deps.tier ?? resolveTier(config);
-    protocol = resolveReviewProtocol(config, tier);
+    protocol = deps.protocol ?? resolveReviewProtocol(config, tier);
   } catch (err) {
     error(`brain:review: refusing to run — ${err.message}`);
     return 1;
@@ -421,6 +426,8 @@ export async function main(deps = {}) {
   const mode = args.mode !== 'auto' ? args.mode : deriveMode({ labels: boot.prView.labels ?? [], changedFiles });
 
   let evalResult;
+  // REQ-682-3 — the axis that actually ran, as a VALUE, for the wire.
+  let judgmentAxis = null;
   // #683 — the verdict declares WHICH CLASSES OF CONTROL ran, and it is derived
   // from the evaluator that actually ran rather than from the findings it
   // produced. A clean mechanical run has NO findings, so a findings-derived list
@@ -479,23 +486,20 @@ export async function main(deps = {}) {
     return 1;
   }
 
-  // #682 slice 2 — the judgment half is ADDITIVE, not a fourth mode. Judgment
-  // applies TO a tranche, a checkpoint or a ruling review; it does not replace
-  // one, and #575 Ruling 3 rules that the two halves join rather than alternate.
-  //
-  // `unionControls` has taken an array since #683 and had only ever been handed
-  // one element. That plural signature is the affordance for exactly this, so
-  // the declaration needs no new plumbing: the union grows when the producer
-  // runs, and #690's complement shrinks by itself.
-  //
-  // AND IT ONLY DECLARES WHAT IT RAN. `shouldRun` requires both an enabled tier
-  // and a real generator; with no transport (slice 3) the producer does not run,
-  // `INFERENTIAL_PRODUCES` never joins the union, and the verdict says
-  // `inferential` did not run — which is true. Running it while returning
-  // nothing would claim a control that was never applied, which is the defect
-  // `controls.mjs` exists to remove.
-  const inferentialEnabled = resolveAxis({ config, tier }) !== null;
-  if (shouldRun({ enabled: inferentialEnabled, generate: deps.inferentialDeps?.generate })) {
+  // #682 — the judgment half is ADDITIVE, not a fourth mode, and it runs behind
+  // ONE gate. `resolveJudgment` decides once, for the producer AND the
+  // challenger, so the two can no longer disagree — which they did at `standard`
+  // (producer on, protocol `/1`, `applyCausalAdmission` skipped entirely), and
+  // that disagreement re-created the state #552 ruled against.
+  let judgment;
+  try {
+    judgment = resolveJudgment({ config, tier, protocol });
+  } catch (err) {
+    error(`brain:review: ${err.message}`);
+    return 1;
+  }
+
+  if (judgment.run) {
     const inferentialInputs = await gatherInferentialInputs({
       worktreePath: boot.worktreePath,
       baseSha,
@@ -504,12 +508,39 @@ export async function main(deps = {}) {
       prBody: boot.prView.body,
       deps: deps.inferentialDeps ?? {},
     });
-    const judged = evaluateInferential(inferentialInputs);
-    evalResult = {
-      ...evalResult,
-      findings: [...evalResult.findings, ...judged.findings],
-    };
-    controls = unionControls([controls, INFERENTIAL_PRODUCES]);
+
+    // #682 acceptance criterion 6. A generator that failed is NOT a generator
+    // that found nothing: posting a verdict that declares the judgment control
+    // applied, over an empty list, is the uncomputable-evidence APPROVE
+    // protocol §10 forbids. Fail closed, name the cause, post nothing.
+    if (inferentialInputs.failed) {
+      error(`brain:review: the judgment half could not run — ${inferentialInputs.reason}. ` +
+        'Refusing to post a verdict that would declare the inferential control applied.');
+      return 1;
+    }
+
+    // An enabled half with no transport does not run and does not declare.
+    if (inferentialInputs.generated !== null) {
+      const judged = evaluateInferential(inferentialInputs);
+      evalResult = {
+        ...evalResult,
+        findings: [...evalResult.findings, ...judged.findings],
+      };
+      controls = unionControls([controls, INFERENTIAL_PRODUCES]);
+      judgmentAxis = judgment.axis;
+
+      // #682 cold review C5 — the merge kept `...evalResult` and replaced only
+      // `findings`, so `evaluateInferential`'s conclusion was discarded and the
+      // mode evaluator's stood. A reasoned blocker, even one the challenger
+      // CORROBORATED, landed in a verdict reading `verdict: APPROVE`.
+      //
+      // The judgment half could escalate when it was UNSURE (inconclusive,
+      // routed:human, unchallenged) and could not block when it was SURE. A
+      // blocker that does not block is not a blocker.
+      if (judged.findings.some((f) => f.severity === 'blocker') && evalResult.conclusion === 'APPROVE') {
+        evalResult = { ...evalResult, conclusion: 'REVISE' };
+      }
+    }
   }
 
   // brain-review/2 causal admission (issue #394 M3, completing #284): ONLY at
@@ -552,13 +583,10 @@ export async function main(deps = {}) {
     // self-description could be false is the thing #683 forbids. Same shape as
     // the controls-coverage refusal immediately below — error, post nothing,
     // exit non-zero.
-    let challenger;
-    try {
-      challenger = deps.refuterRunner ?? resolveChallenger({ config, tier });
-    } catch (err) {
-      error(`brain:review: ${err.message}`);
-      return 1;
-    }
+    // The SAME resolution the producer read. `'refuterRunner' in deps` rather
+    // than `??`: a test that deliberately passes `null` to exercise the
+    // no-runner path must keep getting null, which `??` would have overridden.
+    const challenger = 'refuterRunner' in deps ? deps.refuterRunner : judgment.challenger;
     ({ findings, escalate, conditions: baseConditions } = await applyCausalAdmission({
       findings: evalResult.findings,
       escalate: evalResult.escalate,
@@ -590,6 +618,10 @@ export async function main(deps = {}) {
     rulingAtHead: (boot.doctrine.priorDecisions ?? []).some(d => d?.head_sha === boot.headSha),
     gates: evalResult.gates,
     controls,
+    // REQ-682-3 — the axis that actually challenged the reasoned findings.
+    // `null` when the judgment half did not run, and `renderVerdict` emits the
+    // line only when a reasoned finding exists (#690's wallpaper rule).
+    judgmentAxis,
     findings,
     // #408 — the base probe's own inability to run is a condition of THIS verdict,
     // appended to the evaluator's rather than replacing it: two different things
