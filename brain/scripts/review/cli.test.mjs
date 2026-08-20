@@ -367,6 +367,17 @@ test('main: --mode checkpoint, a base-reproducible blocker routed pre-existing �
     exists: () => true,
     listDir: () => [],
     readFile: () => { throw new Error('no checkpoint-report.md in this fixture'); },
+    // Explicit, matching defaultRunReversion's own no-baseSha shape
+    // (checkpoint.mjs:276) — arm A stubs runReversion, so arm B declares the
+    // same key rather than relying on the implicit default. `baseSha` is null
+    // in this arm (see above), so `evaluateCheckpoint`'s `baseSha ? ... : {
+    // uncomputable: true, command: null }` ternary (checkpoint.mjs:448) never
+    // actually calls this function — it is dead code here, same as the
+    // default it stands in for. Declaring it anyway keeps the two arms'
+    // explicit dependency SETS identical, so the one thing that differs
+    // between arm A and arm B is exactly what the comment above claims: does
+    // the base resolve — not "does arm B also omit a dependency arm A stubs".
+    runReversion: async () => ({ uncomputable: true, command: null }),
     runAudit: () => '',
     runGovernanceStatus: () => '',
     trancheDeps: { fetchRollup: async () => rollupWithRedLocalChecks(), diffNumstat: () => '10\t5\tfoo.mjs\n', readIgnoreList: () => [] },
