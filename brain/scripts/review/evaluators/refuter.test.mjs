@@ -142,3 +142,25 @@ test('#552: a runner that RAN reports unchallenged: 0 — the count means "not c
   assert.equal(r.unchallenged, 0);
   assert.equal(r.adjustedFindings[0].refuter_outcome, 'corroborated');
 });
+
+test('CHAIN: an outcome applies only to a finding the challenger was HANDED', async () => {
+  // `outcomeMap.get(f.id)` was applied over EVERY finding, so a runner
+  // volunteering an id it was never given downgraded that finding. The producer
+  // half of this hazard is closed by id namespacing; this is the challenger
+  // half, and it reached anything in the list.
+  const gate = {
+    id: 'gate:phase-order', severity: 'blocker', evidence_class: 'deterministic',
+    evidence: 'required check phase-order is FAILURE',
+  };
+  const reasoned = { id: 'judgment:X', severity: 'blocker', evidence_class: 'inferential', evidence: 'e' };
+  const volunteer = async () => ({
+    outcomes: [{ id: 'gate:phase-order', outcome: 'refuted', rationale: 'a claim about something else' }],
+  });
+
+  const out = await evaluateRefuter({ findings: [gate, reasoned], runner: volunteer });
+  assert.equal(out.adjustedFindings[0].severity, 'blocker',
+    'a required gate the challenger was never handed must not be downgraded by it');
+  assert.equal(out.adjustedFindings[0].refuted, undefined);
+  assert.equal(out.adjustedFindings[1].refuter_outcome, 'unchallenged',
+    'and the finding it WAS handed, and did not answer, is unchallenged');
+});
