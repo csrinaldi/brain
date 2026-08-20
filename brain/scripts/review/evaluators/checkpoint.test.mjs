@@ -357,12 +357,19 @@ test('evaluateCheckpoint: every new test FAILED against base (real RED) → no r
 // (design decision 2) — every assertion compares `[...new Set(c)].sort()`.
 
 test('evaluateCheckpoint: inherited-only — tranche\'s conclusionCauses propagate untouched when checkpoint adds nothing of its own (#750)', () => {
-  const rollup = greenRollup().map(g => (g.name === 'memory-gate' ? { ...g, conclusion: 'FAILURE' } : g));
+  // A rollup-uncomputable tranche pushes ZERO findings (tranche.mjs:154-166's
+  // early return) — its 'uncomputable' cause is invisible to checkpoint's own
+  // `anyBlocker`/`anyUncomputable` checks (neither a finding nor one of
+  // checkpoint's own uncomputableReasons), so only the union spread of
+  // `tranche.conclusionCauses` can carry it through. This is the pin that
+  // catches "drop the checkpoint union" — the other two tests below both use
+  // 'blocker', which checkpoint's own findings-derived `anyBlocker` would
+  // still see even with the union deleted.
   const result = evaluateCheckpoint({
-    trancheInputs: greenTrancheInputs({ requiredGates: rollup }),
+    trancheInputs: greenTrancheInputs({ requiredGates: null }),
     reversion: { uncomputable: false, command: 'cmd', vacuousTests: [] },
   });
-  assert.deepEqual([...result.conclusionCauses].sort(), ['blocker']);
+  assert.deepEqual([...result.conclusionCauses].sort(), ['uncomputable']);
 });
 
 test('evaluateCheckpoint: observed-only — checkpoint\'s own anyBlocker adds a cause tranche never had (#750)', () => {
