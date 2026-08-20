@@ -221,3 +221,13 @@ test('a reasoned finding with the human axis is routed, not corroborated', async
   assert.equal(r.adjustedFindings[0].refuter_outcome, 'routed:human');
   assert.equal(r.escalate, 'human');
 });
+
+// ── #750 cold review C2: REQ-750-1's negative half — this producer never sets `conclusion` ──
+
+test('#750 REQ-750-1: evaluateInferential never sets conclusion or declares conclusionCauses — there is nothing for it to declare', () => {
+  const result = evaluateInferential({ generated: generated() });
+  assert.equal(result.conclusion, null,
+    'this producer touches only findings/conditions/escalate — it must never raise a conclusion');
+  assert.ok(!('conclusionCauses' in result),
+    'a producer that never sets conclusion must never declare conclusionCauses — there is nothing for it to declare');
+});

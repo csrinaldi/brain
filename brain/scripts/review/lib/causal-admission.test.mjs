@@ -138,3 +138,14 @@ test('#552: a deterministic-only verdict is UNCHANGED — every verdict brain po
   assert.equal(before.escalate, null);
   assert.equal('refuter_outcome' in before.findings[0], false);
 });
+
+// ── #750 cold review C2: REQ-750-1's negative half — this bridge never declares conclusionCauses ──
+
+test('#750 REQ-750-1: applyCausalAdmission never declares conclusionCauses — it never touches conclusion', async () => {
+  const findings = [{ id: 'gate:x', severity: 'blocker', evidence: 'e', cites: 'c' }];
+  const result = await applyCausalAdmission({ findings, conclusion: 'REVISE' });
+  assert.ok(!('conclusionCauses' in result),
+    'applyCausalAdmission has no conclusion parameter and no conclusionCauses field to declare');
+  assert.ok(!('conclusion' in result),
+    'a conclusion passed in is not a parameter this function reads — it must not leak into the result untouched or otherwise');
+});

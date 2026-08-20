@@ -928,6 +928,30 @@ test('#750: conclusionCauses OMITTED entirely (legacy caller shape) — the fail
     'an evaluator that declares no cause is not softened — silence fails closed, not open');
 });
 
+// ── #750 cold review C2: three spec scenarios the earlier batch left unpinned ──
+
+test('#750 REQ-750-5: renderVerdict never emits conclusionCauses — it is builder-internal plumbing, not part of the verdict shape', () => {
+  const vBlocker = buildVerdict(softenableFixture(['blocker']));
+  assert.ok(!('conclusionCauses' in vBlocker),
+    'buildVerdict\'s returned object must not carry conclusionCauses');
+  const renderedBlocker = renderVerdict(vBlocker);
+  assert.ok(!renderedBlocker.includes('conclusionCauses'),
+    'the rendered block must not mention conclusionCauses');
+
+  const vUncomputable = buildVerdict(softenableFixture(['uncomputable']));
+  assert.ok(!('conclusionCauses' in vUncomputable));
+  const renderedUncomputable = renderVerdict(vUncomputable);
+  assert.ok(!renderedUncomputable.includes('conclusionCauses'));
+});
+
+test('#750 REQ-750-5: parse-verdict has no reader for conclusionCauses — it is never round-tripped', () => {
+  const v = buildVerdict(softenableFixture(['blocker']));
+  const rendered = renderVerdict(v);
+  const parsed = parseVerdict({ body: rendered });
+  assert.ok(!('conclusionCauses' in parsed),
+    'parseVerdict must not produce a conclusionCauses key — there is no reader for it on the wire');
+});
+
 test('#682: the raise reads the BLOCKING set, not the processed list', () => {
   // The load-bearing line of the whole "it cannot move to cli.mjs" argument, and
   // a mutation to it survived the full suite at 4124/4124. `processed` is the
