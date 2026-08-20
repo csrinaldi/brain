@@ -336,7 +336,12 @@ follow_ups:                # present only when non-empty
   decides softening, not only for the evaluators that produce the evidence. An evaluator
   that declares no cause at all is not softened either: silence fails closed by
   construction (`conclusionCauses` defaults to `[]`, and `[].every(...)` would otherwise be
-  vacuously true), not by luck.
+  vacuously true), not by luck. **This guarantee's boundary**: the evaluator's declared cause
+  is authoritative and `buildVerdict` does not cross-check it against `conditions[]` strings
+  — that string-matching mechanism is the one issue #750's ruling rejected — so "never
+  `APPROVE` on uncomputable evidence" holds for every evaluator-produced verdict, but a direct
+  `buildVerdict` caller that declares `conclusionCauses: ['blocker']` beside an uncomputable
+  `conditions[]` entry has misdeclared its own cause, and no code here catches that.
 - **Rendering.** `evidence_class` and `causal_disposition` are rendered per-finding when
   present, and a `follow_ups:` block is rendered when non-empty (`renderVerdict`); a `/1`
   verdict simply never has these keys.
