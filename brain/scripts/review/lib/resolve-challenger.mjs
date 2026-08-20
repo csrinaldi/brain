@@ -42,11 +42,30 @@ import { ROUTED_HUMAN, UNCHALLENGED } from '../evaluators/refuter.mjs';
 export const AXES = Object.freeze(['human', 'same-model', 'cross-family', 'mechanical']);
 
 /**
- * Axes this build implements. Separate from `AXES`: "not a real axis" (a typo
- * the operator fixes) and "real but unbuilt" (a property of the build) are
- * different facts and they are reported differently.
+ * The runners this build implements, keyed by axis — the ONE declaration of
+ * which axes are real here. `resolveJudgment`'s dispatch reads this map and
+ * `IMPLEMENTED_AXES` is derived from it, so the set an operator is TOLD about
+ * cannot drift from the set that actually routes to a runner.
+ *
+ * It was two declarations until the cold review of the terminal PR: a hand-
+ * written constant beside a dispatch ternary deciding the same thing. The
+ * mutation that proved it — claiming `same-model` was implemented while
+ * `same-model` still routed to `unbuiltRunner` — passed the full suite.
+ *
+ * A `Map` rather than an object literal: the lookup key comes from operator
+ * config, and a Map has no inherited keys for it to land on.
  */
-export const IMPLEMENTED_AXES = Object.freeze(['human']);
+const RUNNERS = new Map([['human', humanRunner]]);
+
+/**
+ * Axes this build implements, DERIVED from `RUNNERS`. Separate from `AXES`:
+ * "not a real axis" (a typo the operator fixes) and "real but unbuilt" (a
+ * property of the build) are different facts and they are reported differently.
+ *
+ * Slice 3 adds `same-model` by adding its runner to `RUNNERS`. One edit, and
+ * both the dispatch and this declaration follow it.
+ */
+export const IMPLEMENTED_AXES = Object.freeze([...RUNNERS.keys()]);
 
 /**
  * The protocol the judgment half requires, and it is not a preference.
@@ -179,7 +198,7 @@ export function resolveJudgment({ config, tier, protocol = JUDGMENT_PROTOCOL } =
     run: true,
     enabled: true,
     axis,
-    challenger: axis === 'human' ? humanRunner : unbuiltRunner(axis),
+    challenger: RUNNERS.get(axis) ?? unbuiltRunner(axis),
     reason: null,
   };
 }

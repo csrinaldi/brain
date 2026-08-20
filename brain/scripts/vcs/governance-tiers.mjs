@@ -280,7 +280,7 @@ const TIER_PARAMS = Object.freeze({
     reviewProtocol: 'brain-review/2',
     // #682. A second model family: the strongest machine independence, and it
     // costs a second vendor credential and a second per-run price. This tier
-    // is where that is worth paying. NOT IMPLEMENTED YET — resolveChallenger()
+    // is where that is worth paying. NOT IMPLEMENTED YET — resolveJudgment()
     // refuses it out loud rather than degrading to `same-model`, because a
     // tier that asked for stronger evidence and silently got weaker is the
     // defect this whole ticket is about.

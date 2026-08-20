@@ -122,6 +122,47 @@ test('an unbuilt axis reports UNCHALLENGED and escalates — it does not throw',
   assert.match(out.adjustedFindings[0].refuter_rationale, /Refusing to substitute a weaker axis/);
 });
 
+// ── the implemented set is ONE declaration, pinned by a literal ──────────────
+
+test('every axis behaves the way IMPLEMENTED_AXES claims, and the claim is pinned', async () => {
+  // The cold review of the terminal PR mutated `IMPLEMENTED_AXES` to claim
+  // `same-model` was implemented while `same-model` still routed to
+  // `unbuiltRunner` — telling an operator that the strongest axis they asked
+  // for exists — and the FULL suite stayed green. The only test that touched
+  // the constant read the same constant it was meant to pin, so it moved with
+  // the mutation.
+  //
+  // So: a LITERAL, and then every axis checked against what the literal says.
+  // The literal moves only when a runner is added to `RUNNERS` (slice 3 adds
+  // `same-model`), and the loop below moves with it — which is the point.
+  assert.deepEqual([...IMPLEMENTED_AXES], ['human']);
+
+  for (const axis of AXES) {
+    const r = resolveJudgment({
+      config: cfg({ enabled: true, challenger: { axis } }),
+      tier: 'regulated',
+      protocol: JUDGMENT_PROTOCOL,
+    });
+    const [outcome] = (await r.challenger([blocker()])).outcomes;
+
+    if (IMPLEMENTED_AXES.includes(axis)) {
+      assert.notEqual(
+        outcome.outcome, UNCHALLENGED,
+        `"${axis}" is declared implemented — it must produce a challenge, not report unchallenged`
+      );
+    } else {
+      assert.equal(
+        outcome.outcome, UNCHALLENGED,
+        `"${axis}" is unbuilt — it must report unchallenged, never another axis's answer`
+      );
+      assert.match(
+        outcome.rationale, new RegExp(`axis "${axis}" is not implemented`),
+        `"${axis}" must name ITSELF as the axis that did not run`
+      );
+    }
+  }
+});
+
 // ── REQ-682-6 — routed:human is a state of its own ───────────────────────────
 
 test('REQ-682-6: the human axis marks `routed:human`, keeps the blocker, escalates', async () => {
