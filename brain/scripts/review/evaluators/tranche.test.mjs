@@ -442,3 +442,42 @@ test('evaluateTranche: a caller that skips the gather seam gets the standard-tie
   assert.ok(result.findings.find(f => f.id === 'budget'),
     'the default must stay standard/400 — a standard job set judged against a lite budget would be an incoherent doctrine');
 });
+
+// ── #750: every return path declares conclusionCauses ──────────────────────
+//
+// REQ-750-1. `buildVerdict`'s softening cannot read WHY an evaluator said
+// REVISE unless the evaluator says so on every exit — these three pins cover
+// tranche.mjs's three return statements (:154-166, :192-202, :249-251).
+
+test('evaluateTranche: rollup not an array → conclusionCauses is [\'uncomputable\'] (#750)', () => {
+  const result = evaluateTranche({ requiredGates: null, changedFiles: [], budget: { lines: 0, uncomputable: false } });
+  assert.deepEqual(result.conclusionCauses, ['uncomputable']);
+});
+
+test('evaluateTranche: budget uncomputable with no blocker finding already pushed → conclusionCauses is [\'uncomputable\'] only (#750)', () => {
+  const result = evaluateTranche({ requiredGates: greenRollup(), changedFiles: [], budget: { uncomputable: true } });
+  assert.deepEqual(result.conclusionCauses, ['uncomputable'],
+    'every required gate is green, so no blocker finding exists yet when the budget check returns early');
+});
+
+test('evaluateTranche: budget uncomputable WITH a blocker finding already pushed → conclusionCauses contains BOTH (#750)', () => {
+  const rollup = greenRollup().filter(g => g.name !== 'decision-gate');
+  const result = evaluateTranche({ requiredGates: rollup, changedFiles: [], budget: { uncomputable: true } });
+  assert.deepEqual([...result.conclusionCauses].sort(), ['blocker', 'uncomputable'],
+    'the missing required gate pushed a blocker BEFORE the budget check runs — both causes contributed');
+});
+
+test('evaluateTranche: normal exit with a blocker finding → conclusionCauses is [\'blocker\'] (#750)', () => {
+  const rollup = greenRollup().map(g => (g.name === 'memory-gate' ? { ...g, conclusion: 'FAILURE' } : g));
+  const result = evaluateTranche({ requiredGates: rollup, changedFiles: [], budget: { lines: 0, uncomputable: false } });
+  assert.deepEqual(result.conclusionCauses, ['blocker']);
+});
+
+test('evaluateTranche: normal exit with no blocker finding → conclusionCauses is [] (#750)', () => {
+  const result = evaluateTranche({
+    requiredGates: greenRollup(),
+    changedFiles: [],
+    budget: { lines: 120, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+  });
+  assert.deepEqual(result.conclusionCauses, []);
+});

@@ -236,10 +236,23 @@ export function evaluateCheckpoint({
   findings.push(...checkDecisionSurface({ changedFiles, hasDecisionLabel }));
 
   const anyBlocker = findings.some((f) => f.severity === 'blocker');
+  const anyUncomputable = uncomputableReasons.length > 0;
   const conclusion =
-    tranche.conclusion === 'REVISE' || anyBlocker || uncomputableReasons.length > 0 ? 'REVISE' : 'APPROVE';
+    tranche.conclusion === 'REVISE' || anyBlocker || anyUncomputable ? 'REVISE' : 'APPROVE';
 
-  return { conclusion, gates: tranche.gates, findings, conditions };
+  // #750: UNION, not overwrite. Tranche's uncomputable causes are not
+  // findings and are invisible to `anyBlocker` above — a checkpoint whose own
+  // checks are all clean but whose inherited tranche result was uncomputable
+  // must still declare 'uncomputable'. Deduped (blocker genuinely can arrive
+  // from both tranche and checkpoint's own checks) and deliberately NOT
+  // sorted — the only consumer is `length > 0 && every(=== 'blocker')`.
+  const conclusionCauses = [...new Set([
+    ...tranche.conclusionCauses,
+    ...(anyBlocker ? ['blocker'] : []),
+    ...(anyUncomputable ? ['uncomputable'] : []),
+  ])];
+
+  return { conclusion, gates: tranche.gates, findings, conditions, conclusionCauses };
 }
 
 function childTestEnv() {

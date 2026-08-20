@@ -319,6 +319,78 @@ test('main: --mode checkpoint with a genuinely uncomputable base (no ci-context,
   assert.ok(lines.some(l => /evidence uncomputable/.test(l)), 'the base is genuinely uncomputable → must fail closed');
 });
 
+// ── #750: the softening reads the cause, proven through the real verb ───────
+//
+// ONE test, TWO arms, ONE axis varied (does the base resolve). Both arms
+// carry the SAME `local-checks` blocker, routed out as `pre-existing` by the
+// SAME injected `probeBase` stub — the only thing that differs is whether
+// `evaluateCheckpoint`'s OWN base-dependent checks (budget diff, reversion)
+// can be computed. Arm A must stay green TODAY (it is what makes arm B mean
+// anything — without it, a guard hardcoded to refuse everything would pass).
+
+function rollupWithRedLocalChecks() {
+  return greenRollup().map(g => (g.name === 'local-checks' ? { ...g, conclusion: 'FAILURE' } : g));
+}
+
+test('main: --mode checkpoint, a base-reproducible blocker routed pre-existing — softens to APPROVE when the base resolves, refuses to soften when it cannot be computed (#750)', async () => {
+  // Arm A — the base resolves: budget and reversion are both computable, so
+  // conclusionCauses stays ['blocker'] only, and #483's softening fires.
+  const vcsA = spyVcs();
+  const depsA = readyDeps({ vcs: vcsA });
+  depsA.probeBase = () => ({ failed: ['local-checks'], command: 'stub base probe' });
+  depsA.checkpointDeps = {
+    exists: () => true,
+    listDir: () => [],
+    readFile: () => { throw new Error('no checkpoint-report.md in this fixture'); },
+    runReversion: async () => ({ uncomputable: false, command: 'cmd', vacuousTests: [] }),
+    runAudit: () => '',
+    runGovernanceStatus: () => '',
+    trancheDeps: { fetchRollup: async () => rollupWithRedLocalChecks(), diffNumstat: () => '10\t5\tfoo.mjs\n', readIgnoreList: () => [] },
+  };
+  const linesA = [];
+  const codeA = await main({ argv: ['--pr', '42', '--mode', 'checkpoint', '--dry-run'], log: (s) => linesA.push(s), ...depsA });
+  assert.equal(codeA, 0);
+  const outA = linesA.join('\n');
+  assert.match(outA, /verdict: APPROVE/, `arm A must stay green today — the base resolved, so the softening still fires:\n${outA}`);
+  assert.match(outA, /follow_ups:/, 'the routed-out blocker must still be visible as a follow-up, not silently gone');
+
+  // Arm B — the SAME rollup and the SAME probe, but the base does NOT
+  // resolve: budget AND reversion both go uncomputable, conclusionCauses
+  // gains 'uncomputable', and the sixth conjunct refuses to soften.
+  const vcsB = spyVcs();
+  const depsB = readyDeps({ vcs: vcsB });
+  delete depsB.baseSha;
+  depsB.loadCiContext = async () => ({ baseSha: null });
+  depsB.coldBootDeps.fetchPr = async () => ({ number: 42, author: 'alice', labels: [], body: '', headRefOid: HEAD, baseRefOid: null });
+  depsB.probeBase = () => ({ failed: ['local-checks'], command: 'stub base probe' });
+  depsB.checkpointDeps = {
+    exists: () => true,
+    listDir: () => [],
+    readFile: () => { throw new Error('no checkpoint-report.md in this fixture'); },
+    // Explicit, matching defaultRunReversion's own no-baseSha shape
+    // (checkpoint.mjs:276) — arm A stubs runReversion, so arm B declares the
+    // same key rather than relying on the implicit default. `baseSha` is null
+    // in this arm (see above), so `evaluateCheckpoint`'s `baseSha ? ... : {
+    // uncomputable: true, command: null }` ternary (checkpoint.mjs:448) never
+    // actually calls this function — it is dead code here, same as the
+    // default it stands in for. Declaring it anyway keeps the two arms'
+    // explicit dependency SETS identical, so the one thing that differs
+    // between arm A and arm B is exactly what the comment above claims: does
+    // the base resolve — not "does arm B also omit a dependency arm A stubs".
+    runReversion: async () => ({ uncomputable: true, command: null }),
+    runAudit: () => '',
+    runGovernanceStatus: () => '',
+    trancheDeps: { fetchRollup: async () => rollupWithRedLocalChecks(), diffNumstat: () => '10\t5\tfoo.mjs\n', readIgnoreList: () => [] },
+  };
+  const linesB = [];
+  const codeB = await main({ argv: ['--pr', '42', '--mode', 'checkpoint', '--dry-run'], log: (s) => linesB.push(s), ...depsB });
+  assert.equal(codeB, 0);
+  const outB = linesB.join('\n');
+  assert.match(outB, /verdict: REVISE/, `arm B must refuse the softening once a cause is uncomputable, not blocker-only:\n${outB}`);
+  assert.match(outB, /evidence uncomputable/, 'the rendered verdict must state why it refused to soften');
+  assert.doesNotMatch(outB, /verdict: APPROVE/);
+});
+
 test('main: --mode checkpoint local run (no ci-context) feeds boot.prView.baseRefOid into the checkpoint reversion — H1-2C-BASE closure reaches the checkpoint path', async () => {
   const vcs = spyVcs();
   const deps = readyDeps({ vcs });
