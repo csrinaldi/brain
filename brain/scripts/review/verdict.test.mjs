@@ -932,3 +932,44 @@ test('#682: the original #483 softening still fires — routed-out findings, emp
   });
   assert.equal(v.verdict, 'APPROVE', 'every finding routed OUT of the blocking set — #483');
 });
+
+test('CHAIN: a verdict may not APPROVE while it ESCALATES', () => {
+  // Found only by reviewing the CHAIN, not the links. A reasoned blocker with no
+  // `cites` is a BLOCKER when `evaluateRefuter` picks its batch and a
+  // `correction` by the time the conclusion is computed — the evidence drop and
+  // the uncited downgrade run later, inside buildVerdict. So the raise never
+  // fires while the challenge's `escalate: human` and its "were NOT challenged"
+  // condition survive into an APPROVE.
+  //
+  // Two links disagreeing about what a blocker IS. The rule pinned here is
+  // coherence, not a patch for that route: escalation means a person must look,
+  // APPROVE means nothing blocks, and a reader cannot hold both.
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'APPROVE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [{
+      id: 'judgment:J1', severity: 'correction', evidence_class: 'inferential',
+      causal_disposition: 'introduced', evidence: 'e', cites: 'c',
+      refuter_outcome: 'unchallenged',
+    }],
+    conditions: ['1 inferential blocker(s) were NOT challenged'],
+    escalate: 'human',
+  });
+  assert.notEqual(v.verdict, 'APPROVE',
+    'a verdict that summons a human cannot also say nothing blocks');
+  assert.equal(v.escalate, 'human');
+});
+
+test('CHAIN: an escalating verdict is not softened into APPROVE either', () => {
+  // The rule sits BEFORE #483's softening on purpose.
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'REVISE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [{
+      id: 'g1', severity: 'blocker', evidence_class: 'deterministic',
+      causal_disposition: 'pre-existing', evidence: 'e', cites: 'c',
+    }],
+    escalate: 'human',
+  });
+  assert.notEqual(v.verdict, 'APPROVE');
+});

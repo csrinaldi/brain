@@ -229,11 +229,35 @@ export function buildVerdict({
   const boundHit = priorRevCount >= 3 && raisedConclusion === 'REVISE' && !rulingAtHead;
   const shouldEscalate = boundHit || unknownCausality;
   const finalEscalate = shouldEscalate ? 'human' : escalate;
+
+  // CHAIN REVIEW — a verdict may not APPROVE while it ESCALATES.
+  //
+  // Measured on the shipped chain: a reasoned blocker with no `cites` is a
+  // BLOCKER when `evaluateRefuter` picks its batch (`severity === 'blocker'`,
+  // inside `applyCausalAdmission`) and a CORRECTION by the time the conclusion
+  // is computed, because the evidence drop and the uncited downgrade run later,
+  // in this function. So `blockerRemains` never raises — while the challenge's
+  // `escalate: 'human'` and its "N inferential blocker(s) were NOT challenged"
+  // condition both survive into an APPROVE.
+  //
+  // Two links disagreeing about what a blocker IS. No per-PR review could see
+  // it: the batch selection ships in one slice and the conclusion derivation in
+  // another.
+  //
+  // The rule is coherence, not a patch for that one route: escalation means a
+  // person must look, APPROVE means nothing blocks, and a reader cannot hold
+  // both. `unknownCausality` and `boundHit` already force STOP for the same
+  // reason; the refuter's escalation had no such rule and needed one.
+  const escalatesWithoutBlocking = finalEscalate === 'human';
   
   let finalVerdict = raisedConclusion;
   if (boundHit || unknownCausality) {
     finalVerdict = 'STOP';
-  } else if (protocol === 'brain-review/2' && processed.length > 0 && candidateFindings.length === 0 && raisedConclusion === 'REVISE') {
+  } else if (escalatesWithoutBlocking && raisedConclusion === 'APPROVE') {
+    // The coherence rule stated above. It sits BEFORE the softening on purpose:
+    // an escalating verdict must not be softened into an APPROVE either.
+    finalVerdict = 'REVISE';
+  } else if (protocol === 'brain-review/2' && processed.length > 0 && candidateFindings.length === 0 && raisedConclusion === 'REVISE' && !escalatesWithoutBlocking) {
     // #483: `processed.length`, not `findings.length`. The softening means
     // "every finding that exists was routed OUT of the blocking set by the
     // admission rule". Measured against the raw input, a verdict whose

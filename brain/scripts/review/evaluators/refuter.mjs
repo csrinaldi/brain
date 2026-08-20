@@ -118,7 +118,19 @@ export async function evaluateRefuter({ findings = [], runner = null } = {}) {
   if (unansweredCount > 0) escalate = 'human';
 
   const adjustedFindings = findings.map(f => {
-    const res = outcomeMap.get(f.id);
+    // CHAIN REVIEW — an outcome applies ONLY to a finding the challenger was
+    // actually HANDED. `outcomeMap.get(f.id)` used to be applied over EVERY
+    // finding, and `isPendingBlocker` guarded only the unanswered branch, so a
+    // runner volunteering `{id: 'gate:phase-order', outcome: 'refuted'}`
+    // downgraded a genuinely-red required gate to `correction` with
+    // `refuted: true` — a gate nothing challenged, dropped on a claim about a
+    // different thing.
+    //
+    // `inferential.mjs`'s id namespacing closes the PRODUCER half of this
+    // hazard: a produced finding cannot address a deterministic one. This is
+    // the CHALLENGER half, and it was open — the challenger could reach
+    // anything in the list, not just its own batch.
+    const res = isPendingBlocker(f) ? outcomeMap.get(f.id) : undefined;
     if (!res) {
       // An inferential blocker the runner did not answer for is UNCHALLENGED —
       // the same state as having had no runner, because for this finding there
