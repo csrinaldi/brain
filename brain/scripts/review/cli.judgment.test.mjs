@@ -18,6 +18,8 @@ import { parseVerdict } from './lib/parse-verdict.mjs';
 import { ID_PREFIX } from './evaluators/inferential.mjs';
 import { UNCHALLENGED, ROUTED_HUMAN } from './evaluators/refuter.mjs';
 import { REQUIRED_JOBS } from '../vcs/governance-checks.mjs';
+import { tierParams } from '../vcs/governance-tiers.mjs';
+import { resolveJudgment } from './lib/resolve-challenger.mjs';
 
 /** Every required gate green — the same fixture `cli.test.mjs` uses. An empty
  *  rollup is NOT green: the tranche evaluator reads it as uncomputable evidence
@@ -318,4 +320,40 @@ test('H: a challenger that throws fails CLOSED with a readable refusal, not a st
   assert.match(errs.join('\n'), /brain:review: the challenger failed — ECONNRESET/);
   assert.doesNotMatch(lines.join('\n'), /protocol: brain-review/,
     'no verdict may be posted when the reasoned findings were never challenged');
+});
+
+test('the tier table cannot produce a producer without a challenger', async () => {
+  // #741 F2: the producer gated on `inferentialEnabled` and the challenger on
+  // the protocol, and `standard` ships `{inferentialEnabled: true,
+  // reviewProtocol: 'brain-review/1'}` — so the producer ran and the refuter was
+  // skipped wholesale, rendering a reasoned blocker with no refuter annotation.
+  //
+  // The single gate closes it, and this pins the closure as DATA: a future tier
+  // edit that re-opens the pair fails here rather than in a posted verdict.
+  for (const tier of ['lite', 'standard', 'regulated']) {
+    const params = tierParams(tier);
+    const j = resolveJudgment({ config: {}, tier, protocol: params.reviewProtocol });
+    if (j.run) {
+      assert.ok(j.challenger, `tier "${tier}" runs the producer with no challenger`);
+      assert.equal(params.reviewProtocol, 'brain-review/2',
+        `tier "${tier}" runs the judgment half at ${params.reviewProtocol}, which cannot carry it`);
+    }
+  }
+});
+
+test('a runner-reported UNCHALLENGED is COUNTED, not merely marked', async () => {
+  // #742: deleting `unansweredCount++` from the runner-reported branch left the
+  // full suite green while the verdict's "were NOT challenged" condition
+  // vanished end to end. The partial-runner path was asserted on the count; the
+  // runner-reported path was not — the same fact, two ways in, one guarded.
+  const { body } = await run({
+    protocol: 'brain-review/2', config: CFG('human'),
+    generate: async () => reasoned(),
+    refuterRunner: async (bs) => ({
+      outcomes: bs.map(f => ({ id: f.id, outcome: UNCHALLENGED, rationale: 'nothing challenged it' })),
+    }),
+  });
+  assert.match(body, /inferential blocker\(s\) were NOT challenged/,
+    'the count is the sole input to the verdict-level condition — marking without counting loses it');
+  assert.match(body, /^escalate: human$/m);
 });
