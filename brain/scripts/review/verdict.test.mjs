@@ -823,3 +823,31 @@ test('#690: an unknown member of the complement is UNREADABLE, exactly as it is 
   assert.equal(parsed.controls_not_applied, undefined);
   assert.deepEqual(parsed.malformed, ['controls_not_applied']);
 });
+
+test('#682 A2: a REVISE whose only blocker was REFUTED softens — the fixer is not sent after a disproved claim', () => {
+  // The softening tested `candidateFindings.length === 0`. A refuted finding
+  // stays in the list as a `correction`, so the set is never empty and the old
+  // test could not soften a verdict whose only defect had been disproved. The
+  // PR could never go green on the strength of a claim the challenge had
+  // already shown to be false.
+  const refutedOnly = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'REVISE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [{
+      id: 'judgment:J1', severity: 'correction', refuted: true,
+      evidence_class: 'inferential', causal_disposition: 'introduced', evidence: 'e', cites: 'c',
+    }],
+  });
+  assert.equal(refutedOnly.verdict, 'APPROVE');
+
+  // And it must NOT soften while a real blocker survives beside the refuted one.
+  const oneSurvives = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'REVISE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [
+      { id: 'judgment:J1', severity: 'correction', refuted: true, evidence_class: 'inferential', causal_disposition: 'introduced', evidence: 'e', cites: 'c' },
+      { id: 'gate:x', severity: 'blocker', evidence_class: 'deterministic', causal_disposition: 'introduced', evidence: 'e', cites: 'c' },
+    ],
+  });
+  assert.equal(oneSurvives.verdict, 'REVISE', 'a surviving blocker keeps the verdict blocking');
+});

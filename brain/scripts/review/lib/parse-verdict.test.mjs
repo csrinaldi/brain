@@ -507,10 +507,16 @@ test('#478-3/B1: the terminator set does not drift from what renderVerdict emits
   const built = buildVerdict({
     headSha: 'abc123',
     conclusion: 'REVISE',
-    findings: [{ id: 'F-1', severity: 'blocker', evidence: 'x', cites: 'y' }],
+    findings: [{ id: 'F-1', severity: 'blocker', evidence: 'x', cites: 'y', evidence_class: 'inferential' }],
     conditions: ['c'],
     sequencing: ['seq:x'],
     pin: { a: 1 },
+    // #682 — the fixture must be FULLY populated or the guard is blind to the
+    // key it was written to catch. `challenger_axis` rendered for weeks while
+    // this test passed, because `judgmentAxis` was never set here and
+    // `renderVerdict` emits the line only when a reasoned finding exists.
+    protocol: 'brain-review/2',
+    judgmentAxis: 'same-model',
   });
   const block = renderVerdict(built).split('```')[1];
   const emitted = block.split('\n')
@@ -920,4 +926,36 @@ test('#477/review: the READABLE inline forms still work — the control', () => 
   assert.deepEqual(parseVerdict({ body: blockWith(['sequencing: []']) }).sequencing, [],
     'a genuinely empty sequencing is empty, not unreadable');
   assert.equal('malformed' in parseVerdict({ body: blockWith(['sequencing: []']) }), false);
+});
+
+test('#682 REQ-682-3: `challenger_axis` round-trips, and does not terminate the findings list', () => {
+  // It RENDERED and did not parse back — returned absent, and not even reported
+  // in `malformed`, so the one field distinguishing a same-model-challenged
+  // verdict from a cross-family-challenged one was write-only. Missing from
+  // TOP_LEVEL_KEYS it also terminated nothing, so a block placing it after a
+  // findings list lost the WHOLE LIST.
+  //
+  // The drift guard above pins the terminator set; this pins the READER, because
+  // a key that terminates correctly and is never assigned is half a fix that
+  // reads as a whole one.
+  for (const axis of ['same-model', 'cross-family', 'human', 'mechanical']) {
+    const body = renderVerdict({
+      protocol: 'brain-review/2', verdict: 'REVISE', head_sha: 'a'.repeat(40), rev: 1,
+      gates: { required: ['issue-link'], detection: [] },
+      controls: ['inferential'], judgmentAxis: axis,
+      findings: [{ id: 'J1', severity: 'blocker', evidence_class: 'inferential', evidence: 'e', cites: 'c' }],
+      follow_ups: [], conditions: [], escalate: null,
+    });
+    assert.equal(parseVerdict({ body }).challenger_axis, axis,
+      `${axis} must survive the round trip — this field's neighbours shipped an asymmetry once (#381)`);
+  }
+
+  const withAxisAfterFindings = [
+    '```yaml', 'protocol: brain-review/2', 'verdict: REVISE',
+    `head_sha: ${'a'.repeat(40)}`, 'rev: 1', 'gates:', '  required: []', '  detection: []',
+    'findings:', '  - id: "F-1"', 'challenger_axis: human', 'escalate: null', '```',
+  ].join('\n');
+  const parsed = parseVerdict({ body: withAxisAfterFindings });
+  assert.deepEqual(parsed.findings, [{ id: 'F-1' }], 'the axis must TERMINATE the list, not swallow it');
+  assert.equal(parsed.challenger_axis, 'human');
 });
