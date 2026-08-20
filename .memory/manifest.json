@@ -368,6 +368,14 @@
       "sessions": 0,
       "memories": 2,
       "prompts": 0
+    },
+    {
+      "id": "c8daa529",
+      "created_by": "gandalf",
+      "created_at": "2026-08-20T15:34:00Z",
+      "sessions": 2,
+      "memories": 37,
+      "prompts": 2
     }
   ]
 }
