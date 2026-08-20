@@ -221,22 +221,22 @@ Cuatro bloques, en este orden. Solo 0.A y 0.B bloquean el merge.
 
 #### 0.A — Qué falta para mergear #758
 
-Medido contra `origin/feature/issue-682 @ 24c506c`, que es `8ebf523` (la cabeza que la
-review en frío leyó) **más un merge de `main`**: no hay un solo cambio de código después
-de la review.
+Medido contra `origin/feature/issue-682 @ a16e971`. La rev 2 de este documento lo midió
+en `24c506c` — `8ebf523` más un merge de `main`, sin un solo cambio de código después de
+la review — y desde entonces los dos hallazgos abiertos se cerraron.
 
 | # | Qué | Estado |
 |---|---|---|
 | 1 | La auditoría del tracker contra el ruling de #743 — el propio ruling dice *«#758 is held until the audit of the tracker against this ruling returns»* | **es el único bloqueo duro**; está hecha abajo, en 0.B |
 | 2 | `blocker` de la review rev 1: el body afirmaba que en `standard` no cambia nada, y cambia — todo veredicto lleva una condición nueva | **cerrado** — el body ya declara la condición en `standard` y en `regulated` |
-| 3 | `correction`: `IMPLEMENTED_AXES` es una segunda declaración sin pin — agregarle `'same-model'` (mentirle al operador sobre qué ejes existen) pasa la suite completa, 4147/4147 | **falta** — el body lo promete como *chained fix PR* y no hay commit |
-| 4 | `editorial`: `governance-tiers.mjs:283` nombra `resolveChallenger()`, símbolo que esta misma cadena dejó de exportar | **falta** — mismo caso |
-| 5 | Review en frío del chain **otra vez, sobre la cabeza actual**, con veredicto `brain-review/2` en `APPROVE`. La rev 1 fue `REVISE` sobre `8ebf523` | **falta** |
-| 6 | Los gates verdes y la suite | **hecho** — los 6 requeridos por `lite` + `memory-gate` y `phase-order`, verdes en la última corrida; `bootstrap-smoke` y `m4-danger-paths` verdes en la corrida previa; 4147/4147 en tres corridas independientes |
-| 7 | Merge limpio contra `main` | **hecho** — `mergeable_state: clean`; intersección de archivos tocados de los dos lados = ∅ |
+| 3 | `correction`: `IMPLEMENTED_AXES` es una segunda declaración sin pin — agregarle `'same-model'` (mentirle al operador sobre qué ejes existen) pasa la suite completa, 4147/4147 | **cerrado** en `a16e971` — la mutación se reprodujo primero (verde, hallazgo confirmado); ahora `RUNNERS` es la única declaración, `IMPLEMENTED_AXES` se deriva de sus claves y un test la fija contra un literal. Tres mutaciones muertas |
+| 4 | `editorial`: `governance-tiers.mjs:283` nombra `resolveChallenger()`, símbolo que esta misma cadena dejó de exportar | **cerrado** en `a16e971` — dice `resolveJudgment()` |
+| 5 | Review en frío del chain **otra vez, sobre la cabeza actual** (`main...a16e971`), con veredicto `brain-review/2` en `APPROVE`. La rev 1 fue `REVISE` sobre `8ebf523` | **falta, y tiene dueño obligado**: quien escribió el fix no puede revisarlo — `actor-check` pide actor distinto y el protocolo pide lectura en frío |
+| 6 | Los gates verdes y la suite | **hecho** — los 10 checks verdes en `a16e971`, esta vez todos en la misma corrida; suite en 4148 (+1 test), 0 fail; `repo:check` y `brain:nav` verdes |
+| 7 | Merge limpio contra `main`, y el body sin afirmaciones vencidas | **hecho** — `mergeable_state: clean`; intersección de archivos tocados de los dos lados = ∅; el body reescrito declara 933 inserciones de producción (era 914) contra el presupuesto de 1000 |
 
-Es decir: **tres cosas** — los dos hallazgos sin cerrar (3, 4), la review de cierre (5), y
-la decisión de 0.B.
+Es decir, hoy: **una sola cosa** — la review en frío de cierre (5), que necesita un actor
+que no haya escrito el fix ni leído esta cadena — más la decisión de 0.B.
 
 #### 0.B — La auditoría contra el ruling de #743, hecha
 
