@@ -15,6 +15,8 @@ import {
   resolveGatePolicy,
   resolveGateEvidence,
   resolveReviewProtocol,
+  PRODUCED_PROTOCOL,
+  REVIEW_PROTOCOLS,
   tierParams,
   requiredJobs,
   printDiffBudget,
@@ -241,12 +243,40 @@ test('tierParams: unknown tier throws', () => {
   assert.throws(() => tierParams('enterprise'), /unknown tier/);
 });
 
-// ── reviewProtocol — issue #391 T2.3 §3/§5, issue #394 M3 ──────────────────
+// ── the tier answers the approval question, and nothing else (#743) ─────────
+//
+// The pin that stood here asserted the tiered `/1` → `/2` default. The
+// 2026-08-20 ruling on #743 retired it by name, so it is gone rather than
+// adjusted: its property was that the TIER decides the protocol.
+//
+// What replaces it is the guard #743 asks for as acceptance criterion 5, and it
+// is the more useful of the two — it fails when the drift RETURNS, which is the
+// failure mode this ticket exists for. The previous instance was added by an
+// agent extending the very ADR that forbids it, and no test noticed.
 
-test('tierParams: reviewProtocol defaults lite/standard to brain-review/1, regulated to brain-review/2', () => {
-  assert.equal(tierParams('lite').reviewProtocol, 'brain-review/1');
-  assert.equal(tierParams('standard').reviewProtocol, 'brain-review/1');
-  assert.equal(tierParams('regulated').reviewProtocol, 'brain-review/2');
+test('#743: tierParams carries no parameter of the review system', () => {
+  const FORBIDDEN = ['reviewProtocol', 'inferentialEnabled', 'challengerAxis'];
+  for (const tier of TIERS) {
+    for (const k of FORBIDDEN) {
+      assert.ok(!(k in tierParams(tier)),
+        `tier "${tier}" carries "${k}". The tiers answer ONE question — can this team ` +
+        'satisfy an approval requirement (#329) — and ADR-0026 invariant 7 forbids ' +
+        'position tiering from reaching correctness. The review system is configured ' +
+        'by reviewer.* in brain.config.json, never here.');
+    }
+  }
+});
+
+test('#743: every tier still answers the approval question it exists for', () => {
+  // The complement, and the reason the guard above is not just "keep the table
+  // small": what SURVIVED the narrowing has to still be there. A guard that only
+  // forbids would pass on an empty table.
+  for (const tier of TIERS) {
+    const p = tierParams(tier);
+    for (const k of ['requiredReviews', 'memoryAssertion', 'diffBudget', 'artefacts']) {
+      assert.ok(k in p, `tier "${tier}" lost "${k}" — that one answers the approval question`);
+    }
+  }
 });
 
 // ── resolveGatePolicy / resolveGateEvidence — unknown tier fails closed ─────
@@ -291,45 +321,56 @@ test('drift-guard: GATE_MATRIX keys match governance.yml job names exactly', () 
 // the branch, unsatisfiable at n=1 (#329, the contradiction ADR-0026 resolves). The
 // override is what lets `/2` be DOGFOODED without moving a single gate.
 
-test('#442: with no override, every tier returns its own default — byte-identical to pre-#442', () => {
-  // The no-op migration guarantee (REQ-TIER-10's shape). If this drifts, every
-  // consumer's protocol changed under them without their config saying anything.
-  for (const tier of TIERS) {
-    assert.equal(resolveReviewProtocol({}, tier), tierParams(tier).reviewProtocol);
-    assert.equal(resolveReviewProtocol(undefined, tier), tierParams(tier).reviewProtocol);
-    assert.equal(resolveReviewProtocol({ reviewer: {} }, tier), tierParams(tier).reviewProtocol);
-    assert.equal(resolveReviewProtocol({ reviewer: { protocol: null } }, tier), tierParams(tier).reviewProtocol);
+test('#743: with nothing declared, every repo gets /2 — one produced protocol', () => {
+  // This test used to assert the opposite: that each tier returned ITS OWN
+  // default, byte-identical to pre-#442. The ruling made the tier stop having
+  // one. The absent/null shapes still matter — they are the ones a real
+  // brain.config.json produces — so they are kept and pointed at the new answer.
+  for (const shape of [{}, undefined, { reviewer: {} }, { reviewer: { protocol: null } }]) {
+    assert.equal(resolveReviewProtocol(shape), PRODUCED_PROTOCOL,
+      `${JSON.stringify(shape)} must resolve to the one produced protocol`);
   }
-  assert.equal(resolveReviewProtocol({}, 'lite'), 'brain-review/1', 'sanity: lite really does default to /1');
+  assert.equal(PRODUCED_PROTOCOL, 'brain-review/2', 'and that protocol is /2 (#743 ruling)');
+
+  // `/1` stays READABLE — the parsers must keep reading a history of /1 blocks,
+  // which is what makes `rev` and the anti-loop lock work on older PRs. Retired
+  // as an output, never as an input.
+  assert.ok(REVIEW_PROTOCOLS.includes('brain-review/1'),
+    'brain-review/1 must remain parseable — every verdict already posted is one');
 });
 
 test('#442: an explicit protocol wins at EVERY tier — the tier sets a default, not a ceiling', () => {
   // T2.3 design §3.4, quoted in this module's own TIER_PARAMS docstring.
   for (const tier of TIERS) {
-    assert.equal(resolveReviewProtocol({ reviewer: { protocol: 'brain-review/2' } }, tier), 'brain-review/2');
-    assert.equal(resolveReviewProtocol({ reviewer: { protocol: 'brain-review/1' } }, tier), 'brain-review/1');
+    assert.equal(resolveReviewProtocol({ reviewer: { protocol: 'brain-review/2' } }), 'brain-review/2');
+    assert.equal(resolveReviewProtocol({ reviewer: { protocol: 'brain-review/1' } }), 'brain-review/1');
   }
-  assert.equal(resolveReviewProtocol({ reviewer: { protocol: 'brain-review/1' } }, 'regulated'), 'brain-review/1',
+  assert.equal(resolveReviewProtocol({ reviewer: { protocol: 'brain-review/1' } }), 'brain-review/1',
     'downward too — a ceiling in either direction would be a rule this doctrine does not have');
 });
 
 test('#442: an unknown protocol THROWS — it never falls back to the tier default', () => {
   // Falling back would hand the operator a /1 verdict while they believed they had
   // /2, silently dropping causal admission. Same fail-closed shape as resolveTier.
-  assert.throws(() => resolveReviewProtocol({ reviewer: { protocol: 'brain-review/3' } }, 'lite'), /unknown reviewer\.protocol/);
-  assert.throws(() => resolveReviewProtocol({ reviewer: { protocol: '' } }, 'lite'), /unknown reviewer\.protocol/);
-  assert.throws(() => resolveReviewProtocol({ reviewer: { protocol: 'brain-review/2 ' } }, 'lite'), /unknown reviewer\.protocol/,
+  assert.throws(() => resolveReviewProtocol({ reviewer: { protocol: 'brain-review/3' } }), /unknown reviewer\.protocol/);
+  assert.throws(() => resolveReviewProtocol({ reviewer: { protocol: '' } }), /unknown reviewer\.protocol/);
+  assert.throws(() => resolveReviewProtocol({ reviewer: { protocol: 'brain-review/2 ' } }), /unknown reviewer\.protocol/,
     'a trailing space is a typo, not a dialect');
 });
 
-test('#442: brain\'s OWN config requests /2 — the dogfooding, asserted rather than assumed', () => {
-  // This is the whole ticket. Without this guard the line could be dropped from
-  // brain.config.json and every test above would stay green while brain went back to
-  // reviewing its own PRs at /1 — green in test, inert in production (#335).
+test('brain\'s OWN config resolves to /2 — and no longer needs to ask', () => {
+  // #442 made this line an OVERRIDE: `lite` defaulted to /1 and brain.config.json
+  // asked for /2 so brain could dogfood it. After #743 the same result arrives
+  // with nobody asking, so what this guards has changed and the assertion says so
+  // rather than quietly meaning something else.
   const config = JSON.parse(readFileSync(resolve(REPO_ROOT, 'brain.config.json'), 'utf8'));
-  const tier = resolveTier(config);
-  assert.equal(tier, 'lite', 'brain stays at lite — the override moves the protocol, never a gate');
-  assert.equal(tierParams(tier).reviewProtocol, 'brain-review/1', 'and lite still defaults to /1');
-  assert.equal(resolveReviewProtocol(config, tier), 'brain-review/2',
-    'brain.config.json must request brain-review/2 — that is what "dogfooded" means here');
+  assert.equal(resolveTier(config), 'lite', 'brain stays at lite — the tier moves no gate here');
+  assert.equal(resolveReviewProtocol(config), 'brain-review/2');
+
+  // And the point #442 actually defended, which outlives it: removing the line
+  // from brain.config.json must not change what brain produces. It cannot now —
+  // there is nothing left to fall back TO.
+  const withoutTheLine = { ...config, reviewer: { ...config.reviewer, protocol: undefined } };
+  assert.equal(resolveReviewProtocol(withoutTheLine), 'brain-review/2',
+    'dropping reviewer.protocol must leave brain producing /2, not fall back to /1');
 });

@@ -162,15 +162,40 @@ test('e2e: /2 findings carry the causal-admission annotations (REQ-409-3)', (t) 
   }
 });
 
-// ── REQ-409-4: the tier really selects the protocol, both directions ─────────
+// ── #743: the tier selects NO protocol — one produced form, at every tier ────
+//
+// REQ-409-4 pinned the opposite here ("the same fixture at lite posts /1"), and
+// the 2026-08-20 ruling retired the premise: the tiers do not define the review
+// system. What survives of REQ-409-4 is its second half — nothing may DEGRADE a
+// verdict to /1 — and that is now true by construction rather than by tier.
 
-test('e2e: the same fixture at lite posts /1 — the harness detects the tier, and regulated must NOT degrade to it (REQ-409-4)', (t) => {
+test('e2e #743: with nothing declared, lite and regulated both post /2', (t) => {
+  for (const tier of ['lite', 'regulated']) {
+    const fx = withFixture(t, { tier });
+    const r = runReview(fx);
+    assert.equal(r.status, 0, r.stderr);
+    const body = postedBodies(fx)[0].body;
+    assert.match(body, /^protocol: brain-review\/2$/m,
+      `tier "${tier}" must post /2 with nothing declared — the tier no longer chooses`);
+    assert.doesNotMatch(body, /brain-review\/1/,
+      `tier "${tier}" degraded to /1 — the thing REQ-409-4's second half forbids`);
+  }
+});
+
+test('e2e #743: the half is ON by default, and says on the wire that it cannot run', (t) => {
+  // The ruling's addendum declared this consequence in writing rather than
+  // discovering it later: until #682 slice 3 supplies a transport, EVERY verdict
+  // in EVERY repo carries this condition. Pinned end to end so the day it stops
+  // being true, a test says so — that day is slice 3 landing.
   const fx = withFixture(t, { tier: 'lite' });
   const r = runReview(fx);
   assert.equal(r.status, 0, r.stderr);
   const body = postedBodies(fx)[0].body;
-  assert.match(body, /brain-review\/1/);
-  assert.doesNotMatch(body, /brain-review\/2/);
+  assert.match(body, /the judgment half is enabled but no transport is configured/,
+    'the half is on by default and cannot run — a verdict that hid that would claim ' +
+    'a control it never applied');
+  assert.match(body, /^controls_not_applied: \["inferential"\]$/m,
+    'and the run-level declaration must agree with the condition');
 });
 
 // ── REQ-409-5: the identity gates EXECUTE — through them, never around ───────
@@ -590,10 +615,14 @@ test('e2e #442: lite + reviewer.protocol=/2 posts a /2 verdict, with every gate 
     'every finding must carry a causal_disposition — that is the annotation /1 does not have');
 });
 
-test('e2e #442: with NO override, lite still posts /1 — byte-identical to pre-#442', (t) => {
-  // The no-op migration guarantee, at the only layer that matters: the wire. Without
-  // this, the override could have silently become the default for everyone.
-  const fx = withFixture(t, { tier: 'lite', diffLines: 1001 });
+test('e2e: an EXPLICIT brain-review/1 still posts /1 — retired as a default, not as an option', (t) => {
+  // This test used to prove the opposite: that `lite` posts /1 with NO override.
+  // #743 retired the tiered default, and the fixture now ASKS for /1 — which is
+  // the only way to reach this shape after the ruling, and the case that keeps
+  // brain's /1 wire format covered end to end. A repo that explicitly chooses /1
+  // is honoured (the ruling retired the default, and reading it as forbidding an
+  // operator's explicit choice would be inventing doctrine, protocol §5).
+  const fx = withFixture(t, { tier: 'lite', diffLines: 1001, protocol: 'brain-review/1' });
   const r = runReview(fx);
   assert.equal(r.status, 0, r.stderr);
   const body = postedBodies(fx)[0].body;
@@ -605,7 +634,7 @@ test('e2e #442: with NO override, lite still posts /1 — byte-identical to pre-
   // parser's /1 shape is pinned as ABSENT rather than as some value. Same discipline
   // REQ-409-6 above arrived at for `follow_ups`, one field over.
   assert.match(body, /^protocol: brain-review\/1$/m,
-    'the posted body must declare /1 — the override was absent, so the tier default stands');
+    'the posted body must declare the /1 the config asked for');
   const verdict = parseVerdict({ body });
   assert.ok(!('protocol' in verdict),
     'and the parser\'s /1 shape omits the key entirely (parse-verdict.mjs sets it only for /2)');
@@ -678,12 +707,13 @@ test('e2e #683: the declaration is derived from the EVALUATOR, not from the find
 // mattered least. It worked; nothing asserted that it keeps working.
 
 test('e2e #690: a real brain-review/1 run declares BOTH halves of what ran', (t) => {
-  const fx = withFixture(t, { tier: 'lite', diffLines: 1001 });
+  // Reached by an explicit `reviewer.protocol` since #743 — see the test above.
+  const fx = withFixture(t, { tier: 'lite', diffLines: 1001, protocol: 'brain-review/1' });
   const r = runReview(fx);
   assert.equal(r.status, 0, r.stderr);
   const body = postedBodies(fx)[0].body;
 
-  assert.match(body, /^protocol: brain-review\/1$/m, 'lite must still default to /1 — this case is worthless at /2');
+  assert.match(body, /^protocol: brain-review\/1$/m, 'the run must really be /1 — this case is worthless at /2');
   assert.match(body, /^controls: \["deterministic"\]$/m);
   assert.match(body, /^controls_not_applied: \["inferential"\]$/m,
     'the run must state that judgment did NOT run — a reader may not be required to infer it from an absence');

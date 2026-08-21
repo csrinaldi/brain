@@ -322,51 +322,50 @@ test('H: a challenger that throws fails CLOSED with a readable refusal, not a st
     'no verdict may be posted when the reasoned findings were never challenged');
 });
 
-test('the tier table and the judgment gate cannot contradict each other', async () => {
-  // The first cut of this pin was TAUTOLOGICAL: both assertions sat inside
-  // `if (j.run)` and were entailed by `resolveJudgment`'s postconditions given
-  // the test's own argument (`protocol: params.reviewProtocol`). Two tier-table
-  // mutations left it green — `regulated → /1` (the half dies at every tier and
-  // the loop body is never entered) and `standard → /2` (the half runs on an
-  // unimplemented axis). A pin that passes when `run` is false for every tier
-  // constrains nothing.
+test('#743: the config and the judgment gate cannot contradict each other', () => {
+  // This pin used to walk the TIER TABLE. The #743 ruling took the review system
+  // out of that table, so the same property is now asserted over the surface that
+  // does decide: `reviewer.inferential.enabled` and `reviewer.protocol`.
   //
-  // What is NOT entailed is the relationship between the tier's two fields and
-  // what the operator is told. Asserted over the shipped table, so a tier edit
-  // fails here rather than in a posted verdict.
-  for (const tier of ['lite', 'standard', 'regulated']) {
-    const params = tierParams(tier);
-    const j = resolveJudgment({ config: {}, tier, protocol: params.reviewProtocol });
+  // Two things the earlier cuts got wrong and this keeps: the assertions must not
+  // sit inside `if (j.run)` — a pin that passes when nothing runs constrains
+  // nothing — and the case list must exercise BOTH sides of the gate, or the loop
+  // passes vacuously on a list where the half never runs.
+  const CASES = [
+    { label: 'nothing declared', config: {}, protocol: JUDGMENT_PROTOCOL, run: true, enabled: true },
+    { label: 'explicitly off', config: { reviewer: { inferential: { enabled: false } } },
+      protocol: JUDGMENT_PROTOCOL, run: false, enabled: false },
+    { label: 'asked for, refused by the protocol', config: {}, protocol: 'brain-review/1',
+      run: false, enabled: true },
+  ];
 
-    assert.equal(j.enabled, params.inferentialEnabled,
-      `tier "${tier}": the resolved enabled state must be the tier's own`);
+  for (const c of CASES) {
+    const j = resolveJudgment({ config: c.config, protocol: c.protocol });
+    assert.equal(j.run, c.run, `${c.label}: resolved run state`);
+    assert.equal(j.enabled, c.enabled, `${c.label}: resolved enabled state`);
 
-    if (params.inferentialEnabled && params.reviewProtocol === JUDGMENT_PROTOCOL) {
-      assert.equal(j.run, true, `tier "${tier}" enables the half at /2 — it must run`);
-      assert.ok(j.challenger, `tier "${tier}" runs the half with no challenger`);
-      assert.ok(j.axis, `tier "${tier}" runs the half with no declared axis`);
+    if (j.run) {
+      assert.ok(j.challenger, `${c.label}: runs the half with no challenger`);
+      assert.ok(j.axis, `${c.label}: runs the half with no declared axis`);
+      assert.equal(j.reason, null, `${c.label}: runs, and still reports a reason it did not`);
+    } else {
+      assert.equal(j.challenger, null, `${c.label}: does not run, yet resolved a challenger`);
+      assert.equal(j.axis, null, `${c.label}: does not run, yet declared an axis`);
+      assert.ok(j.reason, `${c.label}: refused silently — nothing to report to the operator`);
     }
 
-    if (params.inferentialEnabled && params.reviewProtocol !== JUDGMENT_PROTOCOL) {
-      // The `standard` case, and the one #741 F2 named. It must NOT run, and the
-      // operator must be TOLD — a tier that asks for the half and is refused
-      // cannot render like a tier that never asked.
-      assert.equal(j.run, false, `tier "${tier}" cannot run the half at ${params.reviewProtocol}`);
-      assert.ok(j.reason, `tier "${tier}" is refused silently — no reason to report`);
-      assert.equal(j.enabled, true, 'and it must still read as ASKED, or the refusal is unreportable');
+    // The distinction #741 F2 named, and the reason `enabled` is separate from
+    // `run`: a repo that ASKED and was refused must not read like one that never
+    // asked. Only the first can be reported.
+    if (c.enabled && !c.run) {
+      assert.equal(j.enabled, true, `${c.label}: asked-and-refused must still read as ASKED`);
     }
   }
-});
 
-test('at least one shipped tier exercises each side of the gate', () => {
-  // Without this the loop above can pass vacuously on a table where no tier
-  // enables the half at all — which is exactly how the first cut survived the
-  // `regulated → /1` mutation.
-  const tiers = ['lite', 'standard', 'regulated'].map(tierParams);
-  assert.ok(tiers.some(p => p.inferentialEnabled && p.reviewProtocol === JUDGMENT_PROTOCOL),
-    'no tier runs the judgment half — the gate is untested by this table');
-  assert.ok(tiers.some(p => !p.inferentialEnabled),
-    'no tier disables the judgment half — the off path is untested by this table');
+  assert.ok(CASES.some(c => c.run), 'no case runs the half — the on path is untested by this list');
+  assert.ok(CASES.some(c => !c.run), 'no case refuses the half — the off path is untested by this list');
+  assert.ok(CASES.some(c => c.enabled && !c.run),
+    'no case is asked-and-refused — the state that must be REPORTED is untested');
 });
 
 test('a runner-reported UNCHALLENGED is COUNTED, not merely marked', async () => {
@@ -395,20 +394,26 @@ test('a repo that ASKED for the judgment half and did not get it is told why', a
   // appended, verified against a mutation, and then deleted by the
   // `git checkout --` that restored that same mutation. The PR body claimed it.
   // Read the commit, not your memory of it.
-  const askedByConfig = await run({
+  const askedExplicitly = await run({
     tier: 'standard', protocol: 'brain-review/1', config: CFG('human'),
   });
-  assert.match(askedByConfig.body, /the judgment half did not run — .*requires brain-review\/2/);
+  assert.match(askedExplicitly.body, /the judgment half did not run — .*requires brain-review\/2/);
 
-  // And asked BY THE TIER, which the first cut could not see: `standard` ships
-  // `inferentialEnabled: true` with `brain-review/1`.
-  const askedByTier = await run({ tier: 'standard', protocol: 'brain-review/1', config: {} });
-  assert.match(askedByTier.body, /the judgment half did not run — .*requires brain-review\/2/,
-    'a tier that enables the half and cannot carry it must say so');
+  // And asked BY DEFAULT, which is the common case after the #743 ruling: an
+  // absent key means the half is ON, so a repo that declared nothing and runs at
+  // `/1` has asked for it just as surely as one that wrote the key.
+  const askedByDefault = await run({ tier: 'standard', protocol: 'brain-review/1', config: {} });
+  assert.match(askedByDefault.body, /the judgment half did not run — .*requires brain-review\/2/,
+    'the default-on half, refused by the protocol, must say so');
 
-  // A tier that never asked sees no noise — #690's wallpaper rule.
-  const neverAsked = await run({ tier: 'lite', protocol: 'brain-review/1', config: {} });
+  // The repo that never asked sees no noise — #690's wallpaper rule. Reaching
+  // this state now takes an EXPLICIT `false`; before the ruling the tier could
+  // put a repo here without anyone choosing it.
+  const neverAsked = await run({
+    tier: 'lite', protocol: 'brain-review/1',
+    config: { reviewer: { inferential: { enabled: false } } },
+  });
   assert.match(neverAsked.body, /^conditions: \[\]$/m);
-  assert.notEqual(askedByTier.body, neverAsked.body,
-    'enabled-by-tier-and-refused must not render like never-enabled');
+  assert.notEqual(askedByDefault.body, neverAsked.body,
+    'asked-and-refused must not render like never-asked');
 });
