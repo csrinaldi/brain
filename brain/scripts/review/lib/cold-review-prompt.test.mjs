@@ -158,6 +158,25 @@ test('the prompt carries no posted-verdict shape — proved, not asserted in a c
   assert.match(result.reason, /anti-loop lock/, 'and must say why');
 });
 
+test('the empty case the prompt describes is one the reader accepts', () => {
+  // Not a string match on "write the file with an empty array". The prompt tells
+  // the engine what to write when it found nothing; this executes that
+  // instruction and requires the result to be the DISTINCT empty state — ok:true
+  // with zero findings — rather than a failure.
+  //
+  // That distinction is the whole of REQ-S3-4 and it is the one a tired engine
+  // is most likely to get wrong by omitting the file instead. If the shape the
+  // role describes ever stopped parsing as "ran and found nothing", the review
+  // would report "never ran" for every clean PR.
+  const prompt = buildColdReviewPrompt({ prNumber: PR });
+  const emptied = prompt.replace(/(```brain-findings\/1\n)[\s\S]*?(\n```)/, '$1[]$2');
+  assert.notEqual(emptied, prompt, 'the example block must be replaceable — otherwise this tests nothing');
+
+  const result = readFindingsArtifact(emptied);
+  assert.equal(result.ok, true, `the empty artifact must READ, not fail — ${result.reason ?? ''}`);
+  assert.deepEqual(result.findings, [], 'and must be empty rather than absent');
+});
+
 test('the artifact path is the one the reader will look at', () => {
   const prompt = buildColdReviewPrompt({ prNumber: PR });
 
