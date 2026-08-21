@@ -29,7 +29,7 @@ import { evaluateRuling, gatherRulingInputs, PRODUCES as RULING_PRODUCES } from 
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
 import { resolveJudgment } from './lib/resolve-challenger.mjs';
 import {
-  evaluateInferential, gatherInferentialInputs,
+  evaluateInferential, gatherInferentialInputs, shouldRun as judgmentHalfRuns,
   PRODUCES as INFERENTIAL_PRODUCES,
 } from './evaluators/inferential.mjs';
 import { unionControls, checkControlsCoverFindings } from './lib/controls.mjs';
@@ -524,24 +524,7 @@ export async function main(deps = {}) {
   }
 
   if (judgment.run) {
-    const inferentialInputs = await gatherInferentialInputs({
-      worktreePath: boot.worktreePath,
-      baseSha,
-      headSha: boot.headSha,
-      changedFiles,
-      prBody: boot.prView.body,
-      deps: deps.inferentialDeps ?? {},
-    });
-
-    // #682 acceptance criterion 6. A generator that failed is NOT a generator
-    // that found nothing: posting a verdict that declares the judgment control
-    // applied, over an empty list, is the uncomputable-evidence APPROVE
-    // protocol §10 forbids. Fail closed, name the cause, post nothing.
-    if (inferentialInputs.failed) {
-      error(`brain:review: the judgment half could not run — ${inferentialInputs.reason}. ` +
-        'Refusing to post a verdict that would declare the inferential control applied.');
-      return 1;
-    }
+    const inferentialDeps = deps.inferentialDeps ?? {};
 
     // #682 round-1 review, finding G — AN ENABLED HALF WITH NO TRANSPORT IS NOT
     // THE SAME STATE AS A DISABLED ONE, and until now they rendered
@@ -556,14 +539,43 @@ export async function main(deps = {}) {
     // A repo that turned the judgment half ON is told, on the wire, that it did
     // not run and why. `conditions` is the field protocol §10 already uses for
     // "the evidence behind this verdict is weaker than it looks".
-    if (inferentialInputs.generated === null) {
+    //
+    // Round-2 review — `shouldRun` declared itself "that decision, kept next to
+    // [gatherInferentialInputs] so the two cannot drift" and had NO production
+    // caller: the decision was reached HERE instead, twice, through
+    // `judgment.run` and then through `generated === null`. Three declarations
+    // of one question, and the one that documented itself as authoritative was
+    // the one nothing read. It is read now, so the docstring is true and there
+    // is one place to change when slice 3 supplies the transport.
+    if (!judgmentHalfRuns({ enabled: judgment.run, generate: inferentialDeps.generate })) {
       judgmentConditions.push(
         'the judgment half is enabled but no transport is configured — no reasoned finding ' +
         'was produced, and the inferential control was NOT applied to this verdict.'
       );
-    }
+    } else {
+      const inferentialInputs = await gatherInferentialInputs({
+        worktreePath: boot.worktreePath,
+        baseSha,
+        headSha: boot.headSha,
+        changedFiles,
+        prBody: boot.prView.body,
+        deps: inferentialDeps,
+      });
 
-    if (inferentialInputs.generated !== null) {
+      // #682 acceptance criterion 6. A generator that failed is NOT a generator
+      // that found nothing: posting a verdict that declares the judgment control
+      // applied, over an empty list, is the uncomputable-evidence APPROVE
+      // protocol §10 forbids. Fail closed, name the cause, post nothing.
+      if (inferentialInputs.failed) {
+        error(`brain:review: the judgment half could not run — ${inferentialInputs.reason}. ` +
+          'Refusing to post a verdict that would declare the inferential control applied.');
+        return 1;
+      }
+
+      // `generated` is an array here and cannot be null: the branch is guarded
+      // by a generator existing, and the only other way out of `gather` is
+      // `failed`, refused above. The `!== null` test this replaced was the
+      // third reading of the one decision `judgmentHalfRuns` now owns.
       const judged = evaluateInferential(inferentialInputs);
       evalResult = {
         ...evalResult,
@@ -571,7 +583,6 @@ export async function main(deps = {}) {
       };
       controls = unionControls([controls, INFERENTIAL_PRODUCES]);
       judgmentAxis = judgment.axis;
-
     }
   }
 

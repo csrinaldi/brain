@@ -262,6 +262,8 @@ findings:
     evidence: "<a command the reviewer actually ran cold>"   # MANDATORY — no evidence ⇒ inadmissible
     cites: "<ADR / REQ / record id / gate>"                  # MANDATORY iff severity: blocker
 conditions: [ ... ]
+controls: [ ... ]              # which CLASSES of control ran — always emitted, `[]` included
+controls_not_applied: [ ... ]  # the complement, DERIVED from the same closed vocabulary
 pin: { ... }               # optional — the durable-record payload (§8)
 sequencing: { ... }        # optional — seq:* / reviewed:* only, never status:*
 escalate: human | null
@@ -279,11 +281,18 @@ escalate: human | null
   the reviewer is inventing doctrine, which §5 forbids.
 - **`head_sha` is mandatory.** It binds the verdict to the exact tree the reviewer read (§8) and
   expires with it.
+- **`controls:` and `controls_not_applied:` are always emitted, `[]` included** (issues #683,
+  #690). `controls:` names the classes of control that actually ran. It is never omitted when
+  empty: an absent key is the silence this field exists to break, while `controls: []` reads as
+  "nothing declared that it ran" — loud, and true. `controls_not_applied:` is its complement,
+  **derived** from the same closed vocabulary rather than maintained by hand, because a second
+  list drifts from the first the day either changes. Together they stop "the control ran and
+  found nothing" from rendering identically to "that control never ran".
 
 ### 6.2 `brain-review/2` — causal admission
 
 `brain-review/2` (`brain/scripts/review/lib/schema-v2.mjs`, `verdict.mjs`) is `/1` plus two
-per-finding fields and one thread-level field, all optional in the sense that a `/1` verdict
+per-finding fields and two thread-level ones, all optional in the sense that a `/1` verdict
 simply omits them:
 
 ```yaml
@@ -301,6 +310,7 @@ follow_ups:                # present only when non-empty
     evidence: "<a command the reviewer actually ran cold>"
     evidence_class: deterministic | inferential | insufficient
     causal_disposition: pre-existing | base-only
+challenger_axis: human | same-model | cross-family | mechanical   # only when a reasoned finding exists
 ```
 
 - **`evidence_class`** states how directly the finding was established: `deterministic` (a
@@ -342,9 +352,15 @@ follow_ups:                # present only when non-empty
   `APPROVE` on uncomputable evidence" holds for every evaluator-produced verdict, but a direct
   `buildVerdict` caller that declares `conclusionCauses: ['blocker']` beside an uncomputable
   `conditions[]` entry has misdeclared its own cause, and no code here catches that.
+- **`challenger_axis` names the axis that challenged the reasoned findings** (issue #682,
+  REQ-682-3), and it renders **only when some finding carries `evidence_class: inferential`** —
+  #690's rule one field over: a key that fires on every verdict turns its own channel into
+  wallpaper, and an axis that challenged nothing is not evidence about this verdict. Without it,
+  a verdict challenged by the same model and one challenged by a different family render
+  byte-identically: two evidentiary strengths, one rendering, chosen by a configuration option.
 - **Rendering.** `evidence_class` and `causal_disposition` are rendered per-finding when
-  present, and a `follow_ups:` block is rendered when non-empty (`renderVerdict`); a `/1`
-  verdict simply never has these keys.
+  present, `challenger_axis` when a reasoned finding exists, and a `follow_ups:` block when
+  non-empty (`renderVerdict`); a `/1` verdict simply never has these keys.
 
 ### Compatibility — both protocols coexist by construction
 

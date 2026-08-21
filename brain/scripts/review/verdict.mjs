@@ -253,7 +253,7 @@ export function buildVerdict({
   // person must look, APPROVE means nothing blocks, and a reader cannot hold
   // both. `unknownCausality` and `boundHit` already force STOP for the same
   // reason; the refuter's escalation had no such rule and needed one.
-  const escalatesWithoutBlocking = finalEscalate === 'human';
+  const escalates = finalEscalate === 'human';
 
   // #750 — the length check is HALF the rule, not padding.
   // `[].every(c => c === 'blocker')` is vacuously `true` in JavaScript, so
@@ -265,11 +265,11 @@ export function buildVerdict({
   let finalVerdict = raisedConclusion;
   if (boundHit || unknownCausality) {
     finalVerdict = 'STOP';
-  } else if (escalatesWithoutBlocking && raisedConclusion === 'APPROVE') {
+  } else if (escalates && raisedConclusion === 'APPROVE') {
     // The coherence rule stated above. It sits BEFORE the softening on purpose:
     // an escalating verdict must not be softened into an APPROVE either.
     finalVerdict = 'REVISE';
-  } else if (protocol === 'brain-review/2' && processed.length > 0 && candidateFindings.length === 0 && raisedConclusion === 'REVISE' && !escalatesWithoutBlocking && causeIsBlockerOnly) {
+  } else if (protocol === 'brain-review/2' && processed.length > 0 && candidateFindings.length === 0 && raisedConclusion === 'REVISE' && !escalates && causeIsBlockerOnly) {
     // #483: `processed.length`, not `findings.length`. The softening means
     // "every finding that exists was routed OUT of the blocking set by the
     // admission rule". Measured against the raw input, a verdict whose

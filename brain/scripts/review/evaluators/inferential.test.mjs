@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 
 import {
   evaluateInferential, gatherInferentialInputs, shouldRun, sanitiseFinding,
-  PRODUCES, CARRIED_FIELDS, ID_PREFIX,
+  PRODUCES, CARRIED_FIELDS, ID_PREFIX, RENDERED_ALWAYS, RENDERED_AS_ANCHOR,
 } from './inferential.mjs';
 import { PRODUCES as TRANCHE_PRODUCES } from './tranche.mjs';
 import { unionControls, complementControls } from '../lib/controls.mjs';
@@ -148,6 +148,56 @@ test('REQ-682-4: the carried set is enumerated, so a new generator field cannot 
   }
   assert.equal('brand_new_field' in clean, false,
     'a generator that grows a field does not get to widen the boundary by existing');
+});
+
+test('REQ-682-4: the rendered sets are the oracle, and CARRIED_FIELDS cannot outgrow them', async () => {
+  // `RENDERED_ALWAYS` and `RENDERED_AS_ANCHOR` were declared as the oracle for
+  // this requirement and NOTHING read them — two exports, zero consumers. So
+  // the mutation the file above names as the defect it fixed still passed:
+  // adding `deliberation_notes` to `CARRIED_FIELDS` left the full suite green
+  // while the boundary widened. The test below is a real improvement over the
+  // self-comparison it replaced, but its oracle is the keys ITS OWN fixture
+  // emits — it iterates one hand-written finding, so a carried field no fixture
+  // names is never reached by any assertion.
+  //
+  // Two assertions close it from both sides, and neither needs a fixture to
+  // know a field's name.
+
+  // 1. Nothing crosses the boundary that the renderer does not emit. Adding a
+  //    field to CARRIED_FIELDS alone fails HERE, whatever any fixture carries.
+  const declaredRendered = [...RENDERED_ALWAYS, ...RENDERED_AS_ANCHOR];
+  for (const k of CARRIED_FIELDS) {
+    assert.ok(
+      declaredRendered.includes(k),
+      `${k} is carried to the challenger but no rendered set claims it — add it to the ` +
+      'renderer and to RENDERED_ALWAYS/RENDERED_AS_ANCHOR, or drop it from CARRIED_FIELDS'
+    );
+  }
+
+  // 2. And the rendered sets are not fiction either: every member must appear
+  //    in a verdict built from a finding that carries them all. Without this,
+  //    assertion 1 could be satisfied by declaring a field rendered that the
+  //    renderer never emits — the same lie, one list over.
+  const carrier = evaluateInferential({
+    generated: [{
+      id: 'J9', severity: 'blocker', evidence: 'a claim with every carried field present',
+      cites: 'reviewer-protocol.md §6.1', file: 'a.mjs', line: 12,
+    }],
+  }).findings;
+
+  const carrierBody = renderVerdict({
+    protocol: 'brain-review/2', verdict: 'REVISE', head_sha: 'c'.repeat(40), rev: 1,
+    gates: { required: ['issue-link'], detection: [] },
+    controls: ['deterministic', 'inferential'],
+    findings: carrier, follow_ups: [], conditions: [], escalate: null,
+  });
+
+  for (const k of declaredRendered) {
+    assert.match(
+      carrierBody, new RegExp(`^\\s*(?:-\\s+)?${k}:`, 'm'),
+      `${k} is declared rendered and renderVerdict emits no line for it`
+    );
+  }
 });
 
 test('REQ-682-4: what the challenger receives is a SUBSET of what the verdict RENDERS', async () => {
