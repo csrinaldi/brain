@@ -63,10 +63,16 @@ export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
       // those two messages would make this seam silently permissive the day a
       // third failure mode appears — and a seam whose refusal has holes is a
       // seam that falls back, just less obviously.
+      // `err?.message ?? String(err)` rather than `err.message`: the catch is
+      // deliberately catch-ALL, so it catches throws that are not Errors. A
+      // rejection with `null` made this line throw a TypeError, turning the
+      // refusal into the abort it exists to prevent — found by the test that
+      // enumerates non-Error throws, not by reading.
+      const detail = err?.message ?? String(err);
       return {
         ok: false,
         reason:
-          `the engine "${engine}" could not run the "${stage}" stage — ${err.message}. ` +
+          `the engine "${engine}" could not run the "${stage}" stage — ${detail}. ` +
           'Refusing rather than falling back: an engine you named and did not get is not ' +
           'the same state as one you never named, and a review from a model you did not ' +
           'choose would look exactly like a review from one you did.',

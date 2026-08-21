@@ -104,6 +104,39 @@ test('an engine with no backend FILE at all is refused, not fallen back from', a
   assert.deepEqual(dispatched, ['no-such-engine-at-all'], 'exactly one engine may be tried, and it is the named one');
 });
 
+test('a throw dispatch does NOT spell out is still a refusal', async () => {
+  // The module claims "every throw is a refusal, not just the two `dispatch`
+  // spells out". Measured: narrowing the catch to
+  // `/not found|does not implement/` left the whole suite GREEN — the claim had
+  // no reader, and the seam would have started RETHROWING the day a third
+  // failure mode appeared. A rethrow out of `runColdReviewStage` aborts
+  // `brain:review` instead of reporting a transport failure the operator can
+  // read, so the hole is not theoretical: a backend whose module throws at
+  // import time for its own reasons already produces a message matching neither
+  // pattern.
+  const seam = makeRunStageSeam({
+    dispatch: async () => { throw new Error('EACCES: permission denied, open /opt/engines/plain.mjs'); },
+  });
+
+  const result = await seam({ ...CALL, engine: 'plain' });
+
+  assert.equal(result.ok, false, 'an unfamiliar failure must refuse, not escape');
+  assert.match(result.reason, /EACCES/, 'and must carry what actually went wrong');
+  assert.match(result.reason, /Refusing rather than falling back/);
+});
+
+test('a non-Error throw is refused too, without crashing on .message', async () => {
+  // The catch reads `err.message`. A backend rejecting with a string or an
+  // object has no `.message`, and reading it would put `undefined` in the reason
+  // — or throw, turning a refusal into an abort.
+  for (const thrown of ['a bare string', { code: 'ENOENT' }, 42, null]) {
+    const seam = makeRunStageSeam({ dispatch: async () => { throw thrown; } });
+    const result = await seam({ ...CALL, engine: 'plain' });
+    assert.equal(result.ok, false, `refuses after throwing ${JSON.stringify(thrown)}`);
+    assert.match(result.reason, /Refusing rather than falling back/);
+  }
+});
+
 test("a backend that DOES implement runStage has its answer returned untouched", async () => {
   const answer = { ok: false, reason: 'the engine exited with status 137' };
   const seam = makeRunStageSeam({
