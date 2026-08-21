@@ -16,8 +16,14 @@
 
 ## Slice B — the transport
 
-- [ ] B.1 Draft the ADR (`brain-drafts/`) — network, credential and determinism. Promote
-      it (Route B) before B.2. It decides, and this tracker does not proceed without it.
+- [x] B.1 Draft the ADR (`brain-drafts/`) — network, credential and determinism. Promote
+      it before B.2. It decides, and this tracker does not proceed without it.
+      **ADR-0033, promoted and signed 21/08/2026.** Its own preamble carried a
+      `**Status**:` line as ordinary text and `single-status-line` refused the first
+      attempt: the verb writes the signature header itself, so the house shape is the
+      blockquote it strips. Recorded because the pre-check that missed it validated the
+      PARSER (`transformDraft`) and not the GUARDS — two different layers, and only the
+      second is what refuses.
 - [ ] B.2 `sdd.map` with `cold-review` as its first entry; `{engine, model}`, `model`
       opaque (D7).
 - [ ] B.3 The harness op: spawn an engine with a prompt and a model (REQ-S3-2). Additive,
