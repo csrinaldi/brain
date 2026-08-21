@@ -2,12 +2,23 @@
 
 ## Slice A — the contract, before the transport
 
-- [ ] A.1 Define ` ```brain-findings/1 ` and its reader: the fields are `CARRIED_FIELDS`,
+- [x] A.1 Define ` ```brain-findings/1 ` and its reader: the fields are `CARRIED_FIELDS`,
       the tag is the selector, and a file carrying `protocol:` shape is REFUSED with the
-      reason (#495 D1).
-- [ ] A.2 The reader fails closed on missing / unparseable / malformed, and reports
-      "ran and found nothing" as a distinct state (REQ-S3-4). Prove both with a mutation
-      that makes them render identically and watch a test die.
+      reason (#495 D1). `review/lib/findings-artifact.mjs`.
+      **The payload is JSON, and the reason is measured, not preferred.** Against the
+      verdict's own list reader: the same findings list parses to 1 entry at 2-space
+      indent (what `renderVerdict` emits), and to **0 entries** at 0-indent and at
+      4-space — silently, as an empty list rather than as uncomputable. Its regexes are
+      anchored to one emitter's indentation. Survivable for a block this repo rendered;
+      not for a file a model writes, where indentation is the detail nobody controls.
+- [x] A.2 The reader fails closed on missing / unparseable / malformed, and reports
+      "ran and found nothing" as a distinct state (REQ-S3-4), proven by mutation.
+      **The first cut of that pin was blind along the PATH axis** — it asserted
+      `findings === undefined` on ONE failure branch while its message claimed to cover
+      "a failure", and a mutation adding `findings: []` to the missing-file branch
+      survived the file green. The oracle now enumerates all nine `ok: false` branches.
+      Re-run against three separate branches: three deaths. Six mutations total, full
+      file each, tree reverted clean after every one.
 - [ ] A.3 Wire the reader to `gatherInferentialInputs` as a `deps.generate` that reads a
       file instead of calling a model. **The judgment half runs end to end at this
       point, with a hand-written artifact** — before any agent is spawned.
