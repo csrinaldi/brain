@@ -31,8 +31,18 @@
       `main` a `generate` directly, so `deps.inferentialDeps ?? artifactDeps(...)` could
       be deleted and the suite would stay green. Mutation-checked — deleting the glue
       now kills a test.
-- [ ] A.4 Prove REQ-S3-5 against a real posted review: a finding with `file`+`line`
-      appears as an inline comment. This is M3's exit criterion, reached.
+- [x] A.4 Prove REQ-S3-5 against a real posted review: a finding with `file`+`line`
+      appears as an inline comment. **M3's exit criterion, reached** — and reached
+      without spawning anything, because the stage's engine is a file the test wrote.
+      Driven through the real verb in the e2e fixture: the anchored finding rides as a
+      comment on `big.txt:3` carrying its evidence, the un-anchorable one stays in the
+      summary block, `event` is still `COMMENT`, and the verdict declares `inferential`.
+      **The tripwire moved rather than being deleted**, as its own instruction required
+      — it had survived three owners. Its basis changed and had to be restated: the
+      transport now EXISTS and that fixture does not configure it, which is a different
+      fact from "the transport does not exist" and is the state every repo sees until it
+      runs the stage. The two pins are complements — without the pair, "no comments
+      appeared" and "comments cannot appear" are the same observation.
 
 ## Slice B — the transport
 
