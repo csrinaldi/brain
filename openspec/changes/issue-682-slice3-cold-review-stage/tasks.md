@@ -128,8 +128,63 @@
       that `VALID_OPS` "still routes one op". B.3 made that false. `brain/roles/`
       still does not exist, which is the half carrying the argument — and a stale
       measurement reads exactly like a current one.
-- [ ] B.5 The stage writes `openspec/reviews/pr-NNN/` and does not commit (REQ-S3-3).
-      Pin the not-committing: a test that fails if the run leaves the tree dirty.
+- [x] B.5 The stage writes `openspec/reviews/pr-NNN/` and does not commit (REQ-S3-3).
+      ~~Pin the not-committing: a test that fails if the run leaves the tree dirty.~~
+      `review/lib/run-cold-review-stage.mjs`.
+
+      **This task's own second sentence was wrong, and implementing it literally
+      would have inverted the requirement.** The run necessarily leaves the tree
+      dirty — the artifact is an untracked file, and that is the point. A test
+      failing on a dirty tree would fail on correct behaviour, or would be made to
+      pass by having the stage not write at all. REQ-S3-3's property is that the
+      run creates **no commit and no other mutation**, which is a different
+      sentence: HEAD unmoved, index untouched, no tracked file modified, and the
+      artifact the ONLY worktree change.
+
+      **"It performs no git operations" is a claim about an absence**, which no
+      assertion about the module's source can check and which a later edit could
+      quietly undo. Measured from outside instead: the run happens inside a real
+      repository and `git status` is read afterwards. Stronger than "did not
+      commit" — a stage that committed nothing but rewrote three tracked files
+      would pass that and still have corrupted the diff the verdict is about.
+
+      **The post-run existence check is a fold, not a crash.** An engine exiting 0
+      having written nothing leaves no artifact; `makeArtifactGenerate` reads that
+      as `null`, and the verdict says *"enabled but no transport is configured"* —
+      word for word what a repo that never routed the stage is told. Without the
+      check, a silent no-op engine tells the operator who configured it that they
+      did not. #552's fold, one layer up, at the producer instead of the runner.
+
+      **No default `runStage`.** Defaulting to one backend would hand it every
+      engine a repo routes to — B.6's silent degradation, shipped one commit early
+      — so the seam is required and the resolution lands with its refusal in B.6.
+
+      Ten mutations, full suite each, tree reverted after every one. Seven died
+      first pass. **Two survived, and both were blind oracles of a kind this
+      ticket keeps producing:**
+
+      - **N2** moved the `mkdir` ahead of the routing guard, so an unrouted repo
+        got a directory for a run that never happened — and the suite stayed
+        green. Both "nothing was created" assertions read `git status`, and **git
+        does not track empty directories** at any `-u` level. Git is the right tool
+        for "did it commit" and the wrong one for "did it create a directory".
+        Asked of the filesystem now.
+      - **N6** replaced `routing.engine`/`routing.model` with the literals
+        `'claude'` / `'claude-opus-5'` — invisible, because the only fixture
+        driving that assertion routed to exactly those two values. **An oracle
+        whose fixture equals the hardcode it is meant to catch is not an oracle.**
+        Two distinct routings now, one with a `null` model, which also pins that
+        an absent model stays absent rather than acquiring a default (#323).
+
+      Fourth and fifth occurrences on this ticket. Both were found by mutation,
+      neither by reading.
+
+      **One comment was upgraded from claim to measurement.** `-uall` is load-
+      bearing rather than tidiness: plain `--porcelain` collapses a wholly
+      untracked directory to `?? openspec/`, under which a stray file dropped
+      beside the artifact is invisible. N9 (stray log) dies with `-uall`; N10 (the
+      same stray log, listing reverted to plain `--porcelain`) SURVIVES. The
+      comment says so because it was run, not because it sounded right.
 - [ ] B.6 An engine with no backend REFUSES rather than degrading (REQ-S3-1).
 
 ## Slice C — the bound and the close
