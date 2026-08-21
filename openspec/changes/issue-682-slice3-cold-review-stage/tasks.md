@@ -81,8 +81,53 @@
       A non-zero exit is a FAILURE, and so is `status: null` — `spawnSync` reports a
       timeout through `error`, so a guard reading only `status !== 0` lets a hung engine
       through as clean.
-- [ ] B.4 The provisional role prompt, with its debt recorded against #312 **in
+- [x] B.4 The provisional role prompt, with its debt recorded against #312 **in
       `tasks.md` and on the ticket**, not only in a header comment (D8).
+      `review/lib/cold-review-prompt.mjs`.
+
+      **THE DEBT, recorded here as D8 requires.** The cold-reviewer role is a
+      string in `cold-review-prompt.mjs`. It belongs to #312's role port, is an
+      instance of #576's Adversary archetype, and is the role #754 says exists
+      nowhere. It lives in the reviewer's `lib/` because `brain/roles/` does not
+      exist and this stage could not run without a role. **WHEN #312 LANDS:
+      delete the module and read the role from the port** — there is no half of
+      that file that is reviewer policy rather than role content, so it is a
+      clean deletion, not a split. That distinguishes it from
+      `resolve-challenger.mjs`, where the AXIS resolution stays.
+
+      **The prompt is DERIVED from the reader, not restated beside it.** Fence
+      tag, carried fields, evidence classes, causal dispositions and artifact
+      path are all interpolated from the constants `readFindingsArtifact` uses. A
+      restated contract goes stale the first time a field moves, and the failure
+      is invisible: the engine writes a file, exits 0, the reader silently drops
+      the field, and the review is merely quieter than it should be.
+      `severity` is the one literal — no `ALLOWED_SEVERITIES` exists, and
+      inventing one no validator reads would BE the defect — so the test reads
+      `reviewer-protocol.md`'s own `severity:` line and requires the two to agree.
+
+      **The oracle is the reader, run over the whole prompt.** The role embeds a
+      worked example in the artifact's shape; the test feeds the entire prompt to
+      `readFindingsArtifact` unmocked. Twelve mutations, full suite each, tree
+      reverted after every one — eleven died on the first pass.
+
+      **The twelfth survived, and it was my own test that was blind.** Inverting
+      the instruction to *"if you find nothing, omit the file"* left the suite
+      green: the test replaced the example block with `[]` itself, so it never
+      read the sentence its message said it executed. The engine would have been
+      told to signal "found nothing" by producing the one state that reads as
+      "never ran" — REQ-S3-4's fold, re-created one layer up at the instruction.
+      Split into two claims that do not substitute for each other, and M12 dies now.
+      Third occurrence of this defect class in my own test code on this ticket.
+      Two others were found and closed the same way before commit: the vocabulary
+      assertion was blind to an EXTRA value (`includes(join(' | '))` passes when
+      the prompt lists a fourth class the validator rejects), and the round-trip
+      test claimed in a comment to cover the posted-family refusal "without a
+      second assertion" — a coverage claim in a comment, now executed.
+
+      Also corrected here: `resolve-challenger.mjs`'s PROVISIONAL header measured
+      that `VALID_OPS` "still routes one op". B.3 made that false. `brain/roles/`
+      still does not exist, which is the half carrying the argument — and a stale
+      measurement reads exactly like a current one.
 - [ ] B.5 The stage writes `openspec/reviews/pr-NNN/` and does not commit (REQ-S3-3).
       Pin the not-committing: a test that fails if the run leaves the tree dirty.
 - [ ] B.6 An engine with no backend REFUSES rather than degrading (REQ-S3-1).
