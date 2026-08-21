@@ -307,18 +307,36 @@ test('e2e: a finding OUTSIDE the base-reproducible set never reaches follow_ups,
     'BASE_REPRODUCIBLE_GATES) or the render/parse contract changed — check WHICH before moving this.');
   assert.doesNotMatch(body, /^follow_ups:/m,
     'and the posted body carries no follow_ups block — the wire-level half of the same pin');
-  // No evaluator emits evidence_class: inferential: the refuter must not have run.
+  // MOVED, not deleted — #682 acceptance criterion 4, honouring the instruction
+  // its author left for #408 and #552 honoured before this.
   //
-  // #552 RULED on this rather than leaving it pending. The ruling is (a) — a
-  // reasoning evaluator IS worth building, the reason arrived after this pin was
-  // written — but SEQUENCED behind a refuter that can actually run. So a red here
-  // now means one specific thing: a producer landed. Check, in this order, that
-  // `refuterRunner` is wired in production (it was null at every call site when
-  // #552 was ruled) and that the verdict distinguishes challenged from
-  // unchallenged. Then move this pin onto the new behaviour — do not delete it.
+  // Both conditions the previous form told the reader to check have now landed.
+  // `refuterRunner` IS wired in production (`resolve-challenger.mjs`, #682 slice
+  // 1: the challenger is constructed from config and tier at the seam #552 left),
+  // and the verdict DOES distinguish challenged from unchallenged — `routed:human`
+  // and `unchallenged` render differently and both round-trip.
+  //
+  // So the pin moves onto what is true now: an inferential evaluator EXISTS
+  // (`evaluators/inferential.mjs`) and does not run, because `shouldRun` needs a
+  // transport and slice 3 supplies it. The distinction that matters to a reader
+  // is no longer "no producer exists" but "no producer RAN", and #690's
+  // complement is where a verdict says so.
+  //
+  // A red here now means the transport landed. When it does, this pin moves once
+  // more — onto a verdict that carries an inferential finding AND names the axis
+  // that challenged it (REQ-682-3). Do not delete it.
   assert.ok(verdict.findings.every(f => f.evidence_class !== 'inferential'),
-    'an inferential finding appeared — the refuter fork is live. #552 ruled that a judgment ' +
-    'producer ships only behind a runnable refuter; verify that landed too, then move this pin.');
+    'an inferential finding appeared — the judgment producer is live. Verify the axis is ' +
+    'declared on the verdict (REQ-682-3) and that the challenger actually ran, then move this pin.');
+  // deepEqual, not `!(x ?? []).includes(...)`. `parseVerdict` does NOT assign
+  // `controls` when the field fails its vocabulary check — it pushes to
+  // `malformed` — so the `?? []` form passed having observed NOTHING whenever
+  // the field was unreadable. That is the identical shape this test's own F1
+  // comment diagnoses for `follow_ups` twenty lines above, re-created in the
+  // assertion added to fix a different blindness.
+  assert.deepEqual(verdict.controls, ['deterministic'],
+    'the verdict must declare EXACTLY the controls it applied — a run may only declare controls ' +
+    'it APPLIED (controls.mjs), and an unreadable field must fail here rather than read as absent.');
   // And the gate-shaped source is genuinely live end to end (see the fixture note
   // above) — without this, `redJob` could be silently broken and nothing would say so.
   assert.ok(verdict.findings.find(f => f.id === 'gate:phase-order'),
@@ -365,13 +383,39 @@ function rejectedBodies(fx) {
   return readFileSync(p, 'utf8').trim().split('\n').map(l => JSON.parse(l));
 }
 
-test('e2e: today NO evaluator anchors, so the real CLI posts NO comments key — and this is the tripwire for the first one that does (REQ-405-2/8)', (t) => {
+test('e2e: the producer runs with NO TRANSPORT, so nothing anchors and no comments key is posted — the tripwire for the first run that does (REQ-405-2/8, moved by #682)', (t) => {
   // The additive guarantee, measured at the real process boundary rather than
   // reasoned about: widening the port must leave every shipping evaluator's
-  // payload byte-for-byte what it was. When an evaluator starts emitting
-  // `file`/`line` this case goes red — MOVE it to that change, do not delete it;
-  // a red here means inline comments became reachable from the CLI, which is
-  // the event #405 exists to make possible.
+  // payload byte-for-byte what it was.
+  //
+  // MOVED ONCE (#682), and the instruction it carried is honoured rather than
+  // discharged. Its previous form said: "when an evaluator starts emitting
+  // file/line this case goes red — MOVE it to that change, do not delete it".
+  //
+  // That evaluator now EXISTS. `evaluators/inferential.mjs` carries `file` and
+  // `line` in `CARRIED_FIELDS`, and feeding it a generator that emits them
+  // produces real inline comments through `poster.deriveInlineComments` — the
+  // path #405 built end to end and left with zero producers. Measured, not
+  // predicted: two produced findings, one anchored, the un-anchorable one
+  // degrading into the summary block exactly as REQ-405-4 designed.
+  //
+  // So the pin moves onto what is true now — and the FIRST attempt at this move
+  // got the reason wrong, which is worth leaving visible. It said "the producer
+  // does not RUN in this fixture". It does: `regulated` enables the half and
+  // resolves `brain-review/2`, so `judgment.run` is true, and this fixture's own
+  // posted verdict proves it by carrying the `enabled but no transport`
+  // condition — which is pushed only inside `if (judgment.run)`.
+  //
+  // What is actually missing is the TRANSPORT. The producer runs, has no
+  // generator, emits nothing, and therefore nothing anchors. A pin whose stated
+  // basis is false is worse than a deleted one, because it reads as protection
+  // while guarding a state that does not exist.
+  //
+  // A red here now means the transport landed and the judgment half is live in
+  // a real CLI run. When it does, this pin moves ONCE MORE — onto a posted
+  // payload that DOES carry `comments`, with the un-anchorable finding still in
+  // the summary block. Do not delete it. This is the second move; the
+  // instruction has now survived three owners.
   const fx = withFixture(t, { tier: 'regulated' });
   const r = runReview(fx);
   assert.equal(r.status, 0, r.stderr);
@@ -382,6 +426,16 @@ test('e2e: today NO evaluator anchors, so the real CLI posts NO comments key —
     'findings must exist — otherwise "no comments" would be true for the boring reason and this case would observe nothing');
   assert.ok(verdict.findings.every(f => f.file === undefined && f.line === undefined),
     `an evaluator has started anchoring: ${JSON.stringify(verdict.findings)}`);
+  // The half that moved: an evaluator CAPABLE of anchoring now exists, so the
+  // absence above must be attributable to it not having RUN, never to nothing
+  // being able to. If a reasoned finding appears here, the transport landed.
+  assert.ok(verdict.findings.every(f => f.evidence_class !== 'inferential'),
+    'the judgment half PRODUCED in this fixture — move this pin onto the anchored payload');
+  // The basis, asserted rather than described: the half IS running, and what is
+  // absent is the transport. If this line ever fails, the pin's reason changed
+  // and its comment above must change with it.
+  assert.ok(posted[0].body.includes('enabled but no transport is configured'),
+    'the fixture must reach the producer with no generator — that is the state this pin describes');
   assert.equal('comments' in posted[0], false,
     `no anchor means no inline request at all — got: ${JSON.stringify(Object.keys(posted[0]))}`);
   assert.equal(posted[0].event, 'COMMENT', 'ADR-0020 lock 2: the event stays COMMENT, unreachable by any parameter');

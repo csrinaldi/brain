@@ -162,6 +162,9 @@ export function evaluateTranche({
       gates: { required: [], detection: [] },
       findings: [],
       conditions: [rollupUncomputableCondition(requiredGates)],
+      // #750: the softening in verdict.mjs must be able to see WHY this
+      // evaluator said REVISE — uncomputable evidence, never a blocker.
+      conclusionCauses: ['uncomputable'],
     };
   }
 
@@ -198,6 +201,11 @@ export function evaluateTranche({
       gates: { required: [...requiredJobs], detection: [...detectionJobs] },
       findings,
       conditions: ['evidence uncomputable: budget diff (base sha unresolvable outside CI)'],
+      // #750: `findings` is read AGAIN here, not reused from below — it is
+      // still growing (the budget finding below never gets pushed on this
+      // path), so this is a second, independent measurement of the same
+      // mutating list, not duplicated logic.
+      conclusionCauses: [...(findings.some((f) => f.severity === 'blocker') ? ['blocker'] : []), 'uncomputable'],
     };
   }
 
@@ -246,9 +254,17 @@ export function evaluateTranche({
     });
   }
 
-  const conclusion = findings.some(f => f.severity === 'blocker') ? 'REVISE' : 'APPROVE';
+  const anyBlocker = findings.some(f => f.severity === 'blocker');
+  const conclusion = anyBlocker ? 'REVISE' : 'APPROVE';
 
-  return { conclusion, gates: { required: [...requiredJobs], detection: [...detectionJobs] }, findings, conditions: [] };
+  return {
+    conclusion,
+    gates: { required: [...requiredJobs], detection: [...detectionJobs] },
+    findings,
+    conditions: [],
+    // #750: APPROVE never declares 'blocker' — there is nothing that caused it.
+    conclusionCauses: anyBlocker ? ['blocker'] : [],
+  };
 }
 
 function defaultDiffNumstat({ cwd = process.cwd() } = {}) {

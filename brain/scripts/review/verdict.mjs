@@ -146,8 +146,14 @@ function applySchemaGate(findings) {
 export function buildVerdict({
   headSha,
   conclusion,
+  // #750 — fail-closed default. `['blocker']` would be the CONVENIENT
+  // default and is exactly wrong: an evaluator (or legacy caller) that
+  // declares nothing must not be softened, silence fails closed by
+  // construction, not by luck.
+  conclusionCauses = [],
   protocol = 'brain-review/1',
   controls = [],
+  judgmentAxis = null,
   priorRevCount = 0,
   findings = [],
   gates = {},
@@ -191,6 +197,30 @@ export function buildVerdict({
     }
   }
 
+  // #682 — THE CONCLUSION IS RAISED BEFORE ANYTHING READS IT, and the ordering
+  // is the whole of the fix. Round 2 measured what the first cut cost:
+  //
+  //   · §7's bound was DISARMED. `boundHit` reads `conclusion`, so raising
+  //     afterwards meant a fourth REVISE never hit the bound: a corroborated
+  //     reasoned blocker at `priorRevCount: 4` rendered `REVISE / escalate:
+  //     null` where the pre-fix placement rendered `STOP / escalate: human`.
+  //     §7 says no infinite revise loop is possible BY CONSTRUCTION — the
+  //     construction was this order.
+  //
+  // It cannot move to `cli.mjs` either, which was the other candidate: the
+  // blocking set does not exist there. Routing by `causal_disposition`, the
+  // cites gate that downgrades an uncited blocker, and the inadmissible drop
+  // all happen below, so a raise upstream would fire on findings these gates
+  // then remove.
+  //
+  // So: here, and FIRST. `candidateFindings` is the set after routing, and
+  // `blockerRemains` is the house rule (`REVISE iff a blocker exists`,
+  // tranche.mjs) evaluated on the state a reader of this verdict will see.
+  const blockerRemains = candidateFindings.some((f) => f.severity === 'blocker');
+  const raisedConclusion = (blockerRemains && conclusion !== 'REVISE' && conclusion !== 'STOP')
+    ? 'REVISE'
+    : conclusion;
+
   // #506 — `priorRevCount` is now the count AT THIS HEAD (see verdictsAtHead), so
   // the bound measures what §7 means: iterations on one disagreement, not how many
   // times the reviewer was invoked over a long-lived PR's life.
@@ -201,20 +231,64 @@ export function buildVerdict({
   // that escalation says "the reviewer cannot determine whether this finding is
   // caused by the diff", which a ruling on iteration count does not answer. Two
   // escalations, two questions, and only one of them is about going around in circles.
-  const boundHit = priorRevCount >= 3 && conclusion === 'REVISE' && !rulingAtHead;
+  const boundHit = priorRevCount >= 3 && raisedConclusion === 'REVISE' && !rulingAtHead;
   const shouldEscalate = boundHit || unknownCausality;
   const finalEscalate = shouldEscalate ? 'human' : escalate;
-  
-  let finalVerdict = conclusion;
+
+  // CHAIN REVIEW — a verdict may not APPROVE while it ESCALATES.
+  //
+  // Measured on the shipped chain: a reasoned blocker with no `cites` is a
+  // BLOCKER when `evaluateRefuter` picks its batch (`severity === 'blocker'`,
+  // inside `applyCausalAdmission`) and a CORRECTION by the time the conclusion
+  // is computed, because the evidence drop and the uncited downgrade run later,
+  // in this function. So `blockerRemains` never raises — while the challenge's
+  // `escalate: 'human'` and its "N inferential blocker(s) were NOT challenged"
+  // condition both survive into an APPROVE.
+  //
+  // Two links disagreeing about what a blocker IS. No per-PR review could see
+  // it: the batch selection ships in one slice and the conclusion derivation in
+  // another.
+  //
+  // The rule is coherence, not a patch for that one route: escalation means a
+  // person must look, APPROVE means nothing blocks, and a reader cannot hold
+  // both. `unknownCausality` and `boundHit` already force STOP for the same
+  // reason; the refuter's escalation had no such rule and needed one.
+  const escalates = finalEscalate === 'human';
+
+  // #750 — the length check is HALF the rule, not padding.
+  // `[].every(c => c === 'blocker')` is vacuously `true` in JavaScript, so
+  // without `conclusionCauses.length > 0` a caller that declares NO cause
+  // would soften exactly like one that declared 'blocker' — the same
+  // silent-approve trap #483 came to fix, wearing a new field's name.
+  const causeIsBlockerOnly = conclusionCauses.length > 0 && conclusionCauses.every((c) => c === 'blocker');
+
+  let finalVerdict = raisedConclusion;
   if (boundHit || unknownCausality) {
     finalVerdict = 'STOP';
-  } else if (protocol === 'brain-review/2' && processed.length > 0 && candidateFindings.length === 0 && conclusion === 'REVISE') {
+  } else if (escalates && raisedConclusion === 'APPROVE') {
+    // The coherence rule stated above. It sits BEFORE the softening on purpose:
+    // an escalating verdict must not be softened into an APPROVE either.
+    finalVerdict = 'REVISE';
+  } else if (protocol === 'brain-review/2' && processed.length > 0 && candidateFindings.length === 0 && raisedConclusion === 'REVISE' && !escalates && causeIsBlockerOnly) {
     // #483: `processed.length`, not `findings.length`. The softening means
     // "every finding that exists was routed OUT of the blocking set by the
     // admission rule". Measured against the raw input, a verdict whose
     // findings were all DROPPED as inadmissible satisfies it vacuously and
     // softens REVISE to APPROVE on the strength of findings nobody ever read —
     // fail-open, from the same silent drop this ticket came to fix.
+    //
+    // #682 round 1 widened this to `!blockerRemains` and round 2 REVERTED it,
+    // because the widening was both unnecessary and harmful. `checkpoint.mjs`
+    // derives REVISE from three causes and only one is "a blocker exists"; the
+    // third is §10's uncomputable-evidence rule. Under the widening, a verdict
+    // carrying `conditions: ["evidence uncomputable: …"]` rendered APPROVE —
+    // the verdict approving while declaring it could not compute its evidence,
+    // which is §10 exactly inverted.
+    //
+    // And it was unnecessary: the case it was written for (a REFUTED claim
+    // leaving REVISE) came from the PRE-challenge flip in `cli.mjs`, which is
+    // gone. With the raise computed from the post-challenge set, a refuted
+    // claim never raises in the first place, so there is nothing to soften.
     finalVerdict = 'APPROVE';
   }
 
@@ -227,6 +301,7 @@ export function buildVerdict({
   return {
     protocol,
     controls,
+    judgmentAxis,
     verdict: finalVerdict,
     head_sha: headSha,
     rev: priorRevCount + 1,
@@ -355,6 +430,21 @@ export function renderVerdict(v) {
   // "did not run" list drifts from CONTROL_CLASSES the first time either changes.
   // It shrinks to [] by itself the day #682's evaluator runs.
   lines.push(`controls_not_applied: [${complementControls(v.controls ?? []).map((c) => JSON.stringify(c)).join(', ')}]`);
+
+  // REQ-682-3 — the axis that challenged the reasoned findings, on the wire.
+  //
+  // Emitted ONLY when a reasoned finding exists, for #690's reason: a constant
+  // that fires on every verdict turns its channel into wallpaper, and an axis
+  // that challenged nothing is not evidence about this verdict.
+  //
+  // Without it two verdicts render byte-identically when one was challenged by
+  // the same model and the other by a different family — two evidentiary
+  // strengths, one rendering, produced by a configuration option. That is #683's
+  // rule one field over: a same-model-challenged verdict must not read like a
+  // cross-family-challenged one.
+  if (v.judgmentAxis && (v.findings ?? []).some((f) => f.evidence_class === 'inferential')) {
+    lines.push(`challenger_axis: ${yamlScalar(v.judgmentAxis)}`);
+  }
   if (v.pin) lines.push(`pin: ${yamlScalar(JSON.stringify(v.pin))}`);
   if (v.sequencing) lines.push(`sequencing: ${yamlScalar(JSON.stringify(v.sequencing))}`);
   lines.push(`escalate: ${v.escalate ?? 'null'}`, '```');

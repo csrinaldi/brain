@@ -172,10 +172,16 @@ test('renderVerdict: emits a fenced yaml block naming protocol, verdict, and hea
 // ── Causal Admission Rules (REQ-H2-3) ──────────────────────────────────────
 
 test('buildVerdict: pre-existing or base-only findings do NOT trigger REVISE and are routed to follow_ups[]', () => {
+  // #750: `conclusionCauses: ['blocker']` is a REQUIRED, deliberate addition —
+  // this fixture's concern is routing (pre-existing/base-only → follow_ups),
+  // not the cause-gated softening, and without a declared cause the new
+  // fail-closed default would flip this to REVISE and read as an unrelated
+  // regression. Same treatment as the :923-area fixture, for the same reason.
   const v = buildVerdict({
     headSha: HEAD_SHA,
     conclusion: 'REVISE',
     protocol: 'brain-review/2',
+    conclusionCauses: ['blocker'],
     findings: [
       {
         id: 'f1',
@@ -822,4 +828,221 @@ test('#690: an unknown member of the complement is UNREADABLE, exactly as it is 
   assert.deepEqual(parsed.controls, ['deterministic'], 'the readable half still reads');
   assert.equal(parsed.controls_not_applied, undefined);
   assert.deepEqual(parsed.malformed, ['controls_not_applied']);
+});
+
+test('#682: the raise happens BEFORE §7 reads the conclusion', () => {
+  // Round 2's regression, pinned. `boundHit` reads the conclusion, so raising
+  // afterwards meant a fourth REVISE never hit §7's bound.
+  const blocker = [{
+    id: 'judgment:J1', severity: 'blocker', evidence_class: 'inferential',
+    causal_disposition: 'introduced', evidence: 'e', cites: 'c',
+  }];
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'APPROVE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] }, findings: blocker, priorRevCount: 4,
+  });
+  assert.equal(v.verdict, 'STOP', '§7 forbids a fourth REVISE — the raise must be visible to the bound');
+  assert.equal(v.escalate, 'human');
+});
+
+test('#682: the softening does not APPROVE over uncomputable evidence when a blocker survives routing', () => {
+  // NAMED PRECISELY, because the first version of this test was called "never
+  // APPROVEs over uncomputable evidence" and its fixture used
+  // `causal_disposition: 'introduced'` — the one disposition that keeps
+  // `candidateFindings` non-empty, i.e. the single case the softening cannot
+  // reach. A pin asserting "never" while testing the one input that cannot
+  // falsify it is worse than no pin: it reads as closure.
+  //
+  // What this actually pins is the case #682 round 1 broke and round 2 fixed:
+  // widening the guard to `!blockerRemains` let an uncomputable REVISE soften.
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'REVISE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [{
+      id: 'c1', severity: 'correction', evidence_class: 'deterministic',
+      causal_disposition: 'introduced', evidence: 'e', cites: 'c',
+    }],
+    conditions: ['evidence uncomputable: TDD-RED reversion (base sha unresolvable)'],
+  });
+  assert.equal(v.verdict, 'REVISE');
+});
+
+test('#750: a routed-out blocker no longer softens an uncomputable REVISE — the §10 gap named "KNOWN GAP" is CLOSED', () => {
+  // This REPLACES the KNOWN GAP pin (do not delete it, per that pin's own
+  // instruction) with the closure it named. Same fixture: `causal_disposition:
+  // 'pre-existing'` still empties `candidateFindings`, so #483's softening
+  // still WANTS to fire — but the evaluator that produced this verdict also
+  // said its budget/reversion evidence was uncomputable, and #750's sixth
+  // conjunct now reads that declaration. §10 says never APPROVE on
+  // uncomputable evidence; this route no longer does.
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'REVISE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [{
+      id: 'g1', severity: 'blocker', evidence_class: 'deterministic',
+      causal_disposition: 'pre-existing', evidence: 'e', cites: 'c',
+    }],
+    conditions: ['evidence uncomputable: TDD-RED reversion (base sha unresolvable)'],
+    conclusionCauses: ['blocker', 'uncomputable'],
+  });
+  assert.equal(v.verdict, 'REVISE',
+    'an evaluator that declared uncomputable evidence among its causes must never be softened to APPROVE');
+});
+
+// ── #750: the softening's sixth conjunct reads the declared cause ──────────
+
+function softenableFixture(conclusionCauses) {
+  return {
+    headSha: 'a'.repeat(40), conclusion: 'REVISE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [{
+      id: 'g1', severity: 'blocker', evidence_class: 'deterministic',
+      causal_disposition: 'pre-existing', evidence: 'e', cites: 'c',
+    }],
+    ...(conclusionCauses !== undefined ? { conclusionCauses } : {}),
+  };
+}
+
+test('#750: conclusionCauses explicitly [] — fail-closed, the softening does not fire even though [].every(...) is vacuously true', () => {
+  // `[].every(c => c === 'blocker')` is `true` in JavaScript. The length
+  // check is not defensive padding — deleting it flips this fixture to
+  // APPROVE on an evaluator that declared NO cause at all.
+  const v = buildVerdict(softenableFixture([]));
+  assert.equal(v.verdict, 'REVISE');
+});
+
+test('#750: conclusionCauses is mixed (\'blocker\' AND \'uncomputable\') — the softening requires EVERY cause to be blocker, not some', () => {
+  const v = buildVerdict(softenableFixture(['blocker', 'uncomputable']));
+  assert.equal(v.verdict, 'REVISE',
+    'every(c => c === "blocker") must stay every — some() would soften on a mixed cause list');
+});
+
+test('#750: conclusionCauses OMITTED entirely (legacy caller shape) — the fail-closed default is [], not [\'blocker\']', () => {
+  // This re-adds the un-updated fixture from before #750 under a new name: an
+  // evaluator (or a legacy caller) that declares nothing gets the fail-closed
+  // default, not the convenient one. Companion pin to the :923 case below,
+  // which is the SAME shape but WITH `conclusionCauses: ['blocker']` — one
+  // statement each, both on the record.
+  const v = buildVerdict(softenableFixture(undefined));
+  assert.equal(v.verdict, 'REVISE',
+    'an evaluator that declares no cause is not softened — silence fails closed, not open');
+});
+
+// ── #750 cold review C2: three spec scenarios the earlier batch left unpinned ──
+
+test('#750 REQ-750-5: renderVerdict never emits conclusionCauses — it is builder-internal plumbing, not part of the verdict shape', () => {
+  const vBlocker = buildVerdict(softenableFixture(['blocker']));
+  assert.ok(!('conclusionCauses' in vBlocker),
+    'buildVerdict\'s returned object must not carry conclusionCauses');
+  const renderedBlocker = renderVerdict(vBlocker);
+  assert.ok(!renderedBlocker.includes('conclusionCauses'),
+    'the rendered block must not mention conclusionCauses');
+
+  const vUncomputable = buildVerdict(softenableFixture(['uncomputable']));
+  assert.ok(!('conclusionCauses' in vUncomputable));
+  const renderedUncomputable = renderVerdict(vUncomputable);
+  assert.ok(!renderedUncomputable.includes('conclusionCauses'));
+});
+
+test('#750 REQ-750-5: parse-verdict has no reader for conclusionCauses — it is never round-tripped', () => {
+  const v = buildVerdict(softenableFixture(['blocker']));
+  const rendered = renderVerdict(v);
+  const parsed = parseVerdict({ body: rendered });
+  assert.ok(!('conclusionCauses' in parsed),
+    'parseVerdict must not produce a conclusionCauses key — there is no reader for it on the wire');
+});
+
+test('#682: the raise reads the BLOCKING set, not the processed list', () => {
+  // The load-bearing line of the whole "it cannot move to cli.mjs" argument, and
+  // a mutation to it survived the full suite at 4124/4124. `processed` is the
+  // list BEFORE routing; `candidateFindings` is the blocking set after it. A
+  // `base-only` finding is in the first and not the second, so reading the wrong
+  // one raises a conclusion over a finding that was deliberately routed out.
+  const routedOut = [{
+    id: 'g1', severity: 'blocker', evidence_class: 'deterministic',
+    causal_disposition: 'base-only', evidence: 'e', cites: 'c',
+  }];
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'APPROVE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] }, findings: routedOut, priorRevCount: 4,
+  });
+  assert.equal(v.verdict, 'APPROVE',
+    'a base-only blocker is not in the blocking set — raising on it re-blocks what routing excluded');
+  assert.equal(v.escalate, null, 'and it must not trip §7 either');
+});
+
+test('#682 A1: a corroborated reasoned blocker raises the conclusion', () => {
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'APPROVE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [{
+      id: 'judgment:J1', severity: 'blocker', evidence_class: 'inferential',
+      causal_disposition: 'introduced', evidence: 'e', cites: 'c',
+      refuter_outcome: 'corroborated', refuter_rationale: 'r',
+    }],
+  });
+  assert.equal(v.verdict, 'REVISE', 'a blocker that does not block is not a blocker');
+});
+
+test('#682: the original #483 softening still fires — routed-out findings, empty blocking set', () => {
+  // Reverting the widening must not break what the branch was written for.
+  //
+  // #750: `conclusionCauses: ['blocker']` is a REQUIRED, deliberate edit to
+  // this verbatim pin — without it, #750's sixth conjunct (fail-closed
+  // default `[]`) flips this case to REVISE and it would read as an
+  // unexplained regression. The pin immediately above ("OMITTED entirely")
+  // is this edit's justification: both statements are now on the record —
+  // "an evaluator that says 'blocker' still gets #483's softening" (here) and
+  // "an evaluator that says nothing does not" (there).
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'REVISE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [{
+      id: 'g1', severity: 'blocker', evidence_class: 'deterministic',
+      causal_disposition: 'pre-existing', evidence: 'e', cites: 'c',
+    }],
+    conclusionCauses: ['blocker'],
+  });
+  assert.equal(v.verdict, 'APPROVE', 'every finding routed OUT of the blocking set — #483');
+});
+
+test('CHAIN: a verdict may not APPROVE while it ESCALATES', () => {
+  // Found only by reviewing the CHAIN, not the links. A reasoned blocker with no
+  // `cites` is a BLOCKER when `evaluateRefuter` picks its batch and a
+  // `correction` by the time the conclusion is computed — the evidence drop and
+  // the uncited downgrade run later, inside buildVerdict. So the raise never
+  // fires while the challenge's `escalate: human` and its "were NOT challenged"
+  // condition survive into an APPROVE.
+  //
+  // Two links disagreeing about what a blocker IS. The rule pinned here is
+  // coherence, not a patch for that route: escalation means a person must look,
+  // APPROVE means nothing blocks, and a reader cannot hold both.
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'APPROVE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [{
+      id: 'judgment:J1', severity: 'correction', evidence_class: 'inferential',
+      causal_disposition: 'introduced', evidence: 'e', cites: 'c',
+      refuter_outcome: 'unchallenged',
+    }],
+    conditions: ['1 inferential blocker(s) were NOT challenged'],
+    escalate: 'human',
+  });
+  assert.notEqual(v.verdict, 'APPROVE',
+    'a verdict that summons a human cannot also say nothing blocks');
+  assert.equal(v.escalate, 'human');
+});
+
+test('CHAIN: an escalating verdict is not softened into APPROVE either', () => {
+  // The rule sits BEFORE #483's softening on purpose.
+  const v = buildVerdict({
+    headSha: 'a'.repeat(40), conclusion: 'REVISE', protocol: 'brain-review/2',
+    gates: { required: [], detection: [] },
+    findings: [{
+      id: 'g1', severity: 'blocker', evidence_class: 'deterministic',
+      causal_disposition: 'pre-existing', evidence: 'e', cites: 'c',
+    }],
+    escalate: 'human',
+  });
+  assert.notEqual(v.verdict, 'APPROVE');
 });
