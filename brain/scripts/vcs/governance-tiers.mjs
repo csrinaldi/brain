@@ -206,18 +206,7 @@ export const GATE_MATRIX = Object.freeze({
  * What the tier still answers is the approval question, and only that: can this
  * team satisfy an approval requirement (#329, the n=1 self-approval case).
  *
- * `lite` is OFF, and that is load-bearing rather than cautious. A challenger
- * on any axis but `human` needs a model credential, and
- * `test/fresh-install/in-container.sh` enforces that installing and running
- * brain needs NO credential at all (#435's exit criterion, closed 2026-08-18).
- * With no producer there is no reasoned finding; with no reasoned finding
- * there is nothing to challenge; the credential-free claim holds. Turning this
- * on at `lite` falsifies a claim a test asserts — see that file before
- * changing this value.
- *
- * `challengerAxis` is `null` at `lite` because the question does not arise
- * there, never because a default was omitted.
- *
+ * 
  * @type {Record<'lite'|'standard'|'regulated', {
  *   diffBudget: number,
  *   artefacts: string[],

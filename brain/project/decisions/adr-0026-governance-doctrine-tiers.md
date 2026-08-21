@@ -97,7 +97,7 @@ tier may grant the reviewer merge authority**, which would collide with L5 and #
 | `phase-order` | detection | required | required |
 | release gate (rung 2) | detection | required | required |
 | post-merge auto-revert (rung 3) | detection | detection | required |
-| reviewer verdict recorded | — | detection | detection (panel ≥2) |
+| reviewer verdict recorded | — | detection | detection **[Amended by Amendment 7 (#743): the parenthetical `(panel ≥2)` is retired with the parameter row below. The gate's POSITION still tiers — it is `detection` above `lite` — but what it records does not.]** |
 
 ### Doctrine parameters
 
@@ -107,7 +107,7 @@ tier may grant the reviewer merge authority**, which would collide with L5 and #
 | diff budget | 1000 | 400 | 200 |
 | `required_approving_review_count` | **0** | **1** | **1** |
 | `size:exception` honored | yes | yes | no |
-| reviewer verdict mode | deterministic checks only | single engine | panel ≥2, consensus-gated | **[Amended by Amendment 7 (#743) — RETIRED. The review system is not tiered: the protocol is always `brain-review/2` and the judgment half is a config capability. See Amendment 7.]**
+| reviewer verdict mode | deterministic checks only | single engine | panel ≥2, consensus-gated **[Amended by Amendment 7 (#743) — RETIRED. The review system is not tiered: the protocol is always `brain-review/2` and the judgment half is a config capability. See Amendment 7.]** |
 
 ### The seven tier invariants
 
@@ -720,7 +720,11 @@ does, but a correct one that appears durable and is not.
   !botAllowlist.includes(a))`. A non-author human is the point of the tier.
 - **`regulated` → 1, deliberately not 2.** The *"panel ≥ 2, consensus-gated"* row already in
   this table is the **reviewer verdict mode** — how many engines produce the verdict — not the
-  human approval count. Reading it as an approval count would be inventing doctrine, which
+  human approval count. **[Amendment 7 (#743) retired that row. This reason does not depend on
+  it: the point is that engines-producing-a-verdict and humans-approving are different
+  questions, which is true whether or not the row is doctrine. `regulated → 1` stands, and
+  Amendment 7 independently reaffirms that `regulated` keeps the strictest approval content in
+  the set.]** Reading it as an approval count would be inventing doctrine, which
   `reviewer-protocol.md` §5 forbids. If `regulated` should demand two human approvals, that is a
   separate decision with its own reasoning, not an inference from an adjacent row.
 
