@@ -65,8 +65,22 @@
       The migration ships `map: {}`. A shipped `cold-review` entry would turn a spawn on
       for every consumer at upgrade — nobody asked for that, and the default has to be
       the state that asks for nothing.
-- [ ] B.3 The harness op: spawn an engine with a prompt and a model (REQ-S3-2). Additive,
-      and the four SDD artifacts stay produced identically across backends — assert it.
+- [x] B.3 The harness op: spawn an engine with a prompt and a model (REQ-S3-2).
+      `VALID_OPS = ['init', 'run-stage']`, and `runStage` in the `claude` backend.
+      **The additive guarantee is asserted in CODE, not promised.** ADR-0019 rejected two
+      different things, and only the first is ever cited: routing the artifact lifecycle
+      per-backend (forbidden), and treating one op as the ceiling (also rejected — *"the
+      op count is just today's state"*). So the growth is permitted and the fork is what
+      must stay unbuildable: `assertRoutableStage` refuses all four lifecycle stages, and
+      a test drives every one of them through the op. That is what let ADR-0033 land
+      without resolving Compuerta 1 — an argument about which stages are routed is only
+      as good as the thing keeping it true.
+      **Brain does not parse the engine's stdout.** The contract is the file; the engine
+      writes the artifact and slice A's reader reads it. Nothing interprets what the
+      agent said, which is what keeps the boundary auditable.
+      A non-zero exit is a FAILURE, and so is `status: null` — `spawnSync` reports a
+      timeout through `error`, so a guard reading only `status !== 0` lets a hung engine
+      through as clean.
 - [ ] B.4 The provisional role prompt, with its debt recorded against #312 **in
       `tasks.md` and on the ticket**, not only in a header comment (D8).
 - [ ] B.5 The stage writes `openspec/reviews/pr-NNN/` and does not commit (REQ-S3-3).

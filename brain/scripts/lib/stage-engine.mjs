@@ -22,6 +22,44 @@
 export const COLD_REVIEW_STAGE = 'cold-review';
 
 /**
+ * The four stages of the SDD artifact lifecycle — the ones ADR-0019 protects.
+ *
+ * Their artifacts live in a change dir, are walked by `phase-order`'s Rules A
+ * and C, and are consolidated by `change:archive`. ADR-0019's FIRST rejected
+ * alternative is that routing them per-backend would fork that lifecycle:
+ *
+ *   > "Expand `VALID_OPS` to route scaffold/verify/archive per-backend.
+ *   >  REJECTED: … the SDD artifact lifecycle would fork per harness instead of
+ *   >  staying one evidence contract."
+ */
+export const SDD_LIFECYCLE_STAGES = Object.freeze(['proposal', 'spec', 'design', 'tasks']);
+
+/**
+ * assertRoutableStage() — ADR-0019's boundary, made executable.
+ *
+ * ADR-0033 could land without resolving Compuerta 1 (whether M8's router needs a
+ * supersede) for one reason: `cold-review` produces none of the four. That is an
+ * argument about which stages are routed, and an argument is only as good as the
+ * thing that keeps it true. So the code refuses the case the argument excludes,
+ * instead of a comment promising nobody will write it.
+ *
+ * When M8 decides that a lifecycle stage MAY be routed, this function is where
+ * that decision lands — visibly, in a diff, with an ADR beside it.
+ *
+ * @throws {Error} when the stage is one of the four
+ */
+export function assertRoutableStage(stage) {
+  if (SDD_LIFECYCLE_STAGES.includes(stage)) {
+    throw new Error(
+      `stage-engine: "${stage}" is an SDD lifecycle stage and may not be routed to an engine. ` +
+      'ADR-0019 rejected per-backend routing of the artifact lifecycle: it would fork one ' +
+      'evidence contract into one per harness. Routing it is M8\'s decision (#323) and needs ' +
+      'its own doctrine — see ADR-0024 lines 53-55.'
+    );
+  }
+}
+
+/**
  * resolveStageEngine() — PURE.
  *
  * @param {{sdd?: {map?: Record<string, {engine?: string, model?: string}>}}} config

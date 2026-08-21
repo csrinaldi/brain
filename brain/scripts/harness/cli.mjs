@@ -96,7 +96,17 @@ export function resolveHarness({ env = process.env, envVars = {}, config = {} } 
 // ---------------------------------------------------------------------------
 // Valid ops
 // ---------------------------------------------------------------------------
-export const VALID_OPS = ['init'];
+// `run-stage` is ADDITIVE, and ADR-0019's SECOND rejected alternative is the
+// authority — the one never cited in this discussion:
+//
+//   > "Treat the single-`init`-op surface as the normative ceiling. REJECTED: it
+//   >  would force a future legitimate surface op … the four surfaces are the
+//   >  invariant, THE OP COUNT IS JUST TODAY'S STATE."
+//
+// So growing this list needs no amendment. What ADR-0019 forbids is the SDD
+// artifact LIFECYCLE forking per harness, and `assertRoutableStage` refuses that
+// case in code rather than promising it in a comment (#682 slice B, ADR-0033).
+export const VALID_OPS = ['init', 'run-stage'];
 
 // Normalize hyphenated op to camelCase function name.
 // e.g. 'feature-checkpoint' → 'featureCheckpoint'
