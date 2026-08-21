@@ -1,18 +1,26 @@
 # Del reviewer al router — hoja de ruta M5 → M8
 
-*brain · plan de implementación · **rev 3**, medida el 21/08/2026 contra
-`origin/main @ 7621d00`.*
+*brain · plan de implementación · **rev 4**, medida el 21/08/2026 contra
+`origin/main @ 005dc35`.*
 
 Cerrar la cadena de #682, abrir M5 (role-as-port) y M8 (router etapa→engine) sin que
 ninguna decisión quede dispersa en tickets que nadie volverá a leer.
 
-**#758 mergeado** · **#762** abierto con 0.B · tres issues nuevos de las rondas de
-review (#759 #760 #761) · #682 sigue abierto para el slice 3.
+**#758 y #762 mergeados** — la Etapa 0 está cerrada salvo 0.C. Tres issues nuevos de
+las rondas de review (#759 #760 #761) · #682 sigue abierto para el slice 3.
 
-> **2026-08-21 (rev 3)** · `main @ 7621d00`
+> **2026-08-21 (rev 4)** · `main @ 005dc35`
 > Fuente de verdad para la línea M5 → M8. Reemplaza a `AGENT-PRIORITY-HANDOFF.md`,
 > `MASTER-PLAN-1.0.md` y `brain-v2-epic-plan.md` para cualquier pregunta de estado o
 > prioridad.
+>
+> **Qué cambió desde la rev 3.** #762 mergeó, así que **0.B está cerrada** y el ruling
+> de #743 vive en `main`. Su review en frío devolvió cinco hallazgos y uno era un
+> `blocker` que vale registrar como forma: el marcador de la Enmienda 7 se había puesto
+> como **quinta celda en una tabla de cuatro columnas**, y GFM descarta las celdas que
+> sobran — la fila renderizaba idéntica a antes de la enmienda. Una enmienda firmada
+> diciendo una cosa y la fila mostrando la contraria. Se midió contra el renderer de
+> GitHub, no se dedujo. **Cómo renderiza algo es una propiedad a medir, no a suponer.**
 >
 > **Qué cambió desde la rev 2.** La Etapa 0 dejó de ser un plan y pasó a ser historia
 > en su mayor parte: **#758 mergeó** tras cuatro rondas de review en frío, y el ruling
@@ -36,9 +44,9 @@ Este archivo está vencido en cuanto alguna de estas deje de valer.
 
 | Invariante | Comando | Valor al escribir |
 |---|---|---|
-| `origin/main` es `7621d00` | `git rev-parse --short origin/main` | `7621d00` |
-| #762 sigue abierto | `gh pr view 762 --json state --jq .state` | `OPEN` |
-| El ruling de #743 no está en `main` todavía | `git show origin/main:brain/scripts/vcs/governance-tiers.mjs \| grep -c 'inferentialEnabled'` | `5` |
+| `origin/main` es `005dc35` | `git rev-parse --short origin/main` | `005dc35` |
+| El ruling de #743 YA está en `main` | `git show origin/main:brain/scripts/vcs/governance-tiers.mjs \| grep -c 'inferentialEnabled'` | `0` |
+| El slice 3 sigue sin transporte | `git show origin/main:brain/scripts/review/cli.mjs \| grep -c 'deps.generate'` | `0` |
 | M5 sigue en cero | `fd -t d '^roles$' brain/` | (sin salida) |
 
 ## 1 · Dónde estamos, medido
@@ -244,7 +252,7 @@ veredicto posteado» **no es satisfacible desde ningún contenedor** de los que 
 Dos rondas lo descubrieron por separado. Corre en la máquina del maintainer con el PAT,
 o en un job de Actions con el PAT como secret — que no existe todavía y es #604 mitad 2.
 
-#### 0.B — En review · PR #762
+#### 0.B — CERRADA · #762 mergeado el 21/08 a las 15:50
 
 Los nueve puntos de la auditoría, aplicados. **300 líneas gobernadas** contra 1000 —
 revisable como diff, que era exactamente el motivo de sacarlo de #758.
