@@ -129,8 +129,9 @@ does not control. The gate is now checkable: the danger-path e2e suite (#401) mu
 - **The security boundary is sound** — COMMENT-only, never a merge authorizer.
 - ~~Its flow guarantees are inert in production (#317)~~ **Fixed.** `prReviews` carries `body`
   on both providers, so `priorVerdicts`, the anti-loop, the rev≥3 bound, and board reconciliation
-  are live. The refuter and `brain-review/2` causal admission are wired and tier-activated
-  (lite/standard→`/1`, regulated→`/2`; M3 core, merged `5ef85df`).
+  are live. The refuter and `brain-review/2` causal admission are wired at **every tier** — the
+  tiered `/1` default was retired by the #743 ruling of 2026-08-20 (M3 core, merged `5ef85df`;
+  untiered by #743).
 - **Still open after the M3 core merge** (the M3 milestone exit — "a developer sees inline code
   review in the PR" — does not hold yet):
   - **No inline per-line comments** — the verdict is a single fenced block. (M3 residual → 1.1)
@@ -140,8 +141,14 @@ does not control. The gate is now checkable: the danger-path e2e suite (#401) mu
     set in config; an unset handle warns and proceeds. (#382)
   - **`follow_ups[]` is wired but unreachable** — no evaluator emits `pre-existing`/`base-only`
     dispositions yet. (#284 follow-on)
-  - **`/2` is not dogfoodable**: brain declares `tier: "lite"`, so its own PRs get `/1`; `/2`
-    runs only in tests until a `regulated` fixture/e2e exists.
+  - ~~**`/2` is not dogfoodable**: brain declares `tier: "lite"`, so its own PRs get `/1`~~
+    **Fixed.** #442 made the protocol overridable and brain set it; the #743 ruling then made
+    `/2` the only produced protocol, so no repo at any tier can end up on `/1` without asking.
+  - **The judgment half is on and cannot run.** After #743 `reviewer.inferential.enabled`
+    defaults ON, and #682 slice 3 has not yet supplied a transport — so every verdict, in every
+    repo, carries the condition `the judgment half is enabled but no transport is configured`.
+    It is a condition and not a blocker: `buildVerdict` never reads `conditions[]`, so it cannot
+    move a verdict. Declared here because the ruling declared it rather than discovering it.
 
 ## Governance provider parity
 

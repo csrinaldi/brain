@@ -68,40 +68,58 @@ unattended, and three of the four launch scenarios exist to run unattended.
 - **WHEN** `reviewer.inferential.challenger.axis` is absent or `null`
   **THEN** the axis is `tierParams(tier).challengerAxis`.
 - **WHEN** it names one of `human | same-model | cross-family | mechanical`
-  **THEN** that value wins over the tier default.
+  **THEN** that value wins over `DEFAULT_AXIS`.
 - **WHEN** it names anything else
   **THEN** the run REFUSES and posts nothing — an unrecognised axis is an
   unknown evidentiary strength, and #683's rule is that a verdict whose
   self-description is false must not be posted.
 
-## REQ-682-2 — The inferential producer is OFF at `lite`
+## REQ-682-2 — RETIRED by the #743 ruling of 2026-08-20
 
-- **WHEN** the resolved tier is `lite` and `reviewer.inferential.enabled` is
-  absent or `null`
-  **THEN** no inferential evaluator runs, no reasoned finding is emitted, no
-  challenger is resolved and no model credential is required.
+This requirement said: *the inferential producer is OFF at `lite`* — no reasoned
+finding, no challenger, no model credential, whenever the tier was `lite` and
+`reviewer.inferential.enabled` was absent. Its tier-defaults table read
+`lite: off` / `standard: on, same-model` / `regulated: on, cross-family`.
 
-This keeps `lite` at exactly today's behaviour — mechanical controls only,
-declared as such since #683/#690 — and it protects a claim
-`test/fresh-install/in-container.sh` enforces today:
+**It is retired, not amended.** The ruling:
 
-```
-#   1. Install @logikas/brain from the REGISTRY, with no credential
-# No credential gate. See the header: needing one was the defect, not the setup.
-```
+> *"The tiers do not define the review system. The judgment half is an on/off
+> capability, and the protocol is always `brain-review/2`."*
 
-That was #435's exit criterion, shipped 2026-08-18. A `same-model` default at
-`lite` would require a model key in a fresh install and falsify it. #682's own
-cost table already points here — *"tier — almost certainly not `lite` by
-default"*.
+with an addendum the same day inverting the default: `reviewer.inferential
+.enabled` is **ON when the key is absent**, off only on an explicit `false`. A
+requirement whose subject is which tier decides cannot survive a ruling that says
+no tier decides.
 
-Tier defaults:
+### Its justification cited a test that does not test it
 
-| tier | producer | challenger axis |
-|---|---|---|
-| `lite` | off | — |
-| `standard` | on | `same-model` |
-| `regulated` | on | `cross-family` |
+Worth recording, because the argument is what made the parameter look admissible
+in the first place. REQ-682-2 defended itself with:
+
+> *"it protects a claim `test/fresh-install/in-container.sh` enforces today …
+> A `same-model` default at `lite` would require a model key in a fresh install
+> and falsify it."*
+
+Measured on `main` at `7621d00`: `in-container.sh` exercises `brain:change:verify`,
+`brain:day:start`, `brain:env:init`, `brain:nav`, `brain:repo:check` and
+`brain:upgrade`. **It never runs `brain:review`.** Its credential-free claim is
+about installing the package from the registry with an empty npmrc — a true claim,
+and a different one. No fresh-install assertion could ever have been falsified by
+a producer default, because no fresh-install assertion reaches the producer.
+
+The concern the argument was reaching for is real and survives on its own terms:
+a default that demands a vendor credential to review is a bad default. It is not
+answered by a tier, and it is not answered today by anything — because the
+judgment half has no transport at all until slice 3, so nothing asks for a
+credential. When slice 3 supplies one, THAT is where the question lands, and its
+ADR is where it gets decided.
+
+### What replaces it
+
+`reviewer.inferential.enabled` — one key, no tier, default ON. Pinned in
+`resolve-challenger.test.mjs` (the default, and the single explicit value that
+turns it off) and end to end in `regulated-review.e2e.test.mjs` (the half is on,
+cannot run, and says so on the wire).
 
 ## REQ-682-3 — A verdict declares the axis that challenged its reasoned findings
 

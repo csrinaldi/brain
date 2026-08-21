@@ -231,13 +231,24 @@ Every verdict is a fenced YAML block in the review body. Two schema versions exi
 `brain-review/1` and `brain-review/2`; both are defined in this section because a reviewer
 parsing a verdict thread must handle either one interchangeably (`parse-verdict.mjs` accepts
 both in the same guarded union — see "Compatibility" below). **Current activation status
-(issue #394 M3 — wired):** the protocol is resolved once per run from `governance.tier`
-(`resolveTier`/`tierParams`, `governance-tiers.mjs`) at `cli.mjs`'s `buildVerdict(...)` call —
-`lite`/`standard` default to `tierParams(tier).reviewProtocol === 'brain-review/1'`; `regulated`
-defaults to `'brain-review/2'`. The activation condition itself — tying `/2` to
-`governance.tier` — was specified (not yet wired) in
-`openspec/changes/issue-391-t23-review-package-spec/design.md` (Q5, issue #358); issue #394 M3
-implemented the wiring that document deferred. At `regulated`, findings are additionally routed
+(#743 ruling, 2026-08-20):** brain produces **`brain-review/2` and only `/2`**, at every tier.
+`resolveReviewProtocol(config)` returns `PRODUCED_PROTOCOL` unless `reviewer.protocol` names
+something else, and it no longer reads the tier at all.
+
+> *"The tiers do not define the review system. The judgment half is an on/off capability, and
+> the protocol is always `brain-review/2`."*
+
+The tiered default this section used to describe — `lite`/`standard` → `/1`, `regulated` → `/2`,
+specified in `openspec/changes/issue-391-t23-review-package-spec/design.md` (Q5, #358) and wired
+by #394 M3 — is **retired**. A schema version is not ceremony, and ADR-0026 invariant 7 reserves
+position tiering for ceremony alone; the cost of the drift was measured in #743 and paid at
+`standard`, where the tier asked for the judgment half and the protocol it also chose refused it.
+
+`/1` remains fully readable — see "Compatibility" — and an explicit `reviewer.protocol:
+'brain-review/1'` is still honoured: the ruling retired `/1` as a DEFAULT, and reading it as
+forbidding an operator's explicit choice would be this protocol inventing doctrine (§5).
+
+Findings are additionally routed
 through `brain/scripts/review/lib/causal-admission.mjs` before `buildVerdict`: every finding from
 the deterministic evaluators (tranche/checkpoint/ruling — none of which perform LLM inference) is
 annotated `evidence_class: deterministic` / `causal_disposition: introduced` unless it already
@@ -369,8 +380,14 @@ challenger_axis: human | same-model | cross-family | mechanical   # only when a 
 `protocol`/`findings`-with-causal-fields when they parse — a `/1` block never populates those
 keys. `cold-boot.mjs`'s `priorVerdicts` load, the anti-loop lock, and the `rev >= 3` bound all
 read `head_sha`/`rev`/`verdict` unconditionally, before any protocol-specific branch — so a
-verdict thread mixing `/1` and `/2` posts (e.g. a repo whose tier changed mid-PR) loads
-correctly on both sides. No parser change is required to support either protocol.
+verdict thread mixing `/1` and `/2` posts loads correctly on both sides. No parser change is
+required to support either protocol.
+
+This matters more after the #743 ruling, not less: every verdict posted before it is a `/1`
+block, and `cold-boot.mjs` reads that history to compute `rev` and to hold the anti-loop lock.
+Retiring `/1` from the READER would rewrite the past to simplify the present. It is retired as
+an output; it is not retired as an input, and the mixed thread is now the ordinary case on any
+PR that predates the ruling rather than the tier-change edge case this paragraph used to cite.
 
 ---
 
@@ -493,7 +510,7 @@ npm run brain:review -- --issue <id> --mode ruling
 
 ### Why this is load-bearing:
 1. **Zero Prompt Drift**: Guarantees that the subagent invokes `cli.mjs`, wiring `identity` → `cold-boot` → `mode` → `evaluators` → `verdict` → `poster` deterministically.
-2. **Standardized Protocol Compliance**: Enforces that all review output strictly produces a fenced `brain-review/N` block (`brain-review/1` at `lite`/`standard`; `brain-review/2`, with full causal admission, at `regulated` — the tier-resolved default, see §6.2) with evidence validation, rather than free-form prose.
+2. **Standardized Protocol Compliance**: Enforces that all review output strictly produces a fenced `brain-review/2` block, with full causal admission, at every tier (#743 ruling — see §6). `brain-review/1` stays readable and is honoured when a config names it explicitly, but nothing produces it by default.
 3. **Token Minimization**: Leverages the $0-token deterministic pre-checks in `cli.mjs` before executing any LLM evaluation.
 
 ---

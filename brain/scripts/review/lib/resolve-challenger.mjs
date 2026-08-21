@@ -35,7 +35,6 @@
 // So there is now ONE resolution and one `run` flag that both halves read. They
 // cannot disagree, because there is nothing left to disagree with.
 
-import { tierParams } from '../../vcs/governance-tiers.mjs';
 import { ROUTED_HUMAN, UNCHALLENGED } from '../evaluators/refuter.mjs';
 
 /** The axes #682 ruled on. A closed vocabulary — an unrecognised value refuses. */
@@ -74,6 +73,20 @@ export const IMPLEMENTED_AXES = Object.freeze([...RUNNERS.keys()]);
  * would be emitting claims into a format that cannot carry them.
  */
 export const JUDGMENT_PROTOCOL = 'brain-review/2';
+
+/**
+ * The axis when nobody declares one (#743 ruling, 2026-08-20).
+ *
+ * `human` and not `null`, because `human` is what actually happens: a reasoned
+ * blocker nobody automated is challenged by a person, and `humanRunner` marks it
+ * `routed:human` and escalates. It is also the only axis this build implements,
+ * so it is the one default that does not overstate the strength of the evidence.
+ *
+ * The tier used to answer this — `standard` said `same-model`, `regulated` said
+ * `cross-family` — and both named axes nothing implements. When slice 3 builds
+ * `same-model`, moving this default is one line and a visible decision.
+ */
+export const DEFAULT_AXIS = 'human';
 
 /**
  * humanRunner() — REQ-682-6, and the reason this is a runner rather than `null`.
@@ -143,26 +156,29 @@ function unbuiltRunner(axis) {
  *                    was refused.
  *
  * Order (REQ-682-1):
- *   1. `reviewer.inferential.enabled`, else the tier's `inferentialEnabled`.
+ *   1. `reviewer.inferential.enabled` — ON unless explicitly `false` (#743).
  *   2. The protocol must be `brain-review/2` — see `JUDGMENT_PROTOCOL`.
- *   3. `reviewer.inferential.challenger.axis`, else the tier's `challengerAxis`.
- *   4. An axis outside `AXES` THROWS, and so does an ENABLED half whose tier
- *      supplies no axis. Both are operator-fixable config, and defaulting would
- *      hide an unknown evidentiary strength.
+ *   3. `reviewer.inferential.challenger.axis`, else `DEFAULT_AXIS`.
+ *   4. An axis outside `AXES` THROWS: it is operator-fixable config, and
+ *      defaulting would hide an unknown evidentiary strength.
  *
- * @param {{config?: object, tier: string, protocol?: string}} args
+ * @param {{config?: object, protocol?: string}} args
  * @returns {{run: boolean, axis: string|null, challenger: Function|null, reason: string|null}}
- * @throws {Error} on an unrecognised axis, an enabled half with no axis, or an unknown tier
+ * @throws {Error} on an unrecognised axis
  */
-export function resolveJudgment({ config, tier, protocol = JUDGMENT_PROTOCOL } = {}) {
+export function resolveJudgment({ config, protocol = JUDGMENT_PROTOCOL } = {}) {
   const off = (reason, enabled = true) => ({ run: false, axis: null, challenger: null, reason, enabled });
 
-  const params = tierParams(tier);
   const inferential = config?.reviewer?.inferential ?? {};
 
-  const enabled = inferential.enabled ?? params.inferentialEnabled;
+  // #743 ruling — ON when the key is absent, OFF only on an explicit `false`.
+  // The addendum chose this direction knowing its cost: until slice 3 supplies a
+  // transport, every verdict in every repo carries the "enabled but no transport"
+  // condition below. A half that is on and says it cannot run is honest; one that
+  // is off because nobody set a key is a capability nobody knows they lack.
+  const enabled = inferential.enabled !== false;
   if (!enabled) {
-    return off(`the inferential producer is disabled (tier "${tier}")`, false);
+    return off('the judgment half is disabled (reviewer.inferential.enabled is false)', false);
   }
 
   // The gate that used to live only at the challenger's call site. Reading it
@@ -176,15 +192,12 @@ export function resolveJudgment({ config, tier, protocol = JUDGMENT_PROTOCOL } =
     );
   }
 
-  const axis = inferential.challenger?.axis ?? params.challengerAxis;
-
-  if (axis === null || axis === undefined) {
-    throw new Error(
-      `resolve-challenger: the inferential producer is enabled but tier "${tier}" supplies no ` +
-      'default challenger axis, and reviewer.inferential.challenger.axis names none. ' +
-      `Name one of: ${AXES.join(', ')}.`
-    );
-  }
+  // An explicit `null` falls to the default too, and that is deliberate: `null`
+  // is not a member of `AXES`, so it cannot mean "no challenger" — it can only
+  // mean "unset". The refusal that used to live here fired when an enabled half
+  // met a tier supplying no axis; the tier no longer supplies one, so the branch
+  // is gone rather than kept as a condition nothing can reach.
+  const axis = inferential.challenger?.axis ?? DEFAULT_AXIS;
 
   if (!AXES.includes(axis)) {
     throw new Error(
