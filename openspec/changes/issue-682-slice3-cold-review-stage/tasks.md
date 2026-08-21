@@ -95,8 +95,15 @@
       written → verdict posted with inline comments. #682 acceptance criterion 3.
 - [ ] C.3 The negative case stays honest end to end (#682 criterion 6): an engine that
       fails posts nothing and says why.
-- [ ] C.4 **Open the terminal PR** `feature/issue-682-slice3-cold-review-stage → main`.
-      Named here from the start, per #713.
+- [x] C.4 **The terminal PR is OPEN, as a draft**, from the first slice rather than the
+      last — `feature/issue-682-slice3-cold-review-stage → main`.
+      This task used to say "open it" and was scheduled here, at the end. It moved on
+      purpose: #713's defect is a tracker whose work is invisible because no PR carries
+      it, and #758 paid for that with 43 commits, 12 merged PRs and no terminal PR until
+      the very end. A task that opens the PR last reproduces the shape it exists to
+      prevent. Open early, the gates run on every push and say so early too.
+- [ ] C.4b Mark it **ready for review** — the slices are complete and `Closes #682` is
+      about to be true rather than merely true-at-merge.
 - [ ] C.5 Cold review of the chain, from an environment where credentials are not
       proxy-injected — the only place a verdict can be produced (#604, measured four
       times on this line of work).
