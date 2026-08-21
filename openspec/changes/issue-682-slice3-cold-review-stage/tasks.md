@@ -96,7 +96,7 @@
 - [ ] C.3 The negative case stays honest end to end (#682 criterion 6): an engine that
       fails posts nothing and says why.
 - [x] C.4 **The terminal PR is OPEN, as a draft**, from the first slice rather than the
-      last — `feature/issue-682-slice3-cold-review-stage → main`.
+      last — **#765**, `feature/issue-682-slice3-cold-review-stage → main`.
       This task used to say "open it" and was scheduled here, at the end. It moved on
       purpose: #713's defect is a tracker whose work is invisible because no PR carries
       it, and #758 paid for that with 43 commits, 12 merged PRs and no terminal PR until
