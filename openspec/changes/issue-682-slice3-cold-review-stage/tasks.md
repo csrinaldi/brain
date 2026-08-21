@@ -54,8 +54,17 @@
       blockquote it strips. Recorded because the pre-check that missed it validated the
       PARSER (`transformDraft`) and not the GUARDS — two different layers, and only the
       second is what refuses.
-- [ ] B.2 `sdd.map` with `cold-review` as its first entry; `{engine, model}`, `model`
-      opaque (D7).
+- [x] B.2 `sdd.map` with `cold-review` as its first entry; `{engine, model}`, `model`
+      opaque (D7). `lib/stage-engine.mjs` + migration `0.10.0`.
+      Three states, and the middle one is the only one that produces an engine:
+      **unrouted** → `null`, because a repo that routed nothing misconfigured nothing;
+      **routed** → `{engine, model}` with the model passed through untouched;
+      **routed-but-unreadable** → REFUSES, because an operator who wrote the key asked
+      for something and silence would ignore it. `{}` is not "no opinion" once the key
+      exists.
+      The migration ships `map: {}`. A shipped `cold-review` entry would turn a spawn on
+      for every consumer at upgrade — nobody asked for that, and the default has to be
+      the state that asks for nothing.
 - [ ] B.3 The harness op: spawn an engine with a prompt and a model (REQ-S3-2). Additive,
       and the four SDD artifacts stay produced identically across backends — assert it.
 - [ ] B.4 The provisional role prompt, with its debt recorded against #312 **in
