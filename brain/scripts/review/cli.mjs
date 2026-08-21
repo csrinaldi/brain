@@ -287,7 +287,7 @@ export async function main(deps = {}) {
   let protocol;
   try {
     tier = deps.tier ?? resolveTier(config);
-    protocol = deps.protocol ?? resolveReviewProtocol(config, tier);
+    protocol = deps.protocol ?? resolveReviewProtocol(config);
   } catch (err) {
     error(`brain:review: refusing to run — ${err.message}`);
     return 1;
@@ -494,7 +494,7 @@ export async function main(deps = {}) {
   // that disagreement re-created the state #552 ruled against.
   let judgment;
   try {
-    judgment = resolveJudgment({ config, tier, protocol });
+    judgment = resolveJudgment({ config, protocol });
   } catch (err) {
     error(`brain:review: ${err.message}`);
     return 1;

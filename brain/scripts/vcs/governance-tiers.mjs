@@ -183,20 +183,28 @@ export const GATE_MATRIX = Object.freeze({
 /**
  * §2.C — doctrine parameters (not CI jobs; design.md §2.C verbatim).
  *
- * `reviewProtocol` (issue #391 T2.3 §3/§5, issue #394 M3): the tiered default
- * `brain-review` verdict protocol version — `cli.mjs`'s ONE seam for the
- * `buildVerdict({...protocol})` call. `lite`/`standard` default to `/1`
- * (single-engine deterministic checks, T2.3 design §5); `regulated` defaults
- * to `/2` (panel-consensus's enabling causal-admission vocabulary, Q5 §7).
- * Never forbids the other version at any tier (T2.3 design §3.4) — this is
- * only the DEFAULT `resolveReviewProtocol` would return, not a ceiling.
+ * THREE PARAMETERS LEFT THIS TABLE — the 2026-08-20 ruling on #743.
  *
- * `inferentialEnabled` / `challengerAxis` (issue #682, REQ-682-1/REQ-682-2):
- * whether the judgment half of the review runs at all, and — when it does —
- * which axis of independence challenges the reasoned findings it produces.
- * ONE pair on purpose: an axis with no producer challenges nothing, and a
- * producer with no axis is the unchallengeable reasoned blocker #552 ruled
- * against. Reading either alone is how the two halves drift apart.
+ * `reviewProtocol`, `inferentialEnabled` and `challengerAxis` used to live
+ * here. They answered a question the tier does not ask:
+ *
+ *   > *"The tiers do not define the review system. The judgment half is an
+ *   > on/off capability, and the protocol is always `brain-review/2`."*
+ *
+ * ADR-0026's invariant 7 already forbade it — position tiering applies to
+ * ceremony, never to correctness — and the drift was measured in #743's own
+ * audit: a schema version is not ceremony, and a control that FINDS DEFECTS is
+ * exactly the correctness invariant 7 excludes. The cost was paid before it was
+ * named: `standard` shipped `{inferentialEnabled: true, reviewProtocol: '/1'}`,
+ * so the producer was asked for and the protocol gate refused it, and every
+ * `standard` verdict carried a condition saying so.
+ *
+ * Where they went: the protocol is `PRODUCED_PROTOCOL` below (one value, not a
+ * default per tier), and the capability is `reviewer.inferential.enabled`, read
+ * by `resolveJudgment` in `review/lib/resolve-challenger.mjs`.
+ *
+ * What the tier still answers is the approval question, and only that: can this
+ * team satisfy an approval requirement (#329, the n=1 self-approval case).
  *
  * `lite` is OFF, and that is load-bearing rather than cautious. A challenger
  * on any axis but `human` needs a model credential, and
@@ -217,9 +225,6 @@ export const GATE_MATRIX = Object.freeze({
  *   honorOverride: boolean,
  *   honorSkipMemoryGate: boolean,
  *   memoryAssertion: string,
- *   reviewProtocol: 'brain-review/1'|'brain-review/2',
- *   inferentialEnabled: boolean,
- *   challengerAxis: 'human'|'same-model'|'cross-family'|'mechanical'|null,
  * }>}
  */
 const TIER_PARAMS = Object.freeze({
@@ -237,12 +242,6 @@ const TIER_PARAMS = Object.freeze({
     // memory-gate is `detection` at lite — skip:memory-gate has nothing to skip.
     honorSkipMemoryGate: false,
     memoryAssertion: 'coverage-report',
-    reviewProtocol: 'brain-review/1',
-    // #682 REQ-682-2. OFF, and the docstring above says why: turning this on
-    // here requires a model credential in a fresh install, which
-    // test/fresh-install/in-container.sh asserts is unnecessary.
-    inferentialEnabled: false,
-    challengerAxis: null,
   }),
   standard: Object.freeze({
     diffBudget: 400,
@@ -257,14 +256,6 @@ const TIER_PARAMS = Object.freeze({
     // flag is honest metadata, not yet load-bearing anywhere.
     honorSkipMemoryGate: true,
     memoryAssertion: 'issue-linked-record',
-    reviewProtocol: 'brain-review/1',
-    // #682. `same-model` is a FRESH CONTEXT of the launching agent's model —
-    // never the same process, never holding the producer's reasoning. That is
-    // the axis #682 lists first, and #552 refuses the same process, not the
-    // same model. Its weakness is correlated errors, which is why the verdict
-    // declares the axis (REQ-682-3) instead of implying it.
-    inferentialEnabled: true,
-    challengerAxis: 'same-model',
   }),
   regulated: Object.freeze({
     diffBudget: 200,
@@ -277,15 +268,6 @@ const TIER_PARAMS = Object.freeze({
     honorOverride: false,
     honorSkipMemoryGate: false,
     memoryAssertion: 'issue-linked-session-summary',
-    reviewProtocol: 'brain-review/2',
-    // #682. A second model family: the strongest machine independence, and it
-    // costs a second vendor credential and a second per-run price. This tier
-    // is where that is worth paying. NOT IMPLEMENTED YET — resolveJudgment()
-    // refuses it out loud rather than degrading to `same-model`, because a
-    // tier that asked for stronger evidence and silently got weaker is the
-    // defect this whole ticket is about.
-    inferentialEnabled: true,
-    challengerAxis: 'cross-family',
   }),
 });
 
@@ -316,6 +298,18 @@ export function resolveTier(config) {
 export const REVIEW_PROTOCOLS = Object.freeze(['brain-review/1', 'brain-review/2']);
 
 /**
+ * The protocol brain PRODUCES — one value, at every tier (#743 ruling,
+ * 2026-08-20). `/1` stays in `REVIEW_PROTOCOLS` because the parsers must keep
+ * reading it: every verdict already posted on a merged PR is a `/1` block, and
+ * `cold-boot.mjs` reads that history to compute `rev` and to hold the anti-loop
+ * lock. Retiring it from the READER would rewrite the past to simplify the
+ * present.
+ *
+ * Read: `/1` is legible forever, and nothing emits it by default.
+ */
+export const PRODUCED_PROTOCOL = 'brain-review/2';
+
+/**
  * Resolves the reviewer protocol: an explicit `reviewer.protocol` wins, otherwise the
  * tier's default (issue #442, the D5 middle path).
  *
@@ -328,19 +322,29 @@ export const REVIEW_PROTOCOLS = Object.freeze(['brain-review/1', 'brain-review/2
  * says the tier sets a default and not a ceiling, and this function is the one it
  * names.
  *
+ * THE TIER NO LONGER ANSWERS THIS (#743 ruling, 2026-08-20). The default is
+ * `PRODUCED_PROTOCOL` at every tier. The paragraphs above are kept as the record
+ * of why the seam exists at all — it was built so `/2` could be dogfooded at
+ * `lite`, and the ruling generalised that from an override into the only answer.
+ *
+ * An EXPLICIT `reviewer.protocol: 'brain-review/1'` is still honoured. The
+ * ruling retired `/1` as a DEFAULT, and reading it as also forbidding an
+ * operator's explicit choice would be inventing doctrine (reviewer-protocol.md
+ * §5). What such a repo gets is stated on the wire, not hidden: `resolveJudgment`
+ * refuses to run the judgment half at `/1` and says why in `conditions[]`.
+ *
  * FAIL-CLOSED ON AN UNKNOWN VALUE, exactly like `resolveTier` above and for the same
- * reason: a typo in `reviewer.protocol` must never silently fall back to the tier
- * default. Silently downgrading `/2` to `/1` would drop causal admission — the
- * annotation, the base comparison, the refuter fork — while the operator believed they
- * had it, which is the #382/#413 boot-refusal shape.
+ * reason: a typo in `reviewer.protocol` must never silently fall back to a default.
+ * Silently downgrading `/2` to `/1` would drop causal admission — the annotation, the
+ * base comparison, the refuter fork — while the operator believed they had it, which
+ * is the #382/#413 boot-refusal shape.
  *
  * @param {{ reviewer?: { protocol?: string } }} [config]
- * @param {'lite'|'standard'|'regulated'} tier
  * @returns {'brain-review/1'|'brain-review/2'}
  */
-export function resolveReviewProtocol(config, tier) {
+export function resolveReviewProtocol(config) {
   const raw = config?.reviewer?.protocol;
-  if (raw === undefined || raw === null) return tierParams(tier).reviewProtocol;
+  if (raw === undefined || raw === null) return PRODUCED_PROTOCOL;
   if (!REVIEW_PROTOCOLS.includes(raw)) {
     throw new Error(
       `governance-tiers: unknown reviewer.protocol "${raw}" — must be one of: ${REVIEW_PROTOCOLS.join(', ')}.`
@@ -398,7 +402,7 @@ export function resolveGateEvidence(gate, tier) {
  * Resolves the doctrine parameters for a tier (§2.C).
  *
  * @param {'lite'|'standard'|'regulated'} tier
- * @returns {{ diffBudget: number, artefacts: string[], honorSizeException: boolean, honorOverride: boolean, honorSkipMemoryGate: boolean, memoryAssertion: string, reviewProtocol: 'brain-review/1'|'brain-review/2' }}
+ * @returns {{ diffBudget: number, artefacts: string[], honorSizeException: boolean, honorOverride: boolean, honorSkipMemoryGate: boolean, memoryAssertion: string }}
  */
 /**
  * The artifact FILENAMES a change dir must carry at `tier` — the single
