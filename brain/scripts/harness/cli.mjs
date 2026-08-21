@@ -135,9 +135,24 @@ async function defaultBackendLoader(harness) {
  * @param {{ backendLoader?: (harness: string) => Promise<object> }} [opts]
  *   Injectable backend factory — defaults to a real ESM dynamic import.
  *   Tests pass in a fake loader to avoid touching real backends.
- * @returns {Promise<void>}
+ * @returns {Promise<*>} whatever the backend's op returned.
  * @throws {Error} if the op is unknown, the backend is not found, or the
  *   backend does not implement the requested op.
+ *
+ * THE RESULT IS RETURNED, and until #682 slice B.6 it was DISCARDED — the line
+ * was `await backend[fn](...args);` with `@returns {Promise<void>}` beside it.
+ * That was harmless while `init` was the only op: `init` answers nothing, so
+ * there was nothing to drop. B.3 added `run-stage`, whose entire purpose is its
+ * `{ok, reason}` answer, and the dispatcher swallowed it — a failed engine
+ * reached the caller as `undefined`.
+ *
+ * Reproduced before fixing: a backend returning
+ * `{ok: false, reason: 'the engine exited with status 137'}` came back from
+ * `dispatch` as `undefined`, while calling the backend directly returned the
+ * object. Same shape as #734, where `runSingle` discards `archiveChange`'s
+ * return value and reports a fusion it did not perform — a caller that drops an
+ * answer nobody notices is missing, because the absent value reads as a quiet
+ * success.
  */
 export async function dispatch(harness, op, args = [], { backendLoader = defaultBackendLoader } = {}) {
   if (!VALID_OPS.includes(op)) {
@@ -155,7 +170,7 @@ export async function dispatch(harness, op, args = [], { backendLoader = default
     );
   }
 
-  await backend[fn](...args);
+  return await backend[fn](...args);
 }
 
 // ---------------------------------------------------------------------------
