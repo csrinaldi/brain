@@ -1,25 +1,32 @@
 # Del reviewer al router — hoja de ruta M5 → M8
 
-*brain · plan de implementación · **rev 2**, medida la tarde del 20/08/2026 contra
-`origin/main @ bb4a58d` y `origin/feature/issue-682 @ 24c506c`.*
+*brain · plan de implementación · **rev 3**, medida el 21/08/2026 contra
+`origin/main @ 7621d00`.*
 
 Cerrar la cadena de #682, abrir M5 (role-as-port) y M8 (router etapa→engine) sin que
 ninguna decisión quede dispersa en tickets que nadie volverá a leer.
 
-**71** issues abiertos · **6** `needs-review` · **5** sin etiqueta de estado · **1** PR
-abierto — **#758**, el PR terminal de #682, retenido por el ruling de #743.
+**#758 mergeado** · **#762** abierto con 0.B · tres issues nuevos de las rondas de
+review (#759 #760 #761) · #682 sigue abierto para el slice 3.
 
-> **2026-08-20 (rev 2)** · `main @ bb4a58d`
+> **2026-08-21 (rev 3)** · `main @ 7621d00`
 > Fuente de verdad para la línea M5 → M8. Reemplaza a `AGENT-PRIORITY-HANDOFF.md`,
 > `MASTER-PLAN-1.0.md` y `brain-v2-epic-plan.md` para cualquier pregunta de estado o
 > prioridad.
 >
-> **Qué cambió desde la rev 1, el mismo día.** Tres cosas, y las tres tocan la Etapa 0:
-> #758 abrió (vencieron tres invariantes de §0), el maintainer firmó **#750**, y el
-> **ruling del 20/08 en #743** — *los tiers no definen el sistema de review; el protocolo
-> es siempre `brain-review/2`; la mitad de juicio es un toggle con default ON* — cambió
-> la premisa sobre la que la cadena de #682 está construida. §4 · Etapa 0 se reescribió
-> entera; el resto del plan (Etapas 1 → 5) no se movió.
+> **Qué cambió desde la rev 2.** La Etapa 0 dejó de ser un plan y pasó a ser historia
+> en su mayor parte: **#758 mergeó** tras cuatro rondas de review en frío, y el ruling
+> de #743 está aplicado al árbol y en review como **#762**. Queda 0.C — el slice 3 —
+> que al medirlo resultó ser **dos piezas**, no un slice entero.
+>
+> Tres cosas que la rev 2 no sabía y conviene no volver a aprender:
+> la precondición «review en frío con veredicto posteado» **no es satisfacible desde un
+> contenedor** (dos rondas lo descubrieron por separado); `axis: human` hace que el
+> desafiante **corra de verdad**, así que el slice 3 se parte en dos mitades
+> independientes; y aplicar el ruling literal **rompe toda corrida** si no se le da un
+> default de axis.
+>
+> §4 · Etapa 0 se reescribió entera. Las Etapas 1 → 5 no se movieron.
 >
 > Issue: [#755](https://github.com/csrinaldi/brain/issues/755)
 
@@ -29,11 +36,9 @@ Este archivo está vencido en cuanto alguna de estas deje de valer.
 
 | Invariante | Comando | Valor al escribir |
 |---|---|---|
-| `origin/main` es `bb4a58d` | `git rev-parse --short origin/main` | `bb4a58d` |
-| Hay 71 issues abiertos | `gh issue list --state open --limit 200 --json number --jq length` | `71` |
-| #758 sigue abierto | `gh pr view 758 --json state --jq .state` | `OPEN` |
-| El tracker todavía tiera el protocolo | `git show origin/feature/issue-682:brain/scripts/vcs/governance-tiers.mjs \| rg -c "reviewProtocol: 'brain-review/1'"` | `2` |
-| El ruling de #743 no está en `main` | `git show origin/main:brain/scripts/vcs/governance-tiers.mjs \| rg -c 'inferentialEnabled'` | `0` |
+| `origin/main` es `7621d00` | `git rev-parse --short origin/main` | `7621d00` |
+| #762 sigue abierto | `gh pr view 762 --json state --jq .state` | `OPEN` |
+| El ruling de #743 no está en `main` todavía | `git show origin/main:brain/scripts/vcs/governance-tiers.mjs \| grep -c 'inferentialEnabled'` | `5` |
 | M5 sigue en cero | `fd -t d '^roles$' brain/` | (sin salida) |
 
 ## 1 · Dónde estamos, medido
@@ -128,7 +133,7 @@ Cinco decisiones gatillan todo lo demás. Cada una tiene recomendación con su c
 ninguna de las cinco está tomada. Una sexta se tomó el 20/08 y va primera, porque es la
 que reescribió la Etapa 0.
 
-> **Compuerta 0 · TOMADA el 20/08 — los tiers no definen el sistema de review** (#743)
+> **Compuerta 0 · TOMADA el 20/08, y APLICADA al árbol el 21/08 en #762** (#743)
 >
 > > *«El protocolo es siempre `brain-review/2`. La mitad de juicio es una capacidad
 > > on/off, no una postura de tier. Los tiers responden solo la pregunta de aprobación.»*
@@ -203,7 +208,7 @@ con la tarea explícita "abrir el PR terminal" — la lección de #713 y de #682
 
 ```mermaid
 graph LR
-  E0["Etapa 0<br/>#758 al merge · ruling /2<br/>slice 3 en tracker nuevo"] --> E1["Etapa 1<br/>cinco compuertas<br/>+ once firmas"]
+  E0["Etapa 0<br/>#758 ✓ · #762 en review<br/>falta el slice 3"] --> E1["Etapa 1<br/>cinco compuertas<br/>+ once firmas"]
   E1 --> E2["Etapa 2<br/>#316 · #643 · #456-A · #605"]
   E2 --> M5["Etapa 3 · M5<br/>#312 → #576<br/>absorbe deuda #682 y #754"]
   M5 --> M8["Etapa 4 · M8<br/>#323 → #456-B<br/>absorbe #713 y #752"]
@@ -213,112 +218,104 @@ graph LR
 
 ### Etapa 0 — Cerrar la cadena del reviewer
 
-**Quién:** agente (código) · humano (dos rulings que quedan) · 3–4 días
-**Estado:** en curso. El PR terminal existe — **#758** — y está retenido por decisión
-propia del ruling de #743.
+**Estado: 0.A cerrada · 0.B en review · 0.C y 0.D pendientes.**
 
-Cuatro bloques, en este orden. Solo 0.A y 0.B bloquean el merge.
+#### 0.A — CERRADA · #758 mergeado el 21/08 a las 12:53
 
-#### 0.A — Qué falta para mergear #758
+`main` pasó a `7621d00`. Lo que entró: los slices 1 y 2 de la mitad de juicio, y el
+cierre de **#750** — la inversión de §10 que vivía en `main` y que cada día de espera
+seguía cargando.
 
-Medido contra `origin/feature/issue-682 @ 48b8ac2`. Hubo **dos rondas** de review en frío
-del chain desde que se escribió la rev 2 de este documento, y los ocho hallazgos de las dos
-están cerrados — cada uno **reproducido antes de arreglarlo**, y cada fix probado con una
-mutación contra la suite entera.
+Le costó **cuatro rondas de review en frío** del chain, y vale registrar la forma
+porque se repitió las cuatro veces:
 
-| # | Qué | Estado |
+| ronda | dónde | qué devolvió |
 |---|---|---|
-| 1 | La auditoría del tracker contra el ruling de #743 — el propio ruling dice *«#758 is held until the audit of the tracker against this ruling returns»* | **es el único bloqueo duro**; está hecha abajo, en 0.B |
-| 2 | `blocker` de la review rev 1: el body afirmaba que en `standard` no cambia nada, y cambia — todo veredicto lleva una condición nueva | **cerrado** — el body ya declara la condición en `standard` y en `regulated` |
-| 3 | `correction`: `IMPLEMENTED_AXES` es una segunda declaración sin pin — agregarle `'same-model'` (mentirle al operador sobre qué ejes existen) pasa la suite completa, 4147/4147 | **cerrado** en `a16e971` — la mutación se reprodujo primero (verde, hallazgo confirmado); ahora `RUNNERS` es la única declaración, `IMPLEMENTED_AXES` se deriva de sus claves y un test la fija contra un literal. Tres mutaciones muertas |
-| 4 | `editorial`: `governance-tiers.mjs:283` nombra `resolveChallenger()`, símbolo que esta misma cadena dejó de exportar | **cerrado** en `a16e971` — dice `resolveJudgment()` |
-| 5 | Review en frío del chain sobre `main...48b8ac2`, posteada como `brain-review/2` rev 2 | **falta, y tiene dueño y lugar obligados** — ver abajo |
-| 6 | Los gates verdes y la suite | **hecho** — suite en 4149 (+2 tests), 0 fail; `repo:check` y `brain:nav` verdes |
-| 7 | Merge limpio contra `main`, y el body sin afirmaciones vencidas | **hecho, y con dos correcciones al propio body** — el número de diff-size ahora se declara con la definición del gate (**993 de 1000**, add+del sobre rutas gobernadas, corrido con el `parseDiffNumstat` del repo), y la afirmación "intersección de archivos = ∅" se retiró por **vacua**: `git merge-base origin/main HEAD` **es** el tip de `main`, así que el conjunto del lado `main` tiene 0 archivos y ese check no probaba nada |
+| 2 | `main...8ebf523` | REVISE — 3 hallazgos |
+| 3 | `a16e971` | 5 hallazgos, y **se negó a emitir veredicto** por un motivo mecánico: `brain:review` se rehúsa donde las credenciales se inyectan río arriba (#604) |
+| 4 | `48b8ac2` | **APPROVE**, por `csrinaldibot`, producido por el verbo — la primera vez que la precondición fue *satisfacible*, no solo intentada |
 
-Es decir, hoy: **una sola cosa** — la review en frío de cierre (5) — más la decisión de 0.B.
+Los ocho hallazgos de las rondas 2 y 3 se cerraron, cada uno **reproducido antes de
+arreglarlo**. La ronda 4 encontró uno más que no pudo entrar al veredicto, y ese hueco
+resultó ser más interesante que el hallazgo: ver **#760**.
 
-**La ronda 3 encontró un `blocker` de la misma clase que la ronda 2**, un archivo más allá:
-`inferential.mjs` declaraba `RENDERED_ALWAYS` / `RENDERED_AS_ANCHOR` como el oráculo de
-REQ-682-4 y **nadie los leía** — dos exports, cero consumidores. Así que la mutación que el
-propio archivo nombra como el defecto que arregló seguía pasando. Cerrado, más tres hallazgos
-menores (`shouldRun()` sin call site de producción, §6 vencido en tres claves, un
-identificador que no testeaba lo que nombra).
+**La lección que este documento se lleva:** la precondición «una review en frío con
+veredicto posteado» **no es satisfacible desde ningún contenedor** de los que usamos.
+Dos rondas lo descubrieron por separado. Corre en la máquina del maintainer con el PAT,
+o en un job de Actions con el PAT como secret — que no existe todavía y es #604 mitad 2.
 
-**Dónde puede producirse la rev 2, y dónde no.** El intento de la ronda 3 se negó a emitir
-veredicto, y por un motivo mecánico, no de criterio: `brain:review` se rehúsa a correr donde
-las credenciales se inyectan río arriba, porque una lectura de identidad por token no prueba
-nada ahí. Es el control negativo de **#604** funcionando — y #604 está cerrado, con PR #665.
-Su propio cuerpo dice dónde sí corre el verbo:
+#### 0.B — En review · PR #762
 
-> la máquina del maintainer con el PAT, o **un job de GitHub Actions** con el PAT como secret —
-> *"lo más parecido a un reviewer genuinamente frío que hay disponible"*.
+Los nueve puntos de la auditoría, aplicados. **300 líneas gobernadas** contra 1000 —
+revisable como diff, que era exactamente el motivo de sacarlo de #758.
 
-Y el actor tiene que ser uno que no haya escrito estos fixes ni leído la cadena.
+| # | qué era | cómo quedó |
+|---|---|---|
+| 1–3 | `inferentialEnabled`, `challengerAxis`, y la compuerta que leía el tier | fuera de `tierParams()`; la única llave es `reviewer.inferential.enabled`, ON cuando está ausente |
+| 4–6 | `/1` como default por tier, su pin, y el fallback de `resolveReviewProtocol` | `/2` en los tres tiers; `resolveReviewProtocol` ya no recibe `tier` |
+| 7 | ADR-0026 fila 110 | **Enmienda 7**, promovida por Ruta B y firmada el 21/08 |
+| 8 | `reviewer-protocol.md` §6/§13 y `KNOWN-LIMITATIONS` | reescritos; la limitación nueva se declara en lugar de la que dejó de ser cierta |
+| 9 | `test/fresh-install/` | **no se toca**, y por una medición (abajo) |
 
-**Un aviso de presupuesto para quien siga:** el gate `diff-size` está en **993 de 1000**. Quedan
-**7 líneas** de margen sobre rutas gobernadas. `lite` honra `size:exception`, así que otra ronda
-de fixes no está bloqueada — pero deja de ser una edición gratis y pasa a ser una etiqueta y una
-decisión.
+**Una trampa que hubo que medir antes de escribir código.** Aplicar el ruling literal
+rompe *toda* corrida: sacar `challengerAxis` de la tabla y poner `enabled` en ON por
+default hace que `resolveJudgment` pase las dos primeras barreras y llegue al axis sin
+nada, donde tiraba. Necesitaba un **default de axis sin tier**, y es `human` — el único
+implementado, y el que no exagera la fuerza de la evidencia.
 
-#### 0.B — La auditoría contra el ruling de #743, hecha
+**Y una corrección medida a REQ-682-2.** Su justificación decía que apagar el productor
+en `lite` defendía la promesa sin-credencial que `test/fresh-install/in-container.sh`
+asegura. Ese script ejercita seis verbos y **ninguno es `brain:review`**. Su promesa es
+sobre instalar el paquete con un npmrc vacío: cierta, y otra. Ninguna aserción de
+fresh-install podía falsificarse por un default del productor. La preocupación de fondo
+sobrevive y aterriza donde corresponde: el ADR de transporte del slice 3.
 
-**Nueve puntos del árbol contradicen el ruling.** Los tres primeros los introdujo esta
-misma cadena; los seis siguientes ya viven en `main` y son la deriva que #743 describe.
-
-| # | Dónde | Qué dice hoy | Qué exige el ruling |
-|---|---|---|---|
-| 1 | `governance-tiers.mjs` · `tierParams()` | `inferentialEnabled` y `challengerAxis` por tier — tarea 1.1 del slice 1 | salen de `tierParams()`; la única llave es `reviewer.inferential.enabled` |
-| 2 | `spec.md` · REQ-682-2 | «el productor está OFF en `lite`» cuando la llave está ausente | retirado — ausente significa **ON** (addendum del ruling) |
-| 3 | `cli.mjs:511-513` | la compuerta lee el tier, con un comentario que justifica leerlo | lee la config |
-| 4 | `tierParams()` | `reviewProtocol: 'brain-review/1'` en `lite` y en `standard` | `brain-review/2` en los tres |
-| 5 | `governance-tiers.test.mjs:246` | pinea ese default `/1` (escrito para #391/#394, antes de que #682 existiera) | se retira junto con el default |
-| 6 | `resolveReviewProtocol()` | cae al default del tier cuando la llave está ausente | cae a `/2` |
-| 7 | ADR-0026, fila 110 | `reviewer verdict mode` tierado: *deterministic / single engine / panel ≥2* | enmienda por Ruta B, promovida por el maintainer |
-| 8 | `reviewer-protocol.md` §6 · §6.2 · §13 y `docs/KNOWN-LIMITATIONS.md` | `/1` en `lite`/`standard`, `/2` en `regulated`; «`/2` no es dogfoodable» | una sola forma producida, y la limitación desaparece |
-| 9 | `test/fresh-install/` | la promesa «install sin credencial» apoyada en que `lite` está OFF | se vuelve a **medir**: con default ON y sin transporte no hay credencial que pedir — pero eso hay que correrlo, no leerlo |
-
-**Dos preguntas quedan abiertas y son tuyas** — el ruling las deja marcadas:
-
-1. Los bloques `brain-review/1` ya posteados en PRs mergeados: ¿tienen que seguir
-   parseando (lectura hacia atrás) o el parser también retira `/1`?
-2. ¿El ruling entra **dentro** de #758 o en un PR propio inmediatamente posterior?
-
-> **Recomendación:** parser retro-compatible — lee `/1`, no lo emite nunca — y el ruling
-> **fuera** de #758, en un PR chico y propio contra `main`, encolado detrás.
->
-> **Por qué:** #758 ya fue revisado en frío como cadena de 44 commits. Meterle un cambio
-> de doctrina obliga a rehacer esa review entera en vez de revisar un diff de decenas de
-> líneas, y #752 acaba de medir cuánto cuesta revisar cadenas. El argumento en contra es
-> real y hay que decirlo: mergeando primero, `main` recibe la deriva del punto 1 (los dos
-> parámetros que #743 existe para sacar) y la pierde una tarde después. El costo de
-> esperar, en cambio, es que `main` sigue cargando la inversión de §10 de **#750**, que es
-> un defecto vivo. Ese es el desempate.
+**Lo que #762 NO cierra:** tres de los seis criterios de #743 — los rulings sobre las
+filas borderline, la superficie de capacidad de punta a punta, y si tres tiers valen su
+complejidad. Van en **#761** para que no se pierdan al cerrar el ticket.
 
 #### 0.C — El slice 3, en un tracker nuevo
 
-Se abre **después** de que el ruling esté aplicado, no antes: el slice 3 lee la llave que
-el ruling define.
+Se abre después de que #762 mergee: el slice 3 lee la llave que el ruling volvió
+autoritativa.
 
-- ADR de transporte, runner `same-model`, la prueba por el verbo real, y `cross-family`
-  rechazando en vez de degradar.
-- **REQ-682-5 con tarea propia esta vez** — la fuga que la rev 1 ya había marcado.
-- Termina con su propio PR terminal, nombrado en `tasks.md` desde el día uno (#713), y
-  con **#682 cerrado**.
+**Lo medido al mirar el código, y cambia el tamaño de esto:** toda la cadena debajo del
+generador ya existe y está testeada. Faltan **dos piezas**, no un slice entero.
+
+1. **`deps.generate`, el transporte.** Su contrato ya está fijado por el código: recibe
+   *coordenadas* (`worktreePath`, `baseSha`, `headSha`, `changedFiles`, `prBody`) y no un
+   string de diff — el generador lo lee él mismo del worktree frío. Devuelve un array de
+   findings, y cada uno solo puede llevar los siete campos de `CARRIED_FIELDS`; el resto
+   lo tira `sanitiseFinding`. Tirar o devolver algo que no es array es **fallar**, y
+   `cli.mjs` se niega a postear: no existe «encontré cero» cuando en realidad no pudo.
+2. **Un cargador.** `main()` se invoca **sin argumentos** desde el entrypoint, y
+   `inferentialDeps` hoy lo pueblan únicamente los tests. El seam existe; el caño hacia
+   el CLI no. Aunque escribas el generador perfecto, no hay por dónde entrarlo.
+
+Más **REQ-682-5** con tarea propia esta vez, y el PR terminal nombrado en `tasks.md`
+desde el día uno (#713). Ahí cierra **#682**.
+
+**Una buena noticia que la rev 2 no tenía:** con `axis: human` el desafiante **corre de
+verdad** — `humanRunner` está implementado. No hace falta `same-model` (tarea 3.3) para
+tener un run completo producir → desafiar → postear. El slice se parte en dos mitades
+independientes, y la primera es la que desbloquea todo.
+
+**Por qué el ADR (3.1) no es burocracia:** que el transporte sea una llamada al SDK, un
+agente spawneado o el harness **cambia la superficie de red, credenciales y determinismo
+del reviewer**. Un reviewer que llama a la red durante la review es otra cosa que uno que
+no. El archivo se niega explícitamente a inventar un default por eso.
 
 #### 0.D — Higiene, en paralelo, sin bloquear nada
 
-- Firmar o rechazar **#745** — hoy lleva `status:approved` **y** `status:needs-review` a
-  la vez — y **#746**. **#750 ya está firmado** (20/08). Triaje de #734 y #588 fuera de
-  esta línea.
-- Limpieza: 17 records `.memory/` sin commitear en el worktree, ~20 worktrees `agent-*`
-  de reviews viejas.
+- Firmar o rechazar **#745** — sigue con `status:approved` **y** `status:needs-review` a
+  la vez — y **#746**. Triaje de #734 y #588 fuera de esta línea.
+- Firmar los tres que salieron de las rondas de review: **#759**, **#760**, **#761**.
+- Etiquetar los cinco sin estado: #732 #699 #697 #327 #268.
+- Limpieza: records `.memory/` sin commitear, worktrees `agent-*` de reviews viejas.
 
-**Salida de la Etapa 0:** #758 mergeado con una review en frío del chain en `APPROVE`;
-el ruling de #743 vivo en `main` (protocolo `/2` único, mitad de juicio como toggle con
-default ON, ADR-0026 enmendado); slice 3 con tracker propio, PR terminal y **#682
-cerrado**; 0 commits varados en `feature/issue-682`. #754 y #752 *no* se cierran acá: se
-absorben en M5 y M8 (ver §5).
+**Salida de la Etapa 0:** #762 mergeado; slice 3 con tracker propio, PR terminal y
+**#682 cerrado**. #754 y #752 *no* se cierran acá: se absorben en M5 y M8 (ver §5).
+
 
 ### Etapa 1 — Las cinco compuertas, en una sola sesión
 
@@ -433,8 +430,11 @@ absorbe donde dice la tabla, se construye dos veces.
 | Cinco parsers de `.env` (#316) | `harness/cli.mjs:23`, `bootstrap.sh:226` y tres más | Etapa 2, antes de que M8 lea nada |
 | Verbo de config duplicado (#743 vs #323) | Dos tickets, dos nombres | Compuerta 4 → M8 · S3 |
 | REQ-682-5 sin tarea | `tasks.md` de #682 lo confiesa | Etapa 0 · 0.C |
-| Protocolo y mitad de juicio tierados vs. el ruling del 20/08 | `tierParams()`, ADR-0026 fila 110, REQ-682-2 y seis sitios más | Etapa 0 · 0.B |
-| Los dos hallazgos abiertos de la review de #758 | prometidos en el body del PR, sin commit | Etapa 0 · 0.A |
+| ~~Protocolo y mitad de juicio tierados~~ | ~~`tierParams()`, ADR-0026 fila 110, REQ-682-2~~ | **absorbida** en #762 |
+| ~~Los dos hallazgos abiertos de la review de #758~~ | ~~prometidos en el body, sin commit~~ | **absorbida** en `a16e971` |
+| Tres criterios de #743 sin cerrar (#761) | filas borderline, superficie de capacidad, ¿sobrevive `regulated`? | firma en Etapa 1; la superficie se cruza con la Compuerta 4 |
+| Un hallazgo que el veredicto no puede llevar (#760) | §6.2 tipa `follow_ups[]` a `pre-existing\|base-only`; `findings[]` lo escribe solo el verbo (§13) | decisión propia — es doctrina, va con #745 y #752 |
+| Constante declarada sin lector, 5ª instancia (#759) | `RECOGNISED_OUTCOMES` en `refuter.mjs`; su única consumidora es un mensaje | slice 3 edita esa misma constante — 0.C |
 | Supersede vs enmienda de ADR-0019 | ADR-0024 dice una cosa, #323 otra | Compuerta 1 → M8 · S1 |
 | Campos de #576 que duplican `reads/writes` | Ya ruleado en el ticket (12/08): reusar | M5 · S5 — verificar en review, no re-decidir |
 
@@ -452,7 +452,7 @@ la etapa activa.**
 | i18n | 4 | #638 #642 #715 #716 | medio día; visible para todo adoptante hispanohablante |
 | Memoria | 6 | #712 #714 #738 #361 #461 #247 | #461 y #738 piden doctrina |
 | Instalación y upgrade | 7 | #659 #658 #647 #632 #436 #415 #414 | #436 y #414 son Tier 2 |
-| Reviewer, higiene | 3 | #631 #611 #284 | #284 es alcance diferido de M3 |
+| Reviewer, higiene | 5 | #631 #611 #284 #759 #760 | #284 es alcance diferido de M3; #759 y #760 salieron de las rondas de review de #758 |
 | Status y SDD | 10 | #280 #702 #704 #732 #734 #129 #267 #453 #457 #256 | #702 #704 #732 esperan tu ruling o tu ojo |
 | Decisiones puras | 4 | #268 #327 #356 #357 | todas con recomendación escrita en el cuerpo |
 | Épicos | 2 | #313 #335 | contenedores, no trabajo |
