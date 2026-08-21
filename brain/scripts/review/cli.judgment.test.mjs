@@ -417,3 +417,134 @@ test('a repo that ASKED for the judgment half and did not get it is told why', a
   assert.notEqual(askedByDefault.body, neverAsked.body,
     'asked-and-refused must not render like never-asked');
 });
+
+// ── slice A · the judgment half runs END TO END, from a file ─────────────────
+//
+// #682's acceptance criterion 2 asked that producer and challenger land
+// together; criterion 3 asks for the real verb. This is the half of 3 that a
+// hand-written artifact can prove: file → reader → generate → producer →
+// challenger → verdict. No agent is spawned; that is slice B.
+
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { artifactPathFor, ARTIFACT_TAG } from './lib/findings-artifact.mjs';
+import { artifactDeps } from './cli.mjs';
+
+function repoWithArtifact(t, findings, pr = 762) {
+  const root = mkdtempSync(join(tmpdir(), 'brain-slice-a-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const rel = artifactPathFor(pr);
+  mkdirSync(join(root, dirname(rel)), { recursive: true });
+  writeFileSync(
+    join(root, rel),
+    `# Cold review of PR #${pr}\n\n\`\`\`${ARTIFACT_TAG}\n${JSON.stringify(findings, null, 2)}\n\`\`\`\n`,
+    'utf8',
+  );
+  return root;
+}
+
+test('slice A: a reasoned finding written to the stage artifact reaches the posted verdict', async (t) => {
+  const root = repoWithArtifact(t, [{
+    id: 'J1', severity: 'blocker',
+    evidence: 'the parser is correct; the semantics are inverted',
+    cites: 'reviewer-protocol.md §6.1', file: 'brain/scripts/review/verdict.mjs', line: 166,
+  }]);
+
+  const { body } = await run({
+    protocol: 'brain-review/2', config: CFG('human'),
+    generate: artifactDeps(762, root).generate,
+  });
+
+  assert.match(body, /the semantics are inverted/, 'the finding must reach the wire');
+  assert.match(body, /^controls: \["deterministic", ?"inferential"\]$/m,
+    'and the run must DECLARE that the judgment control was applied — it was');
+  assert.doesNotMatch(body, /no transport is configured/,
+    'the condition that ships today must be gone: there IS a transport now');
+});
+
+test('slice A: the artifact carries `file`+`line`, which is what an inline comment needs', async (t) => {
+  const root = repoWithArtifact(t, [{
+    id: 'J1', severity: 'blocker', evidence: 'e', cites: 'x §1',
+    file: 'brain/scripts/review/verdict.mjs', line: 166,
+  }]);
+  const { body } = await run({
+    protocol: 'brain-review/2', config: CFG('human'),
+    generate: artifactDeps(762, root).generate,
+  });
+  assert.match(body, /file: brain\/scripts\/review\/verdict\.mjs/);
+  assert.match(body, /line: 166/);
+  // deriveInlineComments turns exactly this pair into a comment on the changed
+  // line. A.4 proves it against a posted review; here it is proven to SURVIVE
+  // the pipeline, which is the half that was missing.
+});
+
+test('slice A: an artifact that exists and is broken posts NOTHING, and says why', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-slice-a-bad-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const rel = artifactPathFor(762);
+  mkdirSync(join(root, dirname(rel)), { recursive: true });
+  writeFileSync(join(root, rel), `\`\`\`${ARTIFACT_TAG}\n{ not json }\n\`\`\`\n`, 'utf8');
+
+  const { code, body } = await run({
+    protocol: 'brain-review/2', config: CFG('human'),
+    generate: artifactDeps(762, root).generate,
+  });
+
+  assert.notEqual(code, 0, 'a transport that ran and broke must fail closed');
+  assert.doesNotMatch(body, /^protocol: brain-review/m,
+    'and no verdict may be rendered at all: one declaring `inferential` over findings nobody ' +
+    'produced is the uncomputable-evidence APPROVE §10 forbids');
+
+  // The control — the SAME run with a readable artifact does render one, so the
+  // assertion above is not passing because this harness never renders anything.
+  const good = mkdtempSync(join(tmpdir(), 'brain-slice-a-ok-'));
+  t.after(() => rmSync(good, { recursive: true, force: true }));
+  mkdirSync(join(good, dirname(rel)), { recursive: true });
+  writeFileSync(join(good, rel), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`, 'utf8');
+  const ok = await run({
+    protocol: 'brain-review/2', config: CFG('human'),
+    generate: artifactDeps(762, good).generate,
+  });
+  assert.equal(ok.code, 0);
+  assert.match(ok.body, /^protocol: brain-review/m);
+});
+
+test('slice A: the PRODUCTION path is the artifact — no injected deps at all', async (t) => {
+  // The pin the three tests above do NOT provide: each of them hands `main` a
+  // `generate` directly, so `deps.inferentialDeps ?? artifactDeps(...)` could be
+  // deleted and every one of them would stay green. This drives the real branch
+  // — nothing injected but the root the artifact is read from.
+  const root = repoWithArtifact(t, [{
+    id: 'J1', severity: 'blocker', evidence: 'found by the stage, not by a test double',
+    cites: 'reviewer-protocol.md §6.1', file: 'a.mjs', line: 7,
+  }], 42);   // 42 is the PR the run helper drives
+
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), error: () => {},
+    root, ...deps({ protocol: 'brain-review/2', config: CFG('human') }),
+  });
+  const body = lines.join('\n');
+
+  assert.equal(code, 0);
+  assert.match(body, /found by the stage, not by a test double/,
+    'the verdict must carry a finding that reached it through the production wiring');
+  assert.match(body, /^controls: \["deterministic", ?"inferential"\]$/m);
+});
+
+test('slice A: with no artifact under the root, the half does not run and says so', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-slice-a-none-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), error: () => {},
+    root, ...deps({ protocol: 'brain-review/2', config: CFG('human') }),
+  });
+  const body = lines.join('\n');
+
+  assert.equal(code, 0, 'a repo that never ran the stage has not failed at anything');
+  assert.match(body, /no transport is configured/,
+    'and it is TOLD — the condition that ships today, still correct when the artifact is absent');
+});

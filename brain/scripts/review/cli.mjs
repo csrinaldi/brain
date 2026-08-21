@@ -19,6 +19,7 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { loadContext } from '../vcs/ci-context.mjs';
 import { getVcs } from '../vcs/cli.mjs';
 import { resolveTier, tierParams, resolveReviewProtocol } from '../vcs/governance-tiers.mjs';
+import { makeArtifactGenerate } from './lib/findings-artifact.mjs';
 import { gatherIdentity } from './identity.mjs';
 import { gatherColdBoot } from './cold-boot.mjs';
 import { buildVerdict, renderVerdict } from './verdict.mjs';
@@ -235,6 +236,22 @@ function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
  * `getVcs` when `posterDeps.getVcs` is not separately injected), `queueDeps`
  * (→ queue.mjs, `queue` subcommand only), `boardDeps` (→ board.mjs, `board`
  * subcommand only). */
+/**
+ * The production `inferentialDeps` — the stage's artifact, or nothing.
+ *
+ * Split out so the `??` above never touches the filesystem when a caller
+ * injected its own deps: a test that supplies a generator must not depend on
+ * what happens to be in `openspec/reviews/`.
+ *
+ * `root` is a parameter and not a closure over `process.cwd()` so this glue can
+ * be pinned against a real directory. A seam only its callers can reach is a
+ * seam nothing tests.
+ */
+export function artifactDeps(prNumber, root = process.cwd()) {
+  const generate = makeArtifactGenerate({ prNumber, root });
+  return generate ? { generate } : {};
+}
+
 export async function main(deps = {}) {
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
@@ -524,7 +541,20 @@ export async function main(deps = {}) {
   }
 
   if (judgment.run) {
-    const inferentialDeps = deps.inferentialDeps ?? {};
+    // Slice A's transport (#682, ADR-0033): the judgment half's producer is the
+    // cold-review STAGE, and its output is a file — `openspec/reviews/pr-NNN/`.
+    // Reading it is all the transport this slice has; slice B spawns the engine
+    // that writes it.
+    //
+    // `deps.inferentialDeps` still wins, so a test injects a generator without
+    // touching the filesystem — and so the seam the unit tests already drive
+    // keeps working unchanged.
+    //
+    // NO artifact means no `generate`, which means the half does not run and the
+    // verdict says "enabled but no transport is configured". That is deliberate:
+    // a repo that never ran the stage has not failed, and rendering it as a
+    // failure would put every repo on earth into a refusal.
+    const inferentialDeps = deps.inferentialDeps ?? artifactDeps(args.pr, deps.root ?? process.cwd());
 
     // #682 round-1 review, finding G — AN ENABLED HALF WITH NO TRANSPORT IS NOT
     // THE SAME STATE AS A DISABLED ONE, and until now they rendered

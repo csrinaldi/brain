@@ -155,3 +155,69 @@ test('#682 S3: `file` and `line` cross — they are what becomes an inline comme
   // deriveInlineComments requires BOTH and a positive integer line; without them
   // a reasoned finding reaches the summary block and never the changed line.
 });
+
+// ── the file layer, against a REAL directory ─────────────────────────────────
+//
+// Injected-fs tests would not reach `artifactDeps`'s glue in cli.mjs, and glue
+// nothing tests is where this ticket keeps finding its defects.
+
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+
+import { artifactPathFor, makeArtifactGenerate, REVIEWS_ROOT } from './findings-artifact.mjs';
+import { artifactDeps } from '../cli.mjs';
+
+/** A throwaway repo root carrying (or not) one PR's artifact. */
+function repoWith(t, { pr = 762, body = null } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'brain-findings-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  if (body !== null) {
+    const rel = artifactPathFor(pr);
+    mkdirSync(join(root, dirname(rel)), { recursive: true });
+    writeFileSync(join(root, rel), body, 'utf8');
+  }
+  return root;
+}
+
+test('#682 S3: the path is keyed by PR, and a non-PR REFUSES before becoming a path segment', () => {
+  assert.equal(artifactPathFor(762), join(REVIEWS_ROOT, 'pr-762', 'cold-review.md'));
+  for (const bad of ['../../etc', 0, -1, 1.5, 'abc', null, undefined, '762; rm -rf /']) {
+    assert.throws(() => artifactPathFor(bad), /is not a PR number/,
+      `${JSON.stringify(bad)} must never reach the filesystem as a path segment`);
+  }
+});
+
+test('#682 S3: NO artifact is not a failure — it is the transport that was never configured', (t) => {
+  const root = repoWith(t, { body: null });
+  assert.equal(makeArtifactGenerate({ prNumber: 762, root }), null);
+  assert.deepEqual(artifactDeps(762, root), {},
+    'no generate key at all — shouldRun is then false and the verdict says "no transport configured"');
+});
+
+test('#682 S3: an artifact present yields a generate that returns its findings', async (t) => {
+  const root = repoWith(t, {
+    body: block(JSON.stringify([finding({ id: 'inferential:A' }), finding({ id: 'inferential:B' })])),
+  });
+  const wired = artifactDeps(762, root);
+  assert.equal(typeof wired.generate, 'function', 'the glue must produce a generate, not just a reader');
+
+  const out = await wired.generate({ worktreePath: '/w', baseSha: 'a', headSha: 'b', changedFiles: [], prBody: '' });
+  assert.equal(out.length, 2);
+  assert.deepEqual(out.map((f) => f.id), ['inferential:A', 'inferential:B']);
+});
+
+test('#682 S3: an artifact that exists and cannot be read THROWS — it never reads as empty', async (t) => {
+  const root = repoWith(t, { body: block('{ not json }') });
+  const { generate } = artifactDeps(762, root);
+  await assert.rejects(() => generate({}), /could not be read/,
+    'a transport that ran and broke must fail closed — gatherInferentialInputs maps the throw ' +
+    'to {failed: true} and cli.mjs refuses to post');
+});
+
+test('#682 S3: an artifact whose list is EMPTY resolves — the stage ran and found nothing', async (t) => {
+  const root = repoWith(t, { body: block('[]') });
+  const { generate } = artifactDeps(762, root);
+  assert.deepEqual(await generate({}), [],
+    'distinct from both "no artifact" (no generate at all) and "unreadable" (a throw)');
+});

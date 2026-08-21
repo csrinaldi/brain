@@ -37,6 +37,9 @@
 // JSON has one spelling, escapes its own newlines, and `evidence` in a real cold
 // review is paragraphs long.
 
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { fencedBlocks } from '../../lib/fenced-blocks.mjs';
 import { CARRIED_FIELDS, sanitiseFinding } from '../evaluators/inferential.mjs';
 
@@ -116,3 +119,71 @@ export function readFindingsArtifact(text) {
 
 /** The fields an artifact entry may carry. Re-exported so a writer has one import. */
 export { CARRIED_FIELDS };
+
+// ── the file layer: where the stage writes, and what "absent" means ──────────
+
+/** Where review artifacts live. Keyed by PR, because a review reads a DIFF. */
+export const REVIEWS_ROOT = 'openspec/reviews';
+
+/**
+ * artifactPathFor() — the repo-relative path for one PR's artifact.
+ *
+ * The number is re-validated HERE even though `cli.mjs` already checked its
+ * argv (`args.pr`): this value becomes a path segment, and a boundary that
+ * trusts its caller's validation is a boundary that stops being one the day a
+ * second caller appears. `pr-../../etc` is not a PR number.
+ *
+ * @param {number|string} prNumber
+ * @returns {string}
+ * @throws {Error} on anything that is not a positive integer
+ */
+export function artifactPathFor(prNumber) {
+  const n = Number(prNumber);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(
+      `findings-artifact: ${JSON.stringify(prNumber)} is not a PR number — refusing to build a path from it.`
+    );
+  }
+  return join(REVIEWS_ROOT, `pr-${n}`, 'cold-review.md');
+}
+
+/**
+ * makeArtifactGenerate() — a `deps.generate` that reads a file instead of
+ * calling a model (slice A; the spawn is slice B).
+ *
+ * THE THREE STATES, AND WHY THE FIRST IS NOT A FAILURE:
+ *
+ *   file absent    → `null`. The caller then supplies no `generate`, `shouldRun`
+ *                    is false, and the verdict carries "enabled but no transport
+ *                    is configured" — the state that ships today. A repo that
+ *                    never ran the stage has not failed at anything.
+ *   file present,
+ *   unreadable     → a function that THROWS. `gatherInferentialInputs` catches
+ *                    it into `{failed: true, reason}` and `cli.mjs` refuses to
+ *                    post. An artifact that exists and cannot be read is a
+ *                    transport that ran and broke — never "found nothing".
+ *   file present,
+ *   readable       → a function returning the sanitised findings, `[]` included.
+ *
+ * The middle state is the one worth the words: it is why the reader's refusal is
+ * raised rather than returned. The existing failure path already fails closed on
+ * a throw, so mapping onto it adds no second mechanism to keep honest.
+ *
+ * @param {{prNumber: number|string, root?: string, deps?: {exists?: Function, readFile?: Function}}} args
+ * @returns {(() => Promise<object[]>)|null}
+ */
+export function makeArtifactGenerate({ prNumber, root = process.cwd(), deps = {} } = {}) {
+  const exists = deps.exists ?? ((p) => existsSync(join(root, p)));
+  const readFile = deps.readFile ?? ((p) => readFileSync(join(root, p), 'utf8'));
+
+  const relPath = artifactPathFor(prNumber);
+  if (!exists(relPath)) return null;
+
+  return async () => {
+    const result = readFindingsArtifact(readFile(relPath));
+    if (!result.ok) {
+      throw new Error(`the cold-review artifact at ${relPath} could not be read — ${result.reason}`);
+    }
+    return result.findings;
+  };
+}

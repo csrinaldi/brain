@@ -19,9 +19,18 @@
       survived the file green. The oracle now enumerates all nine `ok: false` branches.
       Re-run against three separate branches: three deaths. Six mutations total, full
       file each, tree reverted clean after every one.
-- [ ] A.3 Wire the reader to `gatherInferentialInputs` as a `deps.generate` that reads a
-      file instead of calling a model. **The judgment half runs end to end at this
-      point, with a hand-written artifact** — before any agent is spawned.
+- [x] A.3 Wire the reader to `gatherInferentialInputs` as a `deps.generate` that reads a
+      file instead of calling a model. **The judgment half runs end to end**, with a
+      hand-written artifact and no agent spawned. `artifactDeps` in `cli.mjs`.
+      Three states at the file layer, and the first is deliberately not a failure:
+      absent → no `generate` at all, so the half does not run and the verdict still says
+      "no transport is configured"; present-and-unreadable → a throw, mapped by
+      `gatherInferentialInputs` to `{failed: true}` and refused by `cli.mjs`;
+      present-and-readable → the findings, `[]` included.
+      **`root` is injectable on `main` for one reason**: without it, every test hands
+      `main` a `generate` directly, so `deps.inferentialDeps ?? artifactDeps(...)` could
+      be deleted and the suite would stay green. Mutation-checked — deleting the glue
+      now kills a test.
 - [ ] A.4 Prove REQ-S3-5 against a real posted review: a finding with `file`+`line`
       appears as an inline comment. This is M3's exit criterion, reached.
 
