@@ -1,7 +1,6 @@
 # ADR-0033 — The cold review runs as a spawned subagent: the transport is a stage engine, and the producer never holds a credential
 
-**Status**: Proposed
-**Date**: 2026-08-21 — Cristian Rinaldi
+> **status:** proposed — pending human promotion | **date:** 2026-08-21 | **owner:** @crinaldi
 
 ## Context
 
