@@ -1,6 +1,6 @@
 # Del reviewer al router — hoja de ruta M5 → M8
 
-*brain · plan de implementación · **rev 4**, medida el 21/08/2026 contra
+*brain · plan de implementación · **rev 5**, medida el 21/08/2026 contra
 `origin/main @ 005dc35`.*
 
 Cerrar la cadena de #682, abrir M5 (role-as-port) y M8 (router etapa→engine) sin que
@@ -9,10 +9,20 @@ ninguna decisión quede dispersa en tickets que nadie volverá a leer.
 **#758 y #762 mergeados** — la Etapa 0 está cerrada salvo 0.C. Tres issues nuevos de
 las rondas de review (#759 #760 #761) · #682 sigue abierto para el slice 3.
 
-> **2026-08-21 (rev 4)** · `main @ 005dc35`
+> **2026-08-21 (rev 5)** · `main @ 005dc35`
 > Fuente de verdad para la línea M5 → M8. Reemplaza a `AGENT-PRIORITY-HANDOFF.md`,
 > `MASTER-PLAN-1.0.md` y `brain-v2-epic-plan.md` para cualquier pregunta de estado o
 > prioridad.
+>
+> **Qué cambió desde la rev 4.** El **slice A de 0.C está completo** y B.1–B.3
+> aterrizaron. La mitad de juicio corre de punta a punta y un hallazgo razonado llega
+> **como comentario en la línea cambiada** de un PR — el criterio de salida de M3,
+> alcanzado, y alcanzado **sin spawnear nada**: el engine del stage es un archivo.
+>
+> Y una medición que ordenó todo el slice: **la mitad «visible en el PR» ya estaba
+> construida**. `deriveInlineComments` convierte todo finding con `file` + `line` en un
+> comentario y `postVerdict` los manda en la misma llamada que el bloque (#405). Nunca
+> faltó transporte al PR — faltaba un lector que produjera hallazgos anclados.
 >
 > **Qué cambió desde la rev 3.** #762 mergeó, así que **0.B está cerrada** y el ruling
 > de #743 vive en `main`. Su review en frío devolvió cinco hallazgos y uno era un
@@ -282,10 +292,37 @@ sobrevive y aterriza donde corresponde: el ADR de transporte del slice 3.
 filas borderline, la superficie de capacidad de punta a punta, y si tres tiers valen su
 complejidad. Van en **#761** para que no se pierdan al cerrar el ticket.
 
-#### 0.C — El slice 3, en un tracker nuevo
+#### 0.C — El slice 3 · **A completo, B en curso**
 
-Se abre después de que #762 mergee: el slice 3 lee la llave que el ruling volvió
-autoritativa.
+Tracker: `feature/issue-682-slice3-cold-review-stage`. **7 de 16 tareas**, 565/1000
+gobernadas. ADR-0033 firmado el 21/08.
+
+| | |
+|---|---|
+| **Slice A** ✅ | el contrato de archivo: ` ```brain-findings/1 `, su lector, el cableado como `deps.generate`, y un hallazgo razonado posteado **en la línea cambiada** |
+| **B.1–B.3** ✅ | el ADR de transporte; `sdd.map` con `cold-review` como primer habitante; la op `run-stage` del harness |
+| **B.4–B.6** ⚪ | el prompt provisional con su deuda contra #312; el pin de que el stage no commitea; un engine sin backend que refuse |
+| **Slice C** ⚪ | REQ-682-5, la prueba por el verbo real, el PR terminal, y el cierre de #682 y #754 |
+
+**Tres decisiones del diseño que vale tener a mano**, porque cada una se tomó midiendo:
+
+1. **El payload del artefacto es JSON, no YAML.** El lector de listas del veredicto tiene
+   sus regexes ancladas a la indentación de *un* emisor: la misma lista da 1 entrada a 2
+   espacios y **0** a 0-indent y a 4 — silenciosamente, como lista vacía y no como
+   incomputable. Sobrevivible para un bloque que el renderer del repo produjo; no para un
+   archivo que escribe un modelo.
+2. **El tag es el selector, y es un peligro vivo.** Un archivo con `protocol:
+   brain-review/N` lo levantaría `parse-verdict.mjs` una vez commiteado, y `cold-boot.mjs`
+   deriva `rev` y sostiene el candado anti-loop desde ahí.
+3. **La Compuerta 1 no bloqueó nada**, y se puede mostrar desde ADR-0019: su **segunda**
+   alternativa rechazada —la que nadie citaba— dice *«the four surfaces are the invariant,
+   the op count is just today's state»*. Crecer `VALID_OPS` ya estaba permitido; lo
+   prohibido es forkear el ciclo de artefactos SDD, y `cold-review` no produce ninguno de
+   los cuatro. `assertRoutableStage` lo refusa **en código**, no en un comentario.
+
+**Lo que sigue sin probarse:** nada del slice B corrió contra un agente real. `runStage`
+está testeado con un runner inyectado. Esa prueba es C.2, y hasta que corra, «el
+subagente funciona» es una predicción.
 
 **Lo medido al mirar el código, y cambia el tamaño de esto:** toda la cadena debajo del
 generador ya existe y está testeada. Faltan **dos piezas**, no un slice entero.
