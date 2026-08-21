@@ -159,16 +159,27 @@ test('the prompt carries no posted-verdict shape — proved, not asserted in a c
 });
 
 test('the empty case the prompt describes is one the reader accepts', () => {
-  // Not a string match on "write the file with an empty array". The prompt tells
-  // the engine what to write when it found nothing; this executes that
-  // instruction and requires the result to be the DISTINCT empty state — ok:true
-  // with zero findings — rather than a failure.
+  // TWO SEPARATE CLAIMS, because the first cut asserted only the second and its
+  // message claimed both. Measured: inverting the instruction to "if you find
+  // nothing, omit the file" left this test GREEN — it was replacing the example
+  // block with `[]` itself, so it never read the sentence it said it executed.
+  // The engine would have been told to signal "found nothing" by producing the
+  // one state that reads as "never ran".
   //
-  // That distinction is the whole of REQ-S3-4 and it is the one a tired engine
-  // is most likely to get wrong by omitting the file instead. If the shape the
-  // role describes ever stopped parsing as "ran and found nothing", the review
-  // would report "never ran" for every clean PR.
+  //   1. THE INSTRUCTION says to write the file. A string match, and nothing
+  //      more — it cannot prove the engine obeys, only that the sentence has not
+  //      been deleted or inverted.
+  //   2. THE SHAPE it describes parses as the distinct empty state. Executed
+  //      against the real reader.
+  //
+  // Neither half substitutes for the other: an instruction nobody can parse and
+  // a parseable shape nobody is told to write both fail REQ-S3-4 silently.
   const prompt = buildColdReviewPrompt({ prNumber: PR });
+
+  assert.ok(
+    prompt.includes('write the file with an empty array'),
+    'the role must tell the engine to WRITE the empty artifact — an omitted file reads as "never ran"'
+  );
   const emptied = prompt.replace(/(```brain-findings\/1\n)[\s\S]*?(\n```)/, '$1[]$2');
   assert.notEqual(emptied, prompt, 'the example block must be replaceable — otherwise this tests nothing');
 
