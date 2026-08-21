@@ -65,18 +65,41 @@ test('#682 S3: an EMPTY findings list is a SUCCESS — the engine ran and found 
   }
 });
 
-test('#682 S3: "found nothing" and "could not read" are DISTINGUISHABLE by the caller', () => {
-  // The pin. A reader that collapsed these would let cli.mjs render a verdict
-  // declaring `inferential` applied over a file it never read.
-  const ranAndFoundNothing = readFindingsArtifact(block('[]'));
-  const couldNotRead = readFindingsArtifact(block('{ nope }'));
+test('#682 S3: "found nothing" and "could not read" are DISTINGUISHABLE — on EVERY failure path', () => {
+  // The pin, and the first cut of it was BLIND ALONG THE PATH AXIS. It asserted
+  // `findings === undefined` on ONE failure — the JSON-parse one — and read as
+  // though it covered "a failure". A mutation that added `findings: []` to the
+  // MISSING-FILE branch survived the whole file, green.
+  //
+  // So the oracle enumerates the paths instead of sampling one. Every branch
+  // that returns `ok: false` is a refusal, and a refusal carrying an empty
+  // findings array is the fold itself: `cli.mjs` would read it as "ran, found
+  // nothing" and declare the inferential control applied over a file it never
+  // read.
+  const FAILURES = [
+    ['missing', undefined],
+    ['empty', '   \n '],
+    ['no block of the tag', '# Cold review\n\nprose only\n'],
+    ['two blocks', block('[]') + '\n' + block('[]')],
+    ['unparseable JSON', block('{ nope }')],
+    ['a JSON scalar', block('"a string"')],
+    ['no findings array', block('{"summary": "fine"}')],
+    ['a non-object entry', block('["a string"]')],
+    ['the posted family shape', '```yaml\nprotocol: brain-review/2\n```\n' + block('[]')],
+  ];
 
+  const ranAndFoundNothing = readFindingsArtifact(block('[]'));
   assert.equal(ranAndFoundNothing.ok, true);
-  assert.equal(couldNotRead.ok, false);
-  assert.notDeepEqual(ranAndFoundNothing, couldNotRead,
-    'the two states must not be the same object — one is a result, the other is a refusal');
-  assert.equal(couldNotRead.findings, undefined,
-    'a failure must carry no findings key at all: an empty array there is the fold itself');
+  assert.deepEqual(ranAndFoundNothing.findings, []);
+
+  for (const [label, input] of FAILURES) {
+    const r = readFindingsArtifact(input);
+    assert.equal(r.ok, false, `${label} must be a refusal`);
+    assert.equal(r.findings, undefined,
+      `${label}: a refusal must carry NO findings key — an empty array there is indistinguishable ` +
+      'from "the engine ran and found nothing", and the verdict would claim a control it never applied');
+    assert.notDeepEqual(r, ranAndFoundNothing, `${label} must not equal the empty-but-successful result`);
+  }
 });
 
 // ── the family rule, which is a live hazard and not a style ──────────────────
