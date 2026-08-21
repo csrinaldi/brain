@@ -221,9 +221,10 @@ Cuatro bloques, en este orden. Solo 0.A y 0.B bloquean el merge.
 
 #### 0.A — Qué falta para mergear #758
 
-Medido contra `origin/feature/issue-682 @ a16e971`. La rev 2 de este documento lo midió
-en `24c506c` — `8ebf523` más un merge de `main`, sin un solo cambio de código después de
-la review — y desde entonces los dos hallazgos abiertos se cerraron.
+Medido contra `origin/feature/issue-682 @ 48b8ac2`. Hubo **dos rondas** de review en frío
+del chain desde que se escribió la rev 2 de este documento, y los ocho hallazgos de las dos
+están cerrados — cada uno **reproducido antes de arreglarlo**, y cada fix probado con una
+mutación contra la suite entera.
 
 | # | Qué | Estado |
 |---|---|---|
@@ -231,12 +232,34 @@ la review — y desde entonces los dos hallazgos abiertos se cerraron.
 | 2 | `blocker` de la review rev 1: el body afirmaba que en `standard` no cambia nada, y cambia — todo veredicto lleva una condición nueva | **cerrado** — el body ya declara la condición en `standard` y en `regulated` |
 | 3 | `correction`: `IMPLEMENTED_AXES` es una segunda declaración sin pin — agregarle `'same-model'` (mentirle al operador sobre qué ejes existen) pasa la suite completa, 4147/4147 | **cerrado** en `a16e971` — la mutación se reprodujo primero (verde, hallazgo confirmado); ahora `RUNNERS` es la única declaración, `IMPLEMENTED_AXES` se deriva de sus claves y un test la fija contra un literal. Tres mutaciones muertas |
 | 4 | `editorial`: `governance-tiers.mjs:283` nombra `resolveChallenger()`, símbolo que esta misma cadena dejó de exportar | **cerrado** en `a16e971` — dice `resolveJudgment()` |
-| 5 | Review en frío del chain **otra vez, sobre la cabeza actual** (`main...a16e971`), con veredicto `brain-review/2` en `APPROVE`. La rev 1 fue `REVISE` sobre `8ebf523` | **falta, y tiene dueño obligado**: quien escribió el fix no puede revisarlo — `actor-check` pide actor distinto y el protocolo pide lectura en frío |
-| 6 | Los gates verdes y la suite | **hecho** — los 10 checks verdes en `a16e971`, esta vez todos en la misma corrida; suite en 4148 (+1 test), 0 fail; `repo:check` y `brain:nav` verdes |
-| 7 | Merge limpio contra `main`, y el body sin afirmaciones vencidas | **hecho** — `mergeable_state: clean`; intersección de archivos tocados de los dos lados = ∅; el body reescrito declara 933 inserciones de producción (era 914) contra el presupuesto de 1000 |
+| 5 | Review en frío del chain sobre `main...48b8ac2`, posteada como `brain-review/2` rev 2 | **falta, y tiene dueño y lugar obligados** — ver abajo |
+| 6 | Los gates verdes y la suite | **hecho** — suite en 4149 (+2 tests), 0 fail; `repo:check` y `brain:nav` verdes |
+| 7 | Merge limpio contra `main`, y el body sin afirmaciones vencidas | **hecho, y con dos correcciones al propio body** — el número de diff-size ahora se declara con la definición del gate (**993 de 1000**, add+del sobre rutas gobernadas, corrido con el `parseDiffNumstat` del repo), y la afirmación "intersección de archivos = ∅" se retiró por **vacua**: `git merge-base origin/main HEAD` **es** el tip de `main`, así que el conjunto del lado `main` tiene 0 archivos y ese check no probaba nada |
 
-Es decir, hoy: **una sola cosa** — la review en frío de cierre (5), que necesita un actor
-que no haya escrito el fix ni leído esta cadena — más la decisión de 0.B.
+Es decir, hoy: **una sola cosa** — la review en frío de cierre (5) — más la decisión de 0.B.
+
+**La ronda 3 encontró un `blocker` de la misma clase que la ronda 2**, un archivo más allá:
+`inferential.mjs` declaraba `RENDERED_ALWAYS` / `RENDERED_AS_ANCHOR` como el oráculo de
+REQ-682-4 y **nadie los leía** — dos exports, cero consumidores. Así que la mutación que el
+propio archivo nombra como el defecto que arregló seguía pasando. Cerrado, más tres hallazgos
+menores (`shouldRun()` sin call site de producción, §6 vencido en tres claves, un
+identificador que no testeaba lo que nombra).
+
+**Dónde puede producirse la rev 2, y dónde no.** El intento de la ronda 3 se negó a emitir
+veredicto, y por un motivo mecánico, no de criterio: `brain:review` se rehúsa a correr donde
+las credenciales se inyectan río arriba, porque una lectura de identidad por token no prueba
+nada ahí. Es el control negativo de **#604** funcionando — y #604 está cerrado, con PR #665.
+Su propio cuerpo dice dónde sí corre el verbo:
+
+> la máquina del maintainer con el PAT, o **un job de GitHub Actions** con el PAT como secret —
+> *"lo más parecido a un reviewer genuinamente frío que hay disponible"*.
+
+Y el actor tiene que ser uno que no haya escrito estos fixes ni leído la cadena.
+
+**Un aviso de presupuesto para quien siga:** el gate `diff-size` está en **993 de 1000**. Quedan
+**7 líneas** de margen sobre rutas gobernadas. `lite` honra `size:exception`, así que otra ronda
+de fixes no está bloqueada — pero deja de ser una edición gratis y pasa a ser una etiqueta y una
+decisión.
 
 #### 0.B — La auditoría contra el ruling de #743, hecha
 
