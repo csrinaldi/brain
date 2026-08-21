@@ -39,14 +39,17 @@
 // example inside it to parse. If the example shows the engine a shape the reader
 // would refuse, drop a field from, or fail to find, the suite goes red.
 //
-// `severity` is the one vocabulary stated as a literal here, and it is stated
-// because there is nothing to derive it from: no `ALLOWED_SEVERITIES` constant
-// exists — the three values are enforced by scattered comparisons
-// (`verdict.mjs`'s uncited-blocker downgrade, `refuter.mjs`'s batch selection)
-// and written down only in `reviewer-protocol.md` §"findings". Adding a constant
-// here that no validator reads would create the very thing this file avoids: a
-// declared vocabulary with no reader. So it is a literal, and this paragraph is
-// the record that it is unchecked.
+// `severity` is the one vocabulary with no constant to derive from: no
+// `ALLOWED_SEVERITIES` exists — the three values are enforced by scattered
+// comparisons (`verdict.mjs`'s uncited-blocker downgrade, `refuter.mjs`'s batch
+// selection) and written down in `reviewer-protocol.md`. Adding a constant here
+// that no validator reads would create the very thing this file avoids.
+//
+// So it stays a literal, AND THE TEST GIVES IT A READER ANYWAY: it parses
+// `reviewer-protocol.md`'s own `severity:` line and requires the two to agree.
+// The protocol document is where the vocabulary is actually written down, so
+// that is a real cross-check rather than a second copy compared to itself — and
+// it fails the day the protocol changes the set without this file following.
 
 import {
   ARTIFACT_TAG,
@@ -119,12 +122,12 @@ silently at the boundary:
 
 ${CARRIED_FIELDS.map((f) => `  - ${f}`).join('\n')}
 
-  · \`severity\`: ${SEVERITIES}
+  · \`severity\` — one of: ${SEVERITIES}
   · \`cites\` is MANDATORY when \`severity\` is \`blocker\`. An uncited blocker is
     downgraded to \`correction\` — cite an ADR, a REQ, a spec line, or a gate.
-  · \`evidence_class\`: ${ALLOWED_EVIDENCE_CLASSES.join(' | ')}. Yours are
-    \`inferential\` — you reasoned to them; a gate did not compute them.
-  · \`causal_disposition\`, when you state one: ${ALLOWED_CAUSAL_DISPOSITIONS.join(' | ')}.
+  · \`evidence_class\` — one of: ${ALLOWED_EVIDENCE_CLASSES.join(' | ')}
+    Yours are \`inferential\`: you reasoned to them; a gate did not compute them.
+  · \`causal_disposition\`, when you state one — one of: ${ALLOWED_CAUSAL_DISPOSITIONS.join(' | ')}
   · \`file\` and \`line\` together anchor a finding to a line of the diff, and that
     is what makes it appear as an inline comment on the pull request rather than
     only in the summary. Anchor everything you can.

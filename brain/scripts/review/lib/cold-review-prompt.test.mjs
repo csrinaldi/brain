@@ -15,6 +15,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { buildColdReviewPrompt, ROLE_DEBT_TICKET } from './cold-review-prompt.mjs';
 import {
@@ -85,17 +86,76 @@ test('the field list handed to the engine is DERIVED from CARRIED_FIELDS', () =>
   );
 });
 
+/** Reads one `· `<name>` … one of: a | b | c` line back out of the prompt. */
+function renderedVocabulary(prompt, name) {
+  const line = prompt.split('\n').find((l) => l.startsWith(`  \u00b7 \`${name}\``));
+  assert.ok(line, `the prompt must render a vocabulary line for \`${name}\``);
+  const [, values] = line.match(/ one of: (.+)$/) ?? [];
+  assert.ok(values, `\`${name}\`'s line must end in its value set`);
+  return values.split(' | ');
+}
+
 test('the vocabularies are derived from schema-v2, not restated', () => {
   const prompt = buildColdReviewPrompt({ prNumber: PR });
 
-  assert.ok(
-    prompt.includes(ALLOWED_EVIDENCE_CLASSES.join(' | ')),
-    'the evidence classes are interpolated from ALLOWED_EVIDENCE_CLASSES'
+  // Read back and compared as a SET, both directions. The first cut of this test
+  // asserted `prompt.includes(CONSTANT.join(' | '))`, and that is blind in one
+  // direction: a hardcoded string listing today's values plus a fourth the
+  // validator rejects contains the derived substring and passes. The engine would
+  // then be told about a class every finding using it gets marked `schema_invalid`
+  // for. Reading the rendered set back cannot miss it.
+  assert.deepEqual(
+    renderedVocabulary(prompt, 'evidence_class'),
+    [...ALLOWED_EVIDENCE_CLASSES],
+    'the evidence classes are ALLOWED_EVIDENCE_CLASSES exactly — no more, no fewer'
   );
-  assert.ok(
-    prompt.includes(ALLOWED_CAUSAL_DISPOSITIONS.join(' | ')),
-    'the dispositions are interpolated from ALLOWED_CAUSAL_DISPOSITIONS'
+  assert.deepEqual(
+    renderedVocabulary(prompt, 'causal_disposition'),
+    [...ALLOWED_CAUSAL_DISPOSITIONS],
+    'the dispositions are ALLOWED_CAUSAL_DISPOSITIONS exactly — no more, no fewer'
   );
+});
+
+test('severity has no constant, so the PROTOCOL DOCUMENT is its reader', () => {
+  const prompt = buildColdReviewPrompt({ prNumber: PR });
+
+  // The one vocabulary the prompt states as a literal, because no
+  // `ALLOWED_SEVERITIES` exists to derive it from. Rather than leave it
+  // unchecked — or invent a constant no validator reads, which is the defect
+  // this module exists to avoid — it is compared against the place the
+  // vocabulary is actually written down.
+  const protocol = readFileSync(
+    new URL('../../../core/methodology/reviewer-protocol.md', import.meta.url),
+    'utf8'
+  );
+  const declared = [...protocol.matchAll(/^\s*severity: (blocker.*)$/gm)].map((m) => m[1].trim());
+  assert.ok(declared.length > 0, 'reviewer-protocol.md must declare the severity vocabulary');
+  assert.ok(
+    declared.every((d) => d === declared[0]),
+    'and must declare it consistently — a document disagreeing with itself has no answer to give'
+  );
+
+  assert.deepEqual(
+    renderedVocabulary(prompt, 'severity'),
+    declared[0].split(' | '),
+    'the prompt\'s severity set must match reviewer-protocol.md\'s'
+  );
+});
+
+test('the prompt carries no posted-verdict shape — proved, not asserted in a comment', () => {
+  // The round-trip test's comment claims this is covered "without a second
+  // assertion", because the reader checks the posted family before selecting a
+  // block. A coverage claim in a comment is the exact defect class this ticket
+  // keeps finding, so it is executed here instead: inject the shape and require
+  // the round-trip to refuse.
+  const poisoned = buildColdReviewPrompt({ prNumber: PR }).replace(
+    '## What you may use',
+    'protocol: brain-review/2\n\n## What you may use'
+  );
+  const result = readFindingsArtifact(poisoned);
+
+  assert.equal(result.ok, false, 'a prompt carrying the posted family must not read as an artifact');
+  assert.match(result.reason, /anti-loop lock/, 'and must say why');
 });
 
 test('the artifact path is the one the reader will look at', () => {
