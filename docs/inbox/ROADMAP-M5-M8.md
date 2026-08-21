@@ -295,7 +295,10 @@ complejidad. Van en **#761** para que no se pierdan al cerrar el ticket.
 #### 0.C — El slice 3 · **A completo, B en curso**
 
 Tracker: `feature/issue-682-slice3-cold-review-stage`. **7 de 16 tareas**, 565/1000
-gobernadas. ADR-0033 firmado el 21/08.
+gobernadas. El ADR de transporte (`adr-0033-cold-review-transport.md`) está firmado **en
+ese tracker** y llega a `main` con él — citado por nombre de archivo y no como `ADR-NNNN`
+porque todavía no vive en `brain/project/decisions/`, que es la forma reservada que #599
+estableció y que el check de citaciones exige.
 
 | | |
 |---|---|
