@@ -306,8 +306,56 @@
         finding, the FIRST is kept and every later one is dropped as a duplicate,
         so a generator that omits ids loses distinct findings and the verdict
         reports fewer than were found. Both directions pinned now.
-- [ ] C.2 Prove the whole path through the real verb, on a real PR: stage runs → artifact
-      written → verdict posted with inline comments. #682 acceptance criterion 3.
+- [x] C.2a Prove the whole path **through the real verb**: stage runs → artifact written →
+      finding reaches the rendered verdict. The wiring, in `cli.mjs`.
+
+      **Measured by grep before this task: `runColdReviewStage` and
+      `makeRunStageSeam` had ZERO production callers.** The slice had a producer,
+      a transport and a reader that never touched — everything tested, nothing
+      reachable from `brain:review`. That is the defect class the mutation passes
+      kept finding, at SLICE scale rather than line scale: a capability that reads
+      as "built" in every place except the one that runs. Until this commit the
+      artifact only existed if a human wrote it by hand.
+
+      **The ordering IS the wiring.** `makeArtifactGenerate` answers `null` for a
+      file absent *at the moment it is asked*, so the stage has to run before
+      `artifactDeps` resolves. The other order makes the FIRST review on every PR
+      report "no transport is configured" about a stage that had just written its
+      artifact. Pinned by a test that reads the filesystem from inside the
+      engine's turn.
+
+      **A routed stage that FAILED is refused, not fallen through.** Falling
+      through reaches `artifactDeps`, finds no file, and renders *"enabled but no
+      transport is configured"* — telling an operator who configured an engine
+      that they did not. Same words, opposite fact. `routed` surviving the failure
+      is what lets this branch tell them apart.
+
+      **An injected `inferentialDeps` replaces the stage entirely** — a caller
+      supplying its own generator has supplied what the stage exists to produce,
+      and spawning anyway burns a model call nothing reads. **It runs under
+      `--dry-run`**, because `--dry-run` governs POSTING, not producing: a preview
+      that skipped the stage would render a different verdict from the real one,
+      which is the only reason to ask for a preview. Cost is opt-in — `sdd.map`
+      ships empty.
+
+      Six tests through `main()`, one with no `stageDeps` at all so B.6's refusal
+      is driven by the real seam and the real dispatcher from the verb.
+
+      Seven mutations, full suite each, tree reverted after every one. Six died.
+      **R5 survived: `baseRef`/`headRef` replaced with nulls left the suite
+      green.** `buildColdReviewPrompt` then falls back to the vague *"the diff of
+      this pull request against its base branch"*, so the engine reviews whatever
+      it infers rather than the range the verdict binds itself to — **and a review
+      of the wrong range is still a well-formatted review.** The composition test
+      asserted stage, engine, model and the artifact path, and stopped one field
+      short of the one that says WHAT to review. Ninth occurrence on this ticket.
+- [ ] C.2b The same path **on a real PR**, with the verdict posted and its inline
+      comments visible. #682 acceptance criterion 3.
+      **Not satisfiable from this container** — #604, measured four times on this
+      line of work: credentials here are proxy-injected, so `brain:review` refuses
+      to post. C.2a proves everything up to the post; A.4 proves the post carries
+      anchored inline comments. What is missing is one run where both halves are
+      the same run. Needs a machine with a real PAT, same precondition as C.5.
 - [ ] C.3 The negative case stays honest end to end (#682 criterion 6): an engine that
       fails posts nothing and says why.
 - [x] C.4 **The terminal PR is OPEN, as a draft**, from the first slice rather than the
