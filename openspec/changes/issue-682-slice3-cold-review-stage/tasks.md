@@ -356,8 +356,47 @@
       to post. C.2a proves everything up to the post; A.4 proves the post carries
       anchored inline comments. What is missing is one run where both halves are
       the same run. Needs a machine with a real PAT, same precondition as C.5.
-- [ ] C.3 The negative case stays honest end to end (#682 criterion 6): an engine that
-      fails posts nothing and says why.
+- [x] C.3 The negative case stays honest end to end (#682 criterion 6): an engine that
+      fails posts nothing and says why. `cli.judgment.test.mjs`, C.3 section.
+
+      **C.2a's tests could not have caught a broken refusal, and that is the whole
+      reason this task is separate.** They all run at `--dry-run`, which posts
+      nothing regardless — "posts nothing" is only a claim when the run is one
+      that WOULD post. These drop `--dry-run` and spy the write verbs, so a
+      regression that let a failed judgment half through shows up as
+      `prReviewComment: 1`.
+
+      **Four failure modes, each refusing, naming its cause, and leaving every
+      write counter at zero:** the engine failed; the engine exited clean and
+      wrote nothing; the artifact exists and cannot be read; the engine has no
+      backend — that last one through the REAL seam and dispatcher, no injection.
+
+      **Their reasons are asserted PAIRWISE DISTINCT.** Three failures rendering
+      one message is the fold this ticket keeps finding, and "something went
+      wrong" is not something an operator can act on. Measured by printing them:
+      three different messages from three different paths.
+
+      **The control is what makes the rest mean anything.** "Refuses on failure"
+      is trivially satisfiable by refusing always, so an engine that ran and found
+      nothing must still POST — REQ-S3-4's distinction arriving intact at the
+      layer that writes to the PR. Mutation S2 made "found nothing" a failure and
+      the control died, along with four older tests.
+
+      **And the refusal comes before the verdict is RENDERED, not after.** A block
+      printed to stdout and then withheld is still one a human can paste onto the
+      PR by hand, carrying an inferential control it never applied.
+
+      Four mutations, full suite each, tree reverted after every one. All died —
+      including S4, the unreadable artifact folding into "found nothing", which is
+      #552's shape at the file layer.
+
+      **One blind spot in my own test, found before commit rather than by
+      mutation.** The mode table built one row via `mode.name.includes(...)` — a
+      branch keyed off the row's DISPLAY NAME. Renaming a row would have silently
+      changed what it ran, and that row would then have fallen through to the real
+      seam and tried to spawn an actual `claude` binary. Each row carries its own
+      behaviour now: a table whose rows mean different things has to say so in the
+      table, not in a string comparison beside it.
 - [x] C.4 **The terminal PR is OPEN, as a draft**, from the first slice rather than the
       last — **#765**, `feature/issue-682-slice3-cold-review-stage → main`.
       This task used to say "open it" and was scheduled here, at the end. It moved on
