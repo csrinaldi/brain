@@ -185,7 +185,59 @@
       beside the artifact is invisible. N9 (stray log) dies with `-uall`; N10 (the
       same stray log, listing reverted to plain `--porcelain`) SURVIVES. The
       comment says so because it was run, not because it sounded right.
-- [ ] B.6 An engine with no backend REFUSES rather than degrading (REQ-S3-1).
+- [x] B.6 An engine with no backend REFUSES rather than degrading (REQ-S3-1).
+      `harness/stage-seam.mjs` — the `runStage` seam B.5 required and deliberately
+      shipped without.
+
+      **Falling back is the failure mode, not crashing.** A seam that quietly ran
+      `claude` when the operator wrote `engine: 'plain'` produces a real, well-
+      formatted, entirely plausible review from a model they did not choose, and
+      nothing on the verdict says so. That is worse than no review, because there
+      is no way for them to find out. The file names exactly one engine — the one
+      it was given — and that is a property of its shape, not a promise.
+
+      **The refusal rides the existing failure channel** rather than a throw.
+      `runColdReviewStage` already has `{routed: true, ok: false, reason}` for "the
+      transport ran and broke", which `cli.mjs` refuses to post on; a missing
+      backend is a transport failure like a non-zero exit is. One mechanism to keep
+      honest, not two. `routed` stays TRUE through it — the operator named an
+      engine, so the verdict must not tell them they configured nothing.
+
+      **The oracle is the `backends/` directory, not a fixture list.** The test
+      reads it at runtime and asserts conditionally on what each backend actually
+      exports: implements `runStage` → its answer must reach the caller; does not →
+      the seam must refuse and NAME it. A fixture listing today's backends would
+      pass forever while a seventh arrived without `runStage`, and would agree with
+      any hardcode a later edit introduced — which is exactly how N6 survived in
+      B.5. Measured 22/08/2026: `claude` implements it; `agent-runtime`,
+      `antigravity`, `gentle-ai`, `plain` and `settings-hooks` do not, and all five
+      refuse. That n=1 is #312's paridad argument, now with a test that watches it.
+
+      **A live instance of #734's shape, found on the way in and reproduced before
+      fixing.** `dispatch` discarded the backend's return value —
+      `await backend[fn](...args)` with `@returns {Promise<void>}` beside it.
+      Harmless while `init` was the only op, because `init` answers nothing; live
+      from the moment B.3 added an op whose entire purpose is its `{ok, reason}`.
+      Measured: a backend returning `{ok: false, reason: 'status 137'}` came back
+      from `dispatch` as `undefined`, so every engine outcome reached
+      `runColdReviewStage` as "the engine returned no result".
+
+      Eight mutations, full suite each, tree reverted after every one. Seven died.
+
+      **P2 survived, and the blind claim was in the MODULE's header this time.**
+      It said *"every throw is a refusal, not just the two `dispatch` spells out"*
+      — and narrowing the catch to `/not found|does not implement/` left the whole
+      suite green. The seam would have started RETHROWING the day a third failure
+      mode appeared, and a rethrow aborts `brain:review` instead of reporting a
+      transport failure the operator can read. Sixth blind claim on this ticket,
+      and the first outside a test message: the class does not care which file it
+      lives in.
+
+      **Writing its reader found a second, live defect.** The catch is catch-ALL,
+      which is precisely why `err.message` was wrong: a rejection with `null` made
+      that line throw a TypeError, turning the refusal into the abort it exists to
+      prevent. `err?.message ?? String(err)` now. Found by enumerating non-Error
+      throws, not by reading the line.
 
 ## Slice C — the bound and the close
 
