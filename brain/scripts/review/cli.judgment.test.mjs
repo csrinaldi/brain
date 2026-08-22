@@ -831,3 +831,190 @@ test('C.2a: a routed engine with no backend refuses through the REAL seam', asyn
   assert.match(errors.join('\n'), /no-such-engine-at-all/, 'the refusal names the engine the operator wrote');
   assert.match(errors.join('\n'), /Refusing rather than falling back/);
 });
+
+// ── C.3 — THE NEGATIVE CASE, ON THE REAL POSTING PATH ───────────────────────
+//
+// #682 acceptance criterion 6: an engine that fails posts nothing and says why.
+//
+// C.2a's tests all run at `--dry-run`, which posts nothing regardless — so they
+// could not have caught a broken refusal. "Posts nothing" is only a claim when
+// the run is one that WOULD post. These drop `--dry-run` and spy the write
+// verbs, so a regression that let a failed judgment half through would show up
+// as `prReviewComment: 1`.
+//
+// FOUR MODES, AND THE FOURTH IS WHAT MAKES THE OTHER THREE MEAN ANYTHING.
+// "Refuses on failure" is trivially satisfiable by refusing always; the
+// found-nothing case is the control that proves the refusal is selective.
+// Their reasons are also asserted PAIRWISE DISTINCT: three failures rendering
+// one message is the fold this whole ticket is about, and an operator cannot act
+// on "something went wrong".
+
+/** Write verbs, counted. A failed judgment half must leave every counter at 0. */
+function spyWriteVerbs() {
+  const calls = { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 };
+  return {
+    calls,
+    prReviewComment: async () => { calls.prReviewComment += 1; return { url: 'unused' }; },
+    issueComment: async () => { calls.issueComment += 1; return { url: 'unused' }; },
+    labelAdd: async () => { calls.labelAdd += 1; return { ok: true }; },
+    labelRemove: async () => { calls.labelRemove += 1; return { ok: true }; },
+    prView: async () => ({ headRefOid: HEAD }),
+  };
+}
+
+/** Runs the real verb on the REAL posting path (no --dry-run). */
+async function runPosting(options, extra = {}) {
+  const vcs = spyWriteVerbs();
+  const lines = [];
+  const errors = [];
+  const code = await main({
+    argv: ['--pr', '42'],
+    log: (s) => lines.push(s),
+    error: (s) => errors.push(s),
+    ...deps(options),
+    ...extra,
+    writeVerbs: vcs,
+  });
+  return { code, vcs, lines, errors, said: errors.join('\n') };
+}
+
+/** Writes an artifact for PR 42 under `root`, with whatever body is given. */
+async function writeArtifact(root, body) {
+  const { writeFileSync, mkdirSync } = await import('node:fs');
+  const { dirname } = await import('node:path');
+  mkdirSync(dirname(join(root, artifactPathFor(42))), { recursive: true });
+  writeFileSync(join(root, artifactPathFor(42)), body);
+}
+
+const NEGATIVE_MODES = [
+  {
+    name: 'the engine failed',
+    stageDeps: { runStage: async () => ({ ok: false, reason: 'the engine exited with status 137' }) },
+    expect: /the cold-review stage failed.*status 137/s,
+  },
+  {
+    name: 'the engine exited clean and wrote nothing',
+    stageDeps: { runStage: async () => ({ ok: true }) },
+    expect: /wrote no artifact/,
+  },
+  {
+    name: 'the engine wrote an artifact nothing can read',
+    stageDeps: null,   // filled per-test: writes a malformed artifact
+    expect: /could not be read/,
+  },
+  {
+    name: 'the engine has no backend at all',
+    routing: { engine: 'no-such-engine-at-all' },
+    stageDeps: undefined,   // no injection — the REAL seam and dispatcher
+    expect: /no-such-engine-at-all/,
+  },
+];
+
+test('C.3: every way the judgment half can fail posts NOTHING and says why', async (t) => {
+  const reasons = [];
+
+  for (const mode of NEGATIVE_MODES) {
+    const root = scratchRoot(t);
+    const config = {
+      reviewer: { inferential: { enabled: true } },
+      sdd: { map: { [COLD_REVIEW_STAGE]: mode.routing ?? { engine: 'claude', model: 'zz-9' } } },
+    };
+
+    const stageDeps = mode.name.includes('nothing can read')
+      ? {
+        runStage: async () => {
+          // Present and unreadable: valid JSON in the wrong shape, so the
+          // reader refuses rather than finding nothing.
+          await writeArtifact(root, `\`\`\`${ARTIFACT_TAG}\n{"not":"a findings list"}\n\`\`\`\n`);
+          return { ok: true };
+        },
+      }
+      : mode.stageDeps;
+
+    const { code, vcs, said } = await runPosting(
+      { config, protocol: 'brain-review/2' },
+      stageDeps ? { root, stageDeps } : { root }
+    );
+
+    assert.equal(code, 1, `${mode.name}: refuses the run`);
+    assert.match(said, mode.expect, `${mode.name}: says why`);
+
+    // THE HALF THIS SECTION EXISTS FOR. A verdict posted here would declare the
+    // inferential control applied over findings nobody produced — the
+    // uncomputable-evidence APPROVE protocol §10 forbids.
+    assert.deepEqual(
+      vcs.calls, { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 },
+      `${mode.name}: NOTHING may be written to the PR`
+    );
+
+    reasons.push(said);
+  }
+
+  // Pairwise distinct. Three failures rendering one message is the fold this
+  // ticket keeps finding, and "something went wrong" is not something an
+  // operator can act on.
+  assert.equal(
+    new Set(reasons).size, NEGATIVE_MODES.length,
+    'each failure mode must be distinguishable from the others by its message alone'
+  );
+});
+
+test('C.3: the CONTROL — an engine that ran and found nothing DOES post', async (t) => {
+  const root = scratchRoot(t);
+
+  const { code, vcs, lines } = await runPosting(
+    {
+      config: {
+        reviewer: { inferential: { enabled: true } },
+        sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'claude', model: 'zz-9' } } },
+      },
+      protocol: 'brain-review/2',
+    },
+    {
+      root,
+      stageDeps: {
+        runStage: async () => {
+          await writeArtifact(root, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+          return { ok: true };
+        },
+      },
+    }
+  );
+
+  // WITHOUT THIS, "refuses on failure" is satisfiable by refusing always. "The
+  // reviewer ran and found nothing" is a real answer and must reach the PR —
+  // it is the distinction REQ-S3-4 draws one layer down, arriving intact at the
+  // layer that posts.
+  assert.equal(code, 0, 'finding nothing is not a failure');
+  assert.equal(vcs.calls.prReviewComment, 1, 'and the verdict is posted exactly once');
+  assert.ok(
+    lines.some((l) => /protocol: brain-review\/2/.test(l)),
+    'a real verdict, on the wire'
+  );
+});
+
+test('C.3: a failure refuses BEFORE the verdict is rendered, not after', async (t) => {
+  const root = scratchRoot(t);
+
+  const { lines, code } = await runPosting(
+    {
+      config: {
+        reviewer: { inferential: { enabled: true } },
+        sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'claude' } } },
+      },
+      protocol: 'brain-review/2',
+    },
+    { root, stageDeps: { runStage: async () => ({ ok: false, reason: 'boom' }) } }
+  );
+
+  assert.equal(code, 1);
+
+  // Not merely "did not post" — did not RENDER. A verdict printed to stdout and
+  // then withheld is still a verdict a human can copy onto the PR by hand, and
+  // it would carry the inferential control it never applied. The refusal has to
+  // come before the block exists.
+  assert.equal(
+    lines.filter((l) => /protocol: brain-review/.test(l)).length, 0,
+    'no verdict block may be rendered at all on a failed judgment half'
+  );
+});
