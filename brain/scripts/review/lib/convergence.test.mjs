@@ -126,6 +126,31 @@ test('a generator that repeats itself converges before the bound', async () => {
   assert.equal(result.rounds, 2);
 });
 
+test('findings with no id dedup by their content, not by all being undefined', async () => {
+  // THE FALLBACK BRANCH, which had no test: every other fixture here carries an
+  // `id`, so replacing `JSON.stringify(f)` with a random key left the suite
+  // green. The hazard it guards is asymmetric and silent — with `undefined` as
+  // the key for every id-less finding, the FIRST one is kept and every later
+  // one is discarded as a duplicate, so a generator that omits ids loses real,
+  // distinct findings and the verdict reports fewer than were found.
+  const distinct = await gatherInferentialInputs({
+    maxRounds: 3,
+    deps: {
+      generate: async ({ round }) => [
+        { severity: 'editorial', evidence: `finding from round ${round}` },
+      ],
+    },
+  });
+  assert.equal(distinct.generated.length, 3, 'distinct id-less findings must all survive');
+
+  const repeated = await gatherInferentialInputs({
+    maxRounds: 3,
+    deps: { generate: async () => [{ severity: 'editorial', evidence: 'the same thing again' }] },
+  });
+  assert.equal(repeated.generated.length, 1, 'and an identical id-less finding is still one sighting');
+  assert.equal(repeated.rounds, 2, 'which is convergence, so the loop stops');
+});
+
 test('finding nothing converges immediately, and stays the distinct empty state', async () => {
   let calls = 0;
   const result = await gatherInferentialInputs({
