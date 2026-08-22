@@ -425,10 +425,11 @@ test('a repo that ASKED for the judgment half and did not get it is told why', a
 // hand-written artifact can prove: file → reader → generate → producer →
 // challenger → verdict. No agent is spawned; that is slice B.
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { artifactPathFor, ARTIFACT_TAG } from './lib/findings-artifact.mjs';
+import { COLD_REVIEW_STAGE } from '../lib/stage-engine.mjs';
 import { artifactDeps } from './cli.mjs';
 
 function repoWithArtifact(t, findings, pr = 762) {
@@ -604,4 +605,219 @@ test('C.1: an unreadable maxRounds refuses the run rather than reviewing under t
   // for something, and quietly running the old bound reviews under a
   // configuration they did not choose.
   assert.match(String(body), /whole number of rounds/);
+});
+
+// ── C.2a — THE STAGE IS REACHABLE FROM THE VERB ─────────────────────────────
+//
+// Until this section existed the slice had a producer, a transport and a reader
+// that never touched: `runColdReviewStage` and `makeRunStageSeam` had ZERO
+// production callers, measured by grep. Everything was tested and nothing was
+// reachable — the same defect class the mutation passes kept finding, at slice
+// scale rather than at line scale.
+//
+// These drive the WHOLE chain through `main()`: config routes the stage → the
+// seam reaches a (stubbed) engine → the engine writes the artifact → the reader
+// finds it → the finding lands in the verdict. No step is injected past the one
+// that would otherwise spawn a real model.
+
+/** A repo root the stage can write into, cleaned up after the test. */
+function scratchRoot(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'cli-stage-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+const ROUTED_CFG = {
+  reviewer: { inferential: { enabled: true } },
+  sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'claude', model: 'zz-9' } } },
+};
+
+test('C.2a: the routed stage runs, writes, and its finding reaches the verdict', async (t) => {
+  const root = scratchRoot(t);
+  let spawned = null;
+
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: (s) => lines.push(s),
+    error: () => {},
+    ...deps({ config: ROUTED_CFG, protocol: 'brain-review/2' }),
+    root,
+    // The ONLY injection is the thing that would spawn a real model. Everything
+    // between here and the verdict is production code.
+    stageDeps: {
+      runStage: async (args) => {
+        spawned = args;
+        const { writeFileSync, mkdirSync } = await import('node:fs');
+        const { dirname } = await import('node:path');
+        mkdirSync(dirname(join(root, artifactPathFor(42))), { recursive: true });
+        writeFileSync(
+          join(root, artifactPathFor(42)),
+          `# cold review\n\n\`\`\`${ARTIFACT_TAG}\n` +
+          JSON.stringify([{
+            id: 'C1', severity: 'blocker',
+            evidence: 'the stage ran and this came from its artifact',
+            cites: 'REQ-S3-3',
+          }]) + '\n\`\`\`\n'
+        );
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(code, 0);
+
+  // 1. The verb reached the seam, with the routing the config named.
+  assert.ok(spawned, 'the stage must actually be spawned — this is the call that did not exist');
+  assert.equal(spawned.stage, COLD_REVIEW_STAGE);
+  assert.equal(spawned.engine, 'claude');
+  assert.equal(spawned.model, 'zz-9');
+  assert.ok(spawned.prompt.includes(artifactPathFor(42)), 'the role names the path it must write');
+
+  // 2. The artifact is on disk, where the reader looks.
+  assert.ok(existsSync(join(root, artifactPathFor(42))), 'the stage wrote its artifact');
+
+  // 3. The finding crossed into the verdict. THIS is the link that was missing:
+  //    the reader could always read, but nothing had written.
+  const body = lines.join('\n');
+  const verdict = parseVerdict({ body });
+  assert.ok(
+    verdict.findings.some((f) => f.evidence?.includes('came from its artifact')),
+    'the artifact the stage wrote must reach the rendered verdict'
+  );
+  assert.ok(
+    !body.includes('no transport is configured'),
+    'and the verdict must NOT claim the transport is unconfigured after running it'
+  );
+});
+
+test('C.2a: the stage runs BEFORE the artifact is looked for', async (t) => {
+  const root = scratchRoot(t);
+  let existedWhenSpawned = null;
+
+  await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: () => {}, error: () => {},
+    ...deps({ config: ROUTED_CFG, protocol: 'brain-review/2' }),
+    root,
+    stageDeps: {
+      runStage: async () => {
+        existedWhenSpawned = existsSync(join(root, artifactPathFor(42)));
+        const { writeFileSync, mkdirSync } = await import('node:fs');
+        const { dirname } = await import('node:path');
+        mkdirSync(dirname(join(root, artifactPathFor(42))), { recursive: true });
+        writeFileSync(join(root, artifactPathFor(42)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        return { ok: true };
+      },
+    },
+  });
+
+  // THE ORDERING IS THE WIRING. `makeArtifactGenerate` answers `null` for a file
+  // absent AT THE MOMENT IT IS ASKED, so resolving the reader first would make
+  // the FIRST review on every PR report "no transport is configured" about a
+  // stage that had just written its artifact. The read has to come after.
+  assert.equal(existedWhenSpawned, false, 'precondition: the artifact did not exist before the stage ran');
+});
+
+test('C.2a: an UNROUTED stage spawns nothing and still reads a hand-written artifact', async (t) => {
+  const root = scratchRoot(t);
+  const { writeFileSync, mkdirSync } = await import('node:fs');
+  const { dirname } = await import('node:path');
+  mkdirSync(dirname(join(root, artifactPathFor(42))), { recursive: true });
+  writeFileSync(
+    join(root, artifactPathFor(42)),
+    `\`\`\`${ARTIFACT_TAG}\n` +
+    JSON.stringify([{ id: 'H1', severity: 'editorial', evidence: 'written by hand, no stage involved' }]) +
+    '\n\`\`\`\n'
+  );
+
+  let spawned = false;
+  const lines = [];
+  await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: (s) => lines.push(s), error: () => {},
+    ...deps({ config: CFG(), protocol: 'brain-review/2' }),   // no sdd.map
+    root,
+    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+  });
+
+  // Routing the stage is opt-in — `sdd.map` ships empty. A repo that has not
+  // routed it must not have an engine spawned on its behalf, and the file-only
+  // path that slice A shipped must keep working exactly as it did.
+  assert.equal(spawned, false, 'an unrouted stage spawns nothing');
+  assert.ok(
+    parseVerdict({ body: lines.join('\n') }).findings.some((f) => f.evidence?.includes('written by hand')),
+    'and the artifact is still read'
+  );
+});
+
+test('C.2a: an injected generator replaces the stage rather than running beside it', async (t) => {
+  const root = scratchRoot(t);
+  let spawned = false;
+
+  await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: () => {}, error: () => {},
+    ...deps({ config: ROUTED_CFG, protocol: 'brain-review/2', generate: async () => reasoned() }),
+    root,
+    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+  });
+
+  // A caller supplying its own generator has supplied the thing the stage exists
+  // to produce. Spawning anyway burns a model call whose output nothing reads —
+  // and would make every existing test in this file spawn an engine.
+  assert.equal(spawned, false, 'an injected generator means the stage is what was replaced');
+});
+
+test('C.2a: a FAILED stage refuses the run and does not report "no transport"', async (t) => {
+  const root = scratchRoot(t);
+  const errors = [];
+
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: () => {}, error: (s) => errors.push(s),
+    ...deps({ config: ROUTED_CFG, protocol: 'brain-review/2' }),
+    root,
+    stageDeps: { runStage: async () => ({ ok: false, reason: 'the engine exited with status 137' }) },
+  });
+
+  assert.equal(code, 1, 'a failed stage refuses the run');
+
+  const said = errors.join('\n');
+  assert.match(said, /the cold-review stage failed/);
+  assert.match(said, /status 137/, 'and names what actually went wrong');
+
+  // THE FOLD THIS BRANCH EXISTS TO PREVENT. Falling through instead would reach
+  // `artifactDeps`, find no file, and render "enabled but no transport is
+  // configured" — telling an operator who configured an engine that they did
+  // not. Same words, opposite fact.
+  assert.ok(
+    !said.includes('no transport is configured'),
+    'a configured engine that broke must not be reported as an unconfigured one'
+  );
+});
+
+test('C.2a: a routed engine with no backend refuses through the REAL seam', async (t) => {
+  const root = scratchRoot(t);
+  const errors = [];
+
+  // No `stageDeps` at all — this drives `makeRunStageSeam()` and the real
+  // dispatcher, so B.6's refusal is exercised from the verb rather than from a
+  // unit test standing next to it.
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: () => {}, error: (s) => errors.push(s),
+    ...deps({
+      config: {
+        reviewer: { inferential: { enabled: true } },
+        sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'no-such-engine-at-all' } } },
+      },
+      protocol: 'brain-review/2',
+    }),
+    root,
+  });
+
+  assert.equal(code, 1);
+  assert.match(errors.join('\n'), /no-such-engine-at-all/, 'the refusal names the engine the operator wrote');
+  assert.match(errors.join('\n'), /Refusing rather than falling back/);
 });

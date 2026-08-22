@@ -30,6 +30,8 @@ import { evaluateRuling, gatherRulingInputs, PRODUCES as RULING_PRODUCES } from 
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
 import { resolveJudgment } from './lib/resolve-challenger.mjs';
 import { resolveConvergence } from './lib/convergence.mjs';
+import { runColdReviewStage } from './lib/run-cold-review-stage.mjs';
+import { makeRunStageSeam } from '../harness/stage-seam.mjs';
 import {
   evaluateInferential, gatherInferentialInputs, shouldRun as judgmentHalfRuns,
   PRODUCES as INFERENTIAL_PRODUCES,
@@ -555,7 +557,65 @@ export async function main(deps = {}) {
     // verdict says "enabled but no transport is configured". That is deliberate:
     // a repo that never ran the stage has not failed, and rendering it as a
     // failure would put every repo on earth into a refusal.
-    const inferentialDeps = deps.inferentialDeps ?? artifactDeps(args.pr, deps.root ?? process.cwd());
+    const root = deps.root ?? process.cwd();
+
+    // ── C.2a — THE STAGE RUNS HERE, AND THE ORDERING IS THE WHOLE WIRING ─────
+    //
+    // Everything below reads a FILE. Until this call existed, that file only
+    // appeared if a human wrote it by hand: `findings-artifact.mjs` read it,
+    // `run-cold-review-stage.mjs` could have written it, `stage-seam.mjs` could
+    // have reached an engine — and NOTHING IN PRODUCTION CALLED EITHER. The
+    // slice had a producer, a transport and a reader that never touched.
+    //
+    // That is the defect class this ticket spent eight mutations chasing, at
+    // slice scale: a capability that exists, is tested, and is unreachable from
+    // the verb. It reads as "built" in every place except the one that runs.
+    //
+    // The stage must run BEFORE `artifactDeps`, because `makeArtifactGenerate`
+    // answers `null` for a file that is absent AT THE MOMENT IT IS ASKED. Run it
+    // after, and the first review on any PR reports "no transport is configured"
+    // about a stage that had just written its artifact.
+    //
+    // AN INJECTED `inferentialDeps` REPLACES THE STAGE ENTIRELY, and that is what
+    // the seam means: a caller supplying its own generator has supplied the thing
+    // the stage exists to produce. Spawning an engine anyway would burn a model
+    // call whose output nothing reads.
+    //
+    // IT RUNS UNDER `--dry-run` TOO. `--dry-run` governs POSTING, not producing:
+    // a dry run that skipped the stage would render a different verdict from the
+    // real one, which defeats the only reason to ask for a preview. The cost is
+    // real and it is opt-in — `sdd.map` ships empty (migration 0.10.0), so no
+    // repo spawns anything until it routes the stage on purpose.
+    //
+    // THE STAGE RUNS ONCE, OUTSIDE the produce loop `maxRounds` bounds. So a
+    // higher bound re-reads one static artifact and converges on round 2, exactly
+    // as `convergence.mjs` records. Moving the stage inside the loop would make
+    // the bound buy real work and would multiply the model cost per review;
+    // ADR-0033 decided the transport, not that.
+    const stageResult = deps.inferentialDeps
+      ? { routed: false }
+      : await runColdReviewStage({
+        config,
+        prNumber: args.pr,
+        baseRef: baseSha,
+        headRef: boot.headSha,
+        root,
+        deps: deps.stageDeps ?? { runStage: makeRunStageSeam() },
+      });
+
+    // A ROUTED STAGE THAT FAILED IS NOT A REPO WITHOUT A TRANSPORT. Refused here
+    // rather than fallen through, because falling through reaches
+    // `artifactDeps`, finds no file, and renders "enabled but no transport is
+    // configured" — telling an operator who configured an engine that they did
+    // not. Same words, opposite fact. `routed` is what keeps the two apart, and
+    // it survives the failure precisely so this branch can read it.
+    if (stageResult.routed && !stageResult.ok) {
+      error(`brain:review: the cold-review stage failed — ${stageResult.reason}. ` +
+        'Refusing to post a verdict that would declare the inferential control applied.');
+      return 1;
+    }
+
+    const inferentialDeps = deps.inferentialDeps ?? artifactDeps(args.pr, root);
 
     // #682 round-1 review, finding G — AN ENABLED HALF WITH NO TRANSPORT IS NOT
     // THE SAME STATE AS A DISABLED ONE, and until now they rendered
