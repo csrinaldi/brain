@@ -38,6 +38,11 @@
  */
 export const PRODUCES = Object.freeze(['inferential']);
 
+// The default round count is IMPORTED, not restated. A second literal `1` here
+// would be the same defect REQ-682-5 is about, in miniature: one bound written
+// down twice, free to drift.
+import { ROUNDS_IN_FORCE_TODAY } from '../lib/convergence.mjs';
+
 /**
  * REQ-682-4 — the fields a reasoned finding may carry to the challenger.
  *
@@ -202,13 +207,25 @@ export function evaluateInferential({ generated = null } = {}) {
  * generator reads the diff itself, from the cold worktree the reviewer already
  * cloned (protocol §8).
  *
+ * `maxRounds` is REQ-682-5's bound, and it bounds THIS loop — the produce rounds
+ * inside one run. It is not §7's `rev >= 3`, which counts posted revisions on the
+ * PR and lives in `verdict.mjs`; see `convergence.mjs` for why the two must not be
+ * one number read twice. The default is 1, which is what ran before the key
+ * existed, so an unset key changes nothing.
+ *
+ * ROUNDS STOP EARLY WHEN ONE PRODUCES NOTHING NEW. A generator that repeats itself
+ * has converged, and re-asking it is spending a model call to receive the same
+ * answer. With today's file transport that happens on round 2 by construction: the
+ * artifact is a static file, so every round after the first is entirely duplicates.
+ *
  * @param {{ worktreePath?: string|null, baseSha?: string|null, headSha?: string|null,
- *           changedFiles?: string[], prBody?: string, deps?: {generate?: Function} }} args
- * @returns {Promise<{generated: Array<object>|null}>}
+ *           changedFiles?: string[], prBody?: string, maxRounds?: number,
+ *           deps?: {generate?: Function} }} args
+ * @returns {Promise<{generated: Array<object>|null, failed: boolean, reason?: string, rounds?: number}>}
  */
 export async function gatherInferentialInputs({
   worktreePath = null, baseSha = null, headSha = null,
-  changedFiles = [], prBody = '', deps = {},
+  changedFiles = [], prBody = '', maxRounds = ROUNDS_IN_FORCE_TODAY, deps = {},
 } = {}) {
   if (typeof deps.generate !== 'function') return { generated: null, failed: false };
 
@@ -221,19 +238,46 @@ export async function gatherInferentialInputs({
   //
   // A throw and a non-array are both FAILURES, reported as such. The caller
   // fails closed on them rather than rendering a green judgment half.
-  let generated;
-  try {
-    generated = await deps.generate({ worktreePath, baseSha, headSha, changedFiles, prBody });
-  } catch (err) {
-    return { generated: null, failed: true, reason: `the generator threw: ${err.message}` };
+  const collected = [];
+  const seen = new Set();
+  let rounds = 0;
+
+  for (let round = 1; round <= maxRounds; round += 1) {
+    rounds = round;
+
+    let produced;
+    try {
+      produced = await deps.generate({ worktreePath, baseSha, headSha, changedFiles, prBody, round });
+    } catch (err) {
+      // A FAILURE IN ANY ROUND FAILS THE WHOLE GATHER, and the earlier rounds'
+      // findings go with it. Keeping them would hand the verdict a PARTIAL list
+      // it would render as complete — "the model became unreachable after round
+      // 1" presented as "this is what the reviewer found", which is the same
+      // fold as the coercion below, one loop iteration further in.
+      return { generated: null, failed: true, reason: `the generator threw on round ${round} of ${maxRounds}: ${err.message}` };
+    }
+    if (!Array.isArray(produced)) {
+      return {
+        generated: null, failed: true,
+        reason: `the generator returned ${produced === undefined ? 'undefined' : typeof produced} on round ${round} of ${maxRounds}, not an array of findings`,
+      };
+    }
+
+    // Deduplicated by `id`, falling back to the whole finding when a generator
+    // omits one. A round that repeats itself has converged, and the repeat is
+    // not a second sighting of anything.
+    const fresh = produced.filter((f) => {
+      const key = f?.id ?? JSON.stringify(f);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    collected.push(...fresh);
+
+    if (fresh.length === 0) break;
   }
-  if (!Array.isArray(generated)) {
-    return {
-      generated: null, failed: true,
-      reason: `the generator returned ${generated === undefined ? 'undefined' : typeof generated}, not an array of findings`,
-    };
-  }
-  return { generated, failed: false };
+
+  return { generated: collected, failed: false, rounds };
 }
 
 /**

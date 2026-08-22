@@ -29,6 +29,7 @@ import { evaluateCheckpoint, gatherCheckpointInputs, PRODUCES as CHECKPOINT_PROD
 import { evaluateRuling, gatherRulingInputs, PRODUCES as RULING_PRODUCES } from './evaluators/ruling.mjs';
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
 import { resolveJudgment } from './lib/resolve-challenger.mjs';
+import { resolveConvergence } from './lib/convergence.mjs';
 import {
   evaluateInferential, gatherInferentialInputs, shouldRun as judgmentHalfRuns,
   PRODUCES as INFERENTIAL_PRODUCES,
@@ -583,12 +584,26 @@ export async function main(deps = {}) {
         'was produced, and the inferential control was NOT applied to this verdict.'
       );
     } else {
+      // REQ-682-5's bound, resolved from the config and read HERE — the only
+      // place that knows a run is starting. It is NOT §7's `rev >= 3`, which is
+      // read from `priorRevCount` further down and counts posted revisions on
+      // this PR rather than produce rounds inside this run. `convergence.mjs`
+      // holds the argument for why the two must not be one number read twice;
+      // this line is where the distinction is either kept or lost.
+      //
+      // Throws on an unreadable key, and that is the same fail-closed shape
+      // `resolveStageEngine` uses: an operator who wrote `maxRounds` asked for
+      // something, and quietly running the old bound would run a review they did
+      // not configure.
+      const { maxRounds } = resolveConvergence(config);
+
       const inferentialInputs = await gatherInferentialInputs({
         worktreePath: boot.worktreePath,
         baseSha,
         headSha: boot.headSha,
         changedFiles,
         prBody: boot.prView.body,
+        maxRounds,
         deps: inferentialDeps,
       });
 
