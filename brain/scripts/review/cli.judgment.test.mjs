@@ -674,6 +674,16 @@ test('C.2a: the routed stage runs, writes, and its finding reaches the verdict',
   assert.equal(spawned.model, 'zz-9');
   assert.ok(spawned.prompt.includes(artifactPathFor(42)), 'the role names the path it must write');
 
+  // THE DIFF RANGE, and it is not decoration. Measured: replacing baseRef/headRef
+  // with nulls left the suite green — `buildColdReviewPrompt` falls back to the
+  // vague "the diff of this pull request against its base branch", and the engine
+  // then reviews whatever it infers instead of the exact range the verdict binds
+  // itself to. A review of the wrong range is still a well-formatted review.
+  assert.ok(
+    spawned.prompt.includes(`git diff BASE...${HEAD}`),
+    'the role must name the resolved base...head range the verdict is about'
+  );
+
   // 2. The artifact is on disk, where the reader looks.
   assert.ok(existsSync(join(root, artifactPathFor(42))), 'the stage wrote its artifact');
 
