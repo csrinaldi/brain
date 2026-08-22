@@ -241,8 +241,71 @@
 
 ## Slice C — the bound and the close
 
-- [ ] C.1 REQ-682-5: `reviewer.convergence.maxRounds` as its own key, distinct from §7's
+- [x] C.1 REQ-682-5: `reviewer.convergence.maxRounds` as its own key, distinct from §7's
       `rev >= 3`. Assert the two bounds are not the same number read twice.
+      `review/lib/convergence.mjs`, read by the produce loop in
+      `evaluators/inferential.mjs` and resolved in `cli.mjs`.
+
+      **Two bounds, two quantities.** §7's `rev >= 3` counts POSTED REVISIONS and
+      asks how many times a PR may be re-reviewed before a human is summoned;
+      `maxRounds` counts PRODUCE ROUNDS inside one run and asks how long a single
+      review may argue with itself. Conflating them is how a PR on its third
+      revision gets a one-round review, or a run is told it used up its rounds on
+      previous days.
+
+      **The oracle is INDEPENDENCE, not equality, and that distinction is the
+      whole task.** Both bounds are small integers and §7's is 3, so a test
+      asserting both are 3 would pass under an implementation that read ONE
+      constant twice — precisely the conflation the requirement forbids. Two
+      knobs, moved one at a time: `maxRounds` moves the loop and leaves §7's
+      escalation where it was; `priorRevCount` moves the escalation and leaves the
+      loop alone. Neither assertion mentions a shared number.
+
+      **The key was not allowed to be a bound with nothing to bound** — that is
+      the defect class this ticket has hit all the way down, and shipping a lonely
+      resolver would have been a fresh instance of it. So the produce loop is
+      real: `gatherInferentialInputs` iterates, stopping early on a round that
+      produces nothing new, and `cli.mjs` resolves the bound at the one place that
+      knows a run is starting.
+
+      **The default is a measurement.** `ROUNDS_IN_FORCE_TODAY = 1` is what called
+      `generate` before this key existed, not a round number that seemed
+      reasonable — REQ-682-5's second clause is "the bound in force today applies,
+      UNCHANGED". Imported rather than restated, because a second literal `1`
+      would be this very requirement's defect in miniature.
+
+      **Written down because an operator would otherwise learn it from a bill:**
+      with today's file transport a higher bound converges on round 2 by
+      construction. `makeArtifactGenerate` reads the same static
+      `cold-review.md` every round, so every round after the first is entirely
+      duplicates. The loop and the bound are real and become load-bearing the
+      moment a transport re-runs the stage between rounds; today `maxRounds: 5`
+      buys one round of work.
+
+      **A failed round discards the earlier rounds.** Keeping them hands the
+      verdict a PARTIAL list it renders as complete — "the model became
+      unreachable after round 1" presented as "this is what the reviewer found",
+      the same fold as the array coercion this evaluator's header rails against,
+      one loop iteration further in.
+
+      Nine mutations, full suite each, tree reverted after every one. Seven died.
+      **Two survived, both blind in the way this ticket keeps producing:**
+
+      - **Q6** deleted `maxRounds` from `cli.mjs`'s call — the resolved bound
+        computed and never passed. Green, because every unit test hands the loop
+        its bound directly. The config key would have been INERT IN THE REAL VERB
+        while `convergence.test.mjs` proved the loop honours a bound nobody gave
+        it. Same shape as A.3's `deps.inferentialDeps ?? artifactDeps(…)`; seventh
+        occurrence overall and the second at the production-glue layer. Three
+        tests through `main()` now — and the "unset key runs one round" one is not
+        redundant: without it, hardcoding `4` at the call site would satisfy the
+        other.
+      - **Q8** replaced the id-less dedup key `JSON.stringify(f)` with a random
+        value. Green, because every fixture carried an `id`. The hazard is
+        asymmetric and silent: with `undefined` as the key for every id-less
+        finding, the FIRST is kept and every later one is dropped as a duplicate,
+        so a generator that omits ids loses distinct findings and the verdict
+        reports fewer than were found. Both directions pinned now.
 - [ ] C.2 Prove the whole path through the real verb, on a real PR: stage runs → artifact
       written → verdict posted with inline comments. #682 acceptance criterion 3.
 - [ ] C.3 The negative case stays honest end to end (#682 criterion 6): an engine that
