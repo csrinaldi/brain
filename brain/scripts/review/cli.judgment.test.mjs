@@ -886,26 +886,41 @@ async function writeArtifact(root, body) {
   writeFileSync(join(root, artifactPathFor(42)), body);
 }
 
+// Each mode carries its OWN behaviour as a function of the scratch root. The
+// first cut dispatched on `mode.name.includes(...)` to build one of them — a
+// branch keyed off a DISPLAY STRING, so renaming a row would silently change
+// what it ran, and the row would fall through to the real seam and try to spawn
+// an actual `claude` binary. A table whose rows mean different things must say
+// so in the table.
 const NEGATIVE_MODES = [
   {
     name: 'the engine failed',
-    stageDeps: { runStage: async () => ({ ok: false, reason: 'the engine exited with status 137' }) },
+    stageDeps: () => ({ runStage: async () => ({ ok: false, reason: 'the engine exited with status 137' }) }),
     expect: /the cold-review stage failed.*status 137/s,
   },
   {
     name: 'the engine exited clean and wrote nothing',
-    stageDeps: { runStage: async () => ({ ok: true }) },
+    stageDeps: () => ({ runStage: async () => ({ ok: true }) }),
     expect: /wrote no artifact/,
   },
   {
     name: 'the engine wrote an artifact nothing can read',
-    stageDeps: null,   // filled per-test: writes a malformed artifact
+    // Present and unreadable: valid JSON in the wrong shape, so the reader
+    // REFUSES rather than finding nothing.
+    stageDeps: (root) => ({
+      runStage: async () => {
+        await writeArtifact(root, `\`\`\`${ARTIFACT_TAG}\n{"not":"a findings list"}\n\`\`\`\n`);
+        return { ok: true };
+      },
+    }),
     expect: /could not be read/,
   },
   {
     name: 'the engine has no backend at all',
     routing: { engine: 'no-such-engine-at-all' },
-    stageDeps: undefined,   // no injection — the REAL seam and dispatcher
+    // NO injection — the REAL seam and the real dispatcher. `null` rather than
+    // a function, so the intent is in the data instead of in an absence.
+    stageDeps: null,
     expect: /no-such-engine-at-all/,
   },
 ];
@@ -920,16 +935,7 @@ test('C.3: every way the judgment half can fail posts NOTHING and says why', asy
       sdd: { map: { [COLD_REVIEW_STAGE]: mode.routing ?? { engine: 'claude', model: 'zz-9' } } },
     };
 
-    const stageDeps = mode.name.includes('nothing can read')
-      ? {
-        runStage: async () => {
-          // Present and unreadable: valid JSON in the wrong shape, so the
-          // reader refuses rather than finding nothing.
-          await writeArtifact(root, `\`\`\`${ARTIFACT_TAG}\n{"not":"a findings list"}\n\`\`\`\n`);
-          return { ok: true };
-        },
-      }
-      : mode.stageDeps;
+    const stageDeps = mode.stageDeps?.(root) ?? null;
 
     const { code, vcs, said } = await runPosting(
       { config, protocol: 'brain-review/2' },
