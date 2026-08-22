@@ -417,3 +417,610 @@ test('a repo that ASKED for the judgment half and did not get it is told why', a
   assert.notEqual(askedByDefault.body, neverAsked.body,
     'asked-and-refused must not render like never-asked');
 });
+
+// ── slice A · the judgment half runs END TO END, from a file ─────────────────
+//
+// #682's acceptance criterion 2 asked that producer and challenger land
+// together; criterion 3 asks for the real verb. This is the half of 3 that a
+// hand-written artifact can prove: file → reader → generate → producer →
+// challenger → verdict. No agent is spawned; that is slice B.
+
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { artifactPathFor, ARTIFACT_TAG } from './lib/findings-artifact.mjs';
+import { COLD_REVIEW_STAGE } from '../lib/stage-engine.mjs';
+import { artifactDeps } from './cli.mjs';
+
+function repoWithArtifact(t, findings, pr = 762) {
+  const root = mkdtempSync(join(tmpdir(), 'brain-slice-a-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const rel = artifactPathFor(pr);
+  mkdirSync(join(root, dirname(rel)), { recursive: true });
+  writeFileSync(
+    join(root, rel),
+    `# Cold review of PR #${pr}\n\n\`\`\`${ARTIFACT_TAG}\n${JSON.stringify(findings, null, 2)}\n\`\`\`\n`,
+    'utf8',
+  );
+  return root;
+}
+
+test('slice A: a reasoned finding written to the stage artifact reaches the posted verdict', async (t) => {
+  const root = repoWithArtifact(t, [{
+    id: 'J1', severity: 'blocker',
+    evidence: 'the parser is correct; the semantics are inverted',
+    cites: 'reviewer-protocol.md §6.1', file: 'brain/scripts/review/verdict.mjs', line: 166,
+  }]);
+
+  const { body } = await run({
+    protocol: 'brain-review/2', config: CFG('human'),
+    generate: artifactDeps(762, root).generate,
+  });
+
+  assert.match(body, /the semantics are inverted/, 'the finding must reach the wire');
+  assert.match(body, /^controls: \["deterministic", ?"inferential"\]$/m,
+    'and the run must DECLARE that the judgment control was applied — it was');
+  assert.doesNotMatch(body, /no transport is configured/,
+    'the condition that ships today must be gone: there IS a transport now');
+});
+
+test('slice A: the artifact carries `file`+`line`, which is what an inline comment needs', async (t) => {
+  const root = repoWithArtifact(t, [{
+    id: 'J1', severity: 'blocker', evidence: 'e', cites: 'x §1',
+    file: 'brain/scripts/review/verdict.mjs', line: 166,
+  }]);
+  const { body } = await run({
+    protocol: 'brain-review/2', config: CFG('human'),
+    generate: artifactDeps(762, root).generate,
+  });
+  assert.match(body, /file: brain\/scripts\/review\/verdict\.mjs/);
+  assert.match(body, /line: 166/);
+  // deriveInlineComments turns exactly this pair into a comment on the changed
+  // line. A.4 proves it against a posted review; here it is proven to SURVIVE
+  // the pipeline, which is the half that was missing.
+});
+
+test('slice A: an artifact that exists and is broken posts NOTHING, and says why', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-slice-a-bad-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const rel = artifactPathFor(762);
+  mkdirSync(join(root, dirname(rel)), { recursive: true });
+  writeFileSync(join(root, rel), `\`\`\`${ARTIFACT_TAG}\n{ not json }\n\`\`\`\n`, 'utf8');
+
+  const { code, body } = await run({
+    protocol: 'brain-review/2', config: CFG('human'),
+    generate: artifactDeps(762, root).generate,
+  });
+
+  assert.notEqual(code, 0, 'a transport that ran and broke must fail closed');
+  assert.doesNotMatch(body, /^protocol: brain-review/m,
+    'and no verdict may be rendered at all: one declaring `inferential` over findings nobody ' +
+    'produced is the uncomputable-evidence APPROVE §10 forbids');
+
+  // The control — the SAME run with a readable artifact does render one, so the
+  // assertion above is not passing because this harness never renders anything.
+  const good = mkdtempSync(join(tmpdir(), 'brain-slice-a-ok-'));
+  t.after(() => rmSync(good, { recursive: true, force: true }));
+  mkdirSync(join(good, dirname(rel)), { recursive: true });
+  writeFileSync(join(good, rel), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`, 'utf8');
+  const ok = await run({
+    protocol: 'brain-review/2', config: CFG('human'),
+    generate: artifactDeps(762, good).generate,
+  });
+  assert.equal(ok.code, 0);
+  assert.match(ok.body, /^protocol: brain-review/m);
+});
+
+test('slice A: the PRODUCTION path is the artifact — no injected deps at all', async (t) => {
+  // The pin the three tests above do NOT provide: each of them hands `main` a
+  // `generate` directly, so `deps.inferentialDeps ?? artifactDeps(...)` could be
+  // deleted and every one of them would stay green. This drives the real branch
+  // — nothing injected but the root the artifact is read from.
+  const root = repoWithArtifact(t, [{
+    id: 'J1', severity: 'blocker', evidence: 'found by the stage, not by a test double',
+    cites: 'reviewer-protocol.md §6.1', file: 'a.mjs', line: 7,
+  }], 42);   // 42 is the PR the run helper drives
+
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), error: () => {},
+    root, ...deps({ protocol: 'brain-review/2', config: CFG('human') }),
+  });
+  const body = lines.join('\n');
+
+  assert.equal(code, 0);
+  assert.match(body, /found by the stage, not by a test double/,
+    'the verdict must carry a finding that reached it through the production wiring');
+  assert.match(body, /^controls: \["deterministic", ?"inferential"\]$/m);
+});
+
+test('slice A: with no artifact under the root, the half does not run and says so', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-slice-a-none-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'], log: (s) => lines.push(s), error: () => {},
+    root, ...deps({ protocol: 'brain-review/2', config: CFG('human') }),
+  });
+  const body = lines.join('\n');
+
+  assert.equal(code, 0, 'a repo that never ran the stage has not failed at anything');
+  assert.match(body, /no transport is configured/,
+    'and it is TOLD — the condition that ships today, still correct when the artifact is absent');
+});
+
+// ── C.1 — the bound reaches the loop through the REAL verb ──────────────────
+
+test('C.1: reviewer.convergence.maxRounds reaches the produce loop through main()', async () => {
+  // THE PRODUCTION GLUE, PINNED. `main` resolves the bound and hands it to
+  // `gatherInferentialInputs`; every unit test for the loop passes `maxRounds`
+  // directly, so deleting that one argument from the call site left the whole
+  // suite GREEN — measured. The config key would have been inert in the real
+  // verb while `convergence.test.mjs` proved the loop honours a bound nobody
+  // gave it. Same shape as A.3, where `deps.inferentialDeps ?? artifactDeps(…)`
+  // was deletable green until a test drove the real branch.
+  const rounds = [];
+  const { code } = await run({
+    config: {
+      reviewer: {
+        inferential: { enabled: true },
+        convergence: { maxRounds: 4 },
+      },
+    },
+    protocol: 'brain-review/2',
+    generate: async ({ round }) => {
+      rounds.push(round);
+      // A distinct finding per round, so the loop cannot converge early and the
+      // count is the bound rather than an accident of repetition.
+      return [{ id: `R${round}`, severity: 'editorial', evidence: `round ${round}` }];
+    },
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(rounds, [1, 2, 3, 4], 'the configured bound must reach the loop, not stop at the resolver');
+});
+
+test('C.1: no convergence key means one round through the real verb', async () => {
+  const rounds = [];
+  await run({
+    config: CFG(),
+    protocol: 'brain-review/2',
+    generate: async ({ round }) => { rounds.push(round); return [{ id: `R${round}`, severity: 'editorial', evidence: 'x' }]; },
+  });
+
+  // The complement, and it is not redundant: without it, passing a constant 4 at
+  // the call site would satisfy the test above.
+  assert.deepEqual(rounds, [1], 'an unset key runs exactly what ran before it existed');
+});
+
+test('C.1: an unreadable maxRounds refuses the run rather than reviewing under the old bound', async () => {
+  const { code, body } = await run({
+    config: { reviewer: { inferential: { enabled: true }, convergence: { maxRounds: 'three' } } },
+    protocol: 'brain-review/2',
+    generate: async () => [{ id: 'x', severity: 'editorial', evidence: 'x' }],
+  }).catch((err) => ({ code: 'threw', body: err.message }));
+
+  // Fail-closed, like `resolveStageEngine`: an operator who wrote the key asked
+  // for something, and quietly running the old bound reviews under a
+  // configuration they did not choose.
+  assert.match(String(body), /whole number of rounds/);
+});
+
+// ── C.2a — THE STAGE IS REACHABLE FROM THE VERB ─────────────────────────────
+//
+// Until this section existed the slice had a producer, a transport and a reader
+// that never touched: `runColdReviewStage` and `makeRunStageSeam` had ZERO
+// production callers, measured by grep. Everything was tested and nothing was
+// reachable — the same defect class the mutation passes kept finding, at slice
+// scale rather than at line scale.
+//
+// These drive the WHOLE chain through `main()`: config routes the stage → the
+// seam reaches a (stubbed) engine → the engine writes the artifact → the reader
+// finds it → the finding lands in the verdict. No step is injected past the one
+// that would otherwise spawn a real model.
+
+/** A repo root the stage can write into, cleaned up after the test. */
+function scratchRoot(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'cli-stage-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+const ROUTED_CFG = {
+  reviewer: { inferential: { enabled: true } },
+  sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'claude', model: 'zz-9' } } },
+};
+
+test('C.2a: the routed stage runs, writes, and its finding reaches the verdict', async (t) => {
+  const root = scratchRoot(t);
+  let spawned = null;
+
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: (s) => lines.push(s),
+    error: () => {},
+    ...deps({ config: ROUTED_CFG, protocol: 'brain-review/2' }),
+    root,
+    // The ONLY injection is the thing that would spawn a real model. Everything
+    // between here and the verdict is production code.
+    stageDeps: {
+      runStage: async (args) => {
+        spawned = args;
+        const { writeFileSync, mkdirSync } = await import('node:fs');
+        const { dirname } = await import('node:path');
+        mkdirSync(dirname(join(root, artifactPathFor(42))), { recursive: true });
+        writeFileSync(
+          join(root, artifactPathFor(42)),
+          `# cold review\n\n\`\`\`${ARTIFACT_TAG}\n` +
+          JSON.stringify([{
+            id: 'C1', severity: 'blocker',
+            evidence: 'the stage ran and this came from its artifact',
+            cites: 'REQ-S3-3',
+          }]) + '\n\`\`\`\n'
+        );
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(code, 0);
+
+  // 1. The verb reached the seam, with the routing the config named.
+  assert.ok(spawned, 'the stage must actually be spawned — this is the call that did not exist');
+  assert.equal(spawned.stage, COLD_REVIEW_STAGE);
+  assert.equal(spawned.engine, 'claude');
+  assert.equal(spawned.model, 'zz-9');
+  assert.ok(spawned.prompt.includes(artifactPathFor(42)), 'the role names the path it must write');
+
+  // THE DIFF RANGE, and it is not decoration. Measured: replacing baseRef/headRef
+  // with nulls left the suite green — `buildColdReviewPrompt` falls back to the
+  // vague "the diff of this pull request against its base branch", and the engine
+  // then reviews whatever it infers instead of the exact range the verdict binds
+  // itself to. A review of the wrong range is still a well-formatted review.
+  assert.ok(
+    spawned.prompt.includes(`git diff BASE...${HEAD}`),
+    'the role must name the resolved base...head range the verdict is about'
+  );
+
+  // 2. The artifact is on disk, where the reader looks.
+  assert.ok(existsSync(join(root, artifactPathFor(42))), 'the stage wrote its artifact');
+
+  // 3. The finding crossed into the verdict. THIS is the link that was missing:
+  //    the reader could always read, but nothing had written.
+  const body = lines.join('\n');
+  const verdict = parseVerdict({ body });
+  assert.ok(
+    verdict.findings.some((f) => f.evidence?.includes('came from its artifact')),
+    'the artifact the stage wrote must reach the rendered verdict'
+  );
+  assert.ok(
+    !body.includes('no transport is configured'),
+    'and the verdict must NOT claim the transport is unconfigured after running it'
+  );
+});
+
+test('C.2a: the stage runs BEFORE the artifact is looked for', async (t) => {
+  const root = scratchRoot(t);
+  let existedWhenSpawned = null;
+
+  await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: () => {}, error: () => {},
+    ...deps({ config: ROUTED_CFG, protocol: 'brain-review/2' }),
+    root,
+    stageDeps: {
+      runStage: async () => {
+        existedWhenSpawned = existsSync(join(root, artifactPathFor(42)));
+        const { writeFileSync, mkdirSync } = await import('node:fs');
+        const { dirname } = await import('node:path');
+        mkdirSync(dirname(join(root, artifactPathFor(42))), { recursive: true });
+        writeFileSync(join(root, artifactPathFor(42)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        return { ok: true };
+      },
+    },
+  });
+
+  // THE ORDERING IS THE WIRING. `makeArtifactGenerate` answers `null` for a file
+  // absent AT THE MOMENT IT IS ASKED, so resolving the reader first would make
+  // the FIRST review on every PR report "no transport is configured" about a
+  // stage that had just written its artifact. The read has to come after.
+  assert.equal(existedWhenSpawned, false, 'precondition: the artifact did not exist before the stage ran');
+});
+
+test('C.2a: an UNROUTED stage spawns nothing and still reads a hand-written artifact', async (t) => {
+  const root = scratchRoot(t);
+  const { writeFileSync, mkdirSync } = await import('node:fs');
+  const { dirname } = await import('node:path');
+  mkdirSync(dirname(join(root, artifactPathFor(42))), { recursive: true });
+  writeFileSync(
+    join(root, artifactPathFor(42)),
+    `\`\`\`${ARTIFACT_TAG}\n` +
+    JSON.stringify([{ id: 'H1', severity: 'editorial', evidence: 'written by hand, no stage involved' }]) +
+    '\n\`\`\`\n'
+  );
+
+  let spawned = false;
+  const lines = [];
+  await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: (s) => lines.push(s), error: () => {},
+    ...deps({ config: CFG(), protocol: 'brain-review/2' }),   // no sdd.map
+    root,
+    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+  });
+
+  // Routing the stage is opt-in — `sdd.map` ships empty. A repo that has not
+  // routed it must not have an engine spawned on its behalf, and the file-only
+  // path that slice A shipped must keep working exactly as it did.
+  assert.equal(spawned, false, 'an unrouted stage spawns nothing');
+  assert.ok(
+    parseVerdict({ body: lines.join('\n') }).findings.some((f) => f.evidence?.includes('written by hand')),
+    'and the artifact is still read'
+  );
+});
+
+test('C.2a: an injected generator replaces the stage rather than running beside it', async (t) => {
+  const root = scratchRoot(t);
+  let spawned = false;
+
+  await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: () => {}, error: () => {},
+    ...deps({ config: ROUTED_CFG, protocol: 'brain-review/2', generate: async () => reasoned() }),
+    root,
+    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+  });
+
+  // A caller supplying its own generator has supplied the thing the stage exists
+  // to produce. Spawning anyway burns a model call whose output nothing reads —
+  // and would make every existing test in this file spawn an engine.
+  assert.equal(spawned, false, 'an injected generator means the stage is what was replaced');
+});
+
+test('C.2a: a FAILED stage refuses the run and does not report "no transport"', async (t) => {
+  const root = scratchRoot(t);
+  const errors = [];
+
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: () => {}, error: (s) => errors.push(s),
+    ...deps({ config: ROUTED_CFG, protocol: 'brain-review/2' }),
+    root,
+    stageDeps: { runStage: async () => ({ ok: false, reason: 'the engine exited with status 137' }) },
+  });
+
+  assert.equal(code, 1, 'a failed stage refuses the run');
+
+  const said = errors.join('\n');
+  assert.match(said, /the cold-review stage failed/);
+  assert.match(said, /status 137/, 'and names what actually went wrong');
+
+  // THE FOLD THIS BRANCH EXISTS TO PREVENT. Falling through instead would reach
+  // `artifactDeps`, find no file, and render "enabled but no transport is
+  // configured" — telling an operator who configured an engine that they did
+  // not. Same words, opposite fact.
+  assert.ok(
+    !said.includes('no transport is configured'),
+    'a configured engine that broke must not be reported as an unconfigured one'
+  );
+});
+
+test('C.2a: a routed engine with no backend refuses through the REAL seam', async (t) => {
+  const root = scratchRoot(t);
+  const errors = [];
+
+  // No `stageDeps` at all — this drives `makeRunStageSeam()` and the real
+  // dispatcher, so B.6's refusal is exercised from the verb rather than from a
+  // unit test standing next to it.
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: () => {}, error: (s) => errors.push(s),
+    ...deps({
+      config: {
+        reviewer: { inferential: { enabled: true } },
+        sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'no-such-engine-at-all' } } },
+      },
+      protocol: 'brain-review/2',
+    }),
+    root,
+  });
+
+  assert.equal(code, 1);
+  assert.match(errors.join('\n'), /no-such-engine-at-all/, 'the refusal names the engine the operator wrote');
+  assert.match(errors.join('\n'), /Refusing rather than falling back/);
+});
+
+// ── C.3 — THE NEGATIVE CASE, ON THE REAL POSTING PATH ───────────────────────
+//
+// #682 acceptance criterion 6: an engine that fails posts nothing and says why.
+//
+// C.2a's tests all run at `--dry-run`, which posts nothing regardless — so they
+// could not have caught a broken refusal. "Posts nothing" is only a claim when
+// the run is one that WOULD post. These drop `--dry-run` and spy the write
+// verbs, so a regression that let a failed judgment half through would show up
+// as `prReviewComment: 1`.
+//
+// FOUR MODES, AND THE FOURTH IS WHAT MAKES THE OTHER THREE MEAN ANYTHING.
+// "Refuses on failure" is trivially satisfiable by refusing always; the
+// found-nothing case is the control that proves the refusal is selective.
+// Their reasons are also asserted PAIRWISE DISTINCT: three failures rendering
+// one message is the fold this whole ticket is about, and an operator cannot act
+// on "something went wrong".
+
+/** Write verbs, counted. A failed judgment half must leave every counter at 0. */
+function spyWriteVerbs() {
+  const calls = { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 };
+  return {
+    calls,
+    prReviewComment: async () => { calls.prReviewComment += 1; return { url: 'unused' }; },
+    issueComment: async () => { calls.issueComment += 1; return { url: 'unused' }; },
+    labelAdd: async () => { calls.labelAdd += 1; return { ok: true }; },
+    labelRemove: async () => { calls.labelRemove += 1; return { ok: true }; },
+    prView: async () => ({ headRefOid: HEAD }),
+  };
+}
+
+/** Runs the real verb on the REAL posting path (no --dry-run). */
+async function runPosting(options, extra = {}) {
+  const vcs = spyWriteVerbs();
+  const lines = [];
+  const errors = [];
+  const code = await main({
+    argv: ['--pr', '42'],
+    log: (s) => lines.push(s),
+    error: (s) => errors.push(s),
+    ...deps(options),
+    ...extra,
+    writeVerbs: vcs,
+  });
+  return { code, vcs, lines, errors, said: errors.join('\n') };
+}
+
+/** Writes an artifact for PR 42 under `root`, with whatever body is given. */
+async function writeArtifact(root, body) {
+  const { writeFileSync, mkdirSync } = await import('node:fs');
+  const { dirname } = await import('node:path');
+  mkdirSync(dirname(join(root, artifactPathFor(42))), { recursive: true });
+  writeFileSync(join(root, artifactPathFor(42)), body);
+}
+
+// Each mode carries its OWN behaviour as a function of the scratch root. The
+// first cut dispatched on `mode.name.includes(...)` to build one of them — a
+// branch keyed off a DISPLAY STRING, so renaming a row would silently change
+// what it ran, and the row would fall through to the real seam and try to spawn
+// an actual `claude` binary. A table whose rows mean different things must say
+// so in the table.
+const NEGATIVE_MODES = [
+  {
+    name: 'the engine failed',
+    stageDeps: () => ({ runStage: async () => ({ ok: false, reason: 'the engine exited with status 137' }) }),
+    expect: /the cold-review stage failed.*status 137/s,
+  },
+  {
+    name: 'the engine exited clean and wrote nothing',
+    stageDeps: () => ({ runStage: async () => ({ ok: true }) }),
+    expect: /wrote no artifact/,
+  },
+  {
+    name: 'the engine wrote an artifact nothing can read',
+    // Present and unreadable: valid JSON in the wrong shape, so the reader
+    // REFUSES rather than finding nothing.
+    stageDeps: (root) => ({
+      runStage: async () => {
+        await writeArtifact(root, `\`\`\`${ARTIFACT_TAG}\n{"not":"a findings list"}\n\`\`\`\n`);
+        return { ok: true };
+      },
+    }),
+    expect: /could not be read/,
+  },
+  {
+    name: 'the engine has no backend at all',
+    routing: { engine: 'no-such-engine-at-all' },
+    // NO injection — the REAL seam and the real dispatcher. `null` rather than
+    // a function, so the intent is in the data instead of in an absence.
+    stageDeps: null,
+    expect: /no-such-engine-at-all/,
+  },
+];
+
+test('C.3: every way the judgment half can fail posts NOTHING and says why', async (t) => {
+  const reasons = [];
+
+  for (const mode of NEGATIVE_MODES) {
+    const root = scratchRoot(t);
+    const config = {
+      reviewer: { inferential: { enabled: true } },
+      sdd: { map: { [COLD_REVIEW_STAGE]: mode.routing ?? { engine: 'claude', model: 'zz-9' } } },
+    };
+
+    const stageDeps = mode.stageDeps?.(root) ?? null;
+
+    const { code, vcs, said } = await runPosting(
+      { config, protocol: 'brain-review/2' },
+      stageDeps ? { root, stageDeps } : { root }
+    );
+
+    assert.equal(code, 1, `${mode.name}: refuses the run`);
+    assert.match(said, mode.expect, `${mode.name}: says why`);
+
+    // THE HALF THIS SECTION EXISTS FOR. A verdict posted here would declare the
+    // inferential control applied over findings nobody produced — the
+    // uncomputable-evidence APPROVE protocol §10 forbids.
+    assert.deepEqual(
+      vcs.calls, { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 },
+      `${mode.name}: NOTHING may be written to the PR`
+    );
+
+    reasons.push(said);
+  }
+
+  // Pairwise distinct. Three failures rendering one message is the fold this
+  // ticket keeps finding, and "something went wrong" is not something an
+  // operator can act on.
+  assert.equal(
+    new Set(reasons).size, NEGATIVE_MODES.length,
+    'each failure mode must be distinguishable from the others by its message alone'
+  );
+});
+
+test('C.3: the CONTROL — an engine that ran and found nothing DOES post', async (t) => {
+  const root = scratchRoot(t);
+
+  const { code, vcs, lines } = await runPosting(
+    {
+      config: {
+        reviewer: { inferential: { enabled: true } },
+        sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'claude', model: 'zz-9' } } },
+      },
+      protocol: 'brain-review/2',
+    },
+    {
+      root,
+      stageDeps: {
+        runStage: async () => {
+          await writeArtifact(root, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+          return { ok: true };
+        },
+      },
+    }
+  );
+
+  // WITHOUT THIS, "refuses on failure" is satisfiable by refusing always. "The
+  // reviewer ran and found nothing" is a real answer and must reach the PR —
+  // it is the distinction REQ-S3-4 draws one layer down, arriving intact at the
+  // layer that posts.
+  assert.equal(code, 0, 'finding nothing is not a failure');
+  assert.equal(vcs.calls.prReviewComment, 1, 'and the verdict is posted exactly once');
+  assert.ok(
+    lines.some((l) => /protocol: brain-review\/2/.test(l)),
+    'a real verdict, on the wire'
+  );
+});
+
+test('C.3: a failure refuses BEFORE the verdict is rendered, not after', async (t) => {
+  const root = scratchRoot(t);
+
+  const { lines, code } = await runPosting(
+    {
+      config: {
+        reviewer: { inferential: { enabled: true } },
+        sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'claude' } } },
+      },
+      protocol: 'brain-review/2',
+    },
+    { root, stageDeps: { runStage: async () => ({ ok: false, reason: 'boom' }) } }
+  );
+
+  assert.equal(code, 1);
+
+  // Not merely "did not post" — did not RENDER. A verdict printed to stdout and
+  // then withheld is still a verdict a human can copy onto the PR by hand, and
+  // it would carry the inferential control it never applied. The refusal has to
+  // come before the block exists.
+  assert.equal(
+    lines.filter((l) => /protocol: brain-review/.test(l)).length, 0,
+    'no verdict block may be rendered at all on a failed judgment half'
+  );
+});

@@ -121,6 +121,19 @@ export const migrations = [
       },
     },
   },
+  {
+    version: '0.10.0',
+    description:
+      'Add sdd.map: the stage → engine router (issue #323, first inhabited by ' +
+      "#682's cold-review stage per ADR-0033). Empty by default — an unrouted " +
+      'stage is the honest default, and a shipped entry would spawn an engine ' +
+      'nobody asked for.',
+    defaults: {
+      sdd: {
+        map: {},
+      },
+    },
+  },
 ];
 
 // NOTE (issue #231 A2, human ruling in tasks.md/design.md): this entry is versioned

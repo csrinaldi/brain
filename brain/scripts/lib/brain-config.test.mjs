@@ -159,7 +159,8 @@ test('ensureBrainConfig: creates config when missing with github identity', () =
     assert.equal(cfg.vcs.provider, 'github');
     assert.equal(cfg.project.gitHost, 'github.com');
     assert.equal(cfg.project.slug, 'owner/repo');
-    assert.equal(cfg.schemaVersion, '0.9.0', 'governance.tier (0.9.0, issue #358 Q5) is now the latest — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) is a deliberate, never-reused retirement mark');
+    assert.equal(cfg.schemaVersion, '0.10.0', 'sdd.map (0.10.0, issues #323/#682) is now the latest — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) is a deliberate, never-reused retirement mark');
+    assert.deepEqual(cfg.sdd.map, {}, 'sdd.map ships EMPTY: a routed cold-review would spawn an engine no consumer asked for');
     assert.ok(!('memory' in cfg), 'memory.dualWrite migration entry removed — no memory key is defaulted anymore');
     assert.equal(cfg.governance.approvedLabel, 'status:approved', 'governance.approvedLabel must default to the plain base form');
     assert.equal(cfg.governance.tier, 'standard', 'governance.tier (issue #358 Q5, REQ-TIER-10) must default to "standard", never "lite"');

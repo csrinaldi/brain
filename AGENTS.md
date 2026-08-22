@@ -87,6 +87,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0030](brain/project/decisions/adr-0030-distribution-scoped-registry-package.md) — Distribution moves to a scoped registry package; ADR-0006's premise no longer exists (**Amendment 1, 13/08/2026** — reachability is a named cost — a registry name needs a registry, where a git URL reached any host; the git-URL install survives as a measured, equivalent escape hatch, #629; **Amendment 2, 14/08/2026** — the deferred organisation scope is no longer deferred — the package is `@logikas/brain`, and a scoped package must declare `access: public` or publish private, #653)
 - [ADR-0031](brain/project/decisions/adr-0031-ai-attribution-is-a-claim-not-a-record.md) — AI attribution in commits is an unverifiable claim, not a provenance record
 - [ADR-0032](brain/project/decisions/adr-0032-graph-block-declared-by-its-tag.md) — A graph block is declared by its fence tag: unspoofability outranks the rendered-artifact rule, and the tag is only half the fix (**Amendment 1, 18/08/2026** — the rendering assumption is closed by observation on both providers — an unknown info-string keeps its code-block shape and loses only highlighting, so the cost stays at "no colours"; and the tag's other half, D6's hidden-declaration refusal, was never wired until #723, #723)
+- [ADR-0033](brain/project/decisions/adr-0033-cold-review-transport.md) — The cold review runs as a spawned subagent: the transport is a stage engine, and the producer never holds a credential
 
 ### Project-specific rules
 

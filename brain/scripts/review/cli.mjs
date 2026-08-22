@@ -19,6 +19,7 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { loadContext } from '../vcs/ci-context.mjs';
 import { getVcs } from '../vcs/cli.mjs';
 import { resolveTier, tierParams, resolveReviewProtocol } from '../vcs/governance-tiers.mjs';
+import { makeArtifactGenerate } from './lib/findings-artifact.mjs';
 import { gatherIdentity } from './identity.mjs';
 import { gatherColdBoot } from './cold-boot.mjs';
 import { buildVerdict, renderVerdict } from './verdict.mjs';
@@ -28,6 +29,9 @@ import { evaluateCheckpoint, gatherCheckpointInputs, PRODUCES as CHECKPOINT_PROD
 import { evaluateRuling, gatherRulingInputs, PRODUCES as RULING_PRODUCES } from './evaluators/ruling.mjs';
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
 import { resolveJudgment } from './lib/resolve-challenger.mjs';
+import { resolveConvergence } from './lib/convergence.mjs';
+import { runColdReviewStage } from './lib/run-cold-review-stage.mjs';
+import { makeRunStageSeam } from '../harness/stage-seam.mjs';
 import {
   evaluateInferential, gatherInferentialInputs, shouldRun as judgmentHalfRuns,
   PRODUCES as INFERENTIAL_PRODUCES,
@@ -235,6 +239,22 @@ function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
  * `getVcs` when `posterDeps.getVcs` is not separately injected), `queueDeps`
  * (→ queue.mjs, `queue` subcommand only), `boardDeps` (→ board.mjs, `board`
  * subcommand only). */
+/**
+ * The production `inferentialDeps` — the stage's artifact, or nothing.
+ *
+ * Split out so the `??` above never touches the filesystem when a caller
+ * injected its own deps: a test that supplies a generator must not depend on
+ * what happens to be in `openspec/reviews/`.
+ *
+ * `root` is a parameter and not a closure over `process.cwd()` so this glue can
+ * be pinned against a real directory. A seam only its callers can reach is a
+ * seam nothing tests.
+ */
+export function artifactDeps(prNumber, root = process.cwd()) {
+  const generate = makeArtifactGenerate({ prNumber, root });
+  return generate ? { generate } : {};
+}
+
 export async function main(deps = {}) {
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
@@ -524,7 +544,78 @@ export async function main(deps = {}) {
   }
 
   if (judgment.run) {
-    const inferentialDeps = deps.inferentialDeps ?? {};
+    // Slice A's transport (#682, ADR-0033): the judgment half's producer is the
+    // cold-review STAGE, and its output is a file — `openspec/reviews/pr-NNN/`.
+    // Reading it is all the transport this slice has; slice B spawns the engine
+    // that writes it.
+    //
+    // `deps.inferentialDeps` still wins, so a test injects a generator without
+    // touching the filesystem — and so the seam the unit tests already drive
+    // keeps working unchanged.
+    //
+    // NO artifact means no `generate`, which means the half does not run and the
+    // verdict says "enabled but no transport is configured". That is deliberate:
+    // a repo that never ran the stage has not failed, and rendering it as a
+    // failure would put every repo on earth into a refusal.
+    const root = deps.root ?? process.cwd();
+
+    // ── C.2a — THE STAGE RUNS HERE, AND THE ORDERING IS THE WHOLE WIRING ─────
+    //
+    // Everything below reads a FILE. Until this call existed, that file only
+    // appeared if a human wrote it by hand: `findings-artifact.mjs` read it,
+    // `run-cold-review-stage.mjs` could have written it, `stage-seam.mjs` could
+    // have reached an engine — and NOTHING IN PRODUCTION CALLED EITHER. The
+    // slice had a producer, a transport and a reader that never touched.
+    //
+    // That is the defect class this ticket spent eight mutations chasing, at
+    // slice scale: a capability that exists, is tested, and is unreachable from
+    // the verb. It reads as "built" in every place except the one that runs.
+    //
+    // The stage must run BEFORE `artifactDeps`, because `makeArtifactGenerate`
+    // answers `null` for a file that is absent AT THE MOMENT IT IS ASKED. Run it
+    // after, and the first review on any PR reports "no transport is configured"
+    // about a stage that had just written its artifact.
+    //
+    // AN INJECTED `inferentialDeps` REPLACES THE STAGE ENTIRELY, and that is what
+    // the seam means: a caller supplying its own generator has supplied the thing
+    // the stage exists to produce. Spawning an engine anyway would burn a model
+    // call whose output nothing reads.
+    //
+    // IT RUNS UNDER `--dry-run` TOO. `--dry-run` governs POSTING, not producing:
+    // a dry run that skipped the stage would render a different verdict from the
+    // real one, which defeats the only reason to ask for a preview. The cost is
+    // real and it is opt-in — `sdd.map` ships empty (migration 0.10.0), so no
+    // repo spawns anything until it routes the stage on purpose.
+    //
+    // THE STAGE RUNS ONCE, OUTSIDE the produce loop `maxRounds` bounds. So a
+    // higher bound re-reads one static artifact and converges on round 2, exactly
+    // as `convergence.mjs` records. Moving the stage inside the loop would make
+    // the bound buy real work and would multiply the model cost per review;
+    // ADR-0033 decided the transport, not that.
+    const stageResult = deps.inferentialDeps
+      ? { routed: false }
+      : await runColdReviewStage({
+        config,
+        prNumber: args.pr,
+        baseRef: baseSha,
+        headRef: boot.headSha,
+        root,
+        deps: deps.stageDeps ?? { runStage: makeRunStageSeam() },
+      });
+
+    // A ROUTED STAGE THAT FAILED IS NOT A REPO WITHOUT A TRANSPORT. Refused here
+    // rather than fallen through, because falling through reaches
+    // `artifactDeps`, finds no file, and renders "enabled but no transport is
+    // configured" — telling an operator who configured an engine that they did
+    // not. Same words, opposite fact. `routed` is what keeps the two apart, and
+    // it survives the failure precisely so this branch can read it.
+    if (stageResult.routed && !stageResult.ok) {
+      error(`brain:review: the cold-review stage failed — ${stageResult.reason}. ` +
+        'Refusing to post a verdict that would declare the inferential control applied.');
+      return 1;
+    }
+
+    const inferentialDeps = deps.inferentialDeps ?? artifactDeps(args.pr, root);
 
     // #682 round-1 review, finding G — AN ENABLED HALF WITH NO TRANSPORT IS NOT
     // THE SAME STATE AS A DISABLED ONE, and until now they rendered
@@ -553,12 +644,26 @@ export async function main(deps = {}) {
         'was produced, and the inferential control was NOT applied to this verdict.'
       );
     } else {
+      // REQ-682-5's bound, resolved from the config and read HERE — the only
+      // place that knows a run is starting. It is NOT §7's `rev >= 3`, which is
+      // read from `priorRevCount` further down and counts posted revisions on
+      // this PR rather than produce rounds inside this run. `convergence.mjs`
+      // holds the argument for why the two must not be one number read twice;
+      // this line is where the distinction is either kept or lost.
+      //
+      // Throws on an unreadable key, and that is the same fail-closed shape
+      // `resolveStageEngine` uses: an operator who wrote `maxRounds` asked for
+      // something, and quietly running the old bound would run a review they did
+      // not configure.
+      const { maxRounds } = resolveConvergence(config);
+
       const inferentialInputs = await gatherInferentialInputs({
         worktreePath: boot.worktreePath,
         baseSha,
         headSha: boot.headSha,
         changedFiles,
         prBody: boot.prView.body,
+        maxRounds,
         deps: inferentialDeps,
       });
 

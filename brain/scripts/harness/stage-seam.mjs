@@ -1,0 +1,94 @@
+// stage-seam.mjs — the `runStage` seam B.5 requires, and the refusal REQ-S3-1
+// demands (#682 slice 3, B.6).
+//
+// REQ-S3-1's third state is the one this file exists for:
+//
+//   > WHEN the entry names an engine with no backend
+//   > THEN the run REFUSES rather than falling back. An engine the operator
+//   > named and did not get is not the same state as one they never named.
+//
+// So there are THREE states at this layer and they must stay three, not two:
+//
+//   unrouted          → `runColdReviewStage` never gets here. Not this file's
+//                       business, and deliberately not a failure.
+//   routed, no engine → REFUSED, naming the engine and what it lacks.
+//   routed, engine    → the backend's own `{ok, reason}` answer, untouched.
+//
+// FALLING BACK IS THE FAILURE MODE, not crashing. A seam that quietly ran
+// `claude` when the operator wrote `engine: 'plain'` would produce a review —
+// a plausible, well-formatted, entirely real review — from a model they did not
+// choose, and nothing on the verdict would say so. That is worse than no review,
+// because the operator has no way to find out. This file names exactly one
+// engine: the one it was given.
+//
+// THE REFUSAL IS A RESULT, NOT A THROW, and that is a choice about which
+// mechanism carries it. `runColdReviewStage` already has a channel for "the
+// transport ran and broke" (`{routed: true, ok: false, reason}`) which `cli.mjs`
+// refuses to post on. A missing backend is a transport failure like a non-zero
+// exit is, so it rides the same channel rather than adding a second one to keep
+// honest. The reason says which engine and what it lacked, because "the run
+// refused" without a name is not something an operator can act on.
+
+import { dispatch as defaultDispatch } from './cli.mjs';
+
+/** The op name the harness routes a stage through. */
+export const RUN_STAGE_OP = 'run-stage';
+
+/**
+ * makeRunStageSeam() — the `deps.runStage` that `runColdReviewStage` requires.
+ *
+ * @param {{dispatch?: Function}} [deps]
+ * @returns {(args: {stage: string, prompt: string, model?: string|null,
+ *                   engine: string, cwd?: string}) => Promise<{ok: boolean, reason?: string}>}
+ */
+export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
+  return async function runStage({ engine, stage, prompt, model = null, cwd } = {}) {
+    if (typeof engine !== 'string' || engine.trim() === '') {
+      return {
+        ok: false,
+        reason: 'stage-seam: no engine was named — a stage cannot be routed to nothing.',
+      };
+    }
+
+    let result;
+    try {
+      // ONE ENGINE, NAMED ONCE. There is no second call in this function and no
+      // list to walk: the only name that can reach `dispatch` is the one the
+      // operator wrote. That is what makes "does not fall back" a property of
+      // the code's shape rather than a promise in a comment.
+      result = await dispatch(engine, RUN_STAGE_OP, [{ stage, prompt, model, cwd }]);
+    } catch (err) {
+      // EVERY throw is a refusal, not just the two `dispatch` spells out
+      // (backend not found; backend does not implement the op). Matching on
+      // those two messages would make this seam silently permissive the day a
+      // third failure mode appears — and a seam whose refusal has holes is a
+      // seam that falls back, just less obviously.
+      // `err?.message ?? String(err)` rather than `err.message`: the catch is
+      // deliberately catch-ALL, so it catches throws that are not Errors. A
+      // rejection with `null` made this line throw a TypeError, turning the
+      // refusal into the abort it exists to prevent — found by the test that
+      // enumerates non-Error throws, not by reading.
+      const detail = err?.message ?? String(err);
+      return {
+        ok: false,
+        reason:
+          `the engine "${engine}" could not run the "${stage}" stage — ${detail}. ` +
+          'Refusing rather than falling back: an engine you named and did not get is not ' +
+          'the same state as one you never named, and a review from a model you did not ' +
+          'choose would look exactly like a review from one you did.',
+      };
+    }
+
+    // A backend that answered nothing is not a success. `dispatch` returned the
+    // op's value from B.6 onward; before that it discarded it, and this branch
+    // is what would have caught that regression had it existed then.
+    if (!result || typeof result !== 'object') {
+      return {
+        ok: false,
+        reason: `the engine "${engine}" returned no result for the "${stage}" stage`,
+      };
+    }
+
+    return result;
+  };
+}

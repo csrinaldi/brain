@@ -96,7 +96,17 @@ export function resolveHarness({ env = process.env, envVars = {}, config = {} } 
 // ---------------------------------------------------------------------------
 // Valid ops
 // ---------------------------------------------------------------------------
-export const VALID_OPS = ['init'];
+// `run-stage` is ADDITIVE, and ADR-0019's SECOND rejected alternative is the
+// authority — the one never cited in this discussion:
+//
+//   > "Treat the single-`init`-op surface as the normative ceiling. REJECTED: it
+//   >  would force a future legitimate surface op … the four surfaces are the
+//   >  invariant, THE OP COUNT IS JUST TODAY'S STATE."
+//
+// So growing this list needs no amendment. What ADR-0019 forbids is the SDD
+// artifact LIFECYCLE forking per harness, and `assertRoutableStage` refuses that
+// case in code rather than promising it in a comment (#682 slice B, ADR-0033).
+export const VALID_OPS = ['init', 'run-stage'];
 
 // Normalize hyphenated op to camelCase function name.
 // e.g. 'feature-checkpoint' → 'featureCheckpoint'
@@ -125,9 +135,24 @@ async function defaultBackendLoader(harness) {
  * @param {{ backendLoader?: (harness: string) => Promise<object> }} [opts]
  *   Injectable backend factory — defaults to a real ESM dynamic import.
  *   Tests pass in a fake loader to avoid touching real backends.
- * @returns {Promise<void>}
+ * @returns {Promise<*>} whatever the backend's op returned.
  * @throws {Error} if the op is unknown, the backend is not found, or the
  *   backend does not implement the requested op.
+ *
+ * THE RESULT IS RETURNED, and until #682 slice B.6 it was DISCARDED — the line
+ * was `await backend[fn](...args);` with `@returns {Promise<void>}` beside it.
+ * That was harmless while `init` was the only op: `init` answers nothing, so
+ * there was nothing to drop. B.3 added `run-stage`, whose entire purpose is its
+ * `{ok, reason}` answer, and the dispatcher swallowed it — a failed engine
+ * reached the caller as `undefined`.
+ *
+ * Reproduced before fixing: a backend returning
+ * `{ok: false, reason: 'the engine exited with status 137'}` came back from
+ * `dispatch` as `undefined`, while calling the backend directly returned the
+ * object. Same shape as #734, where `runSingle` discards `archiveChange`'s
+ * return value and reports a fusion it did not perform — a caller that drops an
+ * answer nobody notices is missing, because the absent value reads as a quiet
+ * success.
  */
 export async function dispatch(harness, op, args = [], { backendLoader = defaultBackendLoader } = {}) {
   if (!VALID_OPS.includes(op)) {
@@ -145,7 +170,7 @@ export async function dispatch(harness, op, args = [], { backendLoader = default
     );
   }
 
-  await backend[fn](...args);
+  return await backend[fn](...args);
 }
 
 // ---------------------------------------------------------------------------
