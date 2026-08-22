@@ -548,3 +548,60 @@ test('slice A: with no artifact under the root, the half does not run and says s
   assert.match(body, /no transport is configured/,
     'and it is TOLD — the condition that ships today, still correct when the artifact is absent');
 });
+
+// ── C.1 — the bound reaches the loop through the REAL verb ──────────────────
+
+test('C.1: reviewer.convergence.maxRounds reaches the produce loop through main()', async () => {
+  // THE PRODUCTION GLUE, PINNED. `main` resolves the bound and hands it to
+  // `gatherInferentialInputs`; every unit test for the loop passes `maxRounds`
+  // directly, so deleting that one argument from the call site left the whole
+  // suite GREEN — measured. The config key would have been inert in the real
+  // verb while `convergence.test.mjs` proved the loop honours a bound nobody
+  // gave it. Same shape as A.3, where `deps.inferentialDeps ?? artifactDeps(…)`
+  // was deletable green until a test drove the real branch.
+  const rounds = [];
+  const { code } = await run({
+    config: {
+      reviewer: {
+        inferential: { enabled: true },
+        convergence: { maxRounds: 4 },
+      },
+    },
+    protocol: 'brain-review/2',
+    generate: async ({ round }) => {
+      rounds.push(round);
+      // A distinct finding per round, so the loop cannot converge early and the
+      // count is the bound rather than an accident of repetition.
+      return [{ id: `R${round}`, severity: 'editorial', evidence: `round ${round}` }];
+    },
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(rounds, [1, 2, 3, 4], 'the configured bound must reach the loop, not stop at the resolver');
+});
+
+test('C.1: no convergence key means one round through the real verb', async () => {
+  const rounds = [];
+  await run({
+    config: CFG(),
+    protocol: 'brain-review/2',
+    generate: async ({ round }) => { rounds.push(round); return [{ id: `R${round}`, severity: 'editorial', evidence: 'x' }]; },
+  });
+
+  // The complement, and it is not redundant: without it, passing a constant 4 at
+  // the call site would satisfy the test above.
+  assert.deepEqual(rounds, [1], 'an unset key runs exactly what ran before it existed');
+});
+
+test('C.1: an unreadable maxRounds refuses the run rather than reviewing under the old bound', async () => {
+  const { code, body } = await run({
+    config: { reviewer: { inferential: { enabled: true }, convergence: { maxRounds: 'three' } } },
+    protocol: 'brain-review/2',
+    generate: async () => [{ id: 'x', severity: 'editorial', evidence: 'x' }],
+  }).catch((err) => ({ code: 'threw', body: err.message }));
+
+  // Fail-closed, like `resolveStageEngine`: an operator who wrote the key asked
+  // for something, and quietly running the old bound reviews under a
+  // configuration they did not choose.
+  assert.match(String(body), /whole number of rounds/);
+});
