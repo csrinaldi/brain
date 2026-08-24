@@ -541,6 +541,37 @@ test('#682 cold-3: a run refused for want of a worktree destroys NOTHING', async
   );
 });
 
+test('#682 cold-3: a refused run creates NOTHING either — not just destroys nothing', async (t) => {
+  // THIS ASSERTION EXISTS BECAUSE A MUTATION SURVIVED. The fix above was stated
+  // as "every precondition refuses before ANY mutation", and only the
+  // destructive half had an oracle: hoisting the `mkdir` back above the
+  // worktree refusal left the whole suite green. A rule whose second clause
+  // nothing reads is the defect this ticket keeps finding, committed inside the
+  // fix for one instance of it.
+  //
+  // The directory is the cheap mutation — an empty `openspec/reviews/pr-N/`
+  // harms nobody. That is exactly why it needs the assertion rather than
+  // trust: nothing downstream would ever complain, so the ordering would rot
+  // silently and the next reader would take the comment at its word.
+  const dir = makeRepo(t);
+  const artifactDir = dirname(join(dir, artifactPathFor(PR)));
+
+  const result = await runColdReviewStage({
+    config: ROUTED,
+    prNumber: PR,
+    root: dir,
+    worktreePath: '   ',
+    deps: { runStage: async () => { throw new Error('the engine must not be reached on a refused run'); } },
+  });
+
+  assert.equal(result.ok, false);
+  assert.ok(
+    !existsSync(artifactDir),
+    'the refused run left a directory behind — "before any mutation" has to mean the mkdir too, ' +
+    'or the phrase is a slogan with half an oracle'
+  );
+});
+
 test('#682 cold-3: an UNROUTED run leaves the artifact alone — it is the operator\'s input', async (t) => {
   // Not an oversight that the clearing sits below the routing check: on this
   // path the file is slice A's transport, written by hand before any engine

@@ -956,14 +956,71 @@ the same run that found it** — a refutation that measured the wrong path.
       | the seam drops `credentialEnv` at its hop | the seam + exact-shape tests |
       | `withoutCredentials` returns the env by reference | five tests across three layers |
 
+- [x] E.3 **`judgment:cold-3` — one real ordering defect, one overstated claim.**
+      Both halves MEASURED before either was touched.
+
+      **HALF 2 — the ordering, and a real fix.** The worktree refusal sat BELOW
+      the clearing, so a run that could never spawn had already deleted the
+      previous artifact. Measured: file gone, engine never reached, and the
+      reason named a missing worktree while saying nothing about the file it had
+      just destroyed. **A true diagnosis with a silent side effect is worse than
+      a false one** — nothing prompts the reader to go looking.
+
+      The fix is the ORDERING, not a sentence added to the reason: a run that
+      cannot spawn has no business clearing the output of the one that could.
+
+      **HALF 1 — the invariant was overstated, and the code was right.** The note
+      claimed flatly that *"a file at that path was written by THIS run"*. The
+      clearing sits below the routing check, so that holds for ROUTED runs only.
+      **Clearing on the unrouted path would be a defect, not a fix:** there the
+      file is not a previous round's OUTPUT but the operator's own INPUT. The
+      artifact was slice A's transport before any engine existed to write it, and
+      `regulated-review.e2e` A.4 writes it by hand with **no `sdd.map` entry** and
+      requires the verdict to read it. Confirmed by mutation — hoisting
+      `remove()` above the routing check kills six tests including A.4 and the
+      pre-existing `C.2a`. So the scoping was already guarded at the wire; what
+      was missing was a local oracle and an honest comment, and both now exist.
+
+      **WHAT STAYS AMBIGUOUS, named rather than papered over:** a repo that
+      ROUTED the stage, got an artifact and then UN-ROUTED it leaves a previous
+      round's engine output where the next run reads it as operator input.
+      Nothing on disk separates them — D.5 already established there is no clock
+      to trust. Closing it needs provenance recorded INSIDE the artifact, a
+      ruling about the format rather than an ordering fix, and not this slice's.
+
+      **REQ-S3-1 amended while closing this.** It read *"the entry is absent →
+      the judgment half does not run"*, which forbids exactly what A.4
+      exercises. What is absent when the entry is absent is the **SPAWN**, not
+      the half — routing only changes WHO writes the file. Read literally, the
+      old wording made the correct implementation delete a shipped capability,
+      and a reader reconciling spec against e2e would have had to guess which
+      one was wrong.
+
+      **A MUTATION SURVIVED, AND IT WAS MINE.** The fix was stated as *"every
+      precondition refuses before ANY mutation"* and only the destructive half
+      had an oracle: hoisting the `mkdir` back above the worktree refusal left
+      the whole suite green. **The ticket's recurring defect class, committed
+      inside the fix for one instance of it.** The directory is the cheap
+      mutation — an empty `openspec/reviews/pr-N/` harms nobody, which is
+      precisely why nothing downstream would ever complain and the ordering
+      would have rotted silently. Closed with the assertion that a refused run
+      creates nothing either; the mutation now fails.
+
+      | mutation | killed by |
+      |---|---|
+      | worktree refusal back below the mutations | the refused-run-destroys-nothing test |
+      | `remove()` hoisted above the routing check | 6 tests, incl. e2e A.4 and C.2a |
+      | `mkdir` hoisted above the refusal | **survived** → new assertion, now kills it |
+
+      One mutation earlier was DISCARDED rather than counted: the splice cut
+      between comment blocks and left the `remove()` statement where it was, so
+      it measured nothing. Same trap as cold-6's — a mutation that proves
+      nothing looks exactly like a property that is well covered.
+
 ## Still open from the second cold review
 
-7 findings: 2 closed (E.1, E.2), 3 to assess, 2 expected and correct.
+7 findings: 3 closed (E.1, E.2, E.3), 2 to assess, 2 expected and correct.
 
-- `judgment:cold-3` (correction) — the pre-spawn `remove()` sits below the
-  routing check, so D.5's invariant holds only for ROUTED runs; and it runs
-  before the worktree refusal, so a run that never spawns still destroys the
-  previous artifact without saying so.
 - `judgment:cold-4` (correction) — `.gitignore` is not in `package.json`'s
   `files`, so the artifact rule holds in this repo and in no consumer.
 - `judgment:cold-5` (correction) — `run-stage` is now reachable from the argv
