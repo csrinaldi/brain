@@ -27,7 +27,7 @@
 // THE PROMPT IS DERIVED FROM THE READER, NOT RESTATED ALONGSIDE IT.
 //
 // Every machine-checkable element of the contract — the fence tag, the field
-// list, the evidence classes, the causal dispositions, the artifact path — is
+// list, the evidence classes, the artifact path — is
 // interpolated from the constant the READER uses. A prompt that spelled them out
 // as its own literals would be a second declaration of the contract with nothing
 // comparing the two, and would go stale the first time a field moved: the engine
@@ -50,16 +50,29 @@
 // The protocol document is where the vocabulary is actually written down, so
 // that is a real cross-check rather than a second copy compared to itself — and
 // it fails the day the protocol changes the set without this file following.
+//
+// `causal_disposition` IS NOT ASKED FOR, and that is a ruling rather than an
+// omission (#682 cold review, judgment:cold-9). This prompt used to document it
+// as a field the engine may state. It is not in `CARRIED_FIELDS`, so
+// `sanitiseFinding` dropped every stated one at the boundary — which is the
+// defect this file's whole design claims to prevent, committed by this file.
+//
+// The fix is to stop ASKING, not to start carrying, and the direction matters:
+// `verdict.mjs` routes `pre-existing`/`base-only` into `follow_ups`, OUT of the
+// blocking set, and `annotateDeterministicFindings` spreads `...f` last so a
+// producer's own value wins over the default. Carry the field and a cold
+// reviewer could de-block its own findings by declaring them pre-existing —
+// the producer grading its own admissibility. `classifyAgainstBase` decides
+// that by MEASURING against the base; a producer's claim is not a measurement.
+// The reader dropping it was already the fail-closed behaviour. The prompt was
+// the half that was wrong.
 
 import {
   ARTIFACT_TAG,
   CARRIED_FIELDS,
   artifactPathFor,
 } from './findings-artifact.mjs';
-import {
-  ALLOWED_EVIDENCE_CLASSES,
-  ALLOWED_CAUSAL_DISPOSITIONS,
-} from './schema-v2.mjs';
+import { ALLOWED_EVIDENCE_CLASSES } from './schema-v2.mjs';
 
 /** The ticket this role is on loan from. Named so the debt has an id in code. */
 export const ROLE_DEBT_TICKET = 312;
@@ -127,7 +140,11 @@ ${CARRIED_FIELDS.map((f) => `  - ${f}`).join('\n')}
     downgraded to \`correction\` — cite an ADR, a REQ, a spec line, or a gate.
   · \`evidence_class\` — one of: ${ALLOWED_EVIDENCE_CLASSES.join(' | ')}
     Yours are \`inferential\`: you reasoned to them; a gate did not compute them.
-  · \`causal_disposition\`, when you state one — one of: ${ALLOWED_CAUSAL_DISPOSITIONS.join(' | ')}
+  · You do NOT state \`causal_disposition\`. Whether a finding is introduced by
+    this diff or pre-existing is MEASURED against the base, not claimed — a
+    finding marked \`pre-existing\` leaves the blocking set, so a producer that
+    stated its own would be grading its own admissibility. The field is not
+    carried across this boundary; state it and it is dropped.
   · \`file\` and \`line\` together anchor a finding to a line of the diff, and that
     is what makes it appear as an inline comment on the pull request rather than
     only in the summary. Anchor everything you can.

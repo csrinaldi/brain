@@ -23,10 +23,7 @@ import {
   artifactPathFor,
   CARRIED_FIELDS,
 } from './findings-artifact.mjs';
-import {
-  ALLOWED_EVIDENCE_CLASSES,
-  ALLOWED_CAUSAL_DISPOSITIONS,
-} from './schema-v2.mjs';
+import { ALLOWED_EVIDENCE_CLASSES } from './schema-v2.mjs';
 
 const PR = 765;
 
@@ -109,10 +106,63 @@ test('the vocabularies are derived from schema-v2, not restated', () => {
     [...ALLOWED_EVIDENCE_CLASSES],
     'the evidence classes are ALLOWED_EVIDENCE_CLASSES exactly — no more, no fewer'
   );
+});
+
+// ── #682 cold review, judgment:cold-9 ────────────────────────────────────────
+//
+// The prompt documented `causal_disposition` as a field the engine may state.
+// It is not in CARRIED_FIELDS, so `sanitiseFinding` dropped every stated one at
+// the boundary — the exact defect this module's header claims derivation
+// prevents, committed by this module.
+//
+// THE OLD ORACLES COULD NOT SEE IT, and the reason is one direction:
+// `RENDERED_ALWAYS` checks that every CARRIED field renders, and the
+// field-list test reads back the enumerated `  - name` block. Neither looks at
+// the PROSE bullets, and neither asks the converse question — is every field
+// this prompt names actually one the reader carries? A field named there and
+// nowhere in CARRIED_FIELDS is invisible to both. This test asks the converse.
+
+test('#682 cold-9: every field the prompt names is one the reader actually carries', () => {
+  const prompt = buildColdReviewPrompt({ prNumber: PR });
+
+  // The prose bullets, where the drift lived. Each opens `  · \`name\`` — a
+  // backticked field name in the leading position is the prompt telling the
+  // engine that this field is part of the shape.
+  const named = [...prompt.matchAll(/^ {2}· `([a-z_]+)`/gm)].map((m) => m[1]);
+  assert.ok(named.length > 0, 'the prose bullets must still name fields — otherwise this test is vacuous');
+
+  const strays = named.filter((f) => !CARRIED_FIELDS.includes(f));
   assert.deepEqual(
-    renderedVocabulary(prompt, 'causal_disposition'),
-    [...ALLOWED_CAUSAL_DISPOSITIONS],
-    'the dispositions are ALLOWED_CAUSAL_DISPOSITIONS exactly — no more, no fewer'
+    strays, [],
+    `the prompt names ${JSON.stringify(strays)}, which sanitiseFinding drops at the boundary — ` +
+    'asking an engine for a field the reader discards is the defect this module exists to prevent'
+  );
+});
+
+test('#682 cold-9: the prompt tells the engine NOT to state a disposition, and says why', () => {
+  const prompt = buildColdReviewPrompt({ prNumber: PR });
+
+  // Silence is not enough. Removing the bullet leaves a prompt that says
+  // nothing about the field, and an engine that carries the habit from another
+  // protocol still emits it — the finding is then dropped without either side
+  // knowing. The prompt has to REFUSE it out loud.
+  assert.match(
+    prompt, /You do NOT state `causal_disposition`/,
+    'the field must be refused explicitly, not merely left undocumented'
+  );
+  assert.match(
+    prompt, /MEASURED against the base, not claimed/,
+    'and the reason must travel with the refusal — a rule without its reason is one a future edit deletes'
+  );
+
+  // The converse, and it is the load-bearing half: whatever the prose says, the
+  // field must not be in the carried set. If a later change adds it there, this
+  // prompt's refusal becomes a lie and a producer can de-block its own findings
+  // by declaring them pre-existing (verdict.mjs routes them into follow_ups,
+  // and annotateDeterministicFindings spreads `...f` last, so the producer wins).
+  assert.ok(
+    !CARRIED_FIELDS.includes('causal_disposition'),
+    'causal_disposition entered CARRIED_FIELDS — a producer can now grade its own admissibility'
   );
 });
 
