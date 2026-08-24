@@ -507,6 +507,67 @@ itself: a declared value with no reader. Tenth, eleventh and twelfth occurrence.
       inherit"* — the property every `probeAgentRuntime` caller depends on and
       the one a careless fix would have broken silently.
 
+- [x] D.2 **`judgment:cold-9` — the prompt asked for a field the reader drops.**
+      `cold-review-prompt.mjs` documented `causal_disposition` as a field the
+      engine may state. It is not in `CARRIED_FIELDS`, so `findings-artifact.mjs:117`
+      dropped every stated one through `sanitiseFinding`. **That is the defect
+      the module's own header claims derivation prevents, committed by the
+      module.** Fixed at `9d77c54`.
+
+      **THE FIX IS TO STOP ASKING, NOT TO START CARRYING, and the finding
+      implied the opposite.** It read the drop as the loss — *"the engine's
+      stated disposition would have been honoured and rendered had it survived
+      the boundary"*. Checked before acting, because the two fixes differ by a
+      security property rather than by taste:
+
+      - `verdict.mjs:192` routes `pre-existing`/`base-only` into `follow_ups` —
+        OUT of the blocking set.
+      - `causal-admission.mjs` spreads `...f` LAST in
+        `annotateDeterministicFindings`, so a producer's own value wins over the
+        default.
+
+      Carry the field and a cold reviewer de-blocks its own findings by
+      declaring them `pre-existing`: the producer grading its own
+      admissibility. `classifyAgainstBase` decides that by MEASURING against the
+      base, and **a producer's claim is not a measurement.** The reader dropping
+      it was already the fail-closed behaviour; the prompt was the wrong half.
+      A reversal of this ruling belongs in an ADR, not in a field list.
+
+      **Refused out loud, not by silence.** Deleting the bullet leaves a prompt
+      that says nothing, and an engine carrying the habit from another protocol
+      still emits the field — dropped with neither side knowing. The prompt now
+      states the refusal and its reason.
+
+      **Why every existing oracle was blind, which is the reusable part:**
+      `RENDERED_ALWAYS` checks that every CARRIED field renders, and the
+      field-list test reads back the enumerated `  - name` block. Both look the
+      same way. **Neither asks the converse — is every field this prompt NAMES
+      one the reader carries?** A field named in the prose bullets and absent
+      from `CARRIED_FIELDS` is invisible to both. The new test asks it.
+
+      Two mutations, full suite each, tree reverted after both. Both died, on
+      different halves: re-adding the field to the bullets kills the converse
+      test AND the refusal test; deleting the refusal bullet while leaving the
+      field uncarried kills ONLY the refusal test — which is what proves
+      "says so out loud" is a property the suite can tell apart from "says
+      nothing".
+
+## Still open from C.5's verdict
+
+Not started, and listed so the count is honest rather than implied:
+
+- `judgment:cold-1` (blocker) — the post-spawn check is a bare `exists`, so a
+  stale artifact from a previous round passes it. Re-review is the normal case.
+- `judgment:cold-3` (blocker) — `boot.worktreePath` is computed, passed to
+  `gatherInferentialInputs`, and consumed by nothing; the engine reads the
+  operator's tree while the verdict binds itself to the PR head.
+- `judgment:cold-2`, `cold-5`, `cold-6` — specific and plausible, NOT yet
+  verified by reading. Nobody should treat them as confirmed until someone does.
+- `budget` (blocker) — 1204 > 1000 at `lite`. Not a false positive: the reviewer
+  keeps `size:exception` in its DENY-SET on purpose, so it reports the overflow
+  raw and leaves the waiver to a human. The gate passes on the label; the
+  reviewer refuses to read it. Both are correct at once.
+
 ## Not in this change
 
 - `same-model` / `cross-family` axes.
