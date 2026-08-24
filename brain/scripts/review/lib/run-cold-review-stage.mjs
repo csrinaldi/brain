@@ -1,8 +1,17 @@
 // run-cold-review-stage.mjs — the cold review, run as a stage (#682 slice 3, B.5).
 //
-// Resolve the engine → build the role → make the directory → spawn → check that
-// the artifact is actually there. That last step is the one that earns its place,
-// and the reason is a fold rather than a crash:
+// Resolve the engine → build the role → make the directory → CLEAR THE PREVIOUS
+// ARTIFACT → spawn in the cold worktree → check that the artifact is there.
+//
+// The clearing step and the check are ONE mechanism, added at different times:
+// the check landed in B.5 and the clearing in D.5, after #682's own cold review
+// found that without it the check could not tell "the engine wrote this" from
+// "a previous round left it here" (judgment:cold-1). Read them together — the
+// check is what the clearing is for, and the clearing is what makes the check
+// mean anything on the second review of a PR, which is the normal case.
+//
+// The check earns its place because the failure it catches is a fold rather
+// than a crash:
 //
 //   An engine that exits 0 and writes nothing leaves no artifact. One layer down,
 //   `makeArtifactGenerate` reads "no artifact" as `null`, the caller supplies no
@@ -32,7 +41,7 @@
 // next, the seam is required and the resolution lands in B.6 with its refusal.
 
 import { join, dirname } from 'node:path';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, rmSync } from 'node:fs';
 
 import { COLD_REVIEW_STAGE, resolveStageEngine } from '../../lib/stage-engine.mjs';
 import { buildColdReviewPrompt } from './cold-review-prompt.mjs';
@@ -68,6 +77,10 @@ export async function runColdReviewStage({
   }
   const mkdir = deps.mkdir ?? ((abs) => mkdirSync(abs, { recursive: true }));
   const exists = deps.exists ?? ((abs) => existsSync(abs));
+  // `force` so an absent file is not an error — the common case is a first run.
+  // Everything else (a directory at the path, a permission failure) throws, and
+  // the caller below turns that into a refusal rather than a silent pass.
+  const remove = deps.remove ?? ((abs) => rmSync(abs, { force: true }));
 
   // Throws on an entry that exists and cannot be read; `null` when the repo
   // routed nothing. Unrouted is NOT a failure — the caller renders it as the
@@ -84,6 +97,42 @@ export async function runColdReviewStage({
   // error — re-running a review is normal, and #495's rev counter is what makes
   // rounds distinguishable, not the filesystem.
   mkdir(dirname(join(root, artifactPath)));
+
+  // THE ARTIFACT IS REMOVED BEFORE THE SPAWN, AND THAT IS WHAT MAKES THE CHECK
+  // BELOW MEAN ANYTHING (judgment:cold-1).
+  //
+  // The presence check was a bare `exists`, so it could not tell "the engine
+  // wrote this" from "a previous round left it here". Re-review is the NORMAL
+  // case — §7 counts revisions precisely because it happens, and the mkdir
+  // above is recursive for the same reason — so on every review after the
+  // first, an engine that exited 0 and wrote nothing passed, and the verdict
+  // for the NEW head declared the judgment control applied over findings
+  // produced against an older one. The guard only ever held on a fresh repo,
+  // which is exactly the shape its own test used.
+  //
+  // Deleting is the cheap half of the fix and the honest one: after this line,
+  // a file at that path was written by THIS run, with no clock, no mtime and no
+  // resolution to trust. The cost is that a failed run leaves no artifact to
+  // inspect — accepted, because the artifact is already ruled ephemeral (it is
+  // `.gitignore`d, and the verdict posted on the PR is the durable record).
+  //
+  // A REMOVAL THAT FAILS IS A REFUSAL. Continuing would run the engine with the
+  // stale file still there and land back in the state this exists to prevent —
+  // and the operator would be told the engine wrote nothing, which would be a
+  // lie about a file the engine never got the chance to replace.
+  try {
+    remove(join(root, artifactPath));
+  } catch (err) {
+    return {
+      routed: true,
+      ok: false,
+      reason:
+        `the stage could not clear the previous artifact at ${artifactPath} — ${err?.message ?? String(err)}. ` +
+        'Refusing rather than running: with a stale file in place, an engine that wrote nothing would ' +
+        'look exactly like one that did its job, and the verdict would declare a control it applied ' +
+        'to findings from an older head.',
+    };
+  }
 
   // THE ENGINE READS THE COLD WORKTREE, AND REFUSING IS THE POINT (judgment:cold-3).
   //

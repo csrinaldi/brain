@@ -14,7 +14,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -367,4 +367,81 @@ test('#682 cold-3: the engine writes into the operator tree and leaves the workt
     existsSync(join(worktree, artifactPathFor(PR))), false,
     'and NOT in the throwaway checkout, which is deleted with it — findings written there are findings lost'
   );
+});
+
+// ── #682 C.5's verdict, judgment:cold-1 ──────────────────────────────────────
+
+test('#682 cold-1: a STALE artifact does not pass for one this run wrote', async (t) => {
+  const root = makeRepo(t);
+  const abs = join(root, artifactPathFor(PR));
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, `\`\`\`${ARTIFACT_TAG}\n[{"id":"OLD","severity":"blocker","evidence":"found at the PREVIOUS head"}]\n\`\`\`\n`);
+
+  // An engine that exits 0 and writes NOTHING — the exact case the presence
+  // check exists to catch, and the case it could not see while a previous
+  // round's file was lying there. Re-review is normal, so this was the state on
+  // every review after the first.
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: { runStage: async () => ({ ok: true }) },
+  });
+
+  assert.equal(result.ok, false, 'a run that produced nothing must not inherit the last one\'s findings');
+  assert.match(result.reason, /wrote no artifact/, 'and it is reported as the engine producing nothing');
+  assert.equal(
+    existsSync(abs), false,
+    'the stale file must be GONE — leaving it lets the next reader treat an older head\'s findings as this head\'s'
+  );
+});
+
+test('#682 cold-1: the clearing happens BEFORE the engine runs, not after', async (t) => {
+  const root = makeRepo(t);
+  const abs = join(root, artifactPathFor(PR));
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, 'stale\n');
+
+  let staleWasGone = null;
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      runStage: async () => {
+        // Asked from INSIDE the engine's turn. Clearing after the spawn would
+        // delete what the engine just wrote, so the ordering is not a detail:
+        // it is the difference between the fix and a new defect.
+        staleWasGone = !existsSync(abs);
+        writeFileSync(abs, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(staleWasGone, true, 'the engine must start from a clean slate');
+  assert.equal(result.ok, true, 'and what it wrote must survive — clearing after the spawn would eat it');
+});
+
+test('#682 cold-1: a clearing that FAILS refuses, with its own reason', async (t) => {
+  const root = makeRepo(t);
+
+  const failed = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      remove: () => { throw new Error('EACCES: permission denied'); },
+      runStage: async () => { throw new Error('the engine must never run'); },
+    },
+  });
+
+  assert.equal(failed.routed, true);
+  assert.equal(failed.ok, false);
+  assert.match(failed.reason, /could not clear/, 'the operator must be told what actually stopped the run');
+  assert.match(failed.reason, /EACCES/, 'carrying the underlying cause, not a summary of it');
+
+  // PAIRWISE DISTINCT, the way C.3 requires. "I could not clear the old file"
+  // and "the engine wrote nothing" are different facts with different fixes,
+  // and folding them would tell the operator the engine failed when it never ran.
+  const wroteNothing = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: { runStage: async () => ({ ok: true }) },
+  });
+  assert.notEqual(failed.reason, wroteNothing.reason);
+  assert.doesNotMatch(wroteNothing.reason, /could not clear/);
 });
