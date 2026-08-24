@@ -349,13 +349,42 @@
       of the wrong range is still a well-formatted review.** The composition test
       asserted stage, engine, model and the artifact path, and stopped one field
       short of the one that says WHAT to review. Ninth occurrence on this ticket.
-- [ ] C.2b The same path **on a real PR**, with the verdict posted and its inline
+- [x] C.2b The same path **on a real PR**, with the verdict posted and its inline
       comments visible. #682 acceptance criterion 3.
-      **Not satisfiable from this container** — #604, measured four times on this
-      line of work: credentials here are proxy-injected, so `brain:review` refuses
-      to post. C.2a proves everything up to the post; A.4 proves the post carries
-      anchored inline comments. What is missing is one run where both halves are
-      the same run. Needs a machine with a real PAT, same precondition as C.5.
+      **Satisfied on PR #765 at `59ecb69`, 24/08/2026**, in ONE invocation of
+      `npm run brain:review -- --pr 765` from a maintainer machine where #604's
+      negative control passes (an invalid token is rejected, so credentials are
+      not proxy-injected). Requires `sdd.map["cold-review"]` — added to
+      `brain.config.json` in this change, because migrations run only at file
+      creation and this repo's `schemaVersion 0.3.0` never received 0.10.0's key.
+
+      **Evidence, all from the same run:**
+      - Artifact: `openspec/reviews/pr-765/cold-review.md`, 12606 bytes, a
+        `brain-findings/1` block. Deleted before the run, so the presence check
+        could not pass on a stale file.
+      - Verdict: <https://github.com/csrinaldi/brain/pull/765#pullrequestreview-5007283896>
+        — `csrinaldibot`, `COMMENTED`, `head_sha: 59ecb69…`, `rev: 1`,
+        `verdict: REVISE`, `escalate: human`.
+      - Both halves declared: `controls: ["deterministic", "inferential"]`,
+        `controls_not_applied: []`, `challenger_axis: human`.
+      - 8 inline comments anchored to file+line, e.g.
+        <https://github.com/csrinaldi/brain/pull/765#discussion_r3843006851>
+        (`run-cold-review-stage.mjs:105`). Reconciles exactly: 11 findings, 8
+        carry `file:`, 8 posted, 0 dropped.
+      - REQ-S3-3 — `git status --porcelain -uall` after the run shows the
+        artifact as `?? openspec/reviews/pr-765/cold-review.md`, HEAD still at
+        the sha the verdict binds to, nothing staged. **The artifact is never
+        committed**: committing it would move the head the verdict is bound to,
+        and §10 would leave the verdict stale against its own commit.
+
+      **Two prior runs failed, and both failures are evidence too.** One posted
+      nothing while exiting 0 — the credential was a fine-grained PAT (403) and
+      `poster.mjs` never reads the write verb's `error`, filed as #766. One hit
+      `spawnSync claude ETIMEDOUT` at `STAGE_TIMEOUT_MS`, and the CLI refused:
+      *"the cold-review stage failed — the engine failed to run: spawnSync claude
+      ETIMEDOUT. Refusing to post a verdict that would declare the inferential
+      control applied."* — exit 1, PR untouched. That is C.3's refusal proven on
+      a real PR rather than against a spy.
 - [x] C.3 The negative case stays honest end to end (#682 criterion 6): an engine that
       fails posts nothing and says why. `cli.judgment.test.mjs`, C.3 section.
 

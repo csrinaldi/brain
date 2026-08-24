@@ -85,3 +85,25 @@ openspec/changes/*/scratch/
 
 # Cold-review agent worktree metadata — per-session, never shared.
 .claude/worktrees/
+
+# ARTEFACTO DE COLD-REVIEW (buffer de frontera, no verdad): el verdict posteado en
+# el PR es la superficie durable — §7 cuenta revisiones ahí y el lock anti-loop vive
+# ahí. El archivo existe sólo para que brain nunca parsee stdout del motor; su
+# persistencia es un accidente de ser archivo en vez de pipe, y una vez leído y
+# renderizado está gastado.
+#
+# No va a governance.ignoreList: esa lista clasifica SUPERFICIE DE REVIEW, y exime
+# artefactos generados cuya CADENA DE DERIVACIÓN está guardada (generador revisado +
+# fuentes revisadas + drift-guard byte a byte — ver diff-size-count.mjs). Este falla
+# las dos: su generador es un modelo, no revisado y no determinista, y el drift-guard
+# es imposible en principio sobre un productor no determinista. Eximirlo sería el
+# escape hatch general del budget que el ruling B1 (#253) estrechó a propósito.
+#
+# Además el lector RECHAZA un artefacto con forma `protocol: brain-review/` (#495 D1):
+# un archivo del repo que parece un verdict corrompe `rev` y el lock anti-loop.
+# Commitear findings escritos por un modelo deja esa clase de contenido en el árbol.
+#
+# Costo aceptado: no se puede auditar a posteriori si brain renderizó fielmente lo que
+# el motor escribió. Lo cubren el verdict posteado y los tests del lector.
+# Ver REQ-S3-3 y ADR-0033. Issue #682 slice 3.
+openspec/reviews/
