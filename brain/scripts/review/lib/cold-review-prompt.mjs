@@ -182,11 +182,14 @@ suite if you need to. Reproduce before you claim.
 
 Write exactly one file: \`${artifactPath}\`
 
-It contains one fenced block, tagged \`${ARTIFACT_TAG}\`, whose content is a JSON
-array of findings. The TAG is what selects the block — not a \`protocol:\` scalar
-inside it. A file carrying a \`protocol: brain-review/...\` line is read by brain
-as a POSTED VERDICT and corrupts the review's round counter, so the reader
-refuses any artifact containing one.
+It contains EXACTLY ONE fenced block, tagged \`${ARTIFACT_TAG}\`, whose content is
+a JSON array of findings. **Two blocks with that tag are refused outright** and
+your whole run is wasted — so do not echo the worked example below above your
+own findings, and do not leave a second copy anywhere in the file. The TAG is
+what selects the block — not a \`protocol:\` scalar inside it. A file carrying a
+\`protocol: brain-review/...\` line is read by brain as a POSTED VERDICT and
+corrupts the review's round counter, so the reader refuses any artifact
+containing one.
 
 Each finding may carry these fields, and only these — anything else is dropped
 silently at the boundary:

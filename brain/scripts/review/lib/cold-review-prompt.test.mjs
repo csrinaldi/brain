@@ -22,6 +22,7 @@ import {
   readFindingsArtifact,
   artifactPathFor,
   CARRIED_FIELDS,
+  ARTIFACT_TAG,
 } from './findings-artifact.mjs';
 import { ALLOWED_EVIDENCE_CLASSES } from './schema-v2.mjs';
 
@@ -340,4 +341,41 @@ test('the engine is told it holds no credential', () => {
 
 test('the debt names its ticket in code, not only in prose', () => {
   assert.equal(ROLE_DEBT_TICKET, 312, 'the role is on loan from #312 until its port lands');
+});
+
+// ── #682 C.5's verdict, judgment:cold-7 ──────────────────────────────────────
+
+test('#682 cold-7: the prompt warns about the two-block refusal, and the reader really refuses', () => {
+  const prompt = buildColdReviewPrompt({ prNumber: PR });
+
+  // THE ONE INSTRUCTION THIS FILE CANNOT INTERPOLATE. Everything else here is
+  // derived from a constant the reader uses; this constraint lives in the
+  // reader's CONTROL FLOW (`found.length > 1`), so there is nothing to
+  // interpolate from and it has to be written by hand — which is exactly the
+  // kind of sentence that goes stale unnoticed.
+  //
+  // So the oracle is not "the prompt contains a string". It MEASURES the
+  // reader's behaviour and requires the prompt to describe it: feed the real
+  // reader an artifact with two tagged blocks and confirm it refuses, then
+  // require the prompt to warn about that. If the reader ever starts tolerating
+  // two blocks, the first half fails and the warning gets deleted deliberately
+  // rather than becoming quietly false.
+  const twoBlocks = [
+    `\`\`\`${ARTIFACT_TAG}`, '[]', '```', '',
+    `\`\`\`${ARTIFACT_TAG}`, '[]', '```', '',
+  ].join('\n');
+  const read = readFindingsArtifact(twoBlocks);
+
+  assert.equal(read.ok, false, 'the reader must still refuse two tagged blocks — the warning below describes THIS');
+  assert.match(read.reason, /expected exactly 1/);
+
+  assert.match(
+    prompt, /EXACTLY ONE fenced block/,
+    'the prompt must say exactly one, not merely "one" — an engine that echoes the worked example ' +
+    'produces two and burns an unrecoverable model call on a refusal it was never warned about'
+  );
+  assert.match(
+    prompt, /do not echo the worked example/i,
+    'and it must name the specific way it happens, because the example is right there in the prompt'
+  );
 });

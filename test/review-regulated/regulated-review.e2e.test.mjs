@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 import { buildFixture } from './fixture.mjs';
 import { parseVerdict } from '../../brain/scripts/review/lib/parse-verdict.mjs';
+import { artifactPathFor, ARTIFACT_TAG } from '../../brain/scripts/review/lib/findings-artifact.mjs';
 import { postVerdict } from '../../brain/scripts/review/poster.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -741,13 +742,25 @@ test('e2e #690: a real brain-review/1 run declares BOTH halves of what ran', (t)
 
 // ── A.4 · the moved pin: a REASONED finding reaches the changed line ─────────
 
-/** Writes the cold-review stage's artifact into a fixture, where the CLI will read it. */
+/**
+ * Writes the cold-review stage's artifact into a fixture, where the CLI will read it.
+ *
+ * DERIVED FROM THE READER'S OWN EXPORTS, not re-spelled (judgment:cold-8). This
+ * helper used to hardcode `join(repoDir, 'openspec', 'reviews', `pr-N`)` and a
+ * hand-written ```brain-findings/1 fence, while `artifactPathFor()` and
+ * `ARTIFACT_TAG` are exported for exactly this and are what
+ * `cold-review-prompt.mjs` derives from. So the highest-level test of the wire
+ * was the one place the contract was written down a second time, free to drift
+ * from the reader it exists to exercise — and drift here fails in the safe-looking
+ * direction: the test keeps passing against its own private contract while
+ * production reads a different path.
+ */
 function withArtifact(fx, findings) {
-  const dir = join(fx.repoDir, 'openspec', 'reviews', `pr-${fx.prNumber}`);
-  mkdirSync(dir, { recursive: true });
+  const abs = join(fx.repoDir, artifactPathFor(fx.prNumber));
+  mkdirSync(dirname(abs), { recursive: true });
   writeFileSync(
-    join(dir, 'cold-review.md'),
-    `# Cold review of PR #${fx.prNumber}\n\n\`\`\`brain-findings/1\n${JSON.stringify(findings, null, 2)}\n\`\`\`\n`,
+    abs,
+    `# Cold review of PR #${fx.prNumber}\n\n\`\`\`${ARTIFACT_TAG}\n${JSON.stringify(findings, null, 2)}\n\`\`\`\n`,
     'utf8',
   );
 }
