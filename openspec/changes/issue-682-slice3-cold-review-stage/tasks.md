@@ -568,6 +568,45 @@ itself: a declared value with no reader. Tenth, eleventh and twelfth occurrence.
       "says so out loud" is a property the suite can tell apart from "says
       nothing".
 
+- [x] D.3 **`judgment:cold-2` — a blocker disappeared because a model reused a
+      label.** The round loop deduplicated by `f?.id`, so two DISTINCT findings
+      sharing an id collapsed to one — inside a SINGLE round, on the default
+      bound of 1, with the loop not even involved. Fixed at `8e1f70a`.
+
+      **Measured on both sides, before touching anything:** a generator emitting
+      `[{id:'J1',…'first claim'},{id:'J1',…'second claim'}]` returns **2**
+      findings at base `71a7abd` and returned **1** at head. The second
+      **blocker** left the verdict with no condition, no count, no log line.
+
+      Fail-OPEN, and over the one input nobody controls: **the ids are a model's
+      choice.** `uniqueId`'s own docstring names *"a generator emitting two
+      findings under `J1`"* as real producer behaviour and exists to
+      disambiguate it with `#2` — and that disambiguation was unreachable,
+      because the finding was dropped before `evaluateInferential` saw it. A
+      convergence check had quietly become a filter that trusts a
+      non-deterministic producer to label its claims uniquely.
+
+      **The fix keys on CONTENT.** Two findings are the same when they SAY the
+      same thing, not when they carry the same name. `findingKey` is total by
+      construction because its input is model output — `canonicalJson` in
+      `memory/lib/format.mjs` does the same job and THROWS on an unsupported
+      value, which here would turn a duplicate check into a crash.
+
+      Three mutations, full suite each, tree reverted after every one, each
+      dying on a different property:
+
+      | mutation | what dies |
+      |---|---|
+      | key by `id` again | the two cold-2 tests |
+      | delete the dedup outright | convergence — the new test AND the two already in `convergence.test.mjs` |
+      | stop sorting keys in `findingKey` | ONLY the new test |
+
+      **The middle row corrected me.** This entry first claimed the early-break
+      had no oracle at all; a grep had missed `convergence.test.mjs:113` and
+      `:129`, and the mutation found them where the search did not. The third
+      row is what earns the new test its place beside them: order-normalisation
+      is a property `findingKey` introduced, and nothing else exercises it.
+
 ## Still open from C.5's verdict
 
 **The count reconciles, and the first version of this section did not.** It
@@ -581,9 +620,9 @@ is arithmetic:
 | | |
 |---|---|
 | the posted verdict | **11** findings |
-| closed (D.1, D.2) | `cold-4`, `cold-9` — 2 |
-| open, below | `cold-1`, `cold-2`, `cold-3`, `cold-5`, `cold-6`, `cold-7`, `cold-8`, `tier2-frontier`, `budget` — 9 |
-| | 2 + 9 = **11** ✓ |
+| closed (D.1, D.2, D.3) | `cold-4`, `cold-9`, `cold-2` — 3 |
+| open, below | `cold-1`, `cold-3`, `cold-5`, `cold-6`, `cold-7`, `cold-8`, `tier2-frontier`, `budget` — 8 |
+| | 3 + 8 = **11** ✓ |
 
 Every one below is CONFIRMED unless it says otherwise, and none is started:
 
@@ -591,13 +630,6 @@ Every one below is CONFIRMED unless it says otherwise, and none is started:
   a bare `exists`, so a stale artifact from a previous round passes it. Nothing
   unlinks before the spawn. Re-review is the normal case (§7 counts revisions
   precisely because it happens).
-- `judgment:cold-2` (blocker) — **confirmed, measured on both sides.** A
-  generator emitting two distinct blockers under one `id`: base `71a7abd`
-  returns 2 (`["first claim","second claim"]`), head returns **1**. The second
-  blocker leaves the verdict with no condition, no count, no log line.
-  `uniqueId`'s `#2` disambiguation never fires because the dedup drops the
-  finding before `evaluateInferential` sees it. Fail-OPEN, and confirmed
-  independently by the second cold review.
 - `judgment:cold-3` (blocker) — **confirmed by reading.** `boot.worktreePath` is
   computed, handed to `gatherInferentialInputs`, and consumed by nothing; the
   engine reads the operator's tree while the verdict binds itself to the PR head.
