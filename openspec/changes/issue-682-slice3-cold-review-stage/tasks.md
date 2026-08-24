@@ -887,14 +887,79 @@ the same run that found it** — a refutation that measured the wrong path.
       AND puts the real `init` back to exit 13. The oracle tracks the failure
       rather than a proxy for it.
 
+- [x] E.2 **`judgment:cold-2` — the producer inherited brain's posting credential.**
+      `runStage`'s docstring says in capitals *"IT HOLDS NO VCS CREDENTIAL AND
+      POSTS NOTHING"*, and ADR-0033 rests on it: an arbitrary engine is safe to
+      run as a producer precisely because it cannot reach the pull request.
+      Nothing enforced it. `defaultRun` called `spawnSync` with no `env` key, so
+      the child inherited `process.env` whole. **Measured, before the fix:**
+
+      ```
+      BRAIN_REVIEWER_TOKEN=SECRET_ABC GH_TOKEN=SECRET_GH node -e '…defaultRun…'
+      → el hijo vio: {"t":"SECRET_ABC","g":"SECRET_GH"}
+      ```
+
+      The only lock between the producer and the forge was one sentence of prompt
+      text asking it not to post. **The ticket's recurring shape once more — a
+      declared oracle with no reader — committed by the claim itself.**
+
+      **WHAT THE PROPERTY ACTUALLY IS, stated before it could be enforced.** The
+      producer necessarily holds ONE credential: the engine's own, or it cannot
+      authenticate and cannot run. So *"holds no credential"* is precisely
+      *"cannot authenticate as brain's poster"*, and **that set is CLOSED** — it
+      is the env var names brain's own posting path reads. A denylist over a
+      closed set is an honest oracle. An allowlist — the other candidate, and
+      fail-closed on the credential axis — would have brain enumerate the auth,
+      proxy, CA-bundle, HOME and XDG variables an ARBITRARY third-party engine
+      needs, with nothing able to check the list: the same defect pointed the
+      other way, and a refusal brain could not explain for the first consumer
+      whose engine needs a variable brain did not guess.
+
+      **DERIVED WHERE THERE IS A SOURCE, LITERAL WHERE THERE IS NOT.**
+      `credential-env.mjs` owns the reviewer token's name and `identity.mjs`
+      re-exports it as `DEFAULT_TOKEN_ENV`; the VCS name comes from
+      `token.mjs`'s `tokenEnvVar()`. Rename either and the scrub follows, and a
+      test asserts the DERIVATION rather than comparing two hand-written lists.
+      The forge-CLI names (`GH_TOKEN` and friends) are an honest literal,
+      labelled as one — `gh`/`glab` read them, brain does not declare them, and
+      inventing a constant nothing validates would be the thing this file avoids.
+      Same treatment `SEVERITIES` gets in `cold-review-prompt.mjs`.
+
+      **FAIL-CLOSED BY DEFAULT, WIDENED BY THE CALLER.** `runStage` scrubs
+      `credentialEnvNames()` with no caller cooperation, so a stage added
+      tomorrow whose caller forgets is still covered; `credentialEnv` can only
+      WIDEN. The review layer passes the repo's configured `reviewer.tokenEnv`,
+      which the harness cannot learn for itself — `loadBrainConfig` resolves
+      `CONFIG_PATH` from the MODULE's location, so in a consumer it would read
+      `node_modules`' config, the same trap that put CI red on `dbe6094`.
+
+      **WHAT IT DOES NOT CLOSE, recorded in the module rather than assumed.**
+      #604's ambient channel: where a proxy injects credentials, an empty
+      environment authenticates exactly as well as a full one — scrubbing does
+      nothing about it and this must not read as if it did. And credentials on
+      disk (`.env` holds `VCS_TOKEN`), which judgment:cold-3's detached worktree
+      keeps out, not this. Two mechanisms, one property.
+
+      **The `defaultRun` oracle is the REAL runner**, like cold-4's and for the
+      same reason: a spy records the `env` it was handed however the runner
+      treats it, which is exactly how `cwd` stayed dropped through four layers.
+
+      Seven mutations, each killed by a DISTINCT oracle:
+
+      | mutation | killed by |
+      |---|---|
+      | `spawnSync` drops `env` again | the real-runner test alone — every spy passed |
+      | backend scrubs only what the caller named | the three `run-stage` tests |
+      | review layer stops passing `reviewer.tokenEnv` | the config-widening test |
+      | case-sensitive name match | the Windows-casing test |
+      | `identity.mjs` respells the name as a literal | the derivation test |
+      | the seam drops `credentialEnv` at its hop | the seam + exact-shape tests |
+      | `withoutCredentials` returns the env by reference | five tests across three layers |
+
 ## Still open from the second cold review
 
-Verified nothing below yet — listed so the count is visible rather than implied.
-7 findings: 1 closed (E.1), 4 to assess, 2 expected and correct.
+7 findings: 2 closed (E.1, E.2), 3 to assess, 2 expected and correct.
 
-- `judgment:cold-2` (blocker) — `defaultRun` spawns with no `env`, so the engine
-  inherits `process.env` whole, including `BRAIN_REVIEWER_TOKEN`. ADR-0033 says
-  the producer holds no credential and only a sentence in the prompt enforces it.
 - `judgment:cold-3` (correction) — the pre-spawn `remove()` sits below the
   routing check, so D.5's invariant holds only for ROUTED runs; and it runs
   before the worktree refusal, so a run that never spawns still destroys the
@@ -908,7 +973,8 @@ Verified nothing below yet — listed so the count is visible rather than implie
 
 Also raised in the accompanying cold read, not in the verdict: `findingKey`'s
 catch collapses unserialisable findings together, which DROPS the second one —
-`judgment:cold-2`'s defect returning inside its own fix, one layer down. The
+**D.3's** `judgment:cold-2` returning inside its own fix, one layer down (not
+E.2's — the two cold reviews reused the id). The
 conservative direction for an uncomputable key is to treat the finding as FRESH.
 
 ## Not in this change
