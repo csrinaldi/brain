@@ -281,3 +281,76 @@ test('#750 REQ-750-1: evaluateInferential never sets conclusion or declares conc
   assert.ok(!('conclusionCauses' in result),
     'a producer that never sets conclusion must never declare conclusionCauses — there is nothing for it to declare');
 });
+
+// ── #682 C.5's verdict, judgment:cold-2 ──────────────────────────────────────
+//
+// The round loop deduplicated by `f?.id`, so two DISTINCT findings sharing an
+// id collapsed to one — inside a single round, on the default bound, with the
+// loop not even involved. A blocker left the verdict in silence.
+//
+// Measured on both sides before the fix: base `71a7abd` returned 2, head
+// returned 1. Fail-OPEN, over a producer whose ids are a model's choice.
+
+test('#682 cold-2: two DISTINCT findings under one id both survive a single round', async () => {
+  const two = [
+    { id: 'J1', severity: 'blocker', evidence: 'first claim', cites: 'REQ-A' },
+    { id: 'J1', severity: 'blocker', evidence: 'second claim', cites: 'REQ-B' },
+  ];
+  const r = await gatherInferentialInputs({ deps: { generate: async () => two.map(o => ({ ...o })) } });
+
+  assert.equal(r.failed, false);
+  assert.deepEqual(
+    r.generated.map(f => f.evidence), ['first claim', 'second claim'],
+    'a blocker was dropped for sharing a label with another — the producer chooses these ids, ' +
+    'and two claims are not one claim because a model reused a name'
+  );
+});
+
+test('#682 cold-2: and the second one reaches the verdict, disambiguated', async () => {
+  // The gather-level assertion above is necessary and not sufficient: the
+  // user-visible property is that BOTH findings are rendered, under distinct
+  // ids. `uniqueId` exists for exactly this and was unreachable, because the
+  // finding was dropped before `evaluateInferential` ever saw it.
+  const r = await gatherInferentialInputs({
+    deps: {
+      generate: async () => ([
+        { id: 'J1', severity: 'blocker', evidence: 'first claim', cites: 'REQ-A' },
+        { id: 'J1', severity: 'blocker', evidence: 'second claim', cites: 'REQ-B' },
+      ]),
+    },
+  });
+
+  const ids = evaluateInferential({ generated: r.generated }).findings.map(f => f.id);
+  assert.deepEqual(
+    ids, [`${ID_PREFIX}J1`, `${ID_PREFIX}J1#2`],
+    'the second finding must render under its own id — refuting one must not silently answer the other'
+  );
+});
+
+test('#682 cold-2: a round that repeats ITSELF still converges — the dedup keeps its job', async () => {
+  // THE PROPERTY THE FIX MUST NOT COST, and it had no oracle before this. A
+  // dedup removed entirely would satisfy both tests above and break this one:
+  // round 2 would re-add round 1's findings and the loop would never stop
+  // early. Same content, emitted twice, must be one finding and must end the
+  // loop — while the bound stays available for a producer that keeps finding
+  // new things.
+  const rounds = [];
+  const r = await gatherInferentialInputs({
+    maxRounds: 5,
+    deps: {
+      generate: async ({ round }) => {
+        rounds.push(round);
+        // Same finding every round, with its keys written in a DIFFERENT ORDER
+        // the second time: a content key that is not order-normalised would see
+        // two findings here and never converge.
+        return round === 1
+          ? [{ id: 'J1', severity: 'blocker', evidence: 'the same claim' }]
+          : [{ evidence: 'the same claim', severity: 'blocker', id: 'J1' }];
+      },
+    },
+  });
+
+  assert.equal(r.generated.length, 1, 'a repeated finding is one finding, whatever order its keys arrive in');
+  assert.deepEqual(rounds, [1, 2], 'the loop must stop on the first round that produces nothing new, not run the bound out');
+  assert.equal(r.rounds, 2);
+});

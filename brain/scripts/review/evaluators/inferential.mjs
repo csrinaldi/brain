@@ -125,6 +125,35 @@ export function sanitiseFinding(finding = {}) {
 export const ID_PREFIX = 'judgment:';
 
 /**
+ * findingKey() — a finding's identity for convergence, by CONTENT.
+ *
+ * TOTAL BY CONSTRUCTION, because its input is a model's output. `canonicalJson`
+ * in `memory/lib/format.mjs` does the same job and THROWS on a value it does
+ * not support; used here that would turn a duplicate check into a crash on a
+ * finding carrying an unexpected type. Key ordering is normalised recursively
+ * so `{a,b}` and `{b,a}` are one finding rather than two, and the whole thing
+ * is guarded: no input can make deduplication the thing that fails the review.
+ *
+ * @param {unknown} f
+ * @returns {string}
+ */
+export function findingKey(f) {
+  const walk = (v) => {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? String(v);
+    if (Array.isArray(v)) return `[${v.map(walk).join(',')}]`;
+    return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${walk(v[k])}`).join(',')}}`;
+  };
+  try {
+    return walk(f);
+  } catch {
+    // Circular or otherwise unserialisable — unreachable from parsed JSON, and
+    // a stable fallback beats a throw. Such findings collapse together, which
+    // is the conservative direction for a value nothing downstream can read.
+    return String(f);
+  }
+}
+
+/**
  * uniqueId() — #682 round-1 review. Namespacing was cross-class only.
  *
  * `evaluateRefuter` keys outcomes by id ALONE and applies each to EVERY finding
@@ -263,11 +292,23 @@ export async function gatherInferentialInputs({
       };
     }
 
-    // Deduplicated by `id`, falling back to the whole finding when a generator
-    // omits one. A round that repeats itself has converged, and the repeat is
-    // not a second sighting of anything.
+    // Deduplicated by the finding's CONTENT, never by its label alone. A round
+    // that repeats itself has converged, and the repeat is not a second
+    // sighting of anything — but two findings are "the same" only when they SAY
+    // the same thing.
+    //
+    // THE FIRST CUT KEYED ON `f?.id`, AND IT WAS FAIL-OPEN. #682's own cold
+    // review measured it: a generator emitting two distinct blockers under one
+    // id — first claim, second claim — returned 2 findings at the base commit
+    // and 1 here. The second BLOCKER left the verdict with no condition, no
+    // count and no log line, on the DEFAULT bound of one round, so the loop was
+    // not even involved. `uniqueId`'s own docstring names "a generator emitting
+    // two findings under `J1`" as real producer behaviour and exists to
+    // disambiguate it with `#2`; keying on the id dropped the finding before
+    // `evaluateInferential` could. A convergence check silently became a filter
+    // that trusts a non-deterministic producer to label its claims uniquely.
     const fresh = produced.filter((f) => {
-      const key = f?.id ?? JSON.stringify(f);
+      const key = findingKey(f);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
