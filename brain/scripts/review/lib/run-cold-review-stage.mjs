@@ -93,6 +93,43 @@ export async function runColdReviewStage({
   // PR number that is not one, and the prompt is built from its answer.
   const artifactPath = artifactPathFor(prNumber);
 
+  // THE ENGINE READS THE COLD WORKTREE, AND REFUSING IS THE POINT (judgment:cold-3).
+  //
+  // ADR-0033 states the producer's load-bearing property as "the subagent reads
+  // a cold worktree and writes a file", and design.md D6 says the generator
+  // reads the diff from that worktree. It used to get `root` — the operator's
+  // checked-out tree, an arbitrary branch with arbitrary uncommitted changes —
+  // while the verdict bound itself to `headRef`. The divergence was SILENT
+  // because `git diff BASE...HEAD` still resolves there: the range was right and
+  // the file contents were whatever was on disk.
+  //
+  // Falling back to `root` when no worktree is supplied would re-create exactly
+  // that, so this refuses instead. Same move as `assertRoutableStage`: a
+  // property an ADR names is only as good as the thing that keeps it true.
+  //
+  // IT SITS ABOVE THE MUTATIONS, and that ordering is judgment:cold-3's fix.
+  // It used to sit below them, so a run refused HERE had already deleted the
+  // previous artifact — measured: the file was gone, the engine was never
+  // reached, and the refusal named a missing worktree while saying nothing
+  // about the file it had just destroyed. A true diagnosis with a silent
+  // side effect is worse than a false one, because nothing prompts the reader
+  // to go looking.
+  //
+  // THE RULE THIS ENCODES: every precondition refuses before any mutation.
+  // Not "mention the deletion in the reason" — a run that cannot spawn has no
+  // business clearing the output of the one that could.
+  if (typeof worktreePath !== 'string' || worktreePath.trim() === '') {
+    return {
+      routed: true,
+      ok: false,
+      reason:
+        'the cold-review stage was given no worktree to read. ADR-0033 makes reading a COLD ' +
+        'checkout the producer\'s load-bearing property, and running in the operator\'s tree ' +
+        'instead would review an arbitrary branch while the verdict binds itself to the head — ' +
+        'silently, because the diff range still resolves. Refusing rather than reviewing the wrong tree.',
+    };
+  }
+
   // The engine is told to write a file; nothing guarantees its tooling creates
   // parents. Recursive, so an existing directory from a previous round is not an
   // error — re-running a review is normal, and #495's rev counter is what makes
@@ -117,6 +154,30 @@ export async function runColdReviewStage({
   // inspect — accepted, because the artifact is already ruled ephemeral (it is
   // `.gitignore`d, and the verdict posted on the PR is the durable record).
   //
+  // THE INVARIANT IS SCOPED TO ROUTED RUNS, AND THAT IS DELIBERATE — the first
+  // cut of this note said "a file at that path was written by THIS run" flat,
+  // which claims more than the code delivers (judgment:cold-3). The clearing
+  // sits BELOW the routing check, so on an unrouted run nothing is cleared.
+  //
+  // Clearing there would be a defect, not a fix. On the unrouted path the file
+  // is not a previous round's OUTPUT — it is the operator's own INPUT. That is
+  // slice A's shipped shape: the artifact was the transport before any engine
+  // existed to write it, and the highest-level test of the whole wire
+  // (`regulated-review.e2e` A.4) writes the file by hand with no `sdd.map`
+  // entry at all and expects the verdict to read it. A `remove()` above the
+  // routing check would delete the operator's input and report that the
+  // judgment half found nothing.
+  //
+  // WHAT IS GENUINELY AMBIGUOUS, said rather than papered over: a repo that
+  // ROUTED the stage, got an artifact, and then UN-ROUTED it leaves a previous
+  // round's engine output on disk, where the next run reads it as operator
+  // input. Nothing on disk separates the two — same path, same shape, and D.5
+  // already established there is no clock to trust. Closing it needs
+  // provenance recorded INSIDE the artifact by whoever wrote it, which is a
+  // ruling about the format rather than an ordering fix, and is not this
+  // slice's. Named here so the next reader finds a known gap instead of
+  // re-deriving it from a comment that overstated its own coverage.
+  //
   // A REMOVAL THAT FAILS IS A REFUSAL. Continuing would run the engine with the
   // stale file still there and land back in the state this exists to prevent —
   // and the operator would be told the engine wrote nothing, which would be a
@@ -132,31 +193,6 @@ export async function runColdReviewStage({
         'Refusing rather than running: with a stale file in place, an engine that wrote nothing would ' +
         'look exactly like one that did its job, and the verdict would declare a control it applied ' +
         'to findings from an older head.',
-    };
-  }
-
-  // THE ENGINE READS THE COLD WORKTREE, AND REFUSING IS THE POINT (judgment:cold-3).
-  //
-  // ADR-0033 states the producer's load-bearing property as "the subagent reads
-  // a cold worktree and writes a file", and design.md D6 says the generator
-  // reads the diff from that worktree. It used to get `root` — the operator's
-  // checked-out tree, an arbitrary branch with arbitrary uncommitted changes —
-  // while the verdict bound itself to `headRef`. The divergence was SILENT
-  // because `git diff BASE...HEAD` still resolves there: the range was right and
-  // the file contents were whatever was on disk.
-  //
-  // Falling back to `root` when no worktree is supplied would re-create exactly
-  // that, so this refuses instead. Same move as `assertRoutableStage`: a
-  // property an ADR names is only as good as the thing that keeps it true.
-  if (typeof worktreePath !== 'string' || worktreePath.trim() === '') {
-    return {
-      routed: true,
-      ok: false,
-      reason:
-        'the cold-review stage was given no worktree to read. ADR-0033 makes reading a COLD ' +
-        'checkout the producer\'s load-bearing property, and running in the operator\'s tree ' +
-        'instead would review an arbitrary branch while the verdict binds itself to the head — ' +
-        'silently, because the diff range still resolves. Refusing rather than reviewing the wrong tree.',
     };
   }
 

@@ -507,3 +507,60 @@ test('#682 cold-2: a repo with NO reviewer block still gets the default set', as
     assert.ok(typeof n === 'string' && n.trim() !== '', `junk name in the scrub set: ${JSON.stringify(n)}`);
   }
 });
+
+// ── Preconditions before mutations — judgment:cold-3 ─────────────────────────
+//
+// The worktree refusal used to sit BELOW the clearing, so a run that could
+// never spawn had already deleted the previous artifact. Measured before the
+// fix: the file was gone, the engine was never reached, and the reason named a
+// missing worktree while saying nothing about the file it had just destroyed.
+
+test('#682 cold-3: a run refused for want of a worktree destroys NOTHING', async (t) => {
+  const dir = makeRepo(t);
+  const abs = join(dir, artifactPathFor(PR));
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+
+  const result = await runColdReviewStage({
+    config: ROUTED,
+    prNumber: PR,
+    root: dir,
+    worktreePath: null,
+    deps: {
+      runStage: async () => { throw new Error('the engine must not be reached on a refused run'); },
+    },
+  });
+
+  assert.equal(result.routed, true);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /no worktree/);
+  assert.ok(
+    existsSync(abs),
+    'the refusal deleted the previous artifact on its way out — a run that cannot spawn has no ' +
+    'business clearing the output of the one that could, and the reason says nothing about it'
+  );
+});
+
+test('#682 cold-3: an UNROUTED run leaves the artifact alone — it is the operator\'s input', async (t) => {
+  // Not an oversight that the clearing sits below the routing check: on this
+  // path the file is slice A's transport, written by hand before any engine
+  // existed to write it, and `regulated-review.e2e` A.4 depends on exactly
+  // this. A future "fix" that hoisted `remove()` above the routing check would
+  // delete the operator's input and report that the half found nothing — so
+  // the deliberate scoping is pinned rather than left to a comment.
+  const dir = makeRepo(t);
+  const abs = join(dir, artifactPathFor(PR));
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+
+  const result = await runColdReviewStage({
+    config: { sdd: { map: {} } },
+    prNumber: PR,
+    root: dir,
+    worktreePath: dir,
+    deps: { runStage: async () => { throw new Error('nothing may be spawned when nothing is routed'); } },
+  });
+
+  assert.deepEqual(result, { routed: false });
+  assert.ok(existsSync(abs), 'an unrouted run deleted a file it was never asked to produce');
+});

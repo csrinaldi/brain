@@ -7,8 +7,17 @@
   **THEN** the engine and model are resolved from that entry, `model` is passed through
   opaquely, and the resolved pair is what the run uses.
 - **WHEN** the entry is absent
-  **THEN** the judgment half does not run, and the verdict says so in `conditions[]` —
-  the state that ships today, unchanged.
+  **THEN** the STAGE does not run — nothing is spawned — and if no artifact is present the
+  verdict says so in `conditions[]`, the state that ships today, unchanged.
+
+  *Amended while closing judgment:cold-3.* This bullet read "the judgment half does not
+  run", which forbids what slice A shipped and what the highest-level test of the wire
+  exercises: `regulated-review.e2e` A.4 writes the artifact BY HAND, routes no stage, and
+  requires the verdict to read it and post inline comments. The artifact was the transport
+  before any engine existed to write it, and routing only changes WHO writes the file. Read
+  the old wording literally and the correct implementation deletes a shipped capability —
+  which is what a reader reconciling the two documents would have had to guess at. What is
+  absent when the entry is absent is the SPAWN, not the half.
 - **WHEN** the entry names an engine with no backend
   **THEN** the run REFUSES rather than falling back. An engine the operator named and did
   not get is not the same state as one they never named.
