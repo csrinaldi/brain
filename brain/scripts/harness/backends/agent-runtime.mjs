@@ -25,7 +25,12 @@
 import { spawnSync } from 'node:child_process';
 
 import { compareSemver } from '../../lib/installer.mjs';
-import { resolvePlatform } from '../cli.mjs';
+// FROM THE LEAF, NOT FROM THE DISPATCHER. This line used to read
+// `from '../cli.mjs'` and closed the cycle that deadlocked the shipped
+// bootstrap path: cli.mjs's top-level await dynamically imports a backend,
+// whose static graph came back here and re-entered a module still evaluating.
+// A backend may not import the dispatcher — see platform.mjs.
+import { resolvePlatform } from '../platform.mjs';
 
 /**
  * The states `probeAgentRuntime`/`agentRuntimeReport` can return, each a

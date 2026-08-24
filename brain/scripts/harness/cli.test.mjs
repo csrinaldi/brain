@@ -141,3 +141,63 @@ test('VALID_OPS includes init', () => {
   assert.ok(Array.isArray(VALID_OPS));
   assert.ok(VALID_OPS.includes('init'));
 });
+
+// ── #682 C.5 round 2, judgment:cold-1 — the module GRAPH, not the dispatch ────
+//
+// A backend importing this dispatcher closes a cycle through its own top-level
+// await, and the graph never settles: `AGENT_PLATFORM=claude node cli.mjs init`
+// exited 13 with `Detected unsettled top-level await` and wrote nothing, on the
+// path `bootstrap.sh` runs.
+//
+// NO TEST IN THIS FILE COULD HAVE SEEN IT, and the reason is structural rather
+// than an oversight: every `dispatch` test above injects `backendLoader`, so the
+// REAL dynamic import never happens, and the cycle only exists in the real one.
+// Faking the loader is right for testing dispatch — it just means dispatch tests
+// say nothing about the module graph, which is a second property needing a
+// second oracle.
+//
+// This one reads the graph directly, which is cheap, deterministic, and needs no
+// child process: no module a backend can reach may import the dispatcher. That
+// is the invariant; the deadlock was one instance of breaking it.
+
+test('#682 cold-1: no backend reaches the dispatcher — the cycle that deadlocked bootstrap', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const { join, dirname } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const backendsDir = join(here, 'backends');
+
+  // Walk the STATIC import graph of every backend, following relative edges.
+  const seen = new Set();
+  const offenders = [];
+
+  const visit = (file, chain) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    let src;
+    try { src = readFileSync(file, 'utf8'); } catch { return; }
+    for (const m of src.matchAll(/^\s*import\s[^'"]*from\s+['"](\.[^'"]+)['"]/gm)) {
+      const target = join(dirname(file), m[1]);
+      if (/harness[/\\]cli\.mjs$/.test(target)) {
+        offenders.push(`${[...chain, file, target].map((f) => f.replace(here, '')).join(' → ')}`);
+        continue;
+      }
+      visit(target, [...chain, file]);
+    }
+  };
+
+  const backends = readdirSync(backendsDir)
+    .filter((f) => f.endsWith('.mjs') && !f.includes('.test.'));
+  assert.ok(backends.length >= 3, 'the backends directory must still hold backends — otherwise this test is vacuous');
+
+  for (const b of backends) visit(join(backendsDir, b), []);
+
+  assert.deepEqual(
+    offenders, [],
+    'a backend reaches harness/cli.mjs through its static imports. cli.mjs dispatches to backends from ' +
+    'inside a top-level await, so that edge is a cycle re-entered through a suspended module and the ' +
+    'graph never settles — `node cli.mjs init` exits 13 and writes nothing. Anything a backend needs ' +
+    'from the dispatcher is not dispatch logic: put it in a leaf, like platform.mjs.'
+  );
+});

@@ -34,24 +34,15 @@ function readEnvFile(root = repoRoot) {
   return vars;
 }
 
-/**
- * Resolves the active agent platform.
- * Pure — takes env + envVars + config explicitly for testing.
- *
- * @param {{ env?: object, envVars?: object, config?: object }} [opts]
- * @returns {string}
- */
-export function resolvePlatform({ env = process.env, envVars = {}, config = {} } = {}) {
-  const platformVal = env.AGENT_PLATFORM ?? envVars.AGENT_PLATFORM ?? config.platform;
-  if (platformVal) return platformVal;
-
-  const harnessVal = env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness;
-  if (harnessVal && ['antigravity', 'claude', 'plain'].includes(harnessVal)) {
-    return harnessVal;
-  }
-
-  return 'antigravity';
-}
+// `resolvePlatform` LIVES IN A LEAF, and is re-exported here so this module's
+// own importers are unaffected. It moved because a backend needs it and a
+// backend importing THIS file closes a cycle through the top-level await below
+// — see `platform.mjs` for the measurement. Re-exported rather than relocated
+// silently: `resolvePlatform` has been part of this module's surface since
+// ADR-0024, and moving it out from under its callers would be a second defect
+// to fix the first.
+import { resolvePlatform } from './platform.mjs';
+export { resolvePlatform };
 
 /**
  * Resolves the active SDD engine.
