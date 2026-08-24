@@ -96,12 +96,21 @@ export const RUN_TIMEOUT_MS = 10_000;
  *
  * An absent `cwd` still means "inherit", which is what every probe caller wants.
  *
+ * `env` HAS THE SAME CONTRACT AND EXISTS FOR THE OPPOSITE REASON. Absent, the
+ * child inherits `process.env` — right for the probes, which need PATH, the
+ * proxy vars and the npm registry config to read a version at all. Given, the
+ * child gets EXACTLY that object and nothing else, which is what lets
+ * `runStage` hand a producer an environment with brain's posting credentials
+ * removed (judgment:cold-2). This function does not decide WHICH names those
+ * are — see `lib/credential-env.mjs`; it only stops the pass-through from
+ * being unrepresentable.
+ *
  * @param {string} cmd
  * @param {string[]} args
- * @param {{ timeoutMs?: number, cwd?: string }} [opts]
+ * @param {{ timeoutMs?: number, cwd?: string, env?: object }} [opts]
  */
-export function defaultRun(cmd, args, { timeoutMs = RUN_TIMEOUT_MS, cwd } = {}) {
-  return spawnSync(cmd, args, { stdio: 'pipe', encoding: 'utf8', timeout: timeoutMs, cwd });
+export function defaultRun(cmd, args, { timeoutMs = RUN_TIMEOUT_MS, cwd, env } = {}) {
+  return spawnSync(cmd, args, { stdio: 'pipe', encoding: 'utf8', timeout: timeoutMs, cwd, env });
 }
 
 /**

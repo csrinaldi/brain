@@ -435,3 +435,60 @@ test('platformConfig: a harness section of the WRONG shape degrades to {}, never
   assert.deepEqual(platformConfig(null), {});
   assert.equal(resolvePlatform({ env: {}, envVars: {}, config: platformConfig({ harness: 'claude' }) }), 'claude');
 });
+
+// ── env: #682's SECOND cold review, judgment:cold-2 ──────────────────────────
+//
+// Same shape as cold-4 above and the same reason for the same oracle. The
+// finding was that `defaultRun` called `spawnSync` with no `env` key at all, so
+// the producer inherited `process.env` WHOLE — `BRAIN_REVIEWER_TOKEN` included,
+// measured — while `runStage`'s docstring said in capitals that it holds no
+// credential. A spy would have recorded whatever `env` it was handed however
+// the real runner treated it, so the oracle spawns a child and asks IT.
+
+test('#682 cold-2: defaultRun gives the child the env it was given, and nothing else', async () => {
+  const { defaultRun } = await import('./agent-runtime.mjs');
+
+  const READ = ['-e', 'process.stdout.write(JSON.stringify({t: process.env.BRAIN_REVIEWER_TOKEN ?? null, k: process.env.BRAIN_TEST_KEEP ?? null}))'];
+
+  // SET IT FIRST. A parent that never held the credential proves nothing about
+  // whether the child would have inherited it — the assertion has to be that a
+  // var PRESENT in `process.env` and absent from the passed `env` does not
+  // arrive, which is the exact condition the finding measured.
+  process.env.BRAIN_REVIEWER_TOKEN = 'SECRET_ABC';
+  let r;
+  try {
+    const { BRAIN_REVIEWER_TOKEN: _drop, ...rest } = process.env;
+    r = defaultRun(process.execPath, READ, { env: { ...rest, BRAIN_TEST_KEEP: 'kept' } });
+  } finally {
+    delete process.env.BRAIN_REVIEWER_TOKEN;
+  }
+  const seen = JSON.parse(r.stdout);
+  assert.equal(
+    seen.t, null,
+    'the child read a credential the caller removed — an env dropped at the last layer ' +
+    'hands the producer the token ADR-0033 says it does not hold'
+  );
+  assert.equal(seen.k, 'kept', 'the rest of the environment must survive — the engine needs PATH to run at all');
+});
+
+test('#682 cold-2: an absent env still means INHERIT — every probe caller depends on it', async () => {
+  const { defaultRun } = await import('./agent-runtime.mjs');
+
+  const marker = 'brain-inherit-probe';
+  process.env.BRAIN_TEST_INHERIT = marker;
+  try {
+    const r = defaultRun(
+      process.execPath,
+      ['-e', 'process.stdout.write(String(process.env.BRAIN_TEST_INHERIT ?? ""))'],
+      {},
+    );
+    assert.equal(
+      r.stdout.trim(), marker,
+      'no env must keep meaning "inherit": probeAgentRuntime reads versions through PATH, ' +
+      'the proxy vars and the npm registry config, and an empty environment reports every ' +
+      'runtime absent'
+    );
+  } finally {
+    delete process.env.BRAIN_TEST_INHERIT;
+  }
+});

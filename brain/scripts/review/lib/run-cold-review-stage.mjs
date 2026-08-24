@@ -44,6 +44,7 @@ import { join, dirname } from 'node:path';
 import { mkdirSync, existsSync, rmSync } from 'node:fs';
 
 import { COLD_REVIEW_STAGE, resolveStageEngine } from '../../lib/stage-engine.mjs';
+import { credentialEnvNames } from '../../lib/credential-env.mjs';
 import { buildColdReviewPrompt } from './cold-review-prompt.mjs';
 import { artifactPathFor } from './findings-artifact.mjs';
 
@@ -169,6 +170,14 @@ export async function runColdReviewStage({
     model: routing.model,
     engine: routing.engine,
     cwd: worktreePath,
+    // THE PRODUCER MUST NOT INHERIT BRAIN'S POSTING CREDENTIAL (judgment:cold-2).
+    // The backend scrubs the default set on its own — this only WIDENS it with
+    // the name this repo actually configured, which is the one thing this layer
+    // knows and the harness cannot learn: `loadBrainConfig` resolves from the
+    // module's location, so in a consumer it would read node_modules' config.
+    // A repo that renamed `reviewer.tokenEnv` would otherwise hand the engine
+    // the very credential ADR-0033 says it does not hold.
+    credentialEnv: credentialEnvNames({ extra: [config?.reviewer?.tokenEnv] }),
   });
 
   if (!result?.ok) {

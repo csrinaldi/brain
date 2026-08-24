@@ -37,12 +37,19 @@ export const RUN_STAGE_OP = 'run-stage';
 /**
  * makeRunStageSeam() — the `deps.runStage` that `runColdReviewStage` requires.
  *
+ * `credentialEnv` rides through UNINTERPRETED. It names env vars the backend
+ * must strip from the producer's environment (judgment:cold-2); this seam does
+ * not decide the set and does not default it — the backend's own default is
+ * already fail-closed, so a seam that invented one here would be a second
+ * declaration of the same policy with nothing comparing the two.
+ *
  * @param {{dispatch?: Function}} [deps]
  * @returns {(args: {stage: string, prompt: string, model?: string|null,
- *                   engine: string, cwd?: string}) => Promise<{ok: boolean, reason?: string}>}
+ *                   engine: string, cwd?: string, credentialEnv?: string[]})
+ *            => Promise<{ok: boolean, reason?: string}>}
  */
 export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
-  return async function runStage({ engine, stage, prompt, model = null, cwd } = {}) {
+  return async function runStage({ engine, stage, prompt, model = null, cwd, credentialEnv } = {}) {
     if (typeof engine !== 'string' || engine.trim() === '') {
       return {
         ok: false,
@@ -56,7 +63,7 @@ export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
       // list to walk: the only name that can reach `dispatch` is the one the
       // operator wrote. That is what makes "does not fall back" a property of
       // the code's shape rather than a promise in a comment.
-      result = await dispatch(engine, RUN_STAGE_OP, [{ stage, prompt, model, cwd }]);
+      result = await dispatch(engine, RUN_STAGE_OP, [{ stage, prompt, model, cwd, credentialEnv }]);
     } catch (err) {
       // EVERY throw is a refusal, not just the two `dispatch` spells out
       // (backend not found; backend does not implement the op). Matching on

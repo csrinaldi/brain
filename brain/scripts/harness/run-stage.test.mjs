@@ -135,3 +135,83 @@ test('#682 cold-4 (SITE): runStage DELIVERS cwd to the runner, not only timeoutM
     '"the engine exited cleanly but wrote no artifact": a true refusal with a false diagnosis'
   );
 });
+
+// ── The producer's environment — #682's second cold review, judgment:cold-2 ──
+//
+// `runStage`'s docstring said, in capitals, "IT HOLDS NO VCS CREDENTIAL AND
+// POSTS NOTHING", and ADR-0033 rests on it: an arbitrary engine is safe to run
+// as a producer precisely because it cannot reach the pull request. Nothing
+// enforced it — the spawn passed no `env`, so the child inherited
+// `process.env` whole and the only lock was a sentence of prompt text.
+//
+// These assert the enforcement at the layer that spawns, and they assert the
+// DEFAULT: a caller that passes no `credentialEnv` at all must still get a
+// producer that cannot authenticate as brain's poster, because otherwise the
+// property holds only for callers who remembered.
+
+test('#682 cold-2: the producer does NOT inherit brain\'s posting credentials', async () => {
+  let opts = null;
+  const parent = {
+    PATH: '/usr/bin',
+    HOME: '/home/op',
+    BRAIN_REVIEWER_TOKEN: 'secret-reviewer',
+    VCS_TOKEN: 'secret-vcs',
+    GH_TOKEN: 'secret-gh',
+    ANTHROPIC_API_KEY: 'the-engine-own-credential',
+  };
+
+  const r = await runStage({
+    stage: COLD_REVIEW_STAGE,
+    prompt: 'review',
+    _env: parent,
+    _run: (_cmd, _args, o) => { opts = o; return okRun(); },
+  });
+  assert.deepEqual(r, { ok: true });
+
+  assert.equal(opts.env.BRAIN_REVIEWER_TOKEN, undefined, 'the reviewer credential reached the producer');
+  assert.equal(opts.env.VCS_TOKEN, undefined, 'the VCS credential reached the producer');
+  assert.equal(opts.env.GH_TOKEN, undefined, '`gh` gives GH_TOKEN precedence over its own keyring — the producer could post');
+
+  // The engine's OWN credential rides, and must: it authenticates before it
+  // reads a diff. "Holds no credential" is precisely "cannot authenticate as
+  // brain's poster", and an allowlist that guessed this name wrong would ship a
+  // refusal brain could not explain.
+  assert.equal(opts.env.ANTHROPIC_API_KEY, 'the-engine-own-credential');
+  assert.equal(opts.env.PATH, '/usr/bin');
+  assert.equal(opts.env.HOME, '/home/op');
+});
+
+test('#682 cold-2: the scrub is the DEFAULT — a caller that passes nothing still gets it', async () => {
+  let opts = null;
+  await runStage({
+    stage: COLD_REVIEW_STAGE,
+    prompt: 'review',
+    _env: { PATH: '/usr/bin', BRAIN_REVIEWER_TOKEN: 'secret' },
+    _run: (_cmd, _args, o) => { opts = o; return okRun(); },
+  });
+  assert.equal(
+    opts.env.BRAIN_REVIEWER_TOKEN, undefined,
+    'a stage added tomorrow whose caller forgets `credentialEnv` must not hand the engine the token'
+  );
+});
+
+test('#682 cold-2: `credentialEnv` WIDENS the set — a repo that renamed reviewer.tokenEnv is covered', async () => {
+  let opts = null;
+  await runStage({
+    stage: COLD_REVIEW_STAGE,
+    prompt: 'review',
+    credentialEnv: ['REPO_SPECIFIC_REVIEWER_TOKEN'],
+    _env: {
+      PATH: '/usr/bin',
+      REPO_SPECIFIC_REVIEWER_TOKEN: 'secret',
+      BRAIN_REVIEWER_TOKEN: 'also-secret',
+    },
+    _run: (_cmd, _args, o) => { opts = o; return okRun(); },
+  });
+  assert.equal(opts.env.REPO_SPECIFIC_REVIEWER_TOKEN, undefined, 'the configured name was not stripped');
+  assert.equal(
+    opts.env.BRAIN_REVIEWER_TOKEN, undefined,
+    'the caller must be able to WIDEN only — passing a list must never narrow the default set'
+  );
+  assert.equal(opts.env.PATH, '/usr/bin');
+});

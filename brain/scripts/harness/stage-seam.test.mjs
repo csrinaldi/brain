@@ -171,7 +171,13 @@ test('the arguments reach the backend as ONE options object, not spread position
   // elements they would arrive as `runStage(stage, prompt, ...)` and every field
   // would read as undefined inside a destructured signature — silently, with the
   // engine spawned on an empty prompt.
-  assert.deepEqual(seen, { stage: COLD_REVIEW_STAGE, prompt: 'review the diff', model: 'zz-9', cwd: '/tmp' });
+  // `credentialEnv` is listed because this assertion is EXACT on purpose: it is
+  // what catches a field added to the seam and never threaded to the backend.
+  // `CALL` does not set one, so it arrives undefined — the backend defaults it.
+  assert.deepEqual(seen, {
+    stage: COLD_REVIEW_STAGE, prompt: 'review the diff', model: 'zz-9', cwd: '/tmp',
+    credentialEnv: undefined,
+  });
 });
 
 test('an unnamed engine is refused before anything is dispatched', async () => {
@@ -224,4 +230,30 @@ test('the refusal composes with the stage runner — routed, and reported as a f
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('#682 cold-2: `credentialEnv` reaches the backend UNINTERPRETED', async () => {
+  // The seam is the third of four layers this value crosses, and a value
+  // dropped at a hop is exactly how `cwd` was lost (judgment:cold-4). The seam
+  // deliberately does not default it: the backend's default is already
+  // fail-closed, and a second default here would be the same policy declared
+  // twice with nothing comparing them.
+  let seen = null;
+  const seam = makeRunStageSeam({
+    dispatch: async (_engine, _op, args) => { seen = args[0]; return { ok: true }; },
+  });
+
+  await seam({
+    engine: 'claude',
+    stage: COLD_REVIEW_STAGE,
+    prompt: 'p',
+    credentialEnv: ['REPO_SPECIFIC_REVIEWER_TOKEN'],
+  });
+  assert.deepEqual(
+    seen.credentialEnv, ['REPO_SPECIFIC_REVIEWER_TOKEN'],
+    'the names the review layer resolved from config never reached the spawn'
+  );
+
+  await seam({ engine: 'claude', stage: COLD_REVIEW_STAGE, prompt: 'p' });
+  assert.equal(seen.credentialEnv, undefined, 'the seam must not invent a set the backend already owns');
 });

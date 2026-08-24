@@ -5,6 +5,7 @@
 // Emits .claude/settings.json deterministically with workspace hooks.
 
 import { assertRoutableStage } from '../../lib/stage-engine.mjs';
+import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env.mjs';
 import { defaultRun } from './agent-runtime.mjs';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -85,18 +86,40 @@ export const STAGE_TIMEOUT_MS = 10 * 60_000;
  * each of them re-proved on a second surface, and would need the credential
  * #604 proved cannot be trusted where the environment injects it.
  *
+ * THAT SENTENCE WAS A CLAIM WITH NO READER UNTIL judgment:cold-2. `defaultRun`
+ * spawned with no `env`, so the child inherited `process.env` whole —
+ * `BRAIN_REVIEWER_TOKEN` and `GH_TOKEN` included, measured — and the only thing
+ * between the producer and the pull request was a line of prompt text asking it
+ * not to post. The scrub below is what makes the capitals true.
+ *
+ * IT SCRUBS BY DEFAULT, AND THE CALLER MAY ONLY WIDEN. `credentialEnv` defaults
+ * to `credentialEnvNames()`, so a future stage whose caller forgets to pass
+ * anything still gets a producer that cannot authenticate as brain's poster.
+ * The review layer passes the repo's CONFIGURED `reviewer.tokenEnv` on top,
+ * because this layer cannot read `brain.config.json` — `loadBrainConfig`
+ * resolves from the module's own location, which in a consumer is inside
+ * `node_modules`. A default that is already fail-closed is what makes that
+ * threading a widening rather than the whole mechanism.
+ *
+ * WHAT IT DOES NOT CLOSE is written down in `credential-env.mjs` and matters
+ * here too: an environment that injects credentials ambiently (#604) is
+ * untouched by scrubbing one, and a credential on disk is kept out by the
+ * detached worktree, not by this.
+ *
  * A NON-ZERO EXIT IS A FAILURE, never an empty result. `cli.mjs` refuses to post
  * on a failure rather than render a verdict declaring a control it never applied
  * — "the engine broke" and "the engine found nothing" are the two states #552
  * exists to keep apart, and this is the layer where they are easiest to fold.
  *
  * @param {{stage: string, prompt: string, model?: string|null, cwd?: string,
- *          timeoutMs?: number, _run?: Function}} args
+ *          timeoutMs?: number, credentialEnv?: string[], _env?: object,
+ *          _run?: Function}} args
  * @returns {Promise<{ok: true} | {ok: false, reason: string}>}
  */
 export async function runStage({
   stage, prompt, model = null, cwd = process.cwd(),
-  timeoutMs = STAGE_TIMEOUT_MS, _run = defaultRun,
+  timeoutMs = STAGE_TIMEOUT_MS, credentialEnv = null, _env = process.env,
+  _run = defaultRun,
 } = {}) {
   assertRoutableStage(stage);
 
@@ -109,9 +132,17 @@ export async function runStage({
   // engine's own, which is the engine's business.
   const args = ['-p', prompt, ...(model ? ['--model', model] : [])];
 
+  // Computed here, not at the call: an `env` built by the caller could be
+  // handed in unscrubbed, and then the property would hold only for callers
+  // that remembered. `credentialEnv` names what to REMOVE, never what to keep.
+  const env = withoutCredentials(
+    _env,
+    Array.isArray(credentialEnv) ? credentialEnvNames({ extra: credentialEnv }) : credentialEnvNames(),
+  );
+
   let r;
   try {
-    r = _run('claude', args, { cwd, timeoutMs });
+    r = _run('claude', args, { cwd, timeoutMs, env });
   } catch (err) {
     return { ok: false, reason: `the engine could not be spawned: ${err.message}` };
   }

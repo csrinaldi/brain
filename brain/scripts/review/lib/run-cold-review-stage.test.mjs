@@ -445,3 +445,65 @@ test('#682 cold-1: a clearing that FAILS refuses, with its own reason', async (t
   assert.notEqual(failed.reason, wroteNothing.reason);
   assert.doesNotMatch(wroteNothing.reason, /could not clear/);
 });
+
+// ── The configured credential name — judgment:cold-2 ─────────────────────────
+//
+// The backend scrubs a fail-closed default on its own, and this layer's only
+// job is to WIDEN it with the name the repo actually configured. It has to
+// happen here: `loadBrainConfig` resolves `CONFIG_PATH` from the MODULE's
+// location, so in a consumer the harness would read node_modules' config
+// instead of the repo's — and a repo that renamed `reviewer.tokenEnv` would
+// hand the engine the very credential ADR-0033 says the producer never holds.
+
+test('#682 cold-2: the repo\'s configured reviewer.tokenEnv reaches the spawn', async (t) => {
+  const dir = makeRepo(t);
+  let seen = null;
+
+  await runColdReviewStage({
+    config: { ...ROUTED, reviewer: { handle: 'bot', tokenEnv: 'REPO_SPECIFIC_REVIEWER_TOKEN' } },
+    prNumber: PR,
+    root: dir,
+    worktreePath: dir,
+    deps: {
+      runStage: async (args) => {
+        seen = args;
+        writeFileSync(join(dir, artifactPathFor(PR)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.ok(
+    Array.isArray(seen.credentialEnv) && seen.credentialEnv.includes('REPO_SPECIFIC_REVIEWER_TOKEN'),
+    'the configured credential name never reached the spawn — the producer inherits it'
+  );
+  // Widening, never narrowing: the defaults have to survive alongside it.
+  assert.ok(seen.credentialEnv.includes('BRAIN_REVIEWER_TOKEN'));
+  assert.ok(seen.credentialEnv.includes('GH_TOKEN'));
+});
+
+test('#682 cold-2: a repo with NO reviewer block still gets the default set', async (t) => {
+  const dir = makeRepo(t);
+  let seen = null;
+
+  await runColdReviewStage({
+    config: ROUTED,
+    prNumber: PR,
+    root: dir,
+    worktreePath: dir,
+    deps: {
+      runStage: async (args) => {
+        seen = args;
+        writeFileSync(join(dir, artifactPathFor(PR)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        return { ok: true };
+      },
+    },
+  });
+
+  // `config?.reviewer?.tokenEnv` is `undefined` here. It must be dropped rather
+  // than ride in as a name, or the scrub set carries a junk entry forever.
+  assert.ok(seen.credentialEnv.includes('BRAIN_REVIEWER_TOKEN'));
+  for (const n of seen.credentialEnv) {
+    assert.ok(typeof n === 'string' && n.trim() !== '', `junk name in the scrub set: ${JSON.stringify(n)}`);
+  }
+});
