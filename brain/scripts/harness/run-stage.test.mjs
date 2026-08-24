@@ -104,3 +104,34 @@ test('#682 B.3: the engine gets a wall clock, and it is passed to the runner', a
   assert.equal(opts.timeoutMs, STAGE_TIMEOUT_MS, 'an unbounded spawn hangs the whole verb');
   assert.ok(STAGE_TIMEOUT_MS > 0);
 });
+
+// ── the SITE axis, from #682's second cold review ────────────────────────────
+//
+// judgment:cold-4 was fixed at `defaultRun`, which had dropped the `cwd` it was
+// handed, and pinned there with a test that spawns a real child. That hardened
+// the LAST layer and left the layer that SUPPLIES the value unpinned: deleting
+// `cwd` from this file's own `_run(...)` call left the whole suite green, which
+// restores exactly the production behaviour the finding describes — the engine
+// running in the parent's directory while the verdict binds itself to a head.
+//
+// Same defect, one layer up, and it is the site the finding's own call chain
+// named. This repo's `red-proof-blind-along-an-unvaried-axis.md` calls it the
+// SITE axis: a fix proved at one site is not proved at the others.
+//
+// The assertion here is deliberately about DELIVERY, not honouring — this test
+// hands in a spy, and a spy can only report what it was given. Honouring is
+// `agent-runtime.test.mjs`'s job, with a real child. Two layers, two oracles.
+
+test('#682 cold-4 (SITE): runStage DELIVERS cwd to the runner, not only timeoutMs', async () => {
+  let opts = null;
+  await runStage({
+    stage: COLD_REVIEW_STAGE, prompt: 'p', cwd: '/somewhere/specific',
+    _run: (_c, _a, o) => { opts = o; return okRun(); },
+  });
+  assert.equal(
+    opts.cwd, '/somewhere/specific',
+    'the runner never received the cwd — the engine would review the parent process directory ' +
+    'instead of the tree the caller named, and the artifact check would then report ' +
+    '"the engine exited cleanly but wrote no artifact": a true refusal with a false diagnosis'
+  );
+});

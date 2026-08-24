@@ -62,8 +62,25 @@
 // blocking set, and `annotateDeterministicFindings` spreads `...f` last so a
 // producer's own value wins over the default. Carry the field and a cold
 // reviewer could de-block its own findings by declaring them pre-existing —
-// the producer grading its own admissibility. `classifyAgainstBase` decides
-// that by MEASURING against the base; a producer's claim is not a measurement.
+// the producer grading its own admissibility.
+//
+// AND NOTHING DOWNSTREAM WOULD CATCH IT. The first cut of this note claimed
+// `classifyAgainstBase` measures the disposition against the base, so a
+// producer's claim would be corrected. THAT IS FALSE, and the second cold
+// review measured it: `gateNameOf` is `/^gate:(.+)$/`, a `judgment:*` id does
+// not match, and `base-comparison.mjs` returns the finding untouched. A
+// producer finding is never measured — it keeps a DEFAULT, and a default is
+// not a measurement. Corrected in place rather than deleted: a note promising
+// a safety net that does not exist is worse than no note, because it tells the
+// next reader the field is safe to carry.
+//
+// THE ONLY LOCK IS THE ABSENCE FROM `CARRIED_FIELDS`. There is a second one
+// today — the refuter escalates on `unchallenged`, so an uncorroborated
+// producer finding still reaches a human — but it holds only while no
+// challenger is built. The day a `same-model` challenger lands and CORROBORATES
+// a finding, that escalation is gone, and a producer-declared `pre-existing`
+// would yield a clean APPROVE over a corroborated blocker.
+//
 // The reader dropping it was already the fail-closed behaviour. The prompt was
 // the half that was wrong.
 
@@ -83,6 +100,22 @@ export const ROLE_DEBT_TICKET = 312;
  * against would be a declared oracle with no reader.
  */
 const SEVERITIES = 'blocker | correction | editorial';
+
+/**
+ * Fields the prompt REFUSES out loud — named here so the refusal has a reader.
+ *
+ * The second cold review showed why prose is not enough: the converse test
+ * parsed bullets with the field name in LEADING position, which is every bullet
+ * EXCEPT the refusal this file added, so a new bullet phrased
+ * "· When it matters, state `risk_score`" asked for an uncarried field and no
+ * oracle could see it. A prompt whose refusals live only in sentences cannot be
+ * checked against the reader; a list can.
+ *
+ * The invariant its test asserts: every backticked identifier in the field spec
+ * is CARRIED, a value from a rendered vocabulary, or REFUSED here — and nothing
+ * is both carried and refused.
+ */
+export const REFUSED_FIELDS = Object.freeze(['causal_disposition']);
 
 /**
  * buildColdReviewPrompt() — PURE. Renders the cold reviewer's role for one PR.
@@ -140,11 +173,11 @@ ${CARRIED_FIELDS.map((f) => `  - ${f}`).join('\n')}
     downgraded to \`correction\` — cite an ADR, a REQ, a spec line, or a gate.
   · \`evidence_class\` — one of: ${ALLOWED_EVIDENCE_CLASSES.join(' | ')}
     Yours are \`inferential\`: you reasoned to them; a gate did not compute them.
-  · You do NOT state \`causal_disposition\`. Whether a finding is introduced by
-    this diff or pre-existing is MEASURED against the base, not claimed — a
-    finding marked \`pre-existing\` leaves the blocking set, so a producer that
-    stated its own would be grading its own admissibility. The field is not
-    carried across this boundary; state it and it is dropped.
+  · You do NOT state ${REFUSED_FIELDS.map((f) => `\`${f}\``).join(', ')}. A finding
+    marked pre-existing leaves the blocking set entirely, so a producer stating
+    its own disposition would be grading its own admissibility — and nothing
+    downstream re-measures it for you. The field is not carried across this
+    boundary; state it and it is dropped.
   · \`file\` and \`line\` together anchor a finding to a line of the diff, and that
     is what makes it appear as an inline comment on the pull request rather than
     only in the summary. Anchor everything you can.

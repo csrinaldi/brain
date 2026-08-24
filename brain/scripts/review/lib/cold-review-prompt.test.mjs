@@ -17,13 +17,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { buildColdReviewPrompt, ROLE_DEBT_TICKET } from './cold-review-prompt.mjs';
+import { buildColdReviewPrompt, ROLE_DEBT_TICKET, REFUSED_FIELDS } from './cold-review-prompt.mjs';
 import {
   readFindingsArtifact,
   artifactPathFor,
   CARRIED_FIELDS,
 } from './findings-artifact.mjs';
 import { ALLOWED_EVIDENCE_CLASSES } from './schema-v2.mjs';
+
+/** The severity vocabulary, read back out of the prompt rather than restated. */
+const SEVERITY_VALUES = (prompt) => renderedVocabulary(prompt, 'severity');
 
 const PR = 765;
 
@@ -122,21 +125,55 @@ test('the vocabularies are derived from schema-v2, not restated', () => {
 // this prompt names actually one the reader carries? A field named there and
 // nowhere in CARRIED_FIELDS is invisible to both. This test asks the converse.
 
-test('#682 cold-9: every field the prompt names is one the reader actually carries', () => {
+test('#682 cold-9: every field the prompt names is carried, a vocabulary value, or REFUSED', () => {
   const prompt = buildColdReviewPrompt({ prNumber: PR });
 
-  // The prose bullets, where the drift lived. Each opens `  · \`name\`` — a
-  // backticked field name in the leading position is the prompt telling the
-  // engine that this field is part of the shape.
-  const named = [...prompt.matchAll(/^ {2}· `([a-z_]+)`/gm)].map((m) => m[1]);
-  assert.ok(named.length > 0, 'the prose bullets must still name fields — otherwise this test is vacuous');
+  // THE FIRST CUT OF THIS TEST WAS BLIND ALONG THE POSITION AXIS, and the
+  // second cold review measured it: it matched `^ {2}· \`name\`` — the field
+  // name in LEADING position — which is every bullet EXCEPT the refusal this
+  // very fix added. It saw 5 of 6. So a new bullet reading
+  // "· When it matters, state \`risk_score\`" asked the engine for a field
+  // `sanitiseFinding` drops, and no oracle in this file could see it: cold-9's
+  // exact defect, reintroduced under another name. The `named.length > 0`
+  // vacuity guard did not help — the other five kept it satisfied.
+  //
+  // Position is not the invariant. Every backticked identifier in the field
+  // spec must be ACCOUNTED FOR: carried by the reader, a value from a rendered
+  // vocabulary, or refused out loud. Anything else is the prompt naming a
+  // field nothing downstream honours.
+  const start = prompt.indexOf('  · ');
+  const end = prompt.indexOf('## The empty case');
+  assert.ok(start > 0 && end > start, 'the field-spec section must still be findable — otherwise this test is vacuous');
 
-  const strays = named.filter((f) => !CARRIED_FIELDS.includes(f));
+  const tokens = [...new Set([...prompt.slice(start, end).matchAll(/`([a-z_]+)`/g)].map((m) => m[1]))];
+  assert.ok(tokens.length >= CARRIED_FIELDS.length, 'the section must still name the carried fields');
+
+  const vocabulary = [
+    ...SEVERITY_VALUES(prompt),
+    ...ALLOWED_EVIDENCE_CLASSES,
+  ];
+  const accounted = new Set([...CARRIED_FIELDS, ...vocabulary, ...REFUSED_FIELDS]);
+  const strays = tokens.filter((t) => !accounted.has(t));
+
   assert.deepEqual(
     strays, [],
-    `the prompt names ${JSON.stringify(strays)}, which sanitiseFinding drops at the boundary — ` +
-    'asking an engine for a field the reader discards is the defect this module exists to prevent'
+    `the prompt names ${JSON.stringify(strays)} — neither carried by the reader, nor a vocabulary ` +
+    'value, nor declared in REFUSED_FIELDS. Asking an engine for a field sanitiseFinding drops is ' +
+    'the defect this module exists to prevent; refusing one is fine, but the refusal must be declared.'
   );
+});
+
+test('#682 cold-9: nothing is both carried and refused', () => {
+  // REFUSED_FIELDS is what makes the test above non-vacuous, so it needs its
+  // own reader: listing a CARRIED field there would silently widen `accounted`
+  // and let a real stray through under its cover.
+  const both = REFUSED_FIELDS.filter((f) => CARRIED_FIELDS.includes(f));
+  assert.deepEqual(
+    both, [],
+    `${JSON.stringify(both)} is declared refused AND carried — the prompt would be telling the engine ` +
+    'not to state a field the reader honours'
+  );
+  assert.ok(REFUSED_FIELDS.length > 0, 'an empty refusal list makes the accounting test weaker, not stronger');
 });
 
 test('#682 cold-9: the prompt tells the engine NOT to state a disposition, and says why', () => {
@@ -151,8 +188,17 @@ test('#682 cold-9: the prompt tells the engine NOT to state a disposition, and s
     'the field must be refused explicitly, not merely left undocumented'
   );
   assert.match(
-    prompt, /MEASURED against the base, not claimed/,
+    prompt, /grading its own admissibility/,
     'and the reason must travel with the refusal — a rule without its reason is one a future edit deletes'
+  );
+  // The reason must be the TRUE one. The first cut said the disposition is
+  // "MEASURED against the base, not claimed"; the second cold review measured
+  // that `classifyAgainstBase` only inspects `^gate:` ids and returns a
+  // `judgment:*` finding untouched, so nothing re-measures it and the sentence
+  // promised a safety net that does not exist.
+  assert.doesNotMatch(
+    prompt, /MEASURED against the base/,
+    'the refusal must not claim a downstream measurement — classifyAgainstBase never inspects a producer finding'
   );
 
   // The converse, and it is the load-bearing half: whatever the prose says, the

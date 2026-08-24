@@ -528,8 +528,24 @@ itself: a declared value with no reader. Tenth, eleventh and twelfth occurrence.
 
       Carry the field and a cold reviewer de-blocks its own findings by
       declaring them `pre-existing`: the producer grading its own
-      admissibility. `classifyAgainstBase` decides that by MEASURING against the
-      base, and **a producer's claim is not a measurement.** The reader dropping
+      admissibility. **This entry first justified that with a measurement that
+      does not exist**, and the second cold review caught it: it said
+      `classifyAgainstBase` decides the disposition by measuring against the
+      base, so a producer's claim would be corrected downstream. False for
+      exactly these findings — `gateNameOf` is `/^gate:(.+)$/`, a `judgment:*`
+      id does not match, and `base-comparison.mjs:259` returns the finding
+      untouched. **A producer finding is never measured; it keeps a DEFAULT, and
+      a default is not a measurement.** The wrong reason is corrected here
+      rather than deleted, because it pointed the next reader at a safety net
+      that was not there — the same defect one layer up, and the third time this
+      ticket has produced a claim with no reader inside the fix for a claim with
+      no reader.
+
+      **The only lock is the absence from `CARRIED_FIELDS`**, and the reviewer's
+      table is worth keeping: unchallenged, a carried `pre-existing` yields
+      `escalate: human`, 0 blocking, REVISE; **corroborated by a challenger it
+      yields a clean APPROVE over a real blocker.** The escalation that saves it
+      today exists only because no challenger is built yet. The reader dropping
       it was already the fail-closed behaviour; the prompt was the wrong half.
       A reversal of this ruling belongs in an ADR, not in a field list.
 
@@ -554,15 +570,60 @@ itself: a declared value with no reader. Tenth, eleventh and twelfth occurrence.
 
 ## Still open from C.5's verdict
 
-Not started, and listed so the count is honest rather than implied:
+**The count reconciles, and the first version of this section did not.** It
+claimed to be "listed so the count is honest rather than implied" and then left
+three of the verdict's eleven findings appearing nowhere — `tier2-frontier`,
+`cold-7` and `cold-8`. `cold-7` still carries a live inline comment on the PR,
+so it existed on GitHub and not in the tracker. A claim about honesty with
+nothing checking it is the defect this ticket keeps finding, and the reader here
+is arithmetic:
 
-- `judgment:cold-1` (blocker) — the post-spawn check is a bare `exists`, so a
-  stale artifact from a previous round passes it. Re-review is the normal case.
-- `judgment:cold-3` (blocker) — `boot.worktreePath` is computed, passed to
-  `gatherInferentialInputs`, and consumed by nothing; the engine reads the
-  operator's tree while the verdict binds itself to the PR head.
-- `judgment:cold-2`, `cold-5`, `cold-6` — specific and plausible, NOT yet
-  verified by reading. Nobody should treat them as confirmed until someone does.
+| | |
+|---|---|
+| the posted verdict | **11** findings |
+| closed (D.1, D.2) | `cold-4`, `cold-9` — 2 |
+| open, below | `cold-1`, `cold-2`, `cold-3`, `cold-5`, `cold-6`, `cold-7`, `cold-8`, `tier2-frontier`, `budget` — 9 |
+| | 2 + 9 = **11** ✓ |
+
+Every one below is CONFIRMED unless it says otherwise, and none is started:
+
+- `judgment:cold-1` (blocker) — **confirmed by reading.** The post-spawn check is
+  a bare `exists`, so a stale artifact from a previous round passes it. Nothing
+  unlinks before the spawn. Re-review is the normal case (§7 counts revisions
+  precisely because it happens).
+- `judgment:cold-2` (blocker) — **confirmed, measured on both sides.** A
+  generator emitting two distinct blockers under one `id`: base `71a7abd`
+  returns 2 (`["first claim","second claim"]`), head returns **1**. The second
+  blocker leaves the verdict with no condition, no count, no log line.
+  `uniqueId`'s `#2` disambiguation never fires because the dedup drops the
+  finding before `evaluateInferential` sees it. Fail-OPEN, and confirmed
+  independently by the second cold review.
+- `judgment:cold-3` (blocker) — **confirmed by reading.** `boot.worktreePath` is
+  computed, handed to `gatherInferentialInputs`, and consumed by nothing; the
+  engine reads the operator's tree while the verdict binds itself to the PR head.
+- `judgment:cold-5` (correction) — **confirmed by reading.** The loop is at
+  `cli.mjs:660`, `applyCausalAdmission` at `:748` — outside and after it. With
+  `maxRounds: 3` an operator gets three produces and one challenge, while
+  `convergence.mjs`'s own header defines the round as one produce plus one
+  challenge.
+- `judgment:cold-6` (correction) — **confirmed, measured, and the secondary half
+  is the worse one.** Through the real test harness: an unreadable
+  `sdd.map["cold-review"].engine` REJECTS with a raw `Error`, 0 lines on the
+  error channel, no `brain:review:` line. And `maxRounds: "3"` — a string, which
+  `resolveConvergence` is documented to refuse — **RESOLVES with exit 0**,
+  because the resolver sits inside the `else` branch and a repo with no
+  transport never reaches it. A bound the operator wrote, documented to fail
+  closed, that is never read. The thirteenth occurrence of this ticket's defect,
+  inside the key C.1 added to bound it.
+- `judgment:cold-7` (editorial) — the prompt embeds its worked example in a fence
+  carrying `ARTIFACT_TAG`, and the reader hard-refuses an artifact with two such
+  blocks. An engine that echoes the example burns a model call on a fail-closed
+  refusal. NOT verified.
+- `judgment:cold-8` (editorial) — the e2e helper re-spells the artifact path and
+  fence as its own literals while `artifactPathFor()` and `ARTIFACT_TAG` are
+  exported for it. NOT verified.
+- `tier2-frontier` (correction) — the diff touches Tier-2 (`config-migrations.mjs`,
+  `adr-0033-*.md`). Deterministic and true; it is a frontier notice, not a defect.
 - `budget` (blocker) — 1204 > 1000 at `lite`. Not a false positive: the reviewer
   keeps `size:exception` in its DENY-SET on purpose, so it reports the overflow
   raw and leaves the waiver to a human. The gate passes on the label; the
