@@ -1017,12 +1017,53 @@ the same run that found it** — a refutation that measured the wrong path.
       it measured nothing. Same trap as cold-6's — a mutation that proves
       nothing looks exactly like a property that is well covered.
 
+- [x] E.4 **`judgment:cold-4` — the fact is right, the fix it implies is a FALSE FIX,
+      and the real one is Tier 2.** Answered, not patched.
+
+      **THE FACT HOLDS.** `.gitignore` is not in `package.json`'s `files`, so the
+      `openspec/reviews/` rule governs this repo and no consumer. A consumer that
+      routes the stage sees the artifact as untracked on every review, and
+      `git add -A` commits model-written findings.
+
+      **THE OBVIOUS FIX IS A NO-OP, AND IT IS MEASURED.** Adding `.gitignore` to
+      `files` DOES put it in the tarball — 3.5 kB, confirmed with `npm pack
+      --dry-run`, which also corrected my own recollection that npm refuses to
+      publish that filename. It still delivers nothing: a `.gitignore` inside
+      `node_modules/@logikas/brain/` governs only what hangs off that directory.
+      Reproduced in a synthetic consumer repo — with the file shipped there,
+      `git check-ignore openspec/reviews/pr-1/cold-review.md` answers NOT
+      IGNORED. **Recording this is most of the value of closing the finding:**
+      the next reader would otherwise "fix" it through `files` and move nothing.
+
+      **NOR IS IT FIXABLE BY COPYING THIS FILE.** The first ~60 lines of brain's
+      `.gitignore` are this repo's own Java/Maven/IDE leavings, not
+      brain-as-a-product's. Shipping it as a managed path would overwrite a
+      consumer's `.gitignore` with Maven scraps. It needs a marked, APPENDED
+      block — a new mechanism.
+
+      **IT ALREADY HAS A TICKET AND IT IS NOT THIS SLICE'S.** #414 (open,
+      `status:approved`) is the same root cause, found by #396, and it states the
+      governing constraint: promoting `.gitignore` into `managed` is a change to
+      `brain/core/**`, **Tier 2 — human-promoted, an agent must not write it**.
+      So the correct fix is out of reach by governance, not by my judgement.
+
+      **THE GAP IS REPO-WIDE AND PREDATES THIS TICKET.** `.env` (a credential),
+      `.memory/chunks/`, `.claude/worktrees/` and `openspec/changes/*/scratch/`
+      have exactly the same hole. `openspec/reviews/` is the fifth instance, not
+      a new defect — `pre-existing` in disposition, which is why it leaves the
+      blocking set rather than being patched here.
+
+      What this slice contributes to #414 is evidence that changes its inputs:
+      #414's option 3 ("document it and leave it") rests on the backup directory
+      being *"only ever visible after a crash or a partial rollback"*. The
+      cold-review artifact appears on EVERY routed review, so that justification
+      no longer covers the whole problem. Posted there rather than acted on.
+
 ## Still open from the second cold review
 
-7 findings: 3 closed (E.1, E.2, E.3), 2 to assess, 2 expected and correct.
+7 findings: 4 closed (E.1, E.2, E.3, E.4 — the last ANSWERED, bound to #414),
+1 to assess, 2 expected and correct.
 
-- `judgment:cold-4` (correction) — `.gitignore` is not in `package.json`'s
-  `files`, so the artifact rule holds in this repo and in no consumer.
 - `judgment:cold-5` (correction) — `run-stage` is now reachable from the argv
   entry point, which was written for `init`: raw string args, a discarded
   `{ok, reason}`, and the op running on both axes.
