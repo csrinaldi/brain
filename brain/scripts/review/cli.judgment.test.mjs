@@ -54,7 +54,10 @@ function deps({ config, protocol, generate, tier = 'regulated', refuterRunner } 
     },
     coldBootDeps: {
       fetchPr: async () => ({ number: 42, author: 'alice', labels: [], body: '', headRefOid: HEAD }),
-      cloneDetached: async () => ({ detached: true }),
+      // A worktree path, because production always has one: cold-boot builds a
+      // detached checkout and judgment:cold-3 makes the stage REFUSE without it.
+      // A double that omits it is less faithful than the code it stands in for.
+      cloneDetached: async () => ({ detached: true, worktreePath: '/cold/worktree' }),
       readRecords: () => [],
       fetchReviews: async () => [],
     },

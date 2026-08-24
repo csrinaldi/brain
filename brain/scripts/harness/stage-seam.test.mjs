@@ -207,6 +207,10 @@ test('the refusal composes with the stage runner — routed, and reported as a f
       config: { sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'no-such-engine-at-all', model: null } } } },
       prNumber: 765,
       root,
+      // judgment:cold-3 made the cold checkout a precondition, and it refuses
+      // BEFORE the engine is reached. Supplied here so what this test measures
+      // is still the SEAM's refusal rather than the runner's.
+      worktreePath: root,
       deps: { runStage: makeRunStageSeam() },
     });
 

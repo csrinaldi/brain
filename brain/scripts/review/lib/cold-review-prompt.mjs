@@ -84,6 +84,8 @@
 // The reader dropping it was already the fail-closed behaviour. The prompt was
 // the half that was wrong.
 
+import { join, isAbsolute } from 'node:path';
+
 import {
   ARTIFACT_TAG,
   CARRIED_FIELDS,
@@ -120,15 +122,32 @@ export const REFUSED_FIELDS = Object.freeze(['causal_disposition']);
 /**
  * buildColdReviewPrompt() — PURE. Renders the cold reviewer's role for one PR.
  *
- * @param {{prNumber: number|string, baseRef?: string|null, headRef?: string|null}} args
+ * `artifactRoot` SPLITS THE READ SURFACE FROM THE WRITE TARGET, and the split is
+ * the whole of judgment:cold-3's fix. The engine runs inside the cold worktree —
+ * a detached checkout at the PR head — so that what it READS is the code the
+ * verdict binds itself to, rather than whatever branch the operator happens to
+ * have checked out. But the artifact must land where the READER looks, which is
+ * the operator's tree; a relative path would put it in the throwaway worktree
+ * and `run-cold-review-stage.mjs` would then report "the engine exited cleanly
+ * but wrote no artifact" about a file the engine wrote perfectly.
+ *
+ * So when `artifactRoot` is given the path renders ABSOLUTE. It is still
+ * `artifactPathFor`'s answer underneath — one source for the location, two
+ * spellings of it.
+ *
+ * @param {{prNumber: number|string, baseRef?: string|null, headRef?: string|null,
+ *          artifactRoot?: string|null}} args
  * @returns {string}
  * @throws {Error} via `artifactPathFor` when the PR number is not one
  */
-export function buildColdReviewPrompt({ prNumber, baseRef = null, headRef = null } = {}) {
+export function buildColdReviewPrompt({
+  prNumber, baseRef = null, headRef = null, artifactRoot = null,
+} = {}) {
   // Thrown, not defaulted: a prompt naming the wrong artifact path sends the
   // engine's whole run to a file nobody reads, and it fails silently — the
   // reader reports "missing", which is indistinguishable from "never ran".
-  const artifactPath = artifactPathFor(prNumber);
+  const relPath = artifactPathFor(prNumber);
+  const artifactPath = artifactRoot ? join(artifactRoot, relPath) : relPath;
 
   const diffCommand = baseRef && headRef
     ? `git diff ${baseRef}...${headRef}`
@@ -137,7 +156,13 @@ export function buildColdReviewPrompt({ prNumber, baseRef = null, headRef = null
   return `You are a COLD REVIEWER. You have not seen this change before, you did not
 write it, and you are not here to be agreeable.
 
-Review ${diffCommand} in the current working directory.
+Review ${diffCommand} in the current working directory.${artifactRoot && isAbsolute(artifactPath) ? `
+
+The working directory is a DETACHED CHECKOUT at the head this review is about.
+It is not the operator's branch, and nothing you read here is affected by
+whatever they have checked out or left uncommitted. The one path below is
+absolute and deliberately points OUTSIDE this directory — that is where the
+reader looks for your findings.` : ''}
 
 ## What you may use
 

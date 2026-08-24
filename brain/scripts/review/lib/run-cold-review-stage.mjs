@@ -55,6 +55,7 @@ export async function runColdReviewStage({
   baseRef = null,
   headRef = null,
   root = process.cwd(),
+  worktreePath = null,
   deps = {},
 } = {}) {
   const { runStage } = deps;
@@ -84,12 +85,41 @@ export async function runColdReviewStage({
   // rounds distinguishable, not the filesystem.
   mkdir(dirname(join(root, artifactPath)));
 
+  // THE ENGINE READS THE COLD WORKTREE, AND REFUSING IS THE POINT (judgment:cold-3).
+  //
+  // ADR-0033 states the producer's load-bearing property as "the subagent reads
+  // a cold worktree and writes a file", and design.md D6 says the generator
+  // reads the diff from that worktree. It used to get `root` — the operator's
+  // checked-out tree, an arbitrary branch with arbitrary uncommitted changes —
+  // while the verdict bound itself to `headRef`. The divergence was SILENT
+  // because `git diff BASE...HEAD` still resolves there: the range was right and
+  // the file contents were whatever was on disk.
+  //
+  // Falling back to `root` when no worktree is supplied would re-create exactly
+  // that, so this refuses instead. Same move as `assertRoutableStage`: a
+  // property an ADR names is only as good as the thing that keeps it true.
+  if (typeof worktreePath !== 'string' || worktreePath.trim() === '') {
+    return {
+      routed: true,
+      ok: false,
+      reason:
+        'the cold-review stage was given no worktree to read. ADR-0033 makes reading a COLD ' +
+        'checkout the producer\'s load-bearing property, and running in the operator\'s tree ' +
+        'instead would review an arbitrary branch while the verdict binds itself to the head — ' +
+        'silently, because the diff range still resolves. Refusing rather than reviewing the wrong tree.',
+    };
+  }
+
   const result = await runStage({
     stage: COLD_REVIEW_STAGE,
-    prompt: buildColdReviewPrompt({ prNumber, baseRef, headRef }),
+    // The artifact path renders ABSOLUTE, into `root`: the engine READS the cold
+    // worktree and WRITES where the reader looks. A relative path would land the
+    // findings inside the throwaway checkout, and the presence check below would
+    // then report "wrote no artifact" about a file written perfectly.
+    prompt: buildColdReviewPrompt({ prNumber, baseRef, headRef, artifactRoot: root }),
     model: routing.model,
     engine: routing.engine,
-    cwd: root,
+    cwd: worktreePath,
   });
 
   if (!result?.ok) {

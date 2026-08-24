@@ -600,6 +600,10 @@ export async function main(deps = {}) {
         baseRef: baseSha,
         headRef: boot.headSha,
         root,
+        // judgment:cold-3: the coordinate cold-boot computes so the reviewer
+        // never reads ambient state was passed to gatherInferentialInputs and
+        // to nothing else. The engine gets it now.
+        worktreePath: boot.worktreePath,
         deps: deps.stageDeps ?? { runStage: makeRunStageSeam() },
       });
 

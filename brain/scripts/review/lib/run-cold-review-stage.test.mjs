@@ -49,6 +49,20 @@ function makeRepo(t) {
   return dir;
 }
 
+/**
+ * A COLD WORKTREE: a separate directory the engine runs in (judgment:cold-3).
+ *
+ * Separate on purpose. When the engine's cwd and the artifact's root are the
+ * same path, "the engine writes where the reader looks" is true by accident and
+ * no test can tell the two apart — which is how the stage shipped reading the
+ * operator's tree while the verdict bound itself to the PR head.
+ */
+function makeWorktree(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'cold-review-worktree-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
 /** A seam that behaves like an engine which did its job. */
 function writingEngine(root, prNumber = PR) {
   return async () => {
@@ -65,7 +79,7 @@ test('the run leaves exactly ONE change, untracked, at the artifact path', async
   const headBefore = git(root, 'rev-parse', 'HEAD');
 
   const result = await runColdReviewStage({
-    config: ROUTED, prNumber: PR, root, deps: { runStage: writingEngine(root) },
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t), deps: { runStage: writingEngine(root) },
   });
 
   assert.deepEqual(result, { routed: true, ok: true, artifactPath: artifactPathFor(PR) });
@@ -104,7 +118,7 @@ test('the stage creates its directory — the engine is not asked to', async (t)
 
   let sawDir = false;
   await runColdReviewStage({
-    config: ROUTED, prNumber: PR, root,
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
     deps: {
       runStage: async () => {
         // Read from INSIDE the engine's turn: the directory has to exist when
@@ -123,8 +137,9 @@ test('a second round is not an error — the directory already being there is no
   const root = makeRepo(t);
   const deps = { runStage: writingEngine(root) };
 
-  const first = await runColdReviewStage({ config: ROUTED, prNumber: PR, root, deps });
-  const second = await runColdReviewStage({ config: ROUTED, prNumber: PR, root, deps });
+  const wt = makeWorktree(t);
+  const first = await runColdReviewStage({ config: ROUTED, prNumber: PR, root, worktreePath: wt, deps });
+  const second = await runColdReviewStage({ config: ROUTED, prNumber: PR, root, worktreePath: wt, deps });
 
   assert.equal(first.ok, true);
   assert.equal(second.ok, true, 'reviews have rounds; the filesystem is not what distinguishes them');
@@ -135,7 +150,7 @@ test('unrouted does not run, and is NOT reported as a failure', async (t) => {
   let spawned = false;
 
   const result = await runColdReviewStage({
-    config: { sdd: { map: {} } }, prNumber: PR, root,
+    config: { sdd: { map: {} } }, prNumber: PR, root, worktreePath: makeWorktree(t),
     deps: { runStage: async () => { spawned = true; return { ok: true }; } },
   });
 
@@ -160,7 +175,7 @@ test('a clean exit with NO artifact is a failure, not "found nothing"', async (t
   const root = makeRepo(t);
 
   const result = await runColdReviewStage({
-    config: ROUTED, prNumber: PR, root,
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
     deps: { runStage: async () => ({ ok: true }) },   // exits 0, writes nothing
   });
 
@@ -179,7 +194,7 @@ test('an engine that failed is reported with its own reason', async (t) => {
   const root = makeRepo(t);
 
   const result = await runColdReviewStage({
-    config: ROUTED, prNumber: PR, root,
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
     deps: { runStage: async () => ({ ok: false, reason: 'the engine exited with status 137' }) },
   });
 
@@ -190,7 +205,7 @@ test('a seam that answers nothing at all is still a failure', async (t) => {
   const root = makeRepo(t);
 
   const result = await runColdReviewStage({
-    config: ROUTED, prNumber: PR, root, deps: { runStage: async () => undefined },
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t), deps: { runStage: async () => undefined },
   });
 
   assert.equal(result.ok, false, 'an undefined answer must not read as success');
@@ -199,11 +214,12 @@ test('a seam that answers nothing at all is still a failure', async (t) => {
 
 test('the engine is handed the RESOLVED engine and model, and the stage name', async (t) => {
   const root = makeRepo(t);
+  const worktree = makeWorktree(t);
 
   async function seamSees(config) {
     let seen = null;
     await runColdReviewStage({
-      config, prNumber: PR, root, baseRef: 'aaa', headRef: 'bbb',
+      config, prNumber: PR, root, worktreePath: worktree, baseRef: 'aaa', headRef: 'bbb',
       deps: {
         runStage: async (args) => {
           seen = args;
@@ -230,9 +246,27 @@ test('the engine is handed the RESOLVED engine and model, and the stage name', a
   assert.equal(b.model, null, 'an absent model stays absent rather than acquiring a default');
 
   assert.equal(a.stage, COLD_REVIEW_STAGE);
-  assert.equal(a.cwd, root);
+
+  // judgment:cold-3. THIS LINE USED TO ASSERT `root`, WHICH IS THE DEFECT — a
+  // test can pin the wrong behaviour just as firmly as the right one, and this
+  // one did, for the whole slice. The engine reads the COLD checkout, so what
+  // it sees is the code the verdict binds itself to rather than whatever branch
+  // the operator has out.
+  assert.equal(
+    a.cwd, worktree,
+    'the engine must run in the cold worktree — running in the operator tree reviews an arbitrary ' +
+    'branch while the verdict claims the head, and silently, because the diff range still resolves'
+  );
+
   assert.ok(a.prompt.includes('git diff aaa...bbb'), 'the refs reach the role');
-  assert.ok(a.prompt.includes(artifactPathFor(PR)), 'and so does the path it must write');
+
+  // And the WRITE target is the other half: absolute, into `root`, because the
+  // reader looks there. Relative, it would land in the throwaway worktree and
+  // the presence check would call a perfectly written artifact missing.
+  assert.ok(
+    a.prompt.includes(join(root, artifactPathFor(PR))),
+    'the path the engine is told to write must be absolute into the operator tree, not relative to its cwd'
+  );
 });
 
 test('there is NO default runStage — a missing seam refuses instead of picking a backend', async (t) => {
@@ -278,5 +312,59 @@ test('a PR number that is not one is refused BEFORE anything is created', async 
     existsSync(join(root, 'openspec', 'reviews')), false,
     'nothing created — the guard must run before the mkdir, or a rejected number has ' +
       'already made a directory somewhere by the time it is refused'
+  );
+});
+
+// ── #682 C.5's verdict, judgment:cold-3 ──────────────────────────────────────
+
+test('#682 cold-3: no worktree is a REFUSAL, not a quiet fallback to the operator tree', async (t) => {
+  const root = makeRepo(t);
+  let spawned = false;
+
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root,       // no worktreePath
+    deps: { runStage: async () => { spawned = true; return { ok: true }; } },
+  });
+
+  assert.equal(spawned, false, 'nothing may be spawned without the checkout the ADR names');
+  assert.equal(result.routed, true, 'routed stays true — the repo DID route this, and the caller needs to tell ' +
+    'a failure apart from a repo with no transport');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /cold/i, 'the reason must name what is missing, not merely that something is');
+
+  // The fallback this refusal replaces is the defect itself: reviewing `root`
+  // would produce a well-formed verdict over the wrong tree, and the diff range
+  // would still resolve, so nothing downstream could notice.
+  assert.doesNotMatch(result.reason, /^the engine/, 'this is not the engine failing — it never ran');
+});
+
+test('#682 cold-3: the engine writes into the operator tree and leaves the worktree untouched', async (t) => {
+  const root = makeRepo(t);
+  const worktree = makeWorktree(t);
+  let cwdSeen = null;
+  let told = null;
+
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: worktree,
+    deps: {
+      runStage: async ({ cwd, prompt }) => {
+        cwdSeen = cwd;
+        // An engine follows the path it is GIVEN. Writing what the prompt names
+        // is the whole behaviour under test: if that path were relative, this
+        // resolves inside the worktree and the presence check below fails.
+        told = prompt.split('\n').find((l) => l.startsWith('Write exactly one file'))
+          .match(/`([^`]+)`/)[1];
+        writeFileSync(told, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(cwdSeen, worktree, 'the engine reads the cold checkout');
+  assert.equal(result.ok, true, `the reader must find what the engine wrote — it was told ${told}`);
+  assert.ok(existsSync(join(root, artifactPathFor(PR))), 'the artifact belongs where artifactDeps looks');
+  assert.equal(
+    existsSync(join(worktree, artifactPathFor(PR))), false,
+    'and NOT in the throwaway checkout, which is deleted with it — findings written there are findings lost'
   );
 });
