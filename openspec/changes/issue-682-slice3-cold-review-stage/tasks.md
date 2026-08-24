@@ -354,9 +354,39 @@
       **Satisfied on PR #765 at `59ecb69`, 24/08/2026**, in ONE invocation of
       `npm run brain:review -- --pr 765` from a maintainer machine where #604's
       negative control passes (an invalid token is rejected, so credentials are
-      not proxy-injected). Requires `sdd.map["cold-review"]` — added to
-      `brain.config.json` in this change, because migrations run only at file
-      creation and this repo's `schemaVersion 0.3.0` never received 0.10.0's key.
+      not proxy-injected). Requires `sdd.map["cold-review"]`, which this repo's
+      `brain.config.json` does not carry: migrations run only at file creation,
+      and `schemaVersion 0.3.0` predates 0.10.0's key. **The operator adds it
+      locally and does not commit it** — see below.
+
+      **The key was committed once, and CI went red on 25 tests. That is the
+      measurement that says it must not be.** `brain-config.mjs:20` derives
+      `CONFIG_PATH` from the MODULE's own location, not from the caller's `root`:
+
+      ```js
+      const REPO_ROOT  = join(dirname(__filename), '..', '..', '..');
+      const CONFIG_PATH = join(REPO_ROOT, 'brain.config.json');
+      ```
+
+      So `loadBrainConfig()` reads the REAL repo's config no matter which
+      fixture repo a test built, and `fixture.mjs:110`'s own `brain.config.json`
+      is never the one consulted. The moment the repo routed the stage, every
+      test reaching `main()` without an injected `deps.config` saw a routed
+      stage, the real seam tried to spawn a `claude` binary CI does not have,
+      B.6 refused — correctly — and `cli.mjs` refused to post. 25 e2e tests that
+      expect a posted verdict failed. Measured at `dbe6094`: 4245 tests, 25 fail.
+
+      **The 25 failures are the smaller half.** With the key in the tree, every
+      `npm test` anyone runs tries to spawn a model: costly, non-deterministic,
+      network-dependent. `config-migrations.mjs`'s 0.10.0 entry already ruled
+      this — *"Empty by default — an unrouted stage is the honest default, and a
+      shipped entry would spawn an engine nobody asked for."* Committing the key
+      into the repo that ships that migration is that same defect, one layer up.
+
+      The routing belongs beside the credential, not beside the code: an
+      operator sets `sdd.map["cold-review"]` locally for the run, exactly as
+      they set `BRAIN_REVIEWER_TOKEN`. **C.2b's evidence does not depend on it
+      living in the tree** — the posted verdict below is the durable record.
 
       **Evidence, all from the same run:**
       - Artifact: `openspec/reviews/pr-765/cold-review.md`, 12606 bytes, a
