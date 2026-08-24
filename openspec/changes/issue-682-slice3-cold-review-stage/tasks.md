@@ -760,7 +760,52 @@ itself: a declared value with no reader. Tenth, eleventh and twelfth occurrence.
       A challenger that genuinely iterates would change this, and would have to
       change REQ-682-5 with it, deliberately and with its own measurement.
 
-## Still open from C.5's verdict
+- [x] D.8 **`judgment:cold-7` — the prompt did not warn about the refusal its own
+      example can trigger.** The role embeds its worked example in a fence
+      carrying `ARTIFACT_TAG`, and `readFindingsArtifact` hard-refuses an
+      artifact containing two such blocks. An engine that echoes the example
+      above its own findings produces two, and the run refuses. Fail-closed, so
+      not a correctness defect — but **the model call is unrecoverable**, and the
+      prompt said only *"It contains one fenced block"*. Fixed at `324f4b2`.
+
+      **This is the one instruction the file cannot interpolate**, which is why
+      it was missing and why it needs care: every other machine-checkable
+      element here is derived from a constant the reader uses, but this
+      constraint lives in the reader's CONTROL FLOW (`found.length > 1`). There
+      is nothing to derive from, so it is hand-written — exactly the kind of
+      sentence that goes stale without anyone noticing.
+
+      **So its oracle does not string-match.** It MEASURES the reader — feeds it
+      a two-block artifact, confirms the refusal — and only then requires the
+      prompt to describe it. The day the reader tolerates two blocks, the first
+      half fails and the warning is deleted deliberately rather than left
+      quietly false. One mutation: weakening the wording back to "one fenced
+      block" kills it.
+
+- [x] D.9 **`judgment:cold-8` — the highest-level test of the wire spelled the
+      contract a second time.** `withArtifact` hardcoded
+      `join(repoDir, 'openspec', 'reviews', 'pr-N')` and a hand-written
+      ` ```brain-findings/1 ` fence, while `artifactPathFor()` and `ARTIFACT_TAG`
+      are exported for exactly that and are what `cold-review-prompt.mjs`
+      derives from. Fixed at `324f4b2`.
+
+      **Measured, and the result is more interesting than the finding claims.**
+      Moving the single source — `artifactPathFor` returning a different
+      filename — and running the e2e file:
+
+      | state | result |
+      |---|---|
+      | source moved, helper DERIVED (the fix) | 25/25 pass — the helper follows |
+      | source moved, helper HARDCODED (before) | **A.4 fails** |
+
+      So the drift was not silent: it would have broken the wire's own e2e test
+      the day the path moved. That is what makes `cold-8` correctly rated
+      EDITORIAL rather than a correction — and it is still worth fixing, because
+      the difference between the two rows is a test that follows a rename and a
+      test that has to be repaired by hand while reading a failure that names
+      neither cause.
+
+## Answered, not pending — the rest of C.5's verdict
 
 **The count reconciles, and the first version of this section did not.** It
 claimed to be "listed so the count is honest rather than implied" and then left
@@ -773,22 +818,19 @@ is arithmetic:
 | | |
 |---|---|
 | the posted verdict | **11** findings |
-| closed (D.1–D.7) | `cold-4`, `cold-9`, `cold-2`, `cold-3`, `cold-1`, `cold-6`, `cold-5` — 7 |
-| open, below | `cold-7`, `cold-8`, `tier2-frontier`, `budget` — 4 |
-| | 7 + 4 = **11** ✓ |
+| closed (D.1–D.9) | `cold-4`, `cold-9`, `cold-2`, `cold-3`, `cold-1`, `cold-6`, `cold-5`, `cold-7`, `cold-8` — 9 |
+| ANSWERED, below — not defects | `tier2-frontier`, `budget` — 2 |
+| | 9 + 2 = **11** ✓ |
 
-**No blockers remain, and no corrections.** What is left is two editorials, a
-frontier notice and a waiver. None is started:
+**Nothing here is a defect, and neither has work to do.** Both are correctly
+reported and already answered — listed so the count closes at 11 and nobody has
+to re-derive why they are not pending:
 
-- `judgment:cold-7` (editorial) — the prompt embeds its worked example in a fence
-  carrying `ARTIFACT_TAG`, and the reader hard-refuses an artifact with two such
-  blocks. An engine that echoes the example burns a model call on a fail-closed
-  refusal. NOT verified.
-- `judgment:cold-8` (editorial) — the e2e helper re-spells the artifact path and
-  fence as its own literals while `artifactPathFor()` and `ARTIFACT_TAG` are
-  exported for it. NOT verified.
 - `tier2-frontier` (correction) — the diff touches Tier-2 (`config-migrations.mjs`,
-  `adr-0033-*.md`). Deterministic and true; it is a frontier notice, not a defect.
+  `adr-0033-*.md`). Deterministic and true, and **already satisfied**: what Tier-2
+  asks for is a promoted, signed ADR, and ADR-0033 has been one since 21/08/2026
+  (B.1). It is a frontier NOTICE — a fact about where the diff reaches — not a
+  defect, and there is no edit that would answer it that has not been made.
 - `budget` (blocker) — 1204 > 1000 at `lite`. Not a false positive: the reviewer
   keeps `size:exception` in its DENY-SET on purpose, so it reports the overflow
   raw and leaves the waiver to a human. The gate passes on the label; the
