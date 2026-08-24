@@ -72,12 +72,31 @@ export const RUN_TIMEOUT_MS = 10_000;
 
 /**
  * Default command runner: captured output, never a shell, always bounded.
+ *
+ * `cwd` IS PART OF THE CONTRACT, and it was silently dropped until #682's cold
+ * review found it. `claude.mjs`'s `runStage` has always called
+ * `_run(cmd, args, { cwd, timeoutMs })`, and this function destructured only
+ * `timeoutMs` — so `spawnSync` inherited the parent's directory and the engine
+ * read whatever tree the operator happened to be standing in. Production masked
+ * it because `cli.mjs` makes `root === process.cwd()` when `deps.root` is unset;
+ * the day they differ, the engine reviews an unrelated directory, the artifact
+ * check at `run-cold-review-stage.mjs` finds nothing, and the run reports "the
+ * engine exited cleanly but wrote no artifact" — a true refusal with a false
+ * diagnosis.
+ *
+ * Same shape as the `dispatch`-discards-its-result defect: a seam that drops a
+ * value nobody notices is missing. Its oracle has to be the REAL runner — every
+ * caller-side test hands in a spy, and a spy records the `cwd` it was given no
+ * matter what this function does with it.
+ *
+ * An absent `cwd` still means "inherit", which is what every probe caller wants.
+ *
  * @param {string} cmd
  * @param {string[]} args
- * @param {{ timeoutMs?: number }} [opts]
+ * @param {{ timeoutMs?: number, cwd?: string }} [opts]
  */
-export function defaultRun(cmd, args, { timeoutMs = RUN_TIMEOUT_MS } = {}) {
-  return spawnSync(cmd, args, { stdio: 'pipe', encoding: 'utf8', timeout: timeoutMs });
+export function defaultRun(cmd, args, { timeoutMs = RUN_TIMEOUT_MS, cwd } = {}) {
+  return spawnSync(cmd, args, { stdio: 'pipe', encoding: 'utf8', timeout: timeoutMs, cwd });
 }
 
 /**

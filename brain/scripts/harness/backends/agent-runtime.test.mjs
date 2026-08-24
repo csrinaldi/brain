@@ -378,6 +378,42 @@ test('defaultRun: a hung command is cut off, it does not block day:start forever
   assert.ok(r.error || r.signal, 'a timed-out spawn must surface as error/signal, not as a clean exit');
 });
 
+// ── cwd: #682's cold review, judgment:cold-4 ─────────────────────────────────
+//
+// THE ORACLE HAS TO BE THE REAL RUNNER. `runStage` has always passed
+// `{ cwd, timeoutMs }` and `defaultRun` destructured only `timeoutMs`, so the
+// engine ran wherever the parent happened to stand. Every caller-side test
+// hands in a spy, and a spy records the `cwd` it was GIVEN however the real
+// runner treats it — which is exactly why the drop survived: `run-stage.test.mjs`
+// asserts `opts.timeoutMs` reaches the runner and asserts nothing about the
+// directory the child actually got. So this spawns a real child and asks IT.
+
+test('#682 cold-4: defaultRun runs the child in the cwd it was given', async () => {
+  const { defaultRun } = await import('./agent-runtime.mjs');
+  const { mkdtempSync, realpathSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  // realpath, because macOS resolves /tmp through a symlink and the child
+  // reports the resolved path — a mismatch there would be the test's bug.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'brain-cwd-')));
+
+  const r = defaultRun(process.execPath, ['-e', 'process.stdout.write(process.cwd())'], { cwd: dir });
+  assert.equal(
+    realpathSync(r.stdout.trim()), dir,
+    'the child ran somewhere else — a cwd threaded through four layers and dropped at the last one ' +
+    'makes the engine review an unrelated tree while the verdict binds itself to the PR head'
+  );
+
+  // And an absent cwd still means inherit: the probe callers pass none, and
+  // defaulting it to anything but the parent would move every version probe.
+  const inherited = defaultRun(process.execPath, ['-e', 'process.stdout.write(process.cwd())'], {});
+  assert.equal(
+    realpathSync(inherited.stdout.trim()), realpathSync(process.cwd()),
+    'no cwd must keep meaning "inherit" — probeAgentRuntime depends on it'
+  );
+});
+
 test('platformEnvVars: BOTH axis keys reach resolvePlatform, not just AGENT_PLATFORM', () => {
   // ADR-0024 keeps SDD_HARNESS as the legacy fallback; a repo declaring only
   // SDD_HARNESS=claude must not silently resolve to the antigravity default.
