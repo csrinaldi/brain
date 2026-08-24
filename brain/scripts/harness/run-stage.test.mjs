@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { VALID_OPS, dispatch } from './cli.mjs';
+import { VALID_OPS, CLI_OPS, dispatch } from './cli.mjs';
 import { runStage, STAGE_TIMEOUT_MS } from './backends/claude.mjs';
 import { SDD_LIFECYCLE_STAGES, COLD_REVIEW_STAGE } from '../lib/stage-engine.mjs';
 
@@ -230,4 +230,58 @@ test('#682 cold-2: `credentialEnv` WIDENS the set — a repo that renamed review
     'the caller must be able to WIDEN only — passing a list must never narrow the default set'
   );
   assert.equal(opts.env.PATH, '/usr/bin');
+});
+
+// ── The two surfaces — judgment:cold-5 ──────────────────────────────────────
+//
+// `run-stage` was published on the command line by accident: one list served
+// both `dispatch()` and the argv entry point. MEASURED on the shipped tree,
+// `node harness/cli.mjs run-stage cold-review "review the diff"` exited 0 with
+// no output — the backend got two positional strings where the contract is one
+// object, destructuring a STRING gave `undefined` for every field, and the
+// entry point threw the `{ok:false}` away. You ask it to run a stage, it does
+// not run one, and it reports success in silence.
+
+test('#682 cold-5: `run-stage` is dispatchable but NOT a command-line op', async () => {
+  assert.ok(VALID_OPS.includes('run-stage'), 'the seam dispatches it — it must stay valid');
+  assert.ok(!CLI_OPS.includes('run-stage'), 'argv cannot carry a generated prompt; publishing it there ships a path that cannot work');
+  assert.deepEqual(CLI_OPS, ['init'], 'the command-line surface is `init` and nothing else');
+});
+
+test('#682 cold-5: every op is CLASSIFIED — a new op cannot default onto the CLI', async () => {
+  // The point of deriving both lists from one table: adding an op means
+  // answering `cli:` for it. This asserts the derivation rather than comparing
+  // two hand-written lists, which is the shape that lets them drift.
+  for (const op of CLI_OPS) {
+    assert.ok(VALID_OPS.includes(op), `${op} is on the CLI but not dispatchable`);
+  }
+  assert.ok(CLI_OPS.length < VALID_OPS.length, 'the CLI surface must stay a strict subset');
+});
+
+test('#682 cold-5: the argv entry point REFUSES run-stage, loudly and by name', async () => {
+  // Through a real child process: the `isMain` block is top-level code with no
+  // injectable seam, so every in-process test says nothing about it — which is
+  // precisely why the defect shipped.
+  const { spawnSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const cli = fileURLToPath(new URL('./cli.mjs', import.meta.url));
+
+  const r = spawnSync(process.execPath, [cli, 'run-stage', COLD_REVIEW_STAGE, 'review the diff'],
+    { encoding: 'utf8', timeout: 30_000 });
+
+  assert.equal(r.status, 1, 'a refused op must exit non-zero — it exited 0 in silence before');
+  assert.match(r.stderr, /not a command-line op/);
+  assert.match(r.stderr, /stage-seam/, 'the refusal must say where the op IS dispatched from');
+  assert.doesNotMatch(r.stderr, /unknown op/, 'an op that plainly exists must not be reported as a typo');
+});
+
+test('#682 cold-5: `init` is still a command-line op and still reaches BOTH axes', async () => {
+  // The removal must not narrow what shipped. Two axes is deliberate for
+  // `init` (ADR-0024): a repo declaring a platform and an engine separately
+  // gets both harnesses configured from one command.
+  assert.ok(CLI_OPS.includes('init'));
+
+  const seen = [];
+  await dispatch('fake-a', 'init', ['x'], { backendLoader: async () => ({ init: async () => { seen.push('a'); } }) });
+  assert.deepEqual(seen, ['a'], '`init` still routes to the backend unchanged');
 });

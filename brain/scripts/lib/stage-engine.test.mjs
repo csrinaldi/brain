@@ -9,7 +9,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveStageEngine, COLD_REVIEW_STAGE } from './stage-engine.mjs';
+import {
+  resolveStageEngine, COLD_REVIEW_STAGE, assertRoutableStage, SDD_LIFECYCLE_STAGES,
+} from './stage-engine.mjs';
 import { migrations } from '../../core/config-migrations.mjs';
 
 const routed = (entry) => ({ sdd: { map: { [COLD_REVIEW_STAGE]: entry } } });
@@ -83,4 +85,34 @@ test('#323: sdd.map ships EMPTY — a default entry would spawn an engine nobody
   // two indistinguishable states.
   const versions = migrations.map((m) => m.version);
   assert.equal(new Set(versions).size, versions.length, 'no version may be reused');
+});
+
+// ── A non-stage is not "a stage outside the lifecycle" (#682, cold-5's tail) ──
+//
+// Found while measuring judgment:cold-5, not reported by it. The comment above
+// `VALID_OPS` calls this guard the executable form of ADR-0019's boundary —
+// "refuses that case in code rather than promising it in a comment" — and it
+// compared only against the lifecycle list, so `undefined` was simply "not a
+// lifecycle stage" and passed. That is what let `runStage('cold-review', p)`
+// get past the one check that should have stopped it: destructuring a string
+// left `stage` undefined, this waved it through, and the refusal that finally
+// came was the prompt check reporting `stage "undefined"` — a true message
+// about the wrong problem.
+
+test('#682 cold-5: assertRoutableStage REFUSES a non-stage, not just a lifecycle one', () => {
+  for (const notAStage of [undefined, null, '', '   ', 42, {}, []]) {
+    assert.throws(
+      () => assertRoutableStage(notAStage),
+      /is not a stage name/,
+      `${JSON.stringify(notAStage)} passed — a caller that lost its argument reads as routable`
+    );
+  }
+});
+
+test('#682 cold-5: a real routable stage still passes, and a lifecycle stage still refuses', () => {
+  assert.doesNotThrow(() => assertRoutableStage(COLD_REVIEW_STAGE));
+  for (const stage of SDD_LIFECYCLE_STAGES) {
+    assert.throws(() => assertRoutableStage(stage), /may not be routed/,
+      'the ADR-0019 refusal must survive the new one — two different facts, two different messages');
+  }
 });

@@ -97,7 +97,52 @@ export function resolveHarness({ env = process.env, envVars = {}, config = {} } 
 // So growing this list needs no amendment. What ADR-0019 forbids is the SDD
 // artifact LIFECYCLE forking per harness, and `assertRoutableStage` refuses that
 // case in code rather than promising it in a comment (#682 slice B, ADR-0033).
-export const VALID_OPS = ['init', 'run-stage'];
+// ── ONE DECLARATION, TWO SURFACES (#682, judgment:cold-5) ───────────────────
+//
+// `dispatch()` is reached two ways and they are NOT the same surface:
+//
+//   programmatically — `stage-seam.mjs` calls `dispatch(engine, 'run-stage',
+//                      [{stage, prompt, model, cwd, credentialEnv}])`, ONE
+//                      options object, and READS the `{ok, reason}` it returns.
+//   from argv        — this file's `isMain` block, written when `init` was the
+//                      only op: `process.argv.slice(3)`, raw strings, result
+//                      discarded, and the op run on BOTH axes.
+//
+// `run-stage` was in one list, so adding it to `dispatch` published it on the
+// command line too. MEASURED on the shipped tree:
+//
+//   $ node harness/cli.mjs run-stage cold-review "review the diff"
+//   → exit 0, no output
+//
+// `dispatch` spreads its args, so the backend got `runStage('cold-review',
+// 'review the diff')` — two positionals where the contract is one object.
+// Destructuring a STRING yields `undefined` for every field, `runStage`
+// returned `{ok: false, reason: 'no prompt for stage "undefined" …'}`, and the
+// entry point threw the answer away. **You ask it to run a stage, it does not
+// run one, and it reports success in silence.** That is #552's fold — "it
+// broke" collapsed into "there was nothing to do" — in the entry point of the
+// very op this slice added to prevent it.
+//
+// THE FIX IS THE SURFACE, NOT THE PARSING. There is no coherent argv spelling
+// for this op: its payload is a PROMPT built by `buildColdReviewPrompt()` from
+// the reader's own constants, plus a cwd and a credential scrub-list. A human
+// typing it would have to paste a generated document as a shell argument. The
+// op is not a CLI op and never was — it leaked onto the command line because
+// one list served both readers.
+//
+// So the classification lives with the op instead of in a second list that
+// could drift from the first. Adding an op means answering `cli:` for it;
+// there is no default, and no list to forget to update.
+const OPS = Object.freeze([
+  { name: 'init', cli: true },
+  { name: 'run-stage', cli: false },
+]);
+
+/** Every op `dispatch()` accepts — the programmatic surface. */
+export const VALID_OPS = OPS.map((o) => o.name);
+
+/** The subset the argv entry point exposes. Derived, never respelled. */
+export const CLI_OPS = OPS.filter((o) => o.cli).map((o) => o.name);
 
 // Normalize hyphenated op to camelCase function name.
 // e.g. 'feature-checkpoint' → 'featureCheckpoint'
@@ -175,19 +220,49 @@ if (isMain) {
 
   const op = process.argv[2];
   if (!op) {
-    console.error(`harness/cli: missing <op>. Valid ops: ${VALID_OPS.join(', ')}`);
+    console.error(`harness/cli: missing <op>. Valid ops: ${CLI_OPS.join(', ')}`);
     process.exit(1);
   }
 
-  if (!VALID_OPS.includes(op)) {
-    console.error(`harness/cli: unknown op '${op}'. Valid ops: ${VALID_OPS.join(', ')}`);
+  // CLI_OPS, NOT VALID_OPS — see the OPS table above. A programmatic op named
+  // here gets its own refusal rather than the generic one, because "unknown op"
+  // about an op that plainly exists sends the reader looking for a typo.
+  if (!CLI_OPS.includes(op)) {
+    const known = VALID_OPS.includes(op);
+    console.error(
+      known
+        ? `harness/cli: '${op}' is not a command-line op. It is dispatched programmatically ` +
+          `(brain/scripts/harness/stage-seam.mjs) because its payload is a generated prompt, ` +
+          `not something argv can carry. Command-line ops: ${CLI_OPS.join(', ')}`
+        : `harness/cli: unknown op '${op}'. Valid ops: ${CLI_OPS.join(', ')}`,
+    );
     process.exit(1);
   }
 
   try {
-    await dispatch(platform, op, process.argv.slice(3));
+    // THE ANSWER IS READ, and today nothing answers. `init` returns undefined,
+    // so this branch is unreachable on the shipped tree — stated plainly rather
+    // than left to look like a tested path. It is here because the alternative
+    // is a discard that becomes wrong SILENTLY the day a command-line op starts
+    // answering, which is exactly how `run-stage` shipped broken: `dispatch`
+    // itself discarded its result for as long as `init` was the only op, and
+    // that was harmless right up until it was not.
+    //
+    // `undefined` stays success. Only an explicit `{ok: false}` is a failure —
+    // an op that answers nothing has not failed at anything.
+    const results = [await dispatch(platform, op, process.argv.slice(3))];
     if (engine !== platform) {
-      await dispatch(engine, op, process.argv.slice(3));
+      // BOTH AXES, deliberately, and only `init` reaches here now. A repo can
+      // declare a platform and an engine separately (ADR-0024), and `init` must
+      // land in both: that is what makes a repo running `antigravity` + a
+      // `gentle-ai` engine get both harnesses configured from one command.
+      results.push(await dispatch(engine, op, process.argv.slice(3)));
+    }
+
+    const failed = results.find((r) => r && r.ok === false);
+    if (failed) {
+      console.error(`harness/cli: ${op}() failed — ${failed.reason ?? 'no reason given'}`);
+      process.exit(1);
     }
   } catch (err) {
     console.error(`harness/cli: ${op}() failed — ${err.message}`);

@@ -49,6 +49,28 @@ export const SDD_LIFECYCLE_STAGES = Object.freeze(['proposal', 'spec', 'design',
  * @throws {Error} when the stage is one of the four
  */
 export function assertRoutableStage(stage) {
+  // A NON-STAGE IS REFUSED FIRST, and it used to pass (#682, found while
+  // measuring judgment:cold-5). This guard is the executable form of ADR-0019's
+  // boundary — the comment above `VALID_OPS` says so in as many words — and it
+  // only ever compared against the lifecycle list, so `undefined`, `null` and
+  // `''` were all "not a lifecycle stage" and sailed through.
+  //
+  // That is how the argv path got as far as it did: `runStage('cold-review', p)`
+  // destructures a STRING, every field lands `undefined`, and the one thing that
+  // should have refused an unnamed stage waved it past. What refused it instead
+  // was the prompt check, two lines later, reporting `stage "undefined"` — a
+  // true message about the wrong problem.
+  //
+  // "Not a lifecycle stage" and "not a stage at all" are different facts, and a
+  // guard that answers the same thing to both reports a check it never made.
+  if (typeof stage !== 'string' || stage.trim() === '') {
+    throw new Error(
+      `stage-engine: ${JSON.stringify(stage)} is not a stage name. Refusing rather than ` +
+      'treating it as routable: an unnamed stage is not a stage outside the lifecycle, it is ' +
+      'a caller that lost its argument, and passing it here sends an engine to run nothing.'
+    );
+  }
+
   if (SDD_LIFECYCLE_STAGES.includes(stage)) {
     throw new Error(
       `stage-engine: "${stage}" is an SDD lifecycle stage and may not be routed to an engine. ` +
