@@ -70,14 +70,31 @@ Carried here from #682, where it was declared orphan by the tracker's own `tasks
 never given a task in any slice.
 
 - **WHEN** `reviewer.convergence.maxRounds` is set
-  **THEN** it bounds the produce→challenge rounds for a single run, independently of
-  §7's `rev >= 3` bound, which counts posted revisions and is a different quantity.
+  **THEN** it bounds the PRODUCE rounds for a single run, independently of §7's
+  `rev >= 3` bound, which counts posted revisions and is a different quantity.
 - **WHEN** it is absent
   **THEN** the bound in force today applies, unchanged.
 
 Naming the two bounds separately is the point: one limits how long a single run argues
 with itself, the other limits how many times a PR may be re-reviewed. Conflating them is
 how a run either loops or stops early for the wrong reason.
+
+**This clause said "the produce→challenge rounds" and the implementation never matched
+it** — #682's own cold review found the gap (`judgment:cold-5`) and measured it: with
+`maxRounds: 4` a run makes **4 produce calls and 1 challenge**. The wording is corrected
+here rather than the code, and that is a ruling with a reason:
+
+The bound exists so a single run cannot loop. The only thing in a run that CAN loop is
+`gatherInferentialInputs`, which calls the generator until it converges or hits the
+bound. `applyCausalAdmission` is a straight-line call — `evaluateRefuter` runs once over
+the blocking set. Bounding it at N would not make anything safer; it would mean *calling
+it N times*, paying N challenger costs to challenge the same findings and inviting N
+different answers about one claim.
+
+So the quantity the key controls is the quantity that needed controlling, and the phrase
+"produce→challenge rounds" described a loop this design does not have. A future
+challenger that genuinely iterates would change that, and it should change this clause
+too — deliberately, with its own measurement.
 
 ## Not in this spec
 

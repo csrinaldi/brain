@@ -1084,3 +1084,48 @@ test('#682 cold-6: an sdd.map entry naming no engine refuses OUT LOUD, not as a 
   assert.ok(named.length > 0, 'and it must reach the operator on the error channel');
   assert.match(named.join('\n'), /names no engine/, 'naming the key that is wrong, so there is something to fix');
 });
+
+test('#682 cold-5: maxRounds bounds the PRODUCE loop — the challenger still runs exactly once', async () => {
+  // THE RULING, GIVEN AN ORACLE. REQ-682-5 used to say the key bounds
+  // "produce→challenge rounds"; the implementation bounds produce only, and the
+  // requirement was corrected rather than the code — the bound exists so a run
+  // cannot loop, and applyCausalAdmission is a straight-line call, so bounding
+  // it at N would buy no safety and pay N challenger costs to challenge the same
+  // findings.
+  //
+  // A prose ruling with nothing reading it is the defect this whole ticket is
+  // about, so it is asserted: whoever later "fixes" the mismatch by looping the
+  // challenger has to face this test and the reason attached to it.
+  let produces = 0;
+  let challenges = 0;
+
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'], log: () => {}, error: () => {},
+    ...deps({
+      config: {
+        reviewer: {
+          inferential: { enabled: true, challenger: { axis: 'same-model' } },
+          convergence: { maxRounds: 4 },
+        },
+      },
+      protocol: 'brain-review/2',
+      generate: async ({ round }) => {
+        produces += 1;
+        // Distinct per round, so the loop cannot converge early and hide the count.
+        return [{ id: `R${round}`, severity: 'blocker', evidence: `round ${round}`, cites: 'REQ-A' }];
+      },
+      refuterRunner: async (blockers) => {
+        challenges += 1;
+        return { outcomes: blockers.map((f) => ({ id: f.id, outcome: 'inconclusive', rationale: 'x' })) };
+      },
+    }),
+  });
+
+  assert.equal(code, 0);
+  assert.equal(produces, 4, 'the bound reaches the produce loop — that is the quantity the key controls');
+  assert.equal(
+    challenges, 1,
+    'and the challenger runs ONCE. Four challenges of the same findings is cost, not safety, and it ' +
+    'invites four different answers about one claim'
+  );
+});

@@ -27,6 +27,21 @@
 // applies, UNCHANGED", which means the default cannot be a round number somebody
 // thought was nicer.
 //
+// AND THE KEY BOUNDS THE PRODUCE ROUNDS, NOT A PRODUCE→CHALLENGE PAIR. This file
+// stated the measurement above correctly and then bounded only the first half of
+// it, while REQ-682-5 said "produce→challenge rounds" — the header and the
+// requirement it cited did not describe the same loop. #682's own cold review
+// found it (`judgment:cold-5`) and measured it: `maxRounds: 4` yields 4 produce
+// calls and 1 challenge.
+//
+// The REQUIREMENT was corrected, not the code, and the reason is what the bound
+// is FOR. It exists so a run cannot loop, and the only thing in a run that CAN
+// loop is the produce loop below; `applyCausalAdmission` is a straight-line call
+// that challenges the blocking set once. Bounding it at N would not make anything
+// safer — it would pay N challenger costs to challenge the same findings and
+// invite N different answers about one claim. A challenger that genuinely
+// iterates would change that, and would have to change REQ-682-5 with it.
+//
 // AND WITH TODAY'S TRANSPORT, A HIGHER BOUND CONVERGES ON ROUND 2. The artifact is
 // a static file: `makeArtifactGenerate` reads the same `cold-review.md` every
 // round, so round 2 produces the same findings, every one of them is a duplicate,
