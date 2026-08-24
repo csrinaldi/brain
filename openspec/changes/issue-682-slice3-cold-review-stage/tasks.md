@@ -836,6 +836,81 @@ to re-derive why they are not pending:
   raw and leaves the waiver to a human. The gate passes on the label; the
   reviewer refuses to read it. Both are correct at once.
 
+## Slice E — the second cold review, on `2149cd1`
+
+C.5 ran again over the whole PR once slice D closed. Verdict REVISE, 7 findings.
+The first is the most serious thing this slice produced, and it was **refuted by
+the same run that found it** — a refutation that measured the wrong path.
+
+- [x] E.1 **`judgment:cold-1` — a backend importing the dispatcher deadlocked the
+      SHIPPED bootstrap path.** `claude.mjs`'s `import { defaultRun } from
+      './agent-runtime.mjs'` (new in B.3) closed a cycle: `agent-runtime.mjs`
+      imported `resolvePlatform` from `../cli.mjs`, and `cli.mjs` dispatches to
+      backends from inside its own top-level await, so the dynamic import
+      re-entered a module still evaluating and the graph never settled. Fixed at
+      `9ffe973`.
+
+      **Measured on one tree, one environment variable apart:**
+
+      | command | exit | `.claude/settings.json` |
+      |---|---|---|
+      | base `71a7abd`, `AGENT_PLATFORM=claude … init` | 0 | written |
+      | `2149cd1`, same command | **13** | **nothing** |
+      | `2149cd1`, WITHOUT the variable | 0 | — resolves to `antigravity` |
+
+      `bootstrap.sh:281` runs exactly this command, so every consumer configuring
+      `claude` — **which is every repo that would route this slice's stage** —
+      got no settings file.
+
+      **THE REFUTATION MEASURED THE WRONG PATH, and this is the part worth
+      keeping.** The same cold read that posted the blocker then refuted it on
+      three probes, all of which miss the condition: two ran on `antigravity`
+      (its own output says *"backend 'antigravity' does not implement op
+      'run-stage'"*), so `claude.mjs` was never loaded and no cycle existed; the
+      third imported `claude.mjs` standalone, which resolves — **ESM tolerates
+      cycles with a partial namespace; what it cannot do is settle one re-entered
+      through a SUSPENDED top-level await.** So the obvious probe reports health
+      and only the real dispatch path reproduces. Accepting the refutation would
+      have shipped a broken bootstrap with the confidence of a finding "refuted
+      by execution". This is what `refuter_outcome: routed:human` is for.
+
+      **No test here could have seen it, structurally.** Every `dispatch` test in
+      `cli.test.mjs` injects `backendLoader`, so the REAL dynamic import never
+      happens and the cycle cannot appear. Faking the loader is correct for
+      testing dispatch — it just means those tests say nothing about the module
+      graph, which is a second property and needs a second oracle. The new one
+      walks the static import graph of every backend and refuses any edge
+      reaching the dispatcher: cheap, deterministic, no child process, and it
+      states the invariant rather than the instance.
+
+      One mutation, and it is two-sided: restoring the edge kills the new test
+      AND puts the real `init` back to exit 13. The oracle tracks the failure
+      rather than a proxy for it.
+
+## Still open from the second cold review
+
+Verified nothing below yet — listed so the count is visible rather than implied.
+7 findings: 1 closed (E.1), 4 to assess, 2 expected and correct.
+
+- `judgment:cold-2` (blocker) — `defaultRun` spawns with no `env`, so the engine
+  inherits `process.env` whole, including `BRAIN_REVIEWER_TOKEN`. ADR-0033 says
+  the producer holds no credential and only a sentence in the prompt enforces it.
+- `judgment:cold-3` (correction) — the pre-spawn `remove()` sits below the
+  routing check, so D.5's invariant holds only for ROUTED runs; and it runs
+  before the worktree refusal, so a run that never spawns still destroys the
+  previous artifact without saying so.
+- `judgment:cold-4` (correction) — `.gitignore` is not in `package.json`'s
+  `files`, so the artifact rule holds in this repo and in no consumer.
+- `judgment:cold-5` (correction) — `run-stage` is now reachable from the argv
+  entry point, which was written for `init`: raw string args, a discarded
+  `{ok, reason}`, and the op running on both axes.
+- `budget`, `tier2-frontier` — expected and correct, as before.
+
+Also raised in the accompanying cold read, not in the verdict: `findingKey`'s
+catch collapses unserialisable findings together, which DROPS the second one —
+`judgment:cold-2`'s defect returning inside its own fix, one layer down. The
+conservative direction for an uncomputable key is to treat the finding as FRESH.
+
 ## Not in this change
 
 - `same-model` / `cross-family` axes.
