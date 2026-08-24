@@ -607,6 +607,55 @@ itself: a declared value with no reader. Tenth, eleventh and twelfth occurrence.
       row is what earns the new test its place beside them: order-normalisation
       is a property `findingKey` introduced, and nothing else exercises it.
 
+- [x] D.4 **`judgment:cold-3` — the engine read the operator's tree, not the cold
+      checkout.** ADR-0033 names the producer's load-bearing property as *"the
+      subagent reads a cold worktree and writes a file"*, and design.md D6 says
+      the generator reads the diff from that worktree. It got `root`. cold-boot
+      computed `worktreePath`, handed it to `gatherInferentialInputs` — whose
+      closure declares no parameters and ignores every coordinate it is given —
+      and handed it to nothing else. Fixed at `550c746`.
+
+      **The divergence was silent, and that is what made it dangerous.**
+      `git diff BASE...HEAD` still resolves in the operator's tree, because
+      cold-boot fetched both shas into the shared object db. So the RANGE was
+      right and the file contents were whatever was on disk — an arbitrary
+      branch with arbitrary uncommitted changes, reviewed under a verdict that
+      binds itself to `boot.headSha`.
+
+      **The read surface and the write target are different places, and the
+      finding does not say so.** Pointing the engine's cwd at the worktree
+      without moving the artifact lands the findings inside a throwaway
+      checkout, where `artifactDeps` does not look — and the presence check then
+      reports *"the engine exited cleanly but wrote no artifact"* about a file
+      the engine wrote perfectly. Acting on the finding as written would have
+      traded one silent wrong answer for a loud one. The prompt now renders the
+      path ABSOLUTE into `root`: reads cold, writes where the reader looks.
+      `artifactPathFor` stays the one source for the location; `artifactRoot`
+      changes only its spelling.
+
+      **No worktree is a REFUSAL.** Falling back to `root` is the defect, and it
+      produces a well-formed verdict over the wrong tree. Same move as
+      `assertRoutableStage`: a property an ADR names is only as good as the
+      thing that keeps it true.
+
+      **A test had PINNED the defect.** `run-cold-review-stage.test.mjs`'s
+      composition test asserted `a.cwd === root` and had done so for the whole
+      slice — a test holds the wrong behaviour exactly as firmly as the right
+      one, and reads exactly as convincing. It asserts the worktree now.
+
+      Four mutations, full suite each, tree reverted after every one:
+
+      | mutation | what dies |
+      |---|---|
+      | `cwd: root` again | the composition test + the split test |
+      | delete the refusal, fall back silently | the refusal test alone |
+      | artifact path relative again | the split test — the artifact lands in the worktree and the reader calls it missing |
+      | `cli.mjs` stops passing `boot.worktreePath` | all six C.2a/C.3 composition tests |
+
+      The last row is the production-glue axis this ticket has now needed three
+      times (A.3, C.1's Q6, here): wiring that no test drives is wiring that can
+      be deleted green.
+
 ## Still open from C.5's verdict
 
 **The count reconciles, and the first version of this section did not.** It
@@ -620,9 +669,9 @@ is arithmetic:
 | | |
 |---|---|
 | the posted verdict | **11** findings |
-| closed (D.1, D.2, D.3) | `cold-4`, `cold-9`, `cold-2` — 3 |
-| open, below | `cold-1`, `cold-3`, `cold-5`, `cold-6`, `cold-7`, `cold-8`, `tier2-frontier`, `budget` — 8 |
-| | 3 + 8 = **11** ✓ |
+| closed (D.1–D.4) | `cold-4`, `cold-9`, `cold-2`, `cold-3` — 4 |
+| open, below | `cold-1`, `cold-5`, `cold-6`, `cold-7`, `cold-8`, `tier2-frontier`, `budget` — 7 |
+| | 4 + 7 = **11** ✓ |
 
 Every one below is CONFIRMED unless it says otherwise, and none is started:
 
@@ -630,9 +679,6 @@ Every one below is CONFIRMED unless it says otherwise, and none is started:
   a bare `exists`, so a stale artifact from a previous round passes it. Nothing
   unlinks before the spawn. Re-review is the normal case (§7 counts revisions
   precisely because it happens).
-- `judgment:cold-3` (blocker) — **confirmed by reading.** `boot.worktreePath` is
-  computed, handed to `gatherInferentialInputs`, and consumed by nothing; the
-  engine reads the operator's tree while the verdict binds itself to the PR head.
 - `judgment:cold-5` (correction) — **confirmed by reading.** The loop is at
   `cli.mjs:660`, `applyCausalAdmission` at `:748` — outside and after it. With
   `maxRounds: 3` an operator gets three produces and one challenge, while
