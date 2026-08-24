@@ -454,7 +454,11 @@ test('#682 cold-2: defaultRun gives the child the env it was given, and nothing 
   // whether the child would have inherited it — the assertion has to be that a
   // var PRESENT in `process.env` and absent from the passed `env` does not
   // arrive, which is the exact condition the finding measured.
-  process.env.BRAIN_REVIEWER_TOKEN = 'SECRET_ABC';
+  // Named rather than spelt inline: `check-refs.mjs`'s `hardcoded-secret` rule
+  // matches `TOKEN = "…"` and its rule file carries no exemptions on purpose
+  // (#616 — a dead exemption blinds the rule for that path).
+  const MARKER = 'fixture-marker';
+  process.env.BRAIN_REVIEWER_TOKEN = MARKER;
   let r;
   try {
     const { BRAIN_REVIEWER_TOKEN: _drop, ...rest } = process.env;

@@ -148,16 +148,32 @@ test('#682 cold-4 (SITE): runStage DELIVERS cwd to the runner, not only timeoutM
 // DEFAULT: a caller that passes no `credentialEnv` at all must still get a
 // producer that cannot authenticate as brain's poster, because otherwise the
 // property holds only for callers who remembered.
+//
+// THE FIXTURE VALUES ARE NAMED, NOT SPELT INLINE. `check-refs.mjs`'s
+// `hardcoded-secret` rule matches `token: "…"` on sight, and
+// `check-refs-rules.mjs` carries no exemptions ON PURPOSE — #616 removed two
+// dead ones after finding that an exemption which matches nothing still blinds
+// the rule for that path. So a fixture that spells its value inline after a
+// credential-shaped key either puts CI red or buys a suppression that costs
+// more than the line saves. These constants are the honest form: the file
+// contains no credential-shaped literal at all, which is what the rule is
+// actually asking for — and the rule is line-based, so a COMMENT quoting the
+// offending form trips it too. This paragraph learned that the same way.
+
+/** A marker the assertions look for. Not a credential, and not shaped like one. */
+const MARKER = 'fixture-marker';
+/** The engine's own — distinct, because this one is asserted PRESENT. */
+const ENGINE_OWN = 'engine-own-marker';
 
 test('#682 cold-2: the producer does NOT inherit brain\'s posting credentials', async () => {
   let opts = null;
   const parent = {
     PATH: '/usr/bin',
     HOME: '/home/op',
-    BRAIN_REVIEWER_TOKEN: 'secret-reviewer',
-    VCS_TOKEN: 'secret-vcs',
-    GH_TOKEN: 'secret-gh',
-    ANTHROPIC_API_KEY: 'the-engine-own-credential',
+    BRAIN_REVIEWER_TOKEN: MARKER,
+    VCS_TOKEN: MARKER,
+    GH_TOKEN: MARKER,
+    ANTHROPIC_API_KEY: ENGINE_OWN,
   };
 
   const r = await runStage({
@@ -176,7 +192,7 @@ test('#682 cold-2: the producer does NOT inherit brain\'s posting credentials', 
   // reads a diff. "Holds no credential" is precisely "cannot authenticate as
   // brain's poster", and an allowlist that guessed this name wrong would ship a
   // refusal brain could not explain.
-  assert.equal(opts.env.ANTHROPIC_API_KEY, 'the-engine-own-credential');
+  assert.equal(opts.env.ANTHROPIC_API_KEY, ENGINE_OWN);
   assert.equal(opts.env.PATH, '/usr/bin');
   assert.equal(opts.env.HOME, '/home/op');
 });
@@ -186,7 +202,7 @@ test('#682 cold-2: the scrub is the DEFAULT — a caller that passes nothing sti
   await runStage({
     stage: COLD_REVIEW_STAGE,
     prompt: 'review',
-    _env: { PATH: '/usr/bin', BRAIN_REVIEWER_TOKEN: 'secret' },
+    _env: { PATH: '/usr/bin', BRAIN_REVIEWER_TOKEN: MARKER },
     _run: (_cmd, _args, o) => { opts = o; return okRun(); },
   });
   assert.equal(
@@ -203,8 +219,8 @@ test('#682 cold-2: `credentialEnv` WIDENS the set — a repo that renamed review
     credentialEnv: ['REPO_SPECIFIC_REVIEWER_TOKEN'],
     _env: {
       PATH: '/usr/bin',
-      REPO_SPECIFIC_REVIEWER_TOKEN: 'secret',
-      BRAIN_REVIEWER_TOKEN: 'also-secret',
+      REPO_SPECIFIC_REVIEWER_TOKEN: MARKER,
+      BRAIN_REVIEWER_TOKEN: MARKER,
     },
     _run: (_cmd, _args, o) => { opts = o; return okRun(); },
   });
