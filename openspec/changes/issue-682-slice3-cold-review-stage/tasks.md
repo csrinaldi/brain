@@ -699,6 +699,67 @@ itself: a declared value with no reader. Tenth, eleventh and twelfth occurrence.
       the engine's turn: clearing is correct and clearing late is a new defect,
       and the two are one line apart.
 
+- [x] D.6 **`judgment:cold-6` — two resolvers failed closed without saying so, and
+      one was never read.** Fixed at `6afe314`. Both halves, and the second is
+      the worse one.
+
+      **OUT LOUD.** `resolveConvergence` and `resolveStageEngine` threw from
+      inside `main()`, whose entry point is `process.exit(await main())` with no
+      outer catch. An operator's typo in `sdd.map` or `convergence.maxRounds`
+      surfaced as a raw `ERR_UNHANDLED_REJECTION`: a Node stack, no
+      `brain:review:` line, no verdict. **Measured: the injected error channel
+      received nothing.** The run failed closed either way — what was lost is
+      the message naming the key to fix, which is the whole point of failing
+      closed out loud rather than merely failing. Both are wrapped now, the way
+      `resolveJudgment` already was two hundred lines above.
+
+      **READ ON EVERY RUN.** `resolveConvergence` sat inside the branch that
+      runs when a transport IS configured, so a repo with none never validated
+      the key: `maxRounds: "three"` **RESOLVED WITH EXIT 0**, measured. The
+      refusal arrived the day someone routed the stage, not the day they wrote
+      the key — and config is wrong when it is WRITTEN.
+
+      **The existing C.1 test could not tell the two apart.** It asserted the
+      message by CATCHING a throw, which passes for a real refusal AND for the
+      unhandled rejection production actually got. It drives `main()` with an
+      error spy now and asserts exit 1 plus a `brain:review:` line.
+
+      Three mutations, full suite each, tree reverted after every one, and the
+      third is the one that made the pair honest:
+
+      | mutation | what dies |
+      |---|---|
+      | unwrap `resolveConvergence` | both C.1 refusal tests |
+      | make the stage wrapper rethrow | the `sdd.map` test alone |
+      | keep it wrapped but move it back INSIDE the `else` | the no-transport test ALONE |
+
+      The first cut of that middle row moved AND unwrapped in one mutation, so
+      it killed the same pair as the first and proved nothing about hoisting.
+      Splitting them is what gives each property its own oracle.
+
+- [x] D.7 **`judgment:cold-5` — the requirement and the loop it named were
+      different loops.** REQ-682-5 said `maxRounds` bounds *"the
+      produce→challenge rounds"*; the implementation bounds produce only, and
+      `convergence.mjs` stated the measurement correctly in its own header and
+      then bounded half of it. Measured through the real verb: **`maxRounds: 4`
+      yields 4 produce calls and 1 challenge.** Fixed at `bd8df2d`.
+
+      **THE REQUIREMENT IS CORRECTED, NOT THE CODE**, and that direction is the
+      ruling. The bound exists so a single run cannot loop. The only thing in a
+      run that CAN loop is `gatherInferentialInputs`; `applyCausalAdmission` is
+      a straight-line call that challenges the blocking set once. Bounding it at
+      N buys no safety — it pays N challenger costs to challenge the same
+      findings and invites N different answers about one claim.
+
+      **A prose ruling with nothing reading it is this ticket's own defect**, so
+      it is pinned: a test drives `main()` at `maxRounds: 4` and asserts 4
+      produces and exactly 1 challenge. One mutation — making the challenger run
+      once per round, which is what "fixing" the mismatch in the other direction
+      would look like — kills it. Whoever tries has to face the reason.
+
+      A challenger that genuinely iterates would change this, and would have to
+      change REQ-682-5 with it, deliberately and with its own measurement.
+
 ## Still open from C.5's verdict
 
 **The count reconciles, and the first version of this section did not.** It
@@ -712,27 +773,13 @@ is arithmetic:
 | | |
 |---|---|
 | the posted verdict | **11** findings |
-| closed (D.1–D.5) | `cold-4`, `cold-9`, `cold-2`, `cold-3`, `cold-1` — 5 |
-| open, below | `cold-5`, `cold-6`, `cold-7`, `cold-8`, `tier2-frontier`, `budget` — 6 |
-| | 5 + 6 = **11** ✓ |
+| closed (D.1–D.7) | `cold-4`, `cold-9`, `cold-2`, `cold-3`, `cold-1`, `cold-6`, `cold-5` — 7 |
+| open, below | `cold-7`, `cold-8`, `tier2-frontier`, `budget` — 4 |
+| | 7 + 4 = **11** ✓ |
 
-**No blockers remain open.** Every one below is CONFIRMED unless it says
-otherwise, and none is started:
+**No blockers remain, and no corrections.** What is left is two editorials, a
+frontier notice and a waiver. None is started:
 
-- `judgment:cold-5` (correction) — **confirmed by reading.** The loop is at
-  `cli.mjs:660`, `applyCausalAdmission` at `:748` — outside and after it. With
-  `maxRounds: 3` an operator gets three produces and one challenge, while
-  `convergence.mjs`'s own header defines the round as one produce plus one
-  challenge.
-- `judgment:cold-6` (correction) — **confirmed, measured, and the secondary half
-  is the worse one.** Through the real test harness: an unreadable
-  `sdd.map["cold-review"].engine` REJECTS with a raw `Error`, 0 lines on the
-  error channel, no `brain:review:` line. And `maxRounds: "3"` — a string, which
-  `resolveConvergence` is documented to refuse — **RESOLVES with exit 0**,
-  because the resolver sits inside the `else` branch and a repo with no
-  transport never reaches it. A bound the operator wrote, documented to fail
-  closed, that is never read. The thirteenth occurrence of this ticket's defect,
-  inside the key C.1 added to bound it.
 - `judgment:cold-7` (editorial) — the prompt embeds its worked example in a fence
   carrying `ARTIFACT_TAG`, and the reader hard-refuses an artifact with two such
   blocks. An engine that echoes the example burns a model call on a fail-closed
