@@ -471,6 +471,42 @@
 - [ ] C.6 Close **#682** and **#754**. #754 closes because the role stops being rewritten
       per launch: it is the stage's prompt.
 
+## Slice D — what the cold review found in the slice that built it
+
+C.5's verdict is REVISE: 11 findings, `escalate: human`. **Nine of them are about
+this slice's own code, and four were confirmed by reading it before any was
+touched.** They are tracked here rather than in the tasks that shipped the
+defects, because a task that already says `[x]` is not where a reader looks for
+what it got wrong.
+
+The pattern is the one this whole ticket is about, and it landed on the ticket
+itself: a declared value with no reader. Tenth, eleventh and twelfth occurrence.
+
+- [x] D.1 **`judgment:cold-4` — `defaultRun` dropped the `cwd` it was handed.**
+      `claude.mjs:114` has always called `_run(cmd, args, { cwd, timeoutMs })`;
+      `agent-runtime.mjs:79` destructured only `{ timeoutMs }`, so `spawnSync`
+      inherited the parent's directory. Production masked it — `cli.mjs:560`
+      makes `root === process.cwd()` when `deps.root` is unset — but `root` was
+      made an explicit parameter precisely so it could differ, and the day it
+      does, the engine reviews an unrelated tree, the artifact check finds
+      nothing, and the run reports *"the engine exited cleanly but wrote no
+      artifact"*: a true refusal with a false diagnosis. Fixed at `ac4c75b`.
+
+      **The oracle had to be the REAL runner, and that is the whole lesson.**
+      `run-stage.test.mjs:101` asserts `opts.timeoutMs` reaches the runner and
+      asserts nothing about the directory the child got — and it could not have:
+      it hands in a spy, and **a spy records the `cwd` it was GIVEN however the
+      real runner treats it.** Every caller-side test in the chain has that
+      shape, which is why four layers of correct threading and one drop at the
+      end stayed green. The new test spawns a child and asks it for
+      `process.cwd()`.
+
+      Two mutations, full suite each, tree reverted after both. Both died, and
+      they die on different halves: re-dropping `cwd` kills the directed
+      assertion; defaulting `cwd` to `'/'` kills *"an absent cwd still means
+      inherit"* — the property every `probeAgentRuntime` caller depends on and
+      the one a careless fix would have broken silently.
+
 ## Not in this change
 
 - `same-model` / `cross-family` axes.
