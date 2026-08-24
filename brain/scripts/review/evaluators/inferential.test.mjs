@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import {
   evaluateInferential, gatherInferentialInputs, shouldRun, sanitiseFinding,
   PRODUCES, CARRIED_FIELDS, ID_PREFIX, RENDERED_ALWAYS, RENDERED_AS_ANCHOR,
+  findingKey,
 } from './inferential.mjs';
 import { PRODUCES as TRANCHE_PRODUCES } from './tranche.mjs';
 import { unionControls, complementControls } from '../lib/controls.mjs';
@@ -353,4 +354,65 @@ test('#682 cold-2: a round that repeats ITSELF still converges — the dedup kee
   assert.equal(r.generated.length, 1, 'a repeated finding is one finding, whatever order its keys arrive in');
   assert.deepEqual(rounds, [1, 2], 'the loop must stop on the first round that produces nothing new, not run the bound out');
   assert.equal(r.rounds, 2);
+});
+
+// ── An uncomputable key is ABSENT, not shared (#682, the cold read's tail) ────
+//
+// `findingKey` returned `String(f)` on an unserialisable value, and a comment
+// called that "the conservative direction". MEASURED before the fix: two
+// DIFFERENT circular findings both keyed to "[object Object]", so the second
+// read as a duplicate and was dropped — two blockers in, one out, with
+// `failed: false` and no condition, count or log line to say so.
+//
+// D.3's `judgment:cold-2` returning one layer down inside its own fix: that one
+// dropped a finding because a producer reused an id, this one because a producer
+// emitted a value JSON cannot describe. Same deletion, same silence.
+
+function circular(id, evidence) {
+  const f = { id, severity: 'blocker', evidence_class: 'inferential', evidence, cites: 'REQ-1' };
+  f.self = f;
+  return f;
+}
+
+test('#682: findingKey reports NO KEY rather than a shared placeholder', () => {
+  const a = circular('A', 'first');
+  const b = circular('B', 'a different claim entirely');
+
+  assert.equal(findingKey(a), null, 'an uncomputable key must be absent, not a string that collides');
+  assert.equal(findingKey(b), null);
+
+  // And it stays TOTAL — the whole reason it exists. A throw here would make
+  // deduplication the thing that fails the review.
+  for (const weird of [undefined, () => {}, Symbol('x'), { n: 1n }, [circular('C', 'c')]]) {
+    assert.doesNotThrow(() => findingKey(weird), `findingKey threw on ${String(weird)}`);
+  }
+});
+
+test('#682: a finding with no computable key is FRESH, never deduplicated away', async () => {
+  const result = await gatherInferentialInputs({
+    deps: { generate: async () => [circular('A', 'first'), circular('B', 'a different claim entirely')] },
+  });
+
+  assert.equal(result.failed, false);
+  assert.equal(
+    result.generated.length, 2,
+    'a second unkeyable blocker was dropped — silently, which is why this needs an oracle rather than a comment'
+  );
+  // Bare ids: `uniqueId`'s `judgment:` prefix is applied downstream by
+  // `evaluateInferential`, not here. Asserted as measured rather than as assumed.
+  assert.deepEqual(result.generated.map((f) => f.id), ['A', 'B']);
+});
+
+test('#682: keyable findings still deduplicate — the fix must not disable convergence', () => {
+  // The other direction, and the one that would rot unnoticed: making every
+  // finding "fresh" would satisfy the test above and destroy the round loop.
+  const one = { id: 'A', severity: 'blocker', evidence: 'same' };
+  const same = { severity: 'blocker', evidence: 'same', id: 'A' };  // key order differs
+
+  assert.notEqual(findingKey(one), null);
+  assert.equal(
+    findingKey(one), findingKey(same),
+    'key ordering must still normalise — {a,b} and {b,a} are one finding'
+  );
+  assert.notEqual(findingKey(one), findingKey({ id: 'A', severity: 'blocker', evidence: 'different' }));
 });

@@ -134,8 +134,40 @@ export const ID_PREFIX = 'judgment:';
  * so `{a,b}` and `{b,a}` are one finding rather than two, and the whole thing
  * is guarded: no input can make deduplication the thing that fails the review.
  *
+ * `null` MEANS "NO KEY", NOT "SOME KEY" — and the difference cost a blocker.
+ *
+ * This used to return `String(f)` on an unserialisable value, with a comment
+ * calling the result "the conservative direction". It is the least conservative
+ * outcome available. MEASURED on the shipped code: two DIFFERENT circular
+ * findings both key to `"[object Object]"`, so the second reads as a duplicate
+ * and is dropped — two blockers in, one blocker out, `failed: false`, no
+ * condition, no count and no log line.
+ *
+ * That is D.3's `judgment:cold-2` returning one layer down INSIDE ITS OWN FIX.
+ * The id-keyed version dropped a second finding because a producer reused an
+ * id; this dropped one because a producer emitted a value JSON does not
+ * describe. Same deletion, same silence, different cause.
+ *
+ * And it is the exact failure this function's own docstring forbids: "no input
+ * can make deduplication the thing that fails the review" — deduplication was
+ * instead made the thing that DELETES a finding, which is strictly worse than
+ * failing, because failing is visible.
+ *
+ * So an uncomputable key is reported as ABSENT and the caller decides. The
+ * policy — an unkeyable finding is always FRESH — belongs at the dedupe site,
+ * not smuggled into a fallback value that looks like a real key. The cost is
+ * that genuinely-duplicate unkeyable findings accumulate across rounds, bounded
+ * by `maxRounds`; a duplicate blocker reaching a human beats a real one that
+ * does not.
+ *
+ * Whether a model can emit such a value through the shipped artifact reader is
+ * a separate question — parsed JSON carries no cycles and no BigInt, so today
+ * it cannot. That is not why this is written this way. This function exists
+ * precisely for input nobody predicted, and a guard whose failure mode is
+ * "silently delete a blocker" is worse than no guard at all.
+ *
  * @param {unknown} f
- * @returns {string}
+ * @returns {string|null} the content key, or `null` when none can be computed
  */
 export function findingKey(f) {
   const walk = (v) => {
@@ -146,10 +178,7 @@ export function findingKey(f) {
   try {
     return walk(f);
   } catch {
-    // Circular or otherwise unserialisable — unreachable from parsed JSON, and
-    // a stable fallback beats a throw. Such findings collapse together, which
-    // is the conservative direction for a value nothing downstream can read.
-    return String(f);
+    return null;
   }
 }
 
@@ -309,6 +338,12 @@ export async function gatherInferentialInputs({
     // that trusts a non-deterministic producer to label its claims uniquely.
     const fresh = produced.filter((f) => {
       const key = findingKey(f);
+      // NO KEY → ALWAYS FRESH. `null` is "this finding has no computable
+      // identity", which is not the same as "it is identical to the last one
+      // that also had none". Deduplicating on a shared placeholder deleted a
+      // second blocker in silence; keeping it lets `evaluateInferential` and a
+      // human decide, which is what an unreadable value deserves.
+      if (key === null) return true;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
