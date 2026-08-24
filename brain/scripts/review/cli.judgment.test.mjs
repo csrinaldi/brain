@@ -598,16 +598,49 @@ test('C.1: no convergence key means one round through the real verb', async () =
 });
 
 test('C.1: an unreadable maxRounds refuses the run rather than reviewing under the old bound', async () => {
-  const { code, body } = await run({
-    config: { reviewer: { inferential: { enabled: true }, convergence: { maxRounds: 'three' } } },
-    protocol: 'brain-review/2',
-    generate: async () => [{ id: 'x', severity: 'editorial', evidence: 'x' }],
-  }).catch((err) => ({ code: 'threw', body: err.message }));
+  // ASSERTED THROUGH THE ERROR CHANNEL, not by catching a throw (judgment:cold-6).
+  // The first cut wrapped this in `.catch(err => ...)` and asserted err.message,
+  // which passes for BOTH a real refusal and a raw ERR_UNHANDLED_REJECTION —
+  // and the raw one is what production got: `process.exit(await main())` has no
+  // outer catch, so the operator saw a Node stack, no `brain:review:` line, and
+  // no verdict. The run failed closed either way; what was lost is the only
+  // part of a refusal that helps anybody.
+  const errs = [];
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'], log: () => {}, error: (m) => errs.push(String(m)),
+    ...deps({
+      config: { reviewer: { inferential: { enabled: true }, convergence: { maxRounds: 'three' } } },
+      protocol: 'brain-review/2',
+      generate: async () => [{ id: 'x', severity: 'editorial', evidence: 'x' }],
+    }),
+  });
 
-  // Fail-closed, like `resolveStageEngine`: an operator who wrote the key asked
-  // for something, and quietly running the old bound reviews under a
-  // configuration they did not choose.
-  assert.match(String(body), /whole number of rounds/);
+  assert.equal(code, 1, 'an unreadable bound must refuse — quietly running the old one reviews under a config nobody chose');
+  const named = errs.filter((m) => m.includes('brain:review:'));
+  assert.ok(named.length > 0, 'the refusal must reach the operator on the error channel, not as a stack trace');
+  assert.match(named.join('\n'), /whole number of rounds/, 'and it must say what is wrong with the key');
+});
+
+test('C.1: the bound is validated even when NO transport is configured', async () => {
+  // The second half of judgment:cold-6, and the worse one. `resolveConvergence`
+  // used to sit inside the branch that runs when a transport IS configured, so
+  // in a repo with none the key was never read: `maxRounds: "three"` RESOLVED
+  // WITH EXIT 0, measured. The refusal arrived on the day someone routed the
+  // stage rather than the day they wrote the key — and config is wrong when it
+  // is WRITTEN, not when it is finally reached.
+  const errs = [];
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'], log: () => {}, error: (m) => errs.push(String(m)),
+    ...deps({
+      config: { reviewer: { inferential: { enabled: true }, convergence: { maxRounds: 'three' } } },
+      protocol: 'brain-review/2',
+      // no `generate`, so no transport — the state every repo is in before it
+      // routes the stage, and the one where this key went unread.
+    }),
+  });
+
+  assert.equal(code, 1, 'an unreadable bound must refuse whether or not a transport exists to use it');
+  assert.match(errs.join('\n'), /whole number of rounds/);
 });
 
 // ── C.2a — THE STAGE IS REACHABLE FROM THE VERB ─────────────────────────────
@@ -1026,4 +1059,28 @@ test('C.3: a failure refuses BEFORE the verdict is rendered, not after', async (
     lines.filter((l) => /protocol: brain-review/.test(l)).length, 0,
     'no verdict block may be rendered at all on a failed judgment half'
   );
+});
+
+test('#682 cold-6: an sdd.map entry naming no engine refuses OUT LOUD, not as a stack', async () => {
+  // Reproduced before the fix: this input REJECTED with a raw
+  // `Error: stage-engine: sdd.map["cold-review"] names no engine…` and the
+  // injected error channel received NOTHING — no `brain:review:` line at all.
+  // `process.exit(await main())` has no outer catch, so the operator got a Node
+  // stack and no verdict. Failing closed is not the same as saying why.
+  const errs = [];
+  const code = await main({
+    argv: ['--pr', '42', '--dry-run'], log: () => {}, error: (m) => errs.push(String(m)),
+    ...deps({
+      config: {
+        reviewer: { inferential: { enabled: true } },
+        sdd: { map: { 'cold-review': { engine: 42 } } },
+      },
+      protocol: 'brain-review/2',
+    }),
+  });
+
+  assert.equal(code, 1, 'a routed stage that cannot be resolved must refuse');
+  const named = errs.filter((m) => m.includes('brain:review:'));
+  assert.ok(named.length > 0, 'and it must reach the operator on the error channel');
+  assert.match(named.join('\n'), /names no engine/, 'naming the key that is wrong, so there is something to fix');
 });

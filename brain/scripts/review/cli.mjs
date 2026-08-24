@@ -520,6 +520,27 @@ export async function main(deps = {}) {
     return 1;
   }
 
+  // REQ-682-5's bound, resolved HERE rather than inside the branch that uses it
+  // (judgment:cold-6, second half). It used to live in the `else` that runs when
+  // a transport IS configured, so a repo with no transport never validated the
+  // key at all: `maxRounds: "3"` — a string `resolveConvergence` is documented
+  // to refuse — RESOLVED WITH EXIT 0, measured. The refusal arrived on the day
+  // someone routed the stage, not on the day they wrote the key, which is the
+  // wrong day: config is wrong when it is WRITTEN.
+  //
+  // Wrapped, for the same reason `resolveJudgment` above is: an uncaught throw
+  // from inside `main()` reaches `process.exit(await main())` as a raw
+  // ERR_UNHANDLED_REJECTION — a Node stack, no `brain:review:` line, and no
+  // verdict. It still fails closed, so what is lost is the operator-actionable
+  // message, which is the whole of what a refusal is for.
+  let maxRounds;
+  try {
+    ({ maxRounds } = resolveConvergence(config));
+  } catch (err) {
+    error(`brain:review: ${err.message}`);
+    return 1;
+  }
+
   // #682 round-1 review — `judgment.reason` had NO CONSUMER. It was computed on
   // every off path and read nowhere, so a repo that deliberately turned the
   // judgment half ON and got nothing was told nothing: `resolveJudgment` knew
@@ -592,20 +613,34 @@ export async function main(deps = {}) {
     // as `convergence.mjs` records. Moving the stage inside the loop would make
     // the bound buy real work and would multiply the model cost per review;
     // ADR-0033 decided the transport, not that.
-    const stageResult = deps.inferentialDeps
-      ? { routed: false }
-      : await runColdReviewStage({
-        config,
-        prNumber: args.pr,
-        baseRef: baseSha,
-        headRef: boot.headSha,
-        root,
-        // judgment:cold-3: the coordinate cold-boot computes so the reviewer
-        // never reads ambient state was passed to gatherInferentialInputs and
-        // to nothing else. The engine gets it now.
-        worktreePath: boot.worktreePath,
-        deps: deps.stageDeps ?? { runStage: makeRunStageSeam() },
-      });
+    // WRAPPED, for the reason `resolveJudgment` is (judgment:cold-6). The throw
+    // that reaches here is `resolveStageEngine`'s, on an `sdd.map` entry that
+    // names no engine — an operator's typo. Uncaught, it left `main()` as a raw
+    // ERR_UNHANDLED_REJECTION: a Node stack, no `brain:review:` line, and no
+    // verdict. Measured: the injected `error` channel received NOTHING. The run
+    // failed closed either way, so what was lost is the message that tells the
+    // operator which key to fix — which is the whole point of failing closed
+    // out loud rather than merely failing.
+    let stageResult;
+    try {
+      stageResult = deps.inferentialDeps
+        ? { routed: false }
+        : await runColdReviewStage({
+          config,
+          prNumber: args.pr,
+          baseRef: baseSha,
+          headRef: boot.headSha,
+          root,
+          // judgment:cold-3: the coordinate cold-boot computes so the reviewer
+          // never reads ambient state was passed to gatherInferentialInputs and
+          // to nothing else. The engine gets it now.
+          worktreePath: boot.worktreePath,
+          deps: deps.stageDeps ?? { runStage: makeRunStageSeam() },
+        });
+    } catch (err) {
+      error(`brain:review: ${err.message}`);
+      return 1;
+    }
 
     // A ROUTED STAGE THAT FAILED IS NOT A REPO WITHOUT A TRANSPORT. Refused here
     // rather than fallen through, because falling through reaches
@@ -648,18 +683,11 @@ export async function main(deps = {}) {
         'was produced, and the inferential control was NOT applied to this verdict.'
       );
     } else {
-      // REQ-682-5's bound, resolved from the config and read HERE — the only
-      // place that knows a run is starting. It is NOT §7's `rev >= 3`, which is
-      // read from `priorRevCount` further down and counts posted revisions on
-      // this PR rather than produce rounds inside this run. `convergence.mjs`
-      // holds the argument for why the two must not be one number read twice;
-      // this line is where the distinction is either kept or lost.
-      //
-      // Throws on an unreadable key, and that is the same fail-closed shape
-      // `resolveStageEngine` uses: an operator who wrote `maxRounds` asked for
-      // something, and quietly running the old bound would run a review they did
-      // not configure.
-      const { maxRounds } = resolveConvergence(config);
+      // `maxRounds` is resolved above, on every run. It is NOT §7's `rev >= 3`,
+      // which is read from `priorRevCount` further down and counts posted
+      // revisions on this PR rather than produce rounds inside this run;
+      // `convergence.mjs` holds the argument for why the two must not be one
+      // number read twice.
 
       const inferentialInputs = await gatherInferentialInputs({
         worktreePath: boot.worktreePath,
