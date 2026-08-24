@@ -1059,21 +1059,127 @@ the same run that found it** — a refutation that measured the wrong path.
       cold-review artifact appears on EVERY routed review, so that justification
       no longer covers the whole problem. Posted there rather than acted on.
 
+- [x] E.5 **`judgment:cold-5` — `run-stage` was never a command-line op.**
+      MEASURED on the shipped tree before anything was touched:
+
+      ```
+      $ node harness/cli.mjs run-stage cold-review "review the diff"
+      → exit 0, no output
+      ```
+
+      **One list served two surfaces.** `dispatch()` is reached programmatically
+      by `stage-seam.mjs` with ONE options object whose `{ok, reason}` it reads,
+      and from argv by an entry point written when `init` was the only op: raw
+      `process.argv.slice(3)` strings, result discarded, op run on both axes.
+      Adding `run-stage` to `VALID_OPS` published it on the command line too.
+
+      So the backend got `runStage('cold-review', 'review the diff')` — two
+      positionals where the contract is one object. Destructuring a STRING
+      yields `undefined` for every field, `runStage` returned `{ok: false,
+      reason: 'no prompt for stage "undefined" …'}`, and the entry point threw
+      the answer away. **You ask it to run a stage, it does not run one, and it
+      reports success in silence** — #552's fold in the entry point of the very
+      op this slice added to prevent it.
+
+      **THE FIX IS THE SURFACE, NOT THE PARSING.** There is no coherent argv
+      spelling: the payload is a prompt GENERATED from the reader's constants,
+      plus a cwd and a credential scrub-list. A human would have to paste a
+      document as a shell argument. One frozen `OPS` table now carries the
+      classification and both `VALID_OPS` and `CLI_OPS` derive from it — adding
+      an op means answering `cli:` for it, no default, no second list to forget.
+      A programmatic op named on the CLI gets its own refusal: *"unknown op"*
+      about an op that plainly exists sends the reader hunting a typo.
+
+      **THE DISCARD IS GUARDED AND THE GUARD IS UNREACHABLE — said, not hidden.**
+      Nothing answers today, so the branch cannot fire; the comment says so
+      rather than letting it read as a tested path, and **the mutation that
+      removes it SURVIVES, which is the honest confirmation.** It is there
+      because the discard becomes wrong SILENTLY the day a CLI op starts
+      answering — precisely how this shipped: `dispatch` discarded its own
+      result for as long as `init` was the only op, and that was harmless right
+      up until it was not.
+
+      Both axes stay for `init`, deliberately: ADR-0024 lets a repo declare a
+      platform and an engine separately, and one command must configure both.
+
+      **FOUND WHILE MEASURING, NOT REPORTED BY THE FINDING:**
+      `assertRoutableStage` accepted `undefined`, `null` and `''`. The comment
+      above `VALID_OPS` calls it the executable form of ADR-0019's boundary —
+      *"refuses that case in code rather than promising it in a comment"* — and
+      it compared only against the lifecycle list, so **"not a lifecycle stage"
+      and "not a stage at all" got the same answer.** That is what let the argv
+      path get as far as it did; the refusal that finally came was the prompt
+      check reporting `stage "undefined"`, a true message about the wrong
+      problem.
+
+      | mutation | killed by |
+      |---|---|
+      | `run-stage` republished on the CLI | 3 tests |
+      | entry point validates `VALID_OPS` again (the original leak) | the child-process test ALONE |
+      | `assertRoutableStage` accepts a non-stage again | the non-stage test |
+      | the ADR-0019 lifecycle refusal removed | 2 tests, incl. B.3's |
+      | the result-discard restored | **survives — as declared** |
+
+      The argv oracle spawns a REAL child process. The `isMain` block is
+      top-level code with no injectable seam, so every in-process test says
+      nothing about it — which is exactly why the defect shipped, and why the
+      second mutation above is killed by that test and no other.
+
+- [x] E.6 **`findingKey` deleted a second blocker in silence.** Raised in the
+      cold read accompanying the second review, not in its verdict.
+
+      It returned `String(f)` on an unserialisable finding, under a comment
+      calling that *"the conservative direction for a value nothing downstream
+      can read"*. It is the least conservative outcome available. MEASURED
+      through the real `gatherInferentialInputs`:
+
+      ```
+      two DIFFERENT circular findings → both key to "[object Object]"
+      generate() returns 2 blockers   → generated.length === 1
+                                      → failed: false, no condition, no count
+      ```
+
+      **D.3's `judgment:cold-2` returning one layer down INSIDE ITS OWN FIX.**
+      The id-keyed version dropped a second finding because a producer reused an
+      id; this dropped one because a producer emitted a value JSON does not
+      describe. Same deletion, same silence, different cause. It is also the
+      exact failure the function's own docstring forbids — *"no input can make
+      deduplication the thing that fails the review"* — with deduplication made
+      the thing that DELETES a finding instead, **which is strictly worse than
+      failing, because failing is visible.**
+
+      `null` now means "no key", the caller treats an unkeyable finding as
+      FRESH, and the policy sits at the dedupe site rather than smuggled into a
+      fallback value shaped like a real key. Cost: genuinely-duplicate unkeyable
+      findings accumulate across rounds, bounded by `maxRounds`. A duplicate
+      blocker reaching a human beats a real one that does not.
+
+      **Reachability is deliberately NOT the argument.** Parsed JSON carries no
+      cycles and no BigInt, so the shipped artifact reader cannot produce one
+      today. This function exists precisely for input nobody predicted, and a
+      guard whose failure mode is "silently delete a blocker" is worse than no
+      guard.
+
+      | mutation | killed by |
+      |---|---|
+      | the shared placeholder restored | the 2 new tests |
+      | every finding treated as fresh (the over-correction) | 3 tests, incl. cold-2's own convergence oracle |
+
+      The second row is why the converse is pinned: making everything fresh
+      would satisfy the drop test and quietly destroy the round loop.
+
 ## Still open from the second cold review
 
-7 findings: 4 closed (E.1, E.2, E.3, E.4 — the last ANSWERED, bound to #414),
-1 to assess, 2 expected and correct.
+**All 7 addressed:** 4 closed by change (E.1, E.2, E.3, E.5), 1 ANSWERED and
+bound to #414 (E.4), 2 expected and correct (`budget`, `tier2-frontier`).
+Plus E.6, from the accompanying cold read rather than the verdict.
 
-- `judgment:cold-5` (correction) — `run-stage` is now reachable from the argv
-  entry point, which was written for `init`: raw string args, a discarded
-  `{ok, reason}`, and the op running on both axes.
 - `budget`, `tier2-frontier` — expected and correct, as before.
 
-Also raised in the accompanying cold read, not in the verdict: `findingKey`'s
-catch collapses unserialisable findings together, which DROPS the second one —
-**D.3's** `judgment:cold-2` returning inside its own fix, one layer down (not
-E.2's — the two cold reviews reused the id). The
-conservative direction for an uncomputable key is to treat the finding as FRESH.
+The chain is clean: nothing from the second cold review is open. **C.5's third
+pass over the whole PR is now the next gate** — it was deliberately not run
+earlier, because a cold read over a tree with known-open findings spends the
+pass re-finding them.
 
 ## Not in this change
 
