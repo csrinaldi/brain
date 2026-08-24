@@ -656,6 +656,49 @@ itself: a declared value with no reader. Tenth, eleventh and twelfth occurrence.
       times (A.3, C.1's Q6, here): wiring that no test drives is wiring that can
       be deleted green.
 
+- [x] D.5 **`judgment:cold-1` — a stale artifact passed for one the run wrote.**
+      The post-spawn check was a bare `exists`, so it could not tell *"the
+      engine wrote this"* from *"a previous round left it here"*. Fixed at
+      `54c41aa`: the artifact is removed BEFORE the spawn.
+
+      **It only ever held on the FIRST review of a PR.** Re-review is the normal
+      case — §7 counts revisions precisely because it happens, and the `mkdir`
+      one line above is recursive for exactly that reason, so re-runs were
+      anticipated and the staleness was not. On every later review an engine
+      that exited 0 and wrote nothing PASSED, and the verdict for the NEW head
+      declared the judgment control applied over findings produced against an
+      older one. **Its own test used a fresh repo, which is why the suite stayed
+      green** — the fixture agreed with the bug.
+
+      **Deleting is the cheap half of the fix and the honest one.** Afterwards, a
+      file at that path was written by THIS run: no clock, no mtime, no
+      filesystem resolution to trust. The alternative — recording an mtime
+      across the spawn — depends on both, and on the engine rewriting rather
+      than touching. The cost is that a failed run leaves no artifact to
+      inspect, and it is accepted rather than overlooked: the artifact is
+      already ruled ephemeral (`.gitignore`d, with the posted verdict as the
+      durable record), so preserving it between runs was never a property
+      anyone chose.
+
+      **A removal that fails is a REFUSAL with its own reason.** Continuing
+      would run the engine with the stale file in place and land back in the
+      state this exists to prevent — and the operator would be told the engine
+      wrote nothing, which is a lie about a file it never got the chance to
+      replace. The two reasons are asserted pairwise distinct, the way C.3
+      requires.
+
+      Three mutations, full suite each, tree reverted after every one:
+
+      | mutation | what dies |
+      |---|---|
+      | delete the removal | all three cold-1 tests |
+      | move it AFTER the spawn | the C.2a/C.3 composition tests and the git test — it eats what the engine wrote |
+      | swallow the removal failure | the refusal test alone |
+
+      The middle row is why the ordering has its own oracle, read from inside
+      the engine's turn: clearing is correct and clearing late is a new defect,
+      and the two are one line apart.
+
 ## Still open from C.5's verdict
 
 **The count reconciles, and the first version of this section did not.** It
@@ -669,16 +712,13 @@ is arithmetic:
 | | |
 |---|---|
 | the posted verdict | **11** findings |
-| closed (D.1–D.4) | `cold-4`, `cold-9`, `cold-2`, `cold-3` — 4 |
-| open, below | `cold-1`, `cold-5`, `cold-6`, `cold-7`, `cold-8`, `tier2-frontier`, `budget` — 7 |
-| | 4 + 7 = **11** ✓ |
+| closed (D.1–D.5) | `cold-4`, `cold-9`, `cold-2`, `cold-3`, `cold-1` — 5 |
+| open, below | `cold-5`, `cold-6`, `cold-7`, `cold-8`, `tier2-frontier`, `budget` — 6 |
+| | 5 + 6 = **11** ✓ |
 
-Every one below is CONFIRMED unless it says otherwise, and none is started:
+**No blockers remain open.** Every one below is CONFIRMED unless it says
+otherwise, and none is started:
 
-- `judgment:cold-1` (blocker) — **confirmed by reading.** The post-spawn check is
-  a bare `exists`, so a stale artifact from a previous round passes it. Nothing
-  unlinks before the spawn. Re-review is the normal case (§7 counts revisions
-  precisely because it happens).
 - `judgment:cold-5` (correction) — **confirmed by reading.** The loop is at
   `cli.mjs:660`, `applyCausalAdmission` at `:748` — outside and after it. With
   `maxRounds: 3` an operator gets three produces and one challenge, while
