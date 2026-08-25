@@ -699,3 +699,102 @@ test('wouldRepeatLastVerdict: postVerdict AGREES with it — one definition, not
   });
   assert.equal(result.skipped, 'anti-loop');
 });
+
+// ── #766: the write verb's error is READ, and a failed post fails closed ────
+//
+// The axis every other case in this file holds fixed. `allowlistSpy` and
+// `recordingSpy` both inject a writer that SUCCEEDS, so the poster's handling of
+// `{ url: null, error }` — half of the contract `vcs-contract.md` states for
+// `prReviewComment` and `issueComment` — had no coverage at all
+// (`red-proof-blind-along-an-unvaried-axis`). Measured on PR #765: a 403 from a
+// PAT that could read and not write produced a full verdict on stdout, exit 0,
+// and nothing on the server.
+
+test('#766: a write verb that returns { url: null, error } does NOT report posted (tranche)', async () => {
+  const { vcs } = recordingSpy({ reviewResult: { url: null, error: 'gh: Resource not accessible by personal access token (HTTP 403)' } });
+  const result = await postVerdict({
+    headSha: HEAD,
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    mode: 'tranche',
+    renderedBody: '```yaml\nprotocol: brain-review/2\n```',
+    reviewerHandle: 'brain-reviewer',
+    priorVerdicts: [],
+    deps: { getVcs: async () => vcs },
+  });
+
+  assert.notEqual(result.posted, true, 'a verdict the forge refused must never report posted: true');
+  assert.equal(result.posted, false);
+  assert.match(result.error, /403/, "the verb's own reason must reach the caller, not be replaced by a generic one");
+});
+
+test('#766: the ruling path reads issueComment\'s error too — both write verbs, not just one', async () => {
+  const calls = [];
+  const vcs = {
+    prView: async () => ({ headRefOid: HEAD }),
+    issueComment: async () => { calls.push('issueComment'); return { url: null, error: 'gh api failed (status 1)' }; },
+    prReviewComment: async () => { throw new Error('ruling mode must not reach prReviewComment'); },
+    labelAdd: async () => { calls.push('labelAdd'); return { ok: true }; },
+  };
+  const result = await postVerdict({
+    headSha: HEAD,
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    mode: 'ruling',
+    renderedBody: '```yaml\nprotocol: brain-review/2\n```',
+    reviewerHandle: 'brain-reviewer',
+    priorVerdicts: [],
+    deps: { getVcs: async () => vcs },
+  });
+
+  assert.equal(result.posted, false);
+  assert.match(result.error, /status 1/);
+});
+
+test('#766: a failed post does not apply the escalation label — nothing landed to escalate', async () => {
+  // The escalation-label branch already states this rule in its own comment
+  // ("only reachable once the verdict actually landed at this head") and enforces
+  // it for anti-loop and anti-stale. A refused WRITE is the third way a verdict
+  // fails to land, and it is the one the branch sits below.
+  const { vcs, calls } = recordingSpy({ reviewResult: { url: null, error: 'HTTP 403' } });
+  const result = await postVerdict({
+    headSha: HEAD,
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    mode: 'tranche',
+    renderedBody: '```yaml\nprotocol: brain-review/2\n```',
+    reviewerHandle: 'brain-reviewer',
+    priorVerdicts: [],
+    escalate: 'human',
+    deps: { getVcs: async () => vcs },
+  });
+
+  assert.equal(result.posted, false);
+  assert.ok(
+    !calls.some(c => c.verb === 'labelAdd'),
+    'needs-decision over a verdict nobody can read points a human at an empty thread',
+  );
+});
+
+test('#766: a write verb answering with neither url nor error still fails closed', async () => {
+  // The contract says `{ url } | { url: null, error }`. A provider that returns
+  // neither is off-contract, and the poster must not read that silence as success.
+  const { vcs } = recordingSpy({ reviewResult: {} });
+  const result = await postVerdict({
+    headSha: HEAD,
+    project: 'csrinaldi/brain',
+    number: 42,
+    provider: 'github',
+    mode: 'tranche',
+    renderedBody: '```yaml\nprotocol: brain-review/2\n```',
+    reviewerHandle: 'brain-reviewer',
+    priorVerdicts: [],
+    deps: { getVcs: async () => vcs },
+  });
+
+  assert.equal(result.posted, false);
+  assert.ok(result.error, 'an off-contract answer still owes the caller a reason');
+});
