@@ -1213,3 +1213,39 @@ test('cold-2: ANOTHER reviewer\'s verdict at this head does not suppress the run
   // conversation the lock exists to permit.
   assert.equal(spawned, true);
 });
+
+
+// ── judgment:cold-3 — the measured round count reaches a reader ────────────
+
+test('cold-3: the run REPORTS how many produce rounds actually ran', async (t) => {
+  // Before this, `rounds` was computed, declared in the @returns shape, and read
+  // by nothing outside the tests — the same shape as `shouldRun`'s missing
+  // production caller, in the value this slice's own bound produces.
+  const { lines } = await run({ config: CFG(), generate: async () => reasoned() });
+  assert.ok(
+    lines.some((l) => /converged in \d+ produce round\(s\)/.test(l)),
+    'a number the run measures and throws away is not a measurement anyone has'
+  );
+});
+
+test('cold-3: a bound HIGHER than the rounds that ran says so, rather than leaving a subtraction', async (t) => {
+  // convergence.mjs's whole argument for keeping the key is that an operator
+  // setting 5 "should know that from here rather than from a bill". *Here* was a
+  // source comment, which is not a place a run reports to.
+  const cfg = {
+    reviewer: { inferential: { enabled: true }, convergence: { maxRounds: 5 } },
+  };
+  const { lines } = await run({ config: cfg, generate: async () => reasoned() });
+  const notice = lines.find((l) => l.includes('maxRounds is 5'));
+  assert.ok(notice, 'the operator configured 5 and must be told what they actually got');
+  assert.match(notice, /converged early|round\(s\) ran/);
+});
+
+test('cold-3: a bound EQUAL to the rounds that ran does not nag', async (t) => {
+  const cfg = { reviewer: { inferential: { enabled: true }, convergence: { maxRounds: 1 } } };
+  const { lines } = await run({ config: cfg, generate: async () => reasoned() });
+  assert.equal(
+    lines.filter((l) => l.includes('maxRounds is')).length, 0,
+    'nothing was over-configured, so there is nothing to report'
+  );
+});

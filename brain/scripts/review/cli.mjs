@@ -738,6 +738,29 @@ export async function main(deps = {}) {
         return 1;
       }
 
+      // judgment:cold-3 — `rounds` IS MEASURED, SO IT REACHES A READER. Until
+      // here it was computed by `gatherInferentialInputs`, declared in its
+      // `@returns` shape, and read by nothing outside the tests. That is the
+      // same defect the comment above records `shouldRun` having had, in the
+      // value this slice's own bound produces: a number the run measures and
+      // throws away.
+      //
+      // AND IT IS THE NUMBER `convergence.mjs` PROMISED THE OPERATOR. Its
+      // argument for keeping `maxRounds` as a key at all is that "an operator
+      // setting `maxRounds: 5` today gets one round of work and should know that
+      // from here rather than from a bill" — but *here* was a source comment,
+      // which is not a place a run reports to. The gap between what was
+      // configured and what actually ran is the whole point, so it is stated
+      // rather than left for the reader to subtract.
+      log(`brain:review: judgment half converged in ${inferentialInputs.rounds} produce round(s).`);
+      if (maxRounds > inferentialInputs.rounds) {
+        log(
+          `brain:review: reviewer.convergence.maxRounds is ${maxRounds}, and ${inferentialInputs.rounds} ` +
+          'round(s) ran — the loop converged early. Raising the bound buys nothing until a transport ' +
+          're-runs the stage between rounds.'
+        );
+      }
+
       // `generated` is an array here and cannot be null: the branch is guarded
       // by a generator existing, and the only other way out of `gather` is
       // `failed`, refused above. The `!== null` test this replaced was the

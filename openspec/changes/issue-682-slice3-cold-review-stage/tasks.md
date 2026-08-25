@@ -1217,7 +1217,7 @@ code before any disposition** — nothing here is taken on the reviewer's word.
       So a second `brain:review` on an unchanged head pays a full engine run —
       `STAGE_TIMEOUT_MS` is 10 minutes — and then posts nothing.
 
-- [ ] F.3 **`judgment:cold-3` (correction) — `rounds` has no production reader.**
+- [x] F.3 **`judgment:cold-3` (correction) — `rounds` has no production reader.**
       Verified: `grep -rn "\.rounds\b" brain/ --include=*.mjs | grep -v '\.test\.'`
       returns NOTHING. It is computed, declared in the `@returns` shape, and read
       only by tests. `convergence.mjs` says an operator setting `maxRounds: 5`
@@ -1535,6 +1535,47 @@ routing through the shared predicate killed three, including the one whose whole
 job is to prove the two agree.
 
 Suite: 4325/4325.
+
+
+### F.3 — closed: the measured round count reaches a reader
+
+`rounds` was computed by `gatherInferentialInputs`, declared in its `@returns`
+shape, and read by nothing outside the tests. `cli.mjs` already carries the
+write-up of this exact defect one branch above, about `shouldRun`: *"the one that
+documented itself as authoritative was the one nothing read."* Here it was the
+value this slice's own bound produces.
+
+**The reader is operator-facing, because that is who was promised it.**
+`convergence.mjs`'s argument for keeping `maxRounds` as a key at all is that *"an
+operator setting `maxRounds: 5` today gets one round of work and should know that
+from here rather than from a bill"* — and *here* was a source comment, which is
+not a place a run reports to. The run now says how many rounds converged, and
+says separately when the configured bound exceeded them, rather than printing two
+numbers and leaving the subtraction to the reader.
+
+`controls` was considered and rejected as the home: it is a union of control
+identifiers, not a place for a measurement.
+
+**Two mutations, two caught.** Deleting the line killed the reporting test;
+turning `>` into `>=` made the over-configuration notice fire on a run that was
+not over-configured, and killed the test that says a correctly-set bound does not
+nag.
+
+Suite: 4328/4328.
+
+
+### Slice F — all three findings closed
+
+| finding | disposition |
+|---|---|
+| F.1 `cold-1` (blocker) | closed — claim narrowed in three places; `producer-forge-reach.mjs` probes instead of asserting |
+| F.2 `cold-2` | closed — one shared predicate, checked before the spawn |
+| F.3 `cold-3` | closed — `rounds` reaches an operator-facing reader |
+
+Five findings across the pass were NOT defects in the change and are recorded
+rather than fixed: F.4 (what the dry-run instruction cost), F.5 and F.8 (the two
+credential measurements, which disagree by deployment), F.6 (a seam disqualified
+by ADR-0005), F.7 (a fourth environmental signature).
 
 
 ## Not in this change
