@@ -92,7 +92,29 @@ export async function runColdReviewStage({
   // in" cannot be the machine the suite happens to run on. `deps.env` defaults
   // to brain's own, which is what `runStage` will scrub and hand the child.
   const env = deps.env ?? process.env;
-  const probeDeps = deps.forgeProbe ? { _run: deps.forgeProbe } : {};
+  // NO DEFAULT, ON PURPOSE — the same ruling `runStage` above already carries,
+  // and for a sharper reason (judgment:cold-2, fourth cold review). This read
+  // `deps.forgeProbe ? {_run: deps.forgeProbe} : {}`, so a caller that omitted
+  // it spawned the machine's REAL `gh`/`glab`. Every test that forgot therefore
+  // passed or failed on whether the developer happened to be logged in:
+  // measured, with a stub `gh` exiting 0, `npm test` — a required gate — went
+  // from green to ten failures, and the suite had been green here only because
+  // this container has no `gh` installed at all.
+  //
+  // A TEST WHOSE ORACLE IS THE HOST is the defect class this ticket has spent
+  // fourteen findings removing, and `producer-forge-reach.test.mjs` carries a
+  // comment warning about it one layer down — written in the commit that
+  // introduced it here. Refusing loudly is what makes the omission impossible to
+  // commit again; `cli.mjs` supplies the real runner exactly as it supplies the
+  // real `runStage` seam.
+  if (typeof deps.forgeProbe !== 'function') {
+    throw new Error(
+      'run-cold-review-stage: no forgeProbe seam was supplied. There is no default on purpose — ' +
+      'defaulting to the real runner makes every caller that forgets spawn the machine\'s own ' +
+      'forge CLI, and a test that does so is measuring the developer, not the code.'
+    );
+  }
+  const probeDeps = { _run: deps.forgeProbe };
 
   // Throws on an entry that exists and cannot be read; `null` when the repo
   // routed nothing. Unrouted is NOT a failure — the caller renders it as the
@@ -145,6 +167,44 @@ export async function runColdReviewStage({
   // parents. Recursive, so an existing directory from a previous round is not an
   // error — re-running a review is normal, and #495's rev counter is what makes
   // rounds distinguishable, not the filesystem.
+  // A PRECONDITION, SO IT RUNS BEFORE ANY MUTATION (judgment:cold-4, fourth cold
+  // review). It sat below `mkdir` and below the `remove` that clears the previous
+  // artifact, so a run that REFUSED had already destroyed the output of the run
+  // that could — breaking the rule stated in capitals above, in the commit that
+  // added it.
+  //
+  // THE SCRUB IS NOT THE WHOLE PROPERTY, AND THIS IS WHERE THAT STOPS BEING
+  // ASSERTED (judgment:cold-1 of the third cold review). `credentialEnv` takes
+  // brain's poster credential out of the child's ENVIRONMENT — kernel-enforced,
+  // real. A forge CLI keeps its own store OUTSIDE the repository, so neither
+  // that scrub nor the detached worktree touches it: measured, with all seven
+  // names unset, `gh auth status` still reported a logged-in account.
+  //
+  // So the property is MEASURED here rather than declared. The probe asks the
+  // one question that does not depend on the deployment — "from this
+  // environment, does a forge CLI still authenticate?" — and a `yes`, or a
+  // probe that reaches no verdict at all, refuses the run. See
+  // `producer-forge-reach.mjs` for the three location-based designs this
+  // replaces and why each was wrong.
+  //
+  // IT REFUSES BEFORE THE SPAWN, not after. A ten-minute engine run whose
+  // output must then be discarded is the same waste F.2 records at the routing
+  // layer, and worse here: the artifact would already exist on disk.
+  const reach = assertProducerCannotReachForge(
+    withoutCredentials(env, credentialEnvNames({ extra: [config?.reviewer?.tokenEnv] })),
+    probeDeps,
+  );
+  if (!reach.ok) {
+    return {
+      routed: true,
+      ok: false,
+      reason:
+        `the producer can still reach the forge, so ADR-0033's load-bearing property does not ` +
+        `hold for this run — ${reach.reason}`,
+    };
+  }
+
+
   mkdir(dirname(join(root, artifactPath)));
 
   // THE ARTIFACT IS REMOVED BEFORE THE SPAWN, AND THAT IS WHAT MAKES THE CHECK
@@ -204,37 +264,6 @@ export async function runColdReviewStage({
         'Refusing rather than running: with a stale file in place, an engine that wrote nothing would ' +
         'look exactly like one that did its job, and the verdict would declare a control it applied ' +
         'to findings from an older head.',
-    };
-  }
-
-  // THE SCRUB IS NOT THE WHOLE PROPERTY, AND THIS IS WHERE THAT STOPS BEING
-  // ASSERTED (judgment:cold-1 of the third cold review). `credentialEnv` takes
-  // brain's poster credential out of the child's ENVIRONMENT — kernel-enforced,
-  // real. A forge CLI keeps its own store OUTSIDE the repository, so neither
-  // that scrub nor the detached worktree touches it: measured, with all seven
-  // names unset, `gh auth status` still reported a logged-in account.
-  //
-  // So the property is MEASURED here rather than declared. The probe asks the
-  // one question that does not depend on the deployment — "from this
-  // environment, does a forge CLI still authenticate?" — and a `yes`, or a
-  // probe that reaches no verdict at all, refuses the run. See
-  // `producer-forge-reach.mjs` for the three location-based designs this
-  // replaces and why each was wrong.
-  //
-  // IT REFUSES BEFORE THE SPAWN, not after. A ten-minute engine run whose
-  // output must then be discarded is the same waste F.2 records at the routing
-  // layer, and worse here: the artifact would already exist on disk.
-  const reach = assertProducerCannotReachForge(
-    withoutCredentials(env, credentialEnvNames({ extra: [config?.reviewer?.tokenEnv] })),
-    probeDeps,
-  );
-  if (!reach.ok) {
-    return {
-      routed: true,
-      ok: false,
-      reason:
-        `the producer can still reach the forge, so ADR-0033's load-bearing property does not ` +
-        `hold for this run — ${reach.reason}`,
     };
   }
 

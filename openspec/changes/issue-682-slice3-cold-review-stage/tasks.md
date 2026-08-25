@@ -1756,6 +1756,81 @@ under the standing `size:exception`.
 Suite: 4355/4355.
 
 
+## Slice H — the second real run, and the test suite that measured the developer
+
+A telemetry run over the SAME range (`71a7abd...59dda0a`) produced **seven** findings
+where the first produced five. Two runs, one range, different results — which is
+`evidence_class: inferential` stated in the ADR and now observed. Two of the seven were
+already closed by slice G; five were open, and one was a blocker.
+
+### H.1 — `judgment:cold-2` (blocker): the tests measured the developer, not the code
+
+`probeDeps` read `deps.forgeProbe ? { _run: deps.forgeProbe } : {}`, so **a caller that
+omitted the seam spawned the machine's real `gh`/`glab`.** On any machine holding a
+`gh auth login` keyring session — the exact state `producer-forge-reach.mjs`'s own header
+records observing — the probe answers `reachable`, the stage refuses before spawning, and
+the tests that assert on stage behaviour fail.
+
+MEASURED here with a stub `gh` exiting 0: **ten failures in `cli.judgment.test.mjs`
+alone**, and `npm test` is a required gate. Under load the reviewer also saw
+`spawnSync glab ETIMEDOUT`, so it was load-sensitive as well.
+
+**IT WAS GREEN HERE FOR A REASON THAT HAS NOTHING TO DO WITH THE CODE:** this container
+has no `gh` installed, so every probe answered `absent`. A test whose oracle is the host —
+committed in the same change whose own test file carries a comment warning about exactly
+that, one layer down.
+
+**And the reviewer named ONE site; there were more.** `cli.judgment.test.mjs` had 15,
+`run-cold-review-stage.test.mjs` had 23 of 31 uninjected, `stage-seam.test.mjs` had 1.
+Patching call sites would leave the next author free to forget, so the seam now follows
+the ruling `runStage` in the same file already carries: **no default, refuse loudly**, and
+`cli.mjs` supplies the real runner exactly as it supplies the real stage seam. The suite
+is now green under BOTH host states — verified with stub `gh` and `glab` on PATH, and
+without them.
+
+`stageDeps` also became a MERGE rather than a replacement: the two tests that deliberately
+drive the real seam could not otherwise stub the probe without rebuilding the seam they
+exist to exercise.
+
+### H.2 — `judgment:cold-4`: two more preconditions below the mutations
+
+Slice G moved `resolveStageTimeout` out of the argument list and left the forge-reach
+probe where it was — below `mkdir` and below the `remove` that clears the previous
+artifact. Same rule, same file, same paragraph in capitals, fixed on one of the two
+preconditions that broke it. The probe now runs before either mutation.
+
+### H.3 — `judgment:cold-6` and `cold-7`: one cause, one move
+
+`stage-timeout.mjs` declared `TIMEOUT_IN_FORCE_TODAY = 10 * 60_000` under a docstring
+saying the default was *"one number rather than one per backend"*, while `claude.mjs` kept
+its own identical literal with no import between them. **The docstring was contradicted by
+its own module** — and it mattered because, with `timeoutMs` dropped at the seam (G.1),
+the backend's copy was the one in force while the operator's config was validated against
+the other.
+
+The second finding shares the cause: `claude.mjs`, a harness backend, imported
+`formatDuration` from a **review-port** module — the axis `platform.mjs` was created in
+this change to keep separate. Both now live in `brain/scripts/lib/duration.mjs`, which
+neither axis owns, and a test pins that the two defaults are the same number.
+
+### H.4 — `judgment:cold-5`: two documents, opposite rulings, one file
+
+`design.md` D3 claimed *"the committed artifact makes the review itself checkable for
+report-vs-tree drift"*. The same change added `openspec/reviews/` to `.gitignore`.
+Measured: `git check-ignore` exits 0. `.gitignore` is the ruling that holds and states its
+own cost; D3 is the half that went stale — **in the direction that promises an audit trail
+nobody would find.** Corrected in place rather than deleted, because a stale ruling in a
+design doc is what a later reader trusts.
+
+### What two runs over one range say about the method
+
+The first run found the dead wire; the second found the test suite that could not have
+caught it. Neither found the other's. **Re-running the same review is not redundant** —
+and the four passes of reading before them found none of the seven.
+
+Suite: 4356/4356, verified under both host states.
+
+
 ## Not in this change
 
 - `same-model` / `cross-family` axes.

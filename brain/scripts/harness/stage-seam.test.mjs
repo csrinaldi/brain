@@ -26,6 +26,16 @@ import { makeRunStageSeam, RUN_STAGE_OP } from './stage-seam.mjs';
 import { dispatch, VALID_OPS } from './cli.mjs';
 import { COLD_REVIEW_STAGE } from '../lib/stage-engine.mjs';
 
+/**
+ * A forge CLI reporting NO session. Injected into every call, because
+ * `runColdReviewStage` refuses without it (judgment:cold-2, fourth cold review):
+ * the seam used to default to the real runner, so a test that forgot spawned the
+ * machine's own `gh` and its result depended on whether the developer was logged
+ * in — measured, ten failures on a machine with a keyring session, green here
+ * only because this container has no `gh` at all.
+ */
+const LOGGED_OUT = () => ({ status: 1, stderr: 'not logged into any hosts' });
+
 const BACKENDS_DIR = fileURLToPath(new URL('./backends/', import.meta.url));
 
 /** Every real backend name, read from disk rather than listed here. */
@@ -227,7 +237,7 @@ test('the refusal composes with the stage runner — routed, and reported as a f
       // BEFORE the engine is reached. Supplied here so what this test measures
       // is still the SEAM's refusal rather than the runner's.
       worktreePath: root,
-      deps: { runStage: makeRunStageSeam() },
+      deps: { forgeProbe: LOGGED_OUT, runStage: makeRunStageSeam() },
     });
 
     // ROUTED stays true through the failure. That is the whole distinction

@@ -6,7 +6,7 @@
 
 import { assertRoutableStage } from '../../lib/stage-engine.mjs';
 import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env.mjs';
-import { formatDuration } from '../../review/lib/stage-timeout.mjs';
+import { DEFAULT_STAGE_TIMEOUT_MS, formatDuration } from '../../lib/duration.mjs';
 import { defaultRun } from './agent-runtime.mjs';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -70,8 +70,18 @@ export async function init({
 
 // ── run-stage — #682 slice B, ADR-0033 ───────────────────────────────────────
 
-/** The wall clock a stage engine gets. A review reads a diff; it is not a build. */
-export const STAGE_TIMEOUT_MS = 10 * 60_000;
+/**
+ * The wall clock a stage engine gets, RE-EXPORTED rather than declared
+ * (judgment:cold-6). This was its own `10 * 60_000` beside an identical literal
+ * in the review port whose docstring claimed the default was "one number rather
+ * than one per backend". It is now.
+ *
+ * The comment that used to sit here — "a review reads a diff; it is not a
+ * build" — was wrong about what a reviewer does, and the first real run proved
+ * it: the engine opens the files the diff does NOT touch, reads the ADRs a
+ * finding must cite, and runs probes of its own. See `lib/duration.mjs`.
+ */
+export const STAGE_TIMEOUT_MS = DEFAULT_STAGE_TIMEOUT_MS;
 
 /**
  * runStage() — spawn an engine to produce one stage's artifact.

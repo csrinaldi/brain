@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { STAGE_TIMEOUT_MS } from '../../harness/backends/claude.mjs';
 import {
   TIMEOUT_IN_FORCE_TODAY,
   MIN_STAGE_TIMEOUT_MS,
@@ -68,4 +69,17 @@ test('formatDuration never renders a number it was not given', () => {
   for (const bad of [undefined, null, NaN, -1, 'x']) {
     assert.equal(formatDuration(bad), 'an unknown time');
   }
+});
+
+
+// ── judgment:cold-6 (fourth cold review) — ONE number, with a reader ───────
+
+test('cold-6: the backend default and the configured default are the SAME number', () => {
+  // They were two separate `10 * 60_000` literals with no import between them,
+  // under a docstring claiming the default was "one number rather than one per
+  // backend". Nothing compared them, so nothing would have said when they drifted
+  // — and with `timeoutMs` dropped at the seam (cold-1), the backend's copy was
+  // the one in force while the operator's config was validated against the other.
+  assert.equal(STAGE_TIMEOUT_MS, TIMEOUT_IN_FORCE_TODAY);
+  assert.equal(TIMEOUT_IN_FORCE_TODAY, resolveStageTimeout({}).timeoutMs);
 });

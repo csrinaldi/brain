@@ -31,12 +31,14 @@
 // however long the number says. Loud and short beats quiet and long until there
 // is a distribution to look at.
 
+import { DEFAULT_STAGE_TIMEOUT_MS, formatDuration } from '../../lib/duration.mjs';
+
 /**
  * The value in force before this key existed. NOT a preference — the constant
  * `claude.mjs` shipped, kept here so the default is one number rather than one
  * per backend.
  */
-export const TIMEOUT_IN_FORCE_TODAY = 10 * 60_000;
+export const TIMEOUT_IN_FORCE_TODAY = DEFAULT_STAGE_TIMEOUT_MS;
 
 /** Below this, no engine can do useful work; a value this small is a mistake. */
 export const MIN_STAGE_TIMEOUT_MS = 30_000;
@@ -77,13 +79,8 @@ export function resolveStageTimeout(config) {
   return { timeoutMs: raw };
 }
 
-/** Human-facing duration, for the messages an operator acts on. */
-export function formatDuration(ms) {
-  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return 'an unknown time';
-  if (ms < 1000) return `${ms}ms`;
-  const s = ms / 1000;
-  if (s < 90) return `${s.toFixed(1)}s`;
-  const m = Math.floor(s / 60);
-  const rem = Math.round(s % 60);
-  return rem === 0 ? `${m}m` : `${m}m ${rem}s`;
-}
+// `formatDuration` lives in `lib/duration.mjs` and is re-exported here so the
+// review port's callers keep one import. It moved because `claude.mjs` needed it
+// too, and a harness backend importing a review module is the layering edge
+// judgment:cold-7 named.
+export { formatDuration };

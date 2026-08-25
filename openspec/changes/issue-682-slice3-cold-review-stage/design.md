@@ -55,13 +55,22 @@ So the run **writes** `openspec/reviews/pr-NNN/cold-review.md` and stops. Whoeve
 addresses the findings commits it, in the same commit that answers them — the same way
 an agent writes `design.md` and a human's commit is the signature (ADR-0028).
 
-Two things fall out, and both are improvements:
+One thing falls out, and it is an improvement:
 
 - The record of *what the review said* lands next to *what was done about it*, in one
   commit, instead of floating as a separate act.
-- The committed artifact makes the review itself checkable for report-vs-tree drift: a
-  later cold read can diff the artifact against the posted verdict. Today that
-  comparison has no left-hand side.
+
+**A SECOND CONSEQUENCE WAS CLAIMED HERE AND IS FALSE — corrected rather than deleted,
+because a stale ruling in a design doc is what a later reader trusts** (judgment:cold-5 of
+the fourth cold review). This section said *"the committed artifact makes the review
+itself checkable for report-vs-tree drift"*. The same change added `openspec/reviews/` to
+`.gitignore`, so nothing lands in a commit without `git add -f`. Measured:
+`git check-ignore -v openspec/reviews/pr-1/cold-review.md` → `.gitignore:135`, exit 0.
+
+`.gitignore` is the ruling that holds, and it states the cost in its own words —
+*"Costo aceptado: no se puede auditar a posteriori"*. Two documents shipped in one change
+saying opposite things about one file; this is the half that went stale, and it went stale
+in the direction that promises an audit trail nobody would find.
 
 ## D4 — the producer writes a file; only the verb touches the VCS
 

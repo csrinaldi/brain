@@ -24,6 +24,16 @@ import { artifactPathFor, ARTIFACT_TAG } from './findings-artifact.mjs';
 import { COLD_REVIEW_STAGE } from '../../lib/stage-engine.mjs';
 import { TIMEOUT_IN_FORCE_TODAY } from './stage-timeout.mjs';
 
+/**
+ * A forge CLI reporting NO session. Injected into every call, because
+ * `runColdReviewStage` refuses without it (judgment:cold-2, fourth cold review):
+ * the seam used to default to the real runner, so a test that forgot spawned the
+ * machine's own `gh` and its result depended on whether the developer was logged
+ * in — measured, ten failures on a machine with a keyring session, green here
+ * only because this container has no `gh` at all.
+ */
+const LOGGED_OUT = () => ({ status: 1, stderr: 'not logged into any hosts' });
+
 const PR = 765;
 const ROUTED = { sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'claude', model: 'claude-opus-5' } } } };
 
@@ -80,7 +90,7 @@ test('the run leaves exactly ONE change, untracked, at the artifact path', async
   const headBefore = git(root, 'rev-parse', 'HEAD');
 
   const result = await runColdReviewStage({
-    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t), deps: { runStage: writingEngine(root) },
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t), deps: { forgeProbe: LOGGED_OUT, runStage: writingEngine(root) },
   });
 
   // F.9 added `elapsedMs` — a clock reading, not what this test is about.
@@ -122,7 +132,7 @@ test('the stage creates its directory — the engine is not asked to', async (t)
   let sawDir = false;
   await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       runStage: async () => {
         // Read from INSIDE the engine's turn: the directory has to exist when
         // the engine runs, not merely by the time the caller looks.
@@ -138,7 +148,7 @@ test('the stage creates its directory — the engine is not asked to', async (t)
 
 test('a second round is not an error — the directory already being there is normal', async (t) => {
   const root = makeRepo(t);
-  const deps = { runStage: writingEngine(root) };
+  const deps = { runStage: writingEngine(root), forgeProbe: LOGGED_OUT };
 
   const wt = makeWorktree(t);
   const first = await runColdReviewStage({ config: ROUTED, prNumber: PR, root, worktreePath: wt, deps });
@@ -154,7 +164,7 @@ test('unrouted does not run, and is NOT reported as a failure', async (t) => {
 
   const result = await runColdReviewStage({
     config: { sdd: { map: {} } }, prNumber: PR, root, worktreePath: makeWorktree(t),
-    deps: { runStage: async () => { spawned = true; return { ok: true }; } },
+    deps: { forgeProbe: LOGGED_OUT, runStage: async () => { spawned = true; return { ok: true }; } },
   });
 
   assert.deepEqual(result, { routed: false });
@@ -179,7 +189,7 @@ test('a clean exit with NO artifact is a failure, not "found nothing"', async (t
 
   const result = await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
-    deps: { runStage: async () => ({ ok: true }) },   // exits 0, writes nothing
+    deps: { forgeProbe: LOGGED_OUT, runStage: async () => ({ ok: true }) },   // exits 0, writes nothing
   });
 
   // The fold this check exists to prevent: with no artifact,
@@ -198,7 +208,7 @@ test('an engine that failed is reported with its own reason', async (t) => {
 
   const result = await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
-    deps: { runStage: async () => ({ ok: false, reason: 'the engine exited with status 137' }) },
+    deps: { forgeProbe: LOGGED_OUT, runStage: async () => ({ ok: false, reason: 'the engine exited with status 137' }) },
   });
 
   const { elapsedMs, ...shape } = result;
@@ -209,7 +219,7 @@ test('a seam that answers nothing at all is still a failure', async (t) => {
   const root = makeRepo(t);
 
   const result = await runColdReviewStage({
-    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t), deps: { runStage: async () => undefined },
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t), deps: { forgeProbe: LOGGED_OUT, runStage: async () => undefined },
   });
 
   assert.equal(result.ok, false, 'an undefined answer must not read as success');
@@ -224,7 +234,7 @@ test('the engine is handed the RESOLVED engine and model, and the stage name', a
     let seen = null;
     await runColdReviewStage({
       config, prNumber: PR, root, worktreePath: worktree, baseRef: 'aaa', headRef: 'bbb',
-      deps: {
+      deps: { forgeProbe: LOGGED_OUT,
         runStage: async (args) => {
           seen = args;
           writeFileSync(join(root, artifactPathFor(PR)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
@@ -289,7 +299,7 @@ test('an unreadable routing entry throws rather than running unrouted', async (t
   await assert.rejects(
     () => runColdReviewStage({
       config: { sdd: { map: { [COLD_REVIEW_STAGE]: {} } } },
-      prNumber: PR, root, deps: { runStage: async () => ({ ok: true }) },
+      prNumber: PR, root, deps: { forgeProbe: LOGGED_OUT, runStage: async () => ({ ok: true }) },
     }),
     /names no engine/,
     'an operator who wrote the key asked for something; silence would ignore it'
@@ -303,7 +313,7 @@ test('a PR number that is not one is refused BEFORE anything is created', async 
   await assert.rejects(
     () => runColdReviewStage({
       config: ROUTED, prNumber: '../../etc', root,
-      deps: { runStage: async () => { spawned = true; return { ok: true }; } },
+      deps: { forgeProbe: LOGGED_OUT, runStage: async () => { spawned = true; return { ok: true }; } },
     }),
     /is not a PR number/
   );
@@ -327,7 +337,7 @@ test('#682 cold-3: no worktree is a REFUSAL, not a quiet fallback to the operato
 
   const result = await runColdReviewStage({
     config: ROUTED, prNumber: PR, root,       // no worktreePath
-    deps: { runStage: async () => { spawned = true; return { ok: true }; } },
+    deps: { forgeProbe: LOGGED_OUT, runStage: async () => { spawned = true; return { ok: true }; } },
   });
 
   assert.equal(spawned, false, 'nothing may be spawned without the checkout the ADR names');
@@ -350,7 +360,7 @@ test('#682 cold-3: the engine writes into the operator tree and leaves the workt
 
   const result = await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: worktree,
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       runStage: async ({ cwd, prompt }) => {
         cwdSeen = cwd;
         // An engine follows the path it is GIVEN. Writing what the prompt names
@@ -387,7 +397,7 @@ test('#682 cold-1: a STALE artifact does not pass for one this run wrote', async
   // every review after the first.
   const result = await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
-    deps: { runStage: async () => ({ ok: true }) },
+    deps: { forgeProbe: LOGGED_OUT, runStage: async () => ({ ok: true }) },
   });
 
   assert.equal(result.ok, false, 'a run that produced nothing must not inherit the last one\'s findings');
@@ -407,7 +417,7 @@ test('#682 cold-1: the clearing happens BEFORE the engine runs, not after', asyn
   let staleWasGone = null;
   const result = await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       runStage: async () => {
         // Asked from INSIDE the engine's turn. Clearing after the spawn would
         // delete what the engine just wrote, so the ordering is not a detail:
@@ -428,7 +438,7 @@ test('#682 cold-1: a clearing that FAILS refuses, with its own reason', async (t
 
   const failed = await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       remove: () => { throw new Error('EACCES: permission denied'); },
       runStage: async () => { throw new Error('the engine must never run'); },
     },
@@ -444,7 +454,7 @@ test('#682 cold-1: a clearing that FAILS refuses, with its own reason', async (t
   // and folding them would tell the operator the engine failed when it never ran.
   const wroteNothing = await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
-    deps: { runStage: async () => ({ ok: true }) },
+    deps: { forgeProbe: LOGGED_OUT, runStage: async () => ({ ok: true }) },
   });
   assert.notEqual(failed.reason, wroteNothing.reason);
   assert.doesNotMatch(wroteNothing.reason, /could not clear/);
@@ -468,7 +478,7 @@ test('#682 cold-2: the repo\'s configured reviewer.tokenEnv reaches the spawn', 
     prNumber: PR,
     root: dir,
     worktreePath: dir,
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       runStage: async (args) => {
         seen = args;
         writeFileSync(join(dir, artifactPathFor(PR)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
@@ -495,7 +505,7 @@ test('#682 cold-2: a repo with NO reviewer block still gets the default set', as
     prNumber: PR,
     root: dir,
     worktreePath: dir,
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       runStage: async (args) => {
         seen = args;
         writeFileSync(join(dir, artifactPathFor(PR)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
@@ -530,7 +540,7 @@ test('#682 cold-3: a run refused for want of a worktree destroys NOTHING', async
     prNumber: PR,
     root: dir,
     worktreePath: null,
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       runStage: async () => { throw new Error('the engine must not be reached on a refused run'); },
     },
   });
@@ -565,7 +575,7 @@ test('#682 cold-3: a refused run creates NOTHING either — not just destroys no
     prNumber: PR,
     root: dir,
     worktreePath: '   ',
-    deps: { runStage: async () => { throw new Error('the engine must not be reached on a refused run'); } },
+    deps: { forgeProbe: LOGGED_OUT, runStage: async () => { throw new Error('the engine must not be reached on a refused run'); } },
   });
 
   assert.equal(result.ok, false);
@@ -593,7 +603,7 @@ test('#682 cold-3: an UNROUTED run leaves the artifact alone — it is the opera
     prNumber: PR,
     root: dir,
     worktreePath: dir,
-    deps: { runStage: async () => { throw new Error('nothing may be spawned when nothing is routed'); } },
+    deps: { forgeProbe: LOGGED_OUT, runStage: async () => { throw new Error('nothing may be spawned when nothing is routed'); } },
   });
 
   assert.deepEqual(result, { routed: false });
@@ -614,7 +624,7 @@ test('cold-1: a logged-in forge CLI REFUSES the run, and the engine is never spa
   let spawned = false;
   const result = await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       runStage: async () => { spawned = true; return { ok: true }; },
       forgeProbe: () => ({ status: 0, stdout: 'Logged in to github.com account someone' }),
     },
@@ -628,7 +638,7 @@ test('cold-1: a logged-in forge CLI REFUSES the run, and the engine is never spa
 test('cold-1: the refusal names ADR-0033\'s property, so the operator knows WHY it refused', async (t) => {
   const result = await runColdReviewStage({
     config: ROUTED, prNumber: PR, root: makeRepo(t), worktreePath: makeWorktree(t),
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       runStage: async () => ({ ok: true }),
       forgeProbe: () => ({ status: 0 }),
     },
@@ -640,7 +650,7 @@ test('cold-1: a probe that reaches NO verdict refuses too — fail closed', asyn
   let spawned = false;
   const result = await runColdReviewStage({
     config: ROUTED, prNumber: PR, root: makeRepo(t), worktreePath: makeWorktree(t),
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       runStage: async () => { spawned = true; return { ok: true }; },
       forgeProbe: () => ({ error: Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }) }),
     },
@@ -668,7 +678,7 @@ test('cold-1: the probe sees the SCRUBBED env, never brain\'s own', async (t) =>
   const root = makeRepo(t);
   await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       runStage: writingEngine(root),
       env: { PATH: '/usr/bin', GH_TOKEN: 'secret', BRAIN_REVIEWER_TOKEN: 'secret2' },
       forgeProbe: (_c, _a, opts) => { seenEnv = opts.env; return { status: 1 }; },
@@ -696,7 +706,7 @@ test('cold-2/F.9: the ceiling the caller resolved reaches runStage', async (t) =
   await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
     timeoutMs: 2_400_000,
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       runStage: async (args) => { seen = args.timeoutMs; return writingEngine(root)(args); },
       forgeProbe: () => ({ status: 1 }),
     },
@@ -712,7 +722,7 @@ test('cold-2/F.9: an absent ceiling stays absent — this layer invents none', a
   let seen = 'unset';
   await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
-    deps: {
+    deps: { forgeProbe: LOGGED_OUT,
       runStage: async (args) => { seen = args.timeoutMs; return writingEngine(root)(args); },
       forgeProbe: () => ({ status: 1 }),
     },

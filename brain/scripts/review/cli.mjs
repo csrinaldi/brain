@@ -33,6 +33,7 @@ import { resolveConvergence } from './lib/convergence.mjs';
 import { runColdReviewStage } from './lib/run-cold-review-stage.mjs';
 import { formatDuration, resolveStageTimeout } from './lib/stage-timeout.mjs';
 import { makeRunStageSeam } from '../harness/stage-seam.mjs';
+import { defaultRun } from '../harness/backends/agent-runtime.mjs';
 import {
   evaluateInferential, gatherInferentialInputs, shouldRun as judgmentHalfRuns,
   PRODUCES as INFERENTIAL_PRODUCES,
@@ -705,7 +706,20 @@ export async function main(deps = {}) {
           // to nothing else. The engine gets it now.
           worktreePath: boot.worktreePath,
           timeoutMs: stageTimeoutMs,
-          deps: deps.stageDeps ?? { runStage: makeRunStageSeam() },
+          // MERGED, NOT REPLACED (judgment:cold-2, fourth cold review). This read
+          // `deps.stageDeps ?? {…}`, so a caller wanting to vary ONE seam had to
+          // rebuild the others — and the two tests that deliberately drive the
+          // REAL `runStage` seam could not stub the forge probe without losing
+          // the very seam they exist to exercise. They therefore spawned the
+          // machine's actual `gh`, and passed or failed on whether the developer
+          // happened to be logged in.
+          //
+          // Production is unchanged: `deps.stageDeps` is undefined there, so this
+          // is the default seam either way.
+          // The REAL runners, supplied here and overridable by a caller — the
+          // forge probe alongside the stage seam, because `runColdReviewStage`
+          // now refuses both rather than defaulting (judgment:cold-2).
+          deps: { runStage: makeRunStageSeam(), forgeProbe: defaultRun, ...(deps.stageDeps ?? {}) },
         });
     } catch (err) {
       error(`brain:review: ${err.message}`);

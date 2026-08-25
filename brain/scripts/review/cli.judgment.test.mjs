@@ -39,6 +39,26 @@ const honestWhoami = (logins) => async ({ token }) => {
 };
 
 /** A green tranche run, with every seam this file needs injectable. */
+/**
+ * A forge CLI that reports NO session, injected into every stage-driving test.
+ *
+ * WITHOUT IT THESE TESTS SPAWN THE REAL `gh`/`glab` (judgment:cold-2 of the
+ * fourth cold review — the first one that EXECUTED the chain). `probeDeps` in
+ * `run-cold-review-stage.mjs` falls back to the real runner when no
+ * `forgeProbe` is supplied, so on any machine holding a `gh auth login` keyring
+ * session — the exact state `producer-forge-reach.mjs`'s header says it
+ * observed — the probe returns `reachable`, the stage refuses before spawning,
+ * and ten tests here fail. MEASURED with a stub `gh` that exits 0: 43 pass, 10
+ * FAIL. `npm test` is a required gate.
+ *
+ * It went unnoticed because THIS container has no `gh` installed, so the probe
+ * answered `absent` and the suite was green for a reason that has nothing to do
+ * with the code — a test whose oracle is the host. `producer-forge-reach.test.mjs`
+ * carries a comment warning about precisely this, one layer down, written in the
+ * same commit that introduced it here.
+ */
+const LOGGED_OUT = () => ({ status: 1, stderr: 'not logged into any hosts' });
+
 function deps({ config, protocol, generate, tier = 'regulated', refuterRunner } = {}) {
   const d = {
     project: 'csrinaldi/brain',
@@ -681,7 +701,7 @@ test('C.2a: the routed stage runs, writes, and its finding reaches the verdict',
     root,
     // The ONLY injection is the thing that would spawn a real model. Everything
     // between here and the verdict is production code.
-    stageDeps: {
+    stageDeps: { forgeProbe: LOGGED_OUT,
       runStage: async (args) => {
         spawned = args;
         const { writeFileSync, mkdirSync } = await import('node:fs');
@@ -746,7 +766,7 @@ test('C.2a: the stage runs BEFORE the artifact is looked for', async (t) => {
     log: () => {}, error: () => {},
     ...deps({ config: ROUTED_CFG, protocol: 'brain-review/2' }),
     root,
-    stageDeps: {
+    stageDeps: { forgeProbe: LOGGED_OUT,
       runStage: async () => {
         existedWhenSpawned = existsSync(join(root, artifactPathFor(42)));
         const { writeFileSync, mkdirSync } = await import('node:fs');
@@ -784,7 +804,7 @@ test('C.2a: an UNROUTED stage spawns nothing and still reads a hand-written arti
     log: (s) => lines.push(s), error: () => {},
     ...deps({ config: CFG(), protocol: 'brain-review/2' }),   // no sdd.map
     root,
-    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+    stageDeps: { forgeProbe: LOGGED_OUT, runStage: async () => { spawned = true; return { ok: true }; } },
   });
 
   // Routing the stage is opt-in — `sdd.map` ships empty. A repo that has not
@@ -806,7 +826,7 @@ test('C.2a: an injected generator replaces the stage rather than running beside 
     log: () => {}, error: () => {},
     ...deps({ config: ROUTED_CFG, protocol: 'brain-review/2', generate: async () => reasoned() }),
     root,
-    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+    stageDeps: { forgeProbe: LOGGED_OUT, runStage: async () => { spawned = true; return { ok: true }; } },
   });
 
   // A caller supplying its own generator has supplied the thing the stage exists
@@ -824,7 +844,7 @@ test('C.2a: a FAILED stage refuses the run and does not report "no transport"', 
     log: () => {}, error: (s) => errors.push(s),
     ...deps({ config: ROUTED_CFG, protocol: 'brain-review/2' }),
     root,
-    stageDeps: { runStage: async () => ({ ok: false, reason: 'the engine exited with status 137' }) },
+    stageDeps: { forgeProbe: LOGGED_OUT, runStage: async () => ({ ok: false, reason: 'the engine exited with status 137' }) },
   });
 
   assert.equal(code, 1, 'a failed stage refuses the run');
@@ -847,12 +867,15 @@ test('C.2a: a routed engine with no backend refuses through the REAL seam', asyn
   const root = scratchRoot(t);
   const errors = [];
 
-  // No `stageDeps` at all — this drives `makeRunStageSeam()` and the real
+  // No `runStage` override — this drives `makeRunStageSeam()` and the real
   // dispatcher, so B.6's refusal is exercised from the verb rather than from a
-  // unit test standing next to it.
+  // unit test standing next to it. Only the forge probe is stubbed, which the
+  // merge in cli.mjs now allows: before it, stubbing anything meant rebuilding
+  // the seam this test exists to exercise, so it spawned the real `gh`.
   const code = await main({
     argv: ['--pr', '42', '--dry-run'],
     log: () => {}, error: (s) => errors.push(s),
+    stageDeps: { forgeProbe: LOGGED_OUT },
     ...deps({
       config: {
         reviewer: { inferential: { enabled: true } },
@@ -975,7 +998,12 @@ test('C.3: every way the judgment half can fail posts NOTHING and says why', asy
 
     const { code, vcs, said } = await runPosting(
       { config, protocol: 'brain-review/2' },
-      stageDeps ? { root, stageDeps } : { root }
+      // The forge probe is stubbed on BOTH arms: a mode that supplies no
+      // stageDeps still drives the real seam, and without this it would spawn the
+      // machine's `gh` (judgment:cold-2).
+      stageDeps
+        ? { root, stageDeps: { forgeProbe: LOGGED_OUT, ...stageDeps } }
+        : { root, stageDeps: { forgeProbe: LOGGED_OUT } }
     );
 
     assert.equal(code, 1, `${mode.name}: refuses the run`);
@@ -1014,7 +1042,7 @@ test('C.3: the CONTROL — an engine that ran and found nothing DOES post', asyn
     },
     {
       root,
-      stageDeps: {
+      stageDeps: { forgeProbe: LOGGED_OUT,
         runStage: async () => {
           await writeArtifact(root, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
           return { ok: true };
@@ -1046,7 +1074,7 @@ test('C.3: a failure refuses BEFORE the verdict is rendered, not after', async (
       },
       protocol: 'brain-review/2',
     },
-    { root, stageDeps: { runStage: async () => ({ ok: false, reason: 'boom' }) } }
+    { root, stageDeps: { forgeProbe: LOGGED_OUT, runStage: async () => ({ ok: false, reason: 'boom' }) } }
   );
 
   assert.equal(code, 1);
@@ -1151,7 +1179,7 @@ test('cold-2: a repeat run does NOT spawn the engine — it decides before payin
     log: (s) => lines.push(s), error: () => {},
     ...d,
     root,
-    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+    stageDeps: { forgeProbe: LOGGED_OUT, runStage: async () => { spawned = true; return { ok: true }; } },
   });
 
   // The whole finding: `STAGE_TIMEOUT_MS` is ten minutes, and every input the
@@ -1172,7 +1200,7 @@ test('cold-2: a DRY RUN still spawns — a rehearsal posts nothing, so there is 
     log: () => {}, error: () => {},
     ...d,
     root,
-    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+    stageDeps: { forgeProbe: LOGGED_OUT, runStage: async () => { spawned = true; return { ok: true }; } },
   });
 
   // Skipping here would take the rehearsal away from an operator who asked for
@@ -1191,7 +1219,7 @@ test('cold-2: a FIRST run at this head spawns normally', async (t) => {
     log: () => {}, error: () => {},
     ...d,
     root,
-    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+    stageDeps: { forgeProbe: LOGGED_OUT, runStage: async () => { spawned = true; return { ok: true }; } },
   });
   assert.equal(spawned, true, 'the guard must not swallow the run it exists to make cheap');
 });
@@ -1207,7 +1235,7 @@ test('cold-2: ANOTHER reviewer\'s verdict at this head does not suppress the run
     log: () => {}, error: () => {},
     ...d,
     root,
-    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+    stageDeps: { forgeProbe: LOGGED_OUT, runStage: async () => { spawned = true; return { ok: true }; } },
   });
   // Going silent because someone ELSE spoke would be the reviewer refusing the
   // conversation the lock exists to permit.
@@ -1280,7 +1308,7 @@ test('cold-2: the refusal happens BEFORE the stage is ever spawned', async (t) =
     ...deps({ config: { ...ROUTED_CFG, reviewer: { ...ROUTED_CFG.reviewer, stageTimeoutMs: 12.5 } },
               protocol: 'brain-review/2' }),
     root: scratchRoot(t),
-    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+    stageDeps: { forgeProbe: LOGGED_OUT, runStage: async () => { spawned = true; return { ok: true }; } },
   });
   assert.equal(spawned, false, 'every precondition refuses before any mutation');
 });
@@ -1293,7 +1321,7 @@ test('cold-2: a valid ceiling reaches the stage from main()', async (t) => {
     ...deps({ config: { ...ROUTED_CFG, reviewer: { ...ROUTED_CFG.reviewer, stageTimeoutMs: 2_400_000 } },
               protocol: 'brain-review/2' }),
     root: scratchRoot(t),
-    stageDeps: { runStage: async (a) => { seen = a.timeoutMs; return { ok: true }; } },
+    stageDeps: { forgeProbe: LOGGED_OUT, runStage: async (a) => { seen = a.timeoutMs; return { ok: true }; } },
   });
   assert.equal(seen, 2_400_000);
 });
@@ -1315,7 +1343,7 @@ test('cold-3: a repeat run still renders its verdict — the output does not dep
     argv: ['--pr', '42'],
     log: (s) => lines.push(s), error: () => {},
     ...d, root,
-    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+    stageDeps: { forgeProbe: LOGGED_OUT, runStage: async () => { spawned = true; return { ok: true }; } },
   });
 
   assert.equal(spawned, false, 'the engine is still skipped — that half was right');
@@ -1336,7 +1364,7 @@ test('cold-3: the skipped judgment half is named as its OWN condition', async (t
   await main({
     argv: ['--pr', '42'], log: (s) => lines.push(s), error: () => {},
     ...d, root,
-    stageDeps: { runStage: async () => ({ ok: true }) },
+    stageDeps: { forgeProbe: LOGGED_OUT, runStage: async () => ({ ok: true }) },
   });
   const body = lines.join('\n');
   assert.match(body, /the judgment half was not run/);
