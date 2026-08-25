@@ -90,6 +90,45 @@ surface, and `brain:review` needs it for the length of one command.
 `refusing to run — env var "BRAIN_REVIEWER_TOKEN" is not set`, which names the
 symptom and not the cause. Tracked on issue #316.
 
+**And the inverse trap, on every OTHER verb: `.env` wins over your shell.**
+The two halves of brain read the environment differently, and the difference bites
+in opposite directions. `brain:review`'s identity check reads `process.env` and
+ignores `.env` entirely (above). Every port verb reads through
+`readEnvVar` (`brain/scripts/vcs/lib/token.mjs`), which looks in `.env` **first**
+and falls back to `process.env` only when the key is absent there:
+
+```js
+export function readEnvVar(key, root = process.cwd()) {
+  try {
+    const line = readFileSync(join(root, '.env'), 'utf8')
+      .split('\n')
+      .find(l => l.startsWith(`${key}=`));
+    if (line) return line.slice(key.length + 1).trim();
+  } catch { /* no .env — fall through */ }
+  return process.env[key] ?? null;
+}
+```
+
+So the workaround an operator reaches for first —
+
+```bash
+VCS_TOKEN="$BRAIN_REVIEWER_TOKEN" npm run brain:review -- --pr 598
+```
+
+— **is silently ignored whenever `.env` already defines `VCS_TOKEN`**. Nothing is
+printed; the run simply uses the `.env` value. If a credential you are sure you
+set does not seem to be taking effect, check `.env` before checking the token.
+
+Two consequences worth knowing:
+
+- The match is `startsWith("KEY=")`, so a **mistyped key silently disables the
+  whole line** and the read falls through to `process.env` with no message.
+  `BRAIN_REVIEWER_TOKE=Nghp_…` — the `N` on the wrong side of the `=` — reads as
+  a key nothing looks up, not as an error.
+- Since issue #631 the reviewer's gate read no longer falls back to `VCS_TOKEN`
+  at all: every gather in `brain:review` runs under the bound reviewer identity.
+  The precedence above still governs every other verb.
+
 ## What the binding changed
 
 **This section used to be called "Both vars are load-bearing" and its reasoning
