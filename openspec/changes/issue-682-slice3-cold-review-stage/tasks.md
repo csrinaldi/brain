@@ -1181,6 +1181,77 @@ pass over the whole PR is now the next gate** — it was deliberately not run
 earlier, because a cold read over a tree with known-open findings spends the
 pass re-finding them.
 
+## Slice F — the third cold review, on `c2a93a8`
+
+C.5's third pass. Verdict REVISE, 5 findings: `budget` and `tier2-frontier`
+expected as always, plus three reasoned ones. **All three verified against the
+code before any disposition** — nothing here is taken on the reviewer's word.
+
+- [ ] F.1 **`judgment:cold-1` (blocker) — the credential scrub closes ONE axis, and
+      the header says otherwise.** Against E.2's fix, four commits later.
+
+      `withoutCredentials` removes named variables from a copy of `process.env`
+      and preserves everything else — the module argues for exactly that, against
+      an allowlist. So `HOME` survives (verified here: `HOME → "/home/op"`,
+      `GH_TOKEN → undefined`), and `gh` reads its OAuth token from the OS keyring
+      / `$HOME/.config/gh`, not from the environment. The reviewer measured it:
+      with all seven names unset, `gh auth status` still reports
+      `Logged in to github.com account csrinaldi (keyring)`, scope `repo`.
+
+      And the spawn constrains nothing — verified at `claude.mjs:133`,
+      `args = ['-p', prompt, ...(model ? ['--model', model] : [])]`, no
+      `--disallowedTools`. The producer holds Bash.
+
+      **WHAT MAKES IT A BLOCKER RATHER THAN A DOC FIX is the half I wrote.**
+      `credential-env.mjs` lines 46-51 name the on-disk channel and assert the
+      detached worktree shuts it. That covers REPO-LOCAL files — a gitignored
+      `.env` — and nothing else. A keyring under `$HOME` is reachable from any
+      cwd. So the note actively tells the next reader a channel is closed when
+      it is open: the ticket's recurring defect class, committed inside the fix
+      written to remove one instance of it.
+
+- [ ] F.2 **`judgment:cold-2` (correction) — the stage spawns before anything can
+      decide it need not.** Verified ordering: `runColdReviewStage` is awaited at
+      `cli.mjs:628`; the anti-loop lock is `poster.mjs:131` and is not reached
+      until `cli.mjs:852`. Every input the lock reads is already in hand at 628.
+      So a second `brain:review` on an unchanged head pays a full engine run —
+      `STAGE_TIMEOUT_MS` is 10 minutes — and then posts nothing.
+
+- [ ] F.3 **`judgment:cold-3` (correction) — `rounds` has no production reader.**
+      Verified: `grep -rn "\.rounds\b" brain/ --include=*.mjs | grep -v '\.test\.'`
+      returns NOTHING. It is computed, declared in the `@returns` shape, and read
+      only by tests. `convergence.mjs` says an operator setting `maxRounds: 5`
+      gets one round of work and "should know that from here rather than from a
+      bill" — but *here* is a source comment, and the run that measures the real
+      number throws it away. The ticket's own defect class, in the value this
+      slice's new bound produces.
+
+### F.4 — what the dry-run cost us, and it was MY instruction
+
+**`--dry-run` IS NOT A CONTENT PREVIEW, and the prompt I wrote for the operator
+said it was.** It governs POSTING, not PRODUCING — `cli.mjs:597-601` says so —
+so a dry run spawns the engine, writes the artifact, and skips the post. The
+real run that follows then CLEARS THAT ARTIFACT BEFORE SPAWNING, which is E.3's
+own fix (`run-cold-review-stage.mjs`, judgment:cold-3 of the second review).
+
+So "dry-run first, read the artifact, then the real run" costs two model calls
+and **destroys the first one's findings**. It did: the dry run produced two
+reasoned findings that were never posted and survive only in the operator's
+session record —
+
+  · an uncomputable base FAILS OPEN
+  · `sdd.map` is not validated at the moment it is written
+
+— which are DIFFERENT from the three that landed. Filed here so they are not
+lost; each likely deserves its own ticket rather than a place in this slice.
+
+**This sharpens F.2 rather than sitting beside it.** F.2 is "the stage spawns
+before the anti-loop lock"; this is the same shape one level up — the stage
+spawns before ANYTHING that could establish the run will not use its output,
+`--dry-run` included. The cost note at `cli.mjs:597-601` reasons only about
+`sdd.map` shipping empty, so neither case is covered by what is written there.
+
+
 ## Not in this change
 
 - `same-model` / `cross-family` axes.
