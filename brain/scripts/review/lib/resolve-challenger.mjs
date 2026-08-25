@@ -14,6 +14,13 @@
 // `VALID_OPS` still routes one op — M8 depends on M5, and the chain has gone
 // untouched across four handoff cuts.
 //
+// HALF OF THAT MEASUREMENT HAS SINCE EXPIRED, and it is corrected rather than
+// left standing: #682 slice 3 added `run-stage`, so `VALID_OPS` routes two ops
+// now, not one. `brain/roles/` still does not exist — which is the half that
+// actually carries the argument, and the reason this binding is still here.
+// Recorded because a stale measurement reads exactly like a current one, and
+// this header's whole purpose is to be believed by whoever finds it next.
+//
 // WHEN #312 LANDS: delete the binding half and call the port instead. Keep the
 // AXIS resolution — that is reviewer policy and belongs here either way.
 // ─────────────────────────────────────────────────────────────────────────────

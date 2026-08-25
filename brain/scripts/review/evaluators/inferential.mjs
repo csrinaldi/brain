@@ -38,6 +38,11 @@
  */
 export const PRODUCES = Object.freeze(['inferential']);
 
+// The default round count is IMPORTED, not restated. A second literal `1` here
+// would be the same defect REQ-682-5 is about, in miniature: one bound written
+// down twice, free to drift.
+import { ROUNDS_IN_FORCE_TODAY } from '../lib/convergence.mjs';
+
 /**
  * REQ-682-4 — the fields a reasoned finding may carry to the challenger.
  *
@@ -117,7 +122,78 @@ export function sanitiseFinding(finding = {}) {
  * @param {{ generated?: Array<object>|null }} input
  * @returns {{conclusion: string|null, gates: {required: string[], detection: string[]}, findings: object[], conditions: string[], escalate: null}}
  */
+/**
+ * The evidence class `evaluateInferential` FORCES on every finding it emits.
+ *
+ * Exported so `cold-review-prompt.mjs` can name it instead of spelling it —
+ * judgment:cold-4 of the third cold review. The prompt used to interpolate the
+ * whole `ALLOWED_EVIDENCE_CLASSES` menu while this evaluator overwrote the field
+ * unconditionally, so the engine was offered a choice that was discarded. Now
+ * the prompt states the one value, and it reads it from HERE: the place that
+ * decides it. A literal in the prompt would be a second declaration with nothing
+ * comparing the two — which is the defect the prompt's own header forbids.
+ */
+export const FORCED_EVIDENCE_CLASS = 'inferential';
+
 export const ID_PREFIX = 'judgment:';
+
+/**
+ * findingKey() — a finding's identity for convergence, by CONTENT.
+ *
+ * TOTAL BY CONSTRUCTION, because its input is a model's output. `canonicalJson`
+ * in `memory/lib/format.mjs` does the same job and THROWS on a value it does
+ * not support; used here that would turn a duplicate check into a crash on a
+ * finding carrying an unexpected type. Key ordering is normalised recursively
+ * so `{a,b}` and `{b,a}` are one finding rather than two, and the whole thing
+ * is guarded: no input can make deduplication the thing that fails the review.
+ *
+ * `null` MEANS "NO KEY", NOT "SOME KEY" — and the difference cost a blocker.
+ *
+ * This used to return `String(f)` on an unserialisable value, with a comment
+ * calling the result "the conservative direction". It is the least conservative
+ * outcome available. MEASURED on the shipped code: two DIFFERENT circular
+ * findings both key to `"[object Object]"`, so the second reads as a duplicate
+ * and is dropped — two blockers in, one blocker out, `failed: false`, no
+ * condition, no count and no log line.
+ *
+ * That is D.3's `judgment:cold-2` returning one layer down INSIDE ITS OWN FIX.
+ * The id-keyed version dropped a second finding because a producer reused an
+ * id; this dropped one because a producer emitted a value JSON does not
+ * describe. Same deletion, same silence, different cause.
+ *
+ * And it is the exact failure this function's own docstring forbids: "no input
+ * can make deduplication the thing that fails the review" — deduplication was
+ * instead made the thing that DELETES a finding, which is strictly worse than
+ * failing, because failing is visible.
+ *
+ * So an uncomputable key is reported as ABSENT and the caller decides. The
+ * policy — an unkeyable finding is always FRESH — belongs at the dedupe site,
+ * not smuggled into a fallback value that looks like a real key. The cost is
+ * that genuinely-duplicate unkeyable findings accumulate across rounds, bounded
+ * by `maxRounds`; a duplicate blocker reaching a human beats a real one that
+ * does not.
+ *
+ * Whether a model can emit such a value through the shipped artifact reader is
+ * a separate question — parsed JSON carries no cycles and no BigInt, so today
+ * it cannot. That is not why this is written this way. This function exists
+ * precisely for input nobody predicted, and a guard whose failure mode is
+ * "silently delete a blocker" is worse than no guard at all.
+ *
+ * @param {unknown} f
+ * @returns {string|null} the content key, or `null` when none can be computed
+ */
+export function findingKey(f) {
+  const walk = (v) => {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? String(v);
+    if (Array.isArray(v)) return `[${v.map(walk).join(',')}]`;
+    return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${walk(v[k])}`).join(',')}}`;
+  };
+  try {
+    return walk(f);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * uniqueId() — #682 round-1 review. Namespacing was cross-class only.
@@ -165,7 +241,7 @@ export function evaluateInferential({ generated = null } = {}) {
     // know every id every evaluator can emit, and that list grows. A reserved
     // prefix cannot collide by construction.
     id: uniqueId(f.id, seen),
-    evidence_class: 'inferential',
+    evidence_class: FORCED_EVIDENCE_CLASS,
   }));
 
   return {
@@ -202,13 +278,25 @@ export function evaluateInferential({ generated = null } = {}) {
  * generator reads the diff itself, from the cold worktree the reviewer already
  * cloned (protocol §8).
  *
+ * `maxRounds` is REQ-682-5's bound, and it bounds THIS loop — the produce rounds
+ * inside one run. It is not §7's `rev >= 3`, which counts posted revisions on the
+ * PR and lives in `verdict.mjs`; see `convergence.mjs` for why the two must not be
+ * one number read twice. The default is 1, which is what ran before the key
+ * existed, so an unset key changes nothing.
+ *
+ * ROUNDS STOP EARLY WHEN ONE PRODUCES NOTHING NEW. A generator that repeats itself
+ * has converged, and re-asking it is spending a model call to receive the same
+ * answer. With today's file transport that happens on round 2 by construction: the
+ * artifact is a static file, so every round after the first is entirely duplicates.
+ *
  * @param {{ worktreePath?: string|null, baseSha?: string|null, headSha?: string|null,
- *           changedFiles?: string[], prBody?: string, deps?: {generate?: Function} }} args
- * @returns {Promise<{generated: Array<object>|null}>}
+ *           changedFiles?: string[], prBody?: string, maxRounds?: number,
+ *           deps?: {generate?: Function} }} args
+ * @returns {Promise<{generated: Array<object>|null, failed: boolean, reason?: string, rounds?: number}>}
  */
 export async function gatherInferentialInputs({
   worktreePath = null, baseSha = null, headSha = null,
-  changedFiles = [], prBody = '', deps = {},
+  changedFiles = [], prBody = '', maxRounds = ROUNDS_IN_FORCE_TODAY, deps = {},
 } = {}) {
   if (typeof deps.generate !== 'function') return { generated: null, failed: false };
 
@@ -221,19 +309,64 @@ export async function gatherInferentialInputs({
   //
   // A throw and a non-array are both FAILURES, reported as such. The caller
   // fails closed on them rather than rendering a green judgment half.
-  let generated;
-  try {
-    generated = await deps.generate({ worktreePath, baseSha, headSha, changedFiles, prBody });
-  } catch (err) {
-    return { generated: null, failed: true, reason: `the generator threw: ${err.message}` };
+  const collected = [];
+  const seen = new Set();
+  let rounds = 0;
+
+  for (let round = 1; round <= maxRounds; round += 1) {
+    rounds = round;
+
+    let produced;
+    try {
+      produced = await deps.generate({ worktreePath, baseSha, headSha, changedFiles, prBody, round });
+    } catch (err) {
+      // A FAILURE IN ANY ROUND FAILS THE WHOLE GATHER, and the earlier rounds'
+      // findings go with it. Keeping them would hand the verdict a PARTIAL list
+      // it would render as complete — "the model became unreachable after round
+      // 1" presented as "this is what the reviewer found", which is the same
+      // fold as the coercion below, one loop iteration further in.
+      return { generated: null, failed: true, reason: `the generator threw on round ${round} of ${maxRounds}: ${err.message}` };
+    }
+    if (!Array.isArray(produced)) {
+      return {
+        generated: null, failed: true,
+        reason: `the generator returned ${produced === undefined ? 'undefined' : typeof produced} on round ${round} of ${maxRounds}, not an array of findings`,
+      };
+    }
+
+    // Deduplicated by the finding's CONTENT, never by its label alone. A round
+    // that repeats itself has converged, and the repeat is not a second
+    // sighting of anything — but two findings are "the same" only when they SAY
+    // the same thing.
+    //
+    // THE FIRST CUT KEYED ON `f?.id`, AND IT WAS FAIL-OPEN. #682's own cold
+    // review measured it: a generator emitting two distinct blockers under one
+    // id — first claim, second claim — returned 2 findings at the base commit
+    // and 1 here. The second BLOCKER left the verdict with no condition, no
+    // count and no log line, on the DEFAULT bound of one round, so the loop was
+    // not even involved. `uniqueId`'s own docstring names "a generator emitting
+    // two findings under `J1`" as real producer behaviour and exists to
+    // disambiguate it with `#2`; keying on the id dropped the finding before
+    // `evaluateInferential` could. A convergence check silently became a filter
+    // that trusts a non-deterministic producer to label its claims uniquely.
+    const fresh = produced.filter((f) => {
+      const key = findingKey(f);
+      // NO KEY → ALWAYS FRESH. `null` is "this finding has no computable
+      // identity", which is not the same as "it is identical to the last one
+      // that also had none". Deduplicating on a shared placeholder deleted a
+      // second blocker in silence; keeping it lets `evaluateInferential` and a
+      // human decide, which is what an unreadable value deserves.
+      if (key === null) return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    collected.push(...fresh);
+
+    if (fresh.length === 0) break;
   }
-  if (!Array.isArray(generated)) {
-    return {
-      generated: null, failed: true,
-      reason: `the generator returned ${generated === undefined ? 'undefined' : typeof generated}, not an array of findings`,
-    };
-  }
-  return { generated, failed: false };
+
+  return { generated: collected, failed: false, rounds };
 }
 
 /**

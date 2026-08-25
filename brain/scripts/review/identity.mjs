@@ -16,10 +16,14 @@
 // against, and cli.mjs's #382 gate refuses that case with its own message.
 
 import { loadBrainConfig } from '../lib/brain-config.mjs';
+import { REVIEWER_TOKEN_ENV } from '../lib/credential-env.mjs';
 import { getVcs } from '../vcs/cli.mjs';
 import { gitlabApiConfig } from '../vcs/ci-context.mjs';
 
-export const DEFAULT_TOKEN_ENV = 'BRAIN_REVIEWER_TOKEN';
+// Re-exported, not respelled: `credential-env.mjs` owns this name because the
+// harness has to strip it from a producer's environment (judgment:cold-2) and
+// cannot import the review port to learn it. One source, two readers.
+export const DEFAULT_TOKEN_ENV = REVIEWER_TOKEN_ENV;
 export const DEFAULT_SETUP_DOC_PATH = 'docs/reviewer-setup.md';
 
 // ── The negative control (#604 half 1) ──────────────────────────────────────

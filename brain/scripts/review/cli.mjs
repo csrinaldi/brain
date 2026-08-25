@@ -19,6 +19,7 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { loadContext } from '../vcs/ci-context.mjs';
 import { getVcs } from '../vcs/cli.mjs';
 import { resolveTier, tierParams, resolveReviewProtocol } from '../vcs/governance-tiers.mjs';
+import { makeArtifactGenerate } from './lib/findings-artifact.mjs';
 import { gatherIdentity } from './identity.mjs';
 import { gatherColdBoot } from './cold-boot.mjs';
 import { buildVerdict, renderVerdict } from './verdict.mjs';
@@ -28,6 +29,11 @@ import { evaluateCheckpoint, gatherCheckpointInputs, PRODUCES as CHECKPOINT_PROD
 import { evaluateRuling, gatherRulingInputs, PRODUCES as RULING_PRODUCES } from './evaluators/ruling.mjs';
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
 import { resolveJudgment } from './lib/resolve-challenger.mjs';
+import { resolveConvergence } from './lib/convergence.mjs';
+import { runColdReviewStage } from './lib/run-cold-review-stage.mjs';
+import { formatDuration, resolveStageTimeout } from './lib/stage-timeout.mjs';
+import { makeRunStageSeam } from '../harness/stage-seam.mjs';
+import { defaultRun } from '../harness/backends/agent-runtime.mjs';
 import {
   evaluateInferential, gatherInferentialInputs, shouldRun as judgmentHalfRuns,
   PRODUCES as INFERENTIAL_PRODUCES,
@@ -35,7 +41,7 @@ import {
 import { unionControls, checkControlsCoverFindings } from './lib/controls.mjs';
 import { needsBaseProbe, probeBase, BASE_REPRODUCIBLE_GATES } from './lib/base-comparison.mjs';
 import { verdictsAtHead } from './lib/parse-verdict.mjs';
-import { postVerdict } from './poster.mjs';
+import { postVerdict, wouldRepeatLastVerdict } from './poster.mjs';
 import { gatherQueue } from './queue.mjs';
 import { runBoard } from './board.mjs';
 
@@ -235,6 +241,22 @@ function defaultGetChangedFiles({ cwd = process.cwd() } = {}) {
  * `getVcs` when `posterDeps.getVcs` is not separately injected), `queueDeps`
  * (→ queue.mjs, `queue` subcommand only), `boardDeps` (→ board.mjs, `board`
  * subcommand only). */
+/**
+ * The production `inferentialDeps` — the stage's artifact, or nothing.
+ *
+ * Split out so the `??` above never touches the filesystem when a caller
+ * injected its own deps: a test that supplies a generator must not depend on
+ * what happens to be in `openspec/reviews/`.
+ *
+ * `root` is a parameter and not a closure over `process.cwd()` so this glue can
+ * be pinned against a real directory. A seam only its callers can reach is a
+ * seam nothing tests.
+ */
+export function artifactDeps(prNumber, root = process.cwd()) {
+  const generate = makeArtifactGenerate({ prNumber, root });
+  return generate ? { generate } : {};
+}
+
 export async function main(deps = {}) {
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
@@ -500,6 +522,49 @@ export async function main(deps = {}) {
     return 1;
   }
 
+  // REQ-682-5's bound, resolved HERE rather than inside the branch that uses it
+  // (judgment:cold-6, second half). It used to live in the `else` that runs when
+  // a transport IS configured, so a repo with no transport never validated the
+  // key at all: `maxRounds: "3"` — a string `resolveConvergence` is documented
+  // to refuse — RESOLVED WITH EXIT 0, measured. The refusal arrived on the day
+  // someone routed the stage, not on the day they wrote the key, which is the
+  // wrong day: config is wrong when it is WRITTEN.
+  //
+  // Wrapped, for the same reason `resolveJudgment` above is: an uncaught throw
+  // from inside `main()` reaches `process.exit(await main())` as a raw
+  // ERR_UNHANDLED_REJECTION — a Node stack, no `brain:review:` line, and no
+  // verdict. It still fails closed, so what is lost is the operator-actionable
+  // message, which is the whole of what a refusal is for.
+  let maxRounds;
+  try {
+    ({ maxRounds } = resolveConvergence(config));
+  } catch (err) {
+    error(`brain:review: ${err.message}`);
+    return 1;
+  }
+
+  // THE STAGE CEILING RESOLVES HERE FOR THE SAME TWO REASONS, and it shipped in
+  // the wrong place one commit earlier (judgment:cold-2, third cold review).
+  //
+  // It was evaluated inside `runStage`'s ARGUMENT LIST — after `mkdir`, and
+  // after `remove` had deleted the previous artifact. `run-cold-review-stage`
+  // states the rule in capitals fifty lines above that call: every precondition
+  // refuses before any mutation. Measured: a string value threw, and the run had
+  // already destroyed the file it could not replace.
+  //
+  // And it sat BELOW the routing check, so an unrouted repo never validated the
+  // key — the identical defect judgment:cold-6 moved `resolveConvergence` up
+  // here to fix, with the identical argument: config is wrong when it is
+  // WRITTEN, not on the day someone finally routes the stage. Fixing one key and
+  // leaving its neighbour is how a lesson stays local to the line that taught it.
+  let stageTimeoutMs;
+  try {
+    ({ timeoutMs: stageTimeoutMs } = resolveStageTimeout(config));
+  } catch (err) {
+    error(`brain:review: ${err.message}`);
+    return 1;
+  }
+
   // #682 round-1 review — `judgment.reason` had NO CONSUMER. It was computed on
   // every off path and read nowhere, so a repo that deliberately turned the
   // judgment half ON and got nothing was told nothing: `resolveJudgment` knew
@@ -524,7 +589,166 @@ export async function main(deps = {}) {
   }
 
   if (judgment.run) {
-    const inferentialDeps = deps.inferentialDeps ?? {};
+    // Slice A's transport (#682, ADR-0033): the judgment half's producer is the
+    // cold-review STAGE, and its output is a file — `openspec/reviews/pr-NNN/`.
+    // Reading it is all the transport this slice has; slice B spawns the engine
+    // that writes it.
+    //
+    // `deps.inferentialDeps` still wins, so a test injects a generator without
+    // touching the filesystem — and so the seam the unit tests already drive
+    // keeps working unchanged.
+    //
+    // NO artifact means no `generate`, which means the half does not run and the
+    // verdict says "enabled but no transport is configured". That is deliberate:
+    // a repo that never ran the stage has not failed, and rendering it as a
+    // failure would put every repo on earth into a refusal.
+    const root = deps.root ?? process.cwd();
+
+    // ── C.2a — THE STAGE RUNS HERE, AND THE ORDERING IS THE WHOLE WIRING ─────
+    //
+    // Everything below reads a FILE. Until this call existed, that file only
+    // appeared if a human wrote it by hand: `findings-artifact.mjs` read it,
+    // `run-cold-review-stage.mjs` could have written it, `stage-seam.mjs` could
+    // have reached an engine — and NOTHING IN PRODUCTION CALLED EITHER. The
+    // slice had a producer, a transport and a reader that never touched.
+    //
+    // That is the defect class this ticket spent eight mutations chasing, at
+    // slice scale: a capability that exists, is tested, and is unreachable from
+    // the verb. It reads as "built" in every place except the one that runs.
+    //
+    // The stage must run BEFORE `artifactDeps`, because `makeArtifactGenerate`
+    // answers `null` for a file that is absent AT THE MOMENT IT IS ASKED. Run it
+    // after, and the first review on any PR reports "no transport is configured"
+    // about a stage that had just written its artifact.
+    //
+    // AN INJECTED `inferentialDeps` REPLACES THE STAGE ENTIRELY, and that is what
+    // the seam means: a caller supplying its own generator has supplied the thing
+    // the stage exists to produce. Spawning an engine anyway would burn a model
+    // call whose output nothing reads.
+    //
+    // IT RUNS UNDER `--dry-run` TOO. `--dry-run` governs POSTING, not producing:
+    // a dry run that skipped the stage would render a different verdict from the
+    // real one, which defeats the only reason to ask for a preview. The cost is
+    // real and it is opt-in — `sdd.map` ships empty (migration 0.10.0), so no
+    // repo spawns anything until it routes the stage on purpose.
+    //
+    // THE STAGE RUNS ONCE, OUTSIDE the produce loop `maxRounds` bounds. So a
+    // higher bound re-reads one static artifact and converges on round 2, exactly
+    // as `convergence.mjs` records. Moving the stage inside the loop would make
+    // the bound buy real work and would multiply the model cost per review;
+    // ADR-0033 decided the transport, not that.
+    // WRAPPED, for the reason `resolveJudgment` is (judgment:cold-6). The throw
+    // that reaches here is `resolveStageEngine`'s, on an `sdd.map` entry that
+    // names no engine — an operator's typo. Uncaught, it left `main()` as a raw
+    // ERR_UNHANDLED_REJECTION: a Node stack, no `brain:review:` line, and no
+    // verdict. Measured: the injected `error` channel received NOTHING. The run
+    // failed closed either way, so what was lost is the message that tells the
+    // operator which key to fix — which is the whole point of failing closed
+    // out loud rather than merely failing.
+    // judgment:cold-2 — DECIDE BEFORE PAYING, not after. Every input the
+    // anti-loop lock reads is already in hand here: `boot.doctrine.priorVerdicts`,
+    // `identity.handle` and `boot.headSha`. The lock itself lives in
+    // `poster.mjs` and is not reached until hundreds of lines below, so a second
+    // `brain:review` on an unchanged head used to pay a full engine run —
+    // `STAGE_TIMEOUT_MS` is ten minutes — and then post nothing.
+    //
+    // THE PREDICATE IS IMPORTED, NEVER RESTATED. A copy here would be the defect
+    // this file already fixed on the SHA half (`verdictsAtHead`, shared "so the
+    // two guards can no longer disagree silently"): a cheap early check that
+    // drifts from the real lock skips runs the lock would have posted, and
+    // nothing on the run would say so.
+    //
+    // A DRY RUN IS EXEMPT, and that is not a special case — it is the same rule.
+    // The lock exists to stop the reviewer answering itself ON THE PULL REQUEST;
+    // a rehearsal posts nothing, so there is no loop to break and skipping would
+    // take the rehearsal away from an operator who asked for exactly it.
+    // IT SKIPS THE SPAWN, NOT THE RUN — and the first version skipped the run
+    // (judgment:cold-3, third cold review). Returning 0 here jumped over the
+    // verdict body, so the same anti-loop rule produced two different
+    // operator-facing outputs depending on `reviewer.inferential.enabled`, a key
+    // with nothing to do with the lock: with the half on, one line; with it off,
+    // the whole rendered block. The comment beside it claimed "the operator's
+    // outcome is identical", which was measurably false — the defect class this
+    // ticket exists to remove, in the fix for another instance of it.
+    //
+    // The verdict body is the ONLY place a non-posting run reports what it
+    // found. A run that declines to repeat itself still ran its deterministic
+    // gates, and an operator is entitled to read them.
+    const antiLoop = !args.dryRun && wouldRepeatLastVerdict({
+      priorVerdicts: boot.doctrine.priorVerdicts,
+      reviewerHandle: identity.handle,
+      headSha: boot.headSha,
+    });
+    if (antiLoop) {
+      // NAMED AS ITS OWN CONDITION, never folded into "no transport is
+      // configured". Protocol §10's `conditions` is the field for "the evidence
+      // behind this verdict is weaker than it looks", and a judgment half that
+      // was deliberately not run is exactly that. Rendering it as an unrouted
+      // repo would tell an operator who configured an engine that they did not.
+      judgmentConditions.push(
+        'the judgment half was not run: this reviewer\'s last verdict at this head is its own, so ' +
+        'the anti-loop lock will post nothing and an engine run would be paid for output nobody reads.'
+      );
+    }
+
+    let stageResult;
+    try {
+      stageResult = (deps.inferentialDeps || antiLoop)
+        ? { routed: false }
+        : await runColdReviewStage({
+          config,
+          prNumber: args.pr,
+          baseRef: baseSha,
+          headRef: boot.headSha,
+          root,
+          // judgment:cold-3: the coordinate cold-boot computes so the reviewer
+          // never reads ambient state was passed to gatherInferentialInputs and
+          // to nothing else. The engine gets it now.
+          worktreePath: boot.worktreePath,
+          timeoutMs: stageTimeoutMs,
+          // MERGED, NOT REPLACED (judgment:cold-2, fourth cold review). This read
+          // `deps.stageDeps ?? {…}`, so a caller wanting to vary ONE seam had to
+          // rebuild the others — and the two tests that deliberately drive the
+          // REAL `runStage` seam could not stub the forge probe without losing
+          // the very seam they exist to exercise. They therefore spawned the
+          // machine's actual `gh`, and passed or failed on whether the developer
+          // happened to be logged in.
+          //
+          // Production is unchanged: `deps.stageDeps` is undefined there, so this
+          // is the default seam either way.
+          // The REAL runners, supplied here and overridable by a caller — the
+          // forge probe alongside the stage seam, because `runColdReviewStage`
+          // now refuses both rather than defaulting (judgment:cold-2).
+          deps: { runStage: makeRunStageSeam(), forgeProbe: defaultRun, ...(deps.stageDeps ?? {}) },
+        });
+    } catch (err) {
+      error(`brain:review: ${err.message}`);
+      return 1;
+    }
+
+    // A ROUTED STAGE THAT FAILED IS NOT A REPO WITHOUT A TRANSPORT. Refused here
+    // rather than fallen through, because falling through reaches
+    // `artifactDeps`, finds no file, and renders "enabled but no transport is
+    // configured" — telling an operator who configured an engine that they did
+    // not. Same words, opposite fact. `routed` is what keeps the two apart, and
+    // it survives the failure precisely so this branch can read it.
+    // F.9 — WHAT THE ENGINE COST, REPORTED WHETHER OR NOT IT SUCCEEDED. The
+    // shipped ceiling was ten minutes and no run had ever said how long it
+    // actually took, so when the first real cold review died at it nobody could
+    // tell whether the number was close or absurd. A measurement the run takes
+    // and discards is not a measurement anyone has — judgment:cold-3, in the
+    // value that decides whether a review can finish at all.
+    if (stageResult.routed && typeof stageResult.elapsedMs === 'number') {
+      log(`brain:review: the cold-review engine ran for ${formatDuration(stageResult.elapsedMs)}.`);
+    }
+
+    if (stageResult.routed && !stageResult.ok) {
+      error(`brain:review: the cold-review stage failed — ${stageResult.reason}. ` +
+        'Refusing to post a verdict that would declare the inferential control applied.');
+      return 1;
+    }
+
+    const inferentialDeps = deps.inferentialDeps ?? artifactDeps(args.pr, root);
 
     // #682 round-1 review, finding G — AN ENABLED HALF WITH NO TRANSPORT IS NOT
     // THE SAME STATE AS A DISABLED ONE, and until now they rendered
@@ -547,18 +771,36 @@ export async function main(deps = {}) {
     // of one question, and the one that documented itself as authoritative was
     // the one nothing read. It is read now, so the docstring is true and there
     // is one place to change when slice 3 supplies the transport.
-    if (!judgmentHalfRuns({ enabled: judgment.run, generate: inferentialDeps.generate })) {
+    // ANTI-LOOP IS TESTED FIRST, AND THE TWO MUST NOT FOLD. A repo that skipped
+    // the engine because it would post nothing HAS a transport; saying "no
+    // transport is configured" would tell an operator who configured an engine
+    // that they did not — the same words, the opposite fact, which is the pair
+    // `routed` exists to keep apart one layer down. The first cut of
+    // judgment:cold-3's fix reached this branch through `{routed: false}` and
+    // emitted BOTH sentences; a test caught it.
+    if (antiLoop) {
+      // The condition was already pushed at the guard. Nothing further to say:
+      // an engine that did not run produced no findings, and that is not the
+      // same as a repo with nowhere to run one.
+    } else if (!judgmentHalfRuns({ enabled: judgment.run, generate: inferentialDeps.generate })) {
       judgmentConditions.push(
         'the judgment half is enabled but no transport is configured — no reasoned finding ' +
         'was produced, and the inferential control was NOT applied to this verdict.'
       );
     } else {
+      // `maxRounds` is resolved above, on every run. It is NOT §7's `rev >= 3`,
+      // which is read from `priorRevCount` further down and counts posted
+      // revisions on this PR rather than produce rounds inside this run;
+      // `convergence.mjs` holds the argument for why the two must not be one
+      // number read twice.
+
       const inferentialInputs = await gatherInferentialInputs({
         worktreePath: boot.worktreePath,
         baseSha,
         headSha: boot.headSha,
         changedFiles,
         prBody: boot.prView.body,
+        maxRounds,
         deps: inferentialDeps,
       });
 
@@ -570,6 +812,29 @@ export async function main(deps = {}) {
         error(`brain:review: the judgment half could not run — ${inferentialInputs.reason}. ` +
           'Refusing to post a verdict that would declare the inferential control applied.');
         return 1;
+      }
+
+      // judgment:cold-3 — `rounds` IS MEASURED, SO IT REACHES A READER. Until
+      // here it was computed by `gatherInferentialInputs`, declared in its
+      // `@returns` shape, and read by nothing outside the tests. That is the
+      // same defect the comment above records `shouldRun` having had, in the
+      // value this slice's own bound produces: a number the run measures and
+      // throws away.
+      //
+      // AND IT IS THE NUMBER `convergence.mjs` PROMISED THE OPERATOR. Its
+      // argument for keeping `maxRounds` as a key at all is that "an operator
+      // setting `maxRounds: 5` today gets one round of work and should know that
+      // from here rather than from a bill" — but *here* was a source comment,
+      // which is not a place a run reports to. The gap between what was
+      // configured and what actually ran is the whole point, so it is stated
+      // rather than left for the reader to subtract.
+      log(`brain:review: judgment half converged in ${inferentialInputs.rounds} produce round(s).`);
+      if (maxRounds > inferentialInputs.rounds) {
+        log(
+          `brain:review: reviewer.convergence.maxRounds is ${maxRounds}, and ${inferentialInputs.rounds} ` +
+          'round(s) ran — the loop converged early. Raising the bound buys nothing until a transport ' +
+          're-runs the stage between rounds.'
+        );
       }
 
       // `generated` is an array here and cannot be null: the branch is guarded

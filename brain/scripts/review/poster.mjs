@@ -93,6 +93,44 @@ export function deriveInlineComments(findings = []) {
  *   | { posted: false, skipped: 'anti-loop'|'anti-stale' }>}
  *   `inlineDropped` is ABSENT when no anchor was lost, never 0.
  */
+/**
+ * wouldRepeatLastVerdict() — would posting now repeat THIS reviewer's own last
+ * verdict at this head? PURE, and exported because it must have exactly ONE
+ * definition (judgment:cold-2 of the third cold review).
+ *
+ * `postVerdict` is where the answer is ENFORCED, and it is not where the answer
+ * is first knowable. Every input — the prior verdicts, the handle, the head SHA —
+ * is in hand at `cli.mjs`'s stage spawn, hundreds of lines before the poster is
+ * reached. Until this was extracted, a second `brain:review` on an unchanged
+ * head paid a full engine run (`STAGE_TIMEOUT_MS` is ten minutes) and then
+ * posted nothing: the run did all the work, then discovered it need not have.
+ *
+ * IT IS ONE FUNCTION RATHER THAN TWO CHECKS BY DESIGN. This file already
+ * learned that lesson on the SHA half — `verdictsAtHead` is shared with the rev
+ * bound precisely "so the two guards can no longer disagree silently about what
+ * the same review iteration means". A second copy of this predicate at the call
+ * site would be the same defect one layer up: the cheap early check and the real
+ * lock drifting apart, with the early one deciding to skip runs the lock would
+ * have posted.
+ *
+ * The AUTHOR half is what makes it a self-loop guard rather than a rev bound: it
+ * refuses to repeat ITSELF, while the bound counts every reviewer's verdicts at
+ * this head.
+ *
+ * @param {{priorVerdicts?: Array<{author?: string}>, reviewerHandle?: string,
+ *          headSha?: string}} args
+ * @returns {boolean}
+ */
+export function wouldRepeatLastVerdict({ priorVerdicts = [], reviewerHandle, headSha } = {}) {
+  const list = Array.isArray(priorVerdicts) ? priorVerdicts : [];
+  const lastVerdict = list.length > 0 ? list[list.length - 1] : null;
+  return Boolean(
+    lastVerdict &&
+    lastVerdict.author === reviewerHandle &&
+    verdictsAtHead([lastVerdict], headSha).length === 1
+  );
+}
+
 export async function postVerdict({
   headSha,
   project,
@@ -127,8 +165,7 @@ export async function postVerdict({
   // same review iteration" means. The AUTHOR half is this lock's own addition and is
   // the difference between them: the bound counts every reviewer's verdicts at this
   // head, while the lock only refuses to repeat ITSELF.
-  const lastVerdict = priorVerdicts.length > 0 ? priorVerdicts[priorVerdicts.length - 1] : null;
-  if (lastVerdict && lastVerdict.author === reviewerHandle && verdictsAtHead([lastVerdict], headSha).length === 1) {
+  if (wouldRepeatLastVerdict({ priorVerdicts, reviewerHandle, headSha })) {
     return { posted: false, skipped: 'anti-loop' };
   }
 

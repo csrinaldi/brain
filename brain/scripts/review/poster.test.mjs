@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { postVerdict, deriveInlineComments } from './poster.mjs';
+import { postVerdict, deriveInlineComments, wouldRepeatLastVerdict } from './poster.mjs';
 import { guardedLabelAdd } from './deny-set.mjs';
 import { VERBS } from '../vcs/cli.mjs';
 
@@ -637,4 +637,65 @@ test('#405 deriveInlineComments: the comment names the finding it came from (REQ
   const [c] = deriveInlineComments([{ id: 'budget', evidence: 'the comparison', file: 'a.mjs', line: 1 }]);
   assert.match(c.body, /budget/, 'the comment must name the finding id');
   assert.match(c.body, /the comparison/, 'and carry its evidence');
+});
+
+
+// ── judgment:cold-2 — the predicate the early guard and the lock SHARE ─────
+
+test('wouldRepeatLastVerdict: this reviewer\'s own last verdict at this head repeats', () => {
+  assert.equal(wouldRepeatLastVerdict({
+    priorVerdicts: [{ author: 'bot', head_sha: 'abc' }],
+    reviewerHandle: 'bot',
+    headSha: 'abc',
+  }), true);
+});
+
+test('wouldRepeatLastVerdict: ANOTHER reviewer\'s verdict does not — it guards a self-loop', () => {
+  // The author half is the difference between this lock and the rev bound: the
+  // bound counts everyone's verdicts at the head, the lock refuses to repeat
+  // ITSELF. Folding them would make the reviewer go silent because someone else
+  // spoke.
+  assert.equal(wouldRepeatLastVerdict({
+    priorVerdicts: [{ author: 'someone-else', head_sha: 'abc' }],
+    reviewerHandle: 'bot',
+    headSha: 'abc',
+  }), false);
+});
+
+test('wouldRepeatLastVerdict: a verdict at a DIFFERENT head does not repeat', () => {
+  assert.equal(wouldRepeatLastVerdict({
+    priorVerdicts: [{ author: 'bot', head_sha: 'old' }],
+    reviewerHandle: 'bot',
+    headSha: 'new',
+  }), false);
+});
+
+test('wouldRepeatLastVerdict: no prior verdicts is false, not a crash', () => {
+  assert.equal(wouldRepeatLastVerdict({ priorVerdicts: [], reviewerHandle: 'bot', headSha: 'abc' }), false);
+  assert.equal(wouldRepeatLastVerdict({ reviewerHandle: 'bot', headSha: 'abc' }), false);
+  assert.equal(wouldRepeatLastVerdict(), false);
+});
+
+test('wouldRepeatLastVerdict: only the LAST verdict counts', () => {
+  // An older self-verdict at this head followed by someone else's is not a
+  // repeat: the reviewer would be answering THEM, which is the conversation the
+  // lock exists to permit.
+  assert.equal(wouldRepeatLastVerdict({
+    priorVerdicts: [{ author: 'bot', head_sha: 'abc' }, { author: 'other', head_sha: 'abc' }],
+    reviewerHandle: 'bot',
+    headSha: 'abc',
+  }), false);
+});
+
+test('wouldRepeatLastVerdict: postVerdict AGREES with it — one definition, not two', async () => {
+  // The whole reason this is exported. If the poster ever stops routing through
+  // the predicate, the early guard in cli.mjs starts skipping runs the lock
+  // would have posted, and nothing on the run says so.
+  const args = { priorVerdicts: [{ author: 'bot', head_sha: 'abc' }], reviewerHandle: 'bot', headSha: 'abc' };
+  assert.equal(wouldRepeatLastVerdict(args), true);
+  const result = await postVerdict({
+    ...args, project: 'o/r', number: 1, mode: 'review', renderedBody: 'x',
+    deps: { getVcs: async () => { throw new Error('the poster must not reach the forge on a skip'); } },
+  });
+  assert.equal(result.skipped, 'anti-loop');
 });

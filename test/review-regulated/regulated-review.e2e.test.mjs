@@ -10,12 +10,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildFixture } from './fixture.mjs';
 import { parseVerdict } from '../../brain/scripts/review/lib/parse-verdict.mjs';
+import { artifactPathFor, ARTIFACT_TAG } from '../../brain/scripts/review/lib/findings-artifact.mjs';
 import { postVerdict } from '../../brain/scripts/review/poster.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -436,11 +437,24 @@ test('e2e: the producer runs with NO TRANSPORT, so nothing anchors and no commen
   // basis is false is worse than a deleted one, because it reads as protection
   // while guarding a state that does not exist.
   //
-  // A red here now means the transport landed and the judgment half is live in
-  // a real CLI run. When it does, this pin moves ONCE MORE — onto a posted
-  // payload that DOES carry `comments`, with the un-anchorable finding still in
-  // the summary block. Do not delete it. This is the second move; the
-  // instruction has now survived three owners.
+  // MOVED A SECOND TIME (#682 slice A), as the instruction said to. The transport
+  // LANDED: `review/lib/findings-artifact.mjs` reads the cold-review stage's
+  // artifact and `cli.mjs` wires it as `deps.generate`. So the old basis — "the
+  // transport does not exist" — is no longer true, and a pin whose stated basis
+  // is false is worse than a deleted one.
+  //
+  // The basis now: the transport exists and THIS FIXTURE DOES NOT CONFIGURE IT.
+  // There is no `openspec/reviews/pr-N/` under the fixture root, so
+  // `artifactDeps` yields no generator and the producer runs with nothing, exactly
+  // as before. That is still a state worth pinning: it is what every repo sees
+  // until it runs the stage, and it must keep rendering as "no transport", never
+  // as a failure.
+  //
+  // The payload that DOES carry `comments` is pinned in the test below, driven
+  // through the real CLI. Between the two, both halves of REQ-405-8 are held:
+  // absent anchors request nothing, present anchors ride the same call.
+  // Do not delete either. This is the second move; the instruction has now
+  // survived four owners.
   const fx = withFixture(t, { tier: 'regulated' });
   const r = runReview(fx);
   assert.equal(r.status, 0, r.stderr);
@@ -724,4 +738,74 @@ test('e2e #690: a real brain-review/1 run declares BOTH halves of what ran', (t)
   assert.ok(!verdict.malformed, 'both halves must round-trip');
   assert.ok(verdict.findings.every((f) => !f.evidence_class),
     'a /1 finding carries no evidence_class — which is precisely why the run-level declaration is what carries the fact here');
+});
+
+// ── A.4 · the moved pin: a REASONED finding reaches the changed line ─────────
+
+/**
+ * Writes the cold-review stage's artifact into a fixture, where the CLI will read it.
+ *
+ * DERIVED FROM THE READER'S OWN EXPORTS, not re-spelled (judgment:cold-8). This
+ * helper used to hardcode `join(repoDir, 'openspec', 'reviews', `pr-N`)` and a
+ * hand-written ```brain-findings/1 fence, while `artifactPathFor()` and
+ * `ARTIFACT_TAG` are exported for exactly this and are what
+ * `cold-review-prompt.mjs` derives from. So the highest-level test of the wire
+ * was the one place the contract was written down a second time, free to drift
+ * from the reader it exists to exercise — and drift here fails in the safe-looking
+ * direction: the test keeps passing against its own private contract while
+ * production reads a different path.
+ */
+function withArtifact(fx, findings) {
+  const abs = join(fx.repoDir, artifactPathFor(fx.prNumber));
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(
+    abs,
+    `# Cold review of PR #${fx.prNumber}\n\n\`\`\`${ARTIFACT_TAG}\n${JSON.stringify(findings, null, 2)}\n\`\`\`\n`,
+    'utf8',
+  );
+}
+
+test('e2e #682 A.4: a reasoned finding from the stage artifact is posted ON THE CHANGED LINE, through the real verb (REQ-S3-5)', (t) => {
+  // M3's exit criterion — "a developer sees inline code review in the PR" —
+  // reached, and reached without spawning anything: the stage's engine is a file
+  // this test wrote. Slice B replaces the file's author with a subagent and
+  // changes nothing below.
+  //
+  // The test above pins the same wire when NO artifact exists. This one is its
+  // complement, and both are needed: without the pair, "no comments appeared"
+  // and "comments cannot appear" are the same observation.
+  const fx = withFixture(t, { tier: 'regulated' });
+  withArtifact(fx, [
+    { id: 'J1', severity: 'blocker', evidence: 'the semantics are inverted here', cites: 'reviewer-protocol.md §6.1', file: 'big.txt', line: 3 },
+    { id: 'J2', severity: 'correction', evidence: 'a whole-PR concern with no single line', cites: 'reviewer-protocol.md §5' },
+  ]);
+
+  const r = runReview(fx);
+  assert.equal(r.status, 0, r.stderr);
+
+  const posted = postedBodies(fx);
+  assert.equal(posted.length, 1, 'still ONE payload — the anti-loop lock counts parseable verdicts');
+  assert.equal(posted[0].event, 'COMMENT', 'ADR-0020 lock 2: the event stays COMMENT even now that the half is live');
+
+  // The anchored one rides as an inline comment, on the line it names.
+  assert.ok(Array.isArray(posted[0].comments), `the payload must carry comments — got: ${JSON.stringify(Object.keys(posted[0]))}`);
+  assert.equal(posted[0].comments.length, 1, 'only the anchored finding becomes a comment');
+  assert.equal(posted[0].comments[0].path, 'big.txt');
+  assert.equal(posted[0].comments[0].line, 3);
+  assert.match(posted[0].comments[0].body, /the semantics are inverted here/,
+    'the developer reads the EVIDENCE on the line');
+
+  // The un-anchorable one is NOT lost — REQ-405-4's rule, now exercised by a
+  // producer instead of a hand-made findings array.
+  assert.match(posted[0].body, /a whole-PR concern with no single line/,
+    'a finding with no anchor stays in the summary block: a dropped anchor is never a dropped finding');
+
+  // And the run DECLARES that the judgment control was applied, because it was.
+  const verdict = parseVerdict({ body: posted[0].body });
+  assert.ok(verdict.controls.includes('inferential'),
+    `the judgment half ran and must say so — got ${JSON.stringify(verdict.controls)}`);
+  assert.ok(verdict.findings.some(f => f.evidence_class === 'inferential'),
+    'and a reasoned finding must be on the wire, annotated as reasoned');
+  assert.doesNotMatch(posted[0].body, /no transport is configured/,
+    'the condition every verdict has carried since #743 is gone HERE — there is a transport now');
 });

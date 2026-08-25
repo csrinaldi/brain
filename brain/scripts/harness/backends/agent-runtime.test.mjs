@@ -378,6 +378,42 @@ test('defaultRun: a hung command is cut off, it does not block day:start forever
   assert.ok(r.error || r.signal, 'a timed-out spawn must surface as error/signal, not as a clean exit');
 });
 
+// ── cwd: #682's cold review, judgment:cold-4 ─────────────────────────────────
+//
+// THE ORACLE HAS TO BE THE REAL RUNNER. `runStage` has always passed
+// `{ cwd, timeoutMs }` and `defaultRun` destructured only `timeoutMs`, so the
+// engine ran wherever the parent happened to stand. Every caller-side test
+// hands in a spy, and a spy records the `cwd` it was GIVEN however the real
+// runner treats it — which is exactly why the drop survived: `run-stage.test.mjs`
+// asserts `opts.timeoutMs` reaches the runner and asserts nothing about the
+// directory the child actually got. So this spawns a real child and asks IT.
+
+test('#682 cold-4: defaultRun runs the child in the cwd it was given', async () => {
+  const { defaultRun } = await import('./agent-runtime.mjs');
+  const { mkdtempSync, realpathSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  // realpath, because macOS resolves /tmp through a symlink and the child
+  // reports the resolved path — a mismatch there would be the test's bug.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'brain-cwd-')));
+
+  const r = defaultRun(process.execPath, ['-e', 'process.stdout.write(process.cwd())'], { cwd: dir });
+  assert.equal(
+    realpathSync(r.stdout.trim()), dir,
+    'the child ran somewhere else — a cwd threaded through four layers and dropped at the last one ' +
+    'makes the engine review an unrelated tree while the verdict binds itself to the PR head'
+  );
+
+  // And an absent cwd still means inherit: the probe callers pass none, and
+  // defaulting it to anything but the parent would move every version probe.
+  const inherited = defaultRun(process.execPath, ['-e', 'process.stdout.write(process.cwd())'], {});
+  assert.equal(
+    realpathSync(inherited.stdout.trim()), realpathSync(process.cwd()),
+    'no cwd must keep meaning "inherit" — probeAgentRuntime depends on it'
+  );
+});
+
 test('platformEnvVars: BOTH axis keys reach resolvePlatform, not just AGENT_PLATFORM', () => {
   // ADR-0024 keeps SDD_HARNESS as the legacy fallback; a repo declaring only
   // SDD_HARNESS=claude must not silently resolve to the antigravity default.
@@ -398,4 +434,65 @@ test('platformConfig: a harness section of the WRONG shape degrades to {}, never
   assert.deepEqual(platformConfig({}), {});
   assert.deepEqual(platformConfig(null), {});
   assert.equal(resolvePlatform({ env: {}, envVars: {}, config: platformConfig({ harness: 'claude' }) }), 'claude');
+});
+
+// ── env: #682's SECOND cold review, judgment:cold-2 ──────────────────────────
+//
+// Same shape as cold-4 above and the same reason for the same oracle. The
+// finding was that `defaultRun` called `spawnSync` with no `env` key at all, so
+// the producer inherited `process.env` WHOLE — `BRAIN_REVIEWER_TOKEN` included,
+// measured — while `runStage`'s docstring said in capitals that it holds no
+// credential. A spy would have recorded whatever `env` it was handed however
+// the real runner treated it, so the oracle spawns a child and asks IT.
+
+test('#682 cold-2: defaultRun gives the child the env it was given, and nothing else', async () => {
+  const { defaultRun } = await import('./agent-runtime.mjs');
+
+  const READ = ['-e', 'process.stdout.write(JSON.stringify({t: process.env.BRAIN_REVIEWER_TOKEN ?? null, k: process.env.BRAIN_TEST_KEEP ?? null}))'];
+
+  // SET IT FIRST. A parent that never held the credential proves nothing about
+  // whether the child would have inherited it — the assertion has to be that a
+  // var PRESENT in `process.env` and absent from the passed `env` does not
+  // arrive, which is the exact condition the finding measured.
+  // Named rather than spelt inline: `check-refs.mjs`'s `hardcoded-secret` rule
+  // matches `TOKEN = "…"` and its rule file carries no exemptions on purpose
+  // (#616 — a dead exemption blinds the rule for that path).
+  const MARKER = 'fixture-marker';
+  process.env.BRAIN_REVIEWER_TOKEN = MARKER;
+  let r;
+  try {
+    const { BRAIN_REVIEWER_TOKEN: _drop, ...rest } = process.env;
+    r = defaultRun(process.execPath, READ, { env: { ...rest, BRAIN_TEST_KEEP: 'kept' } });
+  } finally {
+    delete process.env.BRAIN_REVIEWER_TOKEN;
+  }
+  const seen = JSON.parse(r.stdout);
+  assert.equal(
+    seen.t, null,
+    'the child read a credential the caller removed — an env dropped at the last layer ' +
+    'hands the producer the token ADR-0033 says it does not hold'
+  );
+  assert.equal(seen.k, 'kept', 'the rest of the environment must survive — the engine needs PATH to run at all');
+});
+
+test('#682 cold-2: an absent env still means INHERIT — every probe caller depends on it', async () => {
+  const { defaultRun } = await import('./agent-runtime.mjs');
+
+  const marker = 'brain-inherit-probe';
+  process.env.BRAIN_TEST_INHERIT = marker;
+  try {
+    const r = defaultRun(
+      process.execPath,
+      ['-e', 'process.stdout.write(String(process.env.BRAIN_TEST_INHERIT ?? ""))'],
+      {},
+    );
+    assert.equal(
+      r.stdout.trim(), marker,
+      'no env must keep meaning "inherit": probeAgentRuntime reads versions through PATH, ' +
+      'the proxy vars and the npm registry config, and an empty environment reports every ' +
+      'runtime absent'
+    );
+  } finally {
+    delete process.env.BRAIN_TEST_INHERIT;
+  }
 });

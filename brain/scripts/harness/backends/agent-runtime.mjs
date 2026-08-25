@@ -25,7 +25,12 @@
 import { spawnSync } from 'node:child_process';
 
 import { compareSemver } from '../../lib/installer.mjs';
-import { resolvePlatform } from '../cli.mjs';
+// FROM THE LEAF, NOT FROM THE DISPATCHER. This line used to read
+// `from '../cli.mjs'` and closed the cycle that deadlocked the shipped
+// bootstrap path: cli.mjs's top-level await dynamically imports a backend,
+// whose static graph came back here and re-entered a module still evaluating.
+// A backend may not import the dispatcher — see platform.mjs.
+import { resolvePlatform } from '../platform.mjs';
 
 /**
  * The states `probeAgentRuntime`/`agentRuntimeReport` can return, each a
@@ -72,12 +77,40 @@ export const RUN_TIMEOUT_MS = 10_000;
 
 /**
  * Default command runner: captured output, never a shell, always bounded.
+ *
+ * `cwd` IS PART OF THE CONTRACT, and it was silently dropped until #682's cold
+ * review found it. `claude.mjs`'s `runStage` has always called
+ * `_run(cmd, args, { cwd, timeoutMs })`, and this function destructured only
+ * `timeoutMs` — so `spawnSync` inherited the parent's directory and the engine
+ * read whatever tree the operator happened to be standing in. Production masked
+ * it because `cli.mjs` makes `root === process.cwd()` when `deps.root` is unset;
+ * the day they differ, the engine reviews an unrelated directory, the artifact
+ * check at `run-cold-review-stage.mjs` finds nothing, and the run reports "the
+ * engine exited cleanly but wrote no artifact" — a true refusal with a false
+ * diagnosis.
+ *
+ * Same shape as the `dispatch`-discards-its-result defect: a seam that drops a
+ * value nobody notices is missing. Its oracle has to be the REAL runner — every
+ * caller-side test hands in a spy, and a spy records the `cwd` it was given no
+ * matter what this function does with it.
+ *
+ * An absent `cwd` still means "inherit", which is what every probe caller wants.
+ *
+ * `env` HAS THE SAME CONTRACT AND EXISTS FOR THE OPPOSITE REASON. Absent, the
+ * child inherits `process.env` — right for the probes, which need PATH, the
+ * proxy vars and the npm registry config to read a version at all. Given, the
+ * child gets EXACTLY that object and nothing else, which is what lets
+ * `runStage` hand a producer an environment with brain's posting credentials
+ * removed (judgment:cold-2). This function does not decide WHICH names those
+ * are — see `lib/credential-env.mjs`; it only stops the pass-through from
+ * being unrepresentable.
+ *
  * @param {string} cmd
  * @param {string[]} args
- * @param {{ timeoutMs?: number }} [opts]
+ * @param {{ timeoutMs?: number, cwd?: string, env?: object }} [opts]
  */
-export function defaultRun(cmd, args, { timeoutMs = RUN_TIMEOUT_MS } = {}) {
-  return spawnSync(cmd, args, { stdio: 'pipe', encoding: 'utf8', timeout: timeoutMs });
+export function defaultRun(cmd, args, { timeoutMs = RUN_TIMEOUT_MS, cwd, env } = {}) {
+  return spawnSync(cmd, args, { stdio: 'pipe', encoding: 'utf8', timeout: timeoutMs, cwd, env });
 }
 
 /**
