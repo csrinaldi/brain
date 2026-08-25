@@ -1831,6 +1831,58 @@ and the four passes of reading before them found none of the seven.
 Suite: 4356/4356, verified under both host states.
 
 
+### I.1 — measured: what the producer's MODEL is worth, against a known answer
+
+`sdd.map` carries `model` as an opaque pass-through (#323), so the engine tier is a config
+change with no code behind it. Nobody had measured what changing it costs — until there was
+something to measure against.
+
+**The benchmark is ground truth, not a count.** Two Opus runs over `71a7abd...59dda0a`
+found, between them, a known set including two blockers that reading alone had missed four
+times: the seam dropping `timeoutMs`, and the test suite spawning the host's real `gh`. A
+third run over the SAME range, varying only the model:
+
+| | `claude-opus-5` | `claude-sonnet-5` |
+|---|---|---|
+| wall clock | 8m 38s | **5m 31s** |
+| agentic turns | 50 | 35 |
+| output tokens | 32,015 (62% thinking) | 24,738 (72% thinking) |
+| cost | USD 4.82 | **USD 1.45** |
+| findings | 7 | 3 |
+| **blockers found** | 2 of 2 | **2 of 2** |
+
+**3.3× cheaper, 36% faster, and nothing that would block a merge was missed.**
+
+**THE OBJECTION THIS FALSIFIES WAS MINE.** The argument against a cheaper tier was that the
+value of these runs came from a producer that WRITES AND RUNS PROBES rather than reading —
+every Opus finding says `MEASURED`, and that is why they found what four reading passes did
+not. The prediction was that a smaller model would regress to reading.
+
+It did not, and it beat the bigger one on evidence for the shared blocker. Opus proved the
+non-hermetic tests by putting a stub `gh` on `PATH`. Sonnet ran on a machine where that
+symptom does NOT appear — the operator's only auth channel is `GH_TOKEN`, which the scrub
+removes before the probe runs — and proved it by **timing collapse** instead: the same tests
+take 450-650ms with a normal `PATH` and 2-6ms with `gh`/`glab` removed, so the slow run was
+demonstrably invoking the real binaries. It then reasoned from `producer-forge-reach.mjs`'s
+own header to the keyring case it could not reproduce locally. That is a better proof, found
+on a machine where the obvious one was unavailable.
+
+**WHAT THE CHEAPER TIER DID MISS** is the low-severity tail: `design.md` contradicting
+`.gitignore`, the two un-linked timeout literals, and the harness→review layering edge. All
+real, none blocking.
+
+**LIMITS, STATED BECAUSE ONE RUN IS NOT A DISTRIBUTION.** One run per model, and the two
+Opus runs over this same range disagreed with each other — five findings and then seven.
+Variance is measured, so a single Sonnet result cannot separate "cheaper tier" from "lucky
+draw", and the 2-of-2 on blockers is one observation, not a rate. The honest reading is that
+the cheap tier is worth trying and is not yet proven, and that the tail Opus catches is the
+thing being traded away.
+
+`claude-haiku-4-5` was not run. Worth noting before anyone does: its context window is 200K
+against the 1M the others used, and these runs read ~98k cached tokens PER TURN, so a
+context exhaustion would present as a strange failure rather than as fewer findings.
+
+
 ## Not in this change
 
 - `same-model` / `cross-family` axes.
