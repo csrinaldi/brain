@@ -595,3 +595,82 @@ test('#682 cold-3: an UNROUTED run leaves the artifact alone — it is the opera
   assert.deepEqual(result, { routed: false });
   assert.ok(existsSync(abs), 'an unrouted run deleted a file it was never asked to produce');
 });
+
+
+// ── judgment:cold-1 (third cold review) — the forge-reach refusal ──────────
+//
+// THESE INJECT THE PROBE, and that is the point rather than a convenience. On a
+// machine where no forge CLI is installed the check passes for free, so a suite
+// that relied on the ambient one would go green everywhere while enforcing
+// nothing on the machines that matter — a test whose oracle is the host, which
+// is the defect class this whole ticket has been removing.
+
+test('cold-1: a logged-in forge CLI REFUSES the run, and the engine is never spawned', async (t) => {
+  const root = makeRepo(t);
+  let spawned = false;
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      runStage: async () => { spawned = true; return { ok: true }; },
+      forgeProbe: () => ({ status: 0, stdout: 'Logged in to github.com account someone' }),
+    },
+  });
+  assert.equal(result.routed, true);
+  assert.equal(result.ok, false);
+  assert.equal(spawned, false, 'refusing AFTER a ten-minute spawn would waste the run it exists to prevent');
+  assert.match(result.reason, /can still reach the forge/);
+});
+
+test('cold-1: the refusal names ADR-0033\'s property, so the operator knows WHY it refused', async (t) => {
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root: makeRepo(t), worktreePath: makeWorktree(t),
+    deps: {
+      runStage: async () => ({ ok: true }),
+      forgeProbe: () => ({ status: 0 }),
+    },
+  });
+  assert.match(result.reason, /ADR-0033/);
+});
+
+test('cold-1: a probe that reaches NO verdict refuses too — fail closed', async (t) => {
+  let spawned = false;
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root: makeRepo(t), worktreePath: makeWorktree(t),
+    deps: {
+      runStage: async () => { spawned = true; return { ok: true }; },
+      forgeProbe: () => ({ error: Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }) }),
+    },
+  });
+  assert.equal(result.ok, false, '"could not look" is not "nothing is there"');
+  assert.equal(spawned, false);
+});
+
+test('cold-1: a logged-OUT forge CLI lets the run proceed', async (t) => {
+  const root = makeRepo(t);
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      runStage: writingEngine(root),
+      forgeProbe: () => ({ status: 1, stderr: 'not logged into any hosts' }),
+    },
+  });
+  assert.equal(result.ok, true, 'the check must not refuse a run whose producer genuinely holds nothing');
+});
+
+test('cold-1: the probe sees the SCRUBBED env, never brain\'s own', async (t) => {
+  // A probe run against brain's environment would measure brain and clear the
+  // producer — a true answer to the wrong question.
+  let seenEnv = null;
+  const root = makeRepo(t);
+  await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      runStage: writingEngine(root),
+      env: { PATH: '/usr/bin', GH_TOKEN: 'secret', BRAIN_REVIEWER_TOKEN: 'secret2' },
+      forgeProbe: (_c, _a, opts) => { seenEnv = opts.env; return { status: 1 }; },
+    },
+  });
+  assert.equal(seenEnv.PATH, '/usr/bin', 'the engine still needs its PATH');
+  assert.equal(seenEnv.GH_TOKEN, undefined, 'the forge credential must be gone before the probe asks');
+  assert.equal(seenEnv.BRAIN_REVIEWER_TOKEN, undefined);
+});

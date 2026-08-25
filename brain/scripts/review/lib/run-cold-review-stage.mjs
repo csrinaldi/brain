@@ -44,7 +44,8 @@ import { join, dirname } from 'node:path';
 import { mkdirSync, existsSync, rmSync } from 'node:fs';
 
 import { COLD_REVIEW_STAGE, resolveStageEngine } from '../../lib/stage-engine.mjs';
-import { credentialEnvNames } from '../../lib/credential-env.mjs';
+import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env.mjs';
+import { assertProducerCannotReachForge } from '../../harness/producer-forge-reach.mjs';
 import { buildColdReviewPrompt } from './cold-review-prompt.mjs';
 import { artifactPathFor } from './findings-artifact.mjs';
 
@@ -53,7 +54,8 @@ import { artifactPathFor } from './findings-artifact.mjs';
  *
  * @param {{config: object, prNumber: number|string, baseRef?: string|null,
  *          headRef?: string|null, root?: string,
- *          deps?: {runStage: Function, mkdir?: Function, exists?: Function}}} args
+ *          deps?: {runStage: Function, mkdir?: Function, exists?: Function,
+ *                  remove?: Function, env?: object, forgeProbe?: Function}}} args
  * @returns {Promise<{routed: false} | {routed: true, ok: false, reason: string}
  *                  | {routed: true, ok: true, artifactPath: string}>}
  * @throws {Error} when `sdd.map` names the stage unreadably (resolveStageEngine),
@@ -82,6 +84,14 @@ export async function runColdReviewStage({
   // Everything else (a directory at the path, a permission failure) throws, and
   // the caller below turns that into a refusal rather than a silent pass.
   const remove = deps.remove ?? ((abs) => rmSync(abs, { force: true }));
+
+  // The environment the PRODUCER would be spawned with, and the seam the forge
+  // probe runs through. Both are injectable for the same reason every other
+  // seam here is: the oracle for "this run refuses when a forge CLI is logged
+  // in" cannot be the machine the suite happens to run on. `deps.env` defaults
+  // to brain's own, which is what `runStage` will scrub and hand the child.
+  const env = deps.env ?? process.env;
+  const probeDeps = deps.forgeProbe ? { _run: deps.forgeProbe } : {};
 
   // Throws on an entry that exists and cannot be read; `null` when the repo
   // routed nothing. Unrouted is NOT a failure — the caller renders it as the
@@ -193,6 +203,37 @@ export async function runColdReviewStage({
         'Refusing rather than running: with a stale file in place, an engine that wrote nothing would ' +
         'look exactly like one that did its job, and the verdict would declare a control it applied ' +
         'to findings from an older head.',
+    };
+  }
+
+  // THE SCRUB IS NOT THE WHOLE PROPERTY, AND THIS IS WHERE THAT STOPS BEING
+  // ASSERTED (judgment:cold-1 of the third cold review). `credentialEnv` takes
+  // brain's poster credential out of the child's ENVIRONMENT — kernel-enforced,
+  // real. A forge CLI keeps its own store OUTSIDE the repository, so neither
+  // that scrub nor the detached worktree touches it: measured, with all seven
+  // names unset, `gh auth status` still reported a logged-in account.
+  //
+  // So the property is MEASURED here rather than declared. The probe asks the
+  // one question that does not depend on the deployment — "from this
+  // environment, does a forge CLI still authenticate?" — and a `yes`, or a
+  // probe that reaches no verdict at all, refuses the run. See
+  // `producer-forge-reach.mjs` for the three location-based designs this
+  // replaces and why each was wrong.
+  //
+  // IT REFUSES BEFORE THE SPAWN, not after. A ten-minute engine run whose
+  // output must then be discarded is the same waste F.2 records at the routing
+  // layer, and worse here: the artifact would already exist on disk.
+  const reach = assertProducerCannotReachForge(
+    withoutCredentials(env, credentialEnvNames({ extra: [config?.reviewer?.tokenEnv] })),
+    probeDeps,
+  );
+  if (!reach.ok) {
+    return {
+      routed: true,
+      ok: false,
+      reason:
+        `the producer can still reach the forge, so ADR-0033's load-bearing property does not ` +
+        `hold for this run — ${reach.reason}`,
     };
   }
 

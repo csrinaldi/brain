@@ -103,8 +103,17 @@ export const STAGE_TIMEOUT_MS = 10 * 60_000;
  *
  * WHAT IT DOES NOT CLOSE is written down in `credential-env.mjs` and matters
  * here too: an environment that injects credentials ambiently (#604) is
- * untouched by scrubbing one, and a credential on disk is kept out by the
- * detached worktree, not by this.
+ * untouched by scrubbing one — `gatherIdentity` refuses the whole run on that
+ * axis before this is ever reached — and a REPO-LOCAL credential on disk is kept
+ * out by the detached worktree, not by this.
+ *
+ * A CREDENTIAL STORE OUTSIDE THE REPOSITORY IS NEITHER. This paragraph used to
+ * say "a credential on disk", which read as all of them; `~/.config/gh` plus the
+ * OS keyring sit on disk, outside any worktree, and survived the scrub when the
+ * third cold review measured them. `producer-forge-reach.mjs` is what closes
+ * that channel, and it PROBES rather than asserts — the capitals above are true
+ * of the `env` axis by construction and of that axis by measurement, which are
+ * two different warrants and are no longer written as one.
  *
  * A NON-ZERO EXIT IS A FAILURE, never an empty result. `cli.mjs` refuses to post
  * on a failure rather than render a verdict declaring a control it never applied

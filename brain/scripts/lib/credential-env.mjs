@@ -43,12 +43,29 @@
 //    token resolved to the same login. Scrubbing the environment does nothing
 //    about it and this module must not be read as if it did. `identity.mjs`'s
 //    negative control is what measures that channel; nothing here replaces it.
-// 2. CREDENTIALS ON DISK. `.env` holds `VCS_TOKEN` (token.mjs), and an engine
-//    told to "read anything in the repository" can read a file. What keeps that
-//    shut is judgment:cold-3's fix, not this one: the producer runs in a
-//    detached worktree at the PR head, where a gitignored `.env` does not
-//    exist. Two mechanisms, one property — worth knowing which is which before
-//    changing either.
+// 2. REPO-LOCAL CREDENTIALS ON DISK, AND ONLY THOSE. `.env` holds `VCS_TOKEN`
+//    (token.mjs), and an engine told to "read anything in the repository" can
+//    read a file. What keeps THAT shut is judgment:cold-3's fix, not this one:
+//    the producer runs in a detached worktree at the PR head, where a
+//    gitignored `.env` does not exist. Two mechanisms, one property — worth
+//    knowing which is which before changing either.
+//
+//    THIS HEADING ONCE READ "CREDENTIALS ON DISK" AND THE PARAGRAPH PROVED LESS
+//    THAN THE HEADING PROMISED — the third cold review's blocker, and the
+//    ticket's own defect class committed inside the fix written to remove one
+//    instance of it. A credential STORE outside the repository is on disk too
+//    and no worktree touches it: `~/.config/gh` plus the OS keyring, and the
+//    engine's own credential wherever its vendor roots it. Measured with all
+//    seven names unset, `gh auth status` still reported a logged-in account.
+//    Closing that channel is `producer-forge-reach.mjs`, which probes it rather
+//    than asserting it — because WHERE a credential lives is a property of the
+//    DEPLOYMENT, not of the engine (see the slice tracker's F.8: the same engine
+//    under a synthetic `$HOME` is denied on one machine and authenticates on
+//    another), so nothing here may assume a location.
+//
+// 3. AN OPEN NAMESPACE, WHICH NOTHING HERE CLAIMS. The producer holds a shell.
+//    A credential this module cannot name, read by a tool it cannot enumerate,
+//    is not closed by anything in this file and is not claimed to be.
 //
 // ── DERIVED WHERE THERE IS A SOURCE, LITERAL WHERE THERE IS NOT ─────────────
 //

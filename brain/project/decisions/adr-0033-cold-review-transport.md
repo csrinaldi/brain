@@ -53,8 +53,30 @@ Four parts, and each is separable:
 
 ### Why the producer holds no credential, stated as the property it buys
 
-The subagent reads a cold worktree and writes a file. It opens no connection to the
-forge, holds no token, and posts nothing.
+The subagent reads a cold worktree and writes a file. It does not post: nothing in the
+projection step reads anything the producer says as an instruction to publish.
+
+**WHAT "HOLDS NO TOKEN" MEANS, AND WHAT WARRANT EACH HALF CARRIES.** This sentence once
+read "it opens no connection to the forge, holds no token, and posts nothing", stated
+flatly and followed by *by construction rather than by care*. The third cold review of
+this ticket measured that it was broader than anything enforcing it, so it is narrowed
+here to the property that is actually bought:
+
+| channel | closed by | warrant |
+|---|---|---|
+| brain's poster credential in the environment | `withoutCredentials` — `spawnSync` hands the child an explicit `env` | **by construction**: the kernel, which does not consult the child |
+| a credential injected ambiently by a proxy (#604) | `gatherIdentity`'s negative control, which refuses the whole run before the stage spawns | **by construction**: the run does not reach the producer at all |
+| a repo-local `.env` | the detached worktree at the PR head, where a gitignored file does not exist | **by construction** |
+| a forge CLI's own store outside the repository (`~/.config/gh`, the OS keyring) | `producer-forge-reach.mjs`, which probes the producer's environment and REFUSES when a forge CLI still authenticates | **by measurement, failing closed** — a probe that cannot reach a verdict refuses |
+| any other credential, read by any other tool | nothing | **not claimed** |
+
+The producer also necessarily holds ONE credential it must hold — the engine's own; it
+cannot authenticate to run otherwise. The property is not "the child's environment is
+empty of secrets"; it is "the child cannot authenticate as brain's poster".
+
+The last row is the honest one. The producer holds a shell, and a credential brain
+cannot name read by a tool brain cannot enumerate is an open namespace. This decision
+buys four closed channels and says so, rather than asserting a fifth nobody reads.
 
 This is the load-bearing half. `reviewer-protocol.md` §2's three structural locks —
 COMMENT-only state, no approve verb in the port, the two-key split — all live in the
@@ -63,8 +85,11 @@ the credential that surface requires is the one #604 proved cannot be trusted wh
 environment injects it. That was not theoretical: four consecutive cold reviews of this
 ticket's own PRs hit it, and two of them could not produce a verdict at all.
 
-Keeping the producer credential-free means the identity problem cannot reappear on the
-new path, by construction rather than by care.
+Keeping brain's OWN poster credential away from the producer means the identity problem
+cannot reappear on the new path — by construction on the environment axis, and by a
+fail-closed probe on the forge-CLI axis. Which warrant covers which channel is the table
+above, and it is written that way because "by construction rather than by care" over all
+of them was the claim the third cold review had to remove.
 
 ### Why growing `VALID_OPS` needs no supersede
 

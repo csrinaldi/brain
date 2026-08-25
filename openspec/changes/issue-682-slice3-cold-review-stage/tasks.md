@@ -1187,7 +1187,7 @@ C.5's third pass. Verdict REVISE, 5 findings: `budget` and `tier2-frontier`
 expected as always, plus three reasoned ones. **All three verified against the
 code before any disposition** — nothing here is taken on the reviewer's word.
 
-- [ ] F.1 **`judgment:cold-1` (blocker) — the credential scrub closes ONE axis, and
+- [x] F.1 **`judgment:cold-1` (blocker) — the credential scrub closes ONE axis, and
       the header says otherwise.** Against E.2's fix, four commits later.
 
       `withoutCredentials` removes named variables from a copy of `process.env`
@@ -1458,6 +1458,54 @@ Worth stating precisely rather than implying the scrub unmaps it.
 **STILL UNMEASURED, and not claimed:** `gh` is not installed in this container,
 so F.5's forge half could not be re-run here. The deployment asymmetry is
 measured for the engine only.
+
+
+### F.1 — closed, and the fix is a PROBE rather than a fourth assertion
+
+Two things were fused under one finding and only one of them was the blocker.
+
+**F.1a — the claim was broader than its enforcement.** Corrected in the three
+places that carried it, all saying the same false thing:
+
+- ADR-0033's load-bearing sentence — *"opens no connection to the forge, holds no
+  token, and posts nothing"*, followed by *by construction rather than by care* —
+  is now a table of four channels, each with the warrant that actually covers it,
+  plus a fifth row naming what is **not** claimed. Edited in place rather than
+  superseded: the ADR is not yet on `main`, and the sentence was never true since
+  it was signed, so this is the text catching up to the decision rather than a
+  decision changing.
+- `credential-env.mjs`'s note headed **"CREDENTIALS ON DISK"** proved only the
+  repo-local `.env` half. Narrowed to what it proves, with the out-of-repo store
+  named as open and pointed at the probe.
+- `runStage`'s docstring repeated it verbatim. Same correction.
+
+**F.1b — the mechanism, and why it probes.** `producer-forge-reach.mjs` asks the
+one question that does not depend on the deployment: *after the scrub, does a
+forge CLI still authenticate from this environment?* A `yes` refuses; so does a
+probe that reaches no verdict. Wired into `runColdReviewStage` BEFORE the spawn,
+on the existing `{routed, ok, reason}` channel.
+
+**Why the three location-based designs are all gone.** Each answered "WHERE does
+the credential live", which F.8 measured is a property of the deployment: the
+same engine under a synthetic `$HOME` is denied on the operator's box and
+authenticates in a container. A backend author cannot know that, so all three
+would have removed nothing on some deployments while reporting that they did.
+
+**What is deliberately NOT probed.** The ambient channel (#604) already has a
+reader that runs first — `gatherIdentity` at `cli.mjs:316`, the stage at
+`cli.mjs:628` — so probing it again would be a second reader on a closed channel
+while the open one went unwatched. And the open namespace is not claimed: the
+producer holds a shell, and a credential brain cannot name read by a tool brain
+cannot enumerate is closed by nothing here.
+
+**Two mutations, both caught.** Deleting the refusal killed 3 tests; pointing the
+probe at brain's own environment instead of the scrubbed one killed the 4th.
+Worth recording WHY the second exists: on a machine with no forge CLI installed
+the check passes for free — `gh` is not installed in the container this ran in —
+so a suite relying on the ambient CLI would be green everywhere and enforce
+nothing where it matters. Every one of these tests injects the probe. A test
+whose oracle is the host is the defect class this ticket has spent nine findings
+removing.
 
 
 ## Not in this change
