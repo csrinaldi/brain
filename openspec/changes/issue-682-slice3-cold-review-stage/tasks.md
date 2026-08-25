@@ -1407,6 +1407,59 @@ symptom of — the teardown race does not just fail a test, it leaves the
 directory behind. Enough of them fill the disk.
 
 
+### F.8 — measured: the credential axis is a property of the DEPLOYMENT, not the engine
+
+F.5 ran on the operator's Linux box. This ran in the remote container, same
+engine, same flag, one variable moved — the machine:
+
+| deployment | engine credential lives in | `claude -p` under a synthetic `$HOME` |
+|---|---|---|
+| operator's Linux (F.5) | `~/.claude/.credentials.json` | **DENIED** — "Not logged in", exit 1 |
+| this remote container | env + an inherited **fd** (`CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`, `ANTHROPIC_BASE_URL`, AWS keys); **there is no `~/.claude/.credentials.json` at all** | **STILL WORKS** — answered, exit 0 |
+
+**This kills the descriptor design F.6 was building toward.** The plan was a
+per-backend declaration of where that engine roots its credential — sound-looking,
+and the operator's own survey supports the premise that every engine roots one
+under `$HOME`: `~/.claude`, `~/.codex`, `~/.antigravity` or `~/.config/antigravity`,
+`~/.opencode` or `~/.config/opencode`. The premise is true and the design is still
+wrong, because **the backend author cannot know the deployment.** The same
+`claude.mjs` descriptor is correct on the laptop and inert in the container.
+
+**AND IT FAILS OPEN, SILENTLY — which is the disqualifying half.** A `$HOME`-based
+isolation ships, passes its tests on the machine where it was written, and on
+every deployment that authenticates by environment it removes nothing while
+reporting that it did. That is the exact shape of the "base incomputable falla
+ABIERTO" finding lost in F.4, and of the two comments #614 removed for claiming
+a silence nobody measured. An isolation nobody can see failing is worse than no
+isolation, because ADR-0033 would then assert the property in prose.
+
+**WHAT SURVIVES ALL THREE BREAKS.** Three designs have now been broken — the env
+var (engine-specific), the tool flag (engine vocabulary in the router), the
+`$HOME` allowlist (deployment-blind). The one thing measured true in BOTH
+deployments is the axis already shipped in E.2: **the `env` scrub is
+kernel-enforced via `spawnSync` and carries the credential in the container
+case.** It is also, per F.5's own tier table, the only mechanism `spawnSync`
+does not consult the child about.
+
+**SO THE MECHANISM MUST VERIFY, NOT ASSUME.** The unanswerable question is
+"where does this engine keep its credential" — deployment-dependent, unknowable
+from a backend. The answerable one is **"after isolation, can the producer still
+reach the forge?"** That inverts the failure: a probe that comes back "reachable"
+refuses the run instead of proceeding under a property nobody checked. It is
+platform-agnostic — it asks about reachability, never about a path or a var name —
+and every backend already knows how to spawn its own engine, which is all the
+probe needs.
+
+Note also that the container credential includes an inherited **file descriptor**.
+Scrubbing the env removes the NAME the child would look under, which is what
+closes it in practice; the fd itself still crosses `fork`/`exec` unless closed.
+Worth stating precisely rather than implying the scrub unmaps it.
+
+**STILL UNMEASURED, and not claimed:** `gh` is not installed in this container,
+so F.5's forge half could not be re-run here. The deployment asymmetry is
+measured for the engine only.
+
+
 ## Not in this change
 
 - `same-model` / `cross-family` axes.
