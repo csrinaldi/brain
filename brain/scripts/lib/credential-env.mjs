@@ -56,7 +56,12 @@
 //    instance of it. A credential STORE outside the repository is on disk too
 //    and no worktree touches it: `~/.config/gh` plus the OS keyring, and the
 //    engine's own credential wherever its vendor roots it. Measured with all
-//    seven names unset, `gh auth status` still reported a logged-in account.
+//    every name in `credentialEnvNames()` unset, `gh auth status` still reported
+//    a logged-in account. Stated as the DERIVED set rather than a count: this
+//    line said "all seven" and the list holds eight (judgment:cold-5, third
+//    cold review), and a stale measurement reads exactly like a current one.
+//    `credential-env.test.mjs` now pins the count so the next name added fails
+//    a test instead of quietly falsifying a sentence.
 //    Closing that channel is `producer-forge-reach.mjs`, which probes it rather
 //    than asserting it — because WHERE a credential lives is a property of the
 //    DEPLOYMENT, not of the engine (see the slice tracker's F.8: the same engine

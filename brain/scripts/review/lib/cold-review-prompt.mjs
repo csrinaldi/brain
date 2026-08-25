@@ -51,6 +51,32 @@
 // that is a real cross-check rather than a second copy compared to itself — and
 // it fails the day the protocol changes the set without this file following.
 //
+// `evidence_class` IS STATED, NOT OFFERED, and it used to be offered — the third
+// cold review's judgment:cold-4. This prompt interpolated the whole vocabulary,
+// `deterministic | inferential | insufficient`, while `evaluateInferential`
+// overwrites the field unconditionally. Measured end to end: a finding written
+// as `insufficient` reaches the reader as `insufficient` and leaves the
+// evaluator as `inferential`.
+//
+// THE DIRECTION OF THAT OVERWRITE IS WHAT MAKES IT WORSE THAN A DEAD FIELD.
+// `controls.mjs` defines `insufficient` as NOT_A_CONTROL — "there is no such
+// thing as running the insufficient control" — so a reviewer honestly reporting
+// that it could not establish a claim had that admission upgraded into a control
+// class, and the verdict then declared the inferential control applied over it.
+// The producer was invited to grade its own admissibility and the grade was
+// rewritten in the direction that STRENGTHENS the claim.
+//
+// The forcing itself stays: a producer claiming `deterministic` would put a
+// reasoned claim on the deterministic side of #575 Ruling 3 and skip the refuter
+// entirely. What changes is that the prompt stops presenting a menu it does not
+// honour, which is `causal_disposition`'s ruling applied to its neighbour —
+// STOP ASKING rather than START CARRYING.
+//
+// HONOURING `insufficient` was the other candidate and is NOT taken here. It
+// carries real information and the honest home for it is the controls-coverage
+// path, not a field the evaluator rewrites on the way past; that is a change to
+// what a verdict CLAIMS, which is ADR territory rather than a prompt fix.
+//
 // `causal_disposition` IS NOT ASKED FOR, and that is a ruling rather than an
 // omission (#682 cold review, judgment:cold-9). This prompt used to document it
 // as a field the engine may state. It is not in `CARRIED_FIELDS`, so
@@ -91,7 +117,7 @@ import {
   CARRIED_FIELDS,
   artifactPathFor,
 } from './findings-artifact.mjs';
-import { ALLOWED_EVIDENCE_CLASSES } from './schema-v2.mjs';
+import { FORCED_EVIDENCE_CLASS } from '../evaluators/inferential.mjs';
 
 /** The ticket this role is on loan from. Named so the debt has an id in code. */
 export const ROLE_DEBT_TICKET = 312;
@@ -199,8 +225,10 @@ ${CARRIED_FIELDS.map((f) => `  - ${f}`).join('\n')}
   · \`severity\` — one of: ${SEVERITIES}
   · \`cites\` is MANDATORY when \`severity\` is \`blocker\`. An uncited blocker is
     downgraded to \`correction\` — cite an ADR, a REQ, a spec line, or a gate.
-  · \`evidence_class\` — one of: ${ALLOWED_EVIDENCE_CLASSES.join(' | ')}
-    Yours are \`inferential\`: you reasoned to them; a gate did not compute them.
+  · \`evidence_class\` is ALWAYS \`${FORCED_EVIDENCE_CLASS}\` — you reasoned to these findings;
+    a gate did not compute them. It is not a choice, so do not state another
+    value: \`evaluateInferential\` sets it and any other value you write is
+    overwritten.
   · You do NOT state ${REFUSED_FIELDS.map((f) => `\`${f}\``).join(', ')}. A finding
     marked pre-existing leaves the blocking set entirely, so a producer stating
     its own disposition would be grading its own admissibility — and nothing

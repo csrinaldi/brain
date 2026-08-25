@@ -46,7 +46,6 @@ import { mkdirSync, existsSync, rmSync } from 'node:fs';
 import { COLD_REVIEW_STAGE, resolveStageEngine } from '../../lib/stage-engine.mjs';
 import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env.mjs';
 import { assertProducerCannotReachForge } from '../../harness/producer-forge-reach.mjs';
-import { resolveStageTimeout } from './stage-timeout.mjs';
 import { buildColdReviewPrompt } from './cold-review-prompt.mjs';
 import { artifactPathFor } from './findings-artifact.mjs';
 
@@ -69,6 +68,7 @@ export async function runColdReviewStage({
   headRef = null,
   root = process.cwd(),
   worktreePath = null,
+  timeoutMs = undefined,
   deps = {},
 } = {}) {
   const { runStage } = deps;
@@ -256,11 +256,11 @@ export async function runColdReviewStage({
     // A repo that renamed `reviewer.tokenEnv` would otherwise hand the engine
     // the very credential ADR-0033 says it does not hold.
     credentialEnv: credentialEnvNames({ extra: [config?.reviewer?.tokenEnv] }),
-    // F.9 — the ceiling is the repo's to set. Threaded from here for the same
-    // reason `credentialEnv` is: this layer holds the config and the harness
-    // cannot read it. Throws on a value the operator wrote and this layer
-    // cannot honour, rather than running a review they did not configure.
-    timeoutMs: resolveStageTimeout(config).timeoutMs,
+    // F.9 — the ceiling the CALLER resolved. Resolved in `main()` rather than
+    // here (judgment:cold-2): evaluating it in this argument list put a refusal
+    // after `mkdir` and after `remove` had deleted the previous artifact, and
+    // below the routing check, so an unrouted repo never validated the key.
+    timeoutMs,
   });
 
   if (!result?.ok) {

@@ -122,6 +122,19 @@ export function sanitiseFinding(finding = {}) {
  * @param {{ generated?: Array<object>|null }} input
  * @returns {{conclusion: string|null, gates: {required: string[], detection: string[]}, findings: object[], conditions: string[], escalate: null}}
  */
+/**
+ * The evidence class `evaluateInferential` FORCES on every finding it emits.
+ *
+ * Exported so `cold-review-prompt.mjs` can name it instead of spelling it —
+ * judgment:cold-4 of the third cold review. The prompt used to interpolate the
+ * whole `ALLOWED_EVIDENCE_CLASSES` menu while this evaluator overwrote the field
+ * unconditionally, so the engine was offered a choice that was discarded. Now
+ * the prompt states the one value, and it reads it from HERE: the place that
+ * decides it. A literal in the prompt would be a second declaration with nothing
+ * comparing the two — which is the defect the prompt's own header forbids.
+ */
+export const FORCED_EVIDENCE_CLASS = 'inferential';
+
 export const ID_PREFIX = 'judgment:';
 
 /**
@@ -228,7 +241,7 @@ export function evaluateInferential({ generated = null } = {}) {
     // know every id every evaluator can emit, and that list grows. A reserved
     // prefix cannot collide by construction.
     id: uniqueId(f.id, seen),
-    evidence_class: 'inferential',
+    evidence_class: FORCED_EVIDENCE_CLASS,
   }));
 
   return {

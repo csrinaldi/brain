@@ -37,6 +37,25 @@ export const RUN_STAGE_OP = 'run-stage';
 /**
  * makeRunStageSeam() — the `deps.runStage` that `runColdReviewStage` requires.
  *
+ * `timeoutMs` RIDES THROUGH TOO, and it did not until the first cold review of
+ * this slice found it missing (judgment:cold-1, third pass). The seam
+ * destructured five names and forwarded exactly those, so the value
+ * `runColdReviewStage` resolved from `reviewer.stageTimeoutMs` was dropped here
+ * and the backend fell back to its own default — an operator raising the key
+ * still died at ten minutes, while the backend's timeout message told them to
+ * raise it. A key the run instructs you to set and then ignores.
+ *
+ * NOTHING PINNED THIS HOP, and that is the lesson rather than the bug.
+ * `run-stage.test.mjs` pinned the BACKEND honouring `timeoutMs`;
+ * `run-cold-review-stage.test.mjs` pinned the REVIEW LAYER supplying it. Both
+ * green, with the seam between them unvaried — every caller-side test injects a
+ * `runStage` double and never drives this function. The SITE axis again, one
+ * layer further along than F.9's own note placed it.
+ *
+ * ABSENT MEANS "THE BACKEND'S OWN DEFAULT", exactly like `credentialEnv`: an
+ * `undefined` reaching `runStage` leaves its parameter default in force, which
+ * is already fail-closed. This seam invents no ceiling of its own.
+ *
  * `credentialEnv` rides through UNINTERPRETED. It names env vars the backend
  * must strip from the producer's environment (judgment:cold-2); this seam does
  * not decide the set and does not default it — the backend's own default is
@@ -45,11 +64,12 @@ export const RUN_STAGE_OP = 'run-stage';
  *
  * @param {{dispatch?: Function}} [deps]
  * @returns {(args: {stage: string, prompt: string, model?: string|null,
- *                   engine: string, cwd?: string, credentialEnv?: string[]})
+ *                   engine: string, cwd?: string, credentialEnv?: string[],
+ *                   timeoutMs?: number})
  *            => Promise<{ok: boolean, reason?: string}>}
  */
 export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
-  return async function runStage({ engine, stage, prompt, model = null, cwd, credentialEnv } = {}) {
+  return async function runStage({ engine, stage, prompt, model = null, cwd, credentialEnv, timeoutMs } = {}) {
     if (typeof engine !== 'string' || engine.trim() === '') {
       return {
         ok: false,
@@ -63,7 +83,7 @@ export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
       // list to walk: the only name that can reach `dispatch` is the one the
       // operator wrote. That is what makes "does not fall back" a property of
       // the code's shape rather than a promise in a comment.
-      result = await dispatch(engine, RUN_STAGE_OP, [{ stage, prompt, model, cwd, credentialEnv }]);
+      result = await dispatch(engine, RUN_STAGE_OP, [{ stage, prompt, model, cwd, credentialEnv, timeoutMs }]);
     } catch (err) {
       // EVERY throw is a refusal, not just the two `dispatch` spells out
       // (backend not found; backend does not implement the op). Matching on

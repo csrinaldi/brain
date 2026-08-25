@@ -24,6 +24,7 @@ import {
   CARRIED_FIELDS,
   ARTIFACT_TAG,
 } from './findings-artifact.mjs';
+import { FORCED_EVIDENCE_CLASS } from '../evaluators/inferential.mjs';
 import { ALLOWED_EVIDENCE_CLASSES } from './schema-v2.mjs';
 
 /** The severity vocabulary, read back out of the prompt rather than restated. */
@@ -96,20 +97,35 @@ function renderedVocabulary(prompt, name) {
   return values.split(' | ');
 }
 
-test('the vocabularies are derived from schema-v2, not restated', () => {
+test('cold-4: the prompt names the FORCED evidence class, not the menu', () => {
+  // This test used to require the whole `ALLOWED_EVIDENCE_CLASSES` vocabulary in
+  // the prompt, and that was the right rule applied to the wrong field
+  // (judgment:cold-4, third cold review). `evaluateInferential` overwrites
+  // `evidence_class` unconditionally, so rendering the menu offered the engine a
+  // choice that was discarded — and discarded UPWARDS: an honest `insufficient`,
+  // which `controls.mjs` defines as NOT_A_CONTROL, came out as a control class
+  // the verdict then declared applied.
+  //
+  // The derivation rule still holds; only its source moved. The prompt reads
+  // `FORCED_EVIDENCE_CLASS` from the evaluator that decides it, so a literal here
+  // could not drift from the value actually written.
   const prompt = buildColdReviewPrompt({ prNumber: PR });
-
-  // Read back and compared as a SET, both directions. The first cut of this test
-  // asserted `prompt.includes(CONSTANT.join(' | '))`, and that is blind in one
-  // direction: a hardcoded string listing today's values plus a fourth the
-  // validator rejects contains the derived substring and passes. The engine would
-  // then be told about a class every finding using it gets marked `schema_invalid`
-  // for. Reading the rendered set back cannot miss it.
-  assert.deepEqual(
-    renderedVocabulary(prompt, 'evidence_class'),
-    [...ALLOWED_EVIDENCE_CLASSES],
-    'the evidence classes are ALLOWED_EVIDENCE_CLASSES exactly — no more, no fewer'
+  assert.match(prompt, new RegExp(`ALWAYS \\\`${FORCED_EVIDENCE_CLASS}\\\``));
+  assert.ok(
+    ALLOWED_EVIDENCE_CLASSES.includes(FORCED_EVIDENCE_CLASS),
+    'the forced value must still be a class the reader accepts',
   );
+});
+
+test('cold-4: the prompt does NOT offer a class the evaluator would overwrite', () => {
+  const prompt = buildColdReviewPrompt({ prNumber: PR });
+  for (const cls of ALLOWED_EVIDENCE_CLASSES.filter((c) => c !== FORCED_EVIDENCE_CLASS)) {
+    assert.ok(
+      !prompt.includes(`\`${cls}\``),
+      `the prompt offers \`${cls}\`, which evaluateInferential rewrites — offering a choice ` +
+      'that is discarded is the shape cold-review-prompt.mjs\'s own header forbids',
+    );
+  }
 });
 
 // ── #682 cold review, judgment:cold-9 ────────────────────────────────────────

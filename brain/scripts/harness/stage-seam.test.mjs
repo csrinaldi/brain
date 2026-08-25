@@ -174,8 +174,18 @@ test('the arguments reach the backend as ONE options object, not spread position
   // `credentialEnv` is listed because this assertion is EXACT on purpose: it is
   // what catches a field added to the seam and never threaded to the backend.
   // `CALL` does not set one, so it arrives undefined — the backend defaults it.
+  //
+  // IT COVERS ONE DIRECTION AND THE REAL DEFECT CAME FROM THE OTHER
+  // (judgment:cold-1, third cold review). This catches "the seam knows a field
+  // and the backend never sees it". What shipped broken was "the CALLER sends a
+  // field and the seam never destructures it" — `timeoutMs` was supplied by
+  // `runColdReviewStage` and silently absent from this function's parameter
+  // list, so nothing here was even asked about it and the assertion stayed
+  // exact and green. The cold-1 tests at the bottom of this file close that
+  // direction by asserting every argument the caller supplies survives the hop.
   assert.deepEqual(seen, {
     stage: COLD_REVIEW_STAGE, prompt: 'review the diff', model: 'zz-9', cwd: '/tmp',
+    timeoutMs: undefined,
     credentialEnv: undefined,
   });
 });
@@ -256,4 +266,55 @@ test('#682 cold-2: `credentialEnv` reaches the backend UNINTERPRETED', async () 
 
   await seam({ engine: 'claude', stage: COLD_REVIEW_STAGE, prompt: 'p' });
   assert.equal(seen.credentialEnv, undefined, 'the seam must not invent a set the backend already owns');
+});
+
+
+// ── judgment:cold-1 (third cold review) — the seam is a SITE, and it was blind ──
+//
+// The whole point of these: every caller-side test injects a `runStage` double
+// and never drives this function, so `timeoutMs` was pinned at the backend
+// (run-stage.test.mjs) and at the review layer (run-cold-review-stage.test.mjs)
+// with the hop between them unvaried. Both suites green, and an operator raising
+// `reviewer.stageTimeoutMs` still died at ten minutes — while the backend's own
+// timeout message told them to raise it. Measured on a real cold review.
+
+test('cold-1: the seam FORWARDS timeoutMs — the payload is what the backend receives', async () => {
+  let payload = null;
+  const runStage = makeRunStageSeam({
+    dispatch: async (_engine, _op, [args]) => { payload = args; return { ok: true }; },
+  });
+  await runStage({ engine: 'claude', stage: 'cold-review', prompt: 'p', timeoutMs: 2_400_000 });
+  assert.equal(payload.timeoutMs, 2_400_000, 'a ceiling dropped at the seam is a ceiling nobody set');
+});
+
+test('cold-1: EVERY argument the caller supplies survives the hop', async () => {
+  // Named one by one rather than deep-equalled against a literal: the failure
+  // this catches is a field silently missing from the destructure, and a test
+  // that only checks the fields it remembers is the same blindness one level up.
+  let payload = null;
+  const runStage = makeRunStageSeam({
+    dispatch: async (_e, _o, [args]) => { payload = args; return { ok: true }; },
+  });
+  const sent = {
+    engine: 'claude', stage: 'cold-review', prompt: 'p', model: 'm',
+    cwd: '/w', credentialEnv: ['GH_TOKEN'], timeoutMs: 900_000,
+  };
+  await runStage(sent);
+  for (const [k, v] of Object.entries(sent)) {
+    if (k === 'engine') continue;             // consumed here: it selects the backend
+    assert.deepEqual(payload[k], v, `\`${k}\` was dropped at the seam`);
+  }
+});
+
+test('cold-1: an ABSENT timeoutMs stays absent — the seam invents no ceiling', async () => {
+  // `undefined` leaves the backend's own parameter default in force, which is
+  // already fail-closed. A default invented here would be a second declaration
+  // of the same policy with nothing comparing the two — the argument this file
+  // already makes about `credentialEnv`.
+  let payload = null;
+  const runStage = makeRunStageSeam({
+    dispatch: async (_e, _o, [args]) => { payload = args; return { ok: true }; },
+  });
+  await runStage({ engine: 'claude', stage: 'cold-review', prompt: 'p' });
+  assert.equal(payload.timeoutMs, undefined);
 });

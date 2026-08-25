@@ -1197,6 +1197,11 @@ code before any disposition** — nothing here is taken on the reviewer's word.
       / `$HOME/.config/gh`, not from the environment. The reviewer measured it:
       with all seven names unset, `gh auth status` still reports
       `Logged in to github.com account csrinaldi (keyring)`, scope `repo`.
+      [The count is wrong and the finding is not: `credentialEnvNames()` returns
+      EIGHT. Left as the reviewer wrote it — rewriting a transcribed finding
+      falsifies the record of what was said — and corrected here. The third cold
+      review caught it as judgment:cold-5; the two places that stated it as
+      brain's OWN prose now derive the set instead of counting it.]
 
       And the spawn constrains nothing — verified at `claude.mjs:133`,
       `args = ['-p', prompt, ...(model ? ['--model', model] : [])]`, no
@@ -1634,6 +1639,112 @@ ten minutes and nothing more. The next run with a raised ceiling produces the
 first real number, which is what the default should eventually be argued from.
 
 Suite: 4345/4345.
+
+
+## Slice G — the FIRST REAL cold review, and it reviewed today's own fixes
+
+C.2b and C.5 closed in one run, on the operator's machine, at `59dda0a`. The
+engine ran **8m 32s** and posted `REVISE` with five findings. Every one is
+against work committed in this slice today, and every one is correct.
+
+**The ceiling was MARGINAL, not absurd — and the run proves it twice.** 8m 32s
+against a ten-minute limit; the first attempt died at it, the second did not.
+And the operator's raised `stageTimeoutMs: 2400000` had **no effect at all**
+(G.1) — this run succeeded on the shipped default, by luck.
+
+### G.1 — `judgment:cold-1` (blocker): the seam ate `timeoutMs`
+
+`makeRunStageSeam`'s returned `runStage` destructured five names and forwarded
+exactly those. `timeoutMs` was neither destructured nor forwarded, so the value
+`runColdReviewStage` resolved from `reviewer.stageTimeoutMs` died at the seam and
+the backend fell back to its own default. **An operator raising the key still hit
+ten minutes, while the backend's timeout message told them to raise it** — a key
+the run instructs you to set and then ignores.
+
+**F.9's own SITE note was one layer short of where the gap actually was.** It
+recorded closing the review-layer→`runStage` hop, and every caller-side test
+injects a `runStage` double, so the seam between them was never driven. Both
+suites green over a dead wire.
+
+`stage-seam.test.mjs` already had an EXACT payload assertion whose comment said
+it existed to catch this class — and it covers one direction only: *a field the
+seam knows and the backend never sees*. The defect was the other: *a field the
+CALLER sends and the seam never destructures*, so nothing was asked. Three tests
+added for that direction; the mutation now kills 3.
+
+### G.2 — `judgment:cold-2`: a refusal after a mutation, and a key nobody validated
+
+`resolveStageTimeout(config)` was evaluated inside `runStage`'s ARGUMENT LIST —
+after `mkdir`, and after `remove` had deleted the previous artifact. The rule it
+breaks is stated in capitals fifty lines above that call: *every precondition
+refuses before any mutation*. Measured: a string value threw and the run had
+already destroyed the file it could not replace.
+
+Same root cause, second half: it sat **below** the routing check, so an unrouted
+repo never validated the key at all — the identical defect judgment:cold-6 moved
+`resolveConvergence` up into `main()` to fix, with the identical argument
+recorded beside it (*config is wrong when it is WRITTEN*). Fixing one key and
+leaving its neighbour is how a lesson stays local to the line that taught it.
+
+Resolution moved to `main()`; the runner now receives the number.
+
+### G.3 — `judgment:cold-3`: F.2's guard skipped the RUN, not the spawn
+
+The early anti-loop guard returned 0 before the verdict was built, so the same
+rule produced two different operator-facing outputs depending on
+`reviewer.inferential.enabled` — a key with nothing to do with the lock. The
+comment beside it claimed *"the operator's outcome is identical"*, **measurably
+false**: one line with the half on, the whole rendered block with it off.
+
+The verdict body is the only place a non-posting run reports what it found. It
+now skips the SPAWN and names the skip as its own condition.
+
+**And the first cut of this fix walked into the trap this file already warns
+about**: routing anti-loop through `{routed: false}` made the verdict emit BOTH
+"the judgment half was not run" and "no transport is configured" — the same
+words, the opposite fact. A test caught it before the push.
+
+### G.4 — `judgment:cold-4`: a menu the evaluator overwrote
+
+The prompt interpolated the whole `deterministic | inferential | insufficient`
+vocabulary while `evaluateInferential` overwrites the field unconditionally.
+**The direction of the overwrite is what makes it worse than a dead field**:
+`controls.mjs` defines `insufficient` as NOT_A_CONTROL, so a reviewer honestly
+reporting it could not establish a claim had that admission upgraded into a
+control class the verdict then declared applied. The producer was invited to
+grade its own admissibility and the grade was rewritten in the direction that
+STRENGTHENS the claim.
+
+Fixed in `causal_disposition`'s direction — **stop asking, not start carrying**.
+The prompt now names one value and reads it from `FORCED_EVIDENCE_CLASS`,
+exported from the evaluator that decides it, so the two cannot drift. Honouring
+`insufficient` was the other candidate and is recorded as not taken: it changes
+what a verdict CLAIMS, which is ADR territory.
+
+### G.5 — `judgment:cold-5`: "seven names", and there are eight
+
+Three places stated the forge-reach measurement as *"with all seven names
+unset"*; `credentialEnvNames()` returns EIGHT. Derived from a frozen literal plus
+two imports — checkable, and nothing checked it — in the measurement that
+warrants ADR-0033's load-bearing property.
+
+The two places that were brain's own prose now derive the set instead of counting
+it. The third is a transcribed finding from the SECOND cold review and is left as
+written, with the correction beside it: rewriting a quoted finding falsifies the
+record of what was said. `credential-env.test.mjs` pins the names — not the
+length, which goes green on a rename and tells nobody which name moved.
+
+### What the pass says about the three that came before
+
+Three cold reviews read this code and none of these five. The blocker was a dead
+wire under two green suites; the marginal ceiling needed a real engine and a real
+diff. **Reading finds what reading can find. This pass cost 8m 32s and one
+operator's machine, and it caught what three passes of reading did not.**
+
+`budget` (2686 vs 1000) and `tier2-frontier` are the expected deterministic pair,
+under the standing `size:exception`.
+
+Suite: 4355/4355.
 
 
 ## Not in this change

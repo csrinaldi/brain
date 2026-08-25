@@ -76,3 +76,27 @@ test('#682 cold-2: the match is case-insensitive, because Windows env names are'
   assert.equal(out.Gh_Token, undefined, 'a differently-cased credential is the same credential to the child on Windows');
   assert.equal(out.Keep, 'yes');
 });
+
+
+// ── judgment:cold-5 (third cold review) — the count gets a reader ──────────
+
+test('cold-5: the scrubbed set is pinned, so no prose can state a stale count', () => {
+  // Three places described the forge-reach measurement as "all seven names";
+  // the list holds eight. The number is derived from a frozen literal plus two
+  // imports — checkable, and nothing checked it. A stale measurement reads
+  // exactly like a current one, which is this ticket's own recurring shape in
+  // the measurement that warrants ADR-0033's load-bearing property.
+  //
+  // Pinned as the NAMES rather than the length: a test asserting `=== 8` goes
+  // green on a rename and tells nobody which name moved.
+  assert.deepEqual(credentialEnvNames().sort(), [
+    'BRAIN_REVIEWER_TOKEN',
+    'CI_JOB_TOKEN',
+    'GH_ENTERPRISE_TOKEN',
+    'GH_TOKEN',
+    'GITHUB_ENTERPRISE_TOKEN',
+    'GITHUB_TOKEN',
+    'GITLAB_TOKEN',
+    'VCS_TOKEN',
+  ]);
+});

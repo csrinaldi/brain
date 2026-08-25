@@ -31,7 +31,7 @@ import { applyCausalAdmission } from './lib/causal-admission.mjs';
 import { resolveJudgment } from './lib/resolve-challenger.mjs';
 import { resolveConvergence } from './lib/convergence.mjs';
 import { runColdReviewStage } from './lib/run-cold-review-stage.mjs';
-import { formatDuration } from './lib/stage-timeout.mjs';
+import { formatDuration, resolveStageTimeout } from './lib/stage-timeout.mjs';
 import { makeRunStageSeam } from '../harness/stage-seam.mjs';
 import {
   evaluateInferential, gatherInferentialInputs, shouldRun as judgmentHalfRuns,
@@ -542,6 +542,28 @@ export async function main(deps = {}) {
     return 1;
   }
 
+  // THE STAGE CEILING RESOLVES HERE FOR THE SAME TWO REASONS, and it shipped in
+  // the wrong place one commit earlier (judgment:cold-2, third cold review).
+  //
+  // It was evaluated inside `runStage`'s ARGUMENT LIST — after `mkdir`, and
+  // after `remove` had deleted the previous artifact. `run-cold-review-stage`
+  // states the rule in capitals fifty lines above that call: every precondition
+  // refuses before any mutation. Measured: a string value threw, and the run had
+  // already destroyed the file it could not replace.
+  //
+  // And it sat BELOW the routing check, so an unrouted repo never validated the
+  // key — the identical defect judgment:cold-6 moved `resolveConvergence` up
+  // here to fix, with the identical argument: config is wrong when it is
+  // WRITTEN, not on the day someone finally routes the stage. Fixing one key and
+  // leaving its neighbour is how a lesson stays local to the line that taught it.
+  let stageTimeoutMs;
+  try {
+    ({ timeoutMs: stageTimeoutMs } = resolveStageTimeout(config));
+  } catch (err) {
+    error(`brain:review: ${err.message}`);
+    return 1;
+  }
+
   // #682 round-1 review — `judgment.reason` had NO CONSUMER. It was computed on
   // every off path and read nowhere, so a repo that deliberately turned the
   // judgment half ON and got nothing was told nothing: `resolveJudgment` knew
@@ -639,21 +661,38 @@ export async function main(deps = {}) {
     // The lock exists to stop the reviewer answering itself ON THE PULL REQUEST;
     // a rehearsal posts nothing, so there is no loop to break and skipping would
     // take the rehearsal away from an operator who asked for exactly it.
-    if (!args.dryRun && wouldRepeatLastVerdict({
+    // IT SKIPS THE SPAWN, NOT THE RUN — and the first version skipped the run
+    // (judgment:cold-3, third cold review). Returning 0 here jumped over the
+    // verdict body, so the same anti-loop rule produced two different
+    // operator-facing outputs depending on `reviewer.inferential.enabled`, a key
+    // with nothing to do with the lock: with the half on, one line; with it off,
+    // the whole rendered block. The comment beside it claimed "the operator's
+    // outcome is identical", which was measurably false — the defect class this
+    // ticket exists to remove, in the fix for another instance of it.
+    //
+    // The verdict body is the ONLY place a non-posting run reports what it
+    // found. A run that declines to repeat itself still ran its deterministic
+    // gates, and an operator is entitled to read them.
+    const antiLoop = !args.dryRun && wouldRepeatLastVerdict({
       priorVerdicts: boot.doctrine.priorVerdicts,
       reviewerHandle: identity.handle,
       headSha: boot.headSha,
-    })) {
-      // The SAME sentence the poster prints when it reaches the lock. The
-      // operator's outcome is identical; what changed is that it no longer costs
-      // an engine run to reach it.
-      log('brain:review: anti-loop — nothing posted.');
-      return 0;
+    });
+    if (antiLoop) {
+      // NAMED AS ITS OWN CONDITION, never folded into "no transport is
+      // configured". Protocol §10's `conditions` is the field for "the evidence
+      // behind this verdict is weaker than it looks", and a judgment half that
+      // was deliberately not run is exactly that. Rendering it as an unrouted
+      // repo would tell an operator who configured an engine that they did not.
+      judgmentConditions.push(
+        'the judgment half was not run: this reviewer\'s last verdict at this head is its own, so ' +
+        'the anti-loop lock will post nothing and an engine run would be paid for output nobody reads.'
+      );
     }
 
     let stageResult;
     try {
-      stageResult = deps.inferentialDeps
+      stageResult = (deps.inferentialDeps || antiLoop)
         ? { routed: false }
         : await runColdReviewStage({
           config,
@@ -665,6 +704,7 @@ export async function main(deps = {}) {
           // never reads ambient state was passed to gatherInferentialInputs and
           // to nothing else. The engine gets it now.
           worktreePath: boot.worktreePath,
+          timeoutMs: stageTimeoutMs,
           deps: deps.stageDeps ?? { runStage: makeRunStageSeam() },
         });
     } catch (err) {
@@ -717,7 +757,18 @@ export async function main(deps = {}) {
     // of one question, and the one that documented itself as authoritative was
     // the one nothing read. It is read now, so the docstring is true and there
     // is one place to change when slice 3 supplies the transport.
-    if (!judgmentHalfRuns({ enabled: judgment.run, generate: inferentialDeps.generate })) {
+    // ANTI-LOOP IS TESTED FIRST, AND THE TWO MUST NOT FOLD. A repo that skipped
+    // the engine because it would post nothing HAS a transport; saying "no
+    // transport is configured" would tell an operator who configured an engine
+    // that they did not — the same words, the opposite fact, which is the pair
+    // `routed` exists to keep apart one layer down. The first cut of
+    // judgment:cold-3's fix reached this branch through `{routed: false}` and
+    // emitted BOTH sentences; a test caught it.
+    if (antiLoop) {
+      // The condition was already pushed at the guard. Nothing further to say:
+      // an engine that did not run produced no findings, and that is not the
+      // same as a repo with nowhere to run one.
+    } else if (!judgmentHalfRuns({ enabled: judgment.run, generate: inferentialDeps.generate })) {
       judgmentConditions.push(
         'the judgment half is enabled but no transport is configured — no reasoned finding ' +
         'was produced, and the inferential control was NOT applied to this verdict.'

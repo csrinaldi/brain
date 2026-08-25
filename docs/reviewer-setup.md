@@ -131,8 +131,8 @@ guard checked. Setting the forge var is now belt-and-braces, not load-bearing.
 environment variable and cannot be removed by scrubbing one. That matters
 because `runStage` hands the cold-review producer an environment with the
 credential names stripped, and a keyring session survives it untouched:
-measured, with all seven names unset, `gh auth status` still reported a
-logged-in account.
+measured, with every name `credentialEnvNames()` returns unset, `gh auth status`
+still reported a logged-in account.
 
 `producer-forge-reach.mjs` is what closes that gap, and it **refuses the run**
 rather than proceeding — so on a machine with a `gh auth login` session, the

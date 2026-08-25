@@ -680,31 +680,36 @@ test('cold-1: the probe sees the SCRUBBED env, never brain\'s own', async (t) =>
 });
 
 
-// ── F.9 (SITE) — the configured ceiling must reach the SPAWN ───────────────
+// ── F.9 / judgment:cold-2 — the runner FORWARDS the ceiling it is given ───
 //
-// `run-stage.test.mjs` proves runStage passes `timeoutMs` to the runner. That
-// pins the LAST layer and leaves the one that SUPPLIES the value unpinned:
-// deleting the resolve call here left the whole suite green — measured — which
-// restores exactly the production behaviour F.9 exists to fix, an operator
-// raising the ceiling and the run dying at the shipped one anyway.
+// It used to RESOLVE it, from `config`, inside `runStage`'s argument list. That
+// put the refusal after `mkdir` and after `remove` had deleted the previous
+// artifact — breaking the rule this file states in capitals fifty lines above,
+// every precondition refuses before any mutation — and below the routing check,
+// so an unrouted repo never validated the key at all. Resolution moved to
+// `main()`, beside `resolveConvergence`, for the reason judgment:cold-6 moved
+// that one: config is wrong when it is WRITTEN.
 
-test('cold-2/F.9: reviewer.stageTimeoutMs reaches runStage, not just brain.config.json', async (t) => {
+test('cold-2/F.9: the ceiling the caller resolved reaches runStage', async (t) => {
   const root = makeRepo(t);
   let seen = null;
   await runColdReviewStage({
-    config: { ...ROUTED, reviewer: { ...(ROUTED.reviewer ?? {}), stageTimeoutMs: 2_400_000 } },
-    prNumber: PR, root, worktreePath: makeWorktree(t),
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    timeoutMs: 2_400_000,
     deps: {
       runStage: async (args) => { seen = args.timeoutMs; return writingEngine(root)(args); },
       forgeProbe: () => ({ status: 1 }),
     },
   });
-  assert.equal(seen, 2_400_000, 'a ceiling the operator configured and the stage ignored is not a ceiling');
+  assert.equal(seen, 2_400_000, 'a ceiling the caller resolved and this layer dropped is not a ceiling');
 });
 
-test('cold-2/F.9: an unconfigured repo still gets the shipped ceiling', async (t) => {
+test('cold-2/F.9: an absent ceiling stays absent — this layer invents none', async (t) => {
+  // `undefined` leaves the backend's own default in force, which is already
+  // fail-closed. A default invented here would be a second declaration of the
+  // same policy with nothing comparing the two.
   const root = makeRepo(t);
-  let seen = null;
+  let seen = 'unset';
   await runColdReviewStage({
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
     deps: {
@@ -712,16 +717,22 @@ test('cold-2/F.9: an unconfigured repo still gets the shipped ceiling', async (t
       forgeProbe: () => ({ status: 1 }),
     },
   });
-  assert.equal(seen, TIMEOUT_IN_FORCE_TODAY, 'the default must not become undefined — that is an unbounded spawn');
+  assert.equal(seen, undefined);
 });
 
-test('cold-2/F.9: a ceiling the operator wrote and this layer cannot honour REFUSES the run', async (t) => {
-  await assert.rejects(
-    () => runColdReviewStage({
-      config: { ...ROUTED, reviewer: { stageTimeoutMs: '40m' } },
-      prNumber: PR, root: makeRepo(t), worktreePath: makeWorktree(t),
-      deps: { runStage: async () => ({ ok: true }), forgeProbe: () => ({ status: 1 }) },
-    }),
-    /must be a whole number of milliseconds/,
-  );
+test('cold-2/F.9: this layer no longer READS the config key — it cannot refuse after mutating', async (t) => {
+  // The measured failure: a string value threw from inside the argument list,
+  // and the run had already destroyed the artifact it could not replace.
+  const root = makeRepo(t);
+  const artifact = join(root, artifactPathFor(PR));
+  mkdirSync(dirname(artifact), { recursive: true });
+  writeFileSync(artifact, 'previous\n');
+
+  await runColdReviewStage({
+    config: { ...ROUTED, reviewer: { stageTimeoutMs: 'nonsense' } },
+    prNumber: PR, root, worktreePath: makeWorktree(t),
+    timeoutMs: 2_400_000,
+    deps: { runStage: writingEngine(root), forgeProbe: () => ({ status: 1 }) },
+  });
+  assert.ok(existsSync(artifact), 'the run completed — an unread key cannot throw mid-mutation');
 });

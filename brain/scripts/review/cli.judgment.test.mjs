@@ -1249,3 +1249,96 @@ test('cold-3: a bound EQUAL to the rounds that ran does not nag', async (t) => {
     'nothing was over-configured, so there is nothing to report'
   );
 });
+
+
+// ── judgment:cold-2 (third cold review) — the key validates when it is WRITTEN ──
+
+test('cold-2: an UNROUTED repo still refuses a bad stageTimeoutMs', async (t) => {
+  // The measured defect: `reviewer.stageTimeoutMs = 'nonsense'` with no sdd.map
+  // entry exited 0 with no refusal, while `reviewer.convergence.maxRounds = '3'`
+  // in the same shape exited 1 and named the key — because judgment:cold-6 moved
+  // THAT resolution up into main() and this one was left behind. The refusal
+  // must arrive on the day someone writes the key, not on the day someone
+  // finally routes the stage.
+  const errs = [];
+  const code = await main({
+    argv: ['--pr', '42'],
+    log: () => {}, error: (s) => errs.push(s),
+    ...deps({ config: { reviewer: { inferential: { enabled: true }, stageTimeoutMs: 'nonsense' } },
+              protocol: 'brain-review/2' }),
+    root: scratchRoot(t),
+  });
+  assert.equal(code, 1);
+  assert.ok(errs.some((e) => e.includes('stageTimeoutMs')), 'the refusal must name the key to edit');
+});
+
+test('cold-2: the refusal happens BEFORE the stage is ever spawned', async (t) => {
+  let spawned = false;
+  await main({
+    argv: ['--pr', '42'],
+    log: () => {}, error: () => {},
+    ...deps({ config: { ...ROUTED_CFG, reviewer: { ...ROUTED_CFG.reviewer, stageTimeoutMs: 12.5 } },
+              protocol: 'brain-review/2' }),
+    root: scratchRoot(t),
+    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+  });
+  assert.equal(spawned, false, 'every precondition refuses before any mutation');
+});
+
+test('cold-2: a valid ceiling reaches the stage from main()', async (t) => {
+  let seen = null;
+  await main({
+    argv: ['--pr', '42'],
+    log: () => {}, error: () => {},
+    ...deps({ config: { ...ROUTED_CFG, reviewer: { ...ROUTED_CFG.reviewer, stageTimeoutMs: 2_400_000 } },
+              protocol: 'brain-review/2' }),
+    root: scratchRoot(t),
+    stageDeps: { runStage: async (a) => { seen = a.timeoutMs; return { ok: true }; } },
+  });
+  assert.equal(seen, 2_400_000);
+});
+
+// ── judgment:cold-3 — the anti-loop guard skips the SPAWN, not the run ────
+
+test('cold-3: a repeat run still renders its verdict — the output does not depend on the judgment key', async (t) => {
+  // MEASURED as the defect: with the half ENABLED stdout was one line; with it
+  // DISABLED it was the whole rendered block. Same anti-loop rule, two different
+  // operator-facing outputs, keyed on something unrelated to the lock. The
+  // verdict body is the only place a non-posting run reports what it found.
+  const root = scratchRoot(t);
+  let spawned = false;
+  const d = deps({ config: ROUTED_CFG, protocol: 'brain-review/2' });
+  d.coldBootDeps.fetchReviews = async () => [selfVerdictAtHead()];
+
+  const lines = [];
+  const code = await main({
+    argv: ['--pr', '42'],
+    log: (s) => lines.push(s), error: () => {},
+    ...d, root,
+    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+  });
+
+  assert.equal(spawned, false, 'the engine is still skipped — that half was right');
+  assert.equal(code, 0);
+  const body = lines.join('\n');
+  assert.match(body, /protocol: brain-review\/2/, 'the verdict body must still be rendered');
+  assert.match(body, /anti-loop/, 'and the rule that fired must still be named');
+});
+
+test('cold-3: the skipped judgment half is named as its OWN condition', async (t) => {
+  // Never folded into "no transport is configured": that would tell an operator
+  // who configured an engine that they did not.
+  const root = scratchRoot(t);
+  const d = deps({ config: ROUTED_CFG, protocol: 'brain-review/2' });
+  d.coldBootDeps.fetchReviews = async () => [selfVerdictAtHead()];
+
+  const lines = [];
+  await main({
+    argv: ['--pr', '42'], log: (s) => lines.push(s), error: () => {},
+    ...d, root,
+    stageDeps: { runStage: async () => ({ ok: true }) },
+  });
+  const body = lines.join('\n');
+  assert.match(body, /the judgment half was not run/);
+  assert.doesNotMatch(body, /no transport is configured/);
+});
