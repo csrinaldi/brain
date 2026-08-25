@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readFindingsArtifact, ARTIFACT_TAG, CARRIED_FIELDS } from './findings-artifact.mjs';
+import { readFindingsArtifact, ARTIFACT_TAG, CARRIED_FIELDS, ALLOWED_SEVERITIES } from './findings-artifact.mjs';
 
 const block = (json) => `# Cold review\n\n\`\`\`${ARTIFACT_TAG}\n${json}\n\`\`\`\n`;
 const finding = (over = {}) => ({
@@ -220,4 +220,63 @@ test('#682 S3: an artifact whose list is EMPTY resolves — the stage ran and fo
   const { generate } = artifactDeps(762, root);
   assert.deepEqual(await generate({}), [],
     'distinct from both "no artifact" (no generate at all) and "unreadable" (a throw)');
+});
+
+
+// ── judgment:cold-2 (fifth cold review) — severity is a VALUE, and it decides ──
+
+const fence = (f) => '```brain-findings/1\n' + JSON.stringify([f]) + '\n```\n';
+const base = { id: 'x', evidence: 'e', cites: 'c' };
+
+test('cold-2: every declared severity is accepted', () => {
+  for (const severity of ALLOWED_SEVERITIES) {
+    const r = readFindingsArtifact(fence({ ...base, severity }));
+    assert.equal(r.ok, true, `${severity} must be accepted`);
+    assert.equal(r.findings[0].severity, severity);
+  }
+});
+
+test('cold-2: a NEAR-MISS for blocker refuses the artifact', () => {
+  // MEASURED as the defect: `critical` passed the reader, survived the
+  // evaluator, and buildVerdict returned null where `blocker` returns REVISE.
+  // It also escaped the challenger — refuter.mjs selects on severity ===
+  // 'blocker' — so the finding was neither blocked nor refuted, and nothing
+  // reported that the vocabulary had been violated.
+  const r = readFindingsArtifact(fence({ ...base, severity: 'critical' }));
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /critical/);
+  assert.match(r.reason, /blocker \| correction \| editorial/);
+});
+
+test('cold-2: case matters — the vocabulary is not folded', () => {
+  // Folding case here would be brain deciding what the producer meant, which is
+  // the grading this boundary refuses to do on its behalf.
+  assert.equal(readFindingsArtifact(fence({ ...base, severity: 'BLOCKER' })).ok, false);
+});
+
+test('cold-2: a MISSING severity refuses rather than rendering null on the wire', () => {
+  // It used to render `severity: null`, a value reviewer-protocol.md does not
+  // define, in a verdict that still claimed the inferential control applied.
+  const r = readFindingsArtifact(fence({ ...base }));
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /null/);
+});
+
+test('cold-2: ONE bad entry refuses the WHOLE artifact', () => {
+  // Dropping the bad entry and keeping the rest would silently lose a finding —
+  // the producer said something and the reader would decide it said nothing.
+  const two = '```brain-findings/1\n' +
+    JSON.stringify([{ ...base, severity: 'blocker' }, { ...base, id: 'y', severity: 'nope' }]) +
+    '\n```\n';
+  assert.equal(readFindingsArtifact(two).ok, false);
+});
+
+test('cold-2: the refusal explains why brain does not simply correct the value', () => {
+  const r = readFindingsArtifact(fence({ ...base, severity: 'critical' }));
+  assert.match(r.reason, /brain cannot know the right value|decides whether a finding blocks/);
+});
+
+test('cold-2: the vocabulary is frozen and matches what the prompt offers', () => {
+  assert.ok(Object.isFrozen(ALLOWED_SEVERITIES));
+  assert.equal(new Set(ALLOWED_SEVERITIES).size, ALLOWED_SEVERITIES.length);
 });

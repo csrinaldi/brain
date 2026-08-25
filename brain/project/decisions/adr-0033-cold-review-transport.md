@@ -66,7 +66,7 @@ here to the property that is actually bought:
 |---|---|---|
 | brain's poster credential in the environment | `withoutCredentials` — `spawnSync` hands the child an explicit `env` | **by construction**: the kernel, which does not consult the child |
 | a credential injected ambiently by a proxy (#604) | `gatherIdentity`'s negative control, which refuses the whole run before the stage spawns | **by construction**: the run does not reach the producer at all |
-| a repo-local `.env` | the detached worktree at the PR head, where a gitignored file does not exist | **by construction** |
+| a repo-local `.env` **in the producer's cwd** | the detached worktree at the PR head, where a gitignored file does not exist | **by cost, not by construction** — see below |
 | a forge CLI's own store outside the repository (`~/.config/gh`, the OS keyring) | `producer-forge-reach.mjs`, which probes the producer's environment and REFUSES when a forge CLI still authenticates | **by measurement, failing closed** — a probe that cannot reach a verdict refuses |
 | any other credential, read by any other tool | nothing | **not claimed** |
 
@@ -76,7 +76,32 @@ empty of secrets"; it is "the child cannot authenticate as brain's poster".
 
 The last row is the honest one. The producer holds a shell, and a credential brain
 cannot name read by a tool brain cannot enumerate is an open namespace. This decision
-buys four closed channels and says so, rather than asserting a fifth nobody reads.
+buys the channels above and says so, rather than asserting one nobody reads.
+
+**AND THE WORKTREE ROW WAS OVERSTATED — corrected here, found by the producer itself.**
+It read *"by construction"*, and the fifth cold review measured it **from inside its own
+process**, which is the only place the question can be settled:
+
+> *"`cwd` is not a confinement. `defaultRun` sets `spawnSync`'s `cwd` and nothing else;
+> there is no chroot, no sandbox flag anywhere in the arg list. And the prompt hands the
+> producer the operator's tree as an ABSOLUTE path in its very first instruction. Measured:
+> `test -f <operator tree>/.env` returns TRUE from the producer."*
+
+The premise is true and the conclusion did not follow: the worktree means the file is not
+in the producer's working directory, so nothing trips over it — but `token.mjs` names that
+file as where `VCS_TOKEN` lives, and the prompt itself discloses a path outside the
+worktree because that is how the artifact gets written. **Raising the cost of reaching a
+credential is not closing the channel**, and calling it "by construction" is the same
+warrant inflation this table was rewritten to remove, committed in the rewrite.
+
+**What would close it** is the shape the forge-CLI row already has: a probe, not a claim.
+Two candidates, neither built here — a producer confined by something the kernel enforces
+(a sandbox brain cannot assume under ADR-0005), or a post-run check that the operator's
+tree carries exactly one new untracked file at the artifact path. The second is cheap and
+is currently asserted only by a test, never in production: **nothing today would notice a
+producer that edited code on its way past**, and the verdict would still say only a review
+happened. That gap is named rather than closed, because naming it is what this table is
+for.
 
 This is the load-bearing half. `reviewer-protocol.md` §2's three structural locks —
 COMMENT-only state, no approve verb in the port, the two-key split — all live in the

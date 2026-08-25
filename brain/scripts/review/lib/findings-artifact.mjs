@@ -50,6 +50,23 @@ export const ARTIFACT_TAG = 'brain-findings/1';
 const POSTED_FAMILY_RE = /^\s*protocol:\s*brain-review\//m;
 
 /**
+ * The severity vocabulary, and the ONE place it is enforced.
+ *
+ * `cold-review-prompt.mjs` used to note that no such constant existed and that
+ * adding one "that no validator reads would create the very thing this file
+ * avoids" — three values enforced by scattered comparisons and written down in
+ * `reviewer-protocol.md`. That objection was right, and judgment:cold-2 removed
+ * its premise: this reader now REFUSES on a value outside the set, so the
+ * constant has a reader and the prompt derives its menu from here instead of
+ * spelling it.
+ *
+ * `cold-review-prompt.test.mjs` cross-checks this against the protocol
+ * document's own `severity:` line, so the constant cannot drift from the
+ * doctrine that defines it.
+ */
+export const ALLOWED_SEVERITIES = Object.freeze(['blocker', 'correction', 'editorial']);
+
+/**
  * readFindingsArtifact() — PURE over the artifact's text.
  *
  * Four answers, and the first three are FAILURES rather than empty results
@@ -109,6 +126,43 @@ export function readFindingsArtifact(text) {
   }
   if (!list.every((f) => f !== null && typeof f === 'object' && !Array.isArray(f))) {
     return { ok: false, reason: `every entry of ${ARTIFACT_TAG} must be an object` };
+  }
+
+  // SEVERITY IS THE ONE FIELD WHOSE VALUE DECIDES WHETHER A FINDING BLOCKS, and
+  // until the fifth cold review it was carried across this boundary unread
+  // (judgment:cold-2). The reader validated the field SET and no field's VALUE,
+  // while the vocabulary reached a NON-DETERMINISTIC producer as prompt prose.
+  //
+  // MEASURED on the shipped modules: `severity: 'critical'` — the obvious
+  // near-miss for `blocker` — passed here, survived `sanitiseFinding`, kept its
+  // value through `evaluateInferential`, and `buildVerdict` returned `null`
+  // where the identical finding spelled `blocker` returns `REVISE`. It also
+  // escapes the challenger: `refuter.mjs` selects its batch on
+  // `severity === 'blocker'`. So a mislabelled blocker is neither blocked nor
+  // refuted, and nothing anywhere reported that the vocabulary was violated —
+  // #552's fold at the exact boundary this slice exists to prevent it:
+  // "the reviewer found a blocker and spelled it wrong" rendered byte-identically
+  // to "the reviewer found nothing blocking".
+  //
+  // IT REFUSES RATHER THAN COERCES, and that is the whole ruling. The other two
+  // vocabularies at this boundary are handled by knowing the answer:
+  // `evidence_class` is FORCED (the evaluator knows every finding here is
+  // reasoned) and `causal_disposition` is DROPPED (a producer may not grade its
+  // own admissibility). Severity is neither — brain does NOT know how heavy a
+  // finding is, so it can neither supply nor correct the value. Coercing up
+  // would invent a weight; coercing down would silently weaken the verdict,
+  // which is the direction that already hurt. Refusing is the same channel the
+  // reader already uses for two blocks and for the posted-family shape.
+  const badSeverity = list.find((f) => !ALLOWED_SEVERITIES.includes(f?.severity));
+  if (badSeverity) {
+    return {
+      ok: false,
+      reason:
+        `a finding carries severity ${JSON.stringify(badSeverity.severity ?? null)}, which is not one of ` +
+        `${ALLOWED_SEVERITIES.join(' | ')}. Refusing the whole artifact rather than carrying it: severity ` +
+        'decides whether a finding blocks, brain cannot know the right value, and a near-miss like ' +
+        '"critical" reads downstream as a finding that blocks nothing.',
+    };
   }
 
   // Projected onto CARRIED_FIELDS here, at the boundary, so a generator that

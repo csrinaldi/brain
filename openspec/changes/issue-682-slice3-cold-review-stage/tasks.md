@@ -1928,6 +1928,89 @@ over one range is not redundant; four is not saturated either.
 Suite: 4359/4359, verified under both host states.
 
 
+## Slice J — the first review of the CURRENT head, and what it says about convergence
+
+Every previous pass read `59dda0a`. This one read `7202123` — the day's fixes, which no
+review had seen. Four findings, two blocking, **all four against code written that day**.
+
+### J.1 — `judgment:cold-1` (blocker): a warrant inflated inside the rewrite that removed warrant inflation
+
+ADR-0033's table said the repo-local `.env` channel was closed **by construction** by the
+detached worktree. The producer measured it FROM INSIDE ITS OWN PROCESS — the only place
+the question can be settled:
+
+> *"`cwd` is not a confinement. `defaultRun` sets `spawnSync`'s `cwd` and nothing else;
+> there is no chroot, no sandbox flag anywhere in the arg list. And the prompt hands the
+> producer the operator's tree as an ABSOLUTE path in its very first instruction.
+> Measured: `test -f <operator tree>/.env` returns TRUE from the producer."*
+
+The premise is true and the conclusion did not follow. The worktree means nothing trips
+over the file; `token.mjs` names it as where `VCS_TOKEN` lives, and the prompt discloses a
+path outside the worktree **because that is how the artifact gets written**. Raising the
+cost is not closing the channel. Corrected to `by cost, not by construction`, with the two
+things that would close it named — a kernel-enforced confinement (which ADR-0005 forbids
+assuming) or a post-run check of the operator's tree. **Neither is built**, and the second
+is currently asserted only by a test: nothing in production would notice a producer that
+edited code on its way past.
+
+### J.2 — `judgment:cold-2` (blocker): the one field that decides, carried unread
+
+`readFindingsArtifact` validated the field SET and no field's VALUE, while `severity` — the
+field that decides whether a finding blocks — reached a non-deterministic producer as
+prompt prose. Measured: `severity: 'critical'` passed the reader, survived
+`sanitiseFinding`, kept its value through `evaluateInferential`, and `buildVerdict`
+returned `null` where `blocker` returns `REVISE`. It also escaped the challenger, which
+selects on `severity === 'blocker'`. **Neither blocked nor refuted, and nothing reported
+the violation** — #552's fold at the boundary this slice was built to prevent it.
+
+**It refuses rather than coerces, and that is the ruling.** The other two vocabularies here
+are handled by knowing the answer: `evidence_class` is FORCED, `causal_disposition` is
+DROPPED. Severity is neither — brain does not know how heavy a finding is, so coercing up
+invents a weight and coercing down silently weakens the verdict.
+
+**And the fix paid a debt this slice had recorded as unpayable.** `cold-review-prompt.mjs`
+noted that no `ALLOWED_SEVERITIES` existed and that "adding a constant here that no
+validator reads would create the very thing this file avoids". The objection was right and
+judgment:cold-2 removed its premise: there is a validator now, so the constant has a
+reader and the prompt derives its menu from it.
+
+### J.3 and J.4 — the fix that re-introduced what it fixed
+
+`judgment:cold-5` of the fourth pass corrected "all seven names" (the list holds eight) in
+three prose sites. **Two NEW instances were written in the same commit**, in
+`producer-forge-reach.mjs` and `run-cold-review-stage.mjs` — the exact sentence, in files
+added by the same diff. The pinning test pins the NAMES, not the prose, so nothing could go
+red. And `judgment:cold-4`'s reordering carried the `mkdir` comment forty-two lines up with
+the probe, leaving it above a guard, describing an operation that had not happened yet.
+
+### What eight passes say about convergence — the finding behind the findings
+
+**Every finding in every verdict carries `causal_disposition: introduced`. Not one is
+pre-existing.** Put beside the fact that each pass reviewed code the previous pass's FIXES
+had written, the pattern is not "the reviews cannot find everything":
+
+> **The reviews are not failing to converge on old code. They are finding defects in the
+> fixes.**
+
+J.3 is the clearest instance — a correction that re-introduced its own defect two files
+over, in the same commit. The unit under review has been growing under the reviewer all
+day: 1144 governed lines at the first waiver, 2934 now, with each round adding a few
+hundred more that no pass has read.
+
+**And the defect class is specific to how this codebase writes.** Most of today's blockers
+are not logic errors — they are CLAIMS: `by construction` over a channel nothing enforced,
+`one number rather than one per backend` beside a duplicated literal, `the operator's
+outcome is identical` where it measurably was not, `all seven names` where there are eight.
+The comment density that makes this repo good at recording reasoning is also its largest
+defect surface, because **every assertion in prose is an oracle nobody runs**.
+
+That reframes the cost question. Eight minutes per review is not the bottleneck; reviewing
+a 2934-line unit that grows between rounds is. The lesson is about batch size, not engine
+speed.
+
+Suite: 4366/4366, verified under both host states.
+
+
 ## Not in this change
 
 - `same-model` / `cross-family` axes.

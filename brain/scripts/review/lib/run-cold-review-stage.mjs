@@ -163,10 +163,6 @@ export async function runColdReviewStage({
     };
   }
 
-  // The engine is told to write a file; nothing guarantees its tooling creates
-  // parents. Recursive, so an existing directory from a previous round is not an
-  // error — re-running a review is normal, and #495's rev counter is what makes
-  // rounds distinguishable, not the filesystem.
   // A PRECONDITION, SO IT RUNS BEFORE ANY MUTATION (judgment:cold-4, fourth cold
   // review). It sat below `mkdir` and below the `remove` that clears the previous
   // artifact, so a run that REFUSED had already destroyed the output of the run
@@ -177,8 +173,8 @@ export async function runColdReviewStage({
   // ASSERTED (judgment:cold-1 of the third cold review). `credentialEnv` takes
   // brain's poster credential out of the child's ENVIRONMENT — kernel-enforced,
   // real. A forge CLI keeps its own store OUTSIDE the repository, so neither
-  // that scrub nor the detached worktree touches it: measured, with all seven
-  // names unset, `gh auth status` still reported a logged-in account.
+  // that scrub nor the detached worktree touches it: measured, with every name
+  // `credentialEnvNames()` returns unset, `gh auth status` still reported a logged-in account.
   //
   // So the property is MEASURED here rather than declared. The probe asks the
   // one question that does not depend on the deployment — "from this
@@ -205,6 +201,16 @@ export async function runColdReviewStage({
   }
 
 
+  // The engine is told to write a file; nothing guarantees its tooling creates
+  // parents. Recursive, so an existing directory from a previous round is not an
+  // error — re-running a review is normal, and #495's rev counter is what makes
+  // rounds distinguishable, not the filesystem.
+  //
+  // IT TRAVELLED WITHOUT ITS CODE (judgment:cold-4, fifth cold review). The
+  // reordering that lifted the forge probe above the mutations carried this
+  // comment up with it, leaving it forty-two lines and one whole guard above the
+  // call it describes — where its first sentence explained an operation that had
+  // not happened yet, and read as a preamble to the probe.
   mkdir(dirname(join(root, artifactPath)));
 
   // THE ARTIFACT IS REMOVED BEFORE THE SPAWN, AND THAT IS WHAT MAKES THE CHECK

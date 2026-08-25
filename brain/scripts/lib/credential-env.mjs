@@ -50,6 +50,15 @@
 //    gitignored `.env` does not exist. Two mechanisms, one property — worth
 //    knowing which is which before changing either.
 //
+//    THAT RAISES THE COST; IT DOES NOT CLOSE THE CHANNEL, and this note said
+//    otherwise until the fifth cold review measured it FROM INSIDE the producer:
+//    `cwd` is not a confinement — `spawnSync` sets a working directory and
+//    nothing else, and the prompt hands the producer an ABSOLUTE path outside
+//    the worktree because that is how the artifact gets written. `test -f
+//    <operator tree>/.env` returned TRUE from the producer. ADR-0033's table
+//    now carries this as `by cost, not by construction`, with the two things
+//    that would close it named there.
+//
 //    THIS HEADING ONCE READ "CREDENTIALS ON DISK" AND THE PARAGRAPH PROVED LESS
 //    THAN THE HEADING PROMISED — the third cold review's blocker, and the
 //    ticket's own defect class committed inside the fix written to remove one

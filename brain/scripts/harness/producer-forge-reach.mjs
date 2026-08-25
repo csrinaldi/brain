@@ -4,8 +4,8 @@
 // THE DEFECT THIS CLOSES. `credential-env.mjs` removes brain's poster
 // credential from the child's environment, and that is real: `spawnSync` hands
 // the child an explicit `env` and the kernel does not consult it. But the
-// reviewer measured the obvious next thing and it was open — with all seven
-// names unset, `gh auth status` still reported `Logged in to github.com account
+// reviewer measured the obvious next thing and it was open — with every name
+// `credentialEnvNames()` returns unset, `gh auth status` still reported `Logged in to github.com account
 // csrinaldi (keyring)`, scope `repo`. A forge CLI keeps its own store outside
 // the repository, so neither the scrub nor the detached worktree touches it, and
 // the producer holds a shell.

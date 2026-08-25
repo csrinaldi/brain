@@ -39,7 +39,19 @@
 // example inside it to parse. If the example shows the engine a shape the reader
 // would refuse, drop a field from, or fail to find, the suite goes red.
 //
-// `severity` is the one vocabulary with no constant to derive from: no
+// `severity` NOW DERIVES LIKE EVERYTHING ELSE, and the paragraph below records
+// why it did not until the fifth cold review. The objection was sound — a
+// constant no validator reads is the very thing this file avoids — and
+// judgment:cold-2 removed its premise: `readFindingsArtifact` now REFUSES a
+// value outside the set, so `ALLOWED_SEVERITIES` has a reader and this prompt
+// reads the same constant the boundary enforces. The cross-check against
+// `reviewer-protocol.md` stays, because the doctrine document is still where the
+// vocabulary is DEFINED.
+//
+// What follows is the original note, kept because the reasoning was right and
+// only its premise changed:
+//
+// `severity` was the one vocabulary with no constant to derive from: no
 // `ALLOWED_SEVERITIES` exists — the three values are enforced by scattered
 // comparisons (`verdict.mjs`'s uncited-blocker downgrade, `refuter.mjs`'s batch
 // selection) and written down in `reviewer-protocol.md`. Adding a constant here
@@ -118,6 +130,7 @@ import {
   artifactPathFor,
 } from './findings-artifact.mjs';
 import { FORCED_EVIDENCE_CLASS } from '../evaluators/inferential.mjs';
+import { ALLOWED_SEVERITIES } from './findings-artifact.mjs';
 
 /** The ticket this role is on loan from. Named so the debt has an id in code. */
 export const ROLE_DEBT_TICKET = 312;
@@ -127,7 +140,7 @@ export const ROLE_DEBT_TICKET = 312;
  * constant exists to derive it from, and inventing one that nothing validates
  * against would be a declared oracle with no reader.
  */
-const SEVERITIES = 'blocker | correction | editorial';
+const SEVERITIES = ALLOWED_SEVERITIES.join(' | ');
 
 /**
  * Fields the prompt REFUSES out loud — named here so the refusal has a reader.
