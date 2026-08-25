@@ -83,3 +83,39 @@ test('cold-6: the backend default and the configured default are the SAME number
   assert.equal(STAGE_TIMEOUT_MS, TIMEOUT_IN_FORCE_TODAY);
   assert.equal(TIMEOUT_IN_FORCE_TODAY, resolveStageTimeout({}).timeoutMs);
 });
+
+
+// ── judgment:cold-4 (fifth cold review) — the seconds place must ROLL OVER ──
+
+test('cold-4: a duration near a minute boundary never renders 60 seconds', () => {
+  // MEASURED as the defect: `Math.round(s % 60)` rounds AFTER the remainder, so
+  // 599_600ms rendered as "9m 60s" and 119_600 as "1m 60s". The only multi-minute
+  // case in this file was 754_000 -> "12m 34s", nowhere near a boundary.
+  //
+  // It reaches an operator twice: the ceiling a timeout refusal names, and the
+  // cost every run reports. A duration reading "9m 60s" is a measurement nobody
+  // can trust, which is the shape this whole ticket exists to remove.
+  assert.equal(formatDuration(599_600), '10m');
+  assert.equal(formatDuration(599_500), '10m');
+  assert.equal(formatDuration(599_999), '10m');
+  assert.equal(formatDuration(119_600), '2m');
+  for (let ms = 59_000; ms <= 3_600_000; ms += 331) {
+    assert.doesNotMatch(formatDuration(ms), / 60s$/, `${ms}ms rendered a 60-second remainder`);
+  }
+});
+
+test('cold-4: the BRANCH and the RENDER agree at the 90-second seam', () => {
+  // `s < 90` decided on the unrounded value while `toFixed(1)` rendered the
+  // rounded one, so the 50ms below 90s printed "90.0s" — a seconds form for a
+  // duration the next millisecond calls "1m 30s".
+  assert.equal(formatDuration(89_960), '1m 30s');
+  assert.equal(formatDuration(90_000), '1m 30s');
+  assert.equal(formatDuration(89_940), '89.9s');
+});
+
+test('cold-4: the shapes that already worked still do', () => {
+  assert.equal(formatDuration(450), '450ms');
+  assert.equal(formatDuration(4_793), '4.8s');     // the operator's own probe
+  assert.equal(formatDuration(754_000), '12m 34s');
+  assert.equal(formatDuration(600_000), '10m');
+});

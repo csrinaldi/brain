@@ -49,10 +49,29 @@ export const DEFAULT_STAGE_TIMEOUT_MS = 10 * 60_000;
  */
 export function formatDuration(ms) {
   if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return 'an unknown time';
-  if (ms < 1000) return `${ms}ms`;
-  const s = ms / 1000;
-  if (s < 90) return `${s.toFixed(1)}s`;
-  const m = Math.floor(s / 60);
-  const rem = Math.round(s % 60);
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+
+  // ROUNDED BEFORE IT IS DECOMPOSED, and it was the other way round until the
+  // fifth cold review found it. The seconds place was `Math.round(s % 60)`,
+  // which rounds AFTER taking the remainder and so can land on 60: measured,
+  // `formatDuration(599_600)` returned **"9m 60s"**, and `119_600` returned
+  // "1m 60s". The bound test only covered 754_000 -> "12m 34s", nowhere near a
+  // boundary, so nothing caught it.
+  //
+  // It is not cosmetic. This string is what the timeout refusal names as the
+  // ceiling it hit (`claude.mjs`) and what every run reports as the engine's
+  // cost (`cli.mjs`) — the two places whose whole purpose is giving an operator
+  // a number they can act on. A duration that reads "9m 60s" is exactly the
+  // measurement-nobody-can-trust shape this ticket keeps removing.
+  //
+  // Rounding to tenths first makes the BRANCH and the RENDER agree too: the old
+  // `s < 90` decided on the unrounded value while `toFixed(1)` rendered the
+  // rounded one, so a run between 89.95s and 90s printed "90.0s".
+  const tenths = Math.round(ms / 100);
+  if (tenths < 900) return `${(tenths / 10).toFixed(1)}s`;
+
+  const totalSeconds = Math.round(ms / 1000);
+  const m = Math.floor(totalSeconds / 60);
+  const rem = totalSeconds % 60;
   return rem === 0 ? `${m}m` : `${m}m ${rem}s`;
 }

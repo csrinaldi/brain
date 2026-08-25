@@ -1883,6 +1883,51 @@ against the 1M the others used, and these runs read ~98k cached tokens PER TURN,
 context exhaustion would present as a strange failure rather than as fewer findings.
 
 
+### I.2 — the second Sonnet run: a NEW defect, and a different kind of variance
+
+Same range, same model, same prompt as I.1. It found the two blockers again — and one
+thing no previous run had seen.
+
+**`judgment:cold-4` (correction), and it is mine from today.** `formatDuration` computed
+its seconds place as `Math.round(s % 60)`, which rounds AFTER taking the remainder and so
+can land on **60**. Measured: `formatDuration(599_600)` returned **"9m 60s"**, `119_600`
+returned "1m 60s". The only multi-minute case in the test file was `754_000 → "12m 34s"`,
+nowhere near a boundary.
+
+**Not cosmetic.** That string is what a timeout refusal names as the ceiling it hit and
+what every run reports as the engine's cost — the two places whose whole purpose is giving
+an operator a number to act on. Fixed by rounding before decomposing, which also closes a
+second seam the finding did not name: `s < 90` branched on the unrounded value while
+`toFixed(1)` rendered the rounded one, so the 50ms below 90s printed "90.0s". A sweep over
+59s→60min now asserts no rendering ever ends in ` 60s`.
+
+**THE VARIANCE IS IN THE STRATEGY, NOT ONLY IN THE FINDINGS — and that reframes I.1.**
+
+| | Opus #1 | Opus #2 | Sonnet #1 | Sonnet #2 |
+|---|---|---|---|---|
+| wall | 8m 32s | 8m 38s | 5m 31s | 6m 18s |
+| agentic turns | — | 50 | 35 | 56 |
+| subagents spawned | — | 0 | 0 | **4 (`Explore`)** |
+| cost | — | USD 4.82 | USD 1.45 | **USD 3.59** |
+| findings | 5 | 7 | 3 | 4 |
+| **blockers** | 2 of 2 | 2 of 2 | 2 of 2 | 2 of 2 |
+
+The two Sonnet runs differ by 2.5× in cost because the second **spawned four parallel
+recon subagents** and the first did not. Its `duration_api_ms` (812.8s) exceeds its own
+wall clock (377.9s) — the sum across agents running concurrently. So I.1's headline
+number, "3.3× cheaper", was one draw from a distribution whose spread is not the model's
+tier at all but which strategy the producer happens to choose.
+
+**What IS now a rate rather than an anecdote: four runs, two models, four times both
+blockers.** Reading found neither in four passes; every execution found both.
+
+**And the tail keeps producing.** Each run over this same range has surfaced something the
+others missed — 5, then 7, then 3, then 4 findings, with the union still growing. Two runs
+over one range is not redundant; four is not saturated either.
+
+Suite: 4359/4359, verified under both host states.
+
+
 ## Not in this change
 
 - `same-model` / `cross-family` axes.
