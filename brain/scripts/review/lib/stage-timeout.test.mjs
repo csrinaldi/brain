@@ -1,0 +1,71 @@
+// stage-timeout.test.mjs — #682 slice 3, F.9.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+import {
+  TIMEOUT_IN_FORCE_TODAY,
+  MIN_STAGE_TIMEOUT_MS,
+  resolveStageTimeout,
+  formatDuration,
+} from './stage-timeout.mjs';
+
+test('an absent key keeps the shipped ceiling — the default does not move', () => {
+  // Raising it for everyone on one data point would be the same guess in the
+  // other direction. A short ceiling fails loudly; a long one hangs quietly.
+  assert.equal(resolveStageTimeout({}).timeoutMs, TIMEOUT_IN_FORCE_TODAY);
+  assert.equal(resolveStageTimeout(null).timeoutMs, TIMEOUT_IN_FORCE_TODAY);
+  assert.equal(resolveStageTimeout({ reviewer: {} }).timeoutMs, TIMEOUT_IN_FORCE_TODAY);
+});
+
+test('a configured value is honoured', () => {
+  assert.equal(resolveStageTimeout({ reviewer: { stageTimeoutMs: 2_400_000 } }).timeoutMs, 2_400_000);
+});
+
+test('a non-integer REFUSES rather than defaulting', () => {
+  // The operator asked for something; running the shipped ceiling instead would
+  // die at a limit they thought they had raised.
+  for (const bad of ['40m', 12.5, true, {}, []]) {
+    assert.throws(
+      () => resolveStageTimeout({ reviewer: { stageTimeoutMs: bad } }),
+      /must be a whole number of milliseconds/,
+      `${JSON.stringify(bad)} should refuse`,
+    );
+  }
+});
+
+test('a value below the floor refuses, and says why', () => {
+  assert.throws(
+    () => resolveStageTimeout({ reviewer: { stageTimeoutMs: 5_000 } }),
+    /below the .* floor/,
+  );
+});
+
+test('the floor itself is allowed — the boundary is not the error', () => {
+  assert.equal(
+    resolveStageTimeout({ reviewer: { stageTimeoutMs: MIN_STAGE_TIMEOUT_MS } }).timeoutMs,
+    MIN_STAGE_TIMEOUT_MS,
+  );
+});
+
+test('the refusal names the key an operator would edit', () => {
+  assert.throws(
+    () => resolveStageTimeout({ reviewer: { stageTimeoutMs: 'mucho' } }),
+    /reviewer\.stageTimeoutMs/,
+  );
+});
+
+// ── formatDuration: the messages an operator acts on ──────────────────────
+
+test('formatDuration reads as a human duration at every scale', () => {
+  assert.equal(formatDuration(450), '450ms');
+  assert.equal(formatDuration(4_793), '4.8s');          // the operator's own probe
+  assert.equal(formatDuration(600_000), '10m');         // the ceiling that was hit
+  assert.equal(formatDuration(754_000), '12m 34s');
+});
+
+test('formatDuration never renders a number it was not given', () => {
+  for (const bad of [undefined, null, NaN, -1, 'x']) {
+    assert.equal(formatDuration(bad), 'an unknown time');
+  }
+});

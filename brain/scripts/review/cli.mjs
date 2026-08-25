@@ -31,6 +31,7 @@ import { applyCausalAdmission } from './lib/causal-admission.mjs';
 import { resolveJudgment } from './lib/resolve-challenger.mjs';
 import { resolveConvergence } from './lib/convergence.mjs';
 import { runColdReviewStage } from './lib/run-cold-review-stage.mjs';
+import { formatDuration } from './lib/stage-timeout.mjs';
 import { makeRunStageSeam } from '../harness/stage-seam.mjs';
 import {
   evaluateInferential, gatherInferentialInputs, shouldRun as judgmentHalfRuns,
@@ -677,6 +678,16 @@ export async function main(deps = {}) {
     // configured" — telling an operator who configured an engine that they did
     // not. Same words, opposite fact. `routed` is what keeps the two apart, and
     // it survives the failure precisely so this branch can read it.
+    // F.9 — WHAT THE ENGINE COST, REPORTED WHETHER OR NOT IT SUCCEEDED. The
+    // shipped ceiling was ten minutes and no run had ever said how long it
+    // actually took, so when the first real cold review died at it nobody could
+    // tell whether the number was close or absurd. A measurement the run takes
+    // and discards is not a measurement anyone has — judgment:cold-3, in the
+    // value that decides whether a review can finish at all.
+    if (stageResult.routed && typeof stageResult.elapsedMs === 'number') {
+      log(`brain:review: the cold-review engine ran for ${formatDuration(stageResult.elapsedMs)}.`);
+    }
+
     if (stageResult.routed && !stageResult.ok) {
       error(`brain:review: the cold-review stage failed — ${stageResult.reason}. ` +
         'Refusing to post a verdict that would declare the inferential control applied.');

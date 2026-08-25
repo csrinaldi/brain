@@ -22,6 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { runColdReviewStage } from './run-cold-review-stage.mjs';
 import { artifactPathFor, ARTIFACT_TAG } from './findings-artifact.mjs';
 import { COLD_REVIEW_STAGE } from '../../lib/stage-engine.mjs';
+import { TIMEOUT_IN_FORCE_TODAY } from './stage-timeout.mjs';
 
 const PR = 765;
 const ROUTED = { sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'claude', model: 'claude-opus-5' } } } };
@@ -82,7 +83,9 @@ test('the run leaves exactly ONE change, untracked, at the artifact path', async
     config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t), deps: { runStage: writingEngine(root) },
   });
 
-  assert.deepEqual(result, { routed: true, ok: true, artifactPath: artifactPathFor(PR) });
+  // F.9 added `elapsedMs` — a clock reading, not what this test is about.
+  const { elapsedMs, ...shape } = result;
+  assert.deepEqual(shape, { routed: true, ok: true, artifactPath: artifactPathFor(PR) });
 
   // No commit: the head the verdict binds itself to has not moved. §10 would
   // make the verdict stale against its own commit if it had.
@@ -198,7 +201,8 @@ test('an engine that failed is reported with its own reason', async (t) => {
     deps: { runStage: async () => ({ ok: false, reason: 'the engine exited with status 137' }) },
   });
 
-  assert.deepEqual(result, { routed: true, ok: false, reason: 'the engine exited with status 137' });
+  const { elapsedMs, ...shape } = result;
+  assert.deepEqual(shape, { routed: true, ok: false, reason: 'the engine exited with status 137' });
 });
 
 test('a seam that answers nothing at all is still a failure', async (t) => {
@@ -673,4 +677,51 @@ test('cold-1: the probe sees the SCRUBBED env, never brain\'s own', async (t) =>
   assert.equal(seenEnv.PATH, '/usr/bin', 'the engine still needs its PATH');
   assert.equal(seenEnv.GH_TOKEN, undefined, 'the forge credential must be gone before the probe asks');
   assert.equal(seenEnv.BRAIN_REVIEWER_TOKEN, undefined);
+});
+
+
+// ── F.9 (SITE) — the configured ceiling must reach the SPAWN ───────────────
+//
+// `run-stage.test.mjs` proves runStage passes `timeoutMs` to the runner. That
+// pins the LAST layer and leaves the one that SUPPLIES the value unpinned:
+// deleting the resolve call here left the whole suite green — measured — which
+// restores exactly the production behaviour F.9 exists to fix, an operator
+// raising the ceiling and the run dying at the shipped one anyway.
+
+test('cold-2/F.9: reviewer.stageTimeoutMs reaches runStage, not just brain.config.json', async (t) => {
+  const root = makeRepo(t);
+  let seen = null;
+  await runColdReviewStage({
+    config: { ...ROUTED, reviewer: { ...(ROUTED.reviewer ?? {}), stageTimeoutMs: 2_400_000 } },
+    prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      runStage: async (args) => { seen = args.timeoutMs; return writingEngine(root)(args); },
+      forgeProbe: () => ({ status: 1 }),
+    },
+  });
+  assert.equal(seen, 2_400_000, 'a ceiling the operator configured and the stage ignored is not a ceiling');
+});
+
+test('cold-2/F.9: an unconfigured repo still gets the shipped ceiling', async (t) => {
+  const root = makeRepo(t);
+  let seen = null;
+  await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      runStage: async (args) => { seen = args.timeoutMs; return writingEngine(root)(args); },
+      forgeProbe: () => ({ status: 1 }),
+    },
+  });
+  assert.equal(seen, TIMEOUT_IN_FORCE_TODAY, 'the default must not become undefined — that is an unbounded spawn');
+});
+
+test('cold-2/F.9: a ceiling the operator wrote and this layer cannot honour REFUSES the run', async (t) => {
+  await assert.rejects(
+    () => runColdReviewStage({
+      config: { ...ROUTED, reviewer: { stageTimeoutMs: '40m' } },
+      prNumber: PR, root: makeRepo(t), worktreePath: makeWorktree(t),
+      deps: { runStage: async () => ({ ok: true }), forgeProbe: () => ({ status: 1 }) },
+    }),
+    /must be a whole number of milliseconds/,
+  );
 });

@@ -1578,6 +1578,64 @@ credential measurements, which disagree by deployment), F.6 (a seam disqualified
 by ADR-0005), F.7 (a fourth environmental signature).
 
 
+### F.9 — found by the FIRST end-to-end run, which is the point
+
+The operator routed the stage on a machine that honours credentials and ran
+`brain:review --pr 765`. Everything upstream of the engine passed — the identity
+gate, #604's negative control (which **did not resolve** there, unlike this
+container, measured four times), F.1's forge-reach probe, `sdd.map` routing, cold
+boot's fetch and detached worktree. The engine was then killed at the ceiling
+having written nothing, and the run refused.
+
+**Three defects, and the first one is that we could not say which.**
+
+**1. The timeout branch discarded the engine's output.** `runStage`'s
+`status !== 0` branch includes `stderr`; the `error` branch — which is how
+`spawnSync` reports a timeout — returned `r.error.message` alone. `spawnSync`
+captures both streams up to the moment it kills the child, so whatever the engine
+had printed existed and was thrown away, in the one failure where knowing what it
+was doing matters most. The `dispatch`-drops-its-result shape again. Fixed: the
+tail of `stderr` (or `stdout`, since an engine that printed its reasoning to the
+wrong stream still printed it) rides in the reason.
+
+**2. `STAGE_TIMEOUT_MS` was a number nobody had exercised.** Ten minutes, with a
+persuasive comment beside it: *"A review reads a diff; it is not a build."* The
+reasoning is wrong about what a reviewer does — it opens the files the diff does
+NOT touch, reads the ADRs a finding must cite, and may run the suite. On 7098
+added lines across 43 files it was not enough. The operator's own probe answered
+in 4.8s **in the same worktree**, so the engine was healthy and the ceiling was
+simply too low.
+
+**THE FIX IS NOT A BIGGER CONSTANT, and that restraint is the finding.**
+Replacing ten minutes with thirty repeats the original defect one notch along —
+another plausible number with another convincing comment and no measurement.
+`reviewer.stageTimeoutMs` makes it the repo's to set, refusing rather than
+defaulting on a value it cannot honour (`resolveConvergence`'s rule: an operator
+who wrote the key asked for something). **The default deliberately does not
+move**: a short ceiling fails loudly, naming the limit it hit; a long one hangs
+quietly. Loud and short beats quiet and long until there is a distribution.
+
+**3. No run had ever reported what the engine cost.** That is why nobody could
+say whether ten minutes was close or absurd — judgment:cold-3's defect in the
+value that decides whether a review can finish at all. `runStage` now measures
+elapsed time on EVERY run, success included, and `cli.mjs` reports it.
+
+**Four mutations, and one SURVIVED — which is the useful one.** Deleting the
+output tail killed 2; making `resolveStageTimeout` default instead of refusing
+killed 2. Removing the config→spawn wiring in `runColdReviewStage` killed
+**nothing**: `run-stage.test.mjs` pinned `runStage` passing `timeoutMs` to its
+runner and left the layer that SUPPLIES the value unpinned — the SITE axis this
+repo already documents in `red-proof-blind-along-an-unvaried-axis.md`, and the
+same gap judgment:cold-4 had. Three tests added at that site; the mutation now
+kills 3.
+
+**Still unmeasured:** how long the review actually needs. We know it is more than
+ten minutes and nothing more. The next run with a raised ceiling produces the
+first real number, which is what the default should eventually be argued from.
+
+Suite: 4345/4345.
+
+
 ## Not in this change
 
 - `same-model` / `cross-family` axes.

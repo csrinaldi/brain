@@ -47,7 +47,9 @@ test('#682 B.3: NO SDD lifecycle stage can be routed — the fork ADR-0019 rejec
     );
   }
   // And the complement, so this cannot pass on a list that forbids everything:
-  assert.deepEqual(await runStage({ stage: COLD_REVIEW_STAGE, prompt: 'p', _run: okRun }), { ok: true },
+  // `ok` rather than the whole object: F.9 added `elapsedMs`, whose value is a
+  // clock reading and not what this test is about.
+  assert.equal((await runStage({ stage: COLD_REVIEW_STAGE, prompt: 'p', _run: okRun })).ok, true,
     'a stage OUTSIDE the four must route — otherwise the guard is just "nothing works"');
 });
 
@@ -182,7 +184,7 @@ test('#682 cold-2: the producer does NOT inherit brain\'s posting credentials', 
     _env: parent,
     _run: (_cmd, _args, o) => { opts = o; return okRun(); },
   });
-  assert.deepEqual(r, { ok: true });
+  assert.equal(r.ok, true);
 
   assert.equal(opts.env.BRAIN_REVIEWER_TOKEN, undefined, 'the reviewer credential reached the producer');
   assert.equal(opts.env.VCS_TOKEN, undefined, 'the VCS credential reached the producer');
@@ -284,4 +286,72 @@ test('#682 cold-5: `init` is still a command-line op and still reaches BOTH axes
   const seen = [];
   await dispatch('fake-a', 'init', ['x'], { backendLoader: async () => ({ init: async () => { seen.push('a'); } }) });
   assert.deepEqual(seen, ['a'], '`init` still routes to the backend unchanged');
+});
+
+
+// ── F.9 — the timeout is measured, and its evidence is not discarded ───────
+
+test('F.9: a timeout REPORTS the ceiling it hit, not just that it failed', async () => {
+  const r = await runStage({
+    stage: COLD_REVIEW_STAGE, prompt: 'x', timeoutMs: 600_000,
+    _run: () => ({ error: Object.assign(new Error('spawnSync claude ETIMEDOUT'), { code: 'ETIMEDOUT' }) }),
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /did not finish within 10m/, 'the operator must know WHAT limit was hit');
+  assert.match(r.reason, /stageTimeoutMs/, 'and which key raises it');
+});
+
+test('F.9: whatever the engine said before it was killed RIDES ALONG', async () => {
+  // This branch returned r.error.message alone, so on the one failure where
+  // knowing what the engine was doing matters most, everything it had printed
+  // was thrown away. spawnSync captures both streams up to the kill.
+  const r = await runStage({
+    stage: COLD_REVIEW_STAGE, prompt: 'x', timeoutMs: 600_000,
+    _run: () => ({
+      error: Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' }),
+      stderr: 'reading brain/scripts/review/cli.mjs\nstill working',
+    }),
+  });
+  assert.match(r.reason, /the engine last said/);
+  assert.match(r.reason, /still working/);
+});
+
+test('F.9: stdout is used when stderr is empty — the wrong stream is still evidence', async () => {
+  const r = await runStage({
+    stage: COLD_REVIEW_STAGE, prompt: 'x',
+    _run: () => ({ error: Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' }), stdout: 'halfway through' }),
+  });
+  assert.match(r.reason, /halfway through/);
+});
+
+test('F.9: a NON-timeout error keeps its own message and does not claim a timeout', async () => {
+  const r = await runStage({
+    stage: COLD_REVIEW_STAGE, prompt: 'x',
+    _run: () => ({ error: Object.assign(new Error('nope'), { code: 'ENOENT' }) }),
+  });
+  assert.match(r.reason, /failed to run/);
+  assert.doesNotMatch(r.reason, /did not finish within/, 'ENOENT is not a slow engine');
+  assert.doesNotMatch(r.reason, /stageTimeoutMs/, 'raising the ceiling would not install a binary');
+});
+
+test('F.9: elapsed time is reported on SUCCESS too, not only on failure', async () => {
+  // The reason nobody could say whether ten minutes was close or absurd is that
+  // no successful run had ever reported its cost either.
+  const ticks = [1_000, 5_793];              // start, then finish
+  const r = await runStage({
+    stage: COLD_REVIEW_STAGE, prompt: 'x',
+    _now: () => ticks.shift() ?? 5_793,
+    _run: () => ({ status: 0 }),
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.elapsedMs, 4_793);
+});
+
+test('F.9: the configured ceiling reaches spawnSync', async () => {
+  let seen = null;
+  await runStage({
+    stage: COLD_REVIEW_STAGE, prompt: 'x', timeoutMs: 2_400_000,
+    _run: (_c, _a, opts) => { seen = opts.timeoutMs; return { status: 0 }; },
+  });
+  assert.equal(seen, 2_400_000, 'a ceiling the caller resolved and the spawn ignored is not a ceiling');
 });

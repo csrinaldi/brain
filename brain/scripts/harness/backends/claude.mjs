@@ -6,6 +6,7 @@
 
 import { assertRoutableStage } from '../../lib/stage-engine.mjs';
 import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env.mjs';
+import { formatDuration } from '../../review/lib/stage-timeout.mjs';
 import { defaultRun } from './agent-runtime.mjs';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -125,10 +126,23 @@ export const STAGE_TIMEOUT_MS = 10 * 60_000;
  *          _run?: Function}} args
  * @returns {Promise<{ok: true} | {ok: false, reason: string}>}
  */
+/**
+ * Whatever the engine managed to say before it was killed, trimmed to something
+ * a terminal line can carry. `stderr` first — that is where a tool explains
+ * itself — then `stdout`, because an engine that printed its reasoning to the
+ * wrong stream still printed it.
+ */
+function tail(r, max = 300) {
+  const text = String(r?.stderr ?? '').trim() || String(r?.stdout ?? '').trim();
+  if (!text) return '';
+  const last = text.split('\n').filter(Boolean).slice(-2).join(' / ');
+  return ` — the engine last said: ${last.length > max ? `${last.slice(0, max)}…` : last}`;
+}
+
 export async function runStage({
   stage, prompt, model = null, cwd = process.cwd(),
   timeoutMs = STAGE_TIMEOUT_MS, credentialEnv = null, _env = process.env,
-  _run = defaultRun,
+  _run = defaultRun, _now = Date.now,
 } = {}) {
   assertRoutableStage(stage);
 
@@ -150,22 +164,51 @@ export async function runStage({
   );
 
   let r;
+  const startedAt = _now();
+  // MEASURED ON EVERY RUN, not only on the failing one. `STAGE_TIMEOUT_MS` was a
+  // number nobody had exercised until the first end-to-end cold review died at
+  // it, and the reason nobody could say whether ten minutes was close or absurd
+  // is that no run had ever reported how long it took. See stage-timeout.mjs.
+  const elapsed = () => _now() - startedAt;
+
   try {
     r = _run('claude', args, { cwd, timeoutMs, env });
   } catch (err) {
-    return { ok: false, reason: `the engine could not be spawned: ${err.message}` };
+    return { ok: false, elapsedMs: elapsed(), reason: `the engine could not be spawned: ${err.message}` };
   }
 
   // spawnSync reports a timeout through `error`, not through `status`. Read both
   // or a hung engine returns `status: null` and reads as success.
-  if (r?.error) return { ok: false, reason: `the engine failed to run: ${r.error.message}` };
+  if (r?.error) {
+    // THE OUTPUT RIDES ALONG, and it did not until F.9. This branch returned
+    // `r.error.message` alone, so on a timeout — the one failure where knowing
+    // what the engine was doing matters most — everything it had printed was
+    // discarded. `spawnSync` captures both streams up to the moment it kills the
+    // child, so the evidence existed and was thrown away: the `dispatch`-drops-
+    // its-result shape again, in the branch that can least afford it.
+    const timedOut = r.error.code === 'ETIMEDOUT';
+    return {
+      ok: false,
+      elapsedMs: elapsed(),
+      reason:
+        (timedOut
+          ? `the engine did not finish within ${formatDuration(timeoutMs)}`
+          : `the engine failed to run: ${r.error.message}`) +
+        (timedOut
+          ? '. Raise `reviewer.stageTimeoutMs` if the change is large — a review opens the files the ' +
+            'diff does not touch, reads the ADRs a finding must cite, and may run the suite'
+          : '') +
+        tail(r),
+    };
+  }
   if (r?.status !== 0) {
     return {
       ok: false,
+      elapsedMs: elapsed(),
       reason: `the engine exited ${r?.status === null ? 'without a status (timed out?)' : `with status ${r?.status}`}` +
         `${r?.stderr ? ` — ${String(r.stderr).trim().split('\n')[0]}` : ''}`,
     };
   }
 
-  return { ok: true };
+  return { ok: true, elapsedMs: elapsed() };
 }

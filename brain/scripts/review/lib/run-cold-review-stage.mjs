@@ -46,6 +46,7 @@ import { mkdirSync, existsSync, rmSync } from 'node:fs';
 import { COLD_REVIEW_STAGE, resolveStageEngine } from '../../lib/stage-engine.mjs';
 import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env.mjs';
 import { assertProducerCannotReachForge } from '../../harness/producer-forge-reach.mjs';
+import { resolveStageTimeout } from './stage-timeout.mjs';
 import { buildColdReviewPrompt } from './cold-review-prompt.mjs';
 import { artifactPathFor } from './findings-artifact.mjs';
 
@@ -255,12 +256,18 @@ export async function runColdReviewStage({
     // A repo that renamed `reviewer.tokenEnv` would otherwise hand the engine
     // the very credential ADR-0033 says it does not hold.
     credentialEnv: credentialEnvNames({ extra: [config?.reviewer?.tokenEnv] }),
+    // F.9 — the ceiling is the repo's to set. Threaded from here for the same
+    // reason `credentialEnv` is: this layer holds the config and the harness
+    // cannot read it. Throws on a value the operator wrote and this layer
+    // cannot honour, rather than running a review they did not configure.
+    timeoutMs: resolveStageTimeout(config).timeoutMs,
   });
 
   if (!result?.ok) {
     return {
       routed: true,
       ok: false,
+      elapsedMs: result?.elapsedMs ?? null,
       reason: result?.reason ?? 'the engine returned no result',
     };
   }
@@ -278,5 +285,5 @@ export async function runColdReviewStage({
     };
   }
 
-  return { routed: true, ok: true, artifactPath };
+  return { routed: true, ok: true, artifactPath, elapsedMs: result?.elapsedMs ?? null };
 }

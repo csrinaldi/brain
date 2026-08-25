@@ -63,3 +63,4 @@ test('AGENT_RUNTIME probes cleanly through the generic prober', async () => {
   // The descriptor's own update hint is never executed by the probe.
   assert.ok(!calls.some(c => c === AGENT_RUNTIME.updateHint || /install|update/.test(c.split(' ').slice(0, 2).join(' '))));
 });
+
