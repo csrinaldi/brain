@@ -1307,6 +1307,106 @@ this ticket has spent six findings removing. Worth having as cost-raising; never
 as the claim.
 
 
+### F.6 — the seam F.5 missed, from the docs rather than from a probe
+
+F.5 concluded `$HOME` is the source of BOTH credentials and therefore not a
+seam. That conclusion is correct **for the experiment that was run**, and the
+experiment moved one variable. Claude Code's authentication docs name a second:
+
+> *"On Linux, credentials are stored in `~/.claude/.credentials.json`"* … *"If
+> you've set the `CLAUDE_CONFIG_DIR` environment variable on Linux or Windows,
+> the `.credentials.json` file lives under that directory instead."*
+
+The first sentence explains F.5's engine failure exactly. The second means the
+ENGINE's credential can be relocated independently of `$HOME`:
+
+    HOME=<throwaway>              → kills gh's pointer at ~/.config/gh
+    CLAUDE_CONFIG_DIR=<real ~/.claude>  → the engine keeps its credential
+
+which is F.5's `engine YES / gh NO` cell — the one its table calls the outcome
+we want and its result says is unreachable. **The probe design was mine, and so
+was the missing variable.**
+
+**IF IT HOLDS, IT BEATS THE TOOL-FLAG ROUTE ON BOTH AXES** of F.5's own tier
+table: enforced by the KERNEL (`spawnSync` does not ask the child whether it
+honours `env`) rather than by the engine honouring its own flag, **and it keeps
+the shell**, so the producer can still reproduce — which was the entire cost of
+restricting tools, and the capability every blocker across three cold reviews
+was found with.
+
+**NOT MEASURED, AND THEREFORE NOT DECIDED.** Documentation is not a
+reproduction, and this ticket has spent six findings on claims that were true in
+a document and false in the code. Two things are open:
+
+  1. Does the engine actually authenticate under `HOME=<throwaway>` +
+     `CLAUDE_CONFIG_DIR=<real>`? F.5 measured the engine writing `.claude`,
+     `.claude.json`, `.engram`, `.local` and `.npm` into the throwaway HOME, so
+     `.claude` is not the only HOME-relative thing it wants — `.claude.json`
+     in particular is NOT named by the `CLAUDE_CONFIG_DIR` doc.
+  2. macOS is unknown in both directions: the doc scopes `CLAUDE_CONFIG_DIR` to
+     "Linux or Windows", and there the engine's credential is in the Keychain.
+     A mechanism that works on one platform is `by care` with extra steps —
+     F.5's own standard, and the one that disqualified the plain-`$HOME` route.
+
+**AND IT IS ONE ENGINE'S VARIABLE, WHICH IS THE LARGER CONSTRAINT.**
+`CLAUDE_CONFIG_DIR` is `claude`'s. brain routes `sdd.map` to an arbitrary
+engine — `antigravity` and `opencode` among them — and ADR-0005 makes it
+harness-agnostic. So this cannot be brain's general answer; at most it is one
+backend's implementation of one.
+
+The same objection retires the tool-flag route as it was framed: `--allowedTools`
+is `claude`'s syntax, and an `sdd.map.tools` key carrying that vocabulary leaks a
+backend detail into the router. **Both shapes proposed for F.1 so far were
+engine-specific and neither said so.**
+
+**THE SHAPE THAT SURVIVES IS ALREADY IN THIS REPO.** `agent-runtime.mjs`:
+
+> *"Each platform backend owns one `AGENT_RUNTIME` descriptor; this module knows
+> the descriptor shape and nothing else. Adding a fourth platform tomorrow means
+> exporting one more descriptor — no edit here."*
+
+So: the ROUTER carries an abstract intent (`producer: 'isolated'`), and each
+BACKEND translates it — or declares it cannot, the way `AGENT_RUNTIME = null`
+already means "this backend deliberately declares nothing to probe". No
+engine-specific string lives outside its own backend, and an engine that cannot
+isolate its producer SAYS SO instead of appearing to.
+
+**What that costs, stated rather than discovered later:** if only `claude` can
+implement the descriptor, ADR-0033's property holds for one backend and not the
+others — which is still better than today, and must be written as that rather
+than as a whole guarantee. **Blocked on one fact this container cannot supply:
+where `antigravity` and `opencode` keep their credentials, and whether either
+has a relocation variable at all.**
+
+
+### F.7 — a fourth environmental signature, measured by walking into it
+
+The suite went red on 9 e2e tests against a DOCS-ONLY diff. Cause: the
+container's writable allowance was spent — `df` read `100%` with `580K` free —
+so the e2e fixtures could not be created. Freed by deleting orphaned `mktemp`
+directories left in `/tmp` by earlier runs (38G → 9.7G used); the suite then
+returned 4289/4289.
+
+**It matters because it MIMICS a real defect and is distinguishable by one
+number.** Recorded beside the three already tracked:
+
+| signature | tell |
+|---|---|
+| `ENOTEMPTY` in `withFixture`'s `t.after` | teardown race, one test |
+| `journal: brain:upgrade HOLDS the lock` | under load, one test |
+| CPU starvation | heavy git tests fail, suite runs **>600s** vs ~90s |
+| **disk exhaustion** | **e2e fail, test COUNT drops, duration NORMAL (~35s)** |
+
+The dropped count is the sharper tell: files that cannot write a fixture never
+report their tests at all, so the total falls rather than the failures rising.
+A run that is fast AND smaller than the last one is the environment, not the
+diff.
+
+And it is the same orphaned-fixture accumulation the first signature is a
+symptom of — the teardown race does not just fail a test, it leaves the
+directory behind. Enough of them fill the disk.
+
+
 ## Not in this change
 
 - `same-model` / `cross-family` axes.
