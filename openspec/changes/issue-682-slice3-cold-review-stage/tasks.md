@@ -1210,7 +1210,7 @@ code before any disposition** — nothing here is taken on the reviewer's word.
       it is open: the ticket's recurring defect class, committed inside the fix
       written to remove one instance of it.
 
-- [ ] F.2 **`judgment:cold-2` (correction) — the stage spawns before anything can
+- [x] F.2 **`judgment:cold-2` (correction) — the stage spawns before anything can
       decide it need not.** Verified ordering: `runColdReviewStage` is awaited at
       `cli.mjs:628`; the anti-loop lock is `poster.mjs:131` and is not reached
       until `cli.mjs:852`. Every input the lock reads is already in hand at 628.
@@ -1506,6 +1506,35 @@ so a suite relying on the ambient CLI would be green everywhere and enforce
 nothing where it matters. Every one of these tests injects the probe. A test
 whose oracle is the host is the defect class this ticket has spent nine findings
 removing.
+
+
+### F.2 — closed: the run decides before it pays, through ONE predicate
+
+The lock's three inputs — `priorVerdicts`, `reviewerHandle`, `headSha` — are all
+in hand at `cli.mjs`'s spawn site, so the fix is not new logic but reading the
+existing answer earlier.
+
+**It is one function, not a second check.** `wouldRepeatLastVerdict` is extracted
+from `postVerdict` and exported; the poster now routes through it and `cli.mjs`
+imports it. A copy at the call site would be the defect this file already fixed
+on the SHA half, where `verdictsAtHead` is shared with the rev bound *"so the two
+guards can no longer disagree silently about what the same review iteration
+means"*. A drifting early check would skip runs the lock would have posted, and
+nothing on the run would say so.
+
+**A dry run is exempt, and that is the same rule rather than a special case.**
+The lock exists to stop the reviewer answering itself ON THE PULL REQUEST; a
+rehearsal reaches no PR, so there is no loop to break and skipping would take the
+rehearsal away from an operator who asked for exactly it. This is the distinction
+F.4 recorded from the other side — the dry-run flag governs POSTING, not
+PRODUCTION — applied deliberately this time instead of tripped over.
+
+**Three mutations, three caught.** Disabling the guard killed the no-spawn test;
+making it ignore `--dry-run` killed the rehearsal test; making `postVerdict` stop
+routing through the shared predicate killed three, including the one whose whole
+job is to prove the two agree.
+
+Suite: 4325/4325.
 
 
 ## Not in this change

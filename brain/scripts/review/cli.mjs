@@ -39,7 +39,7 @@ import {
 import { unionControls, checkControlsCoverFindings } from './lib/controls.mjs';
 import { needsBaseProbe, probeBase, BASE_REPRODUCIBLE_GATES } from './lib/base-comparison.mjs';
 import { verdictsAtHead } from './lib/parse-verdict.mjs';
-import { postVerdict } from './poster.mjs';
+import { postVerdict, wouldRepeatLastVerdict } from './poster.mjs';
 import { gatherQueue } from './queue.mjs';
 import { runBoard } from './board.mjs';
 
@@ -621,6 +621,35 @@ export async function main(deps = {}) {
     // failed closed either way, so what was lost is the message that tells the
     // operator which key to fix — which is the whole point of failing closed
     // out loud rather than merely failing.
+    // judgment:cold-2 — DECIDE BEFORE PAYING, not after. Every input the
+    // anti-loop lock reads is already in hand here: `boot.doctrine.priorVerdicts`,
+    // `identity.handle` and `boot.headSha`. The lock itself lives in
+    // `poster.mjs` and is not reached until hundreds of lines below, so a second
+    // `brain:review` on an unchanged head used to pay a full engine run —
+    // `STAGE_TIMEOUT_MS` is ten minutes — and then post nothing.
+    //
+    // THE PREDICATE IS IMPORTED, NEVER RESTATED. A copy here would be the defect
+    // this file already fixed on the SHA half (`verdictsAtHead`, shared "so the
+    // two guards can no longer disagree silently"): a cheap early check that
+    // drifts from the real lock skips runs the lock would have posted, and
+    // nothing on the run would say so.
+    //
+    // A DRY RUN IS EXEMPT, and that is not a special case — it is the same rule.
+    // The lock exists to stop the reviewer answering itself ON THE PULL REQUEST;
+    // a rehearsal posts nothing, so there is no loop to break and skipping would
+    // take the rehearsal away from an operator who asked for exactly it.
+    if (!args.dryRun && wouldRepeatLastVerdict({
+      priorVerdicts: boot.doctrine.priorVerdicts,
+      reviewerHandle: identity.handle,
+      headSha: boot.headSha,
+    })) {
+      // The SAME sentence the poster prints when it reaches the lock. The
+      // operator's outcome is identical; what changed is that it no longer costs
+      // an engine run to reach it.
+      log('brain:review: anti-loop — nothing posted.');
+      return 0;
+    }
+
     let stageResult;
     try {
       stageResult = deps.inferentialDeps

@@ -1129,3 +1129,87 @@ test('#682 cold-5: maxRounds bounds the PRODUCE loop — the challenger still ru
     'invites four different answers about one claim'
   );
 });
+
+
+// ── judgment:cold-2 — the run decides BEFORE it pays ──────────────────────
+
+/** This reviewer's own verdict, at this head — what the anti-loop lock refuses to repeat. */
+const selfVerdictAtHead = () => ({
+  author: 'brain-reviewer',
+  body: ['```yaml', 'protocol: brain-review/2', `head_sha: ${HEAD}`, 'verdict: COMMENT', '```'].join('\n'),
+});
+
+test('cold-2: a repeat run does NOT spawn the engine — it decides before paying', async (t) => {
+  const root = scratchRoot(t);
+  let spawned = false;
+  const lines = [];
+  const d = deps({ config: ROUTED_CFG, protocol: 'brain-review/2' });
+  d.coldBootDeps.fetchReviews = async () => [selfVerdictAtHead()];
+
+  const code = await main({
+    argv: ['--pr', '42'],                       // NOT a dry run: the lock applies
+    log: (s) => lines.push(s), error: () => {},
+    ...d,
+    root,
+    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+  });
+
+  // The whole finding: `STAGE_TIMEOUT_MS` is ten minutes, and every input the
+  // lock reads was already in hand at the spawn site.
+  assert.equal(spawned, false, 'a run that will post nothing must not pay for an engine first');
+  assert.equal(code, 0, 'declining to repeat itself is a clean outcome, not a failure');
+  assert.ok(lines.some((l) => l.includes('anti-loop')), 'and the operator is told which rule fired');
+});
+
+test('cold-2: a DRY RUN still spawns — a rehearsal posts nothing, so there is no loop to break', async (t) => {
+  const root = scratchRoot(t);
+  let spawned = false;
+  const d = deps({ config: ROUTED_CFG, protocol: 'brain-review/2' });
+  d.coldBootDeps.fetchReviews = async () => [selfVerdictAtHead()];
+
+  await main({
+    argv: ['--pr', '42', '--dry-run'],
+    log: () => {}, error: () => {},
+    ...d,
+    root,
+    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+  });
+
+  // Skipping here would take the rehearsal away from an operator who asked for
+  // exactly it — the lock guards the PULL REQUEST, and a dry run never reaches one.
+  assert.equal(spawned, true, 'a dry run is a rehearsal, and the lock has nothing to protect');
+});
+
+test('cold-2: a FIRST run at this head spawns normally', async (t) => {
+  const root = scratchRoot(t);
+  let spawned = false;
+  const d = deps({ config: ROUTED_CFG, protocol: 'brain-review/2' });
+  d.coldBootDeps.fetchReviews = async () => [];       // nothing said yet
+
+  await main({
+    argv: ['--pr', '42'],
+    log: () => {}, error: () => {},
+    ...d,
+    root,
+    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+  });
+  assert.equal(spawned, true, 'the guard must not swallow the run it exists to make cheap');
+});
+
+test('cold-2: ANOTHER reviewer\'s verdict at this head does not suppress the run', async (t) => {
+  const root = scratchRoot(t);
+  let spawned = false;
+  const d = deps({ config: ROUTED_CFG, protocol: 'brain-review/2' });
+  d.coldBootDeps.fetchReviews = async () => [{ ...selfVerdictAtHead(), author: 'someone-else' }];
+
+  await main({
+    argv: ['--pr', '42'],
+    log: () => {}, error: () => {},
+    ...d,
+    root,
+    stageDeps: { runStage: async () => { spawned = true; return { ok: true }; } },
+  });
+  // Going silent because someone ELSE spoke would be the reviewer refusing the
+  // conversation the lock exists to permit.
+  assert.equal(spawned, true);
+});
