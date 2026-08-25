@@ -463,11 +463,20 @@
       it, and #758 paid for that with 43 commits, 12 merged PRs and no terminal PR until
       the very end. A task that opens the PR last reproduces the shape it exists to
       prevent. Open early, the gates run on every push and say so early too.
-- [ ] C.4b Mark it **ready for review** — the slices are complete and `Closes #682` is
-      about to be true rather than merely true-at-merge.
-- [ ] C.5 Cold review of the chain, from an environment where credentials are not
+- [x] C.4b Mark it **ready for review** — the slices are complete and `Closes #682` is
+      about to be true rather than merely true-at-merge. **Done 25/08/2026, after
+      C.5 and not before**: marking it ready while the chain had never been executed
+      would have said "ready to review" over a path nobody had run.
+- [x] C.5 Cold review of the chain, from an environment where credentials are not
       proxy-injected — the only place a verdict can be produced (#604, measured four
       times on this line of work).
+      **Satisfied on PR #765 at `59dda0a`, 25/08/2026.** The engine ran 8m 32s and
+      posted `REVISE` with five findings, IN THE SAME INVOCATION that satisfied
+      C.2b — which is what the two tasks had been waiting for: one run where both
+      halves are the same run. Every finding was against code committed to this
+      slice that day, and every one was correct; all five are closed in slice G.
+      The blocker among them was a wire that had been dead for an hour under two
+      green suites, which is the thing three passes of reading did not find.
 - [ ] C.6 Close **#682** and **#754**. #754 closes because the role stops being rewritten
       per launch: it is the stage's prompt.
 
