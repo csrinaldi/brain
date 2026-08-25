@@ -1252,6 +1252,61 @@ spawns before ANYTHING that could establish the run will not use its output,
 `sdd.map` shipping empty, so neither case is covered by what is written there.
 
 
+### F.5 — measured: where each credential actually lives, and what a spawn can reach
+
+Run by the operator on Linux 7.0.0-29-generic, against a `mktemp -d` HOME. Not a
+change; a measurement, taken because F.1's disposition turned on a fact neither
+this container nor the finding had.
+
+| probe | result |
+|---|---|
+| engine (`claude -p`) with a synthetic `$HOME` | **NO** — *"Not logged in · Please run /login"*, exit 1 |
+| `gh auth status` with the same synthetic `$HOME` | **NO** — *"You are not logged into any GitHub hosts"*, exit 1 |
+| engine tool-restriction flags | **four exist**: `--disallowedTools`, `--allowedTools`, `--tools` (`""` disables all), `--permission-mode` |
+
+**`$HOME` IS THE SOURCE OF BOTH, so it is not a seam.** Emptying it takes the
+forge credential away from the producer AND stops the engine authenticating.
+There is no cell here that isolates one from the other.
+
+**AND THE `(keyring)` LABEL IS MISLEADING — the operator's reading, and it is
+the useful half.** `gh` reports its credential as `(keyring)`, i.e. held by the
+secret-service OUTSIDE `$HOME`, which predicts survival. It does not survive.
+The token is in the keyring; the POINTER — which host, which account is active —
+is `~/.config/gh`. Without that file `gh` does not know there is an account to
+look for, so the keyring is unreachable without the half that hangs off `$HOME`.
+
+That also makes the mechanism NON-PORTABLE: macOS's login Keychain does not need
+the same `$HOME`-resident pointer, so a `$HOME`-based closure would work here and
+probably not there. **A mechanism that depends on the platform is `by care` with
+extra steps, not `by construction`** — which disqualifies it by the standard
+ADR-0033 sets for itself.
+
+**WHAT THE MEASUREMENT OPENS INSTEAD.** The tool flags act INSIDE the engine, not
+on the environment, so they are platform-independent. A producer spawned with no
+execution primitive cannot reach the forge even with the credential present.
+
+**BUT THE ENFORCEMENT TIERS ARE NOT EQUAL, and the ADR should say which it buys:**
+
+| mechanism | enforced by | strength |
+|---|---|---|
+| `env` scrub (E.2, shipped) | the kernel, via `spawnSync` | structural |
+| network namespace / sandbox | the kernel | structural — but brain cannot assume one (ADR-0005) |
+| producer with no forge credential (transport) | the situation | structural |
+| `--allowedTools` without execution | **the engine honouring its own flag** | machine-checked, not kernel-enforced |
+| a sentence in the prompt | the model's care | none |
+
+So a tool restriction is a large step up from prose — a flag is checked, a
+sentence is interpreted — and it is still the engine's own honesty. **brain can
+prove it ASKED; brain cannot prove the engine OBEYED.** The `env` axis is
+different in kind: `spawnSync` does not consult the child about it.
+
+`Bash` scoped by pattern (`"Bash(gh *)"`) is available and must NOT be mistaken
+for the structural answer: it is a denylist over an open namespace — `curl`,
+`wget`, `python -c`, a `git push` to an https remote — which is the exact shape
+this ticket has spent six findings removing. Worth having as cost-raising; never
+as the claim.
+
+
 ## Not in this change
 
 - `same-model` / `cross-family` axes.
