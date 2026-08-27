@@ -201,7 +201,7 @@ function formatChangeLine(change, strings) {
  * @returns {string}
  */
 export function renderContextBlock(model, strings) {
-  const { manifest, engram, change, ticket, recency = null } = model;
+  const { manifest, engram, change, ticket, recency = null, context = null } = model;
   const s = strings;
 
   const lines = [
@@ -225,6 +225,29 @@ export function renderContextBlock(model, strings) {
 
   if (manifest.restored) {
     lines.push(s.manifestRestored);
+  }
+
+  // The reading list, and ONLY when it has something in it. Same rule the
+  // recency line follows: a session with no active change has nothing to
+  // derive a list from, and printing an empty heading every time is how a
+  // block stops being read. It also keeps this function byte-identical for
+  // every caller that passes no `context` at all.
+  const adrs = Array.isArray(context?.matchedDecisions) ? context.matchedDecisions : [];
+  const memories = Array.isArray(context?.matchedMemories) ? context.matchedMemories : [];
+  if (adrs.length > 0 || memories.length > 0) {
+    lines.push(s.contextLabel);
+    for (const adr of adrs) lines.push(fill(s.contextAdr, { path: adr }));
+    for (const m of memories) {
+      lines.push(fill(s.contextRecord, {
+        id: m?.id ?? '(no id)',
+        type: m?.type ?? 'unknown',
+        // The scope marker is the difference between "this is about your ticket"
+        // and "this shares a word with your ticket", and the reader has to be
+        // able to tell them apart at a glance or the exact rule buys nothing.
+        scope: m?.reason === 'issue' && m?.issue != null ? `#${m.issue}` : '~',
+        title: m?.title || '(untitled)',
+      }));
+    }
   }
 
   lines.push(
@@ -393,14 +416,36 @@ export function step4bMemoryRecency(cwd, deps = {}) {
 }
 
 /**
- * Step 5 — synthesize targeted agent context floor + ADRs (REQ-CTX-4).
- * @returns {Promise<{ coreFloor: string[], matchedDecisions: string[], markdown: string }>}
+ * Step 5 — synthesize the targeted reading list: core floor + ADRs + the
+ * durable records that are about THIS change (REQ-CTX-4).
+ *
+ * `issue` is threaded from step 3's already-derived branch token rather than
+ * re-parsed here: `deriveChangeFromBranch` has the delimiter-anchored parser
+ * and the wrong-resolution case it exists to prevent (`issue-13` vs
+ * `issue-138`), and a second extraction beside it is how those diverge.
+ *
+ * NO subprocess is added: the terms come from the change-dir names step 3
+ * already resolved, and the records are read off disk. `git diff` would give
+ * better terms and is NOT on `assertLocalArgv`'s allowlist — widening that gate
+ * for a reading list is a trade this step does not get to make on its own.
+ *
+ * @returns {Promise<{ coreFloor: string[], matchedDecisions: string[],
+ *   matchedMemories: object[], markdown: string }>}
  */
-export async function step5SynthesizeContext(cwd, deps = {}) {
+export async function step5SynthesizeContext(cwd, deps = {}, resolvedChange = null) {
   try {
-    const change = step3ResolveChange(cwd, deps);
+    // The caller passes step 3's result when it has one. `currentBranch` spawns
+    // git, and re-resolving here would make the session pay for a second one to
+    // learn a fact the orchestrator resolved four lines earlier. Defaulted, not
+    // required, so the verb still stands alone.
+    const change = resolvedChange ?? step3ResolveChange(cwd, deps);
     const synth = deps._synthesize ?? synthesizeContext;
-    return await synth({ touchedFiles: change.matches, rootDir: cwd });
+    const iid = typeof change.token === 'string' ? Number(change.token.replace(/^issue-/, '')) : NaN;
+    return await synth({
+      touchedFiles: change.matches,
+      issue: Number.isInteger(iid) ? iid : null,
+      rootDir: cwd,
+    });
   } catch {
     const defaultFloor = [
       'brain/core/methodology/agent-authorities.md',
@@ -442,7 +487,15 @@ export async function runSessionStart(cwd, deps = {}, strings) {
   const change = step3ResolveChange(cwd, deps);
   const ticket = step4LoadTicketMemory(cwd, deps);
   const recency = step4bMemoryRecency(cwd, deps);
-  const output = renderContextBlock({ manifest, engram, change, ticket, recency }, strings);
+  // Step 5 was written, exported and tested for #267 — and never called from
+  // here, so the reading list it produces reached no agent. `runSessionStart`
+  // is the only path an agent's session actually goes through, which makes
+  // this line the difference between the synthesizer existing and the
+  // synthesizer working. It resolves to the isolated failure shape rather than
+  // throwing, so the block still renders when the store or the ADR dir is
+  // unreadable.
+  const context = await step5SynthesizeContext(cwd, deps, change);
+  const output = renderContextBlock({ manifest, engram, change, ticket, recency, context }, strings);
   return { exitCode: 0, output };
 }
 
@@ -468,6 +521,9 @@ const SESSION_I18N_KEYS = {
   memoryRecencyStale:   'session.memory.recency.stale',
   memoryRecencyUnknown: 'session.memory.recency.unknown',
   manifestRestored: 'session.manifest.restored',
+  contextLabel:     'session.context.label',
+  contextAdr:       'session.context.adr',
+  contextRecord:    'session.context.record',
   ticketLabel:      'session.ticket.label',
   ticketNone:       'session.ticket.none',
 };

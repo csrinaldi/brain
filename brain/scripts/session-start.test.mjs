@@ -168,6 +168,9 @@ const SESSION_STRINGS = {
   ticketNone:       en['session.ticket.none'],
   memoryRecencyStale:   en['session.memory.recency.stale'],
   memoryRecencyUnknown: en['session.memory.recency.unknown'],
+  contextLabel:         en['session.context.label'],
+  contextAdr:           en['session.context.adr'],
+  contextRecord:        en['session.context.record'],
 };
 
 test('renderContextBlock: full success — resolved change, engram ok, manifest restored, ticket present', () => {
@@ -560,7 +563,27 @@ test('runSessionStart: output composition matches renderContextBlock for the res
   // that never reaches the renderer would look identical to one that did — measured:
   // mutation M3 (drop the field from the call) was GREEN until this changed.
   const _recency = () => ({ ageDays: 6, newest: '2026-08-04T00:00:00Z' });
-  const result = await runSessionStart('/repo', { _spawn, _branch, _changes, _resume, _recency }, SESSION_STRINGS);
+  // Step 5 is injected for the SAME reason `recency` is, and the reason is not
+  // hypothetical here: step 5 shipped in #267 exported, tested and never called
+  // from `runSessionStart`, so its result reached no agent for as long as it
+  // existed. Left to the real synthesizer against '/repo', every field comes
+  // back empty and the reading list renders nothing — which is exactly what a
+  // step that never ran looks like. A non-empty injected value is what makes
+  // "the synthesizer is wired" and "the synthesizer is absent" different
+  // outputs.
+  const _synthesize = async () => ({
+    coreFloor: [],
+    matchedDecisions: ['brain/project/decisions/adr-0017-memory-format-owned-by-brain.md'],
+    matchedMemories: [
+      { id: 'rec-aaaa000000000001', ts: '2026-08-01T10:00:00Z', type: 'decision', issue: 138, title: 'Prior work', reason: 'issue' },
+    ],
+    recordsScanned: 1,
+    failsafeActivated: false,
+    failsafeMode: 'core_floor',
+    markdown: '',
+  });
+  const deps = { _spawn, _branch, _changes, _resume, _recency, _synthesize };
+  const result = await runSessionStart('/repo', deps, SESSION_STRINGS);
 
   const expected = renderContextBlock({
     manifest: { restored: false },
@@ -568,8 +591,78 @@ test('runSessionStart: output composition matches renderContextBlock for the res
     change: { branch: 'feat/issue-138-x', token: ISSUE_138, matches: ['issue-138-session-start'] },
     ticket: 'next_action: ship it\n',
     recency: { ageDays: 6, newest: '2026-08-04T00:00:00Z' },
+    context: await _synthesize(),
   }, SESSION_STRINGS);
   assert.equal(result.output, expected);
+});
+
+// ── #267 — the synthesizer reaches the session, and says something ──────────
+
+test('runSessionStart: calls step 5 and its reading list reaches the rendered block', async () => {
+  let called = 0;
+  const _synthesize = async () => {
+    called += 1;
+    return {
+      coreFloor: [], matchedDecisions: [], recordsScanned: 3,
+      matchedMemories: [
+        { id: 'rec-bbbb000000000002', ts: '2026-08-09T10:00:00Z', type: 'session_summary', issue: 519, title: 'Closed the silence', reason: 'issue' },
+      ],
+      failsafeActivated: false, failsafeMode: 'core_floor', markdown: '',
+    };
+  };
+  const deps = {
+    _spawn: () => ({ status: 0, stdout: '' }),
+    _branch: () => 'fix/issue-519-memory-writer-silent',
+    _changes: () => [direntDir('issue-519-memory-writer-silent')],
+    _resume: () => null,
+    _recency: () => ({ ageDays: 0, newest: '2026-08-27T00:00:00Z' }),
+    _synthesize,
+  };
+
+  const { output } = await runSessionStart('/repo', deps, SESSION_STRINGS);
+
+  assert.equal(called, 1, 'exactly once — a second call means a second git branch resolution too');
+  assert.ok(output.includes('rec-bbbb000000000002'), 'the record id is addressable from the block');
+  assert.ok(output.includes('Closed the silence'), 'and the title says what it is');
+  assert.ok(output.includes('#519'), 'issue-scoped records are marked as such, not as merely related');
+});
+
+test('renderContextBlock: the reading list is omitted entirely when there is nothing to read', () => {
+  const base = {
+    manifest: { restored: false },
+    engram: { ok: true },
+    change: { branch: 'main', token: null, matches: [] },
+    ticket: null,
+  };
+  const withEmpty = renderContextBlock({
+    ...base,
+    context: { matchedDecisions: [], matchedMemories: [], coreFloor: [], markdown: '' },
+  }, SESSION_STRINGS);
+
+  // Byte-identical to a model that carries no context at all: an empty heading
+  // printed on every session is how a block stops being read, and every caller
+  // that predates step 5 must keep its exact output.
+  assert.equal(withEmpty, renderContextBlock(base, SESSION_STRINGS));
+  assert.ok(!withEmpty.includes(SESSION_STRINGS.contextLabel));
+});
+
+test('renderContextBlock: distinguishes an issue-scoped record from a merely related one', () => {
+  const output = renderContextBlock({
+    manifest: { restored: false },
+    engram: { ok: true },
+    change: { branch: 'main', token: null, matches: [] },
+    ticket: null,
+    context: {
+      matchedDecisions: [],
+      matchedMemories: [
+        { id: 'rec-1', type: 'decision', issue: 519, title: 'exact', reason: 'issue' },
+        { id: 'rec-2', type: 'pattern', issue: null, title: 'related', reason: 'term' },
+      ],
+    },
+  }, SESSION_STRINGS);
+
+  assert.ok(output.includes('rec-1 [#519]'), 'the exact rule reports the issue it matched');
+  assert.ok(output.includes('rec-2 [~]'), 'the fuzzy rule is visibly fuzzy');
 });
 
 // ---------------------------------------------------------------------------

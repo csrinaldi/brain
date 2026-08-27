@@ -292,6 +292,9 @@ export default {
   'session.memory.recency.stale':   'memory:   newest durable record is {days} days old — nothing captured since (see #519)',
   'session.memory.recency.unknown': 'memory:   no durable record found — cannot determine when memory was last captured',
   'session.manifest.restored':  'manifest: churn restored (safe)',
+  'session.context.label':      'context:  read these before exploring (derived from the active change):',
+  'session.context.adr':        '  adr     {path}',
+  'session.context.record':     '  record  {id} [{scope}] {type} — {title}',
   'session.ticket.label':       'ticket:',
   'session.ticket.none':        '(no active ticket memory)',
 

@@ -262,6 +262,9 @@ export default {
   'session.memory.recency.stale':   'memoria:  el registro durable más nuevo tiene {days} días — nada capturado desde entonces (ver #519)',
   'session.memory.recency.unknown': 'memoria:  sin registro durable — no se puede determinar cuándo se capturó memoria por última vez',
   'session.manifest.restored':  'manifest:  cambios descartados (seguro)',
+  'session.context.label':      'contexto: leé esto antes de explorar (derivado del cambio activo):',
+  'session.context.adr':        '  adr      {path}',
+  'session.context.record':     '  record   {id} [{scope}] {type} — {title}',
   'session.ticket.label':       'ticket:',
   'session.ticket.none':        '(sin memoria de ticket activa)',
 
