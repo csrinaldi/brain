@@ -12,6 +12,7 @@ import {
   probeForgeCli,
   evaluateForgeReach,
   assertProducerCannotReachForge,
+  withForgeConfigDir,
 } from './producer-forge-reach.mjs';
 
 const CLI = { name: 'gh', bin: 'gh', args: ['auth', 'status'] };
@@ -180,4 +181,51 @@ test('every verdict evaluateForgeReach can return is declared in REACH_STATES', 
   ];
   for (const s of produced) assert.ok(REACH_STATES.includes(s), `${s} is not declared`);
   assert.equal(new Set(produced).size, 3);
+});
+
+// ── withForgeConfigDir: the shadow, and what it may not do (#775) ──────────
+
+test('withForgeConfigDir: every named CLI gets the per-run directory', () => {
+  const out = withForgeConfigDir({ PATH: '/usr/bin' }, '/tmp/run-1');
+  for (const cli of FORGE_CLIS) {
+    assert.equal(out[cli.configDirEnv], '/tmp/run-1', `${cli.name} was not shadowed`);
+  }
+});
+
+test('withForgeConfigDir: every declared CLI names its config-dir variable', () => {
+  // The shadow is derived from FORGE_CLIS, so a CLI added without one would be
+  // probed and NOT shadowed — the probe would refuse a run the fix could have
+  // saved, silently. One declaration, or none.
+  for (const cli of FORGE_CLIS) {
+    assert.equal(typeof cli.configDirEnv, 'string');
+    assert.notEqual(cli.configDirEnv.trim(), '');
+  }
+});
+
+test('withForgeConfigDir: it is a copy — the input env is not mutated', () => {
+  const input = { PATH: '/usr/bin' };
+  withForgeConfigDir(input, '/tmp/run-1');
+  assert.deepEqual(input, { PATH: '/usr/bin' });
+});
+
+test('withForgeConfigDir: non-forge variables ride through untouched', () => {
+  const out = withForgeConfigDir({ PATH: '/usr/bin', HOME: '/home/x' }, '/tmp/run-1');
+  assert.equal(out.PATH, '/usr/bin');
+  assert.equal(out.HOME, '/home/x');
+});
+
+test('withForgeConfigDir: an existing operator value is OVERWRITTEN, not preserved', () => {
+  // An operator who already points `gh` somewhere is exactly the case this
+  // exists for. Preserving their value would leave the session reachable and
+  // the probe would then refuse the run — correctly, and pointlessly.
+  const out = withForgeConfigDir({ GH_CONFIG_DIR: '/home/x/.config/gh' }, '/tmp/run-1');
+  assert.equal(out.GH_CONFIG_DIR, '/tmp/run-1');
+});
+
+test('withForgeConfigDir: a blank directory REFUSES rather than unsetting the shadow', () => {
+  // Falling back to "leave the env alone" would hand the producer the
+  // operator's real config dir while every caller believes it is shadowed.
+  for (const bad of [null, undefined, '', '   ']) {
+    assert.throws(() => withForgeConfigDir({}, bad), /per-run forge config directory/);
+  }
 });

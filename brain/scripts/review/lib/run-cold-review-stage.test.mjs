@@ -746,3 +746,94 @@ test('cold-2/F.9: this layer no longer READS the config key — it cannot refuse
   });
   assert.ok(existsSync(artifact), 'the run completed — an unread key cannot throw mid-mutation');
 });
+
+// ── #775 — the forge config shadow, and the probe that still reads it ──────
+
+test('the probe measures the SAME environment the producer is spawned with', async (t) => {
+  // The whole point of the shadow. A probe run against an unshadowed env would
+  // answer about an environment the child never receives — a probe that lies is
+  // worse than none, which is the defect class this module exists to remove.
+  const root = makeWorktree(t);
+  let probedEnv = null;
+  let spawnedDir = null;
+  await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      forgeProbe: (_bin, _args, opts) => { probedEnv = opts.env; return { status: 1, stderr: 'no hosts' }; },
+      runStage: async (a) => { spawnedDir = a.forgeConfigDir; return { ok: true }; },
+    },
+  });
+  assert.equal(typeof spawnedDir, 'string');
+  assert.notEqual(spawnedDir.trim(), '');
+  assert.equal(probedEnv.GH_CONFIG_DIR, spawnedDir, 'the probe saw a different config dir than the spawn');
+  assert.equal(probedEnv.GLAB_CONFIG_DIR, spawnedDir);
+});
+
+test('the probe still REFUSES when the shadow does not close the channel', async (t) => {
+  // The shadow changes what is measured, never whether it is. A forge CLI that
+  // authenticates anyway — a deployment where the host mapping is not in the
+  // config dir — refuses exactly as before, and the run never spawns.
+  const root = makeWorktree(t);
+  let spawned = false;
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      forgeProbe: () => ({ status: 0, stdout: 'Logged in to github.com' }),
+      runStage: async () => { spawned = true; return { ok: true }; },
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(spawned, false, 'nothing may spawn when the producer can still reach the forge');
+  assert.match(result.reason, /can still reach the forge/);
+});
+
+test('the refusal names the remedy, not only the property', async (t) => {
+  const root = makeWorktree(t);
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      forgeProbe: () => ({ status: 0, stdout: 'Logged in to github.com' }),
+      runStage: async () => ({ ok: true }),
+    },
+  });
+  assert.match(result.reason, /gh auth logout/, 'a refusal that names no remedy costs the operator the session');
+});
+
+test('the per-run directory is removed — on success AND on refusal', async (t) => {
+  const root = makeWorktree(t);
+  const made = [];
+  const removed = [];
+  const deps = (probe) => ({
+    forgeProbe: probe,
+    runStage: async (a) => { made.push(a.forgeConfigDir); return { ok: true }; },
+    makeForgeConfigDir: () => { const d = `/tmp/brain-forge-${made.length + removed.length}`; return d; },
+    removeForgeConfigDir: (d) => removed.push(d),
+  });
+
+  await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t), deps: deps(LOGGED_OUT),
+  });
+  assert.equal(removed.length, 1, 'a successful run must not leave the directory behind');
+
+  await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: deps(() => ({ status: 0, stdout: 'Logged in' })),
+  });
+  assert.equal(removed.length, 2, 'a REFUSED run must clean up too — that is the path that returns early');
+});
+
+test('a second run does not inherit the first run\'s directory', async (t) => {
+  const root = makeWorktree(t);
+  const seen = [];
+  const run = () => runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      forgeProbe: LOGGED_OUT,
+      runStage: async (a) => { seen.push(a.forgeConfigDir); return { ok: true }; },
+    },
+  });
+  await run();
+  await run();
+  assert.equal(seen.length, 2);
+  assert.notEqual(seen[0], seen[1], 'a reused directory is a place a session could accumulate');
+});

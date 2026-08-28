@@ -144,9 +144,20 @@ measured, with every name `credentialEnvNames()` returns unset, `gh auth status`
 still reported a logged-in account.
 
 `producer-forge-reach.mjs` is what closes that gap, and it **refuses the run**
-rather than proceeding — so on a machine with a `gh auth login` session, the
-cold-review stage will decline to spawn and say the producer can still reach the
-forge. That refusal is correct, and the fix is not to bypass it:
+rather than proceeding — so a machine where a forge CLI still authenticates will
+see the cold-review stage decline to spawn and say the producer can still reach
+the forge. That refusal is correct, and the fix is not to bypass it.
+
+**Since #775 the stage tries first, so on most machines you do not have to do
+anything.** Before probing, the stage creates a per-run, disposable directory and
+points `GH_CONFIG_DIR` and `GLAB_CONFIG_DIR` at it — for the probe and for the
+producer's spawn alike. The secret stays in your keyring untouched; the CLI
+simply can no longer find the host mapping that would make it ask. Measured
+27/08/2026 on a logged-in machine: `reachable` without the shadow, `closed` with
+it, and `gh auth status` unchanged afterwards.
+
+The probe remains the reader. If the shadow does not close the channel on your
+deployment, the run still refuses, and then the remedy is the original one:
 
 ```bash
 gh auth logout                  # drop the keyring session

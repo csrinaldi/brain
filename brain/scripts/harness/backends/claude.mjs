@@ -6,6 +6,7 @@
 
 import { assertRoutableStage } from '../../lib/stage-engine.mjs';
 import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env.mjs';
+import { withForgeConfigDir } from '../producer-forge-reach.mjs';
 import { DEFAULT_STAGE_TIMEOUT_MS, formatDuration } from '../../lib/duration.mjs';
 import { defaultRun } from './agent-runtime.mjs';
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -151,8 +152,8 @@ function tail(r, max = 300) {
 
 export async function runStage({
   stage, prompt, model = null, cwd = process.cwd(),
-  timeoutMs = STAGE_TIMEOUT_MS, credentialEnv = null, _env = process.env,
-  _run = defaultRun, _now = Date.now,
+  timeoutMs = STAGE_TIMEOUT_MS, credentialEnv = null, forgeConfigDir = null,
+  _env = process.env, _run = defaultRun, _now = Date.now,
 } = {}) {
   assertRoutableStage(stage);
 
@@ -168,10 +169,24 @@ export async function runStage({
   // Computed here, not at the call: an `env` built by the caller could be
   // handed in unscrubbed, and then the property would hold only for callers
   // that remembered. `credentialEnv` names what to REMOVE, never what to keep.
-  const env = withoutCredentials(
+  const scrubbed = withoutCredentials(
     _env,
     Array.isArray(credentialEnv) ? credentialEnvNames({ extra: credentialEnv }) : credentialEnvNames(),
   );
+
+  // #775 — THE SHADOW IS APPLIED TO THE SCRUBBED ENV, AND THE ORDER IS THE
+  // WHOLE GUARANTEE. `forgeConfigDir` points the forge CLIs brain names at a
+  // per-run directory the caller owns, so a keyring session the scrub cannot
+  // reach becomes one the CLI cannot FIND. Applied to `_env` and merged
+  // afterwards it could re-admit a credential the scrub had just removed, so it
+  // is applied here and takes a PATH rather than an env bag: there is no
+  // spelling of this parameter that adds a variable brain did not name.
+  //
+  // NO DEFAULT. A directory invented here would shadow the operator's forge CLI
+  // on every stage brain ever routes. The caller that owns the cold review's
+  // isolation owns this too, and it is the same caller that runs the probe —
+  // which is what keeps the probe measuring the env the child actually gets.
+  const env = forgeConfigDir ? withForgeConfigDir(scrubbed, forgeConfigDir) : scrubbed;
 
   let r;
   const startedAt = _now();

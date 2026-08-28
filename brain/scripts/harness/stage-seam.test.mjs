@@ -197,6 +197,10 @@ test('the arguments reach the backend as ONE options object, not spread position
     stage: COLD_REVIEW_STAGE, prompt: 'review the diff', model: 'zz-9', cwd: '/tmp',
     timeoutMs: undefined,
     credentialEnv: undefined,
+    // #775 — same reason `credentialEnv` is listed: exactness is what catches a
+    // field the seam knows and never threads. `CALL` sets none, so it arrives
+    // undefined and the backend's no-shadow branch holds.
+    forgeConfigDir: undefined,
   });
 });
 
@@ -327,4 +331,30 @@ test('cold-1: an ABSENT timeoutMs stays absent — the seam invents no ceiling',
   });
   await runStage({ engine: 'claude', stage: 'cold-review', prompt: 'p' });
   assert.equal(payload.timeoutMs, undefined);
+});
+
+// ── #775 — forgeConfigDir rides through uninterpreted ──────────────────────
+
+test('runStage seam: forgeConfigDir reaches the backend unchanged', async () => {
+  let seen = null;
+  const runStage = makeRunStageSeam({
+    dispatch: async (_engine, _op, [args]) => { seen = args; return { ok: true }; },
+  });
+  await runStage({
+    engine: 'claude', stage: 'cold-review', prompt: 'p', cwd: '/tmp',
+    forgeConfigDir: '/tmp/run-1',
+  });
+  assert.equal(seen.forgeConfigDir, '/tmp/run-1');
+});
+
+test('runStage seam: it invents no directory when the caller names none', async () => {
+  // The seam declares no policy of its own — same ruling `credentialEnv`
+  // already carries one line above. A default here would be a second
+  // declaration with nothing comparing the two.
+  let seen = null;
+  const runStage = makeRunStageSeam({
+    dispatch: async (_engine, _op, [args]) => { seen = args; return { ok: true }; },
+  });
+  await runStage({ engine: 'claude', stage: 'cold-review', prompt: 'p', cwd: '/tmp' });
+  assert.equal(seen.forgeConfigDir, undefined);
 });

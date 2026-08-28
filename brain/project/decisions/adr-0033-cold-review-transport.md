@@ -1,6 +1,6 @@
 # ADR-0033 — The cold review runs as a spawned subagent: the transport is a stage engine, and the producer never holds a credential
 
-**Status**: Accepted · **amended 28/08/2026** (Amendment 1 — see below)
+**Status**: Accepted · **amended 28/08/2026** (Amendments 1-2 — see below)
 **Date**: 2026-08-21 — Cristian Rinaldi
 
 ## Context
@@ -67,7 +67,7 @@ here to the property that is actually bought:
 | brain's poster credential in the environment | `withoutCredentials` — `spawnSync` hands the child an explicit `env` | **by construction**: the kernel, which does not consult the child. **[Amended by Amendment 1 (#773) — this row is now a RULED position rather than an inherited one: making `BRAIN_REVIEWER_TOKEN` readable from a file was proposed and REFUSED, so the credential stays on the environment axis, which is the axis the scrub reaches]** |
 | a credential injected ambiently by a proxy (#604) | `gatherIdentity`'s negative control, which refuses the whole run before the stage spawns | **by construction**: the run does not reach the producer at all |
 | a repo-local `.env` **in the producer's cwd** | the detached worktree at the PR head, where a gitignored file does not exist | **by cost, not by construction** — see below |
-| a forge CLI's own store outside the repository (`~/.config/gh`, the OS keyring) | `producer-forge-reach.mjs`, which probes the producer's environment and REFUSES when a forge CLI still authenticates | **by measurement, failing closed** — a probe that cannot reach a verdict refuses |
+| a forge CLI's own store outside the repository (`~/.config/gh`, the OS keyring) | a per-run config-dir shadow (`withForgeConfigDir`) so the CLI cannot FIND its session, then `producer-forge-reach.mjs`, which probes the producer's environment and REFUSES when a forge CLI still authenticates | **by measurement, failing closed** — a probe that cannot reach a verdict refuses. **[Amended by Amendment 2 (#775) — the shadow changes what is measured, never whether it is; the secret itself is untouched]** |
 | any other credential, read by any other tool | nothing | **not claimed** |
 
 The producer also necessarily holds ONE credential it must hold — the engine's own; it
@@ -290,3 +290,78 @@ refactor that routes `identity.mjs` through the port's reader would make the rev
 file-readable as a side effect, and **the diff would look like plumbing**. #316 therefore carries
 an explicit non-goal citing this amendment. A reviewer who sees the reviewer token gain a file
 path in that PR is looking at a doctrine change wearing a refactor's clothes.
+
+## Amendment 2 — the forge-CLI channel gains a shadow, and the probe stays its reader (issue #775)
+
+**Signed**: 28/08/2026 — Cristian Rinaldi
+
+### What changed
+
+The forge-CLI row's mechanism gains a first half. Before the probe runs, the cold-review stage
+creates a **per-run, disposable directory** and points every forge CLI brain names at it —
+`GH_CONFIG_DIR` and `GLAB_CONFIG_DIR`, declared beside the CLIs themselves in `FORGE_CLIS`. The
+probe then runs **against that same environment**, and the producer is spawned with it.
+
+The row's warrant is unchanged: **by measurement, failing closed.** The shadow changes what is
+measured. It does not change whether it is measured, and it may not.
+
+### Why
+
+This row was the product's first blocker, and the refusal was correct the whole time. A
+developer's machine is normally logged into `gh`; ADR-0033's own stage then declines to spawn,
+and `docs/reviewer-setup.md`'s only remedy was `gh auth logout` — removing the CLI the developer
+uses for everything else, for as long as brain runs. The product model recorded in
+`docs/inbox/cold-review-as-product-stage.md` is a workflow engine **started by the developer**,
+so that remedy is a precondition the product cannot ask for.
+
+### The measurement, and why it works
+
+Taken 27/08/2026 on the maintainer's machine with `gh` authenticated, running the real probe
+against the real post-scrub environment:
+
+```
+WITHOUT the shadow : {"state":"reachable","ok":false,"gh":"authenticated"}
+WITH    the shadow : {"state":"closed","ok":true,"gh":"unauthenticated"}
+```
+
+The reason is exact rather than lucky. `gh auth status` reports `csrinaldi (keyring)`, and
+`~/.config/gh/hosts.yml` holds **no token** — only the host→user mapping. The secret is in the
+OS keyring; the *mapping* is in the config dir. With an empty config dir `gh` no longer knows
+github.com exists, so it never asks the keyring. **The operator's keyring is never touched**,
+before, during or after — verified in the same run.
+
+### What this does NOT close, and it belongs in the row rather than in a reader's assumption
+
+- **The secret is still there.** This makes the CLI unable to FIND it. A tool reading libsecret
+  directly, a `~/.netrc`, or a git credential helper remains the open namespace
+  `credential-env.mjs` declines to pretend it can bound — the table's last row is unchanged.
+- **It is complementary to the scrub, never a replacement.** `GH_TOKEN` in the environment
+  authenticates `gh` whatever the config dir says; what removes that is `withoutCredentials`.
+  Two mechanisms, one property — worth knowing which is which before changing either.
+- **It is measured on ONE deployment.** `gh` keeping the host mapping in the config dir is what
+  makes this work, and that is a probe result on Linux with `gh` 2.x, not a contract. Which is
+  precisely why the probe remains the reader and stays fail-closed: `authenticated` refuses,
+  `unreadable` refuses, an empty probe list refuses. A deployment where the shadow does not close
+  the channel refuses exactly as before, and the refusal now names the remaining remedy.
+
+### Why this is not the `$HOME` design this ADR already rejected
+
+Rejected shape 3 in `producer-forge-reach.mjs` builds a synthetic `$HOME` carrying an allowlist
+of the ENGINE's credential paths, and fails because a backend author cannot know the deployment.
+This names **two variables belonging to the two forge CLIs brain itself declares** — the same
+axis argument that lets `FORGE_CLIS` name `gh` and `glab` at all. No engine vendor appears, so
+ADR-0005 is untouched.
+
+### The ordering that is the guarantee
+
+The shadow is created **before** the probe and handed to **both** the probe and the spawn. A
+probe run against an unshadowed environment would answer about an environment the child never
+receives — and a probe that lies is worse than no probe, which is the defect class this module
+exists to remove. For the same reason the parameter threaded through `runStage` is a **path**
+rather than an env bag: there is no spelling of it that re-admits a credential the scrub removed,
+and it is applied **after** the scrub, never merged over it.
+
+The directory is per-run and disposable because `gh` **writes** a `config.yml` into whatever
+directory it is given. A reused path would be a place a session could accumulate, which would
+turn this fix into the channel it closes. It is removed in a `finally`, so a refused run cleans
+up on the very path an operator is already debugging.
