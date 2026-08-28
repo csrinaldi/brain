@@ -21,26 +21,32 @@ import { vcsToken, readEnvVar } from './vcs/lib/token.mjs';
 import { detectPM } from './lib/pm.mjs';
 import { t } from './i18n/t.mjs';
 import { tryFeatureResume } from './memory/lib/auto-resume.mjs';
+import { parseTicketArgs } from './lib/ticket-args.mjs';
 
 const ROOT = process.cwd();
 const PM = detectPM(ROOT).name;
 
+// THE PARSE LIVES IN A LEAF (#782), so the DEFAULT can be tested without a repo,
+// a network or a git process. It defaulted to a branch in the main checkout —
+// the thing `harness-contract.md:28` calls NEVER — and nothing could ask it what
+// it did with no flags without running the whole verb.
 const argv = process.argv.slice(2);
-const useWorktree = argv.includes('--worktree');
-const baseIdx = argv.indexOf('--base');
-const baseBranch = baseIdx >= 0 ? argv[baseIdx + 1] : 'main';
-if (baseIdx >= 0 && !baseBranch) {
-  console.error(`  ${await t('ticket.error.baseRequiresArg')}`);
-  process.exit(1);
-}
-// id = first numeric argument that is NOT the value of --base
-const id = argv.find((a, i) => /^\d+$/.test(a) && (baseIdx < 0 || i !== baseIdx + 1));
-if (!id) {
+const parsed = parseTicketArgs(argv);
+if (!parsed.ok) {
+  if (parsed.error === 'base-requires-arg') {
+    console.error(`  ${await t('ticket.error.baseRequiresArg')}`);
+    process.exit(1);
+  }
+  if (parsed.error === 'contradictory-modes') {
+    console.error(`  ${await t('ticket.error.contradictoryModes')}`);
+    process.exit(1);
+  }
   console.error(await t('ticket.error.usage'));
   console.error(await t('ticket.error.usageExample1'));
   console.error(await t('ticket.error.usageExample2'));
   process.exit(1);
 }
+const { id, baseBranch, useWorktree } = parsed;
 
 const sh = (cmd, args, opts = {}) => {
   const r = spawnSync(cmd, args, { encoding: 'utf8', cwd: ROOT, stdio: 'pipe', ...opts });
@@ -203,6 +209,12 @@ if (useWorktree) {
 }
 
 // ── Next steps ────────────────────────────────────────────────────────────────
+// THE MODE IS SAID OUT LOUD (#782 acceptance 4). In-place is allowed for
+// strictly solo, serial work — and an operator who lands there without choosing
+// it is exactly the failure this ticket is about, so the run names which one it
+// took rather than leaving it to be inferred from whether a path was printed.
+console.log(`  ${await t(useWorktree ? 'ticket.mode.worktree' : 'ticket.mode.inPlace')}`);
+
 const cdStep = useWorktree
   ? `\n${await t('ticket.nextSteps.cd', { path: worktreePath })}`
   : '';
