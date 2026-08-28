@@ -90,44 +90,47 @@ surface, and `brain:review` needs it for the length of one command.
 `refusing to run — env var "BRAIN_REVIEWER_TOKEN" is not set`, which names the
 symptom and not the cause. Tracked on issue #316.
 
-**And the inverse trap, on every OTHER verb: `.env` wins over your shell.**
-The two halves of brain read the environment differently, and the difference bites
-in opposite directions. `brain:review`'s identity check reads `process.env` and
-ignores `.env` entirely (above). Every port verb reads through
-`readEnvVar` (`brain/scripts/vcs/lib/token.mjs`), which looks in `.env` **first**
-and falls back to `process.env` only when the key is absent there:
+**And the trap on the OTHER side, which INVERTED on 28/08/2026.** The two halves
+of brain used to read the environment in opposite directions, and that asymmetry
+is what cost a session. It no longer exists — but the failure it produced does,
+pointing the other way, so it is worth knowing which shape you are looking at.
 
-```js
-export function readEnvVar(key, root = process.cwd()) {
-  try {
-    const line = readFileSync(join(root, '.env'), 'utf8')
-      .split('\n')
-      .find(l => l.startsWith(`${key}=`));
-    if (line) return line.slice(key.length + 1).trim();
-  } catch { /* no .env — fall through */ }
-  return process.env[key] ?? null;
-}
-```
+**Until #316:** every port verb read `.env` FIRST and fell back to the shell only
+when the key was absent from the file. So a value you exported was silently
+ignored whenever `.env` already defined the same key, and a DEAD line in `.env`
+shadowed a healthy credential. Measured 27/08/2026: `gh auth status` reported a
+perfectly good login while every port verb answered `HTTP 401 Bad credentials`.
+Removing the value was not enough — the fallback applied only when the KEY was
+gone.
 
-So the workaround an operator reaches for first —
+**Since #316:** there is one reader (`brain/scripts/lib/env-read.mjs`) and one
+precedence — **the shell wins**, then `.env`, then a default. So:
 
 ```bash
-VCS_TOKEN="$BRAIN_REVIEWER_TOKEN" npm run brain:review -- --pr 598
+VCS_TOKEN="$SOME_OTHER_TOKEN" npm run brain:review -- --pr 598
 ```
 
-— **is silently ignored whenever `.env` already defines `VCS_TOKEN`**. Nothing is
-printed; the run simply uses the `.env` value. If a credential you are sure you
-set does not seem to be taking effect, check `.env` before checking the token.
+now does what it looks like it does. And the losing value is REPORTED rather
+than dropped: `resolveEnv` returns `shadowed` when both places hold different
+values, so a run can say that two were in play instead of silently picking one.
 
-Two consequences worth knowing:
+Three things worth carrying forward:
 
-- The match is `startsWith("KEY=")`, so a **mistyped key silently disables the
-  whole line** and the read falls through to `process.env` with no message.
-  `BRAIN_REVIEWER_TOKE=Nghp_…` — the `N` on the wrong side of the `=` — reads as
-  a key nothing looks up, not as an error.
-- Since issue #631 the reviewer's gate read no longer falls back to `VCS_TOKEN`
-  at all: every gather in `brain:review` runs under the bound reviewer identity.
-  The precedence above still governs every other verb.
+- **`BRAIN_REVIEWER_TOKEN` is still shell-only, and that is a ruling** — ADR-0033
+  Amendment 1 (#773), see the top of this document. The shared reader has a named
+  spelling for it, `readShellEnv`, so the exception is visible at the call site
+  rather than buried in an options object.
+- **A mistyped key is still a key nothing looks up.** `BRAIN_REVIEWER_TOKE=Nghp_…`
+  — the `N` on the wrong side of the `=` — declares a variable no lookup asks for.
+  What changed is that it no longer disables a whole line by prefix accident:
+  `parseEnvFile` splits on the first `=` and trims both halves, so `KEY = value`
+  now resolves where it used to produce the unreachable key `"KEY "`.
+- **Quoted values are now unquoted.** `VCS_TOKEN="ghp_…"` used to resolve WITH the
+  quotes attached and produce a 401 that named nothing. One matched pair of
+  surrounding quotes is stripped; unmatched and inner quotes are left alone.
+
+Since issue #631 the reviewer's gate read no longer falls back to `VCS_TOKEN` at
+all: every gather in `brain:review` runs under the bound reviewer identity.
 
 ## What the binding changed
 
