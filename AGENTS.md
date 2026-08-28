@@ -217,7 +217,7 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | `npm run brain:env:init` | `env:init` | — | Environment bootstrap: installs tools, configures auth, imports memory, refreshes skill registry. Idempotent. |
 | `npm run brain:day:start` | `day:start` | — | Daily startup: VCS auth, ecosystem updates, team memory, ticket board. |
 | `npm run brain:session:start` | `session:start` | — | Session context loader: restores manifest churn, hydrates local engram, resolves active change and ticket memory. Read-only, local-only, no network. |
-| `npm run brain:ticket:start -- <id> --worktree --base <tracker>` | `ticket:start -- <id>` | `/ticket-start <id>` | Task start. Creates the branch `{type}/issue-{number}-{slug}` in an ISOLATED WORKTREE off `<tracker>`. **Always an isolated worktree; NEVER a branch in the main checkout when parallel work is possible.** `<tracker>` is the integration base (e.g. `feature/v2.0.0`), not `main`, while an epic is in flight. |
+| `npm run brain:ticket:start -- <id> [--base <tracker>]` | `ticket:start -- <id>` | `/ticket-start <id>` | Task start. Creates the branch `{type}/issue-{number}-{slug}` in an ISOLATED WORKTREE off `<tracker>` — **that is the DEFAULT, no flag required (#782)**. **Always an isolated worktree; NEVER a branch in the main checkout when parallel work is possible.** `--in-place` is the named opt-out, for strictly solo serial work only, and the verb says which mode it took. `<tracker>` is the integration base (e.g. `feature/v2.0.0`), not `main`, while an epic is in flight. |
 | `npm run brain:project:feature -- --issue <id>` | `project:feature -- --issue <id>` | `/sdd-new <id>` | Starts an SDD change: creates `openspec/changes/issue-<id>-<slug>/` with `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
 | `npm run brain:repo:check` | `repo:check` | — | Validates prohibited references across the entire tree. Minimum gate before any commit. |
 | `npm run brain:change:verify` | `change:verify` | `/sdd-verify` | Validates the scope of the active change: classifies the diff, runs only the necessary verifications. |
@@ -226,11 +226,23 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | `npm run memory:index` | — | — | Reprojects `brain/` → local engram. Needed when ADRs or glossary change. |
 
 > **Worktree convention (load-bearing):** task start is
-> `npm run brain:ticket:start -- <id> --worktree --base <tracker>`. The isolated worktree is
-> mandatory whenever parallel work is possible — it gives one-branch-per-worktree isolation
-> over a shared object store (single fetch, zero extra clone). A branch in the main checkout
-> is only acceptable for strictly solo, serial work. This rule prevents the whole team from
-> colliding on one working tree.
+> `npm run brain:ticket:start -- <id> [--base <tracker>]`, and **the isolated worktree is what
+> that does with no flags** (#782). It is mandatory whenever parallel work is possible — it
+> gives one-branch-per-worktree isolation over a shared object store (single fetch, zero extra
+> clone). A branch in the main checkout is only acceptable for strictly solo, serial work, and
+> is reached by asking for it: `--in-place`. This rule prevents the whole team from colliding
+> on one working tree.
+>
+> **The flag used to be required, and that was the defect (#782).** This row said *always* while
+> the verb defaulted to the branch the row calls NEVER, so satisfying doctrine depended on
+> remembering a flag. Measured: an agent session on 2026-08-27 created five branches in the main
+> checkout with `AGENTS.md` loaded and this rule in it. `--worktree` still parses and still means
+> what it meant; it is simply no longer load-bearing.
+>
+> **What still has no reader.** Nothing refuses `git checkout -b` in the main checkout. The
+> default is the cheap half; #782's remaining slices are a guard that refuses, and the shape
+> where the orchestrator owns isolation so an agent cannot express the wrong thing — which is
+> what `cold-boot.mjs` already does for the cold-review producer.
 
 ## Optional verbs (recommended)
 
@@ -272,6 +284,39 @@ refreshed automatically on `brain:day:start` and `brain:env:init`.
 The binding to engram (current implementation) uses a symlink `/.engram → .memory/`, so that
 engram writes to `.engram/` (its internal convention) and files land in `.memory/`.
 ADR-0003 documents the memory model; this symlink is an implementation-agnostic detail.
+
+## Worktree default (issue #782)
+
+**Signed**: 28/08/2026 — Cristian Rinaldi
+
+### What changed
+
+The `brain:ticket:start` row and the worktree convention note stop prescribing `--worktree`.
+The isolated worktree is what the verb does with no flags; `--in-place` is the named opt-out
+for the strictly solo, serial case the convention already allowed.
+
+### Why
+
+The row said **always** and the verb defaulted to the opposite. `ticket-start.mjs:29` read
+`argv.includes('--worktree')`, so the plain spelling — the one an operator or an agent types —
+created a branch in the main checkout, which this same row calls NEVER. Doctrine and
+implementation disagreed, and nothing compared them.
+
+That is not hypothetical. An agent session on 2026-08-27 (PRs #777–#781) created **five**
+branches in the main checkout with `AGENTS.md` loaded and this rule inside it. Nothing broke
+because the work was serial and single-agent — luck, not correctness — and it still cost a
+`git stash` mid-rebase, because the shared working tree carried local modifications a per-issue
+worktree could not have collided with.
+
+### What this does NOT close, said plainly
+
+Nothing refuses a hand-rolled `git checkout -b` in the main checkout, which is what actually
+happened. This amendment removes the requirement to REMEMBER; it does not make the wrong thing
+unexpressible. #782's slices 2 and 3 own that — a guard that refuses, and the orchestrator
+owning isolation the way `cold-boot.mjs` already does for the cold-review producer.
+
+Recorded here rather than left implicit, because a doctrine row that reads as if the problem
+were solved is the failure mode this ticket is an instance of.
 
 
 ---
