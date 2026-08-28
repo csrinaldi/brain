@@ -22,6 +22,7 @@ import { detectPM } from './lib/pm.mjs';
 import { t } from './i18n/t.mjs';
 import { tryFeatureResume } from './memory/lib/auto-resume.mjs';
 import { parseTicketArgs } from './lib/ticket-args.mjs';
+import { worktreeAddArgs, inPlaceCheckoutArgs } from './lib/ticket-branch.mjs';
 
 const ROOT = process.cwd();
 const PM = detectPM(ROOT).name;
@@ -154,11 +155,11 @@ if (useWorktree) {
     process.exit(1);
   }
 
-  // If the branch already exists, attach it to the worktree; otherwise create it from the base.
-  const wtArgs = branchExists
-    ? ['worktree', 'add', worktreePath, branchName]
-    : ['worktree', 'add', worktreePath, '-b', branchName, startPoint];
-  const wt = sh('git', wtArgs);
+  // If the branch already exists, attach it to the worktree; otherwise create it
+  // from the base — `--no-track`, so the new branch does not inherit
+  // `origin/<base>` as its upstream (#785). See `lib/ticket-branch.mjs` for what
+  // that inheritance made git suggest.
+  const wt = sh('git', worktreeAddArgs({ worktreePath, branchName, startPoint, branchExists }));
   if (!wt.ok) {
     console.error(`  ${await t('ticket.error.worktreeCreate', { error: wt.err })}`);
     process.exit(1);
@@ -186,7 +187,7 @@ if (useWorktree) {
     console.log(`  ${await t('ticket.noEnv', { root: ROOT })}`);
   }
 } else {
-  const create = sh('git', ['checkout', '-b', branchName, startPoint]);
+  const create = sh('git', inPlaceCheckoutArgs({ branchName, startPoint }));
   if (!create.ok) {
     if (branchExists || create.err.includes('already exists')) {
       console.log(`  ${await t('ticket.branchExists')}`);
