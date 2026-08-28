@@ -5,8 +5,7 @@
 // The provider parameter is kept in all exported signatures for source compatibility
 // with callers that pass it, but it is no longer used to select a var name.
 
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readEnv } from '../../lib/env-read.mjs';
 
 /** The single env var name used for VCS credentials across all providers. */
 const VCS_TOKEN_KEY = 'VCS_TOKEN';
@@ -23,15 +22,27 @@ export function tokenEnvVar(_provider) {
   return VCS_TOKEN_KEY;
 }
 
-/** Reads a var from .env (falling back to process.env). */
+/**
+ * Reads a var: the SHELL first, then `.env`, then nothing (#316).
+ *
+ * THE PRECEDENCE FLIPPED HERE, and it is the point rather than a side effect.
+ * This function read `.env` FIRST and fell back to `process.env` only when the
+ * KEY was absent from the file — so a dead line could shadow a live shell value
+ * and removing the value was not enough to escape it. Measured 2026-08-27: a
+ * dead `VCS_TOKEN` in `.env` shadowed a healthy `gh` keyring session and every
+ * port verb answered `HTTP 401 Bad credentials` while `gh auth status` reported
+ * a good login. Under shell-first that failure cannot be built.
+ *
+ * The parse moved with it: `startsWith("KEY=")` matched a prefix rather than a
+ * key, so `NO_PROXYN=` sat one character away from answering for `NO_PROXY`.
+ * `parseEnvFile` splits on the first `=` and trims the key.
+ *
+ * @param {string} key
+ * @param {string} [root]
+ * @returns {string|null}
+ */
 export function readEnvVar(key, root = process.cwd()) {
-  try {
-    const line = readFileSync(join(root, '.env'), 'utf8')
-      .split('\n')
-      .find(l => l.startsWith(`${key}=`));
-    if (line) return line.slice(key.length + 1).trim();
-  } catch { /* no .env — fall through */ }
-  return process.env[key] ?? null;
+  return readEnv(key, { root });
 }
 
 /** Reads the credential token for the active provider from VCS_TOKEN. */

@@ -18,6 +18,7 @@ import { t } from './i18n/t.mjs';
 import { currentBranch } from './lib/git-branch.mjs';
 import { restoreManifestChurn } from './lib/memory-manifest.mjs';
 import { agentRuntimeReport, platformEnvVars, platformConfig } from './harness/backends/agent-runtime.mjs';
+import { readEnv } from './lib/env-read.mjs';
 
 const ROOT = process.cwd();
 const NODE = process.execPath;
@@ -69,15 +70,10 @@ const run = async (cmd, args = [], opts = {}) => {
 const capture = (cmd, args = []) =>
   spawnSync(cmd, args, { stdio: 'pipe', encoding: 'utf8', cwd: ROOT });
 
-const readEnvVar = (key) => {
-  try {
-    const line = readFileSync(join(ROOT, '.env'), 'utf8')
-      .split('\n')
-      .find(l => l.startsWith(`${key}=`));
-    if (line) return line.slice(key.length + 1).trim();
-  } catch { /* no .env — fall through */ }
-  return process.env[key] ?? null;
-};
+// One reader, one precedence — the shell wins (#316). This was a byte-for-byte
+// copy of `vcs/lib/token.mjs`'s reader, file-first, with `startsWith("KEY=")`
+// matching a prefix instead of a key.
+const readEnvVar = (key) => readEnv(key, { root: ROOT });
 
 // Propagate NO_PROXY from .env so Go binaries (gh/glab) bypass the internal proxy.
 const noProxy = readEnvVar('NO_PROXY') ?? readEnvVar('no_proxy');
