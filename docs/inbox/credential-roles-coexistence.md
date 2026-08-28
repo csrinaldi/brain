@@ -19,6 +19,24 @@
 > one that actually delivers *"set nothing"* — is not: it moves brain's poster
 > credential off the only **by-construction** row in ADR-0033's warrant table, and
 > that is a decision the table has to record, not a refactor.
+>
+> ### What this document produced, filed 2026-08-26 and after
+>
+> The reading below was the input to three tickets, and the split in *Proposal*
+> step 1 became a gate on the M5 → M8 line:
+>
+> - **#773** — the ruling on 1b, and **Compuerta 6** in `ROADMAP-M5-M8.md` §3.
+>   It goes before #316, because #316 is already approved and a refactor that
+>   delivers 1b by accident reads as plumbing in review.
+> - **#772** — ADR-0033's post-run tree check, which exists only as a test.
+>   Orthogonal to 1b: it detects a producer that CHANGED the tree and says
+>   nothing about one that READ a credential.
+> - **#775** — measured after this document was written, on a logged-in machine:
+>   the cold-review stage refuses wherever a forge CLI still authenticates.
+>
+> `docs/inbox/cold-review-as-product-stage.md` carries the **proposed** ruling for
+> #773 — no to 1b — reached by writing down the product model this document's
+> question came from. It is a proposal there and a decision only in #773.
 
 ---
 
@@ -384,6 +402,12 @@ the credential somewhere the scrub does not reach and not said so.
 - `brain/scripts/review/identity.mjs:144` — `process.env` only
 - `brain/scripts/review/cli.mjs:337-347` — the #604 lockout warning
 - `docs/reviewer-setup.md` — both directions, documented in #631
-- Issues: **#316** (unify the `.env` parsers), #501 (identity chokepoint), #413
-  (verified reviewer identity), #604 (ambient-credential negative control),
-  #631 (bound gathers), #767 (`patSetupUrl` throws), #569 (`SUBCOMMAND_PORT_REACH`)
+- `docs/inbox/cold-review-as-product-stage.md` — the product model, and the
+  proposed ruling for the 1a/1b split
+- `brain/project/decisions/adr-0033-cold-review-transport.md:65-71` — the warrant
+  table this document's step 1 turns on
+- Issues: **#773** (the 1b ruling — Compuerta 6), **#316** (unify the `.env`
+  parsers), **#772** (the tree check, orthogonal), **#775** (the stage refuses on
+  a logged-in machine), #501 (identity chokepoint), #413 (verified reviewer
+  identity), #604 (ambient-credential negative control), #631 (bound gathers),
+  #767 (`patSetupUrl` throws), #569 (`SUBCOMMAND_PORT_REACH`)
