@@ -23,6 +23,7 @@ import { t } from './i18n/t.mjs';
 import { tryFeatureResume } from './memory/lib/auto-resume.mjs';
 import { parseTicketArgs } from './lib/ticket-args.mjs';
 import { worktreeAddArgs, inPlaceCheckoutArgs } from './lib/ticket-branch.mjs';
+import { evaluateFreshness } from './lib/checkout-freshness.mjs';
 
 const ROOT = process.cwd();
 const PM = detectPM(ROOT).name;
@@ -139,6 +140,37 @@ if (fetchRes.status !== 0) {
   process.exit(1);
 }
 const startPoint = `origin/${baseBranch}`;
+
+// ── Is the checkout we are RUNNING FROM behind what we just fetched? (#787) ──
+// The fetch above refreshed the START POINT. It did not refresh this checkout,
+// and the copy of this file Node already loaded is whatever `ROOT` had. A run
+// from a stale checkout executes old behaviour and creates a branch from new
+// content — measured 2026-08-28, when that produced an in-place branch hours
+// after #784 made the worktree the default.
+//
+// IT WARNS, IT DOES NOT REFUSE. Slice 2 of #782 catches the consequence: a
+// commit on an in-place branch in the main checkout is refused by
+// `hooks/pre-commit`. A wrong warning is noise; a wrong refusal is a stopped
+// session.
+const headSha = sh('git', ['rev-parse', '--short', 'HEAD']);
+const baseSha = sh('git', ['rev-parse', '--short', startPoint]);
+const scriptsDiff = sh('git', ['diff', '--quiet', 'HEAD', startPoint, '--', 'brain/scripts/']);
+const ancestor = sh('git', ['merge-base', '--is-ancestor', 'HEAD', startPoint]);
+const freshness = evaluateFreshness({
+  headSha: headSha.ok ? headSha.out : null,
+  baseSha: baseSha.ok ? baseSha.out : null,
+  // `git diff --quiet` exits 1 when there IS a difference, so `!ok` is "differ".
+  // Both reads are guarded: a git call that did not answer leaves the fact null
+  // and `evaluateFreshness` returns fresh rather than inventing a verdict.
+  scriptsDiffer: headSha.ok && baseSha.ok ? !scriptsDiff.ok : null,
+  headIsAncestor: headSha.ok && baseSha.ok ? ancestor.ok : null,
+});
+if (freshness.stale) {
+  console.log(`\n  ${await t('ticket.staleCheckout', {
+    head: freshness.headSha, base: freshness.baseSha, branch: baseBranch,
+  })}`);
+  console.log(`  ${await t('ticket.staleCheckoutHint', { root: ROOT, branch: baseBranch })}`);
+}
 
 // ── Create the branch ─────────────────────────────────────────────────────────
 // Two modes: in-place (checkout on the current working tree) or an isolated
