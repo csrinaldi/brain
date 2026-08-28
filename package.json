@@ -6,7 +6,9 @@
   },
   "private": false,
   "_publish_note": "A scoped package publishes `restricted` unless publishConfig says otherwise: `npm publish` would SUCCEED, burn the version, and leave it uninstallable. The workflow passes --access public too; this line is what covers a manual publish from a laptop (ADR-0030 Amendment 2, #653).",
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
   "_files_note": "Derived from `managed` in brain/core/managed-paths.mjs — every path whose strategy needs BRAIN'S BYTES at install time. Verified against a real `npm pack` by test/publish-allowlist.e2e.test.mjs, never against this array alone. AGENTS.md is deliberately absent: it is `regenerate`, compiled in the consumer from SOURCE_DOCS, and shipping brain's own would be a file describing the wrong repository (#397).",
   "files": [
@@ -84,6 +86,7 @@
     "brain:review:board": "node ./brain/scripts/review/cli.mjs board",
     "brain:context:compile": "node ./brain/scripts/context/cli.mjs",
     "context:compile": "node ./brain/scripts/context/cli.mjs",
-    "test:danger-paths": "bash test/upgrade/danger-paths.sh"
+    "test:danger-paths": "bash test/upgrade/danger-paths.sh",
+    "brain:status": "node ./brain/scripts/status/cli.mjs"
   }
 }
