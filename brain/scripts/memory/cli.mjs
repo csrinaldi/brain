@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 
 import { t } from "../i18n/t.mjs";
 import { formatDuplicateReport } from "./lib/duplicates.mjs";
+import { parseEnvFile } from "../lib/env-read.mjs";
 import {
   DEFAULT_BACKEND,
   ENGRAM_BIN,
@@ -49,18 +50,13 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 // very branch under test. That is the ambient-state trap #657's suite already
 // hit with `$VCS_TOKEN`: green here, red on the maintainer's box, for reasons
 // having nothing to do with the code.
+// The PARSE is shared (#316). The precedence is unchanged and already
+// shell-first: `process.env.MEMORY_BACKEND ?? envVars.MEMORY_BACKEND`, below.
+// `BRAIN_MEMORY_ENV_FILE` stays the test seam it was.
 function readEnvFile() {
   const envPath = process.env.BRAIN_MEMORY_ENV_FILE ?? join(repoRoot, ".env");
   if (!existsSync(envPath)) return {};
-  const vars = {};
-  for (const line of readFileSync(envPath, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
-    vars[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
-  }
-  return vars;
+  return parseEnvFile(readFileSync(envPath, "utf8"));
 }
 
 const envVars = readEnvFile();
