@@ -15,23 +15,23 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { parseEnvFile } from '../lib/env-read.mjs';
+
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 // ---------------------------------------------------------------------------
 // Read SDD_HARNESS: env var > .env file > default 'gentle-ai'
 // ---------------------------------------------------------------------------
+// The PARSE is shared (#316); the precedence stays where it always was — at the
+// consumption site below, `process.env.X ?? envVars.X`, which is already
+// shell-first and is now the rule the whole tree follows. What changed is that
+// keys and values are trimmed individually and one matched pair of surrounding
+// quotes is stripped: this loop produced the key `"KEY "` for `KEY = v` and left
+// `X="y"` as `"y"` with the quotes attached.
 function readEnvFile(root = repoRoot) {
   const envPath = join(root, '.env');
   if (!existsSync(envPath)) return {};
-  const vars = {};
-  for (const line of readFileSync(envPath, 'utf8').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq === -1) continue;
-    vars[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
-  }
-  return vars;
+  return parseEnvFile(readFileSync(envPath, 'utf8'));
 }
 
 // `resolvePlatform` LIVES IN A LEAF, and is re-exported here so this module's
