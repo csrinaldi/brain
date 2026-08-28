@@ -23,7 +23,15 @@ function makeTempDir(prefix) {
  * @param {number} [opts.stagedRecordsCode=0]
  * @param {number} [opts.checkRefsCode=0]
  */
-function createMockBin({ callLog, branch = 'feature/x', stagedRecordsCode = 0, checkRefsCode = 0 }) {
+function createMockBin({
+  callLog, branch = 'feature/x', stagedRecordsCode = 0, checkRefsCode = 0,
+  // #788 — WHERE the commit is being made. The default is a LINKED WORKTREE
+  // because that is where task work belongs since #782; every test written
+  // before this option was added is a task-branch commit, and a task-branch
+  // commit belongs in a worktree. Opt into the main checkout to exercise the
+  // refusal.
+  inMainCheckout = false,
+}) {
   const binDir = makeTempDir('pc-bin-');
   writeFileSync(
     join(binDir, 'node'),
@@ -53,6 +61,10 @@ function createMockBin({ callLog, branch = 'feature/x', stagedRecordsCode = 0, c
       `  printf '%s\\n' "${branch}"`,
       'elif [ "$1" = "rev-parse" ] && [ "$2" = "--show-toplevel" ]; then',
       '  printf "/fake/repo\\n"',
+      'elif [ "$1" = "rev-parse" ] && [ "$2" = "--git-dir" ]; then',
+      `  printf '%s\\n' "${inMainCheckout ? '.git' : '/fake/repo/.git/worktrees/brain-issue-788'}"`,
+      'elif [ "$1" = "rev-parse" ] && [ "$2" = "--git-common-dir" ]; then',
+      `  printf '%s\\n' "${inMainCheckout ? '.git' : '/fake/repo/.git'}"`,
       'fi',
       'exit 0',
     ].join('\n'),
@@ -113,4 +125,84 @@ test('pre-commit: a direct commit to main is blocked before either check runs', 
   const result = runHook(binDir);
   assert.equal(result.status, 1);
   assert.deepEqual(readCallLog(callLog), [], 'the main/master block precedes both checks');
+});
+
+// ── #788 · #782 slice 2 — WHERE the commit is being made ──────────────────
+
+test('pre-commit: a task branch in the MAIN CHECKOUT is refused', (t) => {
+  // `harness-contract.md` — "NEVER a branch in the main checkout when parallel
+  // work is possible". The rule was canonical, compiled into AGENTS.md, and
+  // enforced by nothing: an agent session on 2026-08-27 created five such
+  // branches with the rule loaded.
+  const tmpRoot = makeTempDir('pc-root-');
+  const callLog = join(tmpRoot, 'calls.log');
+  t.after(() => rmSync(tmpRoot, { recursive: true, force: true }));
+
+  const binDir = createMockBin({ callLog, branch: 'fix/issue-788', inMainCheckout: true });
+  t.after(() => rmSync(binDir, { recursive: true, force: true }));
+
+  const result = runHook(binDir);
+  assert.equal(result.status, 1);
+  assert.deepEqual(readCallLog(callLog), [], 'nothing downstream may run once the gate refuses');
+});
+
+test('pre-commit: the refusal names the verb AND the bypass', (t) => {
+  // A refusal that names no remedy costs the operator the session, and one with
+  // no way out gets worked around by hand — which is worse than the rule it
+  // guards. The bypass is the one check 1 already established.
+  //
+  // THE FLAG IS NOT SPELLED IN THIS FILE, and that is `check-refs-rules.mjs`'s
+  // `no-verify-bypass` rule working as designed: it scopes itself to tracked
+  // SCRIPTS (`onlyExt: .mjs/.js/.ts/.sh`) and deliberately excludes the
+  // extensionless hooks, which "document the bypass option to users, which is
+  // legitimate self-documentation, not an invocation" (ADR-0014 §9).
+  //
+  // So the hook may name the flag and this test may not. The alternatives were
+  // both worse: splitting the literal to slip past the pattern is the evasion
+  // the rule exists to prevent, and adding this file to the exemption list
+  // would blind the rule for the whole file — "a dead exemption is not inert".
+  // Asserting the command without the flag keeps the coverage and still fails
+  // if the refusal stops offering a way out.
+  const tmpRoot = makeTempDir('pc-root-');
+  const callLog = join(tmpRoot, 'calls.log');
+  t.after(() => rmSync(tmpRoot, { recursive: true, force: true }));
+
+  const binDir = createMockBin({ callLog, branch: 'fix/issue-788', inMainCheckout: true });
+  t.after(() => rmSync(binDir, { recursive: true, force: true }));
+
+  const out = `${runHook(binDir).stdout}${runHook(binDir).stderr}`;
+  assert.match(out, /brain:ticket:start/, 'the remedy is the verb that would have done it right');
+  assert.match(out, /bypass: git commit/, 'the escape hatch must be named where it is needed');
+});
+
+test('pre-commit: the SAME branch inside a linked worktree is silent', (t) => {
+  // A guard that fires everywhere is not a guard. This is the direction that
+  // proves the check reads WHERE rather than merely refusing.
+  const tmpRoot = makeTempDir('pc-root-');
+  const callLog = join(tmpRoot, 'calls.log');
+  t.after(() => rmSync(tmpRoot, { recursive: true, force: true }));
+
+  const binDir = createMockBin({ callLog, branch: 'fix/issue-788', inMainCheckout: false });
+  t.after(() => rmSync(binDir, { recursive: true, force: true }));
+
+  const result = runHook(binDir);
+  assert.equal(result.status, 0);
+  assert.deepEqual(readCallLog(callLog), ['staged-records-check', 'check-refs'],
+    'the existing checks must still run, unchanged, where the commit belongs');
+});
+
+test('pre-commit: main is still refused by check 1, before the worktree check', (t) => {
+  // Ordering matters for the MESSAGE. On `main` in the main checkout both checks
+  // would fire; the operator must be told the one that is actionable, and
+  // "commit to main" is the more specific fact.
+  const tmpRoot = makeTempDir('pc-root-');
+  const callLog = join(tmpRoot, 'calls.log');
+  t.after(() => rmSync(tmpRoot, { recursive: true, force: true }));
+
+  const binDir = createMockBin({ callLog, branch: 'main', inMainCheckout: true });
+  t.after(() => rmSync(binDir, { recursive: true, force: true }));
+
+  const result = runHook(binDir);
+  assert.equal(result.status, 1);
+  assert.match(`${result.stdout}${result.stderr}`, /direct commits to 'main'/);
 });
