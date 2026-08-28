@@ -467,7 +467,17 @@ export async function main(deps = {}) {
       baseSha,
       changedFiles,
       prBody: boot.prView.body,
-      deps: deps.trancheDeps ?? {},
+      // #631: the bound port, FIRST, so a caller's override wins on the seams it
+      // names and cannot silently drop the credential binding by omission.
+      //
+      // This was `deps.trancheDeps ?? {}` on main, and the gather then fell
+      // through to `tranche.mjs`'s module-level `getVcs` — which `vcs/cli.mjs`
+      // binds to the generic `VCS_TOKEN`, i.e. the OPERATOR. Measured on PR #598:
+      // 18 required checks all green, and two consecutive runs read zero gates and
+      // abstained, because the operator's graphql quota was exhausted while the
+      // reviewer token had 4990 of 5000 left. This is #501's class one level up —
+      // there the WRITE went out under the wrong credential, here the READ did.
+      deps: { getVcs: boundGetVcs, ...(deps.trancheDeps ?? {}) },
     });
     evalResult = evaluateTranche(trancheInputs);
     controls = unionControls([TRANCHE_PRODUCES]);
@@ -485,7 +495,12 @@ export async function main(deps = {}) {
       doctrineRecords: boot.doctrine.records,
       // The resolved baseSha (ci-context → port prView.baseRefOid, ADR-0022) feeds
       // the checkpoint seam — takes §10.4 reversion live; checkpointDeps overrides.
-      deps: { baseSha, ...(deps.checkpointDeps ?? {}) },
+      // #631: bound like every other gather in this region. `checkpoint.mjs` does
+      // not import `getVcs` today, and that is exactly why the binding is passed
+      // rather than reasoned about: "this evaluator happens not to need it" is a
+      // fact about today's code that no test held, and the day it stops being true
+      // is the day a read silently goes out under the operator's credential.
+      deps: { getVcs: boundGetVcs, baseSha, ...(deps.checkpointDeps ?? {}) },
     });
     evalResult = evaluateCheckpoint(checkpointInputs);
     controls = unionControls([CHECKPOINT_PRODUCES]);
@@ -498,7 +513,10 @@ export async function main(deps = {}) {
       project,
       number: args.pr,
       prBody: boot.prView.body,
-      deps: deps.rulingDeps ?? {},
+      // #631: bound for the same reason as the checkpoint gather above — not
+      // because `ruling.mjs` reads the port today, but so that it cannot start to
+      // without the credential following it.
+      deps: { getVcs: boundGetVcs, ...(deps.rulingDeps ?? {}) },
     });
     evalResult = evaluateRuling(rulingInputs);
     controls = unionControls([RULING_PRODUCES]);
@@ -801,7 +819,10 @@ export async function main(deps = {}) {
         changedFiles,
         prBody: boot.prView.body,
         maxRounds,
-        deps: inferentialDeps,
+        // #631: bound AT THE CALL SITE, not where `inferentialDeps` is built —
+        // the binding has to be visible beside the gather it protects, which is
+        // the property the derived test in cli.test.mjs checks.
+        deps: { getVcs: boundGetVcs, ...inferentialDeps },
       });
 
       // #682 acceptance criterion 6. A generator that failed is NOT a generator

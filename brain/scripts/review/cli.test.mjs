@@ -1390,3 +1390,104 @@ test('#766: main returns 1 and names the cause when the write verb refuses the p
     `the forge's own reason must reach the operator; got: ${JSON.stringify(errors)}`,
   );
 });
+
+// ── #631: every gather runs under the reviewer's credential, list DERIVED ───
+
+test('#631: every gather*Inputs call in the bound region receives the reviewer-bound port', () => {
+  // Measured on PR #598, whose 18 required checks were all green: two consecutive
+  // runs abstained with `conditions: ["evidence uncomputable"]` having read zero
+  // gates. The operator's ambient credential had `graphql.remaining: 0` while the
+  // reviewer token had 4990 of 5000 — and the tranche gather went out under the
+  // OPERATOR's, because `deps: deps.trancheDeps ?? {}` never handed it the bound
+  // accessor. Every step after that behaved as designed: `gh` failed, the provider
+  // normalized to uncomputable, the evaluator abstained fail-closed. The defect is
+  // that it fired at all.
+  //
+  // The list is DERIVED from the source, and that is the whole point. The guard
+  // above names cold-boot and the poster BY HAND — "Both consumers must receive
+  // it, asserted separately" — which is exactly why it stayed green through #598:
+  // it did not know `trancheDeps` existed. A hand-kept list of consumers cannot
+  // fail on the consumer it omits, which is `RECOGNISED_OUTCOMES` (#759) one layer
+  // out. A FIFTH gather fails this test on the day it is written.
+  //
+  // Two exclusions, and NEITHER is an exemption list — both fall out of where the
+  // code puts them:
+  //   · the region starts at `const boundGetVcs`, so `gatherIdentity` is outside
+  //     it by construction. It cannot read through the bound port: it is what
+  //     PRODUCES the token the port is bound to.
+  //   · `runQueueCommand`/`runBoardCommand` are other functions entirely and hold
+  //     no `gather*Inputs` call, so they never enter this set.
+  //
+  // Source-level for the reason the guard above states: `getVcs` is imported
+  // directly, and a real `main()` run cannot reach these gathers without a live
+  // gh binary and a reviewer token — the two things absent from the environment
+  // where this defect was found.
+  const src = readFileSync(fileURLToPath(new URL('./cli.mjs', import.meta.url)), 'utf8');
+
+  const bindAt = src.indexOf('const boundGetVcs =');
+  assert.ok(bindAt > 0, 'the bound accessor must exist before anything can be asserted about who receives it');
+  const bound = src.slice(bindAt);
+
+  // Every gather call in the bound region, with its argument object. The extent is
+  // found by BALANCING BRACES, not by matching a closing indentation: the first
+  // draft of this test used `/gather\w+\(\{[\s\S]*?\n {4}\}\)/` and the non-greedy
+  // run from `gatherColdBoot` (closing at 2 spaces) swallowed the whole
+  // `gatherTrancheInputs` call before stopping at the first 4-space `})`. It
+  // reported three gathers, all bound, and was blind to the ONE unbound site this
+  // test exists to catch — the defect reproduced inside its own red-proof.
+  const gathers = [];
+  for (const m of bound.matchAll(/\b(gather\w+)\(\{/g)) {
+    let depth = 0;
+    let end = -1;
+    for (let i = m.index + m[0].length - 1; i < bound.length; i++) {
+      const ch = bound[i];
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) { end = i; break; }
+      }
+    }
+    assert.ok(end > 0, `unbalanced argument object on ${m[1]} — the source could not be parsed, which is not a pass`);
+    gathers.push({ name: m[1], args: bound.slice(m.index + m[0].length, end) });
+  }
+
+  assert.ok(
+    gathers.length >= 4,
+    `expected the gathers to be discoverable after the binding, found: ${gathers.map(g => g.name).join(', ') || '(none)'}`,
+  );
+
+  const unbound = gathers.filter(g => !/boundGetVcs/.test(g.args)).map(g => g.name);
+
+  // The ORDER is load-bearing and was unpinned until a mutation survived: moving
+  // `getVcs: boundGetVcs` after the caller's spread left the whole suite green,
+  // while the comment at the call site claims the binding comes first. In
+  // PRODUCTION the two are identical — `deps.trancheDeps` is undefined there, so
+  // the spread is empty either way. The difference is the test seam: binding-last
+  // makes `boundGetVcs` unconditional and a caller can no longer inject its own
+  // port, which is how every gather in this file is exercised. Pinned so the
+  // sentence at the call site is held by something other than itself.
+  const misordered = gathers
+    .filter((g) => {
+      const bind = g.args.indexOf('boundGetVcs');
+      const spread = g.args.search(/\.\.\.\(?\s*(deps\.\w+Deps|inferentialDeps)/);
+      return bind >= 0 && spread >= 0 && bind > spread;
+    })
+    .map(g => g.name);
+
+  assert.deepEqual(
+    misordered,
+    [],
+    `the bound port must be spread BEFORE the caller's deps in: ${misordered.join(', ')}. ` +
+      'Binding last makes it unconditional and closes the seam every test in this file injects through.',
+  );
+
+  assert.deepEqual(
+    unbound,
+    [],
+    `these gathers reach the port under the OPERATOR's credential, not the reviewer's: ${unbound.join(', ')}. ` +
+      "cli.mjs's own comment on boundGetVcs states the rule: a port reading under one credential and writing " +
+      'under another can report on a repository it is not writing to. Bind it AT THE CALL SITE — a gather whose ' +
+      'evaluator never calls getVcs loses nothing by receiving one, and exempting it would rebuild the hand-kept ' +
+      'list this test exists to replace.',
+  );
+});
