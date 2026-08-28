@@ -31,6 +31,7 @@ import { join } from 'node:path';
 
 import { renderReport } from './report.mjs';
 import { deriveTicket, deriveChain, deriveTasks, deriveDivergence } from './derive.mjs';
+import { deriveReview, deriveWorkingMemory, deriveStandingItems } from './derive-review.mjs';
 
 /** Git facts, each `null` when git did not answer. Never throws. */
 function defaultGitFacts(root = process.cwd(), tracker = 'origin/main') {
@@ -43,10 +44,12 @@ function defaultGitFacts(root = process.cwd(), tracker = 'origin/main') {
     return out === null ? null : Number(out);
   };
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
+  const headSha = git('rev-parse', '--short', 'HEAD');
   const dirty = git('status', '--porcelain');
   const upstream = git('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}');
   return {
     branch,
+    headSha,
     ahead: count(`${tracker}..HEAD`),
     behind: count(`HEAD..${tracker}`),
     dirtyFiles: dirty === null ? null : dirty.split('\n').filter(Boolean).length,
@@ -61,6 +64,16 @@ function defaultReadTasks(root, changeDirName) {
   if (!changeDirName) return null;
   try {
     return readFileSync(join(root, 'openspec/changes', changeDirName, 'tasks.md'), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/** `resume.md` for a change dir — the OPERATIONAL artefact, never the reviewer's. */
+function defaultReadResume(root, changeDirName) {
+  if (!changeDirName) return null;
+  try {
+    return readFileSync(join(root, 'openspec/changes', changeDirName, 'resume.md'), 'utf8');
   } catch {
     return null;
   }
@@ -106,10 +119,43 @@ export async function runStatus({ issueNumber, log = console.log, deps = {} } = 
   });
   const openField = Object.fromEntries(tasksSection.fields).open;
 
+  // ── the PR thread (slice 2) ──────────────────────────────────────────────
+  // Read through the port like everything else. `prNumber` is supplied by the
+  // caller for now; deriving it from the branch is its own read and its own
+  // failure mode, and #280's non-goals keep this command from guessing.
+  let reviews = null;
+  let prHeadSha = null;
+  let reviewReason = null;
+  if (deps.prNumber && deps.vcs && project) {
+    try {
+      reviews = await deps.vcs.prReviews({ project, number: deps.prNumber });
+      const pr = await deps.vcs.prView({ project, number: deps.prNumber });
+      prHeadSha = pr?.headRefOid ? String(pr.headRefOid).slice(0, 7) : null;
+      if (!Array.isArray(reviews)) reviewReason = 'the forge returned no reviews list';
+    } catch (err) {
+      reviewReason = err?.message ?? String(err);
+      reviews = null;
+    }
+  } else if (!deps.prNumber) {
+    reviewReason = 'no pull request number was given (--pr)';
+  } else {
+    reviewReason = issueReason ?? 'the forge could not be reached';
+  }
+
+  const resumeText = (deps.readResume ?? (() => defaultReadResume(root, deps.changeDir)))();
+
   const sections = [
     deriveTicket(issue ? { issue } : { reason: issueReason ?? 'the ticket could not be read' }),
     deriveChain(facts),
     tasksSection,
+    deriveReview({
+      reviews,
+      prHeadSha,
+      localHeadSha: facts.headSha ?? null,
+      reason: reviewReason,
+    }),
+    deriveWorkingMemory({ resumeText }),
+    deriveStandingItems({}),
     deriveDivergence({
       issue,
       openTasks: openField?.ok ? openField.value : null,
@@ -129,8 +175,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const argv = process.argv.slice(2);
   const i = argv.indexOf('--issue');
   const issueNumber = i >= 0 ? Number(argv[i + 1]) : null;
+  const p = argv.indexOf('--pr');
+  const prNumber = p >= 0 ? Number(argv[p + 1]) : null;
+  const c = argv.indexOf('--change');
+  const changeDir = c >= 0 ? argv[c + 1] : null;
   if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
-    console.error('usage: npm run brain:status -- --issue <N>');
+    console.error('usage: npm run brain:status -- --issue <N> [--pr <N>] [--change <dir>]');
     process.exit(1);
   }
   const { getVcs } = await import('../vcs/cli.mjs');
@@ -146,5 +196,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     vcs = await getVcs();
     project = originIdentity()?.project ?? null;
   } catch { /* degrades to an uncomputable ticket section, never a crash */ }
-  process.exit(await runStatus({ issueNumber, deps: { vcs, project } }));
+  process.exit(await runStatus({ issueNumber, deps: { vcs, project, prNumber, changeDir } }));
 }
