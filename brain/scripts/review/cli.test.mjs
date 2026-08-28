@@ -1355,3 +1355,38 @@ test('#683: cli refuses rather than posting a verdict whose declaration is false
   assert.ok(buildAt > 0, 'buildVerdict call site not found — this pin is measuring the wrong file');
   assert.ok(guardAt < buildAt, 'the coverage check must precede buildVerdict');
 });
+
+// ── #766: a refused post is reported to the operator and exits non-zero ─────
+
+test('#766: main returns 1 and names the cause when the write verb refuses the post', async () => {
+  // Measured on PR #765: `brain:review --pr 765` printed a complete verdict and
+  // exited 0 while the server held `reviews=0`. A 403 and a successful post
+  // rendered byte-identically — same exit code, same stdout, no diagnostic.
+  const calls = { prReviewComment: 0, issueComment: 0, labelAdd: 0, labelRemove: 0 };
+  const vcs = {
+    calls,
+    prReviewComment: async () => {
+      calls.prReviewComment++;
+      return { url: null, error: 'gh: Resource not accessible by personal access token (HTTP 403)' };
+    },
+    issueComment: async () => { calls.issueComment++; return { url: 'unused' }; },
+    labelAdd: async () => { calls.labelAdd++; return { ok: true }; },
+    labelRemove: async () => { calls.labelRemove++; return { ok: true }; },
+    prView: async () => ({ headRefOid: HEAD }),
+  };
+  const lines = [];
+  const errors = [];
+  const code = await main({
+    argv: ['--pr', '42'],
+    log: (s) => lines.push(s),
+    error: (s) => errors.push(s),
+    ...readyDeps({ vcs }),
+  });
+
+  assert.equal(code, 1, 'a run that posted nothing must not exit 0 — that is the whole defect');
+  assert.equal(calls.prReviewComment, 1, 'the post was attempted; it is the ANSWER that was discarded');
+  assert.ok(
+    errors.some(l => /403/.test(l)),
+    `the forge's own reason must reach the operator; got: ${JSON.stringify(errors)}`,
+  );
+});

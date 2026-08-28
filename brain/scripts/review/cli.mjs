@@ -1007,6 +1007,19 @@ export async function main(deps = {}) {
   });
 
   if (postResult.skipped) log(`brain:review: ${postResult.skipped} — nothing posted.`);
+
+  // #766: a REFUSED post is not a skip. `skipped` is a decision this module made
+  // and printed on stdout at exit 0, which is right for anti-loop and anti-stale;
+  // a forge that rejected the write is a FAILED RUN, and it exits non-zero beside
+  // the stage-failure and generator-failure refusals above. Without this branch a
+  // scheduled reviewer whose credential expires reports success indefinitely, and
+  // the absence of verdicts reads as "no PRs needed review".
+  if (postResult.error) {
+    error(`brain:review: the verdict was NOT posted — ${postResult.error}. ` +
+      'The run computed a verdict the forge refused to accept; nothing is on the pull request.');
+    return 1;
+  }
+
   // REQ-405-4: the count has to reach a READER, not just the caller. An anchor
   // that is dropped, counted, and then never printed is the same silence the
   // requirement exists to break — the run would look identical to one that had

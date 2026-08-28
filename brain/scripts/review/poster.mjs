@@ -90,8 +90,12 @@ export function deriveInlineComments(findings = []) {
  *   not the evaluator's. Ones carrying `file`+`line` become inline comments on the PR path only.
  * @param {{ getVcs?: Function, reResolveHead?: Function }} [args.deps]
  * @returns {Promise<{ posted: true, result: object, inlineDropped?: number }
- *   | { posted: false, skipped: 'anti-loop'|'anti-stale' }>}
+ *   | { posted: false, skipped: 'anti-loop'|'anti-stale' }
+ *   | { posted: false, error: string }>}
  *   `inlineDropped` is ABSENT when no anchor was lost, never 0.
+ *   `posted: false` has two shapes and they are different facts: `skipped` is a
+ *   DECISION not to post (the guards above), `error` is a post the forge REFUSED
+ *   (#766). A caller that collapses them would report a 403 as a policy skip.
  */
 /**
  * wouldRepeatLastVerdict() — would posting now repeat THIS reviewer's own last
@@ -203,9 +207,38 @@ export async function postVerdict({
       : { project, number, body: renderedBody },
   );
 
+  // #766: READ the answer. `prReviewComment` and `issueComment` are never-throws
+  // and return `{ url } | { url: null, error }` (vcs-contract.md) — a refused
+  // write is a VALUE here, not an exception, so a caller that does not branch on
+  // it reports a post that never happened. Measured on PR #765: a fine-grained
+  // PAT that could read and not write returned HTTP 403, and the run printed a
+  // complete verdict and exited 0 while the server held `reviews=0`.
+  //
+  // This is `evidence-reader-empty-on-failure` inverted: there a READER turns
+  // "could not obtain" into "genuinely empty"; here a WRITER turned "refused"
+  // into "posted". It was also the one branch in this module that did not fail
+  // closed — anti-loop and anti-stale above both already return `posted: false`.
+  //
+  // The test is `!result?.url` and not `result?.error`, deliberately: an
+  // off-contract answer carrying NEITHER field is silence, and reading silence
+  // as success is the defect this closes. The cost is stated rather than hidden —
+  // GitHub's `prReviewComment` also answers `{ url: null, error }` when the POST
+  // SUCCEEDED and its echo would not parse, so that case now reports a failure
+  // over a write that landed. That direction is the safe one: the next run
+  // re-reads `priorVerdicts`, and the anti-loop lock above refuses the duplicate.
+  // The inverse — silence over a 403 — has no such guard anywhere.
+  if (!result?.url) {
+    return {
+      posted: false,
+      error: result?.error ?? 'the write verb returned neither a url nor an error',
+    };
+  }
+
   // Escalation inbox, post half: only reachable once the verdict actually
-  // landed at this head (past both anti-stale and anti-loop) — an unposted
-  // verdict never bound to the current tree, so nothing to escalate yet.
+  // landed at this head (past anti-stale, anti-loop, AND a refused write — #766
+  // added the third; `needs-decision` over a verdict nobody can read points a
+  // human at an empty thread) — an unposted verdict never bound to the current
+  // tree, so nothing to escalate yet.
   if (escalate === 'human') {
     await guardedLabelAdd(vcs, { project, number, labels: [ESCALATION_LABEL] });
   }
