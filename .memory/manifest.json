@@ -400,6 +400,14 @@
       "sessions": 3,
       "memories": 13,
       "prompts": 0
+    },
+    {
+      "id": "b6b34e3f",
+      "created_by": "gandalf",
+      "created_at": "2026-08-28T16:56:13Z",
+      "sessions": 2,
+      "memories": 29,
+      "prompts": 1
     }
   ]
 }
