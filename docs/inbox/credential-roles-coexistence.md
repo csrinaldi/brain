@@ -217,6 +217,14 @@ a key exists in both `.env` and the shell and the values differ, say so.
   ADR-0033's only by-construction row. **ADR amendment, not an implementation
   ticket.**
 
+> **RULED — 1a yes, 1b no.** ADR-0033 Amendment 1 (#773). The transparency 1b was
+> meant to buy is delivered by the session boundary instead: a workflow engine
+> started by the developer carries the credential in-process to every stage, so
+> the producer still receives it scrubbed and the by-construction row stands. The
+> accepted loss is one export per session. Not covered by that ruling, and named
+> in it: an engine started **unattended** would have to read the credential from
+> disk, which is 1b under another name.
+
 Issue **#316** owns unifying the four `.env` parsers, which is 1a's mechanism.
 1b is not #316's to decide and must not ride along inside it.
 
