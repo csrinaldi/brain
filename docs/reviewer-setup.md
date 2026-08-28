@@ -45,6 +45,15 @@ npm run brain:review -- --pr <n>     # the `--` is required: without it npm eats
 
 ## Making it survive a new terminal
 
+> **This shape is a ruling, not a workaround** — ADR-0033 Amendment 1 (#773).
+> Letting `brain:review` read the reviewer token from `.env` was proposed and
+> **refused**: it would move brain's poster credential off the warrant table's only
+> `by construction` row, and `reviewer-protocol.md` §2's three structural locks all
+> live behind that credential. The supported answer to the ergonomics is a session
+> that carries the value — the file below, or the workflow engine that starts once
+> and runs every SDD stage in-process. Exporting once per session is the price, and
+> it is the decision rather than an omission.
+
 `export` lasts as long as the shell. A new terminal starts with neither var and
 `brain:review` refuses again — correctly, since it cannot tell an unset token
 from a revoked one.
