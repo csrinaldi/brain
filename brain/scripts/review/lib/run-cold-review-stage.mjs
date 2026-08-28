@@ -41,11 +41,12 @@
 // next, the seam is required and the resolution lands in B.6 with its refusal.
 
 import { join, dirname } from 'node:path';
-import { mkdirSync, existsSync, rmSync } from 'node:fs';
+import { mkdirSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 import { COLD_REVIEW_STAGE, resolveStageEngine } from '../../lib/stage-engine.mjs';
 import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env.mjs';
-import { assertProducerCannotReachForge } from '../../harness/producer-forge-reach.mjs';
+import { assertProducerCannotReachForge, withForgeConfigDir } from '../../harness/producer-forge-reach.mjs';
 import { buildColdReviewPrompt } from './cold-review-prompt.mjs';
 import { artifactPathFor } from './findings-artifact.mjs';
 
@@ -115,6 +116,13 @@ export async function runColdReviewStage({
     );
   }
   const probeDeps = { _run: deps.forgeProbe };
+
+  // #775 — the per-run forge config directory, and its disposal. Seams for the
+  // same reason the rest are: a test must be able to observe the lifecycle
+  // without writing to the machine's temp space, and the default must be the
+  // real thing so a caller that forgets gets a real directory rather than none.
+  const makeForgeConfigDir = deps.makeForgeConfigDir ?? (() => mkdtempSync(join(tmpdir(), 'brain-forge-')));
+  const removeForgeConfigDir = deps.removeForgeConfigDir ?? ((dir) => rmSync(dir, { recursive: true, force: true }));
 
   // Throws on an entry that exists and cannot be read; `null` when the repo
   // routed nothing. Unrouted is NOT a failure — the caller renders it as the
@@ -186,139 +194,173 @@ export async function runColdReviewStage({
   // IT REFUSES BEFORE THE SPAWN, not after. A ten-minute engine run whose
   // output must then be discarded is the same waste F.2 records at the routing
   // layer, and worse here: the artifact would already exist on disk.
-  const reach = assertProducerCannotReachForge(
-    withoutCredentials(env, credentialEnvNames({ extra: [config?.reviewer?.tokenEnv] })),
-    probeDeps,
-  );
-  if (!reach.ok) {
-    return {
-      routed: true,
-      ok: false,
-      reason:
-        `the producer can still reach the forge, so ADR-0033's load-bearing property does not ` +
-        `hold for this run — ${reach.reason}`,
-    };
-  }
-
-
-  // The engine is told to write a file; nothing guarantees its tooling creates
-  // parents. Recursive, so an existing directory from a previous round is not an
-  // error — re-running a review is normal, and #495's rev counter is what makes
-  // rounds distinguishable, not the filesystem.
+  // #775 — THE SHADOW IS CREATED BEFORE THE PROBE, AND THE PROBE IS RUN AGAINST
+  // IT. That ordering is the whole guarantee: a probe run against an unshadowed
+  // environment answers about an environment the child never receives, and a
+  // probe that lies is worse than no probe. The same path is handed to
+  // `runStage` below, so the thing measured and the thing spawned are one env.
   //
-  // IT TRAVELLED WITHOUT ITS CODE (judgment:cold-4, fifth cold review). The
-  // reordering that lifted the forge probe above the mutations carried this
-  // comment up with it, leaving it forty-two lines and one whole guard above the
-  // call it describes — where its first sentence explained an operation that had
-  // not happened yet, and read as a preamble to the probe.
-  mkdir(dirname(join(root, artifactPath)));
-
-  // THE ARTIFACT IS REMOVED BEFORE THE SPAWN, AND THAT IS WHAT MAKES THE CHECK
-  // BELOW MEAN ANYTHING (judgment:cold-1).
+  // WHAT IT BUYS AND WHAT IT DOES NOT is in `withForgeConfigDir`'s header,
+  // measured on a logged-in machine. The short of it: the keyring secret is
+  // untouched — the CLI simply can no longer find the host mapping that would
+  // make it ask.
   //
-  // The presence check was a bare `exists`, so it could not tell "the engine
-  // wrote this" from "a previous round left it here". Re-review is the NORMAL
-  // case — §7 counts revisions precisely because it happens, and the mkdir
-  // above is recursive for the same reason — so on every review after the
-  // first, an engine that exited 0 and wrote nothing passed, and the verdict
-  // for the NEW head declared the judgment control applied over findings
-  // produced against an older one. The guard only ever held on a fresh repo,
-  // which is exactly the shape its own test used.
-  //
-  // Deleting is the cheap half of the fix and the honest one: after this line,
-  // a file at that path was written by THIS run, with no clock, no mtime and no
-  // resolution to trust. The cost is that a failed run leaves no artifact to
-  // inspect — accepted, because the artifact is already ruled ephemeral (it is
-  // `.gitignore`d, and the verdict posted on the PR is the durable record).
-  //
-  // THE INVARIANT IS SCOPED TO ROUTED RUNS, AND THAT IS DELIBERATE — the first
-  // cut of this note said "a file at that path was written by THIS run" flat,
-  // which claims more than the code delivers (judgment:cold-3). The clearing
-  // sits BELOW the routing check, so on an unrouted run nothing is cleared.
-  //
-  // Clearing there would be a defect, not a fix. On the unrouted path the file
-  // is not a previous round's OUTPUT — it is the operator's own INPUT. That is
-  // slice A's shipped shape: the artifact was the transport before any engine
-  // existed to write it, and the highest-level test of the whole wire
-  // (`regulated-review.e2e` A.4) writes the file by hand with no `sdd.map`
-  // entry at all and expects the verdict to read it. A `remove()` above the
-  // routing check would delete the operator's input and report that the
-  // judgment half found nothing.
-  //
-  // WHAT IS GENUINELY AMBIGUOUS, said rather than papered over: a repo that
-  // ROUTED the stage, got an artifact, and then UN-ROUTED it leaves a previous
-  // round's engine output on disk, where the next run reads it as operator
-  // input. Nothing on disk separates the two — same path, same shape, and D.5
-  // already established there is no clock to trust. Closing it needs
-  // provenance recorded INSIDE the artifact by whoever wrote it, which is a
-  // ruling about the format rather than an ordering fix, and is not this
-  // slice's. Named here so the next reader finds a known gap instead of
-  // re-deriving it from a comment that overstated its own coverage.
-  //
-  // A REMOVAL THAT FAILS IS A REFUSAL. Continuing would run the engine with the
-  // stale file still there and land back in the state this exists to prevent —
-  // and the operator would be told the engine wrote nothing, which would be a
-  // lie about a file the engine never got the chance to replace.
+  // PER-RUN AND DISPOSABLE, because `gh` WRITES a `config.yml` into whatever
+  // directory it is given. A reused path is a place a session could accumulate,
+  // which would turn this fix into the channel it closes.
+  const forgeConfigDir = makeForgeConfigDir();
   try {
-    remove(join(root, artifactPath));
-  } catch (err) {
-    return {
-      routed: true,
-      ok: false,
-      reason:
-        `the stage could not clear the previous artifact at ${artifactPath} — ${err?.message ?? String(err)}. ` +
-        'Refusing rather than running: with a stale file in place, an engine that wrote nothing would ' +
-        'look exactly like one that did its job, and the verdict would declare a control it applied ' +
-        'to findings from an older head.',
-    };
+    const reach = assertProducerCannotReachForge(
+      withForgeConfigDir(
+        withoutCredentials(env, credentialEnvNames({ extra: [config?.reviewer?.tokenEnv] })),
+        forgeConfigDir,
+      ),
+      probeDeps,
+    );
+    if (!reach.ok) {
+      return {
+        routed: true,
+        ok: false,
+        reason:
+          `the producer can still reach the forge, so ADR-0033's load-bearing property does not ` +
+          `hold for this run — ${reach.reason}. The per-run config-dir shadow (#775) did not ` +
+          `close it on this deployment, so the remaining remedy is the one ` +
+          `docs/reviewer-setup.md prescribes: \`gh auth logout\` (or \`glab auth logout\`) on the ` +
+          `machine that runs the cold review, and authenticate by environment instead.`,
+      };
+    }
+
+
+    // The engine is told to write a file; nothing guarantees its tooling creates
+    // parents. Recursive, so an existing directory from a previous round is not an
+    // error — re-running a review is normal, and #495's rev counter is what makes
+    // rounds distinguishable, not the filesystem.
+    //
+    // IT TRAVELLED WITHOUT ITS CODE (judgment:cold-4, fifth cold review). The
+    // reordering that lifted the forge probe above the mutations carried this
+    // comment up with it, leaving it forty-two lines and one whole guard above the
+    // call it describes — where its first sentence explained an operation that had
+    // not happened yet, and read as a preamble to the probe.
+    mkdir(dirname(join(root, artifactPath)));
+
+    // THE ARTIFACT IS REMOVED BEFORE THE SPAWN, AND THAT IS WHAT MAKES THE CHECK
+    // BELOW MEAN ANYTHING (judgment:cold-1).
+    //
+    // The presence check was a bare `exists`, so it could not tell "the engine
+    // wrote this" from "a previous round left it here". Re-review is the NORMAL
+    // case — §7 counts revisions precisely because it happens, and the mkdir
+    // above is recursive for the same reason — so on every review after the
+    // first, an engine that exited 0 and wrote nothing passed, and the verdict
+    // for the NEW head declared the judgment control applied over findings
+    // produced against an older one. The guard only ever held on a fresh repo,
+    // which is exactly the shape its own test used.
+    //
+    // Deleting is the cheap half of the fix and the honest one: after this line,
+    // a file at that path was written by THIS run, with no clock, no mtime and no
+    // resolution to trust. The cost is that a failed run leaves no artifact to
+    // inspect — accepted, because the artifact is already ruled ephemeral (it is
+    // `.gitignore`d, and the verdict posted on the PR is the durable record).
+    //
+    // THE INVARIANT IS SCOPED TO ROUTED RUNS, AND THAT IS DELIBERATE — the first
+    // cut of this note said "a file at that path was written by THIS run" flat,
+    // which claims more than the code delivers (judgment:cold-3). The clearing
+    // sits BELOW the routing check, so on an unrouted run nothing is cleared.
+    //
+    // Clearing there would be a defect, not a fix. On the unrouted path the file
+    // is not a previous round's OUTPUT — it is the operator's own INPUT. That is
+    // slice A's shipped shape: the artifact was the transport before any engine
+    // existed to write it, and the highest-level test of the whole wire
+    // (`regulated-review.e2e` A.4) writes the file by hand with no `sdd.map`
+    // entry at all and expects the verdict to read it. A `remove()` above the
+    // routing check would delete the operator's input and report that the
+    // judgment half found nothing.
+    //
+    // WHAT IS GENUINELY AMBIGUOUS, said rather than papered over: a repo that
+    // ROUTED the stage, got an artifact, and then UN-ROUTED it leaves a previous
+    // round's engine output on disk, where the next run reads it as operator
+    // input. Nothing on disk separates the two — same path, same shape, and D.5
+    // already established there is no clock to trust. Closing it needs
+    // provenance recorded INSIDE the artifact by whoever wrote it, which is a
+    // ruling about the format rather than an ordering fix, and is not this
+    // slice's. Named here so the next reader finds a known gap instead of
+    // re-deriving it from a comment that overstated its own coverage.
+    //
+    // A REMOVAL THAT FAILS IS A REFUSAL. Continuing would run the engine with the
+    // stale file still there and land back in the state this exists to prevent —
+    // and the operator would be told the engine wrote nothing, which would be a
+    // lie about a file the engine never got the chance to replace.
+    try {
+      remove(join(root, artifactPath));
+    } catch (err) {
+      return {
+        routed: true,
+        ok: false,
+        reason:
+          `the stage could not clear the previous artifact at ${artifactPath} — ${err?.message ?? String(err)}. ` +
+          'Refusing rather than running: with a stale file in place, an engine that wrote nothing would ' +
+          'look exactly like one that did its job, and the verdict would declare a control it applied ' +
+          'to findings from an older head.',
+      };
+    }
+
+    const result = await runStage({
+      stage: COLD_REVIEW_STAGE,
+      // The artifact path renders ABSOLUTE, into `root`: the engine READS the cold
+      // worktree and WRITES where the reader looks. A relative path would land the
+      // findings inside the throwaway checkout, and the presence check below would
+      // then report "wrote no artifact" about a file written perfectly.
+      prompt: buildColdReviewPrompt({ prNumber, baseRef, headRef, artifactRoot: root }),
+      model: routing.model,
+      engine: routing.engine,
+      cwd: worktreePath,
+      // THE PRODUCER MUST NOT INHERIT BRAIN'S POSTING CREDENTIAL (judgment:cold-2).
+      // The backend scrubs the default set on its own — this only WIDENS it with
+      // the name this repo actually configured, which is the one thing this layer
+      // knows and the harness cannot learn: `loadBrainConfig` resolves from the
+      // module's location, so in a consumer it would read node_modules' config.
+      // A repo that renamed `reviewer.tokenEnv` would otherwise hand the engine
+      // the very credential ADR-0033 says it does not hold.
+      credentialEnv: credentialEnvNames({ extra: [config?.reviewer?.tokenEnv] }),
+      // #775 — the same directory the probe was measured against, never a second
+      // one. Two paths here would mean the probe answered about an environment
+      // the producer does not get, which is the failure this parameter exists to
+      // make impossible rather than merely unlikely.
+      forgeConfigDir,
+      // F.9 — the ceiling the CALLER resolved. Resolved in `main()` rather than
+      // here (judgment:cold-2): evaluating it in this argument list put a refusal
+      // after `mkdir` and after `remove` had deleted the previous artifact, and
+      // below the routing check, so an unrouted repo never validated the key.
+      timeoutMs,
+    });
+
+    if (!result?.ok) {
+      return {
+        routed: true,
+        ok: false,
+        elapsedMs: result?.elapsedMs ?? null,
+        reason: result?.reason ?? 'the engine returned no result',
+      };
+    }
+
+    // See the header: a clean exit with no artifact is the state that would
+    // otherwise render as "you never configured this".
+    if (!exists(join(root, artifactPath))) {
+      return {
+        routed: true,
+        ok: false,
+        reason:
+          `the engine exited cleanly but wrote no artifact at ${artifactPath} — that is a ` +
+          'transport that ran and produced nothing, and it must not render as a repo that ' +
+          'never routed the stage.',
+      };
+    }
+
+    return { routed: true, ok: true, artifactPath, elapsedMs: result?.elapsedMs ?? null };
+  } finally {
+    // EVERY exit, including the refusals that return early and a throw from the
+    // engine. The directory is brain's own leftover, and a cleanup reachable
+    // only on the happy path is the shape that leaves one behind on exactly the
+    // runs an operator is already debugging.
+    removeForgeConfigDir(forgeConfigDir);
   }
-
-  const result = await runStage({
-    stage: COLD_REVIEW_STAGE,
-    // The artifact path renders ABSOLUTE, into `root`: the engine READS the cold
-    // worktree and WRITES where the reader looks. A relative path would land the
-    // findings inside the throwaway checkout, and the presence check below would
-    // then report "wrote no artifact" about a file written perfectly.
-    prompt: buildColdReviewPrompt({ prNumber, baseRef, headRef, artifactRoot: root }),
-    model: routing.model,
-    engine: routing.engine,
-    cwd: worktreePath,
-    // THE PRODUCER MUST NOT INHERIT BRAIN'S POSTING CREDENTIAL (judgment:cold-2).
-    // The backend scrubs the default set on its own — this only WIDENS it with
-    // the name this repo actually configured, which is the one thing this layer
-    // knows and the harness cannot learn: `loadBrainConfig` resolves from the
-    // module's location, so in a consumer it would read node_modules' config.
-    // A repo that renamed `reviewer.tokenEnv` would otherwise hand the engine
-    // the very credential ADR-0033 says it does not hold.
-    credentialEnv: credentialEnvNames({ extra: [config?.reviewer?.tokenEnv] }),
-    // F.9 — the ceiling the CALLER resolved. Resolved in `main()` rather than
-    // here (judgment:cold-2): evaluating it in this argument list put a refusal
-    // after `mkdir` and after `remove` had deleted the previous artifact, and
-    // below the routing check, so an unrouted repo never validated the key.
-    timeoutMs,
-  });
-
-  if (!result?.ok) {
-    return {
-      routed: true,
-      ok: false,
-      elapsedMs: result?.elapsedMs ?? null,
-      reason: result?.reason ?? 'the engine returned no result',
-    };
-  }
-
-  // See the header: a clean exit with no artifact is the state that would
-  // otherwise render as "you never configured this".
-  if (!exists(join(root, artifactPath))) {
-    return {
-      routed: true,
-      ok: false,
-      reason:
-        `the engine exited cleanly but wrote no artifact at ${artifactPath} — that is a ` +
-        'transport that ran and produced nothing, and it must not render as a repo that ' +
-        'never routed the stage.',
-    };
-  }
-
-  return { routed: true, ok: true, artifactPath, elapsedMs: result?.elapsedMs ?? null };
 }

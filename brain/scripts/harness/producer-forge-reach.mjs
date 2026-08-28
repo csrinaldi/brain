@@ -80,9 +80,63 @@ export const PROBE_TIMEOUT_MS = 10_000;
  * exists and non-zero when none does, on both.
  */
 export const FORGE_CLIS = Object.freeze([
-  Object.freeze({ name: 'gh', bin: 'gh', args: ['auth', 'status'] }),
-  Object.freeze({ name: 'glab', bin: 'glab', args: ['auth', 'status'] }),
+  Object.freeze({ name: 'gh', bin: 'gh', args: ['auth', 'status'], configDirEnv: 'GH_CONFIG_DIR' }),
+  Object.freeze({ name: 'glab', bin: 'glab', args: ['auth', 'status'], configDirEnv: 'GLAB_CONFIG_DIR' }),
 ]);
+
+/**
+ * withForgeConfigDir() — a PLAIN COPY of `env` with every named forge CLI's own
+ * config directory pointed at `dir`. Pure. Issue #775.
+ *
+ * WHY THIS IS NOT THE `$HOME` DESIGN THIS MODULE ALREADY REJECTED. Rejected
+ * shape 3 above builds a synthetic `$HOME` carrying an allowlist of the ENGINE's
+ * credential paths, and fails because a backend author cannot know the
+ * deployment. This names two variables belonging to the two forge CLIs brain
+ * itself declares — the same axis argument that lets `FORGE_CLIS` name `gh` and
+ * `glab` at all. No engine vendor appears here, so ADR-0005 is untouched.
+ *
+ * WHAT IT BUYS, MEASURED 2026-08-27 on a logged-in machine. `gh auth status`
+ * reported `csrinaldi (keyring)` while `~/.config/gh/hosts.yml` held NO token —
+ * only the host→user mapping. With the config dir shadowed, `gh` no longer knows
+ * github.com exists, so it never asks the keyring: the probe went from
+ * `reachable` to `closed` and the operator's keyring was never touched.
+ *
+ * WHAT IT DOES NOT BUY, and this belongs in the caller's refusal rather than in
+ * a comment nobody reads:
+ *
+ *   - The secret is still in the keyring. This makes the CLI unable to FIND it.
+ *     A tool reading libsecret directly, a `~/.netrc`, or a git credential
+ *     helper is the open namespace `credential-env.mjs` declines to bound.
+ *   - It is complementary to the scrub, never a replacement. `GH_TOKEN` in the
+ *     environment authenticates `gh` whatever the config dir says; what removes
+ *     that is `withoutCredentials`. Two mechanisms, one property.
+ *   - It is measured on ONE deployment. `gh` keeping the host mapping in the
+ *     config dir is what makes this work, and that is a probe result rather than
+ *     a contract. Which is why the probe REMAINS the reader: this function
+ *     changes what is measured, never whether it is.
+ *
+ * A BLANK DIRECTORY THROWS. The alternative — return the env unchanged — hands
+ * the producer the operator's real config dir while every caller believes it is
+ * shadowed, which is the "declared oracle with no reader" shape this whole
+ * module exists to remove.
+ *
+ * @param {object} env
+ * @param {string} dir Absolute path to a per-run, disposable directory.
+ * @returns {object}
+ */
+export function withForgeConfigDir(env, dir) {
+  if (typeof dir !== 'string' || dir.trim() === '') {
+    throw new Error(
+      'producer-forge-reach: a per-run forge config directory is required. ' +
+      'Refusing to return the environment unshadowed — a caller that believes the ' +
+      'forge CLIs are pointed at an empty directory when they are not is worse than one ' +
+      'that knows they are not.'
+    );
+  }
+  const out = { ...env };
+  for (const cli of FORGE_CLIS) out[cli.configDirEnv] = dir;
+  return out;
+}
 
 /**
  * Per-CLI facts. Four, and they stay four: a reader that answers the same thing

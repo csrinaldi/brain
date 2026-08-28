@@ -56,6 +56,12 @@ export const RUN_STAGE_OP = 'run-stage';
  * `undefined` reaching `runStage` leaves its parameter default in force, which
  * is already fail-closed. This seam invents no ceiling of its own.
  *
+ * `forgeConfigDir` rides through UNINTERPRETED for the same reason, and with
+ * one addition worth stating: the caller that passes it is the caller that RAN
+ * THE PROBE against an env carrying it (#775). A seam that defaulted it would
+ * shadow a forge CLI nobody measured, and the probe's answer would then describe
+ * an environment the child does not get.
+ *
  * `credentialEnv` rides through UNINTERPRETED. It names env vars the backend
  * must strip from the producer's environment (judgment:cold-2); this seam does
  * not decide the set and does not default it — the backend's own default is
@@ -65,11 +71,11 @@ export const RUN_STAGE_OP = 'run-stage';
  * @param {{dispatch?: Function}} [deps]
  * @returns {(args: {stage: string, prompt: string, model?: string|null,
  *                   engine: string, cwd?: string, credentialEnv?: string[],
- *                   timeoutMs?: number})
+ *                   forgeConfigDir?: string, timeoutMs?: number})
  *            => Promise<{ok: boolean, reason?: string}>}
  */
 export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
-  return async function runStage({ engine, stage, prompt, model = null, cwd, credentialEnv, timeoutMs } = {}) {
+  return async function runStage({ engine, stage, prompt, model = null, cwd, credentialEnv, forgeConfigDir, timeoutMs } = {}) {
     if (typeof engine !== 'string' || engine.trim() === '') {
       return {
         ok: false,
@@ -83,7 +89,7 @@ export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
       // list to walk: the only name that can reach `dispatch` is the one the
       // operator wrote. That is what makes "does not fall back" a property of
       // the code's shape rather than a promise in a comment.
-      result = await dispatch(engine, RUN_STAGE_OP, [{ stage, prompt, model, cwd, credentialEnv, timeoutMs }]);
+      result = await dispatch(engine, RUN_STAGE_OP, [{ stage, prompt, model, cwd, credentialEnv, forgeConfigDir, timeoutMs }]);
     } catch (err) {
       // EVERY throw is a refusal, not just the two `dispatch` spells out
       // (backend not found; backend does not implement the op). Matching on
