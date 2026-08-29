@@ -1897,6 +1897,7 @@
 {"id":"rec-d662eee9b9409626","ts":"2026-07-29T14:26:52Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d662eee9b9409626.jsonl"}
 {"id":"rec-d669300f677c409a","ts":"2026-07-25T21:51:38Z","actor":"feat/issue-266-h1-4-ruling","type":"decision","project":"brain","file":"2026-07-rec-d669300f677c409a.jsonl"}
 {"id":"rec-d67035c1ee15c782","ts":"2026-08-08T00:41:15Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-08-rec-d67035c1ee15c782.jsonl"}
+{"id":"rec-d68e9a1e00cea0a8","ts":"2026-08-29T18:54:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-d68e9a1e00cea0a8.jsonl"}
 {"id":"rec-d693c98bb1d250c3","ts":"2026-07-25T00:47:27Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-d693c98bb1d250c3.jsonl"}
 {"id":"rec-d6cf00716b9cae9e","ts":"2026-07-25T00:48:01Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d6cf00716b9cae9e.jsonl"}
 {"id":"rec-d6ebfa2fa17a5080","ts":"2026-07-29T14:27:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d6ebfa2fa17a5080.jsonl"}
@@ -2252,7 +2253,6 @@
 {"id":"rec-fef9ca7ce411e1a3","ts":"2026-07-29T14:26:42Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-fef9ca7ce411e1a3.jsonl"}
 {"id":"rec-ff125f13010ede02","ts":"2026-07-13T00:21:36Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ff125f13010ede02.jsonl"}
 {"id":"rec-ff26958aa7e598f6","ts":"2026-07-21T23:32:38Z","actor":"feat/issue-259-d2-pr3-net-parity-reverter-skip","type":"decision","project":"brain","file":"2026-07-rec-ff26958aa7e598f6.jsonl"}
-{"id":"rec-ff6a6ea41cb62818","ts":"2026-08-29T18:54:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-ff6a6ea41cb62818.jsonl"}
 {"id":"rec-ff7166dd01d20478","ts":"2026-08-11T11:15:00Z","actor":"fix/issue-530-memory-capture-reachable","type":"discovery","project":"brain","issue":518,"file":"2026-08-rec-ff7166dd01d20478.jsonl"}
 {"id":"rec-ffa569c06c3ab605","ts":"2026-07-25T00:48:24Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-ffa569c06c3ab605.jsonl"}
 {"id":"rec-ffacb2bc03a6872d","ts":"2026-07-25T21:51:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ffacb2bc03a6872d.jsonl"}
