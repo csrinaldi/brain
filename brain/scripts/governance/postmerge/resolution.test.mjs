@@ -23,8 +23,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync,
+  mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync,
 } from 'node:fs';
+import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -49,7 +50,7 @@ function setIdentity(dir) {
 
 function makeRepo(t) {
   const dir = mkdtempSync(join(tmpdir(), 'resolution-fixture-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   spawnSync('git', ['init', '--initial-branch=main', dir], { encoding: 'utf8' });
   setIdentity(dir);
   return dir;

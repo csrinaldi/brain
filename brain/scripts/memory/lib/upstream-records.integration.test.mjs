@@ -11,7 +11,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -38,9 +39,9 @@ test('issue #701: a record already merged to origin/main is not re-exported, and
   const trunk = mkdtempSync(join(tmpdir(), 'brain-701-trunk-'));
   const worktree = mkdtempSync(join(tmpdir(), 'brain-701-worktree-'));
   t.after(() => {
-    rmSync(remote, { recursive: true, force: true });
-    rmSync(trunk, { recursive: true, force: true });
-    rmSync(worktree, { recursive: true, force: true });
+    removeTempTree(remote);
+    removeTempTree(trunk);
+    removeTempTree(worktree);
   });
 
   git(remote, ['init', '-q', '--bare', '-b', 'main']);

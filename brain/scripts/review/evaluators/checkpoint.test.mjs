@@ -5,7 +5,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, copyFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, copyFileSync, readFileSync } from 'node:fs';
+import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -735,8 +736,8 @@ test('REVERSION-CWD (real default): defaultRunReversion reverts impl to base in 
   const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-rev-wt-'));
   t.after(() => {
     try { execFileSync('git', ['worktree', 'prune'], { cwd: repo }); } catch { /* best effort */ }
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(wtParent, { recursive: true, force: true });
+    removeTempTree(repo);
+    removeTempTree(wtParent);
   });
 
   const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
@@ -787,8 +788,8 @@ test('REVERSION-ADD (real default): a PR that ADDS impl+test — reversion remov
   const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-rev-add-wt-'));
   t.after(() => {
     try { execFileSync('git', ['worktree', 'prune'], { cwd: repo }); } catch { /* best effort */ }
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(wtParent, { recursive: true, force: true });
+    removeTempTree(repo);
+    removeTempTree(wtParent);
   });
 
   const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
@@ -836,8 +837,8 @@ test('REVERSION-MIXED (real default): one ADDED impl + one MODIFIED impl — bot
   const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-rev-mix-wt-'));
   t.after(() => {
     try { execFileSync('git', ['worktree', 'prune'], { cwd: repo }); } catch { /* best effort */ }
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(wtParent, { recursive: true, force: true });
+    removeTempTree(repo);
+    removeTempTree(wtParent);
   });
 
   const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
@@ -894,8 +895,8 @@ test('REVERSION-CRASHSAFE (real default): an unexpected git failure (bogus head 
   const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-rev-crash-wt-'));
   t.after(() => {
     try { execFileSync('git', ['worktree', 'prune'], { cwd: repo }); } catch { /* best effort */ }
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(wtParent, { recursive: true, force: true });
+    removeTempTree(repo);
+    removeTempTree(wtParent);
   });
 
   const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();

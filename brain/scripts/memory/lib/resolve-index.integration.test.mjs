@@ -20,7 +20,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -97,7 +98,7 @@ function buildConflictedRepo() {
 
 test('resolveIndex: a conflicted index is regenerated from records/ and the path leaves the unmerged state', (t) => {
   const { repo, recordsDir, indexPath, recA, recB, merge } = buildConflictedRepo();
-  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  t.after(() => removeTempTree(repo));
 
   // Precondition — without this the rest of the test proves nothing.
   assert.notEqual(merge.status, 0, 'the fixture merge must actually conflict');
@@ -134,7 +135,7 @@ test('resolveIndex: a conflicted index is regenerated from records/ and the path
 
 test('resolveIndex: refuses when a records file carries conflict markers, and does not write the index', (t) => {
   const { repo, recordsDir, indexPath } = buildConflictedRepo();
-  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  t.after(() => removeTempTree(repo));
 
   const before = readFileSync(indexPath, 'utf8');
   // #677 — one record per file, so the victim is whichever record file the
@@ -154,7 +155,7 @@ test('resolveIndex: refuses when a records file carries conflict markers, and do
 
 test('resolveIndex: on a clean tree it normalizes without staging anything', (t) => {
   const { repo, indexPath } = buildConflictedRepo();
-  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  t.after(() => removeTempTree(repo));
 
   resolveIndex({ repoRoot: repo });
   git(repo, ['commit', '-q', '--no-edit']);

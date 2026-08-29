@@ -33,7 +33,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -241,7 +242,7 @@ test('REQ-509-1: the ADR file is byte-identical to be2d143 (all three §1c acts)
     assert.equal(fx.res.exitCode, 0, fx.res.output);
     assert.equal(fx.read(TARGET), blob(ORACLE, TARGET));
   } finally {
-    rmSync(fx.root, { recursive: true, force: true });
+    removeTempTree(fx.root);
   }
 });
 
@@ -250,7 +251,7 @@ test('REQ-509-1: brain/HOME.md is byte-identical to be2d143 (the amendment marke
   try {
     assert.equal(fx.read(HOME), blob(ORACLE, HOME));
   } finally {
-    rmSync(fx.root, { recursive: true, force: true });
+    removeTempTree(fx.root);
   }
 });
 
@@ -259,7 +260,7 @@ test('REQ-509-1: AGENTS.md is byte-identical to be2d143 (§1d act 3 — the step
   try {
     assert.equal(fx.read(AGENTS), blob(ORACLE, AGENTS));
   } finally {
-    rmSync(fx.root, { recursive: true, force: true });
+    removeTempTree(fx.root);
   }
 });
 
@@ -269,7 +270,7 @@ test('REQ-509-1: exactly the three files are staged, and ZERO commits are create
     assert.equal(commitCount(fx.root), '1', 'the verb must never commit');
     assert.deepEqual(stagedPaths(fx.root), [AGENTS, HOME, TARGET].sort());
   } finally {
-    rmSync(fx.root, { recursive: true, force: true });
+    removeTempTree(fx.root);
   }
 });
 
@@ -302,8 +303,8 @@ test('REQ-509-1: the printed commit command passes the commit-msg hook', { skip:
     const hook = spawnSync('sh', [join(REPO_ROOT, 'brain/scripts/hooks/commit-msg'), msgFile], { encoding: 'utf8' });
     assert.equal(hook.status, 0, `commit-msg rejected the printed message:\n${message}\n${hook.stdout}`);
   } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(scratch, { recursive: true, force: true });
+    removeTempTree(root);
+    removeTempTree(scratch);
   }
 });
 
@@ -329,7 +330,7 @@ test('REQ-509-2: a second run over the already-promoted tree is a no-op, not a s
     assert.match(second.output, /already promoted/i);
     assert.equal(fx.read(TARGET), after, 'the target must be untouched by the second run');
   } finally {
-    rmSync(fx.root, { recursive: true, force: true });
+    removeTempTree(fx.root);
   }
 });
 
@@ -346,7 +347,7 @@ test('REQ-509-2: an act-2 anchor that occurs twice REFUSES — it does not edit 
     assert.deepEqual(fx.res.wrote, []);
     assert.equal(statusOf(fx.root), '', 'a refused run leaves the tree untouched');
   } finally {
-    rmSync(fx.root, { recursive: true, force: true });
+    removeTempTree(fx.root);
   }
 });
 
@@ -360,7 +361,7 @@ test('REQ-509-2: an act-2 anchor that has drifted away REFUSES with nothing writ
     assert.deepEqual(fx.res.wrote, []);
     assert.equal(statusOf(fx.root), '');
   } finally {
-    rmSync(fx.root, { recursive: true, force: true });
+    removeTempTree(fx.root);
   }
 });
 
@@ -385,6 +386,6 @@ test('REQ-509-2: a draft whose amendment number does not follow the target REFUS
     assert.match(res.output, /Amendment 4.*stands at Amendment 1|stands at Amendment 1.*expected 2/s);
     assert.equal(statusOf(root), '');
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTempTree(root);
   }
 });

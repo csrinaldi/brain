@@ -7,7 +7,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, statSync, rmSync } from 'node:fs';
+import { mkdtempSync, statSync } from 'node:fs';
+import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -32,7 +33,7 @@ function git(args, cwd) {
 test('brain-protect-server: installs hook and makes it executable in a bare repo', { skip: !GIT_AVAILABLE }, (t) => {
   const root = makeTempDir('bps-install-');
   const bareDir = join(root, 'repo.git');
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => removeTempTree(root));
 
   git(['init', '--bare', bareDir]);
 
@@ -72,7 +73,7 @@ test('brain-protect-server: returns error for a path that is not a git repositor
 
 test('brain-protect-server: rejects a non-bare working repository', { skip: !GIT_AVAILABLE }, (t) => {
   const root = makeTempDir('bps-nonbare-');
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => removeTempTree(root));
   git(['init', root]); // non-bare
 
   const result = installPreReceiveHook(root);
@@ -88,7 +89,7 @@ test('brain-protect-server: rejects a non-bare working repository', { skip: !GIT
 test('brain-protect-server: refuses to clobber an existing hook unless --force', { skip: !GIT_AVAILABLE }, (t) => {
   const root = makeTempDir('bps-clobber-');
   const bareDir = join(root, 'repo.git');
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => removeTempTree(root));
   git(['init', '--bare', bareDir]);
 
   assert.equal(installPreReceiveHook(bareDir).success, true, 'first install succeeds');

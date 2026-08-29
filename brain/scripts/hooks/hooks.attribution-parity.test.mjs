@@ -26,7 +26,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { removeTempTree } from '../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -106,7 +107,7 @@ function runCommitMsg(message, env = {}) {
       },
     });
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    removeTempTree(dir);
   }
 }
 
@@ -233,7 +234,7 @@ test('commit-msg honours git config brain.aiAgents — tomorrow\'s agent needs n
     assert.equal(allowed.status, 0,
       'the configured list replaces the default — the key is the whole vocabulary, not an addition to it');
   } finally {
-    rmSync(repo, { recursive: true, force: true });
+    removeTempTree(repo);
   }
 });
 

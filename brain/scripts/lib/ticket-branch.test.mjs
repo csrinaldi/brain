@@ -4,7 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { removeTempTree } from '../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,7 +19,7 @@ function git(cwd, ...args) {
 /** A real repo with a real `origin`, both local. No network. */
 function makeRepoWithOrigin(t, defaultBranch = 'main') {
   const dir = mkdtempSync(join(tmpdir(), 'brain-ticket-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const bare = join(dir, 'origin.git');
   const work = join(dir, 'work');

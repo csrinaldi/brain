@@ -14,7 +14,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -49,7 +50,7 @@ function git(dir, ...args) {
  */
 function makeRepo(t) {
   const dir = mkdtempSync(join(tmpdir(), 'cold-review-stage-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   spawnSync('git', ['init', '--initial-branch=main', dir], { encoding: 'utf8' });
   for (const [k, v] of [['user.email', 'test@test.com'], ['user.name', 'Test'], ['commit.gpgsign', 'false']]) {
     git(dir, 'config', k, v);
@@ -70,7 +71,7 @@ function makeRepo(t) {
  */
 function makeWorktree(t) {
   const dir = mkdtempSync(join(tmpdir(), 'cold-review-worktree-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   return dir;
 }
 
