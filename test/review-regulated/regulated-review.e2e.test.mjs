@@ -10,11 +10,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildFixture } from './fixture.mjs';
+import { removeTempTree } from '../../brain/scripts/__fixtures__/tmp-tree.mjs';
 import { parseVerdict } from '../../brain/scripts/review/lib/parse-verdict.mjs';
 import { artifactPathFor, ARTIFACT_TAG } from '../../brain/scripts/review/lib/findings-artifact.mjs';
 import { postVerdict } from '../../brain/scripts/review/poster.mjs';
@@ -28,10 +29,16 @@ const STUB_BIN = join(HERE, 'gh-stub');
  * and since this file now runs on every `npm test`, the un-cleaned version leaked
  * ~57 MB per suite pass. Measured on this working tree before the fix: 47 orphaned
  * trees, 383 MB.
+ *
+ * Teardown goes through `removeTempTree` (issue #800), not a bare `rmSync`: this
+ * suite is the one that observed `rmdir '.../consumer/.git/objects'` fail with
+ * ENOTEMPTY on a re-run of a commit that had already passed — teardown, not an
+ * assertion, taking the whole suite down with it. `force: true` alone never
+ * covered that errno; see `tmp-tree.mjs` for the full argument.
  */
 function withFixture(t, opts) {
   const fx = buildFixture(opts);
-  t.after(() => rmSync(fx.base, { recursive: true, force: true }));
+  t.after(() => removeTempTree(fx.base));
   return fx;
 }
 
