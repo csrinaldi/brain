@@ -14,6 +14,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, rmSync, symlinkSync, chmodSync, mkdtempSync } from 'node:fs';
+import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -100,7 +101,7 @@ function seedAdrTarget(root) {
 }
 
 function cleanup(root) {
-  rmSync(root, { recursive: true, force: true });
+  removeTempTree(root);
 }
 
 function fixture(draftBody = DOC_DRAFT, draftName = 'ruling.draft.md') {
@@ -583,7 +584,7 @@ test('BLOCKER 6 e2e: a symlinked target is REFUSED, and the out-of-repo file is 
     assert.equal(readFileSync(outsideFile, 'utf8'), original, 'the out-of-repo file must be byte-identical');
   } finally {
     cleanup(fx.root);
-    rmSync(outside, { recursive: true, force: true });
+    removeTempTree(outside);
   }
 });
 
@@ -632,7 +633,7 @@ test('BLOCKER 5 e2e: the same rollback against a REAL immutable file (EPERM from
     spawnSync('chattr', ['+i', probeFile]).status === 0 &&
     spawnSync(process.execPath, ['-e', `require('fs').writeFileSync(${JSON.stringify(probeFile)}, 'y')`]).status !== 0;
   spawnSync('chattr', ['-i', probeFile]);
-  rmSync(probe, { recursive: true, force: true });
+  removeTempTree(probe);
   if (!chattrWorks) {
     // Not a pass dressed as a pass: the seam-driven test above still ran and is
     // the one that pins the behaviour everywhere.

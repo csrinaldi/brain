@@ -4,7 +4,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, existsSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { removeTempTree } from '../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -167,8 +168,8 @@ test('COLDBOOT-CWD (real default): defaultCloneDetached checks out a SEPARATE de
   const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-wt-'));
   t.after(() => {
     try { git(repo, 'worktree', 'prune'); } catch { /* best effort */ }
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(wtParent, { recursive: true, force: true });
+    removeTempTree(repo);
+    removeTempTree(wtParent);
   });
 
   git(repo, 'init', '-q');
@@ -210,7 +211,7 @@ test('COLDBOOT-DEPTH (real default): defaultCloneDetached fetches head AND base 
   const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-wt-'));
   t.after(() => {
     try { git(op, 'worktree', 'prune'); } catch { /* best effort */ }
-    for (const d of [remote, seed, op, wtParent]) rmSync(d, { recursive: true, force: true });
+    for (const d of [remote, seed, op, wtParent]) removeTempTree(d);
   });
 
   // Bare remote: a base and a head that DIVERGE from a common ancestor A.
@@ -277,7 +278,7 @@ test('COLDBOOT-SHALLOW (real default): shallow op with both tips already grafted
   const op = join(opParent, 'op');
   t.after(() => {
     try { git(op, 'worktree', 'prune'); } catch { /* best effort */ }
-    for (const d of [remote, seed, opParent, wtParent]) rmSync(d, { recursive: true, force: true });
+    for (const d of [remote, seed, opParent, wtParent]) removeTempTree(d);
   });
 
   git(remote, 'init', '-q', '--bare');

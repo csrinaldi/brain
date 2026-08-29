@@ -6,7 +6,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, cpSync } from 'node:fs';
+import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -51,7 +52,7 @@ function runCheckRefs(dir) {
 
 test('repo:check (no-verify-bypass): flags --no-verify in a .mjs file', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'refs-no-verify-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeMinimalRepo(dir);
   copyRulesFile(dir);
@@ -69,7 +70,7 @@ test('repo:check (no-verify-bypass): flags --no-verify in a .mjs file', (t) => {
 
 test('repo:check (no-verify-bypass): flags git commit -n in a .mjs file', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'refs-commit-n-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeMinimalRepo(dir);
   copyRulesFile(dir);
@@ -87,7 +88,7 @@ test('repo:check (no-verify-bypass): flags git commit -n in a .mjs file', (t) =>
 
 test('repo:check (no-verify-bypass): clean .mjs file passes', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'refs-clean-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeMinimalRepo(dir);
   copyRulesFile(dir);
@@ -116,7 +117,7 @@ function makeChangeDir(dir, name, files) {
 
 test('repo:check S-1: a new dir missing spec.md and design.md is flagged, naming BOTH missing artifacts and pointing to sdd-layout.md (never-cryptic, #595 pin 1b)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'refs-s1-missing-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeMinimalRepo(dir);
   copyRulesFile(dir);
@@ -134,7 +135,7 @@ test('repo:check S-1: a new dir missing spec.md and design.md is flagged, naming
 
 test('repo:check S-1: a grandfathered dir (vcs-adapter) with no spec/design artifacts at all is never flagged (sealed-set short-circuit)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'refs-s1-grandfathered-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeMinimalRepo(dir);
   copyRulesFile(dir);
@@ -148,7 +149,7 @@ test('repo:check S-1: a grandfathered dir (vcs-adapter) with no spec/design arti
 
 test('repo:check S-1 (Phase 6.2 synthetic — REQ-B1-2 "latent-stricter for future new dirs"): a dir missing exactly ONE of the 4 (spec.md) is caught — the OLD 2-of-4 loop would have missed this since proposal.md+tasks.md are both present', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'refs-s1-one-missing-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeMinimalRepo(dir);
   copyRulesFile(dir);
@@ -163,7 +164,7 @@ test('repo:check S-1 (Phase 6.2 synthetic — REQ-B1-2 "latent-stricter for futu
 
 test('repo:check S-1 (Phase 6.1 synthetic): a new dir with a NESTED specs/<capability>/spec.md (no flat spec.md) passes — flat-OR-nested tolerance holds through the wired site', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'refs-s1-nested-spec-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeMinimalRepo(dir);
   copyRulesFile(dir);
@@ -179,7 +180,7 @@ test('repo:check S-1 (Phase 6.1 synthetic): a new dir with a NESTED specs/<capab
 
 test('repo:check S-1 (Phase 6.1 synthetic): a dir with no artifacts at all lists all 4 as missing', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'refs-s1-empty-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeMinimalRepo(dir);
   copyRulesFile(dir);
@@ -208,7 +209,7 @@ function writeTierConfig(git, dir, tier) {
 
 test('#555: at a declared `lite`, a change carrying only spec.md is accepted (config-present path)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'refs-s1-lite-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeMinimalRepo(dir);
   copyRulesFile(dir);
@@ -228,7 +229,7 @@ test('#555: a TYPO in governance.tier REFUSES — it never silently degrades to 
   // declared, in a gate `NEVER_TIERED` lists as required at every tier.
   // `review/cli.mjs` already refuses on this same throw; this gate now agrees.
   const dir = mkdtempSync(join(tmpdir(), 'refs-s1-typo-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeMinimalRepo(dir);
   copyRulesFile(dir);
@@ -247,7 +248,7 @@ test('#555: a TYPO in governance.tier REFUSES — it never silently degrades to 
 
 test('#555: a present-but-unparseable config REFUSES — unreadable is not "absent"', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'refs-s1-badjson-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeMinimalRepo(dir);
   copyRulesFile(dir);

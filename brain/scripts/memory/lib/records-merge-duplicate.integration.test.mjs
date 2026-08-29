@@ -30,7 +30,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
+import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -52,7 +53,7 @@ const BASE = {
 
 function initRepo(t) {
   const repo = mkdtempSync(join(tmpdir(), 'brain-records-dup-merge-'));
-  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  t.after(() => removeTempTree(repo));
   const recordsDir = join(repo, '.memory', 'records');
   git(repo, ['init', '-q', '-b', 'main']);
   git(repo, ['config', 'user.email', 'test@example.invalid']);

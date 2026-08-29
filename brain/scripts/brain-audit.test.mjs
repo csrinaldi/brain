@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, chmodSync,
+  mkdtempSync, mkdirSync, writeFileSync, existsSync, chmodSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
+import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 
 const AUDIT_SCRIPT = new URL('./brain-audit.mjs', import.meta.url).pathname;
 
@@ -59,7 +60,7 @@ function makeSessionSummaryRecord() {
 
 test('brain-audit: PASS merge — emits [PASS] and exits 0', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-pass-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
 
@@ -89,7 +90,7 @@ test('brain-audit: PASS merge — emits [PASS] and exits 0', (t) => {
 
 test('brain-audit: FAIL merge — emits [FAIL] with invariants and exits 1', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-fail-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
@@ -118,7 +119,7 @@ test('brain-audit: FAIL merge — emits [FAIL] with invariants and exits 1', (t)
 // state (a cron run with no new commits since the cursor) and must still exit 0.
 test('brain-audit: a genuinely EMPTY range exits 0 with an info message', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-empty-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
@@ -131,7 +132,7 @@ test('brain-audit: a genuinely EMPTY range exits 0 with an info message', (t) =>
 
 test('#518: an ordinary commit in range is AUDITED — the old "no merges" silence is gone', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-nonmerge-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
@@ -159,7 +160,7 @@ test('#518: an ordinary commit in range is AUDITED — the old "no merges" silen
 // With --first-parent only M1 is visited → no false failures.
 test('brain-audit: --first-parent excludes nested slice merges', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-firstparent-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
 
@@ -216,7 +217,7 @@ test('brain-audit: --first-parent excludes nested slice merges', (t) => {
 //   Exit: 0  (without baseline MERGE_BAD would cause exit 1)
 test('brain-audit: baseline skips pre-baseline merges (no false failure)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-baseline-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
 
@@ -270,7 +271,7 @@ test('brain-audit: baseline skips pre-baseline merges (no false failure)', (t) =
 // ── baseline invalid ref — warns and audits all (no crash) ───────────────────
 test('brain-audit: invalid baseline ref warns and falls back to auditing all', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-baseline-invalid-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
@@ -318,7 +319,7 @@ test('brain-audit: invalid baseline ref warns and falls back to auditing all', (
 // extracts the session_summary observation, and memoryPresence returns pass.
 test('brain-audit: real records with session_summary → memoryPresence passes', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-realrecords-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
@@ -351,7 +352,7 @@ test('brain-audit: real records with session_summary → memoryPresence passes',
 // must exit cleanly (not with an unhandled exception).
 test('brain-audit: corrupt record line is skipped — audit does not crash', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-corrupt-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
@@ -447,7 +448,7 @@ function genuineRevertMerge(git, dir, offenderSha, branchName, mergeMsg) {
 
 test('brain-audit: A7 revert-of-a-revert — a re-added >400-line offender LIVE at HEAD is reported, never all-[SKIP]', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a7-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
 
@@ -560,7 +561,7 @@ function mergeAddingAdr(git, dir, label, mergeMsg) {
 // ── Emission — an un-exempted tree-keyed offender emits [FAIL] + [FAIL-SHA] ──
 test('D2 emission — a diffSize offender carries an additive [FAIL-SHA] <full-sha> line', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-emit-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, {
     'README.md': 'init',
@@ -579,7 +580,7 @@ test('D2 emission — a diffSize offender carries an additive [FAIL-SHA] <full-s
 // ── Resolved-skip liveness (A2) — a genuine revert resolves the offender ─────
 test('D2 A2 — a genuine revert resolves the offender: O [SKIP] resolved by revert, exit 0', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a2-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, {
     'README.md': 'init',
@@ -603,7 +604,7 @@ test('D2 A2 — a genuine revert resolves the offender: O [SKIP] resolved by rev
 // to close the revert-of-revert loop — that is the frozen A7 fixture's job.) ──
 test('D2 A6 — a genuine O(adrPresence)+R reverter pair: R is tree-keyed exempted, O resolved, exit 0', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a6-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, {
     'README.md': 'init',
@@ -635,7 +636,7 @@ test('D2 A6 — a genuine O(adrPresence)+R reverter pair: R is tree-keyed exempt
 // ── claim-only merge is NOT skipped (spec REQ-D2-10a reverter-skip scenario) ──
 test('D2 — a merge that merely CLAIMS a revert but has no tree inverse is NOT skipped', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-claim-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, {
     'README.md': 'init',
@@ -661,7 +662,7 @@ test('D2 — a merge that merely CLAIMS a revert but has no tree inverse is NOT 
 // merges drive exit 1 but emit ZERO [FAIL-SHA] (non-tree-keyed → human gate) ──
 test('D2 A9(a) — a memoryPresence-only failure drives exit 1 but emits ZERO [FAIL-SHA]', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a9mem-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   // NO session_summary anywhere → memoryPresence fails repo-wide.
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
@@ -678,7 +679,7 @@ test('D2 A9(a) — a memoryPresence-only failure drives exit 1 but emits ZERO [F
 
 test('D2 A9(a) — an issueLink-only failure drives exit 1 but emits ZERO [FAIL-SHA]', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a9issue-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, {
     'README.md': 'init',
@@ -700,7 +701,7 @@ test('D2 A9(a) — an issueLink-only failure drives exit 1 but emits ZERO [FAIL-
 // only the newest net-present carrier (R2) emits [FAIL-SHA]; O emits none. ────
 test('D2 dedup — O and R2 share a payload; only the newest carrier R2 emits [FAIL-SHA]', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-dedup-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, {
     'README.md': 'init',
@@ -723,7 +724,7 @@ test('D2 dedup — O and R2 share a payload; only the newest carrier R2 emits [F
 // ── adrPresence [FAIL] line carries the human-gate remediation (§15.6a) ──────
 test('D2 — an adrPresence [FAIL] line appends the human-gate remediation (accept --reason)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-adrrem-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, {
     'README.md': 'init',
@@ -779,7 +780,7 @@ test('D2 crossCheckExit — decoupled failCount / tree-keyed⟺[FAIL-SHA] cohere
 // ── Fail-closed top-level catch — an uncomputable range exits 2 on stdout ────
 test('D2 fail-closed — an uncomputable git range exits 2 with the message on stdout', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-uncomputable-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
 
@@ -885,7 +886,7 @@ function runAuditUnauthenticated(dir, range) {
 
 test('REQ-TS-2 (#474/c724942): an unreadable PR is UNCOMPUTABLE (exit 2), never an issueLink verdict', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-uncomputable-pr-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const { base } = c724942Fixture(dir);
 
   const r = runAuditUnauthenticated(dir, `${base}..HEAD`);
@@ -903,7 +904,7 @@ test('REQ-TS-2 (#474/c724942): an unreadable PR is UNCOMPUTABLE (exit 2), never 
 
 test('REQ-TS-2 (#474): ONE unreadable PR poisons a window whose other merges PASS', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-uncomputable-mixed-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const { git, base } = c724942Fixture(dir);
 
   // A second merge that carries its issue link in the COMMIT body and references
@@ -927,7 +928,7 @@ test('REQ-TS-2 (#474): ONE unreadable PR poisons a window whose other merges PAS
 
 test('REQ-TS-3 (#474): a merge with NO PR reference stays evaluable unauthenticated', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-nopr-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, {
     'README.md': 'init',
@@ -1002,7 +1003,7 @@ function mergeDeletingPath(git, dir, path, label, mergeMsg) {
 
 test('brain-audit: A8 payload predating the window base — a delete + a live re-add of an ungoverned ADR at HEAD is reported, never all-[SKIP]', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a8-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
 
@@ -1281,7 +1282,7 @@ function runAuditWithReviews(dir, range, reviews) {
 
 test('A10b: the MODIFY channel with NO approving review is reported — post-merge, "not yet" is "never" (#511)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a10b-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const { git, base, OFFENDING } = a10Repo(dir);
   const oSha = mergeAddingPayload(git, dir, { [ADR_FILE]: OFFENDING }, 'O',
     'Merge pull request #3 from acme/restore');
@@ -1299,7 +1300,7 @@ test('A10b: the MODIFY channel with NO approving review is reported — post-mer
 
 test('A10c: the same edit WITH an approving human review is not reported (#511)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a10c-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const { git, base, OFFENDING } = a10Repo(dir);
   mergeAddingPayload(git, dir, { [ADR_FILE]: OFFENDING }, 'O',
     'Merge pull request #3 from acme/restore');
@@ -1335,7 +1336,7 @@ test('A10c: the same edit WITH an approving human review is not reported (#511)'
 // side: the good citizen MAY be reported, and must never be auto-reverted.
 test('A10d: the cleanup reverter is a brain/ write too — its missing human gate survives the reverter-skip and is never nominated (#510/#511)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a10d-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, {
@@ -1374,7 +1375,7 @@ test('A10d: the cleanup reverter is a brain/ write too — its missing human gat
 
 test('brain-audit: A10 modification-shaped payload — an ungoverned ADR edited back in and LIVE at HEAD is reported, never all-[SKIP]', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a10-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
 
@@ -1469,7 +1470,7 @@ test('brain-audit: A10 modification-shaped payload — an ungoverned ADR edited 
 
 test('brain-audit: A11 good-citizen emission — a modify-shaped cleanup reverter is reported but NEVER carries [FAIL-SHA]', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a11-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
 
@@ -1563,7 +1564,7 @@ test('brain-audit: A11 good-citizen emission — a modify-shaped cleanup reverte
 
 test('brain-audit: A12 replace-shaped cleanup — a merge whose net effect removes the offending payload is never nominated for auto-revert, even while adding live text', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-a12-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
 
@@ -1667,7 +1668,7 @@ test('#518 PARITY: a squash-shaped offender gets the SAME verdict as a merge-sha
 
   const run = (how) => {
     const dir = mkdtempSync(join(tmpdir(), `audit-518par-${how}-`));
-    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    t.after(() => removeTempTree(dir));
     const git = makeRepo(dir);
     commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
     const base = headShaOf(git);
@@ -1691,7 +1692,7 @@ test('#518 PARITY: a squash-shaped offender gets the SAME verdict as a merge-sha
 
 test('#518: a window whose only content is a squash is AUDITED, not reported empty', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-518sq-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, {
@@ -1711,7 +1712,7 @@ test('#518: a window whose only content is a squash is AUDITED, not reported emp
 
 test('#518: a squash carrying a governance violation FAILS, where it used to pass unseen', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-518bad-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
@@ -1730,7 +1731,7 @@ test('#518: a squash-shaped offender can be NOMINATED for auto-revert', (t) => {
   // already branches on parent count (`-m 1` only when nparents >= 2), so a linear
   // nomination is executable — that branch existed before anything could reach it.
   const dir = mkdtempSync(join(tmpdir(), 'audit-518nom-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init', 'brain/HOME.md': '# home\n' }, 'chore: initial (#0)');
@@ -1752,7 +1753,7 @@ test('#518: a range reaching the ROOT commit is uncomputable, never silently nar
   // replacement guarantee (`%P` is empty only at the root) has to be asserted rather
   // than assumed — fail-closed, never a skip.
   const dir = mkdtempSync(join(tmpdir(), 'audit-518root-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
 
@@ -1771,7 +1772,7 @@ test('#518: readMergeParent REFUSES the root commit — driven as a unit, not th
   // That is the `||`-in-an-assertion lesson in another shape: an outcome satisfied
   // by a second path proves nothing about the first. This drives the function.
   const dir = mkdtempSync(join(tmpdir(), 'audit-518parent-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
   const root = headShaOf(git);
@@ -1828,7 +1829,7 @@ function extractAcceptCommand(stdout) {
 
 test('#518: the printed accept command PARSES — it reaches the CAS, not the usage error', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-518-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, {
@@ -1862,7 +1863,7 @@ test('#518: the printed accept command PARSES — it reaches the CAS, not the us
 
 test('#518: the accept command names the WINDOW, never the offending merge as <from>', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-518b-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, {
@@ -1886,7 +1887,7 @@ test('#518: the accept command names the WINDOW, never the offending merge as <f
 
 test('#518: with no window base, the command is VISIBLY a placeholder rather than a plausible guess', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-518c-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
 
   const git = makeRepo(dir);
   commit(git, dir, {

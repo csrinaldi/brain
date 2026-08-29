@@ -5,8 +5,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mkdtempSync, rmSync, mkdirSync,
+  mkdtempSync, mkdirSync,
 } from 'node:fs';
+import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -65,7 +66,7 @@ function headSha(dir) {
  */
 function makeBareOriginAndClone(t, { setCursorRef = false } = {}) {
   const scratch = mkdtempSync(join(tmpdir(), 'cursor-fixture-'));
-  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  t.after(() => removeTempTree(scratch));
 
   const seedDir = join(scratch, 'seed');
   mkdirSync(seedDir);
@@ -96,7 +97,7 @@ function makeBareOriginAndClone(t, { setCursorRef = false } = {}) {
  */
 function makeOriginWithLinearHistory(t) {
   const scratch = mkdtempSync(join(tmpdir(), 'cursor-race-'));
-  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  t.after(() => removeTempTree(scratch));
 
   const originDir = join(scratch, 'origin.git');
   mkdirSync(originDir);
@@ -259,7 +260,7 @@ test('resolveWindow: absent/unknown cursor state is propagated without computing
 
 test('advanceCursor: B4 — no cursor ref on origin → remote lease rejects (never auto-creates), ref still absent afterward', (t) => {
   const scratch = mkdtempSync(join(tmpdir(), 'cursor-cas-b4-'));
-  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  t.after(() => removeTempTree(scratch));
 
   const originDir = join(scratch, 'origin.git');
   mkdirSync(originDir);
@@ -298,7 +299,7 @@ test('advanceCursor: non-40-hex from throws before touching git', () => {
 
 test('advanceCursor: from that is not an ancestor of to throws (cursor only ever moves forward)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'cursor-cas-notancestor-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git0 = makeRepo(dir);
   git0('commit', '--allow-empty', '-m', 'A');
   const to = headSha(dir);
@@ -402,7 +403,7 @@ test('acceptManually: refuses an empty --reason', (t) => {
 
 test('acceptManually: caller-supplied `from` matches the live cursor → CAS succeeds, echoes reason (positive case)', (t) => {
   const scratch = mkdtempSync(join(tmpdir(), 'cursor-accept-'));
-  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  t.after(() => removeTempTree(scratch));
 
   const originDir = join(scratch, 'origin.git');
   mkdirSync(originDir);
@@ -547,7 +548,7 @@ test('CLI: `cursor.mjs window` prints UNKNOWN <reason> and exits 2 when origin i
 
 test('CLI: `cursor.mjs accept <from> <to> --reason "<text>"` invokes acceptManually', (t) => {
   const scratch = mkdtempSync(join(tmpdir(), 'cursor-cli-accept-'));
-  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  t.after(() => removeTempTree(scratch));
 
   const originDir = join(scratch, 'origin.git');
   mkdirSync(originDir);

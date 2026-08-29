@@ -16,7 +16,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -270,6 +271,6 @@ test('merge-without-a-driver: the month log CONFLICTS and one-file-per-record do
   assert.match(listed, new RegExp(`2026-08-${b.id}\\.jsonl`));
   assert.equal(existsSync(join(splitRecords, '2026-08.jsonl')), false);
 
-  rmSync(monthRepo, { recursive: true, force: true });
-  rmSync(splitRepo, { recursive: true, force: true });
+  removeTempTree(monthRepo);
+  removeTempTree(splitRepo);
 });

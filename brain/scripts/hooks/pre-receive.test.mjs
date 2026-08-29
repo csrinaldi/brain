@@ -20,8 +20,8 @@ import {
   writeFileSync,
   copyFileSync,
   chmodSync,
-  rmSync,
 } from 'node:fs';
+import { removeTempTree } from '../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -116,7 +116,7 @@ function appendAndPush(cloneDir, file, message) {
 
 test('pre-receive: rejects push with a non-conventional commit message', { skip: !GIT_AVAILABLE }, (t) => {
   const { root, cloneDir } = setupFixture('pr-bad-');
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => removeTempTree(root));
 
   const result = commitAndPush(cloneDir, 'bad message no ticket');
 
@@ -137,7 +137,7 @@ test('pre-receive: rejects push with a non-conventional commit message', { skip:
 
 test('pre-receive: accepts push with a valid conventional commit and ticket ref', { skip: !GIT_AVAILABLE }, (t) => {
   const { root, cloneDir } = setupFixture('pr-good-');
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => removeTempTree(root));
 
   const result = commitAndPush(cloneDir, 'feat(x): add thing (#1)');
 
@@ -154,7 +154,7 @@ test('pre-receive: accepts push with a valid conventional commit and ticket ref'
 
 test('pre-receive: accepts exempt chore(release) commit without a ticket ref', { skip: !GIT_AVAILABLE }, (t) => {
   const { root, cloneDir } = setupFixture('pr-exempt-');
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => removeTempTree(root));
 
   const result = commitAndPush(cloneDir, 'chore(release): v1.0.0');
 
@@ -173,7 +173,7 @@ test('pre-receive: accepts exempt chore(release) commit without a ticket ref', {
 
 test('pre-receive: rejects a multi-commit push when a middle commit is bad', { skip: !GIT_AVAILABLE }, (t) => {
   const { root, cloneDir } = setupFixture('pr-multi-');
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => removeTempTree(root));
 
   // Three commits in ONE push: good, BAD (middle), good.
   for (const msg of ['feat(a): first (#1)', 'bad middle commit', 'feat(c): third (#3)']) {
@@ -199,7 +199,7 @@ test('pre-receive: rejects a multi-commit push when a middle commit is bad', { s
 
 test('pre-receive: rejects an append to a tracked file with a non-compliant message (bare-repo push rejection, CP-A4a)', { skip: !GIT_AVAILABLE }, (t) => {
   const { root, cloneDir } = setupFixture('pr-append-bad-');
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => removeTempTree(root));
 
   // First: a COMPLIANT commit that creates a tracked file.
   const first = commitAndPush(cloneDir, 'feat(x): create tracked file (#1)');
@@ -228,7 +228,7 @@ test('pre-receive: rejects an append to a tracked file with a non-compliant mess
 
 test('pre-receive: accepts an append to a tracked file with a compliant message (bare-repo push acceptance, CP-A4a)', { skip: !GIT_AVAILABLE }, (t) => {
   const { root, cloneDir } = setupFixture('pr-append-good-');
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => removeTempTree(root));
 
   const trackedFile = join(cloneDir, 'tracked.txt');
   writeFileSync(trackedFile, 'initial content\n');

@@ -14,7 +14,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -163,7 +164,7 @@ test('drift-guard: the reader returns the COMMITTED bytes even when the working 
     assert.equal(committedBytes('f.json', scratch), 'COMMITTED\n', 'the reader must ignore the working copy');
     assert.equal(committedBytes('untracked.json', scratch), null, 'an untracked path reads as null, not as an error');
   } finally {
-    rmSync(scratch, { recursive: true, force: true });
+    removeTempTree(scratch);
   }
 });
 
@@ -176,6 +177,6 @@ test('drift-guard: the reader REFUSES rather than passing when git cannot answer
       'outside a repository the reader must throw — returning null would read as "nothing is committed"',
     );
   } finally {
-    rmSync(notARepo, { recursive: true, force: true });
+    removeTempTree(notARepo);
   }
 });

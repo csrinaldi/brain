@@ -9,7 +9,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
+import { removeTempTree } from '../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -30,7 +31,7 @@ function commit(git, dir, message) {
 
 test('resolveBaseline: a valid ref resolves and carries no warning', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'merge-walk-baseline-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, 'chore: initial');
   git('tag', 'v0.1.0');
@@ -42,14 +43,14 @@ test('resolveBaseline: a valid ref resolves and carries no warning', (t) => {
 
 test('resolveBaseline: a null/undefined baseline resolves to null, no warning', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'merge-walk-baseline-null-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   assert.deepEqual(resolveBaseline(null, dir), { ref: null, warning: null });
   assert.deepEqual(resolveBaseline(undefined, dir), { ref: null, warning: null });
 });
 
 test('resolveBaseline: an unresolvable ref falls back to null WITH a warning message (caller decides where it goes)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'merge-walk-baseline-invalid-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, 'chore: initial');
 
@@ -61,7 +62,7 @@ test('resolveBaseline: an unresolvable ref falls back to null WITH a warning mes
 
 test('makeGitIsAncestor: true when baseline is an ancestor of sha', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'merge-walk-ancestor-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, 'chore: base');
   const base = git('rev-parse', 'HEAD').stdout.trim();
@@ -74,7 +75,7 @@ test('makeGitIsAncestor: true when baseline is an ancestor of sha', (t) => {
 
 test('makeGitIsAncestor: false when baseline is NOT an ancestor of sha', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'merge-walk-ancestor-not-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, 'chore: base');
   const base = git('rev-parse', 'HEAD').stdout.trim();

@@ -432,6 +432,30 @@
       "sessions": 1,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "925a2565",
+      "created_by": "gandalf",
+      "created_at": "2026-08-29T20:20:12Z",
+      "sessions": 1,
+      "memories": 2,
+      "prompts": 0
+    },
+    {
+      "id": "1f544440",
+      "created_by": "gandalf",
+      "created_at": "2026-08-29T20:56:47Z",
+      "sessions": 1,
+      "memories": 1,
+      "prompts": 0
+    },
+    {
+      "id": "3612681f",
+      "created_by": "gandalf",
+      "created_at": "2026-08-29T20:58:21Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }

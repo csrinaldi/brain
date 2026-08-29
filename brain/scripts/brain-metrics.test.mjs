@@ -3,8 +3,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mkdtempSync, mkdirSync, writeFileSync, rmSync,
+  mkdtempSync, mkdirSync, writeFileSync,
 } from 'node:fs';
+import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -273,7 +274,7 @@ test('package.json declares the brain:metrics script pointing at brain-metrics.m
 
 test('E1 — an empty range prints "No data" and exits 0', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-e1-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
   const head = headShaOf(git);
@@ -285,7 +286,7 @@ test('E1 — an empty range prints "No data" and exits 0', (t) => {
 
 test('E1 — an empty range with --json prints an empty array and exits 0', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-e1-json-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
   const head = headShaOf(git);
@@ -297,7 +298,7 @@ test('E1 — an empty range with --json prints an empty array and exits 0', (t) 
 
 test('E3 — an invalid git range prints an actionable error and exits non-zero', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-e3-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
 
@@ -309,7 +310,7 @@ test('E3 — an invalid git range prints an actionable error and exits non-zero'
 
 test('integration smoke — a small real history produces sane markdown counts (Phase 8)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-smoke-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, {
     'README.md': 'init',
@@ -350,7 +351,7 @@ test('integration smoke — a small real history produces sane markdown counts (
 
 test('lead-time (C1): an injected vcs.labelEvents resolves the ISSUE\'s status:approved label-add timestamp', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-vcs-leadtime-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
   const base = headShaOf(git);
@@ -392,7 +393,7 @@ test('lead-time (C1): an injected vcs.labelEvents resolves the ISSUE\'s status:a
 // must NOT appear in the rendered `detection` map at all.
 test('detection rollup (C1): an injected vcs.prStatusRollup populates tier-scoped detection pass/fail counts — actor-check is excluded (required at every tier)', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-vcs-detection-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, {
     'README.md': 'init',
@@ -436,7 +437,7 @@ test('detection rollup (C1): an injected vcs.prStatusRollup populates tier-scope
 
 test('by-author (C1): an injected vcs.labelEvents resolves the size:exception label-adding actor', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-vcs-byauthor-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
   const base = headShaOf(git);
@@ -472,7 +473,7 @@ test('by-author (C1): an injected vcs.labelEvents resolves the size:exception la
 //   A (initial) → MERGE_BAD (no issue link, oversized) → E (config, tag v0.1.0) → MERGE_GOOD (Closes #1)
 test('brain-metrics: a pre-baseline merge is skipped, not counted as a raw gate failure (parity with brain-audit)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-baseline-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
 
   commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
@@ -531,7 +532,7 @@ test('--help (C3): prints usage and exits 0, via runMetrics directly (no subproc
 
 test('--help (C3): CLI subprocess exits 0 and prints usage, not the doubled-prefix error', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-help-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const r = spawnSync('node', [METRICS_SCRIPT, '--help'], { cwd: dir, encoding: 'utf8' });
   assert.equal(r.status, 0, `expected exit 0\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /Usage: brain:metrics/i);
@@ -547,7 +548,7 @@ test('parseArgs rejection (C3): the error message is never double-prefixed', asy
 
 test('--period=week buckets the same history into ISO week keys', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-week-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   commit(git, dir, {
     'README.md': 'init',

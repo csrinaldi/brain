@@ -6,7 +6,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -23,7 +24,7 @@ function makeRepo(dir) {
 
 test('gitTry: status 0 on a successful command, stdout captured', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'git-seam-ok-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   git('commit', '--allow-empty', '-m', 'init');
 
@@ -35,7 +36,7 @@ test('gitTry: status 0 on a successful command, stdout captured', (t) => {
 
 test('gitTry: never throws on a documented non-zero exit (ls-remote --exit-code, no matching ref → 2)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'git-seam-absent-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   makeRepo(dir);
 
   assert.doesNotThrow(() => {
@@ -46,7 +47,7 @@ test('gitTry: never throws on a documented non-zero exit (ls-remote --exit-code,
 
 test('gitTry: never throws on an unrelated failure (unreachable remote → non-zero, non-2)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'git-seam-unreachable-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   makeRepo(dir);
 
   const bogus = join(dir, 'does', 'not', 'exist', 'at', 'all');
@@ -62,7 +63,7 @@ test('gitTry: never throws on an unrelated failure (unreachable remote → non-z
 // gate for an infra limit rather than a governance violation (issue #332).
 test('gitTry: captures git output larger than the 1 MiB execFileSync default', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'git-seam-bigdiff-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   git('commit', '--allow-empty', '-m', 'init');
 
@@ -87,7 +88,7 @@ test('gitTry: captures git output larger than the 1 MiB execFileSync default', (
 // as a buffer limit, not as an unmappable git tri-state.
 test('gitTry: an exceeded output buffer reports a legible reason, not an empty stderr', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'git-seam-enobufs-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   git('commit', '--allow-empty', '-m', 'init');
 
@@ -99,7 +100,7 @@ test('gitTry: an exceeded output buffer reports a legible reason, not an empty s
 
 test('gitOrThrow: returns stdout on status 0', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'git-seam-orthrow-ok-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
   git('commit', '--allow-empty', '-m', 'init');
 
@@ -109,7 +110,7 @@ test('gitOrThrow: returns stdout on status 0', (t) => {
 
 test('gitOrThrow: throws an Error carrying .status on a non-zero exit', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'git-seam-orthrow-fail-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   makeRepo(dir);
 
   assert.throws(

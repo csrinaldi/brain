@@ -18,8 +18,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mkdtempSync, mkdirSync, writeFileSync, rmSync,
+  mkdtempSync, mkdirSync, writeFileSync,
 } from 'node:fs';
+import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -124,7 +125,7 @@ function countLinesStartingWith(stdout, prefix) {
 
 test('brain-metrics re-execution matches brain-audit\'s own verdict, per gate, over the SAME fixture history and range (spec REQ-7)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-audit-parity-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => removeTempTree(dir));
   buildFixture(dir);
 
   const auditRun = spawnSync('node', [AUDIT_SCRIPT], { cwd: dir, encoding: 'utf8' });

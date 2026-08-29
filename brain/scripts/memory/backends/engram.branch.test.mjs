@@ -9,7 +9,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
+import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -21,7 +22,7 @@ test('_getGitBranch: non-git directory → "unknown"', () => {
   try {
     assert.equal(_getGitBranch(dir), 'unknown');
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    removeTempTree(dir);
   }
 });
 
@@ -40,7 +41,7 @@ test('_getGitBranch: real git repo on a named branch → branch name', () => {
     git(['commit', '-q', '--allow-empty', '-m', 'init']);
     assert.equal(_getGitBranch(dir), 'named-branch');
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    removeTempTree(dir);
   }
 });
 

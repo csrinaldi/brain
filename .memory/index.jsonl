@@ -198,6 +198,7 @@
 {"id":"rec-15d0fb1ed4ba89c3","ts":"2026-07-29T14:28:50Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-15d0fb1ed4ba89c3.jsonl"}
 {"id":"rec-1602e2a35fc473c8","ts":"2026-07-25T21:50:17Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-1602e2a35fc473c8.jsonl"}
 {"id":"rec-1627f01577b2ef78","ts":"2026-08-20T13:34:01Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-1627f01577b2ef78.jsonl"}
+{"id":"rec-162ec02d3aa601c6","ts":"2026-08-29T18:34:24Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-08-rec-162ec02d3aa601c6.jsonl"}
 {"id":"rec-165ef2872588f840","ts":"2026-07-25T21:51:16Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-165ef2872588f840.jsonl"}
 {"id":"rec-167af9d18efd2ead","ts":"2026-08-16T15:06:11Z","actor":"fix/issue-612-fixreview-a-trailing-space-on-a-key-line","type":"bugfix","project":"brain","issue":612,"file":"2026-08-rec-167af9d18efd2ead.jsonl"}
 {"id":"rec-169ea2465fc98105","ts":"2026-07-29T14:27:24Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-169ea2465fc98105.jsonl"}
@@ -1896,6 +1897,7 @@
 {"id":"rec-d662eee9b9409626","ts":"2026-07-29T14:26:52Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d662eee9b9409626.jsonl"}
 {"id":"rec-d669300f677c409a","ts":"2026-07-25T21:51:38Z","actor":"feat/issue-266-h1-4-ruling","type":"decision","project":"brain","file":"2026-07-rec-d669300f677c409a.jsonl"}
 {"id":"rec-d67035c1ee15c782","ts":"2026-08-08T00:41:15Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-08-rec-d67035c1ee15c782.jsonl"}
+{"id":"rec-d68e9a1e00cea0a8","ts":"2026-08-29T18:54:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-d68e9a1e00cea0a8.jsonl"}
 {"id":"rec-d693c98bb1d250c3","ts":"2026-07-25T00:47:27Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-d693c98bb1d250c3.jsonl"}
 {"id":"rec-d6cf00716b9cae9e","ts":"2026-07-25T00:48:01Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d6cf00716b9cae9e.jsonl"}
 {"id":"rec-d6ebfa2fa17a5080","ts":"2026-07-29T14:27:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d6ebfa2fa17a5080.jsonl"}

@@ -70,7 +70,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { removeTempTree } from '../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -130,7 +131,7 @@ function git(cwd, args) {
  */
 function world(t, { config, remote = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'brain-701-cli-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => removeTempTree(root));
 
   mkdirSync(join(root, '.memory', 'records'), { recursive: true });
   mkdirSync(join(root, '.memory', 'chunks'), { recursive: true });
@@ -142,7 +143,7 @@ function world(t, { config, remote = false } = {}) {
 
   if (remote) {
     const bare = mkdtempSync(join(tmpdir(), 'brain-701-cli-remote-'));
-    t.after(() => rmSync(bare, { recursive: true, force: true }));
+    t.after(() => removeTempTree(bare));
     git(bare, ['init', '-q', '--bare', '-b', 'main']);
     git(root, ['init', '-q', '-b', 'main']);
     git(root, ['config', 'user.email', 'test@example.invalid']);

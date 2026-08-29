@@ -21,6 +21,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -82,7 +83,7 @@ function withRepoAndWorktree(fn) {
     writeFileSync(join(main, '.env'), 'VCS_TOKEN=tok-from-main-tree\n');
     return fn({ main, wt });
   } finally {
-    rmSync(base, { recursive: true, force: true });
+    removeTempTree(base);
   }
 }
 

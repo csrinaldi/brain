@@ -4,7 +4,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { removeTempTree } from '../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -55,9 +56,9 @@ function worldWithTrunkRecord(t) {
   const trunk = mkdtempSync(join(tmpdir(), 'brain-701-gate-trunk-'));
   const worktree = mkdtempSync(join(tmpdir(), 'brain-701-gate-worktree-'));
   t.after(() => {
-    rmSync(remote, { recursive: true, force: true });
-    rmSync(trunk, { recursive: true, force: true });
-    rmSync(worktree, { recursive: true, force: true });
+    removeTempTree(remote);
+    removeTempTree(trunk);
+    removeTempTree(worktree);
   });
 
   git(remote, ['init', '-q', '--bare', '-b', 'main']);

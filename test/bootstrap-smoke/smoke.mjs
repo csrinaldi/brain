@@ -46,6 +46,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { removeTempTree } from '../../brain/scripts/__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -356,7 +357,7 @@ for (const d of reordered) {
 // ── Report ──────────────────────────────────────────────────────────────────
 
 if (KEEP) info(`fixture kept at ${scratch}`);
-else rmSync(scratch, { recursive: true, force: true });
+else removeTempTree(scratch);
 
 console.log('');
 if (failures > 0) {
