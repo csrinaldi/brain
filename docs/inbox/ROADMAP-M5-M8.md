@@ -1,168 +1,56 @@
 # Del reviewer al router — hoja de ruta M5 → M8
 
-*brain · plan de implementación · **rev 7**, medida el 28/08/2026 contra
-`origin/main @ 3c40c32`.*
+*brain · el ARGUMENTO de la secuencia M5 → M8. No es un tablero de estado.*
 
-Cerrar la cadena de #682, abrir M5 (role-as-port) y M8 (router etapa→engine) sin que
-ninguna decisión quede dispersa en tickets que nadie volverá a leer.
+> ## Este archivo no dice en qué estado está nada
+>
+> **El estado se lee de los tickets.** Fue la única fuente que estuvo bien las cuatro
+> veces que este documento se equivocó, y por un motivo estructural: un issue lo
+> actualiza un humano como DECISIÓN, no como foto que alguien tiene que acordarse
+> de refrescar.
+>
+> ```
+> npm run brain:status -- --issue <N> [--pr <N>] [--change <dir>]     (#280)
+> gh issue list --state open --label status:approved --limit 200
+> ```
+>
+> **Qué SÍ vive acá, y no caduca:** por qué M5 va antes que M8, por qué #456 se
+> parte en dos, qué fuga absorbe qué etapa, y el razonamiento con el que se
+> tomó cada compuerta. Nada de eso cambió una sola vez en nueve días.
+>
+> **Qué se sacó, y por qué** (#798): la tabla de hitos con porcentajes, los
+> estados de los tickets, el conteo de issues abiertos y los marcadores de
+> compuerta tomada. Ese material se revisó a mano cuatro veces en nueve días —
+> revs 4 → 7 — y caducó siempre, mientras el argumento no falló nunca. El §2 de
+> este mismo archivo lo había diagnosticado el 21/08.
+>
+> **Los rulings de las seis compuertas viven en sus issues** — #792 (C1), #312
+> (C2 y C3), #323 (C4), #357 (C5), #773 (C6) — y no se copian acá. Copiarlos de
+> vuelta es exactamente cómo este archivo volvería a tener estado.
 
-**La Compuerta 6 está TOMADA y la Etapa 2 arrancó.** El ruling de #773 vive en
-`main` como ADR-0033 Amendment 1, #775 cerró con la Amendment 2, y **#316 dejó de
-estar bloqueado**. Quedan cinco compuertas, todas tuyas.
+## 0 · Cómo saber si este documento sigue describiendo el mismo problema
 
-> **2026-08-28 (rev 7)** · `main @ 3c40c32`
-> Fuente de verdad para la línea M5 → M8.
->
-> **Qué cambió desde la rev 6 — se tomó una compuerta, la primera de las seis.**
-> #773 quedó rulado: **`BRAIN_REVIEWER_TOKEN` sigue resolviéndose sólo desde la
-> shell, 1a sí y 1b no.** No por cautela: escribir el modelo de producto disolvió
-> la tensión — un motor de workflows iniciado por el desarrollador porta la
-> credencial in-process a cada etapa, así que el productor la sigue recibiendo
-> scrubeada y la fila `by construction` queda en pie. El ruling vive en `main`
-> como **ADR-0033 Amendment 1**, firmada, con su residuo escrito (un motor
-> DESATENDIDO vuelve a 1b) y sus dos superficies futuras nombradas (CI está
-> cubierta por el mismo warrant; MCP es otra pregunta, dueño #357).
->
-> **Y #775 cerró con la Amendment 2.** La etapa de cold-review ya corre en una
-> máquina logueada a `gh`: un shadow por corrida de `GH_CONFIG_DIR`/`GLAB_CONFIG_DIR`
-> hace que el CLI no encuentre su sesión, medido `reachable` → `closed` con el
-> keyring del operador intacto. La sonda sigue siendo el lector y sigue
-> fail-closed.
->
-> **Lo que eso desbloquea: #316**, cuyo bullet en la Etapa 2 decía "no arranca sin
-> el ruling de la Compuerta 6". Ya arrancó, y su PR trae esta rev.
->
-> **Una fuga nueva, y es de la misma familia que #759 y #772: #782.** La
-> convención de worktree-por-issue es canónica (`harness-contract.md:28`,
-> compilada en `AGENTS.md`) y `brain:ticket:start` **defaultea a lo que esa fila
-> prohíbe**. Una regla presente en los docs y desobedecida igual, porque nada en
-> el camino la exige. Medido: una sesión de agente el 27/08 creó cinco ramas en el
-> checkout principal con la regla cargada.
->
-> **Esta debería ser la última rev a mano.** Es la tercera en ocho días: la rev 5
-> venció en seis, la rev 6 en uno. El §2 de este mismo archivo ya dijo por qué y
-> nombró la cura — #459 (`brain:epic:map`) ya cerró, **#280 (`brain:status`) sigue
-> abierto y aprobado**. Cada rev manual es tiempo que no va a #280.
->
-> Issue: [#316](https://github.com/csrinaldi/brain/issues/316) (esta rev viaja en su PR)
+No lleva invariantes de fecha ni de sha: ésos son los que caducaban. Lleva los
+dos hechos estructurales de los que depende TODA su secuencia. Si alguno deja de
+valer, lo que hay que revisar es el argumento, no una tabla.
 
-> **2026-08-27 (rev 6)** · `main @ dd31906`
-> Fuente de verdad para la línea M5 → M8. Reemplaza a `AGENT-PRIORITY-HANDOFF.md`,
-> `MASTER-PLAN-1.0.md` y `brain-v2-epic-plan.md` para cualquier pregunta de estado o
-> prioridad.
->
-> **Qué cambió desde la rev 5 — la Etapa 0 se cerró.** #765 mergeó a `main` y con él el
-> slice 3 entero: **#682 está `closed/completed`**, igual que #750 y #743. Las dos piezas
-> que la rev 5 midió como faltantes existen las dos — `makeArtifactGenerate` aparece tres
-> veces en `review/cli.mjs` sobre `origin/main`, y el cargador que faltaba es
-> `cli.mjs:256-257`. **ADR-0033 dejó de ser un draft:** vive en
-> `brain/project/decisions/adr-0033-cold-review-transport.md`, indexado en `HOME.md:82`,
-> así que ya se cita como `ADR-0033` y no por nombre de archivo. En `tasks.md` del slice 3
-> queda **una sola casilla sin marcar, C.6**, y está a medias por un motivo que importa:
-> cerraba #682 *y* #754, y #754 sigue abierto.
->
-> **Lo segundo que cambió es la firma.** La lista «los once sin firma» de la rev 5 se
-> vació casi entera: #752 #746 #759 #760 #761 #734 #732 llevan hoy `status:approved`.
-> Quedan **cuatro sin ninguna etiqueta de estado** (#699 #697 #327 #268), **uno en
-> `needs-review`** (#588), y **#754 con la etiqueta doble** — `status:approved` *y*
-> `status:needs-review` a la vez, que es exactamente el defecto que la rev 5 le anotaba
-> a #745.
->
-> **Y apareció una compuerta que la rev 5 no tenía.** Tres issues del 26/08 —#772 #773
-> #774— escriben por primera vez el modelo de credenciales, y **#773 es doctrina, no
-> implementación**: si `BRAIN_REVIEWER_TOKEN` se vuelve file-readable, la credencial del
-> poster sale de la **única fila `by construction`** de la tabla de warrants de ADR-0033.
-> Es la **Compuerta 6** del §3, y su relación con la Etapa 2 es asimétrica: **#316 ya está
-> aprobado y puede arrancar mañana; #773 no está firmado.** Un agente que tome #316 de
-> buena fe no tiene cómo saber que no debe tocar eso, y el diff parecería plumbing.
->
-> §1, §3, §4 · Etapa 0 y §5 se actualizaron. Las Etapas 1 → 5 no cambiaron de contenido,
-> solo de punto de entrada.
->
-> Issue: [#755](https://github.com/csrinaldi/brain/issues/755)
-
-> **2026-08-21 (rev 5)** · `main @ 005dc35`
->
-> **Qué cambió desde la rev 4.** El **slice A de 0.C está completo** y B.1–B.3
-> aterrizaron. La mitad de juicio corre de punta a punta y un hallazgo razonado llega
-> **como comentario en la línea cambiada** de un PR — el criterio de salida de M3,
-> alcanzado, y alcanzado **sin spawnear nada**: el engine del stage es un archivo.
->
-> Y una medición que ordenó todo el slice: **la mitad «visible en el PR» ya estaba
-> construida**. `deriveInlineComments` convierte todo finding con `file` + `line` en un
-> comentario y `postVerdict` los manda en la misma llamada que el bloque (#405). Nunca
-> faltó transporte al PR — faltaba un lector que produjera hallazgos anclados.
->
-> **Qué cambió desde la rev 3.** #762 mergeó, así que **0.B está cerrada** y el ruling
-> de #743 vive en `main`. Su review en frío devolvió cinco hallazgos y uno era un
-> `blocker` que vale registrar como forma: el marcador de la Enmienda 7 se había puesto
-> como **quinta celda en una tabla de cuatro columnas**, y GFM descarta las celdas que
-> sobran — la fila renderizaba idéntica a antes de la enmienda. Una enmienda firmada
-> diciendo una cosa y la fila mostrando la contraria. Se midió contra el renderer de
-> GitHub, no se dedujo. **Cómo renderiza algo es una propiedad a medir, no a suponer.**
->
-> **Qué cambió desde la rev 2.** La Etapa 0 dejó de ser un plan y pasó a ser historia
-> en su mayor parte: **#758 mergeó** tras cuatro rondas de review en frío, y el ruling
-> de #743 está aplicado al árbol y en review como **#762**. Queda 0.C — el slice 3 —
-> que al medirlo resultó ser **dos piezas**, no un slice entero.
->
-> Tres cosas que la rev 2 no sabía y conviene no volver a aprender:
-> la precondición «review en frío con veredicto posteado» **no es satisfacible desde un
-> contenedor** (dos rondas lo descubrieron por separado); `axis: human` hace que el
-> desafiante **corra de verdad**, así que el slice 3 se parte en dos mitades
-> independientes; y aplicar el ruling literal **rompe toda corrida** si no se le da un
-> default de axis.
->
-> §4 · Etapa 0 se reescribió entera. Las Etapas 1 → 5 no se movieron.
->
-> Issue: [#755](https://github.com/csrinaldi/brain/issues/755)
-
-## 0 · Invariantes de vencimiento
-
-Este archivo está vencido en cuanto alguna de estas deje de valer.
-
-| Invariante | Comando | Valor al escribir |
-|---|---|---|
-| `origin/main` es `3c40c32` | `git rev-parse --short origin/main` | `3c40c32` |
-| El transporte del slice 3 YA está en `main` | `git show origin/main:brain/scripts/review/cli.mjs \| grep -c 'makeArtifactGenerate'` | `3` |
-| ADR-0033 ya vive en `decisions/` | `git ls-tree origin/main brain/project/decisions/adr-0033-cold-review-transport.md \| wc -l` | `1` |
-| M5 sigue en cero | `ls -d brain/scripts/roles` | (no existe) |
-| ADR-0033 lleva DOS enmiendas | `grep -c '^## Amendment' brain/project/decisions/adr-0033-*.md` | `2` |
-| #316 sigue abierto | `issue-view 316` → `state` | `open` |
-
-## 1 · Dónde estamos, medido
-
-Cada fila verificada con `gh issue view` hoy; el épico #313 es la fuente, los dos
-documentos de `docs/inbox/` del 24/07 son fotos viejas y dicen cosas ya falsas (ver §7).
-
-| M | Nombre | Estado | Evidencia |
-|---|---|---|---|
-| M0 | Higiene | **HECHO** | #217 #222 #314 cerrados |
-| M1 | Gates de merge | **HECHO** | #210 #94 #305 cerrados |
-| M2 | Decoupling llega al usuario | **3 de 4** | queda **#316** (unificar los parsers de `.env`) |
-| M3 | Reviewer como code-review real | **SALIDA CUMPLIDA** | #405 #408 cerrados; #284 queda como alcance diferido |
-| M4 | Distribución y auto-update | **HECHO** | `@logikas/brain@1.1.0` publicado el 18/08; #436 #414 #415 son follow-ups |
-| M5 | Role-as-port | **0 %** | `brain/scripts/roles/` no existe; `VALID_OPS = ['init', 'run-stage']` — creció por ADR-0033, no por M5 |
-| M6 | Paridad de provider | **2 de 5** | quedan #124 #131 #129 |
-| M7 | Backlog y scope | **2 de 8** | quedan #268 #280 #256 #247 #117 #327 |
-| M8 | Router etapa→engine | **0 %** | bloqueado por M5 por diseño |
-| M9 | `brain:metrics` | **HECHO** | #324 cerrado (los docs del 24/07 dicen "sin ticket": falso) |
-| M10 | Seam contract coverage | **~75 %** | quedan #336 #348 #349 |
-
-### El reviewer (#682) — cerrado
-
-La tabla de porcentajes de las revs 1–5 ya no mide nada: **#682 está
-`closed/completed`**. Los tres slices están en `main`, REQ-682-5 tiene su clave propia
-(`reviewer.convergence.maxRounds`, tarea C.1) y la review en frío corrió contra un PR
-real con veredicto posteado (C.2b).
-
-Queda una casilla y una deuda, y ninguna de las dos bloquea M5/M8:
-
-| Qué | Dónde |
+| el argumento asume | cómo verificarlo |
 |---|---|
-| **C.6 a medias** — cerraba #682 *y* #754; sólo #682 cerró | `tasks.md:480` del slice 3 |
-| **#754 abierto con etiqueta doble** — `status:approved` **y** `status:needs-review` | se absorbe en M5 · S5 (§5) |
-| **#772** — el chequeo post-run del árbol de ADR-0033 existe sólo como test | `review/lib/run-cold-review-stage.mjs:32-35`; carril reviewer-higiene |
+| M5 todavía no existe, así que M8 no puede apoyarse en él | `ls -d brain/scripts/roles` |
+| las cuatro etapas del ciclo SDD siguen sin poder rutearse | `assertRoutableStage` en `brain/scripts/lib/stage-engine.mjs` refusa `SDD_LIFECYCLE_STAGES` |
+
+El segundo es el que la Compuerta 1 habilitó a levantar **bajo cuatro
+condiciones** (ADR-0019 Amendment 1). El día que se levante, la Etapa 4 de este
+plan deja de describir trabajo pendiente y pasa a ser historia.
+
+## 1 · Dónde estamos
+
+En los tickets. Ver la cabecera.
+
+Este archivo tenía acá una tabla de hitos con porcentajes y una lista de tickets
+sin firma. Las dos caducaron en días, dos veces cada una. Lo que sobrevive de esa
+sección es una sola observación, y es del §2: **la cola tiene que derivarse.**
+
 
 ## 2 · Cómo tener la cola de tickets sin mantenerla a mano
 
@@ -182,8 +70,10 @@ La cola tiene que **derivarse**, con tres insumos que ya existen en el repo:
    distintas en cada uno. Declararla una sola vez, en el épico, como bloque legible por
    máquina.
 3. **La cola es una consulta, no un archivo.** `aprobado ∧ no bloqueado según el grafo
-   ∧ sin PR abierto`. Mientras no exista el verbo (#280 `brain:status` y #459 son esa
-   línea), la consulta mínima es:
+   ∧ sin PR abierto`. Los dos verbos de esa línea existen: **#459** (`brain:epic:map`)
+   y **#280** (`brain:status`), que además reporta la DIVERGENCIA entre lo que dice el
+   ticket y lo que hay en disco — que es el defecto que este documento encarnó cuatro
+   veces. Para la cola completa, la consulta mínima sigue siendo:
 
 ```bash
 gh issue list --state open --label status:approved --limit 200 \
@@ -194,35 +84,17 @@ Higiene previa, barata y necesaria: #745 lleva `status:approved` *y*
 `status:needs-review` a la vez; #732 #699 #697 #327 #268 no llevan ninguna. Una cola
 derivada de etiquetas sucias hereda la suciedad.
 
-### Los que siguen sin firma — de once a nueve
-
-Por ADR-0014 ("no merge without an approved ticket") y #124, un agente no puede empezar
-ninguno de estos hasta que vos apliques `status:approved`.
-
-**Buena noticia de la rev 6:** de los once de la rev 5, **siete ya están firmados** —
-#752 #746 #759 #760 #761 #734 #732 llevan `status:approved`, y #750 además cerró.
-Quedan estos, medidos por el port el 27/08:
-
-| # | Estado hoy | Qué es | Dónde cae en este plan |
-|---|---|---|---|
-| **#782** | `needs-review` | `brain:ticket:start` defaultea al checkout que su contrato prohíbe | **sin hogar** — bloquea el trabajo en paralelo de agentes |
-| **#772** | `approved` | el chequeo de árbol de ADR-0033 existe sólo como test | carril reviewer-higiene, sin empezar |
-| ~~#773~~ · ~~#774~~ | **cerrados** | la Compuerta 6 y su documento | ADR-0033 Amendment 1 |
-| #754 | **etiqueta doble** | no existe definición del rol cold-reviewer | sacar una etiqueta; se absorbe en M5 · S5 |
-| #588 | `needs-review` | el spec de gobernanza dice "400 líneas" sin tier en seis sitios | carril gobernanza, S |
-| #699 | *sin etiqueta* | catorce verbos del port VCS descartan la causa | carril VCS, L por verbo |
-| #697 | *sin etiqueta* | `brain:ship` rechaza 76 de 100 ramas reales | decisión con recomendación escrita |
-| #327 | *sin etiqueta* | gobernar `docs/inbox/**` | decisión Tier 2 |
-| #268 | *sin etiqueta* | registro de track-letters — el comentario ya propone issue-number-as-identity | decisión con recomendación escrita |
-
 ## 3 · Las compuertas — decisiones que solo vos podés tomar
 
 **Seis** decisiones gatillan todo lo demás. Cada una tiene recomendación con su costo,
-y **cinco de las seis siguen sin tomar**. La sexta (#773) se tomó el 28/08 — ver abajo.
+y cada una lleva abajo **su razonamiento y su costo**. Cuál está tomada y cuál no
+se lee en su issue — #792 (C1), #312 (C2, C3), #323 (C4), #357 (C5), #773 (C6) —
+porque el ruling firmado vive ahí y una copia acá sería una segunda declaración
+que puede derivar de la primera.
 Una séptima —la Compuerta 0— se tomó el 20/08 y va primera, porque es la que reescribió
 la Etapa 0.
 
-> **Compuerta 0 · TOMADA el 20/08, y APLICADA al árbol el 21/08 en #762** (#743)
+> **Compuerta 0 · el protocolo y la mitad de juicio** (#743)
 >
 > > *«El protocolo es siempre `brain-review/2`. La mitad de juicio es una capacidad
 > > on/off, no una postura de tier. Los tiers responden solo la pregunta de aprobación.»*
@@ -283,20 +155,7 @@ la Etapa 0.
 > `PreToolUse`). **Recomendación:** firmar A. Es gratis y deja el eje quieto mientras
 > M5 construye sobre él.
 
-> **✅ Compuerta 6 · TOMADA el 28/08 — 1a sí, 1b NO (#773)**
->
-> > *"El token del reviewer sigue resolviéndose sólo desde la shell. La transparencia
-> > que 1b iba a comprar la entrega el límite de la sesión: un motor iniciado por el
-> > desarrollador porta la credencial in-process a cada etapa."*
->
-> Vive en `main` como **ADR-0033 Amendment 1**, firmada, con el residuo escrito (un
-> motor desatendido vuelve a 1b) y las dos superficies futuras nombradas. El non-goal
-> quedó aplicado al cuerpo de #316. **El razonamiento original se conserva abajo** — la
-> decisión se registra, no se reescribe.
->
-> ---
->
-> *(planteo original, rev 6)* **¿`BRAIN_REVIEWER_TOKEN` se vuelve file-readable? (#773)**
+> **Compuerta 6 · ¿`BRAIN_REVIEWER_TOKEN` se vuelve file-readable? (#773)**
 >
 > **No estaba en la rev 5 y es la más urgente de las seis**, por una asimetría de
 > tiempos: **#316 ya lleva `status:approved` y puede arrancar mañana; #773 no está
@@ -341,7 +200,7 @@ con la tarea explícita "abrir el PR terminal" — la lección de #713 y de #682
 
 ```mermaid
 graph LR
-  E0["Etapa 0 ✓ CERRADA<br/>#758 · #762 · #765<br/>#682 cerrado"] --> E1["Etapa 1<br/>SEIS compuertas<br/>+ nueve firmas"]
+  E0["Etapa 0<br/>la cadena del reviewer"] --> E1["Etapa 1<br/>las seis compuertas"]
   E1 --> E2["Etapa 2<br/>#316 · #643 · #456-A · #605"]
   E2 --> M5["Etapa 3 · M5<br/>#312 → #576<br/>absorbe deuda #682 y #754"]
   M5 --> M8["Etapa 4 · M8<br/>#323 → #456-B<br/>absorbe #713 y #752"]
@@ -349,162 +208,18 @@ graph LR
   M8 -.después.-> P["M6 / M10<br/>paridad GitLab<br/>#603 #348 #336 #124"]
 ```
 
-### Etapa 0 — Cerrar la cadena del reviewer · **✓ CERRADA**
+### Etapas 0 y 1 — cumplidas, y por eso ya no se describen acá
 
-**Estado: 0.A, 0.B y 0.C cerradas. 0.D es higiene y sigue abierta, sin bloquear nada.**
+La Etapa 0 cerró la cadena del reviewer (#682) y la Etapa 1 tomó las seis
+compuertas. Ciento cincuenta líneas de plan de ejecución vivían acá y hoy
+describen trabajo hecho, que es la forma más cara de estado: se lee como
+pendiente.
 
-#### 0.A — CERRADA · #758 mergeado el 21/08 a las 12:53
+Lo que de esas dos etapas no caduca está en otro lado y con más autoridad —
+**ADR-0033** y sus dos enmiendas para la cadena del reviewer, y los rulings de
+las seis compuertas en sus issues. El §5 de este archivo conserva las fugas que
+esas etapas dejaron abiertas.
 
-`main` pasó a `7621d00`. Lo que entró: los slices 1 y 2 de la mitad de juicio, y el
-cierre de **#750** — la inversión de §10 que vivía en `main` y que cada día de espera
-seguía cargando.
-
-Le costó **cuatro rondas de review en frío** del chain, y vale registrar la forma
-porque se repitió las cuatro veces:
-
-| ronda | dónde | qué devolvió |
-|---|---|---|
-| 2 | `main...8ebf523` | REVISE — 3 hallazgos |
-| 3 | `a16e971` | 5 hallazgos, y **se negó a emitir veredicto** por un motivo mecánico: `brain:review` se rehúsa donde las credenciales se inyectan río arriba (#604) |
-| 4 | `48b8ac2` | **APPROVE**, por `csrinaldibot`, producido por el verbo — la primera vez que la precondición fue *satisfacible*, no solo intentada |
-
-Los ocho hallazgos de las rondas 2 y 3 se cerraron, cada uno **reproducido antes de
-arreglarlo**. La ronda 4 encontró uno más que no pudo entrar al veredicto, y ese hueco
-resultó ser más interesante que el hallazgo: ver **#760**.
-
-**La lección que este documento se lleva:** la precondición «una review en frío con
-veredicto posteado» **no es satisfacible desde ningún contenedor** de los que usamos.
-Dos rondas lo descubrieron por separado. Corre en la máquina del maintainer con el PAT,
-o en un job de Actions con el PAT como secret — que no existe todavía y es #604 mitad 2.
-
-#### 0.B — CERRADA · #762 mergeado el 21/08 a las 15:50
-
-Los nueve puntos de la auditoría, aplicados. **300 líneas gobernadas** contra 1000 —
-revisable como diff, que era exactamente el motivo de sacarlo de #758.
-
-| # | qué era | cómo quedó |
-|---|---|---|
-| 1–3 | `inferentialEnabled`, `challengerAxis`, y la compuerta que leía el tier | fuera de `tierParams()`; la única llave es `reviewer.inferential.enabled`, ON cuando está ausente |
-| 4–6 | `/1` como default por tier, su pin, y el fallback de `resolveReviewProtocol` | `/2` en los tres tiers; `resolveReviewProtocol` ya no recibe `tier` |
-| 7 | ADR-0026 fila 110 | **Enmienda 7**, promovida por Ruta B y firmada el 21/08 |
-| 8 | `reviewer-protocol.md` §6/§13 y `KNOWN-LIMITATIONS` | reescritos; la limitación nueva se declara en lugar de la que dejó de ser cierta |
-| 9 | `test/fresh-install/` | **no se toca**, y por una medición (abajo) |
-
-**Una trampa que hubo que medir antes de escribir código.** Aplicar el ruling literal
-rompe *toda* corrida: sacar `challengerAxis` de la tabla y poner `enabled` en ON por
-default hace que `resolveJudgment` pase las dos primeras barreras y llegue al axis sin
-nada, donde tiraba. Necesitaba un **default de axis sin tier**, y es `human` — el único
-implementado, y el que no exagera la fuerza de la evidencia.
-
-**Y una corrección medida a REQ-682-2.** Su justificación decía que apagar el productor
-en `lite` defendía la promesa sin-credencial que `test/fresh-install/in-container.sh`
-asegura. Ese script ejercita seis verbos y **ninguno es `brain:review`**. Su promesa es
-sobre instalar el paquete con un npmrc vacío: cierta, y otra. Ninguna aserción de
-fresh-install podía falsificarse por un default del productor. La preocupación de fondo
-sobrevive y aterriza donde corresponde: el ADR de transporte del slice 3.
-
-**Lo que #762 NO cierra:** tres de los seis criterios de #743 — los rulings sobre las
-filas borderline, la superficie de capacidad de punta a punta, y si tres tiers valen su
-complejidad. Van en **#761** para que no se pierdan al cerrar el ticket.
-
-#### 0.C — CERRADA · **PR #765 mergeado el 26/08 · #682 `closed/completed`**
-
-Tracker: `feature/issue-682-slice3-cold-review-stage`, mergeado como **PR #765**.
-**15 de 16 tareas** marcadas; la única sin marcar es C.6, y está a medias a propósito:
-cerraba #682 *y* #754, y sólo #682 cerró.
-
-El ADR de transporte **ya no es un draft**: vive en
-`brain/project/decisions/adr-0033-cold-review-transport.md` e indexado en `HOME.md:82`,
-así que se cita como `ADR-0033` — la forma reservada que #599 estableció y que el check
-de citaciones exige.
-
-| | |
-|---|---|
-| **Slice A** ✅ | el contrato de archivo: ` ```brain-findings/1 `, su lector, el cableado como `deps.generate`, y un hallazgo razonado posteado **en la línea cambiada** |
-| **B.1–B.3** ✅ | el ADR de transporte; `sdd.map` con `cold-review` como primer habitante; la op `run-stage` del harness |
-| **B.4–B.6** ✅ | el prompt provisional con su deuda contra #312; el pin de que el stage no commitea; un engine sin backend que refuse |
-| **Slice C** ✅ | REQ-682-5 con clave propia (C.1), la prueba por el verbo real **y sobre un PR real** (C.2a/C.2b), el PR terminal (C.4/C.4b) y la review en frío de la cadena (C.5) |
-| **C.6** ◐ | #682 cerrado; **#754 no** — se absorbe en M5 · S5 |
-
-**Tres decisiones del diseño que vale tener a mano**, porque cada una se tomó midiendo:
-
-1. **El payload del artefacto es JSON, no YAML.** El lector de listas del veredicto tiene
-   sus regexes ancladas a la indentación de *un* emisor: la misma lista da 1 entrada a 2
-   espacios y **0** a 0-indent y a 4 — silenciosamente, como lista vacía y no como
-   incomputable. Sobrevivible para un bloque que el renderer del repo produjo; no para un
-   archivo que escribe un modelo.
-2. **El tag es el selector, y es un peligro vivo.** Un archivo con `protocol:
-   brain-review/N` lo levantaría `parse-verdict.mjs` una vez commiteado, y `cold-boot.mjs`
-   deriva `rev` y sostiene el candado anti-loop desde ahí.
-3. **La Compuerta 1 no bloqueó nada**, y se puede mostrar desde ADR-0019: su **segunda**
-   alternativa rechazada —la que nadie citaba— dice *«the four surfaces are the invariant,
-   the op count is just today's state»*. Crecer `VALID_OPS` ya estaba permitido; lo
-   prohibido es forkear el ciclo de artefactos SDD, y `cold-review` no produce ninguno de
-   los cuatro. `assertRoutableStage` lo refusa **en código**, no en un comentario.
-
-**Lo que la rev 5 daba por no probado, ya corrió.** C.2a probó el camino entero por el
-verbo real y C.2b lo repitió **sobre un PR real, con el veredicto posteado**. «El
-subagente funciona» dejó de ser una predicción.
-
-**Y de esas corridas salió la deuda que abre la Compuerta 6:** correr una review en frío
-exige `gh auth logout` (`producer-forge-reach.mjs` rechaza la corrida si sobrevive una
-sesión del keyring), y el token del reviewer hay que exportarlo a mano en cada terminal
-porque `review/identity.mjs:144` lee `process.env` y no `.env`. Eso es #773 · #774.
-
-**Lo medido al mirar el código, y cambia el tamaño de esto:** toda la cadena debajo del
-generador ya existe y está testeada. Faltan **dos piezas**, no un slice entero.
-
-1. **`deps.generate`, el transporte.** Su contrato ya está fijado por el código: recibe
-   *coordenadas* (`worktreePath`, `baseSha`, `headSha`, `changedFiles`, `prBody`) y no un
-   string de diff — el generador lo lee él mismo del worktree frío. Devuelve un array de
-   findings, y cada uno solo puede llevar los siete campos de `CARRIED_FIELDS`; el resto
-   lo tira `sanitiseFinding`. Tirar o devolver algo que no es array es **fallar**, y
-   `cli.mjs` se niega a postear: no existe «encontré cero» cuando en realidad no pudo.
-2. **Un cargador.** `main()` se invoca **sin argumentos** desde el entrypoint, y
-   `inferentialDeps` hoy lo pueblan únicamente los tests. El seam existe; el caño hacia
-   el CLI no. Aunque escribas el generador perfecto, no hay por dónde entrarlo.
-
-Más **REQ-682-5** con tarea propia esta vez, y el PR terminal nombrado en `tasks.md`
-desde el día uno (#713). Ahí cierra **#682**.
-
-**Una buena noticia que la rev 2 no tenía:** con `axis: human` el desafiante **corre de
-verdad** — `humanRunner` está implementado. No hace falta `same-model` (tarea 3.3) para
-tener un run completo producir → desafiar → postear. El slice se parte en dos mitades
-independientes, y la primera es la que desbloquea todo.
-
-**Por qué el ADR (3.1) no es burocracia:** que el transporte sea una llamada al SDK, un
-agente spawneado o el harness **cambia la superficie de red, credenciales y determinismo
-del reviewer**. Un reviewer que llama a la red durante la review es otra cosa que uno que
-no. El archivo se niega explícitamente a inventar un default por eso.
-
-#### 0.D — Higiene, en paralelo, sin bloquear nada
-
-- Firmar o rechazar **#745** — sigue con `status:approved` **y** `status:needs-review` a
-  la vez — y **#746**. Triaje de #734 y #588 fuera de esta línea.
-- Firmar los tres que salieron de las rondas de review: **#759**, **#760**, **#761**.
-- Etiquetar los cinco sin estado: #732 #699 #697 #327 #268.
-- Limpieza: records `.memory/` sin commitear, worktrees `agent-*` de reviews viejas.
-
-**Salida de la Etapa 0 — CUMPLIDA el 26/08:** #762 y #765 mergeados; slice 3 con tracker
-propio, PR terminal y **#682 cerrado**. #754 y #752 *no* se cierran acá: se absorben en
-M5 y M8 (ver §5).
-
-
-### Etapa 1 — Las seis compuertas, en una sola sesión
-
-**Quién:** humano · media jornada · **es la etapa activa**
-
-- **Primero la Compuerta 6 (#773)**, porque es la única con un ticket ya aprobado que
-  puede desobedecerla sin querer. Dejar el ruling escrito **en #316 además de en #773**.
-- Decidir las compuertas 1–5 de §3 y dejarlas escritas como comentarios de ruling en
-  #323, #312, #743 y #357.
-- Firmar los que quedan sin firma (tabla de §2): #772 #774 #588, y los cuatro sin
-  etiqueta (#699 #697 #327 #268).
-- **Corregir la etiqueta doble de #754** — lleva `status:approved` y `status:needs-review`
-  a la vez, el mismo defecto que la rev 5 le anotaba a #745.
-
-**Salida:** ningún ticket de M5/M8 tiene un "decide esto antes de escribir código" sin
-respuesta, y #316 no puede aterrizar 1b por accidente.
 
 ### Etapa 2 — Prerrequisitos mecánicos, en paralelo
 
@@ -513,7 +228,7 @@ respuesta, y #316 no puede aterrizar 1b por accidente.
 - **#316** — un solo módulo para resolver `AGENT_PLATFORM / SDD_ENGINE /
   MEMORY_BACKEND`. Es el camino por donde M8 va a leer su mapa; si siguen cinco
   parsers, el mapa se lee cinco veces distinto.
-  **TOMADA la Compuerta 6, así que ya arrancó** (ADR-0033 Amendment 1). El asimétrico está medido en
+  **Gatillado por la Compuerta 6** (ADR-0033 Amendment 1). El asimétrico está medido en
   #774: `review/identity.mjs:144` lee `process.env` y todo verbo del port lee `.env`
   primero. Unificar esos lectores es exactamente este ticket — y hacerlo **sin** volver
   file-readable a `BRAIN_REVIEWER_TOKEN` es el paso 1a. El 1b es una enmienda a ADR-0033
@@ -615,8 +330,6 @@ absorbe donde dice la tabla, se construye dos veces.
 | **La convención de worktree-por-issue, sin lector** (#782) | `harness-contract.md:28` la declara canónica y `ticket-start.mjs:29` defaultea a lo contrario | sin hogar — misma familia que #759 y #772 |
 | Verbo de config duplicado (#743 vs #323) | Dos tickets, dos nombres | Compuerta 4 → M8 · S3 |
 | REQ-682-5 sin tarea | `tasks.md` de #682 lo confiesa | Etapa 0 · 0.C |
-| ~~Protocolo y mitad de juicio tierados~~ | ~~`tierParams()`, ADR-0026 fila 110, REQ-682-2~~ | **absorbida** en #762 |
-| ~~Los dos hallazgos abiertos de la review de #758~~ | ~~prometidos en el body, sin commit~~ | **absorbida** en `a16e971` |
 | Tres criterios de #743 sin cerrar (#761) | filas borderline, superficie de capacidad, ¿sobrevive `regulated`? | firma en Etapa 1; la superficie se cruza con la Compuerta 4 |
 | Un hallazgo que el veredicto no puede llevar (#760) | §6.2 tipa `follow_ups[]` a `pre-existing\|base-only`; `findings[]` lo escribe solo el verbo (§13) | decisión propia — es doctrina, va con #745 y #752 |
 | Constante declarada sin lector, 5ª instancia (#759) | `RECOGNISED_OUTCOMES` en `refuter.mjs`; su única consumidora es un mensaje | slice 3 edita esa misma constante — 0.C |
@@ -642,11 +355,10 @@ la etapa activa.**
 | Decisiones puras | 4 | #268 #327 #356 #357 | todas con recomendación escrita en el cuerpo |
 | Épicos | 2 | #313 #335 | contenedores, no trabajo |
 
-La suma de la rev 5 (55 + 6 + 6 + #713 y #743 absorbidos = 71) **ya no cierra**: el port
-midió **78 abiertos** el 27/08, y #682 #750 #743 cerraron mientras entraban #772 #773
-#774 y los que salieron de las rondas de review de #765. **La descomposición carril por
-carril no se re-midió en esta rev** — la tabla de arriba es la de la rev 5 más #772. Si
-la vas a usar para repartir trabajo, re-medila; para eso está #280 (`brain:status`).
+Los carriles de arriba son la FORMA del backlog, no su tamaño: qué familias de
+trabajo corren al costado sin bloquear M5/M8 ni ser bloqueadas por ellas. Cuántos
+tickets tiene cada uno hoy se cuenta con la consulta del §2, no acá — el conteo
+fue lo primero que caducó en cada rev.
 
 **El hito que sigue a M8 es la paridad M6 / M10:** #603 (el pipeline GitLab ignora el
 tier), #348 (GitLab `branchProtect`: implementar o ratificar), #336 (auditoría de
