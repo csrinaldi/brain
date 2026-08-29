@@ -28,9 +28,13 @@ const git = (cwd, ...args) =>
 
 /**
  * @param {{ tier?: string, diffLines?: number, handle?: string, author?: string, prNumber?: number, redJob?: string|null }} opts
- * `base` is the temp root the caller MUST remove — see `withFixture` in the test
- * file. Each fixture vendors brain/core + brain/scripts, measured at ~8 MB with the
- * clone and the bare origin, so seven un-cleaned runs leak ~57 MB per suite pass.
+ * `base` is the temp root the caller MUST remove — via `removeTempTree`
+ * (`brain/scripts/__fixtures__/tmp-tree.mjs`, issue #800), not a bare `rmSync`; see
+ * `withFixture` in the test file. A plain `rmSync({recursive,force})` is exactly
+ * what let this suite's teardown die on ENOTEMPTY on a re-run of an already-passing
+ * commit — `force` only suppresses ENOENT. Each fixture vendors brain/core +
+ * brain/scripts, measured at ~8 MB with the clone and the bare origin, so seven
+ * un-cleaned runs leak ~57 MB per suite pass.
  *
  * `protocol` (issue #442) sets `reviewer.protocol` in the consumer's config; `null`
  * omits the key, which is what makes the tier-default path testable.
