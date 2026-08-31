@@ -29,11 +29,11 @@ nothing to validate against. That makes #456-A M8's real prerequisite.
   today's four**.
 - Unify the two declarations into one resolved source; `SDD_LIFECYCLE_STAGES` stops being
   an independent literal.
-- The **ten** production importers of `sdd-layout.mjs` (`check-refs`, `new-change`,
-  `archive-sweep`, `archive-logic`, `governance-tiers`, `phase-order-check`,
-  `memory/backends/engram`, `session-start`, `memory/lib/feature-resolution`,
-  `review/evaluators/checkpoint`) read the resolved set. *#456's body says "three
-  consuming sites" and understates it.*
+- The **eleven** production importers of `sdd-layout.mjs` (`check-refs`, `new-change`,
+  `archive-sweep`, `archive-logic`, `stage-engine`, `governance-tiers`,
+  `phase-order-check`, `memory/backends/engram`, `session-start`,
+  `memory/lib/feature-resolution`, `review/evaluators/checkpoint`) read the resolved
+  set. *#456's body says "three consuming sites" and understates it.*
 - Close the drift guard's notation blind spot (bare names, not just `*.md`).
 - Validation seam: `artefactFiles()` already refuses an unknown name rather than appending
   `.md`; ADR-0019 Amendment 1 calls that refusal *"the whole test"*. Declared stages
