@@ -18,6 +18,7 @@ import {
   OPERATIONAL_ARTIFACTS,
   CHANGES_ROOT,
   LEGACY_GRANDFATHERED,
+  LIFECYCLE_STAGES,
   changeDir,
   artifactPaths,
   archivePath,
@@ -25,6 +26,7 @@ import {
   isGrandfathered,
   hasSpec,
   missingRequiredArtifacts,
+  resolveStageSet,
 } from './sdd-layout.mjs';
 
 const SCRIPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -215,6 +217,160 @@ test('1.10: resume.md is never consulted by missingRequiredArtifacts (feature-re
 // Task 1.11 (stop-condition, owner ruling #587 item 2): every helper above
 // expressed its cited site's call shape without needing to reshape the site
 // itself. STOP-CONDITION DID NOT FIRE — no B0 finding to report.
+
+// ── #456 slice A — the stage set becomes DATA (design §2 D1/D2/D3/D5/D5a) ──
+//
+// `LIFECYCLE_STAGES` is THE ONE declaration (§1's measurement: the set was
+// declared THREE times — here as bare names, in stage-engine.mjs, in
+// phase-order-check.mjs — and the drift guard was blind to two of them
+// because it only matched `.md`-suffixed names). `resolveStageSet` is PURE:
+// config is RECEIVED, never read, because this module's own header promises
+// "no side effects at import" and #555's first cut broke exactly that promise
+// once already (design D1's "hard constraint discovered").
+//
+// `sdd.stages` is an OBJECT keyed by stage name (design D3, symmetric with
+// `sdd.map`), not an array of bare strings — the spec's scenario prose uses
+// array notation as shorthand for "the declared set of names in this order";
+// the object form is what config actually carries (migration default is
+// `{ sdd: { stages: {} } }`, not `[]`).
+
+test('#456 1.1: resolveStageSet(undefined) resolves to the canonical four, in order, mapped to their default files', () => {
+  const result = resolveStageSet(undefined);
+  assert.deepEqual(result.stages, ['proposal', 'spec', 'design', 'tasks']);
+  assert.deepEqual(result.files, {
+    proposal: 'proposal.md', spec: 'spec.md', design: 'design.md', tasks: 'tasks.md',
+  });
+});
+
+test('#456 1.1: resolveStageSet({}) — no sdd key at all — resolves identically to resolveStageSet(undefined) (zero-config identity)', () => {
+  assert.deepEqual(resolveStageSet({}), resolveStageSet(undefined));
+});
+
+test('#456 1.1: resolveStageSet({ sdd: { stages: {} } }) — the 0.11.0 migration default — also resolves to the canonical four', () => {
+  // This is the shape the migration ships on every existing consumer's config
+  // (design D4): `{}` because writing the four into JSON would be a FOURTH
+  // declaration of the set, in a file the drift guard cannot scan.
+  assert.deepEqual(resolveStageSet({ sdd: { stages: {} } }).stages, ['proposal', 'spec', 'design', 'tasks']);
+});
+
+test('#456 1.1: REQUIRED_ARTIFACTS stays byte-identical after the LIFECYCLE_STAGES re-derivation', () => {
+  assert.deepEqual(REQUIRED_ARTIFACTS, ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
+  assert.deepEqual(REQUIRED_ARTIFACTS, artefactFiles(LIFECYCLE_STAGES));
+});
+
+test('#456: LIFECYCLE_STAGES is frozen and is the four in canonical order', () => {
+  assert.ok(Object.isFrozen(LIFECYCLE_STAGES));
+  assert.deepEqual(LIFECYCLE_STAGES, ['proposal', 'spec', 'design', 'tasks']);
+});
+
+test('#456 1.3: resolveStageSet refuses a declared set omitting one lifecycle stage, naming it', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: { proposal: {}, design: {}, tasks: {} } } }),
+    /sdd.stages omits lifecycle stage\(s\) "spec"/,
+    'the message must name the missing stage so a consumer can fix it without reading source',
+  );
+});
+
+test('#456 1.3: resolveStageSet refuses a declared set omitting TWO lifecycle stages, naming both', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: { proposal: {}, tasks: {} } } }),
+    /"spec".*"design"|"design".*"spec"/,
+  );
+});
+
+test('#456 1.3: resolveStageSet refuses an empty sdd.stages set... no — an EXPLICIT empty set is zero-config (task 1.1), so omission only fires when at least one name is declared but not all four', () => {
+  // Design D1/§the migration default: `{}` (no keys at all) is the absence of
+  // a declaration, not a declaration of zero stages — it MUST resolve to the
+  // default four (asserted above), never refuse. The spec's "empty array"
+  // scenario describes a DIFFERENT shape (an array literal `[]`) that this
+  // object-keyed config cannot express — see the note at the top of this
+  // section on notation.
+  assert.deepEqual(resolveStageSet({ sdd: { stages: {} } }).stages, ['proposal', 'spec', 'design', 'tasks']);
+});
+
+test('#456 1.3: resolveStageSet refuses the four declared out of relative order (D5a — REFUSED, not normalised)', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: { tasks: {}, design: {}, spec: {}, proposal: {} } } }),
+    /out of relative order/,
+  );
+});
+
+test('#456 1.3: resolveStageSet REFUSAL message states the expected canonical order (D5a — "the fix is readable from the error")', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: { tasks: {}, design: {}, spec: {}, proposal: {} } } }),
+    /proposal, spec, design, tasks/,
+  );
+});
+
+test('#456 1.3: a custom stage interleaved BETWEEN the four in canonical relative order is legal (design D5a: "interleaving stays legal")', () => {
+  const result = resolveStageSet({
+    sdd: {
+      stages: {
+        proposal: {}, 'threat-model': { artefact: 'threat-model.md' }, spec: {}, design: {}, tasks: {},
+      },
+    },
+  });
+  assert.deepEqual(result.stages, ['proposal', 'threat-model', 'spec', 'design', 'tasks']);
+});
+
+test('#456 1.3: resolveStageSet refuses a declared artefact colliding with an existing lifecycle file (impersonation, D5)', () => {
+  assert.throws(
+    () => resolveStageSet({
+      sdd: {
+        stages: {
+          proposal: {}, spec: {}, design: {}, tasks: {},
+          'threat-model': { artefact: 'spec.md' },
+        },
+      },
+    }),
+    /collides with an existing lifecycle file/,
+  );
+});
+
+// The BOUNDARY of the collision check, pinned because it is the half a later
+// edit removes. The refusal skips the entry that already owns the file
+// (`lifecycleName !== name` in the finder): a stage restating its own canonical
+// artefact is a redundancy, not an impersonation. Drop that comparison and this
+// test goes red — without it, `spec: { artefact: 'spec.md' }` would be refused
+// for colliding with itself, and the error would name the same stage twice.
+test('#456 1.3b: a stage declaring its OWN canonical file is not a collision — the refusal skips the owner', () => {
+  const result = resolveStageSet({
+    sdd: {
+      stages: {
+        proposal: {}, spec: { artefact: 'spec.md' }, design: {}, tasks: {},
+      },
+    },
+  });
+
+  assert.deepEqual(result.stages, ['proposal', 'spec', 'design', 'tasks']);
+  assert.equal(result.files.spec, 'spec.md');
+});
+
+test('#456 1.5: the four plus an explicit custom stage (`threat-model`) resolves to five, files merged', () => {
+  const result = resolveStageSet({
+    sdd: {
+      stages: {
+        proposal: {}, spec: {}, design: {}, tasks: {}, 'threat-model': { artefact: 'threat-model.md' },
+      },
+    },
+  });
+  assert.deepEqual(result.stages, ['proposal', 'spec', 'design', 'tasks', 'threat-model']);
+  assert.deepEqual(result.files, {
+    proposal: 'proposal.md', spec: 'spec.md', design: 'design.md', tasks: 'tasks.md',
+    'threat-model': 'threat-model.md',
+  });
+});
+
+test('#456: a custom stage declared WITHOUT an artefact file is refused, naming the stage (D3 — the refusal stays intact; which map is consulted changed, not whether one is)', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: { proposal: {}, spec: {}, design: {}, tasks: {}, 'threat-model': {} } } }),
+    /unknown artefact name "threat-model"/,
+  );
+});
+
+test('#456: artefactFiles(names) on the DEFAULT map still throws for an unmapped name — the default fileMap param does not weaken the existing refusal (D3)', () => {
+  assert.throws(() => artefactFiles(['threat-model']), /unknown artefact name/i);
+});
 
 // ── Phase 2: the drift-guard — a TEST, not a lint rule (design §3) ──────────
 
@@ -475,6 +631,7 @@ test('A3 (task 4.5): scanning the six real wired sites reports zero offenders', 
 
 import { requiredArtifactsFor } from '../vcs/governance-tiers.mjs';
 import { tierParams as tierParamsFor, TIERS as ALL_TIERS } from '../vcs/governance-tiers.mjs';
+import { assertRoutableStage } from './stage-engine.mjs';
 
 /** #555: these tests measured against the fixed four; they now name the set explicitly. */
 const STANDARD = requiredArtifactsFor('standard');
@@ -597,4 +754,167 @@ test('#555: REQUIRED_ARTIFACTS is restored as the SCAFFOLD set — four, at ever
   // collapsed two things the spec deliberately separates.
   assert.deepEqual(REQUIRED_ARTIFACTS, ['proposal.md', 'spec.md', 'design.md', 'tasks.md']);
   assert.ok(Object.isFrozen(REQUIRED_ARTIFACTS));
+});
+
+// ── Phase 5 (#456 slice A, design D6) — the drift guard's SECOND scan ───────
+//
+// A1 above matches `.md`-suffixed names only. §1's measurement found the set
+// declared a THIRD time, in BARE names (`stage-engine.mjs`'s
+// `SDD_LIFECYCLE_STAGES`, `phase-order-check.mjs`'s `STANDARD_ARTEFACTS`) —
+// invisible to A1's `ARTIFACT_NAMES` scan. This is a SECOND scan beside A1,
+// not a widened A1 (D6): same BRACKET_RE array-literal window, same 3-of-4
+// quoted-token threshold, following `__fixtures__/tmp-tree-adoption.test.mjs`
+// (#802)'s precedent of writing the false-positive/false-negative traps
+// FIRST, before the real scan is trusted.
+//
+// LANDS LAST in the task order (Phase 5, after Phases 2-3 removed the two
+// bare-name literals it exists to prove are gone) — running it earlier would
+// fail on this repo's OWN pre-migration tree.
+
+const LIFECYCLE_NAMES = ['proposal', 'spec', 'design', 'tasks'];
+
+/** Same quoted-token requirement as A1's countArtifactTokens, over bare names
+ *  instead of `.md`-suffixed ones — a comment inside a bracket carries no
+ *  quotes; a real rival array literal always does. */
+function countBareStageTokens(bracketText) {
+  return LIFECYCLE_NAMES.filter((name) =>
+    bracketText.includes(`'${name}'`) || bracketText.includes(`"${name}"`) || bracketText.includes(`\`${name}\``),
+  ).length;
+}
+
+/**
+ * The allowlist for `scanForRivalStageArray`. `governance-tiers.mjs`'s
+ * `TIER_PARAMS` is the ONE entry, and it is a legitimate 4-of-4 hit — REQ-L4-2′:
+ * "the tier scopes what the GATE demands, never what the SCAFFOLD produces."
+ * That table declares the GATE set per tier (`standard`'s `artefacts` is the
+ * bare four; `regulated`'s is the four plus `verification`), which #555's
+ * first cut collapsed onto the SCAFFOLD set exactly once already. This entry
+ * is the executable statement of that separation, not a workaround for it —
+ * pinned here so the next author who wants to "clean up the duplicate" reads
+ * the reason before doing so.
+ *
+ * Neither `stage-engine.mjs` nor `phase-order-check.mjs` is allowlisted —
+ * both must stop declaring their own literal (Phases 2-3), which is what
+ * task 5.3's real-tree scan proves.
+ */
+const STAGE_DRIFT_ALLOWLIST = [
+  {
+    path: 'brain/scripts/vcs/governance-tiers.mjs',
+    reason: 'REQ-L4-2′: the tier scopes what the GATE demands, never what the SCAFFOLD produces — ' +
+      'TIER_PARAMS.artefacts is the tier-scoped GATE set, a DIFFERENT set from LIFECYCLE_STAGES on purpose.',
+  },
+];
+
+function scanForRivalStageArray(root, { readdir = readdirSync, readFile = readFileSync, allowlist = STAGE_DRIFT_ALLOWLIST } = {}) {
+  const repoRoot = join(SCRIPTS_DIR, '..', '..');
+  const allowSet = new Set(allowlist.map((e) => join(repoRoot, e.path)));
+  const offenders = [];
+  const entries = readdir(root, { recursive: true, withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.mjs')) continue;
+    if (entry.name.endsWith('.test.mjs') || entry.name === 'sdd-layout.mjs') continue;
+    const relDir = entry.parentPath ?? entry.path;
+    const full = join(relDir, entry.name);
+    if (allowSet.has(full)) continue;
+    const content = readFile(full, 'utf8');
+    const brackets = content.match(BRACKET_RE) ?? [];
+    if (brackets.some((b) => countBareStageTokens(b) >= 3)) offenders.push(full);
+  }
+  return offenders;
+}
+
+test('5.1: scanForRivalStageArray catches a bare-name rival array literal co-occurring 3+ of the 4 lifecycle names, naming the file', () => {
+  const files = {
+    'fixture/rival.mjs': `export const RIVAL = ['proposal', 'design', 'tasks'];`,
+  };
+  const offenders = scanForRivalStageArray('fixture', {
+    readdir: () => [{ isFile: () => true, name: 'rival.mjs', parentPath: 'fixture' }],
+    readFile: (p) => files[p],
+    allowlist: [],
+  });
+  assert.deepEqual(offenders, ['fixture/rival.mjs']);
+});
+
+test('5.1: scanForRivalStageArray does NOT trip on a 2-of-4 partial bare-name array (below the 3-of-4 threshold)', () => {
+  const files = {
+    'fixture/partial.mjs': `export const SOME = ['proposal', 'tasks'];`,
+  };
+  const offenders = scanForRivalStageArray('fixture', {
+    readdir: () => [{ isFile: () => true, name: 'partial.mjs', parentPath: 'fixture' }],
+    readFile: (p) => files[p],
+    allowlist: [],
+  });
+  assert.deepEqual(offenders, []);
+});
+
+test('5.1: scanForRivalStageArray ignores an UNQUOTED mention inside brackets — a comment or prose token carries no quotes, a real rival literal always does', () => {
+  const files = {
+    'fixture/prose.mjs': `// [proposal, spec, design, tasks] — the four stages, mentioned in prose\nexport const x = 1;`,
+  };
+  const offenders = scanForRivalStageArray('fixture', {
+    readdir: () => [{ isFile: () => true, name: 'prose.mjs', parentPath: 'fixture' }],
+    readFile: (p) => files[p],
+    allowlist: [],
+  });
+  assert.deepEqual(offenders, []);
+});
+
+test('5.1: the allowlisted governance-tiers.mjs-shaped path does NOT trip, while a non-allowlisted twin at a different path DOES', () => {
+  const repoRoot = join(SCRIPTS_DIR, '..', '..');
+  const dir = join(repoRoot, 'brain', 'scripts', 'vcs');
+  const content = `export const TIER_PARAMS = { standard: { artefacts: ['proposal', 'spec', 'design', 'tasks'] } };`;
+  const files = {
+    [join(dir, 'governance-tiers.mjs')]: content,
+    [join(dir, 'not-allowlisted-twin.mjs')]: content,
+  };
+  const offenders = scanForRivalStageArray(dir, {
+    readdir: () => [
+      { isFile: () => true, name: 'governance-tiers.mjs', parentPath: dir },
+      { isFile: () => true, name: 'not-allowlisted-twin.mjs', parentPath: dir },
+    ],
+    readFile: (p) => files[p],
+  });
+  assert.deepEqual(offenders, [join(dir, 'not-allowlisted-twin.mjs')]);
+});
+
+test('5.2: scanForRivalStageArray real-tree scan of brain/scripts/** returns ZERO offenders (proves Phases 2-3 landed — no bare-name rival remains)', () => {
+  const offenders = scanForRivalStageArray(SCRIPTS_DIR);
+  const message = offenders.length === 0
+    ? undefined
+    : `Found ${offenders.length} bare-name rival stage-set array(s): ${offenders.join(', ')}. ` +
+      'Import LIFECYCLE_STAGES from sdd-layout.mjs instead of declaring a private literal (issue #456), ' +
+      'or add a REVIEWED allowlist entry with a one-line reason stating REQ-L4-2′ if the array is ' +
+      'genuinely a tier-scoped GATE set, not a rival SCAFFOLD declaration.';
+  assert.deepEqual(offenders, [], message);
+});
+
+// ── Phase 6 (#456 slice A) — separation + untouched-surface proof ──────────
+
+test('6.1: REQ-L4-2′ both directions at `lite` — SCAFFOLD (REQUIRED_ARTIFACTS) is the four at every tier; GATE (requiredArtifactsFor) is tier-scoped and DIFFERENT at `lite`', () => {
+  // #555's collapse, re-armed: the fix this slice ships must not quietly
+  // re-merge the two sets it took a bug report to separate the first time.
+  assert.deepEqual(REQUIRED_ARTIFACTS, ['proposal.md', 'spec.md', 'design.md', 'tasks.md'],
+    'SCAFFOLD: brain:project:feature always writes all four, unaffected by tier');
+  assert.deepEqual(requiredArtifactsFor('lite'), ['spec.md'],
+    'GATE: at `lite` the tier demands only spec.md — a DIFFERENT, SMALLER set than SCAFFOLD');
+  assert.notDeepEqual(REQUIRED_ARTIFACTS, requiredArtifactsFor('lite'),
+    'the two sets must disagree at `lite` — proving they are separate, not the same list read twice');
+});
+
+test('6.2: assertRoutableStage refuses all four when sdd.stages declares the four plus a custom stage — routing does not relax it (design D2, ADR-0019 Amendment 1 condition 4, unmodified)', () => {
+  // resolveStageSet's resolved (config-dependent) set is NEVER what
+  // assertRoutableStage refuses against — it refuses against
+  // stage-engine.mjs's SDD_LIFECYCLE_STAGES, a re-export of the same
+  // LIFECYCLE_STAGES constant this resolves from, which additive-only
+  // guarantees is always a subset of any resolved set.
+  const resolved = resolveStageSet({
+    sdd: { stages: { proposal: {}, spec: {}, design: {}, tasks: {}, 'threat-model': { artefact: 'threat-model.md' } } },
+  });
+  assert.deepEqual(resolved.stages, ['proposal', 'spec', 'design', 'tasks', 'threat-model']);
+  for (const stage of LIFECYCLE_STAGES) {
+    assert.throws(() => assertRoutableStage(stage), /is an SDD lifecycle stage and may not be routed/,
+      `${stage} must still refuse routing even though sdd.stages declared it explicitly alongside a custom stage`);
+  }
+  // The custom stage IS routable — that is the point of declaring it (cold-review precedent).
+  assert.doesNotThrow(() => assertRoutableStage('threat-model'));
 });

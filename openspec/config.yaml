@@ -11,13 +11,25 @@ context: |
   Commits: conventional commits only, no AI attribution, no Co-Authored-By
   Branch policy: no direct commits to main (pre-commit hook enforced); branch + PR for all changes
 
-strict_tdd: false
+# strict_tdd corrected 2026-08-29 (sdd-init refresh, issue-456 worktree): the
+# runner is node:test, zero external deps, fast (~27s for 4497 tests) — no
+# reason to run Standard Mode. Previous `false` here was stale relative to the
+# `sdd-init/brain` Engram observation (#237/#701/#456), which already flagged
+# this file as not updated on prior detection-only runs.
+strict_tdd: true
 
 testing:
   test_command: "npm test"
+  raw_command: "node --test \"brain/scripts/**/*.test.mjs\" \"test/**/*.e2e.test.mjs\""
   build_command: ""
   framework: "Node.js built-in (node --test)"
   coverage_available: false
+  baseline:
+    verified: "2026-08-29"
+    tests: 4497
+    pass: 4497
+    fail: 0
+    duration_ms: 27182
   integration:
     - command: "npm run test:fresh-install"
       description: "Docker-based full fresh-install integration test (requires docker + VCS_TOKEN)"
@@ -39,7 +51,7 @@ rules:
     - Keep tasks completable in one session
   apply:
     - Follow existing patterns from the codebase
-    tdd: false
+    tdd: true
     test_command: "npm test"
   verify:
     test_command: "npm test"

@@ -40,20 +40,40 @@ export const ARTEFACT_FILE = Object.freeze({
  * until a consumer at that tier cannot satisfy a gate it has already satisfied.
  *
  * @param {string[]} names
+ * @param {Record<string,string>} [fileMap] defaults to the frozen `ARTEFACT_FILE`.
+ *   `resolveStageSet` (issue #456 slice A, design D3) passes a per-call merge of
+ *   `{...ARTEFACT_FILE, ...declared}` here so a consumer's custom stage resolves
+ *   through the SAME refusal path as the four — the unknown-name refusal stays
+ *   intact for both, "which map is consulted" changed, not whether one is.
  * @returns {string[]}
  */
-export function artefactFiles(names) {
+export function artefactFiles(names, fileMap = ARTEFACT_FILE) {
   return names.map((name) => {
-    const file = ARTEFACT_FILE[name];
+    const file = fileMap[name];
     if (!file) {
       throw new Error(
-        `sdd-layout: unknown artefact name "${name}" — no file is declared for it in ARTEFACT_FILE. ` +
+        `sdd-layout: unknown artefact name "${name}" — no file is declared for it. ` +
         'Appending ".md" would invent a path no gate probes (#555).',
       );
     }
     return file;
   });
 }
+
+/**
+ * The four SDD lifecycle stages, in canonical order (issue #456 slice A, the
+ * maintainer's additive-only ruling). THE ONE declaration: `stage-engine.mjs`'s
+ * `SDD_LIFECYCLE_STAGES` and `phase-order-check.mjs`'s default `artefacts` param
+ * both import this instead of holding their own bare-name literal (design §1 —
+ * the set was declared THREE times, and the drift guard only saw the `.md`
+ * notation, so it was blind to two of the three).
+ *
+ * NOT config-dependent — additive-only guarantees these four are always
+ * present in a resolved set, so nothing that needs "the four" (`assertRoutableStage`'s
+ * refusal, the phase-order positional sentinel) needs `resolveStageSet` at all;
+ * it reads this constant directly and stays untouched by a consumer's declaration.
+ */
+export const LIFECYCLE_STAGES = Object.freeze(['proposal', 'spec', 'design', 'tasks']);
 
 /**
  * The SCAFFOLD set: what `brain:project:feature` writes into a new change dir.
@@ -65,7 +85,114 @@ export function artefactFiles(names) {
  * cut deleted this constant while fixing the gate question, collapsing two things
  * the spec deliberately separates.
  */
-export const REQUIRED_ARTIFACTS = Object.freeze(artefactFiles(['proposal', 'spec', 'design', 'tasks']));
+export const REQUIRED_ARTIFACTS = Object.freeze(artefactFiles(LIFECYCLE_STAGES));
+
+/**
+ * Resolves `config.sdd.stages` against the four, additive-only (maintainer
+ * ruling, 2026-08-29, engram `sdd/issue-456-stage-set/ruling-additive-only`):
+ * a consumer may declare stages BEYOND the four; it may never omit or reorder
+ * one relative to the others (D5/D5a). PURE — `config` is RECEIVED, never
+ * read: this module's header promises no side effects at import, and #555's
+ * first cut broke exactly that promise once, caught by a fixture (D1's "hard
+ * constraint discovered"). The edge (whatever loads `brain.config.json`) is
+ * responsible for reading it; this function only resolves what it is given.
+ *
+ * Absent-or-empty `sdd.stages` is the ABSENCE of a declaration, not a
+ * declaration of zero stages — it resolves to the default four. This is the
+ * shape the `0.11.0` migration ships on every existing consumer (`{}`),
+ * because writing the four into JSON would be a FOURTH declaration of the set,
+ * in a file the drift guard (Phase 5, scans `brain/scripts/**\/*.mjs`) cannot
+ * see at all.
+ *
+ * Full-set semantics, not delta: a declared `sdd.stages` enumerates the WHOLE
+ * set, so omitting one of the four is refused rather than being structurally
+ * impossible. Delta semantics (only declare the extras) is arguably safer but
+ * is rejected (design D5): the maintainer ruled for a refusal that names WHICH
+ * of the four are missing, which delta semantics could never fire, and the
+ * unknown-stage refusal below wants one list to validate a custom stage's
+ * artefact against rather than a union recomputed per call.
+ *
+ * @param {{sdd?: {stages?: Record<string, {artefact?: string}>}}} [config]
+ * @returns {{stages: string[], files: Record<string,string>}}
+ * @throws when a declared set omits one of the four (naming the missing
+ *   stage(s)), reorders them relative to each other (D5a — refused, not
+ *   normalised: `phase-order-check.mjs`'s message sentinel compares
+ *   positionally and a silently reordered declaration would flip it without
+ *   telling the operator), or a declared artefact collides with an existing
+ *   lifecycle file (a custom stage impersonating a gate artefact "changes
+ *   what the gates demand", which ADR-0019 Amendment 1 withholds)
+ */
+export function resolveStageSet(config) {
+  const declared = config?.sdd?.stages;
+  const names = declared && typeof declared === 'object' ? Object.keys(declared) : [];
+
+  if (names.length === 0) {
+    return {
+      stages: [...LIFECYCLE_STAGES],
+      files: Object.fromEntries(LIFECYCLE_STAGES.map((name) => [name, ARTEFACT_FILE[name]])),
+    };
+  }
+
+  const missing = LIFECYCLE_STAGES.filter((stage) => !names.includes(stage));
+  if (missing.length > 0) {
+    throw new Error(
+      `sdd-layout: sdd.stages omits lifecycle stage(s) ${missing.map((s) => `"${s}"`).join(', ')} — the SDD ` +
+      'stage set is ADDITIVE-ONLY. A consumer may declare stages beyond the four; it may not remove one. ' +
+      'Removing a lifecycle stage changes what the gates demand, which ADR-0019 Amendment 1 ("What this ' +
+      'amendment does NOT authorise") withholds and #456\'s ruling settled. Declare all four and add yours ' +
+      'alongside them.',
+    );
+  }
+
+  // D5a — relative order, refused rather than normalised: normalisation has no
+  // defined answer once a custom stage interleaves with the four (which of two
+  // neighbouring canonical stages does it sort next to?), and it would silently
+  // rewrite a declaration the fail-closed posture elsewhere in this repo
+  // (`resolveTier`'s unknown-tier refusal) already treats as the wrong move.
+  const declaredLifecycleOrder = names.filter((name) => LIFECYCLE_STAGES.includes(name));
+  const canonicalSubsequence = LIFECYCLE_STAGES.filter((stage) => declaredLifecycleOrder.includes(stage));
+  const inOrder = declaredLifecycleOrder.every((stage, i) => stage === canonicalSubsequence[i]);
+  if (!inOrder) {
+    throw new Error(
+      'sdd-layout: sdd.stages declares the four lifecycle stages out of relative order — expected ' +
+      `${LIFECYCLE_STAGES.join(', ')} (custom stages may interleave between them; the four may not swap ` +
+      'places relative to each other). A declared order is not normalised: phase-order-check.mjs\'s gate ' +
+      'message compares positionally, and reordering a consumer\'s declaration behind their back would ' +
+      'rewrite intent instead of reporting it (D5a).',
+    );
+  }
+
+  // File collision — a declared artefact impersonating one of the fixed
+  // lifecycle/verification files. Checked BEFORE the unknown-name refusal
+  // below so the more specific "impersonation" message wins over the generic
+  // "no file declared" one when both could apply.
+  for (const [name, entry] of Object.entries(declared)) {
+    const artefact = entry?.artefact;
+    if (!artefact) continue;
+    const collidesWith = Object.entries(ARTEFACT_FILE).find(
+      ([lifecycleName, file]) => file === artefact && lifecycleName !== name,
+    );
+    if (collidesWith) {
+      throw new Error(
+        `sdd-layout: sdd.stages["${name}"].artefact "${artefact}" collides with an existing lifecycle file ` +
+        `(already "${collidesWith[0]}"'s file) — a custom stage may not impersonate a gate artefact. That ` +
+        'changes what the gates demand, which ADR-0019 Amendment 1 withholds.',
+      );
+    }
+  }
+
+  // D3 — per-call merge `{...ARTEFACT_FILE, ...declared artefacts}`, never a
+  // mutation of the frozen default map. A declared stage's `artefact` is
+  // optional: absent means "look it up in ARTEFACT_FILE", which is what the
+  // four do by not naming one.
+  const fileMap = { ...ARTEFACT_FILE };
+  for (const [name, entry] of Object.entries(declared)) {
+    if (entry?.artefact) fileMap[name] = entry.artefact;
+  }
+
+  const resolvedFiles = artefactFiles(names, fileMap);
+  return { stages: names, files: Object.fromEntries(names.map((name, i) => [name, resolvedFiles[i]])) };
+}
 
 /** Machine-written, never required, staleness expected & discardable. NEVER a gate condition. */
 export const OPERATIONAL_ARTIFACTS = Object.freeze(['resume.md']);

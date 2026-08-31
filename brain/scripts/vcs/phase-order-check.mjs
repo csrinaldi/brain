@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadContext } from './ci-context.mjs';
-import { artefactFiles, archivePath, CHANGES_ROOT, LEGACY_GRANDFATHERED } from '../lib/sdd-layout.mjs';
+import { artefactFiles, archivePath, CHANGES_ROOT, LEGACY_GRANDFATHERED, LIFECYCLE_STAGES } from '../lib/sdd-layout.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { resolveTier, tierParams } from './governance-tiers.mjs';
 import { mapDetectionToWarning } from '../governance/detection-policy.mjs';
@@ -109,7 +109,16 @@ const ARTEFACT_FIELD = Object.freeze({
 // default) — used both as evaluateRuleA's default `artefacts` param
 // (preserving every pre-tiering call site/test unchanged) and to detect the
 // legacy literal message below.
-const STANDARD_ARTEFACTS = Object.freeze(['proposal', 'spec', 'design', 'tasks']);
+//
+// Imported from sdd-layout.mjs (issue #456 slice A, design D2) instead of a
+// private literal — this WAS the third of three declarations of the same set
+// §1's measurement found, invisible to the drift guard because it is written
+// in bare names, not `.md`-suffixed ones. The import already existed on this
+// line before this change (design D7: "the seam already exists"); only the
+// binding grew. `LIFECYCLE_STAGES` is not resolvable (never config-dependent),
+// which is exactly why the positional sentinel below is safe to compare
+// against it — see messageForArtefacts.
+const STANDARD_ARTEFACTS = LIFECYCLE_STAGES;
 
 /**
  * Builds the "implementation without ..." message. Preserves the EXACT

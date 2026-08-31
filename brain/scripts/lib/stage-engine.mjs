@@ -1,5 +1,12 @@
 // stage-engine.mjs — resolves `stage → { engine, model }` from `sdd.map`.
 //
+// SDD_LIFECYCLE_STAGES is a RE-EXPORT of sdd-layout.mjs's LIFECYCLE_STAGES
+// (issue #456 slice A, design D2): this file used to hold its own bare-name
+// literal, one of the THREE declarations of the set §1's measurement found.
+// The value is byte-identical — same four, same order, same Object.freeze —
+// so assertRoutableStage below needs no change, and its tests stay green
+// UNMODIFIED (ADR-0019 Amendment 1 condition 4's load-bearing constraint).
+//
 // This is M8's router (#323) in embryo, and it is deliberately not called the
 // reviewer's anything: the cold review is a STAGE, and the question "which
 // engine produces this stage's artifact, with which model" is the same question
@@ -18,6 +25,8 @@
 //     `cold-review` produces none of them, which is why ADR-0033 could land
 //     without answering it.
 
+import { LIFECYCLE_STAGES } from './sdd-layout.mjs';
+
 /** The stage the cold review runs as. Named here so callers stop spelling it. */
 export const COLD_REVIEW_STAGE = 'cold-review';
 
@@ -31,8 +40,16 @@ export const COLD_REVIEW_STAGE = 'cold-review';
  *   > "Expand `VALID_OPS` to route scaffold/verify/archive per-backend.
  *   >  REJECTED: … the SDD artifact lifecycle would fork per harness instead of
  *   >  staying one evidence contract."
+ *
+ * Re-exported from `sdd-layout.mjs`'s `LIFECYCLE_STAGES` (issue #456 slice A) —
+ * the name survives here because callers already import it from this module;
+ * the literal does not, because `sdd-layout.mjs` is now THE ONE declaration.
+ * `assertRoutableStage` below refuses against this constant, never against a
+ * consumer's resolved (config-dependent) set — additive-only guarantees the
+ * four are always present here, so the refusal cannot be relaxed by a
+ * consumer's `sdd.stages` declaration.
  */
-export const SDD_LIFECYCLE_STAGES = Object.freeze(['proposal', 'spec', 'design', 'tasks']);
+export const SDD_LIFECYCLE_STAGES = LIFECYCLE_STAGES;
 
 /**
  * assertRoutableStage() — ADR-0019's boundary, made executable.
