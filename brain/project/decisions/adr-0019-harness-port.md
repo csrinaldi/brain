@@ -1,6 +1,6 @@
 # ADR-0019 — The `SDD_HARNESS` port: four environment surfaces, artifacts neutral by design
 
-**Status**: Accepted · **amended 28/08/2026** (Amendment 1 — see below)
+**Status**: Accepted · **amended 31/08/2026** (Amendments 1-2 — see below)
 **Date**: 2026-07-12 — Cristian Rinaldi (proposed + accepted via #250 / B0; promoted with #253 / B1)
 
 ## Context
@@ -126,12 +126,13 @@ It is not the methodology and it is not a stage count. It is a map from artefact
 path, plus the readers that trust it:
 
 ```
-sdd-layout.mjs:28-32   ARTEFACT_FILE = { proposal: 'proposal.md', spec: 'spec.md',
-                                         design: 'design.md',     tasks: 'tasks.md' }
-sdd-layout.mjs:96-99   openspec/changes/issue-<id>-<slug>/<file>
+sdd-layout.mjs  ARTEFACT_FILE = { proposal: 'proposal.md', spec: 'spec.md',
+                                  design: 'design.md',     tasks: 'tasks.md',
+                                  verification: 'verify-report.md' }
+sdd-layout.mjs  artifactPaths()   openspec/changes/issue-<id>-<slug>/<file>
 ```
 
-Twelve modules import that layout. Three of them are gates on every pull request —
+Ten production modules import that layout, eighteen counting tests. Three of them are gates on every pull request —
 `phase-order-check.mjs:131` fails a PR for a missing artefact, `review/evaluators/checkpoint.mjs:106`
 cites `REQUIRED_ARTIFACTS` as doctrine, and `check-refs.mjs` validates references inside the
 files. **None of them asks an engine where anything is.**
@@ -174,3 +175,52 @@ configurability), not this one, and it is not authorised here.
 **A forked verifier.** Condition 2 is not a preference. If verification forks per engine, every
 gate has to learn N shapes and the evidence contract is gone — which is precisely what the
 bullet above rejects and continues to reject.
+
+## Amendment 2 — the citations, corrected to symbols (issue #456)
+
+**Signed**: 31/08/2026 — Cristian Rinaldi
+
+### What changed
+
+Three citation defects in Amendment 1's *"What the evidence contract actually
+is"* section. The rulings above them are untouched.
+
+1. **`ARTEFACT_FILE` was quoted with four entries.** The tree has **five** —
+   `verification: 'verify-report.md'` was already there when Amendment 1 was
+   written and was left out of the quoted block. The section's whole purpose is
+   to say *once* what the evidence contract is, so a short quotation of it is
+   the one error that matters most there.
+
+2. **"Twelve modules import that layout" was never true.** Measured during
+   #456: **ten** production modules import `sdd-layout.mjs`, eighteen counting
+   test files. Twelve is neither number.
+
+3. **Both citations named line numbers.** `sdd-layout.mjs:28-32` and
+   `sdd-layout.mjs:96-99`. They now name symbols — `ARTEFACT_FILE` and
+   `artifactPaths()`.
+
+### Why line numbers, specifically, are the defect that reproduces
+
+`reviewer-protocol.md` §2 already carries this rule and the incident behind it
+(#580): a doctrine citation pointed at a source line that, within one release
+cycle, had become an unrelated JSDoc block while the mechanism moved elsewhere.
+A doctrine that points at a moving target sends its own verifier to the wrong
+text.
+
+Amendment 1 cited line numbers anyway, and #456 slice A is precisely the change
+that would have invalidated them: `LIFECYCLE_STAGES` and `resolveStageSet` land
+above `ARTEFACT_FILE` in that file, pushing every cited line down. The rule and
+the violation are eleven days apart in the same repository.
+
+### Why this is an amendment and not an edit
+
+ADR-0019 is signed. A correction to a signed artefact is a new, numbered,
+signed act — the same reasoning `memory-format.md` applies to durable records,
+where corrections are new records carrying `supersedes` rather than mutations
+of the original.
+
+This draft was first written as a prose note proposing a direct edit. The
+promotion verb refused it — an ADR target requires `amendment: N`, a
+`home-summary` for the `brain/HOME.md` index, and a `body`. The refusal was
+right and the note was wrong: it is what turned an unnumbered edit into this
+amendment.
