@@ -1,6 +1,6 @@
 # ADR-0019 — The `SDD_HARNESS` port: four environment surfaces, artifacts neutral by design
 
-**Status**: Accepted · **amended 31/08/2026** (Amendments 1-2 — see below)
+**Status**: Accepted · **amended 31/08/2026** (Amendments 1-3 — see below)
 **Date**: 2026-07-12 — Cristian Rinaldi (proposed + accepted via #250 / B0; promoted with #253 / B1)
 
 ## Context
@@ -132,7 +132,7 @@ sdd-layout.mjs  ARTEFACT_FILE = { proposal: 'proposal.md', spec: 'spec.md',
 sdd-layout.mjs  artifactPaths()   openspec/changes/issue-<id>-<slug>/<file>
 ```
 
-Ten production modules import that layout, eighteen counting tests. Three of them are gates on every pull request —
+Eleven production modules import that layout, sixteen counting its five test files. Three of them are gates on every pull request —
 `phase-order-check.mjs:131` fails a PR for a missing artefact, `review/evaluators/checkpoint.mjs:106`
 cites `REQUIRED_ARTIFACTS` as doctrine, and `check-refs.mjs` validates references inside the
 files. **None of them asks an engine where anything is.**
@@ -224,3 +224,56 @@ promotion verb refused it — an ADR target requires `amendment: N`, a
 `home-summary` for the `brain/HOME.md` index, and a `body`. The refusal was
 right and the note was wrong: it is what turned an unnumbered edit into this
 amendment.
+
+## Amendment 3 — the replacement count, measured this time (issue #456)
+
+**Signed**: 31/08/2026 — Cristian Rinaldi
+
+### What changed
+
+`Ten production modules … eighteen counting tests` becomes `Eleven production modules
+… sixteen counting its five test files`.
+
+Measured with a quote-agnostic pattern over the tree:
+
+```
+rg -l "from ['\"][^'\"]*sdd-layout\.mjs['\"]" --glob '*.mjs'
+```
+
+**Eleven production importers**: `check-refs.mjs`, `lib/archive-logic.mjs`,
+`lib/archive-sweep.mjs`, `lib/stage-engine.mjs`, `memory/backends/engram.mjs`,
+`memory/lib/feature-resolution.mjs`, `new-change.mjs`,
+`review/evaluators/checkpoint.mjs`, `session-start.mjs`, `vcs/governance-tiers.mjs`,
+`vcs/phase-order-check.mjs`. **Five test files.** Sixteen total.
+
+### How both numbers were wrong at once
+
+The measurement behind Amendment 2 matched only single-quoted import specifiers.
+`memory/backends/engram.mjs` and `new-change.mjs` import with double quotes, so they
+fell out of the production count — ten instead of eleven.
+
+The "eighteen counting tests" half came from a second, looser pass that counted every
+file mentioning the string `sdd-layout.mjs` anywhere, including comments and
+drift-guard fixtures. Two different greps, neither stated, producing two numbers that
+could not both be right about the same set.
+
+### Why this is worth its own amendment rather than a quiet edit
+
+Amendment 2 exists because Amendment 1 cited a count that was never true and pointed
+at line numbers that rot. Its replacement carried the same class of defect, and it was
+**repeated** — the identical wrong pair appears in this change's `proposal.md`,
+`design.md` and in Amendment 2's own draft, so it was a measurement taken once and
+copied, not a typo.
+
+That is the sharper lesson and it belongs in the record: a correction is not
+self-verifying. Amendment 2 was reviewed, promoted through `brain:promote` with a
+typed confirmation, and merged into signed doctrine with a wrong number inside — and
+what caught it was not the promotion ceremony but a reviewer that re-measured the
+claim instead of reading it.
+
+### What this amendment does NOT touch
+
+The four conditions, the definition of the evidence contract, the boundary in *"What
+this amendment does NOT authorise"*, and Amendment 2's other correction — the
+`ARTEFACT_FILE` quotation and the move from line numbers to symbols, both of which
+were and remain right. Only the module count changes.
