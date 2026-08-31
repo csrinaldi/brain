@@ -1,6 +1,6 @@
 # ADR-0019 — The `SDD_HARNESS` port: four environment surfaces, artifacts neutral by design
 
-**Status**: Accepted · **amended 31/08/2026** (Amendments 1-3 — see below)
+**Status**: Accepted · **amended 31/08/2026** (Amendments 1-4 — see below)
 **Date**: 2026-07-12 — Cristian Rinaldi (proposed + accepted via #250 / B0; promoted with #253 / B1)
 
 ## Context
@@ -194,6 +194,10 @@ is"* section. The rulings above them are untouched.
 2. **"Twelve modules import that layout" was never true.** Measured during
    #456: **ten** production modules import `sdd-layout.mjs`, eighteen counting
    test files. Twelve is neither number.
+   **[SUPERSEDED BY AMENDMENT 4 (#456) — the replacement stated here is ALSO
+   wrong. The measured figures are ELEVEN production modules and FIVE test
+   files, SIXTEEN in total. Do not read "ten" or "eighteen" from this sentence
+   as current; they are recorded here only as what this amendment believed.]**
 
 3. **Both citations named line numbers.** `sdd-layout.mjs:28-32` and
    `sdd-layout.mjs:96-99`. They now name symbols — `ARTEFACT_FILE` and
@@ -277,3 +281,51 @@ The four conditions, the definition of the evidence contract, the boundary in *"
 this amendment does NOT authorise"*, and Amendment 2's other correction — the
 `ARTEFACT_FILE` quotation and the move from line numbers to symbols, both of which
 were and remain right. Only the module count changes.
+
+## Amendment 4 — the superseded count, annotated where it is still written (issue #456)
+
+**Signed**: 31/08/2026 — Cristian Rinaldi
+
+### What changed
+
+Amendment 2's item 2 keeps its original wording — a signed act is not rewritten —
+and gains an inline bracket carrying the measured figures: **eleven** production
+modules, **five** test files, **sixteen** total.
+
+The bracket states the corrected values rather than pointing at Amendment 3. A
+pointer is only as good as the reader who follows it, and the failure this
+annotation exists to prevent is precisely a reader who does not.
+
+### Why the correction did not already cover this
+
+Amendment 3 anchored one sentence — the evidence-contract citation the ADR uses to
+say what the contract *is*. It did not anchor Amendment 2's narrative, which
+repeats the same measurement as the reason the earlier count was wrong. One
+measurement, two places, one of them fixed.
+
+That is the same shape as the defect being corrected: a claim copied to a second
+location, and only the first one maintained. **The correction reproduced the error
+it was correcting, one level in.**
+
+### Three layers deep, and why that is the point
+
+`Twelve` (Amendment 1) → `ten / eighteen` (Amendment 2) → `eleven / sixteen`
+(Amendment 3) → this annotation. Four acts on one count.
+
+A reader entering this document at Amendment 2 has no way to know they are standing
+on a superseded layer. Nothing about that paragraph looks provisional; it reads as a
+correction, which is exactly what makes it dangerous. The bracket is the only thing
+in the document that tells them where they are.
+
+**The house pattern this follows** is already in the tree: ADR-0033's warrant table
+carries `**[Amended by Amendment 1 (#773) — this row is now a RULED position…]**`
+inline in the row it supersedes, rather than leaving the reader to reconcile the
+table with a later section. Same act, one level in.
+
+### The honest cost
+
+Four amendments to fix one number is disproportionate, and saying so is part of the
+record. What made it cost this much was not the number — it was that the same
+measurement was copied into four documents (the ADR, `proposal.md`, `design.md`, and
+the amendment draft) from a grep nobody restated, so each correction found one copy
+and left the others. The count was never the expensive part; the copying was.
