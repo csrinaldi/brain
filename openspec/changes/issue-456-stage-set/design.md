@@ -36,16 +36,16 @@ anywhere else in `brain/scripts/**`."* That claim was false by a factor of two.
 - (3) does **two jobs at once**: the pre-tiering default for an injection seam, and a
   **positional sentinel** that preserves an exact legacy message literal.
 
-### The ten importers do not import the set
+### The eleven importers do not import the set
 
-| What the ten import | Files | Touches the set? |
+| What the eleven import | Files | Touches the set? |
 |---|---|---|
 | `CHANGES_ROOT`, `parseChangeId`, `changeDir`, `archivePath`, `isGrandfathered`, `OPERATIONAL_ARTIFACTS`, `artifactPaths` | `session-start`, `engram`, `feature-resolution`, `archive-sweep`, `archive-logic`, `new-change` | **No** |
 | `missingRequiredArtifacts` + `requiredArtifactsFor(tier)` | `check-refs`, `review/evaluators/checkpoint` | No — that is the **GATE** set |
 | `artefactFiles` over `tierParams(tier).artefacts` | `governance-tiers`, `phase-order-check` | No — **GATE** again |
 
 **`REQUIRED_ARTIFACTS` has zero production importers.** It is imported by
-`sdd-layout.test.mjs` and cited as a *string* by the checkpoint evaluator. The ten
+`sdd-layout.test.mjs` and cited as a *string* by the checkpoint evaluator. The eleven
 import the *layout*; they do not import the *set*.
 
 So slice A's real surface is **three production files plus the migration**, and every
@@ -343,7 +343,7 @@ A1 *"rather than inventing a second shape for the same job (#340)"*).
 
 ### D7 — Order of work, and where the risk sits
 
-Six of the ten consumers are **not touched at all**, and proving that is itself a
+Nine of the eleven importers are **not touched at all**, and proving that is itself a
 step. The order below keeps `npm test` green after every one:
 
 | # | Step | Green because |
@@ -397,7 +397,7 @@ only:
 | `openspec/changes/issue-456-stage-set/**` | — | **not counted** (ignoreList) |
 
 **Countable: ~90 lines. Budget: 1000.** `Chained PRs recommended: No.` The proposal
-forecast this as Medium risk on the strength of "ten importers"; §1's measurement
+forecast this as Medium risk on the strength of "eleven importers"; §1's measurement
 retires it. If `sdd-tasks` finds the estimate drifting past ~400 countable, the slice
 boundary to take is **step 4 onward** (guard + REQ-L4-2′ assertions) as a second PR —
 the guard is the only step with an independent verification story and a clean
@@ -484,7 +484,7 @@ simply ignored by the reverted readers.
 
 - **Citation drift inside ADR-0019 Amendment 1.** It quotes `ARTEFACT_FILE` with
   **four** entries; the tree has **five** (`verification: 'verify-report.md'`). It
-  says *"Twelve modules import that layout"*; measured, **ten** production / eighteen
+  says *"Twelve modules import that layout"*; measured, **eleven** production / sixteen
   with tests. And it cites by line number, which `reviewer-protocol.md` §2 warns
   against by name (#580). Correcting it is a `brain/project/**` write — Tier 3 — so
   it is a **draft candidate** under

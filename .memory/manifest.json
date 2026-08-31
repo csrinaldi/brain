@@ -472,6 +472,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "ba71f095",
+      "created_by": "gandalf",
+      "created_at": "2026-08-31T12:47:50Z",
+      "sessions": 1,
+      "memories": 0,
+      "prompts": 0
     }
   ]
 }

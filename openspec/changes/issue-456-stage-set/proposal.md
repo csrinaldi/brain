@@ -96,8 +96,8 @@ ruling. **Escalated to the human.**
    needed on whether slice A's `sdd.stages` is additive-only.
 2. **Citation drift inside ADR-0019 Amendment 1.** It quotes `ARTEFACT_FILE` at
    `sdd-layout.mjs:28-32` with **four** entries; the tree has **five** (`verification:
-   'verify-report.md'`). It says *"Twelve modules import that layout"*; measured, **ten**
-   production / eighteen with tests. `reviewer-protocol.md` §2 warns against exactly this
+   'verify-report.md'`). It says *"Twelve modules import that layout"*; measured, **eleven**
+   production / sixteen with tests. `reviewer-protocol.md` §2 warns against exactly this
    (*"Citations here name symbols, never line numbers"*, #580) — and the amendment cites
    line numbers. Needs a human ruling: correct the amendment in place, or record the
    measured numbers here and leave the ADR alone.
@@ -113,7 +113,7 @@ and promoted by the human (Tier 3: no agent commits to `brain/core/**` or `brain
 | `brain/scripts/lib/stage-engine.mjs` | Modified | Consumes resolved set; refusal untouched |
 | `brain/scripts/lib/sdd-layout.test.mjs` | Modified | Guard sees bare names |
 | `brain/core/config-migrations.mjs` | Modified | Additive `sdd.stages` migration |
-| ten production importers | Modified | Read resolved set |
+| eleven production importers | Modified | Read resolved set |
 | `brain/project/decisions/adr-0019-*.md` | Draft only | Under `brain-drafts/`, human promotes |
 
 ## Risks
@@ -122,7 +122,7 @@ and promoted by the human (Tier 3: no agent commits to `brain/core/**` or `brain
 |---|---|---|
 | Slice A drifts into slice B or lifts `assertRoutableStage` | Med | Refusal is explicitly out of scope; its test must stay green unchanged |
 | Collapsing SCAFFOLD into GATE (#555's first cut) | Med | REQ-L4-2′ separation asserted by test in both directions |
-| Ten consumers exceed the 1000-line `lite` budget | Med | `sdd-tasks` forecasts; chain PRs if the forecast is high |
+| Eleven consumers exceed the 1000-line `lite` budget | Med | `sdd-tasks` forecasts; chain PRs if the forecast is high |
 | Open question 1 resolved late, forcing rework | Med | Design phase is blocked on it, not apply |
 
 ## Rollback Plan
@@ -146,5 +146,5 @@ reverted readers.
 - [ ] Drift guard fails on a bare-name rival literal (test proves the blind spot is closed).
 - [ ] `assertRoutableStage` still refuses all four lifecycle stages; its test is unmodified.
 - [ ] SCAFFOLD ≠ GATE separation asserted by test (REQ-L4-2′).
-- [ ] All ten production importers read the resolved set; none holds a private copy.
+- [ ] All eleven production importers read the resolved set; none holds a private copy.
 - [ ] Both open questions carry a recorded human ruling before design starts.
