@@ -456,6 +456,22 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "ea1feaa6",
+      "created_by": "gandalf",
+      "created_at": "2026-08-31T11:55:58Z",
+      "sessions": 1,
+      "memories": 14,
+      "prompts": 0
+    },
+    {
+      "id": "073204e0",
+      "created_by": "gandalf",
+      "created_at": "2026-08-31T12:07:45Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }
