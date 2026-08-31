@@ -73,7 +73,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0015](brain/project/decisions/adr-0015-governance-v3-substrate-ladder.md) — Governance v3: six-level fail-closed gate ladder over observable evidence (L1–L6 + substrate rung ladder)
 - [ADR-0016](brain/project/decisions/adr-0016-ci-context-normalization.md) — CI Context Normalization: One Seam Over Provider-Specific Pipeline Evidence
 - [ADR-0017](brain/project/decisions/adr-0017-memory-format-owned-by-brain.md) — The Durable Memory Record Format Is Owned By Brain, Not By Engram (**Amendment 1, 15/08/2026** — duplicate lines are not necessarily byte-identical — brain's own round-trip widens the unhashed `source`, so a divergent pair is reported and resolved first-wins, never refused; and the churn rule governs the diff, not the write, with the cross-file caveat named, #635; **Amendment 2, 16/08/2026** — the durable log holds ONE RECORD PER FILE (`records/<yyyy-mm>-<id>.jsonl`) — `merge=union` was a local git mechanism the forge that performs the merge does not apply, so the log was conflict-free only where the driver ran; two different records are now two different paths and there is nothing to union, #677)
-- [ADR-0019](brain/project/decisions/adr-0019-harness-port.md) — The SDD_HARNESS port: four environment surfaces, artifacts neutral by design (**Amendment 1, 28/08/2026** — routing WHO PRODUCES a stage's artefact does not fork the evidence contract — what forks it is a second layout, #323)
+- [ADR-0019](brain/project/decisions/adr-0019-harness-port.md) — The SDD_HARNESS port: four environment surfaces, artifacts neutral by design (**Amendment 1, 28/08/2026** — routing WHO PRODUCES a stage's artefact does not fork the evidence contract — what forks it is a second layout, #323; **Amendment 2, 31/08/2026** — Amendment 1's evidence-contract citations named line numbers and two counts that were already wrong when written — corrected to symbols, #456; **Amendment 3, 31/08/2026** — Amendment 2's own replacement count was wrong — eleven production importers and five test files, not ten and eighteen, #456; **Amendment 4, 31/08/2026** — Amendment 2's narrative still stated ten/eighteen — annotated in place with the measured eleven/sixteen so no reader takes the superseded count as current, #456)
 - [ADR-0020](brain/project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md) — External-reviewer VCS port verbs + the reviewActors/approvalActors two-key split (**Amendment 1, 06/08/2026; Amendment 2, 07/08/2026** — `prReviewComment` carries optional inline `comments[]`; at most ONE payload the provider accepts carries the verdict, but GitLab needs N+1 calls — verb count and lock 2 unchanged, #405)
 - [ADR-0021](brain/project/decisions/adr-0021-reviewer-port-head-and-rollup.md) — Widen the VCS port for the cold reviewer: headRefOid on prView + a prStatusRollup read verb; retire the H1-1 cold-boot seam
 - [ADR-0022](brain/project/decisions/adr-0022-reviewer-port-base.md) — Widen the VCS port for the cold reviewer: baseRefOid on prView (closes H1-2C-BASE)
@@ -388,12 +388,25 @@ re-declaring a fourth scattered literal.
 ## Single source of truth
 
 `brain/scripts/lib/sdd-layout.mjs` is the ONE module exporting `REQUIRED_ARTIFACTS`,
-`OPERATIONAL_ARTIFACTS`, `CHANGES_ROOT`, `LEGACY_GRANDFATHERED`, and the layout
-path/parse helpers (`changeDir`, `artifactPaths`, `archivePath`, `parseChangeId`,
-`isGrandfathered`, `hasSpec`, `missingRequiredArtifacts`). A drift-guard test
-(`sdd-layout.test.mjs`) fails if a second, independent definition of the
-required-artifact set appears anywhere else in `brain/scripts/**`. Consumers import
-from this module rather than re-deriving the layout inline.
+`LIFECYCLE_STAGES`, `OPERATIONAL_ARTIFACTS`, `CHANGES_ROOT`, `LEGACY_GRANDFATHERED`,
+`resolveStageSet`, and the layout path/parse helpers (`changeDir`, `artifactPaths`,
+`archivePath`, `parseChangeId`, `isGrandfathered`, `hasSpec`,
+`missingRequiredArtifacts`). Consumers import from this module rather than
+re-deriving the layout inline.
+
+Two drift-guard scans in `sdd-layout.test.mjs` hold that single-source claim,
+and it takes two because the set has two notations. One scans for the
+FILENAME form (`'proposal.md', 'spec.md', …`); the other for the BARE-NAME form
+(`'proposal', 'spec', …`). Either alone leaves a hole: for as long as only the
+filename scan existed, `stage-engine.mjs` and `phase-order-check.mjs` each
+carried an independent bare-name declaration of the same four, invisible to a
+guard whose doctrine already claimed to forbid them (#456).
+
+The bare-name scan carries exactly one allowlist entry, and its written reason
+is load-bearing: `governance-tiers.mjs`'s `TIER_PARAMS` names the same four as
+the GATE set for the `standard` tier. That is REQ-L4-2′ — the tier scopes what
+the GATE demands, never what the SCAFFOLD produces — so it is a different set
+that happens to share members, not a rival declaration of this one.
 
 
 ---

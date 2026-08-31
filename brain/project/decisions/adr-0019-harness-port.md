@@ -1,6 +1,6 @@
 # ADR-0019 — The `SDD_HARNESS` port: four environment surfaces, artifacts neutral by design
 
-**Status**: Accepted · **amended 28/08/2026** (Amendment 1 — see below)
+**Status**: Accepted · **amended 31/08/2026** (Amendments 1-4 — see below)
 **Date**: 2026-07-12 — Cristian Rinaldi (proposed + accepted via #250 / B0; promoted with #253 / B1)
 
 ## Context
@@ -126,12 +126,13 @@ It is not the methodology and it is not a stage count. It is a map from artefact
 path, plus the readers that trust it:
 
 ```
-sdd-layout.mjs:28-32   ARTEFACT_FILE = { proposal: 'proposal.md', spec: 'spec.md',
-                                         design: 'design.md',     tasks: 'tasks.md' }
-sdd-layout.mjs:96-99   openspec/changes/issue-<id>-<slug>/<file>
+sdd-layout.mjs  ARTEFACT_FILE = { proposal: 'proposal.md', spec: 'spec.md',
+                                  design: 'design.md',     tasks: 'tasks.md',
+                                  verification: 'verify-report.md' }
+sdd-layout.mjs  artifactPaths()   openspec/changes/issue-<id>-<slug>/<file>
 ```
 
-Twelve modules import that layout. Three of them are gates on every pull request —
+Eleven production modules import that layout, sixteen counting its five test files. Three of them are gates on every pull request —
 `phase-order-check.mjs:131` fails a PR for a missing artefact, `review/evaluators/checkpoint.mjs:106`
 cites `REQUIRED_ARTIFACTS` as doctrine, and `check-refs.mjs` validates references inside the
 files. **None of them asks an engine where anything is.**
@@ -174,3 +175,157 @@ configurability), not this one, and it is not authorised here.
 **A forked verifier.** Condition 2 is not a preference. If verification forks per engine, every
 gate has to learn N shapes and the evidence contract is gone — which is precisely what the
 bullet above rejects and continues to reject.
+
+## Amendment 2 — the citations, corrected to symbols (issue #456)
+
+**Signed**: 31/08/2026 — Cristian Rinaldi
+
+### What changed
+
+Three citation defects in Amendment 1's *"What the evidence contract actually
+is"* section. The rulings above them are untouched.
+
+1. **`ARTEFACT_FILE` was quoted with four entries.** The tree has **five** —
+   `verification: 'verify-report.md'` was already there when Amendment 1 was
+   written and was left out of the quoted block. The section's whole purpose is
+   to say *once* what the evidence contract is, so a short quotation of it is
+   the one error that matters most there.
+
+2. **"Twelve modules import that layout" was never true.** Measured during
+   #456: **ten** production modules import `sdd-layout.mjs`, eighteen counting
+   test files. Twelve is neither number.
+   **[SUPERSEDED BY AMENDMENT 4 (#456) — the replacement stated here is ALSO
+   wrong. The measured figures are ELEVEN production modules and FIVE test
+   files, SIXTEEN in total. Do not read "ten" or "eighteen" from this sentence
+   as current; they are recorded here only as what this amendment believed.]**
+
+3. **Both citations named line numbers.** `sdd-layout.mjs:28-32` and
+   `sdd-layout.mjs:96-99`. They now name symbols — `ARTEFACT_FILE` and
+   `artifactPaths()`.
+
+### Why line numbers, specifically, are the defect that reproduces
+
+`reviewer-protocol.md` §2 already carries this rule and the incident behind it
+(#580): a doctrine citation pointed at a source line that, within one release
+cycle, had become an unrelated JSDoc block while the mechanism moved elsewhere.
+A doctrine that points at a moving target sends its own verifier to the wrong
+text.
+
+Amendment 1 cited line numbers anyway, and #456 slice A is precisely the change
+that would have invalidated them: `LIFECYCLE_STAGES` and `resolveStageSet` land
+above `ARTEFACT_FILE` in that file, pushing every cited line down. The rule and
+the violation are eleven days apart in the same repository.
+
+### Why this is an amendment and not an edit
+
+ADR-0019 is signed. A correction to a signed artefact is a new, numbered,
+signed act — the same reasoning `memory-format.md` applies to durable records,
+where corrections are new records carrying `supersedes` rather than mutations
+of the original.
+
+This draft was first written as a prose note proposing a direct edit. The
+promotion verb refused it — an ADR target requires `amendment: N`, a
+`home-summary` for the `brain/HOME.md` index, and a `body`. The refusal was
+right and the note was wrong: it is what turned an unnumbered edit into this
+amendment.
+
+## Amendment 3 — the replacement count, measured this time (issue #456)
+
+**Signed**: 31/08/2026 — Cristian Rinaldi
+
+### What changed
+
+`Ten production modules … eighteen counting tests` becomes `Eleven production modules
+… sixteen counting its five test files`.
+
+Measured with a quote-agnostic pattern over the tree:
+
+```
+rg -l "from ['\"][^'\"]*sdd-layout\.mjs['\"]" --glob '*.mjs'
+```
+
+**Eleven production importers**: `check-refs.mjs`, `lib/archive-logic.mjs`,
+`lib/archive-sweep.mjs`, `lib/stage-engine.mjs`, `memory/backends/engram.mjs`,
+`memory/lib/feature-resolution.mjs`, `new-change.mjs`,
+`review/evaluators/checkpoint.mjs`, `session-start.mjs`, `vcs/governance-tiers.mjs`,
+`vcs/phase-order-check.mjs`. **Five test files.** Sixteen total.
+
+### How both numbers were wrong at once
+
+The measurement behind Amendment 2 matched only single-quoted import specifiers.
+`memory/backends/engram.mjs` and `new-change.mjs` import with double quotes, so they
+fell out of the production count — ten instead of eleven.
+
+The "eighteen counting tests" half came from a second, looser pass that counted every
+file mentioning the string `sdd-layout.mjs` anywhere, including comments and
+drift-guard fixtures. Two different greps, neither stated, producing two numbers that
+could not both be right about the same set.
+
+### Why this is worth its own amendment rather than a quiet edit
+
+Amendment 2 exists because Amendment 1 cited a count that was never true and pointed
+at line numbers that rot. Its replacement carried the same class of defect, and it was
+**repeated** — the identical wrong pair appears in this change's `proposal.md`,
+`design.md` and in Amendment 2's own draft, so it was a measurement taken once and
+copied, not a typo.
+
+That is the sharper lesson and it belongs in the record: a correction is not
+self-verifying. Amendment 2 was reviewed, promoted through `brain:promote` with a
+typed confirmation, and merged into signed doctrine with a wrong number inside — and
+what caught it was not the promotion ceremony but a reviewer that re-measured the
+claim instead of reading it.
+
+### What this amendment does NOT touch
+
+The four conditions, the definition of the evidence contract, the boundary in *"What
+this amendment does NOT authorise"*, and Amendment 2's other correction — the
+`ARTEFACT_FILE` quotation and the move from line numbers to symbols, both of which
+were and remain right. Only the module count changes.
+
+## Amendment 4 — the superseded count, annotated where it is still written (issue #456)
+
+**Signed**: 31/08/2026 — Cristian Rinaldi
+
+### What changed
+
+Amendment 2's item 2 keeps its original wording — a signed act is not rewritten —
+and gains an inline bracket carrying the measured figures: **eleven** production
+modules, **five** test files, **sixteen** total.
+
+The bracket states the corrected values rather than pointing at Amendment 3. A
+pointer is only as good as the reader who follows it, and the failure this
+annotation exists to prevent is precisely a reader who does not.
+
+### Why the correction did not already cover this
+
+Amendment 3 anchored one sentence — the evidence-contract citation the ADR uses to
+say what the contract *is*. It did not anchor Amendment 2's narrative, which
+repeats the same measurement as the reason the earlier count was wrong. One
+measurement, two places, one of them fixed.
+
+That is the same shape as the defect being corrected: a claim copied to a second
+location, and only the first one maintained. **The correction reproduced the error
+it was correcting, one level in.**
+
+### Three layers deep, and why that is the point
+
+`Twelve` (Amendment 1) → `ten / eighteen` (Amendment 2) → `eleven / sixteen`
+(Amendment 3) → this annotation. Four acts on one count.
+
+A reader entering this document at Amendment 2 has no way to know they are standing
+on a superseded layer. Nothing about that paragraph looks provisional; it reads as a
+correction, which is exactly what makes it dangerous. The bracket is the only thing
+in the document that tells them where they are.
+
+**The house pattern this follows** is already in the tree: ADR-0033's warrant table
+carries `**[Amended by Amendment 1 (#773) — this row is now a RULED position…]**`
+inline in the row it supersedes, rather than leaving the reader to reconcile the
+table with a later section. Same act, one level in.
+
+### The honest cost
+
+Four amendments to fix one number is disproportionate, and saying so is part of the
+record. What made it cost this much was not the number — it was that the same
+measurement was copied into four documents (the ADR, `proposal.md`, `design.md`, and
+the amendment draft) from a grep nobody restated, so each correction found one copy
+and left the others. The count was never the expensive part; the copying was.
