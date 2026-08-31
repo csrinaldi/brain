@@ -171,7 +171,20 @@ key landed before anything routed. A field nobody reads is a real smell; the def
 is that the alternative is slice B declaring the field *and* wiring it in one PR,
 which is the collapse this slicing exists to prevent.
 
-### D4 — Migration `0.11.0`, additive, default `{}`
+### D4 — Migration `1.2.0`, additive, default `{}`
+
+> **Amended after the design was written.** This decision originally numbered the
+> migration `0.11.0`, following the sequence counter every prior entry used. #806's
+> ruling (signed 31/08/2026, candidate D) ends that counter: a migration is numbered
+> with the release it ships in. The package is at `1.1.0`, so this key ships in `1.2.0`.
+>
+> The design was not merely inconsistent — it was wrong, and the investigation that
+> produced #806 started from this very decision. `migrateConfig` seals `schemaVersion`
+> with the installed package version and reads that same field as the migration window's
+> lower bound. A migration numbered `0.11.0` is below the floor of any consumer sealed
+> at `1.1.0` and would never run for them: the code would read `config.sdd.stages` while
+> no schema-valid config for that population could carry it — #643's defect, arriving
+> inside the change meant to avoid it. Nothing else in D4 changes.
 
 Follows `config-migrations.mjs` `0.10.0` (`sdd.map`) exactly:
 

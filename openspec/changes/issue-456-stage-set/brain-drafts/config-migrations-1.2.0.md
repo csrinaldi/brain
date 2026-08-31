@@ -1,4 +1,4 @@
-# DRAFT — Migration `0.11.0` (issue #456 slice A, Phase 4)
+# DRAFT — Migration `1.2.0` (issue #456 slice A, Phase 4 — renumbered per #806)
 
 **Status: DRAFT, NOT APPLIED.** `config-migrations.mjs` lives at
 `brain/core/config-migrations.mjs` — a Tier 3 path this apply run is prohibited
@@ -18,7 +18,7 @@ entry (the `sdd.map` migration) and before the closing `];`:
 
 ```js
   {
-    version: '0.11.0',
+    version: '1.2.0',
     description:
       'Add sdd.stages: the declared stage set (issue #456 slice A). Empty by ' +
       'default — the four lifecycle stages live in code (sdd-layout.mjs ' +
@@ -30,11 +30,31 @@ entry (the `sdd.map` migration) and before the closing `];`:
   },
 ```
 
-No other changes to this file. `0.11.0` is the next version number in
-sequence; per this file's own doctrine (the `0.6.0` note near the bottom),
-version numbers are content-identifiers and are never reused even if this
-draft sits unpromoted for a while — do not renumber it to `0.11.0` a second
-time if another migration lands first; take the next free slot instead.
+No other changes to this file.
+
+**Renumbered from `0.11.0` to `1.2.0` under #806's ruling (signed 31/08/2026,
+candidate D): a migration is numbered with the release it ships in, not with a
+sequence counter.** The package is at `1.1.0`, so this additive key ships in
+`1.2.0`.
+
+`0.11.0` would have been actively wrong, not merely inconsistent. `migrateConfig`
+seals `schemaVersion` with the installed package version and reads that same
+field as the migration window's lower bound, so a migration numbered below the
+package version never runs for any consumer sealed at it. Numbered `0.11.0`,
+this migration would have been dead on arrival the moment anyone ran
+`brain:upgrade` — the code would read `config.sdd.stages` while no schema-valid
+config for that population could carry it. Which is #643's defect, arriving
+inside the change that was supposed to avoid it.
+
+Entries `0.1.0`–`0.10.0` stay as they are: grandfathered by the same ruling,
+because renumbering them would change the meaning of a value already recorded
+in configs that carry it.
+
+If this draft sits unpromoted while another migration lands first, **do not
+reuse `1.2.0`** — take the release this one will actually ship in. Version
+numbers are content-identifiers and are never reused (this file's own `0.6.0`
+retirement note near the bottom is the precedent), and the uniqueness check at
+`stage-engine.test.mjs:87` enforces it.
 
 ---
 
@@ -55,7 +75,7 @@ assert.deepEqual(cfg.sdd.map, {}, 'sdd.map ships EMPTY: a routed cold-review wou
 to:
 
 ```js
-assert.equal(cfg.schemaVersion, '0.11.0', 'sdd.stages (0.11.0, issue #456 slice A) is now the latest — additive-only, empty by default');
+assert.equal(cfg.schemaVersion, '1.2.0', 'sdd.stages (1.2.0, issue #456 slice A) is now the latest — additive-only, empty by default');
 assert.deepEqual(cfg.sdd.map, {}, 'sdd.map ships EMPTY: a routed cold-review would spawn an engine no consumer asked for');
 assert.deepEqual(cfg.sdd.stages, {}, 'sdd.stages ships EMPTY: the four lifecycle stages live in sdd-layout.mjs LIFECYCLE_STAGES, never duplicated into JSON');
 ```
@@ -71,7 +91,7 @@ Add a new test alongside the existing `'#323: sdd.map ships EMPTY...'` test
 
 ```js
 test('#456: sdd.stages ships EMPTY — the four lifecycle stages live in code, never duplicated into a consumer config', () => {
-  const entry = migrations.find((m) => m.version === '0.11.0');
+  const entry = migrations.find((m) => m.version === '1.2.0');
   assert.ok(entry, 'the migration must exist — sdd.stages is new schema surface');
   assert.deepEqual(entry.defaults.sdd.stages, {},
     'a shipped non-empty default would be a FOURTH declaration of the set, in JSON the drift guard cannot scan');
