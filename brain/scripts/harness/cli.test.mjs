@@ -15,6 +15,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { resolveHarness, resolvePlatform, resolveEngine, resolveMemory, dispatch, VALID_OPS } from './cli.mjs';
+import { SDD_ENGINES } from './platform.mjs';
 
 // ── 3-axis resolution tests (issue #305) ───────────────────────────────────
 
@@ -58,6 +59,40 @@ test('resolveEngine: falls back to legacy SDD_HARNESS when engine absent', () =>
 test('resolveEngine: defaults to gentle-ai when absent', () => {
   const result = resolveEngine({ env: {}, envVars: {} });
   assert.equal(result, 'gentle-ai');
+});
+
+// ── #312 D2 supporting change: SDD_ENGINES is ONE declaration, cli.mjs is a reader ──
+//
+// `resolveEngine` used to hold the engine-axis membership as an inline
+// literal `['gentle-ai', 'plain']`. Extracted to `harness/platform.mjs` as
+// `SDD_ENGINES` so `roles/role-port.mjs`'s registry assertion (and any future
+// second reader) shares the same one declaration — `CLI_OPS`-from-`OPS`
+// (`:136-145` above) and `IMPLEMENTED_AXES`-from-`RUNNERS`
+// (`resolve-challenger.mjs:64-74`) are the house pattern this mirrors.
+// `resolveEngine`'s OWN behavior must not move a single inch: this is a
+// refactor of WHERE the membership is declared, never of WHAT it resolves to.
+
+test('#312 D2: SDD_ENGINES is exported from platform.mjs and holds exactly the two known engines', () => {
+  assert.deepEqual([...SDD_ENGINES].sort(), ['gentle-ai', 'plain']);
+});
+
+test('#312 D2: resolveEngine via SDD_HARNESS is unchanged — every SDD_ENGINES member still resolves, in that role, and nothing outside it does', () => {
+  for (const engine of SDD_ENGINES) {
+    const result = resolveEngine({ env: {}, envVars: { SDD_HARNESS: engine } });
+    assert.equal(result, engine, `${engine} must still resolve via the legacy SDD_HARNESS fallback`);
+  }
+  const result = resolveEngine({ env: {}, envVars: { SDD_HARNESS: 'not-a-real-engine' } });
+  assert.equal(result, 'gentle-ai', 'an SDD_HARNESS value outside SDD_ENGINES must still fall through to the default, unchanged');
+});
+
+test('#312 D2: cli.mjs holds no inline engine-membership literal of its own — SDD_ENGINES is the one declaration', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const src = readFileSync(fileURLToPath(new URL('./cli.mjs', import.meta.url)), 'utf8');
+  assert.doesNotMatch(
+    src, /\[\s*['"]gentle-ai['"]\s*,\s*['"]plain['"]\s*\]/,
+    'cli.mjs must read SDD_ENGINES from platform.mjs, not hold its own copy of the engine-axis membership',
+  );
 });
 
 test('resolveMemory: defaults to engram when absent', () => {
