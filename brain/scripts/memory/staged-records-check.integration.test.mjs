@@ -271,3 +271,56 @@ test('issue #701 gate main(): a READABLE config prints no config line at all', a
     'nothing failed to be read, so nothing may be reported — the channel is evidence, not a banner',
   );
 });
+
+// ---------------------------------------------------------------------------
+// Issue #821 — the I/O half of the merge distinction, against real git.
+//
+// The unit tests hand `evaluateStagedRecords` a `merge` object. These two run
+// the actual `MERGE_HEAD` lookup, because the defect was never in the
+// evaluator: the gate simply never asked git whether a merge was underway.
+//
+// `--no-ff` is load-bearing. `feature/701` branches before the trunk record, so
+// a plain `git merge origin/main` FAST-FORWARDS, and a fast-forward writes no
+// `MERGE_HEAD` — the test would then pass for the wrong reason.
+// ---------------------------------------------------------------------------
+
+test('#821 gate: the merge commit CARRYING the trunk record in ALLOWS', (t) => {
+  const { worktree, record } = worldWithTrunkRecord(t);
+
+  git(worktree, ['merge', '--no-ff', '--no-commit', 'origin/main'], { allowFailure: true });
+
+  const staged = git(worktree, ['diff', '--cached', '--name-only']).stdout;
+  assert.match(staged, new RegExp(`2026-07-${record.id}\\.jsonl`), 'precondition: the merge stages the trunk record');
+  assert.notEqual(git(worktree, ['rev-parse', '--verify', 'MERGE_HEAD'], { allowFailure: true }).status, 1,
+    'precondition: a merge is really in progress — a fast-forward would prove nothing');
+
+  const result = runStagedRecordsCheck({ root: worktree });
+
+  assert.equal(result.level, 'pass', 'refusing here makes the operator drop a record the merge is carrying');
+  assert.deepEqual(result.offending, []);
+});
+
+test('#821 gate: mid-merge, a re-export the merge is NOT carrying is still REFUSED', (t) => {
+  // The guarantee `staged-records-check.test.mjs:227` asks for, end to end: the
+  // gate stays live mid-merge. Only the blobs THIS merge introduces are exempt.
+  const { worktree, record } = worldWithTrunkRecord(t);
+
+  git(worktree, ['checkout', '-q', '-b', 'sidebranch']);
+  writeFileSync(join(worktree, 'side.txt'), 'unrelated\n', 'utf8');
+  git(worktree, ['add', 'side.txt']);
+  git(worktree, ['commit', '-q', '-m', 'unrelated work']);
+  git(worktree, ['checkout', '-q', 'feature/701']);
+  git(worktree, ['merge', '--no-ff', '--no-commit', 'sidebranch'], { allowFailure: true });
+
+  // `share` re-materializes the trunk record DURING that merge. The merge did
+  // not bring it — `sidebranch` has no records at all.
+  const recordsDir = join(worktree, '.memory', 'records');
+  mkdirSync(recordsDir, { recursive: true });
+  writeFileSync(join(recordsDir, `2026-07-${record.id}.jsonl`), serializeRecord(record) + '\n', 'utf8');
+  git(worktree, ['add', '.memory/records']);
+
+  const result = runStagedRecordsCheck({ root: worktree });
+
+  assert.equal(result.level, 'fail', 'the gate must keep its keep mid-merge');
+  assert.deepEqual(result.offending, [`.memory/records/2026-07-${record.id}.jsonl`]);
+});

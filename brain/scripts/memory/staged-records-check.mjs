@@ -21,7 +21,7 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { upstreamRecordEntries } from './lib/upstream-records.mjs';
+import { upstreamRecordEntries, parseLsTree } from './lib/upstream-records.mjs';
 import { t } from '../i18n/t.mjs';
 
 const ZERO_OID = '0'.repeat(40);
@@ -38,6 +38,19 @@ const ZERO_OID = '0'.repeat(40);
  *     exporter takes on an unavailable upstream.
  *   - `dstOid === ZERO_OID`   → ALLOW. A staged deletion is a different
  *     concern than a byte-identical re-commit.
+ *   - `merge.byPath.get(path) === dstOid` → ALLOW (issue #821). THIS MERGE is
+ *     carrying that exact blob in at that exact path, so the staged entry is
+ *     the merge itself, not a re-commit of it. Refusing here was destructive,
+ *     not merely noisy: the printed remedy unstages the path, the merge result
+ *     then OMITS the record, and that omission propagates as a DELETION when
+ *     the branch merges back — measured in a throwaway repo, the record was
+ *     gone from the trunk afterwards.
+ *
+ *     This does NOT narrow the gate to "not mid-merge". A record re-exported
+ *     locally during a merge is absent from `MERGE_HEAD` at that path, so it
+ *     still refuses — which is the case `staged-records-check.test.mjs:227`
+ *     means when it calls mid-merge the moment this gate earns its keep. The
+ *     question is not WHEN, it is WHETHER THIS MERGE INTRODUCED THIS BLOB.
  *   - `dstOid === upstream.byPath.get(path)` → REFUSE. Byte-identity compared
  *     as OID equality — zero blob reads, same content-addressed argument
  *     Decision 1 makes for the exporter.
@@ -62,7 +75,7 @@ const ZERO_OID = '0'.repeat(40);
  * @returns {{level: 'pass'|'fail', offending: string[], note?: string, configError?: string,
  *           ref?: string|null}}
  */
-export function evaluateStagedRecords({ staged = [], upstream } = {}) {
+export function evaluateStagedRecords({ staged = [], upstream, merge } = {}) {
   // Carried on BOTH arms: an unreadable config no longer stops the lookup
   // (`upstream-records.mjs`), so it can co-occur with a perfectly good verdict.
   const carry = upstream?.configError === undefined
@@ -82,6 +95,8 @@ export function evaluateStagedRecords({ staged = [], upstream } = {}) {
   for (const entry of staged) {
     if (!entry?.path || !entry.dstOid) continue;
     if (entry.dstOid === ZERO_OID) continue; // a deletion — allow
+    // #821: the merge is carrying this exact blob in — the staged entry IS the merge.
+    if (merge?.ok === true && merge.byPath.get(entry.path) === entry.dstOid) continue;
     if (upstream.byPath.get(entry.path) === entry.dstOid) offending.push(entry.path);
   }
   return { level: offending.length > 0 ? 'fail' : 'pass', offending, ...carry };
@@ -219,6 +234,59 @@ export function stagedRecordDiff({ root, _spawn = spawnSync }) {
 }
 
 /**
+ * mergeIntroducedRecords() — I/O: the records `MERGE_HEAD` holds, so the
+ * evaluator can tell a blob THIS MERGE is carrying from a blob re-staged
+ * beside it (issue #821).
+ *
+ * Reuses `parseLsTree` and the exporter's exact command form at a second call
+ * site rather than growing a second parser — the same argument the header
+ * makes for sharing `upstreamRecordEntries`'s predicate.
+ *
+ * `MERGE_HEAD` resolves inside a LINKED WORKTREE, which is the normal shape
+ * here: worktree-per-issue is the default since #782. Measured in
+ * `brain-issue-312` mid-merge before this was written.
+ *
+ * Every failure — no merge in progress, an octopus merge (`--verify` refuses a
+ * multi-parent `MERGE_HEAD`), an unreadable tree — returns `ok:false`, and the
+ * evaluator then behaves EXACTLY as it did before #821. That degradation
+ * direction is deliberate and is the opposite of the upstream lookup's: an
+ * unanswerable question here must not ALLOW a restage, it must leave the
+ * previous verdict standing.
+ *
+ * @param {object} args
+ * @param {string} args.root
+ * @param {typeof spawnSync} [args._spawn]
+ * @returns {{ok:true, byPath: Map<string,string>}|{ok:false, reason:string}}
+ */
+export function mergeIntroducedRecords({ root, _spawn = spawnSync }) {
+  let head;
+  try {
+    head = _spawn('git', ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], { cwd: root, encoding: 'utf8' });
+  } catch (err) {
+    return { ok: false, reason: `git rev-parse MERGE_HEAD threw — ${err.message}` };
+  }
+  if (head?.error) return { ok: false, reason: `git rev-parse MERGE_HEAD could not run — ${head.error.message}` };
+  if (head?.status !== 0) return { ok: false, reason: 'no merge in progress' };
+
+  let tree;
+  try {
+    tree = _spawn('git', ['ls-tree', '-r', '-z', '--full-tree', 'MERGE_HEAD', '--', '.memory/records'], {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 1e9,
+    });
+  } catch (err) {
+    return { ok: false, reason: `git ls-tree against MERGE_HEAD threw — ${err.message}` };
+  }
+  if (tree?.error) return { ok: false, reason: `git ls-tree against MERGE_HEAD could not run — ${tree.error.message}` };
+  if (typeof tree?.status !== 'number' || tree.status !== 0) {
+    return { ok: false, reason: `git ls-tree against MERGE_HEAD exited ${tree?.status ?? 'with no status'}` };
+  }
+
+  return { ok: true, byPath: parseLsTree(tree.stdout ?? '').byPath };
+}
+
+/**
  * runStagedRecordsCheck() — wires the SAME `upstream-records.mjs` lookup the
  * exporter uses (no second `ls-tree` spawn's worth of policy, one shared
  * module) to the staged-side diff, and evaluates. Seam-injectable for tests;
@@ -237,6 +305,7 @@ export function stagedRecordDiff({ root, _spawn = spawnSync }) {
  * @param {typeof spawnSync} [opts._spawn]
  * @param {typeof upstreamRecordEntries} [opts._upstreamRecordEntries]
  * @param {typeof stagedRecordDiff} [opts._stagedRecordDiff]
+ * @param {typeof mergeIntroducedRecords} [opts._mergeIntroducedRecords]
  * @returns {{level:'pass'|'fail', offending:string[], note?:string, configError?:string,
  *           ref?:string|null}}  `evaluateStagedRecords`'s shape, verbatim, EXCEPT on the
  *   `!diff.ok` early return below, which reports only `note` — see its own comment.
@@ -249,6 +318,7 @@ export function runStagedRecordsCheck({
   _loadConfig,
   _upstreamRecordEntries = upstreamRecordEntries,
   _stagedRecordDiff = stagedRecordDiff,
+  _mergeIntroducedRecords = mergeIntroducedRecords,
 } = {}) {
   const upstream = _upstreamRecordEntries({ root, env, config, _spawn, _loadConfig });
   const diff = _stagedRecordDiff({ root, _spawn });
@@ -257,7 +327,8 @@ export function runStagedRecordsCheck({
     // could not even ASK must never become a block either.
     return { level: 'pass', offending: [], note: `could not read staged .memory/records/ changes — ${diff.reason}` };
   }
-  return evaluateStagedRecords({ staged: diff.staged, upstream });
+  const merge = _mergeIntroducedRecords({ root, _spawn });
+  return evaluateStagedRecords({ staged: diff.staged, upstream, merge });
 }
 
 /**

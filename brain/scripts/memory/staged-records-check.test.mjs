@@ -304,3 +304,87 @@ test('evaluateStagedRecords: a healthy upstream carries no configError — the f
   assert.equal(r.configError, undefined);
   assert.equal(r.ref, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// Issue #821 — the merge commit that CARRIES records in from the trunk.
+//
+// The gate's predicate is byte-identity against upstream, and a record arriving
+// through a merge from the trunk is byte-identical to upstream BY DEFINITION —
+// it IS upstream's blob. So the rule that makes the gate right for a
+// `memory:share` restage fired on every merge, and the remedy it printed
+// (`git restore --staged` + `rm`) made the merge result OMIT the record, which
+// propagates as a deletion when the branch merges back. Measured in a throwaway
+// repo before this fix: the record was gone from the trunk afterwards.
+//
+// The distinction is NOT "mid-merge or not" — `test.mjs:227` deliberately wants
+// this gate live mid-merge, and it stays live. It is "did THIS MERGE introduce
+// this exact blob at this exact path". `MERGE_HEAD` answers that, and it
+// resolves inside a linked worktree, which is the normal shape here since #782.
+// ---------------------------------------------------------------------------
+
+const RECORD = '.memory/records/2026-08-rec-aaaaaaaaaaaaaaaa.jsonl';
+const okMerge = (byPath) => ({ ok: true, byPath });
+
+test('#821 evaluateStagedRecords: a record the MERGE is carrying in from the trunk is ALLOWED', () => {
+  const upstream = okUpstream(new Map([[RECORD, OID_A]]));
+  const merge = okMerge(new Map([[RECORD, OID_A]]));
+  const staged = [{ path: RECORD, dstOid: OID_A, status: 'A' }];
+
+  const r = evaluateStagedRecords({ staged, upstream, merge });
+
+  assert.equal(r.level, 'pass', 'refusing here makes the operator drop a record the merge is carrying');
+  assert.deepEqual(r.offending, []);
+});
+
+test('#821 evaluateStagedRecords: mid-merge, a restage the merge is NOT carrying is still REFUSED', () => {
+  // The gate keeps its keep exactly where test.mjs:227 says it should: a record
+  // re-exported locally during a merge is not in MERGE_HEAD at that path, so
+  // nothing about this fix reaches it.
+  const upstream = okUpstream(new Map([[RECORD, OID_A]]));
+  const merge = okMerge(new Map());   // a merge IS in progress; it just did not bring this
+  const staged = [{ path: RECORD, dstOid: OID_A, status: 'A' }];
+
+  const r = evaluateStagedRecords({ staged, upstream, merge });
+
+  assert.equal(r.level, 'fail');
+  assert.deepEqual(r.offending, [RECORD]);
+});
+
+test('#821 evaluateStagedRecords: mid-merge, DIFFERENT bytes at a path the merge also touched is REFUSED', () => {
+  // Byte-identity is the whole predicate. A path present in MERGE_HEAD does not
+  // launder a blob the merge never carried.
+  const upstream = okUpstream(new Map([[RECORD, OID_A]]));
+  const merge = okMerge(new Map([[RECORD, OID_B]]));
+  const staged = [{ path: RECORD, dstOid: OID_A, status: 'A' }];
+
+  const r = evaluateStagedRecords({ staged, upstream, merge });
+
+  assert.equal(r.level, 'fail', 'the merge carried OID_B here — OID_A is a restage, not the merge');
+  assert.deepEqual(r.offending, [RECORD]);
+});
+
+test('#821 evaluateStagedRecords: NO merge in progress leaves the verdict exactly as before', () => {
+  const upstream = okUpstream(new Map([[RECORD, OID_A]]));
+  const staged = [{ path: RECORD, dstOid: OID_A, status: 'A' }];
+
+  const withoutArg = evaluateStagedRecords({ staged, upstream });
+  const notMerging = evaluateStagedRecords({ staged, upstream, merge: { ok: false, reason: 'no MERGE_HEAD' } });
+
+  assert.equal(withoutArg.level, 'fail', 'omitting the argument must not change the existing contract');
+  assert.equal(notMerging.level, 'fail');
+  assert.deepEqual(notMerging.offending, [RECORD]);
+});
+
+test('#821 runStagedRecordsCheck: the merge lookup is wired through a seam, like every other input', () => {
+  const r = runStagedRecordsCheck({
+    root: '/fake',
+    env: {},
+    config: {},
+    _upstreamRecordEntries: () => okUpstream(new Map([[RECORD, OID_A]])),
+    _stagedRecordDiff: () => ({ ok: true, staged: [{ path: RECORD, dstOid: OID_A, status: 'A' }] }),
+    _mergeIntroducedRecords: () => okMerge(new Map([[RECORD, OID_A]])),
+  });
+
+  assert.equal(r.level, 'pass');
+  assert.deepEqual(r.offending, []);
+});
