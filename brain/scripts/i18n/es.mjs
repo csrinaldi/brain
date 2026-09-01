@@ -305,6 +305,7 @@ export default {
 
   // ── memory/staged-records-check.mjs — gate de pre-commit (issue #701) ────────
   'memory.stagedRecordsCheck.refused': 'rechazado — {count} archivo(s) de .memory/records/ en stage son byte-idénticos a una copia que ya está en el trunk. Esto no agrega nada y es lo que re-dispara este ticket. La solución no pierde información — los bytes ya son durables upstream:',
+  'memory.stagedRecordsCheck.mergeUnreadable': 'hay un merge en curso pero no se pudieron leer sus padres — {error}. Los records que este merge está trayendo no se pueden distinguir de un re-commit, así que el veredicto de abajo es el previo al merge. NO borres con `rm` un record que el merge introdujo confiando en él.',
   'memory.stagedRecordsCheck.remedy': '  git restore --staged {paths}\n  (después hacé `rm` de las rutas que `git status` ahora muestre como sin trackear — mismos bytes, ya están en el trunk)',
   'memory.stagedRecordsCheck.unavailable': 'no se pudo consultar la base upstream — {note}. No se rechazó nada; esta corrida no pudo hacer la pregunta.',
   'memory.stagedRecordsCheck.configUnreadable': '{error}. Cualquier memory.upstreamRef declarado ahí NO fue respetado — la base upstream se derivó como {ref} en su lugar. Arreglá brain.config.json (un marcador de conflicto a medio merge es la causa habitual) si querías apuntar a otro ref.',

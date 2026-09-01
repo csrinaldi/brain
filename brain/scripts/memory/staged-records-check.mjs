@@ -72,6 +72,8 @@ const ZERO_OID = '0'.repeat(40);
  *
  * @param {object} args
  * @param {Array<{path: string, dstOid: string, status: string}>} args.staged
+ * @param {{ok:true, byPath:Map<string,Set<string>>}|{ok:false, absent?:boolean, reason:string}}
+ *        [args.merge]  What THIS merge is carrying, per `mergeIntroducedRecords`.
  * @param {{ok:true, byPath:Map<string,string>, ref:string, configError?:string}
  *        |{ok:false, ref:string|null, reason:string, configError?:string}} args.upstream
  * @returns {{level: 'pass'|'fail', offending: string[], note?: string, configError?: string,
@@ -84,12 +86,27 @@ export function evaluateStagedRecords({ staged = [], upstream, merge } = {}) {
     ? {}
     : { configError: upstream.configError, ref: upstream.ref ?? null };
 
+  // #821, cold review round 3: a merge lookup that FAILED must be said out
+  // loud — the verdict below falls back to the pre-#821 one, and that fallback
+  // is a REFUSE carrying a remedy this module's header calls destructive when
+  // the blob really is merge-carried. `absent` is the ordinary "no merge in
+  // progress" answer and is deliberately silent: it is true on nearly every
+  // commit, so reporting it would be noise on all of them. A lookup that could
+  // not even find out — `git rev-parse --git-path` failing — is silent too: the
+  // message below states a merge IS underway, and saying that without having
+  // seen MERGE_HEAD would be one more claim the code does not back.
+  const mergeCarry = merge?.ok !== true && merge?.inMerge === true
+    ? { mergeError: merge.reason }
+    : {};
+
+
   if (!upstream || upstream.ok !== true) {
     return {
       level: 'pass',
       offending: [],
       note: upstream?.reason ?? 'upstream lookup unavailable — nothing was checked',
       ...carry,
+      ...mergeCarry,
     };
   }
 
@@ -101,7 +118,7 @@ export function evaluateStagedRecords({ staged = [], upstream, merge } = {}) {
     if (merge?.ok === true && merge.byPath.get(entry.path)?.has(entry.dstOid)) continue;
     if (upstream.byPath.get(entry.path) === entry.dstOid) offending.push(entry.path);
   }
-  return { level: offending.length > 0 ? 'fail' : 'pass', offending, ...carry };
+  return { level: offending.length > 0 ? 'fail' : 'pass', offending, ...carry, ...mergeCarry };
 }
 
 /**
@@ -297,12 +314,15 @@ export function mergeIntroducedRecords({ root, _spawn = spawnSync, _readFile = r
     // a broken checkout, and saying "no merge in progress" there tells the
     // operator the opposite of what happened. Both arms still fail safe: the
     // verdict is `ok:false` either way, so only the diagnosis differs.
-    if (err?.code === 'ENOENT') return { ok: false, reason: 'no merge in progress' };
-    return { ok: false, reason: `MERGE_HEAD could not be read — ${err?.code ?? ''} ${err?.message ?? err}`.trim() };
+    // ENOENT is the only code that means "no merge". Any other one means the
+    // file IS there and could not be read, so a merge IS underway — that is
+    // what makes `inMerge` a fact here rather than a guess.
+    if (err?.code === 'ENOENT') return { ok: false, absent: true, reason: 'no merge in progress' };
+    return { ok: false, inMerge: true, reason: `MERGE_HEAD could not be read — ${err?.code ?? ''} ${err?.message ?? err}`.trim() };
   }
 
   const parents = String(text).split('\n').map((l) => l.trim()).filter((l) => /^[0-9a-f]{40}$/.test(l));
-  if (parents.length === 0) return { ok: false, reason: 'MERGE_HEAD named no parent' };
+  if (parents.length === 0) return { ok: false, inMerge: true, reason: 'MERGE_HEAD named no parent' };
 
   const byPath = new Map();
   for (const parent of parents) {
@@ -314,11 +334,11 @@ export function mergeIntroducedRecords({ root, _spawn = spawnSync, _readFile = r
         maxBuffer: 1e9,
       });
     } catch (err) {
-      return { ok: false, reason: `git ls-tree against ${parent} threw — ${err.message}` };
+      return { ok: false, inMerge: true, reason: `git ls-tree against ${parent} threw — ${err.message}` };
     }
-    if (tree?.error) return { ok: false, reason: `git ls-tree against ${parent} could not run — ${tree.error.message}` };
+    if (tree?.error) return { ok: false, inMerge: true, reason: `git ls-tree against ${parent} could not run — ${tree.error.message}` };
     if (typeof tree?.status !== 'number' || tree.status !== 0) {
-      return { ok: false, reason: `git ls-tree against ${parent} exited ${tree?.status ?? 'with no status'}` };
+      return { ok: false, inMerge: true, reason: `git ls-tree against ${parent} exited ${tree?.status ?? 'with no status'}` };
     }
     for (const [path, oid] of parseLsTree(tree.stdout ?? '').byPath) {
       const oids = byPath.get(path);
@@ -408,6 +428,10 @@ export async function main(deps = {}) {
       ? 'memory.stagedRecordsCheck.configUnreadable'
       : 'memory.stagedRecordsCheck.configUnreadableNoRef';
     console.log(`staged-records-check: ${await t(key, { error: result.configError, ref: result.ref })}`);
+  }
+
+  if (result.mergeError) {
+    console.log(`staged-records-check: ${await t('memory.stagedRecordsCheck.mergeUnreadable', { error: result.mergeError })}`);
   }
 
   if (result.note) {

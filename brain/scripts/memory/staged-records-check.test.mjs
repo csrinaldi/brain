@@ -412,3 +412,61 @@ test('#821 mergeIntroducedRecords: ENOENT is "no merge in progress"; any OTHER r
   assert.doesNotMatch(broken.reason, /no merge in progress/, 'a permission error is not an absent merge');
   assert.match(broken.reason, /EACCES/, 'and the operator has to be told which failure it was');
 });
+
+// ---------------------------------------------------------------------------
+// Cold review round 3, `correction`. `mergeIntroducedRecords` can fail for real
+// reasons — an unreadable MERGE_HEAD, an `ls-tree` that refuses against one
+// parent — and on that arm the gate silently falls back to the pre-#821
+// verdict: a REFUSE carrying the same remedy this module's own header calls
+// destructive when the blob really is merge-carried. The operator was never
+// told the tool had TRIED to ask the merge question and failed.
+//
+// This module already states the opposite doctrine for `configError`, and
+// `main()` applies it to both `configError` and `note`. The merge channel got
+// none of it — an omission of MINE, not of #701's.
+//
+// "No merge in progress" is NOT such a failure. It is the answer on almost
+// every commit ever made here, and reporting it would be noise on all of them,
+// which is why the absence is discriminated explicitly rather than by matching
+// the reason string.
+// ---------------------------------------------------------------------------
+
+test('#821 evaluateStagedRecords: a REAL merge-lookup failure is surfaced, never swallowed', () => {
+  const upstream = okUpstream(new Map([[RECORD, OID_A]]));
+  const staged = [{ path: RECORD, dstOid: OID_A, status: 'A' }];
+
+  const r = evaluateStagedRecords({
+    staged,
+    upstream,
+    merge: { ok: false, inMerge: true, reason: 'MERGE_HEAD could not be read — EACCES permission denied' },
+  });
+
+  assert.equal(r.level, 'fail', 'the verdict still falls back — this is about telling, not about deciding');
+  assert.match(r.mergeError, /EACCES/, 'the operator has to learn the merge question was attempted and failed');
+});
+
+test('#821 evaluateStagedRecords: "no merge in progress" is SILENT — it is the answer on nearly every commit', () => {
+  const upstream = okUpstream(new Map([[RECORD, OID_A]]));
+  const staged = [{ path: RECORD, dstOid: OID_A, status: 'A' }];
+
+  const r = evaluateStagedRecords({
+    staged,
+    upstream,
+    merge: { ok: false, absent: true, reason: 'no merge in progress' },
+  });
+
+  assert.equal(r.level, 'fail');
+  assert.equal(r.mergeError, undefined, 'printing this on every ordinary commit is noise, not diagnosis');
+});
+
+test('#821 mergeIntroducedRecords: ENOENT is flagged `absent`, a real failure is not', () => {
+  const spawnNamingPath = () => ({ status: 0, stdout: '.git/MERGE_HEAD\n' });
+  const throwing = (code) => () => { const e = new Error(code); e.code = code; throw e; };
+
+  const absent = mergeIntroducedRecords({ root: '/fake', _spawn: spawnNamingPath, _readFile: throwing('ENOENT') });
+  assert.equal(absent.absent, true, 'the ordinary case must be distinguishable without matching prose');
+
+  const broken = mergeIntroducedRecords({ root: '/fake', _spawn: spawnNamingPath, _readFile: throwing('EACCES') });
+  assert.notEqual(broken.absent, true);
+  assert.equal(broken.inMerge, true, 'EACCES means the file IS there — a merge really is underway');
+});
