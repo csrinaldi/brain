@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 // Task 3.1 (RED): fails until backends/plain.mjs exists.
-import { init } from './plain.mjs';
+import { init, declareRoles } from './plain.mjs';
 import { dispatch } from '../cli.mjs';
 
 // ── (a) unit-level: injected _emit, nine steps in order ──────────────────────
@@ -74,4 +74,34 @@ test('plain declares no agent runtime — there is no AI to check (issue #123)',
   assert.equal(AGENT_RUNTIME, null);
   assert.equal(probeAgentRuntime(AGENT_RUNTIME, { _run: () => { throw new Error('must not run'); } }).state,
     'not-declared');
+});
+
+// ── declareRoles (issue #312 slice A, Unit 3, design D2) ────────────────────
+//
+// plain answers EVERY resolved stage, including a stage it never heard of
+// when this file was written — a human executes any stage, which is a real
+// property of `plain` (AGENT_RUNTIME = null, one manual flow), not a gap. The
+// three values (agent, model_tier, chooses_model) are checked and falsifiable,
+// not a stub: every one of them would change the day plain gained a runtime.
+
+test('#312 D2: declareRoles answers every stage it is asked about, including one it did not know about', () => {
+  const roles = declareRoles(['proposal', 'spec', 'design', 'tasks', 'cold-review']);
+  for (const stage of ['proposal', 'spec', 'design', 'tasks', 'cold-review']) {
+    assert.ok(Object.hasOwn(roles, stage), `plain must declare a role for "${stage}"`);
+    assert.equal(roles[stage].stage, stage);
+  }
+});
+
+test('#312 D2: declareRoles declares a CHECKED model_tier:null and chooses_model:false on every stage — never a fourth tier, never absent', () => {
+  const roles = declareRoles(['proposal', 'spec', 'design', 'tasks', 'cold-review']);
+  for (const stage of Object.keys(roles)) {
+    assert.equal(roles[stage].model_tier, null, `${stage}: plain has no runtime to run a model on`);
+    assert.equal(roles[stage].chooses_model, false, `${stage}: plain never chooses a model — chooses_model must be strictly false, never absent`);
+    assert.equal(roles[stage].agent, 'human', `${stage}: a human executes plain's flow`);
+  }
+});
+
+test('#312 D2: declareRoles declares nothing for a stage it was not asked about', () => {
+  const roles = declareRoles(['proposal']);
+  assert.deepEqual(Object.keys(roles), ['proposal']);
 });

@@ -34,3 +34,27 @@ export async function init({ _emit = console.log } = {}) {
   _emit('SDD_HARNESS=plain — manual flow (no AI). Run these npm verbs in sequence:');
   MANUAL_FLOW_STEPS.forEach((step, i) => _emit(`  ${i + 1}. ${step}`));
 }
+
+/**
+ * `plain`'s role declaration (issue #312 slice A, design D2) — the inhabitant
+ * surface `roles/role-port.mjs`'s `resolveRoles` calls. Answers EVERY stage it
+ * is asked about, including a custom one `plain.mjs` never heard of: a human
+ * executes any stage, which is a real property of this backend (`AGENT_RUNTIME
+ * = null` above, one manual flow), not a gap a static map would leave.
+ *
+ * The three values are CHECKED, not a stub — a stub is a shape with EMPTY
+ * values, and each of these would change the day `plain` gained a runtime:
+ * `agent: 'human'` (the human executing `MANUAL_FLOW_STEPS`, not a null this
+ * object already uses for "no model runs"), `model_tier: null` (a checked
+ * value meaning "a human executes this", never a fourth tier), `chooses_model:
+ * false` (strictly boolean, never absent — `plain` does not choose a model
+ * because no agent runs here to choose one).
+ *
+ * @param {string[]} stages The resolved stage set to declare a role for.
+ * @returns {Record<string, {stage: string, agent: string, model_tier: null, chooses_model: false}>}
+ */
+export function declareRoles(stages) {
+  return Object.fromEntries(stages.map((stage) => [stage, {
+    stage, agent: 'human', model_tier: null, chooses_model: false,
+  }]));
+}
