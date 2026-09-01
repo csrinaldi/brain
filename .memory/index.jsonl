@@ -11,6 +11,7 @@
 {"id":"rec-013ca76bf459840d","ts":"2026-07-29T14:27:58Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-013ca76bf459840d.jsonl"}
 {"id":"rec-0157c01e667c8054","ts":"2026-07-11T21:15:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-0157c01e667c8054.jsonl"}
 {"id":"rec-016f242470ea4319","ts":"2026-07-16T02:48:39Z","actor":"feat/issue-266-h0a-reviewer-protocol-doctrine","type":"decision","project":"brain","file":"2026-07-rec-016f242470ea4319.jsonl"}
+{"id":"rec-01708ef9d43eaf1b","ts":"2026-08-31T17:14:22Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-01708ef9d43eaf1b.jsonl"}
 {"id":"rec-0173112f4e74ecc1","ts":"2026-08-20T14:19:55Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-08-rec-0173112f4e74ecc1.jsonl"}
 {"id":"rec-017ee9fe18312a17","ts":"2026-07-29T14:27:44Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-017ee9fe18312a17.jsonl"}
 {"id":"rec-0184d695b23e7c7e","ts":"2026-07-11T12:33:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-0184d695b23e7c7e.jsonl"}
@@ -55,6 +56,7 @@
 {"id":"rec-05f5eb07bf6ac7ac","ts":"2026-07-29T14:26:39Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-05f5eb07bf6ac7ac.jsonl"}
 {"id":"rec-06168bf8fbd3f96c","ts":"2026-07-13T00:21:36Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-06168bf8fbd3f96c.jsonl"}
 {"id":"rec-065b506e5dad2056","ts":"2026-08-19T14:04:55Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-065b506e5dad2056.jsonl"}
+{"id":"rec-0697f4d88b8aeab5","ts":"2026-08-31T15:34:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-0697f4d88b8aeab5.jsonl"}
 {"id":"rec-069e14d7cac09bb7","ts":"2026-07-29T14:28:53Z","actor":"feat/issue-259-d2-pr3-net-parity-reverter-skip","type":"decision","project":"brain","file":"2026-07-rec-069e14d7cac09bb7.jsonl"}
 {"id":"rec-06d1ec15af217437","ts":"2026-07-29T14:26:40Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-06d1ec15af217437.jsonl"}
 {"id":"rec-06fb1e84447271c3","ts":"2026-08-29T22:44:32Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-08-rec-06fb1e84447271c3.jsonl"}
@@ -774,6 +776,7 @@
 {"id":"rec-572c638923574c8f","ts":"2026-06-26T21:06:25Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-06-rec-572c638923574c8f.jsonl"}
 {"id":"rec-5742fbf3421c6f2a","ts":"2026-07-25T00:47:55Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-5742fbf3421c6f2a.jsonl"}
 {"id":"rec-5762e3e125f6c31e","ts":"2026-07-10T15:19:35Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-5762e3e125f6c31e.jsonl"}
+{"id":"rec-57785fe1736a6f7c","ts":"2026-08-31T17:29:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-57785fe1736a6f7c.jsonl"}
 {"id":"rec-578c1700de8426c4","ts":"2026-07-26T00:39:10Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-578c1700de8426c4.jsonl"}
 {"id":"rec-57bc07ac286d2b6d","ts":"2026-07-22T00:41:51Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-57bc07ac286d2b6d.jsonl"}
 {"id":"rec-57ce6394a6a5fed9","ts":"2026-07-13T00:22:06Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-57ce6394a6a5fed9.jsonl"}
@@ -1350,6 +1353,7 @@
 {"id":"rec-94f69342425b2131","ts":"2026-07-25T21:51:25Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-94f69342425b2131.jsonl"}
 {"id":"rec-950bcd2d364598e1","ts":"2026-07-25T00:47:53Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-950bcd2d364598e1.jsonl"}
 {"id":"rec-953035ce9afcee7a","ts":"2026-07-21T01:58:10Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-953035ce9afcee7a.jsonl"}
+{"id":"rec-954829c81565b53d","ts":"2026-09-01T01:51:58Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-09-rec-954829c81565b53d.jsonl"}
 {"id":"rec-95740755792f0f1c","ts":"2026-08-16T02:49:24Z","actor":"fix/issue-673-actor-checks-deny-branch-cannot-report-t","type":"decision","project":"brain","issue":673,"file":"2026-08-rec-95740755792f0f1c.jsonl"}
 {"id":"rec-959ec3dd8a0c624d","ts":"2026-07-29T14:27:18Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-959ec3dd8a0c624d.jsonl"}
 {"id":"rec-95b7a157945c7601","ts":"2026-07-11T12:34:05Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-95b7a157945c7601.jsonl"}
@@ -1496,6 +1500,7 @@
 {"id":"rec-a4e42cc99a3096a3","ts":"2026-07-25T21:51:22Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-a4e42cc99a3096a3.jsonl"}
 {"id":"rec-a501d8d2a6190020","ts":"2026-08-16T23:58:38Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-a501d8d2a6190020.jsonl"}
 {"id":"rec-a53b6a41e70ae7bc","ts":"2026-07-11T12:33:16Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-a53b6a41e70ae7bc.jsonl"}
+{"id":"rec-a54d62d95e49d338","ts":"2026-09-01T09:41:08Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-09-rec-a54d62d95e49d338.jsonl"}
 {"id":"rec-a58dc5a6e9d14b18","ts":"2026-08-16T14:59:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-a58dc5a6e9d14b18.jsonl"}
 {"id":"rec-a5d4abcd947cc9bd","ts":"2026-08-16T14:19:19Z","actor":"fix/issue-676-adr-0029-carries-675s-corruption-too-sig","type":"decision","project":"brain","issue":676,"file":"2026-08-rec-a5d4abcd947cc9bd.jsonl"}
 {"id":"rec-a5e7f3df0240dd91","ts":"2026-07-25T00:48:30Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-a5e7f3df0240dd91.jsonl"}
@@ -1709,6 +1714,7 @@
 {"id":"rec-bcbe0b2545645f40","ts":"2026-07-25T21:51:31Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-bcbe0b2545645f40.jsonl"}
 {"id":"rec-bcc7a4684c55a49d","ts":"2026-07-30T12:22:35Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-bcc7a4684c55a49d.jsonl"}
 {"id":"rec-bd00cd50a051aede","ts":"2026-07-23T16:17:03Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-bd00cd50a051aede.jsonl"}
+{"id":"rec-bd480d75d9fff966","ts":"2026-09-01T01:32:55Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-09-rec-bd480d75d9fff966.jsonl"}
 {"id":"rec-bd4ee5608e54034c","ts":"2026-07-25T21:51:24Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-bd4ee5608e54034c.jsonl"}
 {"id":"rec-bd56cd884475dc65","ts":"2026-07-29T14:26:28Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-bd56cd884475dc65.jsonl"}
 {"id":"rec-bd9514faf1fd0d1a","ts":"2026-07-29T14:25:39Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-bd9514faf1fd0d1a.jsonl"}
@@ -2058,6 +2064,7 @@
 {"id":"rec-e5e442dc6c766819","ts":"2026-07-13T00:21:16Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-e5e442dc6c766819.jsonl"}
 {"id":"rec-e5ed0e78f2192e01","ts":"2026-08-18T14:16:20Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-e5ed0e78f2192e01.jsonl"}
 {"id":"rec-e6052e9c74c604e6","ts":"2026-06-27T23:10:27Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-e6052e9c74c604e6.jsonl"}
+{"id":"rec-e60d33140a364161","ts":"2026-09-01T09:42:44Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-09-rec-e60d33140a364161.jsonl"}
 {"id":"rec-e624ea9e5ed71eaa","ts":"2026-08-11T23:15:46Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-e624ea9e5ed71eaa.jsonl"}
 {"id":"rec-e62a0b48cbde075c","ts":"2026-07-12T17:26:38Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-e62a0b48cbde075c.jsonl"}
 {"id":"rec-e66458a80eb46d59","ts":"2026-07-29T14:28:40Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-e66458a80eb46d59.jsonl"}
