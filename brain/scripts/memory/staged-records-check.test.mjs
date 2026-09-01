@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { evaluateStagedRecords, parseStagedDiff, runStagedRecordsCheck } from './staged-records-check.mjs';
+import { evaluateStagedRecords, mergeIntroducedRecords, parseStagedDiff, runStagedRecordsCheck } from './staged-records-check.mjs';
 
 const ZERO = '0'.repeat(40);
 const OID_A = 'a'.repeat(40);
@@ -392,4 +392,23 @@ test('#821 runStagedRecordsCheck: the merge lookup is wired through a seam, like
 
   assert.equal(r.level, 'pass');
   assert.deepEqual(r.offending, []);
+});
+
+test('#821 mergeIntroducedRecords: ENOENT is "no merge in progress"; any OTHER read failure says so', () => {
+  // Cold review round 2, editorial. The catch said "no merge in progress" for
+  // every read failure while its own comment claimed ENOENT was the case it
+  // meant. The verdict is unaffected either way — both arms return `ok:false`
+  // and leave the pre-#821 behaviour standing — but an operator debugging a
+  // broken checkout mid-merge was told the opposite of what happened.
+  const spawnNamingPath = () => ({ status: 0, stdout: '.git/MERGE_HEAD\n' });
+  const throwing = (code) => () => { const e = new Error(code); e.code = code; throw e; };
+
+  const absent = mergeIntroducedRecords({ root: '/fake', _spawn: spawnNamingPath, _readFile: throwing('ENOENT') });
+  assert.equal(absent.ok, false);
+  assert.match(absent.reason, /no merge in progress/);
+
+  const broken = mergeIntroducedRecords({ root: '/fake', _spawn: spawnNamingPath, _readFile: throwing('EACCES') });
+  assert.equal(broken.ok, false, 'still fails safe — the verdict must not change');
+  assert.doesNotMatch(broken.reason, /no merge in progress/, 'a permission error is not an absent merge');
+  assert.match(broken.reason, /EACCES/, 'and the operator has to be told which failure it was');
 });

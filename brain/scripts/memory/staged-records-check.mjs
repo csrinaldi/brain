@@ -291,9 +291,14 @@ export function mergeIntroducedRecords({ root, _spawn = spawnSync, _readFile = r
   let text;
   try {
     text = _readFile(isAbsolute(mergeHeadPath) ? mergeHeadPath : join(root, mergeHeadPath), 'utf8');
-  } catch {
-    // ENOENT is the ordinary answer: no merge is in progress.
-    return { ok: false, reason: 'no merge in progress' };
+  } catch (err) {
+    // ENOENT is the ordinary answer and the only one that means "no merge".
+    // Everything else — EACCES, EIO, a directory where the file should be — is
+    // a broken checkout, and saying "no merge in progress" there tells the
+    // operator the opposite of what happened. Both arms still fail safe: the
+    // verdict is `ok:false` either way, so only the diagnosis differs.
+    if (err?.code === 'ENOENT') return { ok: false, reason: 'no merge in progress' };
+    return { ok: false, reason: `MERGE_HEAD could not be read — ${err?.code ?? ''} ${err?.message ?? err}`.trim() };
   }
 
   const parents = String(text).split('\n').map((l) => l.trim()).filter((l) => /^[0-9a-f]{40}$/.test(l));
