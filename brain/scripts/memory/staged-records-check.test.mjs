@@ -323,7 +323,12 @@ test('evaluateStagedRecords: a healthy upstream carries no configError — the f
 // ---------------------------------------------------------------------------
 
 const RECORD = '.memory/records/2026-08-rec-aaaaaaaaaaaaaaaa.jsonl';
-const okMerge = (byPath) => ({ ok: true, byPath });
+// `byPath` maps a path to the SET of oids the merge parents hold there — an
+// octopus merge can carry the same path from more than one parent (#821, cold
+// review round 1). Written as a plain {path: oid} here and lifted, so the cases
+// below stay about the VERDICT rather than about Set construction.
+const okMerge = (byPath) =>
+  ({ ok: true, byPath: new Map([...byPath].map(([k, v]) => [k, new Set([v])])) });
 
 test('#821 evaluateStagedRecords: a record the MERGE is carrying in from the trunk is ALLOWED', () => {
   const upstream = okUpstream(new Map([[RECORD, OID_A]]));

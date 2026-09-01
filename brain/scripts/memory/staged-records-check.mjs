@@ -19,6 +19,8 @@
 // case is closed by the exporter, not by a second gate here.
 
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { upstreamRecordEntries, parseLsTree } from './lib/upstream-records.mjs';
@@ -38,7 +40,7 @@ const ZERO_OID = '0'.repeat(40);
  *     exporter takes on an unavailable upstream.
  *   - `dstOid === ZERO_OID`   → ALLOW. A staged deletion is a different
  *     concern than a byte-identical re-commit.
- *   - `merge.byPath.get(path) === dstOid` → ALLOW (issue #821). THIS MERGE is
+ *   - `merge.byPath.get(path)` contains `dstOid` → ALLOW (issue #821). THIS MERGE is
  *     carrying that exact blob in at that exact path, so the staged entry is
  *     the merge itself, not a re-commit of it. Refusing here was destructive,
  *     not merely noisy: the printed remedy unstages the path, the merge result
@@ -96,7 +98,7 @@ export function evaluateStagedRecords({ staged = [], upstream, merge } = {}) {
     if (!entry?.path || !entry.dstOid) continue;
     if (entry.dstOid === ZERO_OID) continue; // a deletion — allow
     // #821: the merge is carrying this exact blob in — the staged entry IS the merge.
-    if (merge?.ok === true && merge.byPath.get(entry.path) === entry.dstOid) continue;
+    if (merge?.ok === true && merge.byPath.get(entry.path)?.has(entry.dstOid)) continue;
     if (upstream.byPath.get(entry.path) === entry.dstOid) offending.push(entry.path);
   }
   return { level: offending.length > 0 ? 'fail' : 'pass', offending, ...carry };
@@ -246,9 +248,21 @@ export function stagedRecordDiff({ root, _spawn = spawnSync }) {
  * here: worktree-per-issue is the default since #782. Measured in
  * `brain-issue-312` mid-merge before this was written.
  *
- * Every failure — no merge in progress, an octopus merge (`--verify` refuses a
- * multi-parent `MERGE_HEAD`), an unreadable tree — returns `ok:false`, and the
- * evaluator then behaves EXACTLY as it did before #821. That degradation
+ * EVERY parent is read, and the value is a SET of oids per path. An octopus
+ * `MERGE_HEAD` holds one sha PER LINE, and an earlier version of this function
+ * resolved it with `git rev-parse --verify --quiet MERGE_HEAD` while claiming
+ * `--verify` refuses a multi-parent one. That claim was FALSE — measured on git
+ * 2.53.0, `--verify --quiet` exits 0 and prints only the FIRST line — so the
+ * `ls-tree` saw one parent's tree and a record arriving through any later
+ * parent was refused: the very data-loss path this ticket exists to close,
+ * reached through a door the first fix did not look at (cold review round 1).
+ * There is no plumbing command that prints every line, so the file named by
+ * `--git-path MERGE_HEAD` is read directly — the same thing git's own scripts
+ * do, and `--git-path` is what makes it correct inside a linked worktree.
+ *
+ * Every failure — no merge in progress, an unreadable tree — returns
+ * `ok:false`, and the evaluator then behaves EXACTLY as it did before #821.
+ * That degradation
  * direction is deliberate and is the opposite of the upstream lookup's: an
  * unanswerable question here must not ALLOW a restage, it must leave the
  * previous verdict standing.
@@ -256,34 +270,59 @@ export function stagedRecordDiff({ root, _spawn = spawnSync }) {
  * @param {object} args
  * @param {string} args.root
  * @param {typeof spawnSync} [args._spawn]
- * @returns {{ok:true, byPath: Map<string,string>}|{ok:false, reason:string}}
+ * @param {typeof readFileSync} [args._readFile]
+ * @returns {{ok:true, byPath: Map<string,Set<string>>}|{ok:false, reason:string}}
  */
-export function mergeIntroducedRecords({ root, _spawn = spawnSync }) {
-  let head;
+export function mergeIntroducedRecords({ root, _spawn = spawnSync, _readFile = readFileSync }) {
+  let pathResult;
   try {
-    head = _spawn('git', ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], { cwd: root, encoding: 'utf8' });
+    pathResult = _spawn('git', ['rev-parse', '--git-path', 'MERGE_HEAD'], { cwd: root, encoding: 'utf8' });
   } catch (err) {
-    return { ok: false, reason: `git rev-parse MERGE_HEAD threw — ${err.message}` };
+    return { ok: false, reason: `git rev-parse --git-path MERGE_HEAD threw — ${err.message}` };
   }
-  if (head?.error) return { ok: false, reason: `git rev-parse MERGE_HEAD could not run — ${head.error.message}` };
-  if (head?.status !== 0) return { ok: false, reason: 'no merge in progress' };
-
-  let tree;
-  try {
-    tree = _spawn('git', ['ls-tree', '-r', '-z', '--full-tree', 'MERGE_HEAD', '--', '.memory/records'], {
-      cwd: root,
-      encoding: 'utf8',
-      maxBuffer: 1e9,
-    });
-  } catch (err) {
-    return { ok: false, reason: `git ls-tree against MERGE_HEAD threw — ${err.message}` };
-  }
-  if (tree?.error) return { ok: false, reason: `git ls-tree against MERGE_HEAD could not run — ${tree.error.message}` };
-  if (typeof tree?.status !== 'number' || tree.status !== 0) {
-    return { ok: false, reason: `git ls-tree against MERGE_HEAD exited ${tree?.status ?? 'with no status'}` };
+  if (pathResult?.error) return { ok: false, reason: `git rev-parse --git-path could not run — ${pathResult.error.message}` };
+  if (typeof pathResult?.status !== 'number' || pathResult.status !== 0) {
+    return { ok: false, reason: `git rev-parse --git-path exited ${pathResult?.status ?? 'with no status'}` };
   }
 
-  return { ok: true, byPath: parseLsTree(tree.stdout ?? '').byPath };
+  const mergeHeadPath = String(pathResult.stdout ?? '').trim();
+  if (!mergeHeadPath) return { ok: false, reason: 'git named no MERGE_HEAD path' };
+
+  let text;
+  try {
+    text = _readFile(isAbsolute(mergeHeadPath) ? mergeHeadPath : join(root, mergeHeadPath), 'utf8');
+  } catch {
+    // ENOENT is the ordinary answer: no merge is in progress.
+    return { ok: false, reason: 'no merge in progress' };
+  }
+
+  const parents = String(text).split('\n').map((l) => l.trim()).filter((l) => /^[0-9a-f]{40}$/.test(l));
+  if (parents.length === 0) return { ok: false, reason: 'MERGE_HEAD named no parent' };
+
+  const byPath = new Map();
+  for (const parent of parents) {
+    let tree;
+    try {
+      tree = _spawn('git', ['ls-tree', '-r', '-z', '--full-tree', parent, '--', '.memory/records'], {
+        cwd: root,
+        encoding: 'utf8',
+        maxBuffer: 1e9,
+      });
+    } catch (err) {
+      return { ok: false, reason: `git ls-tree against ${parent} threw — ${err.message}` };
+    }
+    if (tree?.error) return { ok: false, reason: `git ls-tree against ${parent} could not run — ${tree.error.message}` };
+    if (typeof tree?.status !== 'number' || tree.status !== 0) {
+      return { ok: false, reason: `git ls-tree against ${parent} exited ${tree?.status ?? 'with no status'}` };
+    }
+    for (const [path, oid] of parseLsTree(tree.stdout ?? '').byPath) {
+      const oids = byPath.get(path);
+      if (oids) oids.add(oid);
+      else byPath.set(path, new Set([oid]));
+    }
+  }
+
+  return { ok: true, byPath };
 }
 
 /**

@@ -324,3 +324,41 @@ test('#821 gate: mid-merge, a re-export the merge is NOT carrying is still REFUS
   assert.equal(result.level, 'fail', 'the gate must keep its keep mid-merge');
   assert.deepEqual(result.offending, [`.memory/records/2026-07-${record.id}.jsonl`]);
 });
+
+// ---------------------------------------------------------------------------
+// Issue #821, cold review round 1 — an OCTOPUS merge.
+//
+// The first version of `mergeIntroducedRecords` resolved the merge with
+// `git rev-parse --verify --quiet MERGE_HEAD` and its docstring claimed
+// `--verify` refuses a multi-parent MERGE_HEAD. That claim is FALSE.
+// Measured on git 2.53.0: an octopus MERGE_HEAD holds one sha per line and
+// `--verify --quiet` exits 0 printing ONLY THE FIRST, so the `ls-tree` that
+// followed saw one parent's tree and the other parents' records were invisible
+// to the exemption. A record arriving through the second parent was then
+// refused — the exact data-loss path #821 exists to close, reached through a
+// door the fix did not look at.
+// ---------------------------------------------------------------------------
+
+test('#821 gate: an OCTOPUS merge carrying the record in through a LATER parent ALLOWS', (t) => {
+  const { worktree, record } = worldWithTrunkRecord(t);
+
+  git(worktree, ['checkout', '-q', '-b', 'sidebranch']);
+  writeFileSync(join(worktree, 'side.txt'), 'unrelated\n', 'utf8');
+  git(worktree, ['add', 'side.txt']);
+  git(worktree, ['commit', '-q', '-m', 'unrelated work']);
+  git(worktree, ['checkout', '-q', 'feature/701']);
+
+  // sidebranch FIRST, origin/main SECOND: the record arrives through the parent
+  // a single-sha read of MERGE_HEAD never reaches.
+  git(worktree, ['merge', '--no-ff', '--no-commit', 'sidebranch', 'origin/main'], { allowFailure: true });
+
+  const parents = git(worktree, ['rev-parse', '--git-path', 'MERGE_HEAD']).stdout.trim();
+  assert.ok(parents, 'precondition: MERGE_HEAD exists');
+  const staged = git(worktree, ['diff', '--cached', '--name-only']).stdout;
+  assert.match(staged, new RegExp(`2026-07-${record.id}\\.jsonl`), 'precondition: the octopus merge stages the trunk record');
+
+  const result = runStagedRecordsCheck({ root: worktree });
+
+  assert.equal(result.level, 'pass', 'a later octopus parent carries records in exactly as the first one does');
+  assert.deepEqual(result.offending, []);
+});
