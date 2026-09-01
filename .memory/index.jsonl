@@ -57,6 +57,7 @@
 {"id":"rec-06168bf8fbd3f96c","ts":"2026-07-13T00:21:36Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-06168bf8fbd3f96c.jsonl"}
 {"id":"rec-065b506e5dad2056","ts":"2026-08-19T14:04:55Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-065b506e5dad2056.jsonl"}
 {"id":"rec-0697f4d88b8aeab5","ts":"2026-08-31T15:34:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-0697f4d88b8aeab5.jsonl"}
+{"id":"rec-069c138d749a9dc4","ts":"2026-09-01T12:30:28Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-09-rec-069c138d749a9dc4.jsonl"}
 {"id":"rec-069e14d7cac09bb7","ts":"2026-07-29T14:28:53Z","actor":"feat/issue-259-d2-pr3-net-parity-reverter-skip","type":"decision","project":"brain","file":"2026-07-rec-069e14d7cac09bb7.jsonl"}
 {"id":"rec-06d1ec15af217437","ts":"2026-07-29T14:26:40Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-06d1ec15af217437.jsonl"}
 {"id":"rec-06fb1e84447271c3","ts":"2026-08-29T22:44:32Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-08-rec-06fb1e84447271c3.jsonl"}
@@ -466,6 +467,7 @@
 {"id":"rec-3577be294be160c7","ts":"2026-07-29T14:26:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3577be294be160c7.jsonl"}
 {"id":"rec-3593bc93b539532b","ts":"2026-07-25T00:48:38Z","actor":"feat/issue-266-h1-1-review-core-cold-boot","type":"decision","project":"brain","file":"2026-07-rec-3593bc93b539532b.jsonl"}
 {"id":"rec-35b469ed9429ddc6","ts":"2026-07-25T00:48:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-35b469ed9429ddc6.jsonl"}
+{"id":"rec-35e09fc539447742","ts":"2026-09-01T16:22:40Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-09-rec-35e09fc539447742.jsonl"}
 {"id":"rec-35f6d0a38c7ef608","ts":"2026-07-11T14:22:37Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-35f6d0a38c7ef608.jsonl"}
 {"id":"rec-361111a5a5985099","ts":"2026-08-16T15:00:47Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-361111a5a5985099.jsonl"}
 {"id":"rec-3622505498689096","ts":"2026-07-18T20:30:57Z","actor":"fix/issue-293-coldboot-shallow","type":"decision","project":"brain","file":"2026-07-rec-3622505498689096.jsonl"}
@@ -681,6 +683,7 @@
 {"id":"rec-4d6ba21868c4a4be","ts":"2026-07-13T00:21:48Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-4d6ba21868c4a4be.jsonl"}
 {"id":"rec-4d71c5f55c62f00a","ts":"2026-08-27T23:55:18Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-08-rec-4d71c5f55c62f00a.jsonl"}
 {"id":"rec-4d9826923dc6c3c6","ts":"2026-07-11T12:33:30Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4d9826923dc6c3c6.jsonl"}
+{"id":"rec-4d99842973ef6c5b","ts":"2026-09-01T16:39:26Z","actor":"fix/issue-821-fixmemory-staged-records-check-blocks-th","type":"bugfix","project":"brain","issue":821,"file":"2026-09-rec-4d99842973ef6c5b.jsonl"}
 {"id":"rec-4dd6b3f0b91250ec","ts":"2026-07-25T00:46:44Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4dd6b3f0b91250ec.jsonl"}
 {"id":"rec-4ddbd54054d82442","ts":"2026-07-25T21:50:33Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-4ddbd54054d82442.jsonl"}
 {"id":"rec-4e052c74af444be3","ts":"2026-07-25T00:47:13Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-4e052c74af444be3.jsonl"}
@@ -1884,6 +1887,7 @@
 {"id":"rec-d2be918e95bac693","ts":"2026-07-29T14:26:56Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-d2be918e95bac693.jsonl"}
 {"id":"rec-d2c5b15b9ca5d1c4","ts":"2026-07-11T12:33:10Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d2c5b15b9ca5d1c4.jsonl"}
 {"id":"rec-d2d8448ae8871971","ts":"2026-07-25T21:50:12Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-d2d8448ae8871971.jsonl"}
+{"id":"rec-d2ded214bc5d66c1","ts":"2026-09-01T12:59:28Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-d2ded214bc5d66c1.jsonl"}
 {"id":"rec-d2f87fbda3c7d858","ts":"2026-08-07T16:13:11Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-08-rec-d2f87fbda3c7d858.jsonl"}
 {"id":"rec-d318e80950148971","ts":"2026-07-25T21:50:46Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-d318e80950148971.jsonl"}
 {"id":"rec-d33090369390d447","ts":"2026-07-25T21:51:38Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-d33090369390d447.jsonl"}
@@ -1954,6 +1958,7 @@
 {"id":"rec-da936da4f3d1c1bf","ts":"2026-06-27T19:46:02Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-da936da4f3d1c1bf.jsonl"}
 {"id":"rec-da9875032d34d622","ts":"2026-07-29T14:25:55Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-da9875032d34d622.jsonl"}
 {"id":"rec-dade96a656d75faf","ts":"2026-07-11T12:33:33Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-dade96a656d75faf.jsonl"}
+{"id":"rec-dae6d879f4eced05","ts":"2026-09-01T12:52:37Z","actor":"fix/issue-818-fixtest-five-tests-pin-the-record-filena","type":"bugfix","project":"brain","issue":818,"file":"2026-09-rec-dae6d879f4eced05.jsonl"}
 {"id":"rec-daf4da9b088dc7a9","ts":"2026-07-29T14:28:25Z","actor":"feat/issue-266-h0a-reviewer-protocol-doctrine","type":"discovery","project":"brain","file":"2026-07-rec-daf4da9b088dc7a9.jsonl"}
 {"id":"rec-dafe27b27540071d","ts":"2026-07-13T00:21:41Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-dafe27b27540071d.jsonl"}
 {"id":"rec-db07eb519a1cba04","ts":"2026-07-29T14:27:00Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-db07eb519a1cba04.jsonl"}
@@ -2128,6 +2133,7 @@
 {"id":"rec-edefa6875431e73d","ts":"2026-07-21T00:54:30Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-edefa6875431e73d.jsonl"}
 {"id":"rec-edfbd4b3f058ba25","ts":"2026-08-12T01:35:06Z","actor":"feat/issue-509-promote-amendments-02","type":"session_summary","project":"brain","file":"2026-08-rec-edfbd4b3f058ba25.jsonl"}
 {"id":"rec-ee0b6a436fea2cbb","ts":"2026-07-13T20:11:23Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-ee0b6a436fea2cbb.jsonl"}
+{"id":"rec-ee6f5736d3724ba4","ts":"2026-09-01T12:52:29Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-ee6f5736d3724ba4.jsonl"}
 {"id":"rec-ee7b45fd89f5b467","ts":"2026-07-29T14:28:20Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ee7b45fd89f5b467.jsonl"}
 {"id":"rec-ee8279ee9c5cd402","ts":"2026-07-25T00:48:44Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-ee8279ee9c5cd402.jsonl"}
 {"id":"rec-ee8336dd44267228","ts":"2026-07-11T12:33:02Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ee8336dd44267228.jsonl"}

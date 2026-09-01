@@ -19,9 +19,11 @@
 // case is closed by the exporter, not by a second gate here.
 
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { upstreamRecordEntries } from './lib/upstream-records.mjs';
+import { upstreamRecordEntries, parseLsTree } from './lib/upstream-records.mjs';
 import { t } from '../i18n/t.mjs';
 
 const ZERO_OID = '0'.repeat(40);
@@ -38,6 +40,19 @@ const ZERO_OID = '0'.repeat(40);
  *     exporter takes on an unavailable upstream.
  *   - `dstOid === ZERO_OID`   → ALLOW. A staged deletion is a different
  *     concern than a byte-identical re-commit.
+ *   - `merge.byPath.get(path)` contains `dstOid` → ALLOW (issue #821). THIS MERGE is
+ *     carrying that exact blob in at that exact path, so the staged entry is
+ *     the merge itself, not a re-commit of it. Refusing here was destructive,
+ *     not merely noisy: the printed remedy unstages the path, the merge result
+ *     then OMITS the record, and that omission propagates as a DELETION when
+ *     the branch merges back — measured in a throwaway repo, the record was
+ *     gone from the trunk afterwards.
+ *
+ *     This does NOT narrow the gate to "not mid-merge". A record re-exported
+ *     locally during a merge is absent from `MERGE_HEAD` at that path, so it
+ *     still refuses — which is the case `staged-records-check.test.mjs:227`
+ *     means when it calls mid-merge the moment this gate earns its keep. The
+ *     question is not WHEN, it is WHETHER THIS MERGE INTRODUCED THIS BLOB.
  *   - `dstOid === upstream.byPath.get(path)` → REFUSE. Byte-identity compared
  *     as OID equality — zero blob reads, same content-addressed argument
  *     Decision 1 makes for the exporter.
@@ -57,17 +72,33 @@ const ZERO_OID = '0'.repeat(40);
  *
  * @param {object} args
  * @param {Array<{path: string, dstOid: string, status: string}>} args.staged
+ * @param {{ok:true, byPath:Map<string,Set<string>>}|{ok:false, absent?:boolean, reason:string}}
+ *        [args.merge]  What THIS merge is carrying, per `mergeIntroducedRecords`.
  * @param {{ok:true, byPath:Map<string,string>, ref:string, configError?:string}
  *        |{ok:false, ref:string|null, reason:string, configError?:string}} args.upstream
  * @returns {{level: 'pass'|'fail', offending: string[], note?: string, configError?: string,
  *           ref?: string|null}}
  */
-export function evaluateStagedRecords({ staged = [], upstream } = {}) {
+export function evaluateStagedRecords({ staged = [], upstream, merge } = {}) {
   // Carried on BOTH arms: an unreadable config no longer stops the lookup
   // (`upstream-records.mjs`), so it can co-occur with a perfectly good verdict.
   const carry = upstream?.configError === undefined
     ? {}
     : { configError: upstream.configError, ref: upstream.ref ?? null };
+
+  // #821, cold review round 3: a merge lookup that FAILED must be said out
+  // loud — the verdict below falls back to the pre-#821 one, and that fallback
+  // is a REFUSE carrying a remedy this module's header calls destructive when
+  // the blob really is merge-carried. `absent` is the ordinary "no merge in
+  // progress" answer and is deliberately silent: it is true on nearly every
+  // commit, so reporting it would be noise on all of them. A lookup that could
+  // not even find out — `git rev-parse --git-path` failing — is silent too: the
+  // message below states a merge IS underway, and saying that without having
+  // seen MERGE_HEAD would be one more claim the code does not back.
+  const mergeCarry = merge?.ok !== true && merge?.inMerge === true
+    ? { mergeError: merge.reason }
+    : {};
+
 
   if (!upstream || upstream.ok !== true) {
     return {
@@ -75,6 +106,7 @@ export function evaluateStagedRecords({ staged = [], upstream } = {}) {
       offending: [],
       note: upstream?.reason ?? 'upstream lookup unavailable — nothing was checked',
       ...carry,
+      ...mergeCarry,
     };
   }
 
@@ -82,9 +114,11 @@ export function evaluateStagedRecords({ staged = [], upstream } = {}) {
   for (const entry of staged) {
     if (!entry?.path || !entry.dstOid) continue;
     if (entry.dstOid === ZERO_OID) continue; // a deletion — allow
+    // #821: the merge is carrying this exact blob in — the staged entry IS the merge.
+    if (merge?.ok === true && merge.byPath.get(entry.path)?.has(entry.dstOid)) continue;
     if (upstream.byPath.get(entry.path) === entry.dstOid) offending.push(entry.path);
   }
-  return { level: offending.length > 0 ? 'fail' : 'pass', offending, ...carry };
+  return { level: offending.length > 0 ? 'fail' : 'pass', offending, ...carry, ...mergeCarry };
 }
 
 /**
@@ -219,6 +253,104 @@ export function stagedRecordDiff({ root, _spawn = spawnSync }) {
 }
 
 /**
+ * mergeIntroducedRecords() — I/O: the records `MERGE_HEAD` holds, so the
+ * evaluator can tell a blob THIS MERGE is carrying from a blob re-staged
+ * beside it (issue #821).
+ *
+ * Reuses `parseLsTree` and the exporter's exact command form at a second call
+ * site rather than growing a second parser — the same argument the header
+ * makes for sharing `upstreamRecordEntries`'s predicate.
+ *
+ * `MERGE_HEAD` resolves inside a LINKED WORKTREE, which is the normal shape
+ * here: worktree-per-issue is the default since #782. Measured in
+ * `brain-issue-312` mid-merge before this was written.
+ *
+ * EVERY parent is read, and the value is a SET of oids per path. An octopus
+ * `MERGE_HEAD` holds one sha PER LINE, and an earlier version of this function
+ * resolved it with `git rev-parse --verify --quiet MERGE_HEAD` while claiming
+ * `--verify` refuses a multi-parent one. That claim was FALSE — measured on git
+ * 2.53.0, `--verify --quiet` exits 0 and prints only the FIRST line — so the
+ * `ls-tree` saw one parent's tree and a record arriving through any later
+ * parent was refused: the very data-loss path this ticket exists to close,
+ * reached through a door the first fix did not look at (cold review round 1).
+ * There is no plumbing command that prints every line, so the file named by
+ * `--git-path MERGE_HEAD` is read directly — the same thing git's own scripts
+ * do, and `--git-path` is what makes it correct inside a linked worktree.
+ *
+ * Every failure — no merge in progress, an unreadable tree — returns
+ * `ok:false`, and the evaluator then behaves EXACTLY as it did before #821.
+ * That degradation
+ * direction is deliberate and is the opposite of the upstream lookup's: an
+ * unanswerable question here must not ALLOW a restage, it must leave the
+ * previous verdict standing.
+ *
+ * @param {object} args
+ * @param {string} args.root
+ * @param {typeof spawnSync} [args._spawn]
+ * @param {typeof readFileSync} [args._readFile]
+ * @returns {{ok:true, byPath: Map<string,Set<string>>}|{ok:false, reason:string}}
+ */
+export function mergeIntroducedRecords({ root, _spawn = spawnSync, _readFile = readFileSync }) {
+  let pathResult;
+  try {
+    pathResult = _spawn('git', ['rev-parse', '--git-path', 'MERGE_HEAD'], { cwd: root, encoding: 'utf8' });
+  } catch (err) {
+    return { ok: false, reason: `git rev-parse --git-path MERGE_HEAD threw — ${err.message}` };
+  }
+  if (pathResult?.error) return { ok: false, reason: `git rev-parse --git-path could not run — ${pathResult.error.message}` };
+  if (typeof pathResult?.status !== 'number' || pathResult.status !== 0) {
+    return { ok: false, reason: `git rev-parse --git-path exited ${pathResult?.status ?? 'with no status'}` };
+  }
+
+  const mergeHeadPath = String(pathResult.stdout ?? '').trim();
+  if (!mergeHeadPath) return { ok: false, reason: 'git named no MERGE_HEAD path' };
+
+  let text;
+  try {
+    text = _readFile(isAbsolute(mergeHeadPath) ? mergeHeadPath : join(root, mergeHeadPath), 'utf8');
+  } catch (err) {
+    // ENOENT is the ordinary answer and the only one that means "no merge".
+    // Everything else — EACCES, EIO, a directory where the file should be — is
+    // a broken checkout, and saying "no merge in progress" there tells the
+    // operator the opposite of what happened. Both arms still fail safe: the
+    // verdict is `ok:false` either way, so only the diagnosis differs.
+    // ENOENT is the only code that means "no merge". Any other one means the
+    // file IS there and could not be read, so a merge IS underway — that is
+    // what makes `inMerge` a fact here rather than a guess.
+    if (err?.code === 'ENOENT') return { ok: false, absent: true, reason: 'no merge in progress' };
+    return { ok: false, inMerge: true, reason: `MERGE_HEAD could not be read — ${err?.code ?? ''} ${err?.message ?? err}`.trim() };
+  }
+
+  const parents = String(text).split('\n').map((l) => l.trim()).filter((l) => /^[0-9a-f]{40}$/.test(l));
+  if (parents.length === 0) return { ok: false, inMerge: true, reason: 'MERGE_HEAD named no parent' };
+
+  const byPath = new Map();
+  for (const parent of parents) {
+    let tree;
+    try {
+      tree = _spawn('git', ['ls-tree', '-r', '-z', '--full-tree', parent, '--', '.memory/records'], {
+        cwd: root,
+        encoding: 'utf8',
+        maxBuffer: 1e9,
+      });
+    } catch (err) {
+      return { ok: false, inMerge: true, reason: `git ls-tree against ${parent} threw — ${err.message}` };
+    }
+    if (tree?.error) return { ok: false, inMerge: true, reason: `git ls-tree against ${parent} could not run — ${tree.error.message}` };
+    if (typeof tree?.status !== 'number' || tree.status !== 0) {
+      return { ok: false, inMerge: true, reason: `git ls-tree against ${parent} exited ${tree?.status ?? 'with no status'}` };
+    }
+    for (const [path, oid] of parseLsTree(tree.stdout ?? '').byPath) {
+      const oids = byPath.get(path);
+      if (oids) oids.add(oid);
+      else byPath.set(path, new Set([oid]));
+    }
+  }
+
+  return { ok: true, byPath };
+}
+
+/**
  * runStagedRecordsCheck() — wires the SAME `upstream-records.mjs` lookup the
  * exporter uses (no second `ls-tree` spawn's worth of policy, one shared
  * module) to the staged-side diff, and evaluates. Seam-injectable for tests;
@@ -237,6 +369,7 @@ export function stagedRecordDiff({ root, _spawn = spawnSync }) {
  * @param {typeof spawnSync} [opts._spawn]
  * @param {typeof upstreamRecordEntries} [opts._upstreamRecordEntries]
  * @param {typeof stagedRecordDiff} [opts._stagedRecordDiff]
+ * @param {typeof mergeIntroducedRecords} [opts._mergeIntroducedRecords]
  * @returns {{level:'pass'|'fail', offending:string[], note?:string, configError?:string,
  *           ref?:string|null}}  `evaluateStagedRecords`'s shape, verbatim, EXCEPT on the
  *   `!diff.ok` early return below, which reports only `note` — see its own comment.
@@ -249,6 +382,7 @@ export function runStagedRecordsCheck({
   _loadConfig,
   _upstreamRecordEntries = upstreamRecordEntries,
   _stagedRecordDiff = stagedRecordDiff,
+  _mergeIntroducedRecords = mergeIntroducedRecords,
 } = {}) {
   const upstream = _upstreamRecordEntries({ root, env, config, _spawn, _loadConfig });
   const diff = _stagedRecordDiff({ root, _spawn });
@@ -257,7 +391,8 @@ export function runStagedRecordsCheck({
     // could not even ASK must never become a block either.
     return { level: 'pass', offending: [], note: `could not read staged .memory/records/ changes — ${diff.reason}` };
   }
-  return evaluateStagedRecords({ staged: diff.staged, upstream });
+  const merge = _mergeIntroducedRecords({ root, _spawn });
+  return evaluateStagedRecords({ staged: diff.staged, upstream, merge });
 }
 
 /**
@@ -293,6 +428,10 @@ export async function main(deps = {}) {
       ? 'memory.stagedRecordsCheck.configUnreadable'
       : 'memory.stagedRecordsCheck.configUnreadableNoRef';
     console.log(`staged-records-check: ${await t(key, { error: result.configError, ref: result.ref })}`);
+  }
+
+  if (result.mergeError) {
+    console.log(`staged-records-check: ${await t('memory.stagedRecordsCheck.mergeUnreadable', { error: result.mergeError })}`);
   }
 
   if (result.note) {
