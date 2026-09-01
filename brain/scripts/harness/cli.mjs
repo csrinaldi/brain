@@ -41,8 +41,8 @@ function readEnvFile(root = repoRoot) {
 // silently: `resolvePlatform` has been part of this module's surface since
 // ADR-0024, and moving it out from under its callers would be a second defect
 // to fix the first.
-import { resolvePlatform } from './platform.mjs';
-export { resolvePlatform };
+import { resolvePlatform, SDD_ENGINES } from './platform.mjs';
+export { resolvePlatform, SDD_ENGINES };
 
 /**
  * Resolves the active SDD engine.
@@ -55,8 +55,12 @@ export function resolveEngine({ env = process.env, envVars = {}, config = {} } =
   const engineVal = env.SDD_ENGINE ?? envVars.SDD_ENGINE ?? config.engine;
   if (engineVal) return engineVal;
 
+  // SDD_ENGINES (platform.mjs, issue #312 D2) is the ONE declaration of this
+  // membership — reading it here, rather than holding a second inline copy,
+  // is the whole point of the extraction. Behavior is unchanged: same two
+  // names, same fallback.
   const harnessVal = env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness;
-  if (harnessVal && ['gentle-ai', 'plain'].includes(harnessVal)) {
+  if (harnessVal && SDD_ENGINES.includes(harnessVal)) {
     return harnessVal;
   }
 

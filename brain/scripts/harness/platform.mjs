@@ -38,6 +38,18 @@
 // `cli.mjs` re-exports `resolvePlatform` so its own importers are unaffected.
 
 /**
+ * The SDD_ENGINE axis membership (issue #312, design D2 supporting change).
+ * Lives here, not `cli.mjs`, for the same reason this whole file does: a
+ * backend may not import the dispatcher, and `roles/role-port.mjs`'s registry
+ * assertion needs this list without reaching into `cli.mjs`'s top-level-await
+ * module. `cli.mjs`'s `resolveEngine` reads it below instead of holding its
+ * own inline literal — one declaration, two readers, the `CLI_OPS`-from-`OPS`
+ * (`cli.mjs:136-145`) / `IMPLEMENTED_AXES`-from-`RUNNERS`
+ * (`resolve-challenger.mjs:64-74`) house pattern.
+ */
+export const SDD_ENGINES = Object.freeze(['gentle-ai', 'plain']);
+
+/**
  * Resolves the active agent platform.
  * Pure — takes env + envVars + config explicitly for testing.
  *
