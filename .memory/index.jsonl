@@ -2130,6 +2130,7 @@
 {"id":"rec-edefa6875431e73d","ts":"2026-07-21T00:54:30Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-edefa6875431e73d.jsonl"}
 {"id":"rec-edfbd4b3f058ba25","ts":"2026-08-12T01:35:06Z","actor":"feat/issue-509-promote-amendments-02","type":"session_summary","project":"brain","file":"2026-08-rec-edfbd4b3f058ba25.jsonl"}
 {"id":"rec-ee0b6a436fea2cbb","ts":"2026-07-13T20:11:23Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-ee0b6a436fea2cbb.jsonl"}
+{"id":"rec-ee6f5736d3724ba4","ts":"2026-09-01T12:52:29Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-ee6f5736d3724ba4.jsonl"}
 {"id":"rec-ee7b45fd89f5b467","ts":"2026-07-29T14:28:20Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ee7b45fd89f5b467.jsonl"}
 {"id":"rec-ee8279ee9c5cd402","ts":"2026-07-25T00:48:44Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-ee8279ee9c5cd402.jsonl"}
 {"id":"rec-ee8336dd44267228","ts":"2026-07-11T12:33:02Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ee8336dd44267228.jsonl"}
