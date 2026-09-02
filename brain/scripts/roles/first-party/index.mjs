@@ -5,6 +5,7 @@
 
 import { ADVERSARY_COLD_REVIEW } from './adversary-cold-review.mjs';
 import { VERIFIER_REVIEW } from './verifier-review.mjs';
+import { ADVERSARY_CHALLENGER } from './adversary-challenger.mjs';
 
 const BY_STAGE = Object.freeze({
   [ADVERSARY_COLD_REVIEW.stage]: ADVERSARY_COLD_REVIEW,
@@ -14,6 +15,7 @@ const BY_STAGE = Object.freeze({
 // a stage (the reviewer, the challenger). One shelf, two read-only doors.
 const BY_NAME = Object.freeze({
   [VERIFIER_REVIEW.name]: VERIFIER_REVIEW,
+  [ADVERSARY_CHALLENGER.name]: ADVERSARY_CHALLENGER,
 });
 
 /**

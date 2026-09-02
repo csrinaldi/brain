@@ -18,7 +18,8 @@
 //
 // EMISSION IS NOT WIRED HERE. Which init writes these files, and any
 // managed-paths declaration, is the maintainer's hand — recorded as a note in
-// ADR-0023's draft, never done silently (proposal T3).
+// the role-port ADR's DRAFT (#576 T5; cited by number only once promoted — the
+// adr-citations guard demands a citation that resolves TODAY), never silent.
 
 export const PROJECTION_PLATFORMS = Object.freeze(['claude', 'antigravity']);
 

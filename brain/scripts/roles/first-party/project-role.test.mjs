@@ -53,13 +53,13 @@ test('#576 T3: compileAgentsMd with roles appends the section, deterministically
 test('#576 T3: the committed goldens ARE the projections — the drift guard, both directions', () => {
   const claude = projectRole(VERIFIER_REVIEW, 'claude');
   assert.equal(
-    readFileSync(new URL('./goldens/brain-verifier-review.claude.md', import.meta.url), 'utf8'),
+    readFileSync(new URL('./__fixtures__/goldens/brain-verifier-review.claude.md', import.meta.url), 'utf8'),
     claude.text,
     'hand-editing the golden OR the source must fail here, naming the truth',
   );
   const adversary = projectRole(ADVERSARY_COLD_REVIEW, 'claude');
   assert.equal(
-    readFileSync(new URL('./goldens/brain-adversary-cold-review.claude.md', import.meta.url), 'utf8'),
+    readFileSync(new URL('./__fixtures__/goldens/brain-adversary-cold-review.claude.md', import.meta.url), 'utf8'),
     adversary.text,
   );
 });
