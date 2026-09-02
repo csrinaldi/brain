@@ -38,7 +38,27 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
       const r = row.roles[stage];
       const tier = r.model_tier === null ? 'no-agent (human)' : r.model_tier;
       const marks = [r.derived ? 'derived' : 'recorded', r.instructions === null ? 'no prompt' : 'instructions'];
+      // Cold review round 1 on this PR: the port computes state/reason and this
+      // was the only surface that could show them — dropping the field was the
+      // same laundering this module's header forbids, for a different field.
+      if (r.state === 'disabled') marks.push(`DISABLED — ${r.reason}`);
       console.log(`    ${stage.padEnd(12)} agent=${r.agent}  tier=${tier}  chooses_model=${r.chooses_model}  [${marks.join(', ')}]`);
+    }
+    // The drift line tasks.md promised and the first cut never built (cold
+    // review round 1, editorial — the box was checked over an overstatement).
+    // A recorded entry is a CLAIM about this engine; when the fresh survey
+    // disagrees, the disagreement is named member by member, never counted.
+    const recorded = config.sdd?.engines?.[row.engine];
+    if (recorded && Array.isArray(recorded.stages)) {
+      const fresh = Object.keys(row.roles);
+      const gone = recorded.stages.filter((st) => !fresh.includes(st));
+      const added = fresh.filter((st) => !recorded.stages.includes(st));
+      if (gone.length > 0 || added.length > 0) {
+        const parts = [];
+        if (gone.length > 0) parts.push(`recorded but no longer surveyed: ${gone.join(', ')}`);
+        if (added.length > 0) parts.push(`surveyed but not recorded: ${added.join(', ')}`);
+        console.log(`    ⚠ drift vs sdd.engines.${row.engine} (recordedAt ${recorded.recordedAt}): ${parts.join('; ')}`);
+      }
     }
     console.log('');
   }

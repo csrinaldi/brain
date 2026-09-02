@@ -53,3 +53,43 @@ test('#824 cli: no brain.config.json is a named refusal, not a stack trace', (t)
   assert.equal(r.status, 1);
   assert.match(r.stderr, /brain\.config\.json/);
 });
+
+// ── round 1 of the cold review — two verified findings ──────────────────────
+
+test('#824 (review r1): a DISABLED stage is visibly disabled — the survey must not launder state either', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-824-disabled-'));
+  t.after(() => removeTempTree(root));
+  writeFileSync(join(root, 'brain.config.json'), JSON.stringify({
+    schemaVersion: '0.10.0',
+    sdd: { configs: { tasks: { enabled: false } } },
+  }, null, 2) + '\n', 'utf8');
+  const r = run(root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /tasks.*DISABLED/s, 'the state the port computed must reach the operator');
+  assert.match(r.stdout, /sdd\.configs/, 'and the reason travels with it');
+});
+
+test('#824 (review r1): a recorded entry that no longer matches the survey prints DRIFT — the promise tasks.md made', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-824-drift-'));
+  t.after(() => removeTempTree(root));
+  writeFileSync(join(root, 'brain.config.json'), JSON.stringify({
+    schemaVersion: '0.10.0',
+    sdd: { engines: { plain: { recordedAt: '2026-08-01T00:00:00Z', stages: ['proposal', 'spec', 'design', 'tasks', 'retired-stage'] } } },
+  }, null, 2) + '\n', 'utf8');
+  const r = run(root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /drift/i);
+  assert.match(r.stdout, /retired-stage/, 'the drifted member is named, not just counted');
+});
+
+test('#824 (review r1): a recorded entry that MATCHES prints no drift — silence about agreement, words about change', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-824-nodrift-'));
+  t.after(() => removeTempTree(root));
+  writeFileSync(join(root, 'brain.config.json'), JSON.stringify({
+    schemaVersion: '0.10.0',
+    sdd: { engines: { plain: { recordedAt: '2026-08-01T00:00:00Z', stages: ['proposal', 'spec', 'design', 'tasks'] } } },
+  }, null, 2) + '\n', 'utf8');
+  const r = run(root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /drift/i);
+});
