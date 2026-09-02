@@ -1183,6 +1183,7 @@
 {"id":"rec-8124585dbeb8bd8a","ts":"2026-07-01T00:57:38Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-8124585dbeb8bd8a.jsonl"}
 {"id":"rec-8128ae03cd5768db","ts":"2026-07-02T20:35:55Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-8128ae03cd5768db.jsonl"}
 {"id":"rec-8147a75919d7acd7","ts":"2026-08-16T14:29:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-8147a75919d7acd7.jsonl"}
+{"id":"rec-815a51251c77ff5c","ts":"2026-09-02T12:10:52Z","actor":"feat/issue-823-featconfig-brainconfig-the-one-verb-comp","type":"architecture","project":"brain","issue":823,"file":"2026-09-rec-815a51251c77ff5c.jsonl"}
 {"id":"rec-81934e923f225163","ts":"2026-07-25T21:51:04Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-81934e923f225163.jsonl"}
 {"id":"rec-819aa3481b4818f0","ts":"2026-07-25T00:47:40Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-819aa3481b4818f0.jsonl"}
 {"id":"rec-81a3aff2d779884a","ts":"2026-08-16T13:56:26Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-81a3aff2d779884a.jsonl"}
