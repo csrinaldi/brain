@@ -80,6 +80,7 @@
     "brain:next": "node ./brain/scripts/brain-next.mjs",
     "brain:adopt": "node ./brain/scripts/adopt.mjs",
     "brain:config": "node ./brain/scripts/config/cli.mjs",
+    "brain:engines": "node ./brain/scripts/harness/engines-cli.mjs",
     "brain:promote": "node ./brain/scripts/brain-promote.mjs",
     "brain:approve": "node ./brain/scripts/approve/cli.mjs",
     "brain:review": "node ./brain/scripts/review/cli.mjs",
