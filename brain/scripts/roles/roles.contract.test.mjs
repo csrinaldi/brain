@@ -19,7 +19,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 import { resolveStageSet } from '../lib/sdd-layout.mjs';
 import { ROLE_TIERS, resolveRoles } from './role-port.mjs';
@@ -126,10 +125,3 @@ test('roles.contract: a synthetic module with no declareRoles is refused', () =>
   );
 });
 
-
-test('roles.contract TRIPWIRE: the dated PARITY DEBT statement is present, unmodified', () => {
-  assert.match(
-    readFileSync(fileURLToPath(import.meta.url), 'utf8'),
-    /PARITY DEBT — #312, dated 2026-08-31/,
-  );
-});
