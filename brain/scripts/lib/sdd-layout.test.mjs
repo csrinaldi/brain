@@ -901,7 +901,7 @@ test('6.1: REQ-L4-2′ both directions at `lite` — SCAFFOLD (REQUIRED_ARTIFACT
     'the two sets must disagree at `lite` — proving they are separate, not the same list read twice');
 });
 
-test('6.2: assertRoutableStage refuses all four when sdd.stages declares the four plus a custom stage — routing does not relax it (design D2, ADR-0019 Amendment 1 condition 4, unmodified)', () => {
+test('6.2: declaring the four in sdd.stages does NOT hand out routed evidence — declaration and the conditions check are different doors (#323 S2)', () => {
   // resolveStageSet's resolved (config-dependent) set is NEVER what
   // assertRoutableStage refuses against — it refuses against
   // stage-engine.mjs's SDD_LIFECYCLE_STAGES, a re-export of the same
@@ -912,8 +912,8 @@ test('6.2: assertRoutableStage refuses all four when sdd.stages declares the fou
   });
   assert.deepEqual(resolved.stages, ['proposal', 'spec', 'design', 'tasks', 'threat-model']);
   for (const stage of LIFECYCLE_STAGES) {
-    assert.throws(() => assertRoutableStage(stage), /is an SDD lifecycle stage and may not be routed/,
-      `${stage} must still refuse routing even though sdd.stages declared it explicitly alongside a custom stage`);
+    assert.throws(() => assertRoutableStage(stage), /without routed evidence/,
+      `${stage} still refuses without assertRoutedStage's result — an sdd.stages declaration is not evidence the conditions hold`);
   }
   // The custom stage IS routable — that is the point of declaring it (cold-review precedent).
   assert.doesNotThrow(() => assertRoutableStage('threat-model'));

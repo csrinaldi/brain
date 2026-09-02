@@ -278,6 +278,7 @@
 {"id":"rec-1d6a7f51c55ebe21","ts":"2026-07-29T14:25:58Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-1d6a7f51c55ebe21.jsonl"}
 {"id":"rec-1d712b343763593b","ts":"2026-07-29T13:59:46Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-1d712b343763593b.jsonl"}
 {"id":"rec-1d841b4d2ef3c26b","ts":"2026-07-11T12:32:50Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-1d841b4d2ef3c26b.jsonl"}
+{"id":"rec-1dade2b9b4c44d9e","ts":"2026-09-02T19:59:20Z","actor":"feat/issue-323-featsdd-m8-per-stage-sdd-engine-routing","type":"architecture","project":"brain","issue":323,"file":"2026-09-rec-1dade2b9b4c44d9e.jsonl"}
 {"id":"rec-1dbf64b9d89cc2c1","ts":"2026-07-29T13:59:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-1dbf64b9d89cc2c1.jsonl"}
 {"id":"rec-1deb374d75e1d140","ts":"2026-07-18T00:24:52Z","actor":"feat/issue-266-h1-1-review-core-cold-boot","type":"decision","project":"brain","file":"2026-07-rec-1deb374d75e1d140.jsonl"}
 {"id":"rec-1dedd91f81a50a76","ts":"2026-07-13T20:42:33Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-1dedd91f81a50a76.jsonl"}
@@ -578,6 +579,7 @@
 {"id":"rec-41b08f413ac54474","ts":"2026-07-11T12:33:49Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-41b08f413ac54474.jsonl"}
 {"id":"rec-41b124772db8079f","ts":"2026-07-25T00:47:00Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-41b124772db8079f.jsonl"}
 {"id":"rec-41c0bc7cd3e962c5","ts":"2026-07-13T00:22:13Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-41c0bc7cd3e962c5.jsonl"}
+{"id":"rec-41c462f8d2c646a8","ts":"2026-09-02T19:54:03Z","actor":"feat/issue-323-featsdd-m8-per-stage-sdd-engine-routing","type":"architecture","project":"brain","issue":323,"file":"2026-09-rec-41c462f8d2c646a8.jsonl"}
 {"id":"rec-41db7531eeae921e","ts":"2026-07-21T16:12:00Z","actor":"feat/issue-259-d2-pr3-net-parity-reverter-skip","type":"decision","project":"brain","file":"2026-07-rec-41db7531eeae921e.jsonl"}
 {"id":"rec-420c9e52f392be6f","ts":"2026-07-11T12:33:26Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-420c9e52f392be6f.jsonl"}
 {"id":"rec-424a3f96a10fa255","ts":"2026-07-25T00:48:23Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-424a3f96a10fa255.jsonl"}
@@ -890,6 +892,7 @@
 {"id":"rec-632e05bc85f0c384","ts":"2026-07-25T21:51:42Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-632e05bc85f0c384.jsonl"}
 {"id":"rec-6331c8866e138c1c","ts":"2026-07-25T00:48:19Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-6331c8866e138c1c.jsonl"}
 {"id":"rec-63481f70948c8535","ts":"2026-07-18T00:24:52Z","actor":"feat/issue-266-h1-1-review-core-cold-boot","type":"decision","project":"brain","file":"2026-07-rec-63481f70948c8535.jsonl"}
+{"id":"rec-636f8309d6bc3060","ts":"2026-09-02T20:08:57Z","actor":"feat/issue-323-featsdd-m8-per-stage-sdd-engine-routing","type":"architecture","project":"brain","issue":834,"file":"2026-09-rec-636f8309d6bc3060.jsonl"}
 {"id":"rec-6370dde869835189","ts":"2026-06-27T21:56:48Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-6370dde869835189.jsonl"}
 {"id":"rec-6377c720d8c4053a","ts":"2026-07-13T00:22:20Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-6377c720d8c4053a.jsonl"}
 {"id":"rec-63856cf4f03d1e1d","ts":"2026-07-12T18:45:56Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-63856cf4f03d1e1d.jsonl"}
