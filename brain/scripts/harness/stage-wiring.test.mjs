@@ -142,3 +142,21 @@ test('#836 (review r3): gentle-ai, custom stage, NO routed AT ALL — the real c
   assert.equal(r.ok, true, 'a TypeError dressed as a generic engine failure is still not a refusal');
   assert.ok(seen.prompt.length > 0, 'composed from the engine\'s own declaration, evidence-free as option A permits');
 });
+
+test('#836 (review r4): credentialEnv and forgeConfigDir SURVIVE gentle-ai — and so does any field it does not name', async () => {
+  // Fifth instance of the destructure-and-drop class, and the most
+  // consequential: dropping these two spawns the child UNSCRUBBED while the
+  // forge-reach probe verified the shadowed env (ADR-0033). The fix kills the
+  // CLASS at this layer: everything gentle-ai does not consume rides ...rest.
+  let seen = null;
+  const routed = await evidence('gentle-ai');
+  await gentleAi.runStage({
+    stage: 'tasks', routed, changeId: 'issue-999-x',
+    credentialEnv: ['BRAIN_REVIEWER_TOKEN'], forgeConfigDir: '/tmp/shadow',
+    futureField: 'must-survive-too',
+    _transport: async (p) => { seen = p; return { ok: true }; },
+  });
+  assert.deepEqual(seen.credentialEnv, ['BRAIN_REVIEWER_TOKEN'], 'the scrub list reaches the child');
+  assert.equal(seen.forgeConfigDir, '/tmp/shadow', 'the forge shadow reaches the child');
+  assert.equal(seen.futureField, 'must-survive-too', 'the class is dead: unnamed fields ride through');
+});

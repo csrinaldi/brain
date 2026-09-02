@@ -360,12 +360,13 @@ function assertBoundEvidence(stage, routed) {
  * (platform.mjs's rule intact). The transport's own {ok, reason} rides
  * through untouched — the seam's doctrine one layer down.
  *
- * @param {{stage: string, routed: object, changeId: string, model?: string|null,
- *          cwd?: string, timeoutMs?: number,
- *          _transport?: (payload: object) => Promise<object>}} payload
+ * @param {{stage: string, routed?: object, changeId?: string, model?: string|null,
+ *          _transport?: (payload: object) => Promise<object>}} payload — every
+ *          field not named here (cwd, timeoutMs, credentialEnv, forgeConfigDir,
+ *          and whatever arrives next) rides ...rest to the transport untouched.
  * @returns {Promise<object>} the transport's answer, verbatim
  */
-export async function runStage({ stage, routed, changeId, model = null, cwd, timeoutMs, _transport } = {}) {
+export async function runStage({ stage, routed, changeId, model = null, _transport, ...rest } = {}) {
   assertBoundEvidence(stage, routed);
   const target = artifactPaths(changeId)[stage];
   // Round 2: S2's custom-stage evidence carries NO role (stage-engine returns
@@ -389,5 +390,10 @@ export async function runStage({ stage, routed, changeId, model = null, cwd, tim
     const { runStage: claudeRunStage } = await import('./claude.mjs');
     return claudeRunStage(payload);
   });
-  return transport({ stage, prompt, model: model ?? routed?.routing?.model ?? null, cwd, timeoutMs, routed });
+  // Round 4 of #836's cold review killed the destructure-and-drop CLASS here:
+  // credentialEnv and forgeConfigDir were the fifth dropped-field instance —
+  // and the one that spawned the child UNSCRUBBED while the forge-reach probe
+  // verified the shadow (ADR-0033). Everything this wrapper does not consume
+  // rides ...rest to the transport, so a sixth field cannot be dropped.
+  return transport({ ...rest, stage, prompt, model: model ?? routed?.routing?.model ?? null, routed });
 }
