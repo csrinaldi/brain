@@ -80,6 +80,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0031](project/decisions/adr-0031-ai-attribution-is-a-claim-not-a-record.md) — AI attribution in commits is an unverifiable claim, not a provenance record
 - [ADR-0032](project/decisions/adr-0032-graph-block-declared-by-its-tag.md) — A graph block is declared by its fence tag: unspoofability outranks the rendered-artifact rule, and the tag is only half the fix (**Amendment 1, 18/08/2026** — the rendering assumption is closed by observation on both providers — an unknown info-string keeps its code-block shape and loses only highlighting, so the cost stays at "no colours"; and the tag's other half, D6's hidden-declaration refusal, was never wired until #723, #723)
 - [ADR-0033](project/decisions/adr-0033-cold-review-transport.md) — The cold review runs as a spawned subagent: the transport is a stage engine, and the producer never holds a credential (**Amendment 1, 28/08/2026** — the poster credential stays on the environment axis by ruling, not by omission — the engine session is the boundary, #773; **Amendment 2, 28/08/2026** — the forge-CLI row gains a per-run config-dir shadow — the CLI can no longer find the keyring, which is not the same as the secret being gone, #775)
+- [ADR-0023](project/decisions/adr-0023-sdd-role-port.md) — The role port: engines declare, platforms receive, brain's own roles live on a shelf
 
 ### Project-specific rules
 
