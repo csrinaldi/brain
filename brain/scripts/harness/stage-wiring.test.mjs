@@ -131,3 +131,14 @@ test('#836 (review r2): gentle-ai composes a CUSTOM stage from its OWN declarati
 test('#836 (review r2): lifecycle stages STILL demand bound evidence — the split narrowed the guard, not the doctrine', async () => {
   await assert.rejects(() => plain.runStage({ stage: 'tasks', changeId: 'x' }), /routed evidence/);
 });
+
+test('#836 (review r3): gentle-ai, custom stage, NO routed AT ALL — the real caller\'s exact shape', async () => {
+  // run-cold-review-stage passes no routed and no changeId. Round 2's fix
+  // covered routed-without-role; the real caller passes routed-as-undefined,
+  // and the custom-no-evidence test existed only for plain — the one backend
+  // that never touches .role. Same class, one branch deeper, third round.
+  let seen = null;
+  const r = await gentleAi.runStage({ stage: 'cold-review', prompt: 'p', _transport: async (p) => { seen = p; return { ok: true }; } });
+  assert.equal(r.ok, true, 'a TypeError dressed as a generic engine failure is still not a refusal');
+  assert.ok(seen.prompt.length > 0, 'composed from the engine\'s own declaration, evidence-free as option A permits');
+});

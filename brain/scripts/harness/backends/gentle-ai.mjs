@@ -374,7 +374,7 @@ export async function runStage({ stage, routed, changeId, model = null, cwd, tim
   // engine's own declaration (its recorded data or derivedRole — module-local,
   // the same #814 rule: never installed files). A lifecycle stage keeps the
   // port-resolved role its evidence guarantees.
-  const role = routed.role ?? (GENTLE_AI_ROLES[stage] ? { stage, ...GENTLE_AI_ROLES[stage] } : derivedRole(stage));
+  const role = routed?.role ?? (GENTLE_AI_ROLES[stage] ? { stage, ...GENTLE_AI_ROLES[stage] } : derivedRole(stage));
   const prompt = [
     role.instructions,
     '',
