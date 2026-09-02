@@ -37,3 +37,13 @@
 - PR3 (#824): `brain:engines` discovery. Blocked on #823 + PR2 landing + `status:approved`.
 - The migration draft `config-migrations-1.4.0.md` ships with PR1 (it declares
   `sdd.engines`, which only the verb writes).
+
+## Batch 2 addendum — 02/09/2026, after the phase-order refusal
+
+`phase-order` (Rule C) refused PR2: implementation present, no checked item —
+the checklist had not been ticked as the units landed. Corrected here: PR1's
+six items are ALSO done (worktree `brain-issue-823`, commit `027cdda`,
+unpushed — `brain:config` + the 1.4.0 draft), so both PRs' copies of this
+trail are updated together and byte-identically, or the chain's shared files
+would conflict on merge. PR3 (#824) remains unstarted, blocked on the 1.4.0
+draft's human promotion.

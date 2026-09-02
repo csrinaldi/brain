@@ -16,52 +16,52 @@ then the implementation turns it green. No test is written after its code.
 
 ## PR1 — the config verb (T1) · closes #823 · ~230 countable lines
 
-- [ ] 1.1 RED: `config-verb.test.mjs` — `planConfigWrite` refuses an unknown
+- [x] 1.1 RED: `config-verb.test.mjs` — `planConfigWrite` refuses an unknown
       path naming the nearest known family; accepts a known path; plans
       pending migrations before the write; JSON-first-then-bare-string values.
-- [ ] 1.2 GREEN: `brain/scripts/config/config-verb.mjs` — pure;
+- [x] 1.2 GREEN: `brain/scripts/config/config-verb.mjs` — pure;
       `KNOWN_PATHS` derived from `config-migrations.mjs` defaults.
-- [ ] 1.3 RED: `cli.test.mjs` — `get` prints resolved value; `set` writes the
+- [x] 1.3 RED: `cli.test.mjs` — `get` prints resolved value; `set` writes the
       planned result atomically; exit codes; refusal text.
-- [ ] 1.4 GREEN: `brain/scripts/config/cli.mjs` + `brain:config` script line.
-- [ ] 1.5 Migration draft `brain-drafts/config-migrations-1.4.0.md`
+- [x] 1.4 GREEN: `brain/scripts/config/cli.mjs` + `brain:config` script line.
+- [x] 1.5 Migration draft `brain-drafts/config-migrations-1.4.0.md`
       (`sdd.engines: {}`; #806 numbering, renumber at land if the package moved).
-- [ ] 1.6 Work-unit commit; `repo:check`, `nav`, full suite.
+- [x] 1.6 Work-unit commit; `repo:check`, `nav`, full suite.
 
 ## PR2 — the port grows, the debt dies (T2+T3+T4+T6) · closes #814 · ~740
 
 Unit 1 — the field (T3):
-- [ ] 2.1 RED: contract/port tests — `instructions` absent → throw naming
+- [x] 2.1 RED: contract/port tests — `instructions` absent → throw naming
       stage+field; `null` accepted as the checked no-prompt state; non-empty
       string carried through verbatim.
-- [ ] 2.2 GREEN: `role-port.mjs` validation clause; `plain.mjs` declares
+- [x] 2.2 GREEN: `role-port.mjs` validation clause; `plain.mjs` declares
       `instructions: null` on every stage.
 
 Unit 2 — the adapter (T2):
-- [ ] 2.3 RED: gentle-ai contract assertions — every resolved stage answered
+- [x] 2.3 RED: gentle-ai contract assertions — every resolved stage answered
       (custom included, marked `derived`); `_provenance` recorded; tiers per
       D4; `chooses_model: false`; runs with no tool installed.
-- [ ] 2.4 GREEN: `gentle-ai.roles.mjs` (recorded data) + `declareRoles` in
+- [x] 2.4 GREEN: `gentle-ai.roles.mjs` (recorded data) + `declareRoles` in
       `gentle-ai.mjs`.
 
 Unit 3 — the Adversary and the assembler (T4):
-- [ ] 2.5 RED: `first-party` tests — `firstPartyRole('cold-review')` returns
+- [x] 2.5 RED: `first-party` tests — `firstPartyRole('cold-review')` returns
       the role; no protocol literal in the text (tag/fields/severities
       asserted ABSENT); no routing-shaped key (neutrality, ADR-0019 Am.1 c.2).
-- [ ] 2.6 RED: `assemble-review-prompt` tests — ports the existing
+- [x] 2.6 RED: `assemble-review-prompt` tests — ports the existing
       cold-review-prompt suite: worked example parses via
       `readFindingsArtifact`; refused-fields invariant; artifactRoot split.
-- [ ] 2.7 GREEN: `roles/first-party/{adversary-cold-review,index}.mjs`;
+- [x] 2.7 GREEN: `roles/first-party/{adversary-cold-review,index}.mjs`;
       `review/lib/assemble-review-prompt.mjs`; `run-cold-review-stage.mjs`
       hands the role in.
-- [ ] 2.8 DELETE `cold-review-prompt.mjs` + its test + `ROLE_DEBT_TICKET`;
+- [x] 2.8 DELETE `cold-review-prompt.mjs` + its test + `ROLE_DEBT_TICKET`;
       update the `resolve-challenger.mjs` debt header.
 
 Unit 4 — parity (T6):
-- [ ] 2.9 `INHABITANTS` += gentle-ai (the one line). TRIPWIRE goes RED.
-- [ ] 2.10 Delete the tripwire + parity-debt statements per their own
+- [x] 2.9 `INHABITANTS` += gentle-ai (the one line). TRIPWIRE goes RED.
+- [x] 2.10 Delete the tripwire + parity-debt statements per their own
       instructions. Suite green over BOTH inhabitants.
-- [ ] 2.11 Work-unit commits (one per unit); gates; the PR body records that
+- [x] 2.11 Work-unit commits (one per unit); gates; the PR body records that
       #814 closes because the tripwire FAILED.
 
 ## PR3 — discovery (T5) · closes #824 · ~140
