@@ -2,27 +2,20 @@
 // REQ-682-1, REQ-682-2, REQ-682-3's axis value, REQ-682-6.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// PROVISIONAL: THE AGENT/MODEL BINDING HERE BELONGS TO #312's ROLE PORT.
+// THE BINDING DEBT IS RETIRED (#576 D4). The header that stood here since #682
+// instructed, once #312 landed: delete the binding half, call the port
+// instead, keep the AXIS resolution. This is that deletion — one prorogue late.
 //
-// `reviewer.inferential.challenger.{axis, agent, model}` binds a ROLE (the
-// refuter) to an AGENT and a MODEL through `brain.config.json`. That is #312's
-// port, #576's archetypes and #323's config map — three open, approved tickets
-// whose entire subject is that binding.
+// The challenger's ROLE now lives on the port's shelf
+// (roles/first-party/adversary-challenger.mjs) and `resolveJudgment` serves it
+// as `challengerRole` — whatever runner slice 3 builds reads the PORT, never a
+// config binding. The AXIS (who challenges: a human today) stays here: that is
+// reviewer policy, exactly as ruled.
 //
-// It lives here because M5 is at ZERO implementation and #682 could not wait:
-// #599 measured it — `brain/roles/` does not exist and `harness/cli.mjs`'s
-// `VALID_OPS` still routes one op — M8 depends on M5, and the chain has gone
-// untouched across four handoff cuts.
-//
-// HALF OF THAT MEASUREMENT HAS SINCE EXPIRED, and it is corrected rather than
-// left standing: #682 slice 3 added `run-stage`, so `VALID_OPS` routes two ops
-// now, not one. `brain/roles/` still does not exist — which is the half that
-// actually carries the argument, and the reason this binding is still here.
-// Recorded because a stale measurement reads exactly like a current one, and
-// this header's whole purpose is to be believed by whoever finds it next.
-//
-// WHEN #312 LANDS: delete the binding half and call the port instead. Keep the
-// AXIS resolution — that is reviewer policy and belongs here either way.
+// `reviewer.inferential.challenger.{agent, model}` were RESERVED for the
+// binding and — measured before this move — never read by any line. They stay
+// unread and are documented as inert (#229's post-release doctrine: the read
+// is what retires; the keys are not deleted from anyone's config).
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // WHY ONE FUNCTION AND NOT TWO — the correction the cold review forced.
@@ -61,6 +54,8 @@ export const AXES = Object.freeze(['human', 'same-model', 'cross-family', 'mecha
  * A `Map` rather than an object literal: the lookup key comes from operator
  * config, and a Map has no inherited keys for it to land on.
  */
+import { firstPartyInstance } from '../../roles/first-party/index.mjs';
+
 const RUNNERS = new Map([['human', humanRunner]]);
 
 /**
@@ -170,11 +165,11 @@ function unbuiltRunner(axis) {
  *      defaulting would hide an unknown evidentiary strength.
  *
  * @param {{config?: object, protocol?: string}} args
- * @returns {{run: boolean, axis: string|null, challenger: Function|null, reason: string|null}}
+ * @returns {{run: boolean, axis: string|null, challenger: Function|null, challengerRole: object|null, reason: string|null}}
  * @throws {Error} on an unrecognised axis
  */
 export function resolveJudgment({ config, protocol = JUDGMENT_PROTOCOL } = {}) {
-  const off = (reason, enabled = true) => ({ run: false, axis: null, challenger: null, reason, enabled });
+  const off = (reason, enabled = true) => ({ run: false, axis: null, challenger: null, challengerRole: null, reason, enabled });
 
   const inferential = config?.reviewer?.inferential ?? {};
 
@@ -219,6 +214,9 @@ export function resolveJudgment({ config, protocol = JUDGMENT_PROTOCOL } = {}) {
     enabled: true,
     axis,
     challenger: RUNNERS.get(axis) ?? unbuiltRunner(axis),
+    // #576 D4: the role the runner speaks AS — served from the port's shelf,
+    // never from a config binding.
+    challengerRole: firstPartyInstance('adversary-challenger'),
     reason: null,
   };
 }

@@ -23,6 +23,7 @@ import { join, dirname, posix as posixPath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { compileSettingsHooksJson } from './settings-hooks.mjs';
+import { rolesSection } from '../../roles/first-party/project-role.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -151,7 +152,11 @@ function rebaseRelativeLinks(content, sourceRelPath, emitRelPath) {
  * @returns {string} The compiled AGENTS.md content.
  * @throws {TypeError} When any SOURCE_DOCS key is missing or is not a string.
  */
-export function compileAgentsMd(docs) {
+// #576 T3: `roles` is ADDITIVE and OPTIONAL — omitted or empty, the output is
+// byte-identical to the five-doc compile (proven by test against the committed
+// AGENTS.md); provided, a first-party roles section APPENDS. The base document
+// never moves.
+export function compileAgentsMd(docs, { roles } = {}) {
   const missing = SOURCE_DOCS.filter((relPath) => typeof docs?.[relPath] !== 'string');
   if (missing.length > 0) {
     throw new TypeError(
@@ -172,7 +177,9 @@ export function compileAgentsMd(docs) {
     return `<!-- source: ${relPath} -->\n\n${rebased}`;
   });
 
-  return [banner, ...sections].join('\n\n---\n\n') + '\n';
+  const base = [banner, ...sections].join('\n\n---\n\n') + '\n';
+  if (!Array.isArray(roles) || roles.length === 0) return base;   // byte-identity when absent
+  return base + '\n---\n\n' + rolesSection(roles) + '\n';
 }
 
 // ---------------------------------------------------------------------------

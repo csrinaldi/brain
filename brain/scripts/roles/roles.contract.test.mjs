@@ -12,9 +12,9 @@
 // — the two SDD_ENGINE frameworks (D6 vocabulary), the pairing Compuerta 3
 // ruled. The parity-debt header and its TRIPWIRE test died on 2026-09-02 the
 // way they demanded to: the tripwire FAILED on a real second entry and was
-// deleted per its own instructions. Of the three recorded debts of that class,
-// resolve-challenger.mjs's "WHEN #312 LANDS" header is the one still standing;
-// cold-review-prompt.mjs's ROLE_DEBT_TICKET was discharged by #814 D5.
+// deleted per its own instructions. The three recorded debts of that class are
+// ALL retired now: cold-review-prompt.mjs's ROLE_DEBT_TICKET by #814 D5, and
+// resolve-challenger.mjs's binding header by #576 D4 — the ledger closes.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
