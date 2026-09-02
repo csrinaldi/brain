@@ -1189,6 +1189,32 @@ test('cold-2: a repeat run does NOT spawn the engine — it decides before payin
   assert.ok(lines.some((l) => l.includes('anti-loop')), 'and the operator is told which rule fired');
 });
 
+/** #829 — this reviewer's own verdict at this head, but with the judgment half
+ * NOT applied: the state two half-runs left PR #828 in, where the only way to a
+ * full verdict was moving the head with a docs commit. */
+const selfHalfVerdictAtHead = () => ({
+  author: 'brain-reviewer',
+  body: ['```yaml', 'protocol: brain-review/2', `head_sha: ${HEAD}`, 'verdict: APPROVE',
+    'controls: ["deterministic"]', 'controls_not_applied: ["inferential"]', '```'].join('\n'),
+});
+
+test('#829: a HALF-verdict of mine does not lock out the half it lacks — the engine spawns', async (t) => {
+  const root = scratchRoot(t);
+  let spawned = false;
+  const d = deps({ config: ROUTED_CFG, protocol: 'brain-review/2' });
+  d.coldBootDeps.fetchReviews = async () => [selfHalfVerdictAtHead()];
+
+  await main({
+    argv: ['--pr', '42'],
+    log: () => {}, error: () => {},
+    ...d, root,
+    stageDeps: { forgeProbe: LOGGED_OUT, runStage: async () => { spawned = true; return { ok: true }; } },
+  });
+
+  assert.equal(spawned, true,
+    'there is NO reasoned output at this head — the lock reading verdict EXISTENCE instead of CONTROLS is the #829 defect');
+});
+
 test('cold-2: a DRY RUN still spawns — a rehearsal posts nothing, so there is no loop to break', async (t) => {
   const root = scratchRoot(t);
   let spawned = false;
