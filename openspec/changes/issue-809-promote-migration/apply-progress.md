@@ -18,3 +18,16 @@
 Verified: suite green, repo:check + nav clean (run at commit). The verb's
 first real promotions are the backlog itself — three drafts, one ceremony
 each, the human's commit as signature.
+
+## Review note — 02/09/2026, the two half-verdicts at dab58cc
+
+Two cold-review runs at head `dab58cc` produced deterministic-only APPROVEs,
+neither with the judgment half applied: the first ran from THIS worktree
+(clean config, no transport — the #812 trap, walked into after documenting
+it), the second from the review checkout, where the anti-loop lock refused
+the engine because "this reviewer's last verdict at this head is its own" —
+conflating "a verdict exists at this head" with "the judgment half ran at
+this head". Distinct defect, same family as #812; ticketed separately.
+
+This commit exists to move the head so the full review can run — the
+maintainer's call (option B), taken in the open rather than by amending.
