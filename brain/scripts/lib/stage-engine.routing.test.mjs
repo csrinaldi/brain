@@ -102,3 +102,16 @@ test('#323 S2 T3: custom stages are untouched — today\'s callers keep working'
   assert.doesNotThrow(() => assertRoutableStage('cold-review'));
   assert.throws(() => assertRoutableStage(''), /not a stage name/);
 });
+
+// ── round 1 of the cold review — evidence is BOUND, not bearer ──────────────
+
+test('#834 (review r1): evidence computed for one stage does not admit another — the check proves conditions FOR THIS stage', async () => {
+  const cfg = { sdd: { map: { tasks: { engine: 'gentle-ai' } } } };
+  const forTasks = await assertRoutedStage({ config: cfg, stage: 'tasks', _load: async () => declaring() });
+  assert.equal(forTasks.stage, 'tasks', 'the evidence NAMES the stage it was computed for');
+  assert.throws(() => assertRoutableStage('design', { routed: forTasks }), (err) => {
+    assert.match(err.message, /design/); assert.match(err.message, /tasks/);
+    return true;
+  }, 'bearer evidence is the copy-paste bug condition 4 exists to make impossible');
+  assert.doesNotThrow(() => assertRoutableStage('tasks', { routed: forTasks }));
+});

@@ -88,6 +88,15 @@ export function assertRoutableStage(stage, { routed } = {}) {
     );
   }
 
+  // Round 1 of #834's cold review: the evidence is BOUND, never bearer — it
+  // names the stage it was computed for, and a mismatch refuses. Reproduced
+  // before fixing: evidence for 'tasks' admitted 'design'.
+  if (routed && routed.routed === true && routed.stage !== stage) {
+    throw new Error(
+      `stage-engine: routed evidence was computed for "${routed.stage}" and handed to "${stage}" — ` +
+      'the check proves the four conditions FOR ONE stage, and its result admits only that one.'
+    );
+  }
   if (SDD_LIFECYCLE_STAGES.includes(stage) && !(routed && routed.routed === true)) {
     // #323 S2 — ADR-0019 Amendment 1, condition 4: "the refusal is REPLACED,
     // not removed". The flat lifecycle throw that held conditions 1-3 true
@@ -207,12 +216,12 @@ export function resolveStageEngine(config, stage) {
  */
 export async function assertRoutedStage({ config, stage, _load } = {}) {
   const routing = resolveStageEngine(config, stage);
-  if (routing === null) return { routed: false };
+  if (routing === null) return { routed: false, stage };
 
   if (!SDD_LIFECYCLE_STAGES.includes(stage)) {
     // A custom stage: transport naming allowed (option A). The routing is the
     // whole answer — there is no declaration to demand from a transport.
-    return { routed: true, routing };
+    return { routed: true, stage, routing };
   }
 
   const { SDD_ENGINES } = await import('../harness/platform.mjs');
@@ -239,5 +248,5 @@ export async function assertRoutedStage({ config, stage, _load } = {}) {
   }
   // `role` is condition 3's HOOK: what was routed, exposed, so S4's parity
   // suite can compare two engines' answers for one stage. The proof is S4's.
-  return { routed: true, routing, role };
+  return { routed: true, stage, routing, role };
 }
