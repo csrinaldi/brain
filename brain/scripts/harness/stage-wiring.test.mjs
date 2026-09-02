@@ -92,3 +92,15 @@ test('#323 S4 D4: a change dir passes the presence reader ENGINE-BLIND — produ
     }
   }
 });
+
+// ── round 1 of the cold review — the PATH, not the parts ────────────────────
+
+test('#836 (review r1): the wiring works THROUGH the seam and dispatch — the only path production has', async () => {
+  const { makeRunStageSeam } = await import('./stage-seam.mjs');
+  const seam = makeRunStageSeam();
+  const routed = await evidence('plain');
+  const r = await seam({ stage: 'tasks', engine: 'plain', prompt: 'ignored', routed, changeId: 'issue-999-x' });
+  assert.equal(r.ok, true, 'the seam that drops a field silently is its own header\'s recorded lesson — relearned');
+  assert.equal(r.manual, true);
+  assert.equal(r.target, artifactPaths('issue-999-x').tasks);
+});

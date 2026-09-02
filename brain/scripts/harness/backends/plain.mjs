@@ -1,3 +1,4 @@
+import { artifactPaths } from '../../lib/sdd-layout.mjs';
 // plain.mjs — the `plain` SDD_HARNESS backend: a real, dispatchable second
 // inhabitant of `init` (issue #250, B0, REQ-B0-5). No `cli.mjs` change is
 // required — the dispatcher is already backend-agnostic (design §4). Emits
@@ -53,7 +54,13 @@ export async function init({ _emit = console.log } = {}) {
  * @param {string[]} stages The resolved stage set to declare a role for.
  * @returns {Record<string, {stage: string, agent: string, model_tier: null, chooses_model: false, instructions: null}>}
  */
-import { artifactPaths } from '../../lib/sdd-layout.mjs';
+export function declareRoles(stages) {
+  return Object.fromEntries(stages.map((stage) => [stage, {
+    // `instructions: null` — checked (#814 T3): a human executes; there is no
+    // prompt to declare. The same reasoning as `model_tier: null` above.
+    stage, agent: 'human', model_tier: null, chooses_model: false, instructions: null,
+  }]));
+}
 
 /**
  * The S2 evidence guard, shared verbatim by both engine wirings (#323 S4 D3):
@@ -97,12 +104,4 @@ export async function runStage({ stage, routed, changeId } = {}) {
       `Run npm run brain:repo:check before committing, as every producer does.`,
     ],
   };
-}
-
-export function declareRoles(stages) {
-  return Object.fromEntries(stages.map((stage) => [stage, {
-    // `instructions: null` — checked (#814 T3): a human executes; there is no
-    // prompt to declare. The same reasoning as `model_tier: null` above.
-    stage, agent: 'human', model_tier: null, chooses_model: false, instructions: null,
-  }]));
 }
