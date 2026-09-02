@@ -83,7 +83,7 @@ test('#323 S2: a non-declaring or disabled engine refuses with the PORT\'s own w
 
 test('#323 S2: unrouted passes through — not an error, exactly as one layer down', async () => {
   const r = await assertRoutedStage({ config: {}, stage: 'tasks' });
-  assert.deepEqual(r, { routed: false });
+  assert.deepEqual(r, { routed: false, stage: 'tasks' }, 'even the unrouted answer names its stage — one shape, every arm');
 });
 
 // ── T3: the refusal is REPLACED — a demand for evidence ─────────────────────
