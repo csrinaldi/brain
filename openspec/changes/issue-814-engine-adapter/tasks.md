@@ -66,12 +66,12 @@ Unit 4 — parity (T6):
 
 ## PR3 — discovery (T5) · closes #824 · ~140
 
-- [ ] 3.1 RED: `engines-cli` tests — reports both engines per stage; a
+- [x] 3.1 RED: `engines-cli` tests — reports both engines per stage; a
       refusing engine is a row, not a crash; `--record` writes
       `sdd.engines.<name>` through `config-verb.mjs` (asserted: no second
       writer); re-run prints drift against the recorded entry.
-- [ ] 3.2 GREEN: `brain/scripts/harness/engines-cli.mjs` + `brain:engines`.
-- [ ] 3.3 Work-unit commit; gates.
+- [x] 3.2 GREEN: `brain/scripts/harness/engines-cli.mjs` + `brain:engines`.
+- [x] 3.3 Work-unit commit; gates.
 
 ## Review Workload Forecast
 

@@ -47,3 +47,13 @@ unpushed — `brain:config` + the 1.4.0 draft), so both PRs' copies of this
 trail are updated together and byte-identically, or the chain's shared files
 would conflict on merge. PR3 (#824) remains unstarted, blocked on the 1.4.0
 draft's human promotion.
+
+## Batch 3 — PR3 (#824), 02/09/2026
+
+`brain:engines` implemented in worktree `brain-issue-824` (both parent PRs
+merged: #825 @ e938685, #826 @ 223ea49). Pure half `engines-report.mjs`
+(survey rows + the record planner through `config-verb.mjs` — one validator,
+second caller), I/O half `engines-cli.mjs`. 9 tests RED-first, including the
+pinned sequencing consequence: `--record` fails closed until the 1.4.0 draft
+is promoted (human, Tier 3). The survey shows `[recorded|derived]` per role —
+the report must not launder what the port now refuses to.
