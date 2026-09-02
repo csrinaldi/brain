@@ -134,6 +134,15 @@ export const migrations = [
       },
     },
   },
+  {
+    version: "1.2.0",
+    description: "Add sdd.stages: the declared stage set (issue #456 slice A). Empty by default — the four lifecycle stages live in code (sdd-layout.mjs LIFECYCLE_STAGES), never in a consumer config, so an upgrade cannot introduce a fourth declaration of them in a file no test can guard. ADDITIVE-ONLY: a declared set omitting one of the four is REFUSED (maintainer ruling 2026-08-29; ADR-0019 Amendment 1 condition 4).",
+    defaults: {
+      sdd: {
+        stages: {}
+      }
+    }
+  },
 ];
 
 // NOTE (issue #231 A2, human ruling in tasks.md/design.md): this entry is versioned
