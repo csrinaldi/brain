@@ -152,6 +152,15 @@ export const migrations = [
       }
     }
   },
+  {
+    version: "1.4.0",
+    description: "Add sdd.engines: the record of what each SDD_ENGINE framework declared when brain:engines --record last interrogated it (issue #824, written ONLY through brain:config — Compuerta 4). Empty by default: an engine nobody recorded is honestly absent, and absence is distinguishable from 'interrogated and declared nothing'.",
+    defaults: {
+      sdd: {
+        engines: {}
+      }
+    }
+  },
 ];
 
 // NOTE (issue #231 A2, human ruling in tasks.md/design.md): this entry is versioned
