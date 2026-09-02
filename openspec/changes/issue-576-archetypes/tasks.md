@@ -21,7 +21,7 @@ HOME.md ~150; tests and openspec exempt) vs `lite` 1000.
       note and T4's inert-keys note.
 - [x] 1.7 Full suite, `repo:check`, `nav`; work-unit commits; memory record
       `--issue 576`.
-- [ ] 1.8 THE MAINTAINER: `brain:promote` the ADR on this branch; `decision`
+- [x] 1.8 THE MAINTAINER: `brain:promote` the ADR on this branch; `decision`
       label on the PR.
 
 ## Review Workload Forecast

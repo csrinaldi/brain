@@ -20,5 +20,5 @@
 - [x] 1.6 ADR-0023 drafted FROM what exists (brain-drafts/), D6 + D3 reasons
       inside, emission wiring and declared-vs-active explicitly NOT decided.
 - [x] 1.7 Suite 4670/0, repo:check + nav clean, work-unit commits, memory.
-- [ ] 1.8 THE MAINTAINER: brain:promote the ADR on this branch + `decision`
+- [x] 1.8 THE MAINTAINER: brain:promote the ADR on this branch + `decision`
       label on the PR.
