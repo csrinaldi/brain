@@ -78,9 +78,11 @@ const FILE = `// header\nexport const migrations = [\n  {\n    version: '0.1.0',
 test('#809 D3: the splice appends before the closing bracket, version first', () => {
   const { next, refusal } = spliceMigrationEntry(FILE, { description: 'Add x.', defaults: { x: {} } }, '1.2.0');
   assert.equal(refusal, null);
-  assert.match(next, /version: '1\.2\.0',\n\s+description: 'Add x\.'/, 'shipped key order: version, description, defaults');
-  assert.ok(next.indexOf("version: '1.2.0'") > next.indexOf("version: '0.1.0'"), 'appended after the tail');
-  assert.ok(next.indexOf("version: '1.2.0'") < next.indexOf('// NOTE'), 'and before the trailing doctrine notes');
+  // Key order is the contract; the quote STYLE is JSON's — double quotes are
+  // valid JS and carry the language's own escaping (the apostrophe blocker).
+  assert.match(next, /version: "1\.2\.0",\n\s+description: "Add x\."/, 'shipped key order: version, description, defaults');
+  assert.ok(next.indexOf('version: "1.2.0"') > next.indexOf("version: '0.1.0'"), 'appended after the tail');
+  assert.ok(next.indexOf('version: "1.2.0"') < next.indexOf('// NOTE'), 'and before the trailing doctrine notes');
 });
 
 test('#809 D3: a file without the anchor refuses — never a guess', () => {
@@ -104,4 +106,18 @@ test('#809 D4: every pending draft in the repo parses under the contract', async
     assert.ok(entry.description.length > 0, rel);
     assert.equal(typeof entry.defaults.sdd, 'object', `${rel}: every pending draft declares under sdd.*`);
   }
+});
+
+// ── round 1 of the full cold review — the apostrophe blocker ────────────────
+
+test('#809 (review r1): an apostrophe in the description SURVIVES the splice as valid JS — reproduced on 2 of the 3 real drafts', () => {
+  const entry = { description: "takes the inhabitant's declared defaults — 'quoted' too", defaults: { sdd: { configs: {} } } };
+  const FILE = "export const migrations = [\n  { version: '0.1.0', description: 'x', defaults: {} },\n];\n";
+  const { next, refusal } = spliceMigrationEntry(FILE, entry, '1.3.0');
+  assert.equal(refusal, null);
+  // The oracle is the LANGUAGE: the spliced text must evaluate, and the entry round-trip.
+  const migrations = new Function(`${next.replace('export const', 'const')}; return migrations;`)();
+  assert.equal(migrations.length, 2);
+  assert.equal(migrations[1].description, entry.description, 'the prose survives byte-exact');
+  assert.deepEqual(migrations[1].defaults, entry.defaults);
 });

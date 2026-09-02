@@ -29,18 +29,24 @@ A draft named `config-migrations-<semver>.md` carrying exactly ONE fenced
 
 ### Requirement: The number is computed, shown, and signed (#806)
 
+> Amended 02/09/2026 during apply (proposal addendum, D2): there is NO `--as`
+> override — `parseArgs`'s own written doctrine ("brain:promote takes no
+> options — deliberately") was found and honored. The computed number is the
+> only path; a human needing a different one edits by hand, exactly as today.
+
 The verb proposes next-minor above max(package.json version, migration tail).
-The plan prints the draft's number AND the promoted number. `--as <semver>`
-overrides. A number ≤ the tail refuses (monotonic-forever).
+The plan prints the draft's number AND the promoted number. Monotonic-forever
+holds by construction and is pinned by test.
 
 #### Scenario: Stale draft number is renumbered in the open
 - **WHEN** the draft says `1.4.0` and the computed number differs
 - **THEN** the plan prints "draft says 1.4.0 → promoting as <computed>" and the
   typed confirmation covers it
 
-#### Scenario: A backward number refuses
-- **WHEN** `--as 0.9.0` while the tail is `0.10.0`
-- **THEN** refusal cites monotonic-forever; nothing staged
+#### Scenario: The computed number is always above the tail
+- **WHEN** the number is proposed for any package/tail pair
+- **THEN** it strictly exceeds the tail — pinned by test, not by a refusal
+  branch no input can reach
 
 ### Requirement: The splice proves itself before anything is staged
 

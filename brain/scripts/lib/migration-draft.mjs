@@ -79,14 +79,23 @@ export function proposeVersion({ draftVersion, packageVersion, tailVersion }) {
   return { version, renumbered: version !== draftVersion };
 }
 
-/** Serializes one entry as source in the shipped key order: version, description, defaults. */
+/**
+ * Serializes one entry as source in the shipped key order: version,
+ * description, defaults. String values stay DOUBLE-QUOTED JSON — valid JS
+ * with escaping the language already guarantees. The first version of this
+ * function swapped every `"` for `'` to match the shipped entries' quote
+ * style, and the cosmetic broke on the first apostrophe: 2 of the 3 real
+ * backlog drafts ("the inhabitant's…", "'interrogated and declared
+ * nothing'") spliced into a SyntaxError the D3 proof then refused — the verb
+ * could not promote its own backlog (cold review round 1, blocker). Only
+ * identifier-shaped KEYS are unquoted; values are never touched.
+ */
 function entrySource(entry, version) {
   const body = JSON.stringify({ version, description: entry.description, defaults: entry.defaults }, null, 2)
     .split('\n')
     .map((line, i, all) => (i === 0 || i === all.length - 1 ? line : `  ${line}`))
     .join('\n')
-    .replace(/"([A-Za-z_$][A-Za-z0-9_$]*)":/g, '$1:')
-    .replace(/"/g, "'");
+    .replace(/^(\s*)"([A-Za-z_$][A-Za-z0-9_$]*)":/gm, '$1$2:');
   return `  ${body.replace(/^\{/, '{').replace(/\}$/, '}')},`;
 }
 

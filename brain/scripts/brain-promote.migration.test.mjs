@@ -62,9 +62,9 @@ test('#809: the happy path — renumber shown, entry spliced, file staged', asyn
   assert.equal(r.exitCode, 0, r.output);
   assert.match(r.output, /1\.4\.0.*promoting as 1\.2\.0|draft says 1\.4\.0/s, 'the renumber happens in the open');
   const next = readFileSync(join(root, 'brain/core/config-migrations.mjs'), 'utf8');
-  assert.match(next, /version: '1\.2\.0'/, 'the COMPUTED number lands, never the draft\'s');
+  assert.match(next, /version: "1\.2\.0"/, 'the COMPUTED number lands, never the draft\'s');
   assert.match(next, /sdd/, 'the defaults landed');
-  assert.ok(next.indexOf("'1.2.0'") > next.indexOf("'0.1.0'"), 'appended after the tail');
+  assert.ok(next.indexOf('"1.2.0"') > next.indexOf("'0.1.0'"), 'appended after the tail');
   assert.ok(drive.staged?.some((p) => p.includes('config-migrations.mjs')), 'the write is staged, the commit stays human');
 });
 
@@ -85,6 +85,15 @@ test('#809 D3: a candidate that cannot PROVE itself refuses before the plan is o
   assert.equal(r.exitCode, 1);
   assert.match(r.output, /prove|proof|import|Cannot access/i, 'the refusal shows the proof failure');
   assert.equal(readFileSync(join(root, 'brain/core/config-migrations.mjs'), 'utf8'), broken, 'untouched');
+});
+
+test('#809 (review r1): the verb PROMOTES a description carrying apostrophes — the backlog is real prose, not fixture prose', async (t) => {
+  const draft = DRAFT.replace('Add sdd.engines.', "Add sdd.engines: distinguishable from 'interrogated and declared nothing' — the inhabitant's own words.");
+  const root = world(t, { draft });
+  const r = await drive(root);
+  assert.equal(r.exitCode, 0, r.output);
+  const next = readFileSync(join(root, 'brain/core/config-migrations.mjs'), 'utf8');
+  assert.match(next, /inhabitant/, 'the apostrophe prose landed');
 });
 
 test('#809: a malformed draft refuses with the parser\'s own sentence', async (t) => {
