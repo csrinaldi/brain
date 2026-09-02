@@ -104,3 +104,30 @@ test('#836 (review r1): the wiring works THROUGH the seam and dispatch — the o
   assert.equal(r.manual, true);
   assert.equal(r.target, artifactPaths('issue-999-x').tasks);
 });
+
+// ── round 2 of the cold review — the custom-stage half of option A ──────────
+
+test('#836 (review r2): cold-review through the SEAM to plain — no evidence demanded of a custom stage', async () => {
+  const { makeRunStageSeam } = await import('./stage-seam.mjs');
+  const seam = makeRunStageSeam();
+  // The real caller (run-cold-review-stage) passes NO routed — before this PR
+  // that failed clean ("does not implement the op"); with runStage present it
+  // must still answer, never fake-refuse about evidence a custom stage owes nobody.
+  const r = await seam({ stage: 'cold-review', engine: 'plain', prompt: 'p', changeId: 'issue-999-x' });
+  assert.equal(r.ok, true, 'a custom stage arrives evidence-free BY THE OPTION-A SPLIT this very change shipped');
+  assert.equal(r.manual, true);
+});
+
+test('#836 (review r2): gentle-ai composes a CUSTOM stage from its OWN declaration — S2 evidence carries no role there', async () => {
+  const routed = await assertRoutedStage({ config: { sdd: { map: { 'cold-review': { engine: 'gentle-ai' } } } }, stage: 'cold-review' });
+  assert.ok(!('role' in routed), 'precondition: custom-stage evidence has no role — the crash input');
+  let seen = null;
+  const r = await gentleAi.runStage({ stage: 'cold-review', routed, changeId: 'issue-999-x',
+    _transport: async (p) => { seen = p; return { ok: true }; } });
+  assert.equal(r.ok, true, 'a TypeError is not a refusal');
+  assert.ok(seen.prompt.length > 0, 'composed from the engine\'s own recorded/derived declaration');
+});
+
+test('#836 (review r2): lifecycle stages STILL demand bound evidence — the split narrowed the guard, not the doctrine', async () => {
+  await assert.rejects(() => plain.runStage({ stage: 'tasks', changeId: 'x' }), /routed evidence/);
+});

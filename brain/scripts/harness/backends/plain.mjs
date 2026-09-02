@@ -1,4 +1,4 @@
-import { artifactPaths } from '../../lib/sdd-layout.mjs';
+import { artifactPaths, LIFECYCLE_STAGES } from '../../lib/sdd-layout.mjs';
 // plain.mjs — the `plain` SDD_HARNESS backend: a real, dispatchable second
 // inhabitant of `init` (issue #250, B0, REQ-B0-5). No `cli.mjs` change is
 // required — the dispatcher is already backend-agnostic (design §4). Emits
@@ -68,6 +68,19 @@ export function declareRoles(stages) {
  * layer too — the same demand the transport guard makes, one layer earlier.
  */
 function assertBoundEvidence(stage, routed) {
+  // Round 2 of #836's cold review: the guard mirrors assertRoutableStage's
+  // OPTION-A split exactly — only LIFECYCLE stages owe evidence; a custom
+  // stage (cold-review, the flagship) arrives evidence-free by the very rule
+  // this change shipped, and demanding it here produced a FALSE refusal on a
+  // reachable config. Reproduced before fixing.
+  if (!LIFECYCLE_STAGES.includes(stage)) {
+    if (routed && routed.routed === true && routed.stage !== stage) {
+      throw new Error(
+        `run-stage: routed evidence was computed for "${routed.stage}" and handed to "${stage}" — bound, never bearer.`
+      );
+    }
+    return;
+  }
   if (!(routed && routed.routed === true)) {
     throw new Error(
       `run-stage: lifecycle stage "${stage}" arrived without routed evidence — call ` +

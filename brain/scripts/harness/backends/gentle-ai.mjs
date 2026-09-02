@@ -47,7 +47,7 @@ import { fileURLToPath } from 'node:url';
 
 import { t } from '../../i18n/t.mjs';
 import { GENTLE_AI_ROLES, derivedRole } from './gentle-ai.roles.mjs';
-import { artifactPaths } from '../../lib/sdd-layout.mjs';
+import { artifactPaths, LIFECYCLE_STAGES } from '../../lib/sdd-layout.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -325,6 +325,19 @@ export async function init({
  * layer too — the same demand the transport guard makes, one layer earlier.
  */
 function assertBoundEvidence(stage, routed) {
+  // Round 2 of #836's cold review: the guard mirrors assertRoutableStage's
+  // OPTION-A split exactly — only LIFECYCLE stages owe evidence; a custom
+  // stage (cold-review, the flagship) arrives evidence-free by the very rule
+  // this change shipped, and demanding it here produced a FALSE refusal on a
+  // reachable config. Reproduced before fixing.
+  if (!LIFECYCLE_STAGES.includes(stage)) {
+    if (routed && routed.routed === true && routed.stage !== stage) {
+      throw new Error(
+        `run-stage: routed evidence was computed for "${routed.stage}" and handed to "${stage}" — bound, never bearer.`
+      );
+    }
+    return;
+  }
   if (!(routed && routed.routed === true)) {
     throw new Error(
       `run-stage: lifecycle stage "${stage}" arrived without routed evidence — call ` +
@@ -355,11 +368,20 @@ function assertBoundEvidence(stage, routed) {
 export async function runStage({ stage, routed, changeId, model = null, cwd, timeoutMs, _transport } = {}) {
   assertBoundEvidence(stage, routed);
   const target = artifactPaths(changeId)[stage];
+  // Round 2: S2's custom-stage evidence carries NO role (stage-engine returns
+  // {routed, stage, routing} there) — reading role.instructions crashed with a
+  // TypeError, which is not a refusal. A custom stage composes from THIS
+  // engine's own declaration (its recorded data or derivedRole — module-local,
+  // the same #814 rule: never installed files). A lifecycle stage keeps the
+  // port-resolved role its evidence guarantees.
+  const role = routed.role ?? (GENTLE_AI_ROLES[stage] ? { stage, ...GENTLE_AI_ROLES[stage] } : derivedRole(stage));
   const prompt = [
-    routed.role.instructions,
+    role.instructions,
     '',
     `You are producing the "${stage}" artefact for change "${changeId}".`,
-    `Write exactly one file: ${target} — the layout's single accessor names it; do not relocate or rename it.`,
+    target
+      ? `Write exactly one file: ${target} — the layout's single accessor names it; do not relocate or rename it.`
+      : `The "${stage}" stage writes to its own declared root — follow its chain's conventions; it is not one of the four lifecycle artefacts.`,
     'Follow the repository\'s existing artefact conventions; run nothing destructive.',
   ].join('\n');
 
