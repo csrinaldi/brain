@@ -46,6 +46,20 @@ export function deriveKnownPaths(migrations) {
   return { leaves, families };
 }
 
+/**
+ * Segments the LANGUAGE owns, not the schema (#823 cold review, blocker
+ * judgment:cold-1 — reproduced: `set sdd.map.__proto__.polluted true` left
+ * `({}).polluted === true`). An open family says "the consumer names the
+ * members", and these three names are never the consumer's to give: writing
+ * through them mutates Object.prototype — far more than the addressed key —
+ * and reading through them walks the prototype chain. One rule, shared by
+ * BOTH verbs: `planConfigWrite` refuses loudly (a write is an intent, the
+ * operator must hear no), `resolvePath` answers undefined (a read of a path
+ * that cannot exist reports absence, exactly as any other missing path does).
+ */
+const HOSTILE_SEGMENTS = Object.freeze(['__proto__', 'constructor', 'prototype']);
+const hostileSegment = (path) => path.split('.').find((seg) => HOSTILE_SEGMENTS.includes(seg)) ?? null;
+
 /** JSON first, bare string on failure — `set sdd.map.x '{"engine":"plain"}'` and `set docs.language es` both work. */
 export function parseValue(raw) {
   try { return JSON.parse(raw); } catch { return String(raw); }
@@ -53,7 +67,11 @@ export function parseValue(raw) {
 
 /** `get`'s resolver — undefined for a missing path, never a throw. */
 export function resolvePath(config, path) {
-  return path.split('.').reduce((node, key) => (node == null ? undefined : node[key]), config);
+  if (hostileSegment(path) !== null) return undefined;
+  return path.split('.').reduce(
+    (node, key) => (node != null && Object.hasOwn(node, key) ? node[key] : undefined),
+    config,
+  );
 }
 
 /** The nearest known family/leaf for a refusal — longest shared prefix wins, then shortest name. */
@@ -75,6 +93,16 @@ function nearestKnown(path, known) {
  * @returns {{next: object|null, migrationsApplied: string[], refusal: string|null}}
  */
 export function planConfigWrite({ config, path, value, migrations, targetVersion }) {
+  const hostile = hostileSegment(path);
+  if (hostile !== null) {
+    return {
+      next: null,
+      migrationsApplied: [],
+      refusal: `config: path '${path}' contains '${hostile}' — refused, nothing written. ` +
+        'That segment is owned by the language, never by the schema: writing through it ' +
+        'mutates the prototype chain, not the addressed key.',
+    };
+  }
   const known = deriveKnownPaths(migrations);
   const inFamily = [...known.families].some((f) => path.startsWith(`${f}.`));
   if (!known.leaves.has(path) && !inFamily) {

@@ -33,6 +33,13 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
 
   if (op === 'get') {
+    // NOT validated against deriveKnownPaths, on purpose (#823 cold review,
+    // judgment:cold-2): the verb itself writes `schemaVersion`, which no
+    // migration's defaults declare — a schema-validated get would refuse to
+    // read a key the verb wrote. Reads report what IS; writes gate what MAY
+    // BE. The shared half is the SAFETY rule: resolvePath refuses hostile
+    // segments and reads own-keys only, so nothing arrives via the prototype
+    // chain through either op.
     const resolved = resolvePath(config, path);
     if (resolved === undefined) fail(`'${path}' is not set (undefined).`);
     console.log(JSON.stringify(resolved, null, 2));

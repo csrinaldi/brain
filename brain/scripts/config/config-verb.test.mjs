@@ -62,3 +62,48 @@ test('#823: migrations NEVER overwrite an existing value on the way through (ADR
   const { next } = planConfigWrite({ config: { schemaVersion: '0.1.0', docs: { language: 'fr' } }, path: 'sdd.map.x', value: '{"engine":"plain"}', migrations: MIGRATIONS, targetVersion: '0.3.0' });
   assert.equal(next.docs.language, 'fr', 'the 0.2.0 default must not clobber the consumer value');
 });
+
+// ── #823, cold review round 1 — hostile path segments ───────────────────────
+// Reproduced before fixing: `set sdd.map.__proto__.polluted true` returned
+// refusal: null and left ({}).polluted === true — the write loop walked INTO
+// Object.prototype because the family check was a bare startsWith. Every open
+// family this verb will ever host (sdd.map today, sdd.engines tomorrow, every
+// #824 --record and #323 route) goes through this one path, so the guard
+// belongs HERE, in the planner, not at any call site.
+
+const HOSTILE = ['__proto__', 'constructor', 'prototype'];
+
+test('#823 security: a hostile segment inside an OPEN FAMILY is refused, and the prototype stays clean', () => {
+  for (const seg of HOSTILE) {
+    const { refusal, next } = planConfigWrite({
+      config: { schemaVersion: '0.3.0' }, path: `sdd.map.${seg}.polluted`, value: 'true',
+      migrations: MIGRATIONS, targetVersion: '0.3.0',
+    });
+    assert.equal(next, null, `${seg}: nothing may be written`);
+    assert.match(refusal, new RegExp(seg.replace(/\$/g, '')), `${seg}: the refusal names the segment`);
+  }
+  assert.equal(({}).polluted, undefined, 'Object.prototype must be untouched');
+});
+
+test('#823 security: a hostile leaf segment is refused even when a known family prefixes it', () => {
+  const { refusal } = planConfigWrite({
+    config: {}, path: 'sdd.map.__proto__', value: '{}',
+    migrations: MIGRATIONS, targetVersion: '0.3.0',
+  });
+  assert.ok(refusal, 'the family owner cannot name a member the language itself owns');
+});
+
+test('#823 security: resolvePath refuses to WALK a hostile segment — get and set share one safety rule', () => {
+  assert.equal(resolvePath({ docs: { language: 'es' } }, 'docs.__proto__.constructor'), undefined,
+    'a hostile segment resolves to undefined — never to the prototype chain');
+});
+
+test('#823: get stays readable OUTSIDE the declared schema — schemaVersion is the proof', () => {
+  // cold review round 1, judgment:cold-2 asked why get and set enforce
+  // different strictness. Stated here as a FACT, not a preference: the verb
+  // itself writes `schemaVersion`, no migration's defaults declare it, so a
+  // get validated against deriveKnownPaths would refuse to read a key the
+  // verb wrote. Reads report what IS; writes gate what MAY BE. The SAFETY
+  // rule (hostile segments) is the shared half — strictness is not.
+  assert.equal(resolvePath({ schemaVersion: '1.1.0' }, 'schemaVersion'), '1.1.0');
+});
