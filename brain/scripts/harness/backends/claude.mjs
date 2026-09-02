@@ -153,9 +153,13 @@ function tail(r, max = 300) {
 export async function runStage({
   stage, prompt, model = null, cwd = process.cwd(),
   timeoutMs = STAGE_TIMEOUT_MS, credentialEnv = null, forgeConfigDir = null,
+  routed = undefined,
   _env = process.env, _run = defaultRun, _now = Date.now,
 } = {}) {
-  assertRoutableStage(stage);
+  // #323 S2: a lifecycle stage needs the routing check's evidence — the caller
+  // runs assertRoutedStage and hands the result through. Custom stages (every
+  // caller today) are untouched.
+  assertRoutableStage(stage, { routed });
 
   if (typeof prompt !== 'string' || prompt.trim() === '') {
     return { ok: false, reason: `no prompt for stage "${stage}" — an engine with nothing to do is not a run` };

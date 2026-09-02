@@ -35,15 +35,15 @@ test('#682 B.3: `run-stage` routes to the backend, kebab→camel like every othe
   assert.deepEqual(seen, { stage: COLD_REVIEW_STAGE });
 });
 
-test('#682 B.3: NO SDD lifecycle stage can be routed — the fork ADR-0019 rejected is unbuildable', async () => {
+test('#682 B.3 → #323 S2: a lifecycle stage without routed EVIDENCE cannot spawn — the conditions check is the only door', async () => {
   // The assertion that lets ADR-0033 land without resolving Compuerta 1. It is
   // code, not a comment: an argument about which stages are routed is only as
   // good as the thing that keeps it true.
   for (const stage of SDD_LIFECYCLE_STAGES) {
     await assert.rejects(
       () => runStage({ stage, prompt: 'p', _run: okRun }),
-      /may not be routed to an engine/,
-      `"${stage}" is one of the four — routing it forks one evidence contract into one per harness`,
+      /without routed evidence/,
+      `"${stage}" is one of the four — spawning it demands assertRoutedStage's result (Amendment 1, condition 4)`,
     );
   }
   // And the complement, so this cannot pass on a list that forbids everything:

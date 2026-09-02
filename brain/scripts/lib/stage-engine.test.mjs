@@ -112,7 +112,7 @@ test('#682 cold-5: assertRoutableStage REFUSES a non-stage, not just a lifecycle
 test('#682 cold-5: a real routable stage still passes, and a lifecycle stage still refuses', () => {
   assert.doesNotThrow(() => assertRoutableStage(COLD_REVIEW_STAGE));
   for (const stage of SDD_LIFECYCLE_STAGES) {
-    assert.throws(() => assertRoutableStage(stage), /may not be routed/,
-      'the ADR-0019 refusal must survive the new one — two different facts, two different messages');
+    assert.throws(() => assertRoutableStage(stage), /without routed evidence/,
+      'the refusal SURVIVES as a demand for evidence (#323 S2, condition 4: replaced, not removed)');
   }
 });
