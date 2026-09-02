@@ -65,7 +65,10 @@ Each target has a drift guard: hand-edits fail.
 
 ### Requirement: The challenger calls the port
 
-`reviewer.inferential.challenger.{agent, model}` binding is DELETED;
+`reviewer.inferential.challenger.{agent, model}` binding is RETIRED — the
+READ is removed (it never existed: the keys were reserved and unread); the
+keys themselves stay in place, documented inert (#229's post-release
+doctrine — a reader trusting this spec must not believe they stopped parsing);
 the challenger's role content resolves from the first-party Adversary. The
 AXIS resolution (`RUNNERS`, `IMPLEMENTED_AXES`, the `human` default) stays
 byte-for-byte — reviewer policy, as the header always said.

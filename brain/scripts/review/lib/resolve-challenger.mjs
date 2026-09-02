@@ -165,11 +165,11 @@ function unbuiltRunner(axis) {
  *      defaulting would hide an unknown evidentiary strength.
  *
  * @param {{config?: object, protocol?: string}} args
- * @returns {{run: boolean, axis: string|null, challenger: Function|null, reason: string|null}}
+ * @returns {{run: boolean, axis: string|null, challenger: Function|null, challengerRole: object|null, reason: string|null}}
  * @throws {Error} on an unrecognised axis
  */
 export function resolveJudgment({ config, protocol = JUDGMENT_PROTOCOL } = {}) {
-  const off = (reason, enabled = true) => ({ run: false, axis: null, challenger: null, reason, enabled });
+  const off = (reason, enabled = true) => ({ run: false, axis: null, challenger: null, challengerRole: null, reason, enabled });
 
   const inferential = config?.reviewer?.inferential ?? {};
 

@@ -35,3 +35,13 @@ test('#576 D4: challenger.agent/model were RESERVED and never read — now said 
   const j = resolveJudgment({ config: { reviewer: { inferential: { challenger: { axis: 'human', agent: 'x', model: 'y' } } } }, protocol: JUDGMENT_PROTOCOL });
   assert.equal(j.run, true, 'the keys change nothing — they never did, and now the file says so instead of promising a future');
 });
+
+test('#576 (review r1): the OFF arms null challengerRole EXPLICITLY — "never computed" must not read as absent', () => {
+  // The pattern off() already keeps for axis and challenger, extended to the
+  // field this change added: a future slice-3 consumer inherits one contract,
+  // both branches, JSDoc included.
+  const disabled = resolveJudgment({ config: { reviewer: { inferential: { enabled: false } } } });
+  assert.equal(disabled.challengerRole, null);
+  const wrongProtocol = resolveJudgment({ config: {}, protocol: 'brain-review/1' });
+  assert.equal(wrongProtocol.challengerRole, null);
+});
