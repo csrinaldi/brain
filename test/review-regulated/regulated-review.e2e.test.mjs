@@ -756,7 +756,7 @@ test('e2e #690: a real brain-review/1 run declares BOTH halves of what ran', (t)
  * helper used to hardcode `join(repoDir, 'openspec', 'reviews', `pr-N`)` and a
  * hand-written ```brain-findings/1 fence, while `artifactPathFor()` and
  * `ARTIFACT_TAG` are exported for exactly this and are what
- * `cold-review-prompt.mjs` derives from. So the highest-level test of the wire
+ * `assemble-review-prompt.mjs` derives from. So the highest-level test of the wire
  * was the one place the contract was written down a second time, free to drift
  * from the reader it exists to exercise — and drift here fails in the safe-looking
  * direction: the test keeps passing against its own private contract while

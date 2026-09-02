@@ -1,4 +1,4 @@
-// cold-review-prompt.test.mjs — the prompt is checked BY THE READER, not by
+// assemble-review-prompt.test.mjs — the prompt is checked BY THE READER, not by
 // string-matching against a second copy of the contract (#682 slice 3, B.4).
 //
 // The central oracle here is not an assertion about the prompt's text. It is
@@ -17,7 +17,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { buildColdReviewPrompt, ROLE_DEBT_TICKET, REFUSED_FIELDS } from './cold-review-prompt.mjs';
+import { assembleReviewPrompt, REFUSED_FIELDS } from './assemble-review-prompt.mjs';
+import { firstPartyRole } from '../../roles/first-party/index.mjs';
+
+const ROLE = firstPartyRole('cold-review');
 import {
   readFindingsArtifact,
   artifactPathFor,
@@ -33,7 +36,7 @@ const SEVERITY_VALUES = (prompt) => renderedVocabulary(prompt, 'severity');
 const PR = 765;
 
 test('the prompt itself parses as an artifact — the reader is the oracle', () => {
-  const result = readFindingsArtifact(buildColdReviewPrompt({ prNumber: PR }));
+  const result = readFindingsArtifact(assembleReviewPrompt({ role: ROLE, prNumber: PR }));
 
   assert.equal(
     result.ok,
@@ -48,7 +51,7 @@ test('the prompt itself parses as an artifact — the reader is the oracle', () 
 });
 
 test("the example's fields ARE the carried fields — no drift in either direction", () => {
-  const [anchored] = readFindingsArtifact(buildColdReviewPrompt({ prNumber: PR })).findings;
+  const [anchored] = readFindingsArtifact(assembleReviewPrompt({ role: ROLE, prNumber: PR })).findings;
 
   // Post-`sanitiseFinding`, so a field the example spells wrong has already been
   // dropped and shows up here as missing. Both directions are asserted on
@@ -64,7 +67,7 @@ test("the example's fields ARE the carried fields — no drift in either directi
 });
 
 test('the un-anchored example carries no anchor — the two cases are distinct', () => {
-  const [, unanchored] = readFindingsArtifact(buildColdReviewPrompt({ prNumber: PR })).findings;
+  const [, unanchored] = readFindingsArtifact(assembleReviewPrompt({ role: ROLE, prNumber: PR })).findings;
 
   assert.equal(unanchored.file, undefined, 'the second example must not anchor');
   assert.equal(unanchored.line, undefined, 'the second example must not anchor');
@@ -72,7 +75,7 @@ test('the un-anchored example carries no anchor — the two cases are distinct',
 });
 
 test('the field list handed to the engine is DERIVED from CARRIED_FIELDS', () => {
-  const prompt = buildColdReviewPrompt({ prNumber: PR });
+  const prompt = assembleReviewPrompt({ role: ROLE, prNumber: PR });
 
   // Parsed back out of the prompt rather than asserted member-by-member. A
   // membership loop over CARRIED_FIELDS would compare the list to itself and
@@ -109,7 +112,7 @@ test('cold-4: the prompt names the FORCED evidence class, not the menu', () => {
   // The derivation rule still holds; only its source moved. The prompt reads
   // `FORCED_EVIDENCE_CLASS` from the evaluator that decides it, so a literal here
   // could not drift from the value actually written.
-  const prompt = buildColdReviewPrompt({ prNumber: PR });
+  const prompt = assembleReviewPrompt({ role: ROLE, prNumber: PR });
   assert.match(prompt, new RegExp(`ALWAYS \\\`${FORCED_EVIDENCE_CLASS}\\\``));
   assert.ok(
     ALLOWED_EVIDENCE_CLASSES.includes(FORCED_EVIDENCE_CLASS),
@@ -118,12 +121,12 @@ test('cold-4: the prompt names the FORCED evidence class, not the menu', () => {
 });
 
 test('cold-4: the prompt does NOT offer a class the evaluator would overwrite', () => {
-  const prompt = buildColdReviewPrompt({ prNumber: PR });
+  const prompt = assembleReviewPrompt({ role: ROLE, prNumber: PR });
   for (const cls of ALLOWED_EVIDENCE_CLASSES.filter((c) => c !== FORCED_EVIDENCE_CLASS)) {
     assert.ok(
       !prompt.includes(`\`${cls}\``),
       `the prompt offers \`${cls}\`, which evaluateInferential rewrites — offering a choice ` +
-      'that is discarded is the shape cold-review-prompt.mjs\'s own header forbids',
+      'that is discarded is the shape assemble-review-prompt.mjs\'s own header forbids',
     );
   }
 });
@@ -143,7 +146,7 @@ test('cold-4: the prompt does NOT offer a class the evaluator would overwrite', 
 // nowhere in CARRIED_FIELDS is invisible to both. This test asks the converse.
 
 test('#682 cold-9: every field the prompt names is carried, a vocabulary value, or REFUSED', () => {
-  const prompt = buildColdReviewPrompt({ prNumber: PR });
+  const prompt = assembleReviewPrompt({ role: ROLE, prNumber: PR });
 
   // THE FIRST CUT OF THIS TEST WAS BLIND ALONG THE POSITION AXIS, and the
   // second cold review measured it: it matched `^ {2}· \`name\`` — the field
@@ -194,7 +197,7 @@ test('#682 cold-9: nothing is both carried and refused', () => {
 });
 
 test('#682 cold-9: the prompt tells the engine NOT to state a disposition, and says why', () => {
-  const prompt = buildColdReviewPrompt({ prNumber: PR });
+  const prompt = assembleReviewPrompt({ role: ROLE, prNumber: PR });
 
   // Silence is not enough. Removing the bullet leaves a prompt that says
   // nothing about the field, and an engine that carries the habit from another
@@ -230,7 +233,7 @@ test('#682 cold-9: the prompt tells the engine NOT to state a disposition, and s
 });
 
 test('severity has no constant, so the PROTOCOL DOCUMENT is its reader', () => {
-  const prompt = buildColdReviewPrompt({ prNumber: PR });
+  const prompt = assembleReviewPrompt({ role: ROLE, prNumber: PR });
 
   // The one vocabulary the prompt states as a literal, because no
   // `ALLOWED_SEVERITIES` exists to derive it from. Rather than leave it
@@ -261,7 +264,7 @@ test('the prompt carries no posted-verdict shape — proved, not asserted in a c
   // block. A coverage claim in a comment is the exact defect class this ticket
   // keeps finding, so it is executed here instead: inject the shape and require
   // the round-trip to refuse.
-  const poisoned = buildColdReviewPrompt({ prNumber: PR }).replace(
+  const poisoned = assembleReviewPrompt({ role: ROLE, prNumber: PR }).replace(
     '## What you may use',
     'protocol: brain-review/2\n\n## What you may use'
   );
@@ -287,7 +290,7 @@ test('the empty case the prompt describes is one the reader accepts', () => {
   //
   // Neither half substitutes for the other: an instruction nobody can parse and
   // a parseable shape nobody is told to write both fail REQ-S3-4 silently.
-  const prompt = buildColdReviewPrompt({ prNumber: PR });
+  const prompt = assembleReviewPrompt({ role: ROLE, prNumber: PR });
 
   assert.ok(
     prompt.includes('write the file with an empty array'),
@@ -302,7 +305,7 @@ test('the empty case the prompt describes is one the reader accepts', () => {
 });
 
 test('the artifact path is the one the reader will look at', () => {
-  const prompt = buildColdReviewPrompt({ prNumber: PR });
+  const prompt = assembleReviewPrompt({ role: ROLE, prNumber: PR });
 
   // The single highest-cost silent failure available here: an engine that writes
   // a perfect artifact to a path nobody reads produces "missing", which renders
@@ -316,7 +319,7 @@ test('the artifact path is the one the reader will look at', () => {
 test('a PR number that is not one is refused, not defaulted', () => {
   for (const bad of [0, -1, 'main', '../../etc', null, undefined, 1.5]) {
     assert.throws(
-      () => buildColdReviewPrompt({ prNumber: bad }),
+      () => assembleReviewPrompt({ role: ROLE, prNumber: bad }),
       /is not a PR number/,
       `refuses ${JSON.stringify(bad)}`
     );
@@ -324,8 +327,8 @@ test('a PR number that is not one is refused, not defaulted', () => {
 });
 
 test('base and head refs render a real command, and their absence renders a different one', () => {
-  const withRefs = buildColdReviewPrompt({ prNumber: PR, baseRef: 'abc123', headRef: 'def456' });
-  const without = buildColdReviewPrompt({ prNumber: PR });
+  const withRefs = assembleReviewPrompt({ role: ROLE, prNumber: PR, baseRef: 'abc123', headRef: 'def456' });
+  const without = assembleReviewPrompt({ role: ROLE, prNumber: PR });
 
   assert.ok(withRefs.includes('git diff abc123...def456'), 'named refs become the command');
   assert.ok(!without.includes('git diff abc123'), 'and are absent when not given');
@@ -338,8 +341,8 @@ test('base and head refs render a real command, and their absence renders a diff
 
   // Half-specified is the generic form, not a broken command: `git diff abc123...`
   // resolves to something, which is worse than not naming a command at all.
-  const halfBase = buildColdReviewPrompt({ prNumber: PR, baseRef: 'abc123' });
-  const halfHead = buildColdReviewPrompt({ prNumber: PR, headRef: 'def456' });
+  const halfBase = assembleReviewPrompt({ role: ROLE, prNumber: PR, baseRef: 'abc123' });
+  const halfHead = assembleReviewPrompt({ role: ROLE, prNumber: PR, headRef: 'def456' });
   assert.equal(halfBase, without, 'a base with no head falls back rather than emitting a partial range');
   assert.equal(halfHead, without, 'a head with no base falls back rather than emitting a partial range');
 });
@@ -350,19 +353,16 @@ test('the engine is told it holds no credential', () => {
   // `runStage`, which holds no VCS credential at all (B.3). This assertion exists
   // so the instruction is not silently deleted from the role while that stays true.
   assert.ok(
-    buildColdReviewPrompt({ prNumber: PR }).includes('You hold no credential'),
+    assembleReviewPrompt({ role: ROLE, prNumber: PR }).includes('You hold no credential'),
     'the role must state that it cannot publish'
   );
 });
 
-test('the debt names its ticket in code, not only in prose', () => {
-  assert.equal(ROLE_DEBT_TICKET, 312, 'the role is on loan from #312 until its port lands');
-});
 
 // ── #682 C.5's verdict, judgment:cold-7 ──────────────────────────────────────
 
 test('#682 cold-7: the prompt warns about the two-block refusal, and the reader really refuses', () => {
-  const prompt = buildColdReviewPrompt({ prNumber: PR });
+  const prompt = assembleReviewPrompt({ role: ROLE, prNumber: PR });
 
   // THE ONE INSTRUCTION THIS FILE CANNOT INTERPOLATE. Everything else here is
   // derived from a constant the reader uses; this constraint lives in the
@@ -394,4 +394,20 @@ test('#682 cold-7: the prompt warns about the two-block refusal, and the reader 
     prompt, /do not echo the worked example/i,
     'and it must name the specific way it happens, because the example is right there in the prompt'
   );
+});
+
+// ── #814 T4: the role is an argument, and its absence is refused ────────────
+
+test('#814 T4: no role handed in → refused, naming where roles are served from', () => {
+  assert.throws(
+    () => assembleReviewPrompt({ prNumber: 7 }),
+    /roles\/first-party/,
+    'a prompt with no role half sends an engine to work as nobody in particular',
+  );
+});
+
+test('#814 T4: the served role text opens the assembled prompt VERBATIM', () => {
+  const prompt = assembleReviewPrompt({ role: ROLE, prNumber: 7 });
+  assert.ok(prompt.startsWith(ROLE.text), 'content first, protocol after — the split is visible in the output');
+  assert.match(prompt, /## What you must produce/, 'and the protocol half is still there');
 });

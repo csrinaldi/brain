@@ -24,12 +24,29 @@
  */
 export const AGENT_RUNTIME = null;
 
+/**
+ * gentle-ai's inhabitant surface (issue #814 T2) — the adapter #312's port
+ * calls. Answers EVERY stage it is asked about: lifecycle stages from the
+ * RECORDED declaration (`gentle-ai.roles.mjs`, provenance inside), a custom
+ * stage with the framework's default producer role marked `derived: true`.
+ *
+ * @param {string[]} stages The resolved stage set to declare a role for.
+ * @returns {Record<string, {stage: string, agent: string, model_tier: string, chooses_model: false, instructions: string, derived?: true}>}
+ */
+export function declareRoles(stages) {
+  return Object.fromEntries(stages.map((stage) => {
+    const recorded = GENTLE_AI_ROLES[stage];
+    return [stage, recorded ? { stage, ...recorded } : derivedRole(stage)];
+  }));
+}
+
 import { spawnSync } from 'node:child_process';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { t } from '../../i18n/t.mjs';
+import { GENTLE_AI_ROLES, derivedRole } from './gentle-ai.roles.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
