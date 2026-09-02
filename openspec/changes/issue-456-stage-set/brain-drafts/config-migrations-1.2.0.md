@@ -109,3 +109,21 @@ draft content above — they were written to describe the POST-promotion
 state directly, since this apply run cannot execute a real RED/GREEN cycle
 against a file it is not permitted to write). Run `npm test` after all three
 edits and confirm the count grows by exactly 1 test with 0 failures.
+
+## The contract block (issue #809 — what `brain:promote` reads)
+
+The prose and `js` blocks above are for the human; THIS block is the machine
+contract. The `version` field is the draft's own number — the verb renumbers
+per #806 at promote time, in the open, under the typed confirmation.
+
+```brain-migration/1
+{
+  "version": "1.2.0",
+  "description": "Add sdd.stages: the declared stage set (issue #456 slice A). Empty by default — the four lifecycle stages live in code (sdd-layout.mjs LIFECYCLE_STAGES), never in a consumer config, so an upgrade cannot introduce a fourth declaration of them in a file no test can guard. ADDITIVE-ONLY: a declared set omitting one of the four is REFUSED (maintainer ruling 2026-08-29; ADR-0019 Amendment 1 condition 4).",
+  "defaults": {
+    "sdd": {
+      "stages": {}
+    }
+  }
+}
+```

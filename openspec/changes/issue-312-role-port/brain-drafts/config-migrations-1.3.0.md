@@ -127,3 +127,21 @@ a file it is not permitted to write). Run `npm test` after all three edits
 and confirm the count grows by exactly 1 test with 0 failures — and confirm
 `stage-engine.test.mjs:87`'s uniqueness check does not fire against whichever
 version number(s) #456's draft is using at promotion time.
+
+## The contract block (issue #809 — what `brain:promote` reads)
+
+The prose and `js` blocks above are for the human; THIS block is the machine
+contract. The `version` field is the draft's own number — the verb renumbers
+per #806 at promote time, in the open, under the typed confirmation.
+
+```brain-migration/1
+{
+  "version": "1.3.0",
+  "description": "Add sdd.configs: per-stage configuration general to all stages — agent and enabled state (issue #312 slice A, design D3). Empty by default: a stage absent from sdd.configs takes the inhabitant's declared defaults, so an upgrade cannot silently disable or reassign a stage nobody configured.",
+  "defaults": {
+    "sdd": {
+      "configs": {}
+    }
+  }
+}
+```

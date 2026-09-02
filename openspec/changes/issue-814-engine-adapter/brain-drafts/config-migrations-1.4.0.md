@@ -44,3 +44,21 @@ declares it.
 
 The verb's own next run (drift line), and #323's router later. Named here so
 the key is not the unread-field defect.
+
+## The contract block (issue #809 — what `brain:promote` reads)
+
+The prose and `js` blocks above are for the human; THIS block is the machine
+contract. The `version` field is the draft's own number — the verb renumbers
+per #806 at promote time, in the open, under the typed confirmation.
+
+```brain-migration/1
+{
+  "version": "1.4.0",
+  "description": "Add sdd.engines: the record of what each SDD_ENGINE framework declared when brain:engines --record last interrogated it (issue #824, written ONLY through brain:config — Compuerta 4). Empty by default: an engine nobody recorded is honestly absent, and absence is distinguishable from 'interrogated and declared nothing'.",
+  "defaults": {
+    "sdd": {
+      "engines": {}
+    }
+  }
+}
+```

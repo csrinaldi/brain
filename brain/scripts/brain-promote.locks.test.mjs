@@ -62,12 +62,17 @@ const SOURCE = readFileSync(MODULE_PATH, 'utf8');
 // classifies by RESOLVED repo-relative path rather than by import specifier:
 // `lib/` modules import their siblings as `./x.mjs` while the entry point says
 // `./lib/x.mjs`, and a list keyed on the raw string reads one module as two.
-const OWN_IMPORTS = ['brain/scripts/lib/amendment-draft.mjs', 'brain/scripts/lib/promote-guards.mjs'];
+// migration-draft.mjs is OWN for the same reason amendment-draft.mjs is: it is
+// a draft CONTRACT of this verb — scanned for env reads and bypass flags.
+// installer.mjs is SHARED: migrateConfig belongs to the installer/upgrade path
+// first; this verb is its third caller (brain-upgrade, brain:config, here).
+const OWN_IMPORTS = ['brain/scripts/lib/amendment-draft.mjs', 'brain/scripts/lib/migration-draft.mjs', 'brain/scripts/lib/promote-guards.mjs'];
 const SHARED_IMPORTS = [
   'brain/scripts/lib/home-index.mjs',
   'brain/scripts/harness/backends/antigravity.mjs',
   'brain/scripts/lib/shipped-hostnames.mjs',
   'brain/scripts/lib/fenced-blocks.mjs',
+  'brain/scripts/lib/installer.mjs',
 ];
 
 const importsOf = (file) =>
@@ -89,7 +94,7 @@ test('REQ-378-2 harness proof: the scanned module set IS the verb — every rela
     'the verb imported a module this guard does not know about — classify it as the verb\'s own ' +
       '(scanned for env reads and bypass flags) or as shared library code, then update OWN_IMPORTS/SHARED_IMPORTS.',
   );
-  assert.equal(VERB_MODULES.length, 3, 'the verb spans three modules; all three must be scanned');
+  assert.equal(VERB_MODULES.length, 4, 'the verb spans four modules (#809 added migration-draft.mjs); all four must be scanned');
 });
 
 test('REQ-378-2 harness proof: the concatenated CODE really contains EVERY scanned module', () => {
