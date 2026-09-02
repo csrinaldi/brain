@@ -8,14 +8,13 @@
 // not export it, and it is small enough that importing across a directory
 // boundary for one helper would be its own coupling to justify).
 //
-// ── PARITY DEBT — #312, dated 2026-08-31. THIS SUITE MEASURES NO PARITY. ──
-// `INHABITANTS` holds ONE entry. n=2 needs #814 (the engine adapter); until it
-// lands, every assertion below is a single-inhabitant assertion wearing a
-// parity loop's shape. The loop is here because the SHAPE is the deliverable —
-// entry two is one line. Do not read a green run as "both engines have roles".
-// Third recorded debt of this class: resolve-challenger.mjs's "WHEN #312 LANDS"
-// header was the first; the second, cold-review-prompt.mjs's ROLE_DEBT_TICKET,
-// was discharged by #814 D5 (the role moved to roles/first-party/).
+// n=2 IS MEASURED here since #814: `INHABITANTS` holds `plain` and `gentle-ai`
+// — the two SDD_ENGINE frameworks (D6 vocabulary), the pairing Compuerta 3
+// ruled. The parity-debt header and its TRIPWIRE test died on 2026-09-02 the
+// way they demanded to: the tripwire FAILED on a real second entry and was
+// deleted per its own instructions. Of the three recorded debts of that class,
+// resolve-challenger.mjs's "WHEN #312 LANDS" header is the one still standing;
+// cold-review-prompt.mjs's ROLE_DEBT_TICKET was discharged by #814 D5.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { resolveStageSet } from '../lib/sdd-layout.mjs';
 import { ROLE_TIERS, resolveRoles } from './role-port.mjs';
 import * as plain from '../harness/backends/plain.mjs';
+import * as gentleAi from '../harness/backends/gentle-ai.mjs';
 
 /** Every fixture MUST declare exactly one of recorded/derived (never both, never neither). */
 function assertProvenance(fixture, fixtureName) {
@@ -38,7 +38,7 @@ function assertProvenance(fixture, fixtureName) {
   assert.ok(p.date, `${fixtureName}: missing _provenance.date`);
 }
 
-const INHABITANTS = { plain: { module: plain } };
+const INHABITANTS = { plain: { module: plain }, 'gentle-ai': { module: gentleAi } };
 
 const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/stage-set-custom.json', import.meta.url)));
 assertProvenance(FIXTURE, 'stage-set-custom.json');
@@ -126,12 +126,6 @@ test('roles.contract: a synthetic module with no declareRoles is refused', () =>
   );
 });
 
-// ── TRIPWIRE, not a ceiling — both must fail TOGETHER when n=2 lands ────────
-
-test('roles.contract TRIPWIRE: INHABITANTS holds exactly one entry — when this fails, n=2 landed, delete the debt statement above and this line', () => {
-  assert.equal(Object.keys(INHABITANTS).length, 1,
-    'TRIPWIRE, not a ceiling: when this fails, n=2 landed — delete the debt statement above and this line');
-});
 
 test('roles.contract TRIPWIRE: the dated PARITY DEBT statement is present, unmodified', () => {
   assert.match(
