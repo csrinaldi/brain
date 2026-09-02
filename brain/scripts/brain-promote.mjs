@@ -55,6 +55,16 @@ import {
   parseAmendmentDraft,
   planAmendment,
 } from './lib/amendment-draft.mjs';
+import {
+  MIGRATION_DRAFT_BASENAME_RE,
+  parseMigrationDraft,
+  proposeVersion,
+  spliceMigrationEntry,
+} from './lib/migration-draft.mjs';
+import { migrateConfig } from './lib/installer.mjs';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { checkShippedContent } from './lib/promote-guards.mjs';
 
 // ── Frozen contract ──────────────────────────────────────────────────────────
@@ -425,7 +435,10 @@ export async function runPromote({
   // The SHAPE is decided before anything else about the environment is read:
   // an unpromotable draft name must report its own reason, not whichever
   // unrelated precondition happens to be checked first.
-  const isAmendment = destinationFor(draftPath) === null;
+  // #809: a migration draft is detected FIRST, by basename — it is never a
+  // destinationFor candidate and never an amendment.
+  const isMigration = MIGRATION_DRAFT_BASENAME_RE.test(basename(draftPath));
+  const isAmendment = !isMigration && destinationFor(draftPath) === null;
   const shapeRefusal = isAmendment ? amendmentShapeRefusal(draftPath, draftText) : null;
   if (shapeRefusal) {
     for (const line of shapeRefusal) say(line);
@@ -447,7 +460,9 @@ export async function runPromote({
   // show, and the commit command to print. Everything after this point — the
   // confirmation, the writes, the staging, the printed command — happens once.
   const ctx = { root, draftPath, draftText, gitUserName, today: todayFn() };
-  const planned = isAmendment ? planAmendmentPromotion(ctx) : planNewAdrPromotion(ctx);
+  const planned = isMigration
+    ? await planMigrationPromotion(ctx)
+    : isAmendment ? planAmendmentPromotion(ctx) : planNewAdrPromotion(ctx);
 
   if (!planned.ok) {
     for (const line of planned.lines) say(line);
@@ -567,6 +582,99 @@ export async function runPromote({
   }
   say('');
   return done(0, wrote, staged);
+}
+
+// ── The migration arm (#809) ────────────────────────────────────────────────
+
+const MIGRATIONS_REL = 'brain/core/config-migrations.mjs';
+
+/**
+ * planMigrationPromotion() — issue #809, proposal D1-D3. Parses the
+ * `brain-migration/1` block, computes the number per #806 (shown, then signed
+ * — never silently), splices, and PROVES the candidate by importing it and
+ * running `migrateConfig` over the result BEFORE the plan is offered: a plan
+ * whose proof already failed is never put in front of a human to sign.
+ *
+ * Async where its siblings are sync because the proof is a real `import()` —
+ * the one honest way to ask "does this file still parse and migrate".
+ */
+async function planMigrationPromotion({ root, draftPath, draftText }) {
+  const { entry, refusal } = parseMigrationDraft(draftText);
+  if (refusal) return { ok: false, lines: [`✗ ${refusal}`] };
+
+  const draftVersion = basename(draftPath).match(MIGRATION_DRAFT_BASENAME_RE)[1];
+
+  let packageVersion;
+  try {
+    packageVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+  } catch (error) {
+    return { ok: false, lines: [`✗ package.json unreadable at ${root} — ${error.message}`] };
+  }
+
+  const targetAbs = join(root, MIGRATIONS_REL);
+  if (!existsSync(targetAbs)) return { ok: false, lines: [`✗ ${MIGRATIONS_REL} not found.`] };
+  const fileText = readFileSync(targetAbs, 'utf8');
+
+  let current;
+  try {
+    current = await import(`${pathToFileURL(targetAbs).href}?promote=${Date.now()}`);
+  } catch (error) {
+    return { ok: false, lines: [`✗ the CURRENT ${MIGRATIONS_REL} does not import (${error.message}) — fix the file before promoting into it.`] };
+  }
+  const tail = current.migrations?.[current.migrations.length - 1]?.version;
+  if (typeof tail !== 'string') {
+    return { ok: false, lines: [`✗ ${MIGRATIONS_REL} exports no readable migrations tail — refusing to number against a list this verb cannot see.`] };
+  }
+
+  const { version, renumbered } = proposeVersion({ draftVersion, packageVersion, tailVersion: tail });
+
+  const spliced = spliceMigrationEntry(fileText, entry, version);
+  if (spliced.refusal) return { ok: false, lines: [`✗ ${spliced.refusal}`] };
+
+  // D3 — the proof, BEFORE the plan. The candidate must import and migrate.
+  try {
+    const dir = mkdtempSync(join(tmpdir(), 'brain-promote-proof-'));
+    const proofPath = join(dir, 'candidate.mjs');
+    writeFileSync(proofPath, spliced.next, 'utf8');
+    const mod = await import(pathToFileURL(proofPath).href);
+    const { applied } = migrateConfig({}, mod.migrations, version);
+    if (!applied.includes(version)) {
+      return { ok: false, lines: [`✗ the proof import succeeded but migrateConfig did not apply ${version} — the spliced entry is not reachable. Nothing was staged.`] };
+    }
+  } catch (error) {
+    return { ok: false, lines: [
+      `✗ the candidate could not prove itself — import/migrate failed: ${error.message}`,
+      '  Nothing was written or staged. The current file is untouched.',
+    ] };
+  }
+
+  const issue = issueNumberFor(draftPath);
+  const numberLine = renumbered
+    ? `draft says ${draftVersion} → promoting as ${version} (#806: next-minor above package ${packageVersion} / tail ${tail})`
+    : `promoting as ${version} (the draft's own number — already the #806 answer)`;
+
+  const planText = [
+    '',
+    '─── PLAN ── config migration (issue #809) ──────────────────────────────────',
+    '',
+    `  ${numberLine}`,
+    `  append one declarative entry to ${MIGRATIONS_REL}:`,
+    `    version:     ${version}`,
+    `    description: ${entry.description}`,
+    `    defaults:    ${JSON.stringify(entry.defaults)}`,
+    '',
+    '  proof already ran: the candidate imports, and migrateConfig applies the',
+    '  new version over an empty config. What you sign is a verified result.',
+    '',
+  ].join('\n');
+
+  return {
+    ok: true,
+    writes: [{ relPath: MIGRATIONS_REL, text: spliced.next }],
+    planText,
+    hasIssue: Boolean(issue),
+    commitCommand: `git commit -m "chore(core): config migration ${version} — ${entry.description.replace(/"/g, "'").slice(0, 60)} (#${issue ?? 'NNN'})"`,
+  };
 }
 
 // ── Write preconditions ──────────────────────────────────────────────────────
