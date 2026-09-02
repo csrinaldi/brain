@@ -47,7 +47,8 @@ import { tmpdir } from 'node:os';
 import { COLD_REVIEW_STAGE, resolveStageEngine } from '../../lib/stage-engine.mjs';
 import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env.mjs';
 import { assertProducerCannotReachForge, withForgeConfigDir } from '../../harness/producer-forge-reach.mjs';
-import { buildColdReviewPrompt } from './cold-review-prompt.mjs';
+import { assembleReviewPrompt } from './assemble-review-prompt.mjs';
+import { firstPartyRole } from '../../roles/first-party/index.mjs';
 import { artifactPathFor } from './findings-artifact.mjs';
 
 /**
@@ -309,7 +310,10 @@ export async function runColdReviewStage({
       // worktree and WRITES where the reader looks. A relative path would land the
       // findings inside the throwaway checkout, and the presence check below would
       // then report "wrote no artifact" about a file written perfectly.
-      prompt: buildColdReviewPrompt({ prNumber, baseRef, headRef, artifactRoot: root }),
+      // #814 D5: the role is SERVED (brain's first-party Adversary instance),
+      // the protocol is assembled beside the reader. Direction of imports:
+      // review → roles/first-party, never back.
+      prompt: assembleReviewPrompt({ role: firstPartyRole(COLD_REVIEW_STAGE), prNumber, baseRef, headRef, artifactRoot: root }),
       model: routing.model,
       engine: routing.engine,
       cwd: worktreePath,

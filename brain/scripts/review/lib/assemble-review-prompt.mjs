@@ -1,28 +1,15 @@
-// cold-review-prompt.mjs — the cold reviewer's ROLE, as a prompt (#682 slice 3, D8).
+// assemble-review-prompt.mjs — the cold review's PROTOCOL half (#682 D8,
+// split by #814 D5).
 //
-// ─────────────────────────────────────────────────────────────────────────────
-// PROVISIONAL: THIS ROLE BELONGS TO #312's ROLE PORT.
-//
-// The text below IS a role definition — what the reviewer is, what it may look
-// at, what it must produce. #312 opens the port that serves roles, #576 defines
-// the Adversary archetype this one is an instance of, and #754 says the
-// cold-reviewer role exists nowhere today. Three open, approved tickets whose
-// subject is exactly this string.
-//
-// It lives here because M5 is at ZERO implementation and #682 could not wait:
-// `brain/roles/` does not exist, and the stage this prompt feeds is the first
-// thing in the repo that needs a role to run at all.
-//
-// WHEN #312 LANDS: delete this module and read the role from the port. Keep
-// nothing — there is no half of this file that is reviewer policy rather than
-// role content, which is what makes it a clean deletion rather than a split.
-//
-// THIS DEBT IS RECORDED IN THREE PLACES, NOT ONE (design.md D8): here, in the
-// change's `tasks.md`, and on #312 itself. The first PROVISIONAL binding on this
-// ticket — `resolve-challenger.mjs` — was recorded only in a header, and a cold
-// review found it by reading the header. A debt that depends on someone opening
-// the right file is a debt that gets paid late.
-// ─────────────────────────────────────────────────────────────────────────────
+// Until #814 this file was `cold-review-prompt.mjs` and carried the reviewer's
+// ROLE too, under a PROVISIONAL header that said: "WHEN #312 LANDS: delete
+// this module and read the role from the port. Keep nothing." The role half is
+// now exactly there — `roles/first-party/adversary-cold-review.mjs`, handed in
+// as an argument — and "keep nothing" turned out to overclaim by one half:
+// everything below is derived from the READER's own constants and per-run
+// parameters, which no port can serve (`declareRoles` is pure and knows no PR
+// number). Content lives with the port; protocol stays beside the reader.
+// `ROLE_DEBT_TICKET` is discharged and deleted with the move.
 //
 // THE PROMPT IS DERIVED FROM THE READER, NOT RESTATED ALONGSIDE IT.
 //
@@ -132,9 +119,6 @@ import {
 import { FORCED_EVIDENCE_CLASS } from '../evaluators/inferential.mjs';
 import { ALLOWED_SEVERITIES } from './findings-artifact.mjs';
 
-/** The ticket this role is on loan from. Named so the debt has an id in code. */
-export const ROLE_DEBT_TICKET = 312;
-
 /**
  * The severity vocabulary — a LITERAL, and unchecked. See the header: no
  * constant exists to derive it from, and inventing one that nothing validates
@@ -159,7 +143,8 @@ const SEVERITIES = ALLOWED_SEVERITIES.join(' | ');
 export const REFUSED_FIELDS = Object.freeze(['causal_disposition']);
 
 /**
- * buildColdReviewPrompt() — PURE. Renders the cold reviewer's role for one PR.
+ * assembleReviewPrompt() — PURE. Interpolates the protocol block around a
+ * served role for one PR.
  *
  * `artifactRoot` SPLITS THE READ SURFACE FROM THE WRITE TARGET, and the split is
  * the whole of judgment:cold-3's fix. The engine runs inside the cold worktree —
@@ -179,9 +164,15 @@ export const REFUSED_FIELDS = Object.freeze(['causal_disposition']);
  * @returns {string}
  * @throws {Error} via `artifactPathFor` when the PR number is not one
  */
-export function buildColdReviewPrompt({
-  prNumber, baseRef = null, headRef = null, artifactRoot = null,
+export function assembleReviewPrompt({
+  role, prNumber, baseRef = null, headRef = null, artifactRoot = null,
 } = {}) {
+  // Refused, not defaulted, for the same reason the path below is thrown on:
+  // a prompt with no role half sends an engine to work as nobody in
+  // particular, and the output would still parse — the worst kind of wrong.
+  if (typeof role?.text !== 'string' || role.text.length === 0) {
+    throw new Error('assemble-review-prompt: no role was handed in — serve one from roles/first-party (or an inhabitant) and pass it as `role`.');
+  }
   // Thrown, not defaulted: a prompt naming the wrong artifact path sends the
   // engine's whole run to a file nobody reads, and it fails silently — the
   // reader reports "missing", which is indistinguishable from "never ran".
@@ -192,8 +183,7 @@ export function buildColdReviewPrompt({
     ? `git diff ${baseRef}...${headRef}`
     : 'the diff of this pull request against its base branch';
 
-  return `You are a COLD REVIEWER. You have not seen this change before, you did not
-write it, and you are not here to be agreeable.
+  return `${role.text}
 
 Review ${diffCommand} in the current working directory.${artifactRoot && isAbsolute(artifactPath) ? `
 
@@ -202,20 +192,6 @@ It is not the operator's branch, and nothing you read here is affected by
 whatever they have checked out or left uncommitted. The one path below is
 absolute and deliberately points OUTSIDE this directory — that is where the
 reader looks for your findings.` : ''}
-
-## What you may use
-
-Read anything in the repository: the diff, the files it touches, the files it does
-NOT touch, the tests, \`openspec/\`, \`brain/project/decisions/\`. Run the test
-suite if you need to. Reproduce before you claim.
-
-## What you must NOT do
-
-- Do not post anything anywhere. You hold no credential and the review is not
-  yours to publish. Your entire output is one file.
-- Do not commit, stage, or amend. Writing the artifact is your only mutation.
-- Do not edit the code you are reviewing. A reviewer who fixes what they found
-  has destroyed the evidence that it was there.
 
 ## What you must produce
 

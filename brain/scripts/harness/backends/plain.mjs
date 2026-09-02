@@ -51,10 +51,12 @@ export async function init({ _emit = console.log } = {}) {
  * because no agent runs here to choose one).
  *
  * @param {string[]} stages The resolved stage set to declare a role for.
- * @returns {Record<string, {stage: string, agent: string, model_tier: null, chooses_model: false}>}
+ * @returns {Record<string, {stage: string, agent: string, model_tier: null, chooses_model: false, instructions: null}>}
  */
 export function declareRoles(stages) {
   return Object.fromEntries(stages.map((stage) => [stage, {
-    stage, agent: 'human', model_tier: null, chooses_model: false,
+    // `instructions: null` — checked (#814 T3): a human executes; there is no
+    // prompt to declare. The same reasoning as `model_tier: null` above.
+    stage, agent: 'human', model_tier: null, chooses_model: false, instructions: null,
   }]));
 }

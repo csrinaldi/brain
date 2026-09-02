@@ -60,7 +60,7 @@ const POSTED_FAMILY_RE = /^\s*protocol:\s*brain-review\//m;
  * constant has a reader and the prompt derives its menu from here instead of
  * spelling it.
  *
- * `cold-review-prompt.test.mjs` cross-checks this against the protocol
+ * `assemble-review-prompt.test.mjs` cross-checks this against the protocol
  * document's own `severity:` line, so the constant cannot drift from the
  * doctrine that defines it.
  */

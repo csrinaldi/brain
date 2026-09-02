@@ -125,7 +125,7 @@ export function sanitiseFinding(finding = {}) {
 /**
  * The evidence class `evaluateInferential` FORCES on every finding it emits.
  *
- * Exported so `cold-review-prompt.mjs` can name it instead of spelling it —
+ * Exported so `assemble-review-prompt.mjs` can name it instead of spelling it —
  * judgment:cold-4 of the third cold review. The prompt used to interpolate the
  * whole `ALLOWED_EVIDENCE_CLASSES` menu while this evaluator overwrote the field
  * unconditionally, so the engine was offered a choice that was discarded. Now
