@@ -45,3 +45,13 @@ test('#576 T2: neutrality holds on the new instance too — content, never routi
     assert.ok(!(key in VERIFIER_REVIEW), `"${key}" would make content into routing`);
   }
 });
+
+// ── T4 (tasks 1.4): the locks the projection CITES still hold mechanically ──
+
+test('#576 1.4: the projected reviewer\'s claims are load-bearing — the port has prReviewComment and NO approve verb', async () => {
+  const { VERBS } = await import('../../vcs/cli.mjs');
+  const names = Array.isArray(VERBS) ? VERBS : [...(VERBS instanceof Map ? VERBS.keys() : Object.keys(VERBS))];
+  assert.ok(names.includes('prReviewComment'), 'lock 2\'s verb exists — the citation has a target');
+  assert.equal(names.filter((n) => /approve/i.test(n)).length, 0,
+    'no verb on the whole port can approve — a fully compromised projected reviewer has no code path to one');
+});
