@@ -162,6 +162,11 @@ export function resolveRoles({ config, engine, inhabitant }) {
       model_tier: role.model_tier,
       chooses_model: role.chooses_model,
       instructions: role.instructions,
+      // #814 round 2: an answer the recording cannot vouch for must SAY so on
+      // the resolved role too — dropping the mark here laundered a guess into
+      // a recording. Strict boolean, always present: the shape is identical
+      // across stages, the value tells the truth.
+      derived: role.derived === true,
       state: stageConfig.enabled ? 'enabled' : 'disabled',
       reason: stageConfig.enabled ? null : `disabled by sdd.configs["${stage}"].enabled = false`,
       selection,

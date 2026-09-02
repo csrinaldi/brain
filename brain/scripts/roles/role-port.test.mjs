@@ -260,3 +260,20 @@ test('#814 T3: a non-string, non-null value is refused', () => {
   const inhabitant = fakeInhabitant({ proposal: { stage: 'proposal', agent: 'x', model_tier: null, chooses_model: false, instructions: 42 } });
   assert.throws(() => resolveRoles({ config: {}, engine: 'synthetic', inhabitant }), /instructions/);
 });
+
+test('#814 (round 2): `derived` SURVIVES the port as a strict boolean — the laundering was the defect', () => {
+  // Cold review round 2 on PR2, correction — verified: declareRoles carried
+  // derived:true and resolveRoles dropped it, so the first real caller would
+  // read a guessed role exactly as if it were the recorded one. Every
+  // resolved role now states it, false included: an always-present boolean
+  // keeps the shape identical across stages while the VALUE tells the truth.
+  const inhabitant = {
+    declareRoles: (stages) => Object.fromEntries(stages.map((stage) => [stage, {
+      stage, agent: 'x', model_tier: 'balanced', chooses_model: false, instructions: 'do it',
+      ...(stage === 'proposal' ? {} : { derived: true }),
+    }])),
+  };
+  const roles = resolveRoles({ config: {}, engine: 'synthetic', inhabitant });
+  assert.equal(roles.proposal.derived, false, 'recorded → strict false, never absent');
+  assert.equal(roles.spec.derived, true, 'guessed → strict true, carried through');
+});
