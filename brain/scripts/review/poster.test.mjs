@@ -798,3 +798,46 @@ test('#766: a write verb answering with neither url nor error still fails closed
   assert.equal(result.posted, false);
   assert.ok(result.error, 'an off-contract answer still owes the caller a reason');
 });
+
+// ── issue #829 — the lock reads CONTROLS, not existence ─────────────────────
+
+const halfVerdictMineAtHead = () => ({
+  author: 'me',
+  controls_not_applied: ['inferential'],
+});
+
+test('#829: a half-verdict of mine does NOT arm the lock against a run that would apply the missing half', () => {
+  assert.equal(wouldRepeatLastVerdict({
+    priorVerdicts: [{ ...halfVerdictMineAtHead(), body: '', head_sha: 'abc' }],
+    reviewerHandle: 'me',
+    headSha: 'abc',
+    nextAppliesInferential: true,
+  }), false, 'there IS no reasoned output at this head — running adds the half, it repeats nothing');
+});
+
+test('#829: the same half-verdict still arms the lock when the next run would ALSO be deterministic-only', () => {
+  assert.equal(wouldRepeatLastVerdict({
+    priorVerdicts: [{ ...halfVerdictMineAtHead(), body: '', head_sha: 'abc' }],
+    reviewerHandle: 'me',
+    headSha: 'abc',
+    nextAppliesInferential: false,
+  }), true, 'a half repeated by a half is exactly the loop the lock exists to break');
+});
+
+test('#829: a FULL last verdict arms the lock even against an inferential run — loop safety is preserved', () => {
+  assert.equal(wouldRepeatLastVerdict({
+    priorVerdicts: [{ author: 'me', body: '', head_sha: 'abc', controls_not_applied: [] }],
+    reviewerHandle: 'me',
+    headSha: 'abc',
+    nextAppliesInferential: true,
+  }), true);
+});
+
+test('#829: a LEGACY verdict with no controls line arms the lock — conservative, never guessed', () => {
+  assert.equal(wouldRepeatLastVerdict({
+    priorVerdicts: [{ author: 'me', body: '', head_sha: 'abc' }],
+    reviewerHandle: 'me',
+    headSha: 'abc',
+    nextAppliesInferential: true,
+  }), true, 'absence of the field is not evidence the half was skipped');
+});

@@ -688,6 +688,7 @@
 {"id":"rec-4d71c5f55c62f00a","ts":"2026-08-27T23:55:18Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-08-rec-4d71c5f55c62f00a.jsonl"}
 {"id":"rec-4d9826923dc6c3c6","ts":"2026-07-11T12:33:30Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4d9826923dc6c3c6.jsonl"}
 {"id":"rec-4d99842973ef6c5b","ts":"2026-09-01T16:39:26Z","actor":"fix/issue-821-fixmemory-staged-records-check-blocks-th","type":"bugfix","project":"brain","issue":821,"file":"2026-09-rec-4d99842973ef6c5b.jsonl"}
+{"id":"rec-4dbb7dee6e82d07e","ts":"2026-09-02T15:27:55Z","actor":"fix/issue-829-fixreview-the-anti-loop-lock-reads-verdi","type":"bugfix","project":"brain","issue":829,"file":"2026-09-rec-4dbb7dee6e82d07e.jsonl"}
 {"id":"rec-4dd6b3f0b91250ec","ts":"2026-07-25T00:46:44Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4dd6b3f0b91250ec.jsonl"}
 {"id":"rec-4ddbd54054d82442","ts":"2026-07-25T21:50:33Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-4ddbd54054d82442.jsonl"}
 {"id":"rec-4e052c74af444be3","ts":"2026-07-25T00:47:13Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-4e052c74af444be3.jsonl"}
@@ -1848,6 +1849,7 @@
 {"id":"rec-cc5561c44de9fd70","ts":"2026-07-25T21:51:16Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-cc5561c44de9fd70.jsonl"}
 {"id":"rec-cc85a30da84c0033","ts":"2026-07-25T21:51:00Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-cc85a30da84c0033.jsonl"}
 {"id":"rec-ccc2c51c09e7e676","ts":"2026-07-29T14:26:09Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ccc2c51c09e7e676.jsonl"}
+{"id":"rec-ccd3c0433001b2a3","ts":"2026-09-02T14:49:45Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-ccd3c0433001b2a3.jsonl"}
 {"id":"rec-ccdb437b83cf52bb","ts":"2026-07-25T00:46:56Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ccdb437b83cf52bb.jsonl"}
 {"id":"rec-cd9a9d61ff389d06","ts":"2026-07-25T00:47:26Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-cd9a9d61ff389d06.jsonl"}
 {"id":"rec-cdabf256aa1e79c1","ts":"2026-08-27T22:03:13Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-08-rec-cdabf256aa1e79c1.jsonl"}

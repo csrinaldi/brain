@@ -29,6 +29,7 @@ import { evaluateCheckpoint, gatherCheckpointInputs, PRODUCES as CHECKPOINT_PROD
 import { evaluateRuling, gatherRulingInputs, PRODUCES as RULING_PRODUCES } from './evaluators/ruling.mjs';
 import { applyCausalAdmission } from './lib/causal-admission.mjs';
 import { resolveJudgment } from './lib/resolve-challenger.mjs';
+import { COLD_REVIEW_STAGE, resolveStageEngine } from '../lib/stage-engine.mjs';
 import { resolveConvergence } from './lib/convergence.mjs';
 import { runColdReviewStage } from './lib/run-cold-review-stage.mjs';
 import { formatDuration, resolveStageTimeout } from './lib/stage-timeout.mjs';
@@ -692,10 +693,30 @@ export async function main(deps = {}) {
     // The verdict body is the ONLY place a non-posting run reports what it
     // found. A run that declines to repeat itself still ran its deterministic
     // gates, and an operator is entitled to read them.
+    // #829: whether THIS run would apply the judgment half — known before the
+    // spawn from the same inputs the stage reads: the half is enabled, and
+    // either a generator is injected or `sdd.map` routes the stage. A malformed
+    // routing entry counts as would-apply so the stage's own wrapped throw
+    // reports it — the lock must never eat an operator's error message.
+    let wouldApplyInferential = false;
+    if (judgment.run) {
+      if (deps.inferentialDeps) {
+        wouldApplyInferential = true;
+      } else {
+        try {
+          wouldApplyInferential = resolveStageEngine(config, COLD_REVIEW_STAGE) !== null;
+        } catch {
+          wouldApplyInferential = true;
+        }
+      }
+    }
+
     const antiLoop = !args.dryRun && wouldRepeatLastVerdict({
       priorVerdicts: boot.doctrine.priorVerdicts,
       reviewerHandle: identity.handle,
       headSha: boot.headSha,
+      // A half-verdict does not lock out the half this run would add (#829).
+      nextAppliesInferential: wouldApplyInferential,
     });
     if (antiLoop) {
       // NAMED AS ITS OWN CONDITION, never folded into "no transport is
@@ -1006,6 +1027,9 @@ export async function main(deps = {}) {
     mode,
     renderedBody: rendered,
     reviewerHandle: identity.handle,
+    // #829: the fact as BUILT, not re-derived — this verdict applied the
+    // judgment half iff its own controls say so.
+    nextAppliesInferential: controls.includes('inferential'),
     priorVerdicts: boot.doctrine.priorVerdicts,
     // #405: the BUILT verdict's `findings`, and DELIBERATELY not its `follow_ups`.
     //

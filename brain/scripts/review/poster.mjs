@@ -121,18 +121,39 @@ export function deriveInlineComments(findings = []) {
  * refuses to repeat ITSELF, while the bound counts every reviewer's verdicts at
  * this head.
  *
- * @param {{priorVerdicts?: Array<{author?: string}>, reviewerHandle?: string,
- *          headSha?: string}} args
+ * THE LOCK READS CONTROLS, NOT EXISTENCE (issue #829). A last verdict that
+ * carries `controls_not_applied: ["inferential"]` is HALF a verdict — the
+ * judgment half never ran at this head — and a run that WOULD apply that half
+ * repeats nothing: there is no reasoned output here, read or unread. Measured
+ * on PR #828: two half-runs at one head, and the only way to a full verdict
+ * was moving the head with a docs commit whose sole purpose was defeating this
+ * lock. Loop safety is preserved on every other arm: a FULL last verdict still
+ * locks, a half repeated by another WOULD-BE half still locks, and a legacy
+ * verdict with no controls line still locks — absence of the field is not
+ * evidence the half was skipped.
+ *
+ * @param {{priorVerdicts?: Array<{author?: string, controls_not_applied?: string[]}>,
+ *          reviewerHandle?: string, headSha?: string,
+ *          nextAppliesInferential?: boolean}} args
  * @returns {boolean}
  */
-export function wouldRepeatLastVerdict({ priorVerdicts = [], reviewerHandle, headSha } = {}) {
+export function wouldRepeatLastVerdict({ priorVerdicts = [], reviewerHandle, headSha, nextAppliesInferential = false } = {}) {
   const list = Array.isArray(priorVerdicts) ? priorVerdicts : [];
   const lastVerdict = list.length > 0 ? list[list.length - 1] : null;
-  return Boolean(
+  const mineAtHead = Boolean(
     lastVerdict &&
     lastVerdict.author === reviewerHandle &&
     verdictsAtHead([lastVerdict], headSha).length === 1
   );
+  if (
+    mineAtHead &&
+    nextAppliesInferential &&
+    Array.isArray(lastVerdict.controls_not_applied) &&
+    lastVerdict.controls_not_applied.includes('inferential')
+  ) {
+    return false;
+  }
+  return mineAtHead;
 }
 
 export async function postVerdict({
@@ -143,6 +164,7 @@ export async function postVerdict({
   mode,
   renderedBody,
   reviewerHandle,
+  nextAppliesInferential = false,
   priorVerdicts = [],
   findings = [],
   escalate = null,
@@ -169,7 +191,7 @@ export async function postVerdict({
   // same review iteration" means. The AUTHOR half is this lock's own addition and is
   // the difference between them: the bound counts every reviewer's verdicts at this
   // head, while the lock only refuses to repeat ITSELF.
-  if (wouldRepeatLastVerdict({ priorVerdicts, reviewerHandle, headSha })) {
+  if (wouldRepeatLastVerdict({ priorVerdicts, reviewerHandle, headSha, nextAppliesInferential })) {
     return { posted: false, skipped: 'anti-loop' };
   }
 
