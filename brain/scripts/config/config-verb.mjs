@@ -59,6 +59,10 @@ export function deriveKnownPaths(migrations) {
  */
 const HOSTILE_SEGMENTS = Object.freeze(['__proto__', 'constructor', 'prototype']);
 const hostileSegment = (path) => path.split('.').find((seg) => HOSTILE_SEGMENTS.includes(seg)) ?? null;
+// A malformed path IS an unknown path (round 2 — reproduced: 'sdd.map..x'
+// wrote a '' key with no refusal). Empty segments come from doubled, leading
+// or trailing dots; nothing an operator means is spelled that way.
+const hasEmptySegment = (path) => path.split('.').some((seg) => seg.length === 0);
 
 /** JSON first, bare string on failure — `set sdd.map.x '{"engine":"plain"}'` and `set docs.language es` both work. */
 export function parseValue(raw) {
@@ -67,7 +71,7 @@ export function parseValue(raw) {
 
 /** `get`'s resolver — undefined for a missing path, never a throw. */
 export function resolvePath(config, path) {
-  if (hostileSegment(path) !== null) return undefined;
+  if (hostileSegment(path) !== null || hasEmptySegment(path)) return undefined;
   return path.split('.').reduce(
     (node, key) => (node != null && Object.hasOwn(node, key) ? node[key] : undefined),
     config,
@@ -93,6 +97,14 @@ function nearestKnown(path, known) {
  * @returns {{next: object|null, migrationsApplied: string[], refusal: string|null}}
  */
 export function planConfigWrite({ config, path, value, migrations, targetVersion }) {
+  if (hasEmptySegment(path)) {
+    return {
+      next: null,
+      migrationsApplied: [],
+      refusal: `config: path '${path}' has an empty segment — refused, nothing written. ` +
+        'A doubled, leading or trailing dot spells no key an operator means.',
+    };
+  }
   const hostile = hostileSegment(path);
   if (hostile !== null) {
     return {

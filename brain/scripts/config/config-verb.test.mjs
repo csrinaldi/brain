@@ -107,3 +107,15 @@ test('#823: get stays readable OUTSIDE the declared schema — schemaVersion is 
   // rule (hostile segments) is the shared half — strictness is not.
   assert.equal(resolvePath({ schemaVersion: '1.1.0' }, 'schemaVersion'), '1.1.0');
 });
+
+test('#823 (round 2): an EMPTY segment is refused — a malformed path is an unknown path', () => {
+  // Cold review round 2 — reproduced: 'sdd.map..polluted' wrote a '' key with
+  // no refusal. Not pollution, but a junk key the fails-closed promise
+  // explicitly covers. Same rule on get: resolvePath answers undefined.
+  for (const path of ['sdd.map..polluted', '.sdd.map.x', 'sdd.map.x.', '.']) {
+    const { refusal, next } = planConfigWrite({ config: {}, path, value: 'true', migrations: MIGRATIONS, targetVersion: '0.3.0' });
+    assert.equal(next, null, `${JSON.stringify(path)}: nothing may be written`);
+    assert.match(refusal, /empty segment/, `${JSON.stringify(path)}: the refusal names the malformation`);
+  }
+  assert.equal(resolvePath({ sdd: { map: { '': { x: 1 } } } }, 'sdd.map..x'), undefined);
+});
