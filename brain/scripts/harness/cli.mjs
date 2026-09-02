@@ -128,7 +128,7 @@ export function resolveHarness({ env = process.env, envVars = {}, config = {} } 
 // very op this slice added to prevent it.
 //
 // THE FIX IS THE SURFACE, NOT THE PARSING. There is no coherent argv spelling
-// for this op: its payload is a PROMPT built by `buildColdReviewPrompt()` from
+// for this op: its payload is a PROMPT built by `assembleReviewPrompt()` from
 // the reader's own constants, plus a cwd and a credential scrub-list. A human
 // typing it would have to paste a generated document as a shell argument. The
 // op is not a CLI op and never was — it leaked onto the command line because

@@ -14,7 +14,8 @@
 // parity loop's shape. The loop is here because the SHAPE is the deliverable —
 // entry two is one line. Do not read a green run as "both engines have roles".
 // Third recorded debt of this class: resolve-challenger.mjs's "WHEN #312 LANDS"
-// header and cold-review-prompt.mjs's ROLE_DEBT_TICKET are the first two.
+// header was the first; the second, cold-review-prompt.mjs's ROLE_DEBT_TICKET,
+// was discharged by #814 D5 (the role moved to roles/first-party/).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

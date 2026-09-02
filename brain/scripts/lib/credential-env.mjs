@@ -92,7 +92,7 @@
 // variables the FORGE CLIs read ambiently, not ones brain declares: `gh` gives
 // `GH_TOKEN` precedence over its own keyring (github.mjs:63 depends on exactly
 // that), and a producer holding one can post through `gh` without ever touching
-// brain's config. Same treatment as `SEVERITIES` in cold-review-prompt.mjs — a
+// brain's config. Same treatment as `SEVERITIES` in assemble-review-prompt.mjs — a
 // literal, labelled as one, rather than a constant nothing validates.
 
 import { tokenEnvVar } from '../vcs/lib/token.mjs';

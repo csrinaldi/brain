@@ -731,7 +731,7 @@ test('C.2a: the routed stage runs, writes, and its finding reaches the verdict',
   assert.ok(spawned.prompt.includes(artifactPathFor(42)), 'the role names the path it must write');
 
   // THE DIFF RANGE, and it is not decoration. Measured: replacing baseRef/headRef
-  // with nulls left the suite green — `buildColdReviewPrompt` falls back to the
+  // with nulls left the suite green — `assembleReviewPrompt` falls back to the
   // vague "the diff of this pull request against its base branch", and the engine
   // then reviews whatever it infers instead of the exact range the verdict binds
   // itself to. A review of the wrong range is still a well-formatted review.
