@@ -389,5 +389,5 @@ export async function runStage({ stage, routed, changeId, model = null, cwd, tim
     const { runStage: claudeRunStage } = await import('./claude.mjs');
     return claudeRunStage(payload);
   });
-  return transport({ stage, prompt, model: model ?? routed.routing?.model ?? null, cwd, timeoutMs, routed });
+  return transport({ stage, prompt, model: model ?? routed?.routing?.model ?? null, cwd, timeoutMs, routed });
 }
