@@ -91,7 +91,7 @@ export function resolveModelSelection({ engine, stage, role, routed }) {
  * declaration is a bug in the inhabitant, not a "stage answered nothing".
  *
  * @param {{ config: object, engine: string, inhabitant: {declareRoles?: (stages: string[]) => Record<string, object>} }} args
- * @returns {Record<string, {stage: string, agent: string, model_tier: string|null, chooses_model: boolean, state: 'enabled'|'disabled', reason: string|null, selection: object}>}
+ * @returns {Record<string, {stage: string, agent: string, model_tier: string|null, chooses_model: boolean, instructions: string|null, state: 'enabled'|'disabled', reason: string|null, selection: object}>}
  */
 export function resolveRoles({ config, engine, inhabitant }) {
   if (!inhabitant || typeof inhabitant.declareRoles !== 'function') {
@@ -132,6 +132,21 @@ export function resolveRoles({ config, engine, inhabitant }) {
         "declaration is refused for the same reason AGENT_RUNTIME may not be '?? null'-ed.",
       );
     }
+    // #814 T3: `instructions` — what the role IS, what it may look at, what it
+    // must produce. `null` is a CHECKED value ("a human executes; there is no
+    // prompt"), mirroring `model_tier: null`. An empty string is refused: "no
+    // prompt" already has a spelling, and a prompt with nothing in it is a
+    // declaration nobody can act on. Absence is refused like a missing
+    // `chooses_model` — an unfilled field must never be readable as a filled one.
+    const okInstructions = role.instructions === null ||
+      (typeof role.instructions === 'string' && role.instructions.length > 0);
+    if (!okInstructions) {
+      throw new Error(
+        `roles: engine '${engine}' declares instructions=${JSON.stringify(role.instructions)} for ` +
+        `stage "${stage}" — must be a non-empty string, or null as the checked no-prompt state. ` +
+        'Absence is refused for the same reason a missing chooses_model is.',
+      );
+    }
 
     const stageConfig = configs[stage];
     const agent = stageConfig.agent ?? role.agent;
@@ -146,6 +161,7 @@ export function resolveRoles({ config, engine, inhabitant }) {
       agent,
       model_tier: role.model_tier,
       chooses_model: role.chooses_model,
+      instructions: role.instructions,
       state: stageConfig.enabled ? 'enabled' : 'disabled',
       reason: stageConfig.enabled ? null : `disabled by sdd.configs["${stage}"].enabled = false`,
       selection,

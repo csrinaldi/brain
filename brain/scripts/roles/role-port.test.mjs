@@ -18,7 +18,7 @@ function fakeInhabitant(overrides = {}) {
   return {
     declareRoles(stages) {
       const roles = Object.fromEntries(stages.map((stage) => [stage, {
-        stage, agent: 'human', model_tier: null, chooses_model: false,
+        stage, agent: 'human', model_tier: null, chooses_model: false, instructions: null,
       }]));
       return { ...roles, ...overrides };
     },
@@ -51,7 +51,7 @@ test('#312 D2: a per-stage omission throws NAMING THE STAGE — it must never be
   const inhabitant = {
     declareRoles(stages) {
       const roles = Object.fromEntries(stages.map((stage) => [stage, {
-        stage, agent: 'human', model_tier: null, chooses_model: false,
+        stage, agent: 'human', model_tier: null, chooses_model: false, instructions: null,
       }]));
       delete roles.design; // omit one stage entirely
       return roles;
@@ -87,7 +87,7 @@ test('#312 D2/spec: a concrete model_tier id is refused, naming the field', () =
 
 test('#312 D2: every declared ROLE_TIERS member is accepted; null is accepted; nothing else is', () => {
   for (const tier of [...ROLE_TIERS, null]) {
-    const inhabitant = fakeInhabitant({ proposal: { stage: 'proposal', agent: 'x', model_tier: tier, chooses_model: false } });
+    const inhabitant = fakeInhabitant({ proposal: { stage: 'proposal', agent: 'x', model_tier: tier, chooses_model: false, instructions: null } });
     assert.doesNotThrow(() => resolveRoles({ config: {}, engine: 'synthetic', inhabitant }));
   }
 });
@@ -220,4 +220,43 @@ test('#312 D1: loadInhabitant routes engine name through the injected loader, un
   const mod = await loadInhabitant('some-engine', { _load: async (engine) => { seenEngine = engine; return fakeModule; } });
   assert.equal(seenEngine, 'some-engine');
   assert.equal(mod, fakeModule);
+});
+
+// ── #814 T3: `instructions` — a checked field, never an unread one ──────────
+
+test('#814 T3: a role with NO instructions key is refused naming the stage and the field', () => {
+  const role = { stage: 'proposal', agent: 'x', model_tier: null, chooses_model: false };
+  delete role.instructions; // explicit: the ABSENCE is the case, not an undefined value
+  const inhabitant = fakeInhabitant({ proposal: role });
+  assert.throws(
+    () => resolveRoles({ config: {}, engine: 'synthetic', inhabitant }),
+    (err) => {
+      assert.match(err.message, /instructions/);
+      assert.match(err.message, /proposal/);
+      return true;
+    },
+  );
+});
+
+test('#814 T3: instructions: null is a CHECKED value — the no-prompt state, resolved and reported as null', () => {
+  const inhabitant = fakeInhabitant({ proposal: { stage: 'proposal', agent: 'x', model_tier: null, chooses_model: false, instructions: null } });
+  const roles = resolveRoles({ config: {}, engine: 'synthetic', inhabitant });
+  assert.equal(roles.proposal.instructions, null);
+});
+
+test('#814 T3: a non-empty string travels to the resolved role VERBATIM', () => {
+  const text = 'You are the proposer. Read the exploration; write intent, scope, non-goals.';
+  const inhabitant = fakeInhabitant({ proposal: { stage: 'proposal', agent: 'x', model_tier: 'balanced', chooses_model: false, instructions: text } });
+  const roles = resolveRoles({ config: {}, engine: 'synthetic', inhabitant });
+  assert.equal(roles.proposal.instructions, text);
+});
+
+test('#814 T3: an EMPTY string is refused — "no prompt" is null, never a prompt with nothing in it', () => {
+  const inhabitant = fakeInhabitant({ proposal: { stage: 'proposal', agent: 'x', model_tier: null, chooses_model: false, instructions: '' } });
+  assert.throws(() => resolveRoles({ config: {}, engine: 'synthetic', inhabitant }), /instructions/);
+});
+
+test('#814 T3: a non-string, non-null value is refused', () => {
+  const inhabitant = fakeInhabitant({ proposal: { stage: 'proposal', agent: 'x', model_tier: null, chooses_model: false, instructions: 42 } });
+  assert.throws(() => resolveRoles({ config: {}, engine: 'synthetic', inhabitant }), /instructions/);
 });
