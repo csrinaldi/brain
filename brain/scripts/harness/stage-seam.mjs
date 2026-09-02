@@ -71,6 +71,7 @@ export const RUN_STAGE_OP = 'run-stage';
  * @param {{dispatch?: Function}} [deps]
  * @returns {(args: {stage: string, prompt: string, model?: string|null,
  *                   engine: string, cwd?: string, credentialEnv?: string[],
+ *                   routed?: object, changeId?: string,
  *                   forgeConfigDir?: string, timeoutMs?: number})
  *            => Promise<{ok: boolean, reason?: string}>}
  */
