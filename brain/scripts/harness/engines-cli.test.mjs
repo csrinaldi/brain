@@ -37,13 +37,30 @@ test('#824 cli: the survey reports BOTH frameworks, per stage, and exits 0', (t)
   assert.match(r.stdout, /derived/i, "gentle-ai's unseen-stage answer states its provenance state or the report is a laundering surface");
 });
 
-test('#824 cli: --record fails CLOSED while sdd.engines is undeclared, and the config is byte-untouched', (t) => {
+test('#824 cli: --record WRITES — sdd.engines is declared since migration 1.4.0, and the sequencing gate stood down the day it landed', (t) => {
+  // This test's previous body pinned the fails-closed state ("while sdd.engines
+  // is undeclared") — that WHILE ended when the 1.4.0 promotion merged (#830),
+  // exactly as the sequencing consequence predicted. The planner-level
+  // fails-closed rule stays pinned in engines-report.test.mjs against a
+  // synthetic list WITHOUT the key; here, against the real shipped list, the
+  // record path is now the product.
   const root = world(t);
-  const before = readFileSync(join(root, 'brain.config.json'), 'utf8');
   const r = run(root, '--record');
-  assert.equal(r.status, 1, 'the sequencing consequence: the 1.4.0 draft is not promoted yet');
-  assert.match(r.stderr, /sdd\.engines/);
-  assert.equal(readFileSync(join(root, 'brain.config.json'), 'utf8'), before);
+  assert.equal(r.status, 0, r.stderr);
+  const cfg = JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
+  // schemaVersion lands at the PACKAGE version, not the migration tail:
+  // migrateConfig applies entries up to the installed version, and 1.2.0-1.4.0
+  // sit ABOVE package 1.1.0 until a release carries them (#806's other half —
+  // the number IS the package version, so the entry activates when the package
+  // reaches it). The PATH is settable now (KNOWN_PATHS reads the declared
+  // list); the DEFAULT applies at release. Declared vs active — noted, ruled
+  // elsewhere if it needs ruling.
+  assert.equal(cfg.schemaVersion, '1.1.0', 'migrated up to the installed package version');
+  for (const engine of ['plain', 'gentle-ai']) {
+    assert.ok(cfg.sdd.engines[engine], `${engine} recorded`);
+    assert.ok(Array.isArray(cfg.sdd.engines[engine].stages) && cfg.sdd.engines[engine].stages.length > 0);
+    assert.ok(cfg.sdd.engines[engine].recordedAt, 'the recording is dated');
+  }
 });
 
 test('#824 cli: no brain.config.json is a named refusal, not a stack trace', (t) => {

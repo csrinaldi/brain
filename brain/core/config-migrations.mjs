@@ -134,6 +134,33 @@ export const migrations = [
       },
     },
   },
+  {
+    version: "1.2.0",
+    description: "Add sdd.stages: the declared stage set (issue #456 slice A). Empty by default — the four lifecycle stages live in code (sdd-layout.mjs LIFECYCLE_STAGES), never in a consumer config, so an upgrade cannot introduce a fourth declaration of them in a file no test can guard. ADDITIVE-ONLY: a declared set omitting one of the four is REFUSED (maintainer ruling 2026-08-29; ADR-0019 Amendment 1 condition 4).",
+    defaults: {
+      sdd: {
+        stages: {}
+      }
+    }
+  },
+  {
+    version: "1.3.0",
+    description: "Add sdd.configs: per-stage configuration general to all stages — agent and enabled state (issue #312 slice A, design D3). Empty by default: a stage absent from sdd.configs takes the inhabitant's declared defaults, so an upgrade cannot silently disable or reassign a stage nobody configured.",
+    defaults: {
+      sdd: {
+        configs: {}
+      }
+    }
+  },
+  {
+    version: "1.4.0",
+    description: "Add sdd.engines: the record of what each SDD_ENGINE framework declared when brain:engines --record last interrogated it (issue #824, written ONLY through brain:config — Compuerta 4). Empty by default: an engine nobody recorded is honestly absent, and absence is distinguishable from 'interrogated and declared nothing'.",
+    defaults: {
+      sdd: {
+        engines: {}
+      }
+    }
+  },
 ];
 
 // NOTE (issue #231 A2, human ruling in tasks.md/design.md): this entry is versioned
