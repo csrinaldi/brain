@@ -176,3 +176,11 @@ test('#836 (review r5): a lifecycle run without changeId REFUSES — never a tar
   const routedG = await evidence('gentle-ai');
   await assert.rejects(() => gentleAi.runStage({ stage: 'tasks', routed: routedG, _transport: async () => ({ ok: true }) }), /changeId/);
 });
+
+test('#836 (review r6): plain\'s handoff for a CUSTOM stage never says "undefined" — the sibling gets the same honesty', async () => {
+  const r = await plain.runStage({ stage: 'cold-review', changeId: 'issue-999-x' });
+  assert.equal(r.ok, true);
+  assert.equal(r.target, null, 'the accessor only knows the four — null is the checked answer, undefined the accident');
+  assert.ok(!JSON.stringify(r.steps).includes('undefined'), 'no step hands a human a path named undefined');
+  assert.ok(r.steps.some((s) => s.includes('own declared root')), 'the custom-stage line, same as gentle-ai\'s');
+});

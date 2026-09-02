@@ -116,14 +116,20 @@ function assertBoundEvidence(stage, routed, changeId) {
  */
 export async function runStage({ stage, routed, changeId } = {}) {
   assertBoundEvidence(stage, routed, changeId);
-  const target = artifactPaths(changeId)[stage];
+  // Round 6: the accessor only knows the four lifecycle artefacts — for a
+  // custom stage `target` is null (checked), never an "undefined" handed to a
+  // human inside a step. gentle-ai got this ternary in round 2; the sibling
+  // kept the accident four rounds longer.
+  const target = artifactPaths(changeId)[stage] ?? null;
   return {
     ok: true,
     manual: true,
     target,
     steps: [
       `Stage "${stage}" is routed to plain: a human executes it (model_tier: null is a checked value).`,
-      `Write the artefact at ${target} — the single accessor's answer; no engine may relocate it.`,
+      target
+        ? `Write the artefact at ${target} — the single accessor's answer; no engine may relocate it.`
+        : `The "${stage}" stage writes to its own declared root — follow its chain's conventions; it is not one of the four lifecycle artefacts.`,
       `Run npm run brain:repo:check before committing, as every producer does.`,
     ],
   };
