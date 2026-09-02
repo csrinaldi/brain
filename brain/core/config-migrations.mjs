@@ -143,6 +143,15 @@ export const migrations = [
       }
     }
   },
+  {
+    version: "1.3.0",
+    description: "Add sdd.configs: per-stage configuration general to all stages — agent and enabled state (issue #312 slice A, design D3). Empty by default: a stage absent from sdd.configs takes the inhabitant's declared defaults, so an upgrade cannot silently disable or reassign a stage nobody configured.",
+    defaults: {
+      sdd: {
+        configs: {}
+      }
+    }
+  },
 ];
 
 // NOTE (issue #231 A2, human ruling in tasks.md/design.md): this entry is versioned
