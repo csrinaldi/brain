@@ -160,3 +160,19 @@ test('#836 (review r4): credentialEnv and forgeConfigDir SURVIVE gentle-ai — a
   assert.equal(seen.forgeConfigDir, '/tmp/shadow', 'the forge shadow reaches the child');
   assert.equal(seen.futureField, 'must-survive-too', 'the class is dead: unnamed fields ride through');
 });
+
+// ── round 5 — the inputs themselves ─────────────────────────────────────────
+
+test('#836 (review r5): an unnamed stage refuses at BOTH wirings — the guard stage-engine\'s own history demanded', async () => {
+  for (const backend of [plain, gentleAi]) {
+    await assert.rejects(() => backend.runStage({ stage: undefined, changeId: 'x', _transport: async () => ({ ok: true }) }), /not a stage name/);
+    await assert.rejects(() => backend.runStage({ stage: '  ', changeId: 'x', _transport: async () => ({ ok: true }) }), /not a stage name/);
+  }
+});
+
+test('#836 (review r5): a lifecycle run without changeId REFUSES — never a target named "undefined"', async () => {
+  const routed = await evidence('plain');
+  await assert.rejects(() => plain.runStage({ stage: 'tasks', routed }), /changeId/);
+  const routedG = await evidence('gentle-ai');
+  await assert.rejects(() => gentleAi.runStage({ stage: 'tasks', routed: routedG, _transport: async () => ({ ok: true }) }), /changeId/);
+});

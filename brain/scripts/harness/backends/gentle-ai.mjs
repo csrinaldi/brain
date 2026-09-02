@@ -324,7 +324,17 @@ export async function init({
  * a lifecycle payload without BOUND routed evidence refuses at the engine
  * layer too — the same demand the transport guard makes, one layer earlier.
  */
-function assertBoundEvidence(stage, routed) {
+function assertBoundEvidence(stage, routed, changeId) {
+  // Round 5: the two INPUTS themselves. An unnamed stage is a caller that lost
+  // its argument (stage-engine's own history, mirrored at last), and a
+  // lifecycle run without a changeId would target 'openspec/changes/undefined/…'
+  // — silent wrong behavior, the inverse of a refusal.
+  if (typeof stage !== 'string' || stage.trim() === '') {
+    throw new Error(`run-stage: ${JSON.stringify(stage)} is not a stage name — a caller that lost its argument, refused before it targets anything.`);
+  }
+  if (LIFECYCLE_STAGES.includes(stage) && (typeof changeId !== 'string' || changeId.trim() === '')) {
+    throw new Error(`run-stage: lifecycle stage "${stage}" needs a changeId — without one the target would be a path literally containing "undefined".`);
+  }
   // Round 2 of #836's cold review: the guard mirrors assertRoutableStage's
   // OPTION-A split exactly — only LIFECYCLE stages owe evidence; a custom
   // stage (cold-review, the flagship) arrives evidence-free by the very rule
@@ -367,7 +377,7 @@ function assertBoundEvidence(stage, routed) {
  * @returns {Promise<object>} the transport's answer, verbatim
  */
 export async function runStage({ stage, routed, changeId, model = null, _transport, ...rest } = {}) {
-  assertBoundEvidence(stage, routed);
+  assertBoundEvidence(stage, routed, changeId);
   const target = artifactPaths(changeId)[stage];
   // Round 2: S2's custom-stage evidence carries NO role (stage-engine returns
   // {routed, stage, routing} there) — reading role.instructions crashed with a
