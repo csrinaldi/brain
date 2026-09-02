@@ -7,7 +7,7 @@ Strict TDD, worktree brain-issue-323 off main@1421f35.
       suite caught it with 47 failures. cold-review is CODE-declared
       (COLD_REVIEW_STAGE, ADR-0033) — the declared set is resolveStageSet ∪
       the shipped stage.
-- [x] 1.2 D3 undeclared refusal + C1 pin. C1's first cut覆 covered the model
+- [x] 1.2 D3 undeclared refusal + C1 pin. C1's first cut covered the model
       and the 05/08 opacity ruling's own test caught the overreach
       ('vendor/model:2026-08' is a legal id) — narrowed to the engine.
 - [x] 1.3 assertRoutedStage — async, the port as enforcement surface;
