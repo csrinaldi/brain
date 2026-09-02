@@ -53,6 +53,52 @@ export async function init({ _emit = console.log } = {}) {
  * @param {string[]} stages The resolved stage set to declare a role for.
  * @returns {Record<string, {stage: string, agent: string, model_tier: null, chooses_model: false, instructions: null}>}
  */
+import { artifactPaths } from '../../lib/sdd-layout.mjs';
+
+/**
+ * The S2 evidence guard, shared verbatim by both engine wirings (#323 S4 D3):
+ * a lifecycle payload without BOUND routed evidence refuses at the engine
+ * layer too — the same demand the transport guard makes, one layer earlier.
+ */
+function assertBoundEvidence(stage, routed) {
+  if (!(routed && routed.routed === true)) {
+    throw new Error(
+      `run-stage: lifecycle stage "${stage}" arrived without routed evidence — call ` +
+      'assertRoutedStage({config, stage}) and hand its result through (#323 S2, condition 4).'
+    );
+  }
+  if (routed.stage !== stage) {
+    throw new Error(
+      `run-stage: routed evidence was computed for "${routed.stage}" and handed to "${stage}" — bound, never bearer.`
+    );
+  }
+}
+
+/**
+ * plain's run-stage (#323 S4 D1): the MANUAL HANDOFF. The human is the
+ * runtime — `AGENT_RUNTIME = null` above is a fact, and this wiring says it
+ * instead of simulating around it. `{ok: true, manual: true}`: the seam stops
+ * refusing an engine the operator legitimately named, and what they get is
+ * the resolved role, the single accessor's target, and the steps.
+ *
+ * @param {{stage: string, routed: object, changeId: string}} payload
+ * @returns {Promise<{ok: true, manual: true, target: string, steps: string[]}>}
+ */
+export async function runStage({ stage, routed, changeId } = {}) {
+  assertBoundEvidence(stage, routed);
+  const target = artifactPaths(changeId)[stage];
+  return {
+    ok: true,
+    manual: true,
+    target,
+    steps: [
+      `Stage "${stage}" is routed to plain: a human executes it (model_tier: null is a checked value).`,
+      `Write the artefact at ${target} — the single accessor's answer; no engine may relocate it.`,
+      `Run npm run brain:repo:check before committing, as every producer does.`,
+    ],
+  };
+}
+
 export function declareRoles(stages) {
   return Object.fromEntries(stages.map((stage) => [stage, {
     // `instructions: null` — checked (#814 T3): a human executes; there is no

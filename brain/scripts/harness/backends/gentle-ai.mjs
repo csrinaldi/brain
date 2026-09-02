@@ -33,6 +33,59 @@ export const AGENT_RUNTIME = null;
  * @param {string[]} stages The resolved stage set to declare a role for.
  * @returns {Record<string, {stage: string, agent: string, model_tier: string, chooses_model: false, instructions: string, derived?: true}>}
  */
+import { artifactPaths } from '../../lib/sdd-layout.mjs';
+
+/**
+ * The S2 evidence guard, shared verbatim by both engine wirings (#323 S4 D3):
+ * a lifecycle payload without BOUND routed evidence refuses at the engine
+ * layer too — the same demand the transport guard makes, one layer earlier.
+ */
+function assertBoundEvidence(stage, routed) {
+  if (!(routed && routed.routed === true)) {
+    throw new Error(
+      `run-stage: lifecycle stage "${stage}" arrived without routed evidence — call ` +
+      'assertRoutedStage({config, stage}) and hand its result through (#323 S2, condition 4).'
+    );
+  }
+  if (routed.stage !== stage) {
+    throw new Error(
+      `run-stage: routed evidence was computed for "${routed.stage}" and handed to "${stage}" — bound, never bearer.`
+    );
+  }
+}
+
+/**
+ * gentle-ai's run-stage (#323 S4 D2): the framework runs ON the platform,
+ * explicitly. The prompt is composed FROM the port's recorded instructions —
+ * `routed.role.instructions`, never the installed files (#814's rule) — and
+ * the spawn is DELEGATED to the claude backend as transport: a
+ * sibling-backend import, stated; the dispatcher stays unimported
+ * (platform.mjs's rule intact). The transport's own {ok, reason} rides
+ * through untouched — the seam's doctrine one layer down.
+ *
+ * @param {{stage: string, routed: object, changeId: string, model?: string|null,
+ *          cwd?: string, timeoutMs?: number,
+ *          _transport?: (payload: object) => Promise<object>}} payload
+ * @returns {Promise<object>} the transport's answer, verbatim
+ */
+export async function runStage({ stage, routed, changeId, model = null, cwd, timeoutMs, _transport } = {}) {
+  assertBoundEvidence(stage, routed);
+  const target = artifactPaths(changeId)[stage];
+  const prompt = [
+    routed.role.instructions,
+    '',
+    `You are producing the "${stage}" artefact for change "${changeId}".`,
+    `Write exactly one file: ${target} — the layout's single accessor names it; do not relocate or rename it.`,
+    'Follow the repository\'s existing artefact conventions; run nothing destructive.',
+  ].join('\n');
+
+  const transport = _transport ?? (async (payload) => {
+    const { runStage: claudeRunStage } = await import('./claude.mjs');
+    return claudeRunStage(payload);
+  });
+  return transport({ stage, prompt, model: model ?? routed.routing?.model ?? null, cwd, timeoutMs, routed });
+}
+
 export function declareRoles(stages) {
   return Object.fromEntries(stages.map((stage) => {
     const recorded = GENTLE_AI_ROLES[stage];

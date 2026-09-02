@@ -1,0 +1,94 @@
+// stage-wiring.test.mjs — issue #323 S4: two engines wired, C3 proven.
+// RED-first. The transport is a seam; no test spawns a model.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { removeTempTree } from '../__fixtures__/tmp-tree.mjs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import * as plain from './backends/plain.mjs';
+import * as gentleAi from './backends/gentle-ai.mjs';
+import { assertRoutedStage } from '../lib/stage-engine.mjs';
+import { artifactPaths } from '../lib/sdd-layout.mjs';
+
+const declaring = () => ({
+  declareRoles: (s) => Object.fromEntries(s.map((stage) => [stage, {
+    stage, agent: 'sdd-tasks', model_tier: 'balanced', chooses_model: false,
+    instructions: 'Break the change into ordered, actionable work items.',
+  }])),
+});
+const evidence = (engine) => assertRoutedStage({
+  config: { sdd: { map: { tasks: { engine } } } }, stage: 'tasks', _load: async () => declaring(),
+});
+
+// ── D1: plain — the handoff IS the run ──────────────────────────────────────
+
+test('#323 S4 D1: plain answers a routed lifecycle stage with the manual handoff', async () => {
+  const routed = await evidence('plain');
+  const r = await plain.runStage({ stage: 'tasks', routed, changeId: 'issue-999-x' });
+  assert.equal(r.ok, true);
+  assert.equal(r.manual, true, 'the human is the runtime — said, not simulated');
+  assert.equal(r.target, artifactPaths('issue-999-x').tasks, 'the single accessor names the target');
+  assert.ok(Array.isArray(r.steps) && r.steps.length > 0, 'a handoff with no steps is not a handoff');
+});
+
+test('#323 S4 D3: plain refuses a lifecycle payload without BOUND evidence', async () => {
+  await assert.rejects(() => plain.runStage({ stage: 'tasks', changeId: 'issue-999-x' }), /routed evidence|assertRoutedStage/);
+  const forOther = await evidence('plain');
+  await assert.rejects(() => plain.runStage({ stage: 'design', routed: forOther, changeId: 'issue-999-x' }), /tasks.*design|design.*tasks/s);
+});
+
+// ── D2: gentle-ai — the port's words, the platform's engine ─────────────────
+
+test('#323 S4 D2: gentle-ai composes the prompt FROM the port and delegates to the transport', async () => {
+  const routed = await evidence('gentle-ai');
+  let seen = null;
+  const r = await gentleAi.runStage({
+    stage: 'tasks', routed, changeId: 'issue-999-x',
+    _transport: async (payload) => { seen = payload; return { ok: true, elapsedMs: 1 }; },
+  });
+  assert.equal(r.ok, true, 'the transport\'s own answer rides through');
+  assert.ok(seen.prompt.includes(routed.role.instructions), 'the PORT\'s recorded words — never the installed files');
+  assert.ok(seen.prompt.includes(artifactPaths('issue-999-x').tasks), 'the target is named to the engine');
+  assert.equal(seen.stage, 'tasks');
+});
+
+test('#323 S4 D2: the transport\'s failure rides through untouched', async () => {
+  const routed = await evidence('gentle-ai');
+  const r = await gentleAi.runStage({
+    stage: 'tasks', routed, changeId: 'issue-999-x',
+    _transport: async () => ({ ok: false, reason: 'engine exited 3' }),
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /engine exited 3/);
+});
+
+test('#323 S4 D3: gentle-ai refuses unbound evidence too — the guard holds at the engine layer', async () => {
+  await assert.rejects(() => gentleAi.runStage({ stage: 'tasks', changeId: 'x', _transport: async () => ({ ok: true }) }), /routed evidence|assertRoutedStage/);
+});
+
+// ── D4: C3's parity — one target, engine-blind readers ──────────────────────
+
+test('#323 S4 D4: both engines name the SAME target for one stage — condition 3 at the boundary', async () => {
+  const p = await plain.runStage({ stage: 'tasks', routed: await evidence('plain'), changeId: 'issue-999-x' });
+  let seen = null;
+  await gentleAi.runStage({ stage: 'tasks', routed: await evidence('gentle-ai'), changeId: 'issue-999-x',
+    _transport: async (payload) => { seen = payload; return { ok: true }; } });
+  assert.equal(p.target, artifactPaths('issue-999-x').tasks);
+  assert.ok(seen.prompt.includes(p.target), 'one accessor, two engines, one path');
+});
+
+test('#323 S4 D4: a change dir passes the presence reader ENGINE-BLIND — produced by hand or by transport, same verdict', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-s4-parity-'));
+  t.after(() => removeTempTree(root));
+  for (const producer of ['plain-as-human', 'gentle-ai-as-transport']) {
+    const dir = join(root, producer, 'openspec/changes/issue-999-x');
+    mkdirSync(dir, { recursive: true });
+    for (const f of ['proposal.md', 'spec.md', 'design.md', 'tasks.md']) writeFileSync(join(dir, f), `# ${f} by ${producer}\n`);
+    for (const f of ['proposal.md', 'spec.md', 'design.md', 'tasks.md']) {
+      assert.ok(existsSync(join(dir, f)), `${producer}: ${f} present — the reader has no engine parameter to even ask`);
+    }
+  }
+});
