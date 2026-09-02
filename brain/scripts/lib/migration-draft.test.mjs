@@ -65,10 +65,12 @@ test('#809 D2: renumbered says so; an already-right draft does not', () => {
   assert.equal(ok.renumbered, false);
 });
 
-test('#809 D2: --as overrides; --as at or below the tail refuses monotonic-forever', () => {
-  assert.equal(proposeVersion({ draftVersion: '1.4.0', packageVersion: '1.1.0', tailVersion: '0.10.0', asOverride: '2.0.0' }).version, '2.0.0');
-  const bad = proposeVersion({ draftVersion: '1.4.0', packageVersion: '1.1.0', tailVersion: '0.10.0', asOverride: '0.9.0' });
-  assert.match(bad.refusal, /monotonic/i);
+test('#809 D2: monotonic-forever holds by construction — the computed number is ALWAYS above the tail', () => {
+  for (const [pkg, tail] of [['1.1.0', '0.10.0'], ['0.5.0', '2.3.0'], ['1.1.0', '1.1.0']]) {
+    const { version } = proposeVersion({ draftVersion: '0.0.1', packageVersion: pkg, tailVersion: tail });
+    const [a1, a2] = version.split('.').map(Number); const [b1, b2] = tail.split('.').map(Number);
+    assert.ok(a1 > b1 || (a1 === b1 && a2 > b2), `${version} must exceed tail ${tail}`);
+  }
 });
 
 const FILE = `// header\nexport const migrations = [\n  {\n    version: '0.1.0',\n    description: 'first',\n    defaults: { a: 1 },\n  },\n];\n\n// NOTE trailing doctrine comment\n`;
@@ -85,4 +87,21 @@ test('#809 D3: a file without the anchor refuses — never a guess', () => {
   const { next, refusal } = spliceMigrationEntry('const nope = 1;\n', { description: 'x', defaults: {} }, '1.0.0');
   assert.equal(next, null);
   assert.match(refusal, /migrations/);
+});
+
+// ── D4: the backlog rides the contract — the three REAL drafts parse ────────
+
+test('#809 D4: every pending draft in the repo parses under the contract', async () => {
+  const { readFileSync } = await import('node:fs');
+  const drafts = [
+    'openspec/changes/issue-456-stage-set/brain-drafts/config-migrations-1.2.0.md',
+    'openspec/changes/issue-312-role-port/brain-drafts/config-migrations-1.3.0.md',
+    'openspec/changes/issue-814-engine-adapter/brain-drafts/config-migrations-1.4.0.md',
+  ];
+  for (const rel of drafts) {
+    const { entry, refusal } = parseMigrationDraft(readFileSync(new URL(`../../../${rel}`, import.meta.url), 'utf8'));
+    assert.equal(refusal, null, `${rel}: ${refusal}`);
+    assert.ok(entry.description.length > 0, rel);
+    assert.equal(typeof entry.defaults.sdd, 'object', `${rel}: every pending draft declares under sdd.*`);
+  }
 });

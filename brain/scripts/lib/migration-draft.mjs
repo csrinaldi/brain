@@ -62,20 +62,21 @@ const gtSemver = (a, b) => {
  * reported, never trusted: renumbering happens in the open, under the typed
  * confirmation.
  *
- * @param {{draftVersion: string, packageVersion: string, tailVersion: string, asOverride?: string}} args
- * @returns {{version: string|null, renumbered: boolean, refusal: string|null}}
+ * There is NO override option, and that is a doctrine consequence, not an
+ * omission: parseArgs's written rule is "brain:promote takes no options", and
+ * this arm does not get to relax a blanket rule for a knob nobody has needed.
+ * A human who wants a different number edits by hand — exactly today's path.
+ * Monotonic-forever holds by construction (floor is max, then +minor) and is
+ * pinned by test rather than by a refusal branch no input can reach.
+ *
+ * @param {{draftVersion: string, packageVersion: string, tailVersion: string}} args
+ * @returns {{version: string, renumbered: boolean}}
  */
-export function proposeVersion({ draftVersion, packageVersion, tailVersion, asOverride }) {
+export function proposeVersion({ draftVersion, packageVersion, tailVersion }) {
   const floor = gtSemver(packageVersion, tailVersion) ? packageVersion : tailVersion;
-  if (asOverride !== undefined) {
-    if (!gtSemver(asOverride, tailVersion)) {
-      return { version: null, renumbered: false, refusal: `migration-draft: --as ${asOverride} is not above the tail ${tailVersion} — version numbers are content identifiers and monotonic-forever (the #231 doctrine note in config-migrations.mjs itself).` };
-    }
-    return { version: asOverride, renumbered: asOverride !== draftVersion, refusal: null };
-  }
   const [maj, min] = parseSemver(floor);
   const version = `${maj}.${min + 1}.0`;
-  return { version, renumbered: version !== draftVersion, refusal: null };
+  return { version, renumbered: version !== draftVersion };
 }
 
 /** Serializes one entry as source in the shipped key order: version, description, defaults. */
