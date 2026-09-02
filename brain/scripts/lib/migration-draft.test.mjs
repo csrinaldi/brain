@@ -121,3 +121,11 @@ test('#809 (review r1): an apostrophe in the description SURVIVES the splice as 
   assert.equal(migrations[1].description, entry.description, 'the prose survives byte-exact');
   assert.deepEqual(migrations[1].defaults, entry.defaults);
 });
+
+test('#809 (review r2): the spliced entry closes at the SAME indent it opens — the file the human signs stays shipped-style', () => {
+  const FILE = "export const migrations = [\n  { version: '0.1.0', description: 'x', defaults: {} },\n];\n";
+  const { next } = spliceMigrationEntry(FILE, { description: 'Add x.', defaults: { x: {} } }, '1.2.0');
+  const lines = next.split('\n');
+  const close = lines[lines.indexOf('];') - 1];
+  assert.equal(close, '  },', 'every shipped entry closes with two-space "  }," — a promotion must not degrade the file one brace at a time');
+});

@@ -91,12 +91,17 @@ export function proposeVersion({ draftVersion, packageVersion, tailVersion }) {
  * identifier-shaped KEYS are unquoted; values are never touched.
  */
 function entrySource(entry, version) {
+  // Every line but the first gets the entry's two-space indent — the first is
+  // indented by the template below. Round 2 of the cold review found the last
+  // line exempted too, closing the entry at column 0, and the "fix" beside it
+  // was two replaces swapping a character for itself: dead code wearing a
+  // repair's shape. The oracle now is the closing line itself.
   const body = JSON.stringify({ version, description: entry.description, defaults: entry.defaults }, null, 2)
     .split('\n')
-    .map((line, i, all) => (i === 0 || i === all.length - 1 ? line : `  ${line}`))
+    .map((line, i) => (i === 0 ? line : `  ${line}`))
     .join('\n')
     .replace(/^(\s*)"([A-Za-z_$][A-Za-z0-9_$]*)":/gm, '$1$2:');
-  return `  ${body.replace(/^\{/, '{').replace(/\}$/, '}')},`;
+  return `  ${body},`;
 }
 
 /**
