@@ -1113,6 +1113,35 @@ test('#682 cold-6: an sdd.map entry naming no engine refuses OUT LOUD, not as a 
   assert.match(named.join('\n'), /names no engine/, 'naming the key that is wrong, so there is something to fix');
 });
 
+test('#829: a malformed sdd.map entry is NOT eaten by the lock — the half-verdict disarms it and the typo surfaces', async (t) => {
+  // Round 1 of this PR's own cold review: the catch arm ("malformed counts as
+  // would-apply") had no test reaching the LOCK — cold-6 runs --dry-run, which
+  // short-circuits antiLoop before the predicate is called. This is the
+  // scenario the branch exists for: half-verdict of mine at this head, entry
+  // malformed, non-dry-run. The lock must disarm (would-apply), the stage must
+  // throw its own wrapped refusal, and the operator must read the typo —
+  // never a silent "anti-loop" line over a broken routing.
+  const errs = [];
+  const d = deps({
+    config: {
+      reviewer: { inferential: { enabled: true } },
+      sdd: { map: { 'cold-review': { engine: 42 } } },
+    },
+    protocol: 'brain-review/2',
+  });
+  d.coldBootDeps.fetchReviews = async () => [selfHalfVerdictAtHead()];
+
+  const code = await main({
+    argv: ['--pr', '42'],                       // NOT a dry run: the lock is live
+    log: () => {}, error: (m) => errs.push(String(m)),
+    ...d,
+  });
+
+  assert.equal(code, 1, 'a routed stage that cannot be resolved must refuse');
+  assert.match(errs.join('\n'), /names no engine/,
+    "the operator's error message survives the lock — eating it was the failure mode the catch arm exists to prevent");
+});
+
 test('#682 cold-5: maxRounds bounds the PRODUCE loop — the challenger still runs exactly once', async () => {
   // THE RULING, GIVEN AN ORACLE. REQ-682-5 used to say the key bounds
   // "produce→challenge rounds"; the implementation bounds produce only, and the
