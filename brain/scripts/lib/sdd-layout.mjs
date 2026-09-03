@@ -162,6 +162,72 @@ export function resolveStageSet(config) {
     );
   }
 
+  // Shape validation (#810 final round) — a declared name and artefact are
+  // IDENTIFIERS, never paths. The reviewer wrote a config with
+  // `artefact: "../../../escaped.md"` and the scaffold put a file at the REPO
+  // ROOT while the gate's probe traversed the same way — a config string
+  // reaching the filesystem unvalidated, the same class as #841's shell
+  // injection. Names follow #823's hostile-segment discipline (a key like
+  // `__proto__` lands in a spread-built file map); artefacts are bare .md
+  // filenames — no separators, no leading dot, nothing for join() to walk.
+  for (const [name, entry] of Object.entries(declared)) {
+    // `constructor` passes the kebab regex and still poisons a spread-built
+    // map — the exact reason #576's ARCHETYPES is a Map and #823 refuses
+    // these three segments. Checked by name, not by regex.
+    if (!/^[a-z][a-z0-9-]*$/.test(name) || name === 'constructor' || name === 'prototype') {
+      throw new Error(
+        `sdd-layout: sdd.stages key "${name}" is not a plain stage identifier (lowercase kebab, ` +
+        'never a prototype-chain name). Stage names become object keys and path parts; anything ' +
+        'else is refused.',
+      );
+    }
+    const artefact = entry?.artefact;
+    if (artefact === undefined) continue;
+    if (typeof artefact !== 'string' || !/^[a-z0-9][a-z0-9._-]*\.md$/.test(artefact) || artefact.includes('/') || artefact.includes('\\')) {
+      throw new Error(
+        `sdd-layout: sdd.stages["${name}"].artefact ${JSON.stringify(artefact)} is not a bare .md ` +
+        'filename. An artefact is a file IN the change dir — no path separators, no leading dot, ' +
+        'no traversal: a declared path would escape the one layout every reader assumes.',
+      );
+    }
+  }
+
+  // Lifecycle-rename collision (#810 round 3) — the FOUR may not rename their
+  // own artefacts. Gate flags (`hasProposal` probes `proposal.md`), the
+  // scaffold's artifactPaths, requiredArtifactsFor and the reviewer checkpoint
+  // all read the four through fixed vocabulary; honoring a rename here would
+  // fork the resolver's answer from every other reader's — the operator told
+  // their config is valid while no gate ever recognises the renamed file.
+  // Amendment 5 authorises a CUSTOM stage's artefact joining the contract; it
+  // does not authorise changing what the gates demand of the four. Declaring
+  // the OWN canonical file stays legal — slice A's 1.3b ruled the collision
+  // refusal skips the owner, and this refusal honours the same line.
+  for (const [name, entry] of Object.entries(declared)) {
+    if (LIFECYCLE_STAGES.includes(name) && entry?.artefact !== undefined && entry.artefact !== ARTEFACT_FILE[name]) {
+      throw new Error(
+        `sdd-layout: sdd.stages["${name}"].artefact is not declarable — the four lifecycle stages' ` +
+        `files are canon ("${name}" is always "${ARTEFACT_FILE[name]}"). Declaring a different file ` +
+        'changes what the gates demand, which ADR-0019 Amendment 5 does not authorise; declare the ' +
+        'stage bare ({}) and add custom stages alongside it instead.',
+      );
+    }
+  }
+
+  // Reserved-name collision (#810 round 2) — a declared stage may not take a
+  // name from the FIXED vocabulary outside the declarable four ("verification"
+  // today; anything ARTEFACT_FILE learns tomorrow). The gate reads such names
+  // through fixed boolean flags while the message renders the resolved map —
+  // letting the declaration through forks the two: Rule A would demand
+  // verify-report.md while the failure message names the overridden file.
+  for (const name of names) {
+    if (!LIFECYCLE_STAGES.includes(name) && Object.hasOwn(ARTEFACT_FILE, name)) {
+      throw new Error(
+        `sdd-layout: sdd.stages["${name}"] takes a reserved vocabulary name — "${name}" is fixed tier ` +
+        'vocabulary (its file and presence flag are not declarable). Choose another stage name.',
+      );
+    }
+  }
+
   // File collision — a declared artefact impersonating one of the fixed
   // lifecycle/verification files. Checked BEFORE the unknown-name refusal
   // below so the more specific "impersonation" message wins over the generic
@@ -179,6 +245,43 @@ export function resolveStageSet(config) {
         'changes what the gates demand, which ADR-0019 Amendment 1 withholds.',
       );
     }
+  }
+
+  // Operational-name collision (#810 confirmation round) — the fixed-file loop
+  // above guards ARTEFACT_FILE only, and resume.md lives outside it: a
+  // machine-written convention whose mere EXISTENCE feature-resolution reads
+  // as "actively worked", and whose content engram merges against
+  // resume-schema's required fields. A scaffolded stub satisfies neither.
+  // Same class as rounds 2 and 4, against the operational namespace.
+  for (const [name, entry] of Object.entries(declared)) {
+    const artefact = entry?.artefact;
+    if (artefact && OPERATIONAL_ARTIFACTS.includes(artefact)) {
+      throw new Error(
+        `sdd-layout: sdd.stages["${name}"].artefact "${artefact}" collides with an OPERATIONAL ` +
+        'artifact — machine-written, never a gate condition, and read by its own consumers ' +
+        '(feature-resolution, engram checkpoints). A declared stage may not impersonate it.',
+      );
+    }
+  }
+
+  // Duplicate-artefact collision (#810 round 4) — two DECLARED stages naming
+  // one file. The fixed-vocabulary loop above cannot see it (it compares
+  // against ARTEFACT_FILE only), and downstream one exists() would satisfy
+  // both demands at once — the walk collapses two declarations into one file.
+  const declaredFiles = new Map();
+  for (const [name, entry] of Object.entries(declared)) {
+    const artefact = entry?.artefact;
+    if (!artefact) continue;
+    const owner = declaredFiles.get(artefact);
+    if (owner !== undefined) {
+      throw new Error(
+        `sdd-layout: sdd.stages["${name}"].artefact "${artefact}" is already declared by stage ` +
+        `"${owner}" — two stages may not share one file. One artefact is one demand; a shared file ` +
+        'would let a single write satisfy both, and the phase-order walk could no longer tell the ' +
+        'stages apart.',
+      );
+    }
+    declaredFiles.set(artefact, name);
   }
 
   // D3 — per-call merge `{...ARTEFACT_FILE, ...declared artefacts}`, never a

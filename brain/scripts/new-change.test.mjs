@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, cpSync, existsSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, existsSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -107,6 +107,70 @@ test('new-change: with --title produces issue-<N>-<slug> exactly as before (unch
     );
     assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.stderr}`);
     assert.ok(existsSync(join(tmpRoot, 'openspec', 'changes', 'issue-666666-unchanged-path')));
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+// ── #810 (#456 slice B): the scaffold produces the DECLARED set ─────────────
+
+test('#810: a declared custom stage is scaffolded from its resolved artefact file', () => {
+  const { tmpRoot, scriptDest } = makeIsolatedScript();
+  try {
+    writeFileSync(join(tmpRoot, 'brain.config.json'), JSON.stringify({
+      sdd: { stages: { proposal: {}, research: { artefact: 'research.md' }, spec: {}, design: {}, tasks: {} } },
+    }));
+    const result = spawnSync('node', [scriptDest, '--issue', '999998', '--title', 'custom stage check'], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const dir = join(tmpRoot, 'openspec', 'changes', 'issue-999998-custom-stage-check');
+    assert.deepEqual(readdirSync(dir).sort(), ['design.md', 'proposal.md', 'research.md', 'spec.md', 'tasks.md'],
+      'the scaffold writes the FULL declared set — never tier-scoped (REQ-L4-2 prime)');
+    const stub = readFileSync(join(dir, 'research.md'), 'utf8');
+    assert.match(stub, /stage: research/, 'the stub names its stage in front matter');
+    assert.match(result.stdout, /research\.md/, 'the summary reports the custom artefact');
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('#810: a malformed declaration refuses with the resolver\'s own message and writes NOTHING', () => {
+  const { tmpRoot, scriptDest } = makeIsolatedScript();
+  try {
+    writeFileSync(join(tmpRoot, 'brain.config.json'), JSON.stringify({
+      sdd: { stages: { spec: {}, design: {}, tasks: {} } },
+    }));
+    const result = spawnSync('node', [scriptDest, '--issue', '999997', '--title', 'refused check'], { encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /omits lifecycle stage/, 'resolveStageSet\'s refusal reaches the operator verbatim');
+    assert.ok(!existsSync(join(tmpRoot, 'openspec', 'changes', 'issue-999997-refused-check')), 'nothing was written');
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('#810: an unreadable config degrades to zero-config — the four, exactly', () => {
+  const { tmpRoot, scriptDest } = makeIsolatedScript();
+  try {
+    writeFileSync(join(tmpRoot, 'brain.config.json'), '{not json');
+    const result = spawnSync('node', [scriptDest, '--issue', '999996', '--title', 'degrade check'], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const dir = join(tmpRoot, 'openspec', 'changes', 'issue-999996-degrade-check');
+    assert.deepEqual(readdirSync(dir).sort(), ['design.md', 'proposal.md', 'spec.md', 'tasks.md']);
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('#810 r7: a traversal artefact never reaches the filesystem — refused before any write', () => {
+  const { tmpRoot, scriptDest } = makeIsolatedScript();
+  try {
+    writeFileSync(join(tmpRoot, 'brain.config.json'), JSON.stringify({
+      sdd: { stages: { proposal: {}, spec: {}, design: {}, tasks: {}, evil: { artefact: '../../../escaped-810.md' } } },
+    }));
+    const result = spawnSync('node', [scriptDest, '--issue', '999995', '--title', 'traversal check'], { encoding: 'utf8' });
+    assert.equal(result.status, 1, 'the scaffold refuses');
+    assert.ok(!existsSync(join(tmpRoot, 'escaped-810.md')), 'NOTHING lands outside the change dir');
+    assert.ok(!existsSync(join(tmpRoot, 'openspec', 'changes', 'issue-999995-traversal-check')), 'nothing lands inside either');
   } finally {
     rmSync(tmpRoot, { recursive: true, force: true });
   }

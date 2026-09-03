@@ -214,6 +214,7 @@
 {"id":"rec-16d5d3fb4f339b06","ts":"2026-08-25T22:42:58Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-08-rec-16d5d3fb4f339b06.jsonl"}
 {"id":"rec-16d685a194186810","ts":"2026-08-07T22:21:05Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-16d685a194186810.jsonl"}
 {"id":"rec-16d8b533a19a6668","ts":"2026-07-25T21:51:23Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-16d8b533a19a6668.jsonl"}
+{"id":"rec-1762eff229873b04","ts":"2026-09-03T01:26:55Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-1762eff229873b04.jsonl"}
 {"id":"rec-176a8abe6f555137","ts":"2026-07-25T00:48:42Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-176a8abe6f555137.jsonl"}
 {"id":"rec-1785e4161b298457","ts":"2026-07-13T00:22:00Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-1785e4161b298457.jsonl"}
 {"id":"rec-1793ab0b1c408dc3","ts":"2026-08-18T11:01:24Z","actor":"docs/issue-717-docsinbox-agent-priority-handoffmd-has-f","type":"discovery","project":"brain","issue":717,"file":"2026-08-rec-1793ab0b1c408dc3.jsonl"}
@@ -994,6 +995,7 @@
 {"id":"rec-6df94c2debd9b706","ts":"2026-07-13T00:21:48Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-6df94c2debd9b706.jsonl"}
 {"id":"rec-6e7543da94da75e2","ts":"2026-07-17T01:17:02Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-6e7543da94da75e2.jsonl"}
 {"id":"rec-6e9cd0c1f45849c3","ts":"2026-07-25T00:48:37Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-6e9cd0c1f45849c3.jsonl"}
+{"id":"rec-6eb317940f928228","ts":"2026-09-03T05:51:16Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-09-rec-6eb317940f928228.jsonl"}
 {"id":"rec-6ee0dd0056d329fb","ts":"2026-08-17T23:48:00Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-6ee0dd0056d329fb.jsonl"}
 {"id":"rec-6ef221faa493f6de","ts":"2026-07-16T03:06:36Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-6ef221faa493f6de.jsonl"}
 {"id":"rec-6efb31f3b6059b87","ts":"2026-07-13T00:21:46Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-6efb31f3b6059b87.jsonl"}
@@ -1669,6 +1671,7 @@
 {"id":"rec-b446bb7b496433ea","ts":"2026-08-19T14:28:58Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-b446bb7b496433ea.jsonl"}
 {"id":"rec-b4538fee410c9bb1","ts":"2026-07-25T21:50:20Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-b4538fee410c9bb1.jsonl"}
 {"id":"rec-b46b09d90ca40e2d","ts":"2026-07-13T00:21:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b46b09d90ca40e2d.jsonl"}
+{"id":"rec-b477b0aedd05d23b","ts":"2026-09-03T05:07:48Z","actor":"feat/issue-810-custom-stage-end-to-end","type":"architecture","project":"brain","issue":810,"file":"2026-09-rec-b477b0aedd05d23b.jsonl"}
 {"id":"rec-b490a4a81de0ba9f","ts":"2026-07-25T00:48:31Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b490a4a81de0ba9f.jsonl"}
 {"id":"rec-b49b4f5216bee540","ts":"2026-07-13T00:22:02Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b49b4f5216bee540.jsonl"}
 {"id":"rec-b4aaa4add16c21e9","ts":"2026-07-11T12:33:22Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-b4aaa4add16c21e9.jsonl"}

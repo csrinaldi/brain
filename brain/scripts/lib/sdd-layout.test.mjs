@@ -949,3 +949,72 @@ test('#323 S5: malformed blocks refuse with the rule named — JS, bad claims, m
   assert.match(parseSliceScopes(wrap('{"slice": 1, "claims": "REQ-1", "terminal_pr": "x"}')).refusal, /claims/);
   assert.match(parseSliceScopes(wrap('{"slice": 1, "claims": ["REQ-1"]}')).refusal, /terminal_pr/);
 });
+
+test('#810 r2: a declared stage may not take a RESERVED vocabulary name — "verification" refused', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: {
+      proposal: {}, spec: {}, design: {}, tasks: {}, verification: { artefact: 'other.md' },
+    } } }),
+    /reserved/,
+    'tier vocabulary outside the declarable four must be refused, not silently forked between flag and message',
+  );
+});
+
+test('#810 r3: a LIFECYCLE stage may not rename its own artefact — the four\'s files are canon', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: {
+      proposal: { artefact: 'kickoff.md' }, spec: {}, design: {}, tasks: {},
+    } } }),
+    /canon|not declarable/,
+    'gate and scaffold read the four through fixed vocabulary; honoring a rename would fork what the gates demand',
+  );
+  const ok = resolveStageSet({ sdd: { stages: {
+    proposal: {}, spec: {}, design: {}, tasks: {}, research: { artefact: 'research.md' },
+  } } });
+  assert.equal(ok.files.proposal, 'proposal.md', 'a bare lifecycle entry keeps its canonical file');
+});
+
+test('#810 r4: two declared stages may not share one artefact file — one file, one demand', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: {
+      proposal: {}, spec: {}, design: {}, tasks: {},
+      research: { artefact: 'shared.md' }, notes: { artefact: 'shared.md' },
+    } } }),
+    /shared|duplicate|already declared/i,
+    'a shared file lets one write satisfy two separately-declared demands — the gate walk collapses',
+  );
+});
+
+test('#810 r7: a declared artefact is a BARE .md filename — traversal and separators refused', () => {
+  const four = { proposal: {}, spec: {}, design: {}, tasks: {} };
+  for (const evil of ['../../../escaped.md', 'a/b.md', '/abs.md', 'a\\b.md', '.hidden.md', 'x.txt', '']) {
+    assert.throws(
+      () => resolveStageSet({ sdd: { stages: { ...four, evil: { artefact: evil } } } }),
+      /bare .*\.md|not a bare/i,
+      `"${evil}" must be refused — a config string reaching the filesystem unvalidated is the S5 shell-injection class`,
+    );
+  }
+  const ok = resolveStageSet({ sdd: { stages: { ...four, research: { artefact: 'research-notes.v2.md' } } } });
+  assert.equal(ok.files.research, 'research-notes.v2.md', 'a bare dotted-kebab .md name stays legal');
+});
+
+test('#810 r7: a declared stage NAME is a plain kebab identifier — hostile keys refused', () => {
+  const four = { proposal: {}, spec: {}, design: {}, tasks: {} };
+  for (const evil of ['__proto__', 'constructor', 'A Stage', 'stage/x']) {
+    assert.throws(
+      () => resolveStageSet({ sdd: { stages: { ...four, [evil]: { artefact: 'x.md' } } } }),
+      /identifier|name/i,
+      `"${evil}" must be refused — #823's hostile-segment discipline applies to stage keys too`,
+    );
+  }
+});
+
+test('#810 r8: a declared artefact may not take an OPERATIONAL name — resume.md refused', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: {
+      proposal: {}, spec: {}, design: {}, tasks: {}, notes: { artefact: 'resume.md' },
+    } } }),
+    /operational|machine-written/i,
+    'resume.md is a machine-written convention: feature-resolution reads its EXISTENCE and engram merges it against a schema a scaffolded stub cannot satisfy',
+  );
+});

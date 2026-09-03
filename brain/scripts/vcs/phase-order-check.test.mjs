@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { evaluatePhaseOrder, runPhaseOrderCheck, main } from './phase-order-check.mjs';
+import { evaluatePhaseOrder, runPhaseOrderCheck, resolveWalkSet, gatherPhaseOrderInputs, main } from './phase-order-check.mjs';
 import { LEGACY_GRANDFATHERED } from '../lib/sdd-layout.mjs';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -813,4 +813,102 @@ test('baseline (REQ-L4-5): pre-v3 legacy dir with no spec artifact → exempt, n
     assert.equal(finding.level, 'exempt');
     assert.match(finding.message, /baseline exemption/);
   }
+});
+
+// ── #810 (#456 slice B): the walk set — tier scopes the four, declaration ────
+// demands the rest, interleaving preserved.
+
+test('#810: zero-config walk sets are byte-identical to the tier tables — all three tiers', () => {
+  const std = resolveWalkSet({ config: {}, tier: 'standard' });
+  assert.deepEqual(std.artefacts, ['proposal', 'spec', 'design', 'tasks']);
+  assert.deepEqual(resolveWalkSet({ config: {}, tier: 'lite' }).artefacts, ['spec']);
+  assert.deepEqual(resolveWalkSet({ config: {}, tier: 'regulated' }).artefacts,
+    ['proposal', 'spec', 'design', 'tasks', 'verification'],
+    'verification keeps its regulated demand — it is tier vocabulary, never a declared stage');
+});
+
+test('#810: a declared custom stage joins the walk IN ITS DECLARED POSITION, at every tier', () => {
+  const config = { sdd: { stages: {
+    proposal: {}, research: { artefact: 'research.md' }, spec: {}, design: {}, tasks: {},
+  } } };
+  assert.deepEqual(resolveWalkSet({ config, tier: 'standard' }).artefacts,
+    ['proposal', 'research', 'spec', 'design', 'tasks'], 'interleaved, not appended');
+  assert.deepEqual(resolveWalkSet({ config, tier: 'lite' }).artefacts,
+    ['research', 'spec'],
+    'the tier scopes the FOUR; declaring a custom stage IS the demand (REQ-L4-2 prime)');
+  const reg = resolveWalkSet({ config, tier: 'regulated' });
+  assert.deepEqual(reg.artefacts, ['proposal', 'research', 'spec', 'design', 'tasks', 'verification']);
+  assert.equal(reg.fileMap.research, 'research.md', 'the resolved file rides with the set');
+  assert.equal(reg.fileMap.verification, 'verify-report.md', 'the fixed map still answers for tier vocabulary');
+});
+
+test('#810: Rule A demands the custom artefact via the generic presence probe and NAMES its file', () => {
+  const config = { sdd: { stages: {
+    proposal: {}, research: { artefact: 'research.md' }, spec: {}, design: {}, tasks: {},
+  } } };
+  const { artefacts, fileMap } = resolveWalkSet({ config, tier: 'standard' });
+  const r = evaluatePhaseOrder({
+    changedFiles: ['brain/scripts/x.mjs', 'openspec/changes/issue-9-z/proposal.md'],
+    changeDirs: [{
+      name: 'issue-9-z', hasProposal: true, hasSpec: true, hasDesign: true, hasTasks: true,
+      present: { research: false }, checkedTasks: 1, statusBefore: null, statusAfter: null,
+    }],
+    artefacts, fileMap,
+  });
+  assert.equal(r.level, 'fail');
+  assert.match(r.findings[0].message, /research\.md/, 'the message names the ACTUAL missing file, never the legacy literal');
+  assert.ok(!r.findings[0].message.includes('spec.md/design.md'), 'the standard-four sentinel must not fire for a custom set');
+});
+
+test('#810: with the custom artefact present the walk passes — presence is read from the probe', () => {
+  const config = { sdd: { stages: {
+    proposal: {}, research: { artefact: 'research.md' }, spec: {}, design: {}, tasks: {},
+  } } };
+  const { artefacts, fileMap } = resolveWalkSet({ config, tier: 'standard' });
+  const r = evaluatePhaseOrder({
+    changedFiles: ['brain/scripts/x.mjs', 'openspec/changes/issue-9-z/proposal.md'],
+    changeDirs: [{
+      name: 'issue-9-z', hasProposal: true, hasSpec: true, hasDesign: true, hasTasks: true,
+      present: { research: true }, checkedTasks: 1, statusBefore: null, statusAfter: null,
+    }],
+    artefacts, fileMap,
+  });
+  assert.equal(r.level, 'pass');
+});
+
+test('#810: a malformed sdd.stages declaration is an UNCOMPUTABLE verdict, never a crash', () => {
+  const r = runPhaseOrderCheck({
+    baseSha: 'b', headSha: 'h', tier: 'standard',
+    readConfig: () => ({ sdd: { stages: { spec: {}, design: {}, tasks: {} } } }),
+  });
+  assert.equal(r.level, 'fail', 'standard tier fails closed on an uncomputable input');
+  assert.match(r.findings[0].message, /omits lifecycle stage/, "the resolver's own refusal reaches the operator");
+});
+
+test('#810: buildChangeDir probes a custom artefact through the resolved file map', () => {
+  const inputs = gatherPhaseOrderInputs({
+    baseSha: 'b', headSha: 'h',
+    deps: {
+      diffNameOnly: () => ['openspec/changes/issue-9-z/research.md', 'brain/scripts/x.mjs'],
+      exists: (p) => p === 'openspec/changes/issue-9-z/research.md' || p === 'openspec/changes/issue-9-z/proposal.md',
+      listDir: () => [],
+      readFile: () => null,
+      showAtRef: () => null,
+    },
+    fileMap: { research: 'research.md' },
+    customNames: ['research'],
+  });
+  assert.equal(inputs.changeDirs.length, 1);
+  assert.deepEqual(inputs.changeDirs[0].present, { research: true }, 'the generic probe reads the RESOLVED file name');
+});
+
+test('#810 r2: a declaration naming reserved vocabulary is an uncomputable verdict at the gate', () => {
+  const r = runPhaseOrderCheck({
+    baseSha: 'b', headSha: 'h', tier: 'regulated',
+    readConfig: () => ({ sdd: { stages: {
+      proposal: {}, spec: {}, design: {}, tasks: {}, verification: { artefact: 'other.md' },
+    } } }),
+  });
+  assert.equal(r.level, 'fail');
+  assert.match(r.findings[0].message, /reserved/, "the resolver's refusal reaches the operator — never a flag/message fork");
 });
