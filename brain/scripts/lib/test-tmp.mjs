@@ -11,7 +11,7 @@
 //     SIGKILL, which no in-process hook survives.
 // The sweeper owns exactly one namespace (brain-test-<pid>-*) and never
 // touches anything else in the tmp dir.
-import { mkdtempSync, rmSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -47,11 +47,20 @@ function pidIsAlive(pid) {
   }
 }
 
+// A live pid is NOT proof of a live run (#843 round 1): pids get reused, and a
+// stale root whose pid was recycled by an unrelated process would be kept
+// forever — the exact orphan class this module exists to kill. Age is the
+// disambiguator: no test run lives a day, so alive-but-ancient means reused.
+const MAX_RUN_AGE_MS = 24 * 60 * 60 * 1000;
+
 export function sweepStaleRuns({
   base = tmpdir(),
+  maxAgeMs = MAX_RUN_AGE_MS,
   _readdir = readdirSync,
   _rm = rmSync,
   _isAlive = pidIsAlive,
+  _stat = statSync,
+  _now = Date.now,
 } = {}) {
   const swept = [];
   const kept = [];
@@ -66,7 +75,7 @@ export function sweepStaleRuns({
     const m = ROOT_RE.exec(name);
     if (!m) continue;
     const pid = Number(m[1]);
-    if (pid === process.pid || _isAlive(pid)) {
+    if (pid === process.pid || (_isAlive(pid) && !olderThan(join(base, name), maxAgeMs, _stat, _now))) {
       kept.push(name);
       continue;
     }
@@ -78,4 +87,13 @@ export function sweepStaleRuns({
     }
   }
   return { swept, kept };
+}
+
+function olderThan(path, maxAgeMs, _stat, _now) {
+  try {
+    return _now() - _stat(path).mtimeMs > maxAgeMs;
+  } catch {
+    // An unstatable root gives liveness the benefit of the doubt — kept.
+    return false;
+  }
 }

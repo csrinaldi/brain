@@ -44,7 +44,22 @@ function defaultFetchPr({ getVcs: getVcsFn = getVcs } = {}) {
 // contain (Law 2 at the plumbing layer). Full-history-both is the obvious
 // simple choice at this repo's size (reviewer ruling #291); revisit only if
 // fetch cost bites on CI shallow clones.
-export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir(), _registerCleanup = (fn) => process.on('exit', fn) } = {}) {
+// ONE exit listener per process, however many shas get reviewed (#843 round 1,
+// editorial): a per-checkout `process.on('exit', ...)` would cross Node's
+// MaxListenersExceededWarning threshold on the 11th review in a single process.
+const exitCleanups = [];
+function defaultRegisterCleanup(fn) {
+  if (exitCleanups.length === 0) {
+    process.on('exit', () => {
+      for (const f of exitCleanups) {
+        try { f(); } catch { /* best effort — teardown never masks the exit */ }
+      }
+    });
+  }
+  exitCleanups.push(fn);
+}
+
+export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir(), _registerCleanup = defaultRegisterCleanup } = {}) {
   const doFetch = fetch ?? (sha => execFileSync('git', ['fetch', 'origin', sha], { cwd, encoding: 'utf8' }));
   return ({ sha, baseSha } = {}) => {
     if (baseSha) doFetch(baseSha);

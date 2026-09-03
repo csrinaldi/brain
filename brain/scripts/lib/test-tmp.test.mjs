@@ -85,3 +85,26 @@ test('sweepStaleRuns: real fs end-to-end — dead root with nested content is fu
   assert.deepEqual(res.swept, ['brain-test-999999-x']);
   assert.equal(readdirSync(base).length, 0);
 });
+
+test('#843: a live pid with an ANCIENT root is swept — pid reuse must not immortalize an orphan', () => {
+  const base = testTmp('unit-sweep-');
+  mkdirSync(join(base, 'brain-test-111-old'));
+  mkdirSync(join(base, 'brain-test-222-fresh'));
+  const DAY = 24 * 60 * 60 * 1000;
+  const res = sweepStaleRuns({
+    base,
+    _isAlive: () => true,
+    _now: () => 1_000_000_000_000,
+    _stat: (p) => ({ mtimeMs: p.endsWith('-old') ? 1_000_000_000_000 - DAY - 1 : 1_000_000_000_000 - 60_000 }),
+  });
+  assert.deepEqual(res.swept, ['brain-test-111-old'], 'alive-but-ancient means the pid was reused');
+  assert.ok(existsSync(join(base, 'brain-test-222-fresh')), 'a fresh live run is untouched');
+});
+
+test('#843: an unstatable root under a live pid stays kept — doubt favors the living', () => {
+  const base = testTmp('unit-sweep-');
+  mkdirSync(join(base, 'brain-test-333-x'));
+  const res = sweepStaleRuns({ base, _isAlive: () => true, _stat: () => { throw new Error('EACCES'); } });
+  assert.deepEqual(res.swept, []);
+  assert.deepEqual(res.kept, ['brain-test-333-x']);
+});
