@@ -13,9 +13,21 @@ guard's coverage moves with the platform without anyone remembering it.
 
 ## D2 — scope draws the produce/verify line
 
-Scanned: vcs + governance + check-refs (verifier territory). Excluded:
-harness/roles/review — engines are their subject matter; scanning them would
-force allowlist noise and dilute the signal to zero.
+Scanned: brain's declared VERIFICATION_SURFACE (governance-tiers.mjs) —
+the vcs and governance roots plus the named verify-side files outside them:
+check-refs, brain-audit, change:archive (archive.mjs + archive-logic.mjs),
+and the checkpoint evaluator's four files under review/. review/ as a ROOT
+stays excluded — its cli and cold-review runner import harness because they
+PRODUCE — which is exactly why the verify-side files are declared one by
+one (round 7: ADR condition 2's own enumeration is the boundary, and two of
+its four readers lived outside the roots).
+
+Entry surfaces, not import closure — a deliberate scope ruling (round 7's
+editorial): transitively following imports crosses into shared lib/ and
+config vocabulary where an engine name is DATA (migration defaults, config
+schema), not a conditional; the neutrality claim is about gate DECISION
+surfaces, and the per-file harness-import check already refuses the one
+road a decision surface has to reach engine code.
 
 ## D3 — proven to bite before shipped
 

@@ -127,6 +127,17 @@ export const VERIFICATION_SURFACE = Object.freeze({
   scripts: Object.freeze([
     'brain/scripts/check-refs.mjs',   // local-checks, reached via npm-script indirection
     'brain/scripts/brain-audit.mjs',  // the postmerge/release audit — a gate that runs after merge
+    // ADR-0019 Amendment 1 condition 2 names FOUR shared readers; the two
+    // below live outside vcs/governance and were absent until #847 round 7.
+    // review/ is NOT scanned as a root — its cli and cold-review runner
+    // legitimately import harness (they PRODUCE) — so the verify-side files
+    // are declared one by one.
+    'brain/scripts/archive.mjs',                       // change:archive, the fourth reader
+    'brain/scripts/lib/archive-logic.mjs',
+    'brain/scripts/review/evaluators/checkpoint.mjs',  // the checkpoint evaluator, the second reader
+    'brain/scripts/review/lib/checkpoint-block.mjs',
+    'brain/scripts/review/poster.mjs',
+    'brain/scripts/review/verdict.mjs',
   ]),
 });
 

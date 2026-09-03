@@ -183,6 +183,21 @@ test('#323 S7: gate surfaces carry ZERO engine names and ZERO harness imports �
     `reason; never widen the scan to stop seeing it.`);
 });
 
+test('#323 S7 (round 7): every reader ADR-0019 Amendment 1 condition 2 names is INSIDE the surface', () => {
+  // The condition's own enumeration is the neutrality boundary: phase-order,
+  // the checkpoint evaluator, check-refs, change:archive. Two lived outside
+  // vcs/governance and were unguarded until this round.
+  const four = [
+    'brain/scripts/vcs/phase-order-check.mjs',
+    'brain/scripts/review/evaluators/checkpoint.mjs',
+    'brain/scripts/check-refs.mjs',
+    'brain/scripts/archive.mjs',
+  ];
+  for (const reader of four) {
+    assert.ok(inSurface(reader), `${reader} — a reader the ADR names must be a reader the guard scans`);
+  }
+});
+
 test('#323 S7: the token list is the PLATFORM\'s, not a copy — a new engine joins this guard automatically', () => {
   assert.ok(SDD_ENGINES.length >= 2, 'the epic shipped two engines; the guard reads them from platform.mjs');
   assert.ok(SDD_ENGINES.includes('plain') && SDD_ENGINES.includes('gentle-ai'), 'the two wired engines are the tokens scanned');
