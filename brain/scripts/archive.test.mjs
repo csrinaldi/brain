@@ -514,3 +514,27 @@ test('5.8: runSingle never touches the VCS — it accepts no readIssueState para
   assert.doesNotMatch(runSingleBody, /readIssueState/, 'runSingle must never reference readIssueState — a human naming one folder has already made the decision the selector exists to make');
 });
 
+
+// ── #810 (#456 slice B): the custom artefact rides the whole-dir move ───────
+test('#810: a declared custom stage artefact lands in the archive with the dir — the move is whole', async () => {
+  const files = {
+    'openspec/changes/issue-810-x': true,
+    'openspec/changes/issue-810-x/proposal.md': 'p',
+    'openspec/changes/issue-810-x/design.md': 'd',
+    'openspec/changes/issue-810-x/tasks.md': 't',
+    'openspec/changes/issue-810-x/spec.md': '# flat\n',
+    'openspec/changes/issue-810-x/research.md': '# the custom artefact\n',
+  };
+  const renames = [];
+  const fs = {
+    exists: (p) => Object.prototype.hasOwnProperty.call(files, p),
+    listDir: (p) => files[p],
+    readFile: (p) => files[p],
+    writeFile: () => {},
+    mkdir: () => {},
+    rename: (src, dest) => { renames.push({ src, dest }); },
+  };
+  await archiveChange({ changeId: 'issue-810-x', fs, dateStr: '2026-09-03' });
+  assert.deepEqual(renames, [{ src: 'openspec/changes/issue-810-x', dest: 'openspec/changes/archive/810' }],
+    'the DIR moves whole — research.md rides it; no per-file copy that could drop a custom artefact');
+});

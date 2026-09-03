@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadContext } from './ci-context.mjs';
-import { artefactFiles, archivePath, CHANGES_ROOT, LEGACY_GRANDFATHERED, LIFECYCLE_STAGES } from '../lib/sdd-layout.mjs';
+import { artefactFiles, archivePath, CHANGES_ROOT, LEGACY_GRANDFATHERED, LIFECYCLE_STAGES, ARTEFACT_FILE, resolveStageSet } from '../lib/sdd-layout.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { resolveTier, tierParams } from './governance-tiers.mjs';
 import { mapDetectionToWarning } from '../governance/detection-policy.mjs';
@@ -121,6 +121,33 @@ const ARTEFACT_FIELD = Object.freeze({
 const STANDARD_ARTEFACTS = LIFECYCLE_STAGES;
 
 /**
+ * #810 (#456 slice B) — the walk set Rule A demands, derived from BOTH owners:
+ * the tier table scopes the FOUR (REQ-L4-2 prime — plus `verification`, tier
+ * vocabulary that no consumer declares), and `sdd.stages` contributes every
+ * declared custom stage IN ITS DECLARED POSITION — declaring a stage IS the
+ * demand (ADR-0019 Amendment 5). Zero-config resolves to the tier table
+ * byte-identically, which keeps `messageForArtefacts`' positional sentinel
+ * honest. Throws whatever `resolveStageSet` throws — the caller maps a
+ * malformed declaration to an uncomputable verdict, never a crash.
+ *
+ * @param {{config?: object, tier: string}} args
+ * @returns {{artefacts: string[], fileMap: Record<string,string>, customNames: string[]}}
+ */
+export function resolveWalkSet({ config, tier }) {
+  const tierNames = tierParams(tier).artefacts;
+  const { stages, files } = resolveStageSet(config);
+  const artefacts = stages.filter(
+    (name) => (LIFECYCLE_STAGES.includes(name) ? tierNames.includes(name) : true),
+  );
+  for (const name of tierNames) {
+    // `verification` and any future tier vocabulary outside the declarable set.
+    if (!LIFECYCLE_STAGES.includes(name) && !artefacts.includes(name)) artefacts.push(name);
+  }
+  const customNames = stages.filter((name) => !LIFECYCLE_STAGES.includes(name));
+  return { artefacts, fileMap: { ...ARTEFACT_FILE, ...files }, customNames };
+}
+
+/**
  * Builds the "implementation without ..." message. Preserves the EXACT
  * pre-tiering literal text ("spec.md/design.md") when the artefact set is the
  * historical standard-tier four — regression-guarded by this file's own
@@ -128,32 +155,41 @@ const STANDARD_ARTEFACTS = LIFECYCLE_STAGES;
  * flags actually failed. For any other artefact set (lite/regulated, or a
  * future custom set), names the artefacts ACTUALLY missing on this dir.
  */
-function messageForArtefacts(artefacts, dir) {
+function messageForArtefacts(artefacts, dir, fileMap = ARTEFACT_FILE) {
   if (artefacts.length === STANDARD_ARTEFACTS.length && artefacts.every((a, i) => a === STANDARD_ARTEFACTS[i])) {
     return 'spec.md/design.md';
   }
-  const missing = artefacts.filter(name => !dir[ARTEFACT_FIELD[name]]);
+  const missing = artefacts.filter(name => !artefactPresent(dir, name));
   // #555: through the shared map, not `${name}.md`. This message named
   // `verification.md` while `buildChangeDir` probed `verify-report.md` — the same
   // invented-filename defect, here before #555 touched anything, and the reason
-  // the mapping is one declaration now.
-  return artefactFiles(missing).join('/');
+  // the mapping is one declaration now. #810: a custom stage's file comes from
+  // the RESOLVED map — the fixed map still answers for the five fixed names.
+  return artefactFiles(missing, fileMap).join('/');
 }
 
-function evaluateRuleA(impl, touchedDirs, artefacts = STANDARD_ARTEFACTS) {
+/** #810 — the generic presence read: fixed names keep their boolean flags
+ * (every pre-#810 caller and test unchanged); a declared custom stage is read
+ * from the `present` map its resolved-file probe fills. */
+function artefactPresent(dir, name) {
+  const flag = ARTEFACT_FIELD[name];
+  return flag ? Boolean(dir[flag]) : Boolean(dir.present?.[name]);
+}
+
+function evaluateRuleA(impl, touchedDirs, artefacts = STANDARD_ARTEFACTS, fileMap = ARTEFACT_FILE) {
   const findings = [];
   // Planning-only PRs (no impl code) are never subjected to Rule A — they may
   // legitimately be mid-phase (design §10-A).
   if (impl.length === 0) return findings;
 
   for (const dir of touchedDirs) {
-    const complete = artefacts.every(name => dir[ARTEFACT_FIELD[name]]);
+    const complete = artefacts.every(name => artefactPresent(dir, name));
     if (!complete) {
       findings.push({
         rule: 'A',
         level: 'fail',
         change: dir.name,
-        message: `openspec/changes/${dir.name}: implementation without ${messageForArtefacts(artefacts, dir)}`,
+        message: `openspec/changes/${dir.name}: implementation without ${messageForArtefacts(artefacts, dir, fileMap)}`,
       });
     }
   }
@@ -226,7 +262,7 @@ function evaluateRuleB(touchedDirs) {
  *   pre-tiering call site unchanged.
  * @returns {{ level: 'pass'|'warn'|'fail', findings: Array<{rule: string, level: string, change?: string, message: string}> }}
  */
-export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [], artefacts = STANDARD_ARTEFACTS } = {}) {
+export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [], artefacts = STANDARD_ARTEFACTS, fileMap = ARTEFACT_FILE } = {}) {
   const impl = changedFiles.filter(f => !f.startsWith(CHANGE_DIR_PREFIX) && !isAllowlisted(f));
 
   const touchedDirs = changeDirs.filter(
@@ -237,7 +273,7 @@ export function evaluatePhaseOrder({ changedFiles = [], changeDirs = [], artefac
 
   const findings = [
     ...evaluateRuleC(impl, touchedDirs),
-    ...evaluateRuleA(impl, touchedDirs, artefacts),
+    ...evaluateRuleA(impl, touchedDirs, artefacts, fileMap),
     ...evaluateRuleB(touchedDirs),
   ];
 
@@ -397,7 +433,7 @@ function touchedDirNames(changedFiles) {
  * for `verify-report.md` (the sdd-verify artefact convention) — consumed only
  * by `regulated`'s tier-scoped Rule A artefact set (issue #358 Q5, REQ-L4-2′).
  */
-function buildChangeDir(name, { exists, listDir, readFile, showAtRef, baseSha }) {
+function buildChangeDir(name, { exists, listDir, readFile, showAtRef, baseSha, fileMap = ARTEFACT_FILE, customNames = [] }) {
   const relDir = `${CHANGE_DIR_PREFIX}${name}`;
   const tasksPath = `${relDir}/tasks.md`;
 
@@ -413,7 +449,14 @@ function buildChangeDir(name, { exists, listDir, readFile, showAtRef, baseSha })
   const statusAfter = parseStatus(tasksTextAfter);
   const statusBefore = parseStatus(showAtRef(baseSha, tasksPath));
 
-  return { name, hasProposal, hasSpec, hasDesign, hasTasks, hasVerification, checkedTasks, statusBefore, statusAfter };
+  // #810 — the generic probe: a declared custom stage's presence is read from
+  // its RESOLVED file (the same map the message renders), never `${name}.md`.
+  const present = {};
+  for (const custom of customNames) {
+    present[custom] = exists(`${relDir}/${fileMap[custom]}`);
+  }
+
+  return { name, hasProposal, hasSpec, hasDesign, hasTasks, hasVerification, checkedTasks, statusBefore, statusAfter, present };
 }
 
 /**
@@ -423,7 +466,7 @@ function buildChangeDir(name, { exists, listDir, readFile, showAtRef, baseSha })
  * @param {{ baseSha: string, headSha: string, cwd?: string, deps?: object }} args
  * @returns {{ changedFiles: string[], changeDirs: Array }}
  */
-export function gatherPhaseOrderInputs({ baseSha, headSha, cwd = process.cwd(), deps = {} } = {}) {
+export function gatherPhaseOrderInputs({ baseSha, headSha, cwd = process.cwd(), deps = {}, fileMap = ARTEFACT_FILE, customNames = [] } = {}) {
   const diffNameOnly = deps.diffNameOnly ?? defaultDiffNameOnly(cwd);
   const exists = deps.exists ?? defaultExists(cwd);
   const listDir = deps.listDir ?? defaultListDir(cwd);
@@ -432,7 +475,7 @@ export function gatherPhaseOrderInputs({ baseSha, headSha, cwd = process.cwd(), 
 
   const changedFiles = diffNameOnly(baseSha, headSha);
   const changeDirs = touchedDirNames(changedFiles).map(name =>
-    buildChangeDir(name, { exists, listDir, readFile, showAtRef, baseSha })
+    buildChangeDir(name, { exists, listDir, readFile, showAtRef, baseSha, fileMap, customNames })
   );
 
   return { changedFiles, changeDirs };
@@ -513,8 +556,17 @@ export function runPhaseOrderCheck(deps = {}) {
   const headSha = deps.headSha ?? ctx.headSha;
 
   const readConfig = deps.readConfig ?? defaultReadConfig;
-  const tier = deps.tier ?? resolveTier(readConfig());
-  const artefacts = tierParams(tier).artefacts;
+  const config = readConfig();
+  const tier = deps.tier ?? resolveTier(config);
+  // #810: the walk set is derived from tier AND declaration; a refused
+  // declaration is an uncomputable input, same posture as a missing sha.
+  let walk;
+  try {
+    walk = resolveWalkSet({ config, tier });
+  } catch (err) {
+    return uncomputableVerdict(`sdd.stages declaration refused: ${err.message}`, tier);
+  }
+  const { artefacts, fileMap, customNames } = walk;
 
   if (!baseSha || !headSha) {
     return uncomputableVerdict(
@@ -525,7 +577,7 @@ export function runPhaseOrderCheck(deps = {}) {
 
   let inputs;
   try {
-    inputs = gatherPhaseOrderInputs({ baseSha, headSha, cwd, deps });
+    inputs = gatherPhaseOrderInputs({ baseSha, headSha, cwd, deps, fileMap, customNames });
   } catch (err) {
     return uncomputableVerdict(
       `diff uncomputable (cannot verify artefact presence): ${err.message}`,
@@ -533,7 +585,7 @@ export function runPhaseOrderCheck(deps = {}) {
     );
   }
 
-  return applyBaselineExemption(evaluatePhaseOrder({ ...inputs, artefacts }));
+  return applyBaselineExemption(evaluatePhaseOrder({ ...inputs, artefacts, fileMap }));
 }
 
 function formatFinding(f) {

@@ -9,11 +9,11 @@
 // brain/core/methodology/sdd-layout.md. Nunca se deriva un placeholder.
 // (alias deprecado: npm run project:feature)
 
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { changeDir, artifactPaths } from "./lib/sdd-layout.mjs";
+import { changeDir, artifactPaths, resolveStageSet, LIFECYCLE_STAGES } from "./lib/sdd-layout.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -62,6 +62,26 @@ if (!slug) {
 
 const changeId = `issue-${issue}-${slug}`;
 const targetDir = join(repoRoot, changeDir(changeId));
+
+// #810 (#456 slice B, ADR-0019 Amendment 5): the scaffold produces the FULL
+// declared stage set — never tier-scoped (REQ-L4-2'). The config is read
+// directly (never via brain-config.mjs: this script's test fixture copies it
+// together with sdd-layout.mjs ALONE — the #555 module-drag trap). An
+// unreadable config degrades to zero-config; a declaration resolveStageSet
+// REFUSES is a hard stop with the resolver's own message, before any write.
+let config = {};
+try {
+  config = JSON.parse(readFileSync(join(repoRoot, "brain.config.json"), "utf8"));
+} catch {
+  config = {};
+}
+let stageSet;
+try {
+  stageSet = resolveStageSet(config);
+} catch (error) {
+  fail(error.message);
+}
+const customStages = stageSet.stages.filter((name) => !LIFECYCLE_STAGES.includes(name));
 
 if (existsSync(targetDir)) {
   fail(`El change "${changeId}" ya existe en openspec/changes/. No se sobrescribe.`);
@@ -140,9 +160,29 @@ writeFileSync(join(repoRoot, paths.spec), spec);
 writeFileSync(join(repoRoot, paths.design), design);
 writeFileSync(join(repoRoot, paths.tasks), tasks);
 
+for (const stage of customStages) {
+  const stub = `---
+status: draft
+issue: ${issue}
+stage: ${stage}
+---
+
+# ${stage} — ${heading}
+
+<Artefacto del stage declarado "${stage}" (sdd.stages). Completalo antes de
+implementar: phase-order lo exige en su posición declarada.>
+`;
+  writeFileSync(join(targetDir, stageSet.files[stage]), stub);
+}
+
+// Derived from the resolver, never a literal — the slice-A drift guard scans
+// for rival declarations of the artefact set, and it caught this line's first
+// cut (a fifth array of the four file names).
+const scaffolded = stageSet.stages.map((stage) => stageSet.files[stage]).join("  ");
+
 console.log(`
   ✓ Change SDD creado: ${changeDir(changeId)}/
-      proposal.md  spec.md  design.md  tasks.md
+      ${scaffolded}
 
   Siguiente: completá la propuesta y abrí la rama {tipo}/${changeId}.
   ({tipo}: feat | fix | chore | refactor | docs | ci | build)
