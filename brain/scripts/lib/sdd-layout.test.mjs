@@ -949,3 +949,13 @@ test('#323 S5: malformed blocks refuse with the rule named — JS, bad claims, m
   assert.match(parseSliceScopes(wrap('{"slice": 1, "claims": "REQ-1", "terminal_pr": "x"}')).refusal, /claims/);
   assert.match(parseSliceScopes(wrap('{"slice": 1, "claims": ["REQ-1"]}')).refusal, /terminal_pr/);
 });
+
+test('#810 r2: a declared stage may not take a RESERVED vocabulary name — "verification" refused', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: {
+      proposal: {}, spec: {}, design: {}, tasks: {}, verification: { artefact: 'other.md' },
+    } } }),
+    /reserved/,
+    'tier vocabulary outside the declarable four must be refused, not silently forked between flag and message',
+  );
+});

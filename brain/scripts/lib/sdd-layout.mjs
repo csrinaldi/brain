@@ -162,6 +162,21 @@ export function resolveStageSet(config) {
     );
   }
 
+  // Reserved-name collision (#810 round 2) — a declared stage may not take a
+  // name from the FIXED vocabulary outside the declarable four ("verification"
+  // today; anything ARTEFACT_FILE learns tomorrow). The gate reads such names
+  // through fixed boolean flags while the message renders the resolved map —
+  // letting the declaration through forks the two: Rule A would demand
+  // verify-report.md while the failure message names the overridden file.
+  for (const name of names) {
+    if (!LIFECYCLE_STAGES.includes(name) && Object.hasOwn(ARTEFACT_FILE, name)) {
+      throw new Error(
+        `sdd-layout: sdd.stages["${name}"] takes a reserved vocabulary name — "${name}" is fixed tier ` +
+        'vocabulary (its file and presence flag are not declarable). Choose another stage name.',
+      );
+    }
+  }
+
   // File collision — a declared artefact impersonating one of the fixed
   // lifecycle/verification files. Checked BEFORE the unknown-name refusal
   // below so the more specific "impersonation" message wins over the generic

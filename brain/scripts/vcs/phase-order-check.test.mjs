@@ -901,3 +901,14 @@ test('#810: buildChangeDir probes a custom artefact through the resolved file ma
   assert.equal(inputs.changeDirs.length, 1);
   assert.deepEqual(inputs.changeDirs[0].present, { research: true }, 'the generic probe reads the RESOLVED file name');
 });
+
+test('#810 r2: a declaration naming reserved vocabulary is an uncomputable verdict at the gate', () => {
+  const r = runPhaseOrderCheck({
+    baseSha: 'b', headSha: 'h', tier: 'regulated',
+    readConfig: () => ({ sdd: { stages: {
+      proposal: {}, spec: {}, design: {}, tasks: {}, verification: { artefact: 'other.md' },
+    } } }),
+  });
+  assert.equal(r.level, 'fail');
+  assert.match(r.findings[0].message, /reserved/, "the resolver's refusal reaches the operator — never a flag/message fork");
+});
