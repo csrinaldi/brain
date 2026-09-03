@@ -661,6 +661,7 @@
 {"id":"rec-49d6d73a9e104c05","ts":"2026-07-25T00:46:58Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-49d6d73a9e104c05.jsonl"}
 {"id":"rec-4a0ea26ffb95c964","ts":"2026-08-20T14:47:08Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-4a0ea26ffb95c964.jsonl"}
 {"id":"rec-4a211f706442f679","ts":"2026-08-11T22:15:35Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-4a211f706442f679.jsonl"}
+{"id":"rec-4a22e13fd3c3aebd","ts":"2026-09-03T01:42:50Z","actor":"fix/issue-842-tmp-fixture-hygiene","type":"decision","project":"brain","issue":842,"file":"2026-09-rec-4a22e13fd3c3aebd.jsonl"}
 {"id":"rec-4a49b587c2661dc9","ts":"2026-07-25T21:51:09Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-4a49b587c2661dc9.jsonl"}
 {"id":"rec-4a5426a5b594533d","ts":"2026-07-13T00:21:21Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4a5426a5b594533d.jsonl"}
 {"id":"rec-4a7a3a64b173cb79","ts":"2026-07-29T14:29:16Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-4a7a3a64b173cb79.jsonl"}
@@ -820,6 +821,7 @@
 {"id":"rec-5aac8e365896716c","ts":"2026-07-11T12:33:10Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-5aac8e365896716c.jsonl"}
 {"id":"rec-5b2108f138a6562a","ts":"2026-07-25T21:51:04Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-5b2108f138a6562a.jsonl"}
 {"id":"rec-5b30ed8538b0634b","ts":"2026-07-23T14:21:51Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-5b30ed8538b0634b.jsonl"}
+{"id":"rec-5b3a62a1ca4e9cce","ts":"2026-09-03T01:22:53Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-09-rec-5b3a62a1ca4e9cce.jsonl"}
 {"id":"rec-5b458bf09f26a8fb","ts":"2026-07-29T14:28:06Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-5b458bf09f26a8fb.jsonl"}
 {"id":"rec-5b4f042986a40dc8","ts":"2026-06-30T22:17:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-5b4f042986a40dc8.jsonl"}
 {"id":"rec-5b63ebe1ee83c239","ts":"2026-09-02T13:01:00Z","actor":"feat/issue-824-featharness-brainengines-the-discovery-v","type":"architecture","project":"brain","issue":824,"file":"2026-09-rec-5b63ebe1ee83c239.jsonl"}
@@ -1469,6 +1471,7 @@
 {"id":"rec-9f1ae484c61ab677","ts":"2026-07-25T21:51:05Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-9f1ae484c61ab677.jsonl"}
 {"id":"rec-9f20d63eb55f3441","ts":"2026-07-25T00:48:35Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-9f20d63eb55f3441.jsonl"}
 {"id":"rec-9f26ad1547c7b843","ts":"2026-07-25T21:50:35Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-9f26ad1547c7b843.jsonl"}
+{"id":"rec-9f4a71001b1744d0","ts":"2026-09-03T01:26:55Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-9f4a71001b1744d0.jsonl"}
 {"id":"rec-9f4fb64bf4a7e1b6","ts":"2026-07-29T13:59:44Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-9f4fb64bf4a7e1b6.jsonl"}
 {"id":"rec-9f9f3d09dce03aef","ts":"2026-07-29T13:59:33Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-9f9f3d09dce03aef.jsonl"}
 {"id":"rec-9fa0ddc0d7e45a20","ts":"2026-07-25T00:48:23Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-9fa0ddc0d7e45a20.jsonl"}

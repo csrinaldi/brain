@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
@@ -101,4 +101,22 @@ test('#809: a malformed draft refuses with the parser\'s own sentence', async (t
   const r = await drive(root);
   assert.equal(r.exitCode, 1);
   assert.match(r.output, /brain-migration\/1/);
+});
+
+test('#842: the D3 proof dir dies with the proof — success AND refusal leave tmpdir clean', async (t) => {
+  const proofDirs = () => readdirSync(tmpdir()).filter((n) => n.startsWith('brain-promote-proof-'));
+  const before = proofDirs();
+
+  // Success path: the proof imports, the plan is offered, the entry lands.
+  const okRoot = world(t);
+  const ok = await drive(okRoot);
+  assert.equal(ok.exitCode, 0, ok.output);
+
+  // Refusal path: the proof import throws — the catch used to be the leak.
+  const broken = `export const migrations = [\n  ...LATER,\n];\nconst LATER = [];\n`;
+  const badRoot = world(t, { migrationsFile: broken });
+  const bad = await drive(badRoot);
+  assert.equal(bad.exitCode, 1);
+
+  assert.deepEqual(proofDirs(), before, 'no brain-promote-proof-* dir survives either path');
 });

@@ -12,13 +12,13 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 import { auditWorkflowAuth, auditGitlabFragment } from './lib/workflow-auth.mjs';
+import { testTmp } from '../lib/test-tmp.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '../../..');
@@ -116,7 +116,7 @@ function substituteExpr(script, subs) {
 
 // Run an extracted step script in an isolated temp repo. Returns {status, stdout, stderr, homeDir}.
 function runStepIsolated(stepId, { repoSetup, subs = {}, ghOpts = {}, env = {} } = {}) {
-  const homeDir = mkdtempSync(join(tmpdir(), 'pm-iso-'));
+  const homeDir = testTmp('pm-iso-');
   writeGhStub(join(homeDir, 'bin'), ghOpts);
   writeFileSync(join(homeDir, 'github_output'), '');
   const repo = join(homeDir, 'repo');

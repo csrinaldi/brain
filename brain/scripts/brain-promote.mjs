@@ -40,7 +40,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, lstatSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, lstatSync, realpathSync, rmSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -632,9 +632,12 @@ async function planMigrationPromotion({ root, draftPath, draftText }) {
   if (spliced.refusal) return { ok: false, lines: [`✗ ${spliced.refusal}`] };
 
   // D3 — the proof, BEFORE the plan. The candidate must import and migrate.
+  // The proof dir dies with the proof (#842): the module is already loaded
+  // when the finally runs, so removal is safe on every path.
+  let proofDir = null;
   try {
-    const dir = mkdtempSync(join(tmpdir(), 'brain-promote-proof-'));
-    const proofPath = join(dir, 'candidate.mjs');
+    proofDir = mkdtempSync(join(tmpdir(), 'brain-promote-proof-'));
+    const proofPath = join(proofDir, 'candidate.mjs');
     writeFileSync(proofPath, spliced.next, 'utf8');
     const mod = await import(pathToFileURL(proofPath).href);
     const { applied } = migrateConfig({}, mod.migrations, version);
@@ -646,6 +649,10 @@ async function planMigrationPromotion({ root, draftPath, draftText }) {
       `✗ the candidate could not prove itself — import/migrate failed: ${error.message}`,
       '  Nothing was written or staged. The current file is untouched.',
     ] };
+  } finally {
+    if (proofDir !== null) {
+      try { rmSync(proofDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
   }
 
   const issue = issueNumberFor(draftPath);
