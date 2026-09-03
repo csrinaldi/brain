@@ -717,3 +717,32 @@ test('#843: many checkouts in one process share ONE exit listener — no MaxList
   clone({ sha });
   assert.ok(process.listenerCount('exit') - before <= 1, 'three checkouts, at most ONE new exit listener');
 });
+
+test('#843 r2: a checkout someone rm\'d by hand still gets UNREGISTERED at exit — the failure branch, real git', (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'brain-review-op-'));
+  const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-wt-'));
+  t.after(() => {
+    try { git(repo, 'worktree', 'prune'); } catch { /* best effort */ }
+    removeTempTree(repo);
+    removeTempTree(wtParent);
+  });
+  git(repo, 'init', '-q');
+  git(repo, 'config', 'user.email', 't@t.t');
+  git(repo, 'config', 'user.name', 't');
+  writeFileSync(join(repo, 'f.txt'), 'hi');
+  git(repo, 'add', 'f.txt');
+  git(repo, 'commit', '-q', '-m', 'a');
+  const sha = git(repo, 'rev-parse', 'HEAD');
+
+  const hooks = [];
+  const clone = defaultCloneDetached({ cwd: repo, fetch: () => {}, tmp: wtParent, _registerCleanup: (fn) => hooks.push(fn) })({ sha });
+
+  // Someone (or a tmp reaper) deleted the checkout out from under git: the
+  // `worktree remove` in the hook now FAILS — the branch round 2 caught untested.
+  removeTempTree(clone.worktreePath);
+  assert.ok(git(repo, 'worktree', 'list').includes(clone.worktreePath.split('/').pop()), 'precondition: the stale registration exists');
+
+  hooks[0]();
+  assert.ok(!git(repo, 'worktree', 'list').includes(clone.worktreePath.split('/').pop()),
+    'the stale .git/worktrees/ entry is pruned — the operator repo never keeps a zombie registration');
+});

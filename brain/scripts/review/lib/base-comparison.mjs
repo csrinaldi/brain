@@ -210,10 +210,17 @@ export function probeBase({ baseSha, gates = [], cwd = process.cwd(), tmp = tmpd
     // A git/fs failure is uncomputable evidence, never a crash and never a verdict.
     return null;
   } finally {
-    try { exec('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' }); } catch { /* best effort */ }
-    // Belt behind the belt (#842): when the remove itself fails — a crashed
-    // add, a path git no longer recognizes — the mkdtemp'd dir still dies.
-    try { _rm(worktreePath, { recursive: true, force: true }); } catch { /* best effort */ }
+    try {
+      exec('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' });
+    } catch {
+      // Belt behind the belt (#842): when the remove itself fails — a crashed
+      // add, a path git no longer recognizes — the mkdtemp'd dir still dies.
+      // And the REGISTRATION dies with it (#843 round 2): a bare rm leaves a
+      // stale .git/worktrees/ entry in the operator's real repo — the exact
+      // invariant this PR's own cold-boot test pins.
+      try { _rm(worktreePath, { recursive: true, force: true }); } catch { /* best effort */ }
+      try { exec('git', ['worktree', 'prune'], { cwd, encoding: 'utf8' }); } catch { /* best effort */ }
+    }
   }
 }
 

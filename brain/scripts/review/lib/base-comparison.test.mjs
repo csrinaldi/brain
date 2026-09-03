@@ -299,12 +299,14 @@ test('#408: annotation still defaults to introduced when no probe ran', async ()
   assert.deepEqual(conditions, []);
 });
 
-test('#842: when `git worktree remove` itself fails, the mkdtemp\'d dir still dies via _rm', () => {
+test('#842: when `git worktree remove` itself fails, the dir dies via _rm AND the registration is pruned', () => {
   const removed = [];
+  const execs = [];
   probeBase({
     baseSha: 'b', gates: ['local-checks'], cwd: '/repo', tmp: '/tmp', _exists: () => true,
     _mkdtemp: (p) => `${p}x`,
     _exec: (file, args) => {
+      execs.push(args.join(' '));
       if (args.includes('remove')) throw new Error('fatal: not a working tree');
       return '';
     },
@@ -312,6 +314,21 @@ test('#842: when `git worktree remove` itself fails, the mkdtemp\'d dir still di
   });
   assert.deepEqual(removed, [{ p: '/tmp/brain-review-base-x', opts: { recursive: true, force: true } }],
     'the belt runs when the worktree remove cannot — a crashed add must not become an orphan');
+  assert.ok(execs[execs.length - 1] === 'worktree prune',
+    'the registration dies too (#843 r2): a bare rm leaves a stale .git/worktrees/ entry in the OPERATOR\'S repo');
+});
+
+test('#843 r2: on the happy path the remove is the whole teardown — no rm, no prune noise', () => {
+  const removed = [];
+  const execs = [];
+  probeBase({
+    baseSha: 'b', gates: ['local-checks'], cwd: '/repo', tmp: '/tmp', _exists: () => true,
+    _mkdtemp: (p) => `${p}x`,
+    _exec: (file, args) => { execs.push(args.join(' ')); return ''; },
+    _rm: (p, opts) => removed.push({ p, opts }),
+  });
+  assert.deepEqual(removed, [], 'a successful worktree remove already deleted the dir');
+  assert.ok(!execs.some((c) => c === 'worktree prune'), 'nothing to prune when git itself removed it');
 });
 
 test('#842: the _rm belt is best-effort — its own failure never masks the probe result', () => {

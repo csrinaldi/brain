@@ -89,8 +89,16 @@ export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir(
     // one full checkout per reviewed sha behind forever — 64 dirs, 464M,
     // measured the day /tmp became the test failure.
     _registerCleanup(() => {
-      try { execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' }); } catch { /* best effort */ }
-      try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* best effort */ }
+      try {
+        execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' });
+      } catch {
+        // The remove failed — a checkout someone rm'd by hand, a path git no
+        // longer recognizes. The dir AND the .git/worktrees/ registration must
+        // both still die (#843 round 2): a bare rm alone leaves the operator's
+        // real repo holding a stale entry.
+        try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* best effort */ }
+        try { execFileSync('git', ['worktree', 'prune'], { cwd, encoding: 'utf8' }); } catch { /* best effort */ }
+      }
     });
     return { detached: true, sha, baseSha: baseSha ?? null, worktreePath };
   };
