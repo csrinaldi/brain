@@ -364,3 +364,37 @@ test('every exemption is load-bearing — no rule exempts a path it would not fl
       'Remove the entry, or fix the rule so it can actually read that path.',
   );
 });
+
+// ── issue #323 S5 — the slice-scope gate, end to end ────────────────────────
+
+test('repo:check S-1b: a MALFORMED brain-slice-scope/1 block goes red naming the file; a valid one and absence both pass', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'refs-slice-scope-'));
+  t.after(() => removeTempTree(dir));
+  const git = makeMinimalRepo(dir);
+  copyRulesFile(dir);
+
+  // Each dir carries the S-1 required artifacts so THIS test isolates S-1b —
+  // the first cut tripped openspec-incomplete and asserted on the wrong rule.
+  const complete = (name, tasks) => {
+    for (const f of ['proposal.md', 'spec.md', 'design.md']) {
+      addTrackedFile(git, dir, `openspec/changes/${name}/${f}`, `# ${f}\n`);
+    }
+    addTrackedFile(git, dir, `openspec/changes/${name}/tasks.md`, tasks);
+  };
+  // absence: legal (grandfather by absence)
+  complete('legacy-x', '# Tasks\n- [ ] 1.1 old plan\n');
+  // valid block: passes
+  complete('good-y',
+    '# Tasks\n```brain-slice-scope/1\n{"slice": 1, "claims": ["REQ-1"], "terminal_pr": "this PR -> main"}\n```\n');
+  let r = runCheckRefs(dir);
+  const structOk = r.stdout.includes('Artifact structure is valid') || r.status === 0;
+  assert.ok(structOk, `valid+absent must pass:\n${r.stdout}\n${r.stderr}`);
+
+  // declared-but-broken: red, naming the file — the gate, not just the parser
+  complete('bad-z', '# Tasks\n```brain-slice-scope/1\n{ slice: 1 }\n```\n');
+  r = runCheckRefs(dir);
+  assert.equal(r.status, 1, `expected exit 1:\n${r.stdout}\n${r.stderr}`);
+  const out = r.stdout + r.stderr;
+  assert.ok(out.includes('slice-scope-malformed'), `rule id present:\n${out}`);
+  assert.ok(out.includes('bad-z/tasks.md'), `the FILE is named — a red nobody can locate is a red nobody fixes:\n${out}`);
+});

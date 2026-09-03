@@ -37,14 +37,21 @@ export function strandedTrackers({ branches, openPrHeads } = {}) {
  * @returns {Promise<{stranded: Array<{name: string, aheadOfDefault: number}>, reason: string|null}>}
  */
 export async function gatherStranded({ vcs, project, root = process.cwd(), tracker = 'origin/main', _run } = {}) {
-  const run = _run ?? (await import('node:child_process')).execSync;
+  // Review round 1 of #841, reproduced with /tmp/PWNED: the first cut built
+  // `git rev-list --count ${tracker}..${name}` through execSync's sh -c, and
+  // git accepts `$( )` inside a ref component — a hostile branch NAME executed
+  // as shell. The house convention (review/, brain-writes-reviewed, checkpoint)
+  // is execFileSync with an args ARRAY precisely so ref data can never be
+  // code; this function's own header invoked that principle for the forge half
+  // while its git half violated it. File + args, no shell, ever.
+  const run = _run ?? (await import('node:child_process')).execFileSync;
   let branches = [];
   try {
-    const names = String(run(`git for-each-ref --format='%(refname:short)' refs/heads/feature`, { cwd: root, encoding: 'utf8' }))
-      .split('\n').map((l) => l.replace(/'/g, '').trim()).filter(Boolean);
+    const names = String(run('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads/feature'], { cwd: root, encoding: 'utf8' }))
+      .split('\n').map((l) => l.trim()).filter(Boolean);
     branches = names.map((name) => ({
       name,
-      aheadOfDefault: Number(String(run(`git rev-list --count ${tracker}..${name}`, { cwd: root, encoding: 'utf8' })).trim()) || 0,
+      aheadOfDefault: Number(String(run('git', ['rev-list', '--count', `${tracker}..${name}`], { cwd: root, encoding: 'utf8' })).trim()) || 0,
     }));
   } catch (err) {
     return { stranded: [], reason: `git could not answer — ${err?.message ?? err}` };

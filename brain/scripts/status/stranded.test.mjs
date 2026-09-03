@@ -42,7 +42,7 @@ test('#713: the answer REPORTS, never throws — refusing would fail closed on c
 
 test('#713: gatherStranded degrades IN BAND — a dead adapter takes the section, never the report', async () => {
   const out = await gatherStranded({ vcs: { mrList: async () => { throw new Error('forge down'); } }, project: 'o/r',
-    _run: () => "'feature/issue-701'\n" });
+    _run: () => 'feature/issue-701\n' });
   assert.deepEqual(out.stranded, []);
   assert.match(out.reason, /forge down/);
 });
@@ -50,8 +50,28 @@ test('#713: gatherStranded degrades IN BAND — a dead adapter takes the section
 test('#713: end to end with seams — the #701 shape reports, the in-flight chain does not', async () => {
   const out = await gatherStranded({
     vcs: { mrList: async () => [{ headRefName: 'feature/issue-682' }] }, project: 'o/r',
-    _run: (cmd) => cmd.includes('for-each-ref') ? "'feature/issue-701'\n'feature/issue-682'\n" : '11\n',
+    _run: (file, args) => args.includes('for-each-ref') ? 'feature/issue-701\nfeature/issue-682\n' : '11\n',
   });
   assert.deepEqual(out.stranded.map((b) => b.name), ['feature/issue-701']);
   assert.equal(out.reason, null);
+});
+
+// ── review r1 — the shell stays out ─────────────────────────────────────────
+
+test('#840 (review r1): a hostile branch name is DATA, never code — args array, no shell, ever', async () => {
+  const calls = [];
+  const out = await gatherStranded({
+    vcs: { mrList: async () => [] }, project: 'o/r',
+    _run: (file, args) => {
+      calls.push([file, args]);
+      assert.equal(file, 'git', 'the runner receives a FILE and ARGS — execFileSync shape, no sh -c anywhere');
+      assert.ok(Array.isArray(args), 'interpolating a ref into a shell string is how /tmp/PWNED got created');
+      if (args[0] === 'for-each-ref') return "feature/$(touch /tmp/PWNED)\n";
+      return '3\n';
+    },
+  });
+  assert.deepEqual(out.stranded.map((b) => b.name), ['feature/$(touch /tmp/PWNED)'],
+    'the hostile name flows through as a literal — reported, never executed');
+  assert.ok(calls.some(([, a]) => a.some((el) => el.endsWith('..feature/$(touch /tmp/PWNED)'))),
+    'the name travels inside ONE argv element (the range) — never through a shell');
 });
