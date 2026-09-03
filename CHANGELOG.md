@@ -6,6 +6,67 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## v1.4.0 — the SDD pipeline becomes composable (M5 + M8)
+
+**No manual step.** Unlike v1.1.0, this release is additive: `brain:upgrade`
+migrates `brain.config.json` for you and nothing is renamed or removed.
+
+### Why the number jumps 1.1.0 → 1.4.0
+
+Three config migrations were promoted and signed between the two releases, and
+`migrateConfig` applies a migration only when its version is **at or below the
+installed package version** (`installer.mjs`). At 1.1.0 all three were dead
+code for every consumer. The package meets its migration tail, so they run:
+
+| migration | key it adds | default |
+|---|---|---|
+| 1.2.0 | `sdd.stages` — the declared stage set | `{}` |
+| 1.3.0 | `sdd.configs` — per-stage agent and enabled state | `{}` |
+| 1.4.0 | `sdd.engines` — what each SDD engine declared when last interrogated | `{}` |
+
+Every default is an **empty object**, and that is the design: an absent
+declaration keeps today's behaviour exactly. A stage you never declared runs as
+it always did; an engine nobody recorded stays honestly absent rather than
+reading as "interrogated and declared nothing".
+
+### What you can do that you could not before
+
+- **Compose the SDD pipeline per stage.** `sdd.map.<stage> = { engine, model? }`
+  routes who PRODUCES each stage's artefact. Two engines ship wired: `plain`
+  (manual handoff) and `gentle-ai` (runs on the platform). Who VERIFIES stays
+  neutral — no gate can name an engine, and a test guards that.
+- **Declare a stage of your own.** A stage beyond the four lifecycle stages is
+  scaffolded by `brain:project:feature`, walked by `phase-order` in its declared
+  position, and carried into the archive like any other. Declaring it is the
+  demand: the gate then requires its artefact.
+- **One config verb.** `brain:config get|set` is the single writer for
+  `brain.config.json`, running pending migrations as part of the write.
+- **Roles as a port.** Each stage declares its agent, model tier and
+  instructions through one interface, with four archetypes on it.
+
+### Refusals you may meet if you declare stages
+
+`sdd.stages` is validated when read, and a malformed declaration is refused
+with a message naming what is wrong — never silently normalised. It refuses:
+omitting one of the four lifecycle stages (the set is additive-only),
+reordering them relative to each other, a custom artefact impersonating a
+lifecycle file, a reserved vocabulary name, one of the four renaming its own
+artefact, two stages sharing one file, a stage name that is not a plain kebab
+identifier, and an artefact that is not a bare `.md` filename.
+
+### Also in this release
+
+- `brain:promote` grows a migration arm: adding a config migration is a
+  declarative draft the human signs, and the verb proves the candidate imports
+  and migrates before it shows a plan.
+- `brain:status` reports stranded feature branches — a tracker ahead of the
+  default branch with no open PR is a signal, not silence.
+- `tasks.md` may carry a `brain-slice-scope/1` block declaring a slice's claims
+  and its terminal PR; `check-refs` refuses a malformed one repo-wide.
+- Test fixtures no longer leak: every temporary directory lives under one
+  per-run root that dies with the process, with a pre-suite sweep for runs that
+  were killed.
+
 ## v1.1.0 — BREAKING: the package is now `@logikas/brain` (#655)
 
 **If brain is already installed in your repo, do not upgrade with

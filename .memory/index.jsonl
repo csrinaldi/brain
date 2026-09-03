@@ -1863,6 +1863,7 @@
 {"id":"rec-cc2fce61ae79d578","ts":"2026-07-13T00:22:20Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-cc2fce61ae79d578.jsonl"}
 {"id":"rec-cc410350226db61b","ts":"2026-07-29T14:26:48Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-cc410350226db61b.jsonl"}
 {"id":"rec-cc5561c44de9fd70","ts":"2026-07-25T21:51:16Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-cc5561c44de9fd70.jsonl"}
+{"id":"rec-cc7ee2a71bfb792a","ts":"2026-09-03T22:24:17Z","actor":"chore/issue-848-release-cut-1.4.0","type":"config","project":"brain","issue":848,"file":"2026-09-rec-cc7ee2a71bfb792a.jsonl"}
 {"id":"rec-cc85a30da84c0033","ts":"2026-07-25T21:51:00Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-cc85a30da84c0033.jsonl"}
 {"id":"rec-ccc2c51c09e7e676","ts":"2026-07-29T14:26:09Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ccc2c51c09e7e676.jsonl"}
 {"id":"rec-ccd3c0433001b2a3","ts":"2026-09-02T14:49:45Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-ccd3c0433001b2a3.jsonl"}

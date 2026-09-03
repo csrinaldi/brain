@@ -89,7 +89,7 @@ npm run brain:env:init
 > ([ADR-0030 Amendment 1](brain/project/decisions/adr-0030-distribution-scoped-registry-package.md)):
 >
 > ```bash
-> npm i -D "git+https://github.com/csrinaldi/brain.git#v1.1.0"
+> npm i -D "git+https://github.com/csrinaldi/brain.git#v1.4.0"
 > ```
 
 `npx brain init` needs no aliases to exist first — it is a `bin` entry, which is
@@ -104,7 +104,7 @@ you already defined, and is safe to re-run. `npx brain --help` lists the verb su
 >
 > ```bash
 > #      "brain:upgrade": "node node_modules/@logikas/brain/brain/scripts/brain-upgrade.mjs"
-> npm run brain:upgrade -- v1.1.0
+> npm run brain:upgrade -- v1.4.0
 > ```
 
 > **Using pnpm / yarn / bun?** brain is **package-manager-agnostic** — it detects your
@@ -153,8 +153,8 @@ Then:
 ### Updating brain
 
 ```bash
-npm run brain:upgrade -- v1.1.0             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v1.1.0 --dry-run   # preview what would change
+npm run brain:upgrade -- v1.4.0             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v1.4.0 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](CHANGELOG.md) before upgrading — **renames / breaking
