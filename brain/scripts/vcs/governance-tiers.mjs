@@ -98,6 +98,43 @@ export const NEVER_TIERED = Object.freeze([
 const PENDING_PROMOTION = Object.freeze([]);
 
 /**
+ * The VERIFICATION SURFACE — every dir and entry script whose code judges a
+ * change (#323 S7). Declared HERE, in the gates' own vocabulary owner, and
+ * nowhere else: "what is a gate" is brain's declaration, platform-neutral.
+ * A forge's CI config (.github/workflows, .gitlab-ci.yml) is an ADAPTER's
+ * wiring of this surface — it is checked AGAINST this declaration for drift
+ * (engine-blind-gates.test.mjs), never read as the authority. That ruling is
+ * the maintainer's, from #847's review: a guard that resolves "what is a
+ * gate" from one forge's config directory has coupled doctrine to an
+ * implementation detail.
+ * Consumed by engine-blind-gates.test.mjs (ADR-0019 Amendment 1 condition 2:
+ * verification stays neutral — no gate names an engine or reaches its home).
+ */
+export const VERIFICATION_SURFACE = Object.freeze({
+  // Whole verify-side DIRECTORIES, not remembered files (#847 rounds 7–8: a
+  // file list missed archive, then missed tranche.mjs — the evaluator's own
+  // decision core, split out by the D1 pure-core pattern. Enumerating
+  // decision files by hand loses to the next refactor; a directory does not).
+  // review/ as a whole stays out: its cli and cold-review runner PRODUCE and
+  // import harness by design — the one such file under review/lib carries a
+  // reviewed allowlist entry in engine-blind-gates.test.mjs instead.
+  dirs: Object.freeze([
+    'brain/scripts/vcs',
+    'brain/scripts/governance',
+    'brain/scripts/review/evaluators',  // the checkpoint evaluator and its decision cores (reader 2)
+    'brain/scripts/review/lib',         // the evaluator's parsing/assembly helpers
+  ]),
+  scripts: Object.freeze([
+    'brain/scripts/check-refs.mjs',    // local-checks, reached via npm-script indirection (reader 3)
+    'brain/scripts/brain-audit.mjs',   // the postmerge/release audit — a gate that runs after merge
+    'brain/scripts/archive.mjs',       // change:archive (reader 4)
+    'brain/scripts/lib/archive-logic.mjs',
+    'brain/scripts/review/poster.mjs', // the verdict's writers — verify-side, outside the dirs above
+    'brain/scripts/review/verdict.mjs',
+  ]),
+});
+
+/**
  * §2 — the gate distribution matrix (design.md §2, verbatim). One row per
  * `GOVERNANCE_JOBS` name (governance-checks.mjs). REQ-TIER-8's drift-guard
  * (governance-tiers.test.mjs) asserts this key set equals GOVERNANCE_JOBS
@@ -109,6 +146,7 @@ const PENDING_PROMOTION = Object.freeze([]);
  *
  * @type {Record<string, Record<'lite'|'standard'|'regulated', {policy: 'required'|'detection', evidence: string}>>}
  */
+
 export const GATE_MATRIX = Object.freeze({
   'issue-link': Object.freeze({
     lite: Object.freeze({ policy: 'required', evidence: 'approved-label' }),

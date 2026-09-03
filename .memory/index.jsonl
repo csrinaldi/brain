@@ -691,6 +691,7 @@
 {"id":"rec-4d603f7294b2ce52","ts":"2026-07-29T14:29:04Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-4d603f7294b2ce52.jsonl"}
 {"id":"rec-4d6ba21868c4a4be","ts":"2026-07-13T00:21:48Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-4d6ba21868c4a4be.jsonl"}
 {"id":"rec-4d71c5f55c62f00a","ts":"2026-08-27T23:55:18Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-08-rec-4d71c5f55c62f00a.jsonl"}
+{"id":"rec-4d7bfcd50eea7275","ts":"2026-09-03T12:57:11Z","actor":"feat/issue-323-s7-terminal","type":"architecture","project":"brain","issue":323,"file":"2026-09-rec-4d7bfcd50eea7275.jsonl"}
 {"id":"rec-4d9826923dc6c3c6","ts":"2026-07-11T12:33:30Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4d9826923dc6c3c6.jsonl"}
 {"id":"rec-4d99842973ef6c5b","ts":"2026-09-01T16:39:26Z","actor":"fix/issue-821-fixmemory-staged-records-check-blocks-th","type":"bugfix","project":"brain","issue":821,"file":"2026-09-rec-4d99842973ef6c5b.jsonl"}
 {"id":"rec-4dbb7dee6e82d07e","ts":"2026-09-02T15:27:55Z","actor":"fix/issue-829-fixreview-the-anti-loop-lock-reads-verdi","type":"bugfix","project":"brain","issue":829,"file":"2026-09-rec-4dbb7dee6e82d07e.jsonl"}
