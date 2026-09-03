@@ -123,20 +123,25 @@ const PENDING_PROMOTION = Object.freeze([]);
  * verification stays neutral — no gate names an engine or reaches its home).
  */
 export const VERIFICATION_SURFACE = Object.freeze({
-  dirs: Object.freeze(['brain/scripts/vcs', 'brain/scripts/governance']),
+  // Whole verify-side DIRECTORIES, not remembered files (#847 rounds 7–8: a
+  // file list missed archive, then missed tranche.mjs — the evaluator's own
+  // decision core, split out by the D1 pure-core pattern. Enumerating
+  // decision files by hand loses to the next refactor; a directory does not).
+  // review/ as a whole stays out: its cli and cold-review runner PRODUCE and
+  // import harness by design — the one such file under review/lib carries a
+  // reviewed allowlist entry in engine-blind-gates.test.mjs instead.
+  dirs: Object.freeze([
+    'brain/scripts/vcs',
+    'brain/scripts/governance',
+    'brain/scripts/review/evaluators',  // the checkpoint evaluator and its decision cores (reader 2)
+    'brain/scripts/review/lib',         // the evaluator's parsing/assembly helpers
+  ]),
   scripts: Object.freeze([
-    'brain/scripts/check-refs.mjs',   // local-checks, reached via npm-script indirection
-    'brain/scripts/brain-audit.mjs',  // the postmerge/release audit — a gate that runs after merge
-    // ADR-0019 Amendment 1 condition 2 names FOUR shared readers; the two
-    // below live outside vcs/governance and were absent until #847 round 7.
-    // review/ is NOT scanned as a root — its cli and cold-review runner
-    // legitimately import harness (they PRODUCE) — so the verify-side files
-    // are declared one by one.
-    'brain/scripts/archive.mjs',                       // change:archive, the fourth reader
+    'brain/scripts/check-refs.mjs',    // local-checks, reached via npm-script indirection (reader 3)
+    'brain/scripts/brain-audit.mjs',   // the postmerge/release audit — a gate that runs after merge
+    'brain/scripts/archive.mjs',       // change:archive (reader 4)
     'brain/scripts/lib/archive-logic.mjs',
-    'brain/scripts/review/evaluators/checkpoint.mjs',  // the checkpoint evaluator, the second reader
-    'brain/scripts/review/lib/checkpoint-block.mjs',
-    'brain/scripts/review/poster.mjs',
+    'brain/scripts/review/poster.mjs', // the verdict's writers — verify-side, outside the dirs above
     'brain/scripts/review/verdict.mjs',
   ]),
 });

@@ -45,7 +45,11 @@ const GATE_FILES = VERIFICATION_SURFACE.scripts;
 
 // A file may buy its way in ONLY with a reviewed one-line reason.
 const ALLOWLIST = new Map([
-  // (empty — measured zero at #323 close; keep it that way)
+  // The ONE producer inside a verify-side dir: the cold-review runner
+  // dispatches the stage to an engine — importing harness is its JOB
+  // (#575/#682). Everything else under review/lib is evaluator territory.
+  ['brain/scripts/review/lib/run-cold-review-stage.mjs',
+    'the cold-review stage runner PRODUCES: it routes to an engine by design'],
 ]);
 
 /** Pure: brain/scripts/*.mjs references in a forge config's EFFECTIVE lines —
@@ -196,6 +200,10 @@ test('#323 S7 (round 7): every reader ADR-0019 Amendment 1 condition 2 names is 
   for (const reader of four) {
     assert.ok(inSurface(reader), `${reader} — a reader the ADR names must be a reader the guard scans`);
   }
+  // Round 8: the evaluator's decision CORE, split into a sibling by the D1
+  // pure-core pattern, must ride the dir — a file list loses to refactors.
+  assert.ok(inSurface('brain/scripts/review/evaluators/tranche.mjs'),
+    'the tranche core is the checkpoint verdict — inside, by directory, not by memory');
 });
 
 test('#323 S7: the token list is the PLATFORM\'s, not a copy — a new engine joins this guard automatically', () => {

@@ -13,11 +13,14 @@ quote) and zero imports whose specifier resolves into the engines' home
 (`brain/scripts/harness/**`, path-boundary not prefix) — static, dynamic, or
 re-export. The surface is BRAIN'S OWN DECLARATION —
 `VERIFICATION_SURFACE` in `governance-tiers.mjs`, the gates' vocabulary
-owner: dirs (`vcs/**`, `governance/**`) plus the named verify-side entry
-scripts outside them — check-refs, brain-audit, change:archive
-(archive.mjs + archive-logic.mjs) and the checkpoint evaluator's files
-under review/ (round 7: ADR condition 2 enumerates FOUR readers, and the
-surface must contain all four — pinned by test). The maintainer's ruling on #847: "what is a gate" is
+owner: whole verify-side DIRS (`vcs/**`, `governance/**`,
+`review/evaluators/**`, `review/lib/**`) plus the named entry scripts
+outside them — check-refs, brain-audit, change:archive, poster, verdict.
+Rounds 7–8: ADR condition 2 enumerates FOUR readers and a hand-kept file
+list missed archive, then missed the evaluator's own decision core
+(tranche.mjs, split out by the D1 pattern) — decision files are declared by
+DIRECTORY, which survives refactors; the one producer inside a verify-side
+dir (the cold-review runner) carries the allowlist's single reviewed entry. The maintainer's ruling on #847: "what is a gate" is
 never resolved from a forge's CI config — that is one adapter's wiring, and
 it is checked AGAINST the declaration (a drift test on effective, comment-
 stripped lines), never read as the authority. Round 5's remembered list and
