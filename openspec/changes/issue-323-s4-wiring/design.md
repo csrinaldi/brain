@@ -1,6 +1,6 @@
 # Design: #323 S4
 
-- `assertBoundEvidence(stage, routed)` — shared verbatim by both wirings
+- `assertBoundEvidence(stage, routed, changeId)` — shared verbatim by both wirings
   (duplicated by value in each backend on purpose: a backend may not import
   the other's internals, and the guard is four lines whose drift the routing
   tests would catch).

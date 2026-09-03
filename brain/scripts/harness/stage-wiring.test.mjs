@@ -184,3 +184,9 @@ test('#836 (review r6): plain\'s handoff for a CUSTOM stage never says "undefine
   assert.ok(!JSON.stringify(r.steps).includes('undefined'), 'no step hands a human a path named undefined');
   assert.ok(r.steps.some((s) => s.includes('own declared root')), 'the custom-stage line, same as gentle-ai\'s');
 });
+
+test('#836 (review r7): the prompt never says "undefined" — the LAST unguarded interpolation, with the real caller\'s shape', async () => {
+  let seen = null;
+  await gentleAi.runStage({ stage: 'cold-review', prompt: 'p', _transport: async (p) => { seen = p; return { ok: true }; } });
+  assert.ok(!seen.prompt.includes('undefined'), 'stage, target and changeId — all three interpolations guarded now');
+});

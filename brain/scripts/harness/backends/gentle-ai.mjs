@@ -389,7 +389,9 @@ export async function runStage({ stage, routed, changeId, model = null, _transpo
   const prompt = [
     role.instructions,
     '',
-    `You are producing the "${stage}" artefact for change "${changeId}".`,
+    // Round 7: the LAST unguarded interpolation — its two siblings (stage,
+    // target) were guarded in rounds 5-6; this one hid three lines above.
+    `You are producing the "${stage}" artefact${changeId ? ` for change "${changeId}"` : ''}.`,
     target
       ? `Write exactly one file: ${target} — the layout's single accessor names it; do not relocate or rename it.`
       : `The "${stage}" stage writes to its own declared root — follow its chain's conventions; it is not one of the four lifecycle artefacts.`,
