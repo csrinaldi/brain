@@ -376,7 +376,7 @@ function assertBoundEvidence(stage, routed, changeId) {
  *          and whatever arrives next) rides ...rest to the transport untouched.
  * @returns {Promise<object>} the transport's answer, verbatim
  */
-export async function runStage({ stage, routed, changeId, model = null, _transport, ...rest } = {}) {
+export async function runStage({ stage, prompt: callerPrompt, routed, changeId, model = null, _transport, ...rest } = {}) {
   assertBoundEvidence(stage, routed, changeId);
   const target = artifactPaths(changeId)[stage];
   // Round 2: S2's custom-stage evidence carries NO role (stage-engine returns
@@ -386,7 +386,13 @@ export async function runStage({ stage, routed, changeId, model = null, _transpo
   // the same #814 rule: never installed files). A lifecycle stage keeps the
   // port-resolved role its evidence guarantees.
   const role = routed?.role ?? (GENTLE_AI_ROLES[stage] ? { stage, ...GENTLE_AI_ROLES[stage] } : derivedRole(stage));
-  const prompt = [
+  // Round 8, the deepest of the family: the caller's prompt used to land in
+  // ...rest and the composed one OVERWROTE it by object-literal precedence —
+  // the assembled cold-review prompt (the only carrier of prNumber, the diff
+  // range and the artifact path) silently discarded on every routed run. The
+  // caller's prompt WINS; composition from the port is the fallback for runs
+  // that arrive without one.
+  const prompt = callerPrompt ?? [
     role.instructions,
     '',
     // Round 7: the LAST unguarded interpolation — its two siblings (stage,

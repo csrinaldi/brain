@@ -190,3 +190,14 @@ test('#836 (review r7): the prompt never says "undefined" — the LAST unguarded
   await gentleAi.runStage({ stage: 'cold-review', prompt: 'p', _transport: async (p) => { seen = p; return { ok: true }; } });
   assert.ok(!seen.prompt.includes('undefined'), 'stage, target and changeId — all three interpolations guarded now');
 });
+
+test('#836 (review r8): the CALLER\'s prompt survives verbatim — composition is the fallback, never the override', async () => {
+  let seen = null;
+  const assembled = 'REVIEW PR #999: git diff base...head — write findings to /abs/cold-review.md';
+  await gentleAi.runStage({ stage: 'cold-review', prompt: assembled, _transport: async (p) => { seen = p; return { ok: true }; } });
+  assert.equal(seen.prompt, assembled, 'the assembled review prompt is the ONLY carrier of prNumber/diff/path — discarding it is a silent wrong run');
+  seen = null;
+  const routed = await evidence('gentle-ai');
+  await gentleAi.runStage({ stage: 'tasks', routed, changeId: 'issue-999-x', _transport: async (p) => { seen = p; return { ok: true }; } });
+  assert.ok(seen.prompt.includes(routed.role.instructions), 'no caller prompt → composed from the port, as before');
+});
