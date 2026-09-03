@@ -355,18 +355,16 @@ an enforcing surface:
 3. **Indistinguishable at the boundary.** A custom stage routes through the
    same `assertRoutedStage` evidence and the same engine seam as the four
    (#834/#836) — the transport cannot tell them apart, by construction.
-4. **The refusal is replaced, not removed.** `resolveStageSet` refuses EIGHT
-   conditions, recounted after the final review round (this ADR's Amendment 3
-   is the standing lesson on citing counts that were never measured — and the
-   first cut of this very passage said six, counted before the last two
-   landed): omission of one of the four, relative reorder, a custom artefact
-   impersonating a fixed file (all three from #456 slice A), a reserved
-   vocabulary name, a lifecycle stage renaming its own artefact, two declared
-   stages sharing one file, a stage name that is not a plain kebab identifier
-   (prototype-chain names refused by name), and an artefact that is not a bare
-   `.md` filename (all five added by #810's review rounds — each one a fork,
-   caught live, between what the gate demands and what a reader assumes).
-   The gate DEMANDS
+4. **The refusal is replaced, not removed.** `resolveStageSet` refuses every
+   collision a declaration can raise, and this prose carries NO count: the
+   enumeration lives in the function body and its tests — the measured record.
+   (This ADR's Amendment 3 is the standing lesson on prose counts; the first
+   two cuts of this very passage said six, then eight, each true when written
+   and stale two commits later. A number here rots; a pointer does not.)
+   Three refusals came from #456 slice A — omission, relative reorder, a
+   custom artefact impersonating a fixed file; every later one was added by
+   #810's review rounds, each a fork, caught live, between what the gate
+   demands and what a reader assumes. The gate DEMANDS
    a declared custom artefact exactly as it demands the tier-scoped four:
    declaring the stage is the demand. What the tier scopes is unchanged — the
    four only (REQ-L4-2′: the tier scopes what the GATE demands of doctrine's
