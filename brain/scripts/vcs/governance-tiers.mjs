@@ -98,18 +98,6 @@ export const NEVER_TIERED = Object.freeze([
 const PENDING_PROMOTION = Object.freeze([]);
 
 /**
- * §2 — the gate distribution matrix (design.md §2, verbatim). One row per
- * `GOVERNANCE_JOBS` name (governance-checks.mjs). REQ-TIER-8's drift-guard
- * (governance-tiers.test.mjs) asserts this key set equals GOVERNANCE_JOBS
- * exactly, in both directions.
- *
- * Row order intentionally mirrors GOVERNANCE_JOBS / governance.yml's job
- * order (REQUIRED jobs, then DETECTION jobs) so `requiredJobs()` — which
- * iterates `Object.keys(GATE_MATRIX)` — preserves that same order.
- *
- * @type {Record<string, Record<'lite'|'standard'|'regulated', {policy: 'required'|'detection', evidence: string}>>}
- */
-/**
  * The VERIFICATION SURFACE — every dir and entry script whose code judges a
  * change (#323 S7). Declared HERE, in the gates' own vocabulary owner, and
  * nowhere else: "what is a gate" is brain's declaration, platform-neutral.
@@ -145,6 +133,19 @@ export const VERIFICATION_SURFACE = Object.freeze({
     'brain/scripts/review/verdict.mjs',
   ]),
 });
+
+/**
+ * §2 — the gate distribution matrix (design.md §2, verbatim). One row per
+ * `GOVERNANCE_JOBS` name (governance-checks.mjs). REQ-TIER-8's drift-guard
+ * (governance-tiers.test.mjs) asserts this key set equals GOVERNANCE_JOBS
+ * exactly, in both directions.
+ *
+ * Row order intentionally mirrors GOVERNANCE_JOBS / governance.yml's job
+ * order (REQUIRED jobs, then DETECTION jobs) so `requiredJobs()` — which
+ * iterates `Object.keys(GATE_MATRIX)` — preserves that same order.
+ *
+ * @type {Record<string, Record<'lite'|'standard'|'regulated', {policy: 'required'|'detection', evidence: string}>>}
+ */
 
 export const GATE_MATRIX = Object.freeze({
   'issue-link': Object.freeze({
