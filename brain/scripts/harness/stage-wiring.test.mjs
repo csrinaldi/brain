@@ -34,10 +34,15 @@ test('#323 S4 D1: plain answers a routed lifecycle stage with the manual handoff
   assert.ok(Array.isArray(r.steps) && r.steps.length > 0, 'a handoff with no steps is not a handoff');
 });
 
-test('#323 S4 D3: plain refuses a lifecycle payload without BOUND evidence', async () => {
-  await assert.rejects(() => plain.runStage({ stage: 'tasks', changeId: 'issue-999-x' }), /routed evidence|assertRoutedStage/);
-  const forOther = await evidence('plain');
-  await assert.rejects(() => plain.runStage({ stage: 'design', routed: forOther, changeId: 'issue-999-x' }), /tasks.*design|design.*tasks/s);
+test('#323 S4 D3: BOTH engines refuse unbound and BEARER evidence — the spec says both, the suite proves both', async () => {
+  // Round 9's correction: this ran only against plain while the spec demanded
+  // both engines — the untested branch was exactly the one the design's
+  // "drift the routing tests would catch" claim leaned on.
+  for (const [name, backend] of [['plain', plain], ['gentle-ai', gentleAi]]) {
+    await assert.rejects(() => backend.runStage({ stage: 'tasks', changeId: 'issue-999-x', _transport: async () => ({ ok: true }) }), /routed evidence|assertRoutedStage/, name);
+    const forOther = await evidence(name);
+    await assert.rejects(() => backend.runStage({ stage: 'design', routed: forOther, changeId: 'issue-999-x', _transport: async () => ({ ok: true }) }), /tasks.*design|design.*tasks/s, `${name}: bound, never bearer`);
+  }
 });
 
 // ── D2: gentle-ai — the port's words, the platform's engine ─────────────────
