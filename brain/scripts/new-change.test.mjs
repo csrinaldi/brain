@@ -160,3 +160,18 @@ test('#810: an unreadable config degrades to zero-config — the four, exactly',
     rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
+
+test('#810 r7: a traversal artefact never reaches the filesystem — refused before any write', () => {
+  const { tmpRoot, scriptDest } = makeIsolatedScript();
+  try {
+    writeFileSync(join(tmpRoot, 'brain.config.json'), JSON.stringify({
+      sdd: { stages: { proposal: {}, spec: {}, design: {}, tasks: {}, evil: { artefact: '../../../escaped-810.md' } } },
+    }));
+    const result = spawnSync('node', [scriptDest, '--issue', '999995', '--title', 'traversal check'], { encoding: 'utf8' });
+    assert.equal(result.status, 1, 'the scaffold refuses');
+    assert.ok(!existsSync(join(tmpRoot, 'escaped-810.md')), 'NOTHING lands outside the change dir');
+    assert.ok(!existsSync(join(tmpRoot, 'openspec', 'changes', 'issue-999995-traversal-check')), 'nothing lands inside either');
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});

@@ -984,3 +984,27 @@ test('#810 r4: two declared stages may not share one artefact file — one file,
     'a shared file lets one write satisfy two separately-declared demands — the gate walk collapses',
   );
 });
+
+test('#810 r7: a declared artefact is a BARE .md filename — traversal and separators refused', () => {
+  const four = { proposal: {}, spec: {}, design: {}, tasks: {} };
+  for (const evil of ['../../../escaped.md', 'a/b.md', '/abs.md', 'a\\b.md', '.hidden.md', 'x.txt', '']) {
+    assert.throws(
+      () => resolveStageSet({ sdd: { stages: { ...four, evil: { artefact: evil } } } }),
+      /bare .*\.md|not a bare/i,
+      `"${evil}" must be refused — a config string reaching the filesystem unvalidated is the S5 shell-injection class`,
+    );
+  }
+  const ok = resolveStageSet({ sdd: { stages: { ...four, research: { artefact: 'research-notes.v2.md' } } } });
+  assert.equal(ok.files.research, 'research-notes.v2.md', 'a bare dotted-kebab .md name stays legal');
+});
+
+test('#810 r7: a declared stage NAME is a plain kebab identifier — hostile keys refused', () => {
+  const four = { proposal: {}, spec: {}, design: {}, tasks: {} };
+  for (const evil of ['__proto__', 'constructor', 'A Stage', 'stage/x']) {
+    assert.throws(
+      () => resolveStageSet({ sdd: { stages: { ...four, [evil]: { artefact: 'x.md' } } } }),
+      /identifier|name/i,
+      `"${evil}" must be refused — #823's hostile-segment discipline applies to stage keys too`,
+    );
+  }
+});

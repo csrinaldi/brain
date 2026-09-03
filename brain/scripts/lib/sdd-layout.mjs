@@ -162,6 +162,36 @@ export function resolveStageSet(config) {
     );
   }
 
+  // Shape validation (#810 final round) — a declared name and artefact are
+  // IDENTIFIERS, never paths. The reviewer wrote a config with
+  // `artefact: "../../../escaped.md"` and the scaffold put a file at the REPO
+  // ROOT while the gate's probe traversed the same way — a config string
+  // reaching the filesystem unvalidated, the same class as #841's shell
+  // injection. Names follow #823's hostile-segment discipline (a key like
+  // `__proto__` lands in a spread-built file map); artefacts are bare .md
+  // filenames — no separators, no leading dot, nothing for join() to walk.
+  for (const [name, entry] of Object.entries(declared)) {
+    // `constructor` passes the kebab regex and still poisons a spread-built
+    // map — the exact reason #576's ARCHETYPES is a Map and #823 refuses
+    // these three segments. Checked by name, not by regex.
+    if (!/^[a-z][a-z0-9-]*$/.test(name) || name === 'constructor' || name === 'prototype') {
+      throw new Error(
+        `sdd-layout: sdd.stages key "${name}" is not a plain stage identifier (lowercase kebab, ` +
+        'never a prototype-chain name). Stage names become object keys and path parts; anything ' +
+        'else is refused.',
+      );
+    }
+    const artefact = entry?.artefact;
+    if (artefact === undefined) continue;
+    if (typeof artefact !== 'string' || !/^[a-z0-9][a-z0-9._-]*\.md$/.test(artefact) || artefact.includes('/') || artefact.includes('\\')) {
+      throw new Error(
+        `sdd-layout: sdd.stages["${name}"].artefact ${JSON.stringify(artefact)} is not a bare .md ` +
+        'filename. An artefact is a file IN the change dir — no path separators, no leading dot, ' +
+        'no traversal: a declared path would escape the one layout every reader assumes.',
+      );
+    }
+  }
+
   // Lifecycle-rename collision (#810 round 3) — the FOUR may not rename their
   // own artefacts. Gate flags (`hasProposal` probes `proposal.md`), the
   // scaffold's artifactPaths, requiredArtifactsFor and the reviewer checkpoint
