@@ -648,6 +648,14 @@
       "sessions": 1,
       "memories": 0,
       "prompts": 1
+    },
+    {
+      "id": "def7bffd",
+      "created_by": "gandalf",
+      "created_at": "2026-09-03T10:53:45Z",
+      "sessions": 1,
+      "memories": 0,
+      "prompts": 1
     }
   ]
 }
