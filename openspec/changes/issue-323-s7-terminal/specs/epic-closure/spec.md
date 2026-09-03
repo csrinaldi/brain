@@ -8,10 +8,14 @@ capability: epic-closure
 
 ## Requirement: no gate names an engine (S7-R1)
 
-Every gate surface (`brain/scripts/vcs/**`, `brain/scripts/governance/**`,
-`check-refs.mjs`) carries zero engine-name string literals (raw text, any
+Every gate surface carries zero engine-name string literals (raw text, any
 quote) and zero imports whose specifier resolves into the engines' home
-(`brain/scripts/harness/**`) — static, dynamic, or re-export. These are the
+(`brain/scripts/harness/**`, path-boundary not prefix) — static, dynamic, or
+re-export. The surface is `brain/scripts/vcs/**` + `brain/scripts/governance/**`
++ every script the CI workflows themselves invoke (DERIVED from
+`.github/workflows/*.yml`, never hand-remembered — round 5's blocker was a
+remembered list missing `brain-audit.mjs`), plus `check-refs.mjs` pinned for
+its npm-script indirection. These are the
 only two binding roads a WORKING engine-conditional has: a bare identifier
 bound to neither is a ReferenceError, not a fork (rounds 1–4 retired a
 strip-then-scan lexer that lost this arms race three times: URLs in strings,

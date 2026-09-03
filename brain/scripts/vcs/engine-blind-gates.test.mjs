@@ -24,7 +24,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, dirname, relative } from 'node:path';
+import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SDD_ENGINES } from '../harness/platform.mjs';
@@ -39,7 +39,25 @@ const GATE_ROOTS = [
   'brain/scripts/vcs',
   'brain/scripts/governance',
 ];
+// Round 5's blocker: a hand-remembered list missed brain-audit.mjs, CI-wired
+// as a gate in two workflows. The entry points are DERIVED from the workflows
+// — the source of truth for "what is a gate" — so a future gate joins the
+// scan the moment it joins a workflow. check-refs.mjs stays pinned by hand:
+// it is reached through npm-script indirection the yml regex cannot see.
 const GATE_FILES = ['brain/scripts/check-refs.mjs'];
+
+export function workflowGateScripts({ repo = REPO } = {}) {
+  const dir = join(repo, '.github', 'workflows');
+  const out = new Set();
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith('.yml') && !name.endsWith('.yaml')) continue;
+    const text = readFileSync(join(dir, name), 'utf8');
+    for (const m of text.matchAll(/brain\/scripts\/[a-z0-9/._-]+\.mjs/g)) {
+      if (!m[0].endsWith('.test.mjs')) out.add(m[0]);
+    }
+  }
+  return [...out].sort();
+}
 
 // A file may buy its way in ONLY with a reviewed one-line reason.
 const ALLOWLIST = new Map([
@@ -67,10 +85,13 @@ export function importSpecifiers(text) {
 
 /** Pure: specifiers that resolve into the engines' home, from a file at relDir. */
 export function harnessImports(text, relDir) {
+  const home = join('brain', 'scripts', 'harness');
   return importSpecifiers(text).filter((spec) => {
     if (!spec.startsWith('.')) return false;
     const resolved = join(relDir, spec);
-    return resolved.startsWith(join('brain', 'scripts', 'harness'));
+    // Path-boundary, not prefix (round 5): a sibling named harness-legacy
+    // must not read as inside the engines' home.
+    return resolved === home || resolved.startsWith(home + sep);
   });
 }
 
@@ -102,14 +123,29 @@ test('#323 S7: the two pure checks catch the binding roads — and only the bind
   assert.deepEqual(harnessImports("export { runStage } from '../harness/stage-seam.mjs';", dir), ['../harness/stage-seam.mjs']);
   assert.deepEqual(harnessImports("import { resolveTier } from './governance-tiers.mjs';", dir), [],
     'a gate importing another gate is the normal shape — silent');
+  // Round 5: the boundary is a path boundary, never a prefix.
+  assert.deepEqual(harnessImports("import { x } from '../harness-legacy/old.mjs';", dir), [],
+    'a sibling merely PREFIXED harness is not the engines\' home');
   // Round 2/3/4's bypass shapes all reduce to one of the two roads: a bare
   // identifier with neither binding is a ReferenceError, not a fork.
   assert.deepEqual(engineLiterals('if (engine === plain) fork();', engines), [],
     'caught not here but at the binding: `plain` must be imported (module road) or defined from a literal (name road)');
 });
 
+test('#323 S7 (round 5): the gate list is DERIVED from the workflows — brain-audit is in because CI says so', () => {
+  const derived = workflowGateScripts();
+  assert.ok(derived.includes('brain/scripts/brain-audit.mjs'),
+    'the postmerge and release audits are gates the hand-written list forgot — the derivation cannot forget');
+  assert.ok(derived.length >= 5, `the workflows wire a real gate population (saw ${derived.length})`);
+  assert.ok(derived.every((f) => !f.endsWith('.test.mjs')));
+});
+
 test('#323 S7: gate surfaces carry ZERO engine names and ZERO harness imports — verification stays neutral', () => {
-  const files = [...GATE_ROOTS.flatMap(mjsFilesUnder), ...GATE_FILES.map((f) => join(REPO, f))];
+  const files = [...new Set([
+    ...GATE_ROOTS.flatMap(mjsFilesUnder),
+    ...GATE_FILES.map((f) => join(REPO, f)),
+    ...workflowGateScripts().map((f) => join(REPO, f)),
+  ])];
   assert.ok(files.length > 20, `the scan must actually see the gate tree (saw ${files.length} files)`);
   const offenders = [];
   for (const file of files) {
