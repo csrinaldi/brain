@@ -58,12 +58,13 @@ function mjsFilesUnder(root) {
 // for a single-word engine (camel === token) no bare form was checked at
 // all; `import { plain }` walked past the guard.
 export function stripCommentsAndStrings(text) {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/\/\/[^\n]*/g, ' ')
-    .replace(/`(?:\\.|[^\\`])*`/g, "''")
-    .replace(/'(?:\\.|[^\\'])*'/g, "''")
-    .replace(/"(?:\\.|[^\\"])*"/g, "''");
+  // ONE alternation, not sequential passes (round 3's blocker): sequential
+  // comment-then-string passes let a '//' INSIDE a string ('http://...')
+  // eat the rest of the line — code included — before strings were touched.
+  // A single regex scans left to right and whichever construct OPENS first
+  // consumes: a string starting before the '//' swallows it as content.
+  const re = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|`(?:\\.|[^\\`])*`|'(?:\\.|[^\\'])*'|"(?:\\.|[^\\"])*"/g;
+  return text.replace(re, (m) => (m.startsWith('/') ? ' ' : "''"));
 }
 
 export function findEngineMentions(text, engines) {
@@ -93,6 +94,18 @@ test('#323 S7 (rounds 1+2): the matcher catches every nameable form — literal,
   assert.deepEqual(findEngineMentions('if (engine === plain) fork();', engines), [{ engine: 'plain', form: 'bare identifier' }]);
   assert.deepEqual(findEngineMentions('engines.plain.runStage();', engines), [{ engine: 'plain', form: 'bare identifier' }]);
   assert.deepEqual(findEngineMentions("import { plain } from './engines.mjs';", engines), [{ engine: 'plain', form: 'bare identifier' }]);
+});
+
+test('#323 S7 (round 3): a URL inside a string does not eat the code after it', () => {
+  const engines = ['gentle-ai', 'plain'];
+  // The reviewer's measured bypass: the '//' in the URL used to consume the
+  // rest of the line as a "comment" BEFORE strings were stripped.
+  assert.deepEqual(findEngineMentions('const url = "http://example.com/x"; if (plain) run();', engines),
+    [{ engine: 'plain', form: 'bare identifier' }]);
+  assert.deepEqual(findEngineMentions("const sep = '//'; gentleAi.run();", engines),
+    [{ engine: 'gentle-ai', form: 'bare identifier' }]);
+  assert.equal(stripCommentsAndStrings('const url = "http://example.com"; if (plain) x();').includes('plain'), true,
+    'the stripped text keeps the CODE that follows a URL string');
 });
 
 test('#323 S7 (round 2): comments and string CONTENTS stay silent — they cannot fork behaviour', () => {
