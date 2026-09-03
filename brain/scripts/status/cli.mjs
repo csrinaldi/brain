@@ -91,6 +91,18 @@ export async function runStatus({ issueNumber, log = console.log, deps = {} } = 
   const gitFacts = deps.gitFacts ?? (() => defaultGitFacts(root, deps.tracker ?? 'origin/main'));
   const readTasks = deps.readTasks ?? (() => defaultReadTasks(root, deps.changeDir));
 
+  // ── stranded trackers (#323 S5 / #713): health ≠ silence ─────────────────
+  {
+    const { gatherStranded } = await import('./stranded.mjs');
+    const s = await gatherStranded({ vcs: deps.vcs, project, root, tracker: deps.tracker ?? 'origin/main', _run: deps._strandedRun });
+    if (s.stranded.length > 0) {
+      log(`⚠ stranded tracker(s) — commits ahead of the default with NO open PR carrying them (#713):`);
+      for (const b of s.stranded) log(`    ${b.name}  (+${b.aheadOfDefault})`);
+    } else if (s.reason) {
+      log(`stranded check: not computed — ${s.reason}`);
+    }
+  }
+
   // ── the authority ────────────────────────────────────────────────────────
   let issue = null;
   let issueReason = null;

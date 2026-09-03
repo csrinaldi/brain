@@ -307,3 +307,49 @@ export function missingRequiredArtifacts(
   }
   return missing;
 }
+
+// ── brain-slice-scope/1 (issue #323 S5) ─────────────────────────────────────
+//
+// The maintainer's reframing on #752, made contract: `tasks.md` carries SCOPE
+// (which requirements a slice CLAIMS — the reviewer cannot judge without it)
+// and PLAN (the task list — the implementer's approach, rightly withheld from
+// review). One file, so withholding the plan withheld the scope; that was the
+// whole bug. The block separates them: a reviewer can someday be handed the
+// BLOCKS without the file. Termination rides the same declaration — #713's
+// `Terminal PR:` rule, normalized out of the external skill's throwaway patch.
+//
+// JSON, never JS — the promote-migration precedent: nothing in an artifact is
+// ever eval'd. ABSENCE IS LEGAL (legacy is grandfathered by absence, not by
+// list); a DECLARED block must be valid — the structure check refuses a
+// malformed one repo-wide, because a contract someone wrote and nobody can
+// parse is worse than none.
+
+export const SLICE_SCOPE_TAG = 'brain-slice-scope/1';
+const SLICE_SCOPE_RE = new RegExp('```' + SLICE_SCOPE_TAG + '\\n([\\s\\S]*?)```', 'g');
+
+/**
+ * @param {string} text A tasks.md body.
+ * @returns {{scopes: Array<{slice: number, claims: string[], terminal_pr: string}>, refusal: string|null}}
+ */
+export function parseSliceScopes(text) {
+  const scopes = [];
+  for (const m of String(text ?? '').matchAll(SLICE_SCOPE_RE)) {
+    let entry;
+    try {
+      entry = JSON.parse(m[1]);
+    } catch (err) {
+      return { scopes: [], refusal: `slice-scope: a ${SLICE_SCOPE_TAG} block is not JSON (${err.message}) — nothing in an artifact is ever eval'd.` };
+    }
+    if (typeof entry?.slice !== 'number') {
+      return { scopes: [], refusal: 'slice-scope: `slice` must be a number — the block names WHICH slice claims what.' };
+    }
+    if (!Array.isArray(entry.claims) || entry.claims.some((c) => typeof c !== 'string' || c.length === 0)) {
+      return { scopes: [], refusal: 'slice-scope: `claims` must be an array of requirement ids — the scope a reviewer judges against, and the over-claim question needs it exact.' };
+    }
+    if (typeof entry.terminal_pr !== 'string' || entry.terminal_pr.length === 0) {
+      return { scopes: [], refusal: 'slice-scope: `terminal_pr` is required — a chain that stops halfway must differ from one that finished (#713), and the declaration is where the difference starts.' };
+    }
+    scopes.push({ slice: entry.slice, claims: entry.claims, terminal_pr: entry.terminal_pr });
+  }
+  return { scopes, refusal: null };
+}
