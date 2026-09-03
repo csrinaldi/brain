@@ -959,3 +959,17 @@ test('#810 r2: a declared stage may not take a RESERVED vocabulary name — "ver
     'tier vocabulary outside the declarable four must be refused, not silently forked between flag and message',
   );
 });
+
+test('#810 r3: a LIFECYCLE stage may not rename its own artefact — the four\'s files are canon', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: {
+      proposal: { artefact: 'kickoff.md' }, spec: {}, design: {}, tasks: {},
+    } } }),
+    /canon|not declarable/,
+    'gate and scaffold read the four through fixed vocabulary; honoring a rename would fork what the gates demand',
+  );
+  const ok = resolveStageSet({ sdd: { stages: {
+    proposal: {}, spec: {}, design: {}, tasks: {}, research: { artefact: 'research.md' },
+  } } });
+  assert.equal(ok.files.proposal, 'proposal.md', 'a bare lifecycle entry keeps its canonical file');
+});

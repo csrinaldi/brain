@@ -162,6 +162,27 @@ export function resolveStageSet(config) {
     );
   }
 
+  // Lifecycle-rename collision (#810 round 3) — the FOUR may not rename their
+  // own artefacts. Gate flags (`hasProposal` probes `proposal.md`), the
+  // scaffold's artifactPaths, requiredArtifactsFor and the reviewer checkpoint
+  // all read the four through fixed vocabulary; honoring a rename here would
+  // fork the resolver's answer from every other reader's — the operator told
+  // their config is valid while no gate ever recognises the renamed file.
+  // Amendment 5 authorises a CUSTOM stage's artefact joining the contract; it
+  // does not authorise changing what the gates demand of the four. Declaring
+  // the OWN canonical file stays legal — slice A's 1.3b ruled the collision
+  // refusal skips the owner, and this refusal honours the same line.
+  for (const [name, entry] of Object.entries(declared)) {
+    if (LIFECYCLE_STAGES.includes(name) && entry?.artefact !== undefined && entry.artefact !== ARTEFACT_FILE[name]) {
+      throw new Error(
+        `sdd-layout: sdd.stages["${name}"].artefact is not declarable — the four lifecycle stages' ` +
+        `files are canon ("${name}" is always "${ARTEFACT_FILE[name]}"). Declaring a different file ` +
+        'changes what the gates demand, which ADR-0019 Amendment 5 does not authorise; declare the ' +
+        'stage bare ({}) and add custom stages alongside it instead.',
+      );
+    }
+  }
+
   // Reserved-name collision (#810 round 2) — a declared stage may not take a
   // name from the FIXED vocabulary outside the declarable four ("verification"
   // today; anything ARTEFACT_FILE learns tomorrow). The gate reads such names

@@ -71,5 +71,8 @@ surface above is byte-identical to its pre-#810 behaviour.
 
 An UNDECLARED artefact joining anything — a file appearing in a change dir
 does not create a stage; only `sdd.stages` does. Removing or reordering the
-four (Amendment 1's additive-only ruling stands). And a forked verifier,
-which condition 2 rejected and continues to reject.
+four (Amendment 1's additive-only ruling stands). RENAMING one of the four's
+artefacts — their files are canon; every fixed reader (gate flags, scaffold
+paths, tier tables, the reviewer checkpoint) reads them by name, and a rename
+would change what the gates demand, which stays withheld. And a forked
+verifier, which condition 2 rejected and continues to reject.
