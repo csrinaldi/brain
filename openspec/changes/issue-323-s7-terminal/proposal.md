@@ -28,8 +28,9 @@ was true but unguarded — a truth with no test is a truth on borrowed time.
    `stage-wiring.test.mjs` D4 pair (one target, engine-blind readers).
    THE GAP: nothing guarded the "zero engine-conditional" half. This PR ships
    `engine-blind-gates.test.mjs` — scans every gate surface for every NAMEABLE
-   form of an SDD_ENGINES member (quoted literal, bare key, camel/Pascal
-   identifier; tokens from platform.mjs, never a copy), empty allowlist,
+   form of an SDD_ENGINES member (quoted literal, or bare identifier on
+   comment-and-string-stripped code, single-word engines included; tokens
+   from platform.mjs, never a copy), empty allowlist,
    bite proven (planted offender + a matcher unit-tested against the bypass
    shapes). What a static scan cannot pin, D4's parity pins behaviourally.
 5. **Drift guard (artifact contract not forked)** — slice A's rival-declaration

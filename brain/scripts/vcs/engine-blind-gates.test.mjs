@@ -51,33 +51,58 @@ function mjsFilesUnder(root) {
 // can always smuggle semantics through concatenation — so the honest contract
 // is this pair: the scan pins every NAMEABLE form, and stage-wiring's D4
 // parity pins the behaviour. Together they hold the produce/verify line.
+// Comments and string CONTENTS cannot fork behaviour, and leaving them in
+// makes a bare `plain` check unusable (every prose "in plain terms" would
+// fire). So the bare-identifier pass runs on STRIPPED text — code only —
+// while the quoted-literal pass runs on the original. Round 2's blocker:
+// for a single-word engine (camel === token) no bare form was checked at
+// all; `import { plain }` walked past the guard.
+export function stripCommentsAndStrings(text) {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ')
+    .replace(/`(?:\\.|[^\\`])*`/g, "''")
+    .replace(/'(?:\\.|[^\\'])*'/g, "''")
+    .replace(/"(?:\\.|[^\\"])*"/g, "''");
+}
+
 export function findEngineMentions(text, engines) {
   const hits = [];
+  const code = stripCommentsAndStrings(text);
   for (const engine of engines) {
     const camel = engine.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
     const pascal = camel[0].toUpperCase() + camel.slice(1);
-    const forms = [
-      { form: 'string literal', re: new RegExp(`['"\`]${engine}['"\`]`) },
-      { form: 'bare object key', re: new RegExp(`\\b${camel}\\s*:`) },
-    ];
-    if (camel !== engine) {
-      forms.push({ form: 'camel identifier', re: new RegExp(`\\b(${camel}|${pascal})\\b`) });
+    if (new RegExp(`['"\`]${engine}['"\`]`).test(text)) {
+      hits.push({ engine, form: 'string literal' });
     }
-    for (const { form, re } of forms) {
-      if (re.test(text)) hits.push({ engine, form });
+    const idents = [...new Set([camel, pascal, ...(/^[a-z][a-z0-9]*$/.test(engine) ? [engine] : [])])];
+    if (new RegExp(`\\b(${idents.join('|')})\\b`).test(code)) {
+      hits.push({ engine, form: 'bare identifier' });
     }
   }
   return hits;
 }
 
-test('#323 S7 (round 1): the matcher catches every nameable form — and ignores prose lookalikes', () => {
+test('#323 S7 (rounds 1+2): the matcher catches every nameable form — literal, key, identifier, single-word included', () => {
   const engines = ['gentle-ai', 'plain'];
   assert.deepEqual(findEngineMentions("const e = 'plain';", engines), [{ engine: 'plain', form: 'string literal' }]);
-  assert.deepEqual(findEngineMentions('const map = { plain: run };', engines), [{ engine: 'plain', form: 'bare object key' }]);
-  assert.deepEqual(findEngineMentions('if (gentleAi) fork();', engines), [{ engine: 'gentle-ai', form: 'camel identifier' }]);
-  assert.deepEqual(findEngineMentions('new GentleAi()', engines), [{ engine: 'gentle-ai', form: 'camel identifier' }]);
-  assert.deepEqual(findEngineMentions('// explain: plaintext output, in plain terms', engines), [],
-    'prose lookalikes stay silent — an allowlist that fights noise dilutes to zero');
+  assert.deepEqual(findEngineMentions('const map = { plain: run };', engines), [{ engine: 'plain', form: 'bare identifier' }]);
+  assert.deepEqual(findEngineMentions('if (gentleAi) fork();', engines), [{ engine: 'gentle-ai', form: 'bare identifier' }]);
+  assert.deepEqual(findEngineMentions('new GentleAi()', engines), [{ engine: 'gentle-ai', form: 'bare identifier' }]);
+  // Round 2's three measured bypasses — all must fire now.
+  assert.deepEqual(findEngineMentions('if (engine === plain) fork();', engines), [{ engine: 'plain', form: 'bare identifier' }]);
+  assert.deepEqual(findEngineMentions('engines.plain.runStage();', engines), [{ engine: 'plain', form: 'bare identifier' }]);
+  assert.deepEqual(findEngineMentions("import { plain } from './engines.mjs';", engines), [{ engine: 'plain', form: 'bare identifier' }]);
+});
+
+test('#323 S7 (round 2): comments and string CONTENTS stay silent — they cannot fork behaviour', () => {
+  const engines = ['gentle-ai', 'plain'];
+  assert.deepEqual(findEngineMentions('// explain: plaintext output, in plain terms', engines), []);
+  assert.deepEqual(findEngineMentions('/* the plain truth about gentleAi */', engines), []);
+  assert.deepEqual(findEngineMentions('const msg = "plain text output";', engines), [],
+    'a substring inside a string is not the exact quoted token and not code');
+  assert.deepEqual(findEngineMentions('explain(); const plaintiff = 1;', engines), [],
+    'word boundaries hold — lookalike identifiers stay silent');
 });
 
 test('#323 S7: gate surfaces carry ZERO engine string literals — verification stays neutral', () => {
