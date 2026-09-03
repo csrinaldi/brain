@@ -31,7 +31,9 @@ was true but unguarded — a truth with no test is a truth on borrowed time.
    engine-conditional has, both scanned: the engine's NAME (quoted literal,
    raw text) and the engine's MODULE (an import resolving into harness/**;
    static, dynamic, re-export). Tokens from platform.mjs, never a copy;
-   empty allowlist; bite proven with planted offenders. A bare identifier
+   ONE allowlist entry, reviewed and reasoned (the cold-review runner, a
+   producer living inside a verify-side dir); bite proven with planted
+   offenders. A bare identifier
    bound to neither road is a ReferenceError, not a fork — the sound claim
    that retired three rounds of hand-lexer bypasses. What a static scan
    cannot pin, D4's parity pins behaviourally.

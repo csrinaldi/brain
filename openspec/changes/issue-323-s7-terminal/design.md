@@ -16,11 +16,14 @@ guard's coverage moves with the platform without anyone remembering it.
 Scanned: brain's declared VERIFICATION_SURFACE (governance-tiers.mjs) —
 the vcs and governance roots plus the named verify-side files outside them:
 check-refs, brain-audit, change:archive (archive.mjs + archive-logic.mjs),
-and the checkpoint evaluator's four files under review/. review/ as a ROOT
-stays excluded — its cli and cold-review runner import harness because they
-PRODUCE — which is exactly why the verify-side files are declared one by
-one (round 7: ADR condition 2's own enumeration is the boundary, and two of
-its four readers lived outside the roots).
+poster and verdict — plus the checkpoint evaluator's WHOLE directories
+(review/evaluators/**, review/lib/**; round 8 replaced the file list with
+dirs after tranche.mjs, the evaluator's split-out decision core, escaped a
+list that named its caller). review/ as a ROOT stays excluded — its cli
+imports harness because it PRODUCES — and the one producer living inside a
+declared dir (the cold-review runner) is the allowlist's single reviewed
+entry (round 7: ADR condition 2's own enumeration is the boundary, and two
+of its four readers lived outside the roots).
 
 Entry surfaces, not import closure — a deliberate scope ruling (round 7's
 editorial): transitively following imports crosses into shared lib/ and
