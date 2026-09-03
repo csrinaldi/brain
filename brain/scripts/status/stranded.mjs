@@ -60,7 +60,12 @@ export async function gatherStranded({ vcs, project, root = process.cwd(), track
   if (vcs && project) {
     try {
       const prs = await vcs.mrList({ project, state: 'open' });
-      openPrHeads = (Array.isArray(prs) ? prs : []).map((p) => p?.headRefName ?? p?.sourceBranch).filter(Boolean);
+      // Round 2 of #841: the port's BOTH producers (github.mjs, gitlab.mjs)
+      // normalize this field to `headBranch` — and the first cut read two
+      // invented names while its mocks invented the same two, so tests and
+      // code agreed with each other and disagreed with reality: every tracker
+      // reported stranded even with its PR open. One contract, the real name.
+      openPrHeads = (Array.isArray(prs) ? prs : []).map((p) => p?.headBranch).filter(Boolean);
     } catch (err) {
       return { stranded: [], reason: `the adapter could not list open PRs — ${err?.message ?? err}` };
     }

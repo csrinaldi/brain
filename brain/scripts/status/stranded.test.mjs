@@ -49,7 +49,7 @@ test('#713: gatherStranded degrades IN BAND — a dead adapter takes the section
 
 test('#713: end to end with seams — the #701 shape reports, the in-flight chain does not', async () => {
   const out = await gatherStranded({
-    vcs: { mrList: async () => [{ headRefName: 'feature/issue-682' }] }, project: 'o/r',
+    vcs: { mrList: async () => [{ headBranch: 'feature/issue-682' }] }, project: 'o/r',
     _run: (file, args) => args.includes('for-each-ref') ? 'feature/issue-701\nfeature/issue-682\n' : '11\n',
   });
   assert.deepEqual(out.stranded.map((b) => b.name), ['feature/issue-701']);
