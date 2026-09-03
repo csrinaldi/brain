@@ -9,15 +9,15 @@ capability: epic-closure
 ## Requirement: no gate names an engine (S7-R1)
 
 Every gate surface (`brain/scripts/vcs/**`, `brain/scripts/governance/**`,
-`check-refs.mjs`) carries zero NAMEABLE forms of an SDD_ENGINES member —
-quoted string literal, or bare identifier in CODE — comments and string
-contents stripped first, single-word engines included (rounds 1 and 2:
-literals alone were narrower than the claim, and `plain`'s bare form had no
-check at all). The token list is
-the platform's own export, so a future engine joins the guard when it joins
-the platform. A static scan cannot pin "zero engine-conditional code" in
-full — the honest contract is the PAIR: this scan pins every nameable form,
-and stage-wiring's D4 parity pins the behaviour.
+`check-refs.mjs`) carries zero engine-name string literals (raw text, any
+quote) and zero imports whose specifier resolves into the engines' home
+(`brain/scripts/harness/**`) — static, dynamic, or re-export. These are the
+only two binding roads a WORKING engine-conditional has: a bare identifier
+bound to neither is a ReferenceError, not a fork (rounds 1–4 retired a
+strip-then-scan lexer that lost this arms race three times: URLs in strings,
+template interpolations, regex literals). The token list is the platform's
+own export, so a future engine joins the guard when it joins the platform.
+What a static scan cannot pin, stage-wiring's D4 parity pins behaviourally.
 
 ### Scenario: the guard bites
 - WHEN a gate file gains a string literal naming a wired engine

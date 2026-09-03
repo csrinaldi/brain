@@ -1,11 +1,26 @@
 // engine-blind-gates.test.mjs — #323's deliverable 4, the half no test pinned:
 // "zero engine-conditional code in any gate". The produce/verify line the epic
 // holds (route who PRODUCES per stage; keep who VERIFIES neutral) is only real
-// while no gate can even NAME an engine. This guard scans every gate surface
-// for SDD_ENGINES string literals — the tokens come from platform.mjs, never a
-// second list here, so a future engine joins the guard the moment it joins the
-// platform. Same shape as #802's adoption scan: an allowlist with a reviewed
-// reason is the only way past it, never a widened scan.
+// while no gate can even NAME an engine.
+//
+// HOW THIS GUARD HOLDS THE LINE — and why it owns no lexer. Three review
+// rounds tried a strip-comments-then-scan approach and each round found the
+// next token type it mishandled (URLs in strings, template interpolations,
+// regex literals): hand-lexing JavaScript with regexes is an arms race with
+// no finish line, and this repo ships zero dependencies, so no real lexer is
+// available either. The sound observation that replaces it: a WORKING
+// engine-conditional needs one of exactly two things —
+//   · the engine's NAME: a quoted string literal, scanned on RAW text
+//     (comments included — a gate file quoting an engine name deserves a
+//     look, and the allowlist with a reason is the exit); or
+//   · the engine's MODULE: an import whose specifier crosses into
+//     brain/scripts/harness/** (the engines' home), scanned by specifier.
+// A bare identifier bound to neither is a ReferenceError, not a fork; a
+// binding chain that works ends at a literal in some scanned file (caught
+// there) or at a harness import (caught here). Tokens come from platform.mjs,
+// never a second list, so a future engine joins the guard the moment it
+// joins the platform. Allowlist shape per #802: a reviewed one-line reason,
+// never a widened scan.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -31,6 +46,34 @@ const ALLOWLIST = new Map([
   // (empty — measured zero at #323 close; keep it that way)
 ]);
 
+/** Pure: every quoted engine-name literal in RAW text. */
+export function engineLiterals(text, engines) {
+  const hits = [];
+  for (const engine of engines) {
+    if (new RegExp(`['"\`]${engine}['"\`]`).test(text)) {
+      hits.push({ engine, form: 'string literal' });
+    }
+  }
+  return hits;
+}
+
+/** Pure: every import/re-export specifier in the text — static, dynamic, export-from. */
+export function importSpecifiers(text) {
+  const out = [];
+  const re = /(?:import|export)\s[^'"();]*?from\s*['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\)|import\s*['"]([^'"]+)['"]/g;
+  for (const m of text.matchAll(re)) out.push(m[1] ?? m[2] ?? m[3]);
+  return out;
+}
+
+/** Pure: specifiers that resolve into the engines' home, from a file at relDir. */
+export function harnessImports(text, relDir) {
+  return importSpecifiers(text).filter((spec) => {
+    if (!spec.startsWith('.')) return false;
+    const resolved = join(relDir, spec);
+    return resolved.startsWith(join('brain', 'scripts', 'harness'));
+  });
+}
+
 function mjsFilesUnder(root) {
   const out = [];
   const walk = (dir) => {
@@ -44,81 +87,28 @@ function mjsFilesUnder(root) {
   return out;
 }
 
-// The matcher is pure and tested against the bypass shapes round 1 named:
-// a quoted literal, a BARE object key (`plain:` — 'gentle-ai' cannot be one
-// without quotes), and the camel/Pascal identifier a hyphenated name becomes.
-// A static scan can never pin "zero engine-conditional code" in full — code
-// can always smuggle semantics through concatenation — so the honest contract
-// is this pair: the scan pins every NAMEABLE form, and stage-wiring's D4
-// parity pins the behaviour. Together they hold the produce/verify line.
-// Comments and string CONTENTS cannot fork behaviour, and leaving them in
-// makes a bare `plain` check unusable (every prose "in plain terms" would
-// fire). So the bare-identifier pass runs on STRIPPED text — code only —
-// while the quoted-literal pass runs on the original. Round 2's blocker:
-// for a single-word engine (camel === token) no bare form was checked at
-// all; `import { plain }` walked past the guard.
-export function stripCommentsAndStrings(text) {
-  // ONE alternation, not sequential passes (round 3's blocker): sequential
-  // comment-then-string passes let a '//' INSIDE a string ('http://...')
-  // eat the rest of the line — code included — before strings were touched.
-  // A single regex scans left to right and whichever construct OPENS first
-  // consumes: a string starting before the '//' swallows it as content.
-  const re = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|`(?:\\.|[^\\`])*`|'(?:\\.|[^\\'])*'|"(?:\\.|[^\\"])*"/g;
-  return text.replace(re, (m) => (m.startsWith('/') ? ' ' : "''"));
-}
-
-export function findEngineMentions(text, engines) {
-  const hits = [];
-  const code = stripCommentsAndStrings(text);
-  for (const engine of engines) {
-    const camel = engine.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-    const pascal = camel[0].toUpperCase() + camel.slice(1);
-    if (new RegExp(`['"\`]${engine}['"\`]`).test(text)) {
-      hits.push({ engine, form: 'string literal' });
-    }
-    const idents = [...new Set([camel, pascal, ...(/^[a-z][a-z0-9]*$/.test(engine) ? [engine] : [])])];
-    if (new RegExp(`\\b(${idents.join('|')})\\b`).test(code)) {
-      hits.push({ engine, form: 'bare identifier' });
-    }
-  }
-  return hits;
-}
-
-test('#323 S7 (rounds 1+2): the matcher catches every nameable form — literal, key, identifier, single-word included', () => {
+test('#323 S7: the two pure checks catch the binding roads — and only the binding roads', () => {
   const engines = ['gentle-ai', 'plain'];
-  assert.deepEqual(findEngineMentions("const e = 'plain';", engines), [{ engine: 'plain', form: 'string literal' }]);
-  assert.deepEqual(findEngineMentions('const map = { plain: run };', engines), [{ engine: 'plain', form: 'bare identifier' }]);
-  assert.deepEqual(findEngineMentions('if (gentleAi) fork();', engines), [{ engine: 'gentle-ai', form: 'bare identifier' }]);
-  assert.deepEqual(findEngineMentions('new GentleAi()', engines), [{ engine: 'gentle-ai', form: 'bare identifier' }]);
-  // Round 2's three measured bypasses — all must fire now.
-  assert.deepEqual(findEngineMentions('if (engine === plain) fork();', engines), [{ engine: 'plain', form: 'bare identifier' }]);
-  assert.deepEqual(findEngineMentions('engines.plain.runStage();', engines), [{ engine: 'plain', form: 'bare identifier' }]);
-  assert.deepEqual(findEngineMentions("import { plain } from './engines.mjs';", engines), [{ engine: 'plain', form: 'bare identifier' }]);
+  // The NAME road: quoted literals, any quote, raw text.
+  assert.deepEqual(engineLiterals("const e = 'plain';", engines), [{ engine: 'plain', form: 'string literal' }]);
+  assert.deepEqual(engineLiterals('run("gentle-ai")', engines), [{ engine: 'gentle-ai', form: 'string literal' }]);
+  assert.deepEqual(engineLiterals('const s = `plain`;', engines), [{ engine: 'plain', form: 'string literal' }]);
+  assert.deepEqual(engineLiterals('// in plain terms, explain plaintext', engines), [],
+    'unquoted prose stays silent — the word is not the token');
+  // The MODULE road: static, dynamic, and re-export specifiers into harness/.
+  const dir = join('brain', 'scripts', 'vcs');
+  assert.deepEqual(harnessImports("import { plain } from '../harness/backends/plain.mjs';", dir), ['../harness/backends/plain.mjs']);
+  assert.deepEqual(harnessImports("const m = await import('../harness/platform.mjs');", dir), ['../harness/platform.mjs']);
+  assert.deepEqual(harnessImports("export { runStage } from '../harness/stage-seam.mjs';", dir), ['../harness/stage-seam.mjs']);
+  assert.deepEqual(harnessImports("import { resolveTier } from './governance-tiers.mjs';", dir), [],
+    'a gate importing another gate is the normal shape — silent');
+  // Round 2/3/4's bypass shapes all reduce to one of the two roads: a bare
+  // identifier with neither binding is a ReferenceError, not a fork.
+  assert.deepEqual(engineLiterals('if (engine === plain) fork();', engines), [],
+    'caught not here but at the binding: `plain` must be imported (module road) or defined from a literal (name road)');
 });
 
-test('#323 S7 (round 3): a URL inside a string does not eat the code after it', () => {
-  const engines = ['gentle-ai', 'plain'];
-  // The reviewer's measured bypass: the '//' in the URL used to consume the
-  // rest of the line as a "comment" BEFORE strings were stripped.
-  assert.deepEqual(findEngineMentions('const url = "http://example.com/x"; if (plain) run();', engines),
-    [{ engine: 'plain', form: 'bare identifier' }]);
-  assert.deepEqual(findEngineMentions("const sep = '//'; gentleAi.run();", engines),
-    [{ engine: 'gentle-ai', form: 'bare identifier' }]);
-  assert.equal(stripCommentsAndStrings('const url = "http://example.com"; if (plain) x();').includes('plain'), true,
-    'the stripped text keeps the CODE that follows a URL string');
-});
-
-test('#323 S7 (round 2): comments and string CONTENTS stay silent — they cannot fork behaviour', () => {
-  const engines = ['gentle-ai', 'plain'];
-  assert.deepEqual(findEngineMentions('// explain: plaintext output, in plain terms', engines), []);
-  assert.deepEqual(findEngineMentions('/* the plain truth about gentleAi */', engines), []);
-  assert.deepEqual(findEngineMentions('const msg = "plain text output";', engines), [],
-    'a substring inside a string is not the exact quoted token and not code');
-  assert.deepEqual(findEngineMentions('explain(); const plaintiff = 1;', engines), [],
-    'word boundaries hold — lookalike identifiers stay silent');
-});
-
-test('#323 S7: gate surfaces carry ZERO engine string literals — verification stays neutral', () => {
+test('#323 S7: gate surfaces carry ZERO engine names and ZERO harness imports — verification stays neutral', () => {
   const files = [...GATE_ROOTS.flatMap(mjsFilesUnder), ...GATE_FILES.map((f) => join(REPO, f))];
   assert.ok(files.length > 20, `the scan must actually see the gate tree (saw ${files.length} files)`);
   const offenders = [];
@@ -126,14 +116,17 @@ test('#323 S7: gate surfaces carry ZERO engine string literals — verification 
     const rel = relative(REPO, file);
     if (ALLOWLIST.has(rel)) continue;
     const text = readFileSync(file, 'utf8');
-    for (const { engine, form } of findEngineMentions(text, SDD_ENGINES)) {
+    for (const { engine, form } of engineLiterals(text, SDD_ENGINES)) {
       offenders.push(`${rel} names '${engine}' (${form})`);
+    }
+    for (const spec of harnessImports(text, dirname(rel))) {
+      offenders.push(`${rel} imports the engines' home ('${spec}')`);
     }
   }
   assert.deepEqual(offenders, [],
-    `a gate that can name an engine can fork per engine — ADR-0019 Amendment 1 condition 2. ` +
-    `If a specific site genuinely must, add a reviewed ALLOWLIST entry with a one-line reason; ` +
-    `never widen the scan to stop seeing it.`);
+    `a gate that can name an engine or reach its module can fork per engine — ADR-0019 Amendment 1 ` +
+    `condition 2. If a specific site genuinely must, add a reviewed ALLOWLIST entry with a one-line ` +
+    `reason; never widen the scan to stop seeing it.`);
 });
 
 test('#323 S7: the token list is the PLATFORM\'s, not a copy — a new engine joins this guard automatically', () => {
