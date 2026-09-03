@@ -16,17 +16,17 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { planSplit, runSplit } from './split-records.mjs';
 import { buildRecord, serializeRecord } from './format.mjs';
+import { testTmp } from '../../lib/test-tmp.mjs';
 
 function tmpRecordsDir() {
-  const root = mkdtempSync(join(tmpdir(), 'brain-split-records-'));
+  const root = testTmp('brain-split-records-');
   const recordsDir = join(root, 'records');
   mkdirSync(recordsDir, { recursive: true });
   return recordsDir;
@@ -216,7 +216,7 @@ test('a per-record file already on disk is never overwritten — first-wins acro
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
 
 function initRepo() {
-  const root = mkdtempSync(join(tmpdir(), 'brain-split-merge-'));
+  const root = testTmp('brain-split-merge-');
   git(root, 'init', '-q', '-b', 'main', '.');
   git(root, 'config', 'user.email', 'test@example.com');
   git(root, 'config', 'user.name', 'test');

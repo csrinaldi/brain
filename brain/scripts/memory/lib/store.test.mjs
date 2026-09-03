@@ -4,15 +4,15 @@
 // RED: these imports fail until store.mjs is created (task C1a.2).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { buildRecord } from './format.mjs';
 import { appendRecord, rebuildIndex, readRecordIds, readRecordObservations } from './store.mjs';
+import { testTmp } from '../../lib/test-tmp.mjs';
 
 function tmpMemoryDir() {
-  const root = mkdtempSync(join(tmpdir(), 'brain-memory-store-'));
+  const root = testTmp('brain-memory-store-');
   return { root, recordsDir: join(root, 'records'), indexPath: join(root, 'index.jsonl') };
 }
 

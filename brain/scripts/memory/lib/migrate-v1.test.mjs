@@ -5,12 +5,13 @@
 // RED: these imports fail until migrate-v1.mjs is created.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { collectChunkObservations, buildMigrationReport, runMigration, rollbackMigration } from './migrate-v1.mjs';
+import { testTmp } from '../../lib/test-tmp.mjs';
 
 const baseObs = (overrides = {}) => ({
   id: 1,
@@ -33,7 +34,7 @@ const baseObs = (overrides = {}) => ({
 // ── collectChunkObservations ─────────────────────────────────────────────────
 
 function tmpChunksDir() {
-  const root = mkdtempSync(join(tmpdir(), 'brain-migrate-v1-'));
+  const root = testTmp('brain-migrate-v1-');
   const chunksDir = join(root, 'chunks');
   mkdirSync(chunksDir, { recursive: true });
   return chunksDir;
@@ -223,7 +224,7 @@ test('buildMigrationReport: one observation with a malformed created_at is rejec
 // ── runMigration (real-run CODE, fixtures only — never the live .memory/) ───
 
 function tmpMigrationFixture() {
-  const root = mkdtempSync(join(tmpdir(), 'brain-migrate-v1-run-'));
+  const root = testTmp('brain-migrate-v1-run-');
   const chunksDir = join(root, 'chunks');
   const recordsDir = join(root, 'records');
   const legacyDir = join(root, 'legacy');

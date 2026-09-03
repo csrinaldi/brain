@@ -29,10 +29,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync, chmodSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, readdirSync, writeFileSync, chmodSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { testTmp } from '../lib/test-tmp.mjs';
 
 const HOOKS_DIR = fileURLToPath(new URL('.', import.meta.url));
 
@@ -49,7 +49,7 @@ const ERR_MARKER = 'MOCK-STDERR-SOMETHING-A-HUMAN-NEEDS';
  * stderr would pass against a hook that discarded stdout too.
  */
 function mockBin({ repoRoot = '/fake/repo' } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'brain-633-bin-'));
+  const dir = testTmp('brain-633-bin-');
 
   writeFileSync(
     join(dir, 'node'),

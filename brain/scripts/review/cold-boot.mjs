@@ -44,7 +44,22 @@ function defaultFetchPr({ getVcs: getVcsFn = getVcs } = {}) {
 // contain (Law 2 at the plumbing layer). Full-history-both is the obvious
 // simple choice at this repo's size (reviewer ruling #291); revisit only if
 // fetch cost bites on CI shallow clones.
-export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir() } = {}) {
+// ONE exit listener per process, however many shas get reviewed (#843 round 1,
+// editorial): a per-checkout `process.on('exit', ...)` would cross Node's
+// MaxListenersExceededWarning threshold on the 11th review in a single process.
+const exitCleanups = [];
+function defaultRegisterCleanup(fn) {
+  if (exitCleanups.length === 0) {
+    process.on('exit', () => {
+      for (const f of exitCleanups) {
+        try { f(); } catch { /* best effort — teardown never masks the exit */ }
+      }
+    });
+  }
+  exitCleanups.push(fn);
+}
+
+export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir(), _registerCleanup = defaultRegisterCleanup } = {}) {
   const doFetch = fetch ?? (sha => execFileSync('git', ['fetch', 'origin', sha], { cwd, encoding: 'utf8' }));
   return ({ sha, baseSha } = {}) => {
     if (baseSha) doFetch(baseSha);
@@ -69,6 +84,22 @@ export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir(
     try { execFileSync('git', ['worktree', 'prune'], { cwd, encoding: 'utf8' }); } catch { /* best effort */ }
     if (existsSync(worktreePath)) rmSync(worktreePath, { recursive: true, force: true });
     execFileSync('git', ['worktree', 'add', '--detach', worktreePath, sha], { cwd, encoding: 'utf8' });
+    // #842: the checkout dies with the review process. The clear-before-add
+    // above keeps reruns idempotent, but clearing only on the NEXT run left
+    // one full checkout per reviewed sha behind forever — 64 dirs, 464M,
+    // measured the day /tmp became the test failure.
+    _registerCleanup(() => {
+      try {
+        execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' });
+      } catch {
+        // The remove failed — a checkout someone rm'd by hand, a path git no
+        // longer recognizes. The dir AND the .git/worktrees/ registration must
+        // both still die (#843 round 2): a bare rm alone leaves the operator's
+        // real repo holding a stale entry.
+        try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* best effort */ }
+        try { execFileSync('git', ['worktree', 'prune'], { cwd, encoding: 'utf8' }); } catch { /* best effort */ }
+      }
+    });
     return { detached: true, sha, baseSha: baseSha ?? null, worktreePath };
   };
 }
