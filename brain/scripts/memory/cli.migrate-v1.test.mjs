@@ -10,11 +10,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
-import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { testTmp } from '../lib/test-tmp.mjs';
 
 const cliPath = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
 
@@ -37,7 +37,7 @@ const baseObs = (overrides = {}) => ({
 });
 
 function tmpFixtureRoot() {
-  const root = mkdtempSync(join(tmpdir(), 'brain-cli-migrate-v1-'));
+  const root = testTmp('brain-cli-migrate-v1-');
   const chunksDir = join(root, '.memory', 'chunks');
   mkdirSync(chunksDir, { recursive: true });
   return { root, chunksDir };

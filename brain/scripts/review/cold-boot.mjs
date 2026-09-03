@@ -44,7 +44,7 @@ function defaultFetchPr({ getVcs: getVcsFn = getVcs } = {}) {
 // contain (Law 2 at the plumbing layer). Full-history-both is the obvious
 // simple choice at this repo's size (reviewer ruling #291); revisit only if
 // fetch cost bites on CI shallow clones.
-export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir() } = {}) {
+export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir(), _registerCleanup = (fn) => process.on('exit', fn) } = {}) {
   const doFetch = fetch ?? (sha => execFileSync('git', ['fetch', 'origin', sha], { cwd, encoding: 'utf8' }));
   return ({ sha, baseSha } = {}) => {
     if (baseSha) doFetch(baseSha);
@@ -69,6 +69,14 @@ export function defaultCloneDetached({ cwd = process.cwd(), fetch, tmp = tmpdir(
     try { execFileSync('git', ['worktree', 'prune'], { cwd, encoding: 'utf8' }); } catch { /* best effort */ }
     if (existsSync(worktreePath)) rmSync(worktreePath, { recursive: true, force: true });
     execFileSync('git', ['worktree', 'add', '--detach', worktreePath, sha], { cwd, encoding: 'utf8' });
+    // #842: the checkout dies with the review process. The clear-before-add
+    // above keeps reruns idempotent, but clearing only on the NEXT run left
+    // one full checkout per reviewed sha behind forever — 64 dirs, 464M,
+    // measured the day /tmp became the test failure.
+    _registerCleanup(() => {
+      try { execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd, encoding: 'utf8' }); } catch { /* best effort */ }
+      try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* best effort */ }
+    });
     return { detached: true, sha, baseSha: baseSha ?? null, worktreePath };
   };
 }

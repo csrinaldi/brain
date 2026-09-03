@@ -7,13 +7,13 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { setSpawn } from './lib/exec.mjs';
 import { renderDecision } from '../review/lib/decision-block.mjs';
+import { testTmp } from '../lib/test-tmp.mjs';
 
 import {
   evaluateActor,
@@ -1178,7 +1178,7 @@ test('A3 TASK1 source-scan: defaultFetchIssue no longer contains execFileSync(\'
 // registered handle (task 7.3 is deferred — no reviewer bot handle exists yet).
 
 test('REQ-266-6 t1 (lock-3, issue #266): reviewer identity in governance.reviewActors (NOT governance.approvalActors) does not pass L5 via the allow-listed-automation branch when self-applying status:approved', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'brain-config-'));
+  const dir = testTmp('brain-config-');
   writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({
     governance: {
       approvalActors: [], // the reviewer must NEVER be registered here (design §3, R2)
@@ -1277,7 +1277,7 @@ test('#375: an actor in neither list still passes — the deny-set does not wide
 });
 
 test('#375: gatherActorCheckInputs sources denyActors from governance.reviewActors', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'brain-config-'));
+  const dir = testTmp('brain-config-');
   writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({
     governance: {
       approvalActors: ['release-bot'],
@@ -2246,7 +2246,7 @@ test('gatherActorCheckInputs: governance.agentActors is read and threaded (REQ-4
 // is the single outcome the no-migration rule exists to prevent. An injected-only
 // guarantee guards nothing (#510 paid for this lesson one ticket ago).
 test('gatherActorCheckInputs: the REAL reader returns [] for a config with no agentActors key (REQ-454-6, #454)', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'agent-actors-'));
+  const dir = testTmp('agent-actors-');
   writeFileSync(join(dir, 'brain.config.json'),
     JSON.stringify({ governance: { tier: 'lite', reviewActors: ['some-bot'] } }), 'utf8');
 

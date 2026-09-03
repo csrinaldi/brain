@@ -298,3 +298,28 @@ test('#408: annotation still defaults to introduced when no probe ran', async ()
   assert.equal(findings[0].evidence_class, 'deterministic');
   assert.deepEqual(conditions, []);
 });
+
+test('#842: when `git worktree remove` itself fails, the mkdtemp\'d dir still dies via _rm', () => {
+  const removed = [];
+  probeBase({
+    baseSha: 'b', gates: ['local-checks'], cwd: '/repo', tmp: '/tmp', _exists: () => true,
+    _mkdtemp: (p) => `${p}x`,
+    _exec: (file, args) => {
+      if (args.includes('remove')) throw new Error('fatal: not a working tree');
+      return '';
+    },
+    _rm: (p, opts) => removed.push({ p, opts }),
+  });
+  assert.deepEqual(removed, [{ p: '/tmp/brain-review-base-x', opts: { recursive: true, force: true } }],
+    'the belt runs when the worktree remove cannot — a crashed add must not become an orphan');
+});
+
+test('#842: the _rm belt is best-effort — its own failure never masks the probe result', () => {
+  const r = probeBase({
+    baseSha: 'b', gates: ['local-checks'], cwd: '/repo', tmp: '/tmp', _exists: () => true,
+    _mkdtemp: (p) => `${p}x`,
+    _exec: () => '',
+    _rm: () => { throw new Error('EBUSY'); },
+  });
+  assert.ok(r && Array.isArray(r.failed), 'the probe result survives a failed cleanup');
+});

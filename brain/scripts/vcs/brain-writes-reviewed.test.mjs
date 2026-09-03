@@ -8,12 +8,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { setSpawn } from './lib/exec.mjs';
+import { testTmp } from '../lib/test-tmp.mjs';
 
 import {
   evaluateBrainWritesReviewed,
@@ -729,7 +729,7 @@ test('A3 TASK2 source-scan: defaultFetchReviews no longer contains execFileSync(
 // that is the distinguishing assertion that a union would fail.
 
 test('governance.reviewActors (issue #266, R2): L6 default botAllowlist reader reads ONLY governance.reviewActors — an approvalActors-only identity is excluded (no key feeds two gates)', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'brain-config-'));
+  const dir = testTmp('brain-config-');
   writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({
     governance: {
       approvalActors: ['release-bot'],       // L5-only — must NOT leak into L6
@@ -770,7 +770,7 @@ test('governance.reviewActors (issue #266, R2): L6 default botAllowlist reader r
 // the human review.
 
 test('REQ-266-6 t2 (lock-3, issue #266): reviewer identity in governance.reviewActors is excluded from L6\'s human-approver count — an APPROVED review it authors does not satisfy brain-writes-reviewed', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'brain-config-'));
+  const dir = testTmp('brain-config-');
   writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({
     governance: { approvalActors: [], reviewActors: ['brain-reviewer[bot]'] },
   }));

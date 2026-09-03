@@ -666,3 +666,30 @@ test('#477: a thread of fully readable verdicts reports nothing unreadable — t
   assert.deepEqual(result.doctrine.unreadableVerdicts, [],
     'a false positive here would teach every reader to ignore the field inside a week');
 });
+
+test('#842: the detached review checkout dies with the process — the exit hook removes AND unregisters it', (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'brain-review-op-'));
+  const wtParent = mkdtempSync(join(tmpdir(), 'brain-review-wt-'));
+  t.after(() => {
+    try { git(repo, 'worktree', 'prune'); } catch { /* best effort */ }
+    removeTempTree(repo);
+    removeTempTree(wtParent);
+  });
+  git(repo, 'init', '-q');
+  git(repo, 'config', 'user.email', 't@t.t');
+  git(repo, 'config', 'user.name', 't');
+  writeFileSync(join(repo, 'f.txt'), 'hi');
+  git(repo, 'add', 'f.txt');
+  git(repo, 'commit', '-q', '-m', 'a');
+  const sha = git(repo, 'rev-parse', 'HEAD');
+
+  const hooks = [];
+  const clone = defaultCloneDetached({ cwd: repo, fetch: () => {}, tmp: wtParent, _registerCleanup: (fn) => hooks.push(fn) })({ sha });
+  assert.equal(hooks.length, 1, 'exactly one cleanup registered per checkout');
+  assert.ok(existsSync(clone.worktreePath), 'the checkout exists while the review runs');
+
+  hooks[0]();
+  assert.ok(!existsSync(clone.worktreePath), 'the checkout is gone at exit');
+  assert.ok(!git(repo, 'worktree', 'list').includes(clone.worktreePath), 'UNREGISTERED, not just deleted — a bare rm leaves a stale worktree entry');
+  assert.equal(git(repo, 'rev-parse', 'HEAD'), sha, 'the operator repo is untouched');
+});
