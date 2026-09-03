@@ -1833,6 +1833,7 @@
 {"id":"rec-c88cfc5d814e97fd","ts":"2026-07-13T00:21:52Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-c88cfc5d814e97fd.jsonl"}
 {"id":"rec-c8982e164eb76f5b","ts":"2026-07-25T21:52:09Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-c8982e164eb76f5b.jsonl"}
 {"id":"rec-c8e7449eacd89ff3","ts":"2026-07-10T00:10:36Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-c8e7449eacd89ff3.jsonl"}
+{"id":"rec-c8f802a07ef82938","ts":"2026-09-02T20:09:52Z","actor":"feat/issue-323-featsdd-m8-per-stage-sdd-engine-routing","type":"discovery","project":"brain","issue":834,"file":"2026-09-rec-c8f802a07ef82938.jsonl"}
 {"id":"rec-c9677a3e4d4838c9","ts":"2026-07-29T14:27:45Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-c9677a3e4d4838c9.jsonl"}
 {"id":"rec-c96a46113afe66b8","ts":"2026-07-14T23:43:17Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-c96a46113afe66b8.jsonl"}
 {"id":"rec-c96a475b95406f2d","ts":"2026-07-25T00:47:22Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-c96a475b95406f2d.jsonl"}

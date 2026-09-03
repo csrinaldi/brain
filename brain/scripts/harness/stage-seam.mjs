@@ -71,11 +71,18 @@ export const RUN_STAGE_OP = 'run-stage';
  * @param {{dispatch?: Function}} [deps]
  * @returns {(args: {stage: string, prompt: string, model?: string|null,
  *                   engine: string, cwd?: string, credentialEnv?: string[],
+ *                   routed?: object, changeId?: string,
  *                   forgeConfigDir?: string, timeoutMs?: number})
  *            => Promise<{ok: boolean, reason?: string}>}
  */
 export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
-  return async function runStage({ engine, stage, prompt, model = null, cwd, credentialEnv, forgeConfigDir, timeoutMs } = {}) {
+  // #836 (S4, cold review round 1): `routed` and `changeId` ride through.
+  // This seam's own header records the lesson — it once destructured five
+  // names, dropped `timeoutMs` silently, and an operator's setting died here.
+  // The same defect, relearned with S4's evidence payload: the backends demand
+  // bound evidence, and a seam that swallows it turns every lifecycle dispatch
+  // into a guard refusal about a field the caller DID pass.
+  return async function runStage({ engine, stage, prompt, model = null, cwd, credentialEnv, forgeConfigDir, timeoutMs, routed, changeId } = {}) {
     if (typeof engine !== 'string' || engine.trim() === '') {
       return {
         ok: false,
@@ -89,7 +96,7 @@ export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
       // list to walk: the only name that can reach `dispatch` is the one the
       // operator wrote. That is what makes "does not fall back" a property of
       // the code's shape rather than a promise in a comment.
-      result = await dispatch(engine, RUN_STAGE_OP, [{ stage, prompt, model, cwd, credentialEnv, forgeConfigDir, timeoutMs }]);
+      result = await dispatch(engine, RUN_STAGE_OP, [{ stage, prompt, model, cwd, credentialEnv, forgeConfigDir, timeoutMs, routed, changeId }]);
     } catch (err) {
       // EVERY throw is a refusal, not just the two `dispatch` spells out
       // (backend not found; backend does not implement the op). Matching on

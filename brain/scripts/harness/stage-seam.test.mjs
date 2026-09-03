@@ -201,6 +201,9 @@ test('the arguments reach the backend as ONE options object, not spread position
     // field the seam knows and never threads. `CALL` sets none, so it arrives
     // undefined and the backend's no-shadow branch holds.
     forgeConfigDir: undefined,
+    // #836: S4's evidence rides the same object — absent here because CALL names neither.
+    routed: undefined,
+    changeId: undefined,
   });
 });
 

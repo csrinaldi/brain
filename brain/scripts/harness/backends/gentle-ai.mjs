@@ -47,6 +47,7 @@ import { fileURLToPath } from 'node:url';
 
 import { t } from '../../i18n/t.mjs';
 import { GENTLE_AI_ROLES, derivedRole } from './gentle-ai.roles.mjs';
+import { artifactPaths, LIFECYCLE_STAGES } from '../../lib/sdd-layout.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -316,4 +317,101 @@ export async function init({
     console.log(`  harness: ${await t('bootstrap.sdd.noProjectAdrs')}`);
     console.log(`    ${await t('bootstrap.sdd.noProjectAdrsHint')}`);
   }
+}
+
+/**
+ * The S2 evidence guard, shared verbatim by both engine wirings (#323 S4 D3):
+ * a lifecycle payload without BOUND routed evidence refuses at the engine
+ * layer too — the same demand the transport guard makes, one layer earlier.
+ */
+function assertBoundEvidence(stage, routed, changeId) {
+  // Round 5: the two INPUTS themselves. An unnamed stage is a caller that lost
+  // its argument (stage-engine's own history, mirrored at last), and a
+  // lifecycle run without a changeId would target 'openspec/changes/undefined/…'
+  // — silent wrong behavior, the inverse of a refusal.
+  if (typeof stage !== 'string' || stage.trim() === '') {
+    throw new Error(`run-stage: ${JSON.stringify(stage)} is not a stage name — a caller that lost its argument, refused before it targets anything.`);
+  }
+  if (LIFECYCLE_STAGES.includes(stage) && (typeof changeId !== 'string' || changeId.trim() === '')) {
+    throw new Error(`run-stage: lifecycle stage "${stage}" needs a changeId — without one the target would be a path literally containing "undefined".`);
+  }
+  // Round 2 of #836's cold review: the guard mirrors assertRoutableStage's
+  // OPTION-A split exactly — only LIFECYCLE stages owe evidence; a custom
+  // stage (cold-review, the flagship) arrives evidence-free by the very rule
+  // this change shipped, and demanding it here produced a FALSE refusal on a
+  // reachable config. Reproduced before fixing.
+  if (!LIFECYCLE_STAGES.includes(stage)) {
+    if (routed && routed.routed === true && routed.stage !== stage) {
+      throw new Error(
+        `run-stage: routed evidence was computed for "${routed.stage}" and handed to "${stage}" — bound, never bearer.`
+      );
+    }
+    return;
+  }
+  if (!(routed && routed.routed === true)) {
+    throw new Error(
+      `run-stage: lifecycle stage "${stage}" arrived without routed evidence — call ` +
+      'assertRoutedStage({config, stage}) and hand its result through (#323 S2, condition 4).'
+    );
+  }
+  if (routed.stage !== stage) {
+    throw new Error(
+      `run-stage: routed evidence was computed for "${routed.stage}" and handed to "${stage}" — bound, never bearer.`
+    );
+  }
+}
+
+/**
+ * gentle-ai's run-stage (#323 S4 D2): the framework runs ON the platform,
+ * explicitly. The prompt is composed FROM the port's recorded instructions —
+ * `routed.role.instructions`, never the installed files (#814's rule) — and
+ * the spawn is DELEGATED to the claude backend as transport: a
+ * sibling-backend import, stated; the dispatcher stays unimported
+ * (platform.mjs's rule intact). The transport's own {ok, reason} rides
+ * through untouched — the seam's doctrine one layer down.
+ *
+ * @param {{stage: string, routed?: object, changeId?: string, model?: string|null,
+ *          _transport?: (payload: object) => Promise<object>}} payload — every
+ *          field not named here (cwd, timeoutMs, credentialEnv, forgeConfigDir,
+ *          and whatever arrives next) rides ...rest to the transport untouched.
+ * @returns {Promise<object>} the transport's answer, verbatim
+ */
+export async function runStage({ stage, prompt: callerPrompt, routed, changeId, model = null, _transport, ...rest } = {}) {
+  assertBoundEvidence(stage, routed, changeId);
+  const target = artifactPaths(changeId)[stage];
+  // Round 2: S2's custom-stage evidence carries NO role (stage-engine returns
+  // {routed, stage, routing} there) — reading role.instructions crashed with a
+  // TypeError, which is not a refusal. A custom stage composes from THIS
+  // engine's own declaration (its recorded data or derivedRole — module-local,
+  // the same #814 rule: never installed files). A lifecycle stage keeps the
+  // port-resolved role its evidence guarantees.
+  const role = routed?.role ?? (GENTLE_AI_ROLES[stage] ? { stage, ...GENTLE_AI_ROLES[stage] } : derivedRole(stage));
+  // Round 8, the deepest of the family: the caller's prompt used to land in
+  // ...rest and the composed one OVERWROTE it by object-literal precedence —
+  // the assembled cold-review prompt (the only carrier of prNumber, the diff
+  // range and the artifact path) silently discarded on every routed run. The
+  // caller's prompt WINS; composition from the port is the fallback for runs
+  // that arrive without one.
+  const prompt = callerPrompt ?? [
+    role.instructions,
+    '',
+    // Round 7: the LAST unguarded interpolation — its two siblings (stage,
+    // target) were guarded in rounds 5-6; this one hid three lines above.
+    `You are producing the "${stage}" artefact${changeId ? ` for change "${changeId}"` : ''}.`,
+    target
+      ? `Write exactly one file: ${target} — the layout's single accessor names it; do not relocate or rename it.`
+      : `The "${stage}" stage writes to its own declared root — follow its chain's conventions; it is not one of the four lifecycle artefacts.`,
+    'Follow the repository\'s existing artefact conventions; run nothing destructive.',
+  ].join('\n');
+
+  const transport = _transport ?? (async (payload) => {
+    const { runStage: claudeRunStage } = await import('./claude.mjs');
+    return claudeRunStage(payload);
+  });
+  // Round 4 of #836's cold review killed the destructure-and-drop CLASS here:
+  // credentialEnv and forgeConfigDir were the fifth dropped-field instance —
+  // and the one that spawned the child UNSCRUBBED while the forge-reach probe
+  // verified the shadow (ADR-0033). Everything this wrapper does not consume
+  // rides ...rest to the transport, so a sixth field cannot be dropped.
+  return transport({ ...rest, stage, prompt, model: model ?? routed?.routing?.model ?? null, routed });
 }

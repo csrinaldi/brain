@@ -1,3 +1,4 @@
+import { artifactPaths, LIFECYCLE_STAGES } from '../../lib/sdd-layout.mjs';
 // plain.mjs — the `plain` SDD_HARNESS backend: a real, dispatchable second
 // inhabitant of `init` (issue #250, B0, REQ-B0-5). No `cli.mjs` change is
 // required — the dispatcher is already backend-agnostic (design §4). Emits
@@ -59,4 +60,77 @@ export function declareRoles(stages) {
     // prompt to declare. The same reasoning as `model_tier: null` above.
     stage, agent: 'human', model_tier: null, chooses_model: false, instructions: null,
   }]));
+}
+
+/**
+ * The S2 evidence guard, shared verbatim by both engine wirings (#323 S4 D3):
+ * a lifecycle payload without BOUND routed evidence refuses at the engine
+ * layer too — the same demand the transport guard makes, one layer earlier.
+ */
+function assertBoundEvidence(stage, routed, changeId) {
+  // Round 5: the two INPUTS themselves. An unnamed stage is a caller that lost
+  // its argument (stage-engine's own history, mirrored at last), and a
+  // lifecycle run without a changeId would target 'openspec/changes/undefined/…'
+  // — silent wrong behavior, the inverse of a refusal.
+  if (typeof stage !== 'string' || stage.trim() === '') {
+    throw new Error(`run-stage: ${JSON.stringify(stage)} is not a stage name — a caller that lost its argument, refused before it targets anything.`);
+  }
+  if (LIFECYCLE_STAGES.includes(stage) && (typeof changeId !== 'string' || changeId.trim() === '')) {
+    throw new Error(`run-stage: lifecycle stage "${stage}" needs a changeId — without one the target would be a path literally containing "undefined".`);
+  }
+  // Round 2 of #836's cold review: the guard mirrors assertRoutableStage's
+  // OPTION-A split exactly — only LIFECYCLE stages owe evidence; a custom
+  // stage (cold-review, the flagship) arrives evidence-free by the very rule
+  // this change shipped, and demanding it here produced a FALSE refusal on a
+  // reachable config. Reproduced before fixing.
+  if (!LIFECYCLE_STAGES.includes(stage)) {
+    if (routed && routed.routed === true && routed.stage !== stage) {
+      throw new Error(
+        `run-stage: routed evidence was computed for "${routed.stage}" and handed to "${stage}" — bound, never bearer.`
+      );
+    }
+    return;
+  }
+  if (!(routed && routed.routed === true)) {
+    throw new Error(
+      `run-stage: lifecycle stage "${stage}" arrived without routed evidence — call ` +
+      'assertRoutedStage({config, stage}) and hand its result through (#323 S2, condition 4).'
+    );
+  }
+  if (routed.stage !== stage) {
+    throw new Error(
+      `run-stage: routed evidence was computed for "${routed.stage}" and handed to "${stage}" — bound, never bearer.`
+    );
+  }
+}
+
+/**
+ * plain's run-stage (#323 S4 D1): the MANUAL HANDOFF. The human is the
+ * runtime — `AGENT_RUNTIME = null` above is a fact, and this wiring says it
+ * instead of simulating around it. `{ok: true, manual: true}`: the seam stops
+ * refusing an engine the operator legitimately named, and what they get is
+ * the resolved role, the single accessor's target, and the steps.
+ *
+ * @param {{stage: string, routed: object, changeId: string}} payload
+ * @returns {Promise<{ok: true, manual: true, target: string, steps: string[]}>}
+ */
+export async function runStage({ stage, routed, changeId } = {}) {
+  assertBoundEvidence(stage, routed, changeId);
+  // Round 6: the accessor only knows the four lifecycle artefacts — for a
+  // custom stage `target` is null (checked), never an "undefined" handed to a
+  // human inside a step. gentle-ai got this ternary in round 2; the sibling
+  // kept the accident four rounds longer.
+  const target = artifactPaths(changeId)[stage] ?? null;
+  return {
+    ok: true,
+    manual: true,
+    target,
+    steps: [
+      `Stage "${stage}" is routed to plain: a human executes it (model_tier: null is a checked value).`,
+      target
+        ? `Write the artefact at ${target} — the single accessor's answer; no engine may relocate it.`
+        : `The "${stage}" stage writes to its own declared root — follow its chain's conventions; it is not one of the four lifecycle artefacts.`,
+      `Run npm run brain:repo:check before committing, as every producer does.`,
+    ],
+  };
 }
