@@ -973,3 +973,14 @@ test('#810 r3: a LIFECYCLE stage may not rename its own artefact — the four\'s
   } } });
   assert.equal(ok.files.proposal, 'proposal.md', 'a bare lifecycle entry keeps its canonical file');
 });
+
+test('#810 r4: two declared stages may not share one artefact file — one file, one demand', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: {
+      proposal: {}, spec: {}, design: {}, tasks: {},
+      research: { artefact: 'shared.md' }, notes: { artefact: 'shared.md' },
+    } } }),
+    /shared|duplicate|already declared/i,
+    'a shared file lets one write satisfy two separately-declared demands — the gate walk collapses',
+  );
+});

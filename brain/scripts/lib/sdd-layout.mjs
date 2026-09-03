@@ -217,6 +217,26 @@ export function resolveStageSet(config) {
     }
   }
 
+  // Duplicate-artefact collision (#810 round 4) — two DECLARED stages naming
+  // one file. The fixed-vocabulary loop above cannot see it (it compares
+  // against ARTEFACT_FILE only), and downstream one exists() would satisfy
+  // both demands at once — the walk collapses two declarations into one file.
+  const declaredFiles = new Map();
+  for (const [name, entry] of Object.entries(declared)) {
+    const artefact = entry?.artefact;
+    if (!artefact) continue;
+    const owner = declaredFiles.get(artefact);
+    if (owner !== undefined) {
+      throw new Error(
+        `sdd-layout: sdd.stages["${name}"].artefact "${artefact}" is already declared by stage ` +
+        `"${owner}" — two stages may not share one file. One artefact is one demand; a shared file ` +
+        'would let a single write satisfy both, and the phase-order walk could no longer tell the ' +
+        'stages apart.',
+      );
+    }
+    declaredFiles.set(artefact, name);
+  }
+
   // D3 — per-call merge `{...ARTEFACT_FILE, ...declared artefacts}`, never a
   // mutation of the frozen default map. A declared stage's `artefact` is
   // optional: absent means "look it up in ARTEFACT_FILE", which is what the
