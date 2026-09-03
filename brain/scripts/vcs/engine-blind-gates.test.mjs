@@ -28,41 +28,45 @@ import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SDD_ENGINES } from '../harness/platform.mjs';
+import { VERIFICATION_SURFACE } from './governance-tiers.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = join(__dirname, '..', '..', '..');
 
-// The gate surfaces: the CI gates' implementations and the shared checkers
-// they call. Harness/roles/review are PRODUCER territory — engines are their
-// subject matter and they are deliberately out of scope here.
-const GATE_ROOTS = [
-  'brain/scripts/vcs',
-  'brain/scripts/governance',
-];
-// Round 5's blocker: a hand-remembered list missed brain-audit.mjs, CI-wired
-// as a gate in two workflows. The entry points are DERIVED from the workflows
-// — the source of truth for "what is a gate" — so a future gate joins the
-// scan the moment it joins a workflow. check-refs.mjs stays pinned by hand:
-// it is reached through npm-script indirection the yml regex cannot see.
-const GATE_FILES = ['brain/scripts/check-refs.mjs'];
-
-export function workflowGateScripts({ repo = REPO } = {}) {
-  const dir = join(repo, '.github', 'workflows');
-  const out = new Set();
-  for (const name of readdirSync(dir)) {
-    if (!name.endsWith('.yml') && !name.endsWith('.yaml')) continue;
-    const text = readFileSync(join(dir, name), 'utf8');
-    for (const m of text.matchAll(/brain\/scripts\/[a-z0-9/._-]+\.mjs/g)) {
-      if (!m[0].endsWith('.test.mjs')) out.add(m[0]);
-    }
-  }
-  return [...out].sort();
-}
+// The scanned surface is BRAIN'S OWN DECLARATION (#847 review, maintainer's
+// ruling): governance-tiers.mjs's VERIFICATION_SURFACE — the gates' vocabulary
+// owner — says what a gate is, platform-neutrally. A forge's CI config is one
+// adapter's WIRING of that surface; the drift test below checks the forge
+// against the declaration, never the reverse. Round 5's hand-remembered list
+// and round 6's read-the-forge derivation were both the same mistake at
+// different depths: resolving doctrine from something other than doctrine.
+const GATE_ROOTS = VERIFICATION_SURFACE.dirs;
+const GATE_FILES = VERIFICATION_SURFACE.scripts;
 
 // A file may buy its way in ONLY with a reviewed one-line reason.
 const ALLOWLIST = new Map([
   // (empty — measured zero at #323 close; keep it that way)
 ]);
+
+/** Pure: brain/scripts/*.mjs references in a forge config's EFFECTIVE lines —
+ * YAML comments stripped first (round 6: a commented path is documentation,
+ * not an invocation; bootstrap-smoke.yml proves the case). */
+export function forgeScriptRefs(yamlText) {
+  const out = new Set();
+  const effective = yamlText.split('\n')
+    .map((line) => line.replace(/(^|\s)#.*$/, ''))
+    .join('\n');
+  for (const m of effective.matchAll(/brain\/scripts\/[a-z0-9/._-]+\.mjs/g)) {
+    if (!m[0].endsWith('.test.mjs')) out.add(m[0]);
+  }
+  return [...out].sort();
+}
+
+/** Pure: is this repo-relative path inside the declared surface? */
+export function inSurface(rel) {
+  if (GATE_FILES.includes(rel)) return true;
+  return GATE_ROOTS.some((root) => rel === root || rel.startsWith(root + sep));
+}
 
 /** Pure: every quoted engine-name literal in RAW text. */
 export function engineLiterals(text, engines) {
@@ -132,19 +136,33 @@ test('#323 S7: the two pure checks catch the binding roads — and only the bind
     'caught not here but at the binding: `plain` must be imported (module road) or defined from a literal (name road)');
 });
 
-test('#323 S7 (round 5): the gate list is DERIVED from the workflows — brain-audit is in because CI says so', () => {
-  const derived = workflowGateScripts();
-  assert.ok(derived.includes('brain/scripts/brain-audit.mjs'),
-    'the postmerge and release audits are gates the hand-written list forgot — the derivation cannot forget');
-  assert.ok(derived.length >= 5, `the workflows wire a real gate population (saw ${derived.length})`);
-  assert.ok(derived.every((f) => !f.endsWith('.test.mjs')));
+test('#323 S7 (round 6 + maintainer): the forge wiring is CHECKED AGAINST the declaration — never the authority', () => {
+  // Every script a forge config actually references must live inside brain's
+  // own declared surface. A new gate wired in CI without joining
+  // VERIFICATION_SURFACE fails HERE — the drift is caught at the boundary,
+  // and the fix is the declaration, not this test.
+  const wfDir = join(REPO, '.github', 'workflows');
+  const outside = [];
+  for (const name of readdirSync(wfDir)) {
+    if (!name.endsWith('.yml') && !name.endsWith('.yaml')) continue;
+    for (const ref of forgeScriptRefs(readFileSync(join(wfDir, name), 'utf8'))) {
+      if (!inSurface(ref)) outside.push(`${name} invokes ${ref}`);
+    }
+  }
+  assert.deepEqual(outside, [],
+    'a forge config invokes a script outside VERIFICATION_SURFACE — declare it in governance-tiers.mjs (the authority), never here');
+});
+
+test('#323 S7 (round 6): a commented path in a forge config is documentation, not an invocation', () => {
+  const yaml = 'on: push\n# bootstrap.sh runs brain/scripts/lib/brain-config.mjs ensure, which imports things\njobs:\n  x:\n    steps:\n      - run: node brain/scripts/brain-audit.mjs   # the audit gate\n';
+  assert.deepEqual(forgeScriptRefs(yaml), ['brain/scripts/brain-audit.mjs'],
+    'the comment-only mention stays out; the run-line reference stays in');
 });
 
 test('#323 S7: gate surfaces carry ZERO engine names and ZERO harness imports — verification stays neutral', () => {
   const files = [...new Set([
     ...GATE_ROOTS.flatMap(mjsFilesUnder),
     ...GATE_FILES.map((f) => join(REPO, f)),
-    ...workflowGateScripts().map((f) => join(REPO, f)),
   ])];
   assert.ok(files.length > 20, `the scan must actually see the gate tree (saw ${files.length} files)`);
   const offenders = [];

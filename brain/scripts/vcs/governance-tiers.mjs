@@ -109,6 +109,27 @@ const PENDING_PROMOTION = Object.freeze([]);
  *
  * @type {Record<string, Record<'lite'|'standard'|'regulated', {policy: 'required'|'detection', evidence: string}>>}
  */
+/**
+ * The VERIFICATION SURFACE — every dir and entry script whose code judges a
+ * change (#323 S7). Declared HERE, in the gates' own vocabulary owner, and
+ * nowhere else: "what is a gate" is brain's declaration, platform-neutral.
+ * A forge's CI config (.github/workflows, .gitlab-ci.yml) is an ADAPTER's
+ * wiring of this surface — it is checked AGAINST this declaration for drift
+ * (engine-blind-gates.test.mjs), never read as the authority. That ruling is
+ * the maintainer's, from #847's review: a guard that resolves "what is a
+ * gate" from one forge's config directory has coupled doctrine to an
+ * implementation detail.
+ * Consumed by engine-blind-gates.test.mjs (ADR-0019 Amendment 1 condition 2:
+ * verification stays neutral — no gate names an engine or reaches its home).
+ */
+export const VERIFICATION_SURFACE = Object.freeze({
+  dirs: Object.freeze(['brain/scripts/vcs', 'brain/scripts/governance']),
+  scripts: Object.freeze([
+    'brain/scripts/check-refs.mjs',   // local-checks, reached via npm-script indirection
+    'brain/scripts/brain-audit.mjs',  // the postmerge/release audit — a gate that runs after merge
+  ]),
+});
+
 export const GATE_MATRIX = Object.freeze({
   'issue-link': Object.freeze({
     lite: Object.freeze({ policy: 'required', evidence: 'approved-label' }),

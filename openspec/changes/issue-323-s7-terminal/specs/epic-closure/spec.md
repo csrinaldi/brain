@@ -11,11 +11,14 @@ capability: epic-closure
 Every gate surface carries zero engine-name string literals (raw text, any
 quote) and zero imports whose specifier resolves into the engines' home
 (`brain/scripts/harness/**`, path-boundary not prefix) — static, dynamic, or
-re-export. The surface is `brain/scripts/vcs/**` + `brain/scripts/governance/**`
-+ every script the CI workflows themselves invoke (DERIVED from
-`.github/workflows/*.yml`, never hand-remembered — round 5's blocker was a
-remembered list missing `brain-audit.mjs`), plus `check-refs.mjs` pinned for
-its npm-script indirection. These are the
+re-export. The surface is BRAIN'S OWN DECLARATION —
+`VERIFICATION_SURFACE` in `governance-tiers.mjs`, the gates' vocabulary
+owner: dirs (`vcs/**`, `governance/**`) plus entry scripts (`check-refs.mjs`,
+`brain-audit.mjs`). The maintainer's ruling on #847: "what is a gate" is
+never resolved from a forge's CI config — that is one adapter's wiring, and
+it is checked AGAINST the declaration (a drift test on effective, comment-
+stripped lines), never read as the authority. Round 5's remembered list and
+round 6's read-the-forge derivation were the same mistake at two depths. These are the
 only two binding roads a WORKING engine-conditional has: a bare identifier
 bound to neither is a ReferenceError, not a fork (rounds 1–4 retired a
 strip-then-scan lexer that lost this arms race three times: URLs in strings,
