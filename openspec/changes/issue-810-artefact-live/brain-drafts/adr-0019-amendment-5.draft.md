@@ -36,6 +36,10 @@ conditions. See Amendment 5 for what each condition maps to and what remains wit
 
 ## Amendment 5 — the declared artefact joins the contract (issue #810)
 
+**Signed**: DD/MM/YYYY — <Name>
+
+### What changed
+
 Amendment 1 withheld one act: a stage whose artefact the shared readers must
 find. #456 slice A built the declaration (`sdd.stages`, resolved by
 `resolveStageSet` with three refusals and a collision guard) and shipped the
