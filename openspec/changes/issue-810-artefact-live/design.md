@@ -34,11 +34,19 @@ every walked name; `ARTEFACT_FIELD` lookups fall back to `present[name]` for
 names outside the fixed map. Legacy flags stay — every existing test and
 consumer reads them unchanged.
 
-## D4 — scaffold reads the same resolver
+## D4 — scaffold reads the same resolver, NOT the same config reader
 
-`new-change.mjs` imports `resolveStageSet` + the config reader the gates use.
-Custom artefacts get one generic stub template (front matter: issue, stage;
-one heading). The four keep their existing template bytes — zero-config runs
+`new-change.mjs` imports `resolveStageSet` and reads `brain.config.json`
+directly (inline `readFileSync` + `JSON.parse`, degrade to `{}`), NOT via
+`brain-config.mjs`'s `loadBrainConfig`: the script's test fixture copies it
+together with `sdd-layout.mjs` ALONE, and importing the shared reader drags
+brain-config → repo + installer + config-migrations into a fixture that
+promises none of them — the exact #555 module-drag trap governance-tiers.mjs
+documents. Accepted tradeoff (round-1 editorial): this is a third
+read/parse/degrade copy in the tree; it stays because the drag is worse than
+the copy, and the degrade contract is pinned by a test on each side. Custom
+artefacts get one generic stub template (front matter: issue, stage; one
+heading). The four keep their existing template bytes — zero-config runs
 produce byte-identical output (S6-R1 scenario 1 pins it).
 
 ## D5 — archive: pin, don't change
