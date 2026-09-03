@@ -247,6 +247,23 @@ export function resolveStageSet(config) {
     }
   }
 
+  // Operational-name collision (#810 confirmation round) — the fixed-file loop
+  // above guards ARTEFACT_FILE only, and resume.md lives outside it: a
+  // machine-written convention whose mere EXISTENCE feature-resolution reads
+  // as "actively worked", and whose content engram merges against
+  // resume-schema's required fields. A scaffolded stub satisfies neither.
+  // Same class as rounds 2 and 4, against the operational namespace.
+  for (const [name, entry] of Object.entries(declared)) {
+    const artefact = entry?.artefact;
+    if (artefact && OPERATIONAL_ARTIFACTS.includes(artefact)) {
+      throw new Error(
+        `sdd-layout: sdd.stages["${name}"].artefact "${artefact}" collides with an OPERATIONAL ` +
+        'artifact — machine-written, never a gate condition, and read by its own consumers ' +
+        '(feature-resolution, engram checkpoints). A declared stage may not impersonate it.',
+      );
+    }
+  }
+
   // Duplicate-artefact collision (#810 round 4) — two DECLARED stages naming
   // one file. The fixed-vocabulary loop above cannot see it (it compares
   // against ARTEFACT_FILE only), and downstream one exists() would satisfy

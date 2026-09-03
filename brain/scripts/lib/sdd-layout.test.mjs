@@ -1008,3 +1008,13 @@ test('#810 r7: a declared stage NAME is a plain kebab identifier — hostile key
     );
   }
 });
+
+test('#810 r8: a declared artefact may not take an OPERATIONAL name — resume.md refused', () => {
+  assert.throws(
+    () => resolveStageSet({ sdd: { stages: {
+      proposal: {}, spec: {}, design: {}, tasks: {}, notes: { artefact: 'resume.md' },
+    } } }),
+    /operational|machine-written/i,
+    'resume.md is a machine-written convention: feature-resolution reads its EXISTENCE and engram merges it against a schema a scaffolded stub cannot satisfy',
+  );
+});
