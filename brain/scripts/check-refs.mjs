@@ -16,10 +16,10 @@
 
 import { execSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { CHANGES_ROOT, missingRequiredArtifacts, isGrandfathered } from './lib/sdd-layout.mjs';
+import { CHANGES_ROOT, missingRequiredArtifacts, isGrandfathered, parseSliceScopes } from './lib/sdd-layout.mjs';
 import { resolveTier, requiredArtifactsFor } from './vcs/governance-tiers.mjs';
 
 const ROOT = process.cwd();
@@ -167,6 +167,35 @@ if (existsSync(changesDir)) {
           `"${declaredTier}" tier (ADR-0026; layout in brain/core/methodology/sdd-layout.md).`,
       });
     }
+  }
+}
+
+// S-1b (#323 S5): a DECLARED brain-slice-scope/1 block must be valid,
+// repo-wide, archive included — a scope contract someone wrote and nobody can
+// parse is worse than none. ABSENCE passes: legacy is grandfathered by
+// absence, not by list (sdd-layout.mjs owns the parser and the rule).
+{
+  const walkTasks = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const tasksPath = join(dir, entry.name, 'tasks.md');
+      if (existsSync(tasksPath)) {
+        const { refusal } = parseSliceScopes(readFileSync(tasksPath, 'utf8'));
+        if (refusal) {
+          structViolations.push({
+            path: `${relative(ROOT, tasksPath)}`,
+            rule: 'slice-scope-malformed',
+            reason: refusal,
+          });
+        }
+      }
+    }
+  };
+  const changesDirAbs = join(ROOT, CHANGES_ROOT);
+  if (existsSync(changesDirAbs)) {
+    walkTasks(changesDirAbs);
+    const archiveDir = join(changesDirAbs, 'archive');
+    if (existsSync(archiveDir)) walkTasks(archiveDir);
   }
 }
 

@@ -918,3 +918,34 @@ test('6.2: declaring the four in sdd.stages does NOT hand out routed evidence �
   // The custom stage IS routable — that is the point of declaring it (cold-review precedent).
   assert.doesNotThrow(() => assertRoutableStage('threat-model'));
 });
+
+// ── issue #323 S5 — the brain-slice-scope/1 contract ────────────────────────
+
+test('#323 S5: two well-formed scope blocks parse, in order', async () => {
+  const { parseSliceScopes } = await import('./sdd-layout.mjs');
+  const text = [
+    '# Tasks', '',
+    '```brain-slice-scope/1', '{"slice": 1, "claims": ["REQ-1"], "terminal_pr": "feature/x -> main"}', '```', '',
+    'plan prose the reviewer never needs', '',
+    '```brain-slice-scope/1', '{"slice": 2, "claims": ["REQ-2", "REQ-3"], "terminal_pr": "feature/x -> main"}', '```',
+  ].join('\n');
+  const { scopes, refusal } = parseSliceScopes(text);
+  assert.equal(refusal, null);
+  assert.deepEqual(scopes.map((s) => s.slice), [1, 2]);
+  assert.deepEqual(scopes[1].claims, ['REQ-2', 'REQ-3']);
+});
+
+test('#323 S5: absence is LEGAL — legacy is grandfathered by absence, not by list', async () => {
+  const { parseSliceScopes } = await import('./sdd-layout.mjs');
+  const { scopes, refusal } = parseSliceScopes('# Tasks\n- [ ] 1.1 things\n');
+  assert.equal(refusal, null);
+  assert.deepEqual(scopes, []);
+});
+
+test('#323 S5: malformed blocks refuse with the rule named — JS, bad claims, missing terminal', async () => {
+  const { parseSliceScopes } = await import('./sdd-layout.mjs');
+  const wrap = (body) => '```brain-slice-scope/1\n' + body + '\n```\n';
+  assert.match(parseSliceScopes(wrap("{ slice: 1 }")).refusal, /JSON/);
+  assert.match(parseSliceScopes(wrap('{"slice": 1, "claims": "REQ-1", "terminal_pr": "x"}')).refusal, /claims/);
+  assert.match(parseSliceScopes(wrap('{"slice": 1, "claims": ["REQ-1"]}')).refusal, /terminal_pr/);
+});
