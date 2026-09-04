@@ -93,7 +93,12 @@ for (const script of ['danger-paths.sh', 'run.sh']) {
 //   · it does not reimplement GLOB matching (round 2). The first cut hand-rolled
 //     a glob→RegExp function tested only against its own author's expectations,
 //     which is the shape that diverges from the real runner without telling
-//     anyone. `fs.globSync` is the platform's own matcher.
+//     anyone. `fs.globSync` is the platform's own matcher. It prints an
+//     ExperimentalWarning on every run — EXPECTED OUTPUT, not a fault to
+//     chase: the alternative is a private reimplementation of glob semantics,
+//     and one warning beats a second implementation whose disagreement with
+//     the first is the entire hazard. If Node ever removes it this test fails
+//     loudly, which is the correct way for that news to arrive.
 //   · it does not hand-pick EXCLUSIONS either (round 3). The replacement walk
 //     skipped three literal names while its comment claimed parity with
 //     `.gitignore` — a list that ignores ten more. Same defect, one layer down.
