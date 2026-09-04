@@ -800,6 +800,14 @@
       "sessions": 1,
       "memories": 0,
       "prompts": 1
+    },
+    {
+      "id": "5bcaa175",
+      "created_by": "gandalf",
+      "created_at": "2026-09-04T02:57:49Z",
+      "sessions": 1,
+      "memories": 0,
+      "prompts": 1
     }
   ]
 }
