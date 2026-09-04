@@ -159,8 +159,13 @@ test('#655/#853: the declared version\'s tag is on this history', () => {
     try {
       execFileSync('git', ['merge-base', '--is-ancestor', tag, 'HEAD'], { cwd: REPO_ROOT, stdio: 'ignore' });
       return true;
-    } catch {
-      return false;  // non-zero means "not an ancestor" — git's own answer
+    } catch (err) {
+      // ONE means "not an ancestor" — git's own answer. Anything else is a
+      // failure to compute (missing object, corrupt ref), and calling that
+      // "no" would report a broken repository as a clean history. Same
+      // uncomputable-is-not-false discipline the gates apply (#853 review r1).
+      if (err?.status === 1) return false;
+      throw err;
     }
   };
   const verdict = tagIsOnThisHistory({ tagged, head, isAncestor });

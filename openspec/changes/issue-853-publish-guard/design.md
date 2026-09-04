@@ -12,8 +12,22 @@ with an exit code, and it is the same question `--is-ancestor` exists for.
 No commit-graph walking here: the tool already knows (the lesson #850's rounds
 kept teaching — ask the tool, do not reimplement it).
 
-Equality is subsumed: a commit is its own ancestor, so the tagged-commit
-scenario needs no special case.
+The tagged-commit case keeps its own branch, and that is deliberate rather
+than redundant — the design first claimed it was subsumed, and the cold review
+caught the claim disagreeing with the code (round 1). Git does report a commit
+as its own ancestor, so `isAncestor` alone would answer correctly TODAY; the
+branch is what keeps the pure function's answer independent of what an injected
+predicate does with self-ancestry. Its unit test injects `isAncestor: () => false`
+for exactly that row: the equality answer must not be borrowed from the seam.
+
+## D1b — a non-zero exit is not automatically "no"
+
+`git merge-base --is-ancestor` exits **1** for "not an ancestor" and something
+else for a real failure (a missing object, a corrupt ref). Collapsing every
+non-zero into `false` would report a broken repository as a clean history —
+this repo's own `uncomputable ≠ false` discipline, applied to a subprocess.
+Only `status === 1` means no; anything else rethrows and the suite reports it
+as what it is (round 1's second editorial).
 
 ## D2 — the early-return on "no tag" stays
 
