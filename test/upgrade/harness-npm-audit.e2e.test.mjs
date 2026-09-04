@@ -31,9 +31,9 @@
 // asking production to lie for it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, globSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -77,59 +77,56 @@ for (const script of ['danger-paths.sh', 'run.sh']) {
   });
 }
 
-/** Pure: a shell glob → an anchored RegExp over repo-relative paths.
- * ONE pass, because two passes is how the first cut broke: replacing `**\/`
- * with `(?:.*\/)?` inserts a `*`, and the next replace then ate it. */
-export function globToRegExp(glob) {
-  let out = '';
-  for (let i = 0; i < glob.length; i++) {
-    if (glob.startsWith('**/', i)) { out += '(?:[^/]+/)*'; i += 2; continue; }
-    if (glob[i] === '*') { out += '[^/]*'; continue; }
-    out += glob[i].replace(/[.+^${}()|[\]\\?]/, '\\$&');
-  }
-  return new RegExp(`^${out}$`);
-}
-
-test('#850: the glob matcher is right about paths it must reach and paths it must not', () => {
-  const deep = globToRegExp('brain/scripts/**/*.test.mjs');
-  assert.ok(deep.test('brain/scripts/governance/checks/issue-link.test.mjs'), 'nested paths are reached');
-  assert.ok(deep.test('brain/scripts/archive.test.mjs'), 'and so is the top level');
-  assert.ok(!deep.test('test/upgrade/x.test.mjs'), 'a different root is not');
-  const e2e = globToRegExp('test/**/*.e2e.test.mjs');
-  assert.ok(e2e.test('test/upgrade/harness-npm-audit.e2e.test.mjs'), 'this very file is reached');
-  assert.ok(!e2e.test('test/upgrade/harness-offline.test.mjs'),
-    'and the name this guard shipped with the FIRST time is not — the bug it exists for');
-});
-
 // ── The class, not the instance ─────────────────────────────────────────────
 // This guard's own first cut was invisible to `npm test`. That is a defect
 // shape, not a typo: any test file whose path does not match one of the two
-// globs passes review, passes when run by hand, and protects nothing. Nothing
-// in the tree detected it — the reviewer did, by reading package.json.
-test('#850: every test file in the tree is REACHED by one of npm test\'s globs', () => {
+// globs passes review, passes when run by hand, and protects nothing.
+//
+// TWO THINGS THIS DELIBERATELY DOES NOT DO, both from round 2 of the review:
+//   · it does not walk a hand-picked list of roots. The first cut visited
+//     `brain/scripts` and `test` while claiming "every test file in the tree",
+//     so a `*.test.mjs` under `brain/core/` would have been unreachable by the
+//     globs AND unseen by the guard — the same silent failure, one directory
+//     over. The walk is the whole repo now, minus what git ignores.
+//   · it does not reimplement glob matching. The first cut hand-rolled a
+//     glob→RegExp function tested only against its own author's expectations,
+//     which is the shape that diverges from the real runner without telling
+//     anyone. `fs.globSync` is the platform's own matcher, given the globs read
+//     out of package.json. (It is flagged experimental; the alternative is a
+//     private reimplementation, and a warning beats a second implementation.)
+test('#850: every test file in the repo is REACHED by one of npm test\'s globs', () => {
   const repo = join(HERE, '..', '..');
   const { test: testScript } = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).scripts;
-  // The globs, read from the script rather than restated — a second copy here
-  // would drift from the one that actually runs the suite.
   const globs = [...testScript.matchAll(/"([^"]*\*[^"]*)"/g)].map((m) => m[1]);
   assert.ok(globs.length >= 2, `expected the test script to carry globs, got: ${testScript}`);
 
-  const matchers = globs.map(globToRegExp);
-  const orphans = [];
-  const walk = (dir, rel) => {
-    for (const name of readdirSync(join(repo, dir), { withFileTypes: true })) {
-      if (name.name === 'node_modules' || name.name === '.git') continue;
-      const relPath = rel ? `${rel}/${name.name}` : name.name;
-      if (name.isDirectory()) walk(join(dir, name.name), relPath);
-      else if (name.name.endsWith('.test.mjs') && !matchers.some((re) => re.test(relPath))) {
-        orphans.push(relPath);
-      }
+  const reached = new Set(globSync(globs, { cwd: repo }).map((f) => f.split(sep).join('/')));
+  assert.ok(reached.size > 100, `the globs must resolve the real suite (saw ${reached.size})`);
+
+  const all = [];
+  const walk = (rel) => {
+    for (const e of readdirSync(join(repo, rel || '.'), { withFileTypes: true })) {
+      if (['node_modules', '.git', '.memory'].includes(e.name)) continue;
+      const p = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.test.mjs')) all.push(p);
     }
   };
-  for (const root of ['brain/scripts', 'test']) walk(root, root);
+  walk('');
 
+  const orphans = all.filter((f) => !reached.has(f));
   assert.deepEqual(orphans, [],
     'these files are named like tests and are never run by `npm test` — rename them to match a glob ' +
     '(`test/**/*.e2e.test.mjs` under test/), or widen the script. A test the suite does not reach is ' +
     'a guard that protects nothing while looking like it does (#850).');
+});
+
+test('#850: the orphan check would actually SEE a stray test — the walk is not vacuous', () => {
+  const repo = join(HERE, '..', '..');
+  const reached = new Set(globSync(['brain/scripts/**/*.test.mjs', 'test/**/*.e2e.test.mjs'], { cwd: repo })
+    .map((f) => f.split(sep).join('/')));
+  // The name this guard shipped with the first time, and a plausible future one.
+  for (const stray of ['test/upgrade/harness-offline.test.mjs', 'brain/core/something.test.mjs']) {
+    assert.ok(!reached.has(stray), `${stray} must read as unreached — it is exactly what the walk must report`);
+  }
 });
