@@ -495,6 +495,7 @@
 {"id":"rec-383af27935e494ca","ts":"2026-07-25T00:48:39Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-383af27935e494ca.jsonl"}
 {"id":"rec-386d66d68377313d","ts":"2026-08-18T12:25:39Z","actor":"fix/issue-725-fixci-publishyml-runs-npm-ci-and-the-loc","type":"bugfix","project":"brain","issue":725,"file":"2026-08-rec-386d66d68377313d.jsonl"}
 {"id":"rec-3885ab4baed99517","ts":"2026-07-25T00:47:26Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3885ab4baed99517.jsonl"}
+{"id":"rec-388ad18feea5c2eb","ts":"2026-09-04T21:59:39Z","actor":"fix/issue-853-publish-guard-descendants","type":"bugfix","project":"brain","issue":853,"file":"2026-09-rec-388ad18feea5c2eb.jsonl"}
 {"id":"rec-3894518548231d20","ts":"2026-07-11T12:54:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3894518548231d20.jsonl"}
 {"id":"rec-3897d7953710e70d","ts":"2026-07-25T00:47:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3897d7953710e70d.jsonl"}
 {"id":"rec-38f33e169697e8bc","ts":"2026-07-29T14:29:10Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-38f33e169697e8bc.jsonl"}
