@@ -31,7 +31,8 @@
 // asking production to lie for it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, globSync } from 'node:fs';
+import { readFileSync, globSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, sep } from 'node:path';
 
@@ -82,40 +83,58 @@ for (const script of ['danger-paths.sh', 'run.sh']) {
 // shape, not a typo: any test file whose path does not match one of the two
 // globs passes review, passes when run by hand, and protects nothing.
 //
-// TWO THINGS THIS DELIBERATELY DOES NOT DO, both from round 2 of the review:
-//   · it does not walk a hand-picked list of roots. The first cut visited
-//     `brain/scripts` and `test` while claiming "every test file in the tree",
-//     so a `*.test.mjs` under `brain/core/` would have been unreachable by the
-//     globs AND unseen by the guard — the same silent failure, one directory
-//     over. The walk is the whole repo now, minus what git ignores.
-//   · it does not reimplement glob matching. The first cut hand-rolled a
-//     glob→RegExp function tested only against its own author's expectations,
+// THREE THINGS THIS DELIBERATELY DOES NOT DO, each one a round of review
+// catching the guard repeating, in miniature, the defect it exists to catch:
+//   · it does not walk a hand-picked list of ROOTS (round 2). The first cut
+//     visited `brain/scripts` and `test` while claiming "every test file in the
+//     tree", so a `*.test.mjs` under `brain/core/` would have been unreachable
+//     by the globs AND unseen by the guard — the same silence, one directory
+//     over.
+//   · it does not reimplement GLOB matching (round 2). The first cut hand-rolled
+//     a glob→RegExp function tested only against its own author's expectations,
 //     which is the shape that diverges from the real runner without telling
-//     anyone. `fs.globSync` is the platform's own matcher, given the globs read
-//     out of package.json. (It is flagged experimental; the alternative is a
-//     private reimplementation, and a warning beats a second implementation.)
-test('#850: every test file in the repo is REACHED by one of npm test\'s globs', () => {
+//     anyone. `fs.globSync` is the platform's own matcher.
+//   · it does not hand-pick EXCLUSIONS either (round 3). The replacement walk
+//     skipped three literal names while its comment claimed parity with
+//     `.gitignore` — a list that ignores ten more. Same defect, one layer down.
+//     So the file list comes from `git ls-files`: git already knows what this
+//     repository contains, and asking it removes the list entirely.
+//
+// The pattern across all three: when a guard needs to know something a tool
+// already knows — which paths a glob reaches, which files a repo holds — ask
+// the tool. A second answer is a second thing that can be wrong, and the
+// disagreement between the two is precisely the hazard being guarded.
+
+/** Pure: of the files this repo holds, those named like tests that no glob reaches. */
+export function orphanTests(repoFiles, reachedFiles) {
+  const reached = new Set(reachedFiles);
+  return repoFiles.filter((f) => f.endsWith('.test.mjs') && !reached.has(f)).sort();
+}
+
+test('#850: the orphan rule is exact — named like a test, and not reached', () => {
+  const repo = ['a/x.test.mjs', 'a/y.test.mjs', 'b/helper.mjs', 'c/z.test.mjs'];
+  assert.deepEqual(orphanTests(repo, ['a/x.test.mjs']), ['a/y.test.mjs', 'c/z.test.mjs'],
+    'every unreached test file is reported, wherever it lives');
+  assert.deepEqual(orphanTests(repo, repo), [], 'nothing is reported when everything is reached');
+  assert.deepEqual(orphanTests(['b/helper.mjs'], []), [],
+    'a non-test file is never an orphan — the rule is the NAME, not mere absence');
+});
+
+test('#850: every test file the repo holds is REACHED by one of npm test\'s globs', () => {
   const repo = join(HERE, '..', '..');
   const { test: testScript } = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).scripts;
   const globs = [...testScript.matchAll(/"([^"]*\*[^"]*)"/g)].map((m) => m[1]);
   assert.ok(globs.length >= 2, `expected the test script to carry globs, got: ${testScript}`);
 
-  const reached = new Set(globSync(globs, { cwd: repo }).map((f) => f.split(sep).join('/')));
-  assert.ok(reached.size > 100, `the globs must resolve the real suite (saw ${reached.size})`);
+  const reached = globSync(globs, { cwd: repo }).map((f) => f.split(sep).join('/'));
+  assert.ok(reached.length > 100, `the globs must resolve the real suite (saw ${reached.length})`);
 
-  const all = [];
-  const walk = (rel) => {
-    for (const e of readdirSync(join(repo, rel || '.'), { withFileTypes: true })) {
-      if (['node_modules', '.git', '.memory'].includes(e.name)) continue;
-      const p = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) walk(p);
-      else if (e.name.endsWith('.test.mjs')) all.push(p);
-    }
-  };
-  walk('');
+  // git, not a walk: no exclusion list to keep in step with .gitignore.
+  const tracked = execFileSync('git', ['ls-files'], { cwd: repo, encoding: 'utf8' })
+    .split('\n').filter(Boolean);
+  assert.ok(tracked.length > 100, `git must list the tree (saw ${tracked.length})`);
 
-  const orphans = all.filter((f) => !reached.has(f));
-  assert.deepEqual(orphans, [],
+  assert.deepEqual(orphanTests(tracked, reached), [],
     'these files are named like tests and are never run by `npm test` — rename them to match a glob ' +
     '(`test/**/*.e2e.test.mjs` under test/), or widen the script. A test the suite does not reach is ' +
     'a guard that protects nothing while looking like it does (#850).');
