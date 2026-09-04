@@ -70,6 +70,7 @@
 {"id":"rec-07583c1d9fb7024d","ts":"2026-07-25T00:47:21Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-07583c1d9fb7024d.jsonl"}
 {"id":"rec-0794b8ea94896c1b","ts":"2026-07-23T14:06:13Z","actor":"docs/p289-stack-merge-order-record","type":"pattern","project":"brain","file":"2026-07-rec-0794b8ea94896c1b.jsonl"}
 {"id":"rec-07a35bce004d146e","ts":"2026-07-11T12:33:49Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-07a35bce004d146e.jsonl"}
+{"id":"rec-07b1d3382156963a","ts":"2026-09-04T00:41:07Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-09-rec-07b1d3382156963a.jsonl"}
 {"id":"rec-07b38d57ac7b89db","ts":"2026-08-17T16:41:30Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-07b38d57ac7b89db.jsonl"}
 {"id":"rec-07bb273b98e15cb5","ts":"2026-07-25T21:51:32Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-07bb273b98e15cb5.jsonl"}
 {"id":"rec-07c5db9e31a0f2ca","ts":"2026-07-13T00:21:58Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-07c5db9e31a0f2ca.jsonl"}
@@ -506,6 +507,7 @@
 {"id":"rec-39dd5154689f9fdc","ts":"2026-06-27T21:58:49Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-39dd5154689f9fdc.jsonl"}
 {"id":"rec-39dd579fdf22b4a5","ts":"2026-07-25T00:48:10Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-39dd579fdf22b4a5.jsonl"}
 {"id":"rec-3a54d468683ba58b","ts":"2026-07-13T00:21:40Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-3a54d468683ba58b.jsonl"}
+{"id":"rec-3a75830097927f55","ts":"2026-09-03T23:10:35Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-3a75830097927f55.jsonl"}
 {"id":"rec-3a77612fc6997b63","ts":"2026-07-25T21:51:34Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-3a77612fc6997b63.jsonl"}
 {"id":"rec-3a7f6a7d4174c860","ts":"2026-07-16T02:12:32Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-3a7f6a7d4174c860.jsonl"}
 {"id":"rec-3abe2b5750e848f2","ts":"2026-08-21T22:06:33Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-3abe2b5750e848f2.jsonl"}
@@ -536,6 +538,7 @@
 {"id":"rec-3cbd8673faa1017b","ts":"2026-07-25T00:48:27Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-3cbd8673faa1017b.jsonl"}
 {"id":"rec-3cf4a161237c3dc2","ts":"2026-07-13T00:21:42Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-3cf4a161237c3dc2.jsonl"}
 {"id":"rec-3cf614ace064d679","ts":"2026-06-27T16:50:48Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-3cf614ace064d679.jsonl"}
+{"id":"rec-3d0591829fa2b41f","ts":"2026-09-03T22:29:26Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-3d0591829fa2b41f.jsonl"}
 {"id":"rec-3d35c757acd464cc","ts":"2026-07-13T00:21:16Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-3d35c757acd464cc.jsonl"}
 {"id":"rec-3d3e1ce5248044b2","ts":"2026-07-11T12:33:42Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-3d3e1ce5248044b2.jsonl"}
 {"id":"rec-3d6bd95f69d78f27","ts":"2026-07-13T00:21:45Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3d6bd95f69d78f27.jsonl"}
@@ -892,6 +895,7 @@
 {"id":"rec-62be66749a0b226b","ts":"2026-07-25T00:47:42Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-62be66749a0b226b.jsonl"}
 {"id":"rec-62f09f384f4fdb67","ts":"2026-07-25T00:48:33Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-62f09f384f4fdb67.jsonl"}
 {"id":"rec-63144b757c7fdc2f","ts":"2026-07-25T14:55:50Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-63144b757c7fdc2f.jsonl"}
+{"id":"rec-63170c664549fbbf","ts":"2026-09-02T23:23:47Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-63170c664549fbbf.jsonl"}
 {"id":"rec-632938c573947dfc","ts":"2026-07-25T00:48:25Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-632938c573947dfc.jsonl"}
 {"id":"rec-632bfdfc1352d36d","ts":"2026-06-30T22:09:48Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-06-rec-632bfdfc1352d36d.jsonl"}
 {"id":"rec-632e05bc85f0c384","ts":"2026-07-25T21:51:42Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-632e05bc85f0c384.jsonl"}
