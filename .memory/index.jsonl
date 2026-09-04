@@ -1855,6 +1855,7 @@
 {"id":"rec-c9cae73380452c87","ts":"2026-07-11T12:33:33Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-c9cae73380452c87.jsonl"}
 {"id":"rec-ca5c95e1065cabb8","ts":"2026-07-25T21:50:40Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ca5c95e1065cabb8.jsonl"}
 {"id":"rec-caa2d64ea1cab116","ts":"2026-06-29T01:27:18Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-caa2d64ea1cab116.jsonl"}
+{"id":"rec-cad4c5ee4082c587","ts":"2026-09-04T02:39:26Z","actor":"fix/issue-850-danger-paths-offline","type":"bugfix","project":"brain","issue":850,"file":"2026-09-rec-cad4c5ee4082c587.jsonl"}
 {"id":"rec-cad58b7786800cf0","ts":"2026-07-17T14:56:32Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-cad58b7786800cf0.jsonl"}
 {"id":"rec-cb5c93a4b7a353b7","ts":"2026-07-25T21:50:53Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-cb5c93a4b7a353b7.jsonl"}
 {"id":"rec-cb7366a5453a44a2","ts":"2026-07-13T00:21:23Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-cb7366a5453a44a2.jsonl"}
