@@ -641,6 +641,7 @@
 {"id":"rec-485ef74bd740d34e","ts":"2026-07-13T00:21:44Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-485ef74bd740d34e.jsonl"}
 {"id":"rec-489c4ccee636ad27","ts":"2026-08-16T02:18:10Z","actor":"claude/update-prioritization-doc-ugwv9g","type":"session_summary","project":"brain","issue":688,"file":"2026-08-rec-489c4ccee636ad27.jsonl"}
 {"id":"rec-489ed76e8239d9cc","ts":"2026-07-29T13:59:47Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-489ed76e8239d9cc.jsonl"}
+{"id":"rec-48b0ff40e7d77d62","ts":"2026-09-03T16:24:58Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-09-rec-48b0ff40e7d77d62.jsonl"}
 {"id":"rec-48b95460c5ea81f5","ts":"2026-07-29T14:28:23Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-48b95460c5ea81f5.jsonl"}
 {"id":"rec-48d0b74d337da255","ts":"2026-07-13T00:21:39Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-48d0b74d337da255.jsonl"}
 {"id":"rec-48f0b4763c6e687a","ts":"2026-07-25T00:48:20Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-48f0b4763c6e687a.jsonl"}
@@ -1863,6 +1864,7 @@
 {"id":"rec-cc2fce61ae79d578","ts":"2026-07-13T00:22:20Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-cc2fce61ae79d578.jsonl"}
 {"id":"rec-cc410350226db61b","ts":"2026-07-29T14:26:48Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-cc410350226db61b.jsonl"}
 {"id":"rec-cc5561c44de9fd70","ts":"2026-07-25T21:51:16Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-cc5561c44de9fd70.jsonl"}
+{"id":"rec-cc7ee2a71bfb792a","ts":"2026-09-03T22:24:17Z","actor":"chore/issue-848-release-cut-1.4.0","type":"config","project":"brain","issue":848,"file":"2026-09-rec-cc7ee2a71bfb792a.jsonl"}
 {"id":"rec-cc85a30da84c0033","ts":"2026-07-25T21:51:00Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-cc85a30da84c0033.jsonl"}
 {"id":"rec-ccc2c51c09e7e676","ts":"2026-07-29T14:26:09Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ccc2c51c09e7e676.jsonl"}
 {"id":"rec-ccd3c0433001b2a3","ts":"2026-09-02T14:49:45Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-ccd3c0433001b2a3.jsonl"}
