@@ -300,7 +300,11 @@ export function denyingList(actor, agentActors = []) {
  *   is uncomputable.
  * @param {string|null} input.headSha  The PR's current head SHA
  *   (`resolveHeadSha(commits)`), or `null` when uncomputable.
- * @param {string[]} [input.denyActors]  `governance.reviewActors` — a review
+ * @param {string[]} [input.agentActors]  `governance.agentActors` — consulted
+ *   ONLY to name which config key denied the signer (#124). The verdict is the
+ *   deny-set's; this picks the sentence.
+ * @param {string[]} [input.denyActors]  the approval deny-set —
+ *   `governance.reviewActors` ∪ `governance.agentActors` since #124 — a review
  *   identity may never SIGN an approval either (design.md §E2 rule 15,
  *   mirrors the label's own deny-before-allow rule, `actor-check.mjs:358`).
  * @returns {{admitted:true,reason:string}|{admitted:false,note:string}|null}

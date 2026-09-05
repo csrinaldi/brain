@@ -2370,3 +2370,32 @@ test('#124 (round 1): BOTH deny reports name the same key — the label branch a
   assert.doesNotMatch(label.reason, /registered in governance\.reviewActors/,
     'and never sends the operator to the wrong config line');
 });
+
+// ── #124 round 6: the SIGN path names its key too, end to end ────────────────
+// Rule 15 was the branch this PR repaired in round 1 and the only one left
+// without an end-to-end regression test — the exact shape the file's own
+// comments describe having happened three times: "the same message repaired on
+// one path and left wrong on the other".
+
+test('#124: rule 15 names governance.agentActors when the signer is an AGENT identity', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ head_sha: HEAD_SHA, actor: 'alice-agent', author: 'alice-agent' })],
+    headSha: HEAD_SHA,
+    denyActors: ['alice-agent'],      // the union the reader produces
+    agentActors: ['alice-agent'],
+  });
+  assert.equal(result.admitted, false, 'an agent may not sign an approval either');
+  assert.match(result.note, /governance\.agentActors/, 'and the note names the key the operator must edit');
+  assert.doesNotMatch(result.note, /governance\.reviewActors/, 'never the wrong one');
+});
+
+test('#124: rule 15 still names governance.reviewActors for a review identity', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ head_sha: HEAD_SHA, actor: 'brain-reviewer[bot]', author: 'brain-reviewer[bot]' })],
+    headSha: HEAD_SHA,
+    denyActors: ['brain-reviewer[bot]'],
+    agentActors: ['alice-agent'],
+  });
+  assert.equal(result.admitted, false);
+  assert.match(result.note, /governance\.reviewActors/, 'the pre-existing message is unchanged for its own identity');
+});
