@@ -181,3 +181,30 @@ test('#860: gatherReleaseFacts never throws — each half degrades on its own', 
   assert.deepEqual(facts, { packageVersion: null, migrationVersions: null, commits: null, tag: null },
     'four unreadable facts, four nulls, and no exception escaping into brain:status');
 });
+
+// ── round 3: severity is a report too ───────────────────────────────────────
+// The lines degraded for all four facts; the returned severity did not. A
+// caller keying off severity would have read unread evidence as health.
+
+test('#860 (round 3): an unread migration list is never severity "none"', () => {
+  const r = releaseDebt({ packageVersion: '1.4.0', migrationVersions: null, commits: [], tag: 'v1.4.0' });
+  assert.match(r.lines.join('\n'), /migration list could not be read/);
+  assert.notEqual(r.severity, 'none', 'the value a genuinely clean tree returns');
+  assert.equal(r.severity, 'uncomparable');
+});
+
+test('#860 (round 3): an unread package version is never severity "none"', () => {
+  const r = releaseDebt({ packageVersion: null, migrationVersions: ['1.0.0'], commits: [], tag: 'v1.0.0' });
+  assert.equal(r.severity, 'uncomparable');
+});
+
+test('#860 (round 3): known debt still outranks an unread fact', () => {
+  const r = releaseDebt({ packageVersion: '1.1.0', migrationVersions: ['1.2.0'], commits: null, tag: 'v1.1.0' });
+  assert.equal(r.severity, 'migration', 'what WAS read keeps its severity');
+});
+
+test('#860 (round 3): a genuinely clean tree still reports "none"', () => {
+  const r = releaseDebt({ packageVersion: '1.4.0', migrationVersions: ['1.4.0'], commits: [], tag: 'v1.4.0' });
+  assert.equal(r.severity, 'none', 'degrading everything would make the signal useless');
+  assert.match(r.lines.join('\n'), /up to date/);
+});

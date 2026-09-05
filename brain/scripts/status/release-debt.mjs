@@ -52,15 +52,20 @@ export function releaseDebt({ packageVersion, migrationVersions, commits, tag } 
 
   // ── The strongest signal: code a consumer cannot reach ────────────────────
   let dormant = [];
-  // THREE inputs, three degradations. The first cut guarded the migration list
+  // FOUR inputs, four degradations, on BOTH channels. The first cut guarded the
+  // migration list
   // and the tag and forgot this one — and the cost was not silence but a false
   // ALARM: `compareSemver(v, null)` parses to 0.0.0, so every migration read as
   // dormant and the report announced "promoted above the published null". A
   // module whose whole subject is honest reporting must not invent debt from an
-  // input it could not read (review round 1).
+  // input it could not read (review round 1) — nor call itself healthy on one
+  // (rounds 2 and 3, once per channel).
+  let unread = false;   // any fact this run could not read — see `severity` below
   if (!packageVersion) {
+    unread = true;
     lines.push('release     package version could not be read — dormant migrations UNKNOWN');
   } else if (migrationVersions === null || migrationVersions === undefined) {
+    unread = true;
     lines.push('release     migration list could not be read — dormant migrations UNKNOWN');
   } else {
     dormant = migrationVersions.filter((v) => compareSemver(v, packageVersion) > 0);
@@ -100,7 +105,16 @@ export function releaseDebt({ packageVersion, migrationVersions, commits, tag } 
 
   if (lines.length === 0) lines.push(`release     up to date (${packageVersion}, ${tag})`);
 
-  const severity = dormant.length > 0 ? 'migration' : (shipping > 0 ? 'drift' : 'none');
+  // Round 3: the lines degraded for all four facts but THIS did not. With the
+  // migration list unread and no commits, the report printed "UNKNOWN" and
+  // returned 'none' — the same value a genuinely clean tree returns. A caller
+  // keying off severity (a CI gate, a dashboard) would read unread evidence as
+  // health, which is the exact claim R860-3 forbids, surviving in the channel I
+  // did not think of as a report. Degradation belongs to the RETURN VALUE, not
+  // to the prose about it.
+  const severity = dormant.length > 0
+    ? 'migration'
+    : (shipping > 0 ? 'drift' : (unread ? 'uncomparable' : 'none'));
   return { severity, lines };
 }
 
