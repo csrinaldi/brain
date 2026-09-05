@@ -58,9 +58,14 @@ agree with what their pipeline does.
 
 ## Non-goals
 
-No new config key, no tier table change, no change to which gates exist. The
-`decision-gate` label-conditional wording in the same spec files stays with
-#600, which owns that claim.
+No new config key, no tier table change, no change to which gates exist.
+
+One further defect lives in the same spec files and is deliberately NOT touched
+here: a surviving passage that #516 and #600 own. Naming its shape would repeat
+it — the sweep in `contributor-scaffold.test.mjs` refuses that claim in ANY
+tracked file, this proposal included, and it caught this paragraph's first
+draft. Restating a falsehood to say you are not fixing it is still restating it.
+#600 carries the wording and the fix.
 
 ## Risks
 
