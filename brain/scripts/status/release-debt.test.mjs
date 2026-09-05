@@ -100,3 +100,30 @@ test('#860: brain:status prints the debt through the injected facts seam', async
   assert.match(out, /DEBT — 3 migration/, 'the dormant case reaches the surface');
   assert.match(out, /UNREACHABLE/, 'saying what it costs a consumer');
 });
+
+test('#860 (round 1): an unreadable package version degrades — it never INVENTS debt', () => {
+  // Reproduced before the fix: compareSemver(v, null) parses to 0.0.0, so every
+  // migration compared greater and the report announced "3 migration(s)
+  // promoted above the published null". Three inputs, three degradations — the
+  // first cut guarded two. A module about honest reporting may not manufacture
+  // an alarm from an input it could not read.
+  const r = releaseDebt({
+    packageVersion: null,
+    migrationVersions: ['1.2.0', '1.3.0', '1.4.0'],
+    commits: [], tag: 'v1.1.0',
+  });
+  assert.notEqual(r.severity, 'migration', 'absent evidence is not evidence of debt');
+  const out = r.lines.join('\n');
+  assert.match(out, /package version could not be read/, 'it says which half failed');
+  assert.doesNotMatch(out, /published null/, 'and never renders the unread value as a fact');
+});
+
+test('#860 (round 1): the other half still reports when the version is unreadable', () => {
+  const r = releaseDebt({
+    packageVersion: null, migrationVersions: ['1.4.0'],
+    commits: ['feat(a): x', 'fix(b): y'], tag: 'v1.4.0',
+  });
+  const out = r.lines.join('\n');
+  assert.match(out, /could not be read/, 'the failed half says so');
+  assert.match(out, /2 commit\(s\).*1 feat, 1 fix/, 'and the half that worked keeps reporting');
+});

@@ -52,7 +52,15 @@ export function releaseDebt({ packageVersion, migrationVersions, commits, tag } 
 
   // ── The strongest signal: code a consumer cannot reach ────────────────────
   let dormant = [];
-  if (migrationVersions === null || migrationVersions === undefined) {
+  // THREE inputs, three degradations. The first cut guarded the migration list
+  // and the tag and forgot this one — and the cost was not silence but a false
+  // ALARM: `compareSemver(v, null)` parses to 0.0.0, so every migration read as
+  // dormant and the report announced "promoted above the published null". A
+  // module whose whole subject is honest reporting must not invent debt from an
+  // input it could not read (review round 1).
+  if (!packageVersion) {
+    lines.push('release     package version could not be read — dormant migrations UNKNOWN');
+  } else if (migrationVersions === null || migrationVersions === undefined) {
     lines.push('release     migration list could not be read — dormant migrations UNKNOWN');
   } else {
     dormant = migrationVersions.filter((v) => compareSemver(v, packageVersion) > 0);
