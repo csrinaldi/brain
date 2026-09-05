@@ -37,6 +37,7 @@
 {"id":"rec-03f0fa1a88d5b0e5","ts":"2026-07-29T14:27:17Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-03f0fa1a88d5b0e5.jsonl"}
 {"id":"rec-03f2657bb6b654d3","ts":"2026-07-11T12:33:47Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-03f2657bb6b654d3.jsonl"}
 {"id":"rec-03fd06b2b7073748","ts":"2026-06-27T23:05:25Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-03fd06b2b7073748.jsonl"}
+{"id":"rec-0406228cfdf63d10","ts":"2026-09-05T17:04:45Z","actor":"fix/issue-812-dogfood-boundary","type":"architecture","project":"brain","issue":812,"file":"2026-09-rec-0406228cfdf63d10.jsonl"}
 {"id":"rec-0409f7d6b3e6e0cb","ts":"2026-07-13T00:21:16Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-0409f7d6b3e6e0cb.jsonl"}
 {"id":"rec-041c35c43d70e4f8","ts":"2026-09-02T16:17:01Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-09-rec-041c35c43d70e4f8.jsonl"}
 {"id":"rec-0430a311676b86f1","ts":"2026-07-13T00:22:14Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-0430a311676b86f1.jsonl"}

@@ -39,5 +39,13 @@
     "tokenEnv": "BRAIN_REVIEWER_TOKEN",
     "protocol": "brain-review/2"
   },
-  "schemaVersion": "0.3.0"
+  "schemaVersion": "0.3.0",
+  "sdd": {
+    "map": {
+      "cold-review": {
+        "engine": "claude",
+        "model": "sonnet"
+      }
+    }
+  }
 }
