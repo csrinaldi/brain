@@ -59,6 +59,36 @@
 #                  mirrors GitHub's two-tier REQUIRED_JOBS/DETECTION_JOBS
 #                  registry (governance-checks.mjs) — see also REQ-A2-4.
 #
+# WHERE THE TIER IS RESOLVED, AND WHY THERE IS NO `allow_failure:` HERE (#603).
+# You are not looking at a fragment that forgot the tier. This YAML is static and
+# cannot resolve one; the CHECKERS do it, and they do it for both providers at
+# once. `mapDetectionToWarning` (governance/detection-policy.mjs) turns a failure
+# into an exit 0 plus a `::warning::` naming the gate and the tier whenever that
+# gate's policy at the resolved tier is `detection` — REQ-TIER-3's own scenario,
+# verbatim.
+#
+# WHICH JOBS ROUTE THROUGH IT, exactly — the first draft of this block said
+# "every entrypoint below" and the cold review measured that false:
+#   · issue-link, diff-size, memory-gate, decision-gate — via run-check.mjs
+#   · phase-order                                        — via phase-order-check.mjs
+#   · actor-check, brain-writes-reviewed, local-checks   — NOT routed
+# The last three do not need it TODAY: GATE_MATRIX pins all three to `required`
+# at every tier, so no softening is ever owed. `local-checks` could not use it
+# anyway — it is a raw shell line, with no Node entrypoint to route through.
+#
+# That is a real precondition, not a footnote: promoting any of those three to a
+# tiered policy means WIRING first, not just editing the matrix. Stated here
+# because this header exists so a reader does not conclude something the file
+# does not do — which is exactly the mistake its own first draft made.
+#
+# So a `lite` consumer's `memory-gate` and `phase-order` do not block here, and
+# they do not block on GitHub either, from ONE implementation. Writing
+# `allow_failure:` into this file would be a second declaration of what
+# GATE_MATRIX already owns: it would hardcode one tier's answer into one
+# provider's YAML and drift the moment a policy changes. Before #603 this
+# fragment DID block all eight at every tier — that was the defect, and the fix
+# was in `run-check.mjs`, not here.
+#
 # Job names below are load-bearing: they MUST equal GOVERNANCE_JOBS
 # (governance-checks.mjs) exactly. A drift-guard test
 # (ci-context-drift-guard.test.mjs) string-slices this file and fails red on
