@@ -5,6 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { CONFIRMATION_WORD, parseArgs, runApprove } from './cli.mjs';
 import { parseDecision } from '../review/lib/decision-block.mjs';
@@ -222,4 +223,82 @@ test('E3: landed review author == block actor (case-folded) → succeeds', async
 
 test('parseArgs is exported and pure', () => {
   assert.deepEqual(parseArgs(['7']), { ok: true, number: 7 });
+});
+
+// ── #124 round 2: the write-side lock is the read side's twin, or it is not ──
+// This file carried its OWN deny reader claiming to mirror L5 rule 15. When
+// #124 widened L5, the copy silently stopped mirroring and `brain:approve`
+// would have let a registered agent sign. One rule, two implementations, and
+// the second one wrong.
+
+test('#124: the write side and the read side compute the SAME deny-set', async () => {
+  const { approvalDenySet } = await import('../vcs/actor-check.mjs');
+  const config = { governance: { reviewActors: ['bot'], agentActors: ['claude'] } };
+  assert.deepEqual(approvalDenySet(config).sort(), ['bot', 'claude'],
+    'both identity lists deny an APPROVAL — the union is the rule, and it lives in one place');
+  assert.deepEqual(approvalDenySet({}), [], 'an absent config denies nobody');
+  assert.deepEqual(approvalDenySet({ governance: { reviewActors: 'not-a-list' } }), [],
+    'a scalar where a list was configured denies nobody rather than throwing');
+});
+
+test('#124: this file states the rule by IMPORTING it, never by restating it', () => {
+  const src = readFileSync(new URL('./cli.mjs', import.meta.url), 'utf8');
+  assert.match(src, /import \{[^}]*approvalDenySet[^}]*\} from '\.\.\/vcs\/actor-check\.mjs'/,
+    'the deny-set rule is imported from its owner');
+  assert.doesNotMatch(src, /governance\?\.reviewActors/,
+    'and is not re-derived here — a local copy is how the twin stopped being one');
+});
+
+test('#124 (round 3): a throwing agent-list reader cannot turn a refusal into a crash', async () => {
+  // The first cut called loadBrainConfig() a SECOND time, unguarded, inside the
+  // deny branch — to build the MESSAGE. That function throws by contract on a
+  // missing or malformed config, so the graceful refusal every other branch
+  // preserves became a raw exception for exactly the callers the injectable
+  // exists to serve. The property is not "our reader is safe" but "a message
+  // cannot crash a verdict", so the call site is guarded too.
+  const vcs = makeVcs();
+  const res = await runApprove(baseCtx(vcs, {
+    readDenyActorsFn: () => ['alice'],
+    readAgentActorsFn: () => { throw new Error('no brain.config.json here'); },
+  })).catch((e) => ({ threw: e }));
+  assert.ok(!res.threw, `the refusal must not throw: ${res.threw?.message}`);
+  assert.notEqual(res.exitCode, 0, 'and it still refuses');
+  assert.equal(vcs.calls.prReviewComment, 0, 'without posting anything');
+});
+
+test('#124: the refusal names the AGENT key when the actor is an agent identity', async () => {
+  const vcs = makeVcs();
+  const res = await runApprove(baseCtx(vcs, {
+    readDenyActorsFn: () => ['alice'],
+    readAgentActorsFn: () => ['alice'],
+  }));
+  assert.match(res.output, /governance\.agentActors/, 'the operator is sent to the key they must edit');
+  assert.doesNotMatch(res.output, /registered in governance\.reviewActors/);
+});
+
+test('#124 (round 5): a denied identity spelled with different CASE does not walk past the write-side lock', async () => {
+  // Reproduced by the reviewer before this fix: whoami returning `Alice` against
+  // a deny-set holding `alice` proceeded through compose/confirm/post and printed
+  // "✓ signed" with exit 0. The read side had learned to fold case; this twin had
+  // not — the third time in one PR that one half of a pair was fixed alone.
+  const vcs = makeVcs({ whoami: () => ({ username: 'Alice' }) });
+  const res = await runApprove(baseCtx(vcs, {
+    readDenyActorsFn: () => ['alice'],
+    readAgentActorsFn: () => ['alice'],
+  }));
+  assert.notEqual(res.exitCode, 0, 'a denied identity is denied in any casing');
+  assert.equal(vcs.calls.prReviewComment, 0, 'and nothing is posted');
+  assert.match(res.output, /governance\.agentActors/);
+});
+
+test('#124: both twins answer the deny question with the SAME function', async () => {
+  const { isDeniedActor } = await import('../vcs/actor-check.mjs');
+  assert.equal(isDeniedActor('Alice', ['alice']), true, 'case folds');
+  assert.equal(isDeniedActor('alice', 'alice'), true, 'a scalar is a one-element list, never an empty one');
+  assert.equal(isDeniedActor('bob', ['alice']), false);
+  assert.equal(isDeniedActor(undefined, ['alice']), false, 'no actor is not a denied actor');
+
+  const src = readFileSync(new URL('./cli.mjs', import.meta.url), 'utf8');
+  assert.match(src, /isDeniedActor\(actor, denyActors\)/, 'the write side ASKS the shared predicate');
+  assert.doesNotMatch(src, /denyActors\.includes\(/, 'and does not restate the rule — that is how it diverged three times');
 });

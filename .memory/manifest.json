@@ -952,6 +952,62 @@
       "sessions": 1,
       "memories": 0,
       "prompts": 1
+    },
+    {
+      "id": "5a6dd893",
+      "created_by": "gandalf",
+      "created_at": "2026-09-05T12:09:34Z",
+      "sessions": 1,
+      "memories": 1,
+      "prompts": 1
+    },
+    {
+      "id": "b5147e17",
+      "created_by": "gandalf",
+      "created_at": "2026-09-05T12:17:31Z",
+      "sessions": 1,
+      "memories": 0,
+      "prompts": 1
+    },
+    {
+      "id": "291360ff",
+      "created_by": "gandalf",
+      "created_at": "2026-09-05T12:26:47Z",
+      "sessions": 1,
+      "memories": 0,
+      "prompts": 1
+    },
+    {
+      "id": "5a856a50",
+      "created_by": "gandalf",
+      "created_at": "2026-09-05T12:34:20Z",
+      "sessions": 1,
+      "memories": 0,
+      "prompts": 1
+    },
+    {
+      "id": "136be5ac",
+      "created_by": "gandalf",
+      "created_at": "2026-09-05T12:44:09Z",
+      "sessions": 1,
+      "memories": 0,
+      "prompts": 1
+    },
+    {
+      "id": "11d48b7d",
+      "created_by": "gandalf",
+      "created_at": "2026-09-05T12:53:40Z",
+      "sessions": 1,
+      "memories": 0,
+      "prompts": 1
+    },
+    {
+      "id": "85197291",
+      "created_by": "gandalf",
+      "created_at": "2026-09-05T13:01:43Z",
+      "sessions": 1,
+      "memories": 0,
+      "prompts": 1
     }
   ]
 }
