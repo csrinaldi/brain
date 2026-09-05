@@ -78,7 +78,17 @@ export function releaseDebt({ packageVersion, migrationVersions, commits, tag } 
     return { severity: dormant.length > 0 ? 'migration' : 'uncomparable', lines };
   }
 
-  const shape = classifyCommits(commits ?? []);
+  if (commits === null || commits === undefined) {
+    // The FOURTH input, and round 1 had just fixed the third. `commits` is null
+    // exactly when the `git log` read threw, and folding it to `[]` reported
+    // "up to date" — health claimed from evidence never read, which is the one
+    // thing R860-3 forbids. Guarding three of four inputs is not a degradation
+    // policy; it is three accidents and a gap.
+    lines.push(`release     commit log since ${tag} could not be read — drift UNKNOWN`);
+    return { severity: dormant.length > 0 ? 'migration' : 'uncomparable', lines };
+  }
+
+  const shape = classifyCommits(commits);
   const shipping = shape.feat + shape.fix;
   if (shipping > 0) {
     const total = (commits ?? []).length;
@@ -120,7 +130,11 @@ export function gatherReleaseFacts({ root, _run, _read } = {}) {
   let commits = null;
   if (tag) {
     try {
-      commits = String(run('git', ['log', '--format=%s', `${tag}..HEAD`])).split('\n').filter(Boolean);
+      // `--no-merges`, following day-start.mjs's identical read. A merge subject
+      // has no conventional-commit shape at all, so it landed in the `fix`
+      // bucket and inflated both counts — and this repository still produces
+      // non-squash merges (review round 2).
+      commits = String(run('git', ['log', '--no-merges', '--format=%s', `${tag}..HEAD`])).split('\n').filter(Boolean);
     } catch { commits = null; }
   }
 

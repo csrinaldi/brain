@@ -127,3 +127,57 @@ test('#860 (round 1): the other half still reports when the version is unreadabl
   assert.match(out, /could not be read/, 'the failed half says so');
   assert.match(out, /2 commit\(s\).*1 feat, 1 fix/, 'and the half that worked keeps reporting');
 });
+
+test('#860 (round 2): an unreadable commit log is UNKNOWN drift, never "up to date"', () => {
+  // The fourth input, and round 1 had just fixed the third. `commits` is null
+  // exactly when the git log read threw; folding it to [] claimed health from
+  // evidence never read.
+  const r = releaseDebt({ packageVersion: '1.4.0', migrationVersions: ['1.4.0'], commits: null, tag: 'v1.4.0' });
+  assert.notEqual(r.severity, 'none');
+  const out = r.lines.join('\n');
+  assert.match(out, /commit log.*could not be read/i);
+  assert.doesNotMatch(out, /up to date/, 'the claim R860-3 exists to forbid');
+});
+
+test('#860 (round 2): a dormant migration still reports when the log is unreadable', () => {
+  const r = releaseDebt({ packageVersion: '1.1.0', migrationVersions: ['1.2.0'], commits: null, tag: 'v1.1.0' });
+  assert.equal(r.severity, 'migration', 'the half that COULD be read keeps its severity');
+  assert.match(r.lines.join('\n'), /1\.2\.0/);
+});
+
+// ── round 2, cold-3: the gatherer is tested through its own seam ─────────────
+// design D1 claims this mirrors `stranded.mjs`, whose test drives its gatherer
+// through the injected seam. Half a shape was mirrored.
+
+test('#860: gatherReleaseFacts reads all four facts through its injected seams', async () => {
+  const { gatherReleaseFacts } = await import('./release-debt.mjs');
+  const calls = [];
+  const facts = gatherReleaseFacts({
+    root: '/nowhere',
+    _read: (p) => {
+      if (p.endsWith('package.json')) return '{"version":"9.9.9"}';
+      if (p.includes('config-migrations')) return "  { version: '1.0.0' },\n  { version: \"2.0.0\" },";
+      throw new Error(`unexpected read: ${p}`);
+    },
+    _run: (file, args) => {
+      calls.push(args.join(' '));
+      return args.includes('describe') ? 'v9.0.0\n' : 'feat(a): x\nfix(b): y\n';
+    },
+  });
+  assert.equal(facts.packageVersion, '9.9.9');
+  assert.deepEqual(facts.migrationVersions, ['1.0.0', '2.0.0'], 'both quote styles are scraped');
+  assert.equal(facts.tag, 'v9.0.0');
+  assert.deepEqual(facts.commits, ['feat(a): x', 'fix(b): y']);
+  assert.ok(calls.some((c) => c.includes('--no-merges')), 'the log read excludes merges');
+});
+
+test('#860: gatherReleaseFacts never throws — each half degrades on its own', async () => {
+  const { gatherReleaseFacts } = await import('./release-debt.mjs');
+  const facts = gatherReleaseFacts({
+    root: '/nowhere',
+    _read: () => { throw new Error('no such file'); },
+    _run: () => { throw new Error('not a git repo'); },
+  });
+  assert.deepEqual(facts, { packageVersion: null, migrationVersions: null, commits: null, tag: null },
+    'four unreadable facts, four nulls, and no exception escaping into brain:status');
+});
