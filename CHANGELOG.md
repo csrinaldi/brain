@@ -14,8 +14,13 @@ dormant and nothing is renamed or removed. `brain:upgrade` is enough.
 ### Why a minor and not a patch
 
 Three of the eight changes add capability a consumer can rely on — a capability
-report, a coverage measurement, and a release-debt line — while four repair the
-verification surface itself. Nothing is removed, so the number moves right.
+report, a coverage measurement, and a release-debt line — and the remaining five
+repair the verification surface itself. Nothing is removed, so the number moves
+right.
+
+(The eight split 4 feat / 4 fix by commit prefix, which is not the same split:
+#124 carries a `feat` prefix but is listed below as a repair, because what it
+changed for a consumer is that a gate stopped being theatre.)
 
 ### What you can do that you could not before
 
