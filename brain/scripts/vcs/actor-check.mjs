@@ -233,6 +233,29 @@ function sniffDecisionProtocol(body) {
 }
 
 /**
+ * Pure: which config key put this identity in the deny-set, phrased for an
+ * operator (#124).
+ *
+ * ONE helper, because there are TWO places a deny is reported — the label
+ * branch and rule 15's signed-decision note — and the first cut of #124 taught
+ * only the first one to name the key. Round 1 of the review measured the
+ * second still saying `governance.reviewActors` for an identity that is only in
+ * `governance.agentActors`: the same message repaired on one path and left
+ * wrong on the other, which is the shape this session keeps paying for.
+ *
+ * @param {string} actor
+ * @param {string[]} agentActors
+ * @returns {{key: string, clause: string}}
+ */
+export function denyingList(actor, agentActors = []) {
+  const isAgent = Array.isArray(agentActors)
+    && agentActors.some((a) => a && String(a).toLowerCase() === String(actor).toLowerCase());
+  return isAgent
+    ? { key: 'governance.agentActors', clause: 'an agent identity' }
+    : { key: 'governance.reviewActors', clause: 'a review identity' };
+}
+
+/**
  * `brain-decision/1` as a PEER `lite` evidence source (design.md §C2, issue
  * #473). A sibling of `evaluateDistinctAct`, not a branch inside it — this
  * function speaks its own vocabulary (which diff did a human sign, and who)
@@ -259,29 +282,6 @@ function sniffDecisionProtocol(body) {
  *   mirrors the label's own deny-before-allow rule, `actor-check.mjs:358`).
  * @returns {{admitted:true,reason:string}|{admitted:false,note:string}|null}
  */
-/**
- * Pure: which config key put this identity in the deny-set, phrased for an
- * operator (#124).
- *
- * ONE helper, because there are TWO places a deny is reported — the label
- * branch and rule 15's signed-decision note — and the first cut of #124 taught
- * only the first one to name the key. Round 1 of the review measured the
- * second still saying `governance.reviewActors` for an identity that is only in
- * `governance.agentActors`: the same message repaired on one path and left
- * wrong on the other, which is the shape this session keeps paying for.
- *
- * @param {string} actor
- * @param {string[]} agentActors
- * @returns {{key: string, clause: string}}
- */
-export function denyingList(actor, agentActors = []) {
-  const isAgent = Array.isArray(agentActors)
-    && agentActors.some((a) => a && String(a).toLowerCase() === String(actor).toLowerCase());
-  return isAgent
-    ? { key: 'governance.agentActors', clause: 'an agent identity' }
-    : { key: 'governance.reviewActors', clause: 'a review identity' };
-}
-
 export function evaluateSignedDecision({ decisions, headSha, denyActors = [], agentActors = [] } = {}) {
   // `decisions === undefined` means the caller never threaded the field at
   // all — a LEGACY caller predating issue #473 (PR #503 cold-review round 1,
@@ -664,6 +664,26 @@ export function evaluateActor({
   headSha = null,
   signedEvidenceSources = LITE_SIGNED_EVIDENCE_SOURCES,
 } = {}) {
+  // ONE normalisation, here, because everything downstream inherits it — the
+  // deny gate, rule 15's own `.some()`, and the report helpers. A scalar
+  // `denyActors` (a string where a list was configured) used to survive the
+  // gate's `.includes()` by accident and exit early; when the gate learned to
+  // fold case, that accident disappeared and the scalar reached rule 15, which
+  // threw. #673's test caught it in one run. A reporting helper may never turn
+  // a fail into a throw, and the way to keep that true is to make the shape
+  // right once rather than guard it at each use.
+  //
+  // A scalar STRING becomes a one-element list rather than an empty one, and
+  // that direction is deliberate: `governance.reviewActors: "csrinaldibot"` is
+  // a typo whose obvious meaning is that one identity. Reading it as empty
+  // would silently DISABLE the deny gate on a misconfiguration — the exact
+  // failure this gate exists to prevent, arriving through a missing bracket.
+  // #673's test pins the fail; this keeps it for the right reason instead of
+  // by way of `String#includes` matching a substring.
+  denyActors = Array.isArray(denyActors)
+    ? denyActors
+    : (typeof denyActors === 'string' && denyActors ? [denyActors] : []);
+
   const withRefusalNote = result => {
     if (!overrideRefused || result.level === 'warn') return result;
     return {
@@ -718,7 +738,18 @@ export function evaluateActor({
   // signature was weighed and found wanting or never read at all. It is always
   // the latter, and on PR #665 that cost the maintainer a debugging loop on the
   // one act the three-lock architecture reserves for humans.
-  if (actor && denyActors.includes(actor)) {
+  // Case-FOLDED, like every other identity comparison in this file
+  // (`isForeignCommit`, `denyingList`, rule 15). Logins fold case on both
+  // providers, so an exact match let a differently-cased spelling of a
+  // registered identity walk past the deny-set holding it — a bypass of the
+  // very gate #124 builds, which predated this change only because the
+  // deny-set had never contained an agent identity before. (#454's guard
+  // keeps this file from naming any consumer's agent: the identity lives in
+  // `governance.agentActors`, and this gate must not know which platform its
+  // user runs. My first draft of this comment spelled one out, and that guard
+  // caught it.)
+  // Review round 4 named the divergence; it is closed rather than noted.
+  if (actor && denyActors.some((d) => d && String(d).toLowerCase() === String(actor).toLowerCase())) {
     // WHICH list caught it (#124). The deny-set is the union of
     // `governance.reviewActors` and `governance.agentActors`, and an operator
     // told only "denied" has to read the source to learn which of two keys to
@@ -1009,13 +1040,6 @@ function defaultReadBotAllowlist(cwd) {
 }
 
 /**
- * L5's DENY list (issue #375, widened by #124): `governance.reviewActors` ∪ `governance.agentActors` — the SAME key L6
- * reads to exclude an identity from the human-approver count. Both readings are
- * restrictive and co-directional ("not a human authority"), which is why ruling
- * R2 is excepted here; see the ADR. Kept as a separate reader from
- * `defaultReadBotAllowlist` so the two keys never merge at the source.
- */
-/**
  * Pure: the APPROVAL deny-set a config declares — `governance.reviewActors` ∪
  * `governance.agentActors` (#124).
  *
@@ -1038,6 +1062,13 @@ export function approvalDenySet(config) {
   return [...new Set([...review, ...agents])];
 }
 
+/**
+ * L5's DENY list (issue #375, widened by #124): `governance.reviewActors` ∪ `governance.agentActors` — the SAME key L6
+ * reads to exclude an identity from the human-approver count. Both readings are
+ * restrictive and co-directional ("not a human authority"), which is why ruling
+ * R2 is excepted here; see the ADR. Kept as a separate reader from
+ * `defaultReadBotAllowlist` so the two keys never merge at the source.
+ */
 function defaultReadDenyActors(cwd) {
   return () => {
     try {
