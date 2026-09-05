@@ -71,3 +71,22 @@ Run on `main`, 55 rows (28 github + 27 gitlab verbs):
 That last one is the reason this had to be a script and not a hand-written
 table: the discrepancy was five files, and no one would have noticed it by
 reading.
+
+## Round 4: the audit was blind the way #317 was blind
+
+Three review rounds hardened the boundaries of `vcs.<verb>(` — escaping the
+verb, then anchoring both sides — while the OBJECT NAME was the wrong premise.
+Production reaches the port through several bindings (`providerModule.<verb>(`,
+`(await getVcsFn({provider})).<verb>(`), and measured before the fix:
+`branchProtect`, `capabilities` and `mrCreate` all read **`consumers: 0` with
+live call sites**.
+
+That is #317's failure mode reproduced inside the tool built to end it, and it
+survived three rounds of tightening the wrong thing. After the fix they read 2,
+1 and 1, and the population of zero-consumer verbs fell from 10 to 7.
+
+The receiver is now any expression; the verb carries the identity. The trade is
+one-directional and deliberate: over-counting moves a verb UP a list someone
+reads, under-counting hides it at the bottom — which is exactly how `prReviews`
+stayed invisible. Between a wrong number and a missing row, this audit chooses
+the wrong number.

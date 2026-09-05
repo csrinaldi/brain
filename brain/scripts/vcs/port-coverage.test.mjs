@@ -156,19 +156,24 @@ test('#336: identifier boundaries hold where \\b cannot — a $ suffix is not th
   assert.equal(countConsumers('prView', [{ file: 'a.mjs', text: 'vcs.prView$Extra({})' }]), 0);
 });
 
-test('#336: a variable merely ENDING in `vcs` is not the port — both sides anchored', () => {
-  // Round 2's finding, reproduced before it was fixed: the right edge of the
-  // verb was anchored and the left edge of `vcs` was not, so `githubvcs.` read
-  // as a port call. An over-count corrupts the consumer ranking, which is the
-  // one thing R336-3 asks this report to get right.
-  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'await githubvcs.prReviews({});' }]), 0,
-    'githubvcs is a different object — it never went through the port');
-  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'await my$vcs.prReviews({});' }]), 0,
-    '$ counts as an identifier character on this side too');
-  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'await vcs.prReviews({});' }]), 1,
-    'and the real call still counts');
-  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'const r = await (vcs).prReviews;' }]), 0,
-    'only a call site counts — a property read is not a consumer of the verb');
+test('#336 (round 4): the port is reached through several receivers, and all of them count', () => {
+  // Rounds 1 and 2 hardened the boundaries of `vcs.<verb>(` while the object
+  // NAME was the wrong premise. Measured on the real tree before this fix:
+  // branchProtect, capabilities and mrCreate read `consumers: 0` with live call
+  // sites — the audit reproducing #317's blindness inside itself.
+  const shapes = [
+    'await vcs.prReviews({});',
+    'result = await providerModule.prReviews({ project });',
+    'const r = (await getVcsFn({ provider })).prReviews(x);',
+    'prReviewsFn: (args) => providerModule.prReviews(args),',
+  ];
+  for (const text of shapes) {
+    assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text }]), 1, `must see: ${text}`);
+  }
+  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'const r = await vcs.prReviews;' }]), 0,
+    'only a CALL counts — a property read is not a consumer of the verb');
+  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'await vcs.prReviewsExtra({});' }]), 0,
+    'and the verb still ends where it ends — prReviewsExtra is a different verb');
 });
 
 // ── A file that said nothing is not a file that said `recorded` ─────────────

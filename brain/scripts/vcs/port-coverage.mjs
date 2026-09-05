@@ -111,11 +111,24 @@ export function coverageOf(verb, contractText, otherTestText) {
  * consumer of the port.
  */
 export function countConsumers(verb, consumers) {
-  // BOTH sides anchored. Round 1 anchored the verb's right edge and round 2
-  // measured what that left open: `githubvcs.prReviews(` — a variable merely
-  // ending in `vcs` — counted as a consumer. Same defect one position over,
-  // and it corrupts precisely the ranking this audit exists for (R336-3).
-  const re = new RegExp(`(?<![\\w$])vcs\\.${escapeForRegExp(verb)}(?![\\w$])\\s*\\(`);
+  // THE RECEIVER IS NOT `vcs`, and assuming it was is the defect three review
+  // rounds circled. Rounds 1 and 2 hardened the boundaries of `vcs.<verb>(` —
+  // escaping the verb, then anchoring the left side of the literal `vcs` —
+  // while the object NAME itself was the wrong premise. Production reaches the
+  // port through several bindings:
+  //     providerModule.branchProtect(...)          brain-protect.mjs
+  //     (await getVcsFn({ provider })).prView(...) review/cold-boot.mjs
+  // Measured before this fix: branchProtect, capabilities and mrCreate all read
+  // `consumers: 0` with live call sites — the audit reproducing, inside itself,
+  // the exact #317 blindness it was commissioned to end.
+  //
+  // So the receiver is ANY expression and the verb carries the identity. The
+  // trade is deliberate and one-directional: a same-named method on an
+  // unrelated object would over-count, and over-counting is visible and moves a
+  // verb UP a list someone then reads. Under-counting hides a verb at the
+  // bottom and is how `prReviews` stayed invisible. Between a wrong number and
+  // a missing row, this audit chooses the wrong number.
+  const re = new RegExp(`\\.${escapeForRegExp(verb)}(?![\\w$])\\s*\\(`);
   return new Set(consumers.filter((c) => re.test(c.text)).map((c) => c.file)).size;
 }
 
