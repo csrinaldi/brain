@@ -327,3 +327,19 @@ test('#336 (round 10): a verb passed by reference and called through an alias co
   assert.equal(countConsumers('checkRuns', [{ file: 'a.mjs', text: 'const n = report.checkRuns.length;' }]), 0,
     'and a property chain off an unrelated object is still not a use');
 });
+
+test('#336 (round 11): a field that says null or false is not evidence of a recording', () => {
+  assert.equal(classifyProvenance({ endpoint: null, note: 'there is no real endpoint' }), 'undeclared',
+    'presence was the wrong test — the field explicitly says no');
+  assert.equal(classifyProvenance({ recorded: false }), 'undeclared');
+  assert.equal(classifyProvenance({ endpoint: '' }), 'undeclared', 'an empty endpoint records nothing');
+  assert.equal(classifyProvenance({ endpoint: 'GET /x' }), 'recorded', 'and a real one still does');
+});
+
+test('#336 (round 11): a computed read off the verb is a property access, not a use', () => {
+  for (const text of ['const n = report.checkRuns[0];', 'const n = report.checkRuns?.[0];']) {
+    assert.equal(countConsumers('checkRuns', [{ file: 'x.mjs', text }]), 0, `reads off it: ${text}`);
+  }
+  assert.equal(countConsumers('checkRuns', [{ file: 'x.mjs', text: 'listCheckRuns: providerModule.checkRuns,' }]), 1,
+    'while a bare reference is still a use');
+});

@@ -113,7 +113,12 @@ export const RECORDING_EVIDENCE = Object.freeze(['recorded', 'endpoint', 'measur
 export function classifyProvenance(p) {
   if (p?.unreadable) return 'unreadable';
   if (p?.derived) return 'derived';
-  if (RECORDING_EVIDENCE.some((k) => p?.[k] !== undefined)) return 'recorded';
+  // Truthiness, not presence — the SAME test `derived` gets two lines up. With
+  // `!== undefined`, `{ endpoint: null }` and `{ recorded: false }` read as
+  // `recorded`, the strongest category, from a field explicitly saying no
+  // (round 11). One function must not hold two ideas of what a field
+  // answering "yes" looks like.
+  if (RECORDING_EVIDENCE.some((k) => Boolean(p?.[k]))) return 'recorded';
   return 'undeclared';
 }
 
@@ -200,7 +205,11 @@ export function countConsumers(verb, consumers) {
   // `?.` is still part of a call, not a different call — the defensive idiom
   // this codebase already uses (`mode.stageDeps?.(root)`, round 8).
   const v = escapeForRegExp(verb);
-  const re = new RegExp(`\\.${v}(?![\\w$])\\s*(?!\\??\\.\\s*[A-Za-z_$])`);
+  // The excluded continuation is any PROPERTY ACCESS, dotted or bracketed:
+  // `.checkRuns.length`, `.checkRuns?.length` and `.checkRuns?.[0]` all read
+  // something off the verb. Round 11 measured that only the dotted forms were
+  // excluded, so a computed read over-counted (`.checkRuns?.[0]` → 1).
+  const re = new RegExp(`\\.${v}(?![\\w$])\\s*(?!\\??\\.\\s*[A-Za-z_$])(?!\\??\\.?\\s*\\[)`);
   const files = new Set();
   for (const c of consumers) {
     if (re.test(stripComments(c.text))) files.add(c.file);
