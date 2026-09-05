@@ -694,11 +694,28 @@ export function evaluateActor({
   // the latter, and on PR #665 that cost the maintainer a debugging loop on the
   // one act the three-lock architecture reserves for humans.
   if (actor && denyActors.includes(actor)) {
+    // WHICH list caught it (#124). The deny-set is the union of
+    // `governance.reviewActors` and `governance.agentActors`, and an operator
+    // told only "denied" has to read the source to learn which of two keys to
+    // edit. `agentActors` is consulted for the MESSAGE only — the verdict is
+    // the deny-set's, and the two lists stay separate at their readers because
+    // they answer opposite questions about the same identity (ADR-0026
+    // Amendment 3 exempts an agent's COMMITS; #124 refuses its APPROVAL).
+    const asAgent = Array.isArray(agentActors) && agentActors.includes(actor);
     return withRefusalNote({
       level: 'fail',
       reason:
-        `the approved label was applied by "${actor}", which is registered in governance.reviewActors ` +
-        '— a review identity may never apply the approved label (reviewer-protocol.md §9; that label is human-only).' +
+        `the approved label was applied by "${actor}", which is registered in ` +
+        // The canonical clause "may never apply the approved label" is kept in
+        // BOTH branches: an existing test (#454, §9) matches on it, and more to
+        // the point it is the sentence the ecosystem reads. Only the KEY and the
+        // authority differ.
+        (asAgent
+          ? 'governance.agentActors — an agent may never apply the approved label '
+            + '(ADR-0013 Tier 3; that label is human-only). Exemption from re-arming an approval and '
+            + 'permission to grant one are different powers; #454 grants only the first. Re-apply it as a human.'
+          : 'governance.reviewActors — a review identity may never apply the approved label '
+            + '(reviewer-protocol.md §9; that label is human-only).') +
         describeUnevaluatedSignedEvidence({ tier, decisions, headSha, denyActors, signedEvidenceSources }),
     });
   }
@@ -977,7 +994,15 @@ function defaultReadDenyActors(cwd) {
   return () => {
     try {
       const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
-      return Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
+      // The LABELING deny-set is the union of both identity lists (#124). An
+      // agent may act under an approval; it may never grant one. The commit
+      // exemption keeps its own reader below and reads `agentActors` ALONE —
+      // merging the two at the source would repeal ADR-0026 Amendment 3 by
+      // accident, since they are opposite answers to different questions about
+      // the same identity.
+      const review = Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
+      const agents = Array.isArray(config?.governance?.agentActors) ? config.governance.agentActors : [];
+      return [...new Set([...review, ...agents])];
     } catch {
       return [];
     }
