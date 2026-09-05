@@ -135,3 +135,23 @@ test('#336: the fixture total the report states equals what it was given', () =>
     'every fixture is either attributed to a verb or listed as an orphan — none evaporates');
   assert.equal(report.derivedFixtures, 2, 'the derived count covers orphans too — they are still fixtures');
 });
+
+// ── The verb is DATA in a regex, and data must not be syntax ────────────────
+// `exportedVerbs` accepts JS-legal identifiers, which may contain `$` — an
+// end-of-string anchor unescaped. No adapter has one today; this is so the day
+// one appears is not the day the audit starts lying quietly (round 1 editorial).
+
+test('#336: a verb containing `$` is matched literally, not as a regex anchor', () => {
+  const contract = 'test("github.pr$Reviews (contract): ...")';
+  assert.equal(coverageOf('pr$Reviews', contract, ''), 'contract',
+    'the $ is part of the name, not an anchor');
+  assert.equal(coverageOf('pr$Nothing', contract, ''), 'uncovered',
+    'and it does not match something else by accident');
+  assert.equal(countConsumers('pr$Reviews', [{ file: 'a.mjs', text: 'vcs.pr$Reviews({})' }]), 1);
+});
+
+test('#336: identifier boundaries hold where \\b cannot — a $ suffix is not the same verb', () => {
+  assert.equal(coverageOf('prView', 'test("github.prView$Extra (contract)")', ''), 'uncovered',
+    'prView must not borrow coverage from prView$Extra — \\b would have allowed it, since $ is a non-word char');
+  assert.equal(countConsumers('prView', [{ file: 'a.mjs', text: 'vcs.prView$Extra({})' }]), 0);
+});

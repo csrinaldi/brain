@@ -60,6 +60,22 @@ export function foldProvenance(provenances) {
 }
 
 /**
+ * Pure: a verb name, safe to interpolate into a RegExp.
+ *
+ * `exportedVerbs` accepts `[A-Za-z_$][\w$]*`, so a JS-legal verb may contain
+ * `$` — which is an END-OF-STRING ANCHOR unescaped, and would silently turn a
+ * name match into something else entirely. And `\b` is no good at that edge
+ * either: `$` is a non-word character, so `\bfoo$bar\b` does not mean what a
+ * reader assumes. Hence the explicit lookarounds below, which treat `$` as part
+ * of an identifier the way JavaScript does. No verb in either adapter carries
+ * one today; this is here so the day one does is not the day the audit starts
+ * lying quietly.
+ */
+export function escapeForRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Pure: `contract` | `elsewhere` | `uncovered`.
  *
  * Word-bounded, never `includes()`: `issueList` must not borrow the coverage of
@@ -67,7 +83,7 @@ export function foldProvenance(provenances) {
  * state because the ticket asks to distinguish it — it is real, and weaker.
  */
 export function coverageOf(verb, contractText, otherTestText) {
-  const re = new RegExp(`\\b${verb}\\b`);
+  const re = new RegExp(`(?<![\\w$])${escapeForRegExp(verb)}(?![\\w$])`);
   if (re.test(contractText)) return 'contract';
   if (re.test(otherTestText)) return 'elsewhere';
   return 'uncovered';
@@ -81,7 +97,7 @@ export function coverageOf(verb, contractText, otherTestText) {
  * consumer of the port.
  */
 export function countConsumers(verb, consumers) {
-  const re = new RegExp(`\\bvcs\\.${verb}\\s*\\(`);
+  const re = new RegExp(`vcs\\.${escapeForRegExp(verb)}(?![\\w$])\\s*\\(`);
   return new Set(consumers.filter((c) => re.test(c.text)).map((c) => c.file)).size;
 }
 

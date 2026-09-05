@@ -7,8 +7,10 @@ phase: design
 
 ## D1 — pure core, IO at the edge
 
-`buildReport({adapters, fixtures, contractText, otherTestText, consumerText})`
-is pure: it takes already-read strings and returns rows. The reading lives in a
+`buildReport({adapters, fixtures, contractText, otherTestText, consumers})`
+is pure: it takes already-read strings — plus `consumers` as `{file, text}[]`,
+because the consumer count is by distinct FILE and one concatenated blob could
+not answer that — and returns rows. The reading lives in a
 thin `gather()` the CLI calls. That is what makes the four scenarios testable
 without a repository — and what keeps this audit honest about a tree it does
 not have to be run inside.
