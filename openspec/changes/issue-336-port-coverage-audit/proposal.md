@@ -128,3 +128,27 @@ call; a property CHAIN off the verb (`.checkRuns.length`) still does not count,
 because that reads something from it rather than using it.
 
 After: `checkRuns` reads 1, and verbs with no named consumer fell from 7 to 4.
+
+## Known limits, measured and left open (round 12)
+
+Twelve review rounds hardened `countConsumers` against seven call shapes. Two
+asymmetries remain, both verified as having NO effect on the current tree, both
+recorded here rather than fixed — because fixing them today would trade a real
+over-count risk for a gap nothing occupies.
+
+- **`coverageOf` accepts a bare name where `countConsumers` demands a use.** A
+  verb name appearing in a test as an unrelated variable, object key or string
+  would promote it from `uncovered` to `elsewhere`. All ten `elsewhere` verbs on
+  this tree were spot-checked and correspond to genuine calls, so there is no
+  live false positive — but the rigour the consumer column received was not
+  applied to this one.
+- **A destructured call carries no leading dot.** `const { prView } = vcs;
+  prView(x)` would not be counted. Grepped: zero occurrences under
+  `brain/scripts` outside providers and tests. Detecting it means matching a
+  bare identifier, which over-counts any local of the same name — a worse trade
+  for a shape nobody writes here.
+
+Both belong to Phase 2, which is where this ticket says the recommendations go.
+Recorded so the next reader inherits the measurement instead of rediscovering
+it — and so the day either shape appears, the report's silence is already
+explained.
