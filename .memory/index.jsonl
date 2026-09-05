@@ -37,6 +37,7 @@
 {"id":"rec-03f0fa1a88d5b0e5","ts":"2026-07-29T14:27:17Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-03f0fa1a88d5b0e5.jsonl"}
 {"id":"rec-03f2657bb6b654d3","ts":"2026-07-11T12:33:47Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-03f2657bb6b654d3.jsonl"}
 {"id":"rec-03fd06b2b7073748","ts":"2026-06-27T23:05:25Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-03fd06b2b7073748.jsonl"}
+{"id":"rec-0406228cfdf63d10","ts":"2026-09-05T17:04:45Z","actor":"fix/issue-812-dogfood-boundary","type":"architecture","project":"brain","issue":812,"file":"2026-09-rec-0406228cfdf63d10.jsonl"}
 {"id":"rec-0409f7d6b3e6e0cb","ts":"2026-07-13T00:21:16Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-0409f7d6b3e6e0cb.jsonl"}
 {"id":"rec-041c35c43d70e4f8","ts":"2026-09-02T16:17:01Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-09-rec-041c35c43d70e4f8.jsonl"}
 {"id":"rec-0430a311676b86f1","ts":"2026-07-13T00:22:14Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-0430a311676b86f1.jsonl"}
@@ -2056,6 +2057,7 @@
 {"id":"rec-df35dc02bba83675","ts":"2026-07-29T14:26:51Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-df35dc02bba83675.jsonl"}
 {"id":"rec-df498471d6a94d11","ts":"2026-07-25T21:51:35Z","actor":"feat/issue-266-h1-1-review-core-cold-boot","type":"decision","project":"brain","file":"2026-07-rec-df498471d6a94d11.jsonl"}
 {"id":"rec-df54c19a60c5d1e6","ts":"2026-07-25T21:51:40Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-df54c19a60c5d1e6.jsonl"}
+{"id":"rec-df6fb16832fcef53","ts":"2026-09-05T16:47:36Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-09-rec-df6fb16832fcef53.jsonl"}
 {"id":"rec-df76f5623047bb1e","ts":"2026-07-25T21:50:17Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-df76f5623047bb1e.jsonl"}
 {"id":"rec-df79ce774c7ce217","ts":"2026-07-16T02:48:40Z","actor":"feat/issue-266-h0a-reviewer-protocol-doctrine","type":"discovery","project":"brain","file":"2026-07-rec-df79ce774c7ce217.jsonl"}
 {"id":"rec-df958ee5e65ad0ca","ts":"2026-07-13T00:21:22Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-df958ee5e65ad0ca.jsonl"}
