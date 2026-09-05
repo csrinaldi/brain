@@ -300,3 +300,15 @@ test('#336 (round 8): an optional call is still a call', () => {
   assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'const x = vcs.prReviews?.length;' }]), 0,
     'but an optional PROPERTY read is still not a call');
 });
+
+test('#336 (round 9): a generator export is a verb, declared or assigned', () => {
+  const src = [
+    'export async function* streamThings(x) {}',
+    'export function* plainGen() {}',
+    'export const assignedGen = function* () {};',
+    'export function normal() {}',
+  ].join('\n');
+  assert.deepEqual(exportedVerbs(src).sort(), ['assignedGen', 'normal', 'plainGen', 'streamThings'],
+    'the declaration path used to miss `function*` while the expression path accepted it — '
+    + 'two answers for one shape, and the missing one produced no row and no orphan');
+});

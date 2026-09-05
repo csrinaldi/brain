@@ -39,7 +39,12 @@ export const PROVIDER_FILES = Object.freeze({
 export function exportedVerbs(source) {
   const found = new Set();
   // `export [async] function name(` — the shape both adapters use today.
-  for (const m of source.matchAll(/^export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)) found.add(m[1]);
+  // `function*` too: a generator puts `*` where the whitespace was, and the
+  // expression branch below already tolerated it via `function\b` — so the two
+  // paths disagreed about the identical shape (round 9). A verb declared as a
+  // generator produced no row and no orphan, which is the silent omission this
+  // whole file refuses.
+  for (const m of source.matchAll(/^export\s+(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/gm)) found.add(m[1]);
   // `export const name = [async] (…) =>` / `= [async] function` — exported as a
   // function without being a function DECLARATION. Neither adapter uses this
   // today, which is exactly why it had to be added: a verb in this shape would
