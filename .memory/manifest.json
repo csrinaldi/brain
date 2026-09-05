@@ -1016,6 +1016,14 @@
       "sessions": 1,
       "memories": 2,
       "prompts": 2
+    },
+    {
+      "id": "afb26f1e",
+      "created_by": "gandalf",
+      "created_at": "2026-09-05T16:29:16Z",
+      "sessions": 1,
+      "memories": 0,
+      "prompts": 1
     }
   ]
 }
