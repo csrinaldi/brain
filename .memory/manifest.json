@@ -1040,6 +1040,14 @@
       "sessions": 1,
       "memories": 0,
       "prompts": 1
+    },
+    {
+      "id": "559bfa22",
+      "created_by": "gandalf",
+      "created_at": "2026-09-05T17:04:47Z",
+      "sessions": 1,
+      "memories": 1,
+      "prompts": 1
     }
   ]
 }
