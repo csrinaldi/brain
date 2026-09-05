@@ -208,3 +208,48 @@ test('#860 (round 3): a genuinely clean tree still reports "none"', () => {
   assert.equal(r.severity, 'none', 'degrading everything would make the signal useless');
   assert.match(r.lines.join('\n'), /up to date/);
 });
+
+// ── round 4: the invariant, over the WHOLE input space ──────────────────────
+// Four rounds of review found the same bug family four times, each in a
+// combination no hand-picked test happened to cover. A fifth case would have
+// been a fifth guess. This enumerates every combination of the four facts and
+// asserts the rule itself, so there is no combination left to guess at.
+
+test('#860: no unread fact is EVER filed as drift or health, across all inputs', () => {
+  const AXES = {
+    packageVersion: [['read', '1.4.0'], ['unread', null]],
+    migrationVersions: [['read', ['1.4.0']], ['read-dormant', ['1.9.0']], ['unread', null]],
+    commits: [['read-empty', []], ['read-shipping', ['feat(a): x']], ['read-internal', ['chore(a): x']], ['unread', null]],
+    tag: [['read', 'v1.4.0'], ['unread', null]],
+  };
+  let checked = 0;
+  for (const [pvK, pv] of AXES.packageVersion)
+    for (const [mvK, mv] of AXES.migrationVersions)
+      for (const [cK, c] of AXES.commits)
+        for (const [tK, t] of AXES.tag) {
+          const where = `packageVersion=${pvK} migrationVersions=${mvK} commits=${cK} tag=${tK}`;
+          const r = releaseDebt({ packageVersion: pv, migrationVersions: mv, commits: c, tag: t });
+          checked += 1;
+
+          assert.ok(r.lines.length > 0, `${where}: reported nothing at all`);
+
+          // `commits` is only read once a tag exists, so it can only go unread
+          // where one does — anything else is not a fact this run needed.
+          const unread = pvK === 'unread' || mvK === 'unread' || tK === 'unread'
+            || (cK === 'unread' && tK === 'read');
+
+          if (unread) {
+            assert.ok(['migration', 'uncomparable'].includes(r.severity),
+              `${where}: unread evidence filed as '${r.severity}' — the R860-3 claim`);
+          } else {
+            assert.ok(['migration', 'drift', 'none'].includes(r.severity),
+              `${where}: four readable facts yielded '${r.severity}'`);
+          }
+
+          // R860-1: known debt is the strongest signal and outranks everything.
+          if (mvK === 'read-dormant' && pvK === 'read') {
+            assert.equal(r.severity, 'migration', `${where}: real debt demoted`);
+          }
+        }
+  assert.equal(checked, 48, 'the whole space, not a sample');
+});

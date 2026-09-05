@@ -35,7 +35,7 @@ commit shape, distinguished from the migration case.
 
 ### Scenario: internal work only
 - GIVEN commits that are all `chore`/`test`/`docs`
-- THEN nothing is reported — a line that fires for everything is unread.
+- THEN no debt or drift line is reported (the report still prints its "up to date" line) — a line that fires for everything is unread.
 
 ## Requirement: absent evidence is reported as absent (R860-3)
 

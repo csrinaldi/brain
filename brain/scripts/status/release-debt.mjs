@@ -105,16 +105,21 @@ export function releaseDebt({ packageVersion, migrationVersions, commits, tag } 
 
   if (lines.length === 0) lines.push(`release     up to date (${packageVersion}, ${tag})`);
 
-  // Round 3: the lines degraded for all four facts but THIS did not. With the
-  // migration list unread and no commits, the report printed "UNKNOWN" and
-  // returned 'none' — the same value a genuinely clean tree returns. A caller
-  // keying off severity (a CI gate, a dashboard) would read unread evidence as
-  // health, which is the exact claim R860-3 forbids, surviving in the channel I
-  // did not think of as a report. Degradation belongs to the RETURN VALUE, not
-  // to the prose about it.
-  const severity = dormant.length > 0
-    ? 'migration'
-    : (shipping > 0 ? 'drift' : (unread ? 'uncomparable' : 'none'));
+  // The rungs, ranked ONCE, strongest first. Round 3 taught severity to degrade
+  // at all but ranked `unread` BELOW drift, so it was reachable only when
+  // shipping === 0: with any shipping commit, "I could not check for a promoted
+  // migration" was reported as "owed but not urgent" (round 4). That inverts
+  // R860-1 — the fact left unread IS the strongest signal, and drift is by its
+  // own wording the weakest. An unknown must never be filed under a claim
+  // weaker than the one it prevented us from making.
+  //
+  // The invariant, held by the exhaustive matrix in the test file rather than
+  // by one more hand-picked case: if ANY fact went unread, severity is
+  // 'migration' or 'uncomparable' — never 'drift', never 'none'.
+  const severity = dormant.length > 0 ? 'migration'
+    : unread ? 'uncomparable'
+    : shipping > 0 ? 'drift'
+    : 'none';
   return { severity, lines };
 }
 
