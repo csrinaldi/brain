@@ -200,3 +200,23 @@ test('#336: the weakest fixture decides the verb — a verb is only as good as i
   assert.equal(foldProvenance([{ endpoint: 'GET /x' }, { unreadable: true }]), 'unreadable',
     'and unreadable still dominates undeclared — we could not even look');
 });
+
+test('#336 (round 5): a verb exported as an arrow or a function EXPRESSION still appears', () => {
+  // R336-1 says every verb the adapter "exports as a function". A declaration
+  // is not the only way to do that, and a verb in any other shape would have
+  // vanished with no row, no orphan and no error — the one outcome this file
+  // refuses everywhere else. Neither adapter uses these shapes today, which is
+  // why the gap was silent rather than absent.
+  const src = [
+    'export async function decl() {}',
+    'export const arrow = async ({ x }) => {};',
+    'export const bare = x => x;',
+    'export const expr = function () {};',
+    'export let mutable = async () => {};',
+    "export const NOT_A_VERB = Object.freeze({});",
+    "export const ALSO_NOT = 'github';",
+    'const notExported = () => {};',
+  ].join('\n');
+  assert.deepEqual(exportedVerbs(src).sort(), ['arrow', 'bare', 'decl', 'expr', 'mutable'],
+    'every function-valued export is a verb; a frozen object and a string are not');
+});

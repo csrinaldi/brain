@@ -37,7 +37,18 @@ export const PROVIDER_FILES = Object.freeze({
  * stays out.
  */
 export function exportedVerbs(source) {
-  return [...source.matchAll(/^export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]);
+  const found = new Set();
+  // `export [async] function name(` — the shape both adapters use today.
+  for (const m of source.matchAll(/^export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)) found.add(m[1]);
+  // `export const name = [async] (…) =>` / `= [async] function` — exported as a
+  // function without being a function DECLARATION. Neither adapter uses this
+  // today, which is exactly why it had to be added: a verb in this shape would
+  // have vanished from the report with no row, no orphan and no error, and this
+  // file refuses that outcome for every other input it handles (round 5).
+  for (const m of source.matchAll(/^export\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/gm)) {
+    found.add(m[1]);
+  }
+  return [...found];
 }
 
 /**
