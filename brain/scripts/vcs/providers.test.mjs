@@ -464,7 +464,11 @@ test('gitlab.branchProtect sends POST to protected_branches with allow_force_pus
   );
   assert.ok(postCall.args.includes('allow_force_push=false'), 'must disable force pushes');
 
-  assert.deepEqual(result, { enforced: true });
+  // #348: protection succeeded AND the approval count was not applied — the
+  // result now says both. `requiredReviews` defaults to 1 here, so the note fires.
+  assert.equal(result.enforced, true);
+  assert.match(result.reason, /NOT applied/, 'the verb states what it could not do');
+  assert.deepEqual(Object.keys(result).sort(), ['enforced', 'reason']);
 });
 
 test('gitlab.branchProtect makes best-effort pipeline call when checks is non-empty', async () => {
@@ -501,7 +505,11 @@ test('gitlab.branchProtect returns {enforced:true} when branch is already protec
   }));
 
   const result = await gitlab.branchProtect({ project: 'g/r', checks: [] });
-  assert.deepEqual(result, { enforced: true });
+  // #348: protection succeeded AND the approval count was not applied — the
+  // result now says both. `requiredReviews` defaults to 1 here, so the note fires.
+  assert.equal(result.enforced, true);
+  assert.match(result.reason, /NOT applied/, 'the verb states what it could not do');
+  assert.deepEqual(Object.keys(result).sort(), ['enforced', 'reason']);
 });
 
 test('gitlab.branchProtect returns {enforced:false,reason:"auth"} on 401', async () => {
@@ -558,7 +566,11 @@ test('gitlab.branchProtect returns {enforced:true} even when the best-effort pip
   });
 
   const result = await gitlab.branchProtect({ project: 'g/r', checks: ['ci/test'] });
-  assert.deepEqual(result, { enforced: true });
+  // #348: protection succeeded AND the approval count was not applied — the
+  // result now says both. `requiredReviews` defaults to 1 here, so the note fires.
+  assert.equal(result.enforced, true);
+  assert.match(result.reason, /NOT applied/, 'the verb states what it could not do');
+  assert.deepEqual(Object.keys(result).sort(), ['enforced', 'reason']);
   assert.equal(call, 2, 'both the POST and the best-effort PUT must have been attempted');
 });
 
@@ -1511,4 +1523,61 @@ test('#533: issueUpdate reports a transport failure rather than throwing', async
     fetchImpl: async () => ({ ok: false, status: 403, json: async () => ({}) }),
   });
   assert.equal(gl.ok, false);
+});
+
+// ── #348: the approvalCount axis, on the real providers ─────────────────────
+// Round 1's blocker: the MUST requirement's primary deliverable shipped with
+// its pure classifier tested and NOT one assertion on either provider's actual
+// capabilities() output. A test that passes is not a suite that covers.
+
+test('#348: github.capabilities reports approvalCount alongside hardEnforcement — one probe, two axes', async () => {
+  setSpawn(() => ({ status: 0, stdout: '{"url":"..."}', stderr: '' }));
+  const r = await github.capabilities({ project: 'cap/348a', branch: 'main' });
+  assert.equal(r.hardEnforcement, 'available');
+  assert.equal(r.approvalCount, 'available',
+    'GitHub applies required_approving_review_count through the endpoint just probed — same answer, no second call');
+});
+
+test('#348: github.capabilities — a plan-gated 403 makes BOTH axes unavailable, with the remedy', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 403: upgrade to GitHub Pro' }));
+  const r = await github.capabilities({ project: 'cap/348b', branch: 'main' });
+  assert.equal(r.hardEnforcement, 'unavailable');
+  assert.equal(r.approvalCount, 'unavailable');
+  assert.match(r.approvalRemedy, /Pro|public/, 'the operator is told what would change it');
+});
+
+test('#348: gitlab.capabilities — protected branches available, approvals NOT enforced by brain', async () => {
+  setSpawn(() => ({ status: 0, stdout: '[]', stderr: '' }));
+  const r = await gitlab.capabilities({ project: 'cap/348c', branch: 'main' });
+  assert.equal(r.hardEnforcement, 'available', 'GitLab protected branches ship on all plans');
+  assert.equal(r.approvalCount, 'unavailable',
+    'and brain enforces no approval count there under ANY plan — the ratified limitation (#348)');
+  assert.match(r.approvalRemedy, /Premium/, 'naming what would offer it');
+  assert.match(r.approvalRemedy, /gate floor|status:approved|actor-check/,
+    'and that the human signature does not depend on it — the point an operator needs');
+});
+
+test('#348: the two axes are INDEPENDENT — GitLab Free is not GitHub Free-private', async () => {
+  setSpawn(() => ({ status: 0, stdout: '[]', stderr: '' }));
+  const gl = await gitlab.capabilities({ project: 'cap/348d', branch: 'main' });
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 403: upgrade to GitHub Pro' }));
+  const gh = await github.capabilities({ project: 'cap/348e', branch: 'main' });
+
+  assert.equal(gl.hardEnforcement, 'available');
+  assert.equal(gh.hardEnforcement, 'unavailable');
+  assert.equal(gl.approvalCount, gh.approvalCount, 'both lack the count');
+  assert.notEqual(gl.hardEnforcement, gh.hardEnforcement,
+    'but only one reaches rung 1 — collapsing the axes into one boolean would make the STRONGER case look like the weaker');
+});
+
+test('#348 (round 3): an unreadable probe carries its diagnostic onto the approvals axis too', async () => {
+  // The status surface reads `approvalDetail`; nothing set it, so an operator
+  // saw "approvals unknown" with no cause while "platform unknown" one row
+  // above showed it — for the identical probe failure.
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'dial tcp: lookup api.github.com: no such host' }));
+  const r = await github.capabilities({ project: 'cap/348f', branch: 'main' });
+  assert.equal(r.hardEnforcement, 'unknown');
+  assert.equal(r.approvalCount, 'unknown', 'an unreadable probe answers neither axis');
+  assert.match(r.approvalDetail, /no such host/, 'and both carry what it could not read');
+  assert.equal(r.approvalRemedy, undefined, 'no remedy — we do not know there is anything to remedy');
 });

@@ -1131,3 +1131,28 @@ test('replay lock: the real 2026-07-24→2026-08-05 outage window reports rung 3
   // because the fixture aged", which is the whole of REQ-R3-9.
   assert.match(output, /mechanism=postmerge-failing\s/, 'rung 3 must be inactive because the run FAILED (E6) — not because the fixture has aged into E8');
 });
+
+// ── #348 (round 3): R348-3 gets the coverage it shipped without ──────────────
+import { approvalLines } from './brain-governance-status.mjs';
+
+test('#348: the approvals axis prints available, NOT ENFORCED with its remedy, and unknown with its cause', () => {
+  assert.deepEqual(approvalLines({ approvalCount: 'available' }),
+    ["  approvals   available  (the tier's requiredReviews is applied)"]);
+
+  const denied = approvalLines({ approvalCount: 'unavailable', approvalRemedy: 'needs GitLab Premium' });
+  assert.match(denied[0], /NOT ENFORCED/);
+  assert.match(denied[1], /needs GitLab Premium/, 'the remedy is on screen, not only in the return value');
+
+  const unknown = approvalLines({ approvalCount: 'unknown', approvalDetail: 'no such host' });
+  assert.match(unknown[0], /unknown/);
+  assert.match(unknown[1], /no such host/,
+    'a probe we could not read tells the operator what it could not read');
+});
+
+test('#348: a provider that omits the axis is REPORTED, never silently absent', () => {
+  const lines = approvalLines({});
+  assert.match(lines[0], /approvals   unknown/, 'the line exists');
+  assert.match(lines[1], /does not report the axis/,
+    'silent omission is the one thing `unknown` may not degrade into — cold-4 of round 1');
+  assert.ok(approvalLines(undefined).length > 0, 'and an absent capability object is still a report');
+});
