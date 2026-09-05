@@ -186,12 +186,21 @@ export function countConsumers(verb, consumers) {
   // verb UP a list someone then reads. Under-counting hides a verb at the
   // bottom and is how `prReviews` stayed invisible. Between a wrong number and
   // a missing row, this audit chooses the wrong number.
-  // `?.` is part of the call, not a different call. `vcs.prReviews?.({})` is a
-  // defensive-call idiom this codebase already uses elsewhere
-  // (`mode.stageDeps?.(root)`), and requiring the paren to be adjacent dropped
-  // such a file from the count silently — no error, no orphan, the one outcome
-  // every round in this file exists to close (round 8).
-  const re = new RegExp(`\\.${escapeForRegExp(verb)}(?![\\w$])\\s*(?:\\?\\.)?\\s*\\(`);
+  // A REFERENCE is a use. Round 10 measured what "only a call counts" cost:
+  // `brain-protect.mjs` passes `providerModule.checkRuns` by reference and
+  // invokes it as `listCheckRuns(...)`, so `checkRuns` read `consumers: 0`
+  // with a live call target. You do not reference a function you do not intend
+  // to call, and an earlier round of this file encoded the opposite assumption
+  // as a test — the reviewer produced the real case that refuted it.
+  //
+  // What stays excluded is a PROPERTY CHAIN: `vcs.prReviews?.length` reads
+  // something off the verb rather than using the verb. So: the verb, its right
+  // boundary, and then anything that is not a further property access.
+  //
+  // `?.` is still part of a call, not a different call — the defensive idiom
+  // this codebase already uses (`mode.stageDeps?.(root)`, round 8).
+  const v = escapeForRegExp(verb);
+  const re = new RegExp(`\\.${v}(?![\\w$])\\s*(?!\\??\\.\\s*[A-Za-z_$])`);
   const files = new Set();
   for (const c of consumers) {
     if (re.test(stripComments(c.text))) files.add(c.file);

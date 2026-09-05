@@ -113,3 +113,18 @@ the wrong number.
   reported as its own line now, naming the files, and no count moves.
 - **A verb named in a test's prose is not a test.** `coverageOf` strips
   comments too, for the same reason in the other column.
+
+## Round 10: a reference is a use
+
+`brain-protect.mjs` passes `providerModule.checkRuns` **by reference** into
+`verifyArmedProtection`, which invokes it as `listCheckRuns(...)`. The verb's
+name never appears beside a paren, so `checkRuns` read **`consumers: 0`** with a
+live call target — a wrong number in the real tree, not a latent shape.
+
+"Only a call counts" was my assumption, and an earlier round wrote it into a
+test asserting a bare reference is not a consumer. The reviewer produced the
+call site that refutes it. You do not reference a function you do not intend to
+call; a property CHAIN off the verb (`.checkRuns.length`) still does not count,
+because that reads something from it rather than using it.
+
+After: `checkRuns` reads 1, and verbs with no named consumer fell from 7 to 4.

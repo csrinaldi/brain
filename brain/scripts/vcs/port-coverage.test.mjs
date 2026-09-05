@@ -170,8 +170,10 @@ test('#336 (round 4): the port is reached through several receivers, and all of 
   for (const text of shapes) {
     assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text }]), 1, `must see: ${text}`);
   }
-  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'const r = await vcs.prReviews;' }]), 0,
-    'only a CALL counts — a property read is not a consumer of the verb');
+  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'const r = vcs.prReviews;' }]), 1,
+    'a bare REFERENCE is a use (round 10): brain-protect.mjs passes providerModule.checkRuns '
+    + 'by reference and calls it through an alias, and this assertion previously said 0 — my '
+    + 'assumption, refuted by a real call site');
   assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'await vcs.prReviewsExtra({});' }]), 0,
     'and the verb still ends where it ends — prReviewsExtra is a different verb');
 });
@@ -298,7 +300,7 @@ test('#336 (round 8): an optional call is still a call', () => {
   assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'await providerModule.prReviews ?. ( x );' }]), 1,
     'whitespace around it changes nothing');
   assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'const x = vcs.prReviews?.length;' }]), 0,
-    'but an optional PROPERTY read is still not a call');
+    'but a PROPERTY CHAIN still is not — that reads something off the verb, it does not use it');
 });
 
 test('#336 (round 9): a generator export is a verb, declared or assigned', () => {
@@ -311,4 +313,17 @@ test('#336 (round 9): a generator export is a verb, declared or assigned', () =>
   assert.deepEqual(exportedVerbs(src).sort(), ['assignedGen', 'normal', 'plainGen', 'streamThings'],
     'the declaration path used to miss `function*` while the expression path accepted it — '
     + 'two answers for one shape, and the missing one produced no row and no orphan');
+});
+
+test('#336 (round 10): a verb passed by reference and called through an alias counts', () => {
+  // The real shape, from brain-protect.mjs:
+  //   verifyArmedProtection({ listCheckRuns: providerModule.checkRuns })
+  //   ... later: await listCheckRuns({ project, branch })
+  // The verb's name never appears next to a paren, and it read `consumers: 0`.
+  const real = [{ file: 'brain-protect.mjs', text: 'await verify({ listCheckRuns: providerModule.checkRuns, log });' }];
+  assert.equal(countConsumers('checkRuns', real), 1, 'passed as a value — it will be called');
+  assert.equal(countConsumers('checkRuns', [{ file: 'a.mjs', text: "if (typeof providerModule.checkRuns === 'function') {}" }]), 1,
+    'a capability guard is a use too — the file depends on the verb existing');
+  assert.equal(countConsumers('checkRuns', [{ file: 'a.mjs', text: 'const n = report.checkRuns.length;' }]), 0,
+    'and a property chain off an unrelated object is still not a use');
 });
