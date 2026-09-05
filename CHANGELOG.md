@@ -6,6 +6,62 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## v1.5.0 — the governance surface stops trusting what it cannot measure
+
+**No manual step.** No migration was promoted since v1.4.0, so nothing is
+dormant and nothing is renamed or removed. `brain:upgrade` is enough.
+
+### Why a minor and not a patch
+
+Three of the eight changes add capability a consumer can rely on — a capability
+report, a coverage measurement, and a release-debt line — and the remaining five
+repair the verification surface itself. Nothing is removed, so the number moves
+right.
+
+(The eight split 4 feat / 4 fix by commit prefix, which is not the same split:
+#124 carries a `feat` prefix but is listed below as a repair, because what it
+changed for a consumer is that a gate stopped being theatre.)
+
+### What you can do that you could not before
+
+- **Ask what your forge account actually allows.** brain now reports the
+  capability it HAS rather than the plan the platform sells. Where a control
+  (required reviews, protected branches) is unavailable on the account tier,
+  it is reported as unavailable and the ruling is *ratify and report* — brain
+  states the gap instead of assuming a control it cannot verify, so the
+  agent–human operating flow degrades honestly across GitHub and GitLab.
+- **Measure the port instead of asserting it.** `brain:vcs:coverage` walks the
+  exported verbs, folds their provenance and reports per-verb coverage with
+  consumer counts, excluding itself from its own walk.
+- **See release debt in `brain:status`.** A line now names dormant migrations
+  (declared above the published version and therefore unreachable) and ordinary
+  drift since the last tag. When a fact cannot be read it says so — the report
+  never claims health from evidence it did not read, on either channel.
+
+### Repairs to the verification surface
+
+- **An approval can no longer be granted by the identity it governs.** An agent
+  may act under an approval and may never grant one: the deny set is the union
+  of `governance.reviewActors` and `governance.agentActors`, compared
+  case-folded, and one exported predicate now answers for both the gate and the
+  approve CLI — the two had diverged twice.
+- **The tier decides the exit code, and decides it once.** `run-check.mjs` —
+  which owns `memory-gate`, `decision-gate`, `issue-link` and `diff-size` —
+  never called `mapDetectionToWarning`, so a gate whose lite policy is
+  *detection* still exited 1. GitHub's branch protection hid this; GitLab has
+  no such layer, so a lite consumer there was blocked by a gate that REQ-TIER-3
+  says must warn. This is the fix consumers on GitLab want most.
+- **The publish guard checks the right thing.** It asserted `tag === HEAD` and
+  so called ordinary post-release history a failure, red on every maintainer
+  checkout while the published state was correct. It now asserts the tag is ON
+  this history — and it no longer returns early in CI, where it had been inert.
+- **The container harness stopped waiting on a service it does not use.** The
+  danger-paths scenarios install a zero-dependency package from a local
+  `git+file://` remote and spent minutes in npm's audit call: 17m57s end to end
+  before, 59s after.
+- **Dogfooding got a boundary.** Configuring `sdd.map` turned 26 tests red, so
+  the repository could dogfood the router or the reviewer and never both.
+
 ## v1.4.0 — the SDD pipeline becomes composable (M5 + M8)
 
 **No manual step.** Unlike v1.1.0, this release is additive: `brain:upgrade`
