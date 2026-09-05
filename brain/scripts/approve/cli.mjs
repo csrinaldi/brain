@@ -46,7 +46,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 import { getVcs } from '../vcs/cli.mjs';
-import { approvalDenySet, denyingList } from '../vcs/actor-check.mjs';
+import { approvalDenySet, denyingList, isDeniedActor } from '../vcs/actor-check.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { currentBranch } from '../lib/git-branch.mjs';
 import { renderDecision } from '../review/lib/decision-block.mjs';
@@ -232,7 +232,14 @@ export async function runApprove({
   }
 
   const denyActors = readDenyActorsFn();
-  if (Array.isArray(denyActors) && denyActors.includes(actor)) {
+  // The SAME predicate L5's read gate uses, imported rather than restated
+  // (#124 round 5). This lock's own docstring calls itself "the write-side twin
+  // of L5 read rule 15", and it stopped being one twice in this PR: first when
+  // the read side widened to the union, then again when the read side learned
+  // to fold case and this one kept an exact `.includes()` — so a denied
+  // identity spelled with different case walked past it and posted a signed
+  // block. A twin that restates its sibling's rule is not a twin.
+  if (isDeniedActor(actor, denyActors)) {
     // Guarded at the CALL SITE as well as in the default reader: the property
     // wanted here is not "our reader is safe" but "a message cannot turn a
     // refusal into a crash", and that must hold for whatever a caller injects.

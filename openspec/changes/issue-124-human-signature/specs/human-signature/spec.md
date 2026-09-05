@@ -49,4 +49,8 @@ An actor that cannot be determined MUST remain a failure, not a pass.
 
 ### Scenario: no labeled event
 - WHEN the approved label carries no readable `labeled` event
-- THEN the gate fails, as it does today.
+- THEN the gate does NOT pass. Today that is `warn`, and REQ-L5-2 ("never
+  failing on missing evidence") is why — this change asserts the property
+  #124 needs without repealing a requirement that predates it. An earlier
+  draft of this line said "fails, as it does today", which contradicted the
+  implementation, the test and this change's own proposal at once.

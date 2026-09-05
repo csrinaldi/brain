@@ -275,3 +275,30 @@ test('#124: the refusal names the AGENT key when the actor is an agent identity'
   assert.match(res.output, /governance\.agentActors/, 'the operator is sent to the key they must edit');
   assert.doesNotMatch(res.output, /registered in governance\.reviewActors/);
 });
+
+test('#124 (round 5): a denied identity spelled with different CASE does not walk past the write-side lock', async () => {
+  // Reproduced by the reviewer before this fix: whoami returning `Alice` against
+  // a deny-set holding `alice` proceeded through compose/confirm/post and printed
+  // "✓ signed" with exit 0. The read side had learned to fold case; this twin had
+  // not — the third time in one PR that one half of a pair was fixed alone.
+  const vcs = makeVcs({ whoami: () => ({ username: 'Alice' }) });
+  const res = await runApprove(baseCtx(vcs, {
+    readDenyActorsFn: () => ['alice'],
+    readAgentActorsFn: () => ['alice'],
+  }));
+  assert.notEqual(res.exitCode, 0, 'a denied identity is denied in any casing');
+  assert.equal(vcs.calls.prReviewComment, 0, 'and nothing is posted');
+  assert.match(res.output, /governance\.agentActors/);
+});
+
+test('#124: both twins answer the deny question with the SAME function', async () => {
+  const { isDeniedActor } = await import('../vcs/actor-check.mjs');
+  assert.equal(isDeniedActor('Alice', ['alice']), true, 'case folds');
+  assert.equal(isDeniedActor('alice', 'alice'), true, 'a scalar is a one-element list, never an empty one');
+  assert.equal(isDeniedActor('bob', ['alice']), false);
+  assert.equal(isDeniedActor(undefined, ['alice']), false, 'no actor is not a denied actor');
+
+  const src = readFileSync(new URL('./cli.mjs', import.meta.url), 'utf8');
+  assert.match(src, /isDeniedActor\(actor, denyActors\)/, 'the write side ASKS the shared predicate');
+  assert.doesNotMatch(src, /denyActors\.includes\(/, 'and does not restate the rule — that is how it diverged three times');
+});

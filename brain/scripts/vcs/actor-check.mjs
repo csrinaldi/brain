@@ -247,6 +247,29 @@ function sniffDecisionProtocol(body) {
  * @param {string[]} agentActors
  * @returns {{key: string, clause: string}}
  */
+/**
+ * Pure: is this actor in the deny-set? (#124 review round 5.)
+ *
+ * EXPORTED because the deny is asked in TWO places — L5's read gate here and
+ * `approve/cli.mjs`'s write-side lock — and this PR fixed the case-folding on
+ * one of them three separate times before extracting the predicate. A rule
+ * asked twice is a rule that will be answered differently; a scalar where a
+ * list was configured becomes a one-element list rather than an empty one, so
+ * a missing bracket cannot silently disable the gate.
+ *
+ * @param {string|undefined} actor
+ * @param {string[]|string} denyActors
+ * @returns {boolean}
+ */
+export function isDeniedActor(actor, denyActors) {
+  if (!actor) return false;
+  const list = Array.isArray(denyActors)
+    ? denyActors
+    : (typeof denyActors === 'string' && denyActors ? [denyActors] : []);
+  const a = String(actor).toLowerCase();
+  return list.some((d) => d && String(d).toLowerCase() === a);
+}
+
 export function denyingList(actor, agentActors = []) {
   const isAgent = Array.isArray(agentActors)
     && agentActors.some((a) => a && String(a).toLowerCase() === String(actor).toLowerCase());
@@ -749,7 +772,7 @@ export function evaluateActor({
   // user runs. My first draft of this comment spelled one out, and that guard
   // caught it.)
   // Review round 4 named the divergence; it is closed rather than noted.
-  if (actor && denyActors.some((d) => d && String(d).toLowerCase() === String(actor).toLowerCase())) {
+  if (isDeniedActor(actor, denyActors)) {
     // WHICH list caught it (#124). The deny-set is the union of
     // `governance.reviewActors` and `governance.agentActors`, and an operator
     // told only "denied" has to read the source to learn which of two keys to
@@ -767,7 +790,7 @@ export function evaluateActor({
       reason:
         `the approved label was applied by "${actor}", which is registered in ${denied.key} — ` +
         (denied.key === 'governance.agentActors'
-          ? 'an agent identity may never apply the approved label (ADR-0013 Tier 3; that label is '
+          ? 'an agent identity may never apply the approved label (ADR-0026 "What is unchanged" §9; '
             + 'human-only). Exemption from re-arming an approval and permission to grant one are '
             + 'different powers; #454 grants only the first. Re-apply it as a human.'
           : 'a review identity may never apply the approved label (reviewer-protocol.md §9; that '
@@ -1054,7 +1077,7 @@ function defaultReadBotAllowlist(cwd) {
  *
  * The COMMIT exemption still reads `agentActors` alone through its own reader.
  * Opposite answers to different questions about one identity (ADR-0026
- * Amendment 3 vs ADR-0013 Tier 3) may never share a list.
+ * Amendment 3 vs the same ADR's §9) may never share a list.
  */
 export function approvalDenySet(config) {
   const review = Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];

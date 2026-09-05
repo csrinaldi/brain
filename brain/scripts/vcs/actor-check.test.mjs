@@ -2295,7 +2295,7 @@ test('#124: an approval applied by a registered AGENT identity is refused', () =
     denyActors: ['claude'],       // the union the reader now produces
     agentActors: ['claude'],
   });
-  assert.equal(r.level, 'fail', 'an agent may act under an approval; it may not grant one (ADR-0013 Tier 3)');
+  assert.equal(r.level, 'fail', 'an agent may act under an approval; it may not grant one (ADR-0026 \'What is unchanged\' §9)');
   assert.match(r.reason, /agentActors/, 'and the refusal names the key the operator must edit');
   assert.doesNotMatch(r.reason, /registered in governance\.reviewActors/,
     'naming the wrong key sends the operator to the wrong config line');
