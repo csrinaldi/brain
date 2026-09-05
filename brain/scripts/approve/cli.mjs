@@ -121,6 +121,24 @@ function defaultReadDenyActors() {
   }
 }
 
+/** The AGENT identity list, for naming which key denied the actor (#124).
+ *
+ * A sibling reader with the same never-throws guarantee and the same injection
+ * point as its twin above — NOT a second `loadBrainConfig()` inside the deny
+ * branch, which is what the first cut did. `loadBrainConfig` throws by contract
+ * on a missing or malformed config, so calling it there turned a graceful
+ * refusal into a raw exception for exactly the callers the injectable exists to
+ * serve: a test harness, a different config source, a repo without the file
+ * (review round 3). A message must never be able to crash a verdict. */
+function defaultReadAgentActors() {
+  try {
+    const config = loadBrainConfig();
+    return Array.isArray(config?.governance?.agentActors) ? config.governance.agentActors : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Runs the read-confirm-post flow (design.md §F1).
  *
@@ -133,6 +151,8 @@ function defaultReadDenyActors() {
  * @param {Function} [ctx.readDenyActorsFn]  () => string[]
  * @param {Function} [ctx.branchFn]      () => string|null — current branch, only consulted when no PR number is given.
  * @param {Function} ctx.readLineFn      async () => string|null|undefined — reads the typed confirmation.
+ * @param {Function} [ctx.readAgentActorsFn] () => string[] — `governance.agentActors`, used only to name
+ *   which config key denied an actor. Injectable and never-throwing for the same reason its twin is.
  * @param {Function} [ctx.nowFn]         () => string ISO-8601, for the block's `at` field.
  * @param {Function} [ctx.write]         (chunk) => void
  * @returns {Promise<{exitCode:number, output:string, url?:string}>}
@@ -144,6 +164,7 @@ export async function runApprove({
   provider,
   getVcsFn = getVcs,
   readDenyActorsFn = defaultReadDenyActors,
+  readAgentActorsFn = defaultReadAgentActors,
   branchFn,
   readLineFn,
   nowFn = () => new Date().toISOString(),
@@ -212,7 +233,12 @@ export async function runApprove({
 
   const denyActors = readDenyActorsFn();
   if (Array.isArray(denyActors) && denyActors.includes(actor)) {
-    const denied = denyingList(actor, loadBrainConfig()?.governance?.agentActors ?? []);
+    // Guarded at the CALL SITE as well as in the default reader: the property
+    // wanted here is not "our reader is safe" but "a message cannot turn a
+    // refusal into a crash", and that must hold for whatever a caller injects.
+    let agents = [];
+    try { agents = readAgentActorsFn() ?? []; } catch { agents = []; }
+    const denied = denyingList(actor, agents);
     say(`✗ "${actor}" is registered in ${denied.key} — ${denied.clause} may never sign an approval.`);
     say('  This is the write-side twin of L5 read rule 15 (design.md §E3).');
     return done(1);

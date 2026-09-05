@@ -248,3 +248,30 @@ test('#124: this file states the rule by IMPORTING it, never by restating it', (
   assert.doesNotMatch(src, /governance\?\.reviewActors/,
     'and is not re-derived here — a local copy is how the twin stopped being one');
 });
+
+test('#124 (round 3): a throwing agent-list reader cannot turn a refusal into a crash', async () => {
+  // The first cut called loadBrainConfig() a SECOND time, unguarded, inside the
+  // deny branch — to build the MESSAGE. That function throws by contract on a
+  // missing or malformed config, so the graceful refusal every other branch
+  // preserves became a raw exception for exactly the callers the injectable
+  // exists to serve. The property is not "our reader is safe" but "a message
+  // cannot crash a verdict", so the call site is guarded too.
+  const vcs = makeVcs();
+  const res = await runApprove(baseCtx(vcs, {
+    readDenyActorsFn: () => ['alice'],
+    readAgentActorsFn: () => { throw new Error('no brain.config.json here'); },
+  })).catch((e) => ({ threw: e }));
+  assert.ok(!res.threw, `the refusal must not throw: ${res.threw?.message}`);
+  assert.notEqual(res.exitCode, 0, 'and it still refuses');
+  assert.equal(vcs.calls.prReviewComment, 0, 'without posting anything');
+});
+
+test('#124: the refusal names the AGENT key when the actor is an agent identity', async () => {
+  const vcs = makeVcs();
+  const res = await runApprove(baseCtx(vcs, {
+    readDenyActorsFn: () => ['alice'],
+    readAgentActorsFn: () => ['alice'],
+  }));
+  assert.match(res.output, /governance\.agentActors/, 'the operator is sent to the key they must edit');
+  assert.doesNotMatch(res.output, /registered in governance\.reviewActors/);
+});
