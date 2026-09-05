@@ -27,10 +27,13 @@ import { resolveGatePolicy } from '../vcs/governance-tiers.mjs';
  * failure regardless of tier position. A `required`-policy gate at this tier
  * passes through unchanged.
  *
- * ONE shared helper, not per-job logic (design §8). Production callers:
- * `vcs/phase-order-check.mjs`, `vcs/actor-check.mjs`, and — since #603 —
- * `governance/run-check.mjs`, which routes memory-gate, decision-gate,
- * issue-link and diff-size through it in `main()`.
+ * ONE shared helper, not per-job logic (design §8). Production callers —
+ * measured by IMPORT, because counting mentions counts comments:
+ *   · `vcs/phase-order-check.mjs`
+ *   · `governance/run-check.mjs` (since #603) — memory-gate, decision-gate,
+ *     issue-link and diff-size, routed in `main()`
+ * `vcs/actor-check.mjs` NAMES this helper in a comment and does not call it;
+ * an earlier revision of this very docstring read that mention as a caller.
  *
  * That last one was the wiring this docstring used to say had "NOT yet"
  * happened, scoped to a T2.1 that never landed. While it had not, a failing

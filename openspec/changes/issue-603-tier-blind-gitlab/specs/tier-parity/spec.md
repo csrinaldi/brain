@@ -10,7 +10,9 @@ capability: tier-parity
 
 `run-check.mjs` MUST route its result through `mapDetectionToWarning` before
 computing an exit code, so REQ-TIER-3's scenario holds for the four gates it
-owns exactly as it already holds for `phase-order` and `actor-check`.
+owns exactly as it already holds for `phase-order`, the helper's only other
+importer. (`actor-check` is not one — it is `required` at every tier and owes
+no softening; an earlier draft of this line miscounted a comment as a call.)
 
 ### Scenario: memory-gate fails at lite
 - WHEN `governance.tier` is `lite` and `memory-gate` finds no record

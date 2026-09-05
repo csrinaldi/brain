@@ -413,6 +413,7 @@
 {"id":"rec-2db40000e1ea2a85","ts":"2026-06-28T23:18:04Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-06-rec-2db40000e1ea2a85.jsonl"}
 {"id":"rec-2dc110f5ecc4772a","ts":"2026-07-29T14:29:00Z","actor":"docs/p289-stack-merge-order-record","type":"pattern","project":"brain","file":"2026-07-rec-2dc110f5ecc4772a.jsonl"}
 {"id":"rec-2dd362082f7e0f86","ts":"2026-07-11T12:33:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-2dd362082f7e0f86.jsonl"}
+{"id":"rec-2de1e6e540ff4bfb","ts":"2026-09-05T01:21:19Z","actor":"fix/issue-603-tier-blind-gitlab","type":"discovery","project":"brain","issue":603,"file":"2026-09-rec-2de1e6e540ff4bfb.jsonl"}
 {"id":"rec-2e241549ae016ed5","ts":"2026-07-01T00:56:21Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-2e241549ae016ed5.jsonl"}
 {"id":"rec-2e55c62d981d15d4","ts":"2026-07-11T12:32:56Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-2e55c62d981d15d4.jsonl"}
 {"id":"rec-2e5f8273288ca478","ts":"2026-07-25T21:50:19Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-2e5f8273288ca478.jsonl"}

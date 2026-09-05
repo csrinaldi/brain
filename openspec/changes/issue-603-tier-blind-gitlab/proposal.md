@@ -23,8 +23,12 @@ from one implementation.
    `issue-link`, `diff-size` — contains **zero** calls to
    `mapDetectionToWarning`. `main()` is `runCheck()` + `resultToExit()`, with no
    tier between them, and `resultToExit({pass:false})` is `1`.
-4. `phase-order-check.mjs` and `actor-check.mjs` DO route through the helper —
-   run-check is the outlier, not the rule.
+4. `phase-order-check.mjs` DOES route through the helper — run-check is the
+   outlier, not the rule. (This line first named `actor-check.mjs` as a second
+   caller. It is not one: it mentions the helper in a comment and never imports
+   it. The error came from counting `rg` matches instead of imports, and it
+   propagated into the spec, a docstring and a memory record before a review
+   round measured it. Every count in this trail is now by import.)
 5. `brain/scripts/ci/gitlab-governance.yml` carries **zero** `allow_failure:`
    across its eight jobs (the three matches are header prose).
 
