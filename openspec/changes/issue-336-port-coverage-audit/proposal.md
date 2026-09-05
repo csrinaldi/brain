@@ -82,11 +82,34 @@ Production reaches the port through several bindings (`providerModule.<verb>(`,
 live call sites**.
 
 That is #317's failure mode reproduced inside the tool built to end it, and it
-survived three rounds of tightening the wrong thing. After the fix they read 2,
+survived three rounds of tightening the wrong thing. After the fix they read 1,
 1 and 1, and the population of zero-consumer verbs fell from 10 to 7.
+
+(That first number was published as **2** and round 6 measured it wrong: the
+audit was counting ITSELF, because this file names `providerModule.branchProtect(...)`
+in its own prose. Round 6 fixed three things at once — comments are stripped
+before matching, the tool is excluded from its own consumer walk, and a
+runtime-resolved dispatch is reported rather than counted.)
 
 The receiver is now any expression; the verb carries the identity. The trade is
 one-directional and deliberate: over-counting moves a verb UP a list someone
 reads, under-counting hides it at the bottom — which is exactly how `prReviews`
 stayed invisible. Between a wrong number and a missing row, this audit chooses
 the wrong number.
+
+## Round 6: three ways the count could still lie
+
+- **A mention is not a call.** This file's own comments name the verbs it
+  discusses, and `gather()` walked it like any other consumer — so
+  `branchProtect` read 2 with one real call site. That is
+  `rec-de8fc48c0201e015` ("count callers by IMPORT, never by mention"),
+  already on file from #603, reproduced across five rounds that hardened this
+  very regex. Comments are stripped now, and the tool is excluded from its own
+  walk: an audit is not a consumer of the thing it audits.
+- **A dispatcher reaches everything and proves nothing.** `vcs/cli.mjs` calls
+  `vcs[verb](args)` with the verb from argv, so seven verbs read `consumers: 0`
+  while being reachable. Counting it per verb was this fix's OWN first cut and
+  inflated `branchProtect` to 8 — the same sin in the other direction. It is
+  reported as its own line now, naming the files, and no count moves.
+- **A verb named in a test's prose is not a test.** `coverageOf` strips
+  comments too, for the same reason in the other column.

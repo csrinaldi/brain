@@ -63,6 +63,45 @@ export function exportedVerbs(source) {
  * gate verdict elsewhere in this repo: a file we could not read is not a file
  * that said `none`.
  */
+/**
+ * Pure: source with COMMENTS removed — code only.
+ *
+ * Round 6 measured why this is not optional: this file's own explanatory
+ * comments contain `providerModule.branchProtect(...)` and `.prView(...)`, and
+ * `gather()` walks this file like any other, so the audit counted ITSELF as a
+ * consumer of the verbs it discusses. `branchProtect` read 2 with one real call
+ * site. That is `rec-de8fc48c0201e015` — "count callers by IMPORT, never by
+ * mention" — reproduced across five rounds that hardened this very regex.
+ *
+ * ONE alternation, never sequential passes (#850's lesson): a comment pass run
+ * before a string pass lets a `//` inside a string eat the rest of the line.
+ * Strings are KEPT — a verb name in a string can be a real dynamic dispatch.
+ */
+export function stripComments(text) {
+  const re = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|`(?:\\.|[^\\`])*`|'(?:\\.|[^\\'])*'|"(?:\\.|[^\\"])*"/g;
+  return text.replace(re, (m) => (m.startsWith('/') ? ' ' : m));
+}
+
+/**
+ * Pure: does this file dispatch the port with a verb resolved at RUNTIME —
+ * `vcs[verb](args)`?
+ *
+ * `brain/scripts/vcs/cli.mjs` does exactly that, so its source never spells any
+ * verb name and seven verbs read `consumers: 0` while being reachable through
+ * the CLI (round 6's blocker).
+ *
+ * REPORTED, NOT COUNTED, and the distinction is the honest part. Counting it
+ * per verb was this fix's own first cut: the detection matches any computed
+ * call, so `branchProtect` jumped to 8 consumers and no verb read zero —
+ * silent inflation of the very ranking R336-3 exists to produce, which is the
+ * same sin as the undercount it was meant to cure. A dispatcher reaches every
+ * verb, but it is not evidence that any PARTICULAR verb is depended upon.
+ * So it appears as its own line, naming the files, where a reader can judge it.
+ */
+export function isGenericDispatcher(code) {
+  return /(?<![\w$])(?:vcs|port|provider[A-Za-z]*)\s*\[\s*[A-Za-z_$][\w$]*\s*\]\s*\(/.test(code);
+}
+
 export const RECORDING_EVIDENCE = Object.freeze(['recorded', 'endpoint', 'measured', 'live_verified']);
 
 /** Pure: what ONE fixture's `_provenance` actually claims. */
@@ -109,8 +148,11 @@ export function escapeForRegExp(text) {
  */
 export function coverageOf(verb, contractText, otherTestText) {
   const re = new RegExp(`(?<![\\w$])${escapeForRegExp(verb)}(?![\\w$])`);
-  if (re.test(contractText)) return 'contract';
-  if (re.test(otherTestText)) return 'elsewhere';
+  // Comments stripped here too (round 6, cold-3): a verb NAMED in a test's
+  // prose is not a verb the test exercises, and reading one as covered is the
+  // same mention-for-call error in the other column.
+  if (re.test(stripComments(contractText))) return 'contract';
+  if (re.test(stripComments(otherTestText))) return 'elsewhere';
   return 'uncovered';
 }
 
@@ -140,7 +182,11 @@ export function countConsumers(verb, consumers) {
   // bottom and is how `prReviews` stayed invisible. Between a wrong number and
   // a missing row, this audit chooses the wrong number.
   const re = new RegExp(`\\.${escapeForRegExp(verb)}(?![\\w$])\\s*\\(`);
-  return new Set(consumers.filter((c) => re.test(c.text)).map((c) => c.file)).size;
+  const files = new Set();
+  for (const c of consumers) {
+    if (re.test(stripComments(c.text))) files.add(c.file);
+  }
+  return files.size;
 }
 
 /**
@@ -183,7 +229,10 @@ export function buildReport({ adapters, fixtures, contractText, otherTestText, c
     .map((f) => ({ name: f.name, claims: f.verb === null ? null : `${f.provider}.${f.verb}` }));
 
   const derivedFixtures = fixtures.filter((f) => f.provenance?.derived).length;
-  return { rows, generated: rows.length, derivedFixtures, orphans };
+  const dispatchers = consumers
+    .filter((c) => isGenericDispatcher(stripComments(c.text)))
+    .map((c) => c.file);
+  return { rows, generated: rows.length, derivedFixtures, orphans, dispatchers };
 }
 
 // ── The edge: reading. Everything above is pure. ────────────────────────────
@@ -232,6 +281,13 @@ export function gather({ repo = REPO, _read = readFileSync, _readdir = readdirSy
         continue;
       }
       if (p.includes('/vcs/providers/')) continue;   // a provider calling itself is not a consumer
+      // And the audit is not a consumer of the port either. This file discusses
+      // verbs by name in its own prose and carries a regex whose SOURCE matches
+      // its own dispatcher pattern — measured: it counted itself for
+      // `branchProtect` and listed itself as a dispatcher. Stripping comments
+      // does not settle it, and it should not have to: excluding the tool is
+      // the true statement, the same one that excludes the adapters.
+      if (p.endsWith('/vcs/port-coverage.mjs')) continue;
       consumers.push({ file: p, text });
     }
   };
@@ -278,6 +334,20 @@ export function renderMarkdown(report) {
     lines.push('**Not one verb has fixtures that are all recorded.** That is the Phase 2 input this audit');
     lines.push('was built to produce, and it is not the gap #336 expected to find: contract COVERAGE is');
     lines.push('complete, and the exposure moved to what the covered tests are checked against.');
+  }
+
+  if (report.dispatchers?.length) {
+    lines.push('');
+    lines.push('## Reached without being named');
+    lines.push('');
+    lines.push('These files call the port with the verb resolved at runtime, so their source spells no');
+    lines.push('verb name and the counts above cannot see them. Every verb is reachable through each:');
+    lines.push('');
+    for (const f of report.dispatchers) lines.push(`- \`${f}\``);
+    lines.push('');
+    lines.push('Listed rather than added to the counts: a dispatcher reaches every verb, but it is not');
+    lines.push('evidence that any particular verb is depended upon, and folding it in would inflate the');
+    lines.push('ranking this report exists to produce.');
   }
 
   if (report.orphans?.length) {

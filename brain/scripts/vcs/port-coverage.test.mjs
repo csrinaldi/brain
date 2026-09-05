@@ -220,3 +220,48 @@ test('#336 (round 5): a verb exported as an arrow or a function EXPRESSION still
   assert.deepEqual(exportedVerbs(src).sort(), ['arrow', 'bare', 'decl', 'expr', 'mutable'],
     'every function-valued export is a verb; a frozen object and a string are not');
 });
+
+// ── Round 6: a mention is not a call, and a dispatcher reaches everything ────
+
+test('#336: a verb named in a COMMENT is not a consumer — the #603 lesson, in this file', () => {
+  const consumers = [
+    { file: 'doc.mjs', text: '// production calls providerModule.branchProtect(...) somewhere\nconst x = 1;' },
+    { file: 'block.mjs', text: '/* see .prView(...) for the shape */\nconst y = 2;' },
+    { file: 'real.mjs', text: 'await providerModule.branchProtect({ project });' },
+  ];
+  assert.equal(countConsumers('branchProtect', consumers), 1,
+    'only real.mjs calls it — this audit counted its OWN comments before round 6');
+  assert.equal(countConsumers('prView', consumers), 0, 'a block comment is not a call either');
+});
+
+test('#336: a `//` inside a string does not eat the code after it', () => {
+  const consumers = [{ file: 'a.mjs', text: 'const u = "http://example.com"; await vcs.prView({});' }];
+  assert.equal(countConsumers('prView', consumers), 1,
+    'ONE alternation, not sequential passes — the #850 lesson applied here');
+});
+
+test('#336: a runtime-resolved dispatch is REPORTED, never folded into a verb\'s count', () => {
+  // brain/scripts/vcs/cli.mjs does `await vcs[verb](args)` with verb from argv,
+  // so its source spells no verb name and seven verbs read consumers:0 while
+  // being reachable (round 6's blocker). Counting it per verb was this fix's
+  // OWN first cut and inflated branchProtect from 1 to 8 — the same sin in the
+  // other direction. It is a report line now, not a number.
+  const cli = [{ file: 'vcs/cli.mjs', text: 'const result = await vcs[verb](args);' }];
+  assert.equal(countConsumers('projectResolve', cli), 0,
+    'the dispatcher does not make projectResolve look depended upon');
+  const report = buildReport({
+    adapters: { github: 'export async function projectResolve(){}' },
+    fixtures: [], contractText: '', otherTestText: '', consumers: cli,
+  });
+  assert.deepEqual(report.dispatchers, ['vcs/cli.mjs'], 'it is named where a reader can judge it');
+  assert.equal(report.rows[0].consumers, 0, 'and no count moved');
+});
+
+test('#336: an ordinary computed call is not a port dispatch', () => {
+  for (const text of ['const x = arr[0];', 'handlers[name](evt);', 'const f = map[key](1);']) {
+    const r = buildReport({ adapters: { github: 'export function a(){}' }, fixtures: [], contractText: '', otherTestText: '', consumers: [{ file: 'x.mjs', text }] });
+    assert.deepEqual(r.dispatchers, [], `not a port dispatch: ${text}`);
+  }
+  const r = buildReport({ adapters: { github: 'export function a(){}' }, fixtures: [], contractText: '', otherTestText: '', consumers: [{ file: 'x.mjs', text: 'await providerModule[verb](args);' }] });
+  assert.deepEqual(r.dispatchers, ['x.mjs'], 'but a port receiver dispatching by variable is');
+});
