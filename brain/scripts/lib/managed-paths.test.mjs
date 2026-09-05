@@ -311,3 +311,23 @@ test('strategyFor: an unclassified path defaults to copy (REQ-397-5)', () => {
   assert.equal(strategyFor('some/unknown/file.txt', managedStrategy), 'copy');
 });
 
+
+// ── #603: the requirement is per PROVIDER, not per platform ─────────────────
+// The GitHub literal above is pinned by name because it is the path this
+// repository itself uses. But `openspec/specs/governance` stated the whole
+// requirement over that one path, while the code has emitted a scaffold per
+// provider since #570 — so the spec under-specified the code and named one
+// platform as the system. This test states the requirement the way the spec
+// now does: over `SCAFFOLD_DELIVERY`, which is the one place the providers and
+// their paths are declared. A third provider joins this guard by joining that
+// table, with nobody remembering to widen a list here.
+test('#603: EVERY provider brain emits a scaffold for has that scaffold managed', async () => {
+  const { SCAFFOLD_DELIVERY, SCAFFOLD_PROVIDERS } = await import('../vcs/contributor-scaffold.mjs');
+  assert.ok(SCAFFOLD_PROVIDERS.length >= 2, `the emission table must carry the providers (saw ${SCAFFOLD_PROVIDERS.length})`);
+  const unmanaged = SCAFFOLD_PROVIDERS
+    .map((p) => SCAFFOLD_DELIVERY[p].path)
+    .filter((path) => !managed.includes(path));
+  assert.deepEqual(unmanaged, [],
+    'a provider whose contributor scaffold is emitted but NOT managed gets a file brain writes once and then '
+    + 'never maintains — the shape #570 built the per-provider emission to avoid (#603).');
+});

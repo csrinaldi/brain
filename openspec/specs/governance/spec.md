@@ -82,20 +82,34 @@ MUST include a link to it. `npm run brain:nav` MUST report no orphans after S1 m
 
 ---
 
-### Requirement REQ-S1-2: PR Template Sections
+### Requirement REQ-S1-2: Contributor Scaffold Sections
 
-`.github/PULL_REQUEST_TEMPLATE.md` MUST exist and MUST contain: an issue-link section
-referencing the `Closes|Fixes|Resolves #N` pattern; a size note referencing the
-400-line budget and `size:exception`; and a decision/ADR checkbox.
+**Each supported provider's** contributor scaffold MUST exist at the path that
+provider declares in `SCAFFOLD_DELIVERY` (`brain/scripts/vcs/contributor-scaffold.mjs`)
+and MUST contain: an issue-link section referencing the `Closes|Fixes|Resolves #N`
+pattern; a size note referencing the 400-line budget and `size:exception`; and a
+decision/ADR checkbox.
 
-#### Scenario: Template file exists with required sections
+Stated over the emission table rather than over one path (#603). Since #570 the
+scaffold is emitted per provider from one source — `.github/PULL_REQUEST_TEMPLATE.md`
+for GitHub, `.gitlab/merge_request_templates/Default.md` for GitLab — and naming
+only the first made this requirement under-specify the code while presenting one
+platform as the system. A provider joins the requirement by joining the table.
+
+#### Scenario: each provider's scaffold exists with required sections
 
 - GIVEN S1 has merged
-- WHEN `.github/PULL_REQUEST_TEMPLATE.md` is read
+- WHEN the scaffold path declared for a provider is read
 - THEN the file is non-empty
 - AND contains text matching `Closes|Fixes|Resolves`
 - AND contains a reference to `400` or `size:exception`
 - AND contains a checkbox or section referencing `ADR` or `decision`
+
+#### Scenario: a GitLab consumer is not a second-class reader
+
+- GIVEN the provider is `gitlab`
+- WHEN `.gitlab/merge_request_templates/Default.md` is read
+- THEN it satisfies this requirement exactly as the GitHub path does
 
 ---
 
@@ -123,16 +137,24 @@ and at least one lock-file pattern.
 
 ### Requirement REQ-S1-4: Managed-Paths Specific Entries
 
-`brain/core/managed-paths.mjs` MUST list `.github/workflows/governance.yml` and
-`.github/PULL_REQUEST_TEMPLATE.md` in the managed array. It MUST NOT contain `.github/**`.
+`brain/core/managed-paths.mjs` MUST list `.github/workflows/governance.yml`, and
+**every provider's scaffold path declared in `SCAFFOLD_DELIVERY`**, in the managed
+array. It MUST NOT contain `.github/**`.
 
-[**unit-testable**: import `managed-paths.mjs`; assert the two specific paths are present; assert no entry matches `.github/**`]
+An emitted scaffold that is not managed is a file brain writes once and then never
+maintains — which is the drift the per-provider emission was built to prevent (#603).
 
-#### Scenario: Two specific paths present
+[**unit-testable**: import `managed-paths.mjs` and `contributor-scaffold.mjs`; assert
+the workflow path and every `SCAFFOLD_DELIVERY[*].path` are present; assert no entry
+matches `.github/**`]
+
+#### Scenario: the workflow and every provider's scaffold are present
 
 - GIVEN `managed-paths.mjs` is imported
 - WHEN the `managed` export is inspected
-- THEN both `.github/workflows/governance.yml` and `.github/PULL_REQUEST_TEMPLATE.md` are in the array
+- THEN `.github/workflows/governance.yml` is in the array
+- AND so is each path `SCAFFOLD_DELIVERY` declares — today
+  `.github/PULL_REQUEST_TEMPLATE.md` and `.gitlab/merge_request_templates/Default.md`
 
 #### Scenario: No broad .github glob
 

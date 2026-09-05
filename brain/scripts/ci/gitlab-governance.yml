@@ -59,6 +59,22 @@
 #                  mirrors GitHub's two-tier REQUIRED_JOBS/DETECTION_JOBS
 #                  registry (governance-checks.mjs) — see also REQ-A2-4.
 #
+# WHERE THE TIER IS RESOLVED, AND WHY THERE IS NO `allow_failure:` HERE (#603).
+# You are not looking at a fragment that forgot the tier. This YAML is static and
+# cannot resolve one; the CHECKERS do it, and they do it for both providers at
+# once. Every entrypoint below routes its result through `mapDetectionToWarning`
+# (governance/detection-policy.mjs), which turns a failure into an exit 0 plus a
+# `::warning::` naming the gate and the tier whenever that gate's policy at the
+# resolved tier is `detection` — REQ-TIER-3's own scenario, verbatim.
+#
+# So a `lite` consumer's `memory-gate` and `phase-order` do not block here, and
+# they do not block on GitHub either, from ONE implementation. Writing
+# `allow_failure:` into this file would be a second declaration of what
+# GATE_MATRIX already owns: it would hardcode one tier's answer into one
+# provider's YAML and drift the moment a policy changes. Before #603 this
+# fragment DID block all eight at every tier — that was the defect, and the fix
+# was in `run-check.mjs`, not here.
+#
 # Job names below are load-bearing: they MUST equal GOVERNANCE_JOBS
 # (governance-checks.mjs) exactly. A drift-guard test
 # (ci-context-drift-guard.test.mjs) string-slices this file and fails red on

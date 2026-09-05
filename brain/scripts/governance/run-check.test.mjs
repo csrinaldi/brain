@@ -181,9 +181,19 @@ test('main: memory-gate passing → returns 0, prints nothing', async () => {
 });
 
 test('main: memory-gate failing → returns 1, prints the reason', async () => {
+  // The tier is now DECLARED here rather than inherited from whatever
+  // brain.config.json this repository happens to carry (#603). It used to be
+  // implicit, and that hid two things at once: the assertion depended on
+  // brain's own tier, and at `lite` — brain's actual tier — this exit code was
+  // the defect #603 fixes, not the contract. `standard` is where memory-gate
+  // is `required`, which is what this test has always meant to pin. The lite
+  // behaviour is pinned by its own test below.
   let code;
   const logs = await captureLog(async () => {
-    code = await main('memory-gate', { readRecords: () => [] });
+    code = await main('memory-gate', {
+      readRecords: () => [],
+      readConfig: () => ({ governance: { tier: 'standard' } }),
+    });
   });
   assert.equal(code, 1);
   assert.ok(logs.length === 1 && logs[0].length > 0);
@@ -1664,4 +1674,60 @@ test('runCheck: decision-gate — an architectural change with NO ADR passes; th
   assert.deepEqual(result, { pass: true },
     'no architectural-surface heuristic exists. If this fails, step 2 was implemented — ' +
     'the doctrine describing it must stop being aspirational in the same change (#516).');
+});
+
+// ── #603: the tier decides the exit code, in ONE place ──────────────────────
+// REQ-TIER-3's scenario is normative — "every job whose lite policy is
+// detection exits 0 with a warning annotation stating the tier as the reason".
+// phase-order-check.mjs and actor-check.mjs already route through
+// mapDetectionToWarning; run-check.mjs did not, so `memory-gate` exited 1 at
+// `lite`. On GitHub branch protection filtered that; on GitLab, where no such
+// layer exists, it BLOCKED an MR on a gate the tier calls advisory.
+
+test('#603: memory-gate failing at LITE → exits 0 and says which gate and which tier', async () => {
+  let code;
+  const logs = await captureLog(async () => {
+    code = await main('memory-gate', {
+      readRecords: () => [],
+      readConfig: () => ({ governance: { tier: 'lite' } }),
+    });
+  });
+  assert.equal(code, 0, 'detection at this tier — REQ-TIER-3 says 0, not 1');
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /memory-gate/, 'the annotation names the gate');
+  assert.match(logs[0], /lite/, 'and states the tier as the reason');
+  assert.match(logs[0], /::warning::/, 'and is a warning, not silence');
+});
+
+test('#603: the SAME failure at STANDARD still exits 1 — the softening is policy-scoped', async () => {
+  let code;
+  await captureLog(async () => {
+    code = await main('memory-gate', {
+      readRecords: () => [],
+      readConfig: () => ({ governance: { tier: 'standard' } }),
+    });
+  });
+  assert.equal(code, 1, 'memory-gate is required at standard — nothing softens it');
+});
+
+test('#603: a REQUIRED gate at lite is untouched — only detection policies soften', async () => {
+  let code;
+  await captureLog(async () => {
+    code = await main('decision-gate', {
+      readConfig: () => ({ governance: { tier: 'lite' } }),
+      diffNameOnly: () => ['brain/HOME.md'], diffNameOnlyAdded: () => [],
+    });
+  });
+  assert.equal(code, 1, 'decision-gate is required at EVERY tier — lite does not reach it');
+});
+
+test('#603: uncomputable is never softened — absent evidence is not a passing gate', async () => {
+  let code;
+  await captureLog(async () => {
+    code = await main('memory-gate', {
+      readRecords: () => { throw new Error('store unreadable'); },
+      readConfig: () => ({ governance: { tier: 'lite' } }),
+    });
+  });
+  assert.equal(code, 2, 'uncomputable stays 2 at a detection tier — the helper refuses to soften it');
 });
