@@ -155,3 +155,18 @@ test('#336: identifier boundaries hold where \\b cannot — a $ suffix is not th
     'prView must not borrow coverage from prView$Extra — \\b would have allowed it, since $ is a non-word char');
   assert.equal(countConsumers('prView', [{ file: 'a.mjs', text: 'vcs.prView$Extra({})' }]), 0);
 });
+
+test('#336: a variable merely ENDING in `vcs` is not the port — both sides anchored', () => {
+  // Round 2's finding, reproduced before it was fixed: the right edge of the
+  // verb was anchored and the left edge of `vcs` was not, so `githubvcs.` read
+  // as a port call. An over-count corrupts the consumer ranking, which is the
+  // one thing R336-3 asks this report to get right.
+  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'await githubvcs.prReviews({});' }]), 0,
+    'githubvcs is a different object — it never went through the port');
+  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'await my$vcs.prReviews({});' }]), 0,
+    '$ counts as an identifier character on this side too');
+  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'await vcs.prReviews({});' }]), 1,
+    'and the real call still counts');
+  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'const r = await (vcs).prReviews;' }]), 0,
+    'only a call site counts — a property read is not a consumer of the verb');
+});

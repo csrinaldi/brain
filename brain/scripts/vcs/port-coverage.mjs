@@ -97,7 +97,11 @@ export function coverageOf(verb, contractText, otherTestText) {
  * consumer of the port.
  */
 export function countConsumers(verb, consumers) {
-  const re = new RegExp(`vcs\\.${escapeForRegExp(verb)}(?![\\w$])\\s*\\(`);
+  // BOTH sides anchored. Round 1 anchored the verb's right edge and round 2
+  // measured what that left open: `githubvcs.prReviews(` — a variable merely
+  // ending in `vcs` — counted as a consumer. Same defect one position over,
+  // and it corrupts precisely the ranking this audit exists for (R336-3).
+  const re = new RegExp(`(?<![\\w$])vcs\\.${escapeForRegExp(verb)}(?![\\w$])\\s*\\(`);
   return new Set(consumers.filter((c) => re.test(c.text)).map((c) => c.file)).size;
 }
 
