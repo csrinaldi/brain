@@ -57,6 +57,7 @@
     "brain:protect": "node ./brain/scripts/brain-protect.mjs",
     "brain:protect-server": "node ./brain/scripts/brain-protect-server.mjs",
     "brain:governance-status": "node ./brain/scripts/brain-governance-status.mjs",
+    "brain:port:coverage": "node brain/scripts/vcs/port-coverage.mjs",
     "pretest": "node brain/scripts/test-hygiene.mjs",
     "test": "node --test \"brain/scripts/**/*.test.mjs\" \"test/**/*.e2e.test.mjs\"",
     "test:fresh-install": "bash test/fresh-install/run.sh",
