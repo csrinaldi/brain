@@ -52,10 +52,24 @@ export function exportedVerbs(source) {
  * gate verdict elsewhere in this repo: a file we could not read is not a file
  * that said `none`.
  */
+export const RECORDING_EVIDENCE = Object.freeze(['recorded', 'endpoint', 'measured', 'live_verified']);
+
+/** Pure: what ONE fixture's `_provenance` actually claims. */
+export function classifyProvenance(p) {
+  if (p?.unreadable) return 'unreadable';
+  if (p?.derived) return 'derived';
+  if (RECORDING_EVIDENCE.some((k) => p?.[k] !== undefined)) return 'recorded';
+  return 'undeclared';
+}
+
 export function foldProvenance(provenances) {
   if (provenances.length === 0) return 'none';
-  if (provenances.some((p) => p?.unreadable)) return 'unreadable';
-  const kinds = new Set(provenances.map((p) => (p?.derived ? 'derived' : 'recorded')));
+  const kinds = new Set(provenances.map(classifyProvenance));
+  // Weakest-wins for the two "we do not know" answers, in that order: an
+  // unreadable file dominates everything, and an undeclared one dominates the
+  // claims, because a verb is only as trustworthy as its least-evidenced fixture.
+  if (kinds.has('unreadable')) return 'unreadable';
+  if (kinds.has('undeclared')) return 'undeclared';
   return kinds.size > 1 ? 'mixed' : [...kinds][0];
 }
 
@@ -166,6 +180,10 @@ export function gather({ repo = REPO, _read = readFileSync, _readdir = readdirSy
     const m = /^([a-z]+)-([A-Za-z0-9_$]+)-/.exec(name);
     let provenance;
     try {
+      // `?? {}` maps a MISSING `_provenance` to the same empty object an empty
+      // one produces — and both are `undeclared`, which is the honest answer
+      // for each. The distinction that matters is against `recorded`, not
+      // between the two shapes of saying nothing.
       provenance = JSON.parse(_read(join(repo, fixDir, name), 'utf8'))._provenance ?? {};
     } catch {
       provenance = { unreadable: true };   // never silently `none`
@@ -219,7 +237,7 @@ export function renderMarkdown(report) {
   lines.push('## What this run measured');
   lines.push('');
   lines.push(`- **Coverage**: ${count('coverage', 'contract')} contract · ${count('coverage', 'elsewhere')} elsewhere · ${count('coverage', 'uncovered')} uncovered`);
-  lines.push(`- **Fixture provenance**: ${count('provenance', 'recorded')} recorded · ${count('provenance', 'derived')} derived · ${count('provenance', 'mixed')} mixed · ${count('provenance', 'none')} none · ${count('provenance', 'unreadable')} unreadable`);
+  lines.push(`- **Fixture provenance**: ${count('provenance', 'recorded')} recorded · ${count('provenance', 'derived')} derived · ${count('provenance', 'mixed')} mixed · ${count('provenance', 'undeclared')} undeclared · ${count('provenance', 'none')} none · ${count('provenance', 'unreadable')} unreadable`);
   lines.push('');
   const fixtureCount = report.rows.reduce((a, r) => a + r.fixtures, 0);
   const derivedFixtures = report.derivedFixtures ?? 0;

@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { exportedVerbs, foldProvenance, coverageOf, countConsumers, buildReport } from './port-coverage.mjs';
+import { exportedVerbs, foldProvenance, classifyProvenance, coverageOf, countConsumers, buildReport } from './port-coverage.mjs';
 
 // ── R336-1: verbs come from the adapter, not a list ─────────────────────────
 
@@ -169,4 +169,29 @@ test('#336: a variable merely ENDING in `vcs` is not the port — both sides anc
     'and the real call still counts');
   assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'const r = await (vcs).prReviews;' }]), 0,
     'only a call site counts — a property read is not a consumer of the verb');
+});
+
+// ── A file that said nothing is not a file that said `recorded` ─────────────
+// Round 3's blocker, and the mirror of a rule the code already had. It guarded
+// `unreadable` — "a file we could not read is not a file that said none" — and
+// left the symmetric case open: the fold read "no derived flag" as `recorded`,
+// the STRONGEST category, so an empty `_provenance` claimed to be a recording.
+
+test('#336: an empty or absent _provenance is UNDECLARED, never recorded', () => {
+  assert.equal(foldProvenance([{}]), 'undeclared',
+    'no evidence is not the best evidence — this returned `recorded` before round 3');
+  assert.equal(foldProvenance([{ note: 'why this exists' }]), 'undeclared',
+    'a note explains; it does not record');
+  assert.equal(classifyProvenance({ endpoint: 'GET /x' }), 'recorded', 'an endpoint IS a recording');
+  assert.equal(classifyProvenance({ recorded: '2026-07-30' }), 'recorded');
+  assert.equal(classifyProvenance({ live_verified: true }), 'recorded');
+  assert.equal(classifyProvenance({ derived: true, endpoint: 'GET /x' }), 'derived',
+    'derived wins over an endpoint it was derived FROM — the flag is the author speaking');
+});
+
+test('#336: the weakest fixture decides the verb — a verb is only as good as its worst evidence', () => {
+  assert.equal(foldProvenance([{ endpoint: 'GET /x' }, {}]), 'undeclared',
+    'one undeclared fixture makes the verb undeclared, not mixed and certainly not recorded');
+  assert.equal(foldProvenance([{ endpoint: 'GET /x' }, { unreadable: true }]), 'unreadable',
+    'and unreadable still dominates undeclared — we could not even look');
 });
