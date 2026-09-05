@@ -61,6 +61,7 @@
 {"id":"rec-069c138d749a9dc4","ts":"2026-09-01T12:30:28Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-09-rec-069c138d749a9dc4.jsonl"}
 {"id":"rec-069e14d7cac09bb7","ts":"2026-07-29T14:28:53Z","actor":"feat/issue-259-d2-pr3-net-parity-reverter-skip","type":"decision","project":"brain","file":"2026-07-rec-069e14d7cac09bb7.jsonl"}
 {"id":"rec-06d1ec15af217437","ts":"2026-07-29T14:26:40Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-06d1ec15af217437.jsonl"}
+{"id":"rec-06d22ae955288335","ts":"2026-09-05T13:37:04Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-09-rec-06d22ae955288335.jsonl"}
 {"id":"rec-06fb1e84447271c3","ts":"2026-08-29T22:44:32Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-08-rec-06fb1e84447271c3.jsonl"}
 {"id":"rec-06fe3bcb69ba45b4","ts":"2026-07-29T14:27:49Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-06fe3bcb69ba45b4.jsonl"}
 {"id":"rec-0715821747e30744","ts":"2026-07-13T00:22:21Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-0715821747e30744.jsonl"}
@@ -1325,6 +1326,7 @@
 {"id":"rec-8d744329c3de68a0","ts":"2026-07-29T14:27:40Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-8d744329c3de68a0.jsonl"}
 {"id":"rec-8d7fc465c048ead8","ts":"2026-07-29T14:25:48Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-8d7fc465c048ead8.jsonl"}
 {"id":"rec-8da91c7a9683d747","ts":"2026-07-12T15:33:43Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-8da91c7a9683d747.jsonl"}
+{"id":"rec-8e1ffbb80f7873e9","ts":"2026-09-05T16:20:15Z","actor":"feat/issue-348-capability-honesty","type":"architecture","project":"brain","issue":348,"file":"2026-09-rec-8e1ffbb80f7873e9.jsonl"}
 {"id":"rec-8e317df99101c3e5","ts":"2026-07-25T21:50:51Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-8e317df99101c3e5.jsonl"}
 {"id":"rec-8e64016868c3b3e0","ts":"2026-07-13T00:22:03Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-8e64016868c3b3e0.jsonl"}
 {"id":"rec-8e820890dbf928b5","ts":"2026-07-29T13:59:36Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-8e820890dbf928b5.jsonl"}
@@ -2179,6 +2181,7 @@
 {"id":"rec-eda961d75925e6cc","ts":"2026-07-13T00:22:08Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-eda961d75925e6cc.jsonl"}
 {"id":"rec-ede6551ad3caf23b","ts":"2026-08-07T20:58:21Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-ede6551ad3caf23b.jsonl"}
 {"id":"rec-edefa6875431e73d","ts":"2026-07-21T00:54:30Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-edefa6875431e73d.jsonl"}
+{"id":"rec-edf051026024fe2f","ts":"2026-09-05T13:08:22Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-09-rec-edf051026024fe2f.jsonl"}
 {"id":"rec-edfbd4b3f058ba25","ts":"2026-08-12T01:35:06Z","actor":"feat/issue-509-promote-amendments-02","type":"session_summary","project":"brain","file":"2026-08-rec-edfbd4b3f058ba25.jsonl"}
 {"id":"rec-ee0b6a436fea2cbb","ts":"2026-07-13T20:11:23Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-ee0b6a436fea2cbb.jsonl"}
 {"id":"rec-ee6f5736d3724ba4","ts":"2026-09-01T12:52:29Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-ee6f5736d3724ba4.jsonl"}
