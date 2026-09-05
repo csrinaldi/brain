@@ -6,6 +6,7 @@
 // (issue #501), in which case every call carries that credential instead.
 
 import { run, runJson } from '../lib/exec.mjs';
+import { classifyProbe } from '../capability-report.mjs';
 import { normalizeCommitStatus, providerState, assigneeParams, normalizeAssignees } from '../lib/normalize.mjs';
 import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
@@ -327,19 +328,23 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
   if (_capabilityCache.has(key)) return _capabilityCache.get(key);
 
   const r = gh(['api', `repos/${project}/branches/${branch}/protection`]);
+  // Classified through the shared pure function (#348): a 404 here means the
+  // API answered and nothing is configured yet, which is what `available`
+  // claims — an opt-in this axis has and a plan-gated endpoint would not.
+  const probe = classifyProbe(r, {
+    notFoundIsAvailable: true,
+    remedies: [{ match: /403|upgrade.*pro/i, remedy: 'GitHub Pro for private repos, or make the repo public' }],
+  });
   let result;
-  if (r.ok) {
+  if (probe.state === 'available') {
     result = { hardEnforcement: 'available' };
-  } else if (r.stderr.includes('404')) {
-    // No protection set yet — API is accessible, feature is available
-    result = { hardEnforcement: 'available' };
-  } else if (r.stderr.includes('403') || /upgrade.*pro/i.test(r.stderr)) {
+  } else if (probe.state === 'unavailable') {
     result = {
       hardEnforcement: 'unavailable',
-      remedy: 'GitHub Pro for private repos, or make the repo public',
+      remedy: probe.remedy,
     };
   } else {
-    result = { hardEnforcement: 'unknown' };
+    result = { hardEnforcement: 'unknown', ...(probe.detail ? { detail: probe.detail } : {}) };
   }
 
   // The second axis (#348). GitHub applies `required_approving_review_count`

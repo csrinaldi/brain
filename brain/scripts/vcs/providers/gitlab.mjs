@@ -7,7 +7,7 @@
 // API accepts the URL-encoded project path everywhere, so the slug is used directly.
 
 import { run, runJson } from '../lib/exec.mjs';
-import { classifyProbe, unappliedNote } from '../capability-report.mjs';
+import { unappliedNote } from '../capability-report.mjs';
 import { normalizeCommitStatus, providerState, assigneeParams, normalizeAssignees } from '../lib/normalize.mjs';
 import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';

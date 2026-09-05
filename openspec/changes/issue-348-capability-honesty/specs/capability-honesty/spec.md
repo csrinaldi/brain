@@ -12,15 +12,28 @@ capability: capability-honesty
 vocabulary `hardEnforcement` already uses: `available` | `unavailable` |
 `unknown`, plus a `remedy` when unavailable.
 
-### Scenario: GitLab without the approval-rules API
-- WHEN the approval-rules endpoint answers 403/404/Premium-gated
-- THEN `approvalCount` is `unavailable` with a remedy naming what would change
-  it — never absent, and never assumed from a plan name.
+### Scenario: GitLab
+- WHEN `capabilities()` is asked on GitLab
+- THEN `approvalCount` is `unavailable`, with a remedy naming both the plan
+  that would offer it AND that the human signature does not depend on it.
 
-### Scenario: probed, never priced
-- WHEN either provider is asked
-- THEN the answer comes from the platform's response, and no code path decides
-  it from a hardcoded plan or tier table.
+  The capability reported is **brain's, not the platform's**. #348 ratified not
+  implementing the approval-rules call, so brain enforces no approval count on
+  GitLab under ANY plan — which makes probing the endpoint a question nobody
+  asked, at the cost of a second spawn this function's cache contract forbids.
+  An earlier draft of this spec described that probe; the implementation
+  reasoned its way out of it and the spec had not caught up (review round 1).
+
+### Scenario: GitHub, from the probe already made
+- WHEN `capabilities()` is asked on GitHub
+- THEN `approvalCount` follows `hardEnforcement`, because the same protection
+  endpoint carries `required_approving_review_count` — derived from the probe
+  that already happened, never from a plan name.
+
+### Scenario: never priced
+- WHEN either provider answers
+- THEN no code path decides it from a hardcoded plan or tier table. Brain does
+  not track two vendors' pricing; it reports what it will do.
 
 ### Scenario: the two axes are independent
 - WHEN protected branches are available but the approval count is not

@@ -1524,3 +1524,48 @@ test('#533: issueUpdate reports a transport failure rather than throwing', async
   });
   assert.equal(gl.ok, false);
 });
+
+// ── #348: the approvalCount axis, on the real providers ─────────────────────
+// Round 1's blocker: the MUST requirement's primary deliverable shipped with
+// its pure classifier tested and NOT one assertion on either provider's actual
+// capabilities() output. A test that passes is not a suite that covers.
+
+test('#348: github.capabilities reports approvalCount alongside hardEnforcement — one probe, two axes', async () => {
+  setSpawn(() => ({ status: 0, stdout: '{"url":"..."}', stderr: '' }));
+  const r = await github.capabilities({ project: 'cap/348a', branch: 'main' });
+  assert.equal(r.hardEnforcement, 'available');
+  assert.equal(r.approvalCount, 'available',
+    'GitHub applies required_approving_review_count through the endpoint just probed — same answer, no second call');
+});
+
+test('#348: github.capabilities — a plan-gated 403 makes BOTH axes unavailable, with the remedy', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 403: upgrade to GitHub Pro' }));
+  const r = await github.capabilities({ project: 'cap/348b', branch: 'main' });
+  assert.equal(r.hardEnforcement, 'unavailable');
+  assert.equal(r.approvalCount, 'unavailable');
+  assert.match(r.approvalRemedy, /Pro|public/, 'the operator is told what would change it');
+});
+
+test('#348: gitlab.capabilities — protected branches available, approvals NOT enforced by brain', async () => {
+  setSpawn(() => ({ status: 0, stdout: '[]', stderr: '' }));
+  const r = await gitlab.capabilities({ project: 'cap/348c', branch: 'main' });
+  assert.equal(r.hardEnforcement, 'available', 'GitLab protected branches ship on all plans');
+  assert.equal(r.approvalCount, 'unavailable',
+    'and brain enforces no approval count there under ANY plan — the ratified limitation (#348)');
+  assert.match(r.approvalRemedy, /Premium/, 'naming what would offer it');
+  assert.match(r.approvalRemedy, /gate floor|status:approved|actor-check/,
+    'and that the human signature does not depend on it — the point an operator needs');
+});
+
+test('#348: the two axes are INDEPENDENT — GitLab Free is not GitHub Free-private', async () => {
+  setSpawn(() => ({ status: 0, stdout: '[]', stderr: '' }));
+  const gl = await gitlab.capabilities({ project: 'cap/348d', branch: 'main' });
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'HTTP 403: upgrade to GitHub Pro' }));
+  const gh = await github.capabilities({ project: 'cap/348e', branch: 'main' });
+
+  assert.equal(gl.hardEnforcement, 'available');
+  assert.equal(gh.hardEnforcement, 'unavailable');
+  assert.equal(gl.approvalCount, gh.approvalCount, 'both lack the count');
+  assert.notEqual(gl.hardEnforcement, gh.hardEnforcement,
+    'but only one reaches rung 1 — collapsing the axes into one boolean would make the STRONGER case look like the weaker');
+});

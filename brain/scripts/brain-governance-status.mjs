@@ -469,9 +469,14 @@ export async function reportGovernanceStatus({
     } else if (cap.approvalCount === 'unavailable') {
       console.log('  approvals   NOT ENFORCED');
       if (cap.approvalRemedy) console.log(`              → ${cap.approvalRemedy}`);
-    } else if (cap.approvalCount === 'unknown') {
+    } else {
+      // No else-if: a provider that omits the axis entirely must not vanish
+      // from the report. `unknown` is a first-class answer in this module's
+      // own words, and a silently missing line is the one thing it may not
+      // degrade into (round 1, cold-4).
       console.log('  approvals   unknown');
       if (cap.approvalDetail) console.log(`              (${cap.approvalDetail})`);
+      else if (cap.approvalCount === undefined) console.log('              (this provider does not report the axis)');
     }
   }
   console.log('');

@@ -5,15 +5,24 @@ phase: design
 
 # Design — #348
 
-## D1 — the answer is probed, never priced
+## D1 — the capability reported is BRAIN's, not the platform's
 
-Both `capabilities()` implementations already ask the platform and translate
-the response. `approvalCount` joins them the same way. A hardcoded plan table
-would be wrong on a schedule nobody in this repository controls, and would put
-brain in the business of tracking two vendors' pricing.
+This section first said both providers "ask the platform" for `approvalCount`.
+That was true of the first implementation and false of the one that shipped —
+the review caught the drift (round 1), and the implementation is the half that
+was right.
 
-This is the same rule the last several changes converged on: when a tool
-already knows the answer, ask it.
+The reframing: the question is not *"can this GitLab plan enforce approvals?"*
+but **"will brain enforce it?"** #348 ratified not implementing the
+approval-rules call, so the answer is no under every plan. Probing would answer
+a question nobody asked, at the cost of a second spawn — and `capabilities()`
+has a one-spawn-per-project cache contract that a test enforced immediately.
+
+GitHub's answer still comes from a probe, because there the same endpoint
+carries `required_approving_review_count`: it is derived from the call that
+already happened. Neither provider consults a plan name, which is the part that
+mattered — brain does not track two vendors' pricing, and a hardcoded table
+would be wrong on a schedule nobody here controls.
 
 ## D2 — two axes, never one
 
