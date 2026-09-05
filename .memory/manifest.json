@@ -984,6 +984,14 @@
       "sessions": 1,
       "memories": 0,
       "prompts": 1
+    },
+    {
+      "id": "136be5ac",
+      "created_by": "gandalf",
+      "created_at": "2026-09-05T12:44:09Z",
+      "sessions": 1,
+      "memories": 0,
+      "prompts": 1
     }
   ]
 }
