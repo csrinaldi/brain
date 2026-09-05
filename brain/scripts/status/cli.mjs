@@ -103,6 +103,19 @@ export async function runStatus({ issueNumber, log = console.log, deps = {} } = 
     }
   }
 
+  // ── release debt (#860): what is published, and what is not ──────────────
+  // Same surface and same ruling as the stranded block above (#713): report,
+  // never refuse. A repo mid-cycle is HEALTHY, and a gate here would make the
+  // honest state look like a failure. The line exists because the alternative —
+  // a cadence policy in a document — is a hand-maintained fact whose failure
+  // mode is silence, and that silence is what left three migrations promoted,
+  // signed and unreachable for weeks.
+  {
+    const { gatherReleaseFacts, releaseDebt } = await import('./release-debt.mjs');
+    const facts = deps.releaseFacts ?? gatherReleaseFacts({ root, _run: deps._releaseRun });
+    for (const line of releaseDebt(facts).lines) log(line);
+  }
+
   // ── the authority ────────────────────────────────────────────────────────
   let issue = null;
   let issueReason = null;

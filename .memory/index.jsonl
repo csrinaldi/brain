@@ -314,6 +314,7 @@
 {"id":"rec-20d62a75ab822c8c","ts":"2026-07-29T14:25:44Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-20d62a75ab822c8c.jsonl"}
 {"id":"rec-20e36717ca431630","ts":"2026-07-25T21:51:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-20e36717ca431630.jsonl"}
 {"id":"rec-20fa61cdec5d1875","ts":"2026-07-25T21:50:53Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-20fa61cdec5d1875.jsonl"}
+{"id":"rec-214dd119e4c64288","ts":"2026-09-05T18:15:40Z","actor":"feat/issue-860-release-debt","type":"architecture","project":"brain","issue":860,"file":"2026-09-rec-214dd119e4c64288.jsonl"}
 {"id":"rec-2162f36c6411f5ab","ts":"2026-07-25T21:50:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-2162f36c6411f5ab.jsonl"}
 {"id":"rec-21a751fdfe893886","ts":"2026-07-11T21:35:52Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-21a751fdfe893886.jsonl"}
 {"id":"rec-21dd6eac67739b71","ts":"2026-08-07T22:31:02Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-21dd6eac67739b71.jsonl"}
