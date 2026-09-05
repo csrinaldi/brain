@@ -1569,3 +1569,15 @@ test('#348: the two axes are INDEPENDENT — GitLab Free is not GitHub Free-priv
   assert.notEqual(gl.hardEnforcement, gh.hardEnforcement,
     'but only one reaches rung 1 — collapsing the axes into one boolean would make the STRONGER case look like the weaker');
 });
+
+test('#348 (round 3): an unreadable probe carries its diagnostic onto the approvals axis too', async () => {
+  // The status surface reads `approvalDetail`; nothing set it, so an operator
+  // saw "approvals unknown" with no cause while "platform unknown" one row
+  // above showed it — for the identical probe failure.
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'dial tcp: lookup api.github.com: no such host' }));
+  const r = await github.capabilities({ project: 'cap/348f', branch: 'main' });
+  assert.equal(r.hardEnforcement, 'unknown');
+  assert.equal(r.approvalCount, 'unknown', 'an unreadable probe answers neither axis');
+  assert.match(r.approvalDetail, /no such host/, 'and both carry what it could not read');
+  assert.equal(r.approvalRemedy, undefined, 'no remedy — we do not know there is anything to remedy');
+});

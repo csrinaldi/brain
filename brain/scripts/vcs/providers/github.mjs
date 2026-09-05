@@ -355,6 +355,12 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
     ...result,
     approvalCount: result.hardEnforcement,
     ...(result.hardEnforcement === 'unavailable' && result.remedy ? { approvalRemedy: result.remedy } : {}),
+    // The DIAGNOSTIC travels with the axis (#348 round 3). The status surface
+    // reads `approvalDetail` and nothing set it, so an unreadable probe printed
+    // "approvals unknown" bare while the platform line one row above showed the
+    // cause for the very same failure. "A probe we could not read is not a probe
+    // that said no" is only useful if the reader is told what it could not read.
+    ...(result.hardEnforcement === 'unknown' && result.detail ? { approvalDetail: result.detail } : {}),
   };
 
   _capabilityCache.set(key, result);

@@ -393,6 +393,41 @@ function printSubstrateReport(substrate, { defaultBranch = 'main' } = {}) {
  * @param {object} [opts.providerModule] pre-resolved VCS provider module (overrides dynamic import)
  * @param {object} [opts.probes]         substrate probe overrides (see substrate.mjs)
  */
+/**
+ * Pure: the `approvals` lines for a capability report (#348).
+ *
+ * Extracted so R348-3 is testable without driving the whole status report —
+ * round 3 measured that the requirement shipped with zero assertions on its
+ * output, which is the third time in this PR that one surface got coverage and
+ * a sibling did not.
+ *
+ * The axis is printed BESIDE `platform`, never folded into it: the account
+ * types make them independent, and not in the direction a reader expects.
+ * GitLab Free reaches rung 1 through its protected branch while brain enforces
+ * no approval count there; GitHub Free-private has neither. One line for both
+ * would make the stronger case look like the weaker one.
+ *
+ * @param {{approvalCount?: string, approvalRemedy?: string, approvalDetail?: string}} cap
+ * @returns {string[]}
+ */
+export function approvalLines(cap = {}) {
+  if (cap.approvalCount === 'available') {
+    return ["  approvals   available  (the tier's requiredReviews is applied)"];
+  }
+  if (cap.approvalCount === 'unavailable') {
+    const out = ['  approvals   NOT ENFORCED'];
+    if (cap.approvalRemedy) out.push(`              → ${cap.approvalRemedy}`);
+    return out;
+  }
+  // No else-if: a provider that omits the axis entirely must not vanish from
+  // the report. `unknown` is a first-class answer in this module's own words,
+  // and a silently missing line is the one thing it may not degrade into.
+  const out = ['  approvals   unknown'];
+  if (cap.approvalDetail) out.push(`              (${cap.approvalDetail})`);
+  else if (cap.approvalCount === undefined) out.push('              (this provider does not report the axis)');
+  return out;
+}
+
 export async function reportGovernanceStatus({
   config: configOverride,
   env = process.env,
@@ -458,26 +493,7 @@ export async function reportGovernanceStatus({
       if (cap.detail) console.log(`              (${cap.detail})`);
     }
 
-    // The second axis (#348), printed beside the first because the account
-    // types make them INDEPENDENT — and not in the direction a reader expects.
-    // GitLab Free reaches rung 1 through its protected branch while brain
-    // enforces no approval count there; GitHub Free-private has neither.
-    // Collapsing them into one line would make the stronger case look like the
-    // weaker one.
-    if (cap.approvalCount === 'available') {
-      console.log('  approvals   available  (the tier\'s requiredReviews is applied)');
-    } else if (cap.approvalCount === 'unavailable') {
-      console.log('  approvals   NOT ENFORCED');
-      if (cap.approvalRemedy) console.log(`              → ${cap.approvalRemedy}`);
-    } else {
-      // No else-if: a provider that omits the axis entirely must not vanish
-      // from the report. `unknown` is a first-class answer in this module's
-      // own words, and a silently missing line is the one thing it may not
-      // degrade into (round 1, cold-4).
-      console.log('  approvals   unknown');
-      if (cap.approvalDetail) console.log(`              (${cap.approvalDetail})`);
-      else if (cap.approvalCount === undefined) console.log('              (this provider does not report the axis)');
-    }
+    for (const line of approvalLines(cap)) console.log(line);
   }
   console.log('');
 
