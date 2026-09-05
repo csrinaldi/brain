@@ -259,7 +259,30 @@ function sniffDecisionProtocol(body) {
  *   mirrors the label's own deny-before-allow rule, `actor-check.mjs:358`).
  * @returns {{admitted:true,reason:string}|{admitted:false,note:string}|null}
  */
-export function evaluateSignedDecision({ decisions, headSha, denyActors = [] } = {}) {
+/**
+ * Pure: which config key put this identity in the deny-set, phrased for an
+ * operator (#124).
+ *
+ * ONE helper, because there are TWO places a deny is reported — the label
+ * branch and rule 15's signed-decision note — and the first cut of #124 taught
+ * only the first one to name the key. Round 1 of the review measured the
+ * second still saying `governance.reviewActors` for an identity that is only in
+ * `governance.agentActors`: the same message repaired on one path and left
+ * wrong on the other, which is the shape this session keeps paying for.
+ *
+ * @param {string} actor
+ * @param {string[]} agentActors
+ * @returns {{key: string, clause: string}}
+ */
+export function denyingList(actor, agentActors = []) {
+  const isAgent = Array.isArray(agentActors)
+    && agentActors.some((a) => a && String(a).toLowerCase() === String(actor).toLowerCase());
+  return isAgent
+    ? { key: 'governance.agentActors', clause: 'an agent identity' }
+    : { key: 'governance.reviewActors', clause: 'a review identity' };
+}
+
+export function evaluateSignedDecision({ decisions, headSha, denyActors = [], agentActors = [] } = {}) {
   // `decisions === undefined` means the caller never threaded the field at
   // all — a LEGACY caller predating issue #473 (PR #503 cold-review round 1,
   // finding 3). That is not "a fetch was attempted and came back
@@ -346,8 +369,9 @@ export function evaluateSignedDecision({ decisions, headSha, denyActors = [] } =
         d => d && (String(d).toLowerCase() === String(author).toLowerCase() || String(d).toLowerCase() === String(parsed.actor).toLowerCase()),
       )
     ) {
+      const denied = denyingList(author, agentActors);
       notes.push(
-        `(brain-decision/1: "${author}" is registered in governance.reviewActors — a review identity may never sign an approval.)`,
+        `(brain-decision/1: "${author}" is registered in ${denied.key} — ${denied.clause} may never sign an approval.)`,
       );
       continue; // rule 15
     }
@@ -440,6 +464,7 @@ export function describeUnevaluatedSignedEvidence({
   decisions,
   headSha = null,
   denyActors = [],
+  agentActors = [],
   signedEvidenceSources = LITE_SIGNED_EVIDENCE_SOURCES,
 } = {}) {
   if (tier !== 'lite') return '';
@@ -464,7 +489,7 @@ export function describeUnevaluatedSignedEvidence({
 
   const notes = [];
   for (const source of signedEvidenceSources) {
-    const signed = source({ decisions, headSha, denyActors: denies });
+    const signed = source({ decisions, headSha, denyActors: denies, agentActors });
     if (signed?.admitted) {
       return (
         ' A signed brain-decision/1 block IS present on this PR and was NOT evaluated: the deny-set is a ' +
@@ -701,22 +726,22 @@ export function evaluateActor({
     // the deny-set's, and the two lists stay separate at their readers because
     // they answer opposite questions about the same identity (ADR-0026
     // Amendment 3 exempts an agent's COMMITS; #124 refuses its APPROVAL).
-    const asAgent = Array.isArray(agentActors) && agentActors.includes(actor);
+    // The canonical clause "may never apply the approved label" is kept in BOTH
+    // branches: an existing test (#454, §9) matches on it, and it is the
+    // sentence the ecosystem reads. Only the KEY and the authority differ, and
+    // `denyingList` is the one place that decides which.
+    const denied = denyingList(actor, agentActors);
     return withRefusalNote({
       level: 'fail',
       reason:
-        `the approved label was applied by "${actor}", which is registered in ` +
-        // The canonical clause "may never apply the approved label" is kept in
-        // BOTH branches: an existing test (#454, §9) matches on it, and more to
-        // the point it is the sentence the ecosystem reads. Only the KEY and the
-        // authority differ.
-        (asAgent
-          ? 'governance.agentActors — an agent may never apply the approved label '
-            + '(ADR-0013 Tier 3; that label is human-only). Exemption from re-arming an approval and '
-            + 'permission to grant one are different powers; #454 grants only the first. Re-apply it as a human.'
-          : 'governance.reviewActors — a review identity may never apply the approved label '
-            + '(reviewer-protocol.md §9; that label is human-only).') +
-        describeUnevaluatedSignedEvidence({ tier, decisions, headSha, denyActors, signedEvidenceSources }),
+        `the approved label was applied by "${actor}", which is registered in ${denied.key} — ` +
+        (denied.key === 'governance.agentActors'
+          ? 'an agent identity may never apply the approved label (ADR-0013 Tier 3; that label is '
+            + 'human-only). Exemption from re-arming an approval and permission to grant one are '
+            + 'different powers; #454 grants only the first. Re-apply it as a human.'
+          : 'a review identity may never apply the approved label (reviewer-protocol.md §9; that '
+            + 'label is human-only).') +
+        describeUnevaluatedSignedEvidence({ tier, decisions, headSha, denyActors, agentActors, signedEvidenceSources }),
     });
   }
 
@@ -727,7 +752,7 @@ export function evaluateActor({
     });
   }
 
-  // `denyActors` IS `governance.reviewActors` (see the deny branch above).
+  // `denyActors` is the UNION of `governance.reviewActors` and `governance.agentActors` (#124; see the deny branch above).
   // Amendment 1 reuses that same set as `lite`'s non-re-arming push identity
   // set — no new config key. The two readings do not conflict: a review
   // identity may never APPLY the approval (denied above), and its pushes do
@@ -742,7 +767,7 @@ export function evaluateActor({
   if (tier === 'lite') {
     const signedNotes = [];
     for (const source of signedEvidenceSources) {
-      const signed = source({ decisions, headSha, denyActors });
+      const signed = source({ decisions, headSha, denyActors, agentActors });
       if (signed?.admitted) return withRefusalNote({ level: 'pass', reason: signed.reason });
       if (signed?.note) signedNotes.push(signed.note);
     }
@@ -984,7 +1009,7 @@ function defaultReadBotAllowlist(cwd) {
 }
 
 /**
- * L5's DENY list (issue #375): `governance.reviewActors` — the SAME key L6
+ * L5's DENY list (issue #375, widened by #124): `governance.reviewActors` ∪ `governance.agentActors` — the SAME key L6
  * reads to exclude an identity from the human-approver count. Both readings are
  * restrictive and co-directional ("not a human authority"), which is why ruling
  * R2 is excepted here; see the ADR. Kept as a separate reader from

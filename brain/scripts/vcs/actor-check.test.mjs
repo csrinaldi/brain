@@ -16,6 +16,7 @@ import { renderDecision } from '../review/lib/decision-block.mjs';
 import { testTmp } from '../lib/test-tmp.mjs';
 
 import {
+  denyingList,
   evaluateActor,
   extractIssueNumber,
   filterLabeledEvents,
@@ -2347,4 +2348,25 @@ test('#124 (R124-3): an unreadable actor does not silently PASS — and the exis
   assert.notEqual(r.level, 'pass', 'no readable actor is not a human signature');
   assert.equal(r.level, 'warn', 'and it is REQ-L5-2 speaking, unchanged by this PR');
   assert.match(r.reason, /REQ-L5-2/, 'the reason names the requirement that chose this level');
+});
+
+test('#124 (round 1): BOTH deny reports name the same key — the label branch and rule 15', () => {
+  // The first cut taught only the label branch to name the key. Rule 15 reuses
+  // the identical denyActors union and kept saying `governance.reviewActors`
+  // for an identity that is only an agent — the same message repaired on one
+  // path and left wrong on the other.
+  assert.deepEqual(denyingList('claude', ['claude']), { key: 'governance.agentActors', clause: 'an agent identity' });
+  assert.deepEqual(denyingList('CLAUDE', ['claude']), { key: 'governance.agentActors', clause: 'an agent identity' },
+    'logins fold case on both providers');
+  assert.deepEqual(denyingList('csrinaldibot', ['claude']), { key: 'governance.reviewActors', clause: 'a review identity' });
+
+  const label = evaluateActor({
+    ...humanApproved,
+    labeledEvents: labelledBy('claude'),
+    denyActors: ['claude'],
+    agentActors: ['claude'],
+  });
+  assert.match(label.reason, /governance\.agentActors/, 'the label branch names the agent key');
+  assert.doesNotMatch(label.reason, /registered in governance\.reviewActors/,
+    'and never sends the operator to the wrong config line');
 });
