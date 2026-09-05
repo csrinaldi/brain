@@ -464,7 +464,11 @@ test('gitlab.branchProtect sends POST to protected_branches with allow_force_pus
   );
   assert.ok(postCall.args.includes('allow_force_push=false'), 'must disable force pushes');
 
-  assert.deepEqual(result, { enforced: true });
+  // #348: protection succeeded AND the approval count was not applied — the
+  // result now says both. `requiredReviews` defaults to 1 here, so the note fires.
+  assert.equal(result.enforced, true);
+  assert.match(result.reason, /NOT applied/, 'the verb states what it could not do');
+  assert.deepEqual(Object.keys(result).sort(), ['enforced', 'reason']);
 });
 
 test('gitlab.branchProtect makes best-effort pipeline call when checks is non-empty', async () => {
@@ -501,7 +505,11 @@ test('gitlab.branchProtect returns {enforced:true} when branch is already protec
   }));
 
   const result = await gitlab.branchProtect({ project: 'g/r', checks: [] });
-  assert.deepEqual(result, { enforced: true });
+  // #348: protection succeeded AND the approval count was not applied — the
+  // result now says both. `requiredReviews` defaults to 1 here, so the note fires.
+  assert.equal(result.enforced, true);
+  assert.match(result.reason, /NOT applied/, 'the verb states what it could not do');
+  assert.deepEqual(Object.keys(result).sort(), ['enforced', 'reason']);
 });
 
 test('gitlab.branchProtect returns {enforced:false,reason:"auth"} on 401', async () => {
@@ -558,7 +566,11 @@ test('gitlab.branchProtect returns {enforced:true} even when the best-effort pip
   });
 
   const result = await gitlab.branchProtect({ project: 'g/r', checks: ['ci/test'] });
-  assert.deepEqual(result, { enforced: true });
+  // #348: protection succeeded AND the approval count was not applied — the
+  // result now says both. `requiredReviews` defaults to 1 here, so the note fires.
+  assert.equal(result.enforced, true);
+  assert.match(result.reason, /NOT applied/, 'the verb states what it could not do');
+  assert.deepEqual(Object.keys(result).sort(), ['enforced', 'reason']);
   assert.equal(call, 2, 'both the POST and the best-effort PUT must have been attempted');
 });
 

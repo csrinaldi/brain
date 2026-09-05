@@ -457,6 +457,22 @@ export async function reportGovernanceStatus({
       console.log('  platform    unknown');
       if (cap.detail) console.log(`              (${cap.detail})`);
     }
+
+    // The second axis (#348), printed beside the first because the account
+    // types make them INDEPENDENT — and not in the direction a reader expects.
+    // GitLab Free reaches rung 1 through its protected branch while brain
+    // enforces no approval count there; GitHub Free-private has neither.
+    // Collapsing them into one line would make the stronger case look like the
+    // weaker one.
+    if (cap.approvalCount === 'available') {
+      console.log('  approvals   available  (the tier\'s requiredReviews is applied)');
+    } else if (cap.approvalCount === 'unavailable') {
+      console.log('  approvals   NOT ENFORCED');
+      if (cap.approvalRemedy) console.log(`              → ${cap.approvalRemedy}`);
+    } else if (cap.approvalCount === 'unknown') {
+      console.log('  approvals   unknown');
+      if (cap.approvalDetail) console.log(`              (${cap.approvalDetail})`);
+    }
   }
   console.log('');
 

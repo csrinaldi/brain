@@ -2183,9 +2183,32 @@ const BRANCH_PROTECT_PROVIDERS = {
 for (const providerName of Object.keys(BRANCH_PROTECT_PROVIDERS)) {
   const { module: vcs, ok, fail } = BRANCH_PROTECT_PROVIDERS[providerName];
 
-  test(`${providerName}.branchProtect (contract): a successful protect returns exactly { enforced: true }`, async () => {
+  test(`${providerName}.branchProtect (contract): a successful protect returns the contract shape, and only it`, async () => {
     const result = await vcs.branchProtect({ project: 'x/y', ...ok(['ci']) });
-    assert.deepEqual(result, { enforced: true }, 'a successful branchProtect must return exactly { enforced: true } — no enabled/rules leakage into the contract shape');
+    // PARITY IS THE CONTRACT, NOT THE ANSWER (#348). This assertion used to
+    // demand `deepEqual({ enforced: true })` from both providers — and that is
+    // the one thing they must NOT agree on, because they did different work:
+    // GitHub applies `required_approving_review_count`, GitLab does not and
+    // now says so. Forcing identical objects would force GitLab to hide the
+    // difference, which is exactly what #348 ruled against.
+    assert.equal(result.enforced, true);
+    const allowed = ['enforced', 'reason', 'remedy'];
+    assert.deepEqual(
+      Object.keys(result).filter((k) => !allowed.includes(k)),
+      [],
+      'no enabled/rules leakage into the contract shape — the shape is shared even where the answer is not',
+    );
+  });
+
+  test(`${providerName}.branchProtect (#348): the result says what was NOT applied, or says nothing`, async () => {
+    const asked = await vcs.branchProtect({ project: 'x/y', requiredReviews: 1, ...ok(['ci']) });
+    const silent = await vcs.branchProtect({ project: 'x/y', requiredReviews: 0, ...ok(['ci']) });
+    assert.equal(silent.reason, undefined,
+      'at requiredReviews 0 — the lite tier value — there is nothing unapplied to announce');
+    if (asked.reason) {
+      assert.match(asked.reason, /NOT applied|UNKNOWN/,
+        'a provider that could not apply the count names it rather than returning a bare success');
+    }
   });
 
   test(`${providerName}.branchProtect (contract): a protect failure returns { enforced: false, reason, remedy } — never throws`, async () => {
@@ -2315,9 +2338,27 @@ test('branchProtect (M10 Phase 2): GitLab requiredReviews is accepted but never 
     'gitlab.branchProtect must not call any approvals/approval-rules endpoint — requiredReviews is accepted but not enforced (pinned, not fixed, per design D1)',
   );
 
-  // requiredReviews must be declared (the destructured parameter) but never referenced again in the body.
-  const occurrences = (body.match(/requiredReviews/g) || []).length;
-  assert.equal(occurrences, 1, 'requiredReviews must occur exactly once in the function body — the parameter signature — proving it is declared but never read/enforced');
+  // #348 CHANGED WHAT THIS HALF ASSERTS, deliberately and with the ruling behind
+  // it. The lock was written to prove `requiredReviews` is "declared but never
+  // read", and it did its job: the moment #348 read the parameter, it fired.
+  //
+  // But "never read" was a PROXY for the thing worth protecting, which the
+  // assertion above states directly: no approvals/approval-rules call in this
+  // body. #348 ratified that limitation and ruled the opposite of silence —
+  // the verb must now READ `requiredReviews` in order to report the count it
+  // did NOT apply, instead of returning a bare `{ enforced: true }` over an
+  // ignored parameter.
+  //
+  // So the proxy is replaced by what it stood for: the parameter is read, and
+  // it is read ONLY to report. If enforcement is ever added, the scan above
+  // fails — that half is untouched and still forces the decision into the open.
+  assert.match(body, /requiredReviews/, 'the parameter is still declared');
+  assert.match(
+    body,
+    /unappliedNote|NOT applied/,
+    'and it is read to REPORT what was not applied (#348) — a verb that accepts a parameter and '
+    + 'ignores it while returning success is the shape this ruling removed',
+  );
 
   // Proves the narrow scope above is load-bearing, not incidentally passing:
   // the SAME pattern DOES match file-wide, via prReviews' legitimate

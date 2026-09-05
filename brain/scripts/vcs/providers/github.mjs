@@ -342,6 +342,16 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
     result = { hardEnforcement: 'unknown' };
   }
 
+  // The second axis (#348). GitHub applies `required_approving_review_count`
+  // through the same protection endpoint just probed, so its availability is
+  // the SAME answer — no second call, and no assumption either: it is derived
+  // from the probe that already happened, not from a plan name.
+  result = {
+    ...result,
+    approvalCount: result.hardEnforcement,
+    ...(result.hardEnforcement === 'unavailable' && result.remedy ? { approvalRemedy: result.remedy } : {}),
+  };
+
   _capabilityCache.set(key, result);
   return result;
 }

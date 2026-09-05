@@ -7,6 +7,7 @@
 // API accepts the URL-encoded project path everywhere, so the slug is used directly.
 
 import { run, runJson } from '../lib/exec.mjs';
+import { classifyProbe, unappliedNote } from '../capability-report.mjs';
 import { normalizeCommitStatus, providerState, assigneeParams, normalizeAssignees } from '../lib/normalize.mjs';
 import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
@@ -961,7 +962,16 @@ export async function branchProtect({ project, branch = 'main', checks, required
     run('glab', ['api', '-X', 'PUT', `projects/${enc}`, '-f', 'only_allow_merge_if_pipeline_succeeds=true']);
   }
 
-  return { enforced: true };
+  // What was applied, and what was not (#348). Returning a bare `enforced: true`
+  // over a `requiredReviews` this function never enforces is the shape brain
+  // removes everywhere else: a result claiming success for work it did not do.
+  // Silent when nothing was asked — at `lite` the tier's value is 0.
+  const note = unappliedNote({
+    requiredReviews,
+    approvalCount: 'unavailable',
+    remedy: 'brain does not enforce approval counts on GitLab (#348); the protected branch is the gate floor',
+  });
+  return note ? { enforced: true, reason: note } : { enforced: true };
 }
 
 // Capability cache — keyed by "project:branch" to avoid cross-test interference.
@@ -995,6 +1005,25 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
   } else {
     result = { hardEnforcement: 'unknown', detail: r.stderr.trim() || 'unexpected error from glab api' };
   }
+
+  // The SECOND axis (#348) — and the question it answers is BRAIN'S, not the
+  // platform's. #348 ratified NOT implementing GitLab's approval-rules call, so
+  // brain will not enforce an approval count on GitLab under ANY plan. Probing
+  // the endpoint would answer a question nobody asked ("could Premium do it?")
+  // at the cost of a second spawn, and this function's contract is one spawn
+  // per project:branch — a test caught that immediately.
+  //
+  // So the answer is structural and needs no network: unavailable, with the
+  // remedy naming both halves of the truth — the plan that would offer it, and
+  // the fact that the protected branch is the gate floor regardless.
+  result = {
+    ...result,
+    approvalCount: 'unavailable',
+    approvalRemedy:
+      'brain does not enforce approval counts on GitLab (#348 ratified): it needs the Premium '
+      + 'approval-rules API. The protected branch is the gate floor, and brain\'s human signature '
+      + 'is `status:approved` + actor-check, which does not depend on this.',
+  };
 
   _capabilityCache.set(key, result);
   return result;
