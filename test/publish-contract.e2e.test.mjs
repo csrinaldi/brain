@@ -95,10 +95,58 @@ test('#655: the workflow refuses a version that already names a different tree',
   assert.match(yml, /Bump the version/, 'the refusal does not tell the operator what to do about it');
 });
 
-test('#655: the version has not already been cut as a tag pointing elsewhere', () => {
-  // The same rule, applied to the tree the suite is running on, so it is caught
-  // locally rather than in the workflow. Skips when the tag does not exist —
-  // publishing before tagging is normal.
+/**
+ * Pure: is the declared version's tag ON this history? (#853)
+ *
+ * It used to ask whether the tag was AT this commit, and that made the ordinary
+ * state between a release and the next version bump a test failure: 1.4.0 was
+ * published, tagged correctly, and `main` moved on — and every maintainer's
+ * `npm test` went red telling them to "bump the version before the first
+ * publish", advice that was wrong precisely when it fired. Worse, `local-checks`
+ * checks out without tags, so the check was INERT in CI and noisy only where it
+ * was noise. A guard that trains its readers to ignore the suite costs more than
+ * it protects.
+ *
+ * What it no longer claims: whether publishing this tree AS this version would
+ * be wrong. After a release that answer is "yes, and that is fine". That
+ * question belongs to publish.yml, which asks it at the only moment it can be
+ * violated — and the sibling test above pins that it still does.
+ *
+ * What remains worth failing on: a tag for our declared version that this
+ * history cannot reach at all — a line the repository abandoned.
+ *
+ * @param {{tagged: string|null, head: string, isAncestor: (tag: string) => boolean}} facts
+ * @returns {{ok: true} | {ok: false, reason: string}}
+ */
+export function tagIsOnThisHistory({ tagged, head, isAncestor }) {
+  if (!tagged) return { ok: true };            // no tag yet — publishing before tagging is normal
+  if (tagged === head) return { ok: true };    // the tagged commit itself
+  if (isAncestor(tagged)) return { ok: true }; // main moved on — ordinary post-release
+  return {
+    ok: false,
+    reason: `tag points at ${tagged.slice(0, 8)}, which HEAD (${head.slice(0, 8)}) cannot reach — `
+      + 'the tag for this declared version is not on this history. Either the tag names an abandoned '
+      + 'line, or this branch was rewritten. Neither is a version to publish from.',
+  };
+}
+
+test('#853: the check passes on every ordinary history and fails only on a diverged one', () => {
+  const head = 'headsha';
+  assert.deepEqual(tagIsOnThisHistory({ tagged: null, head, isAncestor: () => false }), { ok: true },
+    'no tag yet — publishing before tagging is normal');
+  assert.deepEqual(tagIsOnThisHistory({ tagged: head, head, isAncestor: () => false }), { ok: true },
+    'the tagged commit itself');
+  assert.deepEqual(tagIsOnThisHistory({ tagged: 'older', head, isAncestor: () => true }), { ok: true },
+    'main moved on after the release — the state this guard used to call a failure');
+  const diverged = tagIsOnThisHistory({ tagged: 'elsewhere', head, isAncestor: () => false });
+  assert.equal(diverged.ok, false, 'a tag this history cannot reach still fails');
+  assert.match(diverged.reason, /not on this history/);
+  assert.match(diverged.reason, /elsewhe/, 'and names the commit it found');
+});
+
+test('#655/#853: the declared version\'s tag is on this history', () => {
+  // Applied to the tree the suite is running on, so it is caught locally rather
+  // than in the workflow. Skips when the tag does not exist.
   const v = P.version;
   let tagged;
   try {
@@ -107,12 +155,21 @@ test('#655: the version has not already been cut as a tag pointing elsewhere', (
     return; // no such tag — nothing to compare
   }
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
-  assert.equal(
-    tagged, head,
-    `package.json says ${v}, and tag v${v} points at ${tagged.slice(0, 8)} while HEAD is ${head.slice(0, 8)}. `
-      + 'Publishing this version would put different bytes behind a number that already exists, and npm versions '
-      + 'are immutable. Bump the version before the first publish.',
-  );
+  const isAncestor = (tag) => {
+    try {
+      execFileSync('git', ['merge-base', '--is-ancestor', tag, 'HEAD'], { cwd: REPO_ROOT, stdio: 'ignore' });
+      return true;
+    } catch (err) {
+      // ONE means "not an ancestor" — git's own answer. Anything else is a
+      // failure to compute (missing object, corrupt ref), and calling that
+      // "no" would report a broken repository as a clean history. Same
+      // uncomputable-is-not-false discipline the gates apply (#853 review r1).
+      if (err?.status === 1) return false;
+      throw err;
+    }
+  };
+  const verdict = tagIsOnThisHistory({ tagged, head, isAncestor });
+  assert.ok(verdict.ok, `package.json says ${v}, and ${verdict.reason ?? ''}`);
 });
 
 test('#655: brain\'s own release machinery is not shipped to consumers', () => {
