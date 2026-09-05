@@ -229,10 +229,17 @@ export function buildReport({ adapters, fixtures, contractText, otherTestText, c
     .map((f) => ({ name: f.name, claims: f.verb === null ? null : `${f.provider}.${f.verb}` }));
 
   const derivedFixtures = fixtures.filter((f) => f.provenance?.derived).length;
+  // Fixtures counted ONCE, over the same population the derived count uses:
+  // rows plus orphans. Round 7 measured the mismatch — `derivedFixtures` folded
+  // every fixture while the denominator summed rows only, so the report printed
+  // "51 of 55 (93%)" where the truth is 51 of 60 (85%), contradicting this
+  // change's own proposal. A ratio whose halves count different things is a
+  // statistic about nothing.
+  const totalFixtures = fixtures.length;
   const dispatchers = consumers
     .filter((c) => isGenericDispatcher(stripComments(c.text)))
     .map((c) => c.file);
-  return { rows, generated: rows.length, derivedFixtures, orphans, dispatchers };
+  return { rows, generated: rows.length, derivedFixtures, totalFixtures, orphans, dispatchers };
 }
 
 // ── The edge: reading. Everything above is pure. ────────────────────────────
@@ -277,6 +284,13 @@ export function gather({ repo = REPO, _read = readFileSync, _readdir = readdirSy
       if (!e.name.endsWith('.mjs')) continue;
       const text = read(p);
       if (e.name.endsWith('.test.mjs')) {
+        // The audit's OWN test is not evidence about the port. Its mock strings
+        // spell `vcs.prReviews({})` to exercise countConsumers, and folding them
+        // into otherTestText made `prReviews` read `elsewhere` forever — the
+        // file's own worked example, permanently unable to report the very
+        // regression it exists to catch. Third appearance of one shape: the tool
+        // must not be evidence about itself, on ANY path (rounds 4, 6, 7).
+        if (p.endsWith('/vcs/port-coverage.test.mjs')) continue;
         if (!p.includes('vcs.contract.test.mjs')) otherTestText += `\n${text}`;
         continue;
       }
@@ -319,7 +333,7 @@ export function renderMarkdown(report) {
   lines.push(`- **Coverage**: ${count('coverage', 'contract')} contract · ${count('coverage', 'elsewhere')} elsewhere · ${count('coverage', 'uncovered')} uncovered`);
   lines.push(`- **Fixture provenance**: ${count('provenance', 'recorded')} recorded · ${count('provenance', 'derived')} derived · ${count('provenance', 'mixed')} mixed · ${count('provenance', 'undeclared')} undeclared · ${count('provenance', 'none')} none · ${count('provenance', 'unreadable')} unreadable`);
   lines.push('');
-  const fixtureCount = report.rows.reduce((a, r) => a + r.fixtures, 0);
+  const fixtureCount = report.totalFixtures ?? 0;
   const derivedFixtures = report.derivedFixtures ?? 0;
   if (fixtureCount > 0) {
     const pct = Math.round((derivedFixtures / fixtureCount) * 100);

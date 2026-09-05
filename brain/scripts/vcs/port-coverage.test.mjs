@@ -265,3 +265,29 @@ test('#336: an ordinary computed call is not a port dispatch', () => {
   const r = buildReport({ adapters: { github: 'export function a(){}' }, fixtures: [], contractText: '', otherTestText: '', consumers: [{ file: 'x.mjs', text: 'await providerModule[verb](args);' }] });
   assert.deepEqual(r.dispatchers, ['x.mjs'], 'but a port receiver dispatching by variable is');
 });
+
+// ── Round 7: the tool must not be evidence about itself, on ANY path ─────────
+
+test('#336: the ratio counts one population — orphan fixtures are in both halves', () => {
+  const fixtures = [
+    { provider: 'github', verb: 'prView', name: 'a.json', provenance: { derived: true } },
+    { provider: 'github', verb: 'gone', name: 'b.json', provenance: { derived: true } },  // orphan
+    { provider: 'github', verb: 'prView', name: 'c.json', provenance: { endpoint: 'GET /x' } },
+  ];
+  const r = buildReport({ adapters: { github: 'export function prView(){}' }, fixtures, contractText: '', otherTestText: '', consumers: [] });
+  assert.equal(r.totalFixtures, 3, 'the denominator counts every fixture, orphans included');
+  assert.equal(r.derivedFixtures, 2, 'and so does the numerator — a ratio whose halves count different things is a statistic about nothing');
+  assert.equal(r.rows.reduce((a, x) => a + x.fixtures, 0) + r.orphans.length, r.totalFixtures,
+    'and the two views reconcile: attributed + orphaned = all');
+});
+
+test('#336: gather does not fold the audit\'s OWN files into the evidence it reads', async () => {
+  const { gather } = await import('./port-coverage.mjs');
+  const g = gather();
+  const files = g.consumers.map((c) => c.file);
+  assert.ok(!files.some((f) => f.endsWith('/vcs/port-coverage.mjs')),
+    'the audit is not a consumer of the port');
+  assert.ok(!g.otherTestText.includes("await vcs.prReviews({}); await vcs.prReviews({});"),
+    "nor is the audit's own mock string a test that exercises prReviews — that made the file's own "
+    + 'worked example permanently unable to report the regression it exists to catch');
+});
