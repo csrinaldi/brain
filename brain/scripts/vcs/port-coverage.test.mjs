@@ -291,3 +291,12 @@ test('#336: gather does not fold the audit\'s OWN files into the evidence it rea
     "nor is the audit's own mock string a test that exercises prReviews — that made the file's own "
     + 'worked example permanently unable to report the regression it exists to catch');
 });
+
+test('#336 (round 8): an optional call is still a call', () => {
+  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'await vcs.prReviews?.({});' }]), 1,
+    '`?.` is part of the call — requiring an adjacent paren dropped the file silently');
+  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'await providerModule.prReviews ?. ( x );' }]), 1,
+    'whitespace around it changes nothing');
+  assert.equal(countConsumers('prReviews', [{ file: 'a.mjs', text: 'const x = vcs.prReviews?.length;' }]), 0,
+    'but an optional PROPERTY read is still not a call');
+});

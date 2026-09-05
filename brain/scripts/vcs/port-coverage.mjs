@@ -181,7 +181,12 @@ export function countConsumers(verb, consumers) {
   // verb UP a list someone then reads. Under-counting hides a verb at the
   // bottom and is how `prReviews` stayed invisible. Between a wrong number and
   // a missing row, this audit chooses the wrong number.
-  const re = new RegExp(`\\.${escapeForRegExp(verb)}(?![\\w$])\\s*\\(`);
+  // `?.` is part of the call, not a different call. `vcs.prReviews?.({})` is a
+  // defensive-call idiom this codebase already uses elsewhere
+  // (`mode.stageDeps?.(root)`), and requiring the paren to be adjacent dropped
+  // such a file from the count silently — no error, no orphan, the one outcome
+  // every round in this file exists to close (round 8).
+  const re = new RegExp(`\\.${escapeForRegExp(verb)}(?![\\w$])\\s*(?:\\?\\.)?\\s*\\(`);
   const files = new Set();
   for (const c of consumers) {
     if (re.test(stripComments(c.text))) files.add(c.file);
