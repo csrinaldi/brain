@@ -27,11 +27,16 @@ import { resolveGatePolicy } from '../vcs/governance-tiers.mjs';
  * failure regardless of tier position. A `required`-policy gate at this tier
  * passes through unchanged.
  *
- * ONE shared helper, not per-job logic (design §8). Today's only production
- * caller is `vcs/phase-order-check.mjs`; run-check.mjs's own dispatch does
- * NOT yet route any case through this (that wiring is scoped to T2.1,
- * design.md §6 — this module being extracted from run-check.mjs, issue #535
- * Requirement 6, does not by itself wire it in).
+ * ONE shared helper, not per-job logic (design §8). Production callers:
+ * `vcs/phase-order-check.mjs`, `vcs/actor-check.mjs`, and — since #603 —
+ * `governance/run-check.mjs`, which routes memory-gate, decision-gate,
+ * issue-link and diff-size through it in `main()`.
+ *
+ * That last one was the wiring this docstring used to say had "NOT yet"
+ * happened, scoped to a T2.1 that never landed. While it had not, a failing
+ * `memory-gate` exited 1 at `lite` — where the policy is `detection` — which
+ * GitHub's branch protection filtered out of the merge decision and GitLab,
+ * having no such layer, turned into a blocked MR (#603).
  *
  * @param {{ pass: boolean, reason?: string, uncomputable?: boolean }} result
  * @param {'lite'|'standard'|'regulated'} tier
