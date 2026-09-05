@@ -5,9 +5,21 @@ phase: design
 
 # Design — #124
 
-## D1 — one union, at the one place the deny-set is read
+## D1 — one union, and it took a review round to find the second reader
 
-`defaultReadDenyActors` is the single source of `denyActors`. It returns
+This section first said `defaultReadDenyActors` "is the single source of
+`denyActors`". That was ASSERTED, not verified, and it was false:
+`brain/scripts/approve/cli.mjs` carried its own reader of the same name,
+documented in its own comment as *"the write-side twin of L5's read rule 15"*.
+Widening only L5 left the twin silently no longer a twin — `brain:approve`
+would have let a registered agent post a signed block, and only the PR gate
+would have caught it afterwards.
+
+So the rule is now a pure exported `approvalDenySet(config)` with two
+consumers, and a test asserts this file states it by IMPORTING rather than
+restating. One rule, one implementation — the shape
+`brain/core/anti-patterns/` names, which I reproduced while writing a PR about
+enforcement. It returns
 `governance.reviewActors`; it returns the union with `governance.agentActors`
 now. Nothing downstream changes: `evaluateActor`'s deny path, its message, and
 its precedence over the tier's evidence forms are all already built and tested

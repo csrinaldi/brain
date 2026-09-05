@@ -1015,19 +1015,34 @@ function defaultReadBotAllowlist(cwd) {
  * R2 is excepted here; see the ADR. Kept as a separate reader from
  * `defaultReadBotAllowlist` so the two keys never merge at the source.
  */
+/**
+ * Pure: the APPROVAL deny-set a config declares — `governance.reviewActors` ∪
+ * `governance.agentActors` (#124).
+ *
+ * EXPORTED because it is one rule with two callers, and round 2 of the review
+ * measured what happened when it was not: `approve/cli.mjs` carried its own
+ * `defaultReadDenyActors` reading `reviewActors` alone, documented as "the
+ * write-side twin of L5's read rule 15". Widening only the read side left the
+ * write-side lock claiming a mirror it no longer was — `brain:approve` would
+ * have let a registered agent post a signed block, and only the PR gate would
+ * have caught it afterwards. My own design said "the single source"; it was
+ * two, and I had not verified it.
+ *
+ * The COMMIT exemption still reads `agentActors` alone through its own reader.
+ * Opposite answers to different questions about one identity (ADR-0026
+ * Amendment 3 vs ADR-0013 Tier 3) may never share a list.
+ */
+export function approvalDenySet(config) {
+  const review = Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
+  const agents = Array.isArray(config?.governance?.agentActors) ? config.governance.agentActors : [];
+  return [...new Set([...review, ...agents])];
+}
+
 function defaultReadDenyActors(cwd) {
   return () => {
     try {
       const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
-      // The LABELING deny-set is the union of both identity lists (#124). An
-      // agent may act under an approval; it may never grant one. The commit
-      // exemption keeps its own reader below and reads `agentActors` ALONE —
-      // merging the two at the source would repeal ADR-0026 Amendment 3 by
-      // accident, since they are opposite answers to different questions about
-      // the same identity.
-      const review = Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
-      const agents = Array.isArray(config?.governance?.agentActors) ? config.governance.agentActors : [];
-      return [...new Set([...review, ...agents])];
+      return approvalDenySet(config);
     } catch {
       return [];
     }

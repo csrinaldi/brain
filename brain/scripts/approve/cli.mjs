@@ -46,6 +46,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 import { getVcs } from '../vcs/cli.mjs';
+import { approvalDenySet, denyingList } from '../vcs/actor-check.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { currentBranch } from '../lib/git-branch.mjs';
 import { renderDecision } from '../review/lib/decision-block.mjs';
@@ -101,14 +102,20 @@ export function parseArgs(argv) {
   return { ok: true, number: positionals.length === 1 ? Number(positionals[0]) : null };
 }
 
-/** Reads `governance.reviewActors` (issue #375's DENY list) — the SAME key
- * L5's read side denies against (actor-check.mjs rule 15). Read via
- * `loadBrainConfig`, matching identity.mjs's own config access. Never
+/** The approval deny-set — `governance.reviewActors` ∪ `governance.agentActors`.
+ *
+ * The RULE is imported, not restated (#124 review round 2). This file used to
+ * carry its own copy reading `reviewActors` alone while its comment claimed to
+ * be "the write-side twin of L5's read rule 15" — so when #124 widened the read
+ * side, the twin silently stopped being one and `brain:approve` would have let
+ * a registered agent sign. One rule, two implementations, and the second one
+ * wrong: the exact shape `brain/core/anti-patterns/` names.
+ *
+ * Read via `loadBrainConfig`, matching identity.mjs's own config access. Never
  * throws: an unreadable/missing config denies nobody. */
 function defaultReadDenyActors() {
   try {
-    const config = loadBrainConfig();
-    return Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
+    return approvalDenySet(loadBrainConfig());
   } catch {
     return [];
   }
@@ -205,7 +212,8 @@ export async function runApprove({
 
   const denyActors = readDenyActorsFn();
   if (Array.isArray(denyActors) && denyActors.includes(actor)) {
-    say(`✗ "${actor}" is registered in governance.reviewActors — a review identity may never sign an approval.`);
+    const denied = denyingList(actor, loadBrainConfig()?.governance?.agentActors ?? []);
+    say(`✗ "${actor}" is registered in ${denied.key} — ${denied.clause} may never sign an approval.`);
     say('  This is the write-side twin of L5 read rule 15 (design.md §E3).');
     return done(1);
   }

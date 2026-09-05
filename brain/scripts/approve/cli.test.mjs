@@ -5,6 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { CONFIRMATION_WORD, parseArgs, runApprove } from './cli.mjs';
 import { parseDecision } from '../review/lib/decision-block.mjs';
@@ -222,4 +223,28 @@ test('E3: landed review author == block actor (case-folded) → succeeds', async
 
 test('parseArgs is exported and pure', () => {
   assert.deepEqual(parseArgs(['7']), { ok: true, number: 7 });
+});
+
+// ── #124 round 2: the write-side lock is the read side's twin, or it is not ──
+// This file carried its OWN deny reader claiming to mirror L5 rule 15. When
+// #124 widened L5, the copy silently stopped mirroring and `brain:approve`
+// would have let a registered agent sign. One rule, two implementations, and
+// the second one wrong.
+
+test('#124: the write side and the read side compute the SAME deny-set', async () => {
+  const { approvalDenySet } = await import('../vcs/actor-check.mjs');
+  const config = { governance: { reviewActors: ['bot'], agentActors: ['claude'] } };
+  assert.deepEqual(approvalDenySet(config).sort(), ['bot', 'claude'],
+    'both identity lists deny an APPROVAL — the union is the rule, and it lives in one place');
+  assert.deepEqual(approvalDenySet({}), [], 'an absent config denies nobody');
+  assert.deepEqual(approvalDenySet({ governance: { reviewActors: 'not-a-list' } }), [],
+    'a scalar where a list was configured denies nobody rather than throwing');
+});
+
+test('#124: this file states the rule by IMPORTING it, never by restating it', () => {
+  const src = readFileSync(new URL('./cli.mjs', import.meta.url), 'utf8');
+  assert.match(src, /import \{[^}]*approvalDenySet[^}]*\} from '\.\.\/vcs\/actor-check\.mjs'/,
+    'the deny-set rule is imported from its owner');
+  assert.doesNotMatch(src, /governance\?\.reviewActors/,
+    'and is not re-derived here — a local copy is how the twin stopped being one');
 });
