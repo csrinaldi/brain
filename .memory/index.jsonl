@@ -2068,6 +2068,7 @@
 {"id":"rec-dfb39e1bf3d45f64","ts":"2026-07-13T00:21:26Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-dfb39e1bf3d45f64.jsonl"}
 {"id":"rec-dfe52cc20676216e","ts":"2026-07-11T21:10:44Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-dfe52cc20676216e.jsonl"}
 {"id":"rec-e015d6731d42b25b","ts":"2026-07-13T00:21:29Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-e015d6731d42b25b.jsonl"}
+{"id":"rec-e01ca31951bd9a19","ts":"2026-09-05T21:07:16Z","actor":"feat/issue-864-epicmemory-memory-20-the-format-closed-t","type":"decision","project":"brain","issue":864,"file":"2026-09-rec-e01ca31951bd9a19.jsonl"}
 {"id":"rec-e026cc418a1400c6","ts":"2026-06-30T22:24:59Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-06-rec-e026cc418a1400c6.jsonl"}
 {"id":"rec-e030dbaf352ab737","ts":"2026-06-27T23:10:27Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-e030dbaf352ab737.jsonl"}
 {"id":"rec-e05780fd1b44be91","ts":"2026-08-21T22:50:31Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-e05780fd1b44be91.jsonl"}
