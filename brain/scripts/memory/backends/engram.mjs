@@ -962,9 +962,13 @@ export async function importMemory({
     return { written: 0, skipped: 0, deferred: true, contended: true, duplicates: normalizeDuplicates(duplicates) };
   }
 
-  // Everything between acquire and release is SYNCHRONOUS — no await — so a
-  // second importer cannot interleave inside the window, and so the #820-shape
-  // test can express the race with the existing sync seams.
+  // Everything between acquire and release is SYNCHRONOUS — no await. That is
+  // NOT the cross-process safety property (rev-1 cold review of PR #872,
+  // cold-2): two OS processes interleave at the syscall level regardless of
+  // what this event loop awaits. Cross-process safety is the guard's atomic
+  // rename (lib/hydration-guard.mjs). Synchronicity buys two smaller things:
+  // no second importer in THIS process can enter the window, and the
+  // #820-shape test can express the race with the existing sync seams.
   let existingTopicKeys = null;
   let unreadable = null;
   let outcome = null;

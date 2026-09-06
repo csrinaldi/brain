@@ -22,7 +22,7 @@
 // guard at all. Under `MEMORY_BACKEND=plainfiles` `import` is `rebuildIndex`,
 // idempotent by construction, and this module is never wired in.
 
-import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, renameSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -45,14 +45,37 @@ function readOwner(lockPath) {
     const o = JSON.parse(readFileSync(join(lockPath, OWNER_FILE), 'utf8'));
     if (typeof o?.pid === 'number' && typeof o?.startedAt === 'number') return o;
   } catch {
-    /* unreadable → treated as stale below */
+    /* absent or unreadable → the caller decides by the directory's age */
   }
   return null;
 }
 
+function sameOwner(a, b) {
+  return Boolean(a && b) && a.pid === b.pid && a.startedAt === b.startedAt;
+}
+
+const NO_OWNER = Object.freeze({ pid: -1, startedAt: 0, ageMs: 0 });
+
 /**
- * Try to take the guard. `mkdirSync` without `recursive` is atomic: exactly one
- * of two concurrent callers gets it, the other gets EEXIST.
+ * Try to take the guard.
+ *
+ * ACQUISITION IS ONE ATOMIC STEP (rev-1 cold review of PR #872, cold-1). The
+ * first version did `mkdirSync(lock)` and then wrote `owner.json` as a second
+ * syscall; a process hitting EEXIST in between saw a lock with no owner,
+ * called it stale, reclaimed it, and BOTH ended up holding. Now the owner
+ * record is written into a private staging directory first and the staging
+ * directory is `rename`d onto the lock path: the lock either exists with its
+ * owner inside, or does not exist. A rename onto an existing NON-EMPTY
+ * directory fails (ENOTEMPTY/EEXIST), which is the contended signal.
+ *
+ * RECLAIM IS VERIFIED. A stale lock (dead pid, or older than `staleMs`) is
+ * renamed away to a private tombstone — atomic — and its owner re-read there.
+ * Only if it is still the owner the stale decision was made about is it
+ * removed; if another process installed a fresh lock in between, the
+ * tombstone is renamed back and this call reports contended. What remains
+ * unguarded is the rename-back itself losing a three-way race in the same
+ * microseconds; the consequence is the pre-#820 behaviour, never worse, and
+ * the fix for that class is #863's idempotent hydration, not a better lock.
  *
  * @returns {{held: true, release: () => void} | {held: false, owner: {pid:number, startedAt:number, ageMs:number}}}
  */
@@ -63,29 +86,85 @@ export function acquireHydrationGuard({
   _now = Date.now,
   _pid = process.pid,
 } = {}) {
-  const release = () => rmSync(lockPath, { recursive: true, force: true });
-  const take = () => {
-    mkdirSync(lockPath);
-    writeFileSync(join(lockPath, OWNER_FILE), JSON.stringify({ pid: _pid, startedAt: _now() }), 'utf8');
-    return { held: true, release };
+  const privateDir = (tag) => `${lockPath}.${tag}-${_pid}-${process.hrtime.bigint().toString(36)}`;
+  let mine = null; // the owner record this call installed, for the release check
+
+  // RELEASE IS ATOMIC TOO, and verified. `rmSync(lockPath, {recursive})` in place
+  // unlinks owner.json and THEN rmdir's — and between the two the lock path is an
+  // empty directory, which a POSIX rename from another process's staging dir
+  // silently replaces. The multi-process test caught it: the releaser's rmdir
+  // then fails ENOTEMPTY on the newcomer's lock. So: rename the lock aside
+  // (atomic — the path is never empty-but-present), confirm it is still ours,
+  // and remove the tombstone. If it is not ours (we were reclaimed as stale),
+  // put it back. Never throws: a release failure must not mask the import.
+  const release = () => {
+    const tomb = privateDir('released');
+    try {
+      renameSync(lockPath, tomb);
+    } catch {
+      return; // already gone — reclaimed by someone else; nothing of ours to remove
+    }
+    const moved = readOwner(tomb);
+    if (sameOwner(moved, mine)) {
+      rmSync(tomb, { recursive: true, force: true });
+      return;
+    }
+    try { renameSync(tomb, lockPath); } catch { rmSync(tomb, { recursive: true, force: true }); }
   };
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const take = () => {
+    const staging = privateDir('staging');
+    mkdirSync(staging);
+    const owner = { pid: _pid, startedAt: _now() };
+    writeFileSync(join(staging, OWNER_FILE), JSON.stringify(owner), 'utf8');
     try {
-      return take();
+      renameSync(staging, lockPath);
+      mine = owner;
+      return { held: true, release };
     } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
-      const owner = readOwner(lockPath);
-      const ageMs = owner ? _now() - owner.startedAt : Infinity;
-      const stale = !owner || !_pidAlive(owner.pid) || ageMs > staleMs;
-      if (!stale) return { held: false, owner: { pid: owner.pid, startedAt: owner.startedAt, ageMs } };
-      // Stale: reclaim once, then retry the atomic take. If a second reclaim
-      // would be needed, someone else won the race — that is contention.
-      release();
+      rmSync(staging, { recursive: true, force: true });
+      if (err?.code === 'ENOTEMPTY' || err?.code === 'EEXIST' || err?.code === 'EPERM') return null;
+      throw err;
     }
+  };
+
+  const describe = (owner) => (owner ? { pid: owner.pid, startedAt: owner.startedAt, ageMs: _now() - owner.startedAt } : NO_OWNER);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const got = take();
+    if (got) return got;
+
+    const owner = readOwner(lockPath);
+    let stale;
+    if (owner) {
+      stale = !_pidAlive(owner.pid) || _now() - owner.startedAt > staleMs;
+    } else {
+      // Not a lock this module ever creates (ours always carry their owner).
+      // Unknown is not stale: reclaim only once the directory itself is old.
+      let ageMs = 0;
+      try { ageMs = _now() - statSync(lockPath).mtimeMs; } catch { return { held: false, owner: NO_OWNER }; }
+      stale = ageMs > staleMs;
+    }
+    if (!stale) return { held: false, owner: describe(owner) };
+
+    // Verified reclaim: move the stale lock aside atomically, confirm it is
+    // still the one judged stale, and only then discard it.
+    const tomb = privateDir('stale');
+    try {
+      renameSync(lockPath, tomb);
+    } catch {
+      continue; // someone else moved it first — retry the take
+    }
+    const moved = readOwner(tomb);
+    if (owner ? sameOwner(moved, owner) : moved === null) {
+      rmSync(tomb, { recursive: true, force: true });
+      continue;
+    }
+    // A fresh lock was installed between the decision and the reclaim: put it back.
+    try { renameSync(tomb, lockPath); } catch { rmSync(tomb, { recursive: true, force: true }); }
+    return { held: false, owner: describe(moved) };
   }
-  const owner = readOwner(lockPath);
-  return { held: false, owner: owner ? { pid: owner.pid, startedAt: owner.startedAt, ageMs: _now() - owner.startedAt } : { pid: -1, startedAt: 0, ageMs: 0 } };
+  return { held: false, owner: describe(readOwner(lockPath)) };
 }
 
 /**

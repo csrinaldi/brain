@@ -9,8 +9,12 @@ issue: 820
 
 The contended resource is the backend store — one per machine — and sixty worktrees share
 it. A lock under `.memory/` would be per-worktree and guard nothing. The guard is a
-directory created with `mkdirSync` (atomic, `EEXIST` on contention) at
-`join(os.tmpdir(), 'brain-memory-hydration.lock')`, holding `owner.json` `{pid, startedAt}`.
+directory at `join(os.tmpdir(), 'brain-memory-hydration.lock')` holding `owner.json` `{pid,
+startedAt}`. **[rev]** It is created by ONE atomic step: the owner record is written into a
+private staging directory, which is then `rename`d onto the lock path. A rename onto an
+existing non-empty directory fails — that is the contended signal. The first version did
+`mkdirSync` then wrote the owner as a second syscall; the rev-1 cold review reproduced a
+second process reading "no owner" in between, calling it stale, and both ending up held.
 
 Rejected: a lock beside engram's DB (`~/.engram/…`) — that is the adapter's private
 directory and the guard must not assume its layout (#863's no-artifact rule applies in both
@@ -21,8 +25,13 @@ directions).
 - Held by a live pid, younger than `staleMs` (default 10 min): **skip**. `importMemory`
   returns `{written: 0, skipped: 0, deferred: true, contended: true, duplicates}` and warns
   via `memory.import.contended` — to stderr, the channel `post-merge` keeps (#633).
-- Owner pid dead (`process.kill(pid, 0)` throws `ESRCH`) or age > `staleMs`: reclaim (remove,
-  retry acquire once) and proceed.
+- Owner pid dead (`process.kill(pid, 0)` throws `ESRCH`) or age > `staleMs`: **[rev]** verified
+  reclaim — rename the stale lock aside (atomic), re-read its owner there, remove it only if
+  it is still the owner judged stale; if a fresh lock was installed meanwhile, rename it back
+  and report contended. An owner-less directory (not ours) is reclaimed only once the
+  directory itself is older than `staleMs` — unknown is not stale.
+- Residual, stated: the rename-back can lose a three-way race in the same microseconds. The
+  consequence is the pre-#820 behaviour, never worse; the fix for that class is #863.
 - Acquire is synchronous and happens **before the first `await`** on the hydration path, so
   a second importer reaches its contended branch without yielding — which is what makes the
   #820-shape test expressible with the existing sync seams.
