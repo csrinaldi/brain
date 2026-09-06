@@ -381,6 +381,7 @@
 {"id":"rec-290d50af8ed78823","ts":"2026-07-25T21:50:35Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-290d50af8ed78823.jsonl"}
 {"id":"rec-293cc1e1c08d172b","ts":"2026-07-29T14:27:31Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-293cc1e1c08d172b.jsonl"}
 {"id":"rec-29486a341d29d353","ts":"2026-07-25T00:46:31Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-29486a341d29d353.jsonl"}
+{"id":"rec-29662f2b3fcbe8da","ts":"2026-09-06T23:39:15Z","actor":"fix/issue-820-fixmemory-the-import-delta-is-read-and-w","type":"bugfix","project":"brain","issue":820,"file":"2026-09-rec-29662f2b3fcbe8da.jsonl"}
 {"id":"rec-29869ec1f897cba3","ts":"2026-07-25T00:48:11Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-29869ec1f897cba3.jsonl"}
 {"id":"rec-29c213520b4af89e","ts":"2026-08-11T22:25:46Z","actor":"feat/issue-509-promote-amendments","type":"session_summary","project":"brain","file":"2026-08-rec-29c213520b4af89e.jsonl"}
 {"id":"rec-29f4037434156472","ts":"2026-07-24T15:56:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-29f4037434156472.jsonl"}

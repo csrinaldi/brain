@@ -47,6 +47,7 @@ import { emptyDuplicates, normalizeDuplicates } from "../lib/duplicates.mjs";
 import { serializeRecord } from "../lib/format.mjs";
 import { collectChunkObservations } from "../lib/migrate-v1.mjs";
 import { unsupportedOp } from "../lib/unsupported-op.mjs";
+import { acquireHydrationGuard } from "../lib/hydration-guard.mjs";
 import { ENGRAM_BIN, probeBinary } from "../lib/backend-selection.mjs";
 import { t } from "../../i18n/t.mjs";
 
@@ -896,6 +897,7 @@ export async function importMemory({
   _log = console.log,
   _warn = console.error,
   _now = () => new Date().toISOString().replace("T", " ").slice(0, 19),
+  _guard = acquireHydrationGuard,
 } = {}) {
   _requireEngram();
 
@@ -933,23 +935,58 @@ export async function importMemory({
   // A hydration that did not happen is recoverable by running again. Duplicates
   // are not. So: skip the import, SAY why, let the next run retry.
   //
+  // ── The TWIN hazard (#820) ──────────────────────────────────────────────
+  // The guard above covers "my read failed". It does not cover "my read
+  // succeeded, and so did someone else's, at the same time": two importers
+  // through one snapshot both see the same delta and both INSERT it. Fired
+  // three times on 2026-09-01 — one instance the record about #820 itself —
+  // on a path that runs at every session start and every post-merge, with
+  // sixty worktrees sharing ONE store. The read→write window below is
+  // therefore held under a machine-scoped, NON-BLOCKING guard
+  // (lib/hydration-guard.mjs): a second importer skips, says so on stderr,
+  // and returns `contended`. It never waits — post-merge is `|| true` on
+  // purpose. This is MITIGATION; the fix is #863's backend contract
+  // (hydration idempotent by record id), under which no guard is needed.
+  // Under MEMORY_BACKEND=plainfiles `import` is rebuildIndex, idempotent by
+  // construction, and this guard is never wired in.
+  //
   // The distinction the reader must preserve is "the store is genuinely empty"
   // (an empty Set — import everything, correctly) versus "the store could not be
   // read" (a throw, or anything that is not a Set). Conflating those two is the
   // `evidence-reader-empty-on-failure` class; this is the consumer end of it,
   // where the policy on empty is the destructive one.
+  const guard = _guard();
+  if (!guard.held) {
+    const age = Math.round((guard.owner?.ageMs ?? 0) / 1000);
+    _warn(await t("memory.import.contended", { pid: guard.owner?.pid ?? "?", age }));
+    return { written: 0, skipped: 0, deferred: true, contended: true, duplicates: normalizeDuplicates(duplicates) };
+  }
+
+  // Everything between acquire and release is SYNCHRONOUS — no await — so a
+  // second importer cannot interleave inside the window, and so the #820-shape
+  // test can express the race with the existing sync seams.
   let existingTopicKeys = null;
   let unreadable = null;
+  let outcome = null;
   try {
-    existingTopicKeys = _engramExistingTopicKeys();
-  } catch (err) {
-    // execFileSync captures engram's stderr on `pipe`; surfacing it is the whole
-    // point — #433 survived as long as it did because this path runs quiet.
-    unreadable = explainEngramFailure(err);
+    try {
+      existingTopicKeys = _engramExistingTopicKeys();
+    } catch (err) {
+      // execFileSync captures engram's stderr on `pipe`; surfacing it is the whole
+      // point — #433 survived as long as it did because this path runs quiet.
+      unreadable = explainEngramFailure(err);
+    }
+    if (!unreadable && !(existingTopicKeys instanceof Set)) {
+      unreadable = "the reader returned no key set";
+    }
+    if (!unreadable) {
+      outcome = buildImportPayload({ records, existingTopicKeys, startedAt: _now(), _importRecord });
+      if (outcome.payload) _engramImport(outcome.payload);
+    }
+  } finally {
+    guard.release();
   }
-  if (!unreadable && !(existingTopicKeys instanceof Set)) {
-    unreadable = "the reader returned no key set";
-  }
+
   if (unreadable) {
     // To STDERR, not stdout. The post-merge hook redirects stdout to /dev/null,
     // so a skipped hydration on the `git pull` path would otherwise be as silent
@@ -959,14 +996,7 @@ export async function importMemory({
     return { written: 0, skipped: 0, deferred: true, duplicates: normalizeDuplicates(duplicates) };
   }
 
-  const { payload, written, skipped } = buildImportPayload({
-    records,
-    existingTopicKeys,
-    startedAt: _now(),
-    _importRecord,
-  });
-
-  if (payload) _engramImport(payload);
+  const { written, skipped } = outcome;
 
   _log(await t("memory.import.done", { written, total }));
   // `total` is unique RECORDS, not physical lines — it always was the length of

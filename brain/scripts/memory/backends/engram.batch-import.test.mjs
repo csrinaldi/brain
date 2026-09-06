@@ -26,6 +26,10 @@ import assert from 'node:assert/strict';
 import { buildImportPayload, importMemory, topicKeysFromExport } from './engram.mjs';
 import { buildRecord } from '../lib/format.mjs';
 
+// #820: a faked backend has no store to protect — never take the real machine guard from a test.
+const noGuard = () => ({ held: true, release() {} });
+
+
 function rec(id, extra = {}) {
   return {
     id,
@@ -133,6 +137,7 @@ test('importMemory: ONE import call, not one save per record (#433)', async () =
   const imports = [];
 
   const res = await importMemory({
+    _guard: noGuard,
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
     _readRecords: () => ({ records }),
@@ -161,6 +166,7 @@ test('importMemory: a second run over the same records sends NOTHING (#433 + ide
   const imports = [];
 
   const run = () => importMemory({
+    _guard: noGuard,
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
     _readRecords: () => ({ records }),
@@ -183,6 +189,7 @@ test('importMemory: a second run over the same records sends NOTHING (#433 + ide
 test('importMemory: empty records/ → zero writes, no import spawned, no throw', async () => {
   const imports = [];
   const res = await importMemory({
+    _guard: noGuard,
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
     _readRecords: () => ({ records: [] }),
@@ -225,6 +232,7 @@ test('importMemory: an unreadable state SKIPS the import — a full re-import wo
 
   // First run populates the store normally.
   await importMemory({
+    _guard: noGuard,
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
     _readRecords: () => ({ records }),
@@ -236,6 +244,7 @@ test('importMemory: an unreadable state SKIPS the import — a full re-import wo
 
   // Second run: the read fails, exactly as a locked DB on the `git pull` path would.
   const res = await importMemory({
+    _guard: noGuard,
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
     _readRecords: () => ({ records }),
@@ -261,6 +270,7 @@ test('importMemory: the deferred warning goes to STDERR, not stdout (#448)', asy
   const out = [];
   const errs = [];
   await importMemory({
+    _guard: noGuard,
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
     _readRecords: () => ({ records: [rec('rec-aaa')] }),
@@ -281,6 +291,7 @@ test('importMemory: the deferred warning goes to STDERR, not stdout (#448)', asy
 test('importMemory: a reader that returns a non-Set is uncomputable too, not an empty store', async () => {
   const imports = [];
   const res = await importMemory({
+    _guard: noGuard,
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
     _readRecords: () => ({ records: [rec('rec-aaa')] }),
@@ -299,6 +310,7 @@ test('importMemory: a reader that returns a non-Set is uncomputable too, not an 
 test('importMemory: a genuinely EMPTY store still imports everything', async () => {
   const imports = [];
   const res = await importMemory({
+    _guard: noGuard,
     root: '/tmp/nonexistent',
     _requireEngram: () => 'engram',
     _readRecords: () => ({ records: [rec('rec-aaa')] }),
