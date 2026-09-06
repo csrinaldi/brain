@@ -168,10 +168,14 @@ if (op === "audit") {
   const { renderReport } = await import("./lib/audit.mjs");
   const memoryRoot = process.env.BRAIN_MEMORY_TEST_ROOT ?? repoRoot;
   const rest = process.argv.slice(3);
-  const sinceArg = rest.includes("--since") ? rest[rest.indexOf("--since") + 1] : undefined;
-  const sinceMs = sinceArg ? Date.parse(sinceArg) : Date.now() - 30 * 86400000;
+  // A trailing `--since` or one swallowed by the next flag is an ERROR, not the
+  // default window: a silent fallback would print numbers for a window the
+  // operator did not ask for (rev-1 cold review of PR #871, cold-3).
+  const hasSince = rest.includes("--since");
+  const sinceArg = hasSince ? rest[rest.indexOf("--since") + 1] : undefined;
+  const sinceMs = hasSince ? (sinceArg && !sinceArg.startsWith("--") ? Date.parse(sinceArg) : NaN) : Date.now() - 30 * 86400000;
   if (!Number.isFinite(sinceMs)) {
-    console.error(`memory/cli: ${await t("memory.audit.badSince", { value: String(sinceArg) })}`);
+    console.error(`memory/cli: ${await t("memory.audit.badSince", { value: sinceArg === undefined ? "(missing)" : String(sinceArg) })}`);
     process.exit(1);
   }
   try {

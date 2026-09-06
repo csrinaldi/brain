@@ -11,6 +11,7 @@ import { join } from 'node:path';
 
 import { buildReport } from './audit.mjs';
 import { ENGRAM_BIN, probeBinary } from './backend-selection.mjs';
+import { topicKeysFromExport } from '../backends/engram.mjs';
 
 /**
  * Every PHYSICAL line under records/ as `{...record, file}` — repeats included,
@@ -77,8 +78,15 @@ export function readBackendKeys(backend, root, { _probe = probeBinary, _exec = e
     const dir = mkdtempSync(join(tmpdir(), 'brain-memory-audit-'));
     try {
       const file = join(dir, 'state.json');
-      _exec(ENGRAM_BIN, ['export', file], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
-      const parsed = JSON.parse(_read(file, 'utf8'));
+      const stdout = _exec(ENGRAM_BIN, ['export', file], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+      const fileContents = _read(file, 'utf8');
+      // The ONE cross-check, reused rather than re-authored (#445): engram
+      // reports what it wrote on stdout; if that disagrees with what the file
+      // carries — or the schema drifted — this THROWS, and the row below is
+      // measured:false with that reason instead of an understated count that
+      // looks like a measurement (rev-1 cold review of PR #871, cold-1).
+      topicKeysFromExport(stdout, fileContents);
+      const parsed = JSON.parse(fileContents);
       const obs = Array.isArray(parsed?.observations) ? parsed.observations : [];
       const keys = obs.map((o) => o?.topic_key).filter((k) => typeof k === 'string' && k.startsWith('rec-'));
       return { measured: true, mode: 'engram export', keys };
@@ -90,10 +98,19 @@ export function readBackendKeys(backend, root, { _probe = probeBinary, _exec = e
   }
 }
 
-/** Reads everything and returns the report object. Throws only for an unreadable records dir. */
+/**
+ * Reads everything and returns the report object. Throws only for an unreadable
+ * records dir. A git failure (not a repository, shallow clone) does not throw:
+ * latency becomes `{measured:false, reason}` and the other rows still print.
+ */
 export function runAudit({ root, backend, sinceMs, nowMs = Date.now(), _readRecordLines = readRecordLines, _readLandingTimes = readLandingTimes, _readBackendKeys = readBackendKeys }) {
   const records = _readRecordLines(join(root, '.memory', 'records'));
-  const landedMsById = _readLandingTimes(root);
+  let landedMsById;
+  try {
+    landedMsById = _readLandingTimes(root);
+  } catch (err) {
+    landedMsById = { measured: false, reason: String(err?.message ?? err).split('\n')[0] };
+  }
   const backendKeys = _readBackendKeys(backend, root);
   return buildReport({ records, landedMsById, sinceMs, nowMs, backend: backendKeys });
 }

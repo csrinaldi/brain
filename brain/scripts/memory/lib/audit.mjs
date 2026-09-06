@@ -124,16 +124,20 @@ export function buildReport({ records, landedMsById, sinceMs, nowMs, backend }) 
   const unique = [...firstById.values()];
   const inWindow = unique.filter((r) => Date.parse(r.ts) >= sinceMs);
 
-  const pairs = inWindow.map((r) => ({
-    id: r.id,
-    tsMs: Date.parse(r.ts),
-    landedMs: landedMsById.has(r.id) ? landedMsById.get(r.id) : null,
-  }));
+  // landedMsById is a Map, or {measured:false, reason} when git could not be
+  // read — 'could not read' must not render as 'nothing landed'.
+  const latency = landedMsById instanceof Map
+    ? latencyStats(inWindow.map((r) => ({
+        id: r.id,
+        tsMs: Date.parse(r.ts),
+        landedMs: landedMsById.has(r.id) ? landedMsById.get(r.id) : null,
+      })))
+    : { measured: false, reason: landedMsById?.reason ?? 'landing times unavailable' };
 
   return {
     generatedAt: new Date(nowMs).toISOString().replace(/\.\d{3}Z$/, 'Z'),
     window: { sinceIso: new Date(sinceMs).toISOString().replace(/\.\d{3}Z$/, 'Z'), records: inWindow.length },
-    latency: latencyStats(pairs),
+    latency,
     lines: lineAccounting(records.map((r) => r.id)),
     actors: { window: actorShape(inWindow), allTime: actorShape(unique) },
     coverage: { window: coverage(inWindow), allTime: coverage(unique) },
@@ -148,7 +152,9 @@ export function renderReport(r) {
   const L = r.latency;
   const lines = [
     `memory:audit — ${r.generatedAt} — window since ${r.window.sinceIso} (${r.window.records} records)`,
-    `learn→main   n ${L.n} · p50 ${h(L.p50h)} · p75 ${h(L.p75h)} · p90 ${h(L.p90h)} · max ${h(L.maxH)} · ≤1h ${L.within1h} · >24h ${L.over24h} · >72h ${L.over72h} · not landed ${L.notLanded}`,
+    L.measured === false
+      ? `learn→main: not measured — ${L.reason}`
+      : `learn→main   n ${L.n} · p50 ${h(L.p50h)} · p75 ${h(L.p75h)} · p90 ${h(L.p90h)} · max ${h(L.maxH)} · ≤1h ${L.within1h} · >24h ${L.over24h} · >72h ${L.over72h} · not landed ${L.notLanded}`,
     `records      lines ${r.lines.lines} · distinct ${r.lines.distinct} · excess ${r.lines.excess}` +
       (r.lines.repeated.length ? ` · repeated ${r.lines.repeated.map((x) => `${x.id}×${x.times}`).join(' ')}` : ''),
     `actor        window  @legacy ${r.actors.window.legacy} · branch ${r.actors.window.branch} · handle ${r.actors.window.handle} · other ${r.actors.window.other} (of ${r.actors.window.total})`,
