@@ -301,6 +301,8 @@ export default {
   'session.ticket.none':        '(no active ticket memory)',
 
   // ── memory/cli.mjs — reindex (issue #205, C1) ─────────────────────────────────
+  'memory.audit.failed':   '✗ audit could not run — {message}',
+  'memory.audit.badSince': '✗ audit: --since is not a date — {value}',
   'memory.reindex.done':   '✓ reindex complete — {count} record(s) indexed.',
   'memory.reindex.failed': '✗ reindex failed — {message}',
   'memory.resolveIndex.done':   '✓ index regenerated from records/ — {count} record(s). Nothing was unmerged, so nothing was staged.',
