@@ -22,9 +22,9 @@
 // guard at all. Under `MEMORY_BACKEND=plainfiles` `import` is `rebuildIndex`,
 // idempotent by construction, and this module is never wired in.
 
-import { mkdirSync, writeFileSync, readFileSync, rmSync, renameSync, statSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, renameSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 export const DEFAULT_LOCK_PATH = join(tmpdir(), 'brain-memory-hydration.lock');
 export const DEFAULT_STALE_MS = 10 * 60 * 1000;
@@ -55,6 +55,33 @@ function sameOwner(a, b) {
 }
 
 const NO_OWNER = Object.freeze({ pid: -1, startedAt: 0, ageMs: 0 });
+const PRIVATE_TAGS = ['staging', 'stale', 'released'];
+
+/**
+ * Every two-step sequence here (mkdir+rename, rename+rm) can be killed between
+ * its steps — SIGKILL, OOM — and leave a private sibling directory beside the
+ * lock forever (rev-2 cold review of PR #872, cold-1). Nothing else would ever
+ * list them, on a path that runs at every session start. So each acquire sweeps
+ * siblings older than `staleMs`; a live sequence completes in microseconds, so
+ * age alone is the safe criterion. Best effort, never throws.
+ */
+function sweepOrphans(lockPath, staleMs, now) {
+  const dir = dirname(lockPath);
+  const prefix = `${basename(lockPath)}.`;
+  let names;
+  try { names = readdirSync(dir); } catch { return; }
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    const tag = name.slice(prefix.length).split('-')[0];
+    if (!PRIVATE_TAGS.includes(tag)) continue;
+    const full = join(dir, name);
+    try {
+      if (now - statSync(full).mtimeMs > staleMs) rmSync(full, { recursive: true, force: true });
+    } catch {
+      /* gone already, or unreadable — not ours to insist on */
+    }
+  }
+}
 
 /**
  * Try to take the guard.
@@ -129,6 +156,8 @@ export function acquireHydrationGuard({
   };
 
   const describe = (owner) => (owner ? { pid: owner.pid, startedAt: owner.startedAt, ageMs: _now() - owner.startedAt } : NO_OWNER);
+
+  sweepOrphans(lockPath, staleMs, _now());
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const got = take();

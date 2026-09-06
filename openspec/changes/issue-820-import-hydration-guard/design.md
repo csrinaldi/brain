@@ -46,9 +46,13 @@ of memory.
 
 ## D3 — the module is pure; the wiring is one seam
 
-`hydration-guard.mjs` exports `withHydrationGuard(fn, {lockPath, staleMs, _fs, _now,
-_pidAlive})` → `{held: true, result}` | `{held: false, owner}`. `importMemory` gains a
-`_guard` seam defaulting to it. No test spawns a process.
+`hydration-guard.mjs` exports `acquireHydrationGuard({lockPath, staleMs, _now, _pidAlive,
+_pid})` → `{held: true, release}` | `{held: false, owner}`, and `withHydrationGuard(fn, opts)`.
+**[rev]** Real fs on a real path — the seams are the clock, pid liveness and the caller's pid;
+no `_fs` seam, because the atomicity being tested IS the filesystem's. `importMemory` gains a
+`_guard` seam defaulting to it. The unit tests spawn no process; the integration test spawns
+six, on purpose. **[rev]** Each acquire sweeps private staging/tombstone siblings older than
+`staleMs` — a process killed between two steps must not leak a directory forever.
 
 ## D4 — the comment is part of the fix
 

@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { testTmp } from '../../lib/test-tmp.mjs';
@@ -121,6 +121,23 @@ test('withHydrationGuard: contended → fn is NOT called', () => {
   const r = withHydrationGuard(() => { calls++; }, { lockPath, _pidAlive: alive, _now: () => 5001 });
   assert.equal(r.held, false);
   assert.equal(calls, 0);
+});
+
+// ── rev-2 cold review of PR #872, cold-1: orphaned private dirs are swept ──
+
+test('acquire sweeps orphaned staging/tombstone siblings older than staleMs, and leaves fresh ones alone', () => {
+  const lockPath = lockIn();
+  const old = `${lockPath}.staging-1-abc`;
+  const fresh = `${lockPath}.released-2-def`;
+  mkdirSync(old); writeFileSync(join(old, 'owner.json'), '{}');
+  mkdirSync(fresh); writeFileSync(join(fresh, 'owner.json'), '{}');
+  const past = new Date(Date.now() - 3_600_000);
+  utimesSync(old, past, past);
+  const g = acquireHydrationGuard({ lockPath, staleMs: 600_000, _pidAlive: alive, _pid: 3 });
+  assert.equal(g.held, true);
+  assert.equal(existsSync(old), false, 'old orphan swept');
+  assert.equal(existsSync(fresh), true, 'fresh sibling untouched — it may be mid-rename');
+  g.release();
 });
 
 test('defaults: machine-scoped path under tmpdir, not the repo; 10-minute staleness', () => {
