@@ -106,6 +106,7 @@ const VALID_OPS = [
   "import",
   "index",
   "reindex",
+  "audit",
   "resolve-index",
   "split-records",
   "migrate-v1",
@@ -151,6 +152,35 @@ if (op === "reindex") {
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.reindex.failed", { message: err.message })}`);
+    process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// "audit" — the epic's five numbers as one command (#870, memory 2.0 task 0.2).
+// Backend-agnostic like "reindex": records + git log; the backend row goes
+// through the active backend's export and DEGRADES to a stated reason.
+//   --since <ISO>   window start (default: now − 30 d)
+//   --json          the report object instead of text
+// ---------------------------------------------------------------------------
+if (op === "audit") {
+  const { runAudit } = await import("./lib/audit-io.mjs");
+  const { renderReport } = await import("./lib/audit.mjs");
+  const memoryRoot = process.env.BRAIN_MEMORY_TEST_ROOT ?? repoRoot;
+  const rest = process.argv.slice(3);
+  const sinceArg = rest.includes("--since") ? rest[rest.indexOf("--since") + 1] : undefined;
+  const sinceMs = sinceArg ? Date.parse(sinceArg) : Date.now() - 30 * 86400000;
+  if (!Number.isFinite(sinceMs)) {
+    console.error(`memory/cli: ${await t("memory.audit.badSince", { value: String(sinceArg) })}`);
+    process.exit(1);
+  }
+  try {
+    const report = runAudit({ root: memoryRoot, backend: MEMORY_BACKEND, sinceMs });
+    if (rest.includes("--json")) console.log(JSON.stringify(report, null, 2));
+    else for (const line of renderReport(report)) console.log(line);
+    process.exit(0);
+  } catch (err) {
+    console.error(`memory/cli: ${await t("memory.audit.failed", { message: err.message })}`);
     process.exit(1);
   }
 }

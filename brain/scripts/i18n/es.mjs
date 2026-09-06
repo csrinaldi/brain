@@ -271,6 +271,8 @@ export default {
   'session.ticket.none':        '(sin memoria de ticket activa)',
 
   // ── memory/cli.mjs — reindex (issue #205, C1) ─────────────────────────────────
+  'memory.audit.failed':   '✗ audit no pudo correr — {message}',
+  'memory.audit.badSince': '✗ audit: --since no es una fecha — {value}',
   'memory.reindex.done':   '✓ reindex completo — {count} registro(s) indexado(s).',
   'memory.reindex.failed': '✗ reindex falló — {message}',
   'memory.resolveIndex.done':   '✓ índice regenerado desde records/ — {count} registro(s). No había nada en conflicto, no se agregó nada al stage.',
