@@ -11,10 +11,12 @@ issue: 870
 `classifyActor`, `actorShape`, `coverage`, `lineAccounting`, `backendAccounting`,
 `buildReport`, `renderReport`. No `fs`, no `child_process`. Every number is tested here.
 
-`cli.mjs`'s `audit` op does the reading: records lines with their file names; `git log
---diff-filter=A --format=%ct --name-only -- .memory/records` for the landing time of each
-file (first add wins); the backend export through the active backend. Mirrors the `reindex`
-precedent — backend-agnostic ops are dispatched directly.
+`lib/audit-io.mjs` does the reading behind seams, and `cli.mjs`'s `audit` op dispatches to it:
+records lines with their file names; `git log -m --first-parent --diff-filter=A --format="COMMIT
+%ct" --name-only -- .memory/records` for the landing time of each file (the first-parent
+line — see D3 for why the plain form is wrong); the backend export through the active
+backend, run through `topicKeysFromExport`'s stdout-vs-file cross-check (#445) before any
+count. Mirrors the `reindex` precedent — backend-agnostic ops are dispatched directly.
 
 ## D2 — the backend row degrades, it does not lie
 
