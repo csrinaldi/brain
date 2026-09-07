@@ -361,6 +361,7 @@ export default {
   'memory.import.empty':    'ℹ no records found in .memory/records/ — nothing to import.',
   'memory.import.progress': '  ✓ {written}/{total} records imported',
   'memory.import.done':     '✓ import complete — {written}/{total} records imported into engram (records-only, D2/C4).',
+  'memory.import.contended': '⚠ another hydration is running (pid {pid}, started {age}s ago) — import SKIPPED so records are not duplicated. Nothing was written; the next run retries.',
   'memory.import.stateUnreadable': '⚠ engram\'s current state could not be read — import SKIPPED so records are not duplicated. Reason: {reason}. Nothing was written; run the import again once engram responds.',
 
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──

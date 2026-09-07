@@ -17,7 +17,7 @@ The last task is the epic's exit.
 
 ## Wave 0 — stop the bleeding, and be able to measure
 - [ ] 0.0 **[rev]** #864 reopened (human act — PR #867 closed it with a closing keyword). Eleven open slices must not hang off a closed epic, and the exit numbers (6.1) land on it.
-- [ ] 0.1 #820 — skip-and-say mitigation around `import`; the ticket states that the fix is #863's contract, not this guard. Detector for duplicated `rec-` keys lands here or in #863 (design.md §2 D2).
+- [x] 0.1 #820 — skip-and-say mitigation around `import`; the ticket states that the fix is #863's contract, not this guard. Detector for duplicated `rec-` keys is `memory:audit` (#870).
 - [x] 0.2 **[rev]** `memory:audit` **#870** — one command, records + `git log` only, no backend required: p50/p90 learn→main over a window; records vs distinct ids; `actor` shape distribution (`@legacy` / branch-name / handle); `issue` and `supersedes` coverage; `rec-` rows vs distinct keys when the backend exports. Baseline run pasted on #864 before any other slice merges (spec.md "the epic's measurements are a command").
 
 ## Wave 1 — rulings
