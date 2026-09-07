@@ -61,9 +61,9 @@ const PRIVATE_TAGS = ['staging', 'stale', 'released'];
  * Every two-step sequence here (mkdir+rename, rename+rm) can be killed between
  * its steps — SIGKILL, OOM — and leave a private sibling directory beside the
  * lock forever (rev-2 cold review of PR #872, cold-1). Nothing else would ever
- * list them, on a path that runs at every session start. So each acquire sweeps
- * siblings older than `staleMs`; a live sequence completes in microseconds, so
- * age alone is the safe criterion. Best effort, never throws.
+ * list them. So a CONTENDED acquire sweeps siblings older than `staleMs` (the
+ * uncontended fast path pays no readdir); a live sequence completes in
+ * microseconds, so age alone is the safe criterion. Best effort, never throws.
  */
 function sweepOrphans(lockPath, staleMs, now) {
   const dir = dirname(lockPath);
@@ -157,11 +157,14 @@ export function acquireHydrationGuard({
 
   const describe = (owner) => (owner ? { pid: owner.pid, startedAt: owner.startedAt, ageMs: _now() - owner.startedAt } : NO_OWNER);
 
-  sweepOrphans(lockPath, staleMs, _now());
-
   for (let attempt = 0; attempt < 2; attempt++) {
     const got = take();
     if (got) return got;
+
+    // Contended path only (rev-3 cold review of PR #872): a readdir of tmpdir on
+    // every uncontended acquire would tax every session start for a leak that
+    // can only exist once something has gone wrong here.
+    if (attempt === 0) sweepOrphans(lockPath, staleMs, _now());
 
     const owner = readOwner(lockPath);
     let stale;

@@ -125,7 +125,8 @@ test('withHydrationGuard: contended → fn is NOT called', () => {
 
 // ── rev-2 cold review of PR #872, cold-1: orphaned private dirs are swept ──
 
-test('acquire sweeps orphaned staging/tombstone siblings older than staleMs, and leaves fresh ones alone', () => {
+test('a CONTENDED acquire sweeps orphaned staging/tombstone siblings older than staleMs, and leaves fresh ones alone', () => {
+  // (the uncontended fast path pays no readdir — see sweepOrphans)
   const lockPath = lockIn();
   const old = `${lockPath}.staging-1-abc`;
   const fresh = `${lockPath}.released-2-def`;
@@ -133,7 +134,9 @@ test('acquire sweeps orphaned staging/tombstone siblings older than staleMs, and
   mkdirSync(fresh); writeFileSync(join(fresh, 'owner.json'), '{}');
   const past = new Date(Date.now() - 3_600_000);
   utimesSync(old, past, past);
-  const g = acquireHydrationGuard({ lockPath, staleMs: 600_000, _pidAlive: alive, _pid: 3 });
+  // The sweep runs on the CONTENDED path only: make this acquire contend with a dead holder.
+  mkdirSync(lockPath); writeFileSync(join(lockPath, 'owner.json'), JSON.stringify({ pid: 99, startedAt: 0 }));
+  const g = acquireHydrationGuard({ lockPath, staleMs: 600_000, _pidAlive: dead, _pid: 3 });
   assert.equal(g.held, true);
   assert.equal(existsSync(old), false, 'old orphan swept');
   assert.equal(existsSync(fresh), true, 'fresh sibling untouched — it may be mid-rename');

@@ -218,13 +218,11 @@ test('importMemory (#820 shape): importer B started inside A\'s read window is C
   let bPromise = null;
 
   const a = await importMemory({
-    _guard: noGuard,
     _requireEngram: () => ({}),
     _readRecords: () => records,
     _engramExistingTopicKeys: () => {
       // While A holds the guard between its read and its write, B starts.
       bPromise = importMemory({
-        _guard: noGuard,
         _requireEngram: () => ({}),
         _readRecords: () => records,
         _engramExistingTopicKeys: () => new Set(),
@@ -257,7 +255,6 @@ test('importMemory: contended path never waits and never throws — returns defe
   let imported = 0;
   const started = Date.now();
   const r = await importMemory({
-    _guard: noGuard,
     _requireEngram: () => ({}),
     _readRecords: () => fixtureRecords(2),
     _engramExistingTopicKeys: () => new Set(),
@@ -291,7 +288,6 @@ test('importMemory: the guard is released when the read throws (unreadable store
   const _guard = sharedGuard();
   let imported = 0;
   const r1 = await importMemory({
-    _guard: noGuard,
     _requireEngram: () => ({}),
     _readRecords: () => fixtureRecords(1),
     _engramExistingTopicKeys: () => { throw new Error('engram: locked'); },
@@ -301,7 +297,6 @@ test('importMemory: the guard is released when the read throws (unreadable store
   });
   assert.equal(r1.deferred, true);
   const r2 = await importMemory({
-    _guard: noGuard,
     _requireEngram: () => ({}),
     _readRecords: () => fixtureRecords(1),
     _engramExistingTopicKeys: () => new Set(),
