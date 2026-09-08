@@ -19,7 +19,7 @@ The agent may execute without asking for permission:
 
 - Read any file in the repo (`brain/`, `openspec/`, code, scripts)
 - Create/modify files in `openspec/changes/**` (in-flight SDD artifacts)
-- Capture memory as records: `npm run memory:save` (a record under `.memory/records/` first, then the active backend is hydrated from it — `memory-backend-contract.md` rule 2). The backend's own MCP write (`mem_save`) is working memory for the change in flight, non-durable by definition: nothing exports it.
+- Capture memory as records: `npm run memory:save` writes a record under `.memory/records/` first (`memory-backend-contract.md` rule 2); the active backend picks it up on the next hydration (`session:start`, `cli.mjs import`) until #874 adds direct hydration. The backend's own MCP write (`mem_save`) is working memory for the change in flight, non-durable by definition: nothing exports it.
 - Write to `scratch/{agent-id}.md` within an active change
 - Run `npm run brain:repo:check`, `npm run backend:build`, `npm run brain:change:verify`
 - Create issues in GitLab (`/gitlab-issue`)

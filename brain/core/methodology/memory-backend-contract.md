@@ -7,13 +7,6 @@
 > ADR-0017:13, ADR-0004 Amendment 1). Referenced by ADR-0004 and by the memory 2.0 epic (#864,
 > ruling #863). Sibling of `vcs-contract.md`.
 
-> **Promotion note (agent-drafted):** `brain/core/**` is Tier 2 — this file is a draft under
-> `openspec/changes/issue-863-backend-contract/brain-drafts/`. It is a NEW methodology
-> document, so `brain:promote`'s two shapes (new ADR, in-place amendment) do not apply: the
-> maintainer copies it to `brain/core/methodology/memory-backend-contract.md`, adds the
-> `brain/HOME.md` entry beside `vcs-contract.md`, regenerates `AGENTS.md`, and signs with the
-> commit. Promote it in the same sitting as `adr-0004-amendment-1.draft.md`, which cites it.
-
 The active backend is chosen via `MEMORY_BACKEND` in `.env` (default `engram`; `plainfiles`
 is the second inhabitant, #246). The dispatcher `brain/scripts/memory/cli.mjs` reads that key
 and delegates to `brain/scripts/memory/backends/<backend>.mjs`. Verbs that are
