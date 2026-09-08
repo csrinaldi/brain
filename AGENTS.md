@@ -226,7 +226,7 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | `npm run memory:share` | — | — | Materializes what `.memory/records/` does not yet hold and rebuilds `index.jsonl`; reports the duplicate accounting. Under record-first (#864 task 3.2) it exports nothing from the backend. |
 | `npm run memory:pull` | — | — | `git pull`, then hydrates the active backend from `.memory/records/` (idempotent by record id — `memory-backend-contract.md` rule 1). Brings the team's memory. |
 | `npm run memory:index` | — | — | Re-projects `brain/` doctrine into the active backend, where the backend supports it (`plainfiles` does not, by design). Needed when ADRs or glossary change. |
-| `npm run memory:save` | — | — | The producer path: writes a record to `.memory/records/` first (provenance, `--issue`, `--supersedes`), then hydrates the active backend from it. `memory-backend-contract.md` rule 2. |
+| `npm run memory:save` | — | — | The producer path: writes a record to `.memory/records/` first (provenance, `--issue`; `--supersedes` lands with #805). Today it is pinned to `plainfiles` and the active backend picks the record up on its next hydration (`session:start`, `cli.mjs import`); direct hydration lands with #874. `memory-backend-contract.md` rule 2. |
 | `npm run memory:audit` | — | — | The five numbers of memory 2.0 (#870) from records and `git log` alone; the backend row degrades to a stated reason. |
 
 > **Worktree convention (load-bearing):** task start is
